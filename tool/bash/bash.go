@@ -266,17 +266,53 @@ func render(fields []field) string {
 
 // splitRunes cuts a string into its head and its tail, each within a
 // character budget, without splitting a rune.
+//
+// The text is walked rather than copied: the head is found by ranging
+// over the string, and the tail by walking back over its last
+// characters, so a large output costs no rune slice of its own.
 func splitRunes(s string, half int) (string, string) {
 	if half <= 0 {
 		return "", ""
 	}
-	runes := []rune(s)
-	if len(runes) <= half {
+	if utf8.RuneCountInString(s) <= half {
 		return s, ""
 	}
-	head := string(runes[:half])
-	tail := string(runes[len(runes)-half:])
-	return head, tail
+	return headRunes(s, half), tailRunes(s, half)
+}
+
+// headRunes returns the first n characters of a string.
+func headRunes(s string, n int) string {
+	count := 0
+	for i := range s {
+		if count == n {
+			return s[:i]
+		}
+		count++
+	}
+	return s
+}
+
+// tailRunes returns the last n characters of a string.
+func tailRunes(s string, n int) string {
+	// The end of the string is found by walking back over its
+	// characters, so a rune is never cut in half.
+	end := len(s)
+	count := 0
+	for end > 0 {
+		r, size := utf8.DecodeLastRuneInString(s[:end])
+		if r == utf8.RuneError && size == 1 {
+			// A byte that is not a rune of its own. It is dropped
+			// rather than kept, because it is not a character.
+			end--
+			continue
+		}
+		end -= size
+		count++
+		if count == n {
+			break
+		}
+	}
+	return s[end:]
 }
 
 // mustJSON encodes a value, falling back to an empty object.
