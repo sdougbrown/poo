@@ -9,6 +9,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // result is what a command produced.
@@ -184,10 +185,27 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 }
 
 // String returns the captured output.
+//
+// A cut that lands in the middle of a character drops the partial one,
+// so the captured output is always valid UTF-8 and never holds a
+// replacement character.
 func (b *cappedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return string(b.buf)
+	return trimPartialRune(string(b.buf))
+}
+
+// trimPartialRune drops an incomplete rune from the end of a string.
+func trimPartialRune(s string) string {
+	for len(s) > 0 {
+		r, size := utf8.DecodeLastRuneInString(s)
+		if r == utf8.RuneError && size == 1 {
+			s = s[:len(s)-1]
+			continue
+		}
+		break
+	}
+	return s
 }
 
 // ChildEnv returns the environment for the child process.
