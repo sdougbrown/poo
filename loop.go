@@ -1,0 +1,580 @@
+package poo
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+	"time"
+)
+
+// State is the skeleton's agent-loop state.
+type State string
+
+const (
+	// StateRequesting means the run is asking the provider for a response.
+	StateRequesting State = "requesting"
+	// StateExecuting means the run is running the tool calls the model
+	// asked for.
+	StateExecuting State = "executing"
+	// StateSettled means the run has settled.
+	StateSettled State = "settled"
+)
+
+// Options configure a run.
+type Options struct {
+	// Transport sends the provider requests.
+	Transport ChatTransport
+	// Tools are the tools the model may call, keyed by name.
+	Tools map[string]Tool
+	// ToolOrder is the order the tools are offered to the model in.
+	ToolOrder []string
+	// Sink receives the session records.
+	Sink RecordSink
+	// SessionID identifies the session.
+	SessionID string
+	// RunID identifies the run.
+	RunID string
+	// ModelID is the provider's model identifier.
+	ModelID string
+	// ContextLimit is the model's context window in tokens.
+	ContextLimit int
+	// MaxOutput is the model's output-token ceiling, 0 when unknown.
+	MaxOutput int
+	// MaxTurns is the turn ceiling. 0 means unlimited.
+	MaxTurns int
+	// SystemPrompt is the system message prepended to the model's view.
+	SystemPrompt string
+	// WorkingDir is the directory the tools work in.
+	WorkingDir string
+	// Env is the scrubbed child environment for the tools.
+	Env []string
+	// Settings holds the tools' tunable knobs.
+	Settings ToolSettings
+	// ToolsMode is how the run asks for tool calls.
+	ToolsMode string
+}
+
+// Run is one prompt through to settled.
+type Run struct {
+	opts Options
+	// history is the model's view: what has been said so far.
+	history []Message
+	// turn counts the provider requests made so far.
+	turn int
+	// requests counts the provider requests made so far.
+	requests int
+	// seq numbers the records written to the sink.
+	seq int64
+	// sunk reports whether the sink failed.
+	sunk bool
+}
+
+// Result is the outcome of a run.
+type Result struct {
+	// Reason is the settle reason.
+	Reason Reason
+	// Detail explains the outcome.
+	Detail SettleDetail
+	// Turns is the number of provider requests the run made.
+	Turns int
+}
+
+// NewRun builds a run. The caller drives it with Run.Execute.
+func NewRun(opts Options) *Run {
+	return &Run{opts: opts}
+}
+
+// Execute runs the loop until it settles.
+//
+// The loop is the skeleton's small version of the plan's FSM: requesting,
+// executing, settled. It has no hooks, no finalize protocol and no
+// compaction; those arrive in later stages.
+func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
+	promptHash := hashText(prompt)
+
+	if err := r.write(ctx, &RunStarted{
+		RecordMeta: NewRecordMeta("run.started"),
+		RunID:      r.opts.RunID,
+		PromptHash: promptHash,
+		StartedAt:  nowRFC3339(),
+		ModelID:    r.opts.ModelID,
+		MaxTurns:   r.opts.MaxTurns,
+		ToolsMode:  r.opts.ToolsMode,
+	}); err != nil {
+		return Result{}, err
+	}
+
+	// The system prompt is the first thing the model sees, and it is
+	// frozen for the length of the run.
+	if r.opts.SystemPrompt != "" {
+		msg := NewTextMessage(RoleSystem, r.opts.SystemPrompt)
+		r.history = append(r.history, msg)
+		if err := r.write(ctx, &MessageRecord{
+			RecordMeta: NewRecordMeta("message"),
+			RunID:      r.opts.RunID,
+			Origin:     "system",
+			Role:       msg.Role,
+			Content:    msg.Content,
+		}); err != nil {
+			return Result{}, err
+		}
+	}
+
+	user := NewTextMessage(RoleUser, prompt)
+	r.history = append(r.history, user)
+	if err := r.write(ctx, &MessageRecord{
+		RecordMeta: NewRecordMeta("message"),
+		RunID:      r.opts.RunID,
+		Turn:       0,
+		Origin:     "user",
+		Role:       user.Role,
+		Content:    user.Content,
+	}); err != nil {
+		return Result{}, err
+	}
+
+	reason, detail, err := r.loop(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+
+	settle := &RunSettled{
+		RecordMeta: NewRecordMeta("run.settled"),
+		RunID:      r.opts.RunID,
+		Reason:     reason,
+		Detail:     detail,
+		Turns:      r.turn,
+		SettledAt:  nowRFC3339(),
+	}
+	if err := r.write(ctx, settle); err != nil {
+		return Result{}, err
+	}
+	if r.opts.Sink != nil {
+		if err := r.opts.Sink.Flush(ctx); err != nil {
+			return Result{}, err
+		}
+	}
+
+	return Result{Reason: reason, Detail: detail, Turns: r.turn}, nil
+}
+
+// loop drives the requesting/executing cycle.
+func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return ReasonCancelled, SettleDetail{Source: "cancel:context", Text: err.Error()}, nil
+		}
+
+		// The next-request gate. The skeleton has no compactor, no budget
+		// ratio and no 80% notice, so the only check is the output room.
+		maxTokens, room := r.maxTokens()
+		if !room {
+			return ReasonContextExhausted, SettleDetail{
+				Source: "no_output_room",
+				Text:   fmt.Sprintf("computed max_tokens %d is under the 256-token minimum", maxTokens),
+			}, nil
+		}
+
+		if r.opts.MaxTurns > 0 && r.turn >= r.opts.MaxTurns {
+			return ReasonMaxTurns, SettleDetail{
+				Source: "max_turns",
+				Text:   fmt.Sprintf("the run reached its %d-turn ceiling", r.opts.MaxTurns),
+			}, nil
+		}
+
+		r.turn++
+		r.requests++
+
+		resp, err := r.request(ctx, maxTokens)
+		if err != nil {
+			return r.settleForError(err)
+		}
+
+		// The model's response is part of the history whether or not it
+		// asked for tool calls.
+		assistant := Message{Role: RoleAssistant, Content: resp.content}
+		for _, call := range resp.calls {
+			assistant.Content = append(assistant.Content, ContentBlock{
+				Kind:       ContentToolCall,
+				ToolCallID: call.ID,
+				Name:       call.Name,
+				Arguments:  recordArgs(call.Arguments),
+			})
+		}
+		if len(assistant.Content) > 0 {
+			r.history = append(r.history, assistant)
+			if err := r.write(ctx, &MessageRecord{
+				RecordMeta: NewRecordMeta("message"),
+				RunID:      r.opts.RunID,
+				Turn:       r.turn,
+				Origin:     "model",
+				Role:       assistant.Role,
+				Content:    assistant.Content,
+			}); err != nil {
+				return "", SettleDetail{}, err
+			}
+		}
+
+		if resp.finish == FinishLength {
+			// The provider stopped on the output-token limit. The
+			// skeleton's enum has no output_truncated, so this settles
+			// as provider_error.
+			return ReasonProviderError, SettleDetail{
+				Source:   "finish:length",
+				Text:     "the provider stopped on the output-token limit",
+				Provider: &ProviderDetail{Kind: "output_truncated"},
+			}, nil
+		}
+
+		if len(resp.calls) == 0 {
+			return ReasonEndTurn, SettleDetail{Source: "end_turn"}, nil
+		}
+
+		// Executing: run the calls in model order.
+		for i, call := range resp.calls {
+			if err := r.execute(ctx, i+1, call); err != nil {
+				return "", SettleDetail{}, err
+			}
+		}	}
+}
+
+// maxTokens computes the output room for the next request.
+//
+// The plan's rule: min(model MaxOutput or 8192, context_limit − estimated
+// input − 256). A value under 256 means there is no room to answer.
+func (r *Run) maxTokens() (int, bool) {
+	limit := r.opts.MaxOutput
+	if limit <= 0 {
+		limit = 8192
+	}
+	room := r.opts.ContextLimit - r.estimatedInput() - 256
+	if room < limit {
+		limit = room
+	}
+	return limit, limit >= 256
+}
+
+// estimatedInput estimates the prompt tokens of the next request.
+func (r *Run) estimatedInput() int {
+	chars := 0
+	for _, m := range r.history {
+		chars += estimateMessageChars(m)
+	}
+	// The plan estimates at 3.5 chars per token.
+	return chars * 10 / 35
+}
+
+// execute runs one tool call and records it.
+func (r *Run) execute(ctx context.Context, index int, call ToolCall) error {
+	handle := fmt.Sprintf("r%d", index)
+
+	tool, ok := r.opts.Tools[call.Name]
+	if !ok {
+		text := fmt.Sprintf("unknown tool %q", call.Name)
+		return r.recordCall(ctx, r.turn, handle, call, text)
+	}
+
+	if err := r.write(ctx, &ToolCallRecord{
+		RecordMeta: NewRecordMeta("tool.call"),
+		RunID:      r.opts.RunID,
+		Turn:       r.turn,
+		Handle:     handle,
+		Tool:       call.Name,
+		Arguments:  recordArgs(call.Arguments),
+	}); err != nil {
+		return err
+	}
+
+	prepared, err := tool.Prepare(call.Arguments, PrepareEnv{WorkingDir: r.opts.WorkingDir})
+	if err != nil {
+		return r.recordResult(ctx, r.turn, handle, call, ToolResult{
+			Text:    err.Error(),
+			IsError: true,
+		})
+	}
+
+	result, err := tool.Call(ctx, prepared, ToolEnv{
+		PrepareEnv: PrepareEnv{WorkingDir: r.opts.WorkingDir},
+		SessionID:  r.opts.SessionID,
+		RunID:      r.opts.RunID,
+		Handle:     handle,
+		Env:        r.opts.Env,
+		Settings:   r.opts.Settings,
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return err
+		}
+		return r.recordResult(ctx, r.turn, handle, call, ToolResult{
+			Text:    err.Error(),
+			IsError: true,
+		})
+	}
+
+	return r.recordResult(ctx, r.turn, handle, call, result)
+}
+
+// recordCall records a call that never reached the tool.
+func (r *Run) recordCall(ctx context.Context, turn int, handle string, call ToolCall, text string) error {
+	if err := r.write(ctx, &ToolCallRecord{
+		RecordMeta: NewRecordMeta("tool.call"),
+		RunID:      r.opts.RunID,
+		Turn:       turn,
+		Handle:     handle,
+		Tool:       call.Name,
+		Arguments:  recordArgs(call.Arguments),
+	}); err != nil {
+		return err
+	}
+	return r.recordResult(ctx, turn, handle, call, ToolResult{Text: text, IsError: true})
+}
+
+// recordResult records a tool result and appends it to the history.
+func (r *Run) recordResult(ctx context.Context, turn int, handle string, call ToolCall, result ToolResult) error {
+	outcome := OutcomeOK
+	if result.IsError {
+		outcome = OutcomeError
+	}
+	if err := r.write(ctx, &ToolResultRecord{
+		RecordMeta: NewRecordMeta("tool.result"),
+		RunID:      r.opts.RunID,
+		Turn:       turn,
+		Handle:     handle,
+		Tool:       call.Name,
+		Outcome:    outcome,
+		Text:       result.Text,
+		Structured: result.Structured,
+	}); err != nil {
+		return err
+	}
+
+	// The result goes back to the model under the call's provider-side id,
+	// because that is the id the provider matches it against.
+	msg := ToolResultMessage(call.ID, call.Name, result.Text, result.IsError)
+	r.history = append(r.history, msg)
+	return r.write(ctx, &MessageRecord{
+		RecordMeta: NewRecordMeta("message"),
+		RunID:      r.opts.RunID,
+		Turn:       turn,
+		Origin:     "tool",
+		Role:       msg.Role,
+		Content:    msg.Content,
+	})
+}
+
+// request sends one provider request and reads the whole response.
+func (r *Run) request(ctx context.Context, maxTokens int) (*response, error) {
+	reader, err := r.opts.Transport.Stream(ctx, ChatRequest{
+		Model:     r.opts.ModelID,
+		Messages:  r.history,
+		Tools:     r.toolSpecs(),
+		MaxTokens: maxTokens,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	return readResponse(ctx, reader, r.opts.RunID, r.turn, r.requests, r.opts.Sink)
+}
+
+// toolSpecs returns the tools the model may call, in offer order.
+func (r *Run) toolSpecs() []ToolSpec {
+	specs := make([]ToolSpec, 0, len(r.opts.ToolOrder))
+	for _, name := range r.opts.ToolOrder {
+		if t, ok := r.opts.Tools[name]; ok {
+			specs = append(specs, t.Spec())
+		}
+	}
+	return specs
+}
+
+// write appends one record to the sink.
+func (r *Run) write(ctx context.Context, rec Record) error {
+	if r.opts.Sink == nil {
+		return nil
+	}
+	if r.sunk {
+		return fmt.Errorf("poo: the session store is broken")
+	}
+	r.seq++
+	Stamp(rec, r.seq, time.Now())
+	if err := r.opts.Sink.Append(ctx, rec); err != nil {
+		r.sunk = true
+		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
+	}
+	return nil
+}
+
+// settleForError maps a request error to a settle reason.
+func (r *Run) settleForError(err error) (Reason, SettleDetail, error) {
+	if errors.Is(err, context.Canceled) {
+		return ReasonCancelled, SettleDetail{Source: "cancel:context", Text: err.Error()}, nil
+	}
+	var pe *ProviderError
+	if errors.As(err, &pe) {
+		kind := string(pe.Kind)
+		if pe.Kind == ProviderKindContextLength {
+			return ReasonContextExhausted, SettleDetail{
+				Source:   "provider:context_length",
+				Text:     pe.Message,
+				Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code},
+			}, nil
+		}
+		return ReasonProviderError, SettleDetail{
+			Source:   "provider:" + kind,
+			Text:     pe.Message,
+			Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code},
+		}, nil
+	}
+	return "", SettleDetail{}, err
+}
+
+// response is what one provider request produced.
+type response struct {
+	// content is the assistant message's blocks.
+	content []ContentBlock
+	// calls are the tool calls the model asked for.
+	calls []ToolCall
+	// finish is why the model stopped.
+	finish FinishReason
+}
+
+// readResponse drains a stream into a response, recording usage.
+func readResponse(ctx context.Context, reader StreamReader, runID string, turn, request int, sink RecordSink) (*response, error) {
+	resp := &response{finish: FinishStop}
+	var text strings.Builder
+	var thinking strings.Builder
+	calls := make(map[int]*ToolCall)
+	var order []int
+
+	for {
+		ev, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch ev.Kind {
+		case "delta":
+			if ev.Delta == nil {
+				continue
+			}
+			switch ev.Delta.Kind {
+			case "thinking":
+				thinking.WriteString(ev.Delta.Text)
+			default:
+				text.WriteString(ev.Delta.Text)
+			}
+		case "tool_call":
+			if ev.ToolCall == nil {
+				continue
+			}
+			// A provider may split one call across several events, and
+			// may send several calls in one event. The index the
+			// provider sends groups the fragments of one call.
+			idx := ev.ToolCall.Index
+			existing, ok := calls[idx]
+			if !ok {
+				existing = &ToolCall{}
+				calls[idx] = existing
+				order = append(order, idx)
+			}
+			if ev.ToolCall.ID != "" {
+				existing.ID = ev.ToolCall.ID
+			}
+			if ev.ToolCall.Name != "" {
+				existing.Name = ev.ToolCall.Name
+			}
+			if len(ev.ToolCall.Arguments) > 0 {
+				existing.Arguments = append(existing.Arguments, ev.ToolCall.Arguments...)
+			}
+		case "usage":
+			if ev.Usage != nil && sink != nil {
+				_ = sink.Append(ctx, &Usage{
+					RecordMeta:     NewRecordMeta("usage"),
+					RunID:          runID,
+					Turn:           turn,
+					Request:        request,
+					InputTokens:    ev.Usage.InputTokens,
+					OutputTokens:   ev.Usage.OutputTokens,
+					CacheReadTokens: ev.Usage.CacheReadTokens,
+				})
+			}
+		case "finish":
+			if ev.FinishReason != "" {
+				resp.finish = ev.FinishReason
+			}
+		}
+	}
+
+	// A reasoning stream becomes its own content block, so the model's
+	// thinking survives without breaking the text.
+	if thinking.Len() > 0 {
+		resp.content = append(resp.content, ContentBlock{Kind: ContentThinking, Text: thinking.String()})
+	}
+	if text.Len() > 0 {
+		resp.content = append(resp.content, ContentBlock{Kind: ContentText, Text: text.String()})
+	}
+
+	// The calls are ordered by the provider's index, so the model sees
+	// them in the order it asked for them.
+	sort.Ints(order)
+	for _, idx := range order {
+		c := calls[idx]
+		if c.Name == "" {
+			continue
+		}
+		resp.calls = append(resp.calls, *c)
+	}
+	return resp, nil
+}
+// hashText returns the hex SHA-256 of a text.
+func hashText(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// nowRFC3339 returns the current time in UTC, RFC 3339 with nanoseconds.
+func nowRFC3339() string {
+	return time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+// recordArgs returns the arguments as JSON, or the raw text as a JSON
+// string when the model did not send valid JSON.
+//
+// A record always holds valid JSON, so a consumer can decode the arguments
+// without a special case, and a model that sent malformed arguments is
+// still recorded faithfully.
+func recordArgs(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return json.RawMessage("{}")
+	}
+	if json.Valid(raw) {
+		return raw
+	}
+	quoted, err := json.Marshal(string(raw))
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return quoted
+}
+
+// estimateMessageChars returns the approximate serialized size of a message.
+func estimateMessageChars(m Message) int {
+	chars := len(string(m.Role))
+	for _, c := range m.Content {
+		chars += len(c.Text) + len(c.Name) + len(c.ToolCallID)
+		if len(c.Arguments) > 0 {
+			chars += len(c.Arguments)
+		}
+	}
+	return chars
+}
