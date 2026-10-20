@@ -34,7 +34,8 @@ fi
 CORE="$MODULE"
 
 violations=0
-errors=0
+unchecked=0
+unresolved_imports=0
 
 # is_allowed <import path> <mode> -- true when the import is permitted.
 #
@@ -131,7 +132,7 @@ check_package() {
   own_error="$(go list -e -f '{{if .Error}}{{.Error.Err}}{{end}}' "$pkg" 2>/dev/null)"
   if [ -n "$own_error" ]; then
     echo "error: cannot check $pkg: $own_error" >&2
-    errors=$((errors + 1))
+    unchecked=$((unchecked + 1))
     return 0
   fi
 
@@ -184,7 +185,7 @@ check_package() {
   while IFS= read -r import_path; do
     [ -n "$import_path" ] || continue
     echo "error: cannot resolve $import_path (imported by $pkg)" >&2
-    errors=$((errors + 1))
+    unresolved_imports=$((unresolved_imports + 1))
   done <<< "$unresolved"
 }
 
@@ -196,11 +197,14 @@ check_package "$MODULE/wire/protocol" stdlib
 if [ "$violations" -ne 0 ]; then
   echo "check-imports: $violations import violation(s) found" >&2
 fi
-if [ "$errors" -ne 0 ]; then
-  echo "check-imports: $errors package(s) could not be checked" >&2
+if [ "$unchecked" -ne 0 ]; then
+  echo "check-imports: $unchecked package(s) could not be checked" >&2
+fi
+if [ "$unresolved_imports" -ne 0 ]; then
+  echo "check-imports: $unresolved_imports import(s) could not be resolved" >&2
 fi
 
-if [ "$violations" -ne 0 ] || [ "$errors" -ne 0 ]; then
+if [ "$violations" -ne 0 ] || [ "$unchecked" -ne 0 ] || [ "$unresolved_imports" -ne 0 ]; then
   exit 1
 fi
 
