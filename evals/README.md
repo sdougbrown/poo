@@ -13,6 +13,18 @@ Run the set with:
 
     poo-eval run --models gemma4,qwen --seeds 3
 
+## Isolation
+
+The workdirs are made under `<user cache dir>/poo-eval/work`, outside
+the repository. `--work-root` overrides it, and the runner refuses a
+work root that holds the task set or lies inside it, so the task set
+is never an ancestor of a workdir.
+
+The limit that remains: a model can still search the filesystem, and
+the derivations in `check_answer.py` and the checks are files on the
+same disk. Real isolation is a sandbox's job. A transcript that reads
+outside its workdir should be treated as invalid.
+
 ## How a task is measured
 
 **A coding task** is a Python package with a bug and a `unittest` suite

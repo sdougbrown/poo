@@ -126,6 +126,8 @@ type Runner struct {
 	// variables. They are removed from every environment the harness
 	// builds, except the one the running model needs.
 	keyEnvs []string
+	// pooErr is why the poo binary could not be found, if it could not.
+	pooErr error
 }
 
 // NewRunner returns a runner with the options filled in.
@@ -142,13 +144,19 @@ func NewRunner(opts RunOptions) *Runner {
 	if opts.PooBinary == "" {
 		opts.PooBinary = DefaultPooBinary
 	}
-	// The binary's path is made absolute here: the run executes it in
-	// the workdir, so a relative path would be resolved against the
-	// workdir rather than against the caller's directory.
-	if opts.PooBinary != "" {
+	// A path to the binary is made absolute here: the run executes it
+	// in the workdir, so a relative path would be resolved against the
+	// workdir rather than against the caller's directory. A bare name
+	// is looked up on PATH instead.
+	var pooErr error
+	if strings.ContainsRune(opts.PooBinary, filepath.Separator) {
 		if abs, err := filepath.Abs(opts.PooBinary); err == nil {
 			opts.PooBinary = abs
 		}
+	} else if found, err := exec.LookPath(opts.PooBinary); err != nil {
+		pooErr = fmt.Errorf("eval: finding the poo binary %q: %w", opts.PooBinary, err)
+	} else if abs, err := filepath.Abs(found); err == nil {
+		opts.PooBinary = abs
 	}
 	// The out directory and the work root are made absolute here, not
 	// in the run: poo resolves a relative --log against its own working
@@ -170,7 +178,7 @@ func NewRunner(opts RunOptions) *Runner {
 	// without a catalog still scrubs its own model's key.
 	catalog := append([]Model(nil), opts.Catalog...)
 	catalog = append(catalog, opts.Models...)
-	return &Runner{opts: opts, keyEnvs: keyEnvs(catalog)}
+	return &Runner{opts: opts, keyEnvs: keyEnvs(catalog), pooErr: pooErr}
 }
 
 // Seeds returns the number of times each task runs against each model.
@@ -193,6 +201,12 @@ func (r *Runner) Parallel() int { return r.opts.Parallel }
 // The runs themselves live in a directory of this invocation's own, so
 // two invocations never write over each other's logs.
 func (r *Runner) Run(ctx context.Context) (*Report, error) {
+	if r.pooErr != nil {
+		return nil, r.pooErr
+	}
+	if err := r.checkWorkRoot(); err != nil {
+		return nil, err
+	}
 	if err := r.prepareOut(); err != nil {
 		return nil, err
 	}
@@ -282,6 +296,31 @@ func (r *Runner) newRunDir() (string, error) {
 		return "", fmt.Errorf("eval: creating %s: %w", dir, err)
 	}
 	return dir, nil
+}
+
+// checkWorkRoot refuses a work root the task set can be reached from.
+//
+// The task set holds the checks and the scripts that derive the
+// answers. A workdir under it, or under a directory that holds it, has
+// the task set one walk away.
+func (r *Runner) checkWorkRoot() error {
+	if r.opts.TaskRoot == "" || r.opts.WorkRoot == "" {
+		return nil
+	}
+	tasks, err := filepath.Abs(r.opts.TaskRoot)
+	if err != nil {
+		return nil
+	}
+	if within(r.opts.WorkRoot, tasks) || within(tasks, r.opts.WorkRoot) {
+		return fmt.Errorf("eval: the work root %s and the task set %s must not contain one another", r.opts.WorkRoot, tasks)
+	}
+	return nil
+}
+
+// within reports whether path is dir or lies under it.
+func within(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // newWorkRoot creates the directory this invocation's workdirs live in.
@@ -693,8 +732,12 @@ func (r *Runner) runCheck(ctx context.Context, t Task, workdir, logPath string, 
 func (r *Runner) metrics(j job, logPath string, diff Diff) Metrics {
 	log, err := ParseLog(logPath)
 	if err != nil {
-		m := Metrics{SettleReason: "unknown", ChangedFiles: diff.Files, DiffLines: diff.Lines}
-		return m
+		return Metrics{
+			SettleReason:    "unknown",
+			ChangedFiles:    diff.Files,
+			DiffLines:       diff.Lines,
+			UnexpectedFiles: unexpectedFiles(j.task, diff.Files),
+		}
 	}
 	m := ComputeMetrics(log, diff)
 	m.UnexpectedFiles = unexpectedFiles(j.task, diff.Files)
@@ -727,13 +770,10 @@ func unexpectedFiles(t Task, changed []string) []string {
 // isTestFile reports whether a changed path is a test file.
 func isTestFile(path string) bool {
 	parts := strings.Split(filepath.ToSlash(path), "/")
-	for i, p := range parts {
-		if p != TestsDir {
-			continue
-		}
-		// The last component is the file's name, so a path under a
-		// tests directory is a test file.
-		if i == len(parts)-1 {
+	// The last component is the file's name, so a tests component
+	// before it means the file is under a tests directory.
+	for _, p := range parts[:len(parts)-1] {
+		if p == TestsDir {
 			return true
 		}
 	}

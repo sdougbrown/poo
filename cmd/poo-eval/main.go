@@ -38,6 +38,7 @@ Run flags:
   --models-file <path> The model catalog (default: evals/models.yaml)
   --tasks-dir <path>   The task set (default: evals/tasks)
   --poo <path>         The poo binary to run (default: poo)
+  --work-root DIR      Where the workdirs are made (default: the user cache directory)
   --keep-workdirs      Leave the workdirs behind after the run
   --force              Clear the out directory's runs before the run
 
@@ -117,6 +118,7 @@ type runOptions struct {
 	modelsFile string
 	tasksDir   string
 	pooBinary  string
+	workRoot   string
 	keepWork   bool
 	force      bool
 }
@@ -137,6 +139,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.modelsFile, "models-file", "", "The model catalog")
 	fs.StringVar(&o.tasksDir, "tasks-dir", "", "The task set")
 	fs.StringVar(&o.pooBinary, "poo", "", "The poo binary to run")
+	fs.StringVar(&o.workRoot, "work-root", "", "Where the workdirs are made (default: the user cache directory)")
 	fs.BoolVar(&o.keepWork, "keep-workdirs", false, "Leave the workdirs behind")
 	fs.BoolVar(&o.force, "force", false, "Clear the out directory's runs before the run")
 
@@ -191,9 +194,18 @@ func runRun(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// The workdirs are scratch. They live under the repository's .cache
-	// directory, never in /tmp, and they are removed when the run ends.
-	workRoot := filepath.Join(root, ".cache", "eval-work")
+	// The workdirs are scratch, removed when the run ends. They live
+	// outside the repository, so the task set is not an ancestor of
+	// them.
+	workRoot := o.workRoot
+	if workRoot == "" {
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
+			return 1
+		}
+		workRoot = filepath.Join(cache, "poo-eval", "work")
+	}
 	if err := os.MkdirAll(workRoot, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
 		return 1
