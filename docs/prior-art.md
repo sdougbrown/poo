@@ -30,9 +30,9 @@ an essay. Each source records exactly what was read and when.
   renders `{returncode, output}` below a cap and `{output_head, output_tail,
   elided_chars}` above it. Poo uses the same shape with a context-relative cap
   and a hint pointing at `grep`/`sed`/`head`/`tail`.
-- **The "output too long" guidance text.** mini's warning tells the model to
-  use `head`, `tail` or `sed` to view a smaller range. Poo reuses that
-  advice verbatim in spirit in the bash hint.
+- **The "output too long" guidance text.** mini's system template tells the
+  model to use `head`, `tail` or `sed` to view a smaller range. Poo reuses
+  that advice verbatim in spirit in the bash hint.
 - **The prompt structure.** A system template that states the operating
   contract, plus an instance template that states the task, the recommended
   workflow, and the command-execution rules. Poo splits this into named
@@ -43,7 +43,7 @@ an essay. Each source records exactly what was read and when.
   reasoning text and at least one bash call, and that directory changes are not
   persistent. Poo keeps the substance, drops the exact-output-format
   requirement (poo uses native tool calls where the model supports them).
-- **Process-group kill on timeout.** mini's `LocalEnvironment._run` uses
+- **Process-group kill on timeout.** mini's `environments/local.py` `_run` uses
   `start_new_session=True` and `os.killpg` so a timed-out command leaves no
   orphaned children. Poo does the same, and adds a grace period before
   `SIGKILL` plus cleanup of survivors in the call's own process group.
@@ -73,8 +73,9 @@ an essay. Each source records exactly what was read and when.
 - **A rich terminal UI.** `InteractiveAgent` renders to the console with
   `rich`. Poo v1 has no TUI; a future TUI is a wire client.
 - **Third-party dependencies.** mini depends on `litellm`, `pydantic`, `jinja2`,
-  `rich` and `dotenv`. Poo's core and every opt-in package in v1 depend on the
-  standard library only.
+  `rich` and `dotenv`. Poo's core, `poo/prompt`, `poo/decide` and
+  `poo/wire/protocol` depend on the standard library only, and CI checks
+  that. The other opt-in packages may take dependencies.
 
 ## pi-durable
 
@@ -89,14 +90,14 @@ an essay. Each source records exactly what was read and when.
 
 ### Copied
 
-- **Storage / codec / projection / authority layering.** pi-durable separates
-  durable records from a versioned codec from display projections from the
-  single-owner lock. Poo adopts the same four layers for `poo/session` (plan,
-  §Package layout), with append-only JSONL as the v0 codec.
+- **Storage backends, and one owner per store.** pi-durable ships memory,
+  SQLite and JSONL storage, and "one process owns a storage at a time" while
+  other clients attach to that process. Poo takes the ownership half: the
+  `flock` authority in `poo/session` (plan, §Package layout).
 - **The state/session model: a harness owns conversations, each conversation
-  owns an agent, and a run is a sequence of durable tasks.** poo maps this onto
-  one session per run, with the store, the projection and the authority lock as
-  the session seam.
+  owns an agent, and a run is a sequence of durable tasks.** poo maps this
+  onto a session that holds a sequence of runs, one active run at a time,
+  with the store, the projection and the authority lock as the session seam.
 - **The task-and-checkpoint idea as the durability model.** pi-durable stores a
   checkpoint before every step, so a new process can find unfinished work. Poo
   takes the v1 subset: every record is written as it happens, and Stage 8
@@ -109,11 +110,9 @@ an essay. Each source records exactly what was read and when.
 - **Extensions as named bundles of prompt sections, tools and hooks.** poo's
   equivalent is a build-time composition of packages plus Go hook interfaces,
   wired at compile time rather than installed at runtime.
-- **Tool calls as tasks with a declared replay policy.** pi-durable tags each
-  tool `replay: "safe"` or not, deciding whether a crash may re-run it. Poo
-  does not re-run anything: Stage 8 recovery records an interrupted outcome
-  and leaves the decision to the consumer. The plan records this as a
-  deliberate divergence, not an omission.
+- **Tool calls as durable tasks.** pi-durable runs every tool call as its own
+  durable task, and stores the call's intent before it runs. Poo's equivalent
+  is a tool call as a record with an outcome, written as it happens.
 - **A fork that shares history.** pi-durable forks a conversation at a point
   without copying it. Poo keeps the idea at the transport level only
   (`ForkFunc`, plan, §Compaction seam), where a fork re-sends a byte-identical
@@ -141,13 +140,21 @@ an essay. Each source records exactly what was read and when.
   installs extensions at runtime, and a running call finishes on the code it
   started with. Poo's customization is compile-time, so the question does not
   arise.
+- **A declared replay policy for tool calls.** pi-durable tags each tool
+  `replay: "safe"` or not, deciding whether a crash may re-run it. Poo does
+  not re-run anything: Stage 8 recovery records an interrupted outcome and
+  leaves the decision to the consumer. The plan records this as a deliberate
+  divergence, not an omission.
 - **Background tasks and durable timers.** Out of scope for v1.
 - **Application state as typed documents.** pi-durable's `defineDoc` model for
   todos, plans and sandboxes is a nice idea, but v1 has no application state
   layer, and adding one would be a new locked-decision surface.
 - **Compaction as a background task that summarizes older messages.** Poo's
-  governing rule is that nothing rewrites the model's history silently. poo
-  v1 ships no compaction strategy at all; only the seam.
+  governing rule is that nothing rewrites the model's history silently. The
+  `handoff` strategy that ships in v1 forks the request and ends the run with
+  a note; it never rewrites or summarizes the history it leaves behind. No
+  strategy that rewrites or summarizes older messages ships in v1; only the
+  seam, and the `handoff` strategy on top of it.
 
 ### FSM state changes adopted from pi-durable
 
@@ -162,14 +169,15 @@ conversations, background tasks) are all out of scope for v1.
 
 Locked decision 8 constrains this study: it may reshape states, but it cannot
 add a dependency, and it must not add a state that only pi-durable's durable
-model needs. No proposal was found, so none is listed for the owner.
+model needs. No state change is adopted; one question is raised for the owner
+below.
 
 **Proposal for the owner (not adopted, not approved).** pi-durable separates
 "the conversation is idle" from "the conversation has nothing in flight" by
 treating background work as part of the conversation but not part of its
-current work. Poo's v1 equivalent question is whether a `settling` session that
-still owns a background task should report itself as `idle`. Poo v1 has no
-background tasks, so there is nothing to model today. If a later stage adds
-background work, the question is whether `settled` should be reachable while
-background work is outstanding, and whether `agent/cancel` should abort it.
-This is raised for the owner's judgment, not decided here.
+current work: the conversation goes idle while a background task runs, and an
+ordinary abort leaves it alone. Poo's v1 equivalent question is whether an
+`idle` session with outstanding background work is reported as available for
+a new run, and whether `agent/cancel` reaches that work. Poo v1 has no
+background tasks, so there is nothing to model today. This is raised for the
+owner's judgment, not decided here.
