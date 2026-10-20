@@ -268,6 +268,7 @@ func WriteReport(dir string, report *Report) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("eval: creating %s: %w", dir, err)
 	}
+	report = portable(dir, report)
 
 	summary := Summarize(report)
 
@@ -373,4 +374,20 @@ func formatRatio(r *float64) string {
 		return "n/a"
 	}
 	return fmt.Sprintf("%.1f%%", *r*100)
+}
+
+// portable returns a copy of the report whose paths are relative to the
+// report's own directory, so a committed report names no machine's
+// home directory. The caller's report is left as it is.
+func portable(dir string, report *Report) *Report {
+	out := *report
+	out.Dir = "."
+	out.Results = make([]RunResult, len(report.Results))
+	for i, r := range report.Results {
+		if rel, err := filepath.Rel(dir, r.LogPath); err == nil && r.LogPath != "" {
+			r.LogPath = rel
+		}
+		out.Results[i] = r
+	}
+	return &out
 }
