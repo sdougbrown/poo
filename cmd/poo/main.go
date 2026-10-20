@@ -165,6 +165,16 @@ func runRun(args []string) int {
 	bashTool := bash.New()
 	readTool := read.New()
 
+	tools := map[string]poo.Tool{
+		"bash": bashTool,
+		"read": readTool,
+	}
+	toolOrder := []string{"bash", "read"}
+	toolSpecs := make([]poo.ToolSpec, 0, len(toolOrder))
+	for _, name := range toolOrder {
+		toolSpecs = append(toolSpecs, tools[name].Spec())
+	}
+
 	settings := poo.ToolSettings{
 		BashTimeoutSeconds: 120,
 		ObservationCapChars: bash.ObservationCap(o.contextLimit),
@@ -196,19 +206,17 @@ func runRun(args []string) int {
 
 	r := poo.NewRun(poo.Options{
 		Transport: transport,
-		Tools: map[string]poo.Tool{
-			"bash": bashTool,
-			"read": readTool,
-		},
-		ToolOrder:    []string{"bash", "read"},
-		Sink:         log,
-		SessionID:    sessionID,
-		RunID:        runID,
-		ModelID:      o.modelID,
+		Tools:     tools,
+		ToolOrder: toolOrder,
+		Sink:      log,
+		SessionID: sessionID,
+		RunID:     runID,
+		ModelID:   o.modelID,
+
 		ContextLimit: o.contextLimit,
 		MaxOutput:    o.maxOutput,
 		MaxTurns:     o.maxTurns,
-		SystemPrompt: systemPrompt(o.modelID),
+		SystemPrompt: systemPrompt(o.modelID, toolSpecs),
 		WorkingDir:   absWorkDir,
 		Env:          childEnv,
 		Settings:     settings,

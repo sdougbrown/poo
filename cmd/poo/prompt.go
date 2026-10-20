@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/sdougbrown/poo"
 )
 
 // systemPrompt is the operating contract the model works under.
@@ -13,7 +15,11 @@ import (
 // arrives in Stage 4. The skeleton ships one short contract, in the shape
 // mini-swe-agent uses: how to work, read narrowly, every bash call is a
 // fresh shell, and what "done" looks like.
-func systemPrompt(modelID string) string {
+//
+// In the text and auto modes the model cannot call a tool through the
+// wire format, so the tools are described here and the model answers with
+// a call written out. The format is the one the transport's parser reads.
+func systemPrompt(modelID string, tools []poo.ToolSpec) string {
 	var b strings.Builder
 
 	b.WriteString("You are a coding agent working in a shell. You solve the task by inspecting the repository and changing what is needed.\n\n")
@@ -28,6 +34,16 @@ func systemPrompt(modelID string) string {
 	b.WriteString("- Every bash call runs in a fresh shell. A cd, an exported variable or a background job from one call is gone by the next one, so use absolute paths or start each command where you want it.\n")
 	b.WriteString("- Background processes are killed when the command returns.\n")
 	b.WriteString("- Long output is truncated with the middle elided. Use grep/sed/head/tail to inspect narrower ranges.\n\n")
+
+	if len(tools) > 0 {
+		b.WriteString("Tools:\n")
+		for _, t := range tools {
+			fmt.Fprintf(&b, "- %s: %s\n", t.Name, t.Description)
+		}
+		b.WriteString("\nCall a tool by writing a <tool_call> block holding a JSON object with a name and an arguments object, for example:\n")
+		b.WriteString("<tool_call>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls -la\"}}</tool_call>\n")
+		b.WriteString("Call one tool at a time, and wait for its result before the next call.\n\n")
+	}
 
 	b.WriteString("Done means:\n")
 	b.WriteString("- The task is actually complete, not just started.\n")

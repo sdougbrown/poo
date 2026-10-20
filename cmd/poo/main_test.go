@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/poo"
 )
 
 // runCLI runs the command with the given arguments and returns its exit
@@ -93,7 +95,7 @@ func TestTheDefaultLogPathIsInTheWorkingDirectory(t *testing.T) {
 }
 
 func TestTheSystemPromptStatesTheOperatingContract(t *testing.T) {
-	prompt := systemPrompt("gemma4")
+	prompt := systemPrompt("gemma4", nil)
 	for _, needle := range []string{
 		"fresh shell",
 		"narrow reads",
@@ -106,10 +108,30 @@ func TestTheSystemPromptStatesTheOperatingContract(t *testing.T) {
 	}
 }
 
+func TestTheTextModePromptNamesTheToolsAndTheCallFormat(t *testing.T) {
+	// In the text mode the model cannot call a tool through the wire
+	// format, so the prompt has to say how to write one.
+	tools := []poo.ToolSpec{
+		{Name: "bash", Description: "Run a shell command."},
+		{Name: "read", Description: "Read a range of lines from a file."},
+	}
+	prompt := systemPrompt("gemma4", tools)
+	for _, needle := range []string{
+		"bash: Run a shell command.",
+		"read: Read a range of lines from a file.",
+		"<tool_call>",
+		`{"name": "bash"`,
+	} {
+		if !strings.Contains(prompt, needle) {
+			t.Errorf("the prompt does not mention %q", needle)
+		}
+	}
+}
+
 // The system prompt must be usable as JSON content, so the model's own
 // quoting of it does not break the request.
 func TestTheSystemPromptSurvivesJSONEncoding(t *testing.T) {
-	b, err := json.Marshal(systemPrompt("gemma4"))
+	b, err := json.Marshal(systemPrompt("gemma4", nil))
 	if err != nil {
 		t.Fatalf("encoding the prompt: %v", err)
 	}

@@ -97,15 +97,25 @@ func (p *parser) flush() []poo.StreamEvent {
 	}
 	var out []poo.StreamEvent
 	if p.inCall {
-		ev, ok := p.parseBody(p.callBody)
-		if ok {
+		// The call never closed. The body is what arrived, plus the tail
+		// the parser held back in case it was the start of the closing
+		// marker.
+		body := p.callBody + p.buf
+		if ev, ok := p.parseBody(body); ok {
 			out = append(out, ev)
 		} else {
-			out = append(out, textEvent(p.callText))
+			text := p.callText
+			if p.callKind == kindTagged {
+				text += taggedClose
+			} else if p.callKind == kindFence {
+				text += "```"
+			}
+			out = append(out, textEvent(text))
 		}
 		p.inCall = false
 		p.callBody = ""
 		p.callText = ""
+		p.buf = ""
 	}
 	if rest := strings.TrimSpace(p.buf); rest != "" {
 		// A bare JSON object that arrived without a trailing newline.
@@ -159,6 +169,9 @@ func (p *parser) drain() []poo.StreamEvent {
 }
 
 // openCall starts a new call of the given shape.
+//
+// The text before the call's opening is prose and is emitted separately,
+// so the buffer starts at the call's own text.
 func (p *parser) openCall(kind callKind) {
 	p.inCall = true
 	p.callKind = kind
@@ -197,85 +210,104 @@ func (p *parser) openText(kind callKind) string {
 }
 
 // consumeCall advances an open call, returning the events it produced.
+//
+// The call's body is accumulated separately from the buffer, because the
+// buffer is emptied as the text arrives. The closing marker may straddle
+// the two, so the search is over the whole body and what is left of the
+// buffer, and the text before the marker is moved into the body.
 func (p *parser) consumeCall() ([]poo.StreamEvent, bool) {
 	switch p.callKind {
 	case kindTagged:
-		i := strings.Index(p.buf, taggedClose)
-		if i < 0 {
-			p.callBody += p.buf
-			p.callText += p.buf
-			p.buf = ""
-			return nil, false
-		}
-		p.callBody += p.buf[:i]
-		p.callText += p.buf[:i] + taggedClose
-		p.buf = p.buf[i+len(taggedClose):]
-		p.inCall = false
-		if ev, ok := p.parseBody(p.callBody); ok {
-			return []poo.StreamEvent{ev}, true
-		}
-		return []poo.StreamEvent{textEvent(p.callText)}, true
-
+		return p.consumeUntil(taggedClose)
 	case kindFence:
-		i := strings.Index(p.buf, "```")
-		if i < 0 {
-			p.callBody += p.buf
-			p.callText += p.buf
-			p.buf = ""
-			return nil, false
-		}
-		p.callBody += p.buf[:i]
-		p.callText += p.buf[:i] + "```"
-		p.buf = p.buf[i+len("```"):]
-		p.inCall = false
-		if ev, ok := p.parseBody(p.callBody); ok {
-			return []poo.StreamEvent{ev}, true
-		}
-		return []poo.StreamEvent{textEvent(p.callText)}, true
-
+		return p.consumeUntil("```")
 	default:
-		// A bare JSON object. The body ends at its matching brace.
-		for i := 0; i < len(p.buf); i++ {
-			c := p.buf[i]
-			if p.inString {
-				if p.escaped {
-					p.escaped = false
-					continue
-				}
-				switch c {
-				case '\\':
-					p.escaped = true
-				case '"':
-					p.inString = false
-				}
-				continue
-			}
-			switch c {
-			case '"':
-				p.inString = true
-			case '{':
-				p.depth++
-			case '}':
-				p.depth--
-				if p.depth == 0 {
-					p.callBody += p.buf[:i+1]
-					p.callText += p.buf[:i+1]
-					p.buf = p.buf[i+1:]
-					p.inCall = false
-					if ev, ok := p.parseBody(p.callBody); ok {
-						return []poo.StreamEvent{ev}, true
-					}
-					return []poo.StreamEvent{textEvent(p.callText)}, true
-				}
-			}
-		}
-		p.callBody += p.buf
-		p.callText += p.buf
-		p.buf = ""
-		return nil, false
+		return p.consumeJSON()
 	}
 }
 
+// consumeUntil advances a call that ends at a marker.
+//
+// The marker may straddle the body and the buffer, so the search is over
+// the two together.
+func (p *parser) consumeUntil(marker string) ([]poo.StreamEvent, bool) {
+	combined := p.callBody + p.buf
+	// The search starts far enough back that a marker split across the
+	// body and the buffer is still found.
+	start := len(p.callBody) - len(marker)
+	if start < 0 {
+		start = 0
+	}
+	i := strings.Index(combined[start:], marker)
+	if i < 0 {
+		// The marker has not arrived. All but the last few characters
+		// are body now; the rest may be the start of the marker.
+		keep := len(marker) - 1
+		if keep > len(combined) {
+			keep = len(combined)
+		}
+		split := len(combined) - keep
+		p.callBody = combined[:split]
+		p.callText += combined[:split]
+		p.buf = combined[split:]
+		return nil, false
+	}
+	i += start
+	p.callBody = combined[:i]
+	p.callText += combined[:i] + marker
+	p.buf = combined[i+len(marker):]
+	p.inCall = false
+	if ev, ok := p.parseBody(p.callBody); ok {
+		return []poo.StreamEvent{ev}, true
+	}
+	return []poo.StreamEvent{textEvent(p.callText)}, true
+}
+
+// consumeJSON advances a call that is a bare JSON object.
+//
+// The body ends at the object's matching brace. The scan runs over the
+// new text only: the body already counted the braces it holds, and
+// counting them again would unbalance the depth.
+func (p *parser) consumeJSON() ([]poo.StreamEvent, bool) {
+	for i := 0; i < len(p.buf); i++ {
+		c := p.buf[i]
+		if p.inString {
+			if p.escaped {
+				p.escaped = false
+				continue
+			}
+			switch c {
+			case '\\':
+				p.escaped = true
+			case '"':
+				p.inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			p.inString = true
+		case '{':
+			p.depth++
+		case '}':
+			p.depth--
+			if p.depth == 0 {
+				p.callBody += p.buf[:i+1]
+				p.callText += p.buf[:i+1]
+				p.buf = p.buf[i+1:]
+				p.inCall = false
+				if ev, ok := p.parseBody(p.callBody); ok {
+					return []poo.StreamEvent{ev}, true
+				}
+				return []poo.StreamEvent{textEvent(p.callText)}, true
+			}
+		}
+	}
+	p.callBody += p.buf
+	p.callText += p.buf
+	p.buf = ""
+	return nil, false
+}
 // findCallStart locates the next call in the buffer.
 //
 // It returns the index, the shape, and whether a call was found.
