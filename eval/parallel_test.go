@@ -152,6 +152,65 @@ func TestTheGlobalLimitHolds(t *testing.T) {
 	}
 }
 
+func TestConcurrentSeedsKeepTheirOwnWorkdir(t *testing.T) {
+	// Two seeds of the same model run at the same time, and one seed's
+	// cleanup must not pull the workdir out from under the other.
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+
+	// The fake poo records the workdir it ran in, and checks that the
+	// directory is still there when it runs.
+	marker := filepath.Join(t.TempDir(), "seen.txt")
+	binary := fakePoo(t, `
+dir=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --working-dir) dir="$2"; shift 2 ;;
+    --log) log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+# The first run holds the directory for a while, and the later ones
+# check it after it: the first run's cleanup is what would pull the
+# directory away from the others.
+sleep 0.6
+if [ -f "$dir/a.txt" ]; then
+  echo "present" >> "`+marker+`"
+else
+  echo "gone" >> "`+marker+`"
+fi
+cat > "$log" <<'JSON'
+{"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s"}
+{"record":"run.settled","seq":2,"ts":"2026-10-20T00:00:01Z","run_id":"r","reason":"end_turn","detail":{"source":"end_turn"},"turns":1}
+JSON
+exit 0
+`)
+
+	out := t.TempDir()
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     3,
+		Parallel:  3,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: binary,
+	})
+	if _, err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+
+	seen, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("reading the marker: %v", err)
+	}
+	if strings.Contains(string(seen), "gone") {
+		t.Errorf("a run found its workdir gone:\n%s", seen)
+	}
+}
+
 func TestTheRunIsBoundedByTheTaskTimeout(t *testing.T) {
 	// A poo that never ends is stopped by the task's timeout, and the
 	// run is reported as an error rather than hanging the harness.

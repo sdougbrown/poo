@@ -241,11 +241,11 @@ func (r *Runner) runOne(ctx context.Context, j job) RunResult {
 	workdir := filepath.Join(workRoot, "work")
 	pristine := filepath.Join(workRoot, "pristine")
 	if !r.opts.KeepWorkdirs {
-		// The whole run's scratch goes, and the empty directories it
-		// leaves behind go with it.
+		// The run's own scratch goes. The directories above it do not:
+		// another seed of the same model may be running in one of them
+		// at the same time, and removing it would pull the workdir out
+		// from under that run.
 		defer os.RemoveAll(workRoot)
-		defer os.RemoveAll(filepath.Dir(workRoot))
-		defer os.RemoveAll(filepath.Dir(filepath.Dir(workRoot)))
 	}
 
 	workdir, err := r.checkout(ctx, j.task, workdir)
