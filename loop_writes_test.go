@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -87,5 +88,56 @@ func TestARefusedUsageWriteOnASuccessfulRequestDoesNotStopTheSettle(t *testing.T
 			t.Errorf("the record seqs are %v, want no gap where the refused usage was", seqs)
 			break
 		}
+	}
+}
+
+// scriptedTransport answers every request with the same events.
+type scriptedTransport struct {
+	// turns holds the events for each request in order. The last repeats.
+	turns [][]poo.StreamEvent
+	// n is the next turn to serve.
+	n int
+}
+
+// Stream serves the next turn's events.
+func (s *scriptedTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, error) {
+	i := s.n
+	if i >= len(s.turns) {
+		i = len(s.turns) - 1
+	} else {
+		s.n++
+	}
+	return &fakeReader{events: s.turns[i]}, nil
+}
+
+// TestTwoCallsAtOneIndexAreTwoCalls covers a provider that sends every
+// parallel tool call at index 0, each with its own id: each id is its
+// own call, rather than one call holding both names and both arguments.
+func TestTwoCallsAtOneIndexAreTwoCalls(t *testing.T) {
+	call := func(id, text string) poo.StreamEvent {
+		return poo.StreamEvent{Kind: "tool_call", ToolCall: &poo.ToolCallDelta{
+			Index: 0, ID: id, Name: "echo",
+			Arguments: json.RawMessage(`{"text":"` + text + `"}`), Complete: true,
+		}}
+	}
+	tr := &scriptedTransport{turns: [][]poo.StreamEvent{
+		{call("call_a", "one"), call("call_b", "two"), {Kind: "finish", FinishReason: poo.FinishToolCalls}},
+		{{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "done"}}, {Kind: "finish", FinishReason: poo.FinishStop}},
+	}}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	res, err := poo.NewRun(testOptions(t, tr, tool, sink)).Execute(context.Background(), "do the thing")
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn", res.Reason)
+	}
+	if len(tool.calls) != 2 {
+		t.Fatalf("the tool ran %d times with %q, want 2 calls", len(tool.calls), tool.calls)
+	}
+	if !strings.Contains(tool.calls[0], "one") || !strings.Contains(tool.calls[1], "two") {
+		t.Errorf("the calls are %q, want one then two", tool.calls)
 	}
 }

@@ -589,6 +589,10 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 	var thinking strings.Builder
 	calls := make(map[int]*ToolCall)
 	var order []int
+	// current maps a provider index to the call its fragments now join.
+	current := make(map[int]int)
+	// splitKey numbers a second call that arrived at an index in use.
+	splitKey := 500
 
 	for {
 		ev, err := reader.Next()
@@ -616,13 +620,28 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 			}
 			// A provider may split one call across several events, and
 			// may send several calls in one event. The index the
-			// provider sends groups the fragments of one call.
+			// provider sends groups the fragments of one call. Some
+			// providers send every parallel call at index 0, each with
+			// its own id, so a new id at an index starts a new call.
 			idx := ev.ToolCall.Index
-			existing, ok := calls[idx]
+			key, ok := current[idx]
+			existing := calls[key]
+			if ok && ev.ToolCall.ID != "" && existing.ID != "" && ev.ToolCall.ID != existing.ID {
+				ok = false
+			}
 			if !ok {
+				key = idx
+				if _, taken := calls[key]; taken {
+					// Between the native indexes and the text
+					// parser's calls, which are numbered from 1000,
+					// in arrival order.
+					key = splitKey
+					splitKey++
+				}
 				existing = &ToolCall{}
-				calls[idx] = existing
-				order = append(order, idx)
+				calls[key] = existing
+				current[idx] = key
+				order = append(order, key)
 			}
 			if ev.ToolCall.ID != "" {
 				existing.ID = ev.ToolCall.ID
