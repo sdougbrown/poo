@@ -30,6 +30,9 @@ type Model struct {
 	// ToolsMode is how the run asks for tool calls: "native", "text" or
 	// "auto". Empty means "native".
 	ToolsMode string `yaml:"tools_mode,omitempty" json:"tools_mode,omitempty"`
+	// ReasoningEffort is passed to poo as --reasoning-effort when set,
+	// for a model that thinks only when asked to.
+	ReasoningEffort string `yaml:"reasoning_effort,omitempty" json:"reasoning_effort,omitempty"`
 	// Notes is a free-text note about the entry.
 	Notes string `yaml:"notes,omitempty" json:"notes,omitempty"`
 }

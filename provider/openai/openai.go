@@ -31,6 +31,9 @@ type Config struct {
 	// ToolsMode is how the run asks for tool calls: "native", "text" or
 	// "auto".
 	ToolsMode string
+	// ReasoningEffort is sent as the request's reasoning_effort when it
+	// is set, for endpoints whose models think only when asked to.
+	ReasoningEffort string
 	// HTTPClient is the client to use. Nil means a default client.
 	HTTPClient *http.Client
 	// Timeout bounds a whole request, streaming included. Zero means no
@@ -65,6 +68,9 @@ type chatRequest struct {
 	// MaxTokens is always sent, because some local servers default to 512.
 	MaxTokens int  `json:"max_tokens"`
 	Stream    bool `json:"stream"`
+	// ReasoningEffort asks a thinking model to think. It is omitted when
+	// unset, so an endpoint that does not know the field never sees it.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// StreamOptions asks for the usage chunk, which some servers honour
 	// and others ignore.
 	StreamOptions *streamOptions `json:"stream_options,omitempty"`
@@ -304,9 +310,10 @@ func (t *Transport) chatURL() string {
 // buildBody turns a core request into the wire payload.
 func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	out := chatRequest{
-		Model:     req.Model,
-		MaxTokens: req.MaxTokens,
-		Stream:    true,
+		Model:           req.Model,
+		MaxTokens:       req.MaxTokens,
+		Stream:          true,
+		ReasoningEffort: t.cfg.ReasoningEffort,
 		// The usage chunk is asked for in every mode, because the log's
 		// usage record needs the token accounting and a server that
 		// reports it on its own still ignores the field.

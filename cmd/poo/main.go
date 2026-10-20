@@ -36,6 +36,7 @@ Run flags:
   --context-limit <n>    The model's context window in tokens (required)
   --api-key-env <var>    The environment variable holding the API key
   --tools-mode <mode>    native (default), text or auto
+  --reasoning-effort <e> reasoning_effort to send (e.g. low), for models that think only when asked
   --max-turns <n>        The turn ceiling; 0 means unlimited
   --max-output <n>       The model's output-token ceiling
   --log <path>           The session log path
@@ -74,9 +75,11 @@ type runOptions struct {
 	toolsMode    string
 	maxTurns     int
 	maxOutput    int
-	logPath      string
-	workingDir   string
-	timeout      time.Duration
+	// reasoningEffort is sent as the request's reasoning_effort when set.
+	reasoningEffort string
+	logPath         string
+	workingDir      string
+	timeout         time.Duration
 }
 
 // runRun executes `poo run`.
@@ -93,6 +96,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.toolsMode, "tools-mode", "native", "native, text or auto")
 	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn ceiling")
 	fs.IntVar(&o.maxOutput, "max-output", 0, "The model's output-token ceiling")
+	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "The reasoning_effort to send, for models that think only when asked")
 	fs.StringVar(&o.logPath, "log", "", "The session log path")
 	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
 	fs.DurationVar(&o.timeout, "timeout", 0, "The wall-clock ceiling for the run")
@@ -168,10 +172,11 @@ func runRun(args []string) int {
 	}
 
 	transport := openai.New(openai.Config{
-		BaseURL:   o.baseURL,
-		Model:     o.modelID,
-		APIKey:    apiKey,
-		ToolsMode: o.toolsMode,
+		BaseURL:         o.baseURL,
+		Model:           o.modelID,
+		APIKey:          apiKey,
+		ToolsMode:       o.toolsMode,
+		ReasoningEffort: o.reasoningEffort,
 	})
 
 	bashTool := bash.New()

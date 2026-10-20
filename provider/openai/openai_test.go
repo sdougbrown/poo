@@ -979,3 +979,26 @@ func TestTheRequestBodyIsValidJSON(t *testing.T) {
 }
 
 var _ = fmt.Sprintf
+
+func TestTheReasoningEffortIsSentOnlyWhenSet(t *testing.T) {
+	for _, effort := range []string{"", "low"} {
+		body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+		srv := newSSEServer(t, body)
+		tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ReasoningEffort: effort})
+
+		reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+		if err != nil {
+			t.Fatalf("starting the request: %v", err)
+		}
+		read(t, reader)
+		reader.Close()
+
+		got, sent := srv.requests[0]["reasoning_effort"]
+		if effort == "" && sent {
+			t.Errorf("an unset effort sent reasoning_effort %v", got)
+		}
+		if effort != "" && got != effort {
+			t.Errorf("the request's reasoning_effort is %v, want %q", got, effort)
+		}
+	}
+}

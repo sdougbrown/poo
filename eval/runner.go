@@ -618,6 +618,9 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 	if j.model.APIKeyEnv != "" {
 		args = append(args, "--api-key-env", j.model.APIKeyEnv)
 	}
+	if j.model.ReasoningEffort != "" {
+		args = append(args, "--reasoning-effort", j.model.ReasoningEffort)
+	}
 	args = append(args, j.task.Prompt)
 
 	cmd := exec.CommandContext(ctx, r.opts.PooBinary, args...)
