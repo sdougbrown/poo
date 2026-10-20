@@ -154,10 +154,14 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 
 	resp, err := t.http.Do(httpReq)
 	if err != nil {
+		// The failure is classified before the request's context is
+		// released, because releasing it would replace the failure with
+		// the context's own error.
+		perr := classifyTransportError(ctx, err)
 		if cancel != nil {
 			cancel()
 		}
-		return nil, classifyTransportError(ctx, err)
+		return nil, perr
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
@@ -248,7 +252,7 @@ func errorInBody(body []byte) (poo.ProviderKind, string, string, bool) {
 	if message == "" {
 		message = "the endpoint returned an error"
 	}
-	return classifyError(code, message), message, code, true
+	return classifyError(code, message, poo.ProviderKindInvalidRequest), message, code, true
 }
 
 // codeString renders an error code, which a server may send as a string
@@ -268,8 +272,11 @@ func codeString(v any) string {
 //
 // A context-length failure is recognised whatever status it arrived with,
 // because a server that reports one with a 500 still means the request was
-// too long.
-func classifyError(code, message string) poo.ProviderKind {
+// too long. A failure the body does not describe falls to the default the
+// caller names: a body that answers a request with a refusal is a
+// rejected request, and an error chunk in a stream is the server's own
+// failure.
+func classifyError(code, message string, fallback poo.ProviderKind) poo.ProviderKind {
 	lower := strings.ToLower(code + " " + message)
 	switch {
 	case isContextLength(code, message):
@@ -281,7 +288,7 @@ func classifyError(code, message string) poo.ProviderKind {
 	case strings.Contains(lower, "authentication"):
 		return poo.ProviderKindAuthFailed
 	default:
-		return poo.ProviderKindServer
+		return fallback
 	}
 }
 
