@@ -1,0 +1,276 @@
+// Package read implements the read tool: a line-based view of a file.
+//
+// The tool shows the model an explicit range of a file, so it can resume
+// from a known position instead of re-reading the whole thing.
+package read
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/sdougbrown/poo"
+)
+
+// Defaults for the read tool.
+const (
+	// DefaultLimit is the number of lines a read shows when the model
+	// does not ask for a limit.
+	DefaultLimit = 2000
+	// MaxLineChars is the number of characters a single line may show.
+	// Longer lines are truncated, so a minified file cannot flood the
+	// context.
+	MaxLineChars = 2000
+	// OutputCapMax is the largest read output the model ever sees.
+	OutputCapMax = 70000
+	// CharsPerToken is the plan's estimate of characters per token.
+	CharsPerToken = 3.5
+	// BinarySniffBytes is how much of a file is read to decide whether it
+	// is binary.
+	BinarySniffBytes = 8 << 10
+)
+
+// OutputCap returns the cap on a read's output.
+//
+// The cap is context-relative: min(70000, floor(0.10 × context_limit × 3.5))
+// characters.
+func OutputCap(contextLimit int) int {
+	cap := int(0.10 * float64(contextLimit) * CharsPerToken)
+	if cap > OutputCapMax {
+		return OutputCapMax
+	}
+	if cap < 0 {
+		return 0
+	}
+	return cap
+}
+
+// Tool is the read tool.
+type Tool struct {
+	// OutputCap is the cap on the output. Zero means the cap is taken from
+	// the run's settings.
+	OutputCap int
+}
+
+// New returns a read tool.
+func New() *Tool { return &Tool{} }
+
+// Spec describes the tool.
+func (t *Tool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        "read",
+		Description: "Read a range of lines from a file.",
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "path": {"type": "string", "description": "The path of the file to read."},
+    "offset": {"type": "integer", "description": "The first line to show, 1-indexed."},
+    "limit": {"type": "integer", "description": "How many lines to show."}
+  },
+  "required": ["path"]
+}`),
+		Class:      poo.ClassReadOnly,
+		PrimaryArg: "path",
+	}
+}
+
+// args are the tool's arguments.
+type args struct {
+	Path   string `json:"path"`
+	Offset int    `json:"offset,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// prepared is a validated read call.
+type prepared struct {
+	path   string
+	offset int
+	limit  int
+}
+
+// Summary describes the call for a human reader.
+func (p *prepared) Summary() string {
+	return fmt.Sprintf("%s (offset %d, limit %d)", p.path, p.offset, p.limit)
+}
+
+// Prepare validates the arguments.
+func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	var a args
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&a); err != nil {
+		return nil, poo.InvalidArgsf("read: %v", err)
+	}
+	if strings.TrimSpace(a.Path) == "" {
+		return nil, poo.InvalidArgsf("read: path must not be empty")
+	}
+	if a.Offset < 0 {
+		return nil, poo.InvalidArgsf("read: offset must not be negative")
+	}
+	if a.Limit < 0 {
+		return nil, poo.InvalidArgsf("read: limit must not be negative")
+	}
+	offset := a.Offset
+	if offset == 0 {
+		offset = 1
+	}
+	limit := a.Limit
+	if limit == 0 {
+		limit = DefaultLimit
+	}
+	return &prepared{path: a.Path, offset: offset, limit: limit}, nil
+}
+
+// Call reads the file.
+func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	p, ok := in.(*prepared)
+	if !ok {
+		return poo.ToolResult{}, errors.New("read: prepared value is not a read call")
+	}
+
+	path := p.path
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(env.WorkingDir, path)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+	}
+	if info.IsDir() {
+		return poo.ToolResult{Text: fmt.Sprintf("read: %s is a directory", path), IsError: true}, nil
+	}
+
+	// A NUL byte in the first 8 KiB means the file is binary.
+	sniff := make([]byte, BinarySniffBytes)
+	n, err := f.Read(sniff)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+	}
+	if idx := indexNUL(sniff[:n]); idx >= 0 {
+		return poo.ToolResult{
+			Text: fmt.Sprintf("read: %s is a binary file (%d bytes); use grep or a command instead", path, info.Size()),
+			IsError: true,
+		}, nil
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+	}
+
+	cap := t.OutputCap
+	if cap <= 0 {
+		cap = env.Settings.ReadOutputCapChars
+	}
+	if cap <= 0 {
+		cap = OutputCapMax
+	}
+
+	total, err := countLines(f)
+	if err != nil {
+		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+	}
+
+	body, first, last, capped, err := readRange(path, f, p.offset, p.limit, cap)
+	if err != nil {
+		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+	}
+
+	header := fmt.Sprintf("[%s · lines %d–%d of %d]", p.path, first, last, total)
+	if capped {
+		header = fmt.Sprintf("[%s · lines %d–%d of %d · capped]", p.path, first, last, total)
+	}
+	text := header + "\n" + body
+
+	return poo.ToolResult{Text: text}, nil
+}
+
+// countLines counts the lines in a file.
+func countLines(f *os.File) (int, error) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return 0, err
+	}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	n := 0
+	for sc.Scan() {
+		n++
+	}
+	if err := sc.Err(); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// readRange reads the requested lines, honouring the output cap.
+//
+// It returns the body, the first and last line shown, and whether the cap
+// ended the read early.
+func readRange(path string, f *os.File, offset, limit, cap int) (string, int, int, bool, error) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", 0, 0, false, err
+	}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
+	var b strings.Builder
+	line := 0
+	first := 0
+	last := 0
+	capped := false
+
+	for sc.Scan() {
+		line++
+		if line < offset {
+			continue
+		}
+		if line-first >= limit && first > 0 {
+			break
+		}
+		if first == 0 {
+			first = line
+		}
+		text := sc.Text()
+		if len(text) > MaxLineChars {
+			text = text[:MaxLineChars]
+		}
+		chunk := text + "\n"
+		if b.Len()+len(chunk) > cap {
+			// The cap ends the read. The header says so, so the model can
+			// continue from the next line.
+			capped = true
+			break
+		}
+		b.WriteString(chunk)
+		last = line
+	}
+	if err := sc.Err(); err != nil {
+		return "", 0, 0, false, err
+	}
+	if first == 0 {
+		// The file has fewer lines than the offset.
+		return "", offset, offset - 1, false, nil
+	}
+	return b.String(), first, last, capped, nil
+}
+
+// indexNUL returns the index of the first NUL byte, or -1.
+func indexNUL(b []byte) int {
+	for i, c := range b {
+		if c == 0 {
+			return i
+		}
+	}
+	return -1
+}
