@@ -13,6 +13,25 @@ exactly what it wants — and what it leaves out cannot be reached at runtime.
 **Status: experimental.** The Go APIs, settings and wire protocol may change
 without a deprecation period until the TUI launches.
 
+## What works today
+
+Stage 1 is the walking skeleton: enough of a harness to put a real model on
+a real task and measure what happens.
+
+```
+poo run --base-url http://localhost:4000/v1 --model-id gemma4 \
+  --context-limit 262144 --max-turns 8 --log session.jsonl \
+  "List the Go packages in this repository."
+```
+
+The command talks to an OpenAI-compatible endpoint, runs the `bash` and
+`read` tools, and settles with a reason. The exit code says why: 0 for
+`end_turn`, 11 for `max_turns`, 13 for `context_exhausted`, 20 for
+`provider_error` and 130 for `cancelled`.
+
+Every run writes an append-only JSONL log. The record names and their
+fields are in [docs/session-log-v0.md](docs/session-log-v0.md).
+
 ## Layout
 
 | Package | Role |
