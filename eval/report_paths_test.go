@@ -31,3 +31,25 @@ func TestAWrittenReportHoldsNoAbsolutePaths(t *testing.T) {
 		t.Error("writing the report changed the caller's log path")
 	}
 }
+
+func TestARelativeReportDirStillWritesRelativePaths(t *testing.T) {
+	base := t.TempDir()
+	t.Chdir(base)
+	dir := filepath.Join("results", "r")
+	report := &Report{
+		Dir: filepath.Join(base, dir),
+		Results: []RunResult{{
+			LogPath: filepath.Join(base, dir, "runs", "run-1", "t", "m", "seed1", "session.jsonl"),
+		}},
+	}
+	if err := WriteReport(dir, report); err != nil {
+		t.Fatalf("writing the report: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "report.md"))
+	if err != nil {
+		t.Fatalf("reading the report: %v", err)
+	}
+	if strings.Contains(string(data), base) {
+		t.Errorf("report.md holds the absolute path %s", base)
+	}
+}

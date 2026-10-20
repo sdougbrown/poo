@@ -380,6 +380,9 @@ func formatRatio(r *float64) string {
 // report's own directory, so a committed report names no machine's
 // home directory. The caller's report is left as it is.
 func portable(dir string, report *Report) *Report {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
 	out := *report
 	out.Dir = "."
 	out.Results = make([]RunResult, len(report.Results))
