@@ -2,6 +2,12 @@ package openai_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -124,5 +130,53 @@ func TestTheEventsArriveInOrder(t *testing.T) {
 				t.Errorf("the events are %v, want %v", kinds, want)
 			}
 		})
+	}
+}
+
+// TestAnEventBeforeABrokenConnectionIsKept covers a server that separates
+// its events with a single newline and then drops the connection: the
+// last complete event still reaches the caller ahead of the failure.
+func TestAnEventBeforeABrokenConnectionIsKept(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, buf, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijacking the connection: %v", err)
+			return
+		}
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+		event := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"kept\"}}]}\n"
+		_, _ = fmt.Fprintf(buf, "%x\r\n%s\r\n", len(event), event)
+		_ = buf.Flush()
+		if tcp, ok := conn.(*net.TCPConn); ok {
+			_ = tcp.SetLinger(0)
+		}
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+
+	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	var text string
+	var failed bool
+	for {
+		ev, err := reader.Next()
+		if err != nil {
+			failed = !errors.Is(err, io.EOF)
+			break
+		}
+		if ev.Kind == "delta" && ev.Delta != nil {
+			text += ev.Delta.Text
+		}
+	}
+	if text != "kept" {
+		t.Errorf("the text is %q, want the event that arrived before the break", text)
+	}
+	if !failed {
+		t.Error("the stream ended cleanly, want the broken connection reported")
 	}
 }

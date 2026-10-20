@@ -248,10 +248,15 @@ func (r *streamReader) close() (poo.StreamEvent, error) {
 
 // fail ends the stream with a failure.
 //
-// The usage report comes first, so a consumer sees the request's
-// accounting even when the stream broke. The failure itself is returned
-// by the next call.
+// A complete event still waiting for its dispatch is queued first, so
+// it is not lost with the connection. An in-band error it carries is the
+// more specific failure and replaces the read error. The usage report
+// follows, so a consumer sees the request's accounting even when the
+// stream broke. The failure itself is returned by the next call.
 func (r *streamReader) fail(err error) (poo.StreamEvent, error) {
+	if derr := r.dispatch(); derr != nil {
+		err = derr
+	}
 	r.done = true
 	r.err = err
 	r.pending = r.appendUsage(r.pending)
