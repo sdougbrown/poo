@@ -296,16 +296,12 @@ func headRunes(s string, n int) string {
 func tailRunes(s string, n int) string {
 	// The end of the string is found by walking back over its
 	// characters, so a rune is never cut in half.
+	// A byte that is not part of a valid rune counts as one character,
+	// as it does for utf8.RuneCountInString and for the head.
 	end := len(s)
 	count := 0
 	for end > 0 {
-		r, size := utf8.DecodeLastRuneInString(s[:end])
-		if r == utf8.RuneError && size == 1 {
-			// A byte that is not a rune of its own. It is dropped
-			// rather than kept, because it is not a character.
-			end--
-			continue
-		}
+		_, size := utf8.DecodeLastRuneInString(s[:end])
 		end -= size
 		count++
 		if count == n {

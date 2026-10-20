@@ -317,8 +317,9 @@ func readRange(f *os.File, offset, limit, cap int) (string, int, int, int, bool,
 // A carriage return is stripped, so a file with CRLF endings reads the
 // same as a file with LF endings.
 func readLine(br *bufio.Reader, limit int) (string, bool, error) {
-	// A rune is at most four bytes, so this budget holds enough whole
-	// characters to satisfy the limit.
+	// A rune is at most four bytes, so this budget holds more than limit
+	// characters. The cut to limit characters therefore always lands
+	// before the budget's own cut, which may split a rune.
 	budget := limit*4 + 4
 	var b strings.Builder
 	for {
@@ -333,13 +334,13 @@ func readLine(br *bufio.Reader, limit int) (string, bool, error) {
 		switch {
 		case err == nil:
 			text := trimCarriageReturn(strings.TrimSuffix(b.String(), "\n"))
-			return truncateRunes(trimPartialRune(text), limit), false, nil
+			return truncateRunes(text, limit), false, nil
 		case errors.Is(err, bufio.ErrBufferFull):
 			// The line is longer than the buffer. Keep reading.
 			continue
 		case errors.Is(err, io.EOF):
 			text := trimCarriageReturn(b.String())
-			return truncateRunes(trimPartialRune(text), limit), true, nil
+			return truncateRunes(text, limit), true, nil
 		default:
 			return "", false, err
 		}
@@ -349,19 +350,6 @@ func readLine(br *bufio.Reader, limit int) (string, bool, error) {
 // trimCarriageReturn drops a carriage return from the end of a line.
 func trimCarriageReturn(s string) string {
 	return strings.TrimSuffix(s, "\r")
-}
-
-// trimPartialRune drops an incomplete rune from the end of a string.
-func trimPartialRune(s string) string {
-	for len(s) > 0 {
-		r, size := utf8.DecodeLastRuneInString(s)
-		if r == utf8.RuneError && size == 1 {
-			s = s[:len(s)-1]
-			continue
-		}
-		break
-	}
-	return s
 }
 
 // truncateRunes keeps a string within a character budget, without

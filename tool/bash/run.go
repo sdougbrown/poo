@@ -186,24 +186,30 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 
 // String returns the captured output.
 //
-// A cut that lands in the middle of a character drops the partial one,
-// so the captured output is always valid UTF-8 and never holds a
-// replacement character.
+// A cut that lands in the middle of a character drops the partial one.
+// Bytes the command printed are otherwise kept as they are, valid UTF-8
+// or not.
 func (b *cappedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return trimPartialRune(string(b.buf))
+	if len(b.buf) < b.limit {
+		return string(b.buf)
+	}
+	return trimCutRune(string(b.buf))
 }
 
-// trimPartialRune drops an incomplete rune from the end of a string.
-func trimPartialRune(s string) string {
-	for len(s) > 0 {
-		r, size := utf8.DecodeLastRuneInString(s)
-		if r == utf8.RuneError && size == 1 {
-			s = s[:len(s)-1]
-			continue
+// trimCutRune drops the start of a multi-byte rune that a cut left
+// incomplete at the end of a string.
+func trimCutRune(s string) string {
+	// A rune is at most utf8.UTFMax bytes, so its start is within the
+	// last few bytes.
+	for i := len(s) - 1; i >= 0 && i >= len(s)-utf8.UTFMax; i-- {
+		if utf8.RuneStart(s[i]) {
+			if s[i] >= utf8.RuneSelf && !utf8.FullRuneInString(s[i:]) {
+				return s[:i]
+			}
+			return s
 		}
-		break
 	}
 	return s
 }

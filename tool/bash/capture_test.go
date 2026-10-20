@@ -39,3 +39,16 @@ func TestTheCaptureCapKeepsWholeCharacters(t *testing.T) {
 		t.Errorf("the capture is %q, want three euro signs", got)
 	}
 }
+
+// TestTheCaptureKeepsInvalidBytesItDidNotCut covers output that ends in a
+// byte that is not a character: with no cut, the capture holds what the
+// command printed.
+func TestTheCaptureKeepsInvalidBytesItDidNotCut(t *testing.T) {
+	for _, out := range []string{"ok\xff", "\xff", "a\xe2\x82"} {
+		b := &cappedBuffer{limit: 1 << 20}
+		_, _ = b.Write([]byte(out))
+		if got := b.String(); got != out {
+			t.Errorf("the capture of %q is %q, want it unchanged", out, got)
+		}
+	}
+}

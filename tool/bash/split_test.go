@@ -88,3 +88,17 @@ func BenchmarkSplitRunes(b *testing.B) {
 		}
 	}
 }
+
+// TestTheSplitCountsInvalidBytesAsCharacters covers output that is not
+// valid UTF-8: each stray byte counts as one character, so the tail stays
+// within its budget and never repeats the head.
+func TestTheSplitCountsInvalidBytesAsCharacters(t *testing.T) {
+	text := "ab" + strings.Repeat("\xff", 20) + "cd"
+	head, tail := splitRunes(text, 4)
+	if head != "ab\xff\xff" {
+		t.Errorf("the head is %q, want %q", head, "ab\xff\xff")
+	}
+	if tail != "\xff\xffcd" {
+		t.Errorf("the tail is %q, want %q", tail, "\xff\xffcd")
+	}
+}

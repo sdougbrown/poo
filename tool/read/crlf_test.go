@@ -45,3 +45,19 @@ func TestACarriageReturnOnTheLastLineIsStripped(t *testing.T) {
 		t.Errorf("the body is %q, want the two lines", body)
 	}
 }
+
+// TestAnInvalidByteAtTheEndOfALineIsKept covers a line that ends in a
+// byte that is not a character: the line is read as it is.
+func TestAnInvalidByteAtTheEndOfALineIsKept(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "bytes.txt", "ok\xff\nnext\n")
+
+	res := call(t, read.New(), map[string]any{"path": "bytes.txt"}, dir)
+	if res.IsError {
+		t.Fatalf("the read failed: %s", res.Text)
+	}
+	body := strings.SplitN(res.Text, "\n", 2)[1]
+	if body != "ok\xff\nnext\n" {
+		t.Errorf("the body is %q, want the line's invalid byte kept", body)
+	}
+}
