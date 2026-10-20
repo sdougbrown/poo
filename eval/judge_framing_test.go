@@ -21,6 +21,36 @@ import (
 // A judge outage that produced no flagged verdicts would read as "no
 // transcript needs the owner", which is the opposite of the truth.
 
+func TestTheJudgeFindsTheTranscriptsUnderTheRunDirectory(t *testing.T) {
+	// The runs live in a directory of the invocation's own, so the
+	// judge's walk has to find the transcripts one level deeper than
+	// the task, the model and the seed.
+	resultsDir := t.TempDir()
+	runDir := filepath.Join(resultsDir, "runs", "run-abc123", "t", "m", "seed1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("making the run directory: %v", err)
+	}
+	log := `{"record":"run.settled","seq":1,"ts":"2026-10-20T00:00:00Z","run_id":"r","reason":"end_turn","detail":{"source":"end_turn"},"turns":1}`
+	if err := os.WriteFile(filepath.Join(runDir, "session.jsonl"), []byte(log), 0o644); err != nil {
+		t.Fatalf("writing the log: %v", err)
+	}
+
+	judge, err := NewJudge(JudgeOptions{ResultsDir: resultsDir})
+	if err != nil {
+		t.Fatalf("making the judge: %v", err)
+	}
+	found, err := judge.findTranscripts()
+	if err != nil {
+		t.Fatalf("finding the transcripts: %v", err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("the judge found %d transcripts, want 1", len(found))
+	}
+	if found[0].task != "t" || found[0].model != "m" || found[0].seed != 1 {
+		t.Errorf("the transcript is %+v, want the task, the model and the seed", found[0])
+	}
+}
+
 func TestAJudgeErrorNeedsTheOwner(t *testing.T) {
 	// A judge that answers with an error.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -265,11 +265,17 @@ func (j *Judge) findTranscripts() ([]transcript, error) {
 		if len(parts) < 3 {
 			return nil
 		}
+		// The seed's directory names the seed, so a session.jsonl
+		// anywhere else is not a run's transcript.
+		seed, ok := seedFromName(parts[len(parts)-1])
+		if !ok {
+			return nil
+		}
 		out = append(out, transcript{
 			path:  path,
 			task:  parts[len(parts)-3],
 			model: parts[len(parts)-2],
-			seed:  seedNumber(parts[len(parts)-1]),
+			seed:  seed,
 		})
 		return nil
 	})
@@ -791,15 +797,27 @@ func verdictFileName(v Verdict) string {
 // The name is "seed" and a number. A name that is not that shape has no
 // seed, and the answer is zero.
 func seedNumber(name string) int {
-	rest, ok := strings.CutPrefix(name, "seed")
+	seed, ok := seedFromName(name)
 	if !ok {
 		return 0
 	}
+	return seed
+}
+
+// seedFromName reads the seed out of a directory name.
+//
+// The name is "seed" and a number. A name that is not that shape names
+// no seed.
+func seedFromName(name string) (int, bool) {
+	rest, ok := strings.CutPrefix(name, "seed")
+	if !ok {
+		return 0, false
+	}
 	n, err := strconv.Atoi(rest)
 	if err != nil {
-		return 0
+		return 0, false
 	}
-	return n
+	return n, true
 }
 
 // truncate shortens a string to n characters.

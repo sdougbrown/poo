@@ -76,8 +76,11 @@ func (r *Runner) pooEnv(m Model) []string {
 //
 // Every key variable is gone: the check's output goes into the report,
 // and a check that prints its environment must not print a credential.
+//
+// The extra variables are added first and the scrubbing runs over the
+// whole set, so an extra can never bring a key variable back.
 func (r *Runner) checkEnv(extra ...string) []string {
-	return append(scrubbedEnv(os.Environ(), r.keyEnvs, ""), extra...)
+	return scrubbedEnv(append(os.Environ(), extra...), r.keyEnvs, "")
 }
 
 // randomName returns a short random name.

@@ -122,13 +122,6 @@ type Report struct {
 // Runner runs the harness.
 type Runner struct {
 	opts RunOptions
-	// workRoot is the directory this invocation's workdirs live under.
-	// It carries a name of its own, so two invocations that share a
-	// work root do not share a workdir: one invocation's cleanup must not
-	// pull the other one's workdir away.
-	workRoot string
-	// runsDir is the directory this invocation's run logs live under.
-	runsDir string
 	// keyEnvs are the environment variables the catalog names as key
 	// variables. They are removed from every environment the harness
 	// builds, except the one the running model needs.
@@ -216,24 +209,22 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 	}
 	// The runs live in a directory of this invocation's own, so a
 	// rerun never lands on the previous run's log.
-	runID, err := r.newRunDir()
+	runsDir, err := r.newRunDir()
 	if err != nil {
 		return nil, err
 	}
-	r.runsDir = runID
 	// The workdirs live under a directory of this invocation's own, so
 	// two invocations that share a work root do not share a workdir.
 	workRoot, err := r.newWorkRoot()
 	if err != nil {
 		return nil, err
 	}
-	r.workRoot = workRoot
 	if !r.opts.KeepWorkdirs {
 		defer os.RemoveAll(workRoot)
 	}
 
 	jobs := r.jobs()
-	results := r.execute(ctx, jobs)
+	results := r.execute(ctx, jobs, runsDir, workRoot)
 
 	report.Results = results
 	sort.SliceStable(report.Results, func(i, j int) bool {
@@ -333,7 +324,7 @@ func (r *Runner) jobs() []job {
 //
 // The parallel limit is global, and each endpoint has its own smaller
 // limit, so two models on one endpoint do not both use it at once.
-func (r *Runner) execute(ctx context.Context, jobs []job) []RunResult {
+func (r *Runner) execute(ctx context.Context, jobs []job, runsDir, workRoot string) []RunResult {
 	results := make([]RunResult, len(jobs))
 
 	var wg sync.WaitGroup
@@ -356,7 +347,7 @@ func (r *Runner) execute(ctx context.Context, jobs []job) []RunResult {
 			semEP <- struct{}{}
 			defer func() { <-semEP }()
 
-			results[i] = r.runOne(ctx, j)
+			results[i] = r.runOne(ctx, j, runsDir, workRoot)
 		}(i, j, semEP)
 	}
 	wg.Wait()
@@ -364,31 +355,31 @@ func (r *Runner) execute(ctx context.Context, jobs []job) []RunResult {
 }
 
 // runOne makes one run: check out, run poo, run the check.
-func (r *Runner) runOne(ctx context.Context, j job) RunResult {
+func (r *Runner) runOne(ctx context.Context, j job, runsDir, workRoot string) RunResult {
 	started := time.Now()
 	result := RunResult{Task: j.task.ID, Model: j.model.Name, Seed: j.seed}
 
 	// The report holds the log and the check's output. The workdir is
 	// scratch, and lives under the work root, which is never /tmp.
-	runDir := filepath.Join(r.runsDir, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
+	runDir := filepath.Join(runsDir, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		result.Error = fmt.Sprintf("creating %s: %v", runDir, err)
 		return result
 	}
 
-	workRoot := filepath.Join(r.workRoot, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
-	if err := os.MkdirAll(workRoot, 0o755); err != nil {
-		result.Error = fmt.Sprintf("creating %s: %v", workRoot, err)
+	seedRoot := filepath.Join(workRoot, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
+	if err := os.MkdirAll(seedRoot, 0o755); err != nil {
+		result.Error = fmt.Sprintf("creating %s: %v", seedRoot, err)
 		return result
 	}
-	workdir := filepath.Join(workRoot, "work")
-	pristine := filepath.Join(workRoot, "pristine")
+	workdir := filepath.Join(seedRoot, "work")
+	pristine := filepath.Join(seedRoot, "pristine")
 	if !r.opts.KeepWorkdirs {
 		// The run's own scratch goes. The directories above it do not:
 		// another seed of the same model may be running in one of them
 		// at the same time, and removing it would pull the workdir out
 		// from under that run.
-		defer os.RemoveAll(workRoot)
+		defer os.RemoveAll(seedRoot)
 	}
 
 	workdir, err := r.checkout(ctx, j.task, workdir)
