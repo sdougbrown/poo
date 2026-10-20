@@ -150,9 +150,9 @@ output as a finished command.
 
 ## `usage`
 
-The token accounting of one provider request. Every request gets a record,
-so a consumer can see the time to the first token even when the endpoint
-reports no token counts.
+The token accounting of one provider request. Every request whose stream
+started gets a record, so a consumer can see the time to the first token
+even when the endpoint reports no token counts.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -168,9 +168,11 @@ The time to the first token is the time to the first *token*: a non-empty
 text delta, a thinking delta or a tool call. A chunk that only announces
 the assistant's role carries no token, so it does not start the clock.
 
-Every provider request gets a `usage` record, including a request whose
-stream failed part way through: the request still cost tokens, and the
-record is what a consumer reads to account for it.
+Every provider request whose stream started gets a `usage` record,
+including a request whose stream failed part way through: the request
+still cost tokens, and the record is what a consumer reads to account for
+it. A request that failed before the endpoint's stream started has no
+usage record: no token was spent on it.
 
 ## `run.settled`
 
@@ -260,11 +262,15 @@ The bash tool's payload is the observation the model reads, as JSON:
 | `hint` | string | How to see the elided middle. Absent when the output was not elided. |
 
 The observation cap and `elided_chars` are counted in characters, not
-bytes, and a cut never splits a rune.
+bytes, and a cut never splits a rune. The output is captured up to 1 MiB,
+and a capture cut that lands in the middle of a character drops the
+partial one rather than turning it into a replacement character.
 
 The read tool's payload is the range the model saw. Its text carries a
 header naming the range, such as `[path · lines 1–2000 of 5312]`, and the
 body below it. The header says `· capped` when the output cap ended the
 read early, and names an empty range when the offset is past the end of
 the file. A line is truncated at 2000 characters, counted in characters,
-and a cut never splits a rune.
+and a cut never splits a rune. A carriage return at the end of a line is
+stripped, so a file with CRLF endings reads the same as one with LF
+endings.
