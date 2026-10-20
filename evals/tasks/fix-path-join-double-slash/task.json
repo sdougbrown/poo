@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-path-join-double-slash",
+  "prompt": "The `join` function in `pathkit/__init__.py` leaves a doubled slash when a part already ends with one, so `join(\"a/\", \"b\")` gives `\"a//b\"`. It should give `\"a/b\"`. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "pathkit/__init__.py"
+  ],
+  "description": "Joining paths leaves a doubled slash."
+}

@@ -1,0 +1,12 @@
+{
+  "repo": "fixture:find-dead-code",
+  "prompt": "One of the handlers in `src/handlers.py` is never reachable: no route in `src/routes.py` points at it. Name the handler, and say which file would have to change for it to become reachable. Do not change any file.",
+  "timeout_s": 300,
+  "tags": [
+    "readonly",
+    "explain",
+    "small"
+  ],
+  "expected_paths": [],
+  "description": "A handler no route reaches."
+}

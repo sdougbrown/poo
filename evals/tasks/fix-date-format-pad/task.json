@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-date-format-pad",
+  "prompt": "The `format_date` function in `datakit/__init__.py` does not pad the year, so a year under 1000 is printed without its leading zeros. The year should be four digits wide, padded with zeros. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "datakit/__init__.py"
+  ],
+  "description": "A date's year is not padded."
+}

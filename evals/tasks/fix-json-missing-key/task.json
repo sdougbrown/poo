@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-json-missing-key",
+  "prompt": "The `require` function in `confload/__init__.py` returns None when the key is missing from the configuration. It should raise a KeyError naming the missing key, as its docstring says. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "confload/__init__.py"
+  ],
+  "description": "A missing configuration key returns None instead of raising."
+}

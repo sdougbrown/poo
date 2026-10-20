@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-cache-never-expires",
+  "prompt": "The `Cache` class in `cachekit/__init__.py` does not honour its capacity: it keeps more entries than it was given. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "cachekit/__init__.py"
+  ],
+  "description": "A cache ignores its capacity."
+}

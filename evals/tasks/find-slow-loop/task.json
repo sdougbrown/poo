@@ -1,0 +1,12 @@
+{
+  "repo": "fixture:find-slow-loop",
+  "prompt": "The `get` method of `Store` in `svc/store.py` scans the whole record list on every call, so a request that looks up many keys scans the list many times. Say which method is the slow one and what data structure would replace the scan. Do not change any file.",
+  "timeout_s": 300,
+  "tags": [
+    "readonly",
+    "explain",
+    "small"
+  ],
+  "expected_paths": [],
+  "description": "A store scans its whole list on every lookup."
+}

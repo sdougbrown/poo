@@ -1,0 +1,12 @@
+{
+  "repo": "fixture:find-version-mismatch",
+  "prompt": "The project's version is declared in two places and they disagree: the packaging metadata and the package itself. Say what each place declares, and name the file that is out of step with the changelog. Do not change any file.",
+  "timeout_s": 300,
+  "tags": [
+    "readonly",
+    "explain",
+    "small"
+  ],
+  "expected_paths": [],
+  "description": "The version is declared twice and the two disagree."
+}

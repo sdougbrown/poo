@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-unicode-decode-error",
+  "prompt": "The `character_count` function in `unicodelib/__init__.py` counts bytes rather than characters, so a non-ASCII character is counted more than once. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "unicodelib/__init__.py"
+  ],
+  "description": "A character count counts bytes."
+}
