@@ -134,3 +134,24 @@ func TestAFileUnderTestsIsAlwaysUnexpected(t *testing.T) {
 		t.Errorf("a task that allows test edits still flagged %v", allowed)
 	}
 }
+
+func TestAWorkRootInsideTheTaskSetsRepositoryIsRefused(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taskRoot := filepath.Join(repo, "evals", "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       t.TempDir(),
+		WorkRoot:  filepath.Join(repo, ".cache", "eval-work"),
+		PooBinary: fakePoo(t, logWritingPoo),
+	})
+	if _, err := runner.Run(context.Background()); err == nil {
+		t.Error("a work root inside the task set's repository was accepted")
+	}
+}

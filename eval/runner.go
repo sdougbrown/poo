@@ -314,7 +314,27 @@ func (r *Runner) checkWorkRoot() error {
 	if within(r.opts.WorkRoot, tasks) || within(tasks, r.opts.WorkRoot) {
 		return fmt.Errorf("eval: the work root %s and the task set %s must not contain one another", r.opts.WorkRoot, tasks)
 	}
+	// A workdir anywhere in the task set's repository has the task set a
+	// walk up and a walk down away.
+	if repo := repositoryRoot(tasks); repo != "" && within(r.opts.WorkRoot, repo) {
+		return fmt.Errorf("eval: the work root %s is inside the task set's repository %s", r.opts.WorkRoot, repo)
+	}
 	return nil
+}
+
+// repositoryRoot returns the nearest directory at or above dir that
+// holds a go.mod, or the empty string when there is none.
+func repositoryRoot(dir string) string {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // within reports whether path is dir or lies under it.
