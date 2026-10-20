@@ -165,6 +165,9 @@ check_package() {
     if [ "$dep" = "$pkg" ]; then
       continue
     fi
+    if in_set "$dep" "$imports"; then
+      continue
+    fi
     if in_set "$dep" "$unresolved"; then
       continue
     fi
