@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -95,15 +96,34 @@ func (p *prepared) Summary() string { return p.command }
 // Prepare validates the arguments.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&a); err != nil {
+	if err := decodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("bash: %v", err)
 	}
 	if strings.TrimSpace(a.Command) == "" {
 		return nil, poo.InvalidArgsf("bash: command must not be empty")
 	}
 	return &prepared{command: a.Command}, nil
+}
+
+// decodeStrict decodes one JSON value and nothing else.
+//
+// A second value, or anything after the first, is a malformed call: the
+// model sent more than it meant to, and taking the first object would
+// silently run the wrong command.
+func decodeStrict(raw json.RawMessage, into any) error {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		return err
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("the arguments hold more than one JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 // Call runs the command.
@@ -143,14 +163,17 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		code = *res.returncode
 	}
 	fields = append(fields, field{"returncode", code}, field{"timed_out", res.timedOut})
-	if len(out) <= cap {
+	// The cap is in characters, and a cut never splits a rune.
+	outChars := utf8.RuneCountInString(out)
+	if outChars <= cap {
 		fields = append(fields, field{"output", out})
 	} else {
 		half := cap / 2
+		head, tail := splitRunes(out, half)
 		fields = append(fields,
-			field{"output_head", truncate(out[:half], half)},
-			field{"output_tail", truncate(out[len(out)-half:], half)},
-			field{"elided_chars", len(out) - 2*half},
+			field{"output_head", head},
+			field{"output_tail", tail},
+			field{"elided_chars", outChars - 2*half},
 			field{"hint", ElisionHint},
 		)
 	}
@@ -164,6 +187,10 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	return poo.ToolResult{
 		Text:       text,
 		Structured: mustJSON(structured),
+		// A timed-out call is a recoverable error: the model has to see
+		// that it failed, or it will read the partial output as a
+		// finished command.
+		IsError: res.timedOut || res.cancelled,
 	}, nil
 }
 
@@ -200,16 +227,19 @@ func render(fields []field) string {
 	return b.String()
 }
 
-// truncate keeps a string within a byte budget, without splitting a rune.
-func truncate(s string, limit int) string {
-	if len(s) <= limit {
-		return s
+// splitRunes cuts a string into its head and its tail, each within a
+// character budget, without splitting a rune.
+func splitRunes(s string, half int) (string, string) {
+	if half <= 0 {
+		return "", ""
 	}
-	b := s[:limit]
-	for len(b) > 0 && !utf8.ValidString(b) {
-		b = b[:len(b)-1]
+	runes := []rune(s)
+	if len(runes) <= half {
+		return s, ""
 	}
-	return b
+	head := string(runes[:half])
+	tail := string(runes[len(runes)-half:])
+	return head, tail
 }
 
 // mustJSON encodes a value, falling back to an empty object.

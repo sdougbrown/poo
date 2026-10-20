@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 )
@@ -102,9 +103,7 @@ func (p *prepared) Summary() string {
 // Prepare validates the arguments.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&a); err != nil {
+	if err := decodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("read: %v", err)
 	}
 	if strings.TrimSpace(a.Path) == "" {
@@ -125,6 +124,27 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 		limit = DefaultLimit
 	}
 	return &prepared{path: a.Path, offset: offset, limit: limit}, nil
+}
+
+// decodeStrict decodes one JSON value and nothing else.
+//
+// A second value, or anything after the first, is a malformed call: the
+// model sent more than it meant to, and taking the first object would
+// silently run the wrong thing.
+func decodeStrict(raw json.RawMessage, into any) error {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		return err
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("the arguments hold more than one JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 // Call reads the file.
@@ -183,6 +203,10 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 
 	header := fmt.Sprintf("[%s · lines %d–%d of %d]", p.path, first, last, total)
+	if first == 0 {
+		// The range is empty: the offset is past the end of the file.
+		header = fmt.Sprintf("[%s · no lines at offset %d of %d]", p.path, p.offset, total)
+	}
 	if capped {
 		header = fmt.Sprintf("[%s · lines %d–%d of %d · capped]", p.path, first, last, total)
 	}
@@ -196,12 +220,15 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 // It returns the body, the total number of lines, the first and last
 // line shown, and whether the cap ended the read early. The file is read
 // once, so a large file costs one pass.
+//
+// The cap and the line cap are counted in characters, and a cut never
+// splits a rune. A line longer than the line cap is read to its end and
+// truncated, so a minified file is readable and costs a bounded buffer.
 func readRange(path string, f *os.File, offset, limit, cap int) (string, int, int, int, bool, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", 0, 0, 0, false, err
 	}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	br := bufio.NewReader(f)
 
 	var b strings.Builder
 	line := 0
@@ -209,16 +236,32 @@ func readRange(path string, f *os.File, offset, limit, cap int) (string, int, in
 	first := 0
 	last := 0
 	capped := false
+	// room is how much of the cap is left, in characters.
+	room := cap
 
-	for sc.Scan() {
+	for {
+		text, eof, err := readLine(br, MaxLineChars)
+		if err != nil {
+			return "", 0, 0, 0, false, err
+		}
+		if eof && text == "" {
+			// The file ended.
+			break
+		}
 		line++
 		total = line
 		if line < offset {
+			if eof {
+				break
+			}
 			continue
 		}
 		if first > 0 && line-first >= limit {
 			// The range is complete, but the rest of the file is still
 			// counted, so the header can name the total.
+			if eof {
+				break
+			}
 			continue
 		}
 		if first == 0 {
@@ -227,30 +270,105 @@ func readRange(path string, f *os.File, offset, limit, cap int) (string, int, in
 		if capped {
 			// The cap already ended the body, so the rest is only
 			// counted.
+			if eof {
+				break
+			}
 			continue
 		}
-		text := sc.Text()
-		if len(text) > MaxLineChars {
-			text = text[:MaxLineChars]
-		}
+
 		chunk := text + "\n"
-		if b.Len()+len(chunk) > cap {
-			// The cap ends the read. The header says so, so the model can
-			// continue from the next line.
+		chars := utf8.RuneCountInString(chunk)
+		if chars > room {
+			// The cap ends the read. The first line is still shown, in
+			// part, so the model can make progress.
+			if room > 0 {
+				chunk = truncateRunes(chunk, room)
+				b.WriteString(chunk)
+				last = line
+			}
 			capped = true
+			room = 0
+			if eof {
+				break
+			}
 			continue
 		}
 		b.WriteString(chunk)
+		room -= chars
 		last = line
-	}
-	if err := sc.Err(); err != nil {
-		return "", 0, 0, 0, false, err
+
+		if eof {
+			break
+		}
 	}
 	if first == 0 {
 		// The file has fewer lines than the offset.
-		return "", total, offset, offset - 1, false, nil
+		return "", total, 0, 0, false, nil
 	}
 	return b.String(), total, first, last, capped, nil
+}
+
+// readLine reads one line, keeping at most limit characters.
+//
+// The rest of the line is discarded rather than held in memory, so a
+// minified file costs a bounded buffer. It reports whether the file
+// ended with the line.
+func readLine(br *bufio.Reader, limit int) (string, bool, error) {
+	// A rune is at most four bytes, so this budget holds enough whole
+	// characters to satisfy the limit.
+	budget := limit*4 + 4
+	var b strings.Builder
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if b.Len() < budget {
+			room := budget - b.Len()
+			if room > len(chunk) {
+				room = len(chunk)
+			}
+			b.Write(chunk[:room])
+		}
+		switch {
+		case err == nil:
+			text := strings.TrimSuffix(b.String(), "\n")
+			return truncateRunes(trimPartialRune(text), limit), false, nil
+		case errors.Is(err, bufio.ErrBufferFull):
+			// The line is longer than the buffer. Keep reading.
+			continue
+		case errors.Is(err, io.EOF):
+			return truncateRunes(trimPartialRune(b.String()), limit), true, nil
+		default:
+			return "", false, err
+		}
+	}
+}
+
+// trimPartialRune drops an incomplete rune from the end of a string.
+func trimPartialRune(s string) string {
+	for len(s) > 0 {
+		r, size := utf8.DecodeLastRuneInString(s)
+		if r == utf8.RuneError && size == 1 {
+			s = s[:len(s)-1]
+			continue
+		}
+		break
+	}
+	return s
+}
+
+// truncateRunes keeps a string within a character budget, without
+// splitting a rune.
+func truncateRunes(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	count := 0
+	for i := range s {
+		if count == limit {
+			return s[:i]
+		}
+		count++
+	}
+	return s
 }
 
 // indexNUL returns the index of the first NUL byte, or -1.
