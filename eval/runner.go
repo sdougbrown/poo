@@ -99,6 +99,10 @@ type RunResult struct {
 	CheckOutput string `json:"check_output,omitempty"`
 	// DiffOutput is the diff the run left behind.
 	DiffOutput string `json:"diff_output,omitempty"`
+	// SourceChanged is set when the run, or something running beside it,
+	// changed the task set's source fixture or task directory. The run is
+	// invalid.
+	SourceChanged bool `json:"source_changed,omitempty"`
 	// Error is set when the run could not be made at all: the binary
 	// was missing, the task could not be checked out, the run timed out.
 	Error string `json:"error,omitempty"`
@@ -237,8 +241,13 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 		defer os.RemoveAll(workRoot)
 	}
 
+	guard, err := newSourceGuard(r.opts.Tasks, r.opts.TaskRoot, workRoot)
+	if err != nil {
+		return nil, err
+	}
+
 	jobs := r.jobs()
-	results := r.execute(ctx, jobs, runsDir, workRoot)
+	results := r.execute(ctx, jobs, runsDir, workRoot, guard)
 
 	report.Results = results
 	sort.SliceStable(report.Results, func(i, j int) bool {
@@ -383,7 +392,7 @@ func (r *Runner) jobs() []job {
 //
 // The parallel limit is global, and each endpoint has its own smaller
 // limit, so two models on one endpoint do not both use it at once.
-func (r *Runner) execute(ctx context.Context, jobs []job, runsDir, workRoot string) []RunResult {
+func (r *Runner) execute(ctx context.Context, jobs []job, runsDir, workRoot string, guard *sourceGuard) []RunResult {
 	results := make([]RunResult, len(jobs))
 
 	var wg sync.WaitGroup
@@ -406,7 +415,7 @@ func (r *Runner) execute(ctx context.Context, jobs []job, runsDir, workRoot stri
 			semEP <- struct{}{}
 			defer func() { <-semEP }()
 
-			results[i] = r.runOne(ctx, j, runsDir, workRoot)
+			results[i] = r.runOne(ctx, j, runsDir, workRoot, guard)
 		}(i, j, semEP)
 	}
 	wg.Wait()
@@ -414,7 +423,23 @@ func (r *Runner) execute(ctx context.Context, jobs []job, runsDir, workRoot stri
 }
 
 // runOne makes one run: check out, run poo, run the check.
-func (r *Runner) runOne(ctx context.Context, j job, runsDir, workRoot string) RunResult {
+func (r *Runner) runOne(ctx context.Context, j job, runsDir, workRoot string, guard *sourceGuard) RunResult {
+	result := r.runJob(ctx, j, runsDir, workRoot, guard)
+	if changed := guard.changed(j.task, r.opts.TaskRoot); len(changed) > 0 {
+		result.SourceChanged = true
+		result.Success = false
+		msg := "the source fixture changed during the run: " + strings.Join(changed, ", ")
+		if result.Error != "" {
+			msg += "; " + result.Error
+		}
+		result.Error = msg
+		fmt.Fprintf(os.Stderr, "poo-eval: WARNING: %s\n", msg+" (run "+j.task.ID+"/"+j.model.Name+"/seed"+strconv.Itoa(j.seed)+" is invalid)")
+	}
+	return result
+}
+
+// runJob makes one run and leaves the source check to its caller.
+func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, guard *sourceGuard) RunResult {
 	started := time.Now()
 	result := RunResult{Task: j.task.ID, Model: j.model.Name, Seed: j.seed}
 
@@ -441,7 +466,17 @@ func (r *Runner) runOne(ctx context.Context, j job, runsDir, workRoot string) Ru
 		defer os.RemoveAll(seedRoot)
 	}
 
-	workdir, err := r.checkout(ctx, j.task, workdir)
+	var err error
+	if strings.HasPrefix(j.task.Repo, "fixture:") {
+		// The workdir comes from the invocation's snapshot, never from
+		// the repository's fixture, which a run may have edited.
+		var snap string
+		if snap, err = guard.snapshot(j.task, r.opts.TaskRoot); err == nil {
+			err = copyTree(snap, workdir)
+		}
+	} else {
+		workdir, err = r.checkout(ctx, j.task, workdir)
+	}
 	if err != nil {
 		result.Error = err.Error()
 		return result
@@ -510,23 +545,12 @@ func (r *Runner) timeout(t Task) time.Duration {
 
 // checkout prepares the workdir for a run.
 //
-// A fixture repo is copied; a git repo is cloned at its pinned sha. The
-// directory is the one the caller names, which is under the work root,
-// never in /tmp.
+// A git repo is cloned at its pinned sha. The directory is the one the
+// caller names, which is under the work root, never in /tmp. A fixture
+// repo is copied from the invocation's snapshot by the caller.
 func (r *Runner) checkout(ctx context.Context, t Task, workdir string) (string, error) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		return "", fmt.Errorf("creating %s: %w", workdir, err)
-	}
-
-	if strings.HasPrefix(t.Repo, "fixture:") {
-		src, err := t.FixtureDir(r.opts.TaskRoot)
-		if err != nil {
-			return "", err
-		}
-		if err := copyTree(src, workdir); err != nil {
-			return "", fmt.Errorf("checking out fixture %s: %w", src, err)
-		}
-		return workdir, nil
 	}
 
 	// A git repo: "<url>@<sha>". The sha is the part after the last

@@ -20,6 +20,16 @@ the repository. `--work-root` overrides it, and the runner refuses a
 work root that holds the task set or lies inside it, so the task set
 is never an ancestor of a workdir.
 
+Each invocation copies the fixtures its tasks use into
+`<work root>/<invocation>/fixtures/` before the first run and makes
+every workdir from that snapshot, so a model that edits
+`evals/fixtures` cannot change the start of a later run. The runner
+also hashes each fixture and task directory at the start and again
+after each run. A run that finds one changed is marked invalid
+(`source_changed`, success false, an error saying so), a warning
+naming the run goes to stderr, and `poo-eval run` exits non-zero. The
+source is not restored; that is the operator's call.
+
 The limit that remains: a model can still search the filesystem, and
 the derivations in `check_answer.py` and the checks are files on the
 same disk. Real isolation is a sandbox's job. A transcript that reads

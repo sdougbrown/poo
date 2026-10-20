@@ -242,6 +242,10 @@ func runRun(args []string) int {
 	summary := eval.Summarize(report)
 	fmt.Fprintf(os.Stderr, "poo-eval: success %.1f%% over %d run(s); report: %s\n",
 		summary.Overall.SuccessRate*100, len(report.Results), filepath.Join(o.out, "report.md"))
+	if n := report.SourceChanged(); n > 0 {
+		fmt.Fprintf(os.Stderr, "poo-eval: %d run(s) are invalid: the source fixture changed during the run; the source was not restored\n", n)
+		return 1
+	}
 	return 0
 }
 
