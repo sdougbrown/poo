@@ -235,6 +235,31 @@ func TestPrepareRejectsUnknownFieldsAndEmptyCommands(t *testing.T) {
 	}
 }
 
+func TestTheEnvelopeNamesTheExitCode(t *testing.T) {
+	dir := t.TempDir()
+	tool := &bash.Tool{Timeout: 5 * time.Second}
+
+	res := call(t, tool, "echo hello; exit 3", poo.ToolEnv{
+		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+		Env:        os.Environ(),
+	})
+
+	// The model-facing text is the same envelope, and it names the exit
+	// code as a number.
+	obs := structured(t, res)
+	if rc, ok := obs["returncode"].(float64); !ok || rc != 3 {
+		t.Errorf("the structured returncode is %v, want 3", obs["returncode"])
+	}
+	if !strings.Contains(res.Text, `"returncode": 3`) {
+		t.Errorf("the observation is %q, want it to name the exit code", res.Text)
+	}
+	// The observation is valid JSON, so the model can read it either way.
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(res.Text), &decoded); err != nil {
+		t.Errorf("the observation is not valid JSON: %v; %q", err, res.Text)
+	}
+}
+
 func TestTheCommandRunsInTheWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	tool := bash.New()

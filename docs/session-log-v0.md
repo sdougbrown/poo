@@ -29,7 +29,7 @@ The record's own fields follow the envelope.
 | `message` | Once per message that enters the model's history. |
 | `tool.call` | Once per tool call the model makes, before it runs. |
 | `tool.result` | Once per tool call, after it runs. |
-| `usage` | Once per provider request that reports token accounting. |
+| `usage` | Once per provider request. |
 | `run.settled` | Once per run, when the run ends. |
 
 ## `session.created`
@@ -140,18 +140,19 @@ continued.
 
 ## `usage`
 
-The token accounting of one provider request. A record is written only when
-the endpoint reported usage.
+The token accounting of one provider request. Every request gets a record,
+so a consumer can see the time to the first token even when the endpoint
+reports no token counts.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `run_id` | string | The run the request belongs to. |
 | `turn` | integer | The turn the request belongs to. |
 | `request` | integer | The request's number within the run, starting at 1. |
-| `input_tokens` | integer | The prompt tokens the endpoint reported. |
-| `output_tokens` | integer | The completion tokens the endpoint reported. |
+| `input_tokens` | integer | The prompt tokens the endpoint reported. `0` when it reported none. |
+| `output_tokens` | integer | The completion tokens the endpoint reported. `0` when it reported none. |
 | `cache_read_tokens` | integer | The prompt tokens served from the provider's cache. **Absent** when the endpoint does not report it. |
-| `ttft_ms` | number | The time to the first streamed token, in milliseconds. |
+| `ttft_ms` | number | The time to the first streamed token, in milliseconds. Measured by the transport, not reported by the endpoint. |
 
 ## `run.settled`
 

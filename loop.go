@@ -221,6 +221,22 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 			}
 		}
 
+		// The usage record follows the message it belongs to.
+		if resp.usage != nil {
+			if err := r.write(ctx, &Usage{
+				RecordMeta:      NewRecordMeta("usage"),
+				RunID:           r.opts.RunID,
+				Turn:            r.turn,
+				Request:         r.requests,
+				InputTokens:     resp.usage.InputTokens,
+				OutputTokens:    resp.usage.OutputTokens,
+				CacheReadTokens: resp.usage.CacheReadTokens,
+				TTFTMS:          resp.usage.TTFTMS,
+			}); err != nil {
+				return "", SettleDetail{}, err
+			}
+		}
+
 		if resp.finish == FinishLength {
 			// The provider stopped on the output-token limit. The
 			// skeleton's enum has no output_truncated, so this settles
@@ -444,9 +460,15 @@ type response struct {
 	calls []ToolCall
 	// finish is why the model stopped.
 	finish FinishReason
+	// usage is the token accounting the endpoint reported, if any.
+	usage *UsageReport
 }
 
-// readResponse drains a stream into a response, recording usage.
+// readResponse drains a stream into a response.
+//
+// The usage is collected rather than written, so the caller can write it
+// after the assistant's message: the log then reads in the order the
+// events happened.
 func readResponse(ctx context.Context, reader StreamReader, runID string, turn, request int, sink RecordSink) (*response, error) {
 	resp := &response{finish: FinishStop}
 	var text strings.Builder
@@ -497,16 +519,9 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 				existing.Arguments = append(existing.Arguments, ev.ToolCall.Arguments...)
 			}
 		case "usage":
-			if ev.Usage != nil && sink != nil {
-				_ = sink.Append(ctx, &Usage{
-					RecordMeta:     NewRecordMeta("usage"),
-					RunID:          runID,
-					Turn:           turn,
-					Request:        request,
-					InputTokens:    ev.Usage.InputTokens,
-					OutputTokens:   ev.Usage.OutputTokens,
-					CacheReadTokens: ev.Usage.CacheReadTokens,
-				})
+			if ev.Usage != nil {
+				usage := *ev.Usage
+				resp.usage = &usage
 			}
 		case "finish":
 			if ev.FinishReason != "" {

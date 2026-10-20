@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/sdougbrown/poo"
 )
@@ -76,6 +77,15 @@ type streamReader struct {
 	err error
 	// closed reports that the body is closed.
 	closed bool
+	// started is when the request was sent, for the time to the first
+	// token.
+	started time.Time
+	// ttft is the time to the first streamed token.
+	ttft time.Duration
+	// ttftSet reports that the first token has arrived.
+	ttftSet bool
+	// usageSent reports that the usage report has been produced.
+	usageSent bool
 }
 
 // newScanner configures a scanner for SSE lines.
@@ -112,7 +122,9 @@ func (r *streamReader) Next() (poo.StreamEvent, error) {
 			// The stream ended without a [DONE] marker. Whatever the
 			// parser still holds is flushed, so a text-mode tool call
 			// that arrived without a trailing newline is not lost.
-			if evs := r.parser.flush(); len(evs) > 0 {
+			evs := r.parser.flush()
+			evs = append(evs, r.usageEvent())
+			if len(evs) > 0 {
 				r.pending = append(r.pending, evs...)
 				ev := r.pending[0]
 				r.pending = r.pending[1:]
@@ -135,7 +147,9 @@ func (r *streamReader) Next() (poo.StreamEvent, error) {
 		}
 		if payload == "[DONE]" {
 			r.done = true
-			if evs := r.parser.flush(); len(evs) > 0 {
+			evs := r.parser.flush()
+			evs = append(evs, r.usageEvent())
+			if len(evs) > 0 {
 				r.pending = append(r.pending, evs...)
 				ev := r.pending[0]
 				r.pending = r.pending[1:]
@@ -150,6 +164,8 @@ func (r *streamReader) Next() (poo.StreamEvent, error) {
 			// failing the run.
 			continue
 		}
+		// The first chunk of any kind is the endpoint's first token.
+		r.markFirstToken()
 		if chunk.Error != nil && chunk.Error.Message != "" {
 			r.done = true
 			r.err = &poo.ProviderError{
@@ -189,11 +205,13 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 		}
 
 		if thinking := delta.ReasoningContent; thinking != "" {
+			r.markFirstToken()
 			out = append(out, poo.StreamEvent{
 				Kind:  "delta",
 				Delta: &poo.Delta{Kind: "thinking", Text: thinking},
 			})
 		} else if thinking := delta.Reasoning; thinking != "" {
+			r.markFirstToken()
 			out = append(out, poo.StreamEvent{
 				Kind:  "delta",
 				Delta: &poo.Delta{Kind: "thinking", Text: thinking},
@@ -201,6 +219,7 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 		}
 
 		if delta.Content != "" {
+			r.markFirstToken()
 			out = append(out, poo.StreamEvent{
 				Kind:  "delta",
 				Delta: &poo.Delta{Kind: "text", Text: delta.Content},
@@ -212,6 +231,9 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 		}
 
 		for _, tc := range delta.ToolCalls {
+			// A tool call is the first token too: a turn that only asks
+			// for a tool call still has a time to its first token.
+			r.markFirstToken()
 			complete := isCompleteJSON(tc.Function.Arguments)
 			out = append(out, poo.StreamEvent{
 				Kind: "tool_call",
@@ -237,15 +259,51 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 		u := &poo.UsageReport{
 			InputTokens:  chunk.Usage.PromptTokens,
 			OutputTokens: chunk.Usage.CompletionTokens,
+			TTFTMS:       r.ttftMS(),
 		}
 		if d := chunk.Usage.PromptTokensDetails; d != nil {
 			cached := d.CachedTokens
 			u.CacheReadTokens = &cached
 		}
+		r.usageSent = true
 		out = append(out, poo.StreamEvent{Kind: "usage", Usage: u})
 	}
 
 	return out, nil
+}
+
+// markFirstToken records the time the first token arrived.
+func (r *streamReader) markFirstToken() {
+	if r.ttftSet {
+		return
+	}
+	r.ttftSet = true
+	r.ttft = time.Since(r.started)
+}
+
+// ttftMS returns the time to the first token in milliseconds.
+func (r *streamReader) ttftMS() float64 {
+	if !r.ttftSet {
+		return 0
+	}
+	return float64(r.ttft.Microseconds()) / 1000
+}
+
+// usageEvent returns the usage report for the request.
+//
+// Every request gets one, so a consumer can see the time to the first
+// token even when the endpoint reports no token counts.
+func (r *streamReader) usageEvent() poo.StreamEvent {
+	if r.usageSent {
+		return poo.StreamEvent{}
+	}
+	r.usageSent = true
+	return poo.StreamEvent{
+		Kind: "usage",
+		Usage: &poo.UsageReport{
+			TTFTMS: r.ttftMS(),
+		},
+	}
 }
 
 // Close releases the response.

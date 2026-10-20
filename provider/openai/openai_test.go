@@ -606,6 +606,37 @@ func TestTheUsageChunkIsAskedForInTextMode(t *testing.T) {
 	}
 }
 
+func TestTheTimeToTheFirstTokenIsMeasured(t *testing.T) {
+	// The endpoint takes a moment before it answers, so the time to the
+	// first token is not zero.
+	body := chunk(`{"choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`) + done
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(80 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	for _, ev := range read(t, reader) {
+		if ev.Kind != "usage" || ev.Usage == nil {
+			continue
+		}
+		if ev.Usage.TTFTMS < 50 {
+			t.Errorf("the time to the first token is %v ms, want at least the endpoint's delay", ev.Usage.TTFTMS)
+		}
+		return
+	}
+	t.Fatal("the stream held no usage report")
+}
+
 func TestTheRequestIsStreamed(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
@@ -742,7 +773,9 @@ func TestTheErrorBodyIsReadWhenTheStatusIsNotOK(t *testing.T) {
 	}
 }
 
-func TestTheUsageReportIsAbsentWhenTheServerSendsNone(t *testing.T) {
+func TestEveryRequestHasAUsageReport(t *testing.T) {
+	// The endpoint reports no token counts, but the request still gets a
+	// usage report, so a consumer can see the time to the first token.
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
@@ -753,10 +786,47 @@ func TestTheUsageReportIsAbsentWhenTheServerSendsNone(t *testing.T) {
 	}
 	defer reader.Close()
 
+	events := read(t, reader)
+	var usage *poo.UsageReport
+	for _, ev := range events {
+		if ev.Kind == "usage" {
+			usage = ev.Usage
+		}
+	}
+	if usage == nil {
+		t.Fatal("the stream held no usage report")
+	}
+	if usage.InputTokens != 0 || usage.OutputTokens != 0 {
+		t.Errorf("the usage is %d/%d, want no counts", usage.InputTokens, usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != nil {
+		t.Errorf("the cache-read count is %v, want none", *usage.CacheReadTokens)
+	}
+}
+
+func TestOnlyOneUsageReportIsProduced(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) +
+		chunk(`{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2}}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+
+	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	n := 0
 	for _, ev := range read(t, reader) {
 		if ev.Kind == "usage" {
-			t.Error("the stream held a usage report, want none")
+			n++
+			if ev.Usage.InputTokens != 10 {
+				t.Errorf("the input tokens are %d, want 10", ev.Usage.InputTokens)
+			}
 		}
+	}
+	if n != 1 {
+		t.Errorf("the stream held %d usage reports, want 1", n)
 	}
 }
 

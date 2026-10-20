@@ -94,6 +94,9 @@ type UsageReport struct {
 	// CacheReadTokens is the number of prompt tokens served from the
 	// provider's cache. It is nil when the endpoint does not report it.
 	CacheReadTokens *int
+	// TTFTMS is the time to the first streamed token, in milliseconds.
+	// It is measured by the transport, not reported by the endpoint.
+	TTFTMS float64
 }
 
 // ChatTransport sends a chat request to a provider.

@@ -10,7 +10,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -136,43 +135,66 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 
 	out := res.output
-	structured := map[string]any{
-		"returncode": res.returncode,
-		"timed_out":  res.timedOut,
+	// The envelope's fields, in the order the plan names them.
+	var fields []field
+	// A killed process has no exit code, so the field is null.
+	var code any
+	if res.returncode != nil {
+		code = *res.returncode
 	}
+	fields = append(fields, field{"returncode", code}, field{"timed_out", res.timedOut})
 	if len(out) <= cap {
-		structured["output"] = out
+		fields = append(fields, field{"output", out})
 	} else {
 		half := cap / 2
-		structured["output_head"] = truncate(out[:half], half)
-		structured["output_tail"] = truncate(out[len(out)-half:], half)
-		structured["elided_chars"] = len(out) - 2*half
-		structured["hint"] = ElisionHint
+		fields = append(fields,
+			field{"output_head", truncate(out[:half], half)},
+			field{"output_tail", truncate(out[len(out)-half:], half)},
+			field{"elided_chars", len(out) - 2*half},
+			field{"hint", ElisionHint},
+		)
 	}
 
-	text := render(structured)
+	text := render(fields)
+	structured := map[string]any{}
+	for _, f := range fields {
+		structured[f.key] = f.value
+	}
+
 	return poo.ToolResult{
 		Text:       text,
 		Structured: mustJSON(structured),
 	}, nil
 }
 
+// field is one entry of the observation envelope.
+type field struct {
+	key   string
+	value any
+}
+
 // render formats the observation the model reads.
-func render(obs map[string]any) string {
+//
+// The fields keep the order the plan names them in, and the result is
+// valid JSON, so the model can read it either way.
+func render(fields []field) string {
 	var b strings.Builder
 	b.WriteString("{")
-	keys := []string{"returncode", "timed_out"}
-	for _, k := range keys {
-		fmt.Fprintf(&b, "%q: %v, ", k, obs[k])
-	}
-	if _, ok := obs["output"]; ok {
-		fmt.Fprintf(&b, "%q: %q", "output", obs["output"])
-	} else {
-		fmt.Fprintf(&b, "%q: %q, %q: %q, %q: %d, %q: %q",
-			"output_head", obs["output_head"],
-			"output_tail", obs["output_tail"],
-			"elided_chars", obs["elided_chars"],
-			"hint", obs["hint"])
+	for i, f := range fields {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		key, err := json.Marshal(f.key)
+		if err != nil {
+			continue
+		}
+		value, err := json.Marshal(f.value)
+		if err != nil {
+			continue
+		}
+		b.Write(key)
+		b.WriteString(": ")
+		b.Write(value)
 	}
 	b.WriteString("}")
 	return b.String()

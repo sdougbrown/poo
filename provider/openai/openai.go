@@ -138,6 +138,10 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		httpReq.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
 	}
 
+	// The request is timed from the moment it goes out, so the time to
+	// the first token includes the endpoint's own latency.
+	started := time.Now()
+
 	if t.cfg.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
@@ -153,11 +157,97 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		return nil, classifyStatus(resp)
 	}
 
+	// Some servers answer a failed request with a 200 and a JSON error
+	// body instead of the SSE stream. The first byte tells the two apart,
+	// so the stream is not buffered and the time to the first token
+	// measures the endpoint's latency rather than the reader's.
+	br := bufio.NewReader(resp.Body)
+	first, err := peekFirstByte(br)
+	if err != nil {
+		resp.Body.Close()
+		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
+	}
+	if first == '{' {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(br)
+		if kind, msg, code, ok := errorInBody(body); ok {
+			return nil, &poo.ProviderError{
+				Kind:    kind,
+				Message: msg,
+				Code:    code,
+				Status:  resp.StatusCode,
+			}
+		}
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindServer,
+			Message: "the endpoint returned a body that is not a stream",
+			Status:  resp.StatusCode,
+		}
+	}
+
 	return &streamReader{
-		body:   resp.Body,
-		scanner: bufio.NewScanner(resp.Body),
-		parser: newParser(t.cfg.ToolsMode),
+		body:    resp.Body,
+		scanner: bufio.NewScanner(br),
+		parser:  newParser(t.cfg.ToolsMode),
+		started: started,
 	}, nil
+}
+
+// peekFirstByte returns the first non-space byte of the body, without
+// consuming it.
+func peekFirstByte(br *bufio.Reader) (byte, error) {
+	for {
+		b, err := br.Peek(1)
+		if err != nil {
+			return 0, err
+		}
+		switch b[0] {
+		case ' ', '\t', '\r', '\n':
+			if _, err := br.ReadByte(); err != nil {
+				return 0, err
+			}
+		default:
+			return b[0], nil
+		}
+	}
+}
+
+// errorInBody reports whether a response body is a JSON error rather than
+// an SSE stream.
+func errorInBody(body []byte) (poo.ProviderKind, string, string, bool) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return "", "", "", false
+	}
+	var payload struct {
+		Error *errorBody `json:"error"`
+	}
+	if err := json.Unmarshal(trimmed, &payload); err != nil || payload.Error == nil {
+		return "", "", "", false
+	}
+	code := ""
+	switch v := payload.Error.Code.(type) {
+	case string:
+		code = v
+	case float64:
+		code = fmt.Sprintf("%v", v)
+	}
+	message := payload.Error.Message
+	if message == "" {
+		message = "the endpoint returned an error"
+	}
+	kind := poo.ProviderKindInvalidRequest
+	switch {
+	case isContextLength(code, message):
+		kind = poo.ProviderKindContextLength
+	case strings.Contains(strings.ToLower(code+" "+message), "rate_limit"):
+		kind = poo.ProviderKindRateLimited
+	case strings.Contains(strings.ToLower(code+" "+message), "quota"):
+		kind = poo.ProviderKindUsageLimit
+	case strings.Contains(strings.ToLower(code+" "+message), "authentication"):
+		kind = poo.ProviderKindAuthFailed
+	}
+	return kind, message, code, true
 }
 
 // chatURL returns the endpoint's chat completion URL.
@@ -175,9 +265,10 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
 		Stream:    true,
-	}
-	if t.cfg.ToolsMode != "native" {
-		out.StreamOptions = &streamOptions{IncludeUsage: true}
+		// The usage chunk is asked for in every mode, because the log's
+		// usage record needs the token accounting and a server that
+		// reports it on its own still ignores the field.
+		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
 
 	for _, m := range req.Messages {
