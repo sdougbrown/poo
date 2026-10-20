@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,29 +319,35 @@ func TestTheReplayRunsTheRecordedCalls(t *testing.T) {
 }
 
 func TestTheReplayReportsADifference(t *testing.T) {
-	// A recording of a call the current harness would not make is
-	// reported as a difference.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "session.jsonl")
-	log := strings.Join([]string{
-		`{"record":"message","seq":1,"ts":"2026-10-20T00:00:00Z","run_id":"r","turn":1,"origin":"model","role":"assistant","content":[{"kind":"tool_call","name":"bash","arguments":{"command":"ls"}}]}`,
-		`{"record":"run.settled","seq":2,"ts":"2026-10-20T00:00:00Z","run_id":"r","reason":"end_turn","detail":{"source":"end_turn"},"turns":1}`,
-	}, "\n")
-	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
-		t.Fatalf("writing the log: %v", err)
-	}
-
-	result, err := Replay(path, ReplayOptions{Context: context.Background(), ContextLimit: 32768})
-	if err != nil {
-		t.Fatalf("replaying: %v", err)
-	}
-	// The recording holds one call and the replay holds none, because
-	// the harness has no tools linked.
-	if result.Match {
+	// A replayed call that is not the recorded one is a difference, and
+	// the difference names both.
+	same, differences := diffCalls(
+		[]CallStep{{Index: 1, Turn: 1, Tool: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)}},
+		[]CallStep{{Index: 1, Turn: 2, Tool: "read", Arguments: json.RawMessage(`{"path":"a.go"}`)}},
+	)
+	if same {
 		t.Error("the sequences matched, want a difference")
 	}
-	if len(result.Differences) == 0 {
-		t.Error("the difference was not described")
+	if len(differences) == 0 {
+		t.Fatal("the difference was not described")
+	}
+	if !strings.Contains(differences[0], "bash") || !strings.Contains(differences[0], "read") {
+		t.Errorf("the difference is %q, want both calls named", differences[0])
+	}
+
+	// A replay that stops early is a difference too.
+	same, differences = diffCalls(
+		[]CallStep{{Index: 1, Turn: 1, Tool: "bash"}},
+		nil,
+	)
+	if same {
+		t.Error("the sequences matched, want a difference")
+	}
+	if len(differences) != 1 {
+		t.Fatalf("the replay reported %d differences, want 1: %v", len(differences), differences)
+	}
+	if !strings.Contains(differences[0], "1") {
+		t.Errorf("the difference is %q, want the counts named", differences[0])
 	}
 }
 

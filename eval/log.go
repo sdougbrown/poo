@@ -198,6 +198,28 @@ func (l *Log) Settle() *LogRecord {
 	return nil
 }
 
+// ContextLimit returns the context window the session ran under.
+//
+// The session's own record holds it. A log that does not name one has
+// no limit to report, and the answer is zero.
+func (l *Log) ContextLimit() int {
+	for _, r := range l.Records {
+		if r.Record == "session.created" && r.ContextLimit > 0 {
+			return r.ContextLimit
+		}
+	}
+	return 0
+}
+
+// SettleTurns returns the number of turns the run made, as the settle
+// record says.
+func (l *Log) SettleTurns() int {
+	if s := l.Settle(); s != nil {
+		return s.Turns
+	}
+	return 0
+}
+
 // FinalMessage returns the last text the model produced, which is the
 // answer a read-only task is judged on.
 func (l *Log) FinalMessage() string {

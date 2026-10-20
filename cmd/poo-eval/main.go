@@ -45,8 +45,8 @@ Compare flags:
   --out <dir>          Where the comparison goes (default: the candidate's directory)
 
 Replay flags:
-  --context-limit <n>  The context window the replay uses (default: 32768)
-  --max-turns <n>      The turn ceiling the replay uses
+  --context-limit <n>  The context window the replay uses (default: the recording's)
+  --max-turns <n>      The turn ceiling the replay uses (default: the recording's)
 
 Judge flags:
   --base-url <url>     The judge's endpoint (default: http://localhost:4000/v1)
@@ -287,7 +287,7 @@ func runReplay(args []string) int {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 
 	var contextLimit, maxTurns int
-	fs.IntVar(&contextLimit, "context-limit", 32768, "The context window the replay uses")
+	fs.IntVar(&contextLimit, "context-limit", 0, "The context window the replay uses")
 	fs.IntVar(&maxTurns, "max-turns", 0, "The turn ceiling the replay uses")
 	if err := fs.Parse(args); err != nil {
 		return 2

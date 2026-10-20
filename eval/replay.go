@@ -3,6 +3,7 @@ package eval
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -80,9 +81,10 @@ func ScriptFromLog(log *Log) (*Script, error) {
 // scriptedTransport replays a recorded conversation.
 //
 // The transport hands out the recorded responses in order. When the
-// recorded conversation runs out, it repeats the last one, so a harness
-// that asks for more turns than the recording holds still gets an
-// answer instead of an error.
+// recorded conversation runs out, it says so: a transport that repeated
+// the last response would turn a one-turn recording into an endless
+// loop, and the comparison would then report a difference that is only
+// the loop.
 type scriptedTransport struct {
 	// turns are the recorded responses.
 	turns []ScriptedTurn
@@ -91,6 +93,13 @@ type scriptedTransport struct {
 	// requests counts the requests the transport served.
 	requests int
 }
+
+// ErrScriptExhausted is the error the transport returns when the
+// recording holds no more responses.
+//
+// It is a typed error, so a caller can tell an exhausted script from a
+// broken one.
+var ErrScriptExhausted = errors.New("eval: the script holds no more responses")
 
 // newScriptedTransport returns a transport that replays a script.
 func newScriptedTransport(turns []ScriptedTurn) *scriptedTransport {
@@ -102,10 +111,10 @@ func (t *scriptedTransport) Stream(ctx context.Context, req poo.ChatRequest) (po
 	if len(t.turns) == 0 {
 		return nil, fmt.Errorf("eval: the script holds no response")
 	}
-	idx := t.index
-	if idx >= len(t.turns) {
-		idx = len(t.turns) - 1
+	if t.index >= len(t.turns) {
+		return nil, ErrScriptExhausted
 	}
+	idx := t.index
 	t.index++
 	t.requests++
 
@@ -209,6 +218,9 @@ type ReplayResult struct {
 // so the replay needs no model and no network. The result is the
 // recorded tool-call sequence beside the replayed one, and whether they
 // are the same.
+//
+// The replay runs on the recording's own limits: its context limit and
+// its turn count, unless the caller names its own.
 func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	log, err := ParseLog(path)
 	if err != nil {
@@ -217,6 +229,18 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	script, err := ScriptFromLog(log)
 	if err != nil {
 		return nil, err
+	}
+
+	contextLimit := opts.ContextLimit
+	if contextLimit <= 0 {
+		contextLimit = log.ContextLimit()
+	}
+	if contextLimit <= 0 {
+		contextLimit = DefaultReplayContextLimit
+	}
+	maxTurns := opts.MaxTurns
+	if maxTurns <= 0 {
+		maxTurns = log.SettleTurns()
 	}
 
 	transport := newScriptedTransport(script.Turns)
@@ -230,12 +254,16 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 		SessionID:    "replay",
 		RunID:        "replay",
 		ModelID:      "replay",
-		ContextLimit: opts.ContextLimit,
-		MaxTurns:     opts.MaxTurns,
+		ContextLimit: contextLimit,
+		MaxTurns:     maxTurns,
 		WorkingDir:   opts.WorkingDir,
 	})
 	if _, err := run.Execute(opts.Context, "replay"); err != nil {
-		return nil, fmt.Errorf("eval: replaying %s: %w", path, err)
+		// A script that runs out is not a failure: the recording held
+		// what it held, and the replay compared what it could.
+		if !errors.Is(err, ErrScriptExhausted) {
+			return nil, fmt.Errorf("eval: replaying %s: %w", path, err)
+		}
 	}
 
 	result := &ReplayResult{
@@ -246,6 +274,10 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	result.Match, result.Differences = diffCalls(result.Recorded, result.Replayed)
 	return result, nil
 }
+
+// DefaultReplayContextLimit is the context window a replay uses when the
+// recording names none.
+const DefaultReplayContextLimit = 32768
 
 // ReplayOptions configure a replay.
 type ReplayOptions struct {

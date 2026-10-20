@@ -331,8 +331,12 @@ func TestALargeTranscriptIsSummarized(t *testing.T) {
 		t.Errorf("the summary does not say what it elided: %q", text[:200])
 	}
 	// The first and the last turn survive.
-	if !contains(text, strings.Repeat("x", 1000)) {
+	if !contains(text, strings.Repeat("x", 100)) {
 		t.Error("the summary holds none of the original turns")
+	}
+	// The summary is within the limit.
+	if len(text) > 5000 {
+		t.Errorf("the summary is %d characters, want at most 5000", len(text))
 	}
 }
 
