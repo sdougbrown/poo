@@ -140,11 +140,10 @@ func (r *streamReader) Next() (poo.StreamEvent, error) {
 		line := r.scanner.Text()
 		if line == "" {
 			// A blank line ends the event.
-			ev, ok, err := r.dispatch()
-			if err != nil {
+			if err := r.dispatch(); err != nil {
 				return r.fail(err)
 			}
-			if ok {
+			if ev, ok := r.take(); ok {
 				return ev, nil
 			}
 			continue
@@ -161,47 +160,69 @@ func (r *streamReader) Next() (poo.StreamEvent, error) {
 			r.done = true
 			return r.close()
 		}
+
+		// A server that separates its events with a single newline
+		// never sends the blank line that ends an event, so the event
+		// is dispatched as soon as the next one starts. An event whose
+		// payload is not valid JSON yet is kept, because it may still
+		// be a payload spread over several data lines.
+		complete := len(r.data) > 0 && json.Valid([]byte(strings.Join(r.data, "\n")))
+		if complete {
+			if err := r.dispatch(); err != nil {
+				return r.fail(err)
+			}
+			r.data = append(r.data, payload)
+			if ev, ok := r.take(); ok {
+				return ev, nil
+			}
+			continue
+		}
 		r.data = append(r.data, payload)
 	}
 }
 
+// take removes the next queued event and reports whether there was one.
+func (r *streamReader) take() (poo.StreamEvent, bool) {
+	if len(r.pending) == 0 {
+		return poo.StreamEvent{}, false
+	}
+	ev := r.pending[0]
+	r.pending = r.pending[1:]
+	return ev, true
+}
+
 // dispatch turns the event the reader has collected into events.
 //
-// It returns the first event, whether there was one, and the failure that
-// ended the stream. An event whose payload does not parse is skipped,
+// The events are queued, so they leave the reader in the order the
+// endpoint sent them. An event whose payload does not parse is skipped,
 // because a chunk the transport cannot read is not worth failing the run
 // over.
-func (r *streamReader) dispatch() (poo.StreamEvent, bool, error) {
+func (r *streamReader) dispatch() error {
 	if len(r.data) == 0 {
-		return poo.StreamEvent{}, false, nil
+		return nil
 	}
 	payload := strings.Join(r.data, "\n")
 	r.data = nil
 
 	var chunk streamChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-		return poo.StreamEvent{}, false, nil
+		return nil
 	}
 	if chunk.Error != nil && chunk.Error.Message != "" {
 		r.done = true
 		err := r.providerError(chunk.Error)
 		r.err = err
-		return poo.StreamEvent{}, false, err
+		return err
 	}
 
 	events, err := r.events(chunk)
 	if err != nil {
 		r.done = true
 		r.err = err
-		return poo.StreamEvent{}, false, err
-	}
-	if len(events) == 0 {
-		return poo.StreamEvent{}, false, nil
+		return err
 	}
 	r.pending = append(r.pending, events...)
-	ev := r.pending[0]
-	r.pending = r.pending[1:]
-	return ev, true, nil
+	return nil
 }
 
 // close ends the stream and returns the events that close it.
@@ -210,19 +231,13 @@ func (r *streamReader) dispatch() (poo.StreamEvent, bool, error) {
 // trailing newline is not lost, and the usage report is produced, so every
 // request has one.
 func (r *streamReader) close() (poo.StreamEvent, error) {
-	var evs []poo.StreamEvent
-	if ev, ok, err := r.dispatch(); err != nil {
+	if err := r.dispatch(); err != nil {
 		// The event ended the stream. The usage is still reported.
 		return r.fail(err)
-	} else if ok {
-		evs = append(evs, ev)
 	}
-	evs = append(evs, r.parser.flush()...)
-	evs = r.appendUsage(evs)
-	if len(evs) > 0 {
-		r.pending = append(r.pending, evs...)
-		ev := r.pending[0]
-		r.pending = r.pending[1:]
+	r.pending = append(r.pending, r.parser.flush()...)
+	r.pending = r.appendUsage(r.pending)
+	if ev, ok := r.take(); ok {
 		return ev, nil
 	}
 	if r.err != nil {
@@ -239,11 +254,8 @@ func (r *streamReader) close() (poo.StreamEvent, error) {
 func (r *streamReader) fail(err error) (poo.StreamEvent, error) {
 	r.done = true
 	r.err = err
-	evs := r.appendUsage(nil)
-	if len(evs) > 0 {
-		r.pending = append(r.pending, evs...)
-		ev := r.pending[0]
-		r.pending = r.pending[1:]
+	r.pending = r.appendUsage(r.pending)
+	if ev, ok := r.take(); ok {
 		return ev, nil
 	}
 	return poo.StreamEvent{}, err
@@ -274,7 +286,7 @@ func (r *streamReader) providerError(body *errorBody) error {
 		message = "the endpoint returned an error"
 	}
 	return &poo.ProviderError{
-		Kind:    classifyError(code, message),
+		Kind:    classifyError(code, message, poo.ProviderKindServer),
 		Message: message,
 		Code:    code,
 	}
@@ -399,7 +411,9 @@ func (r *streamReader) appendUsage(evs []poo.StreamEvent) []poo.StreamEvent {
 	}
 	r.ensureUsage()
 	return append(evs, poo.StreamEvent{Kind: "usage", Usage: r.usage})
-} // ensureUsage builds the usage report a request gets when the endpoint
+}
+
+// ensureUsage builds the usage report a request gets when the endpoint
 // reported none.
 func (r *streamReader) ensureUsage() {
 	if r.usage != nil {
