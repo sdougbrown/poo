@@ -95,7 +95,7 @@ func TestTheDefaultLogPathIsInTheWorkingDirectory(t *testing.T) {
 }
 
 func TestTheSystemPromptStatesTheOperatingContract(t *testing.T) {
-	prompt := systemPrompt("gemma4", nil)
+	prompt := systemPrompt("gemma4", nil, "native")
 	for _, needle := range []string{
 		"fresh shell",
 		"narrow reads",
@@ -115,7 +115,7 @@ func TestTheTextModePromptNamesTheToolsAndTheCallFormat(t *testing.T) {
 		{Name: "bash", Description: "Run a shell command."},
 		{Name: "read", Description: "Read a range of lines from a file."},
 	}
-	prompt := systemPrompt("gemma4", tools)
+	prompt := systemPrompt("gemma4", tools, "text")
 	for _, needle := range []string{
 		"bash: Run a shell command.",
 		"read: Read a range of lines from a file.",
@@ -131,7 +131,7 @@ func TestTheTextModePromptNamesTheToolsAndTheCallFormat(t *testing.T) {
 // The system prompt must be usable as JSON content, so the model's own
 // quoting of it does not break the request.
 func TestTheSystemPromptSurvivesJSONEncoding(t *testing.T) {
-	b, err := json.Marshal(systemPrompt("gemma4", nil))
+	b, err := json.Marshal(systemPrompt("gemma4", nil, "native"))
 	if err != nil {
 		t.Fatalf("encoding the prompt: %v", err)
 	}

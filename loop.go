@@ -204,7 +204,29 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 
 		resp, err := r.request(ctx, maxTokens)
 		if err != nil {
-			return r.settleForError(err)
+			reason, detail, serr := r.settleForError(err)
+			if serr != nil {
+				return "", SettleDetail{}, serr
+			}
+			// The request failed, but the usage it produced is still
+			// written: every request gets a usage record, so a consumer
+			// can see the request's accounting even when the stream
+			// broke.
+			if resp != nil && resp.usage != nil {
+				if werr := r.write(ctx, &Usage{
+					RecordMeta:      NewRecordMeta("usage"),
+					RunID:           r.opts.RunID,
+					Turn:            r.turn,
+					Request:         r.requests,
+					InputTokens:     resp.usage.InputTokens,
+					OutputTokens:    resp.usage.OutputTokens,
+					CacheReadTokens: resp.usage.CacheReadTokens,
+					TTFTMS:          resp.usage.TTFTMS,
+				}); werr != nil {
+					return "", SettleDetail{}, werr
+				}
+			}
+			return reason, detail, nil
 		}
 
 		// The model's response is part of the history whether or not it
@@ -398,6 +420,9 @@ func (r *Run) recordResult(ctx context.Context, turn int, handle string, call To
 }
 
 // request sends one provider request and reads the whole response.
+//
+// A response that broke part way through is returned along with the error,
+// so the caller can still write the usage it produced.
 func (r *Run) request(ctx context.Context, maxTokens int) (*response, error) {
 	reader, err := r.opts.Transport.Stream(ctx, ChatRequest{
 		Model:     r.opts.ModelID,
@@ -410,7 +435,18 @@ func (r *Run) request(ctx context.Context, maxTokens int) (*response, error) {
 	}
 	defer reader.Close()
 
-	return readResponse(ctx, reader, r.opts.RunID, r.turn, r.requests, r.opts.Sink)
+	resp, err := readResponse(ctx, reader, r.opts.RunID, r.turn, r.requests, r.opts.Sink)
+	if err != nil && resp != nil && resp.usage == nil {
+		// The stream broke before its usage arrived. A request that
+		// failed still cost tokens, so the transport's own report is
+		// used.
+		if reporter, ok := reader.(UsageReporter); ok {
+			if usage := reporter.ReportUsage(); usage != nil {
+				resp.usage = usage
+			}
+		}
+	}
+	return resp, err
 }
 
 // toolSpecs returns the tools the model may call, in offer order.
@@ -443,7 +479,10 @@ func (r *Run) write(ctx context.Context, rec Record) error {
 
 // settleForError maps a request error to a settle reason.
 func (r *Run) settleForError(err error) (Reason, SettleDetail, error) {
-	if errors.Is(err, context.Canceled) {
+	// A cancellation and a deadline are the same outcome: the run was
+	// stopped before the model finished. The plan's reason set has no
+	// separate one for a deadline.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return ReasonCancelled, SettleDetail{Source: "cancel:context", Text: err.Error()}, nil
 	}
 	var pe *ProviderError
@@ -482,6 +521,9 @@ type response struct {
 // The usage is collected rather than written, so the caller can write it
 // after the assistant's message: the log then reads in the order the
 // events happened.
+//
+// A stream that fails part way through returns the response it managed to
+// read along with the failure, so the caller can still write the usage.
 func readResponse(ctx context.Context, reader StreamReader, runID string, turn, request int, sink RecordSink) (*response, error) {
 	resp := &response{finish: FinishStop}
 	var text strings.Builder
@@ -495,7 +537,8 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 			break
 		}
 		if err != nil {
-			return nil, err
+			collectResponse(resp, text.String(), thinking.String(), calls, &order)
+			return resp, err
 		}
 		switch ev.Kind {
 		case "delta":
@@ -543,26 +586,31 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 		}
 	}
 
+	collectResponse(resp, text.String(), thinking.String(), calls, &order)
+	return resp, nil
+}
+
+// collectResponse fills a response with what the stream carried.
+func collectResponse(resp *response, text, thinking string, calls map[int]*ToolCall, order *[]int) {
 	// A reasoning stream becomes its own content block, so the model's
 	// thinking survives without breaking the text.
-	if thinking.Len() > 0 {
-		resp.content = append(resp.content, ContentBlock{Kind: ContentThinking, Text: thinking.String()})
+	if thinking != "" {
+		resp.content = append(resp.content, ContentBlock{Kind: ContentThinking, Text: thinking})
 	}
-	if text.Len() > 0 {
-		resp.content = append(resp.content, ContentBlock{Kind: ContentText, Text: text.String()})
+	if text != "" {
+		resp.content = append(resp.content, ContentBlock{Kind: ContentText, Text: text})
 	}
 
 	// The calls are ordered by the provider's index, so the model sees
 	// them in the order it asked for them.
-	sort.Ints(order)
-	for _, idx := range order {
+	sort.Ints(*order)
+	for _, idx := range *order {
 		c := calls[idx]
 		if c.Name == "" {
 			continue
 		}
 		resp.calls = append(resp.calls, *c)
 	}
-	return resp, nil
 }
 
 // hashText returns the hex SHA-256 of a text.

@@ -19,7 +19,9 @@ import (
 // In the text and auto modes the model cannot call a tool through the
 // wire format, so the tools are described here and the model answers with
 // a call written out. The format is the one the transport's parser reads.
-func systemPrompt(modelID string, tools []poo.ToolSpec) string {
+// The native mode needs neither: the transport sends the tools in the
+// request, so the prompt says nothing about them.
+func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string {
 	var b strings.Builder
 
 	b.WriteString("You are a coding agent working in a shell. You solve the task by inspecting the repository and changing what is needed.\n\n")
@@ -35,7 +37,7 @@ func systemPrompt(modelID string, tools []poo.ToolSpec) string {
 	b.WriteString("- Background processes are killed when the command returns.\n")
 	b.WriteString("- Long output is truncated with the middle elided. Use grep/sed/head/tail to inspect narrower ranges.\n\n")
 
-	if len(tools) > 0 {
+	if len(tools) > 0 && toolsMode != "native" {
 		b.WriteString("Tools:\n")
 		for _, t := range tools {
 			fmt.Fprintf(&b, "- %s: %s\n", t.Name, t.Description)

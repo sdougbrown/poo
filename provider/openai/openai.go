@@ -128,8 +128,18 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		return nil, err
 	}
 
+	// The timeout bounds the whole request, streaming included, so the
+	// context is created before the request goes out.
+	var cancel context.CancelFunc
+	if t.cfg.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
+	}
+
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.chatURL(), bytes.NewReader(body))
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -142,18 +152,18 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	// the first token includes the endpoint's own latency.
 	started := time.Now()
 
-	if t.cfg.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
-		defer cancel()
-	}
-
 	resp, err := t.http.Do(httpReq)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, classifyTransportError(ctx, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
+		if cancel != nil {
+			cancel()
+		}
 		return nil, classifyStatus(resp)
 	}
 
@@ -165,10 +175,16 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	first, err := peekFirstByte(br)
 	if err != nil {
 		resp.Body.Close()
+		if cancel != nil {
+			cancel()
+		}
 		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 	if first == '{' {
 		defer resp.Body.Close()
+		if cancel != nil {
+			cancel()
+		}
 		body, _ := io.ReadAll(br)
 		if kind, msg, code, ok := errorInBody(body); ok {
 			return nil, &poo.ProviderError{
@@ -189,6 +205,8 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		body:    resp.Body,
 		scanner: bufio.NewScanner(br),
 		parser:  newParser(t.cfg.ToolsMode),
+		ctx:     ctx,
+		cancel:  cancel,
 		started: started,
 	}, nil
 }
@@ -225,29 +243,46 @@ func errorInBody(body []byte) (poo.ProviderKind, string, string, bool) {
 	if err := json.Unmarshal(trimmed, &payload); err != nil || payload.Error == nil {
 		return "", "", "", false
 	}
-	code := ""
-	switch v := payload.Error.Code.(type) {
-	case string:
-		code = v
-	case float64:
-		code = fmt.Sprintf("%v", v)
-	}
+	code := codeString(payload.Error.Code)
 	message := payload.Error.Message
 	if message == "" {
 		message = "the endpoint returned an error"
 	}
-	kind := poo.ProviderKindInvalidRequest
+	return classifyError(code, message), message, code, true
+}
+
+// codeString renders an error code, which a server may send as a string
+// or as a number.
+func codeString(v any) string {
+	switch c := v.(type) {
+	case string:
+		return c
+	case float64:
+		return fmt.Sprintf("%v", c)
+	default:
+		return ""
+	}
+}
+
+// classifyError names the failure class an error code and message imply.
+//
+// A context-length failure is recognised whatever status it arrived with,
+// because a server that reports one with a 500 still means the request was
+// too long.
+func classifyError(code, message string) poo.ProviderKind {
+	lower := strings.ToLower(code + " " + message)
 	switch {
 	case isContextLength(code, message):
-		kind = poo.ProviderKindContextLength
-	case strings.Contains(strings.ToLower(code+" "+message), "rate_limit"):
-		kind = poo.ProviderKindRateLimited
-	case strings.Contains(strings.ToLower(code+" "+message), "quota"):
-		kind = poo.ProviderKindUsageLimit
-	case strings.Contains(strings.ToLower(code+" "+message), "authentication"):
-		kind = poo.ProviderKindAuthFailed
+		return poo.ProviderKindContextLength
+	case strings.Contains(lower, "rate_limit"):
+		return poo.ProviderKindRateLimited
+	case strings.Contains(lower, "quota"):
+		return poo.ProviderKindUsageLimit
+	case strings.Contains(lower, "authentication"):
+		return poo.ProviderKindAuthFailed
+	default:
+		return poo.ProviderKindServer
 	}
-	return kind, message, code, true
 }
 
 // chatURL returns the endpoint's chat completion URL.
@@ -340,13 +375,7 @@ func classifyStatus(resp *http.Response) error {
 	er := errorResponse{}
 	_ = json.Unmarshal(body, &er)
 
-	code := ""
-	switch v := er.Error.Code.(type) {
-	case string:
-		code = v
-	case float64:
-		code = fmt.Sprintf("%v", v)
-	}
+	code := codeString(er.Error.Code)
 
 	message := er.Error.Message
 	if message == "" {
@@ -370,9 +399,11 @@ func classifyStatus(resp *http.Response) error {
 		}
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
 		kind = poo.ProviderKindInvalidRequest
-		if isContextLength(code, message) {
-			kind = poo.ProviderKindContextLength
-		}
+	}
+	// A context-length failure is a context-length failure whatever
+	// status it arrived with.
+	if isContextLength(code, message) {
+		kind = poo.ProviderKindContextLength
 	}
 
 	return &poo.ProviderError{

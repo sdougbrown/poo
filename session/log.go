@@ -9,7 +9,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,18 +29,24 @@ type Log struct {
 	seq int64
 }
 
-// Open creates or opens a session log at a path.
+// Open creates a session log at a path.
 //
-// The file is opened for append, so an existing log is extended rather
-// than replaced.
+// The file is created exclusively, so an existing log is never extended:
+// a session log is one session's record, and appending a second
+// session.created to it would break the vocabulary the log promises.
+//
+// The directory the log lives in is created when it is missing.
 func Open(path string) (*Log, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("session: creating %s: %w", dir, err)
 		}
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return nil, fmt.Errorf("session: %s already exists", path)
+		}
 		return nil, fmt.Errorf("session: opening %s: %w", path, err)
 	}
 	return &Log{f: f, w: bufio.NewWriter(f)}, nil

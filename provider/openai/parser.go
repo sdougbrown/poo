@@ -72,6 +72,12 @@ func newParser(mode string) *parser {
 	}
 }
 
+// on reports whether the parser runs.
+//
+// A disabled parser leaves the text alone, so the transport emits the raw
+// content delta itself.
+func (p *parser) on() bool { return p != nil && p.enabled }
+
 // taggedOpen and taggedClose mark a tool call block.
 const (
 	taggedOpen  = "<tool_call>"

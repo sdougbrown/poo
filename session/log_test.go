@@ -135,7 +135,9 @@ func TestTheRecordsCarryTheirSequenceNumberAndTimestamp(t *testing.T) {
 	}
 }
 
-func TestTheLogIsAppendOnly(t *testing.T) {
+// TestAnExistingLogIsRefused covers a log that is opened twice: the
+// second open fails, because a session log holds one session's records.
+func TestAnExistingLogIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 
@@ -151,21 +153,23 @@ func TestTheLogIsAppendOnly(t *testing.T) {
 		t.Fatalf("closing: %v", err)
 	}
 
-	// Re-opening the same path adds to it rather than replacing it.
+	// Re-opening the same path is refused rather than extending it.
 	log, err = session.Open(path)
-	if err != nil {
-		t.Fatalf("re-opening the log: %v", err)
+	if err == nil {
+		log.Close()
+		t.Fatal("re-opening the log succeeded, want it refused")
 	}
-	if err := log.Append(ctx, &poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started")}); err != nil {
-		t.Fatalf("appending: %v", err)
-	}
-	if err := log.Close(); err != nil {
-		t.Fatalf("closing: %v", err)
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("the error is %q, want it to say the log exists", err)
 	}
 
+	// The log still holds the one record.
 	recs := records(t, path)
-	if len(recs) != 2 {
-		t.Errorf("the log holds %d records, want 2", len(recs))
+	if len(recs) != 1 {
+		t.Errorf("the log holds %d records, want 1", len(recs))
+	}
+	if recs[0]["seq"].(float64) != 1 {
+		t.Errorf("the record's sequence number is %v, want 1", recs[0]["seq"])
 	}
 }
 

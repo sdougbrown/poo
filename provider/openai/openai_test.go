@@ -576,12 +576,19 @@ func TestAnErrorChunkEndsTheStream(t *testing.T) {
 	}
 	defer reader.Close()
 
-	_, err = reader.Next()
-	if err == nil {
+	// Every request gets a usage report, so the failure comes after it.
+	var last error
+	for i := 0; i < 4; i++ {
+		if _, err = reader.Next(); err != nil {
+			last = err
+			break
+		}
+	}
+	if last == nil {
 		t.Fatal("the stream did not fail")
 	}
-	if !strings.Contains(err.Error(), "the model died") {
-		t.Errorf("the error is %q, want the provider's message", err)
+	if !strings.Contains(last.Error(), "the model died") {
+		t.Errorf("the error is %q, want the provider's message", last)
 	}
 }
 

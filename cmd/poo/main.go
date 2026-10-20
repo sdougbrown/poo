@@ -10,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -119,6 +120,17 @@ func runRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1
 	}
+	// The working directory has to exist: a typo would otherwise create
+	// an empty directory and run the task in it.
+	info, err := os.Stat(absWorkDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: --working-dir %s: %v\n", absWorkDir, err)
+		return 2
+	}
+	if !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "poo run: --working-dir %s is not a directory\n", absWorkDir)
+		return 2
+	}
 
 	logPath := o.logPath
 	if logPath == "" {
@@ -143,7 +155,7 @@ func runRun(args []string) int {
 	log, err := session.Open(logPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 1
+		return 2
 	}
 	defer log.Close()
 
@@ -191,7 +203,7 @@ func runRun(args []string) int {
 		Mode:       "logged",
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 		WorkingDir: absWorkDir,
-		Model:      poo.SessionModel{ID: o.modelID, BaseURL: o.baseURL, MaxOutput: o.maxOutput},
+		Model:      poo.SessionModel{ID: o.modelID, BaseURL: loggedBaseURL(o.baseURL), MaxOutput: o.maxOutput},
 		Tools: []poo.SessionTool{
 			{Name: "bash", Class: poo.ClassSideEffecting},
 			{Name: "read", Class: poo.ClassReadOnly},
@@ -216,7 +228,7 @@ func runRun(args []string) int {
 		ContextLimit: o.contextLimit,
 		MaxOutput:    o.maxOutput,
 		MaxTurns:     o.maxTurns,
-		SystemPrompt: systemPrompt(o.modelID, toolSpecs),
+		SystemPrompt: systemPrompt(o.modelID, toolSpecs, o.toolsMode),
 		WorkingDir:   absWorkDir,
 		Env:          childEnv,
 		Settings:     settings,
@@ -225,18 +237,30 @@ func runRun(args []string) int {
 
 	res, err := r.Execute(ctx, strings.Join(fs.Args(), " "))
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			// A cancellation that arrived before the settle record was
-			// written still settles the run.
-			res = poo.Result{Reason: poo.ReasonCancelled, Detail: poo.SettleDetail{Source: "cancel:signal"}}
-		} else {
-			fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-			return 1
-		}
+		// The core owns the settle record, so an error here means the
+		// run never settled and the log has no run.settled.
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
 	}
 
 	fmt.Fprintf(os.Stderr, "poo: settled %s after %d turn(s); log: %s\n", res.Reason, res.Turns, logPath)
 	return poo.ExitCode(res.Reason)
+}
+
+// loggedBaseURL returns the base URL the log records.
+//
+// A URL may carry credentials, and the log is a file a consumer reads, so
+// the userinfo is stripped before it is written.
+func loggedBaseURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
 }
 
 // validate checks the flags and the prompt.

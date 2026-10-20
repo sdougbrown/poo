@@ -70,6 +70,18 @@ type StreamReader interface {
 	Close() error
 }
 
+// UsageReporter is implemented by a stream reader that can report the
+// usage of a request that failed before its usage arrived.
+//
+// A provider that dies mid-stream still cost tokens, so the transport
+// reports what it knows. The core uses it to write the usage record of a
+// request that broke.
+type UsageReporter interface {
+	// ReportUsage returns the usage the request produced, or nil when
+	// there is none.
+	ReportUsage() *UsageReport
+}
+
 // StreamEvent is one piece of a provider response.
 type StreamEvent struct {
 	// Delta is a text or thinking fragment. It is set when Kind is
