@@ -177,12 +177,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		cap = OutputCapMax
 	}
 
-	total, err := countLines(f)
-	if err != nil {
-		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
-	}
-
-	body, first, last, capped, err := readRange(path, f, p.offset, p.limit, cap)
+	body, total, first, last, capped, err := readRange(path, f, p.offset, p.limit, cap)
 	if err != nil {
 		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
 	}
@@ -196,50 +191,43 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	return poo.ToolResult{Text: text}, nil
 }
 
-// countLines counts the lines in a file.
-func countLines(f *os.File) (int, error) {
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return 0, err
-	}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	n := 0
-	for sc.Scan() {
-		n++
-	}
-	if err := sc.Err(); err != nil {
-		return 0, err
-	}
-	return n, nil
-}
-
 // readRange reads the requested lines, honouring the output cap.
 //
-// It returns the body, the first and last line shown, and whether the cap
-// ended the read early.
-func readRange(path string, f *os.File, offset, limit, cap int) (string, int, int, bool, error) {
+// It returns the body, the total number of lines, the first and last
+// line shown, and whether the cap ended the read early. The file is read
+// once, so a large file costs one pass.
+func readRange(path string, f *os.File, offset, limit, cap int) (string, int, int, int, bool, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return "", 0, 0, false, err
+		return "", 0, 0, 0, false, err
 	}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
 	var b strings.Builder
 	line := 0
+	total := 0
 	first := 0
 	last := 0
 	capped := false
 
 	for sc.Scan() {
 		line++
+		total = line
 		if line < offset {
 			continue
 		}
-		if line-first >= limit && first > 0 {
-			break
+		if first > 0 && line-first >= limit {
+			// The range is complete, but the rest of the file is still
+			// counted, so the header can name the total.
+			continue
 		}
 		if first == 0 {
 			first = line
+		}
+		if capped {
+			// The cap already ended the body, so the rest is only
+			// counted.
+			continue
 		}
 		text := sc.Text()
 		if len(text) > MaxLineChars {
@@ -250,19 +238,19 @@ func readRange(path string, f *os.File, offset, limit, cap int) (string, int, in
 			// The cap ends the read. The header says so, so the model can
 			// continue from the next line.
 			capped = true
-			break
+			continue
 		}
 		b.WriteString(chunk)
 		last = line
 	}
 	if err := sc.Err(); err != nil {
-		return "", 0, 0, false, err
+		return "", 0, 0, 0, false, err
 	}
 	if first == 0 {
 		// The file has fewer lines than the offset.
-		return "", offset, offset - 1, false, nil
+		return "", total, offset, offset - 1, false, nil
 	}
-	return b.String(), first, last, capped, nil
+	return b.String(), total, first, last, capped, nil
 }
 
 // indexNUL returns the index of the first NUL byte, or -1.

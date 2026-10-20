@@ -190,6 +190,45 @@ func TestPrepareRejectsBadArguments(t *testing.T) {
 	}
 }
 
+func TestTheHeaderNamesTheTotalWhenTheCapEndsTheRead(t *testing.T) {
+	dir := t.TempDir()
+	var b strings.Builder
+	for i := 1; i <= 500; i++ {
+		fmt.Fprintf(&b, "line-%04d-%s\n", i, strings.Repeat("y", 100))
+	}
+	writeFile(t, dir, "a.txt", b.String())
+
+	// A cap of 1000 chars ends the read well before the file does, but
+	// the header still names the file's total, so the model knows how
+	// much is left.
+	tool := &read.Tool{OutputCap: 1000}
+	res := call(t, tool, map[string]any{"path": "a.txt"}, dir)
+	lines := strings.SplitN(res.Text, "\n", 2)
+	if !strings.Contains(lines[0], "of 500") {
+		t.Errorf("the header is %q, want it to name the total", lines[0])
+	}
+}
+
+func TestARangePastTheEndOfTheFileIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.txt", "one\ntwo\n")
+
+	res := call(t, read.New(), map[string]any{
+		"path":   "a.txt",
+		"offset": 50,
+	}, dir)
+	if res.IsError {
+		t.Fatalf("the read failed: %s", res.Text)
+	}
+	lines := strings.SplitN(res.Text, "\n", 2)
+	if !strings.Contains(lines[0], "of 2") {
+		t.Errorf("the header is %q, want it to name the total", lines[0])
+	}
+	if strings.TrimSpace(lines[1]) != "" {
+		t.Errorf("the body is %q, want it empty", lines[1])
+	}
+}
+
 func TestTheOutputCapIsContextRelative(t *testing.T) {
 	// The plan: min(70000, floor(0.10 × context_limit × 3.5)).
 	if got := read.OutputCap(32768); got != 11468 {
