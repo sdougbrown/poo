@@ -17,28 +17,16 @@
 
 set -euo pipefail
 
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
 MODULE="$(go list -m -f '{{.Path}}' 2>/dev/null || true)"
 if [ -z "$MODULE" ]; then
   echo "check-imports: cannot determine the module path from go.mod" >&2
   exit 1
 fi
 
-# Packages whose imports are restricted to the standard library.
-STDLIB_ONLY=(
-  "$MODULE/prompt"
-  "$MODULE/decide"
-  "$MODULE/wire/protocol"
-)
-
-# The core package, and the only non-stdlib packages it may reach.
 CORE="$MODULE"
-CORE_ALLOWED=(
-  "$MODULE/prompt"
-  "$MODULE/decide"
-)
-
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
 
 failures=0
 
@@ -51,17 +39,34 @@ is_stdlib() {
   esac
 }
 
-in_list() {
-  local needle="$1"
-  shift
-  local item
-  for item in "$@"; do
-    [ -n "$item" ] || continue
-    if [ "$needle" = "$item" ]; then
-      return 0
-    fi
-  done
+# is_allowed <import path> <mode> -- true when the import is permitted.
+#
+# mode "core"   -- standard library plus poo/prompt and poo/decide
+# mode "stdlib" -- standard library only
+is_allowed() {
+  local import_path="$1"
+  local mode="$2"
+  case "$mode" in
+    core)
+      case "$import_path" in
+        "$MODULE/prompt" | "$MODULE/decide") return 0 ;;
+      esac
+      ;;
+    stdlib) ;;
+  esac
   return 1
+}
+
+# rule_text <mode> -- the rule that applies, for the failure message.
+rule_text() {
+  case "$1" in
+    core)
+      echo "core may import only the standard library, $MODULE/prompt and $MODULE/decide"
+      ;;
+    stdlib)
+      echo "$2 may import only the standard library"
+      ;;
+  esac
 }
 
 # package_exists <import path> -- true when the package has a directory in
@@ -73,9 +78,6 @@ package_exists() {
 }
 
 # check_package <import path> <mode>
-#
-# mode "core"   -- standard library plus CORE_ALLOWED
-# mode "stdlib" -- standard library only
 check_package() {
   local pkg="$1"
   local mode="$2"
@@ -84,17 +86,6 @@ check_package() {
     echo "skip: $pkg (does not exist yet)" >&2
     return 0
   fi
-
-  local allowed
-  case "$mode" in
-    core) allowed=("${CORE_ALLOWED[@]}") ;;
-    stdlib) allowed=() ;;
-    *)
-      echo "error: unknown mode '$mode' for $pkg" >&2
-      failures=$((failures + 1))
-      return 1
-      ;;
-  esac
 
   local deps imports
   if ! deps="$(go list -deps "$pkg" 2>&1)"; then
@@ -117,18 +108,11 @@ check_package() {
     if is_stdlib "$import_path"; then
       continue
     fi
-    if in_list "$import_path" "${allowed[@]}"; then
+    if is_allowed "$import_path" "$mode"; then
       continue
     fi
     echo "check-imports: $pkg imports $import_path" >&2
-    case "$mode" in
-      core)
-        echo "  core may import only the standard library, $MODULE/prompt and $MODULE/decide" >&2
-        ;;
-      stdlib)
-        echo "  $pkg may import only the standard library" >&2
-        ;;
-    esac
+    echo "  $(rule_text "$mode" "$pkg")" >&2
     failures=$((failures + 1))
   done <<< "$imports"
 
@@ -136,30 +120,25 @@ check_package() {
   local dep
   while IFS= read -r dep; do
     [ -n "$dep" ] || continue
-    [ "$dep" = "$pkg" ] && continue
+    if [ "$dep" = "$pkg" ]; then
+      continue
+    fi
     if is_stdlib "$dep"; then
       continue
     fi
-    if in_list "$dep" "${allowed[@]}"; then
+    if is_allowed "$dep" "$mode"; then
       continue
     fi
     echo "check-imports: $pkg depends on $dep" >&2
-    case "$mode" in
-      core)
-        echo "  core may depend only on the standard library, $MODULE/prompt and $MODULE/decide" >&2
-        ;;
-      stdlib)
-        echo "  $pkg may depend only on the standard library" >&2
-        ;;
-    esac
+    echo "  $(rule_text "$mode" "$pkg")" >&2
     failures=$((failures + 1))
   done <<< "$deps"
 }
 
 check_package "$CORE" core
-for pkg in "${STDLIB_ONLY[@]}"; do
-  check_package "$pkg" stdlib
-done
+check_package "$MODULE/prompt" stdlib
+check_package "$MODULE/decide" stdlib
+check_package "$MODULE/wire/protocol" stdlib
 
 if [ "$failures" -ne 0 ]; then
   echo "check-imports: $failures import violation(s) found" >&2
