@@ -71,7 +71,9 @@ func copyFile(src, dst string) error {
 // treeFiles returns the regular files of a tree, keyed by their relative
 // path.
 //
-// The .git directory is skipped, and the paths are sorted.
+// The .git directory is skipped, and so are the paths a tool generates:
+// the bytecode a python run leaves behind and the cache a test run
+// leaves behind are not the model's changes. The paths are sorted.
 func treeFiles(dir string) (map[string]string, error) {
 	files := map[string]string{}
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -86,12 +88,15 @@ func treeFiles(dir string) (map[string]string, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" {
+			if d.Name() == ".git" || generatedDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if !d.Type().IsRegular() {
+			return nil
+		}
+		if generatedFile(rel) {
 			return nil
 		}
 		hash, err := hashFile(path)
@@ -107,11 +112,41 @@ func treeFiles(dir string) (map[string]string, error) {
 	return files, nil
 }
 
+// generatedDir reports whether a directory holds files a tool generates.
+//
+// The bytecode cache and the test cache are not the model's changes, and
+// a read-only task's check rejects any change at all.
+func generatedDir(name string) bool {
+	switch name {
+	case "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache":
+		return true
+	}
+	return false
+}
+
+// generatedFile reports whether a path names a file a tool generates.
+//
+// The check is on the whole relative path, so a bytecode file inside a
+// package's cache is caught as well as the cache directory itself.
+func generatedFile(rel string) bool {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for _, p := range parts {
+		if generatedDir(p) {
+			return true
+		}
+	}
+	base := parts[len(parts)-1]
+	return strings.HasSuffix(base, ".pyc") || strings.HasSuffix(base, ".pyo")
+}
+
 // measureDiff reports what a run changed, comparing the workdir against a
 // pristine copy of it.
 //
 // The comparison does not need a repository: a fixture is a plain
 // directory, and the harness has to work on one.
+//
+// The scratch the diff needs lives under the run's own work root, never
+// in /tmp's shared space.
 func measureDiff(workdir, pristine string) (Diff, string, error) {
 	newFiles, err := treeFiles(workdir)
 	if err != nil {
@@ -173,13 +208,16 @@ func diffOne(workdir, pristine, rel string) (string, int, error) {
 	case !oldExists && !newExists:
 		return "", 0, nil
 	}
-	return diffBytes(rel, oldData, newData)
+	return diffBytesIn(filepath.Dir(pristine), rel, oldData, newData)
 }
 
-// diffBytes returns the unified diff of two files and the number of
+// diffBytesIn returns the unified diff of two files and the number of
 // changed lines.
-func diffBytes(rel string, oldData, newData []byte) (string, int, error) {
-	dir, err := os.MkdirTemp("", "poo-eval-diff")
+//
+// The scratch the diff needs is made under the given base directory, so
+// it lives with the run's own scratch and never in /tmp.
+func diffBytesIn(base, rel string, oldData, newData []byte) (string, int, error) {
+	dir, err := os.MkdirTemp(base, "poo-eval-diff")
 	if err != nil {
 		return "", 0, fmt.Errorf("eval: making a diff directory: %w", err)
 	}

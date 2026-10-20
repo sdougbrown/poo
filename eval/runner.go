@@ -32,6 +32,14 @@ const (
 	// DefaultPooBinary is the binary the runner executes when the
 	// caller names none.
 	DefaultPooBinary = "poo"
+	// KillGrace is how long a killed process group has to finish on its
+	// own before it is killed outright. The plan's process rule is
+	// SIGTERM, wait two seconds, then SIGKILL.
+	KillGrace = 2 * time.Second
+	// CheckTimeout bounds one check script. The check runs on its own
+	// clock, not the run's, so a run that used its whole budget does
+	// not starve the check.
+	CheckTimeout = 120 * time.Second
 )
 
 // RunOptions configure one harness run.
@@ -58,6 +66,15 @@ type RunOptions struct {
 	PooBinary string
 	// KeepWorkdirs leaves the workdirs behind after the run.
 	KeepWorkdirs bool
+	// Force clears the out directory's runs directory before the run.
+	// A run into a directory that already holds a run's output is
+	// refused without it.
+	Force bool
+	// Catalog is every model the run set knows about, whether or not
+	// this run uses it. The key variables the catalog names are removed
+	// from every environment the harness builds, so a run against one
+	// model never carries another model's credential.
+	Catalog []Model
 }
 
 // RunResult is the outcome of one task x model x seed.
@@ -105,6 +122,17 @@ type Report struct {
 // Runner runs the harness.
 type Runner struct {
 	opts RunOptions
+	// workRoot is the directory this invocation's workdirs live under.
+	// It carries a name of its own, so two invocations that share a
+	// work root do not share a workdir: one invocation's cleanup must not
+	// pull the other one's workdir away.
+	workRoot string
+	// runsDir is the directory this invocation's run logs live under.
+	runsDir string
+	// keyEnvs are the environment variables the catalog names as key
+	// variables. They are removed from every environment the harness
+	// builds, except the one the running model needs.
+	keyEnvs []string
 }
 
 // NewRunner returns a runner with the options filled in.
@@ -121,7 +149,27 @@ func NewRunner(opts RunOptions) *Runner {
 	if opts.PooBinary == "" {
 		opts.PooBinary = DefaultPooBinary
 	}
-	return &Runner{opts: opts}
+	// The out directory and the work root are made absolute here, not
+	// in the run: poo resolves a relative --log against its own working
+	// directory, and the harness opens the log against its own.
+	if opts.Out != "" {
+		if abs, err := filepath.Abs(opts.Out); err == nil {
+			opts.Out = abs
+		}
+	}
+	if opts.WorkRoot != "" {
+		if abs, err := filepath.Abs(opts.WorkRoot); err == nil {
+			opts.WorkRoot = abs
+		}
+	}
+	// The key variables the catalog names are known before the run, so
+	// every environment the harness builds can be scrubbed of them.
+	// The catalog the caller names holds every model the run set knows
+	// about; the models the run uses are added to it, so a run made
+	// without a catalog still scrubs its own model's key.
+	catalog := append([]Model(nil), opts.Catalog...)
+	catalog = append(catalog, opts.Models...)
+	return &Runner{opts: opts, keyEnvs: keyEnvs(catalog)}
 }
 
 // Seeds returns the number of times each task runs against each model.
@@ -135,7 +183,18 @@ func (r *Runner) Parallel() int { return r.opts.Parallel }
 // Every task runs against every model, once per seed. The runs happen in
 // parallel, up to the parallel limit, and no more than two of them share
 // an endpoint at the same time.
+//
+// The out directory holds one run's output. A run into a directory that
+// already holds a run's output is refused: the logs of the earlier run
+// are there, and a run that reused one of them would report the earlier
+// run's metrics. The --force option clears the runs directory first.
+//
+// The runs themselves live in a directory of this invocation's own, so
+// two invocations never write over each other's logs.
 func (r *Runner) Run(ctx context.Context) (*Report, error) {
+	if err := r.prepareOut(); err != nil {
+		return nil, err
+	}
 	report := &Report{
 		StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Dir:       r.opts.Out,
@@ -146,6 +205,23 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 	}
 	if err := os.MkdirAll(r.opts.WorkRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("eval: creating %s: %w", r.opts.WorkRoot, err)
+	}
+	// The runs live in a directory of this invocation's own, so a
+	// rerun never lands on the previous run's log.
+	runID, err := r.newRunDir()
+	if err != nil {
+		return nil, err
+	}
+	r.runsDir = runID
+	// The workdirs live under a directory of this invocation's own, so
+	// two invocations that share a work root do not share a workdir.
+	workRoot, err := r.newWorkRoot()
+	if err != nil {
+		return nil, err
+	}
+	r.workRoot = workRoot
+	if !r.opts.KeepWorkdirs {
+		defer os.RemoveAll(workRoot)
 	}
 
 	jobs := r.jobs()
@@ -164,6 +240,65 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 	})
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return report, nil
+}
+
+// prepareOut makes the out directory ready for the run.
+//
+// The runs directory holds the logs. A directory that already holds a
+// run's output is refused, because the earlier run's log is there and a
+// run that landed on it would report the earlier run's metrics. The
+// --force option clears the directory instead.
+func (r *Runner) prepareOut() error {
+	runsDir := filepath.Join(r.opts.Out, "runs")
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("eval: reading %s: %w", runsDir, err)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if !r.opts.Force {
+		return fmt.Errorf("eval: %s already holds a run's output; use --force to clear it", runsDir)
+	}
+	if err := os.RemoveAll(runsDir); err != nil {
+		return fmt.Errorf("eval: clearing %s: %w", runsDir, err)
+	}
+	return nil
+}
+
+// newRunDir creates the directory this invocation's runs live in.
+//
+// The directory carries a name of its own, so a rerun never lands on the
+// previous run's log.
+func (r *Runner) newRunDir() (string, error) {
+	name, err := randomName()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(r.opts.Out, "runs", "run-"+name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("eval: creating %s: %w", dir, err)
+	}
+	return dir, nil
+}
+
+// newWorkRoot creates the directory this invocation's workdirs live in.
+//
+// The directory carries a name of its own, so two invocations that share
+// a work root do not share a workdir.
+func (r *Runner) newWorkRoot() (string, error) {
+	name, err := randomName()
+	if err != nil {
+		return "", err
+	}
+	root := filepath.Join(r.opts.WorkRoot, "run-"+name)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", fmt.Errorf("eval: creating %s: %w", root, err)
+	}
+	return root, nil
 }
 
 // job is one run to make.
@@ -227,13 +362,13 @@ func (r *Runner) runOne(ctx context.Context, j job) RunResult {
 
 	// The report holds the log and the check's output. The workdir is
 	// scratch, and lives under the work root, which is never /tmp.
-	runDir := filepath.Join(r.opts.Out, "runs", j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
+	runDir := filepath.Join(r.runsDir, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		result.Error = fmt.Sprintf("creating %s: %v", runDir, err)
 		return result
 	}
 
-	workRoot := filepath.Join(r.opts.WorkRoot, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
+	workRoot := filepath.Join(r.workRoot, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
 	if err := os.MkdirAll(workRoot, 0o755); err != nil {
 		result.Error = fmt.Sprintf("creating %s: %v", workRoot, err)
 		return result
@@ -324,16 +459,13 @@ func (r *Runner) checkout(ctx context.Context, t Task, workdir string) (string, 
 		return workdir, nil
 	}
 
-	// A git repo: "<url>@<sha>". The clone is shallow, and the sha is
-	// checked out when the server allows it.
-	url, sha, ok := strings.Cut(t.Repo, "@")
+	// A git repo: "<url>@<sha>". The sha is the part after the last
+	// "@", so an SSH url ("git@host:repo") keeps its own "@".
+	url, sha, ok := splitRepoSHA(t.Repo)
 	if !ok {
 		return "", fmt.Errorf("task %q: the git repo %q names no sha", t.ID, t.Repo)
 	}
 	args := []string{"clone", "--quiet"}
-	if sha != "" {
-		args = append(args, "--depth", "1")
-	}
 	args = append(args, url, workdir)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	var out bytes.Buffer
@@ -343,6 +475,17 @@ func (r *Runner) checkout(ctx context.Context, t Task, workdir string) (string, 
 		return "", fmt.Errorf("cloning %s: %v: %s", url, err, strings.TrimSpace(out.String()))
 	}
 	if sha != "" {
+		// The clone is shallow, so the sha may not be in it. The sha is
+		// fetched on its own when it is missing.
+		if !r.gitHasSHA(ctx, workdir, sha) {
+			fetch := exec.CommandContext(ctx, "git", "-C", workdir, "fetch", "--quiet", "--depth", "1", "origin", sha)
+			var fo bytes.Buffer
+			fetch.Stdout = &fo
+			fetch.Stderr = &fo
+			if err := fetch.Run(); err != nil {
+				return "", fmt.Errorf("fetching %s: %v: %s", sha, err, strings.TrimSpace(fo.String()))
+			}
+		}
 		checkout := exec.CommandContext(ctx, "git", "-C", workdir, "checkout", "--quiet", sha)
 		var co bytes.Buffer
 		checkout.Stdout = &co
@@ -352,6 +495,29 @@ func (r *Runner) checkout(ctx context.Context, t Task, workdir string) (string, 
 		}
 	}
 	return workdir, nil
+}
+
+// splitRepoSHA splits a task's repo into its url and its pinned sha.
+//
+// The sha is the part after the last "@", so an SSH url ("git@host:org
+// /repo") keeps the "@" it owns.
+func splitRepoSHA(repo string) (url, sha string, ok bool) {
+	idx := strings.LastIndex(repo, "@")
+	if idx < 0 {
+		return repo, "", false
+	}
+	url = repo[:idx]
+	sha = repo[idx+1:]
+	if url == "" || sha == "" {
+		return repo, "", false
+	}
+	return url, sha, true
+}
+
+// gitHasSHA reports whether a clone holds a commit.
+func (r *Runner) gitHasSHA(ctx context.Context, dir, sha string) bool {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "cat-file", "-e", sha+"^{commit}")
+	return cmd.Run() == nil
 }
 
 // runPoo runs the poo binary against a task.
@@ -374,6 +540,10 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 		"--max-turns", strconv.Itoa(r.opts.MaxTurns),
 		"--log", logPath,
 		"--working-dir", workdir,
+		// poo is given the run's own deadline, so it can settle by
+		// itself and write its settle record rather than being killed
+		// mid-write.
+		"--timeout", r.timeout(j.task).String(),
 	}
 	if j.model.APIKeyEnv != "" {
 		args = append(args, "--api-key-env", j.model.APIKeyEnv)
@@ -383,9 +553,13 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 	cmd := exec.CommandContext(ctx, r.opts.PooBinary, args...)
 	cmd.Dir = workdir
 	// The run inherits the environment, so the key variable is there for
-	// the binary to read. The binary scrubs it from the tools' child
-	// environment itself.
-	cmd.Env = os.Environ()
+	// the binary to read. Every other key variable the catalog names is
+	// gone, so a run against a model with no key never carries another
+	// model's credential.
+	cmd.Env = r.pooEnv(j.model)
+	// The python the model runs must not leave bytecode behind, and the
+	// check's own python must not either.
+	cmd.Env = append(cmd.Env, "PYTHONDONTWRITEBYTECODE=1")
 	// The child runs in its own process group, and the group is killed
 	// when the run's context ends. Killing only the process would leave
 	// its children holding the output pipe, and the harness would wait
@@ -406,7 +580,14 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			exit = exitErr.ExitCode()
-			err = nil
+			// A process the harness killed reports a negative exit
+			// code, and there is no error to report beyond that: the
+			// run's own context says why it was killed.
+			if exit >= 0 {
+				err = nil
+			} else {
+				err = fmt.Errorf("the process was killed by signal %d", -exit)
+			}
 		}
 	}
 	if err != nil {
@@ -420,8 +601,9 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 
 // killGroup kills a process group.
 //
-// The group gets a SIGTERM first and a SIGKILL after a short grace, so
-// a child that ignores the first signal still goes away.
+// The group gets a SIGTERM first and a SIGKILL after a two-second
+// grace, so a process that needs a moment to write its settle record
+// still has the time to write it.
 func killGroup(pid int) error {
 	if pid <= 0 {
 		return nil
@@ -430,7 +612,7 @@ func killGroup(pid int) error {
 	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
 		return err
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(KillGrace)
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }
 
@@ -446,17 +628,29 @@ func killGroup(pid int) error {
 //
 // The check gets no network and a small timeout: a check that hangs must
 // not hang the harness.
+//
+// The check runs on its own clock, not the run's. A run that used its
+// whole budget would otherwise leave the check no time at all, and the
+// check would fail with a cancellation even though the model finished.
+//
+// The check's environment holds no key variable: its output goes into
+// the report, and a check that prints its environment must not print a
+// credential.
 func (r *Runner) runCheck(ctx context.Context, t Task, workdir, logPath string, changed []string) (int, string, error) {
-	checkCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	checkCtx, cancel := context.WithTimeout(context.Background(), CheckTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(checkCtx, "/bin/bash", filepath.Join(t.Dir, "check.sh"))
 	cmd.Dir = workdir
-	cmd.Env = append(os.Environ(),
+	cmd.Env = r.checkEnv(
 		"POO_CHECK=1",
 		"POO_WORKDIR="+workdir,
 		"POO_SESSION_LOG="+logPath,
 		"POO_CHANGED_FILES="+strings.Join(changed, "\n"),
+		// The check's own python must not leave bytecode in the
+		// workdir, or the diff would show files the model never
+		// touched.
+		"PYTHONDONTWRITEBYTECODE=1",
 	)
 	// The check runs in its own process group, and the group is killed
 	// when the check's context ends. A check that leaves a child behind

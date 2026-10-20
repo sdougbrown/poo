@@ -238,53 +238,44 @@ type transcript struct {
 
 // findTranscripts returns the transcripts under the results directory.
 //
-// A transcript is a session.jsonl under a run directory. The directory
-// layout names the task, the model and the seed.
+// A transcript is a session.jsonl under a run directory. The last three
+// components of its path name the run: the task, the model and the
+// seed. The directories above them are the harness's own, and their
+// names do not matter.
 func (j *Judge) findTranscripts() ([]transcript, error) {
 	runsDir := filepath.Join(j.opts.ResultsDir, "runs")
-	entries, err := os.ReadDir(runsDir)
+	var out []transcript
+	err := filepath.WalkDir(runsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() || d.Name() != "session.jsonl" {
+			return nil
+		}
+		rel, err := filepath.Rel(runsDir, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) < 3 {
+			return nil
+		}
+		out = append(out, transcript{
+			path:  path,
+			task:  parts[len(parts)-3],
+			model: parts[len(parts)-2],
+			seed:  seedNumber(parts[len(parts)-1]),
+		})
+		return nil
+	})
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("eval: reading %s: %w", runsDir, err)
-	}
-
-	var out []transcript
-	for _, task := range entries {
-		if !task.IsDir() {
-			continue
-		}
-		taskDir := filepath.Join(runsDir, task.Name())
-		models, err := os.ReadDir(taskDir)
-		if err != nil {
-			return nil, fmt.Errorf("eval: reading %s: %w", taskDir, err)
-		}
-		for _, model := range models {
-			if !model.IsDir() {
-				continue
-			}
-			modelDir := filepath.Join(taskDir, model.Name())
-			seeds, err := os.ReadDir(modelDir)
-			if err != nil {
-				return nil, fmt.Errorf("eval: reading %s: %w", modelDir, err)
-			}
-			for _, seed := range seeds {
-				if !seed.IsDir() {
-					continue
-				}
-				path := filepath.Join(modelDir, seed.Name(), "session.jsonl")
-				if _, err := os.Stat(path); err != nil {
-					continue
-				}
-				out = append(out, transcript{
-					path:  path,
-					task:  task.Name(),
-					model: model.Name(),
-					seed:  seedNumber(seed.Name()),
-				})
-			}
-		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].task != out[j].task {

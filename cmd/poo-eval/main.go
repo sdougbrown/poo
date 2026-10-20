@@ -39,6 +39,7 @@ Run flags:
   --tasks-dir <path>   The task set (default: evals/tasks)
   --poo <path>         The poo binary to run (default: poo)
   --keep-workdirs      Leave the workdirs behind after the run
+  --force              Clear the out directory's runs before the run
 
 Compare flags:
   --out <dir>          Where the comparison goes (default: the candidate's directory)
@@ -117,6 +118,7 @@ type runOptions struct {
 	tasksDir   string
 	pooBinary  string
 	keepWork   bool
+	force      bool
 }
 
 // runRun executes `poo-eval run`.
@@ -136,6 +138,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.tasksDir, "tasks-dir", "", "The task set")
 	fs.StringVar(&o.pooBinary, "poo", "", "The poo binary to run")
 	fs.BoolVar(&o.keepWork, "keep-workdirs", false, "Leave the workdirs behind")
+	fs.BoolVar(&o.force, "force", false, "Clear the out directory's runs before the run")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -164,6 +167,10 @@ func runRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
 		return 1
 	}
+	// The whole catalog is passed to the runner, not just the models the
+	// run uses: the key variables every model names are removed from
+	// every environment the harness builds.
+	catalog := models
 	models = eval.SelectModels(models, splitList(o.models))
 	if len(models) == 0 {
 		fmt.Fprintf(os.Stderr, "poo-eval: no model matches %q\n", o.models)
@@ -194,6 +201,7 @@ func runRun(args []string) int {
 
 	runner := eval.NewRunner(eval.RunOptions{
 		Models:       models,
+		Catalog:      catalog,
 		Tasks:        tasks,
 		TaskRoot:     o.tasksDir,
 		Seeds:        o.seeds,
@@ -203,6 +211,7 @@ func runRun(args []string) int {
 		WorkRoot:     workRoot,
 		PooBinary:    o.pooBinary,
 		KeepWorkdirs: o.keepWork,
+		Force:        o.force,
 	})
 
 	fmt.Fprintf(os.Stderr, "poo-eval: %d model(s) x %d task(s) x %d seed(s) -> %s\n",
