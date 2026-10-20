@@ -131,19 +131,21 @@ def derive(workdir, task):
         if not match:
             return []
         # The comparison in the loop that is off by one is the one
-        # against the length of the list.
-        comparisons = [
-            "index < len(items) - 1",
-            "index < len(items)-1",
-            "index < len(items) - 1 ",
-        ]
-        if not any(c in source for c in comparisons):
-            # The off-by-one is somewhere else in the loop, so the fact
-            # is the loop's own condition, read out of the source.
-            cond = re.search(r"while ([^\n:]+):", source)
-            if not cond:
-                return []
-            comparisons = [cond.group(1).strip()]
+        # against the length of the list. The answer may write the
+        # comparison out as the source writes it, or name the bound it
+        # gets wrong.
+        cond = re.search(r"while ([^\n:]+):", source)
+        if not cond:
+            return []
+        condition = cond.group(1).strip()
+        bound = re.search(r"len\(items\)\s*-\s*(\d+)", condition)
+        comparisons = [condition, re.sub(r"\s+", " ", condition)]
+        if bound:
+            comparisons.append("len(items) - " + bound.group(1))
+            comparisons.append("len(items)-" + bound.group(1))
+            # The bound the answer says it should be.
+            comparisons.append("len(items) - " + str(int(bound.group(1)) + 1))
+            comparisons.append("len(items)-" + str(int(bound.group(1)) + 1))
         return [
             ("the helper that chunks the list", [match.group(1)]),
             ("the comparison that is off by one", comparisons),

@@ -212,6 +212,50 @@ func TestTheReadOnlyChecksAcceptTheRightAnswer(t *testing.T) {
 	}
 }
 
+// The read-only checks accept a right answer written a different way.
+//
+// A check that only accepts one phrasing measures the phrasing, not
+// the answer.
+func TestTheReadOnlyChecksAcceptAnotherPhrasing(t *testing.T) {
+	root := repoRoot(t)
+	tasks, err := LoadTasks(filepath.Join(root, "evals", "tasks"))
+	if err != nil {
+		t.Fatalf("loading the tasks: %v", err)
+	}
+
+	answers := map[string]string{
+		"find-off-by-one-loop":  "The helper is chunks. Its loop condition is `index < len(items) - 1`, and it should be `index < len(items)`.",
+		"find-slow-loop":        "Store.get is the slow one. Build a dict of the records keyed by id and look the key up in it.",
+		"find-version-mismatch": "The packaging metadata says 1.4.0 and the package says 1.3.0, so src/shop/__init__.py is the one out of step.",
+		"find-dead-code":        "handle_legacy_ping is the orphan. Adding it to ROUTES in routes.py would make it reachable.",
+		"find-secret-in-config": "read_api_token() reads it, and the variable is APP_TOKEN.",
+	}
+
+	for _, task := range tasks {
+		if !task.HasTag("readonly") {
+			continue
+		}
+		answer, ok := answers[task.ID]
+		if !ok {
+			continue
+		}
+		t.Run(task.ID, func(t *testing.T) {
+			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+			if err != nil {
+				t.Fatalf("resolving the fixture: %v", err)
+			}
+			workdir := t.TempDir()
+			copyDir(t, fixture, workdir)
+			log := filepath.Join(workdir, "session.jsonl")
+
+			writeSessionLog(t, log, answer)
+			if code := runCheck(t, task.Dir, workdir, log, ""); code != 0 {
+				t.Errorf("the check rejected another phrasing of the right answer: %q", answer)
+			}
+		})
+	}
+}
+
 // The two tasks that were invalid have a real defect now.
 //
 // A task whose premise is false measures nothing, and a check that
