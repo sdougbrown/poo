@@ -103,7 +103,8 @@ func (p *parser) feed(text string) []poo.StreamEvent {
 // flush returns the events the parser holds at the end of a stream.
 //
 // A call that arrived without its closing marker is still a call, as long
-// as its body parses.
+// as its body parses. A body that does not parse stays in the model's
+// prose, exactly as the model wrote it.
 func (p *parser) flush() []poo.StreamEvent {
 	if !p.enabled {
 		return nil
@@ -117,13 +118,10 @@ func (p *parser) flush() []poo.StreamEvent {
 		if ev, ok := p.parseBody(body); ok {
 			out = append(out, ev)
 		} else {
-			text := p.callText
-			if p.callKind == kindTagged {
-				text += taggedClose
-			} else if p.callKind == kindFence {
-				text += "```"
-			}
-			out = append(out, textEvent(text))
+			// The block is not a call, so the model's own text goes back
+			// into the prose. No closing marker is invented: the model
+			// never wrote one.
+			out = append(out, textEvent(p.callText+p.buf))
 		}
 		p.inCall = false
 		p.callBody = ""
@@ -184,7 +182,9 @@ func (p *parser) drain() []poo.StreamEvent {
 // openCall starts a new call of the given shape.
 //
 // The text before the call's opening is prose and is emitted separately,
-// so the buffer starts at the call's own text.
+// so the buffer starts at the call's own text. The opening itself is
+// kept, so a block that turns out not to be a call goes back into the
+// prose exactly as the model wrote it.
 func (p *parser) openCall(kind callKind) {
 	p.inCall = true
 	p.callKind = kind
@@ -196,29 +196,19 @@ func (p *parser) openCall(kind callKind) {
 
 	switch kind {
 	case kindTagged:
+		p.callText = p.buf[:len(taggedOpen)]
 		p.buf = p.buf[len(taggedOpen):]
 	case kindFence:
+		open := p.buf[:len("```")]
 		p.buf = p.buf[len("```"):]
 		// A fence may name the language.
 		if i := strings.IndexByte(p.buf, '\n'); i >= 0 {
+			open += p.buf[:i+1]
 			p.buf = p.buf[i+1:]
 		} else {
 			p.buf = ""
 		}
-	}
-	p.callText = p.openText(kind)
-}
-
-// openText returns the markup that opened the call, so it can be restored
-// when the body turns out not to be a call.
-func (p *parser) openText(kind callKind) string {
-	switch kind {
-	case kindTagged:
-		return taggedOpen
-	case kindFence:
-		return "```"
-	default:
-		return ""
+		p.callText = open
 	}
 }
 
@@ -414,12 +404,17 @@ func (p *parser) parseCallBody(body string) (poo.StreamEvent, bool) {
 	}
 	args := json.RawMessage("{}")
 	for _, key := range []string{"arguments", "parameters", "args", "input"} {
-		if v, ok := raw[key]; ok {
-			if isCompleteJSON(string(v)) {
-				args = v
-			}
-			break
+		v, ok := raw[key]
+		if !ok {
+			continue
 		}
+		// The tools take an object, so arguments that are not one are
+		// not a call. The block stays in the model's prose.
+		if !isJSONObject(v) {
+			return poo.StreamEvent{}, false
+		}
+		args = v
+		break
 	}
 	return p.toolEvent(name, string(args))
 }
@@ -432,11 +427,22 @@ func (p *parser) parseXMLCall(body string) (poo.StreamEvent, bool) {
 	}
 	args := "{}"
 	if am := between(body, "<arguments>", "</arguments>"); am != "" {
-		if isCompleteJSON(strings.TrimSpace(am)) {
-			args = strings.TrimSpace(am)
+		am = strings.TrimSpace(am)
+		if !isJSONObject(json.RawMessage(am)) {
+			return poo.StreamEvent{}, false
 		}
+		args = am
 	}
 	return p.toolEvent(strings.TrimSpace(nm), args)
+}
+
+// isJSONObject reports whether a raw JSON value is an object.
+func isJSONObject(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	return json.Valid([]byte(trimmed))
 }
 
 // between returns the text between two markers, or the empty string.
@@ -458,7 +464,7 @@ func (p *parser) toolEvent(name, args string) (poo.StreamEvent, bool) {
 	if name == "" {
 		return poo.StreamEvent{}, false
 	}
-	if !isCompleteJSON(args) {
+	if !isJSONObject(json.RawMessage(args)) {
 		args = "{}"
 	}
 	p.seq++
