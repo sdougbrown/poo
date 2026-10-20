@@ -18,9 +18,13 @@
   base_url: http://localhost:4000/v1
   model_id: gemma4
   context_limit: 32768
+  tools_mode: auto
   notes: >-
     Capped from 262144 on purpose: the low-budget run. The cap makes the
     context limit bite, so the harness's context handling is measured.
+    The tools mode is auto, not native: a smoke test on 2026-10-20
+    showed gemma4 writing its tool calls as text rather than through the
+    wire format, so the text parser has to read them.
 
 - name: qwen
   base_url: http://localhost:4000/v1

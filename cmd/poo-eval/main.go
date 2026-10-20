@@ -184,8 +184,14 @@ func runRun(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// The workdirs live under the report's directory, on the same
-	// filesystem, and never in /tmp.
+	// The workdirs are scratch. They live under the repository's .cache
+	// directory, never in /tmp, and they are removed when the run ends.
+	workRoot := filepath.Join(root, ".cache", "eval-work")
+	if err := os.MkdirAll(workRoot, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
+		return 1
+	}
+
 	runner := eval.NewRunner(eval.RunOptions{
 		Models:       models,
 		Tasks:        tasks,
@@ -194,7 +200,7 @@ func runRun(args []string) int {
 		Parallel:     o.parallel,
 		MaxTurns:     o.maxTurns,
 		Out:          o.out,
-		WorkRoot:     filepath.Join(o.out, "work"),
+		WorkRoot:     workRoot,
 		PooBinary:    o.pooBinary,
 		KeepWorkdirs: o.keepWork,
 	})

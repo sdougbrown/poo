@@ -224,28 +224,36 @@ func (r *Runner) runOne(ctx context.Context, j job) RunResult {
 	started := time.Now()
 	result := RunResult{Task: j.task.ID, Model: j.model.Name, Seed: j.seed}
 
+	// The report holds the log and the check's output. The workdir is
+	// scratch, and lives under the work root, which is never /tmp.
 	runDir := filepath.Join(r.opts.Out, "runs", j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		result.Error = fmt.Sprintf("creating %s: %v", runDir, err)
 		return result
 	}
 
-	workdir, err := r.checkout(ctx, j.task, runDir)
+	workRoot := filepath.Join(r.opts.WorkRoot, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
+	if err := os.MkdirAll(workRoot, 0o755); err != nil {
+		result.Error = fmt.Sprintf("creating %s: %v", workRoot, err)
+		return result
+	}
+	workdir := filepath.Join(workRoot, "work")
+	pristine := filepath.Join(workRoot, "pristine")
+	if !r.opts.KeepWorkdirs {
+		defer os.RemoveAll(workRoot)
+	}
+
+	workdir, err := r.checkout(ctx, j.task, workdir)
 	if err != nil {
 		result.Error = err.Error()
 		return result
 	}
-	if !r.opts.KeepWorkdirs {
-		defer os.RemoveAll(workdir)
-	}
 
 	// The pristine tree, so the diff can be measured against it.
-	pristine := filepath.Join(runDir, "pristine")
 	if err := copyTree(workdir, pristine); err != nil {
 		result.Error = fmt.Sprintf("copying the pristine tree: %v", err)
 		return result
 	}
-	defer os.RemoveAll(pristine)
 
 	logPath := filepath.Join(runDir, "session.jsonl")
 	result.LogPath = logPath

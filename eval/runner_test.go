@@ -167,28 +167,49 @@ func TestTheRunnerMeasuresAFailingCheck(t *testing.T) {
 	}
 }
 
-func TestTheRunnerKeepsTheWorkdirOutOfTmp(t *testing.T) {
-	// The workdir is under the report's directory, never in /tmp's
-	// shared space.
+func TestTheWorkdirLivesUnderTheWorkRoot(t *testing.T) {
+	// The workdir is under the work root the caller names, never in
+	// /tmp's shared space.
 	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 
-	out := filepath.Join(t.TempDir(), "results")
+	out := t.TempDir()
+	workRoot := filepath.Join(out, "work")
+	// The fake poo writes down where it ran, so the harness's layout can
+	// be checked.
+	marker := filepath.Join(out, "workdir.txt")
+	binary := fakePoo(t, `
+dir=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --working-dir) dir="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s' "$dir" > "`+marker+`"
+`+logWritingPoo)
+
 	runner := NewRunner(RunOptions{
 		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
-		PooBinary: fakePoo(t, logWritingPoo),
+		WorkRoot:  workRoot,
+		PooBinary: binary,
 	})
 	if _, err := runner.Run(context.Background()); err != nil {
 		t.Fatalf("running the harness: %v", err)
 	}
-	if !strings.HasPrefix(out, t.TempDir()[:0]+out[:0]) && !strings.Contains(out, "results") {
-		t.Errorf("the report went to %q, want it under the caller's directory", out)
+
+	where, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("reading the marker: %v", err)
+	}
+	got := string(where)
+	if !strings.HasPrefix(got, workRoot) {
+		t.Errorf("the workdir is %q, want it under %q", got, workRoot)
 	}
 }
 
