@@ -37,6 +37,13 @@ violations=0
 unchecked=0
 unresolved_imports=0
 
+# attributed holds the unresolved imports reported against a checked package
+# that imports them directly. closure_errors holds every unresolved entry of a
+# checked package's dependency closure, as "path|package". Both hold one entry
+# per line.
+attributed=""
+closure_errors=""
+
 # is_allowed <import path> <mode> -- true when the import is permitted.
 #
 # mode "core"   -- standard library plus poo/prompt and poo/decide
@@ -75,8 +82,8 @@ package_dir() {
 }
 
 # package_name <import path> -- the Go package name, or the empty string when
-# the path holds no non-test Go files: a directory that does not exist yet, or
-# one that holds nothing but documentation.
+# go list reports none: a directory that does not exist yet, one that holds
+# nothing but documentation, or one whose Go files do not parse.
 package_name() {
   go list -e -f '{{.Name}}' "$1" 2>/dev/null || true
 }
@@ -108,10 +115,23 @@ check_package() {
   local mode="$2"
 
   if [ -z "$(package_name "$pkg")" ]; then
-    if [ -d "$(package_dir "$pkg")" ]; then
-      echo "skip: $pkg (no non-test Go files)" >&2
-    else
+    local dir
+    dir="$(package_dir "$pkg")"
+    if [ ! -d "$dir" ]; then
       echo "skip: $pkg (does not exist yet)" >&2
+      return 0
+    fi
+    # Go files that go list cannot name do not parse, and go list reports why.
+    # A directory without non-test Go files has no such error to report.
+    local parse_error=""
+    if [ -n "$(find "$dir" -maxdepth 1 -name '*.go' ! -name '*_test.go' -print -quit)" ]; then
+      parse_error="$(go list -e -f '{{if .Error}}{{.Error.Err}}{{end}}' "$pkg" 2>/dev/null || true)"
+    fi
+    if [ -n "$parse_error" ]; then
+      echo "error: cannot check $pkg: $parse_error" >&2
+      unchecked=$((unchecked + 1))
+    else
+      echo "skip: $pkg (no non-test Go files)" >&2
     fi
     return 0
   fi
@@ -181,11 +201,16 @@ check_package() {
   done <<< "$deps"
 
   # A dependency that could not be resolved is an error, not a violation: the
-  # package could not be checked, so the run continues with the others.
+  # package could not be checked, so the run continues with the others. Only
+  # a direct import is reported here. Any other entry is reported after all
+  # packages are checked, unless a checked package imports it directly.
   while IFS= read -r import_path; do
     [ -n "$import_path" ] || continue
+    closure_errors="$closure_errors$import_path|$pkg"$'\n'
+    in_set "$import_path" "$imports" || continue
     echo "error: cannot resolve $import_path (imported by $pkg)" >&2
     unresolved_imports=$((unresolved_imports + 1))
+    attributed="$attributed$import_path"$'\n'
   done <<< "$unresolved"
 }
 
@@ -193,6 +218,19 @@ check_package "$CORE" core
 check_package "$MODULE/prompt" stdlib
 check_package "$MODULE/decide" stdlib
 check_package "$MODULE/wire/protocol" stdlib
+
+# Each unresolved dependency that no checked package imports directly is
+# reported once, against the first checked package whose closure holds it.
+reported=""
+while IFS='|' read -r import_path owner; do
+  [ -n "$import_path" ] || continue
+  if in_set "$import_path" "$attributed" || in_set "$import_path" "$reported"; then
+    continue
+  fi
+  echo "error: cannot resolve $import_path (in the dependency closure of $owner)" >&2
+  unresolved_imports=$((unresolved_imports + 1))
+  reported="$reported$import_path"$'\n'
+done <<< "$closure_errors"
 
 if [ "$violations" -ne 0 ]; then
   echo "check-imports: $violations import violation(s) found" >&2
