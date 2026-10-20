@@ -10,6 +10,6 @@
 // wired at compile time, so what a consumer leaves out cannot be reached at
 // runtime.
 //
-// This package depends on the standard library, plus the optional poo/prompt
-// and poo/decide packages.
+// This package depends on the standard library, plus poo/prompt and
+// poo/decide, which import only the standard library.
 package poo
