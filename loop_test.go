@@ -31,6 +31,8 @@ type fakeResponse struct {
 	finish poo.FinishReason
 	// err is the failure the request returns, if any.
 	err error
+	// usage is the accounting the stream reports, if any.
+	usage *poo.UsageReport
 }
 
 // Stream answers the next scripted response.
@@ -78,6 +80,9 @@ func (r fakeResponse) events() []poo.StreamEvent {
 		finish = poo.FinishStop
 	}
 	events = append(events, poo.StreamEvent{Kind: "finish", FinishReason: finish})
+	if r.usage != nil {
+		events = append(events, poo.StreamEvent{Kind: "usage", Usage: r.usage})
+	}
 	return events
 }
 

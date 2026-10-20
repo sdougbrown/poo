@@ -165,11 +165,13 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 		Turns:      r.turn,
 		SettledAt:  nowRFC3339(),
 	}
-	if err := r.write(context.WithoutCancel(ctx), settle); err != nil {
+	if err := r.write(ctx, settle); err != nil {
 		return Result{}, err
 	}
 	if r.opts.Sink != nil {
-		if err := r.opts.Sink.Flush(context.WithoutCancel(ctx)); err != nil {
+		fctx, cancel := recordContext(ctx)
+		defer cancel()
+		if err := r.opts.Sink.Flush(fctx); err != nil {
 			return Result{}, err
 		}
 	}
@@ -217,7 +219,7 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 			// broke. The write is best-effort, because the record that
 			// says the run ended matters more than the accounting.
 			if resp != nil && resp.usage != nil {
-				r.writeBestEffort(context.WithoutCancel(ctx), &Usage{
+				r.writeBestEffort(ctx, &Usage{
 					RecordMeta:      NewRecordMeta("usage"),
 					RunID:           r.opts.RunID,
 					Turn:            r.turn,
@@ -256,9 +258,11 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 			}
 		}
 
-		// The usage record follows the message it belongs to.
+		// The usage record follows the message it belongs to. Like the
+		// accounting of a failed request, it is worth less than the
+		// record that says the run ended, so a refused write is dropped.
 		if resp.usage != nil {
-			if err := r.write(ctx, &Usage{
+			r.writeBestEffort(ctx, &Usage{
 				RecordMeta:      NewRecordMeta("usage"),
 				RunID:           r.opts.RunID,
 				Turn:            r.turn,
@@ -267,9 +271,7 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 				OutputTokens:    resp.usage.OutputTokens,
 				CacheReadTokens: resp.usage.CacheReadTokens,
 				TTFTMS:          resp.usage.TTFTMS,
-			}); err != nil {
-				return "", SettleDetail{}, err
-			}
+			})
 		}
 
 		if resp.finish == FinishLength {
@@ -470,13 +472,27 @@ func (r *Run) write(ctx context.Context, rec Record) error {
 	if r.sunk {
 		return fmt.Errorf("poo: the session store is broken")
 	}
-	r.seq++
-	Stamp(rec, r.seq, time.Now())
-	if err := r.opts.Sink.Append(ctx, rec); err != nil {
+	wctx, cancel := recordContext(ctx)
+	defer cancel()
+	Stamp(rec, r.seq+1, time.Now())
+	if err := r.opts.Sink.Append(wctx, rec); err != nil {
 		r.sunk = true
 		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
 	}
+	r.seq++
 	return nil
+}
+
+// recordWriteBudget bounds one record write or flush.
+var recordWriteBudget = 5 * time.Second
+
+// recordContext returns the context a record write runs under.
+//
+// A record is written even when the run's context has ended, because the
+// log has to say what the run did and how it ended. The write is still
+// bounded, so a store that never answers cannot hang the process.
+func recordContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), recordWriteBudget)
 }
 
 // writeBestEffort appends one record to the sink and ignores the
@@ -489,9 +505,12 @@ func (r *Run) writeBestEffort(ctx context.Context, rec Record) {
 	if r.opts.Sink == nil || r.sunk {
 		return
 	}
-	r.seq++
-	Stamp(rec, r.seq, time.Now())
-	_ = r.opts.Sink.Append(ctx, rec)
+	wctx, cancel := recordContext(ctx)
+	defer cancel()
+	Stamp(rec, r.seq+1, time.Now())
+	if r.opts.Sink.Append(wctx, rec) == nil {
+		r.seq++
+	}
 }
 
 // settleForError maps a request error to a settle reason.

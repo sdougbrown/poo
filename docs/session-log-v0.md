@@ -242,6 +242,10 @@ The order of the records is the order of the events. A `tool.call` is
 always followed by its `tool.result`, and a `run.started` is always
 followed by a `run.settled`. The core writes the settle record itself, so
 a run that was cancelled, or whose provider failed, still ends with one.
+Every record is written under a context of its own, bounded at 5 s, so a
+cancelled run still records what it did. A `usage` record the store
+refuses is dropped rather than ending the run. Only a store that refuses
+the run's other records stops it before its `run.settled`.
 
 ## The tools' observations
 
@@ -262,9 +266,10 @@ The bash tool's payload is the observation the model reads, as JSON:
 | `hint` | string | How to see the elided middle. Absent when the output was not elided. |
 
 The observation cap and `elided_chars` are counted in characters, not
-bytes, and a cut never splits a rune. The output is captured up to 1 MiB,
+bytes, and a cut never splits a rune. A byte that is not part of a valid
+character counts as one character. The output is captured up to 1 MiB,
 and a capture cut that lands in the middle of a character drops the
-partial one rather than turning it into a replacement character.
+partial one. Bytes the command printed are otherwise kept as they are.
 
 The read tool's payload is the range the model saw. Its text carries a
 header naming the range, such as `[path · lines 1–2000 of 5312]`, and the
