@@ -523,7 +523,9 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 	// The check runs in the workdir, whatever the run did.
 	checkExit, checkOut, checkErr := r.runCheck(runCtx, j.task, workdir, logPath, diff.Files)
 	result.CheckExit = checkExit
-	result.CheckOutput = tail(checkOut, 4000)
+	// The workdir is scratch on this machine, so the report names it
+	// $WORKDIR rather than by a path that holds a home directory.
+	result.CheckOutput = tail(strings.ReplaceAll(checkOut, workdir, "$WORKDIR"), 4000)
 	result.Success = checkExit == 0 && checkErr == nil
 	if checkErr != nil && result.Error == "" {
 		result.Error = checkErr.Error()
