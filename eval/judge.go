@@ -792,18 +792,6 @@ func verdictFileName(v Verdict) string {
 	return fmt.Sprintf("%s__%s__seed%d.json", v.Task, v.Model, v.Seed)
 }
 
-// seedNumber reads the seed out of a directory name.
-//
-// The name is "seed" and a number. A name that is not that shape has no
-// seed, and the answer is zero.
-func seedNumber(name string) int {
-	seed, ok := seedFromName(name)
-	if !ok {
-		return 0
-	}
-	return seed
-}
-
 // seedFromName reads the seed out of a directory name.
 //
 // The name is "seed" and a number. A name that is not that shape names
