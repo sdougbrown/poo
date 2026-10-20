@@ -619,7 +619,7 @@
 2026-10-18T02:10:17Z INFO request req-00000269 ok: november uniform bravo india papa whiskey delta kilo romeo latency_ms=429 shard=9
 2026-10-18T02:10:18Z INFO request req-0000026a ok: alpha hotel oscar victor charlie juliet quebec xray echo latency_ms=466 shard=10
 2026-10-18T02:10:19Z INFO request req-0000026b ok: november uniform bravo india papa whiskey delta kilo romeo latency_ms=503 shard=11
-2026-10-18T02:10:20Z INFO request req-0000026c ok: alpha hotel oscar victor charlie juliet quebec xray echo latency_ms=540 shard=12
+2026-10-18T02:10:20Z ERROR request req-8f2a41c9 failed: upstream timeout after 30000ms (attempt 3 of 3, region=eu-west-2, shard=17)
 2026-10-18T02:10:21Z INFO request req-0000026d ok: november uniform bravo india papa whiskey delta kilo romeo latency_ms=577 shard=13
 2026-10-18T02:10:22Z INFO request req-0000026e ok: alpha hotel oscar victor charlie juliet quebec xray echo latency_ms=614 shard=14
 2026-10-18T02:10:23Z WARN request req-0000026f ok: november uniform bravo india papa whiskey delta kilo romeo latency_ms=651 shard=15
