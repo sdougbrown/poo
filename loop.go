@@ -516,6 +516,29 @@ type response struct {
 	usage *UsageReport
 }
 
+// collect fills the response with what the stream carried.
+//
+// A reasoning stream becomes its own content block, so the model's
+// thinking survives without breaking the text. The calls are ordered by
+// the provider's index, so the model sees them in the order it asked for
+// them.
+func (r *response) collect(text, thinking string, calls map[int]*ToolCall, order []int) {
+	if thinking != "" {
+		r.content = append(r.content, ContentBlock{Kind: ContentThinking, Text: thinking})
+	}
+	if text != "" {
+		r.content = append(r.content, ContentBlock{Kind: ContentText, Text: text})
+	}
+	sort.Ints(order)
+	for _, idx := range order {
+		c := calls[idx]
+		if c.Name == "" {
+			continue
+		}
+		r.calls = append(r.calls, *c)
+	}
+}
+
 // readResponse drains a stream into a response.
 //
 // The usage is collected rather than written, so the caller can write it
@@ -537,7 +560,7 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 			break
 		}
 		if err != nil {
-			collectResponse(resp, text.String(), thinking.String(), calls, &order)
+			resp.collect(text.String(), thinking.String(), calls, order)
 			return resp, err
 		}
 		switch ev.Kind {
@@ -586,31 +609,8 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 		}
 	}
 
-	collectResponse(resp, text.String(), thinking.String(), calls, &order)
+	resp.collect(text.String(), thinking.String(), calls, order)
 	return resp, nil
-}
-
-// collectResponse fills a response with what the stream carried.
-func collectResponse(resp *response, text, thinking string, calls map[int]*ToolCall, order *[]int) {
-	// A reasoning stream becomes its own content block, so the model's
-	// thinking survives without breaking the text.
-	if thinking != "" {
-		resp.content = append(resp.content, ContentBlock{Kind: ContentThinking, Text: thinking})
-	}
-	if text != "" {
-		resp.content = append(resp.content, ContentBlock{Kind: ContentText, Text: text})
-	}
-
-	// The calls are ordered by the provider's index, so the model sees
-	// them in the order it asked for them.
-	sort.Ints(*order)
-	for _, idx := range *order {
-		c := calls[idx]
-		if c.Name == "" {
-			continue
-		}
-		resp.calls = append(resp.calls, *c)
-	}
 }
 
 // hashText returns the hex SHA-256 of a text.

@@ -199,19 +199,19 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	if res.returncode != nil {
 		code = *res.returncode
 	}
-	fields = append(fields, field{"returncode", code}, field{"timed_out", res.timedOut})
+	fields = append(fields, field{EnvelopeReturncode, code}, field{EnvelopeTimedOut, res.timedOut})
 	// The cap is in characters, and a cut never splits a rune.
 	outChars := utf8.RuneCountInString(out)
 	if outChars <= cap {
-		fields = append(fields, field{"output", out})
+		fields = append(fields, field{EnvelopeOutput, out})
 	} else {
 		half := cap / 2
 		head, tail := splitRunes(out, half)
 		fields = append(fields,
-			field{"output_head", head},
-			field{"output_tail", tail},
-			field{"elided_chars", outChars - 2*half},
-			field{"hint", ElisionHint},
+			field{EnvelopeOutputHead, head},
+			field{EnvelopeOutputTail, tail},
+			field{EnvelopeElidedChars, outChars - 2*half},
+			field{EnvelopeHint, ElisionHint},
 		)
 	}
 

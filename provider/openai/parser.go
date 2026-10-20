@@ -93,7 +93,7 @@ const textCallIndexBase = 1000
 
 // feed takes a text delta and returns the events it produced.
 func (p *parser) feed(text string) []poo.StreamEvent {
-	if !p.enabled {
+	if !p.on() {
 		return nil
 	}
 	p.buf += text
@@ -106,7 +106,7 @@ func (p *parser) feed(text string) []poo.StreamEvent {
 // as its body parses. A body that does not parse stays in the model's
 // prose, exactly as the model wrote it.
 func (p *parser) flush() []poo.StreamEvent {
-	if !p.enabled {
+	if !p.on() {
 		return nil
 	}
 	var out []poo.StreamEvent

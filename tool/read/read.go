@@ -197,7 +197,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		cap = OutputCapMax
 	}
 
-	body, total, first, last, capped, err := readRange(path, f, p.offset, p.limit, cap)
+	body, total, first, last, capped, err := readRange(f, p.offset, p.limit, cap)
 	if err != nil {
 		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
 	}
@@ -224,7 +224,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 // The cap and the line cap are counted in characters, and a cut never
 // splits a rune. A line longer than the line cap is read to its end and
 // truncated, so a minified file is readable and costs a bounded buffer.
-func readRange(path string, f *os.File, offset, limit, cap int) (string, int, int, int, bool, error) {
+func readRange(f *os.File, offset, limit, cap int) (string, int, int, int, bool, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", 0, 0, 0, false, err
 	}
