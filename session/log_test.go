@@ -54,15 +54,15 @@ func TestTheLogHoldsOneJSONObjectPerLine(t *testing.T) {
 	ctx := context.Background()
 
 	if err := log.Append(ctx, &poo.SessionCreated{
-		RecordMeta:  poo.NewRecordMeta("session.created"),
-		Format:      poo.FormatVersion,
-		SessionID:   "s1",
-		Mode:        "logged",
-		CreatedAt:   "2026-10-20T00:00:00Z",
-		WorkingDir:  "/tmp",
+		RecordMeta:   poo.NewRecordMeta("session.created"),
+		Format:       poo.FormatVersion,
+		SessionID:    "s1",
+		Mode:         "logged",
+		CreatedAt:    "2026-10-20T00:00:00Z",
+		WorkingDir:   "/tmp",
 		ContextLimit: 32768,
-		ToolsMode:   "native",
-		Build:       poo.BuildInfo{Name: "poo", Version: "0.1.0"},
+		ToolsMode:    "native",
+		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
 	}); err != nil {
 		t.Fatalf("appending: %v", err)
 	}

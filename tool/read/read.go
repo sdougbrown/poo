@@ -161,7 +161,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 	if idx := indexNUL(sniff[:n]); idx >= 0 {
 		return poo.ToolResult{
-			Text: fmt.Sprintf("read: %s is a binary file (%d bytes); use grep or a command instead", path, info.Size()),
+			Text:    fmt.Sprintf("read: %s is a binary file (%d bytes); use grep or a command instead", path, info.Size()),
 			IsError: true,
 		}, nil
 	}

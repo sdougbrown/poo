@@ -66,9 +66,9 @@ type streamChunk struct {
 
 // streamReader reads an SSE response.
 type streamReader struct {
-	body   io.ReadCloser
+	body    io.ReadCloser
 	scanner *bufio.Scanner
-	parser *parser
+	parser  *parser
 	// pending holds events the reader has decoded but not yet returned.
 	pending []poo.StreamEvent
 	// done reports that the stream is finished.

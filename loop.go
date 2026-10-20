@@ -73,7 +73,16 @@ type Run struct {
 	seq int64
 	// sunk reports whether the sink failed.
 	sunk bool
+	// state is where the run is in the loop.
+	state State
 }
+
+// State returns where the run is in the loop.
+//
+// The states are the skeleton's: requesting, executing and settled. There
+// is no streaming state, because the skeleton's transport reads a whole
+// response before the run acts on it.
+func (r *Run) State() State { return r.state }
 
 // Result is the outcome of a run.
 type Result struct {
@@ -87,7 +96,7 @@ type Result struct {
 
 // NewRun builds a run. The caller drives it with Run.Execute.
 func NewRun(opts Options) *Run {
-	return &Run{opts: opts}
+	return &Run{opts: opts, state: StateRequesting}
 }
 
 // Execute runs the loop until it settles.
@@ -143,6 +152,7 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	r.state = StateSettled
 
 	settle := &RunSettled{
 		RecordMeta: NewRecordMeta("run.settled"),
@@ -190,6 +200,7 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 
 		r.turn++
 		r.requests++
+		r.state = StateRequesting
 
 		resp, err := r.request(ctx, maxTokens)
 		if err != nil {
@@ -253,11 +264,13 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 		}
 
 		// Executing: run the calls in model order.
+		r.state = StateExecuting
 		for i, call := range resp.calls {
 			if err := r.execute(ctx, i+1, call); err != nil {
 				return "", SettleDetail{}, err
 			}
-		}	}
+		}
+	}
 }
 
 // maxTokens computes the output room for the next request.
@@ -551,6 +564,7 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 	}
 	return resp, nil
 }
+
 // hashText returns the hex SHA-256 of a text.
 func hashText(s string) string {
 	sum := sha256.Sum256([]byte(s))

@@ -534,10 +534,10 @@ func TestAnAssistantToolCallBecomesAToolCallMessage(t *testing.T) {
 		Messages: []poo.Message{{
 			Role: poo.RoleAssistant,
 			Content: []poo.ContentBlock{{
-				Kind:      poo.ContentToolCall,
+				Kind:       poo.ContentToolCall,
 				ToolCallID: "call_1",
-				Name:      "bash",
-				Arguments: json.RawMessage(`{"command":"ls"}`),
+				Name:       "bash",
+				Arguments:  json.RawMessage(`{"command":"ls"}`),
 			}},
 		}},
 		MaxTokens: 16,
@@ -854,6 +854,35 @@ func TestTheChunkedArgumentsAreJoined(t *testing.T) {
 	}
 	if string(calls[1].Arguments) != `and":"ls"}` {
 		t.Errorf("the second fragment is %s", calls[1].Arguments)
+	}
+}
+
+func TestTheAutoModeKeepsTheNativeAndParsedCallsApart(t *testing.T) {
+	// The endpoint sends a native tool call and a text call in the same
+	// response. Both are read, and neither overwrites the other.
+	body := chunk(`{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"ls\"}"}}]}}]}`) +
+		chunk(`{"choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\": \"read\", \"arguments\": {\"path\": \"a.txt\"}}</tool_call>"}}]}`) +
+		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`) + done
+
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "auto"})
+
+	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 1024})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	calls := toolCallsOf(read(t, reader))
+	if len(calls) != 2 {
+		t.Fatalf("the stream held %d calls, want 2", len(calls))
+	}
+	names := []string{calls[0].Name, calls[1].Name}
+	if !((names[0] == "bash" && names[1] == "read") || (names[0] == "read" && names[1] == "bash")) {
+		t.Errorf("the calls are %v, want one bash and one read", names)
+	}
+	if calls[0].Index == calls[1].Index {
+		t.Errorf("the calls share the index %d, want them apart", calls[0].Index)
 	}
 }
 

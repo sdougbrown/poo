@@ -176,7 +176,7 @@ func runRun(args []string) int {
 	}
 
 	settings := poo.ToolSettings{
-		BashTimeoutSeconds: 120,
+		BashTimeoutSeconds:  120,
 		ObservationCapChars: bash.ObservationCap(o.contextLimit),
 		ReadOutputCapChars:  read.OutputCap(o.contextLimit),
 	}
@@ -185,13 +185,13 @@ func runRun(args []string) int {
 	runID := newSessionID()
 
 	if err := log.Append(ctx, &poo.SessionCreated{
-		RecordMeta:  poo.NewRecordMeta("session.created"),
-		Format:      poo.FormatVersion,
-		SessionID:   sessionID,
-		Mode:        "logged",
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
-		WorkingDir:  absWorkDir,
-		Model:       poo.SessionModel{ID: o.modelID, BaseURL: o.baseURL, MaxOutput: o.maxOutput},
+		RecordMeta: poo.NewRecordMeta("session.created"),
+		Format:     poo.FormatVersion,
+		SessionID:  sessionID,
+		Mode:       "logged",
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		WorkingDir: absWorkDir,
+		Model:      poo.SessionModel{ID: o.modelID, BaseURL: o.baseURL, MaxOutput: o.maxOutput},
 		Tools: []poo.SessionTool{
 			{Name: "bash", Class: poo.ClassSideEffecting},
 			{Name: "read", Class: poo.ClassReadOnly},

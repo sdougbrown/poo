@@ -78,6 +78,13 @@ const (
 	taggedClose = "</tool_call>"
 )
 
+// textCallIndexBase is where a parsed call's index starts.
+//
+// The provider numbers its own calls from zero, so the parsed calls
+// start well past that. The two kinds never share a slot, which matters
+// in the auto mode, where both are read.
+const textCallIndexBase = 1000
+
 // feed takes a text delta and returns the events it produced.
 func (p *parser) feed(text string) []poo.StreamEvent {
 	if !p.enabled {
@@ -308,6 +315,7 @@ func (p *parser) consumeJSON() ([]poo.StreamEvent, bool) {
 	p.buf = ""
 	return nil, false
 }
+
 // findCallStart locates the next call in the buffer.
 //
 // It returns the index, the shape, and whether a call was found.
@@ -451,7 +459,9 @@ func (p *parser) toolEvent(name, args string) (poo.StreamEvent, bool) {
 	return poo.StreamEvent{
 		Kind: "tool_call",
 		ToolCall: &poo.ToolCallDelta{
-			Index:     p.seq - 1,
+			// The parsed calls start after the provider's own calls, so
+			// the two kinds never share a slot in the auto mode.
+			Index:     textCallIndexBase + p.seq - 1,
 			ID:        "text_call_" + itoa(p.seq),
 			Name:      name,
 			Arguments: []byte(args),

@@ -538,6 +538,31 @@ func TestAnUnknownToolIsARecoverableError(t *testing.T) {
 	}
 }
 
+func TestTheRunMovesThroughTheLoopStates(t *testing.T) {
+	tr := &fakeTransport{responses: []fakeResponse{
+		{
+			calls: []poo.ToolCall{{
+				ID:        "call_1",
+				Name:      "echo",
+				Arguments: json.RawMessage(`{"text":"hello"}`),
+			}},
+		},
+		{text: "finished"},
+	}}
+	tool := &echoTool{result: "echoed"}
+
+	r := poo.NewRun(testOptions(t, tr, tool, &recordingSink{}))
+	if r.State() != poo.StateRequesting {
+		t.Errorf("a new run is in %q, want requesting", r.State())
+	}
+	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if r.State() != poo.StateSettled {
+		t.Errorf("a finished run is in %q, want settled", r.State())
+	}
+}
+
 func TestTheSettleRecordCarriesTheReason(t *testing.T) {
 	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
 	sink := &recordingSink{}

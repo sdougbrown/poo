@@ -40,7 +40,7 @@ type Config struct {
 
 // Transport is the OpenAI-compatible chat transport.
 type Transport struct {
-	cfg Config
+	cfg  Config
 	http *http.Client
 }
 
@@ -63,7 +63,7 @@ type chatRequest struct {
 	Messages []chatMessage `json:"messages"`
 	Tools    []chatTool    `json:"tools,omitempty"`
 	// MaxTokens is always sent, because some local servers default to 512.
-	MaxTokens int `json:"max_tokens"`
+	MaxTokens int  `json:"max_tokens"`
 	Stream    bool `json:"stream"`
 	// StreamOptions asks for the usage chunk, which some servers honour
 	// and others ignore.
@@ -77,10 +77,10 @@ type streamOptions struct {
 
 // chatMessage is the wire shape of one message.
 type chatMessage struct {
-	Role       string       `json:"role"`
-	Content    string       `json:"content,omitempty"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content,omitempty"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string       `json:"tool_call_id,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
 
 // chatToolCall is the wire shape of a tool call.
@@ -98,8 +98,8 @@ type chatToolCall struct {
 type chatTool struct {
 	Type     string `json:"type"`
 	Function struct {
-		Name        string `json:"name"`
-		Description string `json:"description,omitempty"`
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
 		Parameters  json.RawMessage `json:"parameters,omitempty"`
 	} `json:"function"`
 }
