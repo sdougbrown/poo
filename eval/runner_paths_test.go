@@ -187,6 +187,44 @@ func TestTheRunnerClearsTheRunsDirectoryWithForce(t *testing.T) {
 	}
 }
 
+func TestThePooBinaryPathIsMadeAbsolute(t *testing.T) {
+	// The binary runs in the workdir, so a relative path would be
+	// resolved against the workdir rather than against the caller's
+	// directory.
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+
+	base := t.TempDir()
+	binary := fakePoo(t, logWritingPoo)
+	relative := filepath.Join(base, "poo")
+	if err := os.Rename(binary, relative); err != nil {
+		t.Fatalf("moving the binary: %v", err)
+	}
+
+	out := t.TempDir()
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: relative,
+	})
+
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	if report.Results[0].Error != "" {
+		t.Errorf("the run failed: %s", report.Results[0].Error)
+	}
+	if report.Results[0].Metrics.SettleReason != "end_turn" {
+		t.Errorf("the run settled %q, want end_turn", report.Results[0].Metrics.SettleReason)
+	}
+}
+
 func TestTwoRunsDoNotShareAWorkRoot(t *testing.T) {
 	// Two harness invocations must not share a work root, or one
 	// removes the other's workdir.

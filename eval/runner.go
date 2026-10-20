@@ -149,6 +149,14 @@ func NewRunner(opts RunOptions) *Runner {
 	if opts.PooBinary == "" {
 		opts.PooBinary = DefaultPooBinary
 	}
+	// The binary's path is made absolute here: the run executes it in
+	// the workdir, so a relative path would be resolved against the
+	// workdir rather than against the caller's directory.
+	if opts.PooBinary != "" {
+		if abs, err := filepath.Abs(opts.PooBinary); err == nil {
+			opts.PooBinary = abs
+		}
+	}
 	// The out directory and the work root are made absolute here, not
 	// in the run: poo resolves a relative --log against its own working
 	// directory, and the harness opens the log against its own.
