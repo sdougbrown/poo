@@ -4,6 +4,10 @@ A poo session log is an append-only JSONL file: one JSON object per line,
 in the order the records were produced. The log is written with no lock and
 no recovery. This document is the contract a consumer parses.
 
+A session log holds one session. The file is created exclusively, so a run
+pointed at a log that already exists fails before it sends a request rather
+than appending a second session to the log.
+
 The first record is always `session.created`, and it carries
 `"format": "poo-session-v0"`. A consumer that does not recognise the format
 should stop rather than guess.
@@ -56,6 +60,10 @@ The first record of a log.
 | `id` | string | The provider's model identifier. |
 | `base_url` | string | The endpoint, without credentials. Absent when empty. |
 | `max_output` | integer | The model's output-token ceiling. Absent when unknown. |
+
+The `base_url` never carries credentials: a URL that names a user and a
+password is written without its userinfo, so a consumer can read the log
+without picking up a secret.
 
 Each entry of `tools` holds:
 
@@ -136,7 +144,9 @@ The outcome of a tool call.
 | `structured` | any | The tool's side-channel payload. Absent when the tool has none. |
 
 An `error` outcome is recoverable: the model saw the text and the run
-continued.
+continued. A bash call that hit its timeout is an `error` outcome, because
+the model has to see that the command failed rather than read its partial
+output as a finished command.
 
 ## `usage`
 
@@ -153,6 +163,14 @@ reports no token counts.
 | `output_tokens` | integer | The completion tokens the endpoint reported. `0` when it reported none. |
 | `cache_read_tokens` | integer | The prompt tokens served from the provider's cache. **Absent** when the endpoint does not report it. |
 | `ttft_ms` | number | The time to the first streamed token, in milliseconds. Measured by the transport, not reported by the endpoint. |
+
+The time to the first token is the time to the first *token*: a non-empty
+text delta, a thinking delta or a tool call. A chunk that only announces
+the assistant's role carries no token, so it does not start the clock.
+
+Every provider request gets a `usage` record, including a request whose
+stream failed part way through: the request still cost tokens, and the
+record is what a consumer reads to account for it.
 
 ## `run.settled`
 
@@ -194,7 +212,10 @@ process's exit code.
 | `max_turns` | 11 | The run hit its turn ceiling. |
 | `provider_error` | 20 | A provider request failed, or the provider stopped on the output-token limit. |
 | `context_exhausted` | 13 | A provider context-length error, or the computed `max_tokens` fell under 256. |
-| `cancelled` | 130 | The run was cancelled. |
+| `cancelled` | 130 | The run was cancelled, or its deadline passed before the model finished. |
+
+A cancellation and a deadline are the same outcome: the run was stopped
+before the model finished, and both settle `cancelled`.
 
 `detail.source` names the condition. The values the skeleton writes:
 
@@ -203,11 +224,10 @@ process's exit code.
 | `end_turn` | The model stopped on its own. |
 | `max_turns` | The run hit its turn ceiling. |
 | `no_output_room` | The computed `max_tokens` was under 256, so the request was never sent. |
-| `provider:context_length` | The endpoint reported that the request was too long. |
+| `provider:context_length` | The endpoint reported that the request was too long. It is recognised whatever status the endpoint sent it with, including a 5xx. |
 | `provider:<kind>` | The provider request failed with that kind. |
 | `finish:length` | The provider stopped on the output-token limit. |
-| `cancel:context` | The run's context was cancelled. |
-| `cancel:signal` | The process was interrupted. |
+| `cancel:context` | The run's context was cancelled, or its deadline passed. |
 
 ## Reading a log
 
@@ -218,4 +238,33 @@ fails on an unknown field breaks on a newer log.
 
 The order of the records is the order of the events. A `tool.call` is
 always followed by its `tool.result`, and a `run.started` is always
-followed by a `run.settled`.
+followed by a `run.settled`. The core writes the settle record itself, so
+a run that was cancelled, or whose provider failed, still ends with one.
+
+## The tools' observations
+
+A `tool.result` carries the tool's own text in `text`, and the tool's
+side-channel payload in `structured`. The two tools the skeleton ships
+have these shapes.
+
+The bash tool's payload is the observation the model reads, as JSON:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `returncode` | integer or null | The command's exit status. Null when the process was killed, which is the case for a timeout. |
+| `timed_out` | boolean | Whether the command hit its timeout. |
+| `output` | string | The output, when it fits under the observation cap. |
+| `output_head` | string | The head of the output, when it was elided. |
+| `output_tail` | string | The tail of the output, when it was elided. |
+| `elided_chars` | integer | The characters dropped from the middle. Absent when the output was not elided. |
+| `hint` | string | How to see the elided middle. Absent when the output was not elided. |
+
+The observation cap and `elided_chars` are counted in characters, not
+bytes, and a cut never splits a rune.
+
+The read tool's payload is the range the model saw. Its text carries a
+header naming the range, such as `[path · lines 1–2000 of 5312]`, and the
+body below it. The header says `· capped` when the output cap ended the
+read early, and names an empty range when the offset is past the end of
+the file. A line is truncated at 2000 characters, counted in characters,
+and a cut never splits a rune.

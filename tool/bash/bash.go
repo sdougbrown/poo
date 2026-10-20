@@ -51,6 +51,43 @@ func ObservationCap(contextLimit int) int {
 	return cap
 }
 
+// The observation the model reads is an envelope.
+//
+// The output that fits under the cap is one field:
+//
+//	{"returncode": int|null, "timed_out": false, "output": "..."}
+//
+// The output that does not fit is elided, and the middle is dropped:
+//
+//	{"returncode": int|null, "timed_out": false, "output_head": "...",
+//	 "output_tail": "...", "elided_chars": 1234, "hint": "..."}
+//
+// The cap and elided_chars are counted in characters, not bytes, and a
+// cut never splits a rune. returncode is null when the process was
+// killed, which is the case for a timeout. A timed-out call is a
+// recoverable error, so the model is told the command failed.
+const (
+	// EnvelopeOutput is the field that holds the output that fits.
+	EnvelopeOutput = "output"
+	// EnvelopeOutputHead is the field that holds the head of an elided
+	// output.
+	EnvelopeOutputHead = "output_head"
+	// EnvelopeOutputTail is the field that holds the tail of an elided
+	// output.
+	EnvelopeOutputTail = "output_tail"
+	// EnvelopeElidedChars is the field that holds the number of
+	// characters dropped from the middle.
+	EnvelopeElidedChars = "elided_chars"
+	// EnvelopeReturncode is the field that holds the command's exit
+	// status.
+	EnvelopeReturncode = "returncode"
+	// EnvelopeTimedOut is the field that holds the timeout flag.
+	EnvelopeTimedOut = "timed_out"
+	// EnvelopeHint is the field that holds the hint about the elided
+	// middle.
+	EnvelopeHint = "hint"
+)
+
 // Tool is the bash tool.
 type Tool struct {
 	// Timeout is the per-call timeout. Zero means DefaultTimeout.

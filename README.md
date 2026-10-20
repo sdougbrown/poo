@@ -30,7 +30,9 @@ The command talks to an OpenAI-compatible endpoint, runs the `bash` and
 `provider_error` and 130 for `cancelled`.
 
 Every run writes an append-only JSONL log. The record names and their
-fields are in [docs/session-log-v0.md](docs/session-log-v0.md).
+fields are in [docs/session-log-v0.md](docs/session-log-v0.md). A log holds
+one session: `poo run` creates the file exclusively and refuses a path
+that already exists, rather than appending a second session to it.
 
 ## Layout
 
