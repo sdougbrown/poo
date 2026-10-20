@@ -73,12 +73,18 @@ type Log struct {
 	Path string
 	// Records are the records, in the order they were written.
 	Records []LogRecord
+	// Torn reports that the log's last line did not decode, which
+	// happens when a run is killed mid-write.
+	Torn bool
 }
 
 // ParseLog reads a session log.
 //
 // A record that does not decode is an error: a metric computed from a
-// half-read log is worse than no metric.
+// half-read log is worse than no metric. The one exception is the last
+// line: a run that was killed mid-write leaves a partial record there,
+// and the records before it are good. The tail is kept as it was found,
+// so a reader can see that the run did not finish.
 func ParseLog(path string) (*Log, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -90,25 +96,62 @@ func ParseLog(path string) (*Log, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
 	line := 0
+	// A line is held back until the next one arrives, so a malformed
+	// line can be told from the last one: a run that was killed
+	// mid-write leaves a partial record there, and the records before it
+	// are good.
+	var pending string
+	pendingLine := 0
+	flush := func(text string, at int, last bool) error {
+		if text == "" {
+			return nil
+		}
+		rec, err := decodeRecord(text)
+		if err != nil {
+			if last {
+				// The last line did not decode. A run that was
+				// killed mid-write leaves one there, and the records
+				// before it are good, so the tail is kept as it was
+				// found.
+				log.Torn = true
+				return nil
+			}
+			return fmt.Errorf("eval: %s line %d: %w", path, at, err)
+		}
+		log.Records = append(log.Records, rec)
+		return nil
+	}
 	for sc.Scan() {
-		line++
 		text := strings.TrimSpace(sc.Text())
 		if text == "" {
 			continue
 		}
-		var rec LogRecord
-		if err := json.Unmarshal([]byte(text), &rec); err != nil {
-			return nil, fmt.Errorf("eval: %s line %d: %w", path, line, err)
+		if err := flush(pending, pendingLine, false); err != nil {
+			return nil, err
 		}
-		log.Records = append(log.Records, rec)
+		pending = text
+		pendingLine = line + 1
+		line++
 	}
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("eval: reading %s: %w", path, err)
+	}
+	if err := flush(pending, pendingLine, true); err != nil {
+		return nil, err
 	}
 	if len(log.Records) == 0 {
 		return nil, fmt.Errorf("eval: %s holds no records", path)
 	}
 	return log, nil
+}
+
+// decodeRecord decodes one line of a session log.
+func decodeRecord(text string) (LogRecord, error) {
+	var rec LogRecord
+	if err := json.Unmarshal([]byte(text), &rec); err != nil {
+		return LogRecord{}, err
+	}
+	return rec, nil
 }
 
 // ToolCalls returns the tool calls the run made, in order.

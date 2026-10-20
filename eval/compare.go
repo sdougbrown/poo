@@ -104,12 +104,14 @@ func comparedMetrics() []metric {
 			get:            func(a Aggregate) float64 { return a.InputTokens },
 			spread:         func(a Aggregate) float64 { return a.InputSpread },
 			higherIsBetter: false,
+			relative:       true,
 		},
 		{
 			name:           "output_tokens",
 			get:            func(a Aggregate) float64 { return a.OutputTokens },
 			spread:         func(a Aggregate) float64 { return a.OutputSpread },
 			higherIsBetter: false,
+			relative:       true,
 		},
 		{
 			name:           "tool_error_rate",
@@ -143,8 +145,9 @@ func comparedMetrics() []metric {
 // A difference is a regression when it is larger than the noise floor:
 // max(an absolute floor, twice the larger side's seed standard
 // deviation). A success-rate difference uses a floor of five points; a
-// rate difference uses twenty percent, and a token difference has no
-// absolute floor, because the tokens have no natural scale.
+// rate difference uses twenty percent; a token difference uses twenty
+// percent of the baseline, because a tenth of a small token count and
+// a tenth of a large one are not the same amount of work.
 func Compare(baseline, candidate *Report) Comparison {
 	cmp := Comparison{Baseline: baseline.Dir, Candidate: candidate.Dir}
 

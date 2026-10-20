@@ -2,8 +2,9 @@ package eval
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
+	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -78,6 +79,10 @@ type Metrics struct {
 	UnexpectedFiles []string `json:"unexpected_files,omitempty"`
 	// DiffLines is the size of the diff, in changed lines.
 	DiffLines int `json:"diff_lines"`
+	// LogTorn reports that the log's last line did not decode, which
+	// happens when a run is killed mid-write. The metrics before it are
+	// still good.
+	LogTorn bool `json:"log_torn,omitempty"`
 }
 
 // ComputeMetrics measures one run from its session log.
@@ -89,6 +94,7 @@ func ComputeMetrics(log *Log, diff Diff) Metrics {
 		SettleReason: "unknown",
 		ChangedFiles: diff.Files,
 		DiffLines:    diff.Lines,
+		LogTorn:      log.Torn,
 	}
 
 	// The settle reason.
@@ -201,7 +207,7 @@ func collectReads(calls []LogRecord) []read {
 			if !ok {
 				continue
 			}
-			out = append(out, read{path: path, start: offset, end: offset + limit - 1, whole: offset == 1 && limit >= 2000})
+			out = append(out, read{path: normalizePath(path), start: offset, end: offset + limit - 1, whole: offset == 1 && limit >= 2000})
 		case "bash":
 			command, ok := stringArg(c.Arguments, "command")
 			if !ok {
@@ -258,13 +264,22 @@ func stringArg(args json.RawMessage, key string) (string, bool) {
 var catPattern = regexp.MustCompile(`(?:^|[;&|]\s*|\s)cat\s+(?:--\s+)?([^\s;|&]+)`)
 
 // headPattern matches a shell read of the head of a file.
-var headPattern = regexp.MustCompile(`(?:^|[;&|]\s*|\s)head\s+(?:-[A-Za-z0-9]+\s+)*(?:-[A-Za-z0-9]+\s+)*([^\s;|&]+)`)
+//
+// The options are skipped as a group, so a count or a line number is
+// never read as the file's name.
+var headPattern = regexp.MustCompile(`(?:^|[;&|]\s*|\s)head\s+(?:-{1,2}[A-Za-z][A-Za-z0-9-]*(?:[= ]\S+)?\s+)*([^\s;|&]+)`)
 
 // tailPattern matches a shell read of the tail of a file.
-var tailPattern = regexp.MustCompile(`(?:^|[;&|]\s*|\s)tail\s+(?:-[A-Za-z0-9]+\s+)*([^\s;|&]+)`)
+//
+// The options are skipped as a group, so a count or a line number is
+// never read as the file's name.
+var tailPattern = regexp.MustCompile(`(?:^|[;&|]\s*|\s)tail\s+(?:-{1,2}[A-Za-z][A-Za-z0-9-]*(?:[= ]\S+)?\s+)*([^\s;|&]+)`)
 
 // sedPattern matches a shell read of a line range.
-var sedPattern = regexp.MustCompile(`(?:^|[;&|]\s*|\s)sed\s+(?:[^\s;&|]*\s+)*?-n\s+(?:[^\s;&|]*?\s+)*?['"]?(\d+)(?:,(\d+))?p`)
+//
+// The capture groups are the first line, the last line and the file, in
+// that order.
+var sedPattern = regexp.MustCompile(`(?:^|[;&|]\s*|\s)sed\s+(?:[^\s;&|]*\s+)*?-n\s+(?:[^\s;&|]*?\s+)*?['"]?(\d+)(?:,(\d+))?p['"]?\s+([^\s;|&]+)`)
 
 // shellReads returns the file ranges a shell command reads.
 //
@@ -274,13 +289,13 @@ var sedPattern = regexp.MustCompile(`(?:^|[;&|]\s*|\s)sed\s+(?:[^\s;&|]*\s+)*?-n
 func shellReads(command string) []read {
 	var out []read
 	for _, m := range catPattern.FindAllStringSubmatch(command, -1) {
-		out = append(out, read{path: m[1], whole: true})
+		out = append(out, read{path: normalizePath(m[1]), whole: true})
 	}
 	for _, m := range headPattern.FindAllStringSubmatch(command, -1) {
-		out = append(out, read{path: m[1], whole: true})
+		out = append(out, read{path: normalizePath(m[1]), whole: true})
 	}
 	for _, m := range tailPattern.FindAllStringSubmatch(command, -1) {
-		out = append(out, read{path: m[1], whole: true})
+		out = append(out, read{path: normalizePath(m[1]), whole: true})
 	}
 	for _, m := range sedPattern.FindAllStringSubmatch(command, -1) {
 		start, _ := strconv.Atoi(m[1])
@@ -288,9 +303,22 @@ func shellReads(command string) []read {
 		if m[2] != "" {
 			end, _ = strconv.Atoi(m[2])
 		}
-		out = append(out, read{path: m[1], start: start, end: end})
+		out = append(out, read{path: normalizePath(m[3]), start: start, end: end})
 	}
 	return out
+}
+
+// normalizePath puts a path into the form the re-read key uses.
+//
+// The path is cleaned, so "./src/main.go" and "src/main.go" are one
+// file, and a leading "./" is dropped.
+func normalizePath(p string) string {
+	p = filepath.ToSlash(strings.TrimSpace(p))
+	if p == "" {
+		return ""
+	}
+	cleaned := path.Clean(p)
+	return strings.TrimPrefix(cleaned, "./")
 }
 
 // rereadStats counts the file ranges the run read more than once.
@@ -302,29 +330,46 @@ func rereadStats(reads []read) (int, float64) {
 	if len(reads) == 0 {
 		return 0, 0
 	}
-	counts := map[string]int{}
+	// The reads of one file, so an overlap can be seen.
+	byFile := map[string][]read{}
+	var order []string
 	for _, r := range reads {
-		counts[readKey(r)]++
+		if _, ok := byFile[r.path]; !ok {
+			order = append(order, r.path)
+		}
+		byFile[r.path] = append(byFile[r.path], r)
 	}
+
 	rereads := 0
-	for _, n := range counts {
-		if n > 1 {
-			rereads += n - 1
+	for _, path := range order {
+		file := byFile[path]
+		for i := 1; i < len(file); i++ {
+			if overlapsEarlier(file[:i], file[i]) {
+				rereads++
+			}
 		}
 	}
 	return rereads, float64(rereads) / float64(len(reads))
 }
 
-// readKey returns the key a read is counted under.
+// overlapsEarlier reports whether a read repeats content an earlier read
+// of the same file already pulled in.
 //
-// The key is the path plus the range, so two reads of the same range
-// collide and two reads of different ranges do not. A whole-file read
-// covers every range, so it is keyed by the path alone.
-func readKey(r read) string {
-	if r.whole {
-		return "file:" + r.path
+// A whole-file read covers every range of the file, and two ranges
+// overlap when they share a line.
+func overlapsEarlier(earlier []read, r read) bool {
+	for _, e := range earlier {
+		if e.whole {
+			return true
+		}
+		if r.whole {
+			return true
+		}
+		if e.start <= r.end && r.start <= e.end {
+			return true
+		}
 	}
-	return fmt.Sprintf("range:%s:%d-%d", r.path, r.start, r.end)
+	return false
 }
 
 // slope returns the slope of y against x, by the least-squares fit.
