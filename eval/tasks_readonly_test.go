@@ -308,3 +308,47 @@ func TestTheVersionTaskHasOneOutOfStepFile(t *testing.T) {
 		t.Errorf("%d files are out of step with the changelog, want exactly 1", outOfStep)
 	}
 }
+
+// The read-only checks tell a named fact from a word that shares its
+// spelling, and accept a path however much of it is written.
+func TestTheReadOnlyChecksJudgeTheFactNotTheWord(t *testing.T) {
+	root := repoRoot(t)
+	tasks, err := LoadTasks(filepath.Join(root, "evals", "tasks"))
+	if err != nil {
+		t.Fatalf("loading the tasks: %v", err)
+	}
+	byID := map[string]Task{}
+	for _, task := range tasks {
+		byID[task.ID] = task
+	}
+
+	cases := []struct {
+		task   string
+		answer string
+		pass   bool
+	}{
+		{"find-slow-loop", "Store.get scans every record. Use a dict.", true},
+		{"find-slow-loop", "Each lookup scans, so you get slow behaviour. Use a dict.", false},
+		{"find-off-by-one-loop", "chunks() stops early: it should be `index < len(items)`.", true},
+		{"find-off-by-one-loop", "chunks() stops early: it should be `index <= len(items) - 1`.", true},
+		{"find-off-by-one-loop", "chunks() stops early: it should be `index < len(items) - 2`.", false},
+		{"find-version-mismatch", "pyproject says 1.4.0, the package says 1.3.0, and shop/__init__.py is out of step.", true},
+		{"long-find-definition-in-tree", "parse_manifest is defined in loader.py.", true},
+		{"long-find-definition-in-tree", "parse_manifest is defined in other.py.", false},
+	}
+	for _, c := range cases {
+		task := byID[c.task]
+		fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+		if err != nil {
+			t.Fatalf("resolving the fixture: %v", err)
+		}
+		workdir := t.TempDir()
+		copyDir(t, fixture, workdir)
+		log := filepath.Join(workdir, "session.jsonl")
+		writeSessionLog(t, log, c.answer)
+		code := runCheck(t, task.Dir, workdir, log, "")
+		if (code == 0) != c.pass {
+			t.Errorf("%s: %q: passed=%t, want %t", c.task, c.answer, code == 0, c.pass)
+		}
+	}
+}

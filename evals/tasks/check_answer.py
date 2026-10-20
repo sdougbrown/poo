@@ -58,7 +58,7 @@ class Ident(str):
     A name that is an ordinary word ("get", "map", "chunks") is not
     found by the word alone: "you get slow behaviour" mentions the word
     without naming the method. It has to be written as a call, an
-    attribute, a quoted name, or "the get method".
+    attribute, a quoted name, "the get method", or "the method is get".
     """
 
 
@@ -71,7 +71,7 @@ def ident_forms(name):
         r"(?<![\w])" + n + r"\s*\(",
         quote + n + quote,
         r"(?<![\w])" + n + r"\s+(?:method|function|helper|call)(?![\w])",
-        r"(?<![\w])(?:method|function|helper|call)\s+" + n + r"(?![\w])",
+        r"(?<![\w])(?:method|function|helper|call)\s+(?:(?:is|was|called|named)\s+)?['\"`]?" + n + r"(?![\w])",
     ]
 
 
