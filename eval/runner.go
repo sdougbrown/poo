@@ -241,7 +241,11 @@ func (r *Runner) runOne(ctx context.Context, j job) RunResult {
 	workdir := filepath.Join(workRoot, "work")
 	pristine := filepath.Join(workRoot, "pristine")
 	if !r.opts.KeepWorkdirs {
+		// The whole run's scratch goes, and the empty directories it
+		// leaves behind go with it.
 		defer os.RemoveAll(workRoot)
+		defer os.RemoveAll(filepath.Dir(workRoot))
+		defer os.RemoveAll(filepath.Dir(filepath.Dir(workRoot)))
 	}
 
 	workdir, err := r.checkout(ctx, j.task, workdir)
@@ -302,9 +306,9 @@ func (r *Runner) timeout(t Task) time.Duration {
 // checkout prepares the workdir for a run.
 //
 // A fixture repo is copied; a git repo is cloned at its pinned sha. The
-// directory is created under the run's own directory, never in /tmp.
-func (r *Runner) checkout(ctx context.Context, t Task, runDir string) (string, error) {
-	workdir := filepath.Join(runDir, "work")
+// directory is the one the caller names, which is under the work root,
+// never in /tmp.
+func (r *Runner) checkout(ctx context.Context, t Task, workdir string) (string, error) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		return "", fmt.Errorf("creating %s: %w", workdir, err)
 	}

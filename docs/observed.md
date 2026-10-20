@@ -35,7 +35,17 @@ TheThe unreachable unreachable handler handler is is ` handle`handle__legacylega
 keyword, and the doubled text still holds the keyword, so the check
 mostly survives. But the model sees a mangled version of its own
 previous message, and a model that reads its own output is confused by
-it. The wider smoke test showed gemma4 re-running the same test
+it.
+
+The corruption goes further than the prose. On the
+`long-find-error-in-log` task, gemma4 found the right error line and
+answered with the request id `req--88ff22aa4411cc99`, which is
+`req-8f2a41c9` with every character doubled and the hyphen doubled
+too. The check compares the answer against the id derived from the
+log, so the run failed: the model was right and the harness gave it a
+mangled answer.
+
+The wider smoke test also showed gemma4 re-running the same test
 command from turn 9 to turn 50, without stopping, having already
 solved the task at turn 7. The judge called the tail of that
 transcript "corrupted, heavily duplicated summary text".
@@ -47,6 +57,13 @@ out as `"Hello world.Hello world."`.
 fix is to let the parser take the text *instead of* the transport in
 the modes where the parser runs, or to have the parser return only the
 calls it found and leave the prose to the transport.
+
+**What it costs the baseline:** every text-mode model's answers are
+corrupted, and the read-only tasks read those answers. On the 2026-10-20
+smoke test, gemma4 passed all three coding tasks and failed all three
+read-only ones, and qwen, which runs in the native mode, passed all
+six. The baseline has to be measured after the fix, or the read-only
+success rate measures the bug rather than the model.
 
 ### gemma4 writes its tool calls as text
 
@@ -78,10 +95,11 @@ no repeated-read guard.
 
 ### gemma4 hit the turn ceiling
 
-**Where:** the `fix-division-by-zero` task, gemma4, seed 1.
+**Where:** the `fix-division-by-zero` and `fix-off-by-one-slice` tasks,
+gemma4, seed 1.
 
-**What:** the run settled `max_turns` after 50 turns. The task was
-solved at turn 7, and the run kept going: it re-ran the same test
+**What:** both runs settled `max_turns` after 50 turns. The task was
+solved by turn 7, and the run kept going: it re-ran the same test
 command, `python3 -m unittest discover tests`, at every turn from 9
 to 50. Each of those turns produced the same summary text, doubled by
 the text-mode bug above, so the model saw its own message repeated
@@ -89,11 +107,11 @@ with every word doubled and kept going.
 
 **Why it matters:** two things are true at once. The skeleton's
 `end_turn`-only vocabulary is not enough: a model that does not end
-its turn on its own runs to the ceiling, and the plan's typed `finish`
-tool and the `finished` settle reason are the answer. And the text
-mode's doubling is what kept this model in the loop: qwen, which runs
-in the native mode and so sees its own text once, ended the same task
-in 6 turns.
+its own turn runs to the ceiling, and the plan's typed `finish` tool
+and the `finished` settle reason are the answer. And the text mode's
+doubling is what kept this model in the loop: qwen, which runs in the
+native mode and so sees its own text once, ended the same task in 5
+turns.
 
 **What to check in Stage 3:** whether the doubling fix alone ends the
 loop, and whether the `finish` tool is still needed. The plan's typed
@@ -129,8 +147,8 @@ written:
 
 ## What is not observed yet
 
-The long tasks have not been run end to end against a live model, so
-the harness's behaviour at the context limit is untested. The smoke
-test was bounded to one easy task and one wider run over five short
-tasks, so the long tasks' working sets and the context-exhausted path
-are still unmeasured.
+The long change task and the long definition task have not been run end
+to end against a live model, so the harness's behaviour at the context
+limit is untested. The smoke test was bounded to one easy task and one
+wider run over six tasks, so the change task's many-file edit and the
+context-exhausted path are still unmeasured.
