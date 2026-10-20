@@ -227,8 +227,14 @@ def derive(workdir, task):
                 break
         if not method:
             return []
+        # The function the method hands the scan to does the walk itself,
+        # so naming it finds the lookup as well as naming the method does.
+        walkers = [Ident(method)]
+        imported = re.search(r"^from \.\w+ import (\w+)", source, re.M)
+        if imported:
+            walkers.append(Ident(imported.group(1)))
         return [
-            ("the method that walks the records", [Ident(method)]),
+            ("the method that walks the records", walkers),
             ("the data structure that would replace the walk", ["dict", "dictionary", "map", "hash map", "hashtable", "hash table"]),
         ]
 
