@@ -265,6 +265,44 @@ func TestTheJudgeVerdictIsWritten(t *testing.T) {
 	}
 }
 
+func TestOneUnreadableTranscriptDoesNotStopTheJudge(t *testing.T) {
+	// A judge that cannot be reached produces a verdict with the error
+	// in it, and the run still reports every transcript.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "the judge is down", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	resultsDir := t.TempDir()
+	runDir := filepath.Join(resultsDir, "runs", "t", "m", "seed1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("making the run directory: %v", err)
+	}
+	log := `{"record":"run.settled","seq":1,"ts":"2026-10-20T00:00:00Z","run_id":"r","reason":"end_turn","detail":{"source":"end_turn"},"turns":1}`
+	if err := os.WriteFile(filepath.Join(runDir, "session.jsonl"), []byte(log), 0o644); err != nil {
+		t.Fatalf("writing the log: %v", err)
+	}
+
+	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: resultsDir})
+	if err != nil {
+		t.Fatalf("making the judge: %v", err)
+	}
+	result, err := judge.Run(t.Context())
+	if err != nil {
+		t.Fatalf("running the judge: %v", err)
+	}
+	if len(result.Verdicts) != 1 {
+		t.Fatalf("the judge wrote %d verdicts, want 1", len(result.Verdicts))
+	}
+	if result.Verdicts[0].Error == "" {
+		t.Error("the verdict has no error, want the judge's failure")
+	}
+	// The verdict is still written, so a reader can see what happened.
+	if _, err := os.Stat(filepath.Join(resultsDir, "judgments", "t__m__seed1.json")); err != nil {
+		t.Errorf("the verdict file is missing: %v", err)
+	}
+}
+
 func TestTheJudgePromptTreatsTheTranscriptAsData(t *testing.T) {
 	// The prompt must tell the judge to treat the transcript as data.
 	if !contains(judgePrompt, "DATA") {

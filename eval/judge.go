@@ -299,23 +299,28 @@ func (j *Judge) findTranscripts() ([]transcript, error) {
 }
 
 // judgeOne judges one transcript.
+//
+// A transcript that cannot be read, or a judge that cannot be reached,
+// produces a verdict with the error in it rather than stopping the run:
+// one bad transcript must not lose the other verdicts.
 func (j *Judge) judgeOne(ctx context.Context, t transcript) (*Verdict, error) {
+	verdict := &Verdict{
+		Task:  t.task,
+		Model: t.model,
+		Seed:  t.seed,
+	}
+
 	log, err := ParseLog(t.path)
 	if err != nil {
-		return nil, err
+		verdict.Error = err.Error()
+		return verdict, nil
 	}
 
 	segments := log.TranscriptSegments()
 	text, summarized, elided := summarizeTranscript(segments, j.opts.MaxChars)
-
-	verdict := &Verdict{
-		Task:            t.task,
-		Model:           t.model,
-		Seed:            t.seed,
-		Summarized:      summarized,
-		TranscriptChars: len(text),
-		ElidedTurns:     elided,
-	}
+	verdict.Summarized = summarized
+	verdict.TranscriptChars = len(text)
+	verdict.ElidedTurns = elided
 
 	payload := j.buildPayload(log, text, t)
 	answer, err := j.ask(ctx, payload)
