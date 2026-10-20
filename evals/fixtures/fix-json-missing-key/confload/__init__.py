@@ -18,5 +18,5 @@ def load_config(text):
 
 
 def require(config, key):
-    """Return the value of `key`, or None when it is missing."""
+    """Return the value of `key`, or raise KeyError when it is missing."""
     return config.get(key)

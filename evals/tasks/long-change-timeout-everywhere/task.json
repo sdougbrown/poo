@@ -7,6 +7,7 @@
     "python",
     "long"
   ],
+  "allow_test_edits": true,
   "expected_paths": [
     "shop/**",
     "tests/**"

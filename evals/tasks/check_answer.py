@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Check that a run's answer names the thing the task asked about.
+"""Check that a run's answer names every fact the task asked about.
 
 The answer is the run's last message: the session log holds one JSON
 object per line, and the last message whose origin is "model" holds it.
 
-The expected answer is *derived* from the workdir, not written into this
-script. A check that spells the answer out would hand it to any model
-that reads the task directory, and the task would stop measuring
+The expected answers are *derived* from the workdir, not written into
+this script. A check that spells the answer out would hand it to any
+model that reads the task directory, and the task would stop measuring
 anything.
+
+The derivation is the ground truth, so it runs against the workdir as
+the model found it, not against a copy the harness made. A model that
+edited the workdir to change the answer has not answered the question.
 """
 import json
 import os
@@ -48,44 +52,154 @@ def read(path):
         return ""
 
 
+def mentions(answer, needle):
+    """Report whether the answer mentions a fact.
+
+    The match is on word boundaries where the fact has any, so a short
+    name is not found inside a longer one. A fact with no word
+    characters (a path, an id) is matched as a substring.
+
+    A fact whose name is an ordinary word is looked for as a call or a
+    definition, because "the token comes from APP_TOKEN" mentions the
+    word "token" without naming the function that reads it.
+    """
+    if not needle:
+        return False
+    if re.fullmatch(r"[\w./-]+", needle):
+        if re.search(r"(?<![\w])" + re.escape(needle) + r"(?![\w])", answer, re.I):
+            return True
+        # The name alone is not enough when the name is a common word:
+        # the answer has to name it as a function.
+        if re.fullmatch(r"[a-z_]{3,}", needle) and not needle.endswith("_"):
+            call = r"(?<![\w])" + re.escape(needle) + r"\s*\("
+            if re.search(call, answer, re.I):
+                return True
+        return False
+    return needle.lower() in answer.lower()
+
+
 def derive(workdir, task):
-    """Return the answer the task asked about.
+    """Return the facts the task asked about, derived from the workdir.
 
     Each derivation reads the workdir and works out the answer the same
     way a careful model would, so the check verifies the model's answer
     against the ground truth rather than against a written-out string.
+
+    A task's facts are a list of (name, values): the name says what
+    the fact is, and the values are the strings that answer it. A fact
+    with several accepted values has more than one right answer, and a
+    fact whose values are empty cannot be derived, which is an error.
     """
     if task == "find-secret-in-config":
-        # The environment variable the token is read from.
+        # The function that reads the token, and the environment
+        # variable it comes from.
         source = read(os.path.join(workdir, "app", "secrets.py"))
-        match = re.search(r'environ\.get\(\s*["\']([A-Z0-9_]+)["\']', source)
-        return match.group(1) if match else ""
+        match = re.search(r"environ\.get\(\s*[\"']([A-Z0-9_]+)[\"']", source)
+        if not match:
+            return []
+        variable = match.group(1)
+        # The function the read is inside, which is the one the task
+        # asks for.
+        func = ""
+        for candidate in re.findall(r"^def (\w+)\(", source, re.M):
+            body = source.split("def " + candidate, 1)[1]
+            if variable in body:
+                func = candidate
+                break
+        if not func:
+            return []
+        return [("the environment variable", [variable]), ("the function that reads it", [func])]
 
     if task == "find-dead-code":
-        # The handler no route points at.
+        # The handler no route points at, and the file that would have
+        # to change for it to become reachable.
         handlers = set(re.findall(r"^def (handle_\w+)\(", read(os.path.join(workdir, "src", "handlers.py")), re.M))
         routes = set(re.findall(r"handlers\.(handle_\w+)", read(os.path.join(workdir, "src", "routes.py"))))
         unreachable = sorted(handlers - routes)
-        return unreachable[0] if unreachable else ""
+        if not unreachable:
+            return []
+        return [
+            ("the unreachable handler", [unreachable[0]]),
+            ("the file that would have to change", ["routes.py", "src/routes.py"]),
+        ]
 
     if task == "find-off-by-one-loop":
-        # The function that drops the last item.
+        # The helper that chunks the list, and the comparison that is
+        # off by one.
         source = read(os.path.join(workdir, "lib", "pipeline.py"))
-        match = re.search(r"^def (chunks\w*)\(", source, re.M)
-        return match.group(1) if match else ""
+        match = re.search(r"^def (\w+)\(", source, re.M)
+        if not match:
+            return []
+        # The comparison in the loop that is off by one is the one
+        # against the length of the list.
+        comparisons = [
+            "index < len(items) - 1",
+            "index < len(items)-1",
+            "index < len(items) - 1 ",
+        ]
+        if not any(c in source for c in comparisons):
+            # The off-by-one is somewhere else in the loop, so the fact
+            # is the loop's own condition, read out of the source.
+            cond = re.search(r"while ([^\n:]+):", source)
+            if not cond:
+                return []
+            comparisons = [cond.group(1).strip()]
+        return [
+            ("the helper that chunks the list", [match.group(1)]),
+            ("the comparison that is off by one", comparisons),
+        ]
 
     if task == "find-slow-loop":
-        # The method that scans the whole list.
+        # The method that walks the records, and the data structure that
+        # would replace the walk.
         source = read(os.path.join(workdir, "svc", "store.py"))
-        match = re.search(r"^    def (get\w*)\(", source, re.M)
-        return match.group(1) if match else ""
+        # The method that calls the scan, which is the one the task
+        # asks about: the constructor does not look anything up.
+        method = ""
+        for candidate in re.findall(r"^    def (\w+)\(", source, re.M):
+            if candidate == "__init__":
+                continue
+            body = source.split("def " + candidate, 1)[1]
+            if "find_all" in body or "self.records" in body:
+                method = candidate
+                break
+        if not method:
+            return []
+        return [
+            ("the method that walks the records", [method]),
+            ("the data structure that would replace the walk", ["dict", "dictionary", "map", "hash map", "hashtable", "hash table"]),
+        ]
 
     if task == "find-version-mismatch":
-        # The version the package declares, against the one the
-        # packaging metadata declares.
-        source = read(os.path.join(workdir, "src", "shop", "__init__.py"))
-        match = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', source)
-        return match.group(1) if match else ""
+        # The version the packaging metadata declares, the version the
+        # package declares, and the file that is out of step with the
+        # changelog.
+        metadata = read(os.path.join(workdir, "pyproject.toml"))
+        package = read(os.path.join(workdir, "src", "shop", "__init__.py"))
+        changelog = read(os.path.join(workdir, "docs", "CHANGELOG.md"))
+
+        meta = re.search(r'^\s*version\s*=\s*["\']([^"\']+)["\']', metadata, re.M)
+        pkg = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', package)
+        change = re.search(r"^##\s*([0-9][^\s]*)", changelog, re.M)
+        if not meta or not pkg or not change:
+            return []
+        meta_version = meta.group(1)
+        pkg_version = pkg.group(1)
+        changelog_version = change.group(1)
+
+        # The file whose declaration is out of step with the changelog.
+        out_of_step = []
+        if meta_version != changelog_version:
+            out_of_step.append("pyproject.toml")
+        if pkg_version != changelog_version:
+            out_of_step.append("src/shop/__init__.py")
+        if not out_of_step:
+            return []
+        return [
+            ("the version the packaging metadata declares", [meta_version]),
+            ("the version the package declares", [pkg_version]),
+            ("the file that is out of step with the changelog", out_of_step),
+        ]
 
     if task == "long-find-error-in-log":
         # The request id on the one ERROR line.
@@ -94,8 +208,8 @@ def derive(workdir, task):
             if " ERROR " in line:
                 match = re.search(r"request (\S+)", line)
                 if match:
-                    return match.group(1)
-        return ""
+                    return [("the request id", [match.group(1)])]
+        return []
 
     if task == "long-find-definition-in-tree":
         # The file that defines the symbol.
@@ -105,8 +219,8 @@ def derive(workdir, task):
                     continue
                 path = os.path.join(root, name)
                 if re.search(r"^def parse_manifest\(", read(path), re.M):
-                    return os.path.relpath(path, workdir)
-        return ""
+                    return [("the file that defines it", [os.path.relpath(path, workdir)])]
+        return []
 
     raise SystemExit(f"check_answer.py: no derivation for {task}")
 
@@ -117,8 +231,8 @@ def main():
         return 2
     log_path, workdir, task = sys.argv[1], sys.argv[2], sys.argv[3]
 
-    expected = derive(workdir, task)
-    if not expected:
+    facts = derive(workdir, task)
+    if not facts:
         print(f"the check could not work out the answer for {task}", file=sys.stderr)
         return 1
 
@@ -127,12 +241,20 @@ def main():
         print("the run recorded no answer", file=sys.stderr)
         return 1
 
-    if expected.lower() not in answer.lower():
-        print(f"the answer does not mention {expected!r}:", file=sys.stderr)
+    missing = []
+    for name, values in facts:
+        if not any(mentions(answer, v) for v in values if v):
+            missing.append((name, values))
+    if missing:
+        print("the answer does not name every fact the task asked about:", file=sys.stderr)
+        for name, values in missing:
+            print(f"  {name}: expected one of {values!r}", file=sys.stderr)
         print(answer[:2000], file=sys.stderr)
         return 1
 
-    print(f"the answer names {expected!r}, which is what the task asked about")
+    print("the answer names every fact the task asked about:")
+    for name, _ in facts:
+        print(f"  {name}")
     return 0
 
 

@@ -29,11 +29,23 @@ type Task struct {
 	// ExpectedPaths are the globs the run is allowed to change. A change
 	// outside them is a diff-sanity finding, not a failure.
 	ExpectedPaths []string `json:"expected_paths,omitempty"`
+	// AllowTestEdits says the task's own prompt asks the run to change
+	// the fixture's tests. A coding task does not: the harness puts the
+	// pristine tests back before the check runs, so a run that rewrote
+	// them did not fix the bug.
+	AllowTestEdits bool `json:"allow_test_edits,omitempty"`
 	// Description is a free-text note about the task.
 	Description string `json:"description,omitempty"`
 	// Dir is the task's own directory, holding task.json and check.sh.
 	Dir string `json:"-"`
 }
+
+// TestsDir is the directory a task's fixture keeps its tests in.
+//
+// A task with tests in it is a coding task: the harness puts the
+// fixture's own tests back before the check runs, and a change to a test
+// file is always an unexpected change.
+const TestsDir = "tests"
 
 // HasTag reports whether the task carries a tag.
 func (t Task) HasTag(tag string) bool {
@@ -50,12 +62,13 @@ func (t Task) HasTag(tag string) bool {
 // It is a separate type so the file's fields can be strict: a typo in a
 // task file is an error, not a silently dropped key.
 type taskFile struct {
-	Repo          string   `json:"repo"`
-	Prompt        string   `json:"prompt"`
-	TimeoutS      int      `json:"timeout_s"`
-	Tags          []string `json:"tags"`
-	ExpectedPaths []string `json:"expected_paths"`
-	Description   string   `json:"description"`
+	Repo           string   `json:"repo"`
+	Prompt         string   `json:"prompt"`
+	TimeoutS       int      `json:"timeout_s"`
+	Tags           []string `json:"tags"`
+	ExpectedPaths  []string `json:"expected_paths"`
+	AllowTestEdits bool     `json:"allow_test_edits"`
+	Description    string   `json:"description"`
 }
 
 // LoadTasks reads the task set under a directory.
@@ -115,14 +128,15 @@ func LoadTask(dir string) (Task, error) {
 
 	id := filepath.Base(dir)
 	task := Task{
-		ID:            id,
-		Repo:          file.Repo,
-		Prompt:        file.Prompt,
-		TimeoutS:      file.TimeoutS,
-		Tags:          file.Tags,
-		ExpectedPaths: file.ExpectedPaths,
-		Description:   file.Description,
-		Dir:           dir,
+		ID:             id,
+		Repo:           file.Repo,
+		Prompt:         file.Prompt,
+		TimeoutS:       file.TimeoutS,
+		Tags:           file.Tags,
+		ExpectedPaths:  file.ExpectedPaths,
+		AllowTestEdits: file.AllowTestEdits,
+		Description:    file.Description,
+		Dir:            dir,
 	}
 	if err := task.validate(); err != nil {
 		return Task{}, fmt.Errorf("eval: %s: %w", path, err)

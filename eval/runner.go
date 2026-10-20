@@ -415,6 +415,18 @@ func (r *Runner) runOne(ctx context.Context, j job) RunResult {
 	}
 	result.DiffOutput = tail(diffOut, 8000)
 
+	// The fixture's own tests are put back before the check runs, so a
+	// model that rewrote them cannot make the check pass. A change to
+	// a test file is still in the diff, so it is reported as an
+	// unexpected change.
+	if !j.task.AllowTestEdits {
+		if err := restoreTests(pristine, workdir); err != nil {
+			if result.Error == "" {
+				result.Error = fmt.Sprintf("restoring the fixture's tests: %v", err)
+			}
+		}
+	}
+
 	// The check runs in the workdir, whatever the run did.
 	checkExit, checkOut, checkErr := r.runCheck(runCtx, j.task, workdir, logPath, diff.Files)
 	result.CheckExit = checkExit
@@ -695,20 +707,38 @@ func (r *Runner) metrics(j job, logPath string, diff Diff) Metrics {
 //
 // A task with no expected paths expects nothing in particular, so every
 // change is unexpected: the signal is meant to be read.
+//
+// A change to a test file is always unexpected, unless the task's own
+// prompt asks the run to change the tests. The fixture's tests are the
+// task's own, and a run that rewrote them changed the measuring
+// instrument rather than the thing under test.
 func unexpectedFiles(t Task, changed []string) []string {
 	if len(changed) == 0 {
 		return nil
 	}
-	if len(t.ExpectedPaths) == 0 {
-		return sortedStrings(append([]string(nil), changed...))
-	}
 	var out []string
 	for _, f := range changed {
-		if !matchesAny(t.ExpectedPaths, f) {
+		if (!t.AllowTestEdits && isTestFile(f)) || !matchesAny(t.ExpectedPaths, f) {
 			out = append(out, f)
 		}
 	}
 	return out
+}
+
+// isTestFile reports whether a changed path is a test file.
+func isTestFile(path string) bool {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	for i, p := range parts {
+		if p != TestsDir {
+			continue
+		}
+		// The last component is the file's name, so a path under a
+		// tests directory is a test file.
+		if i == len(parts)-1 {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesAny reports whether a path matches one of the globs.

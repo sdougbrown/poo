@@ -1,5 +1,7 @@
 """The record store."""
 
+from .lookup import find_all
+
 
 class Store:
     def __init__(self, records):

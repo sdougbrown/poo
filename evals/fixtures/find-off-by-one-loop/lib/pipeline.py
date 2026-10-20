@@ -5,7 +5,7 @@ def chunks(items, size):
     """Split `items` into lists of at most `size` items."""
     out = []
     index = 0
-    while index < len(items):
+    while index < len(items) - 1:
         out.append(items[index:index + size])
         index += size
     return out

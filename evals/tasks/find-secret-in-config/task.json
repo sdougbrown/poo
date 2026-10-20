@@ -1,6 +1,6 @@
 {
   "repo": "fixture:find-secret-in-config",
-  "prompt": "Find where the application reads its API token, and say which function reads it and which environment variable it comes from. Do not change any file: this is a question, not a task to fix.",
+  "prompt": "This application reads an API token from its environment at run time. Find where the token is read, and say which function reads it and which environment variable it comes from. Do not change any file: this is a question, not a task to fix.",
   "timeout_s": 300,
   "tags": [
     "readonly",

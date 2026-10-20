@@ -1,6 +1,6 @@
 {
   "repo": "fixture:find-off-by-one-loop",
-  "prompt": "The `chunks` function in `lib/pipeline.py` drops the last item of a list whose length is not a multiple of `size`. Say which function is wrong, and describe the off-by-one in one sentence. Do not change any file.",
+  "prompt": "The chunking helper in this repository splits a list into batches, and a batch that is not a full size comes out with items missing from it. Find the helper, and say what it does wrong and which comparison in it is off by one. Do not change any file.",
   "timeout_s": 300,
   "tags": [
     "readonly",

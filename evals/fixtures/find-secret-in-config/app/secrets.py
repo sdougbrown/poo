@@ -5,6 +5,6 @@ environment.
 """
 
 
-def token():
+def read_api_token():
     import os
     return os.environ.get("APP_TOKEN", "")

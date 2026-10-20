@@ -139,6 +139,27 @@ func generatedFile(rel string) bool {
 	return strings.HasSuffix(base, ".pyc") || strings.HasSuffix(base, ".pyo")
 }
 
+// restoreTests puts the fixture's own tests back into the workdir.
+//
+// A coding task's check runs the fixture's tests, and a model that
+// rewrote them would make the check pass without fixing anything. The
+// pristine copy is the one the harness took before the run, so the
+// check always runs the tests the task shipped with.
+//
+// The tests directory is only restored when there is one: a task with
+// no tests has nothing to restore.
+func restoreTests(pristine, workdir string) error {
+	src := filepath.Join(pristine, "tests")
+	if info, err := os.Stat(src); err != nil || !info.IsDir() {
+		return nil
+	}
+	dst := filepath.Join(workdir, "tests")
+	if err := os.RemoveAll(dst); err != nil {
+		return fmt.Errorf("eval: clearing %s: %w", dst, err)
+	}
+	return copyTree(src, dst)
+}
+
 // measureDiff reports what a run changed, comparing the workdir against a
 // pristine copy of it.
 //

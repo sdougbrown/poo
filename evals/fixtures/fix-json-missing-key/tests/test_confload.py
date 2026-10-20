@@ -18,8 +18,9 @@ class LoadConfigTest(unittest.TestCase):
 
     def test_require_raises_for_missing(self):
         config = load_config("a=1\n")
-        with self.assertRaises(KeyError):
+        with self.assertRaises(KeyError) as caught:
             require(config, "b")
+        self.assertIn("b", str(caught.exception))
 
     def test_require_returns_value(self):
         config = load_config("a=1\n")
