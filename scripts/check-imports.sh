@@ -10,8 +10,13 @@
 # The check walks the import graph with "go list -deps" (the transitive closure
 # of non-test imports) and also reads each package's direct imports, so a
 # violation is reported against the package that actually made the import.
+# What counts as standard library is the toolchain's own answer (.Standard),
+# not a heuristic about dots in a path.
 #
-# Packages that do not exist yet are skipped, not errors.
+# Packages that do not exist yet, and directories that hold no non-test Go
+# files, are skipped, not errors. Every "go list" call uses "-e", so a package
+# that cannot be resolved is counted and reported but never aborts the run:
+# the other packages are still checked and the summary is still printed.
 #
 # Exits non-zero with a message naming the package and the offending import.
 
@@ -28,16 +33,8 @@ fi
 
 CORE="$MODULE"
 
-failures=0
-
-# A standard library path never has a dot in its first path element.
-is_stdlib() {
-  local first="${1%%/*}"
-  case "$first" in
-    *.* | "") return 1 ;;
-    *) return 0 ;;
-  esac
-}
+violations=0
+errors=0
 
 # is_allowed <import path> <mode> -- true when the import is permitted.
 #
@@ -69,12 +66,39 @@ rule_text() {
   esac
 }
 
-# package_exists <import path> -- true when the package has a directory in
-# this module.
-package_exists() {
+# package_dir <import path> -- the directory of the package, inside this
+# module. It need not exist.
+package_dir() {
   local rel="${1#"$MODULE"}"
-  rel="${rel#/}"
-  [ -d "$ROOT/$rel" ]
+  echo "$ROOT/${rel#/}"
+}
+
+# package_name <import path> -- the Go package name, or the empty string when
+# the path holds no non-test Go files: a directory that does not exist yet, or
+# one that holds nothing but documentation.
+package_name() {
+  go list -e -f '{{.Name}}' "$1" 2>/dev/null || true
+}
+
+# The transitive closure of a package's non-test imports, classified by the
+# toolchain: std for standard library, dep for a dependency, err for one that
+# could not be resolved. One "go list" call, one line per package.
+CLOSURE_FORMAT='{{.ImportPath}}|{{if .Standard}}std{{else}}{{if .Error}}err{{else}}dep{{end}}{{end}}'
+
+# in_set <path> <set> -- true when the path is one of the entries of the set.
+# The set holds one path per line, and the path is matched between newlines,
+# so it never matches a longer one.
+in_set() {
+  local needle="$1"
+  local set="$2"
+  case "
+$set
+" in
+    *"
+"$needle"
+"*) return 0 ;;
+  esac
+  return 1
 }
 
 # check_package <import path> <mode>
@@ -82,30 +106,48 @@ check_package() {
   local pkg="$1"
   local mode="$2"
 
-  if ! package_exists "$pkg"; then
-    echo "skip: $pkg (does not exist yet)" >&2
+  if [ -z "$(package_name "$pkg")" ]; then
+    if [ -d "$(package_dir "$pkg")" ]; then
+      echo "skip: $pkg (no non-test Go files)" >&2
+    else
+      echo "skip: $pkg (does not exist yet)" >&2
+    fi
     return 0
   fi
 
-  local deps imports
-  if ! deps="$(go list -deps "$pkg" 2>&1)"; then
-    echo "error: cannot resolve dependencies of $pkg:" >&2
-    printf '%s\n' "$deps" >&2
-    failures=$((failures + 1))
-    return 1
-  fi
-  if ! imports="$(go list -f '{{join .Imports "\n"}}' "$pkg" 2>&1)"; then
-    echo "error: cannot list imports of $pkg:" >&2
-    printf '%s\n' "$imports" >&2
-    failures=$((failures + 1))
-    return 1
+  local closure
+  closure="$(go list -e -deps -f "$CLOSURE_FORMAT" "$pkg" 2>/dev/null | sed '/^$/d')"
+
+  # The dependencies, and the ones that could not be resolved. A dependency
+  # that could not be resolved has unknown imports of its own, so it is
+  # reported as an error instead of a violation.
+  local deps unresolved
+  deps="$(printf '%s\n' "$closure" | awk -F'|' '$2 == "dep" { print $1 }')"
+  unresolved="$(printf '%s\n' "$closure" | awk -F'|' -v self="$pkg" '$2 == "err" && $1 != self { print $1 }')"
+
+  # A package that cannot be listed at all is an error: its own imports are
+  # unknown, so the rule could not be applied to it.
+  local own_error
+  own_error="$(go list -e -f '{{if .Error}}{{.Error.Err}}{{end}}' "$pkg" 2>/dev/null)"
+  if [ -n "$own_error" ]; then
+    echo "error: cannot check $pkg: $own_error" >&2
+    errors=$((errors + 1))
+    return 0
   fi
 
   # Direct imports: name the package that made the import.
+  local imports
+  imports="$(go list -e -f '{{join .Imports "\n"}}' "$pkg" 2>/dev/null | sed '/^$/d')"
+
   local import_path
   while IFS= read -r import_path; do
     [ -n "$import_path" ] || continue
-    if is_stdlib "$import_path"; then
+    # A standard library import is not in the dependency set, and an
+    # unresolvable one is reported below.
+    if ! in_set "$import_path" "$deps"; then
+      continue
+    fi
+    if in_set "$import_path" "$unresolved"; then
       continue
     fi
     if is_allowed "$import_path" "$mode"; then
@@ -113,7 +155,7 @@ check_package() {
     fi
     echo "check-imports: $pkg imports $import_path" >&2
     echo "  $(rule_text "$mode" "$pkg")" >&2
-    failures=$((failures + 1))
+    violations=$((violations + 1))
   done <<< "$imports"
 
   # Transitive closure: an allowed package must not drag in anything else.
@@ -123,7 +165,7 @@ check_package() {
     if [ "$dep" = "$pkg" ]; then
       continue
     fi
-    if is_stdlib "$dep"; then
+    if in_set "$dep" "$unresolved"; then
       continue
     fi
     if is_allowed "$dep" "$mode"; then
@@ -131,8 +173,16 @@ check_package() {
     fi
     echo "check-imports: $pkg depends on $dep" >&2
     echo "  $(rule_text "$mode" "$pkg")" >&2
-    failures=$((failures + 1))
+    violations=$((violations + 1))
   done <<< "$deps"
+
+  # A dependency that could not be resolved is an error, not a violation: the
+  # package could not be checked, so the run continues with the others.
+  while IFS= read -r import_path; do
+    [ -n "$import_path" ] || continue
+    echo "error: cannot resolve $import_path (imported by $pkg)" >&2
+    errors=$((errors + 1))
+  done <<< "$unresolved"
 }
 
 check_package "$CORE" core
@@ -140,8 +190,14 @@ check_package "$MODULE/prompt" stdlib
 check_package "$MODULE/decide" stdlib
 check_package "$MODULE/wire/protocol" stdlib
 
-if [ "$failures" -ne 0 ]; then
-  echo "check-imports: $failures import violation(s) found" >&2
+if [ "$violations" -ne 0 ]; then
+  echo "check-imports: $violations import violation(s) found" >&2
+fi
+if [ "$errors" -ne 0 ]; then
+  echo "check-imports: $errors package(s) could not be checked" >&2
+fi
+
+if [ "$violations" -ne 0 ] || [ "$errors" -ne 0 ]; then
   exit 1
 fi
 
