@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -354,6 +355,11 @@ func (r *Runner) checkout(ctx context.Context, t Task, runDir string) (string, e
 // The binary is the real one: the harness measures what a user gets. The
 // API key is passed by name, through --api-key-env, so the harness never
 // reads the value and never writes it anywhere.
+//
+// The child runs in its own process group, and the group is killed when
+// the run's context ends. Killing only the process would leave its
+// children holding the output pipe, and the harness would wait for a
+// run that was already over.
 func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (int, error) {
 	args := []string{
 		"run",
@@ -376,6 +382,16 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 	// the binary to read. The binary scrubs it from the tools' child
 	// environment itself.
 	cmd.Env = os.Environ()
+	// The child runs in its own process group, and the group is killed
+	// when the run's context ends. Killing only the process would leave
+	// its children holding the output pipe, and the harness would wait
+	// for a run that was already over.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// The cancel function kills the whole group, and the wait delay
+	// bounds the time after it: the pipes are closed even if a child
+	// holds them.
+	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
+	cmd.WaitDelay = 2 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -396,6 +412,22 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 		return exit, fmt.Errorf("running poo: %v: %s", err, strings.TrimSpace(out.String()))
 	}
 	return exit, nil
+}
+
+// killGroup kills a process group.
+//
+// The group gets a SIGTERM first and a SIGKILL after a short grace, so
+// a child that ignores the first signal still goes away.
+func killGroup(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	// A negative pid names the process group.
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+		return err
+	}
+	time.Sleep(100 * time.Millisecond)
+	return syscall.Kill(-pid, syscall.SIGKILL)
 }
 
 // runCheck runs a task's check.sh in the workdir.
@@ -422,6 +454,12 @@ func (r *Runner) runCheck(ctx context.Context, t Task, workdir, logPath string, 
 		"POO_SESSION_LOG="+logPath,
 		"POO_CHANGED_FILES="+strings.Join(changed, "\n"),
 	)
+	// The check runs in its own process group, and the group is killed
+	// when the check's context ends. A check that leaves a child behind
+	// must not hold the harness up.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
+	cmd.WaitDelay = 2 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
