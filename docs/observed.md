@@ -53,17 +53,18 @@ transcript "corrupted, heavily duplicated summary text".
 **Reproduced** with a one-line SSE body in text mode: the text comes
 out as `"Hello world.Hello world."`.
 
-**Status:** this is unit A's code. It is reported, not fixed here. The
-fix is to let the parser take the text *instead of* the transport in
-the modes where the parser runs, or to have the parser return only the
-calls it found and leave the prose to the transport.
+**Status:** fixed. This was unit A's code, and the fix has landed: the
+parser now takes the text *instead of* the transport in the modes where
+the parser runs, so the prose reaches the model once. The 2026-10-20
+smoke test after unit A's fix found no doubled word in any of gemma4's
+answers.
 
-**What it costs the baseline:** every text-mode model's answers are
-corrupted, and the read-only tasks read those answers. On the 2026-10-20
-smoke test, gemma4 passed all three coding tasks and failed all three
-read-only ones, and qwen, which runs in the native mode, passed all
-six. The baseline has to be measured after the fix, or the read-only
-success rate measures the bug rather than the model.
+**What it cost the baseline:** every text-mode model's answers were
+corrupted, and the read-only tasks read those answers. On the
+2026-10-20 smoke test, gemma4 passed all three coding tasks and failed
+all three read-only ones, and qwen, which runs in the native mode,
+passed all six. The baseline is measured after the fix, so the
+read-only success rate measures the model and not the bug.
 
 ### gemma4 writes its tool calls as text
 
@@ -144,6 +145,50 @@ written:
 - The first transcript renderer put every turn's events in one block,
   so the judge could not elide the middle of a long transcript. It now
   renders one segment per turn, which is what the summary needs.
+
+A later review of the harness found five more, and they are fixed:
+
+- A rerun into the same report directory read the earlier run's log,
+  because poo refuses a log that already exists and the harness reused
+  the path. Every run now gets a directory of its own, and a run into
+  a directory that already holds a run's output is refused unless
+  `--force` clears it.
+- The re-read metric recorded a `sed -n '10,20p' a.go` as a read of
+  the file "10", so two different files looked like a re-read and the
+  same file's two ranges did not.
+- The replayed transport repeated the last recorded response, so a
+  recording with one tool call replayed into 1486 calls and the
+  difference it reported was the loop rather than the recording.
+- The API key reached the check's environment, and the check's output
+  goes into the report. Every key variable the catalog names is now
+  removed from the check's environment, and from the poo process's
+  environment except the running model's own.
+- A judge that could not be reached produced a verdict that was not
+  flagged, so a judge outage read as "no transcript needs the owner".
+
+## gemma4 asks for a tool poo does not have
+
+**Where:** the model's own behaviour, seen in the 2026-10-20 smoke
+test after the fixes.
+
+**What:** on the read-only task, gemma4 asked the gateway for a tool
+called `run_shell_command`, which is not in poo's tool set. The
+gateway dropped the unmatched call and answered with an empty response
+and `finish_reason: tool_calls`. poo saw a response with no content and
+no calls and settled `end_turn` after one turn, so the run produced no
+answer at all and the check failed with "the run recorded no answer".
+
+The same request with a shell tool offered under the name `bash` gets
+the call, and the same model answers a question in prose when it is
+asked to. The judge read the trajectory correctly: "the agent ended
+its turn with zero tool calls and no answer", flagged as
+`premature_end_turn`.
+
+**Why it matters:** this is a measurement of the model against poo's
+tool names, not a defect in the harness. It is the kind of thing the
+baseline exists to show, and it is the reason the judge runs over
+every transcript: a run that ends with no answer looks like a harness
+failure unless someone reads it.
 
 ## What is not observed yet
 
