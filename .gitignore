@@ -21,6 +21,9 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# Scratch space (cloned prior art, local notes, cached builds)
+.cache/
+
 # Go workspace file
 go.work
 go.work.sum
