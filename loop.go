@@ -154,6 +154,9 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 	}
 	r.state = StateSettled
 
+	// The settle record is written with a context of its own: the run's
+	// context may already have ended, and the log still has to say the
+	// run ended.
 	settle := &RunSettled{
 		RecordMeta: NewRecordMeta("run.settled"),
 		RunID:      r.opts.RunID,
@@ -162,11 +165,11 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 		Turns:      r.turn,
 		SettledAt:  nowRFC3339(),
 	}
-	if err := r.write(ctx, settle); err != nil {
+	if err := r.write(context.WithoutCancel(ctx), settle); err != nil {
 		return Result{}, err
 	}
 	if r.opts.Sink != nil {
-		if err := r.opts.Sink.Flush(ctx); err != nil {
+		if err := r.opts.Sink.Flush(context.WithoutCancel(ctx)); err != nil {
 			return Result{}, err
 		}
 	}
@@ -211,9 +214,10 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 			// The request failed, but the usage it produced is still
 			// written: every request gets a usage record, so a consumer
 			// can see the request's accounting even when the stream
-			// broke.
+			// broke. The write is best-effort, because the record that
+			// says the run ended matters more than the accounting.
 			if resp != nil && resp.usage != nil {
-				if werr := r.write(ctx, &Usage{
+				r.writeBestEffort(context.WithoutCancel(ctx), &Usage{
 					RecordMeta:      NewRecordMeta("usage"),
 					RunID:           r.opts.RunID,
 					Turn:            r.turn,
@@ -222,9 +226,7 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 					OutputTokens:    resp.usage.OutputTokens,
 					CacheReadTokens: resp.usage.CacheReadTokens,
 					TTFTMS:          resp.usage.TTFTMS,
-				}); werr != nil {
-					return "", SettleDetail{}, werr
-				}
+				})
 			}
 			return reason, detail, nil
 		}
@@ -475,6 +477,21 @@ func (r *Run) write(ctx context.Context, rec Record) error {
 		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
 	}
 	return nil
+}
+
+// writeBestEffort appends one record to the sink and ignores the
+// failure.
+//
+// The accounting of a request that failed is worth less than the record
+// that says the run ended, so a write that fails here neither stops the
+// run nor marks the sink broken.
+func (r *Run) writeBestEffort(ctx context.Context, rec Record) {
+	if r.opts.Sink == nil || r.sunk {
+		return
+	}
+	r.seq++
+	Stamp(rec, r.seq, time.Now())
+	_ = r.opts.Sink.Append(ctx, rec)
 }
 
 // settleForError maps a request error to a settle reason.

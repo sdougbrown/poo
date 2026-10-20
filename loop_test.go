@@ -173,7 +173,7 @@ type echoPrepared struct {
 func (p echoPrepared) Summary() string { return p.text }
 
 // testOptions builds the options for a test run.
-func testOptions(t *testing.T, tr poo.ChatTransport, tool *echoTool, sink *recordingSink) poo.Options {
+func testOptions(t *testing.T, tr poo.ChatTransport, tool *echoTool, sink poo.RecordSink) poo.Options {
 	t.Helper()
 	return poo.Options{
 		Transport: tr,
