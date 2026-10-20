@@ -506,7 +506,7 @@ func judgeUserMessage(payload judgePayload, nonce string) string {
 	fmt.Fprintf(&b, "Seed: %d\n", payload.Seed)
 	fmt.Fprintf(&b, "Check script passed: %t\n", payload.CheckPassed)
 	fmt.Fprintf(&b, "Check output (a JSON string): %s\n", checkOutput)
-	fmt.Fprintf(&b, "Metrics: %s\n", formatMetrics(payload.Metrics))
+	fmt.Fprintf(&b, "Metrics (a JSON object): %s\n", formatMetrics(payload.Metrics))
 	if payload.Summarized {
 		fmt.Fprintf(&b, "The transcript below was summarized: its first and last turns are kept and the middle is elided with counts.\n")
 	}
@@ -527,23 +527,32 @@ func newNonce() (string, error) {
 	return hex.EncodeToString(buf[:]), nil
 }
 
-// formatMetrics renders the metrics for the judge.
+// formatMetrics renders the metrics for the judge as one JSON object.
+//
+// The changed files are names a run chose, so they are encoded: a name
+// with a newline in it stays inside its string.
 func formatMetrics(m Metrics) string {
-	parts := []string{
-		fmt.Sprintf("turns=%d", m.Turns),
-		fmt.Sprintf("tool_calls=%d", m.ToolCalls),
-		fmt.Sprintf("tool_errors=%d", m.ToolErrors),
-		fmt.Sprintf("text_parse_failures=%d", m.TextParseFailures),
-		fmt.Sprintf("reads=%d", m.Reads),
-		fmt.Sprintf("rereads=%d", m.Rereads),
-		fmt.Sprintf("diff_lines=%d", m.DiffLines),
-		fmt.Sprintf("settle_reason=%s", m.SettleReason),
-		fmt.Sprintf("ttft_ms=%.0f", m.TTFTMS),
+	out := struct {
+		Turns             int      `json:"turns"`
+		ToolCalls         int      `json:"tool_calls"`
+		ToolErrors        int      `json:"tool_errors"`
+		TextParseFailures int      `json:"text_parse_failures"`
+		Reads             int      `json:"reads"`
+		Rereads           int      `json:"rereads"`
+		DiffLines         int      `json:"diff_lines"`
+		SettleReason      string   `json:"settle_reason"`
+		TTFTMS            float64  `json:"ttft_ms"`
+		UnexpectedFiles   []string `json:"unexpected_files,omitempty"`
+	}{
+		m.Turns, m.ToolCalls, m.ToolErrors, m.TextParseFailures, m.Reads,
+		m.Rereads, m.DiffLines, m.SettleReason, float64(int64(m.TTFTMS + 0.5)),
+		m.UnexpectedFiles,
 	}
-	if len(m.UnexpectedFiles) > 0 {
-		parts = append(parts, "changed_files="+strings.Join(m.UnexpectedFiles, ","))
+	data, err := json.Marshal(out)
+	if err != nil {
+		return "{}"
 	}
-	return strings.Join(parts, " ")
+	return string(data)
 }
 
 // summarizeTranscript keeps the first and last segments of a transcript
