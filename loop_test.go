@@ -563,6 +563,39 @@ func TestTheRunMovesThroughTheLoopStates(t *testing.T) {
 	}
 }
 
+func TestTheContextRunningOutMidRunSettlesContextExhausted(t *testing.T) {
+	// The model asks for a call whose result is large, so the next
+	// request has no room left.
+	tr := &fakeTransport{responses: []fakeResponse{{
+		calls: []poo.ToolCall{{
+			ID:        "call_1",
+			Name:      "echo",
+			Arguments: json.RawMessage(`{"text":"hello"}`),
+		}},
+	}}}
+	tool := &echoTool{result: string(make([]byte, 20000))}
+	sink := &recordingSink{}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.ContextLimit = 2000
+
+	r := poo.NewRun(opts)
+	res, err := r.Execute(context.Background(), "do the thing")
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if res.Reason != poo.ReasonContextExhausted {
+		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
+	}
+	if res.Detail.Source != "no_output_room" {
+		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
+	}
+	// The first request went out, and the second did not.
+	if len(tr.requests) != 1 {
+		t.Errorf("the transport got %d requests, want 1", len(tr.requests))
+	}
+}
+
 func TestTheSettleRecordCarriesTheReason(t *testing.T) {
 	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
 	sink := &recordingSink{}
