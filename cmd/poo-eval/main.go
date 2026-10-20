@@ -375,15 +375,17 @@ func runJudge(args []string) int {
 
 // defaultRunName returns the name a run's report directory gets.
 //
-// The name carries the date and the commit, so two runs on different
-// days or on different commits do not collide.
+// The name carries the date, the commit and the time, so two runs on
+// the same day and the same commit do not collide. A run into a
+// directory that already holds a run's output is refused, and the
+// default name never is one.
 func defaultRunName(root string) string {
 	sha := gitSHA(root)
-	date := time.Now().UTC().Format("2006-01-02")
+	stamp := time.Now().UTC().Format("2006-01-02-150405")
 	if sha == "" {
-		return date
+		return stamp
 	}
-	return date + "-" + sha
+	return stamp + "-" + sha
 }
 
 // gitSHA returns the repository's short commit, or the empty string.

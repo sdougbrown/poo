@@ -6,7 +6,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -454,10 +453,4 @@ func stdev(values []float64) float64 {
 // between two runs of the same thing.
 func round2(v float64) float64 {
 	return math.Round(v*100) / 100
-}
-
-// sortedStrings sorts a list of strings in place and returns it.
-func sortedStrings(in []string) []string {
-	sort.Strings(in)
-	return in
 }
