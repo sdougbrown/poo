@@ -313,6 +313,9 @@ func readRange(f *os.File, offset, limit, cap int) (string, int, int, int, bool,
 // The rest of the line is discarded rather than held in memory, so a
 // minified file costs a bounded buffer. It reports whether the file
 // ended with the line.
+//
+// A carriage return is stripped, so a file with CRLF endings reads the
+// same as a file with LF endings.
 func readLine(br *bufio.Reader, limit int) (string, bool, error) {
 	// A rune is at most four bytes, so this budget holds enough whole
 	// characters to satisfy the limit.
@@ -329,17 +332,23 @@ func readLine(br *bufio.Reader, limit int) (string, bool, error) {
 		}
 		switch {
 		case err == nil:
-			text := strings.TrimSuffix(b.String(), "\n")
+			text := trimCarriageReturn(strings.TrimSuffix(b.String(), "\n"))
 			return truncateRunes(trimPartialRune(text), limit), false, nil
 		case errors.Is(err, bufio.ErrBufferFull):
 			// The line is longer than the buffer. Keep reading.
 			continue
 		case errors.Is(err, io.EOF):
-			return truncateRunes(trimPartialRune(b.String()), limit), true, nil
+			text := trimCarriageReturn(b.String())
+			return truncateRunes(trimPartialRune(text), limit), true, nil
 		default:
 			return "", false, err
 		}
 	}
+}
+
+// trimCarriageReturn drops a carriage return from the end of a line.
+func trimCarriageReturn(s string) string {
+	return strings.TrimSuffix(s, "\r")
 }
 
 // trimPartialRune drops an incomplete rune from the end of a string.
