@@ -37,7 +37,7 @@ fi
 # There has to be at least one request timeout, or the search above
 # found nothing and passed by default.
 found45=""
-for file in $(grep -rl --include='*.py' "_TIMEOUT_SECONDS = 45" shop 2>/dev/null | grep -v '^shop/settings.py$' | sort); do
+for file in $(grep -rl --include='*.py' -E "_TIMEOUT_SECONDS[[:space:]]*=[[:space:]]*45([^0-9]|$)" shop 2>/dev/null | grep -v '^shop/settings.py$' | sort); do
   found45="yes"
 done
 if [ -z "$found45" ]; then
