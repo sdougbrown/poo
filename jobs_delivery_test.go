@@ -491,3 +491,112 @@ func TestAnInterruptDuringExecutingStopsTheCallAndNotTheJob(t *testing.T) {
 		return sink.count("job.ended") == 1
 	})
 }
+
+// TestOnIdleHoldDoesNotSuppressAWaitingDelivery covers the plan's
+// delivery table: a result arriving while the run waits is delivered at
+// once, whatever on_idle says. on_idle is the idle row only.
+func TestOnIdleHoldDoesNotSuppressAWaitingDelivery(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting now"},
+		{text: "answered the job"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	opts := jobOptions(t, tr, tool, sink)
+	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	waitFor(t, "the run to wait", func() bool { return s.State() == poo.StateWaiting })
+	tool.Release()
+	waitFor(t, "the run to leave waiting", func() bool { return s.State() != poo.StateWaiting })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := s.Wait(ctx)
+	if err != nil {
+		t.Fatalf("waiting for the run: %v (state %s)", err, s.State())
+	}
+	if got := s.LastAssistantMessage(); got != "answered the job" {
+		t.Errorf("last assistant message = %q, want the job answered (settled %s)", got, res.Reason)
+	}
+}
+
+// openRunHoldTransport holds the second request, so a job can finish
+// while the run is open.
+type openRunHoldTransport struct {
+	inner   *pootest.Transport
+	mu      sync.Mutex
+	n       int
+	at2     chan struct{}
+	release chan struct{}
+}
+
+// Stream holds the second request until the test releases it.
+func (b *openRunHoldTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	b.mu.Lock()
+	b.n++
+	n := b.n
+	b.mu.Unlock()
+	if n == 2 {
+		close(b.at2)
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+			return nil, poo.Rendered{}, ctx.Err()
+		}
+	}
+	return b.inner.Stream(ctx, req)
+}
+
+// Fork hands the fork to the scripted transport.
+func (b *openRunHoldTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return b.inner.Fork(ctx, prev, appended, maxTokens)
+}
+
+// TestOnIdleHoldDeliversToAnOpenRun covers the plan's delivery table: a
+// result that finishes while a run is open is delivered at the turn end,
+// even when on_idle is hold.
+func TestOnIdleHoldDeliversToAnOpenRun(t *testing.T) {
+	inner := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	tr := &openRunHoldTransport{inner: inner, at2: make(chan struct{}), release: make(chan struct{})}
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	opts := jobOptions(t, tr, tool, sink)
+	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tr.at2
+	tool.Release()
+	waitFor(t, "the job to be queued", func() bool { return s.QueuedJobResults() == 1 })
+	close(tr.release)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := s.Wait(ctx)
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	delivered := 0
+	for _, rec := range sink.allRecords() {
+		if d, ok := rec.(*poo.InputDelivered); ok && d.Mode == poo.InputModeJob {
+			delivered++
+		}
+	}
+	if delivered != 1 {
+		t.Errorf("the run settled %s with %d job deliveries, want 1", res.Reason, delivered)
+	}
+}

@@ -556,8 +556,10 @@ func jobOutcomeOf(outcome Outcome) JobOutcome {
 // it for the next one.
 func (s *Session) queueJobResult(result jobResult) {
 	s.mu.Lock()
-	held := s.onIdle() == OnIdleHold
-	s.jobQueue = append(s.jobQueue, jobQueueItem{result: result, held: held})
+	// A result is never held at queue time: on_idle is the idle row of
+	// the delivery table. A run that is open or waiting takes the
+	// result; only the idle decision (or the close) holds it.
+	s.jobQueue = append(s.jobQueue, jobQueueItem{result: result})
 	queued := s.jobQueued
 	s.mu.Unlock()
 
