@@ -608,3 +608,53 @@ type failingBeforeTool struct{}
 func (h *failingBeforeTool) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
 	return poo.ToolDecision{}, errors.New("the hook failed")
 }
+
+// TestACallThatFinishesAsTheRunSettlesGetsOneResult covers the race:
+// a call that finishes at the same moment the run settles gets exactly
+// one result, never two.
+func TestACallThatFinishesAsTheRunSettlesGetsOneResult(t *testing.T) {
+	// The test runs the race many times, because the two goroutines
+	// have to meet for the bug to show.
+	for i := 0; i < 50; i++ {
+		release := make(chan struct{})
+		started := make(chan struct{})
+		tool := &echoTool{result: "echoed"}
+		tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return poo.ToolResult{Text: "the result"}, nil
+		}
+		tr := &fakeTransport{responses: []fakeResponse{
+			{
+				calls: []poo.ToolCall{{
+					ID:        "call_1",
+					Name:      "echo",
+					Arguments: []byte(`{"text":"hello"}`),
+				}},
+			},
+		}}
+		sink := &recordingSink{}
+
+		s := newTestSession(t, testOptions(t, tr, tool, sink))
+		if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+			t.Fatalf("starting the run: %v", err)
+		}
+		<-started
+		// The run is cancelled and the call is released at the same
+		// moment.
+		go func() {
+			close(release)
+		}()
+		s.Cancel("cancel:test")
+		if _, err := s.Wait(context.Background()); err != nil {
+			t.Fatalf("waiting for the run: %v", err)
+		}
+
+		if n := sink.count("tool.result"); n != 1 {
+			t.Fatalf("the log holds %d tool.result records, want exactly 1", n)
+		}
+	}
+}
