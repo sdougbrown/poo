@@ -39,6 +39,9 @@ func (s *Session) Prompt(ctx context.Context, text string, opts ...InputOption) 
 	// The run is reserved under the lock, so a wake that is starting
 	// at the same time does not start a second run.
 	s.reserved = true
+	// A client message resets the count of the unattended wakes: the
+	// chain of job → wake → job is broken by a person.
+	s.unattendedWakes = 0
 	s.mu.Unlock()
 
 	runID, err := s.start(ctx, text, TriggerPrompt, note)

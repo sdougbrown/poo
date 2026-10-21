@@ -431,7 +431,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 	// held result never leaks what a hook would have redacted. The
 	// after-tool chain is Stage 4's; the core records the tool's own
 	// result for now.
-	s.write(context.WithoutCancel(job.ctx), &JobEnded{
+	if err := s.write(context.WithoutCancel(job.ctx), &JobEnded{
 		RecordMeta: NewRecordMeta("job.ended"),
 		SessionID:  s.opts.SessionID,
 		Job:        job.id,
@@ -443,7 +443,14 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 		InputID:    inputID,
 		Text:       text,
 		EndedAt:    nowRFC3339(),
-	})
+	}); err != nil {
+		// The store refused the job's end. The session is broken at
+		// once: the wakes stop, and the run that is still open gets
+		// the store_error candidate.
+		s.markBroken()
+		s.addStoreError(job.runID)
+		return
+	}
 	s.events.emit(EventJobEnded, map[string]any{
 		"job":      job.id,
 		"handle":   handle,
@@ -462,6 +469,23 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 		text:    text,
 		fatal:   fatal,
 	})
+}
+
+// addStoreError gives the open run the store_error candidate.
+//
+// The run that owns the job may already have settled, and then the
+// candidate is dropped: a settled run is never mutated.
+func (s *Session) addStoreError(runID string) {
+	s.mu.Lock()
+	run := s.run
+	s.mu.Unlock()
+	if run == nil || run.id != runID {
+		return
+	}
+	s.addCandidate(run, newCandidate(ReasonStoreError, SettleDetail{
+		Source: "store",
+		Text:   "the store refused the job's end",
+	}))
 }
 
 // jobOutcomeOf maps a call outcome to a job outcome.
@@ -558,7 +582,7 @@ func (s *Session) takeUnheldResultsLocked() []jobQueueItem {
 // session was idle.
 func (s *Session) handleIdleJobResults() {
 	s.mu.Lock()
-	if s.run != nil || s.closed || s.broken {
+	if s.run != nil || s.reserved || s.closed || s.broken {
 		s.mu.Unlock()
 		return
 	}
@@ -580,9 +604,20 @@ func (s *Session) handleIdleJobResults() {
 		s.writePendingHeld()
 		return
 	}
+	// The reservation is taken under the lock, so a wake and a
+	// concurrent prompt race for one reservation: the loser of a prompt
+	// race gets busy, and nothing is accepted.
+	s.reserved = true
+	s.mu.Unlock()
+
+	// The seam the race is tested at: the wake has the session's
+	// reservation, and a prompt that arrives now is refused.
+	s.raceHook("wake")
+
 	// Every result that is queued at this moment joins the woken run.
 	// A held result waits for the next client prompt, so it does not
 	// join the wake.
+	s.mu.Lock()
 	var results []jobResult
 	kept := s.jobQueue[:0]
 	for _, item := range s.jobQueue {
@@ -594,6 +629,7 @@ func (s *Session) handleIdleJobResults() {
 	}
 	s.jobQueue = kept
 	if len(results) == 0 {
+		s.reserved = false
 		s.mu.Unlock()
 		return
 	}
@@ -602,7 +638,11 @@ func (s *Session) handleIdleJobResults() {
 
 	// The woken run is a normal run: it starts with the results, and
 	// the first request goes through the gate.
-	s.startWokenRun(results)
+	_, _ = s.start(context.Background(), "", TriggerJob, nil, results...)
+
+	s.mu.Lock()
+	s.reserved = false
+	s.mu.Unlock()
 }
 
 // holdJobResultsLocked marks the queued results as held.
@@ -684,31 +724,6 @@ func jobOutcomeToCallOutcome(outcome JobOutcome) Outcome {
 	}
 }
 
-// startWokenRun starts a run because job results arrived.
-//
-// The reservation is taken under the session lock, so a wake and a
-// concurrent prompt race for one reservation: the loser of a prompt race
-// gets busy, and nothing is accepted.
-func (s *Session) startWokenRun(results []jobResult) {
-	s.mu.Lock()
-	if s.run != nil || s.reserved || s.closed || s.broken {
-		s.mu.Unlock()
-		return
-	}
-	s.reserved = true
-	s.mu.Unlock()
-
-	// The seam the race is tested at: the wake has the session's
-	// reservation, and a prompt that arrives now is refused.
-	s.raceHook("wake")
-
-	_, _ = s.start(context.Background(), "", TriggerJob, nil, results...)
-
-	s.mu.Lock()
-	s.reserved = false
-	s.mu.Unlock()
-}
-
 // deliverJobResult appends one job result to the model's view.
 //
 // The result is a user-role message with origin "job", because the
@@ -752,34 +767,6 @@ func (s *Session) deliverJobResult(run *runState, result jobResult) {
 // jobResultText renders the text the model reads for a job result.
 func jobResultText(result jobResult) string {
 	return fmt.Sprintf("[job %s · %s finished (%s): %s]", result.job, result.tool, result.outcome, result.text)
-}
-
-// appendJobResultMessage appends a woken run's job result to the
-// model's view.
-//
-// The result is a user-role message with origin "job", because the
-// call's result slot already holds the "started" result. It never
-// carries a delivery note.
-//
-// A result that carries a fatal error adds the tool_fatal candidate to
-// the woken run, so the run settles before it makes a request.
-func (s *Session) appendJobResultMessage(run *runState, result JobResult) {
-	text := fmt.Sprintf("[job %s · %s finished (%s): %s]", result.Job, result.Tool, result.Outcome, result.Text)
-	msg := NewTextMessage(RoleUser, text)
-	msg.Origin = OriginJob
-	s.appendMessages(msg)
-	_ = s.write(run.ctx, &MessageRecord{
-		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
-		RunID:      run.id,
-		Role:       msg.Role,
-		Content:    msg.Content,
-	})
-	if result.Outcome == OutcomeError && result.Fatal {
-		s.addCandidate(run, newCandidate(ReasonToolFatal, SettleDetail{
-			Source: "tool:" + result.Tool,
-			Text:   result.Text,
-		}))
-	}
 }
 
 // publicJobResults turns the internal results into the public ones the

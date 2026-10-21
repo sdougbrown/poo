@@ -31,8 +31,12 @@ type JobTool struct {
 	// started is signalled when a call starts, so a test knows the job
 	// is running.
 	started chan struct{}
-	// release is closed when the calls may finish.
-	release chan struct{}
+	// gate holds the releases, one per call.
+	gate chan struct{}
+	// closed is closed when every call may finish.
+	closed chan struct{}
+	// rounds counts the releases that let the waiting calls finish.
+	rounds int
 	// calls counts the calls the tool served.
 	calls int
 	// envs holds the environment of every call, in order.
@@ -52,21 +56,53 @@ func NewJobTool(name string, background poo.Background) *JobTool {
 		name:       name,
 		background: background,
 		started:    make(chan struct{}, 64),
-		release:    make(chan struct{}),
+		gate:       make(chan struct{}, 64),
+		closed:     make(chan struct{}),
 	}
 }
 
-// Release lets the blocked calls finish.
+// Release lets one blocked call finish.
 //
-// A test that wants the call to finish at once calls Release before the
-// call starts.
+// A call that is not blocked yet takes the release when it starts, so a
+// test may release before the call begins.
 func (t *JobTool) Release() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	select {
-	case <-t.release:
+	case t.gate <- struct{}{}:
 	default:
-		close(t.release)
+	}
+}
+
+// ReleaseAll lets every blocked call finish, and every call that starts
+// after it.
+func (t *JobTool) ReleaseAll() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	select {
+	case <-t.closed:
+	default:
+		close(t.closed)
+	}
+}
+
+// ReleaseWaiting lets every call that is blocked right now finish.
+//
+// The release is a round: a call that starts after it is blocked again,
+// so a test can release one round of calls without opening the tool for
+// good.
+func (t *JobTool) ReleaseWaiting() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.rounds++
+	// The calls that are waiting now are released at once, and a call
+	// that arrives after this is not blocked.
+	for {
+		select {
+		case t.gate <- struct{}{}:
+		default:
+			return
+		}
 	}
 }
 
@@ -133,11 +169,16 @@ func (t *JobTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared
 }
 
 // Call blocks until the test releases it, and then answers.
+//
+// A call that arrives after a release round started is not blocked: the
+// round releases the calls that were waiting when it began.
 func (t *JobTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
 	t.mu.Lock()
 	t.calls++
 	t.envs = append(t.envs, env)
-	release := t.release
+	gate := t.gate
+	closed := t.closed
+	round := t.rounds
 	t.mu.Unlock()
 
 	select {
@@ -145,10 +186,16 @@ func (t *JobTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (p
 	default:
 	}
 
-	select {
-	case <-release:
-	case <-ctx.Done():
-		return poo.ToolResult{Text: "the call was stopped"}, ctx.Err()
+	t.mu.Lock()
+	released := t.rounds > round
+	t.mu.Unlock()
+	if !released {
+		select {
+		case <-gate:
+		case <-closed:
+		case <-ctx.Done():
+			return poo.ToolResult{Text: "the call was stopped"}, ctx.Err()
+		}
 	}
 
 	t.mu.Lock()

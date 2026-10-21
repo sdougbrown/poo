@@ -530,6 +530,9 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		s.steerQueue = append(s.steerQueue, input)
 	}
 	waiting := s.state == StateWaiting
+	// A client message resets the count of the unattended wakes: the
+	// chain of job → wake → job is broken by a person.
+	s.unattendedWakes = 0
 	s.mu.Unlock()
 
 	// The input is recorded before the call returns, so an accepted

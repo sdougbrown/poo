@@ -2,7 +2,6 @@ package poo_test
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -430,9 +429,4 @@ func (h *countingBeforeSettle) Calls() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.calls
-}
-
-// jobCallWithArgs is a call of the scripted job tool with raw arguments.
-func jobCallWithArgs(args string) poo.ToolCall {
-	return poo.ToolCall{ID: "call_1", Name: "job", Arguments: json.RawMessage(args)}
 }

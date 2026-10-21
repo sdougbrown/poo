@@ -3,7 +3,6 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -125,20 +124,23 @@ func TestMaxRunningRefusesTheExtraCall(t *testing.T) {
 
 	opts := jobOptions(t, tr, tool, sink)
 	opts.Jobs = poo.JobOptions{MaxRunning: 1}
+	// The turn ceiling settles the run right after the batch, so the
+	// first job is still running when the second call is made.
+	opts.MaxTurns = 1
 
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tool.Started()
-	tool.Release()
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
-	if res.Reason != poo.ReasonEndTurn {
-		t.Errorf("the run settled %q, want end_turn", res.Reason)
+	if res.Reason != poo.ReasonMaxTurns {
+		t.Errorf("the run settled %q, want max_turns", res.Reason)
 	}
+	tool.Release()
 	// One job started, and the other call got the recoverable error.
 	if sink.count("job.started") != 1 {
 		t.Errorf("the log holds %d job.started records, want 1", sink.count("job.started"))
@@ -413,5 +415,47 @@ func TestTheJobRunsUnderTheSessionContext(t *testing.T) {
 	}
 }
 
-// errIsJobStopped is the error a stopped job returns.
-var errIsJobStopped = errors.New("the job was stopped")
+// TestAJobThatFailsFatallyWhileTheRunWaitsSettlesIt covers the
+// plan's rule: a job that fails fatally while the run is waiting
+// settles the run tool_fatal with no further request.
+func TestAJobThatFailsFatallyWhileTheRunWaitsSettlesIt(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetError(poo.Fatalf("the working directory is gone"))
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	firstRunID, err := s.Prompt(context.Background(), "do the thing")
+	if err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	waitFor(t, "the run to wait", func() bool {
+		return s.State() == poo.StateWaiting
+	})
+	// The job fails fatally, and the waiting run settles with it.
+	tool.Release()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonToolFatal {
+		t.Errorf("the run settled %q, want tool_fatal", res.Reason)
+	}
+	// The run made no request after the result arrived.
+	requests := 0
+	for _, ev := range s.Events() {
+		if ev.Name != poo.EventTurnStarted {
+			continue
+		}
+		if ev.Payload["run_id"] == firstRunID {
+			requests++
+		}
+	}
+	if requests != 2 {
+		t.Errorf("the run made %d requests, want 2: none after the fatal result", requests)
+	}
+}

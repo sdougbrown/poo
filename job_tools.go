@@ -1,9 +1,6 @@
 package poo
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "fmt"
 
 // registerJobTools adds the core's own job tools and checks that every
 // linked tool may be registered.
@@ -90,18 +87,4 @@ func (s *Session) callBecomesJob(name string, asked bool) bool {
 	default:
 		return false
 	}
-}
-
-// stripBackgroundArg removes the reserved background argument from a
-// call's arguments.
-//
-// The core validates the argument and removes it before the tool's own
-// decoder sees the arguments, so a strict decoder never sees it. The
-// tool.call record keeps the original arguments.
-func stripBackgroundArg(raw json.RawMessage) (asked bool, stripped json.RawMessage, err error) {
-	asked, stripped, err = backgroundArg(raw)
-	if err != nil {
-		return false, raw, err
-	}
-	return asked, stripped, nil
 }

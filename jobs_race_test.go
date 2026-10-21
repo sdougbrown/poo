@@ -398,18 +398,35 @@ func TestConcurrentStartsAtTheLimitAdmitExactlyTheLimit(t *testing.T) {
 
 	opts := jobOptions(t, tr, tool, sink)
 	opts.Jobs = poo.JobOptions{MaxRunning: 1}
+	// The turn ceiling settles the run right after the batch, so the
+	// first job is still running when the second call is made.
+	opts.MaxTurns = 1
 
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tool.Started()
-	tool.Release()
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
+	// The limit is one, so only one job started, and the other call
+	// got the recoverable error.
 	if sink.count("job.started") != 1 {
 		t.Errorf("the log holds %d job.started records, want 1", sink.count("job.started"))
+	}
+	limit := false
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok {
+			continue
+		}
+		if r.Outcome == poo.OutcomeError && strings.Contains(r.Text, "too many jobs running") {
+			limit = true
+		}
+	}
+	if !limit {
+		t.Error("the model did not see the limit error")
 	}
 }
 
