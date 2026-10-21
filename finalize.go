@@ -417,6 +417,10 @@ func (s *Session) wakeWaiters(run *runState, result Result) {
 	}
 	s.lastResult = result
 	s.lastRunID = run.id
+	if s.runResults == nil {
+		s.runResults = map[string]Result{}
+	}
+	s.runResults[run.id] = result
 	s.settleCodes = append(s.settleCodes, ExitCode(result.Reason))
 	waiters := s.waiters
 	s.waiters = nil
@@ -474,6 +478,37 @@ func (s *Session) Wait(ctx context.Context) (Result, error) {
 	// The context ended. A run started under the same context settles on
 	// its own, so a bounded grace period covers a run that is finishing
 	// its work.
+	select {
+	case res := <-ch:
+		return res, nil
+	case <-time.After(recordWriteBudget):
+		return Result{}, ctx.Err()
+	}
+}
+
+// WaitRun waits for one run to settle and returns its result.
+//
+// A run that has already settled answers at once, even when a later run
+// (a woken one) is active. The client therefore reads the outcome of the
+// run it asked for, not whichever run happens to be current.
+func (s *Session) WaitRun(ctx context.Context, runID string) (Result, error) {
+	ch := make(chan Result, 1)
+	s.mu.Lock()
+	if result, ok := s.runResults[runID]; ok {
+		s.mu.Unlock()
+		return result, nil
+	}
+	if s.run == nil || s.run.id != runID {
+		s.mu.Unlock()
+		return Result{}, ErrNotRunning
+	}
+	s.waiters = append(s.waiters, ch)
+	s.mu.Unlock()
+	select {
+	case res := <-ch:
+		return res, nil
+	case <-ctx.Done():
+	}
 	select {
 	case res := <-ch:
 		return res, nil

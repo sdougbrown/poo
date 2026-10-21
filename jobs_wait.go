@@ -41,11 +41,14 @@ func (s *Session) WaitJobs(ctx context.Context) error {
 	for {
 		s.mu.Lock()
 		running := s.runningJobCountLocked()
+		// A run that is open is work in flight, including a woken run
+		// whose job has already ended.
+		active := s.run != nil
 		// A result that is queued while a run is open is delivered to
 		// that run, so it does not keep the wait alive. Only a result
 		// that is waiting for a wake does.
 		pending := 0
-		if s.run == nil {
+		if !active {
 			for _, item := range s.jobQueue {
 				if !item.held {
 					pending++
@@ -58,7 +61,7 @@ func (s *Session) WaitJobs(ctx context.Context) error {
 		if closed {
 			return ErrSessionClosed
 		}
-		if running == 0 && pending == 0 {
+		if running == 0 && pending == 0 && !active {
 			return nil
 		}
 		// The wait is short: the core does the work, and the client

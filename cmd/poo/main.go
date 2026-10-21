@@ -254,12 +254,15 @@ func runRun(args []string) int {
 	}
 	defer sess.Close()
 
-	if _, err := sess.Prompt(ctx, strings.Join(fs.Args(), " ")); err != nil {
+	runID, err := sess.Prompt(ctx, strings.Join(fs.Args(), " "))
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1
 	}
 
-	res, err := sess.Wait(ctx)
+	// The answer and the exit code belong to the run the client asked
+	// for, not to a later run that a job result woke.
+	res, err := sess.WaitRun(ctx, runID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1

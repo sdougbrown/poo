@@ -128,6 +128,9 @@ type Session struct {
 	lastResult Result
 	// lastRunID is the id of the run that finished last.
 	lastRunID string
+	// runResults holds each settled run's outcome, by run id, so a
+	// client can ask for the run it started even after a wake moved on.
+	runResults map[string]Result
 	// settleCodes holds the exit codes of the runs that have settled,
 	// in order. A woken run's code joins the first run's, so a client
 	// can combine them.

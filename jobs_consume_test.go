@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -298,4 +299,113 @@ func TestAJobResultDuringCompactingStaysQueued(t *testing.T) {
 			t.Error("the compactor's first view holds the job's result")
 		}
 	}
+}
+
+// wokenRunHoldTransport holds the third request, so a woken run is
+// active when the client asks whether the jobs are done.
+type wokenRunHoldTransport struct {
+	inner   *pootest.Transport
+	mu      sync.Mutex
+	n       int
+	atThird chan struct{}
+	release chan struct{}
+}
+
+// Stream holds the third request until the test releases it.
+func (t *wokenRunHoldTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	t.mu.Lock()
+	t.n++
+	n := t.n
+	t.mu.Unlock()
+	if n == 3 {
+		close(t.atThird)
+		select {
+		case <-t.release:
+		case <-ctx.Done():
+			return nil, poo.Rendered{}, ctx.Err()
+		}
+	}
+	return t.inner.Stream(ctx, req)
+}
+
+// Fork hands the fork to the scripted transport.
+func (t *wokenRunHoldTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return t.inner.Fork(ctx, prev, appended, maxTokens)
+}
+
+// TestWaitJobsWaitsForAWokenRun covers the one-shot's wait: a woken run
+// is active work, so WaitJobs keeps waiting while it runs.
+func TestWaitJobsWaitsForAWokenRun(t *testing.T) {
+	inner := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting now"},
+		{text: "the woken answer"},
+	})
+	tr := &wokenRunHoldTransport{
+		inner:   inner,
+		atThird: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	waitFor(t, "the run to wait", func() bool { return s.State() == poo.StateWaiting })
+	tool.Release()
+	<-tr.atThird // a woken run is now in flight
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if err := s.WaitJobs(ctx); err == nil {
+		t.Errorf("WaitJobs returned while a woken run was active (running=%v)", s.Running())
+	}
+	close(tr.release)
+	_, _ = s.Wait(context.Background())
+}
+
+// TestWaitRunAnswersForTheClientsRun covers the plan's one-shot output:
+// the client reads the run it asked for, even when a later woken run is
+// active.
+func TestWaitRunAnswersForTheClientsRun(t *testing.T) {
+	inner := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting now"},
+		{text: "the woken answer"},
+	})
+	tr := &wokenRunHoldTransport{
+		inner:   inner,
+		atThird: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+	s := newTestSession(t, jobOptions(t, tr, tool, &recordingSink{}))
+
+	firstRunID, err := s.Prompt(context.Background(), "do the thing")
+	if err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	waitFor(t, "the run to wait", func() bool { return s.State() == poo.StateWaiting })
+	s.Cancel("cancel:test")
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the first run: %v", err)
+	}
+	tool.Release()
+	<-tr.atThird // the woken run is in flight
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := s.WaitRun(ctx, firstRunID)
+	if err != nil {
+		t.Fatalf("waiting for the client's run: %v", err)
+	}
+	if res.Reason != poo.ReasonCancelled {
+		t.Errorf("the client's run settled %q, want cancelled", res.Reason)
+	}
+	close(tr.release)
+	_, _ = s.Wait(context.Background())
 }
