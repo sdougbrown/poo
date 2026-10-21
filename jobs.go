@@ -1024,7 +1024,7 @@ func (s *Session) enterWaiting(run *runState) (waiting, drained bool) {
 		// the loop's next pass sees it.
 		return false, true
 	}
-	if len(s.steerQueue) > 0 || len(s.jobQueue) > 0 {
+	if s.hasDrainableInputLocked() || len(s.jobQueue) > 0 {
 		s.mu.Unlock()
 		// A message is waiting, so the run does not wait: the queues
 		// are drained and the run goes to the gate.

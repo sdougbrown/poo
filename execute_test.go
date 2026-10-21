@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -34,6 +35,7 @@ func TestACallWhoseRecordFailsStartsNoEffect(t *testing.T) {
 type blockingRecordSink struct {
 	recordingSink
 	kind    string
+	fail    bool
 	entered chan struct{}
 	release chan struct{}
 	once    sync.Once
@@ -46,6 +48,9 @@ func (s *blockingRecordSink) Append(ctx context.Context, rec poo.Record) error {
 			close(s.entered)
 			<-s.release
 		})
+		if s.fail {
+			return errors.New("injected refusal")
+		}
 	}
 	return s.recordingSink.Append(ctx, rec)
 }

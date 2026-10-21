@@ -168,6 +168,10 @@ type queuedInput struct {
 	// note is the delivery note the input was accepted with, when it
 	// carries one. Its text is rendered again at delivery.
 	note *DeliveryNote
+	// accepted reports that the input.queued record was written. A
+	// queued entry that has not been accepted is not drainable: a
+	// rollback must be able to take it back.
+	accepted bool
 }
 
 // renderDeliveryNote renders the note that says how much of a reply the

@@ -618,7 +618,7 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 	delivered := false
 	for {
 		s.mu.Lock()
-		if run.committed || run.finalizing || len(s.steerQueue) == 0 {
+		if run.committed || run.finalizing || len(s.steerQueue) == 0 || !s.steerQueue[0].accepted {
 			s.mu.Unlock()
 			break
 		}
@@ -649,7 +649,7 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 	}
 	for {
 		s.mu.Lock()
-		if run.committed || run.finalizing || len(s.followUpQueue) == 0 {
+		if run.committed || run.finalizing || len(s.followUpQueue) == 0 || !s.followUpQueue[0].accepted {
 			s.mu.Unlock()
 			break
 		}

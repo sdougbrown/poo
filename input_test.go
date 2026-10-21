@@ -1573,3 +1573,52 @@ func TestAnInterruptedSyncCallKeepsItsPartialOutput(t *testing.T) {
 		}
 	}
 }
+
+// TestARefusedInputIsNotDrainedBeforeItsQueuedRecord covers the input
+// contract: a message is not drainable until its input.queued record is
+// written, so a refused message cannot reach the model through a
+// concurrent turn-end drain.
+func TestARefusedInputIsNotDrainedBeforeItsQueuedRecord(t *testing.T) {
+	sink := &blockingRecordSink{
+		kind:    "input.queued",
+		fail:    true,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	tool := &echoTool{result: "ok"}
+	hold := newNoteHold(tool)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "done"},
+	})
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	id, err := s.Prompt(context.Background(), "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold.wait(t)
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Send("REFUSED INPUT", poo.Steer)
+		done <- err
+	}()
+	<-sink.entered
+	hold.finish()
+	// The turn-end drain has run, and the run has moved on to its next
+	// request. The refused message must not be part of it.
+	waitFor(t, "the drain's next request", func() bool { return len(tr.Requests()) >= 2 })
+	close(sink.release)
+	if err := <-done; err == nil {
+		t.Fatal("Send accepted a message whose input.queued record was refused")
+	}
+	if _, err := s.WaitRun(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range tr.Requests() {
+		for _, m := range req.Messages {
+			if strings.Contains(m.Text(), "REFUSED INPUT") {
+				t.Fatal("a refused input reached the provider")
+			}
+		}
+	}
+}

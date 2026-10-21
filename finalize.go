@@ -199,7 +199,7 @@ func (s *Session) abandonFinalize(run *runState) bool {
 			return false
 		}
 	}
-	if len(s.steerQueue) == 0 && len(s.followUpQueue) == 0 && len(s.jobQueue) == 0 {
+	if !s.hasDrainableInputLocked() && len(s.jobQueue) == 0 {
 		return false
 	}
 	// The natural candidates are discarded, and the run goes back to
@@ -249,9 +249,27 @@ func (s *Session) resume(run *runState) ([]candidate, bool) {
 // never dropped here: settling never drops a job result.
 func (s *Session) collectUndelivered(run *runState) []UndeliveredInput {
 	s.mu.Lock()
-	pending := append(append([]queuedInput(nil), s.steerQueue...), s.followUpQueue...)
-	s.steerQueue = nil
-	s.followUpQueue = nil
+	var pending []queuedInput
+	keptSteer := s.steerQueue[:0]
+	for _, input := range s.steerQueue {
+		if input.accepted {
+			pending = append(pending, input)
+			continue
+		}
+		// An entry whose acceptance is still in flight is not accepted
+		// yet: its own Send either accepts it too late or takes it back.
+		keptSteer = append(keptSteer, input)
+	}
+	s.steerQueue = keptSteer
+	keptFollowUp := s.followUpQueue[:0]
+	for _, input := range s.followUpQueue {
+		if input.accepted {
+			pending = append(pending, input)
+			continue
+		}
+		keptFollowUp = append(keptFollowUp, input)
+	}
+	s.followUpQueue = keptFollowUp
 	s.mu.Unlock()
 
 	if len(pending) == 0 {
@@ -573,14 +591,17 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		// the abort. Both keep their arrival order.
 		s.steerQueue = append(s.steerQueue, input)
 	}
-	waiting := s.state == StateWaiting
+	// The acceptance write is in-flight work: the finalization waits
+	// for it, and reports an input it accepted too late.
+	run.delivering = append(run.delivering, input)
 	// A client message resets the count of the unattended wakes: the
 	// chain of job → wake → job is broken by a person.
 	s.unattendedWakes = 0
 	s.mu.Unlock()
 
 	// The input is recorded before the call returns, so an accepted
-	// input is never lost.
+	// input is never lost. The write runs outside the lock, so a drain
+	// never hangs on the store.
 	if err := s.write(context.Background(), &InputQueued{
 		RecordMeta:   NewRecordMeta("input.queued"),
 		SessionID:    s.opts.SessionID,
@@ -596,6 +617,7 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		// says, so a waiting run does not sleep on a lost message.
 		s.mu.Lock()
 		s.removeQueuedInputLocked(input)
+		s.finishInputAcceptanceLocked(run, input)
 		s.mu.Unlock()
 		s.finalize(run, storeErrorCandidate(err))
 		return "", err
@@ -605,6 +627,31 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		"input_id": id,
 		"mode":     string(mode),
 	})
+
+	s.mu.Lock()
+	// The entry becomes drainable only now, after its acceptance
+	// record succeeded.
+	accepted := s.markInputAcceptedLocked(id)
+	committed := run.committed
+	late := committed || run.finalizing
+	if late && accepted {
+		// The run settled while the record was in flight: the input is
+		// accepted, and its fate is dropped.
+		if s.removeQueuedInputLockedBool(input) {
+			run.abandonedInputs = append(run.abandonedInputs, input)
+		}
+	}
+	s.finishInputAcceptanceLocked(run, input)
+	waiting := !late && s.run == run && s.state == StateWaiting
+	reason := run.result.Reason
+	s.mu.Unlock()
+
+	if late {
+		if committed {
+			s.dropUndelivered(run, []UndeliveredInput{{InputID: id, Mode: string(mode)}}, reason)
+		}
+		return id, nil
+	}
 
 	// A waiting run has nothing to abort, so a steer and an interrupt
 	// are the same there: the message is delivered at once and the run
@@ -619,6 +666,88 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		s.addInterrupt(run, id)
 	}
 	return id, nil
+}
+
+// markInputAcceptedLocked makes a queued input drainable.
+//
+// The caller holds the session's lock.
+func (s *Session) markInputAcceptedLocked(id string) bool {
+	for i := range s.steerQueue {
+		if s.steerQueue[i].id == id {
+			s.steerQueue[i].accepted = true
+			return true
+		}
+	}
+	for i := range s.followUpQueue {
+		if s.followUpQueue[i].id == id {
+			s.followUpQueue[i].accepted = true
+			return true
+		}
+	}
+	return false
+}
+
+// removeQueuedInputLockedBool takes one input back off its queue and
+// reports whether it was there.
+//
+// The caller holds the session's lock.
+func (s *Session) removeQueuedInputLockedBool(input queuedInput) bool {
+	for i, queued := range s.steerQueue {
+		if queued.id == input.id {
+			s.steerQueue = append(s.steerQueue[:i], s.steerQueue[i+1:]...)
+			return true
+		}
+	}
+	for i, queued := range s.followUpQueue {
+		if queued.id == input.id {
+			s.followUpQueue = append(s.followUpQueue[:i], s.followUpQueue[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// finishInputAcceptanceLocked releases an input's in-flight acceptance
+// claim. It is not a delivery, so it is not reported as one.
+//
+// The caller holds the session's lock.
+func (s *Session) finishInputAcceptanceLocked(run *runState, input queuedInput) {
+	for i := range run.delivering {
+		if run.delivering[i].id == input.id {
+			run.delivering = append(run.delivering[:i], run.delivering[i+1:]...)
+			break
+		}
+	}
+	s.signalWorkLocked(run)
+}
+
+// hasDrainableInputLocked reports that the front of a client queue can
+// be delivered: its acceptance record has been written.
+//
+// The caller holds the session's lock.
+func (s *Session) hasDrainableInputLocked() bool {
+	if len(s.steerQueue) > 0 && s.steerQueue[0].accepted {
+		return true
+	}
+	return len(s.followUpQueue) > 0 && s.followUpQueue[0].accepted
+}
+
+// hasAcceptedInputLocked reports that a client queue holds an accepted
+// input.
+//
+// The caller holds the session's lock.
+func (s *Session) hasAcceptedInputLocked() bool {
+	for _, input := range s.steerQueue {
+		if input.accepted {
+			return true
+		}
+	}
+	for _, input := range s.followUpQueue {
+		if input.accepted {
+			return true
+		}
+	}
+	return false
 }
 
 // removeQueuedInputLocked takes one input back off its queue.
