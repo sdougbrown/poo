@@ -91,6 +91,12 @@ echo fixed > "$dir/a.txt"
 exit 0
 `
 
+// tamperingPoo returns a fake poo that appends a line to the fixture's
+// source file during the run.
+func tamperingPoo(fixtureSource string) string {
+	return strings.Replace(logWritingPoo, "exit 0", "echo tampered >> "+fixtureSource, 1)
+}
+
 func TestTheRunnerRunsTheTasksAndMeasuresThem(t *testing.T) {
 	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
@@ -530,5 +536,33 @@ func TestANonZeroExitWithALogKeepsItsCause(t *testing.T) {
 	}
 	if !strings.Contains(report.Results[0].Error, "poo exited 1") {
 		t.Errorf("the error is %q, want it to name the exit", report.Results[0].Error)
+	}
+}
+
+// TestARunThatEditsTheSourceFixtureIsReportedInvalid covers the guard's
+// positive branch: a run that edits the task set's source fixture is
+// reported as invalid, not silently clean.
+func TestARunThatEditsTheSourceFixtureIsReportedInvalid(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+
+	out := t.TempDir()
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: fakePoo(t, tamperingPoo(filepath.Join(fixtureRoot, "fix-a", "a.txt"))),
+	})
+
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	if !report.Results[0].SourceChanged {
+		t.Errorf("the tampering run is not reported as invalid: %+v", report.Results[0])
 	}
 }

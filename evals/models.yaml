@@ -1,0 +1,56 @@
+# The models a baseline is measured against.
+#
+# Each entry is one model the harness runs against. The name is the key a
+# report and a comparison use, so it stays stable.
+#
+# api_key_env names the environment variable holding the key. The runner
+# passes the name to the poo subprocess and never reads the value: the
+# binary reads it and scrubs it from the tools' child environment. (The
+# judge reads its own key, named by poo-eval judge --api-key-env.)
+#
+# context_limit is the model's context window in tokens. The harness
+# passes it to poo as --context-limit, and poo computes the output room
+# from it.
+#
+# tools_mode is native, text or auto. It is native unless a model needs
+# the text tool-call parser.
+
+- name: gemma4
+  base_url: http://localhost:4000/v1
+  model_id: gemma4
+  context_limit: 32768
+  tools_mode: auto
+  notes: >-
+    Capped from 262144 on purpose: the low-budget run. The cap makes the
+    context limit bite, so the harness's context handling is measured.
+    The tools mode is auto, not native: a smoke test on 2026-10-20
+    showed gemma4 writing its tool calls as text rather than through the
+    wire format, so the text parser has to read them.
+
+- name: gemma4-think
+  base_url: http://localhost:4000/v1
+  model_id: gemma4
+  context_limit: 32768
+  tools_mode: auto
+  reasoning_effort: low
+  notes: >-
+    gemma4 with thinking on. gemma4 thinks only when the request asks it
+    to, so this entry sends reasoning_effort low and keeps everything else
+    the same as the gemma4 entry: the same 32768 cap and the same tools
+    mode. It shows what thinking changes for the same weights.
+
+- name: qwen
+  base_url: http://localhost:4000/v1
+  model_id: qwen
+  context_limit: 262144
+  notes: >-
+    Streams reasoning_content. The provider keeps it separate from the
+    answer, so the transcript shows the model's thinking.
+
+- name: minimax-m3.1-flash
+  base_url: https://ollama.com/v1
+  model_id: minimax-m3.1-flash
+  api_key_env: OLLAMA_API_KEY
+  context_limit: 262144
+  notes: >-
+    Capped from 1M. Thinks before answering.
