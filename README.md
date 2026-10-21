@@ -51,7 +51,7 @@ that already exists, rather than appending a second session to it.
 | `poo/cmd/poo` | The headless CLI |
 
 The core depends on the standard library only (plus `poo/prompt` and
-`poo/decide`). `scripts/check-imports.sh` enforces this in CI.
+`poo/decide`). `internal/depcheck` enforces this in `go test`.
 
 The message model is provider-neutral and carries what the three wire
 APIs need. The round trip through Chat Completions, OpenAI Responses and
@@ -65,7 +65,6 @@ Requires [mise](https://mise.jdx.dev/) and Go 1.25 (see `mise.toml`).
 ```
 mise exec -- go vet ./...
 mise exec -- go test -race ./...
-mise exec -- ./scripts/check-imports.sh
 ```
 
 ## License
