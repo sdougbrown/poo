@@ -422,3 +422,72 @@ func TestATurnWithoutTokenCountsReportsNoUsage(t *testing.T) {
 		t.Error("a turn with token counts reported no usage")
 	}
 }
+
+// TestTheTransportReturnsTheErrorsItWasTold covers SetError and a turn's
+// own Err.
+func TestTheTransportReturnsTheErrorsItWasTold(t *testing.T) {
+	boom := errors.New("boom")
+	req := poo.ChatRequest{Model: "m"}
+
+	tr := pootest.NewTransport(pootest.Turn{Text: "never"})
+	tr.SetError(boom)
+	if _, _, err := tr.Stream(context.Background(), req); !errors.Is(err, boom) {
+		t.Errorf("Stream returned %v, want the set error", err)
+	}
+	tr.SetForkTurns(pootest.Turn{Text: "never"})
+	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1); !errors.Is(err, boom) {
+		t.Errorf("Fork returned %v, want the set error", err)
+	}
+
+	tr = pootest.NewTransport(pootest.Turn{Err: boom}, pootest.Turn{Text: "after"})
+	if _, _, err := tr.Stream(context.Background(), req); !errors.Is(err, boom) {
+		t.Errorf("a failing turn returned %v, want its error", err)
+	}
+	reader, _, err := tr.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("the turn after a failing one failed: %v", err)
+	}
+	reader.Close()
+}
+
+// TestAnExhaustedForkListIsTyped covers a fork with no fork turns and a
+// fork past the last one.
+func TestAnExhaustedForkListIsTyped(t *testing.T) {
+	tr := pootest.NewTransport()
+	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1); !errors.Is(err, pootest.ErrScriptExhausted) {
+		t.Errorf("an empty fork list returned %v, want ErrScriptExhausted", err)
+	}
+
+	tr.SetForkTurns(pootest.Turn{Text: "one"})
+	reader, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1)
+	if err != nil {
+		t.Fatalf("the first fork failed: %v", err)
+	}
+	reader.Close()
+	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 1); !errors.Is(err, pootest.ErrScriptExhausted) {
+		t.Errorf("a fork past the list returned %v, want ErrScriptExhausted", err)
+	}
+	if got := len(tr.Forks()); got != 3 {
+		t.Errorf("the transport recorded %d forks, want 3", got)
+	}
+}
+
+// TestTheForkKeepsACopyOfWhatWasAppended covers a caller that changes the
+// slice after the call.
+func TestTheForkKeepsACopyOfWhatWasAppended(t *testing.T) {
+	tr := pootest.NewTransport()
+	tr.SetForkTurns(pootest.Turn{Text: "x"})
+	appended := []poo.Message{poo.NewTextMessage(poo.RoleUser, "original")}
+	reader, err := tr.Fork(context.Background(), poo.Rendered{Body: []byte("body")}, appended, 1)
+	if err != nil {
+		t.Fatalf("forking: %v", err)
+	}
+	reader.Close()
+
+	appended[0].Content[0].Text = "changed"
+	appended[0] = poo.NewTextMessage(poo.RoleUser, "replaced")
+
+	if got := tr.Forks()[0].Appended[0].Text(); got != "original" {
+		t.Errorf("the recorded fork appended %q, want original", got)
+	}
+}

@@ -230,7 +230,11 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.forks = append(t.forks, Fork{Prev: prev, Appended: appended, MaxTokens: maxTokens})
+	t.forks = append(t.forks, Fork{
+		Prev:      copyRendered(prev),
+		Appended:  poo.CloneMessages(appended),
+		MaxTokens: maxTokens,
+	})
 	if t.err != nil {
 		return nil, t.err
 	}
