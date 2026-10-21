@@ -235,7 +235,6 @@ func runRun(args []string) int {
 		ContextLimit: o.contextLimit,
 		MaxOutput:    o.maxOutput,
 		MaxTurns:     o.maxTurns,
-		MaxDuration:  o.timeout,
 		SystemPrompt: systemPrompt(o.modelID, toolSpecs, o.toolsMode),
 		WorkingDir:   absWorkDir,
 		Env:          childEnv,

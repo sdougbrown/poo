@@ -130,7 +130,7 @@ func TestTheExitCodesAreThePlanTable(t *testing.T) {
 		poo.ReasonFinished:          0,
 		poo.ReasonStopRequested:     0,
 		poo.ReasonOutputTruncated:   10,
-		poo.ReasonEndTurn:            0,
+		poo.ReasonEndTurn:           0,
 	}
 	for reason, want := range codes {
 		if got := poo.ExitCode(reason); got != want {
