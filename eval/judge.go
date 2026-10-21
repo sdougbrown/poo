@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/sdougbrown/poo/provider/openai"
 )
 
 // judgePrompt is the judge's prompt.
@@ -122,8 +124,9 @@ type JudgeOptions struct {
 	// Model is the judge's model identifier.
 	Model string
 	// APIKeyEnv names the environment variable holding the judge's API
-	// key. The value is never read by the harness: it is passed to the
-	// judge client by name.
+	// key. The judge reads the value to send it as the bearer token of
+	// its own requests. It never logs or stores it, and a verdict
+	// holds only the name.
 	APIKeyEnv string
 	// ResultsDir is the directory the transcripts come from.
 	ResultsDir string
@@ -545,7 +548,7 @@ func (j *Judge) post(ctx context.Context, userMessage string, withMaxTokens bool
 		return 0, nil, fmt.Errorf("eval: encoding the judge request: %w", err)
 	}
 
-	url := strings.TrimRight(j.opts.BaseURL, "/") + "/chat/completions"
+	url := openai.ChatURL(j.opts.BaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, fmt.Errorf("eval: making the judge request: %w", err)

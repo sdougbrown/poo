@@ -443,3 +443,24 @@ func TestCroppingAndTruncatingKeepWholeCharacters(t *testing.T) {
 		}
 	}
 }
+
+func TestABaseURLThatEndsInChatCompletionsIsNotDoubled(t *testing.T) {
+	var path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer server.Close()
+
+	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL + "/v1/chat/completions", ResultsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := judge.ask(t.Context(), judgePayload{Task: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/v1/chat/completions" {
+		t.Errorf("the judge asked %q, want /v1/chat/completions", path)
+	}
+}

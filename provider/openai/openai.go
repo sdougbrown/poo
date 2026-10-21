@@ -141,7 +141,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.chatURL(), bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.BaseURL), bytes.NewReader(body))
 	if err != nil {
 		if cancel != nil {
 			cancel()
@@ -298,9 +298,11 @@ func classifyError(code, message string, fallback poo.ProviderKind) poo.Provider
 	}
 }
 
-// chatURL returns the endpoint's chat completion URL.
-func (t *Transport) chatURL() string {
-	base := strings.TrimRight(t.cfg.BaseURL, "/")
+// ChatURL returns the chat completion URL of an endpoint.
+//
+// A base URL that already ends in /chat/completions is used as it is.
+func ChatURL(baseURL string) string {
+	base := strings.TrimRight(baseURL, "/")
 	if strings.HasSuffix(base, "/chat/completions") {
 		return base
 	}
