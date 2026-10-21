@@ -25,8 +25,9 @@ func TestAFailedDeliveryLeavesTheResultQueued(t *testing.T) {
 		{text: "the answer"},
 	})
 	// The sink refuses the message that carries the result, and only
-	// that one: the first message it sees is the prompt's.
-	sink := &failingSink{failRecord: "message", failAfter: 4}
+	// that one. The messages before it are the system prompt's, the
+	// prompt's, the model's reply and the tool's result.
+	sink := &failingSink{failRecord: "message", failAfter: 5}
 	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
 	tool.SetResult("the job's output")
 

@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // Session is a conversation with a model.
@@ -109,12 +111,6 @@ type Session struct {
 	// events is the session's event bus.
 	events *eventBus
 
-	// promptEdits are the prompt edits the session-start hooks made.
-	//
-	// They are applied to every run's prompt, so a change the session
-	// start made is still there in the next run.
-	promptEdits []SystemPromptEdit
-
 	// sunk reports that the store failed.
 	sunk bool
 
@@ -130,6 +126,10 @@ type Session struct {
 	// noticeArmed reports that the context notice may fire. The notice
 	// re-arms when the estimate drops back below the notice ratio.
 	noticeArmed bool
+	// promptBuilder holds the sections the system prompt is assembled
+	// from. A run renders a copy of it, so a run's prompt may change
+	// without the session's prompt changing.
+	promptBuilder *prompt.Builder
 
 	// waiters are the goroutines waiting for the run to settle.
 	waiters []chan Result
@@ -321,7 +321,17 @@ type Options struct {
 	// MaxOutput is the model's output-token ceiling, 0 when unknown.
 	MaxOutput int
 	// SystemPrompt is the system message prepended to the model's view.
+	//
+	// The text is the whole prompt: the sections the core assembles are
+	// not used when it is set, and the text is the prompt's base
+	// section, so a later edit still has somewhere to go.
 	SystemPrompt string
+	// Prompt changes the session's system prompt.
+	//
+	// Every mutation is called with the session's prompt builder, in
+	// the order they were added, after the core's own sections and the
+	// tools' sections are in it. A mutation that is nil is skipped.
+	Prompt []func(*prompt.Builder)
 	// WorkingDir is the directory the tools work in.
 	WorkingDir string
 	// Env is the scrubbed child environment for the tools.
@@ -472,6 +482,11 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	if err := s.registerJobTools(); err != nil {
 		return nil, &ErrSessionInit{Cause: err}
 	}
+
+	// The prompt is assembled from the sections the core and the
+	// consumer put in the builder. The job tools are registered by
+	// now, so their own sections are in it too.
+	s.promptBuilder = buildPrompt(&s.opts)
 
 	// The observers start before anything can emit an event, and they
 	// are stopped if the construction fails.

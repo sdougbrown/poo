@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // Option changes a session's options when the session is built.
@@ -118,6 +120,23 @@ func WithSessionStart(h SessionStartHook) Option {
 func WithObserver(o Observer) Option {
 	return func(opts *Options) {
 		opts.Observers = append(opts.Observers, o)
+	}
+}
+
+// WithPrompt changes the session's system prompt.
+//
+// The mutation is called with the session's prompt builder, after the
+// core's own sections and the tools' sections are in it, and before the
+// session's first run. Several mutations compose, in the order they
+// were added, so a consumer may change the prompt in as many layers as
+// it needs.
+//
+// A mutation that sets a section changes that section, a mutation that
+// removes one takes it away, and a mutation that replaces the prompt
+// takes the whole thing over.
+func WithPrompt(edit func(*prompt.Builder)) Option {
+	return func(opts *Options) {
+		opts.Prompt = append(opts.Prompt, edit)
 	}
 }
 

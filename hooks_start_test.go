@@ -106,7 +106,7 @@ func TestTheSessionStartHookAppendsAndEditsThePrompt(t *testing.T) {
 		t.Fatal("the model was never asked")
 	}
 	messages := requests[0].Messages
-	if got := systemText(messages); got != "the edited prompt" {
+	if got := systemText(messages); got != "the edited prompt\n" {
 		t.Errorf("the system message is %q, want the edited prompt", got)
 	}
 	if !historyHas(messages, "the session's context") {
@@ -147,7 +147,7 @@ func TestTheBeforeRunHookAppendsAndEditsThePrompt(t *testing.T) {
 		t.Fatal("the model was never asked")
 	}
 	messages := requests[0].Messages
-	if got := systemText(messages); got != "the run's prompt" {
+	if got := systemText(messages); got != "the run's prompt\n" {
 		t.Errorf("the system message is %q, want the run's prompt", got)
 	}
 	if !historyHas(messages, "the run's context") {
@@ -178,7 +178,7 @@ func TestTheSessionStartHooksEditIsInEveryRunsPrompt(t *testing.T) {
 	if len(requests) < 2 {
 		t.Fatalf("the model was asked %d time(s), want 2", len(requests))
 	}
-	if got := systemText(requests[1].Messages); got != "the session's prompt" {
+	if got := systemText(requests[1].Messages); got != "the session's prompt\n" {
 		t.Errorf("the second run's system message is %q, want the session's prompt", got)
 	}
 }

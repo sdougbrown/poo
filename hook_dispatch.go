@@ -133,9 +133,11 @@ func (s *Session) runSessionStart() ([]Record, error) {
 		decision, _ := out.value.(StartDecision)
 		decisions.appendStartDecision(hookName(h), decision)
 	}
-	// The prompt edits the session start made are kept, so the next
-	// run's prompt carries them too.
-	s.promptEdits = append(s.promptEdits, decisions.edits...)
+	// The prompt edits the session start made are applied to the
+	// session's builder, so every run's prompt carries them.
+	for _, edit := range decisions.edits {
+		s.applyPromptEdit(edit)
+	}
 	for _, added := range decisions.messages {
 		msg := hookMessage(added.message, added.name)
 		s.appendMessages(msg)

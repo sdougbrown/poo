@@ -148,7 +148,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 
 	// The system prompt is rendered once per run, after the before-run
 	// hooks, and it is frozen for the length of the run.
-	if promptText := s.renderPrompt(decisions.edits); promptText != "" {
+	if promptText := s.renderSystemPrompt(decisions.edits); promptText != "" {
 		msg := NewTextMessage(RoleSystem, promptText)
 		msg.Origin = OriginSystem
 		s.appendMessages(msg)
