@@ -198,8 +198,16 @@ func runRun(args []string) int {
 		ReadOutputCapChars:  read.OutputCap(o.contextLimit),
 	}
 
-	sessionID := newSessionID()
-	runID := newSessionID()
+	sessionID, err := newSessionID()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
+	runID, err := newSessionID()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
 
 	if err := log.Append(ctx, &poo.SessionCreated{
 		RecordMeta: poo.NewRecordMeta("session.created"),
