@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -656,5 +657,42 @@ func TestACallThatFinishesAsTheRunSettlesGetsOneResult(t *testing.T) {
 		if n := sink.count("tool.result"); n != 1 {
 			t.Fatalf("the log holds %d tool.result records, want exactly 1", n)
 		}
+	}
+}
+
+// flushFailingSink takes every record and fails the flush.
+type flushFailingSink struct {
+	recordingSink
+}
+
+// Flush fails.
+func (s *flushFailingSink) Flush(ctx context.Context) error {
+	return errors.New("the disk is full")
+}
+
+// TestAFailingFlushAfterTheSettleIsReported covers a sink that cannot
+// flush: the run reports the store failure, the session is broken, and
+// the sink holds exactly one run.settled record.
+func TestAFailingFlushAfterTheSettleIsReported(t *testing.T) {
+	tr := &fakeTransport{responses: []fakeResponse{{
+		text:  "all done",
+		usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 2},
+	}}}
+	sink := &flushFailingSink{}
+
+	s := newTestSession(t, testOptions(t, tr, &echoTool{result: "echoed"}, sink))
+	res := runSession(t, s, "do the thing")
+
+	if res.Reason != poo.ReasonStoreError {
+		t.Errorf("the run settled %q, want store_error", res.Reason)
+	}
+	if !strings.Contains(res.Detail.Text, "the disk is full") {
+		t.Errorf("the settle text is %q, want the flush error", res.Detail.Text)
+	}
+	if !s.Broken() {
+		t.Error("the session is not broken after a failed flush")
+	}
+	if sink.count("run.settled") != 1 {
+		t.Errorf("the sink holds %d run.settled records, want 1", sink.count("run.settled"))
 	}
 }

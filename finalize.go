@@ -99,21 +99,25 @@ func (s *Session) finalizeRun(run *runState) Result {
 	}
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), recordWriteBudget)
 	defer cleanupCancel()
-	if err := s.write(cleanupCtx, settle); err != nil {
-		// The store refused the settle record, so the run's outcome may
-		// not exist. The session is broken, and the reason changes to
-		// store_error, unless the run was cancelled: a cancelled run
-		// stays cancelled, and the store error goes into the detail.
+	storeErr := s.write(cleanupCtx, settle)
+	if s.opts.Sink != nil {
+		if err := s.opts.Sink.Flush(cleanupCtx); err != nil && storeErr == nil {
+			storeErr = err
+		}
+	}
+	if storeErr != nil {
+		// The store refused the settle record or the flush after it, so
+		// the run's outcome may not exist. The session is broken, and
+		// the reason changes to store_error, unless the run was
+		// cancelled: a cancelled run stays cancelled, and the store
+		// error goes into the detail.
 		s.markBroken()
 		detail.Losing = append(detail.Losing, string(ReasonStoreError))
 		if reason != ReasonCancelled {
 			reason = ReasonStoreError
 			detail.Source = "store"
-			detail.Text = err.Error()
+			detail.Text = storeErr.Error()
 		}
-	}
-	if s.opts.Sink != nil {
-		_ = s.opts.Sink.Flush(cleanupCtx)
 	}
 
 	// Step 8: emit the settled event, wake every waiter and clear the
