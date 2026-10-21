@@ -350,11 +350,12 @@ func (s *Session) turnEnd(run *runState, turn int, resp *response, truncated boo
 	// Step 1: the turn is over.
 	s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
 
-	// Step 2: drain the steer queue, then the follow-up queue.
+	// Step 2: drain the steer queue.
 	//
-	// The job queue belongs to the jobs stage: it is the same drain,
-	// with a second source.
-	appended := s.drainInputs(run, true)
+	// A follow-up is not drained here: it waits for a natural stop, and
+	// finalize step 1 delivers it. The job queue belongs to the jobs
+	// stage: it is the same drain, with a second source.
+	appended := s.drainInputs(run, false)
 
 	// Step 3: the AfterTurn hooks run on every turn, tool-free turns
 	// included.

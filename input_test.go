@@ -1024,3 +1024,48 @@ func (r *partialCallReader) Next() (poo.StreamEvent, error) {
 
 // Close releases the reader.
 func (r *partialCallReader) Close() error { return nil }
+
+// TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd covers the plan's
+// rule: a follow-up is delivered only when the run would settle
+// naturally, so a turn end that continues the run leaves it queued.
+func TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
+		{text: "the second answer"},
+		{text: "the third answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	hold := newNoteHold(tool)
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	hold.wait(t)
+	if _, err := s.Send("and then this", poo.FollowUp); err != nil {
+		t.Fatalf("sending the follow-up: %v", err)
+	}
+	hold.finish()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn", res.Reason)
+	}
+
+	reqs := tr.Requests()
+	if len(reqs) != 3 {
+		t.Fatalf("the run made %d requests, want 3: the call, the answer, the follow-up", len(reqs))
+	}
+	for _, m := range reqs[1].Messages {
+		if m.Origin == poo.OriginFollowUp {
+			t.Errorf("the second request already carries the follow-up %q", m.Text())
+		}
+	}
+	last := reqs[2].Messages
+	if got := last[len(last)-1]; got.Origin != poo.OriginFollowUp {
+		t.Errorf("the third request ends with a %q message, want the follow-up", got.Origin)
+	}
+}
