@@ -64,6 +64,10 @@ func bwrapArgs(poo, workdir, logPath string, args []string) []string {
 		"--symlink", "usr/lib", "/lib",
 		"--symlink", "usr/lib64", "/lib64",
 		"--ro-bind", "/etc", "/etc",
+		// /etc/resolv.conf is often a link into systemd-resolved's
+		// directory, so the resolver needs that directory too. It is
+		// skipped on a machine without it.
+		"--ro-bind-try", "/run/systemd/resolve", "/run/systemd/resolve",
 		"--proc", "/proc",
 		"--dev", "/dev",
 		"--tmpfs", "/tmp",
