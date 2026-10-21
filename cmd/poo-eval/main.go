@@ -293,11 +293,8 @@ func runCompare(args []string) int {
 
 	fmt.Fprintf(os.Stderr, "poo-eval: %d regression(s), %d improvement(s); comparison: %s\n",
 		len(cmp.Regressions), len(cmp.Improvements), filepath.Join(out, "comparison.md"))
-	if len(cmp.Regressions) > 0 {
-		// A regression is a signal for the stage's author, not a broken
-		// command, so the exit code stays zero.
-		return 0
-	}
+	// A regression is a signal for the stage's author, not a broken
+	// command, so the exit code stays zero.
 	return 0
 }
 
