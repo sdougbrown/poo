@@ -693,7 +693,10 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 	if r.opts.Sandbox == SandboxBwrap {
 		// Inside the sandbox the home directory and the tools' paths
 		// are the sandbox's own: nothing under the real home exists.
-		cmd.Env = append(cmd.Env, "HOME="+sandboxWork, "PATH=/usr/bin:/bin")
+		// The home is the sandbox's private /tmp, not the workdir, so
+		// what a tool installs there (pip --user, caches) stays out of
+		// the run's diff.
+		cmd.Env = append(cmd.Env, "HOME=/tmp", "PATH=/usr/bin:/bin")
 	}
 	// The child runs in its own process group, and the group is killed
 	// when the run's context ends. Killing only the process would leave

@@ -46,6 +46,7 @@ func TestTheBwrapSandboxHidesEverythingButTheWorkdir(t *testing.T) {
 if ls '`+repo+`' >/dev/null 2>&1; then echo repo=readable; else echo repo=hidden; fi
 if ls '`+home+`' >/dev/null 2>&1; then echo realhome=readable; else echo realhome=hidden; fi
 } > "$(dirname "$log")/seen.txt"
+mkdir -p "$HOME/.local/bin" && touch "$HOME/.local/bin/pytest"
 exit 0`, 1))
 
 	out := t.TempDir()
@@ -80,8 +81,13 @@ exit 0`, 1))
 	if strings.Contains(string(seen), "fix-a") {
 		t.Errorf("the run listed the task set: %q", seen)
 	}
-	if !strings.Contains(string(seen), "home=/work pwd=/work") {
-		t.Errorf("the run saw %q, want its home and working directory to be /work", seen)
+	if !strings.Contains(string(seen), "home=/tmp pwd=/work") {
+		t.Errorf("the run saw %q, want its home in /tmp and its working directory /work", seen)
+	}
+	// A tool that installs into the home directory, as pip --user does,
+	// leaves nothing in the workdir's diff.
+	if len(res.Metrics.UnexpectedFiles) != 0 {
+		t.Errorf("the run's home directory reached the diff: %v", res.Metrics.UnexpectedFiles)
 	}
 	if !strings.Contains(string(seen), "repo=hidden") {
 		t.Errorf("the run could read the repository %s: %q", repo, seen)

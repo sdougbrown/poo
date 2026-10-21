@@ -17,8 +17,10 @@ Run the set with:
 
 A baseline runs with `--sandbox bwrap`, which needs bubblewrap. Each run's
 poo process sees the system's read-only `/usr` and `/etc`, its own workdir
-at `/work`, its log directory at `/log`, and nothing else: no home
-directory, no repository and no task set. The network is shared, so the
+at `/work`, its log directory at `/log`, and a private `/tmp` that is
+also its `$HOME`, and nothing else: not the real home directory, the
+repository or the task set. What a tool installs into `$HOME`, such as
+`pip install --user`, stays out of the run's diff. The network is shared, so the
 model's endpoint is still reachable. `check.sh` runs outside the sandbox,
 because it needs the task set. Without the sandbox, a model that searches
 the filesystem can find the task set's checks, as minimax did in the
