@@ -54,9 +54,9 @@ func Open(path string) (*Log, error) {
 
 // Append writes one record.
 //
-// The context is checked before anything else: a write whose budget the
-// caller already spent is refused without consuming a sequence number,
-// so the log's numbering stays dense.
+// A context that is already done is refused before any write work,
+// without consuming a sequence number, so the log's numbering stays
+// dense. The closed-log check below is a precondition, not write work.
 func (l *Log) Append(ctx context.Context, rec poo.Record) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
