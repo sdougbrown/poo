@@ -36,6 +36,14 @@ type callPlan struct {
 	// complete reports that the call's arguments are a complete JSON
 	// object.
 	complete bool
+	// invalid reports that the call failed its validation, so it
+	// counts toward the invalid near key.
+	invalid bool
+	// prepared is the validated call, when it validated.
+	prepared Prepared
+	// prepareErr is the failure the validation produced, when it
+	// failed.
+	prepareErr error
 }
 
 // executeBatch runs a turn's tool calls.
@@ -63,6 +71,12 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 	s.startActivity(run)
 	defer s.endActivity(run)
 
+	// The repeat counters are asked about the calls in model order,
+	// before the batch runs: the counts depend on the order the model
+	// asked for the calls, and a batch that runs in parallel still has
+	// that order.
+	s.countRepeats(plans)
+
 	if s.batchIsParallel(plans) {
 		s.executeParallel(run, turn, plans)
 		// The calls that never started because of an interrupt get a
@@ -80,6 +94,37 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 			return
 		}
 		s.executeOne(run, turn, p)
+	}
+}
+
+// countRepeats records every call of a batch in the model order.
+//
+// The counts are the doom loop's, and they depend on the order the
+// model asked for the calls: a batch that runs in parallel still has
+// the model's order.
+//
+// A call that failed its validation counts toward the invalid near key,
+// because the same malformed call repeated is the same loop.
+func (s *Session) countRepeats(plans []callPlan) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.repeats == nil {
+		s.repeats = newRepeatCounter()
+	}
+	if s.repeatCounts == nil {
+		s.repeatCounts = map[string]repeatCounts{}
+	}
+	for _, p := range plans {
+		primary := s.primaryArgOf(p.call.Name)
+		exact := exactKeyOf(p.call.Name, p.call.Arguments)
+		near := nearKeyOf(p.call.Name, primary, p.call.Arguments, false)
+		if p.invalid {
+			exact = "invalid:" + p.call.Name
+			near = nearKeyOf(p.call.Name, primary, p.call.Arguments, true)
+		}
+		counts := s.repeats.count(p.call.Name, exact, near)
+		s.repeatCounts[p.handle] = counts
+		s.repeatOrder = append(s.repeatOrder, p.handle)
 	}
 }
 
@@ -113,6 +158,10 @@ func (s *Session) beginTurn(run *runState, turn int, plans []callPlan) {
 // A call in a truncated response is complete when its arguments parse as
 // a complete JSON object and pass Prepare. An incomplete call is
 // skipped with a visible result.
+//
+// The plan validates every call, so the repeat counters are asked about
+// the calls in the model order and a call that failed its validation is
+// counted toward the near key before the batch runs.
 func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated bool) []callPlan {
 	var plans []callPlan
 	for i, call := range calls {
@@ -120,6 +169,22 @@ func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated
 		plan := callPlan{handle: handle, call: call, index: i, complete: true}
 		if truncated && !isCompleteJSONObject(call.Arguments) {
 			plan.complete = false
+			plans = append(plans, plan)
+			continue
+		}
+		// The call is validated now, so the repeat counters know
+		// which calls failed before the batch runs.
+		tool, ok := s.opts.Tools[call.Name]
+		if !ok {
+			plans = append(plans, plan)
+			continue
+		}
+		prepared, err := tool.Prepare(call.Arguments, s.prepareEnv())
+		if err != nil {
+			plan.invalid = true
+			plan.prepareErr = err
+		} else {
+			plan.prepared = prepared
 		}
 		plans = append(plans, plan)
 	}
@@ -230,24 +295,24 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	}
 
 	// The call's outcome is decided by the core, not by the tool.
-	prepared, err := tool.Prepare(call.Arguments, s.prepareEnv())
-	if err != nil {
-		// A Prepare failure is a recoverable error: the model sees
-		// the message and may correct the call. It counts toward the
-		// near repeat key, because the same malformed call repeated is
-		// the same loop.
-		s.countPrepareFailure(call)
+	prepared := plan.prepared
+	if prepared == nil {
+		// The call failed its validation. The failure is a recoverable
+		// error: the model sees the message and may correct the call.
+		text := "the call was not prepared"
+		if plan.prepareErr != nil {
+			text = plan.prepareErr.Error()
+		}
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-			Text:    err.Error(),
+			Text:    text,
 			IsError: true,
 		}, OutcomeError)
 		return
 	}
 
-	// The repeat counters are asked about the call before it runs, so
-	// the counts the policy slot sees are the ones the plan names.
-	counts := s.countRepeat(call)
-	s.lastRepeatCounts = counts
+	// The repeat counters were asked about the call before the batch
+	// ran, so the counts the policy slot sees are the ones the plan
+	// names.
 
 	// The call has been issued, so it needs a result even if the run
 	// settles before it finishes.
@@ -484,15 +549,17 @@ func Fatalf(format string, args ...any) error {
 // canonical input, and a near key is the tool plus its primary
 // argument. A Prepare failure counts toward the near key, because the
 // same malformed call repeated is the same loop.
+//
+// The counters count consecutive repeats, and a call to another tool
+// does not break the streak: a run that reads the same file five times
+// with another tool in between is still a loop.
 type repeatCounter struct {
-	// exact counts the consecutive repeats of each exact key.
+	// exact counts the repeats of each exact key.
 	exact map[string]int
-	// near counts the consecutive repeats of each near key.
+	// near counts the repeats of each near key.
 	near map[string]int
-	// lastExact is the exact key of the last call.
-	lastExact string
-	// lastNear is the near key of the last call.
-	lastNear string
+	// lastTool is the tool the last call was for.
+	lastTool string
 }
 
 // repeatCounts is what a call's repeat counters hold.
@@ -511,50 +578,19 @@ func newRepeatCounter() *repeatCounter {
 
 // count records a call and returns the counts it had.
 //
-// A call to a different tool breaks the streak: the counters count
-// consecutive repeats.
-func (c *repeatCounter) count(exactKey, nearKey string) repeatCounts {
-	if exactKey != c.lastExact {
+// The counts are the number of times the model has made this call, and
+// the number of times it has made a call with the same primary
+// argument, since the last call to another tool.
+func (c *repeatCounter) count(tool, exactKey, nearKey string) repeatCounts {
+	if tool != c.lastTool {
+		// A call to another tool breaks the streak.
 		c.exact = map[string]int{}
-		c.lastExact = exactKey
-	}
-	if nearKey != c.lastNear {
 		c.near = map[string]int{}
-		c.lastNear = nearKey
+		c.lastTool = tool
 	}
 	c.exact[exactKey]++
 	c.near[nearKey]++
 	return repeatCounts{exact: c.exact[exactKey], near: c.near[nearKey]}
-}
-
-// countRepeat records a call and returns the repeat counts it had.
-//
-// The counts are the doom loop's: an exact key is the tool plus its
-// canonical arguments, and a near key is the tool plus its primary
-// argument.
-func (s *Session) countRepeat(call ToolCall) repeatCounts {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.repeats == nil {
-		s.repeats = newRepeatCounter()
-	}
-	primary := s.primaryArgOf(call.Name)
-	return s.repeats.count(exactKeyOf(call.Name, call.Arguments), nearKeyOf(call.Name, primary, call.Arguments, false))
-}
-
-// countPrepareFailure records a call that failed its validation.
-//
-// The failure counts toward the near key, so the same malformed call
-// repeated is caught.
-func (s *Session) countPrepareFailure(call ToolCall) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.repeats == nil {
-		s.repeats = newRepeatCounter()
-	}
-	primary := s.primaryArgOf(call.Name)
-	near := nearKeyOf(call.Name, primary, call.Arguments, true)
-	s.repeats.count("invalid:"+call.Name, near)
 }
 
 // primaryArgOf returns the name of a tool's primary argument.

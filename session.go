@@ -42,9 +42,15 @@ type Session struct {
 	// repeats counts the consecutive repeats of a call, for the doom
 	// loop.
 	repeats *repeatCounter
-	// lastRepeatCounts are the repeat counts of the call that ran
-	// last. The policy slot reads them when it is asked about a call.
-	lastRepeatCounts repeatCounts
+	// repeatCounts are the repeat counts of each call, by handle.
+	//
+	// The counts are per call, so a batch that runs in parallel does
+	// not race over them: the counts of the call the core is asking
+	// about are the ones it wrote.
+	repeatCounts map[string]repeatCounts
+	// repeatOrder is the handles the calls were counted in, so the
+	// last call's counts can be named without a map's random order.
+	repeatOrder []string
 
 	// run is the active run, nil when the session is idle.
 	run *runState
@@ -402,6 +408,52 @@ func (s *Session) MessageIDs() *MessageIDs { return s.opts.MessageIDs }
 
 // Events returns the events the session published, in order.
 func (s *Session) Events() []Event { return s.events.events() }
+
+// RepeatCounts returns the repeat counts of the call that ran last.
+//
+// The counts are the doom loop's: the exact count is how many times the
+// model made this exact call, and the near count is how many times it
+// made a call with the same primary argument. The policy slot reads
+// them when it is asked about a call.
+func (s *Session) RepeatCounts() RepeatCounts {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastRepeatCountsLocked()
+}
+
+// RepeatCountsFor returns the repeat counts of one call.
+//
+// A handle that was never counted has no counts.
+func (s *Session) RepeatCountsFor(handle string) RepeatCounts {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	counts, ok := s.repeatCounts[handle]
+	if !ok {
+		return RepeatCounts{}
+	}
+	return RepeatCounts{Exact: counts.exact, Near: counts.near}
+}
+
+// lastRepeatCountsLocked returns the repeat counts of the call that ran
+// last.
+//
+// The caller holds the session's lock.
+func (s *Session) lastRepeatCountsLocked() RepeatCounts {
+	if len(s.repeatOrder) == 0 {
+		return RepeatCounts{}
+	}
+	counts := s.repeatCounts[s.repeatOrder[len(s.repeatOrder)-1]]
+	return RepeatCounts{Exact: counts.exact, Near: counts.near}
+}
+
+// RepeatCounts are the repeat counters of one call.
+type RepeatCounts struct {
+	// Exact is how many times the model made this exact call.
+	Exact int
+	// Near is how many times the model made a call with the same
+	// primary argument.
+	Near int
+}
 
 // runSessionStart runs the session-start hooks.
 //
