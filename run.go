@@ -242,6 +242,9 @@ func (s *Session) loop(run *runState) []candidate {
 	for {
 		// A cancellation of the run's own context ends the run.
 		if err := run.ctx.Err(); err != nil {
+			if cancelledByFinalize(run) {
+				return nil
+			}
 			return []candidate{newCandidate(ReasonCancelled, cancelDetail(err))}
 		}
 
@@ -282,6 +285,9 @@ func (s *Session) loop(run *runState) []candidate {
 			if s.interruptPending(run) {
 				s.interruptedActivityTurn(run, turn, resp, false)
 				continue
+			}
+			if cancelledByFinalize(run) {
+				return nil
 			}
 			reason, detail, serr := s.settleForError(err)
 			if serr != nil {
@@ -724,6 +730,12 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 		"output_tokens":     usage.OutputTokens,
 		"cache_read_tokens": usage.CacheReadTokens,
 	})
+}
+
+// cancelledByFinalize reports that the run's context ended because the
+// run is being finalized, which is never a cancelled candidate.
+func cancelledByFinalize(run *runState) bool {
+	return context.Cause(run.ctx) == errFinalizing
 }
 
 // cancelDetail explains a cancelled settle. A deadline has its own
