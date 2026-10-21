@@ -280,7 +280,7 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 // run that landed on it would report the earlier run's metrics. The
 // --force option clears the directory instead.
 func (r *Runner) prepareOut() error {
-	runsDir := filepath.Join(r.opts.Out, "runs")
+	runsDir := filepath.Join(r.opts.Out, runsDirName)
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -309,7 +309,7 @@ func (r *Runner) newRunDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(r.opts.Out, "runs", "run-"+name)
+	dir := filepath.Join(r.opts.Out, runsDirName, "run-"+name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("eval: creating %s: %w", dir, err)
 	}
@@ -458,7 +458,7 @@ func (r *Runner) portableText(text, workRoot string, j job) string {
 	if text == "" {
 		return text
 	}
-	workdir := filepath.Join(workRoot, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed), "work")
+	workdir := jobWorkdir(workRoot, j)
 	pairs := []string{workdir, "$WORKDIR", workRoot, "$WORKROOT"}
 	if out, err := filepath.Abs(r.opts.Out); err == nil {
 		pairs = append(pairs, out, "$OUT")
@@ -473,18 +473,18 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 
 	// The report holds the log and the check's output. The workdir is
 	// scratch, and lives under the work root, which is never /tmp.
-	runDir := filepath.Join(runsDir, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
+	runDir := jobDir(runsDir, j)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		result.Error = fmt.Sprintf("creating %s: %v", runDir, err)
 		return result
 	}
 
-	seedRoot := filepath.Join(workRoot, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed))
+	seedRoot := jobDir(workRoot, j)
 	if err := os.MkdirAll(seedRoot, 0o755); err != nil {
 		result.Error = fmt.Sprintf("creating %s: %v", seedRoot, err)
 		return result
 	}
-	workdir := filepath.Join(seedRoot, "work")
+	workdir := jobWorkdir(workRoot, j)
 	pristine := filepath.Join(seedRoot, "pristine")
 	if !r.opts.KeepWorkdirs {
 		// The run's own scratch goes. The directories above it do not:

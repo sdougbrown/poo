@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -241,12 +240,12 @@ type transcript struct {
 
 // findTranscripts returns the transcripts under the results directory.
 //
-// A transcript is a session.jsonl under a run directory. The last three
-// components of its path name the run: the task, the model and the
-// seed. The directories above them are the harness's own, and their
-// names do not matter.
+// A transcript is a session.jsonl under a run directory, laid out the way
+// the runner lays it out (see parseRunDir). A runs directory that holds
+// files but no transcript is an error, so a changed layout cannot pass
+// for an empty set of verdicts.
 func (j *Judge) findTranscripts() ([]transcript, error) {
-	runsDir := filepath.Join(j.opts.ResultsDir, "runs")
+	runsDir := filepath.Join(j.opts.ResultsDir, runsDirName)
 	var out []transcript
 	err := filepath.WalkDir(runsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -258,24 +257,14 @@ func (j *Judge) findTranscripts() ([]transcript, error) {
 		if d.IsDir() || d.Name() != "session.jsonl" {
 			return nil
 		}
-		rel, err := filepath.Rel(runsDir, filepath.Dir(path))
-		if err != nil {
-			return err
-		}
-		parts := strings.Split(filepath.ToSlash(rel), "/")
-		if len(parts) < 3 {
-			return nil
-		}
-		// The seed's directory names the seed, so a session.jsonl
-		// anywhere else is not a run's transcript.
-		seed, ok := seedFromName(parts[len(parts)-1])
+		task, model, seed, ok := parseRunDir(runsDir, filepath.Dir(path))
 		if !ok {
 			return nil
 		}
 		out = append(out, transcript{
 			path:  path,
-			task:  parts[len(parts)-3],
-			model: parts[len(parts)-2],
+			task:  task,
+			model: model,
 			seed:  seed,
 		})
 		return nil
@@ -285,6 +274,12 @@ func (j *Judge) findTranscripts() ([]transcript, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("eval: reading %s: %w", runsDir, err)
+	}
+	if len(out) == 0 {
+		if entries, err := os.ReadDir(runsDir); err == nil && len(entries) > 0 {
+			return nil, fmt.Errorf("eval: %s holds files but no run's transcript; "+
+				"the run directories should be <task>/<model>/%s<N>/session.jsonl", runsDir, seedDirPrefix)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].task != out[j].task {
@@ -821,22 +816,6 @@ func normalizePathologies(names []string) []Pathology {
 // verdictFileName returns the file name a verdict is written under.
 func verdictFileName(v Verdict) string {
 	return fmt.Sprintf("%s__%s__seed%d.json", v.Task, v.Model, v.Seed)
-}
-
-// seedFromName reads the seed out of a directory name.
-//
-// The name is "seed" and a number. A name that is not that shape names
-// no seed.
-func seedFromName(name string) (int, bool) {
-	rest, ok := strings.CutPrefix(name, "seed")
-	if !ok {
-		return 0, false
-	}
-	n, err := strconv.Atoi(rest)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
 }
 
 // truncate shortens a string to n characters.
