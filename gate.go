@@ -268,14 +268,16 @@ func (s *Session) rebaseEstimate() {
 //
 // The ratio of the serialized request's characters to the reported input
 // tokens becomes the model's characters-per-token, clamped to the
-// plan's bounds and kept for the session.
-func (s *Session) observeUsage(report *UsageReport) {
+// plan's bounds and kept for the session. The characters are the
+// request's own, not the view's now: the view also holds the reply the
+// request produced, which the report does not count.
+func (s *Session) observeUsage(report *UsageReport, requestChars int) {
 	if report == nil || report.InputTokens <= 0 {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.est.observe(report.InputTokens, s.historyCharsLocked())
+	s.est.observe(report.InputTokens, requestChars)
 }
 
 // historyCharsLocked returns the serialized size of the model's view.

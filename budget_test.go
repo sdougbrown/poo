@@ -501,3 +501,36 @@ func TestTheCalibrationIsClamped(t *testing.T) {
 		t.Errorf("the second request's max_tokens is %d, want at most %d", got, want)
 	}
 }
+
+// TestTheEstimateCountsTheReplyTheUsageReportLeftOut covers the plan's
+// rule that between reports the estimate adds everything appended since,
+// assistant output included. The usage report counts the request, which
+// does not hold the reply it produced.
+func TestTheEstimateCountsTheReplyTheUsageReportLeftOut(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{
+			usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 2000},
+			text:  strings.Repeat("a", 7000),
+			calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
+		},
+		{text: "the second answer"},
+	})
+	tool := &echoTool{result: "ok"}
+
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	opts.ContextLimit = 6000
+
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	reqs := tr.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("the transport got %d requests, want 2", len(reqs))
+	}
+	// The reply is at least 3500 tokens at the clamped ratio, so with the
+	// reported 1000 the estimate is about 4500 and under 1500 tokens of
+	// room are left.
+	if reqs[1].MaxTokens > 1500 {
+		t.Errorf("the second request's max_tokens is %d, want under 1500: the reply counts toward the estimate", reqs[1].MaxTokens)
+	}
+}

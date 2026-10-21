@@ -290,7 +290,7 @@ func (s *Session) loop(run *runState) []candidate {
 			// The request failed, but the usage it produced is still
 			// written: every request gets a usage record.
 			if resp != nil && resp.usage != nil {
-				s.writeUsage(run, turn, resp.usage)
+				s.writeUsage(run, turn, resp.usage, resp.requestChars)
 			}
 			return []candidate{newCandidate(reason, detail)}
 		}
@@ -330,7 +330,7 @@ func (s *Session) loop(run *runState) []candidate {
 		}
 
 		if resp.usage != nil {
-			s.writeUsage(run, turn, resp.usage)
+			s.writeUsage(run, turn, resp.usage, resp.requestChars)
 		}
 
 		// A truncated response: the complete calls run, and the
@@ -634,6 +634,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	s.mu.Lock()
 	messages := CloneMessages(s.history)
 	tools := s.toolSpecs()
+	requestChars := s.historyCharsLocked()
 	s.mu.Unlock()
 
 	// The request runs under the run's activity context, so an
@@ -658,6 +659,9 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	// still streaming.
 	ids := s.messageIDs
 	resp, err := readResponse(actCtx, reader, ids, run.id, turn, run.requests, s.opts.Sink)
+	if resp != nil {
+		resp.requestChars = requestChars
+	}
 	if err != nil && resp != nil && resp.usage == nil {
 		if reporter, ok := reader.(UsageReporter); ok {
 			if usage := reporter.ReportUsage(); usage != nil {
@@ -684,11 +688,11 @@ func (s *Session) toolSpecs() []ToolSpec {
 // The accounting of a request is worth less than the record that says
 // the run ended, so a refused write is dropped rather than ending the
 // run.
-func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport) {
+func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, requestChars int) {
 	s.mu.Lock()
 	run.tokens += usage.InputTokens + usage.OutputTokens
 	s.mu.Unlock()
-	s.observeUsage(usage)
+	s.observeUsage(usage, requestChars)
 	s.writeBestEffort(run.ctx, &Usage{
 		RecordMeta:      NewRecordMeta("usage"),
 		RunID:           run.id,
@@ -794,6 +798,9 @@ type response struct {
 	// message is recorded, so a delivery note may name a message that
 	// is still streaming.
 	messageID string
+	// requestChars is the serialized size of the view the request sent,
+	// which is what the endpoint's input token count measures.
+	requestChars int
 }
 
 // collect fills the response with what the stream carried.
