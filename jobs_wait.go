@@ -58,10 +58,16 @@ func (s *Session) WaitJobs(ctx context.Context) error {
 			}
 		}
 		closed := s.closed
+		broken := s.broken
 		s.mu.Unlock()
 
 		if closed {
 			return ErrSessionClosed
+		}
+		if broken {
+			// A broken session cannot record a wake or deliver a
+			// result: waiting for one would never end.
+			return ErrSessionBroken
 		}
 		if running == 0 && pending == 0 && !active {
 			return nil

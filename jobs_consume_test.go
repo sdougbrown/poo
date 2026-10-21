@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -252,6 +253,39 @@ func TestWaitJobsWaitsForTheRunningJobs(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("the wait did not end after the job ended")
+	}
+}
+
+// TestWaitJobsEndsWhenTheSessionIsBroken covers the broken session: a
+// queued result cannot wake a run, so the wait reports the break instead
+// of waiting for a wake that cannot happen.
+func TestWaitJobsEndsWhenTheSessionIsBroken(t *testing.T) {
+	sink := &failingSink{failRecord: "input.delivered"}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.ReleaseAll()
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting"},
+	})
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonStoreError {
+		t.Fatalf("the run settled %q, want store_error", res.Reason)
+	}
+	if queued := s.QueuedJobResults(); queued == 0 {
+		t.Fatal("the broken session has no queued job result")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err = s.WaitJobs(ctx)
+	if !errors.Is(err, poo.ErrSessionBroken) {
+		t.Fatalf("WaitJobs on the broken session returned %v with queued=%d held=%v; want ErrSessionBroken", err, s.QueuedJobResults(), s.HeldJobs())
 	}
 }
 
