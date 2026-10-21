@@ -144,91 +144,11 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		Messages: len(req.Messages),
 	}
 
-	// The timeout bounds the whole request, streaming included, so the
-	// context is created before the request goes out.
-	var cancel context.CancelFunc
-	if t.cfg.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.BaseURL), bytes.NewReader(body))
+	reader, err := t.open(ctx, body)
 	if err != nil {
-		if cancel != nil {
-			cancel()
-		}
-		return nil, rendered, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
+		return nil, rendered, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
-	if t.cfg.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
-	}
-
-	// The request is timed from the moment it goes out, so the time to
-	// the first token includes the endpoint's own latency.
-	started := time.Now()
-
-	resp, err := t.http.Do(httpReq)
-	if err != nil {
-		// The failure is classified before the request's context is
-		// released, because releasing it would replace the failure with
-		// the context's own error.
-		perr := classifyTransportError(ctx, err)
-		if cancel != nil {
-			cancel()
-		}
-		return nil, rendered, perr
-	}
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		if cancel != nil {
-			cancel()
-		}
-		return nil, rendered, classifyStatus(resp)
-	}
-
-	// Some servers answer a failed request with a 200 and a JSON error
-	// body instead of the SSE stream. The first byte tells the two apart,
-	// so the stream is not buffered and the time to the first token
-	// measures the endpoint's latency rather than the reader's.
-	br := bufio.NewReader(resp.Body)
-	first, err := peekFirstByte(br)
-	if err != nil {
-		resp.Body.Close()
-		if cancel != nil {
-			cancel()
-		}
-		return nil, rendered, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
-	}
-	if first == '{' {
-		defer resp.Body.Close()
-		if cancel != nil {
-			cancel()
-		}
-		body, _ := io.ReadAll(br)
-		if kind, msg, code, ok := errorInBody(body); ok {
-			return nil, rendered, &poo.ProviderError{
-				Kind:    kind,
-				Message: msg,
-				Code:    code,
-				Status:  resp.StatusCode,
-			}
-		}
-		return nil, rendered, &poo.ProviderError{
-			Kind:    poo.ProviderKindServer,
-			Message: "the endpoint returned a body that is not a stream",
-			Status:  resp.StatusCode,
-		}
-	}
-
-	return &streamReader{
-		body:    resp.Body,
-		scanner: bufio.NewScanner(br),
-		parser:  newParser(t.cfg.ToolsMode),
-		ctx:     ctx,
-		cancel:  cancel,
-		started: started,
-	}, rendered, nil
+	return reader, rendered, nil
 }
 
 // Fork sends a body that is byte-identical to the snapshot, apart from
@@ -250,16 +170,34 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		return nil, err
 	}
 
+	reader, err := t.open(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	return reader, nil
+}
+
+// open sends a serialized body and returns the response stream.
+//
+// Stream and Fork both go through it, so the timeout, the headers, the
+// error classification and the time to the first token mean the same
+// thing for both.
+func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error) {
+	// The timeout bounds the whole request, streaming included, so the
+	// context is created before the request goes out.
 	var cancel context.CancelFunc
 	if t.cfg.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
 	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.BaseURL), bytes.NewReader(body))
-	if err != nil {
+	release := func() {
 		if cancel != nil {
 			cancel()
 		}
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.BaseURL), bytes.NewReader(body))
+	if err != nil {
+		release()
 		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -268,41 +206,44 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		httpReq.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
 	}
 
+	// The request is timed from the moment it goes out, so the time to
+	// the first token includes the endpoint's own latency.
+	started := time.Now()
+
 	resp, err := t.http.Do(httpReq)
 	if err != nil {
+		// The failure is classified before the request's context is
+		// released, because releasing it would replace the failure with
+		// the context's own error.
 		perr := classifyTransportError(ctx, err)
-		if cancel != nil {
-			cancel()
-		}
+		release()
 		return nil, perr
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		// The body is read before the context is released: releasing
-		// it aborts the read and leaves an error with no message.
-		perr := classifyStatus(resp)
-		if cancel != nil {
-			cancel()
-		}
-		return nil, perr
+		release()
+		return nil, classifyStatus(resp)
 	}
 
+	// Some servers answer a failed request with a 200 and a JSON error
+	// body instead of the SSE stream. The first byte tells the two apart,
+	// so the stream is not buffered and the time to the first token
+	// measures the endpoint's latency rather than the reader's.
 	br := bufio.NewReader(resp.Body)
 	first, err := peekFirstByte(br)
 	if err != nil {
 		resp.Body.Close()
-		if cancel != nil {
-			cancel()
-		}
+		release()
 		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 	if first == '{' {
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(br, 1<<20))
-		if cancel != nil {
-			cancel()
+		release()
+		errBody, err := io.ReadAll(io.LimitReader(br, 1<<20))
+		if err != nil {
+			return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 		}
-		if kind, msg, code, ok := errorInBody(body); ok {
+		if kind, msg, code, ok := errorInBody(errBody); ok {
 			return nil, &poo.ProviderError{
 				Kind:    kind,
 				Message: msg,
@@ -323,7 +264,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		parser:  newParser(t.cfg.ToolsMode),
 		ctx:     ctx,
 		cancel:  cancel,
-		started: time.Now(),
+		started: started,
 	}, nil
 }
 
@@ -624,7 +565,16 @@ func convertMessage(m poo.Message) (chatMessage, error) {
 	var text strings.Builder
 	var calls []chatToolCall
 	for _, c := range m.Content {
+		if c.Provider != nil {
+			if err := checkProviderBlock(c.Provider); err != nil {
+				return chatMessage{}, err
+			}
+		}
 		switch c.Kind {
+		case poo.ContentProvider:
+			// The block's payload is opaque and has no wire field here.
+			// checkProviderBlock has already refused a required block that
+			// belongs to another API, so what is left is omitted.
 		case poo.ContentText:
 			text.WriteString(c.Text)
 		case poo.ContentThinking:
@@ -649,6 +599,23 @@ func convertMessage(m poo.Message) (chatMessage, error) {
 	cm.Content = text.String()
 	cm.ToolCalls = calls
 	return cm, nil
+}
+
+// checkProviderBlock applies the foreign-block rule to one opaque block.
+//
+// A block for another API is omitted from the request unless it is
+// required, and a required one fails the request. A Chat Completions
+// block is this transport's own, but the wire has no field that carries
+// opaque data, so it is omitted too.
+func checkProviderBlock(p *poo.ProviderBlock) error {
+	if p.API != poo.APIChatCompletions && p.Required {
+		return &poo.ProviderError{
+			Kind: poo.ProviderKindSessionIncompatible,
+			Message: fmt.Sprintf("the history holds a required %q block (%s) that Chat Completions cannot carry",
+				p.Type, p.API),
+		}
+	}
+	return nil
 }
 
 // classifyStatus turns a non-200 response into a provider error.

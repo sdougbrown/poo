@@ -38,6 +38,10 @@ const (
 	// ProviderKindOutputTruncated means the provider stopped on the
 	// output-token limit.
 	ProviderKindOutputTruncated ProviderKind = "output_truncated"
+	// ProviderKindSessionIncompatible means the history holds a required
+	// provider block that belongs to another wire API, so this transport
+	// cannot make the request.
+	ProviderKindSessionIncompatible ProviderKind = "session_incompatible"
 )
 
 // ProviderError is a failure a provider reported.
