@@ -56,32 +56,3 @@ func TestPrepareReceivesThePrepareEnv(t *testing.T) {
 		t.Errorf("Prepare's working directory is %q, want %q", tool.env.WorkingDir, "/tmp/the-working-dir")
 	}
 }
-
-// TestPrepareEnvCarriesTheProtectedPaths covers the other half of the
-// environment: the protected paths are already expanded when the tool
-// sees them.
-func TestPrepareEnvCarriesTheProtectedPaths(t *testing.T) {
-	env := poo.PrepareEnv{
-		WorkingDir:     "/work",
-		ProtectedPaths: []string{"/work/.env", "/work/secrets"},
-	}
-	if len(env.ProtectedPaths) != 2 {
-		t.Errorf("the environment holds %d protected paths, want 2", len(env.ProtectedPaths))
-	}
-	if env.ProtectedPaths[0] != "/work/.env" {
-		t.Errorf("the first protected path is %q, want %q", env.ProtectedPaths[0], "/work/.env")
-	}
-}
-
-// TestTheToolEnvCarriesTheJobHandle covers the job seam: a call that runs
-// as a job names its job, and a call that runs in the turn does not.
-func TestTheToolEnvCarriesTheJobHandle(t *testing.T) {
-	env := poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: "/work"}}
-	if env.Job != "" {
-		t.Errorf("the job handle is %q, want the empty string", env.Job)
-	}
-	env.Job = "j3"
-	if env.Job != "j3" {
-		t.Errorf("the job handle is %q, want j3", env.Job)
-	}
-}

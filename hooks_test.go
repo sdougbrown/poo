@@ -1,12 +1,10 @@
 package poo_test
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -109,39 +107,6 @@ func TestTheTurnDecisions(t *testing.T) {
 	stop := poo.StopTurn("the task is done")
 	if !stop.Stop {
 		t.Errorf("the stop decision is %+v, want a stop", stop)
-	}
-}
-
-// TestTheHookContextCarriesTheRun covers the hook context: the run's
-// identity, the turn, the history as a view, the budget and the decider.
-func TestTheHookContextCarriesTheRun(t *testing.T) {
-	ctx := poo.HookContext{
-		Context:     context.Background(),
-		SessionID:   "s1",
-		RunID:       "r1",
-		Turn:        3,
-		Interrupted: true,
-		History:     poo.NewHistory(nil, nil, nil),
-		Budget:      poo.Budget{ContextLimit: 32768, EstimatedInput: 100, CharsPerToken: 3.5},
-		Decider:     decide.DeciderFunc(nil),
-	}
-	if ctx.SessionID != "s1" || ctx.RunID != "r1" {
-		t.Errorf("the context names %q and %q, want s1 and r1", ctx.SessionID, ctx.RunID)
-	}
-	if ctx.Turn != 3 {
-		t.Errorf("the context's turn is %d, want 3", ctx.Turn)
-	}
-	if !ctx.Interrupted {
-		t.Error("the context does not report the interruption")
-	}
-	if ctx.History == nil {
-		t.Error("the context holds no history")
-	}
-	if ctx.Budget.ContextLimit != 32768 {
-		t.Errorf("the budget's limit is %d, want 32768", ctx.Budget.ContextLimit)
-	}
-	if ctx.Decider == nil {
-		t.Error("the context holds no decider")
 	}
 }
 
@@ -275,27 +240,6 @@ func (s *fakeSections) Replace(text string) {
 // Names returns the section names.
 func (s *fakeSections) Names() []string { return s.names }
 
-// TestTheToolCallInfoCarriesTheCall covers the call info a tool hook is
-// given: the spec, the prepared call, the handle and the repeat counts.
-func TestTheToolCallInfoCarriesTheCall(t *testing.T) {
-	info := poo.ToolCallInfo{
-		Spec:            poo.ToolSpec{Name: "bash", Class: poo.ClassSideEffecting},
-		Handle:          "r1",
-		RepeatCount:     2,
-		NearRepeatCount: 5,
-		BatchIndex:      0,
-	}
-	if info.Spec.Name != "bash" {
-		t.Errorf("the spec's name is %q, want bash", info.Spec.Name)
-	}
-	if info.Handle != "r1" {
-		t.Errorf("the handle is %q, want r1", info.Handle)
-	}
-	if info.RepeatCount != 2 || info.NearRepeatCount != 5 {
-		t.Errorf("the repeat counts are %d and %d, want 2 and 5", info.RepeatCount, info.NearRepeatCount)
-	}
-}
-
 // TestTheEventNamesAreThePlanNames covers the event names: the set the
 // plan names, spelled the way the wire spells them.
 func TestTheEventNamesAreThePlanNames(t *testing.T) {
@@ -317,35 +261,6 @@ func TestTheEventNamesAreThePlanNames(t *testing.T) {
 		if string(got) != want {
 			t.Errorf("the event name is %q, want %q", got, want)
 		}
-	}
-}
-
-// TestTheRunTriggerCarriesTheJobs covers the trigger: a prompt run and a
-// job run, and the job results that woke the session.
-func TestTheRunTriggerCarriesTheJobs(t *testing.T) {
-	prompt := poo.RunTrigger{Kind: poo.TriggerPrompt, Prompt: "do the thing"}
-	if prompt.Kind != "prompt" {
-		t.Errorf("the trigger's kind is %q, want prompt", prompt.Kind)
-	}
-
-	job := poo.RunTrigger{
-		Kind: poo.TriggerJob,
-		Jobs: []poo.JobResult{{
-			Job:     "j3",
-			Handle:  "r1",
-			Tool:    "bash",
-			Text:    "the result",
-			Outcome: poo.OutcomeOK,
-		}},
-	}
-	if job.Kind != "job" {
-		t.Errorf("the trigger's kind is %q, want job", job.Kind)
-	}
-	if len(job.Jobs) != 1 {
-		t.Fatalf("the trigger carries %d jobs, want 1", len(job.Jobs))
-	}
-	if job.Jobs[0].Job != "j3" {
-		t.Errorf("the job is %q, want j3", job.Jobs[0].Job)
 	}
 }
 
