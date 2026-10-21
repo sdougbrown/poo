@@ -35,6 +35,8 @@ type fakeResponse struct {
 	text string
 	// calls are the tool calls the model asked for.
 	calls []poo.ToolCall
+	// thinking is the assistant's reasoning, if any.
+	thinking string
 	// finish is why the model stopped.
 	finish poo.FinishReason
 	// err is the failure the request returns, if any.
@@ -94,6 +96,12 @@ func (f *fakeTransport) requestsOf() []poo.ChatRequest {
 // events turns a response into the events a stream yields.
 func (r fakeResponse) events() []poo.StreamEvent {
 	var events []poo.StreamEvent
+	if r.thinking != "" {
+		events = append(events, poo.StreamEvent{
+			Kind:  "delta",
+			Delta: &poo.Delta{Kind: "thinking", Text: r.thinking},
+		})
+	}
 	if r.text != "" {
 		events = append(events, poo.StreamEvent{
 			Kind:  "delta",

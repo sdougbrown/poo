@@ -181,14 +181,16 @@ func renderDeliveryNote(note *DeliveryNote, message Message) string {
 	if note == nil {
 		return ""
 	}
+	if note.UpToChars <= 0 {
+		// Nothing was presented, and that is worth saying even when
+		// the reply itself was empty.
+		return "[The user did not see or hear any of your reply " + note.MessageID + ".]"
+	}
 	text := message.Text()
 	runes := []rune(text)
 	if note.UpToChars >= len(runes) {
 		// The whole reply was presented, so there is nothing to say.
 		return ""
-	}
-	if note.UpToChars <= 0 {
-		return "[The user did not see or hear any of your reply " + note.MessageID + ".]"
 	}
 	shown := runes[:note.UpToChars]
 	// The quoted part is the last eighty code points of what the user

@@ -279,7 +279,11 @@ func (s *Session) loop(run *runState) []candidate {
 		// The model's response is part of the history whether or not
 		// it asked for tool calls.
 		assistant := Message{Role: RoleAssistant, Content: resp.content, Origin: OriginModel}
-		assistant.ID = s.messageIDs.Next()
+		if resp.messageID != "" {
+			assistant.ID = resp.messageID
+		} else {
+			assistant.ID = s.messageIDs.Next()
+		}
 		for _, call := range resp.calls {
 			assistant.Content = append(assistant.Content, ContentBlock{
 				Kind:       ContentToolCall,
@@ -622,7 +626,11 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	defer reader.Close()
 
 	s.transition(StateStreaming)
-	resp, err := readResponse(actCtx, reader, run.id, turn, run.requests, s.opts.Sink)
+	// The message id is assigned at the stream's first delta, before the
+	// message is recorded: a delivery note may name a message that is
+	// still streaming.
+	ids := s.messageIDs
+	resp, err := readResponse(actCtx, reader, ids, run.id, turn, run.requests, s.opts.Sink)
 	if err != nil && resp != nil && resp.usage == nil {
 		if reporter, ok := reader.(UsageReporter); ok {
 			if usage := reporter.ReportUsage(); usage != nil {
@@ -734,6 +742,12 @@ type response struct {
 	finish FinishReason
 	// usage is the token accounting the endpoint reported, if any.
 	usage *UsageReport
+	// messageID is the id the assistant message carries.
+	//
+	// The id is assigned at the stream's first delta, before the
+	// message is recorded, so a delivery note may name a message that
+	// is still streaming.
+	messageID string
 }
 
 // collect fills the response with what the stream carried.
@@ -777,7 +791,7 @@ type callSlot struct {
 //
 // A stream that fails part way through returns the response it managed to
 // read along with the failure, so the caller can still write the usage.
-func readResponse(ctx context.Context, reader StreamReader, runID string, turn, request int, sink RecordSink) (*response, error) {
+func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, runID string, turn, request int, sink RecordSink) (*response, error) {
 	resp := &response{finish: FinishStop}
 	var text strings.Builder
 	var thinking strings.Builder
@@ -806,6 +820,11 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 		case "delta":
 			if ev.Delta == nil {
 				continue
+			}
+			// The message id is assigned at the first delta, before
+			// the message is recorded.
+			if resp.messageID == "" && ids != nil {
+				resp.messageID = ids.Next()
 			}
 			switch ev.Delta.Kind {
 			case "thinking":
