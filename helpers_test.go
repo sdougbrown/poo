@@ -320,8 +320,22 @@ func newTestSession(t *testing.T, opts poo.Options, fns ...poo.Option) *poo.Sess
 	if err != nil {
 		t.Fatalf("building the session: %v", err)
 	}
+	t.Cleanup(func() { checkTransitions(t, s) })
 	t.Cleanup(func() { s.Close() })
 	return s
+}
+
+// checkTransitions fails the test for every state change the session made
+// that the transition table does not list.
+func checkTransitions(t *testing.T, s *poo.Session) {
+	t.Helper()
+	from := poo.StateIdle
+	for _, to := range s.Transitions() {
+		if !poo.IsLegal(from, to) {
+			t.Errorf("the session moved %s -> %s, which the transition table does not list", from, to)
+		}
+		from = to
+	}
 }
 
 // runSession prompts a session and waits for the run to settle.

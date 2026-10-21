@@ -1032,11 +1032,11 @@ func TestTheTransitionTableIsClosed(t *testing.T) {
 		poo.StateSettling,
 		poo.StateSettled,
 	}
-	// The settled state goes nowhere: a settled run does not move
-	// again.
+	// A settled run does not move again: the only way out of settled is
+	// the next run's first request.
 	for _, to := range states {
-		if poo.IsLegal(poo.StateSettled, to) {
-			t.Errorf("the settled state may move to %q, want nowhere", to)
+		if poo.IsLegal(poo.StateSettled, to) != (to == poo.StateRequesting) {
+			t.Errorf("the settled state's move to %q is %v, want only requesting", to, poo.IsLegal(poo.StateSettled, to))
 		}
 	}
 	// Every state that can hold a run may settle.
@@ -1156,5 +1156,33 @@ func TestATruncatedTurnWhoseCallsAreAllIncompleteReachesBeforeSettle(t *testing.
 	}
 	if n := len(tr.Requests()); n != 1 {
 		t.Errorf("the run made %d requests, want 1", n)
+	}
+}
+
+// TestEveryTransitionOfAMultiRunSessionIsInTheTable covers the plan's
+// rule that the table is the FSM: a session that runs twice takes
+// settled -> requesting, and every move it makes is listed.
+func TestEveryTransitionOfAMultiRunSessionIsInTheTable(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer"},
+	})
+	s := newTestSession(t, testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{}))
+	runSession(t, s, "first")
+	runSession(t, s, "second")
+
+	sawSecondRun := false
+	from := poo.StateIdle
+	for _, to := range s.Transitions() {
+		if !poo.IsLegal(from, to) {
+			t.Errorf("the session moved %s -> %s, which the table does not list", from, to)
+		}
+		if from == poo.StateSettled && to == poo.StateRequesting {
+			sawSecondRun = true
+		}
+		from = to
+	}
+	if !sawSecondRun {
+		t.Error("the session never moved from settled to requesting")
 	}
 }

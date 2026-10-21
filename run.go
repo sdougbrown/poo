@@ -86,6 +86,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		// record rather than as a failed call.
 		s.mu.Lock()
 		s.run = nil
+		s.transitionLocked(StateSettling)
 		s.transitionLocked(StateSettled)
 		s.lastResult = Result{Reason: ReasonStoreError, Detail: SettleDetail{
 			Source: "store",

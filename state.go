@@ -35,7 +35,10 @@ const (
 // legalStates lists, for each state, the states the session may move to.
 //
 // The table is the FSM: a transition that is not in it is a bug in the
-// core, and the transition function is the only place that moves.
+// core, and the transition function is the only place that moves. A
+// settled session takes a new prompt, so settled leads back to
+// requesting for the next run of a multi-run session. The tests check
+// every transition a session takes against the table.
 //
 // The waiting state is in the set for the jobs stage, and nothing
 // enters it yet.
@@ -47,7 +50,7 @@ var legalStates = map[State][]State{
 	StateCompacting: {StateRequesting, StateSettling},
 	StateWaiting:    {StateRequesting, StateCompacting, StateSettling},
 	StateSettling:   {StateSettled},
-	StateSettled:    {},
+	StateSettled:    {StateRequesting},
 }
 
 // IsLegal reports whether a session may move from one state to another.
