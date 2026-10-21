@@ -420,3 +420,13 @@ func TestThePreambleSaysCroppedOrElidedAsItWas(t *testing.T) {
 		t.Errorf("a whole transcript is described as summarized: %q", whole)
 	}
 }
+
+func TestTheJudgePayloadNamesTheRun(t *testing.T) {
+	// The judge's message names the task, the model and the seed, so a
+	// verdict can be read against the run it is about.
+	j := &Judge{}
+	payload := j.buildPayload(&Log{}, "the transcript", transcript{task: "fix-a", model: "m", seed: 2}, nil)
+	if payload.Task != "fix-a" || payload.Model != "m" || payload.Seed != 2 {
+		t.Errorf("the payload names task %q, model %q, seed %d; want fix-a, m, 2", payload.Task, payload.Model, payload.Seed)
+	}
+}

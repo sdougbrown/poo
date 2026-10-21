@@ -438,7 +438,7 @@ type judgePayload struct {
 // report then see the same numbers, and the judge's "agrees with check"
 // question has the check's real answer to compare against.
 func (j *Judge) buildPayload(log *Log, transcript string, t transcript, report *Report) judgePayload {
-	payload := judgePayload{Transcript: transcript}
+	payload := judgePayload{Task: t.task, Model: t.model, Seed: t.seed, Transcript: transcript}
 	if entry, ok := runEntry(report, t); ok {
 		payload.CheckPassed = entry.Success
 		payload.CheckOutput = entry.CheckOutput
