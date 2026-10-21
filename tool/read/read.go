@@ -151,7 +151,12 @@ func decodeStrict(raw json.RawMessage, into any) error {
 }
 
 // Call reads the file.
+//
+// The context is honoured: a cancelled run stops paying for the read.
 func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+	}
 	p, ok := in.(*prepared)
 	if !ok {
 		return poo.ToolResult{}, errors.New("read: prepared value is not a read call")
@@ -200,7 +205,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		cap = OutputCapMax
 	}
 
-	body, total, first, last, capped, err := readRange(f, p.offset, p.limit, cap)
+	body, total, first, last, capped, err := readRange(ctx, f, p.offset, p.limit, cap)
 	if err != nil {
 		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
 	}
@@ -227,7 +232,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 // The cap and the line cap are counted in characters, and a cut never
 // splits a rune. A line longer than the line cap is read to its end and
 // truncated, so a minified file is readable and costs a bounded buffer.
-func readRange(f *os.File, offset, limit, cap int) (string, int, int, int, bool, error) {
+func readRange(ctx context.Context, f *os.File, offset, limit, cap int) (string, int, int, int, bool, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", 0, 0, 0, false, err
 	}
@@ -243,6 +248,11 @@ func readRange(f *os.File, offset, limit, cap int) (string, int, int, int, bool,
 	room := cap
 
 	for {
+		// A cancelled run stops the scan: the model will never see the
+		// rest.
+		if err := ctx.Err(); err != nil {
+			return "", 0, 0, 0, false, err
+		}
 		text, eof, err := readLine(br, MaxLineChars)
 		if err != nil {
 			return "", 0, 0, 0, false, err

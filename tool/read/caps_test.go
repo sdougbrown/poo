@@ -60,28 +60,6 @@ func TestALineLongerThanTheScannerCapIsReadable(t *testing.T) {
 	}
 }
 
-// TestAnOffsetPastTheEndOfTheFileIsNamed covers a read whose offset is
-// beyond the file: the header must not claim a range that does not
-// exist.
-func TestAnOffsetPastTheEndOfTheFileIsNamed(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "a.txt", "one\ntwo\n")
-
-	res := call(t, read.New(), map[string]any{"path": "a.txt", "offset": 50}, dir)
-	if res.IsError {
-		t.Fatalf("the read failed: %s", res.Text)
-	}
-	header := strings.SplitN(res.Text, "\n", 2)[0]
-	if !strings.Contains(header, "of 2") {
-		t.Errorf("the header is %q, want it to name the total", header)
-	}
-	// The range is empty, so the header says so rather than naming a
-	// line that does not exist.
-	if strings.Contains(header, "50–49") {
-		t.Errorf("the header is %q, want it to name an empty range", header)
-	}
-}
-
 // TestAnEmptyFileIsNamed covers a file with no lines at all.
 func TestAnEmptyFileIsNamed(t *testing.T) {
 	dir := t.TempDir()
@@ -141,6 +119,3 @@ func TestPrepareRejectsTrailingData(t *testing.T) {
 		}
 	}
 }
-
-var _ = poo.PrepareEnv{}
-var _ = json.Marshal

@@ -190,6 +190,9 @@ func TestPrepareRejectsBadArguments(t *testing.T) {
 	}
 }
 
+// TestARangePastTheEndOfTheFileIsEmpty covers a read whose offset is
+// beyond the file: the body is empty, and the header names the total
+// rather than claiming a range that does not exist.
 func TestARangePastTheEndOfTheFileIsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.txt", "one\ntwo\n")
@@ -208,6 +211,11 @@ func TestARangePastTheEndOfTheFileIsEmpty(t *testing.T) {
 	if strings.TrimSpace(lines[1]) != "" {
 		t.Errorf("the body is %q, want it empty", lines[1])
 	}
+	// The range is empty, so the header says so rather than naming a
+	// line that does not exist.
+	if strings.Contains(lines[0], "50–49") {
+		t.Errorf("the header is %q, want it to name an empty range", lines[0])
+	}
 }
 
 func TestTheOutputCapIsContextRelative(t *testing.T) {
@@ -217,5 +225,35 @@ func TestTheOutputCapIsContextRelative(t *testing.T) {
 	}
 	if got := read.OutputCap(262144); got != 70000 {
 		t.Errorf("OutputCap(262144) is %d, want 70000", got)
+	}
+}
+
+// TestACancelledReadIsAnErrorBeforeItScans covers the context contract:
+// a read whose context is already done fails without paying for the
+// scan, the same way the bash tool honours its context.
+func TestACancelledReadIsAnErrorBeforeItScans(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.txt", "one\ntwo\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	raw, err := json.Marshal(map[string]any{"path": "a.txt"})
+	if err != nil {
+		t.Fatalf("marshalling args: %v", err)
+	}
+	prepared, err := read.New().Prepare(json.RawMessage(raw), poo.PrepareEnv{WorkingDir: dir})
+	if err != nil {
+		t.Fatalf("preparing: %v", err)
+	}
+	res, err := read.New().Call(ctx, prepared, poo.ToolEnv{
+		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+		Env:        os.Environ(),
+	})
+	if err != nil {
+		t.Fatalf("calling: %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("the cancelled read is not an error: %s", res.Text)
 	}
 }
