@@ -17,6 +17,10 @@ const (
 	// FollowUp delivers the message only when the run would settle
 	// naturally.
 	FollowUp InputMode = "follow_up"
+	// InputModeJob is the mode a job result carries. A job result is
+	// not a client message: it is the session's own work coming back,
+	// and it never carries a delivery note.
+	InputModeJob InputMode = "job"
 )
 
 // String returns the mode's name.

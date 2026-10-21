@@ -186,15 +186,20 @@ func (s *recordingSink) messages() []*poo.MessageRecord {
 }
 
 // settled returns the run's settle record, or nil.
+//
+// The last settle record is the one returned: a session may run more
+// than once, and a consumer wants the outcome of the run that just
+// finished.
 func (s *recordingSink) settled() *poo.RunSettled {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var last *poo.RunSettled
 	for _, rec := range s.records {
 		if r, ok := rec.(*poo.RunSettled); ok {
-			return r
+			last = r
 		}
 	}
-	return nil
+	return last
 }
 
 // allRecords returns every record the sink kept.

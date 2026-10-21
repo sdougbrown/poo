@@ -25,7 +25,7 @@ func (s *Session) Prompt(ctx context.Context, text string, opts ...InputOption) 
 		s.mu.Unlock()
 		return "", ErrSessionBroken
 	}
-	if s.run != nil {
+	if s.run != nil || s.reserved {
 		s.mu.Unlock()
 		return "", ErrBusy
 	}
@@ -36,15 +36,27 @@ func (s *Session) Prompt(ctx context.Context, text string, opts ...InputOption) 
 		s.mu.Unlock()
 		return "", err
 	}
+	// The run is reserved under the lock, so a wake that is starting
+	// at the same time does not start a second run.
+	s.reserved = true
 	s.mu.Unlock()
 
-	return s.start(ctx, text, TriggerPrompt, note)
+	runID, err := s.start(ctx, text, TriggerPrompt, note)
+	s.mu.Lock()
+	s.reserved = false
+	s.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	return runID, nil
 }
 
 // start begins a run and returns its identifier.
 //
-// The caller has checked the session's state.
-func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, note *DeliveryNote) (string, error) {
+// The caller has checked the session's state. A run that was woken by job
+// results carries them, and the results are appended before the run's
+// first request.
+func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, note *DeliveryNote, jobs ...jobResult) (string, error) {
 	s.mu.Lock()
 	runID := NewULID()
 	runCtx, cancel := context.WithCancelCause(ctx)
@@ -58,12 +70,17 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		workDone:        make(chan struct{}, 1),
 		finalizeDone:    make(chan struct{}),
 		finalizeStarted: make(chan struct{}),
+		wake:            make(chan struct{}, 1),
 	}
 	s.run = run
 	s.turns = nil
 	s.results = map[string]ToolResult{}
 	s.repeats = newRepeatCounter()
 	s.transitionLocked(StateRequesting)
+	// The results that were held are delivered at the start of the run,
+	// before the prompt text. They are the session's own work coming
+	// back, and the client asked for them.
+	held := s.takeHeldResultsLocked()
 	s.mu.Unlock()
 
 	// The run's own record of its beginning.
@@ -78,6 +95,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 
 		ReasoningEffort: s.opts.ReasoningEffort,
 		Trigger:         trigger,
+		Jobs:            publicJobResults(jobs),
 	}); err != nil {
 		// The store refused the run's first record. The run cannot
 		// continue, and the session is broken. The run settles
@@ -100,6 +118,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		"run_id":      runID,
 		"prompt_hash": hashText(text),
 		"trigger":     string(trigger),
+		"jobs":        jobPayload(jobs),
 	})
 
 	// The system prompt is the first thing the model sees, and it is
@@ -120,6 +139,17 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 			}))
 			return runID, nil
 		}
+	}
+
+	// The held results are delivered before the prompt's text, so the
+	// model sees them first. A woken run's job results are appended
+	// before its first request too, and they are recorded with the
+	// delivery the queue gave them.
+	for _, result := range held {
+		s.deliverJobResult(run, result)
+	}
+	for _, result := range jobs {
+		s.deliverJobResult(run, result)
 	}
 
 	user := NewTextMessage(RoleUser, withDeliveryNote(text, note))
@@ -246,6 +276,13 @@ func (s *Session) loop(run *runState) []candidate {
 				return nil
 			}
 			return []candidate{newCandidate(ReasonCancelled, cancelDetail(err))}
+		}
+
+		// A waiting run blocks until a message or a job result arrives.
+		// Nothing is requested, no tool runs and no hook fires while the
+		// run waits.
+		if s.waitWhileWaiting(run) {
+			continue
 		}
 
 		// The next-request gate. Every path to a new request comes
@@ -388,11 +425,10 @@ func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool) tu
 	// Step 1: the turn is over.
 	s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
 
-	// Step 2: drain the steer queue.
+	// Step 2: drain the steer queue, then the job queue.
 	//
 	// A follow-up is not drained here: it waits for a natural stop, and
-	// finalize step 1 delivers it. The job queue belongs to the jobs
-	// stage: it is the same drain, with a second source.
+	// finalize step 1 delivers it.
 	appended := s.drainInputs(run, false)
 
 	// Step 3: the AfterTurn hooks run on every turn, tool-free turns
@@ -438,6 +474,16 @@ func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool) tu
 	if truncated {
 		natural = ReasonOutputTruncated
 	}
+
+	// A job started by this run that is still running holds the run
+	// open: the run goes to the waiting state, and the settle hooks do
+	// not run, because the run is not ending.
+	if s.runHasRunningJob(run) {
+		if s.enterWaiting(run) {
+			return turnOutcome{}
+		}
+	}
+
 	decision, continued, err := s.runBeforeSettle(run, turn, natural)
 	if s.interruptPending(run) {
 		// An interrupt that arrived during the settle hooks discards
@@ -558,8 +604,9 @@ func (s *Session) callStates(turn int) []CallState {
 // drainInputs delivers the queued inputs and reports whether anything
 // was appended.
 //
-// The steer queue comes first, then the follow-up queue. The job queue
-// belongs to the jobs stage.
+// The steer queue comes first, then the job queue, then the follow-up
+// queue. A job result is a user message with origin "job", and it never
+// carries a delivery note.
 func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 	delivered := false
 	for {
@@ -584,6 +631,11 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 			// instead of losing them.
 			return delivered
 		}
+	}
+	// The job queue drains next: the results are the session's own work
+	// coming back, and they reach the model before a follow-up does.
+	if s.drainJobQueue(run) {
+		delivered = true
 	}
 	if !includeFollowUp {
 		return delivered
@@ -831,8 +883,8 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 func (s *Session) toolSpecs() []ToolSpec {
 	specs := make([]ToolSpec, 0, len(s.opts.ToolOrder))
 	for _, name := range s.opts.ToolOrder {
-		if t, ok := s.opts.Tools[name]; ok {
-			specs = append(specs, t.Spec())
+		if _, ok := s.opts.Tools[name]; ok {
+			specs = append(specs, s.toolSpecFor(name))
 		}
 	}
 	return specs

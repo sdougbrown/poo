@@ -53,6 +53,13 @@ type Session struct {
 
 	// run is the active run, nil when the session is idle.
 	run *runState
+	// reserved reports that a run has been admitted but has not been
+	// installed yet.
+	//
+	// The reservation is taken under the session lock, so a wake and
+	// a concurrent prompt race for one reservation: the loser of a
+	// prompt race gets busy, and nothing is accepted.
+	reserved bool
 	// broken reports that the store failed and the session cannot be
 	// used any more.
 	broken bool
@@ -64,6 +71,29 @@ type Session struct {
 	steerQueue []queuedInput
 	// followUpQueue holds the follow-up messages, in arrival order.
 	followUpQueue []queuedInput
+
+	// jobs holds the session's jobs, by job id.
+	jobs map[string]*jobState
+	// jobOrder is the job ids in start order, so a list of jobs is
+	// stable.
+	jobOrder []string
+	// jobSeq numbers the session's jobs.
+	jobSeq int
+	// jobQueue holds the finished job results, in completion order.
+	jobQueue []jobQueueItem
+	// pendingHeld is the held record that is waiting to be written.
+	//
+	// The write takes the session's lock, so the record is built under
+	// the lock and written outside it.
+	pendingHeld *InputHeld
+	// jobCtx is the session's job context. The jobs run under it, so
+	// an interrupt, a cancel and a settle never stop them.
+	jobCtx context.Context
+	// jobCancel stops the session's jobs.
+	jobCancel context.CancelCauseFunc
+	// unattendedWakes counts the woken runs that followed one another
+	// with no client input in between.
+	unattendedWakes int
 
 	// events is the session's event bus.
 	events *eventBus
@@ -170,6 +200,8 @@ type runState struct {
 	// finalizing is signalled when the finalization starts, so a
 	// second call only adds a candidate.
 	finalizeStarted chan struct{}
+	// wake is signalled when the run leaves the waiting state.
+	wake chan struct{}
 }
 
 // issuedCall is a call that was issued but has no result yet.
@@ -278,6 +310,8 @@ type Options struct {
 	// The policy slot is a before-tool hook that only ever allows or
 	// denies, and it is installed here as the first one.
 	BeforeTool []BeforeToolHook
+	// Jobs configures the session's background jobs.
+	Jobs JobOptions
 }
 
 // New builds a session.
@@ -328,8 +362,16 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		repeats:     newRepeatCounter(),
 		events:      newEventBus(),
 		noticeArmed: true,
+		jobs:        map[string]*jobState{},
 	}
 	s.est.charsPerToken = CharsPerToken
+	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
+
+	// The job tools are the core's own, and they are registered
+	// whenever a tool may run in the background.
+	if err := s.registerJobTools(); err != nil {
+		return nil, &ErrSessionInit{Cause: err}
+	}
 
 	// The observers start before anything can emit an event, and they
 	// are stopped if the construction fails.
@@ -405,6 +447,17 @@ func (s *Session) State() State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.state
+}
+
+// Running reports that the session has a run.
+//
+// A settled session keeps the settled state until its next run starts,
+// so the state alone does not say whether the session is busy. A client
+// that wants to know may ask this.
+func (s *Session) Running() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.run != nil
 }
 
 // Transitions returns the states the session moved through, in order.

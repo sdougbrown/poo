@@ -23,8 +23,8 @@ const (
 	StateCompacting State = "compacting"
 	// StateWaiting means the run is open while a job it started runs.
 	//
-	// The state belongs to the jobs stage: nothing enters it yet, and
-	// the wake path that would leave it is the same seam.
+	// The run leaves the state when a job result or a client message
+	// arrives, and it settles from it on a cancel or a budget.
 	StateWaiting State = "waiting"
 	// StateSettling means the run is finalizing.
 	StateSettling State = "settling"
@@ -39,15 +39,12 @@ const (
 // settled session takes a new prompt, so settled leads back to
 // requesting for the next run of a multi-run session. The tests check
 // every transition a session takes against the table.
-//
-// The waiting state is in the set for the jobs stage, and nothing
-// enters it yet.
 var legalStates = map[State][]State{
 	StateIdle:       {StateRequesting},
-	StateRequesting: {StateStreaming, StateExecuting, StateCompacting, StateRequesting, StateSettling},
-	StateStreaming:  {StateExecuting, StateRequesting, StateCompacting, StateSettling},
-	StateExecuting:  {StateExecuting, StateRequesting, StateCompacting, StateSettling},
-	StateCompacting: {StateRequesting, StateSettling},
+	StateRequesting: {StateStreaming, StateExecuting, StateCompacting, StateRequesting, StateWaiting, StateSettling},
+	StateStreaming:  {StateExecuting, StateRequesting, StateCompacting, StateWaiting, StateSettling},
+	StateExecuting:  {StateExecuting, StateRequesting, StateCompacting, StateWaiting, StateSettling},
+	StateCompacting: {StateRequesting, StateWaiting, StateSettling},
 	StateWaiting:    {StateRequesting, StateCompacting, StateSettling},
 	StateSettling:   {StateSettled},
 	StateSettled:    {StateRequesting},

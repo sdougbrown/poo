@@ -1055,10 +1055,9 @@ func TestTheTransitionTableIsClosed(t *testing.T) {
 	// Every state that holds a run is entered from somewhere.
 	for _, to := range states {
 		switch to {
-		case poo.StateSettled, poo.StateIdle, poo.StateWaiting:
-			// The settled state is entered from settling, the idle
-			// state from nowhere, and the waiting state belongs to
-			// the jobs stage.
+		case poo.StateSettled, poo.StateIdle:
+			// The settled state is entered from settling, and the
+			// idle state from nowhere.
 			continue
 		}
 		reachable := false
@@ -1072,14 +1071,13 @@ func TestTheTransitionTableIsClosed(t *testing.T) {
 			t.Errorf("no state may move to %q, want one to", to)
 		}
 	}
-	// The waiting state belongs to the jobs stage: nothing enters it
-	// yet, and the wake path is the same seam.
+	// The waiting state is entered from the states a run may wait in.
 	for _, from := range states {
-		if from == poo.StateWaiting {
-			continue
-		}
-		if poo.IsLegal(from, poo.StateWaiting) {
-			t.Errorf("the state %q may move to waiting, want it to wait for the jobs stage", from)
+		switch from {
+		case poo.StateRequesting, poo.StateStreaming, poo.StateExecuting, poo.StateCompacting:
+			if !poo.IsLegal(from, poo.StateWaiting) {
+				t.Errorf("the state %q may not move to waiting, want it to", from)
+			}
 		}
 	}
 }

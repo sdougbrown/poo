@@ -407,4 +407,7 @@ type JobResult struct {
 	Text string `json:"text"`
 	// Outcome is the job's outcome.
 	Outcome Outcome `json:"outcome"`
+	// Fatal reports that the job failed with an error that wraps
+	// ErrFatal. The run that receives the result settles tool_fatal.
+	Fatal bool `json:"fatal,omitempty"`
 }

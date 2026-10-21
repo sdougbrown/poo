@@ -87,6 +87,10 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// cancelled.
 	s.settleIssuedCalls(run)
 
+	// The jobs the run started are still running: the settle detail
+	// lists them, because a run that leaves work behind says so.
+	jobsRunning := s.jobsRunningFor(run.id)
+
 	// Step 6: the commit point. The highest-precedence candidate
 	// wins, and the outcome is fixed from here.
 	s.mu.Lock()
@@ -100,6 +104,9 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// for.
 	if len(undelivered) > 0 {
 		detail.UndeliveredInput = undelivered
+	}
+	if len(jobsRunning) > 0 {
+		detail.JobsRunning = jobsRunning
 	}
 
 	// Step 7: the outcome records are written with a context of their
@@ -147,7 +154,25 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// client learns the run's outcome first.
 	s.dropUndelivered(run, undelivered, reason)
 	s.wakeWaiters(run, Result{Reason: reason, Detail: detail, Turns: turns})
+	// A result that was queued while the run was settling is handled
+	// here: the session wakes with it, or holds it.
+	s.actOnQueuedJobResults()
 	return Result{Reason: reason, Detail: detail, Turns: turns}, false
+}
+
+// actOnQueuedJobResults wakes or holds the results that are queued and
+// undelivered.
+//
+// The session is idle by now, so the result either wakes a run or is
+// held for the next one. A closed session holds everything.
+func (s *Session) actOnQueuedJobResults() {
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return
+	}
+	s.handleIdleJobResults()
 }
 
 // abandonFinalize reports whether the finalization is abandoned because
@@ -166,7 +191,7 @@ func (s *Session) abandonFinalize(run *runState) bool {
 			return false
 		}
 	}
-	if len(s.steerQueue) == 0 && len(s.followUpQueue) == 0 {
+	if len(s.steerQueue) == 0 && len(s.followUpQueue) == 0 && len(s.jobQueue) == 0 {
 		return false
 	}
 	// The natural candidates are discarded, and the run goes back to
@@ -212,8 +237,8 @@ func (s *Session) resume(run *runState) ([]candidate, bool) {
 // be delivered.
 //
 // The inputs are dropped and reported with the reason the run settled
-// for. The job queue belongs to the jobs stage: a queued job result
-// stays on the session's queue and is never dropped here.
+// for. A queued job result stays on the session's job queue and is
+// never dropped here: settling never drops a job result.
 func (s *Session) collectUndelivered(run *runState) []UndeliveredInput {
 	s.mu.Lock()
 	pending := append(append([]queuedInput(nil), s.steerQueue...), s.followUpQueue...)
@@ -495,6 +520,7 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		// the abort. Both keep their arrival order.
 		s.steerQueue = append(s.steerQueue, input)
 	}
+	waiting := s.state == StateWaiting
 	s.mu.Unlock()
 
 	// The input is recorded before the call returns, so an accepted
@@ -516,6 +542,14 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		"input_id": id,
 		"mode":     string(mode),
 	})
+
+	// A waiting run has nothing to abort, so a steer and an interrupt
+	// are the same there: the message is delivered at once and the run
+	// goes to the gate. A follow-up waits for a real settle.
+	if waiting && mode != FollowUp {
+		s.deliverWaitingInput(run, input)
+		return id, nil
+	}
 
 	// An interrupt aborts the activity that is running.
 	if mode == Interrupt {
@@ -594,8 +628,8 @@ func (s *Session) messagesByIDLocked(id string) (Message, bool) {
 
 // Close ends the session.
 //
-// An active run is cancelled, the observers are stopped and drained, and
-// the session's records are flushed.
+// An active run is cancelled, the jobs are stopped, the observers are
+// stopped and drained, and the session's records are flushed.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -612,6 +646,9 @@ func (s *Session) Close() error {
 			Text:   "the session was closed",
 		}))
 	}
+	// The jobs are stopped before the observers, so a job's own record
+	// is written while the store is still open.
+	s.closeJobs()
 	s.events.stop()
 	if s.opts.Sink != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), recordWriteBudget)

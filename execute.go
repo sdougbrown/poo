@@ -45,6 +45,11 @@ type callPlan struct {
 	// prepareErr is the failure the validation produced, when it
 	// failed.
 	prepareErr error
+	// background reports that the model asked for the call to run in
+	// the background.
+	background bool
+	// summary describes the call, for the job's own bookkeeping.
+	summary string
 }
 
 // executeBatch runs a turn's tool calls.
@@ -227,7 +232,19 @@ func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated
 			plans = append(plans, plan)
 			continue
 		}
-		prepared, err := tool.Prepare(call.Arguments, s.prepareEnv())
+		// The reserved background argument is validated and removed
+		// before the tool's own decoder sees the arguments, so a
+		// strict decoder never sees it. The tool.call record keeps the
+		// original arguments.
+		asked, stripped, err := backgroundArg(call.Arguments)
+		if err != nil {
+			plan.invalid = true
+			plan.prepareErr = err
+			plans = append(plans, plan)
+			continue
+		}
+		plan.background = asked
+		prepared, err := tool.Prepare(stripped, s.prepareEnv())
 		if err != nil {
 			plan.invalid = true
 			plan.prepareErr = err
@@ -238,6 +255,7 @@ func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated
 			}
 		} else {
 			plan.prepared = prepared
+			plan.summary = prepared.Summary()
 		}
 		plans = append(plans, plan)
 	}
@@ -399,6 +417,13 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// ran, so the counts the policy slot sees are the ones the plan
 	// names.
 
+	// A call that becomes a job returns at once, and its result
+	// arrives later as an input.
+	if s.callBecomesJob(call.Name, plan.background) {
+		s.startJobCall(run, turn, handle, call, plan)
+		return
+	}
+
 	// The call has been issued, so it needs a result even if the run
 	// settles before it finishes.
 	s.issueCall(run, turn, handle, call.Name, call.ID)
@@ -469,6 +494,34 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	s.recordResult(run, turn, handle, call.Name, call.ID, result, OutcomeOK)
 }
 
+// startJobCall turns a call into a background job.
+//
+// The job's slot is reserved and the job is registered under the session
+// lock, and the job.started record is written before the goroutine
+// starts. The call's own result is the "started" one, and the batch
+// carries on.
+func (s *Session) startJobCall(run *runState, turn int, handle string, call ToolCall, plan callPlan) {
+	jobID, ok := s.startJob(run, handle, call.Name, plan.prepared, plan.summary)
+	if !ok {
+		// There was no free slot. The failure is recoverable: the
+		// model sees the message and may wait or cancel one.
+		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+			Text:    TooManyJobsText,
+			IsError: true,
+		}, OutcomeError)
+		return
+	}
+
+	text := fmt.Sprintf(StartedText, jobID, call.Name)
+	s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{Text: text}, OutcomeStarted)
+	s.events.emit(EventJobStarted, map[string]any{
+		"job":    jobID,
+		"handle": handle,
+		"tool":   call.Name,
+		"run_id": run.id,
+	})
+}
+
 // prepareEnv builds the environment a tool validates its arguments in.
 func (s *Session) prepareEnv() PrepareEnv {
 	return PrepareEnv{
@@ -479,10 +532,20 @@ func (s *Session) prepareEnv() PrepareEnv {
 
 // toolEnv builds the environment a tool runs in.
 func (s *Session) toolEnv(run *runState, handle string) ToolEnv {
+	return s.toolEnvFor(run.id, handle)
+}
+
+// toolEnvFor builds the environment a tool runs in, for a run that may
+// already have settled.
+//
+// A job runs under the session, so the run it names may be gone by the
+// time the job runs. The environment still names the run that started
+// it, so a tool can tie its work back to the call.
+func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 	return ToolEnv{
 		PrepareEnv: s.prepareEnv(),
 		SessionID:  s.opts.SessionID,
-		RunID:      run.id,
+		RunID:      runID,
 		Handle:     handle,
 		Env:        s.opts.Env,
 		Settings:   s.opts.Settings,
