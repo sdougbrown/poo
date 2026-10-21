@@ -380,3 +380,90 @@ func TestAPrepareFailureCountsTowardTheNearKey(t *testing.T) {
 		t.Errorf("the second call's near count is %d, want 2: a Prepare failure counts", second.Near)
 	}
 }
+
+// TestTheCalibrationChangesTheOutputRoom covers the plan's calibration:
+// the observed characters-per-token ratio is what the estimate uses
+// after the first usage report.
+//
+// The endpoint reports far fewer input tokens than the view's character
+// count suggests, so the calibrated ratio is large and the estimate
+// grows: the second request asks for less output room than the first.
+func TestTheCalibrationChangesTheOutputRoom(t *testing.T) {
+	tr := &fakeTransport{responses: []fakeResponse{
+		{
+			usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 1},
+			calls: []poo.ToolCall{{
+				ID:        "call_1",
+				Name:      "echo",
+				Arguments: []byte(`{"text":"hello"}`),
+			}},
+		},
+		{text: "the answer"},
+	}}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	// A window small enough that the output room shows the estimate.
+	opts.ContextLimit = 2000
+
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	reqs := tr.requestsOf()
+	if len(reqs) != 2 {
+		t.Fatalf("the transport got %d requests, want 2", len(reqs))
+	}
+	// The first request's room came from the starting ratio, and the
+	// second from the calibrated one. The calibrated ratio is the
+	// character count over ten tokens, which is over the clamp, so the
+	// estimate is at its largest and the room is at its smallest.
+	if reqs[1].MaxTokens >= reqs[0].MaxTokens {
+		t.Errorf("the second request's max_tokens is %d, want less than the first's %d",
+			reqs[1].MaxTokens, reqs[0].MaxTokens)
+	}
+}
+
+// TestTheCalibrationIsClamped covers the plan's bounds: the observed
+// ratio is clamped to [2.0, 5.0].
+func TestTheCalibrationIsClamped(t *testing.T) {
+	tr := &fakeTransport{responses: []fakeResponse{
+		{
+			usage: &poo.UsageReport{InputTokens: 1, OutputTokens: 1},
+			calls: []poo.ToolCall{{
+				ID:        "call_1",
+				Name:      "echo",
+				Arguments: []byte(`{"text":"hello"}`),
+			}},
+		},
+		{text: "the answer"},
+	}}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	opts.ContextLimit = 2000
+
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	reqs := tr.requestsOf()
+	if len(reqs) != 2 {
+		t.Fatalf("the transport got %d requests, want 2", len(reqs))
+	}
+	// The ratio is clamped to 5.0, so the estimate grows at five
+	// characters per token. Without the clamp the ratio would be the
+	// view's character count over one token, and the estimate would be
+	// far larger, leaving no room at all.
+	//
+	// The window is small enough that the clamped estimate still
+	// leaves room, and the unclamped one does not.
+	got := reqs[1].MaxTokens
+	if got < 256 {
+		t.Errorf("the second request's max_tokens is %d, want room: the ratio was not clamped", got)
+	}
+	// The clamped ratio means the estimate is at most the view's
+	// character count over five, so the room is at least that.
+	chars := len("the system prompt") + len("do the thing") + len("the answer")
+	if want := 2000 - chars/5 - 256; got > want+8 {
+		t.Errorf("the second request's max_tokens is %d, want at most %d", got, want)
+	}
+}
