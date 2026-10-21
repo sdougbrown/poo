@@ -231,7 +231,8 @@ before the model finished, and both settle `cancelled`.
 | `provider:context_length` | The endpoint reported that the request was too long. It is recognised whatever status the endpoint sent it with, including a 5xx. |
 | `provider:<kind>` | The provider request failed with that kind. |
 | `finish:length` | The provider stopped on the output-token limit. |
-| `cancel:context` | The run's context was cancelled, or its deadline passed. |
+| `cancel:context` | The run's context was cancelled. |
+| `cancel:deadline` | The run's context deadline passed. |
 
 ## Reading a log
 

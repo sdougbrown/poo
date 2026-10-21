@@ -74,6 +74,9 @@ func TestACancelledRequestSettlesCancelled(t *testing.T) {
 	if settle.Reason != poo.ReasonCancelled {
 		t.Errorf("the settle record says %q, want cancelled", settle.Reason)
 	}
+	if settle.Detail.Source != "cancel:context" {
+		t.Errorf("the settle source is %q, want cancel:context", settle.Detail.Source)
+	}
 }
 
 // TestADeadlineDuringTheRequestSettlesCancelled covers a run whose
@@ -97,6 +100,9 @@ func TestADeadlineDuringTheRequestSettlesCancelled(t *testing.T) {
 	}
 	if settleOf(t, sink).Reason != poo.ReasonCancelled {
 		t.Error("the settle record does not say cancelled")
+	}
+	if got := settleOf(t, sink).Detail.Source; got != "cancel:deadline" {
+		t.Errorf("the settle source is %q, want cancel:deadline", got)
 	}
 }
 

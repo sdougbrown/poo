@@ -188,7 +188,7 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 	for {
 		if err := ctx.Err(); err != nil {
-			return ReasonCancelled, SettleDetail{Source: "cancel:context", Text: err.Error()}, nil
+			return ReasonCancelled, cancelDetail(err), nil
 		}
 
 		// The next-request gate. The skeleton has no compactor, no budget
@@ -518,13 +518,24 @@ func (r *Run) writeBestEffort(ctx context.Context, rec Record) {
 	}
 }
 
+// cancelDetail explains a cancelled settle. A deadline has its own
+// source, so a consumer can tell it from a plain cancel without reading
+// the text.
+func cancelDetail(err error) SettleDetail {
+	source := "cancel:context"
+	if errors.Is(err, context.DeadlineExceeded) {
+		source = "cancel:deadline"
+	}
+	return SettleDetail{Source: source, Text: err.Error()}
+}
+
 // settleForError maps a request error to a settle reason.
 func (r *Run) settleForError(err error) (Reason, SettleDetail, error) {
 	// A cancellation and a deadline are the same outcome: the run was
 	// stopped before the model finished. The plan's reason set has no
 	// separate one for a deadline.
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return ReasonCancelled, SettleDetail{Source: "cancel:context", Text: err.Error()}, nil
+		return ReasonCancelled, cancelDetail(err), nil
 	}
 	var pe *ProviderError
 	if errors.As(err, &pe) {
