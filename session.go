@@ -194,6 +194,11 @@ type runState struct {
 	// records are still being written, in delivery order. The
 	// finalization waits for them, and reports the ones it abandons.
 	delivering []queuedInput
+	// deliveringJobs are the job results taken from the session's job
+	// queue whose delivery records are still being written. The
+	// finalization waits for them; a result it abandons goes back on
+	// the queue, because settling never drops a job result.
+	deliveringJobs []jobQueueItem
 	// abandonedInputs are taken inputs whose delivery was abandoned
 	// because the run settled; the finalization reports them as
 	// undelivered.

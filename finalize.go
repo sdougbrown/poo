@@ -353,7 +353,7 @@ func (s *Session) waitForWork(run *runState) {
 	deadline := time.After(recordWriteBudget)
 	for {
 		s.mu.Lock()
-		pending := len(run.pendingCalls) + run.resultWrites + len(run.delivering)
+		pending := len(run.pendingCalls) + run.resultWrites + len(run.delivering) + len(run.deliveringJobs)
 		done := run.workDone
 		s.mu.Unlock()
 		if pending == 0 {

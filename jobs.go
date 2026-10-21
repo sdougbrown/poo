@@ -544,13 +544,9 @@ func (s *Session) deliverJobResults() {
 		s.handleIdleJobResults()
 		return
 	case s.state == StateWaiting:
-		items := s.takeUnheldResultsLocked()
 		run := s.run
 		s.mu.Unlock()
-		for _, item := range items {
-			s.deliverJobResult(run, item.result)
-		}
-		if len(items) == 0 {
+		if !s.drainJobQueue(run) {
 			return
 		}
 		// The run leaves the waiting state and goes to the gate.
@@ -561,23 +557,6 @@ func (s *Session) deliverJobResults() {
 		// next turn end, or after the run has settled.
 		s.mu.Unlock()
 	}
-}
-
-// takeUnheldResultsLocked takes the results that are not held.
-//
-// The caller holds the session's lock.
-func (s *Session) takeUnheldResultsLocked() []jobQueueItem {
-	var items []jobQueueItem
-	kept := s.jobQueue[:0]
-	for _, item := range s.jobQueue {
-		if item.held {
-			kept = append(kept, item)
-			continue
-		}
-		items = append(items, item)
-	}
-	s.jobQueue = kept
-	return items
 }
 
 // handleIdleJobResults wakes or holds the results that arrived while the
@@ -732,27 +711,63 @@ func jobOutcomeToCallOutcome(outcome JobOutcome) Outcome {
 // call's result slot already holds the "started" result. It never
 // carries a delivery note.
 //
+// The delivery is tracked like an input's, so the finalization waits for
+// a write that is in flight. A result the finalization abandons goes
+// back on the session's queue, because settling never drops a job
+// result.
+func (s *Session) deliverJobResult(run *runState, result jobResult) bool {
+	item := jobQueueItem{result: result}
+	s.mu.Lock()
+	run.deliveringJobs = append(run.deliveringJobs, item)
+	s.mu.Unlock()
+	return s.deliverTrackedJobResult(run, item)
+}
+
+// deliverTrackedJobResult delivers a result whose in-flight claim is
+// already recorded on the run.
+//
+// The records come before the history append, so a delivery the
+// finalization abandons does not mutate the view. A record the store
+// refuses is a store_error candidate, the result goes back on the queue,
+// and the drain stops there.
+//
 // A result that carries a fatal error adds the tool_fatal candidate to
 // the receiving run, so the run settles before it makes another
 // request.
-func (s *Session) deliverJobResult(run *runState, result jobResult) {
+func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool {
+	result := item.result
+	s.mu.Lock()
+	if run.committed || run.finalizing {
+		s.abandonJobDeliveryLocked(run, item)
+		s.mu.Unlock()
+		return false
+	}
+	s.mu.Unlock()
+
 	msg := NewTextMessage(RoleUser, jobResultText(result))
 	msg.Origin = OriginJob
-	s.appendMessages(msg)
-	_ = s.write(run.ctx, &MessageRecord{
+	if err := s.writeDelivery(run.ctx, run, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
 		Role:       msg.Role,
 		Content:    msg.Content,
-	})
-	_ = s.write(run.ctx, &InputDelivered{
+	}); err != nil {
+		s.failJobDelivery(run, item, err)
+		return false
+	}
+	if err := s.writeDelivery(run.ctx, run, &InputDelivered{
 		RecordMeta:  NewRecordMeta("input.delivered"),
 		SessionID:   s.opts.SessionID,
 		RunID:       run.id,
 		InputID:     result.id,
 		Mode:        InputModeJob,
 		DeliveredAt: nowRFC3339(),
-	})
+	}); err != nil {
+		s.failJobDelivery(run, item, err)
+		return false
+	}
+	s.appendMessages(msg)
+	s.finishJobDelivery(run, item)
 	s.events.emit(EventInputDelivered, map[string]any{
 		"run_id":   run.id,
 		"input_id": result.id,
@@ -763,6 +778,51 @@ func (s *Session) deliverJobResult(run *runState, result jobResult) {
 			Source: "tool:" + result.tool,
 			Text:   result.text,
 		}))
+	}
+	return true
+}
+
+// failJobDelivery puts a result whose delivery failed back on the queue
+// and reports a refused write.
+//
+// A write the finalization abandoned is not a store error: the result
+// simply goes back on the queue.
+func (s *Session) failJobDelivery(run *runState, item jobQueueItem, err error) {
+	s.mu.Lock()
+	s.abandonJobDeliveryLocked(run, item)
+	s.mu.Unlock()
+	if !errors.Is(err, errDeliveryAbandoned) {
+		s.addCandidate(run, storeErrorCandidate(err))
+	}
+}
+
+// finishJobDelivery releases a delivered result's in-flight claim.
+func (s *Session) finishJobDelivery(run *runState, item jobQueueItem) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.removeJobDeliveryLocked(run, item)
+	s.signalWorkLocked(run)
+}
+
+// abandonJobDeliveryLocked puts an in-flight result back at the front of
+// the session's queue and releases its claim.
+//
+// The caller holds the session's lock.
+func (s *Session) abandonJobDeliveryLocked(run *runState, item jobQueueItem) {
+	s.removeJobDeliveryLocked(run, item)
+	s.jobQueue = append([]jobQueueItem{item}, s.jobQueue...)
+	s.signalWorkLocked(run)
+}
+
+// removeJobDeliveryLocked drops a result's in-flight claim.
+//
+// The caller holds the session's lock.
+func (s *Session) removeJobDeliveryLocked(run *runState, item jobQueueItem) {
+	for i := range run.deliveringJobs {
+		if run.deliveringJobs[i].result.id == item.result.id {
+			run.deliveringJobs = append(run.deliveringJobs[:i], run.deliveringJobs[i+1:]...)
+			return
+		}
 	}
 }
 
@@ -793,24 +853,45 @@ func publicJobResults(results []jobResult) []JobResult {
 
 // drainJobQueue delivers the queued results to an open run.
 //
-// The drain happens at the turn end, after the steer queue, and a drain
-// that is interrupted or fails to write leaves the results queued, in
-// order. A held result waits for the next client prompt, so it stays.
+// The drain happens at the turn end, after the steer queue. The result is
+// taken under the same lock as the queue and tied to the run, so the
+// finalization can wait for the delivery or put it back. A drain that is
+// interrupted or fails to write leaves the results queued, in order. A
+// held result waits for the next client prompt, so it is skipped here.
 func (s *Session) drainJobQueue(run *runState) bool {
 	delivered := false
 	for {
 		s.mu.Lock()
-		if len(s.jobQueue) == 0 || s.jobQueue[0].held {
-			s.mu.Unlock()
+		item, ok := s.takeJobResultLocked(run)
+		s.mu.Unlock()
+		if !ok {
 			break
 		}
-		item := s.jobQueue[0]
-		s.jobQueue = s.jobQueue[1:]
-		s.mu.Unlock()
-		s.deliverJobResult(run, item.result)
 		delivered = true
+		if !s.deliverTrackedJobResult(run, item) {
+			return delivered
+		}
 	}
 	return delivered
+}
+
+// takeJobResultLocked takes the first unheld result and ties it to the
+// run.
+//
+// The caller holds the session's lock.
+func (s *Session) takeJobResultLocked(run *runState) (jobQueueItem, bool) {
+	if run.committed || run.finalizing {
+		return jobQueueItem{}, false
+	}
+	for i, item := range s.jobQueue {
+		if item.held {
+			continue
+		}
+		s.jobQueue = append(s.jobQueue[:i], s.jobQueue[i+1:]...)
+		run.deliveringJobs = append(run.deliveringJobs, item)
+		return item, true
+	}
+	return jobQueueItem{}, false
 }
 
 // jobsRunningFor returns the jobs a run started that are still running.
@@ -962,10 +1043,12 @@ func (s *Session) deliverWaitingInput(run *runState, input queuedInput) {
 		return
 	}
 	// The message was queued with the other steers; it is taken out
-	// again so it is delivered exactly once.
+	// again so it is delivered exactly once, and tied to the run so the
+	// finalization waits for the delivery or reports it.
 	for i, queued := range s.steerQueue {
 		if queued.id == input.id {
 			s.steerQueue = append(s.steerQueue[:i], s.steerQueue[i+1:]...)
+			run.delivering = append(run.delivering, input)
 			break
 		}
 	}
