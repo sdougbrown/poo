@@ -31,10 +31,21 @@ func TestTheBwrapSandboxHidesEverythingButTheWorkdir(t *testing.T) {
 	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	// The repository and the real home directory are where the task set
+	// and the user's files live on a real machine, so the probe lists
+	// them too. A listing creates nothing.
+	repo := repositoryRootOfTests(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
 	// The fake run writes its log as the real one does, then records what
 	// it could see outside the workdir.
 	poo := fakePoo(t, strings.Replace(logWritingPoo, "exit 0",
-		`{ cat `+secret+` 2>&1; ls `+taskRoot+` 2>&1; echo "home=$HOME pwd=$(pwd)"; } > "$(dirname "$log")/seen.txt"
+		`{ cat `+secret+` 2>&1; ls `+taskRoot+` 2>&1; echo "home=$HOME pwd=$(pwd)"
+if ls '`+repo+`' >/dev/null 2>&1; then echo repo=readable; else echo repo=hidden; fi
+if ls '`+home+`' >/dev/null 2>&1; then echo realhome=readable; else echo realhome=hidden; fi
+} > "$(dirname "$log")/seen.txt"
 exit 0`, 1))
 
 	out := t.TempDir()
@@ -72,6 +83,12 @@ exit 0`, 1))
 	if !strings.Contains(string(seen), "home=/work pwd=/work") {
 		t.Errorf("the run saw %q, want its home and working directory to be /work", seen)
 	}
+	if !strings.Contains(string(seen), "repo=hidden") {
+		t.Errorf("the run could read the repository %s: %q", repo, seen)
+	}
+	if !strings.Contains(string(seen), "realhome=hidden") {
+		t.Errorf("the run could read the real home %s: %q", home, seen)
+	}
 	if report.Sandbox != SandboxBwrap {
 		t.Errorf("the report's sandbox is %q, want %q", report.Sandbox, SandboxBwrap)
 	}
@@ -100,5 +117,25 @@ func TestASandboxThatFailsToStartSaysSo(t *testing.T) {
 	got := report.Results[0].Error
 	if !strings.Contains(got, "bwrap sandbox failed to start") || !strings.Contains(got, "/nonexistent-dir/poo") {
 		t.Errorf("error = %q, want it to say the sandbox failed and what bwrap printed", got)
+	}
+}
+
+// repositoryRootOfTests returns the directory above the test's working
+// directory that holds go.mod.
+func repositoryRootOfTests(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("no go.mod above the test's working directory")
+		}
+		dir = parent
 	}
 }
