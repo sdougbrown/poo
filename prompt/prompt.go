@@ -2,13 +2,11 @@
 //
 // The system prompt is assembled from named sections, and a consumer can
 // change it at every layer: a Go consumer, a profile, a settings file, a
-// CLI flag or a hook. This package holds the two things every layer
-// shares: the environment a section may read, and the surface a section
-// list is edited through.
+// CLI flag or a hook. This package holds the three things every layer
+// shares: the environment a section may read, the surface a section
+// list is edited through, and the builder that renders the prompt.
 //
-// The package imports the standard library only. The builder that renders
-// a prompt arrives with the prompt stage; what is here is the vocabulary
-// the rest of poo already depends on.
+// The package imports the standard library only.
 package prompt
 
 // Env is what a dynamic section may read.
