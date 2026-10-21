@@ -63,13 +63,9 @@ func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string
 // The identifier is random rather than a ULID: the plan's ULID arrives with
 // the session seam in Stage 8, and nothing in the skeleton depends on the
 // ordering.
-//
-// It returns an error when the system's random source fails, because an
-// identifier that is not random is not unique.
-func newSessionID() (string, error) {
+func newSessionID() string {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("creating an identifier: %w", err)
-	}
-	return hex.EncodeToString(b[:]), nil
+	// crypto/rand.Read never returns an error (it ends the program if the system's source fails).
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
