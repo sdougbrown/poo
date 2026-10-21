@@ -405,3 +405,18 @@ func TestAnUnrelatedBadRequestIsNotRetried(t *testing.T) {
 		t.Errorf("the endpoint saw %d requests, want 1", calls)
 	}
 }
+
+func TestThePreambleSaysCroppedOrElidedAsItWas(t *testing.T) {
+	cropped := judgeUserMessage(judgePayload{Summarized: true}, "n")
+	if strings.Contains(cropped, "elided") || !strings.Contains(cropped, "cropped") {
+		t.Errorf("a cropped transcript is described as %q", cropped)
+	}
+	elided := judgeUserMessage(judgePayload{Summarized: true, ElidedTurns: 4}, "n")
+	if !strings.Contains(elided, "elided") {
+		t.Errorf("an elided transcript is described as %q", elided)
+	}
+	whole := judgeUserMessage(judgePayload{}, "n")
+	if strings.Contains(whole, "summarized") {
+		t.Errorf("a whole transcript is described as summarized: %q", whole)
+	}
+}
