@@ -289,3 +289,33 @@ func TestTheNativeModeRunSendsTheToolsNatively(t *testing.T) {
 		}
 	}
 }
+
+// TestAWorkingDirectoryThatIsAFileFails covers a --working-dir that
+// exists as a regular file: the run must refuse it and not create
+// anything.
+func TestAWorkingDirectoryThatIsAFileFails(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a-file")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+
+	code, stderr := runCLI(t,
+		"run",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", file,
+		"say hello",
+	)
+	if code != 2 {
+		t.Fatalf("the exit code is %d, want 2; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "not a directory") {
+		t.Errorf("the error is %q, want it to name the directory problem", stderr)
+	}
+}

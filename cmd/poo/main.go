@@ -188,12 +188,17 @@ func runRun(args []string) int {
 	}
 	toolOrder := []string{"bash", "read"}
 	toolSpecs := make([]poo.ToolSpec, 0, len(toolOrder))
+	// The session's tool list derives from the same specs: one source
+	// for the name and class, so the log cannot drift from the wire.
+	sessionTools := make([]poo.SessionTool, 0, len(toolOrder))
 	for _, name := range toolOrder {
-		toolSpecs = append(toolSpecs, tools[name].Spec())
+		spec := tools[name].Spec()
+		toolSpecs = append(toolSpecs, spec)
+		sessionTools = append(sessionTools, poo.SessionTool{Name: spec.Name, Class: spec.Class})
 	}
 
 	settings := poo.ToolSettings{
-		BashTimeoutSeconds:  120,
+		BashTimeoutSeconds:  int(bash.DefaultTimeout / time.Second),
 		ObservationCapChars: bash.ObservationCap(o.contextLimit),
 		ReadOutputCapChars:  read.OutputCap(o.contextLimit),
 	}
@@ -202,17 +207,14 @@ func runRun(args []string) int {
 	runID := newSessionID()
 
 	if err := log.Append(ctx, &poo.SessionCreated{
-		RecordMeta: poo.NewRecordMeta("session.created"),
-		Format:     poo.FormatVersion,
-		SessionID:  sessionID,
-		Mode:       "logged",
-		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
-		WorkingDir: absWorkDir,
-		Model:      poo.SessionModel{ID: o.modelID, BaseURL: loggedBaseURL(o.baseURL), MaxOutput: o.maxOutput},
-		Tools: []poo.SessionTool{
-			{Name: "bash", Class: poo.ClassSideEffecting},
-			{Name: "read", Class: poo.ClassReadOnly},
-		},
+		RecordMeta:   poo.NewRecordMeta("session.created"),
+		Format:       poo.FormatVersion,
+		SessionID:    sessionID,
+		Mode:         "logged",
+		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+		WorkingDir:   absWorkDir,
+		Model:        poo.SessionModel{ID: o.modelID, BaseURL: loggedBaseURL(o.baseURL), MaxOutput: o.maxOutput},
+		Tools:        sessionTools,
 		ContextLimit: o.contextLimit,
 		ToolsMode:    o.toolsMode,
 
