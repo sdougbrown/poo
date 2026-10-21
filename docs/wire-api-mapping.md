@@ -70,7 +70,7 @@ thinking block's signature).
 | C8 | `usage.prompt_tokens`, `usage.completion_tokens`, `usage.prompt_tokens_details.cached_tokens` | `UsageReport{InputTokens, OutputTokens, CacheReadTokens}` | — (response side) | **yes** |
 | C9 | `finish_reason: "stop"｜"length"｜"tool_calls"` | `FinishReason` | the same | **yes** |
 | C10 | `tools[].function.{name,description,parameters}` | `ToolSpec{Name, Description, Schema}` | the same | **yes** |
-| C11 | `{"role":"assistant","content":[{"type":"refusal","refusal":"…"}]}` | `Content{kind:text}` | a plain string | **no** — see *Scope decisions* |
+| C11 | `{"role":"assistant","content":null,"refusal":"…"}` — a refusal is a **top-level string** on the message, not a content part | `Content{kind:text}` | a plain string | **no** — see *Scope decisions* |
 
 Two asymmetries are worth naming because they are properties of the API, not
 of poo's model:
@@ -95,11 +95,12 @@ request carries the whole history, which is poo's rule.
 | R2 | `{"type":"message","role":"assistant","content":[{"type":"output_text","text":"…"}]}` | `Message{Role:assistant, Origin:model, Content:[text]}` | a message item with `output_text` | **yes** |
 | R3 | `{"type":"function_call","call_id":"call_1","name":"bash","arguments":"{\"command\":\"ls\"}"}` | `Content{kind:tool_call, tool_call_id:"call_1", name:"bash", arguments:{"command":"ls"}}` | its own item, arguments re-encoded as a string | **yes, in value** |
 | R4 | `{"type":"function_call_output","call_id":"call_1","output":"…"}` | `Content{kind:tool_result, tool_call_id:"call_1", text:"…"}` | its own item | **yes** |
-| R5 | `{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"…"}],"encrypted_content":"…"}` | `Content{kind:thinking, text:"…", provider:{api:responses, type:"reasoning", data:{"id":"rs_1","encrypted_content":"…"}}}` | one reasoning item again: the summary from the thinking text, the id and the encrypted content from the provider block | **yes** — this is the case the plan names: the encrypted content is opaque, and it must travel back untouched |
+| R5 | `{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"…"}],"encrypted_content":"…"}` | `Content{kind:thinking, text:"…", provider:{api:responses, type:"reasoning", data:{"id":"rs_1","encrypted_content":"…"}}}` | one reasoning item again: the summary from the thinking text, the id and the encrypted content from the provider block | **in the summary shape** — the encrypted content is opaque and travels back untouched, and the summary's text survives. The *part* boundaries do not: the thinking is one string, so a summary of several parts comes back as one part. See *Where this document is not sure*. |
 | R6 | a compaction item (an opaque item the provider's own compaction produced) | `Content{kind:provider, provider:{api:responses, type:"compaction", data:<the item, verbatim>, required:true}}` | the same item, verbatim | **yes** — the payload is never interpreted, only carried |
 | R7 | `instructions` (the system prompt) | `Message{Role:system, Origin:system, Content:[text]}` | the `instructions` field | **yes, in content** — the field's shape differs, the prompt does not |
 | R8 | `usage.input_tokens`, `usage.output_tokens`, `usage.input_tokens_details.cached_tokens` | `UsageReport` | — (response side) | **yes** |
 | R9 | `max_output_tokens` | `ChatRequest.MaxTokens` | the same | **yes** |
+| R10 | `{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"…"}]}` — a refusal is a **content part** here, unlike Chat Completions | `Content{kind:text}` | a plain string | **no** — see *Scope decisions* |
 
 The structural difference from Chat Completions is that a function call and
 its output are **top-level items**, not messages. poo's model keeps a tool
@@ -175,12 +176,15 @@ Two placement rules belong to the API, and a transport has to honour them:
 
 These are deliberate, and they are not gaps in the model:
 
-- **Refusal parts** (`{"type":"refusal"}` in a Chat Completions content
-  array) are not represented. v1 ships one transport, the plan's block list
-  does not name refusal, and a refusal is only distinguishable by the
-  content array's shape — a shape the OpenAI-compatible servers v1 targets
-  do not all accept. The refusal text is kept as a text block, so nothing
-  the model said is lost; what is lost is the *label*.
+- **Refusal parts** are not represented. The two APIs differ in where a
+  refusal lives: the Responses API sends it as a `refusal` content part
+  (`{"type":"refusal","refusal":"…"}`), and Chat Completions sends it as
+  a top-level `message.refusal` string next to the content. v1 ships one
+  transport, the plan's block list does not name refusal, and a refusal is
+  only distinguishable by the message's shape — a shape the
+  OpenAI-compatible servers v1 targets do not all accept. The refusal text
+  is kept as a text block, so nothing the model said is lost; what is
+  lost is the *label*.
 - **Images and audio** are not carried in the model. The plan lists them as
   provider *input modalities*, and v1's tools produce text.
 - **A tool result that carries images** is out of scope for the same
@@ -204,6 +208,17 @@ the transport that implements it:
   does not care: the item is carried verbatim in a `provider` block, and the
   transport that implements the endpoint is the only thing that has to know
   its shape.
+- **The Responses reasoning item's `summary` versus `content`.** A
+  reasoning item carries either a `summary` (a list of `summary_text`
+  parts) or `content` (a list of `reasoning_text` parts), and the two
+  hold different things: the summary is the model's own account of its
+  reasoning, and the content is the reasoning itself. poo's model has one
+  thinking string, so the *text* survives in either shape but the *part
+  boundaries* do not, and an item whose reasoning arrived as `content`
+  cannot be told from one whose summary said the same words. The
+  transport that implements the Responses API must decide how the two
+  shapes map onto the one block; the model does not depend on the answer,
+  because the opaque `encrypted_content` is carried verbatim either way.
 - **Whether the Responses API accepts a `system`-role message item.** The
   documented way to send a system prompt is the top-level `instructions`
   field, and that is what the mapping uses. A system-role item is not
@@ -215,7 +230,9 @@ the transport that implements it:
   the blocks in order either way.
 - **The Chat Completions content-part array.** The `text` and `refusal` part
   types are part of the newer spec; the servers poo targets mostly take a
-  plain string. poo sends a string.
+  plain string. poo sends a string. A refusal, when the server sends one
+  at all, arrives as the message's top-level `refusal` string, not as a
+  part.
 - **Anthropic's `cache_creation_input_tokens`.** The field name is taken
   from the usage block's shape; the value is not carried, so a wrong guess
   costs nothing.
