@@ -270,19 +270,20 @@ func runRun(args []string) int {
 
 	fmt.Fprintf(os.Stderr, "poo: settled %s after %d turn(s); log: %s\n", res.Reason, res.Turns, logPath)
 
-	// The run's answer goes to stdout: the finish result when the run
-	// produced one, and the last assistant message otherwise.
-	if text := finalAnswer(sess, res); text != "" {
-		fmt.Println(text)
+	// The one-shot waits for the jobs, so the work the model put in the
+	// background is done before the process goes. The answer is selected
+	// after the wait, because a wake may produce the last run. The flag
+	// turns the wait off, and the jobs stop through the session's close.
+	answer, waitErr := runOutput(ctx, sess, res, o.noWaitJobs)
+	if waitErr != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", waitErr)
 	}
 
-	// The one-shot waits for the jobs, so the work the model put in the
-	// background is done before the process goes. The flag turns that
-	// off, and the jobs stop through the session's close.
-	if !o.noWaitJobs {
-		if err := sess.WaitJobs(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		}
+	// The run's answer goes to stdout: the finish result when the
+	// client's run produced one, and the last assistant message
+	// otherwise.
+	if answer != "" {
+		fmt.Println(answer)
 	}
 
 	// The held results do not keep the process alive: they wait for the
@@ -305,6 +306,21 @@ func finalAnswer(sess *poo.Session, res poo.Result) string {
 		return string(res.Detail.Result)
 	}
 	return sess.LastAssistantMessage()
+}
+
+// runOutput waits for the jobs and then selects the answer to print.
+//
+// The client run's finish result is fixed by its settle, so it is kept
+// across the wait. Without one, the answer is the last run's final
+// assistant message, which is only known once the jobs and their wakes
+// are done.
+func runOutput(ctx context.Context, sess *poo.Session, res poo.Result, noWaitJobs bool) (string, error) {
+	if !noWaitJobs {
+		if err := sess.WaitJobs(ctx); err != nil {
+			return "", err
+		}
+	}
+	return finalAnswer(sess, res), nil
 }
 
 // combinedExitCode combines the exit codes of the runs that settled.
