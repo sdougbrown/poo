@@ -1290,3 +1290,29 @@ func TestARunThatWindsDownAfterTheSettleDoesNotMoveTheState(t *testing.T) {
 		t.Errorf("the session is %q after the late stream started, want settled", got)
 	}
 }
+
+// TestHasToolCallIgnoresASkippedCall covers the plan's rule: HasToolCall
+// matches only a call whose result is not an error. A call skipped as
+// truncated has an error result, so it must not stop the run.
+func TestHasToolCallIgnoresASkippedCall(t *testing.T) {
+	tr := scripted([]fakeResponse{{
+		finish: poo.FinishLength,
+		calls:  []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":`)}},
+	}})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.StopConditions = []poo.StopCondition{poo.HasToolCall("echo")}
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonOutputTruncated {
+		t.Errorf("the run settled %q, want output_truncated: a skipped call is an error result", res.Reason)
+	}
+}

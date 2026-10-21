@@ -596,11 +596,12 @@ func (s *Session) callStates(turn int) []CallState {
 			continue
 		}
 		for _, c := range t.Calls {
+			result := s.results[c.Handle]
 			out = append(out, CallState{
 				Handle:  c.Handle,
 				Tool:    c.Tool,
 				Outcome: c.Outcome,
-				IsError: c.Outcome == OutcomeError || c.Outcome == OutcomeDenied,
+				IsError: result.IsError,
 			})
 		}
 	}

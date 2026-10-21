@@ -1,6 +1,7 @@
 package poo_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -130,5 +131,48 @@ func TestTheHistoryCopiesTheMessagesItIsBuiltFrom(t *testing.T) {
 
 	if got := history.Messages(); got[0].Text() != "the prompt" {
 		t.Errorf("the message's text is %q, want %q", got[0].Text(), "the prompt")
+	}
+}
+
+// resultPeekHook reads one tool result through the view.
+type resultPeekHook struct {
+	text string
+	ok   bool
+	seen bool
+}
+
+// AfterTurn reads r1 the first time it runs.
+func (h *resultPeekHook) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) {
+	if !h.seen {
+		h.seen = true
+		r, ok := ctx.History.Result("r1")
+		h.text, h.ok = r.Text, ok
+	}
+	return poo.TurnDecision{}, nil
+}
+
+// TestTheViewCarriesTheToolResult covers the plan's rule: a hook that
+// asks the view for a tool result gets the result the call produced.
+func TestTheViewCarriesTheToolResult(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)}}},
+		{text: "done"},
+	})
+	tool := &echoTool{result: "echoed"}
+	hook := &resultPeekHook{}
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	opts.AfterTurn = []poo.AfterTurnHook{hook}
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "go"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !hook.ok {
+		t.Fatal("the view has no result for r1")
+	}
+	if hook.text != "echoed" {
+		t.Errorf("the view's result text is %q, want %q", hook.text, "echoed")
 	}
 }
