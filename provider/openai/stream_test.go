@@ -266,3 +266,30 @@ func TestAContextLengthErrorInAServerResponseIsMapped(t *testing.T) {
 		t.Errorf("the error kind is %q, want context_length", pe.Kind)
 	}
 }
+
+// TestAnErrorChunkWithoutAMessageIsStillAnError covers an endpoint that
+// reports a failure with no message.
+func TestAnErrorChunkWithoutAMessageIsStillAnError(t *testing.T) {
+	for _, errBody := range []string{`{"error":{}}`, `{"error":{"code":1}}`} {
+		t.Run(errBody, func(t *testing.T) {
+			srv := newSSEServer(t, chunk(errBody))
+			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+			reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+			if err != nil {
+				t.Fatalf("starting the request: %v", err)
+			}
+			defer reader.Close()
+
+			var last error
+			for i := 0; i < 10 && last == nil; i++ {
+				if _, err := reader.Next(); err != nil {
+					last = err
+				}
+			}
+			var pe *poo.ProviderError
+			if !errors.As(last, &pe) {
+				t.Fatalf("the stream ended with %v, want a provider error", last)
+			}
+		})
+	}
+}

@@ -208,7 +208,7 @@ func (r *streamReader) dispatch() error {
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return nil
 	}
-	if chunk.Error != nil && chunk.Error.Message != "" {
+	if chunk.Error != nil {
 		r.done = true
 		err := r.providerError(chunk.Error)
 		r.err = err
