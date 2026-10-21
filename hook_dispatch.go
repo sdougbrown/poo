@@ -270,7 +270,7 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 	s.startActivity(run)
 	defer s.endActivity(run)
 	ctx := s.activityContext(run)
-	var continues []Message
+	var continues []hookAppend
 	for _, h := range s.opts.BeforeSettle {
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
 			return h.BeforeSettle(s.hookContext(hctx, turn, false), natural)
@@ -288,7 +288,7 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 			return decision, false, nil
 		}
 		if decision.Continue != nil {
-			continues = append(continues, *decision.Continue)
+			continues = append(continues, hookAppend{name: hookName(h), message: *decision.Continue})
 		}
 	}
 	if len(continues) == 0 {
@@ -306,8 +306,8 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 
 	// Every Continue message is appended, and the run goes back to the
 	// model.
-	for _, msg := range continues {
-		msg = hookMessage(msg, "before_settle")
+	for _, added := range continues {
+		msg := hookMessage(added.message, added.name)
 		s.appendMessages(msg)
 		_ = s.writeRun(run, &MessageRecord{
 			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
