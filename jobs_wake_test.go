@@ -532,5 +532,3 @@ func TestTheJobsOptionsMatchTheSettings(t *testing.T) {
 		t.Errorf("the log holds %d job.started records, want 1", sink.count("job.started"))
 	}
 }
-
-

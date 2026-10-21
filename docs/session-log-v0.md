@@ -43,6 +43,9 @@ A record that someone produced also carries an `origin`:
 | `input.queued` | Once per input the session accepts. |
 | `input.delivered` | Once per input that reaches the model. |
 | `input.dropped` | Once per input that never reaches the model. |
+| `input.held` | Once per round of job results that were held instead of delivered. |
+| `job.started` | Once per background job, when it is accepted. |
+| `job.ended` | Once per background job, when it finishes. |
 | `turn.interrupted` | Once per turn an interrupt cut short. |
 | `compaction` | Once per compaction a compactor produced. |
 | `run.settled` | Once per run, when the run ends. |
@@ -190,7 +193,8 @@ a log shows what the model asked for even when the tool never finished.
 | `turn` | integer | The turn the call belongs to. |
 | `handle` | string | The call's handle within the turn, e.g. `"r1"`. |
 | `tool` | string | The tool the model called. |
-| `arguments` | object or string | The full arguments, in the same shape as a `tool_call` content block. |
+| `arguments` | object or string | The full arguments, in the same shape as a `tool_call` content block. The reserved `background` argument is kept here, even though the core removes it before the tool sees it. |
+| `mode` | string | How the call ran: `"sync"` in the turn, or `"job"` in the background. Absent when the log was written before the field existed. |
 
 ## `tool.result`
 
@@ -257,6 +261,53 @@ settle reason.
 | `mode` | string | How the input was accepted. |
 | `reason` | string | Why the input was dropped. |
 | `dropped_at` | string | RFC 3339, UTC. |
+
+## `input.held`
+
+Job results that were held instead of delivered. A held result waits
+for the next run, or for the next load: it is never lost.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `session_id` | string | The session's identifier. |
+| `run_id` | string | The run the results were held for. Absent when the session had no run. |
+| `jobs` | array of strings | The jobs whose results were held. |
+| `reason` | string | Why they were held: `"on_idle"`, `"wake_limit"` or `"session_closed"`. |
+| `held_at` | string | RFC 3339, UTC. |
+
+## `job.started`
+
+A background job was accepted and started. The record is the
+acceptance: the job, the call it came from, the run that started it and
+the tool it runs.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `session_id` | string | The session's identifier. |
+| `job` | string | The job's identifier, e.g. `"j3"`. |
+| `handle` | string | The handle of the tool call the job came from, e.g. `"r1"`. The call returned at once with a `"started"` outcome. |
+| `tool` | string | The name of the tool the job runs. |
+| `run_id` | string | The run that started the job. |
+| `started_at` | string | RFC 3339, UTC. |
+
+## `job.ended`
+
+A background job finished. The record carries the result the model
+reads, so a held result survives a crash and a load can deliver it.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `session_id` | string | The session's identifier. |
+| `job` | string | The job's identifier, e.g. `"j3"`. |
+| `handle` | string | The handle of the tool call the job came from. |
+| `tool` | string | The name of the tool the job ran. |
+| `run_id` | string | The run that started the job. |
+| `outcome` | string | How the job ended: `"ok"`, `"error"`, `"cancelled"` or `"interrupted"`. |
+| `cause` | string | Why the job ended, when something else ended it. Absent unless the cause is `"session_closed"`. |
+| `timed_out` | boolean | `true` when the job hit the jobs timeout. Absent when it did not. |
+| `input_id` | string | The id the queued result is delivered under. |
+| `text` | string | The result the model reads. |
+| `ended_at` | string | RFC 3339, UTC. |
 
 ## `turn.interrupted`
 

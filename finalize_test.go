@@ -25,8 +25,13 @@ type failingSink struct {
 	// failRecord is the name of the record that fails. Empty means no
 	// record fails by name.
 	failRecord string
+	// failAfter is how many records of that name are accepted before
+	// one fails. Zero means the first one fails.
+	failAfter int
 	// appends counts every append, including the failed one.
 	appends int
+	// named counts the records of the failing name that were seen.
+	named int
 	// err is the failure the sink returns.
 	err error
 	// blockUntilContextEnd makes every write wait for its context.
@@ -55,12 +60,16 @@ func (s *failingSink) Append(ctx context.Context, rec poo.Record) error {
 	}
 	if s.failRecord != "" && rec.Meta().Record == s.failRecord {
 		s.mu.Lock()
+		s.named++
+		seen := s.named
 		err := s.err
 		s.mu.Unlock()
-		if err != nil {
-			return err
+		if seen > s.failAfter {
+			if err != nil {
+				return err
+			}
+			return errors.New("the store refused the record")
 		}
-		return errors.New("the store refused the record")
 	}
 	s.mu.Lock()
 	s.records = append(s.records, rec)
@@ -70,6 +79,19 @@ func (s *failingSink) Append(ctx context.Context, rec poo.Record) error {
 
 // Flush does nothing.
 func (s *failingSink) Flush(ctx context.Context) error { return nil }
+
+// count returns how many records of a name the sink kept.
+func (s *failingSink) count(name string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, rec := range s.records {
+		if rec.Meta().Record == name {
+			n++
+		}
+	}
+	return n
+}
 
 // TestAHookErrorSettlesTheRunOnce covers the hook row of the failure
 // table: a hook that fails settles the run, and the run settles once.

@@ -979,6 +979,15 @@ func (s *Session) cancelJob(jobID string) error {
 	return nil
 }
 
+// CancelJob stops one of the session's jobs.
+//
+// The job's partial output is delivered like any result. A job that is
+// unknown or already finished is reported as `ErrUnknownJob`, and
+// stopping it twice is not an error the caller has to handle.
+func (s *Session) CancelJob(jobID string) error {
+	return s.cancelJob(jobID)
+}
+
 // ErrUnknownJob is the error a cancel of an unknown job returns.
 var ErrUnknownJob = errors.New("poo: there is no such job")
 
@@ -1279,7 +1288,9 @@ func (t *jobTool) Call(ctx context.Context, in Prepared, env ToolEnv) (ToolResul
 		}
 		err := t.session.cancelJob(p.job)
 		if err != nil {
-			return ToolResult{Text: err.Error(), IsError: true}, nil
+			// The job is unknown or already finished. The failure is
+			// recoverable: the model sees the message and carries on.
+			return ToolResult{}, err
 		}
 		return ToolResult{Text: fmt.Sprintf("The job %s was cancelled.", p.job)}, nil
 	}
