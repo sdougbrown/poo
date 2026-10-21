@@ -363,6 +363,25 @@ func TestTheSnapshotDistinguishesTheRequestsItHolds(t *testing.T) {
 	if callBody == thinkingBody {
 		t.Errorf("a request with a tool call has the same body as one with thinking: %s", callBody)
 	}
+
+	// A signature on the thinking and the error flag on a tool result
+	// change what the provider receives, so they change the body.
+	signed := poo.Message{
+		Role: poo.RoleAssistant,
+		Content: []poo.ContentBlock{
+			{Kind: poo.ContentThinking, Text: "the thinking", Provider: &poo.ProviderBlock{API: "anthropic_messages", Type: "thinking_signature", Data: json.RawMessage(`"sig"`)}},
+			{Kind: poo.ContentText, Text: "the answer"},
+		},
+	}
+	if bodyOf(signed) == thinkingBody {
+		t.Errorf("a request with signed thinking has the same body as one without the signature: %s", thinkingBody)
+	}
+	result := func(isError bool) poo.Message {
+		return poo.Message{Role: poo.RoleTool, Content: []poo.ContentBlock{{Kind: poo.ContentToolResult, ToolCallID: "call_1", Text: "out", IsError: isError}}}
+	}
+	if bodyOf(result(true)) == bodyOf(result(false)) {
+		t.Errorf("a failed tool result has the same body as a successful one: %s", bodyOf(result(false)))
+	}
 	// The tool call's name reaches the body, so a test can see what the
 	// model was asked to do.
 	if !strings.Contains(callBody, "bash") {

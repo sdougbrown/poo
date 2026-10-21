@@ -73,7 +73,7 @@ type HookContext struct {
 	// RunID identifies the run. A job's completion names the run that
 	// started the job, which may already have settled.
 	RunID string
-	// Job is the handle of the job the hook runs for, e.g. "j3". It is
+	// Job is the identifier of the job the hook runs for, e.g. "j3". It is
 	// empty when the hook runs for the run itself.
 	Job string
 	// Turn is the turn the hook is called in, counting from one.
@@ -114,7 +114,7 @@ type ToolCallInfo struct {
 	Prepared Prepared
 	// Handle is the call's handle, e.g. "r1".
 	Handle string
-	// Job is the handle of the job the call runs as, e.g. "j3". It is
+	// Job is the identifier of the job the call runs as, e.g. "j3". It is
 	// empty when the call runs in the turn.
 	Job string
 	// RepeatCount is how many times the model has made this exact call
@@ -397,7 +397,8 @@ const (
 type JobResult struct {
 	// Job is the job's identifier, e.g. "j3".
 	Job string `json:"job"`
-	// Handle is the handle of the tool call the job came from, e.g.
+	// Handle is the handle of the tool call the job came from (that
+	// call's ToolEnv.Handle), e.g.
 	// "r1".
 	Handle string `json:"handle"`
 	// Tool is the name of the tool the job ran.

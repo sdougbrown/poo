@@ -563,7 +563,9 @@ func (r *Run) settleForError(err error) (Reason, SettleDetail, error) {
 		// the plan's provider_limit row settles on a Retry-After over
 		// thirty seconds, so the record has to carry the number it
 		// settles on.
-		retryAfter := int(pe.RetryAfter.Seconds())
+		// It is rounded up, so a wait just over thirty seconds is not
+		// recorded as thirty, which the rule reads as retryable.
+		retryAfter := int((pe.RetryAfter + time.Second - 1) / time.Second)
 		if pe.Kind == ProviderKindContextLength {
 			return ReasonContextExhausted, SettleDetail{
 				Source:   "provider:context_length",

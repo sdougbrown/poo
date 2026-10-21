@@ -200,7 +200,18 @@ type questionWire struct {
 // some prose.
 func (q Question) MarshalJSON() ([]byte, error) {
 	w := questionWire{ID: q.ID, Instructions: q.Instructions}
-	switch k := q.Kind.(type) {
+	// A pointer kind satisfies Kind and passes Validate, so it is
+	// recorded as its value.
+	kind := q.Kind
+	switch k := kind.(type) {
+	case *Bool:
+		kind = *k
+	case *Choice:
+		kind = *k
+	case *Score:
+		kind = *k
+	}
+	switch k := kind.(type) {
 	case nil:
 		w.Kind = ""
 	case Bool:

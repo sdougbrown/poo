@@ -543,3 +543,23 @@ func TestTheRecordedQuestionNamesItsKind(t *testing.T) {
 		}
 	}
 }
+
+func TestAPointerKindIsRecordedLikeItsValue(t *testing.T) {
+	// A caller may write the kind as a pointer. Validate accepts it, so
+	// the record has to encode it too, or the decision is made and its
+	// record is lost.
+	for _, kind := range []decide.Kind{&decide.Bool{True: "yes", False: "no"}, &decide.Choice{Options: []decide.Option{{Name: "a"}, {Name: "b"}}}, &decide.Score{Levels: []string{"low", "mid", "high"}}} {
+		q := decide.Question{ID: "q1", Instructions: "does this fit?", Kind: kind}
+		data, err := json.Marshal(q)
+		if err != nil {
+			t.Fatalf("encoding a question with kind %T: %v", kind, err)
+		}
+		var back decide.Question
+		if err := json.Unmarshal(data, &back); err != nil {
+			t.Fatalf("decoding %s: %v", data, err)
+		}
+		if back.Kind == nil {
+			t.Errorf("the question with kind %T came back with no kind: %s", kind, data)
+		}
+	}
+}

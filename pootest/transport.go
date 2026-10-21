@@ -279,11 +279,13 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 // body as one that holds only text.
 func renderBody(req poo.ChatRequest) []byte {
 	type block struct {
-		Kind       string `json:"kind"`
-		Text       string `json:"text,omitempty"`
-		ToolCallID string `json:"tool_call_id,omitempty"`
-		Name       string `json:"name,omitempty"`
-		Arguments  string `json:"arguments,omitempty"`
+		Kind       string             `json:"kind"`
+		Text       string             `json:"text,omitempty"`
+		ToolCallID string             `json:"tool_call_id,omitempty"`
+		Name       string             `json:"name,omitempty"`
+		Arguments  string             `json:"arguments,omitempty"`
+		IsError    bool               `json:"is_error,omitempty"`
+		Provider   *poo.ProviderBlock `json:"provider,omitempty"`
 	}
 	type message struct {
 		Role    string  `json:"role"`
@@ -311,11 +313,14 @@ func renderBody(req poo.ChatRequest) []byte {
 					ToolCallID: c.ToolCallID,
 					Name:       c.Name,
 					Arguments:  string(c.Arguments),
+					IsError:    c.IsError,
+					Provider:   c.Provider,
 				})
 			default:
 				msg.Blocks = append(msg.Blocks, block{
-					Kind: string(c.Kind),
-					Text: c.Text,
+					Kind:     string(c.Kind),
+					Text:     c.Text,
+					Provider: c.Provider,
 				})
 			}
 		}

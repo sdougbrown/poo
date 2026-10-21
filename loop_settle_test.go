@@ -316,6 +316,30 @@ func TestARateLimitCarriesTheWaitItAskedFor(t *testing.T) {
 	}
 }
 
+// TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty covers a
+// Retry-After sent as a date: the wait is fractional, and a wait just
+// over thirty seconds must not be recorded as thirty, which the plan's
+// rule reads as retryable.
+func TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", time.Now().Add(31*time.Second).UTC().Format(http.TimeFormat))
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"message":"slow down"}}`)
+	}))
+	defer srv.Close()
+
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	sink := &recordingSink{}
+	r := poo.NewRun(testOptions(t, tr, &echoTool{result: "echoed"}, sink))
+	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	settle := settleOf(t, sink)
+	if settle.Detail.Provider == nil || settle.Detail.Provider.RetryAfterSec <= 30 {
+		t.Errorf("the recorded retry-after is %+v, want more than 30 seconds", settle.Detail.Provider)
+	}
+}
+
 // TestATruncatedStreamKeepsItsOriginalKind covers a stream that breaks
 // after a delta: the plan reclassifies the failure as an interrupted
 // stream and keeps the kind the failure had in the code, so a reader can

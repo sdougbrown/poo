@@ -70,7 +70,7 @@ type ToolEnv struct {
 	RunID     string
 	// Handle is this call's identifier, e.g. "r1".
 	Handle string
-	// Job is the handle of the job this call runs as, e.g. "j3". It is
+	// Job is the identifier of the job this call runs as, e.g. "j3". It is
 	// empty when the call runs in the turn.
 	Job string
 	// Env is the scrubbed child environment for a subprocess tool.
