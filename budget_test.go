@@ -104,6 +104,41 @@ func TestTheNoticeRearmsAfterTheUsageDrops(t *testing.T) {
 	}
 }
 
+// TestTheNoticeFiresAgainOnceTheUsageDroppedBelowTheRatio covers the
+// re-arming: after a notice, a later run whose usage fell below the
+// ratio and then rose again gets a second notice.
+func TestTheNoticeFiresAgainOnceTheUsageDroppedBelowTheRatio(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 10}, text: "high"},
+		{usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 10}, text: "low"},
+		{usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 10}, text: "high again"},
+		{usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 10}, text: "still high"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.ContextLimit = 2000
+	opts.NoticeRatio = 0.5
+
+	s := newTestSession(t, opts)
+	for i := 0; i < 4; i++ {
+		runSession(t, s, "go on")
+	}
+
+	notices := 0
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventContextNotice {
+			notices++
+		}
+	}
+	// Run 2 starts high and gets the notice. Run 3 starts low, which
+	// re-arms it. Run 4 starts high again and gets the second notice.
+	if notices != 2 {
+		t.Errorf("the session emitted %d context notices, want 2", notices)
+	}
+}
+
 // TestTheEstimateGrowsWithTheAppendedOutput covers the plan's rule: the
 // estimate grows with what was appended between usage reports.
 func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {

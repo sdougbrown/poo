@@ -113,23 +113,23 @@ func (s *Session) overHardLimit() bool {
 // The notice fires at most once per run, and it fires again in a later
 // run only if the estimate has dropped back below the notice ratio.
 func (s *Session) maybeNotice(run *runState) {
-	s.mu.Lock()
-	estimated := s.estimatedInputLocked()
-	armed := s.noticeArmed
-	fired := run.noticeFired
-	s.mu.Unlock()
-
-	if !armed || fired {
-		return
-	}
 	limit := s.opts.ContextLimit
 	if limit <= 0 {
 		return
 	}
+	s.mu.Lock()
+	estimated := s.estimatedInputLocked()
 	if float64(estimated) < s.opts.NoticeRatio*float64(limit) {
+		// The usage is below the ratio, which re-arms the notice for
+		// the runs to come.
+		s.noticeArmed = true
+		s.mu.Unlock()
 		return
 	}
-	s.mu.Lock()
+	if !s.noticeArmed || run.noticeFired {
+		s.mu.Unlock()
+		return
+	}
 	run.noticeFired = true
 	s.noticeArmed = false
 	s.mu.Unlock()
