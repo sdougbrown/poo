@@ -212,3 +212,65 @@ func asInvalidArgs(err error, target **poo.ErrInvalidArgs) bool {
 	}
 	return false
 }
+
+// sampleArguments builds arguments that conform to an advertised schema:
+// required properties are filled in, objects recursively. A caller that
+// follows the tool's advertised schema can build its arguments this way.
+func sampleArguments(t *testing.T, schema json.RawMessage) any {
+	t.Helper()
+	var decoded struct {
+		Type       string                     `json:"type"`
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+	}
+	if err := json.Unmarshal(schema, &decoded); err != nil {
+		t.Fatalf("decoding the advertised schema: %v", err)
+	}
+	switch decoded.Type {
+	case "object":
+		value := map[string]any{}
+		for _, name := range decoded.Required {
+			value[name] = sampleArguments(t, decoded.Properties[name])
+		}
+		return value
+	case "number", "integer":
+		return 1
+	case "boolean":
+		return true
+	case "array":
+		return []any{}
+	default:
+		return "done"
+	}
+}
+
+// TestTheAdvertisedArgumentsAreCallable covers the tool's advertised
+// schema: the plan's call is finish({result: <object>}), so a caller that
+// follows the advertised schema must pass Prepare.
+func TestTheAdvertisedArgumentsAreCallable(t *testing.T) {
+	consumer := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)
+	tool, err := finish.New(consumer)
+	if err != nil {
+		t.Fatalf("building the tool: %v", err)
+	}
+	args := sampleArguments(t, tool.Spec().Schema)
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("building the arguments: %v", err)
+	}
+	prepared, err := tool.Prepare(raw, poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("the arguments %s conform to the advertised schema %s but Prepare rejects them: %v", raw, tool.Spec().Schema, err)
+	}
+	result := finish.PreparedResult(prepared)
+	if result == nil {
+		t.Fatal("the prepared call carries no result")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result, &payload); err != nil {
+		t.Fatalf("the result is not valid JSON: %v", err)
+	}
+	if payload["answer"] != "done" {
+		t.Errorf("the result is %v, want the answer the caller sent", payload)
+	}
+}

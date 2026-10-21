@@ -45,14 +45,24 @@ func New(schema json.RawMessage) (*Tool, error) {
 }
 
 // Spec describes the tool.
+//
+// The plan's call is finish({result: <object>}), so the advertised
+// arguments wrap the consumer's schema in the result property. The
+// consumer's schema describes the result, not the call's arguments.
 func (t *Tool) Spec() poo.ToolSpec {
-	schema := t.schema
-	if schema == nil {
-		schema = map[string]any{"type": "object"}
+	result := t.schema
+	if result == nil {
+		result = map[string]any{"type": "object"}
+	}
+	schema := map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{"result": result},
+		"required":             []string{"result"},
+		"additionalProperties": false,
 	}
 	raw, err := json.Marshal(schema)
 	if err != nil {
-		raw = json.RawMessage(`{"type":"object"}`)
+		raw = json.RawMessage(`{"type":"object","properties":{"result":{"type":"object"}},"required":["result"],"additionalProperties":false}`)
 	}
 	return poo.ToolSpec{
 		Name:        ToolName,
