@@ -50,8 +50,6 @@ type hookOutcome struct {
 	// interrupted reports that the hook's context ended before it
 	// answered.
 	interrupted bool
-	// err is the failure the hook reported.
-	err error
 }
 
 // runAfterTurn runs the AfterTurn hooks in registration order.

@@ -1,9 +1,6 @@
 package poo
 
-import (
-	"encoding/json"
-	"errors"
-)
+import "errors"
 
 // InputMode says how a client message reaches the model.
 //
@@ -73,10 +70,6 @@ func WithDelivered(messageID string, uptoChars int) InputOption {
 
 // inputRequest is one input on its way into the session.
 type inputRequest struct {
-	// text is the message text.
-	text string
-	// mode is how the message is delivered.
-	mode InputMode
 	// delivered is the delivery note, when the client sent one.
 	delivered *DeliveryNote
 }
@@ -226,21 +219,6 @@ func escapeNoteText(s string) string {
 	return string(out)
 }
 
-// messageChars counts the code points of a message's text blocks.
-//
-// The count is over the text blocks concatenated in emitted order, and
-// the thinking is left out: it is what a client gets by summing its
-// text deltas.
-func messageChars(m Message) int {
-	n := 0
-	for _, c := range m.Content {
-		if c.Kind == ContentText {
-			n += len([]rune(c.Text))
-		}
-	}
-	return n
-}
-
 // errInterrupted is the cancellation cause an interrupt uses.
 //
 // It is never a settle candidate: an interrupt ends the activity, not
@@ -252,12 +230,3 @@ var errInterrupted = errors.New("poo: interrupted by the user")
 // Errors that carry this cause are never candidates, so finalizing never
 // manufactures a cancelled run.
 var errFinalizing = errors.New("poo: the run is finalizing")
-
-// jsonRawOrEmpty returns the raw JSON, or an empty object when there is
-// none.
-func jsonRawOrEmpty(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return json.RawMessage("{}")
-	}
-	return raw
-}

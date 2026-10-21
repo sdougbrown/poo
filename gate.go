@@ -22,8 +22,11 @@ type gateResult struct {
 // The gate never opens a request while a candidate is pending.
 func (s *Session) gate(run *runState) gateResult {
 	// Step 0: a pending candidate settles the run.
-	if len(run.candidates) > 0 {
-		return gateResult{candidates: run.candidates}
+	s.mu.Lock()
+	pending := append([]candidate(nil), run.candidates...)
+	s.mu.Unlock()
+	if len(pending) > 0 {
+		return gateResult{candidates: pending}
 	}
 
 	// Step 1: the compactor.

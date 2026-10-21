@@ -17,13 +17,13 @@ type recordingPrepareTool struct {
 	echoTool
 	// env is the environment the last Prepare received.
 	env poo.PrepareEnv
-	// calls counts the Prepare calls.
-	calls int
+	// prepareCalls counts the Prepare calls.
+	prepareCalls int
 }
 
 // Prepare records the environment and accepts the call.
 func (t *recordingPrepareTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
-	t.calls++
+	t.prepareCalls++
 	t.env = env
 	return echoPrepared{text: string(raw)}, nil
 }
@@ -47,8 +47,8 @@ func TestPrepareReceivesThePrepareEnv(t *testing.T) {
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
-	if tool.calls != 1 {
-		t.Fatalf("Prepare was called %d times, want 1", tool.calls)
+	if tool.prepareCalls != 1 {
+		t.Fatalf("Prepare was called %d times, want 1", tool.prepareCalls)
 	}
 	if tool.env.WorkingDir != "/tmp/the-working-dir" {
 		t.Errorf("Prepare's working directory is %q, want %q", tool.env.WorkingDir, "/tmp/the-working-dir")

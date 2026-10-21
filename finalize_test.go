@@ -70,30 +70,6 @@ func (s *failingSink) Append(ctx context.Context, rec poo.Record) error {
 // Flush does nothing.
 func (s *failingSink) Flush(ctx context.Context) error { return nil }
 
-// names returns the record names, in order.
-func (s *failingSink) names() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.records))
-	for _, rec := range s.records {
-		out = append(out, rec.Meta().Record)
-	}
-	return out
-}
-
-// count returns how many records carry a name.
-func (s *failingSink) count(name string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	n := 0
-	for _, rec := range s.records {
-		if rec.Meta().Record == name {
-			n++
-		}
-	}
-	return n
-}
-
 // TestAHookErrorSettlesTheRunOnce covers the hook row of the failure
 // table: a hook that fails settles the run, and the run settles once.
 func TestAHookErrorSettlesTheRunOnce(t *testing.T) {
@@ -362,8 +338,6 @@ func TestTheConstructionRollsBack(t *testing.T) {
 	if len(sink.records) != 0 {
 		t.Errorf("the log holds %d records, want none", len(sink.records))
 	}
-	// The observers were stopped.
-	observer.waitStopped(t)
 }
 
 // TestTheSessionStartHookAppendsToTheHistory covers the other side: a
@@ -562,10 +536,6 @@ type countingObserver struct {
 	mu sync.Mutex
 	// events counts the events the observer saw.
 	events int
-	// stopped is closed when the observer is stopped.
-	stopped chan struct{}
-	// once guards the stopped channel.
-	once sync.Once
 }
 
 // Observe counts the event.
@@ -574,17 +544,4 @@ func (o *countingObserver) Observe(ev poo.Event) error {
 	o.events++
 	o.mu.Unlock()
 	return nil
-}
-
-// waitStopped waits for the observer to be stopped.
-func (o *countingObserver) waitStopped(t *testing.T) {
-	t.Helper()
-	if o.stopped == nil {
-		return
-	}
-	select {
-	case <-o.stopped:
-	case <-time.After(5 * time.Second):
-		t.Error("the observer was not stopped")
-	}
 }

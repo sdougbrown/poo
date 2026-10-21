@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
-	"strings"
 	"sync"
 )
 
@@ -667,20 +665,4 @@ func canonicalJSON(raw json.RawMessage) string {
 		return string(raw)
 	}
 	return string(out)
-}
-
-// sortedCalls returns the calls of a turn, in order.
-func sortedCalls(calls []ToolCallSummary) []ToolCallSummary {
-	out := append([]ToolCallSummary(nil), calls...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Handle < out[j].Handle })
-	return out
-}
-
-// joinSummary joins the summaries of the calls of a turn.
-func joinSummary(calls []ToolCallSummary) string {
-	parts := make([]string, 0, len(calls))
-	for _, c := range calls {
-		parts = append(parts, c.Tool)
-	}
-	return strings.Join(parts, ", ")
 }

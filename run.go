@@ -672,6 +672,14 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport) {
 		CacheReadTokens: usage.CacheReadTokens,
 		TTFTMS:          usage.TTFTMS,
 	})
+	s.events.emit(EventUsage, map[string]any{
+		"run_id":            run.id,
+		"turn":              turn,
+		"request":           run.requests,
+		"input_tokens":      usage.InputTokens,
+		"output_tokens":     usage.OutputTokens,
+		"cache_read_tokens": usage.CacheReadTokens,
+	})
 }
 
 // settleForError maps a request error to a settle reason.

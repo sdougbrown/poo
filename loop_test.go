@@ -54,11 +54,11 @@ func TestARunThatCallsAToolExecutesIt(t *testing.T) {
 	if res.Turns != 2 {
 		t.Errorf("the run made %d turns, want 2", res.Turns)
 	}
-	if len(tool.calls) != 1 {
-		t.Fatalf("the tool ran %d times, want 1", len(tool.calls))
+	if len(tool.Calls()) != 1 {
+		t.Fatalf("the tool ran %d times, want 1", len(tool.Calls()))
 	}
-	if !strings.Contains(tool.calls[0], "hello") {
-		t.Errorf("the tool received %q, want the call's arguments", tool.calls[0])
+	if !strings.Contains(tool.Calls()[0], "hello") {
+		t.Errorf("the tool received %q, want the call's arguments", tool.Calls()[0])
 	}
 
 	// The tool call and its result are both recorded.
@@ -142,8 +142,8 @@ func TestTheMaxTurnsCeilingSettlesMaxTurns(t *testing.T) {
 	if res.Turns != 3 {
 		t.Errorf("the run made %d turns, want 3", res.Turns)
 	}
-	if len(tool.calls) != 3 {
-		t.Errorf("the tool ran %d times, want 3", len(tool.calls))
+	if len(tool.Calls()) != 3 {
+		t.Errorf("the tool ran %d times, want 3", len(tool.Calls()))
 	}
 	// The turn ceiling is a candidate of its own.
 	if res.Detail.Source != "max_turns" {

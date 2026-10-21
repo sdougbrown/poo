@@ -1,9 +1,6 @@
 package poo
 
-import (
-	"context"
-	"fmt"
-)
+import "fmt"
 
 // Cause names why a message was cut short.
 type Cause string
@@ -172,19 +169,4 @@ func (s *Session) turnSummaryLocked(turn int, handle string) ToolCallSummary {
 		}
 	}
 	return ToolCallSummary{}
-}
-
-// activityCause returns the cause the run's current activity ended
-// with.
-//
-// It is nil while the activity is running, and it is errInterrupted when
-// an interrupt cut it short.
-func (s *Session) activityCause(run *runState) error {
-	s.mu.Lock()
-	ctx := run.activityCtx
-	s.mu.Unlock()
-	if ctx == nil {
-		return nil
-	}
-	return context.Cause(ctx)
 }

@@ -160,11 +160,11 @@ func TestATruncatedResponseRunsTheCompleteCalls(t *testing.T) {
 	runSession(t, s, "do the thing")
 
 	// The complete call ran.
-	if len(tool.calls) != 1 {
-		t.Fatalf("the tool ran %d times, want 1", len(tool.calls))
+	if len(tool.Calls()) != 1 {
+		t.Fatalf("the tool ran %d times, want 1", len(tool.Calls()))
 	}
-	if !strings.Contains(tool.calls[0], "whole") {
-		t.Errorf("the tool received %q, want the complete call", tool.calls[0])
+	if !strings.Contains(tool.Calls()[0], "whole") {
+		t.Errorf("the tool received %q, want the complete call", tool.Calls()[0])
 	}
 
 	// The incomplete call is skipped with the visible note.
@@ -235,8 +235,8 @@ func TestABatchCompletesBeforeHasToolCallStopsTheRun(t *testing.T) {
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")
 
-	if len(tool.calls) != 2 {
-		t.Errorf("the tool ran %d times, want 2: the whole batch runs first", len(tool.calls))
+	if len(tool.Calls()) != 2 {
+		t.Errorf("the tool ran %d times, want 2: the whole batch runs first", len(tool.Calls()))
 	}
 	if res.Reason != poo.ReasonStopRequested {
 		t.Errorf("the run settled %q, want stop_requested", res.Reason)
@@ -640,8 +640,8 @@ func TestTheOtherCallsInTheBatchCompleteFirst(t *testing.T) {
 		t.Errorf("the run settled %q, want finished", res.Reason)
 	}
 	// The other call in the batch ran.
-	if len(tool.calls) != 1 {
-		t.Errorf("the tool ran %d times, want 1: the batch completes first", len(tool.calls))
+	if len(tool.Calls()) != 1 {
+		t.Errorf("the tool ran %d times, want 1: the batch completes first", len(tool.Calls()))
 	}
 }
 

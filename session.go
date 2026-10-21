@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 )
@@ -138,8 +137,6 @@ type runState struct {
 	// pendingInterruptIDs are the inputs whose messages aborted the
 	// current activity.
 	pendingInterruptIDs []string
-	// cancelRequested reports that the run was cancelled from outside.
-	cancelRequested bool
 
 	// pendingCalls are the calls that were issued but have no result
 	// yet.
@@ -697,15 +694,4 @@ func hookName(h any) string {
 		name = "hook"
 	}
 	return name
-}
-
-// stringsJoin joins the non-empty parts with a separator.
-func stringsJoin(sep string, parts ...string) string {
-	var kept []string
-	for _, p := range parts {
-		if p != "" {
-			kept = append(kept, p)
-		}
-	}
-	return strings.Join(kept, sep)
 }

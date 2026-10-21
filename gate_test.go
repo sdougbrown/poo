@@ -61,18 +61,18 @@ func TestTheObserverSeesTheEventsInOrder(t *testing.T) {
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
 	// The observer's goroutine may still be delivering, so the test
-	// waits for it to catch up.
+	// waits for it to catch up with the session's own event log.
 	deadline := time.After(5 * time.Second)
 	for {
 		observer.mu.Lock()
 		count := len(observer.events)
 		observer.mu.Unlock()
-		if count > 0 {
+		if count >= len(s.Events()) {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatal("the observer saw no events")
+			t.Fatalf("the observer saw %d events, want %d", count, len(s.Events()))
 		case <-time.After(time.Millisecond):
 		}
 	}

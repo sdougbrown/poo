@@ -224,7 +224,12 @@ func (s *recordingSink) allRecords() []poo.Record {
 }
 
 // echoTool is a tool that records what it was asked to do.
+//
+// The recording is guarded, because a read-only batch runs its calls at
+// the same time.
 type echoTool struct {
+	// mu guards calls.
+	mu sync.Mutex
 	// calls holds the arguments the tool received.
 	calls []string
 	// result is the text the tool returns.
@@ -238,6 +243,13 @@ type echoTool struct {
 	// call is called with the call's context, so a test can act at a
 	// known point without a sleep.
 	call func(ctx context.Context) (poo.ToolResult, error)
+}
+
+// Calls returns the arguments the tool received, in order.
+func (t *echoTool) Calls() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.calls...)
 }
 
 // Spec describes the tool.
@@ -266,7 +278,9 @@ func (t *echoTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 // Call records the call and returns the result.
 func (t *echoTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
 	p := in.(echoPrepared)
+	t.mu.Lock()
 	t.calls = append(t.calls, p.text)
+	t.mu.Unlock()
 	if t.call != nil {
 		return t.call(ctx)
 	}
