@@ -204,9 +204,13 @@ func (j *Judge) Run(ctx context.Context) (*JudgeResult, error) {
 		return nil, fmt.Errorf("eval: creating %s: %w", j.opts.OutDir, err)
 	}
 
+	// The report is read once. A results directory without a readable
+	// report is judged from the logs alone.
+	report, _ := LoadReport(j.opts.ResultsDir)
+
 	result := &JudgeResult{OutDir: j.opts.OutDir}
 	for _, t := range transcripts {
-		verdict, err := j.judgeOne(ctx, t)
+		verdict, err := j.judgeOne(ctx, t, report)
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +306,7 @@ func (j *Judge) findTranscripts() ([]transcript, error) {
 // An errored verdict needs the owner. A judge outage that produced no
 // flagged verdicts would read as "no transcript needs the owner", which
 // is the opposite of the truth.
-func (j *Judge) judgeOne(ctx context.Context, t transcript) (*Verdict, error) {
+func (j *Judge) judgeOne(ctx context.Context, t transcript, report *Report) (*Verdict, error) {
 	verdict := &Verdict{
 		Task:  t.task,
 		Model: t.model,
@@ -321,7 +325,7 @@ func (j *Judge) judgeOne(ctx context.Context, t transcript) (*Verdict, error) {
 	verdict.TranscriptChars = len(text)
 	verdict.ElidedTurns = elided
 
-	payload := j.buildPayload(log, text, t)
+	payload := j.buildPayload(log, text, t, report)
 	answer, err := j.ask(ctx, payload)
 	if errors.Is(err, errEmptyAnswer) {
 		answer, err = j.ask(ctx, payload)
@@ -381,9 +385,9 @@ type judgePayload struct {
 // entry, when the harness wrote one. The judge and a reader of the
 // report then see the same numbers, and the judge's "agrees with check"
 // question has the check's real answer to compare against.
-func (j *Judge) buildPayload(log *Log, transcript string, t transcript) judgePayload {
+func (j *Judge) buildPayload(log *Log, transcript string, t transcript, report *Report) judgePayload {
 	payload := judgePayload{Transcript: transcript}
-	if entry, ok := j.runEntry(t); ok {
+	if entry, ok := runEntry(report, t); ok {
 		payload.CheckPassed = entry.Success
 		payload.CheckOutput = entry.CheckOutput
 		payload.Metrics = entry.Metrics
@@ -402,11 +406,10 @@ func (j *Judge) buildPayload(log *Log, transcript string, t transcript) judgePay
 	return payload
 }
 
-// runEntry returns the report entry of a run, when the harness wrote
-// one.
-func (j *Judge) runEntry(t transcript) (RunResult, bool) {
-	report, err := LoadReport(j.opts.ResultsDir)
-	if err != nil {
+// runEntry returns the report entry of a run, when the report holds
+// one. A nil report holds none.
+func runEntry(report *Report, t transcript) (RunResult, bool) {
+	if report == nil {
 		return RunResult{}, false
 	}
 	for _, r := range report.Results {
