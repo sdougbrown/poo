@@ -732,24 +732,6 @@ func (s *Session) hasDrainableInputLocked() bool {
 	return len(s.followUpQueue) > 0 && s.followUpQueue[0].accepted
 }
 
-// hasAcceptedInputLocked reports that a client queue holds an accepted
-// input.
-//
-// The caller holds the session's lock.
-func (s *Session) hasAcceptedInputLocked() bool {
-	for _, input := range s.steerQueue {
-		if input.accepted {
-			return true
-		}
-	}
-	for _, input := range s.followUpQueue {
-		if input.accepted {
-			return true
-		}
-	}
-	return false
-}
-
 // removeQueuedInputLocked takes one input back off its queue.
 //
 // The caller holds the session's lock.
