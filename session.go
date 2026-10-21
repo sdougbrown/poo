@@ -200,9 +200,9 @@ type runState struct {
 	// follows run.settled.
 	callWrites int
 	// sealed reports that the finalization owns the run's remaining
-	// records. A claim that would write a call record or a call result
-	// checks the seal when it is claimed, so nothing is added for the run
-	// after it.
+	// records. A claim that would write a call record, a call result or
+	// an input's acceptance checks the seal when it is claimed, so
+	// nothing is added for the run after it.
 	sealed bool
 	// jobStarts counts the job acceptance records whose writes are still
 	// in flight. The finalization waits for them as it does for the
@@ -211,9 +211,14 @@ type runState struct {
 	// workDone is signalled when a pending call gets its result.
 	workDone chan struct{}
 
+	// accepting are the inputs whose acceptance record is still being
+	// written. The finalization waits for them, and reports the ones it
+	// seals as undelivered.
+	accepting []queuedInput
 	// delivering are the inputs taken from the queues whose delivery
 	// records are still being written, in delivery order. The
-	// finalization waits for them, and reports the ones it abandons.
+	// finalization waits for them, and reports the ones it seals as
+	// undelivered.
 	delivering []queuedInput
 	// deliveringJobs are the job results taken from the session's job
 	// queue whose delivery records are still being written. The

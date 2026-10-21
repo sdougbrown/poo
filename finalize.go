@@ -78,15 +78,12 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// result; the work that is still running is abandoned.
 	s.waitForWork(run)
 
-	// A delivery the finalization abandoned during the wait never
-	// reached the model, so it is reported with the queued inputs.
-	undelivered = append(undelivered, s.collectAbandonedDeliveries(run)...)
-
 	// The seal: the finalization takes ownership of every claim that is
 	// still outstanding. The calls it takes get their record and their
-	// terminal result, and no other goroutine adds one for the run after
-	// this point.
-	issued := s.sealRun(run)
+	// terminal result, the inputs it takes are reported as undelivered,
+	// and no other goroutine adds a record for the run after this point.
+	issued, sealed := s.sealRun(run)
+	undelivered = append(undelivered, sealed...)
 
 	// Steps 4 and 5: every call that was issued but has no result
 	// gets a synthetic one, and every pending ask resolves as
@@ -288,24 +285,6 @@ func (s *Session) collectUndelivered(run *runState) []UndeliveredInput {
 	return out
 }
 
-// collectAbandonedDeliveries takes the inputs whose delivery was in
-// flight when the finalization abandoned it.
-func (s *Session) collectAbandonedDeliveries(run *runState) []UndeliveredInput {
-	s.mu.Lock()
-	pending := run.abandonedInputs
-	run.abandonedInputs = nil
-	s.mu.Unlock()
-
-	if len(pending) == 0 {
-		return nil
-	}
-	out := make([]UndeliveredInput, 0, len(pending))
-	for _, input := range pending {
-		out = append(out, UndeliveredInput{InputID: input.id, Mode: string(input.mode)})
-	}
-	return out
-}
-
 // dropUndelivered records the inputs that never reached the model.
 //
 // The drop events are emitted even if the store write fails, so the
@@ -386,7 +365,7 @@ func (s *Session) waitForWork(run *runState) {
 				started++
 			}
 		}
-		pending := started + run.resultWrites + run.callWrites + run.jobStarts + len(run.delivering) + len(run.deliveringJobs)
+		pending := started + run.resultWrites + run.callWrites + run.jobStarts + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
 		done := run.workDone
 		s.mu.Unlock()
 		if pending == 0 {
@@ -400,16 +379,18 @@ func (s *Session) waitForWork(run *runState) {
 	}
 }
 
-// sealRun seals the run and takes ownership of the calls that were
-// claimed but not finished.
+// sealRun seals the run and takes ownership of every claim that was
+// made but not finished.
 //
-// The seal and the claims are one step under the lock, so a call that is
-// claimed afterwards is refused instead of slipping past the commit
+// The seal and the claims are one step under the lock, so a claim that
+// arrives afterwards is refused instead of slipping past the commit
 // point. The returned calls are the finalization's to settle: each one
 // gets the record its caller had not written and its terminal result.
-func (s *Session) sealRun(run *runState) []*issuedCall {
+// The returned inputs are the ones whose acceptance or delivery was
+// still in flight; they never reached the model, so the finalization
+// reports them with the run's reason.
+func (s *Session) sealRun(run *runState) ([]*issuedCall, []UndeliveredInput) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	run.sealed = true
 	issued := make([]*issuedCall, 0, len(run.pendingCalls))
 	for _, call := range run.pendingCalls {
@@ -425,7 +406,22 @@ func (s *Session) sealRun(run *runState) []*issuedCall {
 	for _, call := range issued {
 		run.settledCalls[call.handle] = true
 	}
-	return issued
+	pending := run.abandonedInputs
+	run.abandonedInputs = nil
+	pending = append(pending, run.accepting...)
+	run.accepting = nil
+	pending = append(pending, run.delivering...)
+	run.delivering = nil
+	for _, input := range pending {
+		s.removeQueuedInputLocked(input)
+	}
+	s.mu.Unlock()
+
+	undelivered := make([]UndeliveredInput, 0, len(pending))
+	for _, input := range pending {
+		undelivered = append(undelivered, UndeliveredInput{InputID: input.id, Mode: string(input.mode)})
+	}
+	return issued, undelivered
 }
 
 // settleIssuedCalls gives every call that was issued but has no result
@@ -603,7 +599,7 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	run := s.run
 	// A run that is settling cannot take a message: the outcome is
 	// already fixed, and a message that arrived now would be dropped.
-	if s.state == StateSettling || run.finalizing {
+	if s.state == StateSettling || run.finalizing || run.sealed {
 		s.mu.Unlock()
 		return "", ErrNotRunning
 	}
@@ -626,8 +622,9 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		s.steerQueue = append(s.steerQueue, input)
 	}
 	// The acceptance write is in-flight work: the finalization waits
-	// for it, and reports an input it accepted too late.
-	run.delivering = append(run.delivering, input)
+	// for it, and owns the input if it seals the run before the write
+	// finishes.
+	run.accepting = append(run.accepting, input)
 	// A client message resets the count of the unattended wakes: the
 	// chain of job → wake → job is broken by a person.
 	s.unattendedWakes = 0
@@ -666,16 +663,19 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	// The entry becomes drainable only now, after its acceptance
 	// record succeeded.
 	accepted := s.markInputAcceptedLocked(id)
+	// The acceptance claim is released here, and it reports whether the
+	// claim was still ours. A finalization that sealed the run took it,
+	// and the input's fate is then the finalization's to write.
+	owned := s.finishInputAcceptanceLocked(run, input)
 	committed := run.committed
-	late := committed || run.finalizing
-	if late && accepted {
+	late := committed || run.finalizing || run.sealed
+	if late && accepted && owned {
 		// The run settled while the record was in flight: the input is
 		// accepted, and its fate is dropped.
 		if s.removeQueuedInputLockedBool(input) {
 			run.abandonedInputs = append(run.abandonedInputs, input)
 		}
 	}
-	s.finishInputAcceptanceLocked(run, input)
 	waiting := !late && s.run == run && s.state == StateWaiting
 	reason := run.result.Reason
 	s.mu.Unlock()
@@ -742,17 +742,21 @@ func (s *Session) removeQueuedInputLockedBool(input queuedInput) bool {
 }
 
 // finishInputAcceptanceLocked releases an input's in-flight acceptance
-// claim. It is not a delivery, so it is not reported as one.
+// claim, and reports whether the claim was still the caller's. It is not
+// a delivery, so it is not reported as one.
 //
 // The caller holds the session's lock.
-func (s *Session) finishInputAcceptanceLocked(run *runState, input queuedInput) {
-	for i := range run.delivering {
-		if run.delivering[i].id == input.id {
-			run.delivering = append(run.delivering[:i], run.delivering[i+1:]...)
+func (s *Session) finishInputAcceptanceLocked(run *runState, input queuedInput) bool {
+	owned := false
+	for i := range run.accepting {
+		if run.accepting[i].id == input.id {
+			run.accepting = append(run.accepting[:i], run.accepting[i+1:]...)
+			owned = true
 			break
 		}
 	}
 	s.signalWorkLocked(run)
+	return owned
 }
 
 // hasDrainableInputLocked reports that the front of a client queue can
