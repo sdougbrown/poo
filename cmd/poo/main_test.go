@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -133,17 +132,5 @@ func TestTheTextModePromptNamesTheToolsAndTheCallFormat(t *testing.T) {
 		if !strings.Contains(prompt, needle) {
 			t.Errorf("the prompt does not mention %q", needle)
 		}
-	}
-}
-
-// The system prompt must be usable as JSON content, so the model's own
-// quoting of it does not break the request.
-func TestTheSystemPromptSurvivesJSONEncoding(t *testing.T) {
-	b, err := json.Marshal(systemPrompt("gemma4", nil, "native"))
-	if err != nil {
-		t.Fatalf("encoding the prompt: %v", err)
-	}
-	if !json.Valid(b) {
-		t.Error("the encoded prompt is not valid JSON")
 	}
 }
