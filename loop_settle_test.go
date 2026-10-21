@@ -322,7 +322,7 @@ func TestARateLimitCarriesTheWaitItAskedFor(t *testing.T) {
 // rule reads as retryable.
 func TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Retry-After", time.Now().Add(31*time.Second).UTC().Format(http.TimeFormat))
+		w.Header().Set("Retry-After", time.Now().Add(45*time.Second).UTC().Format(http.TimeFormat))
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = io.WriteString(w, `{"error":{"message":"slow down"}}`)
 	}))
@@ -335,8 +335,8 @@ func TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty(t *testing.T) {
 		t.Fatalf("the run failed: %v", err)
 	}
 	settle := settleOf(t, sink)
-	if settle.Detail.Provider == nil || settle.Detail.Provider.RetryAfterSec <= 30 {
-		t.Errorf("the recorded retry-after is %+v, want more than 30 seconds", settle.Detail.Provider)
+	if settle.Detail.Provider == nil || settle.Detail.Provider.RetryAfterSec <= 30 || settle.Detail.Provider.RetryAfterSec > 45 {
+		t.Errorf("the recorded retry-after is %+v, want more than 30 and at most 45 seconds", settle.Detail.Provider)
 	}
 }
 
