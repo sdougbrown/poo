@@ -1,199 +1,231 @@
 # Observed
 
-What the eval harness has actually seen.
+What the eval harness has seen. This is the Stage 1 deliverable named in
+the plan: the observed failure modes, written down so that Stage 3's
+failure table and defaults can be checked against them before Stage 3
+starts.
 
-This file is the plan's Stage 1 deliverable: the observed failure modes,
-written down so Stage 3's failure table and defaults can be checked
-against them before Stage 3 starts.
+Every entry names the runs it came from. The raw transcripts are not
+committed (`evals/results/**/runs/` is ignored); the report, the
+summary and the judge's verdicts are.
 
-Every entry here names the run it came from, so it can be reproduced.
+## The baseline
 
-## Observed in the 2026-10-20 smoke test
+`evals/results/2026-10-21-003728-f6a832f/`: 20 tasks × 4 models × 3
+seeds = 240 runs at `f6a832f`, each inside the bwrap sandbox
+(`--sandbox bwrap`), `--max-turns 50`.
 
-The smoke test ran one task, `fix-division-by-zero`, against `gemma4`
-and `qwen`, seed 1, and then judged both transcripts. A wider run over
-five tasks and both models followed.
+| model | endpoint | context | success | turns | tool err | reread | settle |
+|---|---|---|---|---|---|---|---|
+| qwen | grace router | 262144 | 100.0% | 5.5 | 0.5% | 12.4% | 60 end_turn |
+| minimax-m3.1-flash | Ollama cloud | 262144 | 100.0% | 8.2 | 6.9% | 17.7% | 60 end_turn |
+| gemma4 | grace router | 32768 | 90.0% | 13.3 | 2.2% | 25.7% | 58 end_turn, 2 max_turns |
+| gemma4-think | grace router, `reasoning_effort: low` | 32768 | 86.7% | 10.8 | 1.5% | 21.3% | 58 end_turn, 2 max_turns |
 
-### The text mode doubles the model's prose
+No run settled `context_exhausted` or `provider_error`.
 
-**Where:** `provider/openai/stream.go`, in the transport's `events`
-function.
+The report's mean diff size for gemma4 and gemma4-think is inflated:
+three runs (`fix-json-missing-key` gemma4 seeds 1–2,
+`fix-stack-push-order` gemma4-think seed 1) ran `pip install --user
+pytest`, and with the sandbox's `$HOME` at `/work` the installed files
+counted as the run's diff, about 178000 lines each. Their success is
+unaffected. The sandbox now puts `$HOME` in its private `/tmp`, so later
+baselines do not count it. The text
+parse-failure rate is 0% for every model: the parser never failed on a
+block it recognized. Malformed calls it did not recognize show up as a
+premature `end_turn` instead (entry 3).
 
-**What:** in the `text` and `auto` tools modes, the transport appends
-the content delta as a text event *and* feeds the same text to the
-parser, which emits its own text event for the prose the parser does
-not consume. The reader returns both, so every character of the model's
-prose reaches the model twice.
+All 14 failed runs are gemma4 or gemma4-think runs. 6 of them are
+`find-off-by-one-loop`, which no gemma run passed.
 
-A gemma4 answer came back as:
+## Failure modes
 
-```
-TheThe unreachable unreachable handler handler is is ` handle`handle__legacylegacy__pingping` ...
-```
+### 1. A model edits what the task said not to touch
 
-**Why it matters:** a read-only task's check greps the answer for a
-keyword, and the doubled text still holds the keyword, so the check
-mostly survives. But the model sees a mangled version of its own
-previous message, and a model that reads its own output is confused by
-it.
+**Runs:** `find-off-by-one-loop` gemma4 seeds 1–2 and gemma4-think
+seeds 2–3; `fix-json-missing-key` gemma4 seed 3; `fix-off-by-one-slice`
+gemma4-think seed 1; `fix-unicode-decode-error` minimax seeds 1–3;
+`fix-stack-push-order` minimax seed 1; `fix-path-join-double-slash`
+minimax seed 2.
 
-The corruption goes further than the prose. On the
-`long-find-error-in-log` task, gemma4 found the right error line and
-answered with the request id `req--88ff22aa4411cc99`, which is
-`req-8f2a41c9` with every character doubled and the hyphen doubled
-too. The check compares the answer against the id derived from the
-log, so the run failed: the model was right and the harness gave it a
-mangled answer.
+**What:** on a read-only task that says "do not change any file", four
+of the six gemma runs wrote a `test_chunks.py` to confirm their
+diagnosis, then gave the right answer. The check fails them for the
+unexpected file. (The other two never answered: one made no call at
+all, and one is entry 3.) On coding tasks, gemma left a scratch
+`fix_require.py` or `fix_attempt.py` behind, and minimax rewrote
+`README.md` or added tests it was not asked for after the fix passed.
+None of the coding-task edits failed a check.
 
-The wider smoke test also showed gemma4 re-running the same test
-command from turn 9 to turn 50, without stopping, having already
-solved the task at turn 7. The judge called the tail of that
-transcript "corrupted, heavily duplicated summary text".
+**Harness relevance:** the harness can't stop this, and v1 shouldn't
+try. The diff-sanity metric (`unexpected_files`) and the judge's
+`off_task_edit` both catch it, which is what they are for. A
+permission policy (Stage 7) could deny writes on a read-only task, but
+that is a consumer's choice, not a default.
 
-**Reproduced** with a one-line SSE body in text mode: the text comes
-out as `"Hello world.Hello world."`.
+### 2. A model calls a tool poo does not have
 
-**Status:** fixed. This was unit A's code, and the fix has landed: the
-parser now takes the text *instead of* the transport in the modes where
-the parser runs, so the prose reaches the model once. The 2026-10-20
-smoke test after unit A's fix found no doubled word in any of gemma4's
-answers.
+**Runs:** minimax across the set: 34 calls to `edit` and 5 to `write`,
+of 655 calls. qwen made 1 call to `call`.
 
-**What it cost the baseline:** every text-mode model's answers were
-corrupted, and the read-only tasks read those answers. On the
-2026-10-20 smoke test, gemma4 passed all three coding tasks and failed
-all three read-only ones, and qwen, which runs in the native mode,
-passed all six. The baseline is measured after the fix, so the
-read-only success rate measures the model and not the bug.
+**What:** minimax-m3.1-flash reaches for an `edit` tool even though the
+request offers only `bash` and `read`. Each call gets a recoverable
+error result, and minimax then edits with a heredoc or `sed`. It never
+failed a task because of it, but it is most of its 6.9% tool-error
+rate.
 
-### gemma4 writes its tool calls as text
+**Harness relevance:** matches the failure table's recoverable-error
+row. Stage 5's `edit` tool will absorb most of these. Worth a
+tool-error-rate check after Stage 5.
 
-**Where:** the model's own behaviour, seen in the smoke test.
+### 3. A malformed call ends the run as a premature `end_turn`
 
-**What:** gemma4 answered the tool-calling prompt with a
-`<tool_call>` block in its text rather than a wire-format
-`tool_calls` array. The `native` tools mode therefore made no tool
-call at all, and the run ended after one turn with the task undone.
+**Runs:** the assistant text of 18 gemma4-think runs and 3 gemma4 runs
+holds Gemma's own channel or tool tokens (`<|channel>batch` followed by
+a JSON command, `decalration:bash{command:<|"|>ls -R<|"|>}`). When that
+text was the model's attempted call, the run ended there. Examples:
+`find-dead-code` gemma4-think seed 2 and `find-off-by-one-loop`
+gemma4-think seed 1.
 
-**What was done:** `evals/models.yaml` gives gemma4 `tools_mode: auto`,
-so the text parser reads the calls. The owner allowed this change on
-the evidence of a smoke test, and the change is recorded in the
-catalog's own notes.
+**What:** the response has text and no recognized call, so the run
+settles `end_turn` on that turn with the task undone.
 
-### The models re-read what they have already read
+**Harness relevance:** two separate issues.
 
-**Where:** every model in the smoke test.
+- The leaked tokens come from the gateway's chat template for gemma4,
+  mostly with thinking on. That is endpoint configuration, not poo.
+- The settle is poo's, and it is the case the plan's `BeforeSettle`
+  hook (Stage 4) exists for: a turn that ends in something that looks
+  like an attempted call can be continued with a nudge instead of
+  accepted. The plan already says `end_turn` is "accepted by
+  `BeforeSettle`", so the table needs no change.
 
-**What:** the re-read rate was 20% to 50% across the smoke test's runs.
-gemma4 read `rates/__init__.py`, edited it, and read it again; qwen
-re-read the source and the tests before editing.
+### 4. A model does not stop after the task is done
 
-**Why it matters:** the plan's re-read rate is a metric on the
-baseline, and a high value is a signal that the harness's context
-handling forces a model to re-read. It is not a bug in itself, and the
-harness does not guard against it: the plan's decision 3 says v1 ships
-no repeated-read guard.
+**Runs:** 4 runs hit `max_turns` (50): `fix-path-join-double-slash`
+gemma4 seed 1, `fix-word-count-ignores-case` gemma4 seed 2 and
+gemma4-think seed 2, `fix-off-by-one-slice` gemma4-think seed 2. Three
+of the four still passed the check, because the fix was in place long
+before turn 50.
 
-### gemma4 hit the turn ceiling
+**What:** the model fixes the bug, runs the tests, and then keeps
+re-running the same test command and restating its summary until the
+ceiling.
 
-**Where:** the `fix-division-by-zero` and `fix-off-by-one-slice` tasks,
-gemma4, seed 1.
+**Harness relevance:** `loop_or_reread` is gemma's most common
+pathology (see the judge table). The plan answers it twice: the
+doom-loop repeat counting in Stage 3 (exact and near keys) and the typed
+`finish` tool. This baseline has no loop guard at all, so these runs
+show what an unguarded loop costs: most of the 50 turns.
 
-**What:** both runs settled `max_turns` after 50 turns. The task was
-solved by turn 7, and the run kept going: it re-ran the same test
-command, `python3 -m unittest discover tests`, at every turn from 9
-to 50. Each of those turns produced the same summary text, doubled by
-the text-mode bug above, so the model saw its own message repeated
-with every word doubled and kept going.
+### 5. A model wanders outside its working directory
 
-**Why it matters:** two things are true at once. The skeleton's
-`end_turn`-only vocabulary is not enough: a model that does not end
-its own turn runs to the ceiling, and the plan's typed `finish` tool
-and the `finished` settle reason are the answer. And the text mode's
-doubling is what kept this model in the loop: qwen, which runs in the
-native mode and so sees its own text once, ended the same task in 5
-turns.
+**Runs:** minimax ran 37 bash commands that searched outside the
+workdir (`find / -maxdepth 3 -name ...`); qwen ran 15 (`cd /home/user`,
+a `find /` for the package it was editing).
 
-**What to check in Stage 3:** whether the doubling fix alone ends the
-loop, and whether the `finish` tool is still needed. The plan's typed
-result is the right shape either way, but the baseline should be
-measured after the doubling fix, or the ceiling rate will be an
-artefact of the bug rather than a fact about gemma4.
+**What:** in an earlier, unsandboxed baseline, minimax found the task
+set through `find /`, read `check_answer.py`, and patched the source
+fixtures of two tasks. That led to the fixture snapshot guard and then
+the bwrap sandbox. Inside the sandbox the same searches find nothing
+outside `/work`, and the source fixtures stayed unchanged for all 240
+runs.
 
-### The tool error rate was low but not zero
+**Harness relevance:** this is why `poo-eval run --sandbox bwrap`, which
+wraps the whole `poo` process, is the eval isolation (owner decision,
+2026-10-21). An executor that confines only bash would leave `read`,
+which runs inside poo's own process, able to open the answer key. The
+plan's Stage 5 bwrap executor is about keeping credentials away from
+model-chosen commands, not about eval isolation.
 
-**Where:** the wider smoke test.
+### 6. Re-reads are common
 
-**What:** 4.2% of the tool calls failed across the smoke test's ten
-runs. The failures were recoverable: a command that named `python`
-where the machine has `python3`, and a `sed` whose quoting did not
-survive the shell.
+**Runs:** every model. The re-read rate runs from 12.4% (qwen) to 25.7%
+(gemma4).
 
-**Why it matters:** the tool error rate is a metric, and the errors
-show the harness's own behaviour working as the plan wants: the model
-saw the error and adapted.
+**What:** a model reads a file, edits it, and reads the same range
+again, or reads source and tests twice before editing.
 
-## What the harness itself got wrong
+**Harness relevance:** a measurement, not a defect. Decision 3 says v1
+ships no repeated-read guard. It is a baseline to compare Stage 4's
+prompt builder against.
 
-Two things were found and fixed in the harness while it was being
-written:
+### 7. TTFT and the prefix cache
 
-- The first diff implementation compared the workdir against a hash
-  list, so a file the run had changed could not be diffed against its
-  original content. It now keeps a pristine copy of the workdir and
-  diffs against that.
-- The first transcript renderer put every turn's events in one block,
-  so the judge could not elide the middle of a long transcript. It now
-  renders one segment per turn, which is what the summary needs.
+The prefix-cache hit ratio is 71% (minimax) to 83% (gemma4); qwen's
+endpoint reports none. The judge flagged no `ttft_growth`. Nothing here
+for Stage 3 to change.
 
-A later review of the harness found five more, and they are fixed:
+## What the harness got wrong along the way
 
-- A rerun into the same report directory read the earlier run's log,
-  because poo refuses a log that already exists and the harness reused
-  the path. Every run now gets a directory of its own, and a run into
-  a directory that already holds a run's output is refused unless
-  `--force` clears it.
-- The re-read metric recorded a `sed -n '10,20p' a.go` as a read of
-  the file "10", so two different files looked like a re-read and the
-  same file's two ranges did not.
-- The replayed transport repeated the last recorded response, so a
-  recording with one tool call replayed into 1486 calls and the
-  difference it reported was the loop rather than the recording.
-- The API key reached the check's environment, and the check's output
-  goes into the report. Every key variable the catalog names is now
-  removed from the check's environment, and from the poo process's
-  environment except the running model's own.
-- A judge that could not be reached produced a verdict that was not
-  flagged, so a judge outage read as "no transcript needs the owner".
+Found while taking the baseline, and fixed before it was taken:
 
-## gemma4 asks for a tool poo does not have
+- **The text mode doubled the model's prose.** The transport appended a
+  content delta as text and also fed it to the parser, which emitted it
+  again. gemma4's answers came back with every word twice, and that kept
+  a gemma4 run in a 50-turn loop. A streamed fenced block that was not a
+  call was re-emitted the same way. Both are fixed and tested.
+- **Parallel calls at one index merged.** minimax sends every parallel
+  call at index 0, each with its own id. The transport merged them into
+  one call with both names and both arguments, and the provider
+  answered 400. Fragments are now routed by index and id.
+- **The judge lost answers.** The grace gateway cuts a deepseek-flash
+  reply at the first literal `<tool_call>` the model writes, even inside
+  its reasoning, and returns empty content. The judge now shows the tag
+  as `⟨tool_call⟩`, asks once more after an empty answer, and reports
+  the finish reason if the answer is still empty.
+- **Reports held local paths, a run could edit a source fixture, and a
+  run could read the answer key.** Fixed by relative report paths and
+  `$WORKDIR` rewriting, the snapshot guard, and the sandbox.
 
-**Where:** the model's own behaviour, seen in the 2026-10-20 smoke
-test after the fixes.
+## Judge
 
-**What:** on the read-only task, gemma4 asked the gateway for a tool
-called `run_shell_command`, which is not in poo's tool set. The
-gateway dropped the unmatched call and answered with an empty response
-and `finish_reason: tool_calls`. poo saw a response with no content and
-no calls and settled `end_turn` after one turn, so the run produced no
-answer at all and the check failed with "the run recorded no answer".
+deepseek-flash judged all 240 transcripts after the judge fix above.
+`judgments/summary.md` lists the 10 it flagged for the owner:
 
-The same request with a shell tool offered under the name `bash` gets
-the call, and the same model answers a question in prose when it is
-asked to. The judge read the trajectory correctly: "the agent ended
-its turn with zero tool calls and no answer", flagged as
-`premature_end_turn`.
+- 4 are the `find-off-by-one-loop` gemma runs that wrote `test_chunks.py`
+  (entry 1).
+- 3 are minimax runs that edited `README.md` or added tests after the
+  fix passed (entry 1).
+- 3 are judge errors: the request timed out at the judge's 120 s limit
+  (`find-off-by-one-loop` minimax seed 1, `fix-path-join-double-slash`
+  minimax seed 2, `fix-json-missing-key` gemma4 seed 1). The gateway was
+  slow on long transcripts. These runs passed or failed on `check.sh`
+  as the report says; they are unjudged, not suspect.
 
-**Why it matters:** this is a measurement of the model against poo's
-tool names, not a defect in the harness. It is the kind of thing the
-baseline exists to show, and it is the reason the judge runs over
-every transcript: a run that ends with no answer looks like a harness
-failure unless someone reads it.
+The pathology counts per model:
 
-## What is not observed yet
+| model | tool-call parse failure | premature end_turn | loop or re-read | off-task edit | other |
+|---|---|---|---|---|---|
+| gemma4 | 13 | 3 | 33 | 3 | 5 |
+| gemma4-think | 16 | 6 | 34 | 3 | 0 |
+| minimax-m3.1-flash | 37 | 0 | 1 | 6 | 2 |
+| qwen | 2 | 0 | 1 | 0 | 0 |
 
-The long change task and the long definition task have not been run end
-to end against a live model, so the harness's behaviour at the context
-limit is untested. The smoke test was bounded to one easy task and one
-wider run over six tasks, so the change task's many-file edit and the
-context-exhausted path are still unmeasured.
+No transcript showed a context blowup or TTFT growth. The judge counts a
+call to a tool poo does not have as a parse failure, which is most of
+minimax's 37 (entry 2).
+
+The judge is not perfectly consistent. Two runs with the same behaviour
+can get different `needs_owner` flags, so the flagged list is a place
+to start reading, not a complete list.
+
+## Checked against Stage 3
+
+Stage 3's failure table (`v1-plan.md`, "Failure and finalization") and
+its defaults were read against the entries above:
+
+- **Unknown tool** (entry 2): recoverable error result. Matches.
+- **Premature `end_turn` on a malformed call** (entry 3): `end_turn` is
+  "accepted by `BeforeSettle`". No change; Stage 4's hook is where a
+  nudge belongs.
+- **Not stopping** (entry 4): doom-loop counting and `finish` are both
+  planned. No change. The baseline gives Stage 3 a number to beat: 4 of
+  120 gemma runs at the ceiling.
+- **`provider_error`:** none in this baseline. An earlier minimax run
+  hit one Ollama HTTP/2 timeout, which the Stage 6 retry budget covers.
+- **`context_exhausted`:** none at gemma's 32768 limit, so the 80%
+  notice and the 97% hard limit are untested by real runs. Stage 3
+  keeps its own injected tests for that path.
+
+No change to the Stage 3 table or defaults follows from this baseline.
