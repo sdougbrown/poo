@@ -290,3 +290,25 @@ func TestAnEmptyAnswerIsAskedAgainWithoutTheToolCallTag(t *testing.T) {
 		t.Errorf("the transcript the judge sees holds a literal tool_call tag: %s", data)
 	}
 }
+
+func TestACroppedSummaryDoesNotClaimElidedTurns(t *testing.T) {
+	// Too few segments to elide any: they are cropped, and the note
+	// says that.
+	segments := []TranscriptSegment{
+		{Turn: 0, Text: strings.Repeat("a", 4000)},
+		{Turn: 1, Text: strings.Repeat("b", 4000)},
+	}
+	text, summarized, elided := summarizeTranscript(segments, 1000)
+	if !summarized || elided != 0 {
+		t.Fatalf("summarized %v with %d elided, want a summary with none elided", summarized, elided)
+	}
+	if strings.Contains(text, "elided") {
+		t.Errorf("the summary claims elided turns when none were: %q", text)
+	}
+	if !strings.Contains(text, "2 segment(s) cropped") {
+		t.Errorf("the summary does not say two segments were cropped: %q", text)
+	}
+	if len(text) > 1000 {
+		t.Errorf("the summary is %d characters, want at most 1000", len(text))
+	}
+}

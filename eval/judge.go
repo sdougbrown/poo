@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -615,14 +616,22 @@ func summarizeTranscript(segments []TranscriptSegment, maxChars int) (string, bo
 	}
 
 	// The kept segments get a share of the limit each, and the note
-	// about what was elided is part of the budget.
-	note := fmt.Sprintf("[%d turn(s) elided from the middle of the transcript]\n", elided)
+	// about what was elided or cropped is part of the budget. The
+	// count in the note is at most the number of segments, so the note
+	// is measured with that count.
 	kept := len(head) + len(tail)
-	budget := maxChars - len(note)
+	budget := maxChars - len(transcriptNote(elided, len(segments)))
 	if budget < 0 {
 		budget = 0
 	}
 	perSegment := budget / max(kept, 1)
+	cropped := 0
+	for _, s := range slices.Concat(head, tail) {
+		if len(s.Text) > perSegment {
+			cropped++
+		}
+	}
+	note := transcriptNote(elided, cropped)
 
 	var b strings.Builder
 	for _, s := range head {
@@ -633,6 +642,17 @@ func summarizeTranscript(segments []TranscriptSegment, maxChars int) (string, bo
 		b.WriteString(crop(s.Text, perSegment))
 	}
 	return b.String(), true, elided
+}
+
+// transcriptNote says what was left out of the middle of a transcript.
+//
+// When turns were elided the note counts them. When none were and some
+// segments were cut to fit, it counts those instead.
+func transcriptNote(elided, cropped int) string {
+	if elided > 0 {
+		return fmt.Sprintf("[%d turn(s) elided from the middle of the transcript]\n", elided)
+	}
+	return fmt.Sprintf("[%d segment(s) cropped to fit the transcript limit]\n", cropped)
 }
 
 // crop shortens a string to a number of characters.
