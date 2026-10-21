@@ -262,7 +262,6 @@ func TestWaitJobsWaitsForTheRunningJobs(t *testing.T) {
 func TestWaitJobsEndsWhenTheSessionIsBroken(t *testing.T) {
 	sink := &failingSink{failRecord: "input.delivered"}
 	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
-	tool.ReleaseAll()
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
 		{text: "waiting"},
@@ -271,6 +270,14 @@ func TestWaitJobsEndsWhenTheSessionIsBroken(t *testing.T) {
 	if _, err := s.Prompt(context.Background(), "start"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	// The job is held until the run waits for it, so its result reaches
+	// the run's delivery: the input.delivered write is the one the sink
+	// refuses, and it breaks the session.
+	<-tool.Started()
+	waitFor(t, "the run to wait", func() bool {
+		return s.State() == poo.StateWaiting
+	})
+	tool.Release()
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
