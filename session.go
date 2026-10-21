@@ -496,6 +496,17 @@ func (s *Session) appendMessages(msgs ...Message) {
 	s.history = append(s.history, msgs...)
 }
 
+// markBroken marks the session broken.
+//
+// A broken session refuses every later prompt: the store is the
+// session's memory, and a session that cannot write cannot be trusted.
+func (s *Session) markBroken() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.broken = true
+	s.sunk = true
+}
+
 // write appends one record to the sink.
 //
 // A refused write marks the session broken: the store is the session's

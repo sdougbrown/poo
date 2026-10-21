@@ -80,11 +80,21 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		ReasoningEffort: s.opts.ReasoningEffort,
 		Trigger:         trigger,
 	}); err != nil {
+		// The store refused the run's first record. The run cannot
+		// continue, and the session is broken. The run settles
+		// store_error, so the caller sees the outcome in the settle
+		// record rather than as a failed call.
 		s.mu.Lock()
 		s.run = nil
+		s.transitionLocked(StateSettled)
+		s.lastResult = Result{Reason: ReasonStoreError, Detail: SettleDetail{
+			Source: "store",
+			Text:   err.Error(),
+		}}
+		s.lastRunID = runID
 		s.mu.Unlock()
 		cancel(nil)
-		return "", err
+		return runID, nil
 	}
 	s.events.emit(EventRunStarted, map[string]any{
 		"run_id":      runID,
@@ -104,7 +114,11 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 			Role:       msg.Role,
 			Content:    msg.Content,
 		}); err != nil {
-			return "", err
+			s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
+				Source: "store",
+				Text:   err.Error(),
+			}))
+			return runID, nil
 		}
 	}
 
@@ -120,7 +134,13 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		Content:      user.Content,
 		DeliveryNote: note,
 	}); err != nil {
-		return "", err
+		// The store refused a record. The run settles store_error, and
+		// the session is broken.
+		s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
+			Source: "store",
+			Text:   err.Error(),
+		}))
+		return runID, nil
 	}
 
 	// The run goes on in the background: the caller gets the run's

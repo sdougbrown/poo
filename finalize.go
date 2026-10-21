@@ -100,10 +100,11 @@ func (s *Session) finalizeRun(run *runState) Result {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), recordWriteBudget)
 	defer cleanupCancel()
 	if err := s.write(cleanupCtx, settle); err != nil {
-		// A store that refuses the settle record means the run's
-		// outcome may not exist. The reason changes to store_error,
-		// unless the run was cancelled: a cancelled run stays
-		// cancelled, and the store error goes into the detail.
+		// The store refused the settle record, so the run's outcome may
+		// not exist. The session is broken, and the reason changes to
+		// store_error, unless the run was cancelled: a cancelled run
+		// stays cancelled, and the store error goes into the detail.
+		s.markBroken()
 		detail.Losing = append(detail.Losing, string(ReasonStoreError))
 		if reason != ReasonCancelled {
 			reason = ReasonStoreError
