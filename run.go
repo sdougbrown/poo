@@ -313,8 +313,9 @@ func (s *Session) loop(run *runState) []candidate {
 		truncated := resp.finish == FinishLength
 
 		// The turn's calls run before the turn ends.
+		processed := false
 		if len(resp.calls) > 0 {
-			s.executeBatch(run, turn, resp.calls, truncated)
+			processed = s.executeBatch(run, turn, resp.calls, truncated)
 			// An interrupt during the batch cut the turn short. The
 			// unstarted calls are skipped, and the run continues.
 			if s.interruptPending(run) {
@@ -325,7 +326,7 @@ func (s *Session) loop(run *runState) []candidate {
 
 		// The turn ended. The turn-end algorithm decides what happens
 		// next: it may settle the run, or it may go to the gate.
-		outcome := s.turnEnd(run, turn, resp, truncated)
+		outcome := s.turnEnd(run, turn, processed, truncated)
 		if len(outcome.candidates) > 0 {
 			return outcome.candidates
 		}
@@ -346,7 +347,7 @@ type turnOutcome struct {
 // The steps are normative: emit turn.ended, drain the queues, run the
 // AfterTurn hooks, evaluate the stop conditions, and then either settle
 // or go to the next-request gate.
-func (s *Session) turnEnd(run *runState, turn int, resp *response, truncated bool) turnOutcome {
+func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool) turnOutcome {
 	// Step 1: the turn is over.
 	s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
 
@@ -386,8 +387,8 @@ func (s *Session) turnEnd(run *runState, turn int, resp *response, truncated boo
 	}
 
 	// Step 6: the turn processed a call, or something was appended, so
-	// the run goes to the gate.
-	processed := len(resp.calls) > 0
+	// the run goes to the gate. A call skipped as truncated is not
+	// processed.
 	if processed || appended {
 		return turnOutcome{}
 	}

@@ -1129,3 +1129,32 @@ func TestASessionWithAFinishSchemaNeedsTheTool(t *testing.T) {
 		t.Fatalf("the error is %T, want an ErrSessionInit", err)
 	}
 }
+
+// TestATruncatedTurnWhoseCallsAreAllIncompleteReachesBeforeSettle covers
+// the plan's step 6: a call skipped as truncated does not count as
+// processed, so the turn is a natural stop.
+func TestATruncatedTurnWhoseCallsAreAllIncompleteReachesBeforeSettle(t *testing.T) {
+	tr := scripted([]fakeResponse{{
+		text:   "writing",
+		finish: poo.FinishLength,
+		calls:  []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hel`)}},
+	}})
+	tool := &echoTool{result: "echoed"}
+	hook := &recordingBeforeSettle{}
+
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+
+	if hook.calls != 1 || hook.candidate != poo.ReasonOutputTruncated {
+		t.Errorf("the BeforeSettle hook ran %d times and saw %q, want once with output_truncated", hook.calls, hook.candidate)
+	}
+	if res.Reason != poo.ReasonOutputTruncated {
+		t.Errorf("the run settled %q, want output_truncated", res.Reason)
+	}
+	if n := len(tr.Requests()); n != 1 {
+		t.Errorf("the run made %d requests, want 1", n)
+	}
+}

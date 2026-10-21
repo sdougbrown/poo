@@ -50,10 +50,19 @@ type callPlan struct {
 // remaining calls. The calls run in parallel only when every one of
 // them belongs to a tool declared ReadOnly; otherwise they run
 // sequentially in model order.
-func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, truncated bool) {
+//
+// It reports whether any call was processed: a call that got a result
+// other than skipped: truncated.
+func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, truncated bool) bool {
 	plans := s.planCalls(run, turn, calls, truncated)
 	if len(plans) == 0 {
-		return
+		return false
+	}
+	processed := false
+	for _, p := range plans {
+		if p.complete {
+			processed = true
+		}
 	}
 
 	s.mu.Lock()
@@ -82,17 +91,18 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 		if s.interruptPending(run) {
 			s.skipInterruptedCalls(run, turn, callsFromPlans(plans))
 		}
-		return
+		return processed
 	}
 	for _, p := range plans {
 		// An interrupt skips the calls that have not started, and the
 		// run continues.
 		if s.interruptPending(run) {
 			s.skipInterruptedCalls(run, turn, callsFromPlans(plans))
-			return
+			return processed
 		}
 		s.executeOne(run, turn, p)
 	}
+	return processed
 }
 
 // countRepeats records every call of a batch in the model order.
