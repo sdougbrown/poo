@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,14 +22,21 @@ func runCLI(t *testing.T, args ...string) (int, string) {
 	}
 	os.Stderr = w
 
+	// The pipe is drained while the command runs, so output larger than
+	// the pipe's buffer cannot block it.
+	done := make(chan []byte, 1)
+	go func() {
+		out, _ := io.ReadAll(r)
+		done <- out
+	}()
+
 	code := run(args)
 
 	os.Stderr = oldStderr
 	w.Close()
-	out := make([]byte, 64*1024)
-	n, _ := r.Read(out)
+	out := <-done
 	r.Close()
-	return code, string(out[:n])
+	return code, string(out)
 }
 
 func TestTheRequiredFlagsAreChecked(t *testing.T) {
