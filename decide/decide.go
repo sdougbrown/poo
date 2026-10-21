@@ -172,6 +172,80 @@ type Question struct {
 	Kind Kind `json:"-"`
 }
 
+// questionWire is the shape a question takes in a record.
+//
+// The kind is a tagged union: the record names the kind and holds that
+// kind's own fields, so a recorded question can be read back and a
+// reader never has to guess what a question asked.
+type questionWire struct {
+	// ID names the question.
+	ID string `json:"id"`
+	// Instructions say what to decide.
+	Instructions string `json:"instructions"`
+	// Kind names the shape of the answer: "bool", "choice" or "score".
+	Kind string `json:"kind"`
+	// True and False are the bool kind's two descriptions.
+	True  string `json:"true,omitempty"`
+	False string `json:"false,omitempty"`
+	// Options are the choice kind's answers.
+	Options []Option `json:"options,omitempty"`
+	// Levels are the score kind's scale.
+	Levels []string `json:"levels,omitempty"`
+}
+
+// MarshalJSON encodes the question as a tagged union.
+//
+// A recorded decision is a durable artifact: a reader has to be able to
+// see what was asked, and a question that lost its kind is an id and
+// some prose.
+func (q Question) MarshalJSON() ([]byte, error) {
+	w := questionWire{ID: q.ID, Instructions: q.Instructions}
+	switch k := q.Kind.(type) {
+	case nil:
+		w.Kind = ""
+	case Bool:
+		w.Kind = "bool"
+		w.True = k.True
+		w.False = k.False
+	case Choice:
+		w.Kind = "choice"
+		w.Options = k.Options
+	case Score:
+		w.Kind = "score"
+		w.Levels = k.Levels
+	default:
+		return nil, fmt.Errorf("decide: a question has an unknown kind %T", q.Kind)
+	}
+	return json.Marshal(w)
+}
+
+// UnmarshalJSON decodes a question's tagged union.
+//
+// An unknown kind is an error: a question whose shape the package does
+// not know cannot be answered, and guessing would send the model a
+// question nobody wrote.
+func (q *Question) UnmarshalJSON(data []byte) error {
+	var w questionWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	q.ID = w.ID
+	q.Instructions = w.Instructions
+	switch w.Kind {
+	case "":
+		q.Kind = nil
+	case "bool":
+		q.Kind = Bool{True: w.True, False: w.False}
+	case "choice":
+		q.Kind = Choice{Options: w.Options}
+	case "score":
+		q.Kind = Score{Levels: w.Levels}
+	default:
+		return fmt.Errorf("decide: a question has the unknown kind %q", w.Kind)
+	}
+	return nil
+}
+
 // Validate checks the question.
 //
 // A question that is wrong is a caller bug, so the failure is
@@ -321,9 +395,10 @@ type Record struct {
 	Error string `json:"error,omitempty"`
 	// LatencyMS is how long the call took, in milliseconds.
 	LatencyMS float64 `json:"latency_ms"`
-	// Requests is the number of wire requests the call made. It is zero
-	// when the decider did not report one.
-	Requests int `json:"requests"`
+	// Requests is the number of wire requests the call made. It is nil
+	// when the decider did not report one, so a reader can tell "no
+	// requests were made" from "the count was never reported".
+	Requests *int `json:"requests,omitempty"`
 	// At is the RFC 3339 time of the call, in UTC.
 	At string `json:"at"`
 }
@@ -383,10 +458,11 @@ func (d *recordedDecider) Decide(ctx context.Context, state any, instructions st
 	rec.LatencyMS = float64(time.Since(started).Microseconds()) / 1000
 	rec.Answers = answers
 	// A decider that knows how many wire requests it made reports it;
-	// one that does not leaves the count at zero, which is the truth:
-	// the count was never reported.
+	// one that does not leaves the count unreported, which the record
+	// says so.
 	if reporter, ok := d.inner.(RequestReporter); ok {
-		rec.Requests = reporter.Requests()
+		n := reporter.Requests()
+		rec.Requests = &n
 	}
 	switch {
 	case err == nil:

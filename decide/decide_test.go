@@ -2,6 +2,7 @@ package decide_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -294,7 +295,7 @@ func TestTheAnswersAreSortedInTheOrderOfTheQuestions(t *testing.T) {
 
 // TestTheRequestCountComesFromTheDecider covers the request count: a
 // decider that knows how many wire requests it made reports it, and one
-// that does not leaves the count at zero.
+// that does not leaves the count unreported.
 func TestTheRequestCountComesFromTheDecider(t *testing.T) {
 	sink := &recordingSink{}
 	recorder := decide.Recorded(countingDecider{requests: 3}, sink, "the caller")
@@ -306,19 +307,62 @@ func TestTheRequestCountComesFromTheDecider(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("the sink holds %d records, want 1", len(records))
 	}
-	if records[0].Requests != 3 {
-		t.Errorf("the record's request count is %d, want 3", records[0].Requests)
+	if records[0].Requests == nil {
+		t.Fatal("the record has no request count, want 3")
+	}
+	if *records[0].Requests != 3 {
+		t.Errorf("the record's request count is %d, want 3", *records[0].Requests)
 	}
 
-	// A decider that does not report a count leaves it at zero, which is
-	// the truth: the count was never reported.
+	// A decider that does not report a count leaves it unreported, and
+	// the record says so: a reader can tell "no requests were made"
+	// from "the count was never reported".
 	sink2 := &recordingSink{}
-	recorder2 := decide.Recorded(countingDecider{}, sink2, "the caller")
+	recorder2 := decide.Recorded(plainDecider{}, sink2, "the caller")
 	if _, err := recorder2.Decide(context.Background(), nil, "", nil); err != nil {
 		t.Fatalf("deciding: %v", err)
 	}
-	if got := sink2.records[0].Requests; got != 0 {
-		t.Errorf("the record's request count is %d, want 0", got)
+	if got := sink2.records[0].Requests; got != nil {
+		t.Errorf("the record's request count is %d, want unreported", *got)
+	}
+}
+
+// TestTheUnreportedRequestCountIsAbsentFromTheRecord covers the wire
+// shape: an unreported count is absent, not a zero.
+func TestTheUnreportedRequestCountIsAbsentFromTheRecord(t *testing.T) {
+	sink := &recordingSink{}
+	recorder := decide.Recorded(plainDecider{}, sink, "the caller")
+	if _, err := recorder.Decide(context.Background(), nil, "", nil); err != nil {
+		t.Fatalf("deciding: %v", err)
+	}
+	raw, err := json.Marshal(sink.records[0])
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if _, ok := decoded["requests"]; ok {
+		t.Errorf("the record has a request count, want none: %v", decoded)
+	}
+
+	// A reported count of zero is a count, and it is in the record.
+	sink2 := &recordingSink{}
+	recorder2 := decide.Recorded(countingDecider{requests: 0}, sink2, "the caller")
+	if _, err := recorder2.Decide(context.Background(), nil, "", nil); err != nil {
+		t.Fatalf("deciding: %v", err)
+	}
+	raw2, err := json.Marshal(sink2.records[0])
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	var decoded2 map[string]any
+	if err := json.Unmarshal(raw2, &decoded2); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if decoded2["requests"] != float64(0) {
+		t.Errorf("the record's request count is %v, want 0", decoded2["requests"])
 	}
 }
 
@@ -347,6 +391,14 @@ func (d countingDecider) Decide(ctx context.Context, state any, instructions str
 
 // Requests reports the request count.
 func (d countingDecider) Requests() int { return d.requests }
+
+// plainDecider is a decider that does not report a request count.
+type plainDecider struct{}
+
+// Decide answers nothing.
+func (d plainDecider) Decide(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+	return nil, nil
+}
 
 // manyOptions returns n named options.
 func manyOptions(n int) []decide.Option {
@@ -379,4 +431,115 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+// TestTheQuestionKindSurvivesARecordRoundTrip covers the record's
+// questions: a recorded decision has to be re-readable, and a question
+// that lost its kind is an id and some prose.
+func TestTheQuestionKindSurvivesARecordRoundTrip(t *testing.T) {
+	questions := []decide.Question{
+		{ID: "q1", Instructions: "is it?", Kind: decide.Bool{True: "it is a finding", False: "it is not"}},
+		{ID: "q2", Instructions: "which one?", Kind: decide.Choice{Options: []decide.Option{
+			{Name: "alpha", Desc: "the first one"},
+			{Name: "beta", Desc: "the second one"},
+		}}},
+		{ID: "q3", Instructions: "how bad?", Kind: decide.Score{Levels: []string{"low", "mid", "high"}}},
+	}
+
+	rec := decide.Record{
+		Origin:    "hook:policy",
+		Questions: questions,
+		StateHash: "abc",
+		Outcome:   decide.OutcomeOK,
+	}
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	var back decide.Record
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if len(back.Questions) != len(questions) {
+		t.Fatalf("the record holds %d questions, want %d", len(back.Questions), len(questions))
+	}
+
+	for i, want := range questions {
+		got := back.Questions[i]
+		if got.ID != want.ID {
+			t.Errorf("question %d has the id %q, want %q", i, got.ID, want.ID)
+		}
+		if got.Instructions != want.Instructions {
+			t.Errorf("question %d has the instructions %q, want %q", i, got.Instructions, want.Instructions)
+		}
+		if got.Kind == nil {
+			t.Fatalf("question %d came back without a kind", i)
+		}
+		switch w := want.Kind.(type) {
+		case decide.Bool:
+			g, ok := got.Kind.(decide.Bool)
+			if !ok {
+				t.Errorf("question %d came back as a %T, want a bool", i, got.Kind)
+				continue
+			}
+			if g.True != w.True || g.False != w.False {
+				t.Errorf("question %d came back as %+v, want %+v", i, g, w)
+			}
+		case decide.Choice:
+			g, ok := got.Kind.(decide.Choice)
+			if !ok {
+				t.Errorf("question %d came back as a %T, want a choice", i, got.Kind)
+				continue
+			}
+			if len(g.Options) != len(w.Options) {
+				t.Errorf("question %d came back with %d options, want %d", i, len(g.Options), len(w.Options))
+				continue
+			}
+			for j, opt := range w.Options {
+				if g.Options[j].Name != opt.Name || g.Options[j].Desc != opt.Desc {
+					t.Errorf("question %d's option %d came back as %+v, want %+v", i, j, g.Options[j], opt)
+				}
+			}
+		case decide.Score:
+			g, ok := got.Kind.(decide.Score)
+			if !ok {
+				t.Errorf("question %d came back as a %T, want a score", i, got.Kind)
+				continue
+			}
+			if len(g.Levels) != len(w.Levels) {
+				t.Errorf("question %d came back with %d levels, want %d", i, len(g.Levels), len(w.Levels))
+				continue
+			}
+			for j, level := range w.Levels {
+				if g.Levels[j] != level {
+					t.Errorf("question %d's level %d came back as %q, want %q", i, j, g.Levels[j], level)
+				}
+			}
+		}
+	}
+}
+
+// TestTheRecordedQuestionNamesItsKind covers the wire shape: the record
+// says which kind the question was, so a reader does not have to guess.
+func TestTheRecordedQuestionNamesItsKind(t *testing.T) {
+	questions := []decide.Question{
+		{ID: "q1", Instructions: "is it?", Kind: decide.Bool{True: "yes", False: "no"}},
+		{ID: "q2", Instructions: "which one?", Kind: decide.Choice{Options: []decide.Option{{Name: "alpha"}}}},
+		{ID: "q3", Instructions: "how bad?", Kind: decide.Score{Levels: []string{"low", "high"}}},
+	}
+	wantKinds := []string{"bool", "choice", "score"}
+
+	for i, q := range questions {
+		raw, err := json.Marshal(q)
+		if err != nil {
+			t.Fatalf("encoding question %d: %v", i, err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("decoding question %d: %v", i, err)
+		}
+		if decoded["kind"] != wantKinds[i] {
+			t.Errorf("question %d names the kind %v, want %q", i, decoded["kind"], wantKinds[i])
+		}
+	}
 }
