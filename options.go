@@ -68,6 +68,50 @@ func WithBeforeTool(h BeforeToolHook) Option {
 	}
 }
 
+// WithPolicy fills the policy slot.
+//
+// The slot is a before-tool hook that only ever allows or denies, and
+// it runs before every other before-tool hook. It is exempt from the
+// hook deadline: the permission engine keeps its own chain deadline and
+// always returns a decision.
+func WithPolicy(h PolicyHook) Option {
+	return func(opts *Options) {
+		opts.Policy = h
+	}
+}
+
+// WithAfterTool adds an after-tool hook.
+//
+// The hooks run after a call ran and before the model sees the result.
+// They may keep it, annotate it, replace it or redact it.
+//
+// A job's chain runs at the job's completion, under the session's own
+// context, and never again when the result is delivered.
+func WithAfterTool(h AfterToolHook) Option {
+	return func(opts *Options) {
+		opts.AfterTool = append(opts.AfterTool, h)
+	}
+}
+
+// WithBeforeRun adds a before-run hook.
+//
+// The hooks run at the start of every run, before the first request.
+// The trigger says what started the run.
+func WithBeforeRun(h BeforeRunHook) Option {
+	return func(opts *Options) {
+		opts.BeforeRun = append(opts.BeforeRun, h)
+	}
+}
+
+// WithSessionStart adds a session-start hook.
+//
+// The hook runs once, when the session is built, before the first run.
+func WithSessionStart(h SessionStartHook) Option {
+	return func(opts *Options) {
+		opts.SessionStart = append(opts.SessionStart, h)
+	}
+}
+
 // WithObserver adds an observer.
 //
 // The observers see every event, in the session's order.

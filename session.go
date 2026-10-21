@@ -109,6 +109,12 @@ type Session struct {
 	// events is the session's event bus.
 	events *eventBus
 
+	// promptEdits are the prompt edits the session-start hooks made.
+	//
+	// They are applied to every run's prompt, so a change the session
+	// start made is still there in the next run.
+	promptEdits []SystemPromptEdit
+
 	// sunk reports that the store failed.
 	sunk bool
 
@@ -197,6 +203,11 @@ type runState struct {
 	// being written. The finalization waits for them as it does for the
 	// pending calls.
 	resultWrites int
+	// runWrites counts the records a hook wrote for the run whose
+	// writes are still in flight. The finalization waits for them, so
+	// a hook that appends a message while the finalization is under
+	// way cannot add a record after run.settled.
+	runWrites int
 	// callWrites counts the tool.call records whose writes are still in
 	// flight. The finalization waits for them, so no record of the run
 	// follows run.settled.
@@ -375,6 +386,19 @@ type Options struct {
 	// The policy slot is a before-tool hook that only ever allows or
 	// denies, and it is installed here as the first one.
 	BeforeTool []BeforeToolHook
+	// Policy is the policy slot: the before-tool hook the permission
+	// engine fills.
+	//
+	// The slot runs before every other before-tool hook, and it is
+	// exempt from the hook deadline: the permission engine keeps its
+	// own chain deadline and always returns a decision.
+	Policy PolicyHook
+	// AfterTool runs after a call ran and before the model sees the
+	// result.
+	//
+	// A job's chain runs at the job's completion, under the session's
+	// own context.
+	AfterTool []AfterToolHook
 	// Jobs configures the session's background jobs.
 	Jobs JobOptions
 }
@@ -670,9 +694,17 @@ func hookMessage(msg Message, name string) Message {
 
 // hookContext builds the context a hook is called with.
 func (s *Session) hookContext(ctx context.Context, turn int, interrupted bool) HookContext {
+	return s.hookContextFor(ctx, "", "", turn, interrupted)
+}
+
+// hookContextFor builds the context a hook is called with, naming the
+// run and the job the hook runs for.
+//
+// A job's completion names the run that started the job, which may
+// already have settled, and the job itself.
+func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn int, interrupted bool) HookContext {
 	s.mu.Lock()
-	runID := ""
-	if s.run != nil {
+	if runID == "" && s.run != nil {
 		runID = s.run.id
 	}
 	s.mu.Unlock()
@@ -680,6 +712,7 @@ func (s *Session) hookContext(ctx context.Context, turn int, interrupted bool) H
 		Context:     ctx,
 		SessionID:   s.opts.SessionID,
 		RunID:       runID,
+		Job:         job,
 		Turn:        turn,
 		Interrupted: interrupted,
 		History:     s.view(),
@@ -740,6 +773,50 @@ func (s *Session) write(ctx context.Context, rec Record) error {
 	wctx, cancel := recordContext(ctx)
 	defer cancel()
 	return s.appendRecord(wctx, rec, nil)
+}
+
+// writeRun appends one record that belongs to a run.
+//
+// The record is claimed against the run's seal: a hook that appends a
+// message while the finalization is under way writes nothing, because
+// the run's records are the finalization's from the seal on. A write
+// that is claimed before the seal is waited for by the finalization, so
+// no record of the run follows run.settled.
+func (s *Session) writeRun(run *runState, rec Record) error {
+	if run == nil {
+		return s.write(context.Background(), rec)
+	}
+	if !s.beginRunWrite(run) {
+		// The finalization sealed the run: the record is abandoned.
+		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
+	}
+	defer s.finishRunWrite(run)
+	wctx, cancel := recordContext(run.ctx)
+	defer cancel()
+	return s.appendRecord(wctx, rec, run)
+}
+
+// beginRunWrite claims a record's write against the run's seal.
+//
+// The claim is made under the session's lock, so a write that arrives
+// after the seal is refused, and one that arrives before it is waited
+// for by the finalization.
+func (s *Session) beginRunWrite(run *runState) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run.sealed {
+		return false
+	}
+	run.runWrites++
+	return true
+}
+
+// finishRunWrite releases a claimed write.
+func (s *Session) finishRunWrite(run *runState) {
+	s.mu.Lock()
+	run.runWrites--
+	s.signalWorkLocked(run)
+	s.mu.Unlock()
 }
 
 // appendRecord appends one record under the context given.
