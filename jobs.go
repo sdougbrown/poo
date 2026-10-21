@@ -375,7 +375,7 @@ func (s *Session) finishUnlaunchedJob(job *jobState) {
 	})
 	if err != nil {
 		s.markBroken()
-		s.addStoreError(job.runID)
+		s.addStoreError()
 	}
 	s.events.emit(EventJobEnded, map[string]any{
 		"job":     job.id,
@@ -561,7 +561,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 		// once: the wakes stop, and the run that is still open gets
 		// the store_error candidate.
 		s.markBroken()
-		s.addStoreError(job.runID)
+		s.addStoreError()
 		return
 	}
 	s.events.emit(EventJobEnded, map[string]any{
@@ -584,17 +584,18 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 	})
 }
 
-// addStoreError gives the open run the store_error candidate.
+// addStoreError gives the current uncommitted run the store_error
+// candidate.
 //
-// The run that owns the job may already have settled, and then the
-// candidate is dropped: a settled run is never mutated. The candidate
-// goes through finalize, so a waiting run is woken and settles instead
-// of waiting for a job that will never deliver.
-func (s *Session) addStoreError(runID string) {
+// The job that failed may belong to an earlier run, but the failure
+// terminates whichever run is active now: a jobs result can never
+// arrive from a store that refuses records. A settled run is never
+// mutated, and finalize drops a candidate after its commit point.
+func (s *Session) addStoreError() {
 	s.mu.Lock()
 	run := s.run
 	s.mu.Unlock()
-	if run == nil || run.id != runID {
+	if run == nil {
 		return
 	}
 	s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{

@@ -569,3 +569,49 @@ func TestAJobEndStoreFailureSettlesAWaitingRun(t *testing.T) {
 		t.Errorf("the run settled %q, want store_error", res.Reason)
 	}
 }
+
+// TestAJobStoreFailureSettlesTheCurrentRun covers the plan's rule: a
+// job record failure terminates whichever uncommitted run is active,
+// even when the job came from an earlier run.
+func TestAJobStoreFailureSettlesTheCurrentRun(t *testing.T) {
+	a := pootest.NewJobTool("a", poo.BackgroundAlways)
+	b := pootest.NewJobTool("b", poo.BackgroundAlways)
+	sink := &failingSink{failRecord: "job.ended"}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "a", Name: "a", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "waiting a"},
+		{calls: []poo.ToolCall{{ID: "b", Name: "b", Arguments: []byte(`{"text":"two"}`)}}},
+		{text: "waiting b"},
+	})
+	s := newTestSession(t, poo.Options{
+		Transport:    tr,
+		Tools:        map[string]poo.Tool{"a": a, "b": b},
+		ToolOrder:    []string{"a", "b"},
+		Sink:         sink,
+		SessionID:    "s1",
+		ModelID:      "m",
+		ContextLimit: 32768,
+	})
+	if _, err := s.Prompt(context.Background(), "first"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the first run to wait", func() bool { return s.State() == poo.StateWaiting })
+	s.Cancel("first done")
+	id, err := s.Prompt(context.Background(), "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the second run to wait", func() bool { return s.State() == poo.StateWaiting })
+	a.Release()
+	waitFor(t, "the session to break", s.Broken)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := s.WaitRun(ctx, id)
+	if err != nil {
+		t.Fatalf("the current run did not settle after the job store failure: %v", err)
+	}
+	if res.Reason != poo.ReasonStoreError {
+		t.Errorf("the current run settled %q, want store_error", res.Reason)
+	}
+}
