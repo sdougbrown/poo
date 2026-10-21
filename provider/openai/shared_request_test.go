@@ -95,3 +95,39 @@ func TestABodyThatBreaksMidReadIsANetworkFailure(t *testing.T) {
 	_, err = tr.Fork(context.Background(), rendered, nil, 16)
 	check(t, err)
 }
+
+// slowTwoWriteErrorServer answers with a JSON error that arrives in two writes,
+// with a pause between them, under the given status.
+func slowTwoWriteErrorServer(t *testing.T, status int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"error":{"message":"slow `)
+		w.(http.Flusher).Flush()
+		time.Sleep(150 * time.Millisecond)
+		_, _ = io.WriteString(w, `body","code":"x"}}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestASlowErrorBodyIsReadUnderTheTimeout covers an error body that
+// arrives late while Config.Timeout is set: the timeout must not be
+// released before the body is read.
+func TestASlowErrorBodyIsReadUnderTheTimeout(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusBadRequest} {
+		srv := slowTwoWriteErrorServer(t, status)
+		tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", Timeout: 5 * time.Second})
+		_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+		var pe *poo.ProviderError
+		if !errors.As(err, &pe) {
+			t.Fatalf("status %d: the error is %v, want a provider error", status, err)
+		}
+		if pe.Kind != poo.ProviderKindInvalidRequest || pe.Message != "slow body" || pe.Status != status {
+			t.Errorf("status %d: got kind %q, message %q, status %d; want invalid_request, %q, %d",
+				status, pe.Kind, pe.Message, pe.Status, "slow body", status)
+		}
+	}
+}

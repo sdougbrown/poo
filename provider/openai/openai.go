@@ -221,7 +221,9 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		release()
+		// The body is read under the request's timeout, so the context is
+		// released after it.
+		defer release()
 		return nil, classifyStatus(resp)
 	}
 
@@ -238,7 +240,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 	}
 	if first == '{' {
 		defer resp.Body.Close()
-		release()
+		defer release()
 		errBody, err := io.ReadAll(io.LimitReader(br, 1<<20))
 		if err != nil {
 			return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
@@ -564,17 +566,23 @@ func convertMessage(m poo.Message) (chatMessage, error) {
 
 	var text strings.Builder
 	var calls []chatToolCall
+	// The provider blocks are checked in a pass of their own, so a block
+	// after a tool result is checked too.
 	for _, c := range m.Content {
 		if c.Provider != nil {
 			if err := checkProviderBlock(c.Provider); err != nil {
 				return chatMessage{}, err
 			}
 		}
+	}
+	for _, c := range m.Content {
 		switch c.Kind {
 		case poo.ContentProvider:
 			// The block's payload is opaque and has no wire field here.
-			// checkProviderBlock has already refused a required block that
-			// belongs to another API, so what is left is omitted.
+			// checkProviderBlock has already refused a required block, so
+			// what is left is optional and omitted. The plan's "the
+			// omission is recorded" is the loop's job (Stage 3/6): the
+			// transport cannot write records.
 		case poo.ContentText:
 			text.WriteString(c.Text)
 		case poo.ContentThinking:
@@ -601,14 +609,13 @@ func convertMessage(m poo.Message) (chatMessage, error) {
 	return cm, nil
 }
 
-// checkProviderBlock applies the foreign-block rule to one opaque block.
+// checkProviderBlock applies the opaque-block rule to one block.
 //
-// A block for another API is omitted from the request unless it is
-// required, and a required one fails the request. A Chat Completions
-// block is this transport's own, but the wire has no field that carries
-// opaque data, so it is omitted too.
+// Chat Completions has no field that carries opaque data, so no block can
+// be sent. An optional block is omitted, and a required one fails the
+// request, whichever API produced it.
 func checkProviderBlock(p *poo.ProviderBlock) error {
-	if p.API != poo.APIChatCompletions && p.Required {
+	if p.Required {
 		return &poo.ProviderError{
 			Kind: poo.ProviderKindSessionIncompatible,
 			Message: fmt.Sprintf("the history holds a required %q block (%s) that Chat Completions cannot carry",

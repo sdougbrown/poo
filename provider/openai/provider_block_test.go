@@ -102,24 +102,50 @@ func TestARequiredForeignCompanionFailsTheRequest(t *testing.T) {
 	assertSessionIncompatible(t, err)
 }
 
-// TestAChatCompletionsBlockIsNotSentAndDoesNotFail covers the transport's
-// own API: the wire has no field for opaque data, so the block is left
-// out, required or not.
-func TestAChatCompletionsBlockIsNotSentAndDoesNotFail(t *testing.T) {
-	for _, required := range []bool{false, true} {
-		srv := newForkServer(t)
-		tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
-		block := poo.ProviderBlock{API: poo.APIChatCompletions, Type: "x", Data: rawData(`"own-payload"`), Required: required}
-		reader, _, err := tr.Stream(context.Background(), providerRequest(block))
-		if err != nil {
-			t.Fatalf("required=%v: starting the request: %v", required, err)
-		}
-		read(t, reader)
-		reader.Close()
-		if contains(srv.bodies[0], "own-payload") {
-			t.Errorf("required=%v: the body carries the payload: %s", required, srv.bodies[0])
-		}
+// TestAChatCompletionsBlockIsOmittedOnlyWhenOptional covers the
+// transport's own API: the wire has no field for opaque data, so an
+// optional block is left out and a required one fails the request.
+func TestAChatCompletionsBlockIsOmittedOnlyWhenOptional(t *testing.T) {
+	srv := newForkServer(t)
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+
+	optional := poo.ProviderBlock{API: poo.APIChatCompletions, Type: "x", Data: rawData(`"own-payload"`)}
+	reader, _, err := tr.Stream(context.Background(), providerRequest(optional))
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
 	}
+	read(t, reader)
+	reader.Close()
+	if contains(srv.bodies[0], "own-payload") {
+		t.Errorf("the body carries the payload: %s", srv.bodies[0])
+	}
+
+	required := optional
+	required.Required = true
+	_, _, err = tr.Stream(context.Background(), providerRequest(required))
+	assertSessionIncompatible(t, err)
+}
+
+// TestARequiredBlockAfterAToolResultFailsTheRequest covers a block that
+// follows a tool result in the same message.
+func TestARequiredBlockAfterAToolResultFailsTheRequest(t *testing.T) {
+	srv := newForkServer(t)
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	block := poo.ProviderBlock{API: poo.APIResponses, Type: "compaction", Data: rawData(`{}`), Required: true}
+	msg := poo.Message{Role: poo.RoleTool, Content: []poo.ContentBlock{
+		{Kind: poo.ContentToolResult, ToolCallID: "c1", Text: "out"},
+		{Kind: poo.ContentProvider, Provider: &block},
+	}}
+
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16, Messages: []poo.Message{msg}})
+	assertSessionIncompatible(t, err)
+
+	_, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	_, err = tr.Fork(context.Background(), rendered, []poo.Message{msg}, 16)
+	assertSessionIncompatible(t, err)
 }
 
 func assertSessionIncompatible(t *testing.T, err error) {
