@@ -1,7 +1,6 @@
 package poo_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -66,10 +65,9 @@ func TestTheRunsIdsContinueAcrossRuns(t *testing.T) {
 	opts := testOptions(t, tr, tool, sink)
 	opts.MessageIDs = ids
 
+	s := newTestSession(t, opts)
 	for run := 1; run <= 2; run++ {
-		if _, err := poo.NewRun(opts).Execute(context.Background(), "do the thing"); err != nil {
-			t.Fatalf("run %d failed: %v", run, err)
-		}
+		runSession(t, s, "do the thing")
 	}
 
 	var ids_ []string
@@ -94,9 +92,8 @@ func TestTheMessageRecordCarriesTheId(t *testing.T) {
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	if _, err := poo.NewRun(testOptions(t, tr, tool, sink)).Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	runSession(t, s, "do the thing")
 
 	messages := sink.messages()
 	if len(messages) != 3 {

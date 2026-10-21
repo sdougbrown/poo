@@ -150,6 +150,11 @@ type MessageRecord struct {
 	// MessageID is the message's session-monotonic id, e.g. "m7". It is
 	// set on the messages the model produced.
 	MessageID string `json:"message_id,omitempty"`
+	// Partial reports that the message was cut short.
+	Partial bool `json:"partial,omitempty"`
+	// Cause says why the message was cut short: "interrupt" or
+	// "provider_error". It is set only on a partial message.
+	Cause Cause `json:"cause,omitempty"`
 	// DeliveryNote says how much of the previous reply the user had
 	// seen, when the message carries one.
 	DeliveryNote *DeliveryNote `json:"delivery_note,omitempty"`
@@ -300,4 +305,19 @@ func Stamp(rec Record, seq int64, at time.Time) {
 	m := rec.Meta()
 	m.Seq = seq
 	m.TS = at.UTC().Format(time.RFC3339Nano)
+}
+
+// CompactionRecord records what a compactor did.
+//
+// The store keeps every original record, and the compaction record says
+// what the model's view was replaced with. The compaction's own fields
+// carry the form it took.
+type CompactionRecord struct {
+	RecordMeta
+	// RunID identifies the run the compaction belongs to.
+	RunID string `json:"run_id"`
+	// Strategy names the strategy that produced the compaction.
+	Strategy string `json:"strategy"`
+	// Compaction is the compaction itself.
+	Compaction Compaction `json:"compaction"`
 }

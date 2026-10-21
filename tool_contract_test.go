@@ -1,7 +1,6 @@
 package poo_test
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -46,9 +45,8 @@ func TestPrepareReceivesThePrepareEnv(t *testing.T) {
 	// turn ceiling: the test is about the first call's environment.
 	opts.MaxTurns = 1
 
-	if _, err := poo.NewRun(opts).Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
 	if tool.calls != 1 {
 		t.Fatalf("Prepare was called %d times, want 1", tool.calls)
 	}

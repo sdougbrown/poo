@@ -167,6 +167,11 @@ type Message struct {
 	// DeliveryNote says how much of the previous reply the user had
 	// seen, when the message carries one.
 	DeliveryNote *DeliveryNote `json:"delivery_note,omitempty"`
+	// Partial reports that the message was cut short.
+	Partial bool `json:"partial,omitempty"`
+	// Cause says why the message was cut short: "interrupt" or
+	// "provider_error". It is set only on a partial message.
+	Cause Cause `json:"cause,omitempty"`
 }
 
 // Text returns the concatenated text blocks of the message.

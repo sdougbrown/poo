@@ -52,3 +52,22 @@ func (ids *MessageIDs) Set(n int) {
 		ids.next = n
 	}
 }
+
+// Knows reports that the session has assigned the given message id.
+//
+// The registry is what a delivery note is validated against: every
+// assistant-message id assigned in the session, including one still
+// streaming. A reference is validated once, at acceptance, and is never
+// re-validated however late the delivery is.
+func (ids *MessageIDs) Knows(id string) bool {
+	if id == "" {
+		return false
+	}
+	ids.mu.Lock()
+	defer ids.mu.Unlock()
+	var n int
+	if _, err := fmt.Sscanf(id, "m%d", &n); err != nil {
+		return false
+	}
+	return n > 0 && n <= ids.next
+}

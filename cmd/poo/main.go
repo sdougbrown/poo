@@ -204,7 +204,6 @@ func runRun(args []string) int {
 	}
 
 	sessionID := newSessionID()
-	runID := newSessionID()
 
 	if err := log.Append(ctx, &poo.SessionCreated{
 		RecordMeta:   poo.NewRecordMeta("session.created"),
@@ -225,18 +224,18 @@ func runRun(args []string) int {
 		return 1
 	}
 
-	r := poo.NewRun(poo.Options{
+	sess, err := poo.New(poo.Options{
 		Transport: transport,
 		Tools:     tools,
 		ToolOrder: toolOrder,
 		Sink:      log,
 		SessionID: sessionID,
-		RunID:     runID,
 		ModelID:   o.modelID,
 
 		ContextLimit: o.contextLimit,
 		MaxOutput:    o.maxOutput,
 		MaxTurns:     o.maxTurns,
+		MaxDuration:  o.timeout,
 		SystemPrompt: systemPrompt(o.modelID, toolSpecs, o.toolsMode),
 		WorkingDir:   absWorkDir,
 		Env:          childEnv,
@@ -245,11 +244,19 @@ func runRun(args []string) int {
 
 		ReasoningEffort: o.reasoningEffort,
 	})
-
-	res, err := r.Execute(ctx, strings.Join(fs.Args(), " "))
 	if err != nil {
-		// The core owns the settle record, so an error here means the
-		// run never settled and the log has no run.settled.
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
+	defer sess.Close()
+
+	if _, err := sess.Prompt(ctx, strings.Join(fs.Args(), " ")); err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
+
+	res, err := sess.Wait(ctx)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1
 	}
