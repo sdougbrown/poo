@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -362,3 +363,6 @@ func (t *usageTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.S
 func (t *usageTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
 	return nil, fmt.Errorf("usageTransport: no fork")
 }
+
+// errNoFork is the error the fake transports return for a fork.
+var errNoFork = errors.New("the fake transport has no fork")

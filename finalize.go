@@ -12,24 +12,24 @@ import (
 // The first call starts the finalization. Later calls only add
 // candidates, until the commit point at step 6. The outcome therefore
 // never depends on which goroutine arrived first.
-func (s *Session) finalize(run *runState, cand candidate) Result {
+func (s *Session) finalize(run *runState, cands ...candidate) Result {
 	s.mu.Lock()
 	if run.committed {
 		// A candidate arriving after the commit point is logged and
 		// ignored: it never mutates a settled run.
+		result := run.result
 		s.mu.Unlock()
-		return run.result
+		return result
 	}
 	if run.finalizing {
-		// The finalization is under way. The candidate is added, and
-		// the finalization picks it up at the commit point.
-		run.candidates = append(run.candidates, cand)
+		// The finalization is under way. The candidates are added, and
+		// the finalization picks them up at the commit point.
+		run.candidates = append(run.candidates, cands...)
 		s.mu.Unlock()
-		s.wakeWaiters(run, run.result)
-		return run.result
+		return Result{}
 	}
 	run.finalizing = true
-	run.candidates = append(run.candidates, cand)
+	run.candidates = append(run.candidates, cands...)
 	s.mu.Unlock()
 
 	return s.finalizeRun(run)
@@ -181,7 +181,7 @@ func (s *Session) resumeRun(run *runState) {
 	if len(cands) == 0 {
 		cands = []candidate{newCandidate(ReasonEndTurn, SettleDetail{Source: "end_turn"})}
 	}
-	s.finalize(run, cands[0])
+	s.finalize(run, cands...)
 }
 
 // collectUndelivered takes the queued client messages that will never
@@ -312,6 +312,8 @@ func (s *Session) wakeWaiters(run *runState, result Result) {
 		s.run = nil
 		s.transitionLocked(StateSettled)
 	}
+	s.lastResult = result
+	s.lastRunID = run.id
 	waiters := s.waiters
 	s.waiters = nil
 	s.mu.Unlock()
@@ -352,8 +354,10 @@ func (s *Session) Wait(ctx context.Context) (Result, error) {
 	ch := make(chan Result, 1)
 	s.mu.Lock()
 	if s.run == nil {
+		// The run has already settled, and its outcome is the answer.
+		result := s.lastResult
 		s.mu.Unlock()
-		return Result{}, nil
+		return result, nil
 	}
 	s.waiters = append(s.waiters, ch)
 	s.mu.Unlock()

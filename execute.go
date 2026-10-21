@@ -65,11 +65,31 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 
 	if s.batchIsParallel(plans) {
 		s.executeParallel(run, turn, plans)
+		// The calls that never started because of an interrupt get a
+		// visible result.
+		if s.interruptPending(run) {
+			s.skipInterruptedCalls(run, turn, callsFromPlans(plans))
+		}
 		return
 	}
 	for _, p := range plans {
+		// An interrupt skips the calls that have not started, and the
+		// run continues.
+		if s.interruptPending(run) {
+			s.skipInterruptedCalls(run, turn, callsFromPlans(plans))
+			return
+		}
 		s.executeOne(run, turn, p)
 	}
+}
+
+// callsFromPlans returns the calls a plan holds.
+func callsFromPlans(plans []callPlan) []ToolCall {
+	out := make([]ToolCall, 0, len(plans))
+	for _, p := range plans {
+		out = append(out, p.call)
+	}
+	return out
 }
 
 // beginTurn records the turn's calls in the turn's summary.
@@ -147,6 +167,11 @@ func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
 		wg.Add(1)
 		go func(p callPlan) {
 			defer wg.Done()
+			// An interrupt that arrived before the call started skips
+			// it.
+			if s.interruptPending(run) {
+				return
+			}
 			s.executeOne(run, turn, p)
 		}(p)
 	}
@@ -229,6 +254,16 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	s.issueCall(run, turn, handle, call.Name, call.ID)
 
 	result, err := tool.Call(s.activityContextFor(run), prepared, s.toolEnv(run, handle))
+	if err == nil && s.wasInterrupted(run) {
+		// The call was cut short by an interrupt, even though the tool
+		// returned a result: the tool saw the cancellation and gave
+		// back what it had. The outcome says the call was cancelled.
+		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+			Text:    result.Text,
+			IsError: true,
+		}, OutcomeCancelled)
+		return
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errInterrupted) {
 			// The call was cut short. The outcome says which: a call

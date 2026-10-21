@@ -104,6 +104,8 @@ func ExitCode(r Reason) int {
 		return 0
 	case ReasonMaxTurns:
 		return 11
+	case ReasonOutputTruncated:
+		return 10
 	case ReasonHookContinueLimit:
 		return 12
 	case ReasonContextExhausted:

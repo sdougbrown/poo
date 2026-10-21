@@ -156,7 +156,7 @@ func (s *Session) drive(run *runState) {
 	if len(cands) == 0 {
 		cands = []candidate{newCandidate(ReasonEndTurn, SettleDetail{Source: "end_turn"})}
 	}
-	s.finalize(run, cands[0])
+	s.finalize(run, cands...)
 }
 
 // startDurationTimer starts the run's wall-clock budget.
@@ -389,6 +389,15 @@ func (s *Session) turnEnd(run *runState, turn int, resp *response, truncated boo
 		return turnOutcome{}
 	}
 	if err != nil {
+		// A hook that asked for more continuations than the run may
+		// take settles with its own reason, not with hook_error.
+		var limit *hookContinueLimitError
+		if errors.As(err, &limit) {
+			return turnOutcome{candidates: []candidate{newCandidate(ReasonHookContinueLimit, SettleDetail{
+				Source: "before_settle",
+				Text:   limit.Error(),
+			})}}
+		}
 		return turnOutcome{candidates: []candidate{newCandidate(ReasonHookError, SettleDetail{
 			Source: "before_settle",
 			Text:   err.Error(),

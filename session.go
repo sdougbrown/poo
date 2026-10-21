@@ -81,6 +81,14 @@ type Session struct {
 
 	// waiters are the goroutines waiting for the run to settle.
 	waiters []chan Result
+	// lastResult is the outcome of the run that finished last.
+	//
+	// A waiter that arrives after the run has settled reads it here,
+	// so the answer does not depend on whether the caller got to Wait
+	// before or after the settle.
+	lastResult Result
+	// lastRunID is the id of the run that finished last.
+	lastRunID string
 }
 
 // runState is the state of the active run.
