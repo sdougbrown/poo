@@ -40,6 +40,11 @@ A record that someone produced also carries an `origin`:
 | `tool.call` | Once per tool call the model makes, before it runs. |
 | `tool.result` | Once per tool call, after it runs. |
 | `usage` | Once per provider request. |
+| `input.queued` | Once per input the session accepts. |
+| `input.delivered` | Once per input that reaches the model. |
+| `input.dropped` | Once per input that never reaches the model. |
+| `turn.interrupted` | Once per turn an interrupt cut short. |
+| `compaction` | Once per compaction a compactor produced. |
 | `run.settled` | Once per run, when the run ends. |
 
 The fields of the records grow over time. A consumer must tolerate a field
@@ -127,7 +132,13 @@ list the model sees: nothing is trimmed, rewritten or summarised.
 | `role` | string | The message's role: `"system"`, `"user"`, `"assistant"` or `"tool"`. |
 | `content` | array of objects | The message's content blocks. |
 | `message_id` | string | The message's session-monotonic id, e.g. `"m7"`. Absent when the message has none. |
+| `partial` | boolean | `true` when the message was cut short. Absent when it was not. |
+| `cause` | string | Why the message was cut short: `"interrupt"` or `"provider_error"`. Absent unless the message is partial. |
 | `delivery_note` | object | How much of the previous reply the user had seen. Absent when the message carries none. |
+
+A partial message is the text a cut-short response carried. The
+assistant's own tool calls in a partial response did not run, and the
+calls that did not run are recorded as `skipped`.
 
 `delivery_note` holds:
 
@@ -205,6 +216,72 @@ once and its result arrives later as a message. The `denied`, `skipped`,
 `cancelled` and `interrupted` outcomes arrive with the later stages that
 produce them.
 
+## `input.queued`
+
+An input the session accepted. The record is written before the call
+that accepted the input returns, so an accepted input is never lost: its
+fate is in the records.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `session_id` | string | The session's identifier. |
+| `run_id` | string | The run the input belongs to. Absent when the session had no run. |
+| `input_id` | string | The input's identifier. |
+| `mode` | string | How the input is delivered: `"steer"`, `"interrupt"` or `"follow_up"`. |
+| `text` | string | The message text. |
+| `delivery_note` | object | How much of the previous reply the user had seen. Absent when the input carries none. |
+| `queued_at` | string | RFC 3339, UTC. |
+
+## `input.delivered`
+
+An input that reached the model.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `session_id` | string | The session's identifier. |
+| `run_id` | string | The run the input was delivered to. |
+| `input_id` | string | The input's identifier. |
+| `mode` | string | How the input was delivered. |
+| `delivered_at` | string | RFC 3339, UTC. |
+
+## `input.dropped`
+
+An input that never reached the model. The reason is the run's final
+settle reason.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `session_id` | string | The session's identifier. |
+| `run_id` | string | The run the input belonged to. Absent when the session had no run. |
+| `input_id` | string | The input's identifier. |
+| `mode` | string | How the input was accepted. |
+| `reason` | string | Why the input was dropped. |
+| `dropped_at` | string | RFC 3339, UTC. |
+
+## `turn.interrupted`
+
+A turn an interrupt cut short. The record follows the turn's end: a
+client reads it as a note on the turn that just closed.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `session_id` | string | The session's identifier. |
+| `run_id` | string | The run the turn belongs to. |
+| `turn` | integer | The turn that was interrupted. |
+| `input_ids` | array of strings | The inputs whose messages aborted the turn. |
+| `interrupted_at` | string | RFC 3339, UTC. |
+
+## `compaction`
+
+What a compactor did. The store keeps every original record, and the
+compaction record says what the model's view was replaced with.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | string | The run the compaction belongs to. |
+| `strategy` | string | The strategy that produced the compaction. |
+| `compaction` | object | The compaction itself. Its shape is the strategy's form: `replace`, `rewrite`, `window` or `end`. |
+
 ## `usage`
 
 The token accounting of one provider request. Every request whose stream
@@ -274,32 +351,57 @@ A `undelivered_input` entry holds:
 
 ### Settle reasons
 
-The skeleton's `poo run` produces these reasons. The exit code is the
-process's exit code.
+The reasons are a closed set, and the exit code is the process's exit
+code. The precedence is the order of the table: a run collects a
+candidate from every source, and the highest-precedence one wins at the
+commit point.
 
-| Reason | Exit | Meaning |
-|---|---|---|
-| `end_turn` | 0 | The model stopped on its own. |
-| `max_turns` | 11 | The run hit its turn ceiling. |
-| `provider_error` | 20 | A provider request failed, or the provider stopped on the output-token limit. |
-| `context_exhausted` | 13 | A provider context-length error, or the computed `max_tokens` fell under 256. |
-| `cancelled` | 130 | The run was cancelled, or its deadline passed before the model finished. |
+| Precedence | Reason | Exit | Meaning |
+|---|---|---|---|
+| 1 | `cancelled` | 130 | The run was cancelled. |
+| 2 | `store_error` | 23 | The session's store failed. The session becomes broken. |
+| 3 | `hook_error` | 22 | An executable hook failed or missed its deadline. |
+| 4 | `tool_fatal` | 21 | A tool failed with an error that means the environment is unusable. |
+| 5 | `provider_limit` | 24 | The provider refused for quota or plan reasons. The session is not broken. |
+| 5b | `provider_error` | 20 | A provider request failed and cannot be retried, or the retry budget was spent. |
+| 6 | `context_exhausted` | 13 | The context window is full. |
+| 7 | `hook_continue_limit` | 12 | The `BeforeSettle` hooks asked for more continuations than the run allows. |
+| 8 | `max_turns` | 11 | The run hit its turn ceiling. |
+| 8b | `budget_exhausted` | 14 | The run hit a token or time budget. |
+| 9 | `finished` | 0 | The model called the `finish` tool with a valid result. |
+| 9b | `stop_requested` | 0 | A hook or a stop condition asked the run to stop. |
+| 10 | `output_truncated` | 10 | The provider stopped on the output-token limit. |
+| 11 | `end_turn` | 0 | The model stopped on its own. |
+
+`provider_limit` and `provider_error` share a precedence level, because
+a single failed request produces only one of them.
 
 A cancellation and a deadline are the same outcome: the run was stopped
 before the model finished, and both settle `cancelled`.
 
-`detail.source` names the condition. The values the skeleton writes:
+`detail.source` names the condition. The values the core writes:
 
 | Source | Meaning |
 |---|---|
 | `end_turn` | The model stopped on its own. |
+| `output_truncated` | The provider stopped on the output-token limit. |
 | `max_turns` | The run hit its turn ceiling. |
+| `max_run_tokens` | The run hit its token budget. |
+| `max_duration` | The run hit its wall-clock budget. |
 | `no_output_room` | The computed `max_tokens` was under 256, so the request was never sent. |
+| `hard_limit` | The estimate crossed the hard ratio of the context window. |
+| `compaction_failed` | The compactor failed at or above the hard ratio. |
 | `provider:context_length` | The endpoint reported that the request was too long. It is recognised whatever status the endpoint sent it with, including a 5xx. |
 | `provider:<kind>` | The provider request failed with that kind. |
-| `finish:length` | The provider stopped on the output-token limit. |
+| `finish` | The model called the `finish` tool with a valid result. |
+| `before_settle` | A `BeforeSettle` hook stopped the run, or the run asked for more continuations than it allows. |
+| `after_turn:<name>` | An `AfterTurn` hook stopped the run. |
+| `stop_condition` | A stop condition matched. |
 | `cancel:context` | The run's context was cancelled. |
 | `cancel:deadline` | The run's context deadline passed. |
+| `cancel:client` | The client cancelled the run. |
+| `cancel:close` | The session closed while the run was active. |
+| `store` | The session's store refused a record. |
 
 ## Reading a log
 

@@ -38,6 +38,16 @@ func (s *Session) gate(run *runState) gateResult {
 			s.transition(StateCompacting)
 			compacted, err := s.compact(run)
 			if err != nil {
+				// An interrupt that cancelled the compaction is not
+				// a compaction failure: the run carries on, and no
+				// compaction is applied. The compaction is not a
+				// turn, so the interrupt emits no turn events.
+				if s.interruptPending(run) {
+					s.clearInterrupt(run)
+					s.drainInputs(run, false)
+					s.transition(StateRequesting)
+					return gateResult{}
+				}
 				// The compactor failed. Below the hard limit the run
 				// continues uncompacted; at or above it the run
 				// settles context_exhausted.
@@ -146,7 +156,12 @@ func (s *Session) compact(run *runState) (bool, error) {
 	view := s.view()
 	fork := s.forkFunc(run)
 
-	compaction, err := s.opts.Compactor.Compact(run.ctx, view, fork)
+	// The compaction runs under the run's activity context, so an
+	// interrupt cancels it and no compaction is applied.
+	ctx, _ := s.startActivity(run)
+	defer s.endActivity(run)
+
+	compaction, err := s.opts.Compactor.Compact(ctx, view, fork)
 	if err != nil {
 		s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
 		return false, err

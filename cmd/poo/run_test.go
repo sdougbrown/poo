@@ -449,3 +449,85 @@ func TestTheLogCarriesTheNewRecordFields(t *testing.T) {
 		t.Error("the model's message carries no id")
 	}
 }
+
+// TestATruncatedAnswerSetsTheExitCode covers the output-truncated
+// reason: the provider stopped on the output limit, and the exit code
+// says 10.
+func TestATruncatedAnswerSetsTheExitCode(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"half an ans"},"finish_reason":"length"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+
+	code, _ := runCLI(t,
+		"run",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--log", logPath,
+		"a prompt",
+	)
+	if code != 10 {
+		t.Fatalf("the exit code is %d, want 10", code)
+	}
+
+	recs := readLog(t, logPath)
+	settled := recs[len(recs)-1]
+	if settled["reason"] != "output_truncated" {
+		t.Errorf("the settle reason is %v, want output_truncated", settled["reason"])
+	}
+}
+
+// TestAProviderLimitSetsTheExitCode covers the provider-limit reason:
+// the endpoint refused for quota reasons, and the exit code says 24.
+func TestAProviderLimitSetsTheExitCode(t *testing.T) {
+	endpoint := newFakeEndpoint(t, `{"error":{"message":"you are out of credits","code":"insufficient_quota"}}`)
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+
+	code, _ := runCLI(t,
+		"run",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--log", logPath,
+		"a prompt",
+	)
+	if code != 24 {
+		t.Fatalf("the exit code is %d, want 24", code)
+	}
+
+	recs := readLog(t, logPath)
+	settled := recs[len(recs)-1]
+	if settled["reason"] != "provider_limit" {
+		t.Errorf("the settle reason is %v, want provider_limit", settled["reason"])
+	}
+}
+
+// TestTheRunSettlesEndTurnWithZero covers the happy path's exit code.
+func TestTheRunSettlesEndTurnWithZero(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+
+	code, _ := runCLI(t,
+		"run",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--log", logPath,
+		"a prompt",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0", code)
+	}
+}
