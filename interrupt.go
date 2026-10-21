@@ -131,6 +131,14 @@ func (s *Session) recordPartial(run *runState, turn int, resp *response) {
 // A call that never ran gets a visible result, so the model can see
 // that the call was not made.
 func (s *Session) skipInterruptedCalls(run *runState, turn int, calls []ToolCall) {
+	s.skipCalls(run, turn, calls, SkippedInterruptedText)
+}
+
+// skipCalls records the calls of a batch that never started, with the
+// visible result text given.
+//
+// A call that already has a result, or that is running, is left alone.
+func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text string) {
 	handles := s.handlesOf(turn, len(calls))
 	for i, call := range calls {
 		handle := handles[i]
@@ -155,7 +163,7 @@ func (s *Session) skipInterruptedCalls(run *runState, turn int, calls []ToolCall
 			Arguments:  recordArgs(call.Arguments),
 		})
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-			Text:    SkippedInterruptedText,
+			Text:    text,
 			IsError: true,
 		}, OutcomeSkipped)
 	}

@@ -776,3 +776,39 @@ func TestALosingCandidateIsListedOnce(t *testing.T) {
 		t.Errorf("detail.losing is %v, want [max_turns]", got)
 	}
 }
+
+// TestAFatalToolErrorSkipsTheRestOfTheBatch covers the plan's rule that
+// a fatal error ends the batch: the calls after it do not start, and
+// they get a visible skipped result so the history stays valid.
+func TestAFatalToolErrorSkipsTheRestOfTheBatch(t *testing.T) {
+	tr := scripted([]fakeResponse{{
+		calls: []poo.ToolCall{
+			{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
+			{ID: "call_2", Name: "echo", Arguments: []byte(`{"text":"two"}`)},
+		},
+	}})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed", class: poo.ClassSideEffecting}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		return poo.ToolResult{}, poo.Fatalf("the working directory is gone")
+	}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
+
+	if res.Reason != poo.ReasonToolFatal {
+		t.Fatalf("the run settled %q, want tool_fatal", res.Reason)
+	}
+	if n := len(tool.Calls()); n != 1 {
+		t.Errorf("the tool ran %d times, want 1: the fatal error ends the batch", n)
+	}
+	outcomes := map[string]poo.Outcome{}
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolResultRecord); ok {
+			outcomes[r.Handle] = r.Outcome
+		}
+	}
+	if outcomes["r1"] != poo.OutcomeError || outcomes["r2"] != poo.OutcomeSkipped {
+		t.Errorf("the outcomes are %v, want r1 error and r2 skipped", outcomes)
+	}
+}

@@ -17,6 +17,9 @@ const (
 	// SkippedInterruptedText is the result of a call that an interrupt
 	// cut short before it started.
 	SkippedInterruptedText = "Not run: interrupted by the user."
+	// SkippedSettlingText is the result of a call that did not start
+	// because the run was settling.
+	SkippedSettlingText = "Not run: the run settled before the call started."
 	// CancelledInterruptedText is the result of a call that an
 	// interrupt cut short while it ran.
 	CancelledInterruptedText = "Cancelled: interrupted by the user."
@@ -46,8 +49,9 @@ type callPlan struct {
 
 // executeBatch runs a turn's tool calls.
 //
-// A batch always runs to completion: no stop condition skips the
-// remaining calls. The calls run in parallel only when every one of
+// A batch runs to completion: no stop condition skips the remaining
+// calls. Only a cancellation or a fatal error (through the
+// finalization) and an interrupt end it early. The calls run in parallel only when every one of
 // them belongs to a tool declared ReadOnly; otherwise they run
 // sequentially in model order.
 //
@@ -90,6 +94,8 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 		// visible result.
 		if s.interruptPending(run) {
 			s.skipInterruptedCalls(run, turn, callsFromPlans(plans))
+		} else if s.batchStopped(run) {
+			s.skipCalls(run, turn, callsFromPlans(plans), SkippedSettlingText)
 		}
 		return processed
 	}
@@ -100,9 +106,32 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 			s.skipInterruptedCalls(run, turn, callsFromPlans(plans))
 			return processed
 		}
+		// A fatal error or a cancellation ends the batch: the calls that
+		// have not started do not start.
+		if s.batchStopped(run) {
+			s.skipCalls(run, turn, callsFromPlans(plans), SkippedSettlingText)
+			return processed
+		}
 		s.executeOne(run, turn, p)
 	}
 	return processed
+}
+
+// batchStopped reports that the run holds a candidate that ends the
+// batch.
+//
+// A batch runs to completion except for a cancellation or a fatal error,
+// which end it through the finalization, and an interrupt. A finished
+// call is not one of them: the calls around it still run.
+func (s *Session) batchStopped(run *runState) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range run.candidates {
+		if c.reason != ReasonFinished {
+			return true
+		}
+	}
+	return false
 }
 
 // countRepeats records every call of a batch in the model order.
@@ -253,7 +282,7 @@ func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
 			defer wg.Done()
 			// An interrupt that arrived before the call started skips
 			// it.
-			if s.interruptPending(run) {
+			if s.interruptPending(run) || s.batchStopped(run) {
 				return
 			}
 			s.executeOne(run, turn, p)

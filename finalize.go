@@ -319,7 +319,7 @@ func (s *Session) settleIssuedCalls(run *runState) {
 	sort.Slice(issued, func(i, j int) bool { return issued[i].handle < issued[j].handle })
 	for _, call := range issued {
 		outcome := OutcomeSkipped
-		text := "Not run: the run settled before the call started."
+		text := SkippedSettlingText
 		if call.started {
 			outcome = OutcomeCancelled
 			text = "Cancelled: the run settled before the call finished."
