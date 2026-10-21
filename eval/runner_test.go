@@ -417,3 +417,67 @@ func TestTheTailKeepsWholeCharacters(t *testing.T) {
 		t.Errorf("tail of a short string gave %q", got)
 	}
 }
+
+func TestARunPooEndedByItsOwnTimeoutReportsTheTimeout(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	task.TimeoutS = 20
+
+	// poo settles as cancelled because its deadline passed, and exits 130.
+	binary := fakePoo(t, `
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --log) log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat > "$log" <<'JSON'
+{"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s"}
+{"record":"run.settled","seq":2,"ts":"2026-10-20T00:00:01Z","run_id":"r","reason":"cancelled","detail":{"source":"cancel:context","text":"context deadline exceeded"},"turns":1}
+JSON
+exit 130
+`)
+	out := t.TempDir()
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: binary,
+	})
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	if got, want := report.Results[0].Error, "the run timed out after 18s"; got != want {
+		t.Errorf("the error is %q, want %q", got, want)
+	}
+}
+
+func TestARunTheHarnessKilledQuotesTheDeadlineItEnforced(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	task.TimeoutS = 1
+
+	out := t.TempDir()
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: fakePoo(t, "sleep 30\n"),
+	})
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	if got := report.Results[0].Error; !strings.HasPrefix(got, "the run timed out after 1s") {
+		t.Errorf("the error is %q, want it to name the 1s deadline the harness enforced", got)
+	}
+}

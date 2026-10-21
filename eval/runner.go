@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/sdougbrown/poo"
 )
 
 // Defaults for the runner.
@@ -529,6 +531,8 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 	result.RunExit = pooExit
 	if runErr != nil {
 		result.Error = runErr.Error()
+	} else if pooTimedOut(logPath) {
+		result.Error = fmt.Sprintf("the run timed out after %s", r.pooTimeout(j.task))
 	}
 
 	// The diff, measured against the pristine tree. It is measured
@@ -769,6 +773,18 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 		return exit, fmt.Errorf("poo exited %d without writing a log: %s", exit, msg)
 	}
 	return exit, nil
+}
+
+// pooTimedOut reports whether poo settled the run because its own
+// --timeout ran out: the settle record says the run was cancelled, and
+// the cause is the context's deadline.
+func pooTimedOut(logPath string) bool {
+	log, err := ParseLog(logPath)
+	if err != nil {
+		return false
+	}
+	s := log.Settle()
+	return s != nil && s.Reason == string(poo.ReasonCancelled) && strings.Contains(s.Details.Text, context.DeadlineExceeded.Error())
 }
 
 // hasLog reports whether a session log exists and holds something.
