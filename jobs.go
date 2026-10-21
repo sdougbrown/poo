@@ -367,6 +367,13 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	// belongs to the job, and the receiving run settles tool_fatal.
 	fatal := err != nil && errors.Is(err, ErrFatal)
 
+	// A job that the session closed stops is not recorded here: the
+	// close writes the record with its cause, so a job gets exactly
+	// one job.ended.
+	if s.jobCtx.Err() != nil {
+		return
+	}
+
 	switch {
 	case err == nil:
 		s.finishJob(job, OutcomeOK, result.Text, false, false)
@@ -481,7 +488,15 @@ func (s *Session) queueJobResult(result jobResult) {
 	s.mu.Lock()
 	held := s.onIdle() == OnIdleHold
 	s.jobQueue = append(s.jobQueue, jobQueueItem{result: result, held: held})
+	queued := s.jobQueued
 	s.mu.Unlock()
+
+	// The signal tells a test that is waiting at a boundary that the
+	// result is queued.
+	select {
+	case queued <- struct{}{}:
+	default:
+	}
 
 	s.deliverJobResults()
 }
@@ -683,6 +698,10 @@ func (s *Session) startWokenRun(results []jobResult) {
 	s.reserved = true
 	s.mu.Unlock()
 
+	// The seam the race is tested at: the wake has the session's
+	// reservation, and a prompt that arrives now is refused.
+	s.raceHook("wake")
+
 	_, _ = s.start(context.Background(), "", TriggerJob, nil, results...)
 
 	s.mu.Lock()
@@ -857,6 +876,10 @@ func (s *Session) runHasRunningJob(run *runState) bool {
 //
 // The call reports whether the run is waiting.
 func (s *Session) enterWaiting(run *runState) bool {
+	// The seam the race is tested at: the drain has happened, and the
+	// run has not waited yet.
+	s.raceHook("waiting")
+
 	s.mu.Lock()
 	if s.run != run {
 		s.mu.Unlock()

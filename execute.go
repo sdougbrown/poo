@@ -325,21 +325,39 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	call := plan.call
 
 	// The call is recorded before it runs, so a log shows what the
-	// model asked for even when the call never finished.
-	if err := s.write(run.ctx, &ToolCallRecord{
-		RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
-		RunID:      run.id,
-		Turn:       turn,
-		Handle:     handle,
-		Tool:       call.Name,
-		Arguments:  recordArgs(call.Arguments),
-	}); err != nil {
-		s.addCandidate(run, newCandidate(ReasonStoreError, SettleDetail{
-			Source: "store",
-			Text:   err.Error(),
-		}))
-		return
+	// model asked for even when the call never finished. The record
+	// carries the original arguments and the mode the call ran in.
+	//
+	// The mode is only known once the before-tool hooks have answered,
+	// because a refusal never starts a job. A call that never reaches
+	// them ran in the turn.
+	wantsJob := s.callBecomesJob(call.Name, plan.background)
+	mode := CallModeSync
+	if wantsJob {
+		mode = CallModeJob
 	}
+	recorded := false
+	record := func(m CallMode) {
+		if recorded {
+			return
+		}
+		recorded = true
+		if err := s.write(run.ctx, &ToolCallRecord{
+			RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
+			RunID:      run.id,
+			Turn:       turn,
+			Handle:     handle,
+			Tool:       call.Name,
+			Arguments:  recordArgs(call.Arguments),
+			Mode:       m,
+		}); err != nil {
+			s.addCandidate(run, newCandidate(ReasonStoreError, SettleDetail{
+				Source: "store",
+				Text:   err.Error(),
+			}))
+		}
+	}
+	record(mode)
 	s.events.emit(EventToolCall, map[string]any{
 		"run_id": run.id,
 		"handle": handle,
@@ -396,7 +414,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		return
 	}
 	if decision.Denied {
-		// A refused call is a model-visible error result.
+		// A refused call is a model-visible error result, and it
+		// never becomes a job.
+		record(CallModeSync)
 		text := decision.Detail
 		if text == "" {
 			text = "The call was refused."
@@ -408,7 +428,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		return
 	}
 	if decision.Result != nil {
-		// A hook answered the call itself.
+		// A hook answered the call itself, and it never becomes a
+		// job.
+		record(CallModeSync)
 		s.recordResult(run, turn, handle, call.Name, call.ID, *decision.Result, OutcomeOK)
 		return
 	}

@@ -1,0 +1,417 @@
+package poo_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
+)
+
+// The stopping of a job: the model may cancel one, the jobs timeout
+// stops one, and the session's limit refuses a new one.
+
+// TestCancelJobStopsTheJobAndDeliversItsPartialOutput covers the
+// plan's rule: cancel_job stops the job, and its partial output is
+// delivered like any result.
+func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{calls: []poo.ToolCall{{
+			ID:        "call_2",
+			Name:      "cancel_job",
+			Arguments: json.RawMessage(`{"job":"j1"}`),
+		}}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn", res.Reason)
+	}
+	// The job ended as cancelled, and the result was delivered.
+	found := false
+	for _, rec := range sink.allRecords() {
+		ended, ok := rec.(*poo.JobEnded)
+		if !ok {
+			continue
+		}
+		if ended.Outcome != poo.JobOutcomeCancelled {
+			t.Errorf("the job ended %q, want cancelled", ended.Outcome)
+		}
+		found = true
+	}
+	if !found {
+		t.Error("the log holds no job.ended record")
+	}
+	delivered := false
+	for _, m := range sink.messages() {
+		if m.Origin == poo.OriginJob {
+			delivered = true
+		}
+	}
+	if !delivered {
+		t.Error("the cancelled job's result did not reach the model")
+	}
+}
+
+// TestTheJobTimeoutStopsTheJob covers the plan's rule: the job timeout
+// stops the job, and the outcome is an error with the timeout flag.
+func TestTheJobTimeoutStopsTheJob(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	opts := jobOptions(t, tr, tool, sink)
+	opts.Jobs = poo.JobOptions{Timeout: 50 * time.Millisecond}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	waitFor(t, "the job to time out", func() bool {
+		return sink.count("job.ended") == 1
+	})
+	var ended *poo.JobEnded
+	for _, rec := range sink.allRecords() {
+		if e, ok := rec.(*poo.JobEnded); ok {
+			ended = e
+		}
+	}
+	if ended == nil {
+		t.Fatal("the log holds no job.ended record")
+	}
+	if ended.Outcome != poo.JobOutcomeError {
+		t.Errorf("the job ended %q, want error", ended.Outcome)
+	}
+	if !ended.TimedOut {
+		t.Error("the job.ended record does not carry the timeout flag")
+	}
+}
+
+// TestMaxRunningRefusesTheExtraCall covers the plan's rule: a call over
+// the limit gets a recoverable error, not a queue.
+func TestMaxRunningRefusesTheExtraCall(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{
+			jobCall("one", true),
+			jobCall("two", true),
+		}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	opts := jobOptions(t, tr, tool, sink)
+	opts.Jobs = poo.JobOptions{MaxRunning: 1}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	tool.Release()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn", res.Reason)
+	}
+	// One job started, and the other call got the recoverable error.
+	if sink.count("job.started") != 1 {
+		t.Errorf("the log holds %d job.started records, want 1", sink.count("job.started"))
+	}
+	found := false
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok {
+			continue
+		}
+		if r.Outcome == poo.OutcomeError && strings.Contains(r.Text, "too many jobs running") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the model did not see the limit error")
+	}
+}
+
+// TestAJobThatFailsFatallySettlesTheReceivingRun covers the plan's
+// rule: a job error that wraps ErrFatal is delivered like any result
+// and adds the tool_fatal candidate to the receiving run.
+func TestAJobThatFailsFatallySettlesTheReceivingRun(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetError(poo.Fatalf("the working directory is gone"))
+	tool.Release()
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonToolFatal {
+		t.Errorf("the run settled %q, want tool_fatal", res.Reason)
+	}
+}
+
+// TestARunWithOnlyEarlierJobsSettlesNormally covers the plan's rule: a
+// job started by an earlier run never holds a run open.
+func TestARunWithOnlyEarlierJobsSettlesNormally(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	waitFor(t, "the run to wait", func() bool {
+		return s.State() == poo.StateWaiting
+	})
+	// The run is cancelled, and the job keeps running.
+	s.Cancel("cancel:test")
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	// The next run does not wait for the earlier run's job.
+	tool.Release()
+	tr2 := scripted([]fakeResponse{{text: "the second answer"}})
+	sink2 := &recordingSink{}
+	tool2 := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool2.SetResult("the job's output")
+
+	s2 := newTestSession(t, jobOptions(t, tr2, tool2, sink2))
+	res2 := runSession(t, s2, "do the thing")
+	if res2.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn", res2.Reason)
+	}
+}
+
+// TestTheJobsToolListsTheRunningJobs covers the plan's rule: the model
+// can see the jobs it started.
+func TestTheJobsToolListsTheRunningJobs(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{calls: []poo.ToolCall{{
+			ID:        "call_2",
+			Name:      "jobs",
+			Arguments: json.RawMessage(`{}`),
+		}}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	tool.Release()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	found := false
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok {
+			continue
+		}
+		if r.Tool == "jobs" && strings.Contains(r.Text, "j1") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the jobs tool did not name the job")
+	}
+}
+
+// TestTheSessionCloseStopsTheRunningJobs covers the plan's rule: closing
+// the session stops the jobs, and each one gets a job.ended record with
+// the cause session_closed.
+func TestTheSessionCloseStopsTheRunningJobs(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s, err := poo.New(jobOptions(t, tr, tool, sink))
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	if err := s.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	// The job got a job.ended record with the close's cause.
+	var ended *poo.JobEnded
+	for _, rec := range sink.allRecords() {
+		if e, ok := rec.(*poo.JobEnded); ok {
+			ended = e
+		}
+	}
+	if ended == nil {
+		t.Fatal("the log holds no job.ended record")
+	}
+	if ended.Outcome != poo.JobOutcomeCancelled {
+		t.Errorf("the job ended %q, want cancelled", ended.Outcome)
+	}
+	if ended.Cause != poo.CauseSessionClosed {
+		t.Errorf("the job's cause is %q, want session_closed", ended.Cause)
+	}
+}
+
+// TestAJobResultNeverCarriesADeliveryNote covers the plan's rule: a job
+// result never carries a delivery note.
+func TestAJobResultNeverCarriesADeliveryNote(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	tool.Release()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	for _, m := range sink.messages() {
+		if m.Origin != poo.OriginJob {
+			continue
+		}
+		if m.DeliveryNote != nil {
+			t.Error("the job's message carries a delivery note")
+		}
+	}
+}
+
+// TestTheJobHandleSurvivesTheTurnEnd covers the plan's rule: a job
+// handle survives the turn, and the record names the call it came from.
+func TestTheJobHandleSurvivesTheTurnEnd(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	tool.Release()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	var started *poo.JobStarted
+	for _, rec := range sink.allRecords() {
+		if j, ok := rec.(*poo.JobStarted); ok {
+			started = j
+		}
+	}
+	if started == nil {
+		t.Fatal("the log holds no job.started record")
+	}
+	if started.Job != "j1" {
+		t.Errorf("the job is %q, want j1", started.Job)
+	}
+	if started.Handle != "r1" {
+		t.Errorf("the job's handle is %q, want r1", started.Handle)
+	}
+	if started.Tool != "job" {
+		t.Errorf("the job's tool is %q, want job", started.Tool)
+	}
+}
+
+// TestTheJobRunsUnderTheSessionContext covers the plan's rule: the job
+// runs under the session, so a cancel of the run does not stop it.
+func TestTheJobRunsUnderTheSessionContext(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	waitFor(t, "the run to wait", func() bool {
+		return s.State() == poo.StateWaiting
+	})
+	s.Cancel("cancel:test")
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	// The job is still running: the cancel did not stop it.
+	tool.Release()
+	waitFor(t, "the job to end", func() bool {
+		return sink.count("job.ended") == 1
+	})
+	for _, rec := range sink.allRecords() {
+		ended, ok := rec.(*poo.JobEnded)
+		if !ok {
+			continue
+		}
+		if ended.Outcome != poo.JobOutcomeOK {
+			t.Errorf("the job ended %q, want ok", ended.Outcome)
+		}
+	}
+}
+
+// errIsJobStopped is the error a stopped job returns.
+var errIsJobStopped = errors.New("the job was stopped")

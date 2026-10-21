@@ -86,6 +86,10 @@ type Session struct {
 	// The write takes the session's lock, so the record is built under
 	// the lock and written outside it.
 	pendingHeld *InputHeld
+	// raceHooks are the seams the job races are tested at.
+	raceHooks *JobRaceHooks
+	// jobQueued is signalled when a job result is queued.
+	jobQueued chan struct{}
 	// jobCtx is the session's job context. The jobs run under it, so
 	// an interrupt, a cancel and a settle never stop them.
 	jobCtx context.Context
@@ -120,6 +124,10 @@ type Session struct {
 	lastResult Result
 	// lastRunID is the id of the run that finished last.
 	lastRunID string
+	// settleCodes holds the exit codes of the runs that have settled,
+	// in order. A woken run's code joins the first run's, so a client
+	// can combine them.
+	settleCodes []int
 }
 
 // runState is the state of the active run.
@@ -363,6 +371,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		events:      newEventBus(),
 		noticeArmed: true,
 		jobs:        map[string]*jobState{},
+		jobQueued:   make(chan struct{}, 1),
 	}
 	s.est.charsPerToken = CharsPerToken
 	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
@@ -475,6 +484,24 @@ func (s *Session) Broken() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.broken
+}
+
+// LastAssistantMessage returns the text of the last assistant message.
+//
+// It is the answer the model gave, and it is what a one-shot client
+// prints when the run produced no typed result.
+func (s *Session) LastAssistantMessage() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.history) - 1; i >= 0; i-- {
+		if s.history[i].Role != RoleAssistant {
+			continue
+		}
+		if text := s.history[i].Text(); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 // MessageIDs returns the session's message-id counter.

@@ -25,7 +25,6 @@ func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string
 	var b strings.Builder
 
 	b.WriteString("You are a coding agent working in a shell. You solve the task by inspecting the repository and changing what is needed.\n\n")
-
 	b.WriteString("How to work:\n")
 	b.WriteString("- Inspect before you edit. Read the files that matter and the code around the place you will change.\n")
 	b.WriteString("- Prefer narrow reads over whole files. Use the read tool for a specific line range, and use bash with grep, sed, head or tail when you need to search or slice.\n")
@@ -47,6 +46,8 @@ func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string
 		b.WriteString("Call one tool at a time, and wait for its result before the next call.\n\n")
 	}
 
+	b.WriteString(jobsSection(tools))
+
 	b.WriteString("Done means:\n")
 	b.WriteString("- The task is actually complete, not just started.\n")
 	b.WriteString("- You have verified the change, for example by running the project's tests or the command that exercises the behaviour.\n")
@@ -55,6 +56,30 @@ func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string
 	if modelID != "" {
 		fmt.Fprintf(&b, "\nYou are running as the model %s.\n", modelID)
 	}
+	return b.String()
+}
+
+// jobsSection renders the section that tells the model about the
+// background jobs.
+//
+// A session with no job-capable tool has no jobs, so the section is
+// empty and the prompt does not mention them.
+func jobsSection(tools []poo.ToolSpec) string {
+	allowed := false
+	for _, t := range tools {
+		if t.Background == poo.BackgroundAllowed || t.Background == poo.BackgroundAlways {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Background jobs:\n")
+	b.WriteString("- A tool that says it may run in the background takes a \"background\": true argument. The call returns at once with a job handle, and the job's result arrives later as a message.\n")
+	b.WriteString("- Use the jobs tool to see the jobs that are running, and cancel_job to stop one. There is no wait_job: ending your turn is how you wait.\n")
+	b.WriteString("- A job keeps running when the turn ends and when the run is cancelled, so a long command belongs in one.\n\n")
 	return b.String()
 }
 

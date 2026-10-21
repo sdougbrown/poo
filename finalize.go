@@ -87,6 +87,10 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// cancelled.
 	s.settleIssuedCalls(run)
 
+	// The seam the race is tested at: the input check has passed, and
+	// the outcome is not fixed yet.
+	s.raceHook("commit")
+
 	// The jobs the run started are still running: the settle detail
 	// lists them, because a run that leaves work behind says so.
 	jobsRunning := s.jobsRunningFor(run.id)
@@ -182,6 +186,10 @@ func (s *Session) actOnQueuedJobResults() {
 // and the reopening of the run are one step under the lock, so a
 // candidate that joins afterwards starts a finalization of its own.
 func (s *Session) abandonFinalize(run *runState) bool {
+	// The seam the race is tested at: the finalization is under way,
+	// and the queues have not been looked at yet.
+	s.raceHook("finalize")
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Only a natural candidate may be abandoned: a run that is
@@ -409,6 +417,7 @@ func (s *Session) wakeWaiters(run *runState, result Result) {
 	}
 	s.lastResult = result
 	s.lastRunID = run.id
+	s.settleCodes = append(s.settleCodes, ExitCode(result.Reason))
 	waiters := s.waiters
 	s.waiters = nil
 	s.mu.Unlock()

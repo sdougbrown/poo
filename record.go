@@ -160,6 +160,16 @@ type MessageRecord struct {
 	DeliveryNote *DeliveryNote `json:"delivery_note,omitempty"`
 }
 
+// CallMode says how a tool call ran.
+type CallMode string
+
+const (
+	// CallModeSync means the call ran in the turn.
+	CallModeSync CallMode = "sync"
+	// CallModeJob means the call became a background job.
+	CallModeJob CallMode = "job"
+)
+
 // ToolCallRecord records a tool call the model made, with its full arguments.
 type ToolCallRecord struct {
 	RecordMeta
@@ -175,6 +185,9 @@ type ToolCallRecord struct {
 	// object when the model sent valid JSON, and a JSON string holding the
 	// raw text when it did not.
 	Arguments json.RawMessage `json:"arguments"`
+	// Mode says how the call ran: "sync" in the turn, or "job" in the
+	// background.
+	Mode CallMode `json:"mode,omitempty"`
 }
 
 // ToolResultRecord records the outcome of a tool call.
