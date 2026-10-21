@@ -240,14 +240,13 @@ func runRun(args []string) int {
 		ContextLimit: o.contextLimit,
 		MaxOutput:    o.maxOutput,
 		MaxTurns:     o.maxTurns,
-		SystemPrompt: systemPrompt(o.modelID, toolSpecs, o.toolsMode),
 		WorkingDir:   absWorkDir,
 		Env:          childEnv,
 		Settings:     settings,
 		ToolsMode:    o.toolsMode,
 
 		ReasoningEffort: o.reasoningEffort,
-	})
+	}, poo.WithPrompt(systemPrompt(o.modelID, toolSpecs, o.toolsMode)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1
