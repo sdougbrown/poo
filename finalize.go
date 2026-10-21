@@ -13,26 +13,38 @@ import (
 // candidates, until the commit point at step 6. The outcome therefore
 // never depends on which goroutine arrived first.
 func (s *Session) finalize(run *runState, cands ...candidate) Result {
+	res, _ := s.finalizeCandidates(run, false, cands)
+	return res
+}
+
+// finalizeCandidates adds the candidates and, when it is the first call,
+// runs the finalization.
+//
+// Only the goroutine that drives the run passes resumable: it is the one
+// that can carry on after an abandoned finalization, and the second
+// result reports that the finalization was abandoned. Any other caller
+// has a non-natural candidate, which is never abandoned.
+func (s *Session) finalizeCandidates(run *runState, resumable bool, cands []candidate) (Result, bool) {
 	s.mu.Lock()
 	if run.committed {
 		// A candidate arriving after the commit point is logged and
 		// ignored: it never mutates a settled run.
 		result := run.result
 		s.mu.Unlock()
-		return result
+		return result, false
 	}
 	if run.finalizing {
 		// The finalization is under way. The candidates are added, and
 		// the finalization picks them up at the commit point.
 		run.candidates = append(run.candidates, cands...)
 		s.mu.Unlock()
-		return Result{}
+		return Result{}, false
 	}
 	run.finalizing = true
 	run.candidates = append(run.candidates, cands...)
 	s.mu.Unlock()
 
-	return s.finalizeRun(run)
+	return s.finalizeRun(run, resumable)
 }
 
 // finalizeRun runs the finalization protocol.
@@ -40,15 +52,12 @@ func (s *Session) finalize(run *runState, cands ...candidate) Result {
 // The steps are the plan's: the input check, the cancellation of the
 // run's context, the wait for in-flight work, the synthetic results,
 // the commit point, the outcome records, and the settled event.
-func (s *Session) finalizeRun(run *runState) Result {
+func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// Step 1: the input check. A run that would settle naturally can
 	// still take a queued input; a run that is settling because of a
 	// failure or a limit cannot.
-	if s.abandonFinalize(run) {
-		s.mu.Lock()
-		run.finalizing = false
-		s.mu.Unlock()
-		return Result{}
+	if resumable && s.abandonFinalize(run) {
+		return Result{}, true
 	}
 
 	// The queued client messages that will never be delivered are
@@ -131,58 +140,60 @@ func (s *Session) finalizeRun(run *runState) Result {
 	// client learns the run's outcome first.
 	s.dropUndelivered(run, undelivered, reason)
 	s.wakeWaiters(run, Result{Reason: reason, Detail: detail, Turns: run.turn})
-	return Result{Reason: reason, Detail: detail, Turns: run.turn}
+	return Result{Reason: reason, Detail: detail, Turns: run.turn}, false
 }
 
 // abandonFinalize reports whether the finalization is abandoned because
 // a queued input can still be delivered.
 //
-// This is the only place a finalization can be abandoned.
+// This is the only place a finalization can be abandoned. The decision
+// and the reopening of the run are one step under the lock, so a
+// candidate that joins afterwards starts a finalization of its own.
 func (s *Session) abandonFinalize(run *runState) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	// Only a natural candidate may be abandoned: a run that is
 	// settling because of a failure or a limit has to settle.
-	natural := true
 	for _, c := range run.candidates {
 		if !IsNatural(c.reason) {
-			natural = false
-			break
+			return false
 		}
 	}
-	if !natural {
-		s.mu.Unlock()
-		return false
-	}
 	if len(s.steerQueue) == 0 && len(s.followUpQueue) == 0 {
-		s.mu.Unlock()
 		return false
 	}
-	// The queues are drained, and the run goes to the next-request
-	// gate. The AfterTurn hooks and the stop conditions are not
-	// re-run, and this does not count against MaxContinuations.
-	go s.resumeRun(run)
-	s.mu.Unlock()
+	// The natural candidates are discarded, and the run goes back to
+	// the next-request gate. The AfterTurn hooks and the stop conditions
+	// are not re-run, and this does not count against MaxContinuations.
+	run.finalizing = false
+	run.candidates = nil
 	return true
 }
 
-// resumeRun puts a run back on the loop after an abandoned
-// finalization.
+// resume takes the run back after an abandoned finalization and returns
+// what the loop produces from the gate on.
 //
-// The run's context was not cancelled, so the loop carries on from
-// where it was.
-func (s *Session) resumeRun(run *runState) {
-	s.drainInputs(run, true)
+// The run's context was not cancelled, so the loop carries on from where
+// it was. It runs in the goroutine that drives the run, under the run's
+// duration timer and panic recovery. It reports false when another
+// finalization has taken the run over, in which case that one settles it.
+func (s *Session) resume(run *runState) ([]candidate, bool) {
 	s.mu.Lock()
-	if s.run != run {
+	if s.run != run || run.finalizing || run.committed {
 		s.mu.Unlock()
-		return
+		return nil, false
 	}
-	run.finalizing = false
-	run.candidates = nil
+	for _, c := range run.candidates {
+		if !IsNatural(c.reason) {
+			s.mu.Unlock()
+			return nil, false
+		}
+	}
 	s.transitionLocked(StateRequesting)
 	s.mu.Unlock()
 
-	s.finalize(run, s.settleCandidates(run, s.loop(run))...)
+	s.drainInputs(run, true)
+	return s.loop(run), true
 }
 
 // collectUndelivered takes the queued client messages that will never

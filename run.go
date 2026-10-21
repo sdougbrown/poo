@@ -172,7 +172,19 @@ func (s *Session) drive(run *runState) {
 	stopTimer := s.startDurationTimer(run)
 	defer stopTimer()
 
-	s.finalize(run, s.settleCandidates(run, s.loop(run))...)
+	cands := s.loop(run)
+	for {
+		_, abandoned := s.finalizeCandidates(run, true, s.settleCandidates(run, cands))
+		if !abandoned {
+			return
+		}
+		// A queued input reopened the run, and the loop carries on in
+		// this goroutine, under the same timer and recovery.
+		var ok bool
+		if cands, ok = s.resume(run); !ok {
+			return
+		}
+	}
 }
 
 // settleCandidates returns the candidates a loop that ended hands to the

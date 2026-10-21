@@ -1069,3 +1069,81 @@ func TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd(t *testing.T) {
 		t.Errorf("the third request ends with a %q message, want the follow-up", got.Origin)
 	}
 }
+
+// resumedRun starts a run whose first turn ends naturally while a
+// BeforeSettle hook runs, queues a follow-up in that window, and lets
+// the finalization be abandoned so the run resumes with the tool call
+// the second scripted response makes.
+func resumedRun(t *testing.T, tool *echoTool, maxDuration time.Duration) (*poo.Session, *recordingSink) {
+	t.Helper()
+	hookStarted := make(chan struct{})
+	release := make(chan struct{})
+	hook := &blockingBeforeSettle{started: hookStarted, release: release}
+	tr := scripted([]fakeResponse{
+		{text: "the first answer"},
+		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
+	})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, tool, sink)
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+	opts.MaxDuration = maxDuration
+	opts.MaxTurns = 4
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-hookStarted
+	if _, err := s.Send("and then this", poo.FollowUp); err != nil {
+		t.Fatalf("sending the follow-up: %v", err)
+	}
+	close(release)
+	return s, sink
+}
+
+// TestAResumedRunKeepsItsDurationBudget covers the plan's MaxDuration:
+// the timer settles a stuck run, also one that resumed after an
+// abandoned finalization.
+func TestAResumedRunKeepsItsDurationBudget(t *testing.T) {
+	tool := &echoTool{result: "echoed"}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		select {
+		case <-ctx.Done():
+		case <-time.After(3 * time.Second):
+		}
+		return poo.ToolResult{Text: "done"}, nil
+	}
+	start := time.Now()
+	s, _ := resumedRun(t, tool, 300*time.Millisecond)
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonBudgetExhausted || res.Detail.Source != "max_duration" {
+		t.Errorf("the run settled %q (%s), want budget_exhausted from max_duration", res.Reason, res.Detail.Source)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("the run took %s to settle, want the timer to settle it near 300ms", took)
+	}
+}
+
+// TestAPanicInAResumedRunStillSettles covers the settle guarantee: a
+// panic in the resumed part of a run settles tool_fatal, as it does in
+// the first part.
+func TestAPanicInAResumedRunStillSettles(t *testing.T) {
+	tool := &echoTool{result: "echoed"}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		panic("the tool panicked")
+	}
+	s, sink := resumedRun(t, tool, 0)
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonToolFatal || res.Detail.Source != "panic" {
+		t.Errorf("the run settled %q (%s), want tool_fatal from the panic", res.Reason, res.Detail.Source)
+	}
+	if sink.count("run.settled") != 1 {
+		t.Errorf("the log holds %d run.settled records, want 1", sink.count("run.settled"))
+	}
+}
