@@ -559,17 +559,22 @@ func (r *Run) settleForError(err error) (Reason, SettleDetail, error) {
 	var pe *ProviderError
 	if errors.As(err, &pe) {
 		kind := string(pe.Kind)
+		// The wait the endpoint asked for travels with the failure:
+		// the plan's provider_limit row settles on a Retry-After over
+		// thirty seconds, so the record has to carry the number it
+		// settles on.
+		retryAfter := int(pe.RetryAfter.Seconds())
 		if pe.Kind == ProviderKindContextLength {
 			return ReasonContextExhausted, SettleDetail{
 				Source:   "provider:context_length",
 				Text:     pe.Message,
-				Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code},
+				Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code, RetryAfterSec: retryAfter},
 			}, nil
 		}
 		return ReasonProviderError, SettleDetail{
 			Source:   "provider:" + kind,
 			Text:     pe.Message,
-			Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code},
+			Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code, RetryAfterSec: retryAfter},
 		}, nil
 	}
 	return "", SettleDetail{}, err

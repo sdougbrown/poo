@@ -67,14 +67,25 @@ func (e *ProviderError) Error() string {
 
 // Retryable reports whether the failure is worth retrying.
 //
-// A rate limit, a server failure and a network failure are worth another
-// attempt, as long as the attempt has not spent the budget. A rejection
-// is not: the same request would be refused again.
+// The plan's rule: a rate limit is worth another attempt only when the
+// endpoint asked for a wait of thirty seconds or less, and a wait of
+// none means it asked for no wait at all. A server failure and a network
+// failure always are. A rejection is not: the same request would be
+// refused again.
 func (e *ProviderError) Retryable() bool {
 	switch e.Kind {
-	case ProviderKindRateLimited, ProviderKindServer, ProviderKindNetwork:
+	case ProviderKindRateLimited:
+		return e.RetryAfter <= MaxRetryAfter
+	case ProviderKindServer, ProviderKindNetwork:
 		return true
 	default:
 		return false
 	}
 }
+
+// MaxRetryAfter is the longest wait a rate limit may ask for and still
+// be worth retrying.
+//
+// A limit that asks for longer is a provider limit, not a transient
+// failure: the run settles and a later run may succeed.
+const MaxRetryAfter = 30 * time.Second
