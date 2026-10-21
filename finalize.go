@@ -375,9 +375,10 @@ func (s *Session) Cancel(reason string) {
 // It returns the run's result. A session with no run returns the zero
 // result at once.
 //
-// The context bounds the wait. When it ends, the run's own context ends
-// with it, so the run settles as cancelled: the wait continues for the
-// settle, because the settle record is the answer.
+// The context bounds the wait, and it does not cancel the run. When it
+// ends, the wait gives the run a short grace period to settle, which
+// covers a run whose own context is the same one, and then returns the
+// context's error while the run goes on. Cancel ends the run.
 func (s *Session) Wait(ctx context.Context) (Result, error) {
 	ch := make(chan Result, 1)
 	s.mu.Lock()
@@ -394,9 +395,9 @@ func (s *Session) Wait(ctx context.Context) (Result, error) {
 		return res, nil
 	case <-ctx.Done():
 	}
-	// The context ended, and the run's own context ended with it. The
-	// run settles on its own, so the wait continues: a bounded grace
-	// period covers a run that is finishing its work.
+	// The context ended. A run started under the same context settles on
+	// its own, so a bounded grace period covers a run that is finishing
+	// its work.
 	select {
 	case res := <-ch:
 		return res, nil

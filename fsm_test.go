@@ -1186,3 +1186,23 @@ func TestEveryTransitionOfAMultiRunSessionIsInTheTable(t *testing.T) {
 		t.Error("the session never moved from settled to requesting")
 	}
 }
+
+// TestTheContinuationLimitTextNamesTheConfiguredLimit covers the settle
+// detail: the text a client reads names the limit the session was
+// configured with.
+func TestTheContinuationLimitTextNamesTheConfiguredLimit(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{}}
+	opts.MaxContinuations = 1
+
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+
+	if res.Reason != poo.ReasonHookContinueLimit {
+		t.Fatalf("the run settled %q, want hook_continue_limit", res.Reason)
+	}
+	if !strings.Contains(res.Detail.Text, "the limit is 1") {
+		t.Errorf("the detail text is %q, want it to name the limit 1", res.Detail.Text)
+	}
+}

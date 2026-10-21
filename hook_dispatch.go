@@ -154,7 +154,7 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 	count := run.continuations
 	s.mu.Unlock()
 	if count > s.opts.MaxContinuations {
-		return SettleDecision{}, false, &hookContinueLimitError{count: count}
+		return SettleDecision{}, false, &hookContinueLimitError{count: count, limit: s.opts.MaxContinuations}
 	}
 
 	// Every Continue message is appended, and the run goes back to the
@@ -178,8 +178,10 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 type hookContinueLimitError struct {
 	// count is how many continuations the run asked for.
 	count int
+	// limit is how many continuations the session allows.
+	limit int
 }
 
 func (e *hookContinueLimitError) Error() string {
-	return fmt.Sprintf("poo: the run asked for %d continuations, and the limit is %d", e.count, DefaultMaxContinuations)
+	return fmt.Sprintf("poo: the run asked for %d continuations, and the limit is %d", e.count, e.limit)
 }
