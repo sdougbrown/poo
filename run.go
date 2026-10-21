@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -374,6 +375,10 @@ func (s *Session) loop(run *runState) []candidate {
 
 		if resp.usage != nil {
 			s.writeUsage(run, turn, resp.usage, resp.requestChars)
+		} else {
+			// The endpoint reported no usage, and the run's token
+			// budget still has to count the turn.
+			s.addEstimatedUsage(run, resp, assistant)
 		}
 
 		// A truncated response: the complete calls run, and the
@@ -913,6 +918,23 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 		"output_tokens":     usage.OutputTokens,
 		"cache_read_tokens": usage.CacheReadTokens,
 	})
+}
+
+// addEstimatedUsage counts a turn the endpoint reported no usage for.
+//
+// The estimate is the serialized request plus the response's text, tool
+// calls and reasoning, divided by the session's characters-per-token
+// ratio. A turn always counts at least one token, so a budget of one is
+// spent by the first request.
+func (s *Session) addEstimatedUsage(run *runState, resp *response, assistant Message) {
+	chars := resp.requestChars + estimateMessageChars(assistant)
+	s.mu.Lock()
+	tokens := int(math.Ceil(float64(chars) / s.est.charsPerToken))
+	if tokens < 1 {
+		tokens = 1
+	}
+	run.tokens += tokens
+	s.mu.Unlock()
 }
 
 // errRunWindingDown reports that a run settled while a step of the loop

@@ -1,11 +1,13 @@
 package poo_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // The context budget: the estimator with its calibration, the notice, the
@@ -560,5 +562,36 @@ func TestACallToAnotherToolDoesNotBreakTheStreak(t *testing.T) {
 
 	if got := s.RepeatCountsFor("r3"); got.Exact != 2 || got.Near != 2 {
 		t.Errorf("the third call's counts are %+v, want exact 2 and near 2", got)
+	}
+}
+
+// TestTheTokenBudgetUsesTheEstimateWithoutProviderUsage covers the
+// plan's rule: MaxRunTokens counts provider-reported or estimated
+// tokens. A turn whose response reports no usage is counted from the
+// request and response it produced.
+func TestTheTokenBudgetUsesTheEstimateWithoutProviderUsage(t *testing.T) {
+	tr := scripted([]fakeResponse{{
+		calls: []poo.ToolCall{jobCall("one", false)},
+	}})
+	tool := pootest.NewJobTool("job", poo.BackgroundNever)
+	tool.ReleaseAll()
+
+	opts := jobOptions(t, tr, tool, &recordingSink{})
+	opts.MaxTurns = 3
+	opts.MaxRunTokens = 1
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), strings.Repeat("x", 100)); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if res.Reason != poo.ReasonBudgetExhausted {
+		t.Fatalf("reason=%s turns=%d requests=%d losing=%v; want budget_exhausted from the estimate",
+			res.Reason, res.Turns, len(tr.Requests()), res.Detail.Losing)
+	}
+	if res.Detail.Source != "max_run_tokens" {
+		t.Errorf("the budget source is %q, want max_run_tokens", res.Detail.Source)
 	}
 }
