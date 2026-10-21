@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -532,4 +533,138 @@ func TestWaitJobsWaitsForACompletionBeingRecorded(t *testing.T) {
 	if err == nil {
 		t.Fatal("WaitJobs returned while the job.ended record was still being written")
 	}
+}
+
+// unlaunchedJobSink holds the job.started record until the test releases
+// it, so the run settles while the job's acceptance is in flight.
+type unlaunchedJobSink struct {
+	recordingSink
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+// Append holds the job.started record.
+func (s *unlaunchedJobSink) Append(ctx context.Context, rec poo.Record) error {
+	if rec.Meta().Record == "job.started" {
+		s.once.Do(func() {
+			close(s.entered)
+			<-s.release
+		})
+	}
+	return s.recordingSink.Append(ctx, rec)
+}
+
+// TestAnUnlaunchedJobCompletesThroughTheQueue covers the plan's jobs
+// rule: every accepted job completes with a job.ended that names the
+// input its result is delivered under. A job the run settles before
+// launching is cancelled and its result is queued like any other, so the
+// idle decision holds it.
+func TestAnUnlaunchedJobCompletesThroughTheQueue(t *testing.T) {
+	sink := &unlaunchedJobSink{entered: make(chan struct{}), release: make(chan struct{})}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the cancelled result woke a run"},
+	})
+	opts := jobOptions(t, tr, tool, sink)
+	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
+	s := newTestSession(t, opts)
+	id, err := s.Prompt(context.Background(), "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-sink.entered
+	cancelDone := make(chan struct{})
+	go func() {
+		s.Cancel("probe")
+		close(cancelDone)
+	}()
+	// The job's acceptance is in flight when the finalization begins, so
+	// the run settles before the job launches.
+	waitFor(t, "the settling event", func() bool {
+		for _, e := range s.Events() {
+			if e.Name == poo.EventRunSettling {
+				return true
+			}
+		}
+		return false
+	})
+	close(sink.release)
+	if _, err := s.WaitRun(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	<-cancelDone
+
+	names := sink.names()
+	started, ended := -1, -1
+	var end *poo.JobEnded
+	for i, name := range names {
+		switch name {
+		case "job.started":
+			started = i
+		case "job.ended":
+			ended = i
+		}
+	}
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.JobEnded); ok {
+			end = r
+		}
+	}
+	if started < 0 || ended < 0 || started > ended {
+		t.Fatalf("records are %v; want job.started before job.ended", names)
+	}
+	if end.Outcome != poo.JobOutcomeCancelled {
+		t.Errorf("the unlaunched job ended %q, want cancelled", end.Outcome)
+	}
+	if end.InputID == "" {
+		t.Errorf("the unlaunched job's job.ended names no input_id, so its result has no fate")
+	}
+	if end.Text != "the run settled before the job started" {
+		t.Errorf("the unlaunched job's text is %q, want the settling note", end.Text)
+	}
+	if got := s.QueuedJobResults(); got != 1 {
+		t.Errorf("%d job result(s) queued, want the unlaunched job's cancelled result", got)
+	}
+	if got := sink.count("input.held"); got != 1 {
+		t.Errorf("the log holds %d input.held records, want 1", got)
+	}
+}
+
+// TestAQueuedFollowUpDoesNotKeepARunFromWaiting covers the waiting
+// entry: a follow-up is delivered only at a natural stop, so it is not
+// queued work that keeps a run with a job running from waiting.
+func TestAQueuedFollowUpDoesNotKeepARunFromWaiting(t *testing.T) {
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting for the job"},
+	})
+	opts := jobOptions(t, tr, tool, sink)
+	opts.MaxTurns = 4
+	s := newTestSession(t, opts)
+	var once sync.Once
+	var sendErr error
+	restore := s.SetJobRaceHooks(&poo.JobRaceHooks{BeforeWaiting: func(poo.WaitForResult) {
+		once.Do(func() {
+			_, sendErr = s.Send("follow up later", poo.FollowUp)
+		})
+	}})
+	defer restore()
+	id, err := s.Prompt(context.Background(), "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "waiting or settlement", func() bool { return s.State() == poo.StateWaiting || !s.Running() })
+	if s.State() != poo.StateWaiting {
+		res, err := s.WaitRun(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Fatalf("the follow-up caused %d request(s) and %s with jobs=%v, queued=%d delivered=%d dropped=%d; want waiting (Send error=%v)",
+			len(tr.Requests()), res.Reason, s.JobsRunning(), sink.count("input.queued"), sink.count("input.delivered"), sink.count("input.dropped"), sendErr)
+	}
+	s.Cancel("cleanup")
 }

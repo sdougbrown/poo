@@ -326,11 +326,16 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	}
 	if winding {
 		// The run went down while the acceptance was being recorded, so
-		// the job never launches. It was accepted, so it still gets its
-		// terminal outcome. The acceptance claim is held until the
-		// terminal record is written, so the finalization cannot commit
-		// before the job has one.
-		s.finishUnlaunchedJob(job)
+		// the job never launches. It was accepted, so it still completes
+		// through the job queue: a cancelled job.ended with the input id
+		// of its result, which wakes a run or is held like any other. The
+		// acceptance claim is held until that completion is written, so
+		// the finalization cannot commit before the job has one.
+		s.finishJob(job, OutcomeCancelled, "the run settled before the job started", false, false)
+		// The job never had a goroutine, so nothing else closes its done
+		// channel: a close that waits for it would wait for a job that
+		// cannot finish.
+		close(job.done)
 		s.mu.Lock()
 		run.jobStarts--
 		s.mu.Unlock()
@@ -345,45 +350,6 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 
 	go s.runJob(job, prepared)
 	return jobID, true, false
-}
-
-// finishUnlaunchedJob gives an accepted job that never started its
-// terminal record.
-//
-// The job is stopped, and its outcome is cancelled: it never ran, so
-// there is no result to deliver. The record is what makes the job's
-// lifecycle complete.
-func (s *Session) finishUnlaunchedJob(job *jobState) {
-	s.mu.Lock()
-	if job.ended {
-		s.mu.Unlock()
-		return
-	}
-	job.ended = true
-	s.mu.Unlock()
-
-	err := s.write(context.WithoutCancel(job.ctx), &JobEnded{
-		RecordMeta: NewRecordMeta("job.ended"),
-		SessionID:  s.opts.SessionID,
-		Job:        job.id,
-		Handle:     job.handle,
-		Tool:       job.tool,
-		RunID:      job.runID,
-		Outcome:    JobOutcomeCancelled,
-		Text:       "the run settled before the job started",
-		EndedAt:    nowRFC3339(),
-	})
-	if err != nil {
-		s.markBroken()
-		s.addStoreError()
-	}
-	s.events.emit(EventJobEnded, map[string]any{
-		"job":     job.id,
-		"handle":  job.handle,
-		"tool":    job.tool,
-		"outcome": string(JobOutcomeCancelled),
-	})
-	close(job.done)
 }
 
 // removeJobLocked forgets a job that never ran.
