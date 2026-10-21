@@ -532,6 +532,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 		return
 	}
 	job.ended = true
+	s.jobCompletions++
 	jobOutcome := jobOutcomeOf(outcome)
 	s.inputSeq++
 	inputID := fmt.Sprintf("%s-ji%d", s.opts.SessionID, s.inputSeq)
@@ -539,6 +540,13 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 	handle := job.handle
 	tool := job.tool
 	s.mu.Unlock()
+	// The completion stays outstanding until its record is written and
+	// its result is queued, so a waiter cannot slip through the gap.
+	defer func() {
+		s.mu.Lock()
+		s.jobCompletions--
+		s.mu.Unlock()
+	}()
 
 	// The hook-processed result is what gets recorded and emitted, so a
 	// held result never leaks what a hook would have redacted. The

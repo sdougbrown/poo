@@ -42,8 +42,10 @@ func (s *Session) WaitJobs(ctx context.Context) error {
 		s.mu.Lock()
 		running := s.runningJobCountLocked()
 		// A run that is open is work in flight, including a woken run
-		// whose job has already ended.
-		active := s.run != nil
+		// whose job has already ended. A completion being recorded and
+		// a reserved wake are work too: their handoff into the queue or
+		// the active run has not happened yet.
+		active := s.run != nil || s.reserved || s.jobCompletions > 0
 		// A result that is queued while a run is open is delivered to
 		// that run, so it does not keep the wait alive. Only a result
 		// that is waiting for a wake does.

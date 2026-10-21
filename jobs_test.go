@@ -500,3 +500,36 @@ func TestANullBackgroundArgumentIsRefused(t *testing.T) {
 		t.Fatalf("background:null invoked the tool %d times; a non-boolean must be a recoverable argument error", tool.Calls())
 	}
 }
+
+// TestWaitJobsWaitsForACompletionBeingRecorded covers the completion
+// handoff: a job whose job.ended record is being written is still
+// outstanding work, so WaitJobs cannot return in the gap before its
+// result is queued.
+func TestWaitJobsWaitsForACompletionBeingRecorded(t *testing.T) {
+	sink := &blockingRecordSink{
+		kind:    "job.ended",
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting"},
+		{text: "woken answer"},
+	})
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the run to wait", func() bool { return s.State() == poo.StateWaiting })
+	s.Cancel("probe")
+	tool.Release()
+	<-sink.entered
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := s.WaitJobs(ctx)
+	close(sink.release)
+	if err == nil {
+		t.Fatal("WaitJobs returned while the job.ended record was still being written")
+	}
+}

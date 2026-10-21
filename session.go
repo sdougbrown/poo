@@ -79,6 +79,11 @@ type Session struct {
 	jobOrder []string
 	// jobSeq numbers the session's jobs.
 	jobSeq int
+	// jobCompletions counts the job completions whose terminal record
+	// or queued result is still being handled. WaitJobs treats them as
+	// outstanding work, so it cannot return in the gap between the
+	// running job and its queued result.
+	jobCompletions int
 	// jobQueue holds the finished job results, in completion order.
 	jobQueue []jobQueueItem
 	// pendingHeld is the held record that is waiting to be written.
