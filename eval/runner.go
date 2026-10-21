@@ -712,7 +712,22 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 		}
 		return exit, fmt.Errorf("running poo: %v: %s", err, strings.TrimSpace(out.String()))
 	}
+	if exit != 0 && !hasLog(logPath) {
+		// poo left nothing to read, so what it printed is all there is
+		// to say why.
+		msg := strings.TrimSpace(out.String())
+		if r.opts.Sandbox == SandboxBwrap {
+			msg = "the bwrap sandbox failed to start poo: " + msg
+		}
+		return exit, errors.New(msg)
+	}
 	return exit, nil
+}
+
+// hasLog reports whether a session log exists and holds something.
+func hasLog(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Size() > 0
 }
 
 // killGroup kills a process group.
