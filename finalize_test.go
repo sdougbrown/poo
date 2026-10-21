@@ -338,6 +338,17 @@ func TestTheConstructionRollsBack(t *testing.T) {
 	if len(sink.records) != 0 {
 		t.Errorf("the log holds %d records, want none", len(sink.records))
 	}
+	// No run was settled: the construction failed before there was a
+	// run to settle.
+	if sink.count("run.settled") != 0 {
+		t.Errorf("the log holds %d run.settled records, want none", sink.count("run.settled"))
+	}
+	// The observers were stopped, so nothing arrives after the failure.
+	before := observer.eventCount()
+	time.Sleep(50 * time.Millisecond)
+	if after := observer.eventCount(); after != before {
+		t.Errorf("the observer saw %d events after the construction failed, want none", after-before)
+	}
 }
 
 // TestTheSessionStartHookAppendsToTheHistory covers the other side: a
@@ -532,6 +543,9 @@ func (h *appendingSessionStart) SessionStart(ctx poo.HookContext) (poo.StartDeci
 }
 
 // countingObserver is an observer that counts the events it sees.
+//
+// It also reports whether the session stopped it, so a test can check
+// the construction rollback.
 type countingObserver struct {
 	mu sync.Mutex
 	// events counts the events the observer saw.
@@ -544,6 +558,13 @@ func (o *countingObserver) Observe(ev poo.Event) error {
 	o.events++
 	o.mu.Unlock()
 	return nil
+}
+
+// eventCount returns how many events the observer saw.
+func (o *countingObserver) eventCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.events
 }
 
 // TestABeforeToolHookErrorSettlesTheRun covers the hook row of the
