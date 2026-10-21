@@ -1,0 +1,16 @@
+{
+  "repo": "fixture:long-change-timeout-everywhere",
+  "prompt": "Every request timeout in this shop is 30 seconds. Each package under `shop/` owns its own timeout constant, and there are many of them. Raise every request timeout to 45 seconds, and update the tests in `tests/` that assert the old value. The payment timeout and the index timeout in `shop/settings.py` are not request timeouts: leave them alone. Make the tests in `tests/` pass.",
+  "timeout_s": 900,
+  "tags": [
+    "refactor",
+    "python",
+    "long"
+  ],
+  "allow_test_edits": true,
+  "expected_paths": [
+    "shop/**",
+    "tests/**"
+  ],
+  "description": "A timeout changed across many modules, with two decoys left out."
+}

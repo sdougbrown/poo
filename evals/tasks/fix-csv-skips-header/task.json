@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-csv-skips-header",
+  "prompt": "The `parse_csv` function in `csvkit/__init__.py` returns the header row as if it were data. The first line is a header and should not be a row. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "csvkit/__init__.py"
+  ],
+  "description": "A CSV reader returns the header as data."
+}

@@ -1,0 +1,97 @@
+"""pi module 5."""
+
+from ..common import helper
+
+def pi_5_0(value):
+    """Handle the pi case 0."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 0
+
+def pi_5_1(value):
+    """Handle the pi case 1."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 1
+
+def pi_5_2(value):
+    """Handle the pi case 2."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 2
+
+def pi_5_3(value):
+    """Handle the pi case 3."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 3
+
+def pi_5_4(value):
+    """Handle the pi case 4."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 4
+
+def pi_5_5(value):
+    """Handle the pi case 5."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 5
+
+def pi_5_6(value):
+    """Handle the pi case 6."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 6
+
+def pi_5_7(value):
+    """Handle the pi case 7."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 7
+
+def pi_5_8(value):
+    """Handle the pi case 8."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 8
+
+def pi_5_9(value):
+    """Handle the pi case 9."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 9
+
+def pi_5_10(value):
+    """Handle the pi case 10."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 10
+
+def pi_5_11(value):
+    """Handle the pi case 11."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 11
+
+def pi_5_12(value):
+    """Handle the pi case 12."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 12
+
+def pi_5_13(value):
+    """Handle the pi case 13."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 13
+
+def pi_5_14(value):
+    """Handle the pi case 14."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 14
+
+def pi_5_15(value):
+    """Handle the pi case 15."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 15
+
+def pi_5_16(value):
+    """Handle the pi case 16."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 16
+
+def pi_5_17(value):
+    """Handle the pi case 17."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 17
+
+def call_5(payload):
+    """Call parse_manifest with the payload."""
+    return parse_manifest(payload)

@@ -34,3 +34,7 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Python bytecode, from running the eval fixtures' tests
+__pycache__/
+*.pyc

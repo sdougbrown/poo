@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-off-by-one-slice",
+  "prompt": "The `clamp_slice` function in `slacelib/__init__.py` is supposed to return the items between `start` and `stop` with both bounds inclusive. It is off by one: the end of the range is dropped. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "slacelib/__init__.py"
+  ],
+  "description": "The end of a clamped slice is dropped."
+}

@@ -1,0 +1,12 @@
+{
+  "repo": "fixture:long-find-error-in-log",
+  "prompt": "The service log in `logs/service.log` holds exactly one line whose level is ERROR. Find it and say the request id it carries, exactly as it is written. The log is large, so use grep or a narrow read rather than reading the whole file. Do not change any file.",
+  "timeout_s": 600,
+  "tags": [
+    "readonly",
+    "explain",
+    "long"
+  ],
+  "expected_paths": [],
+  "description": "One error buried in a large service log."
+}

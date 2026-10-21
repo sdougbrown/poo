@@ -1,0 +1,12 @@
+{
+  "repo": "fixture:long-find-definition-in-tree",
+  "prompt": "In this repository the function `parse_manifest` is mentioned in many files but defined in only one. Find the file that defines it and say that file's path relative to the repository root, exactly as it is written. Grep first to narrow the search down, then read the candidates. Do not change any file.",
+  "timeout_s": 600,
+  "tags": [
+    "readonly",
+    "explain",
+    "long"
+  ],
+  "expected_paths": [],
+  "description": "One definition among many mentions in a large source tree."
+}
