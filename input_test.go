@@ -821,3 +821,203 @@ func (r *stallingReader) Next() (poo.StreamEvent, error) {
 
 // Close releases the reader.
 func (r *stallingReader) Close() error { return nil }
+
+// TestAMessageWhileSettlingIsRefused covers the plan's rule: a message
+// for a run that is settling is refused, because the outcome is already
+// fixed.
+func TestAMessageWhileSettlingIsRefused(t *testing.T) {
+	// The store holds the run's settle record, so the run stays in the
+	// settling state while the test sends a message.
+	sink := &blockingSink{started: make(chan struct{}), release: make(chan struct{})}
+
+	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-sink.started
+	// The run is settling.
+	_, err := s.Send("and this", poo.Steer)
+	if err == nil {
+		t.Fatal("the session accepted a message while the run was settling")
+	}
+	if err != poo.ErrNotRunning {
+		t.Errorf("the error is %v, want ErrNotRunning", err)
+	}
+	close(sink.release)
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+}
+
+// blockingSink is a record sink that holds the settle record until it
+// is released.
+//
+// The run stays in the settling state while the write is held, so a
+// test can act at a known point.
+type blockingSink struct {
+	// mu guards the records.
+	mu sync.Mutex
+	// records holds the records that were accepted.
+	records []poo.Record
+	// started is closed when the settle record's write begins.
+	started chan struct{}
+	// release is closed to let the write finish.
+	release chan struct{}
+	// once guards the started channel.
+	once sync.Once
+}
+
+// Append keeps the record, and holds the settle record until it is
+// released.
+func (s *blockingSink) Append(ctx context.Context, rec poo.Record) error {
+	if rec.Meta().Record == "run.settled" {
+		s.once.Do(func() { close(s.started) })
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = append(s.records, rec)
+	return nil
+}
+
+// Flush does nothing.
+func (s *blockingSink) Flush(ctx context.Context) error { return nil }
+
+// TestTheInterruptMessageIsDeliveredNext covers the plan's rule: the
+// interrupt's own message reaches the model at the turn end.
+func TestTheInterruptMessageIsDeliveredNext(t *testing.T) {
+	tr := newStallingTransport()
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tr.streaming
+	if _, err := s.Send("stop that", poo.Interrupt); err != nil {
+		t.Fatalf("sending the interrupt: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	// The message reached the model, with the interrupt's origin.
+	found := false
+	for _, m := range sink.messages() {
+		if m.Origin == poo.OriginInterrupt && strings.Contains(m.Content[0].Text, "stop that") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the interrupt's message did not reach the model's view")
+	}
+}
+
+// TestThePartialMessageKeepsTheToolCallsVisible covers the plan's rule:
+// the calls in a partial response are not run, and the model sees that.
+func TestThePartialMessageKeepsTheToolCallsVisible(t *testing.T) {
+	tr := newPartialTransport()
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tr.streaming
+	if _, err := s.Send("stop that", poo.Interrupt); err != nil {
+		t.Fatalf("sending the interrupt: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	// The tool did not run.
+	if len(tool.Calls()) != 0 {
+		t.Errorf("the tool ran %d times, want none: a partial response's calls do not run", len(tool.Calls()))
+	}
+	// The call is recorded as skipped with the visible note.
+	var skipped *poo.ToolResultRecord
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok {
+			continue
+		}
+		skipped = r
+	}
+	if skipped == nil {
+		t.Fatal("the log holds no tool result")
+	}
+	if skipped.Outcome != poo.OutcomeSkipped {
+		t.Errorf("the outcome is %q, want skipped", skipped.Outcome)
+	}
+	if skipped.Text != poo.SkippedInterruptedText {
+		t.Errorf("the result's text is %q, want the visible note", skipped.Text)
+	}
+}
+
+// partialTransport answers with a response that carries text and a tool
+// call, and then never ends.
+type partialTransport struct {
+	// streaming is closed when the first delta is handed out.
+	streaming chan struct{}
+}
+
+// newPartialTransport returns a transport that answers with a partial
+// response.
+func newPartialTransport() *partialTransport {
+	return &partialTransport{streaming: make(chan struct{})}
+}
+
+// Stream hands out the partial stream.
+func (t *partialTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	return &partialCallReader{ctx: ctx, started: t.streaming}, poo.Rendered{API: poo.APIChatCompletions}, nil
+}
+
+// Fork is not implemented by the fake.
+func (t *partialTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return nil, errNoFork
+}
+
+// partialCallReader yields a text delta and a tool call, and then waits.
+type partialCallReader struct {
+	// ctx is the request's context.
+	ctx context.Context
+	// started is closed when the first delta is handed out.
+	started chan struct{}
+	// stage is what the reader hands out next.
+	stage int
+}
+
+// Next hands out the delta and the call, and then waits.
+func (r *partialCallReader) Next() (poo.StreamEvent, error) {
+	switch r.stage {
+	case 0:
+		r.stage++
+		close(r.started)
+		return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "partial text"}}, nil
+	case 1:
+		r.stage++
+		return poo.StreamEvent{Kind: "tool_call", ToolCall: &poo.ToolCallDelta{
+			Index:     0,
+			ID:        "call_1",
+			Name:      "echo",
+			Arguments: []byte(`{"text":"hello"}`),
+			Complete:  true,
+		}}, nil
+	default:
+		<-r.ctx.Done()
+		return poo.StreamEvent{}, r.ctx.Err()
+	}
+}
+
+// Close releases the reader.
+func (r *partialCallReader) Close() error { return nil }

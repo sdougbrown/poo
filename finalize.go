@@ -401,6 +401,12 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		return "", ErrNotRunning
 	}
 	run := s.run
+	// A run that is settling cannot take a message: the outcome is
+	// already fixed, and a message that arrived now would be dropped.
+	if s.state == StateSettling || run.finalizing {
+		s.mu.Unlock()
+		return "", ErrNotRunning
+	}
 	note, err := s.prepareDeliveryNoteLocked(opts)
 	if err != nil {
 		s.mu.Unlock()
