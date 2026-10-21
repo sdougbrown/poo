@@ -3,9 +3,10 @@
 # Each entry is one model the harness runs against. The name is the key a
 # report and a comparison use, so it stays stable.
 #
-# api_key_env names the environment variable holding the key. The harness
+# api_key_env names the environment variable holding the key. The runner
 # passes the name to the poo subprocess and never reads the value: the
-# binary reads it and scrubs it from the tools' child environment.
+# binary reads it and scrubs it from the tools' child environment. (The
+# judge reads its own key, named by poo-eval judge --api-key-env.)
 #
 # context_limit is the model's context window in tokens. The harness
 # passes it to poo as --context-limit, and poo computes the output room

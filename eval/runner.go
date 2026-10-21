@@ -670,9 +670,10 @@ func (r *Runner) gitHasSHA(ctx context.Context, dir, sha string) bool {
 
 // runPoo runs the poo binary against a task.
 //
-// The binary is the real one: the harness measures what a user gets. The
-// API key is passed by name, through --api-key-env, so the harness never
-// reads the value and never writes it anywhere.
+// The binary is the real one: the harness measures what a user gets. A
+// model's API key is passed by name, through --api-key-env, so the
+// runner never reads the value and never writes it anywhere. (The judge
+// reads its own key; see JudgeOptions.)
 //
 // The child runs in its own process group, and the group is killed when
 // the run's context ends. Killing only the process would leave its
