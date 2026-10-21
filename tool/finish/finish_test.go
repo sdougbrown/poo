@@ -274,3 +274,36 @@ func TestTheAdvertisedArgumentsAreCallable(t *testing.T) {
 		t.Errorf("the result is %v, want the answer the caller sent", payload)
 	}
 }
+
+// TestAnEnumComparesJSONTypes covers the enum: a string "1" is not the
+// numeric value 1.
+func TestAnEnumComparesJSONTypes(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"enum":[1]}}}`)
+	tool, err := finish.New(schema)
+	if err != nil {
+		t.Fatalf("building the tool: %v", err)
+	}
+	if _, err := tool.Prepare(json.RawMessage(`{"result":{"answer":"1"}}`), poo.PrepareEnv{}); err == nil {
+		t.Fatal(`the tool accepted the string "1" for the numeric enum [1]`)
+	}
+	if _, err := tool.Prepare(json.RawMessage(`{"result":{"answer":1}}`), poo.PrepareEnv{}); err != nil {
+		t.Fatalf("the tool refused the numeric value the enum allows: %v", err)
+	}
+}
+
+// TestAClosedObjectWithNoPropertiesAcceptsNoFields covers
+// additionalProperties: false with the properties list absent: a closed
+// object with no declared property accepts no fields.
+func TestAClosedObjectWithNoPropertiesAcceptsNoFields(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","additionalProperties":false}`)
+	tool, err := finish.New(schema)
+	if err != nil {
+		t.Fatalf("building the tool: %v", err)
+	}
+	if _, err := tool.Prepare(json.RawMessage(`{"result":{"unexpected":"accepted"}}`), poo.PrepareEnv{}); err == nil {
+		t.Fatal("the tool accepted a field with additionalProperties: false and no properties")
+	}
+	if _, err := tool.Prepare(json.RawMessage(`{"result":{}}`), poo.PrepareEnv{}); err != nil {
+		t.Fatalf("the tool refused the empty object the schema allows: %v", err)
+	}
+}

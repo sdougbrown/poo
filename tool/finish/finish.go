@@ -227,7 +227,9 @@ func validateObject(schema map[string]any, value map[string]any, path string) er
 		}
 	}
 	if additional, ok := schema["additionalProperties"]; ok {
-		if allowed, ok := additional.(bool); ok && !allowed && props != nil {
+		// An absent properties list is the empty set: a closed object
+		// with no declared property accepts no field.
+		if allowed, ok := additional.(bool); ok && !allowed {
 			var extra []string
 			for name := range value {
 				if _, known := props[name]; !known {
@@ -311,7 +313,16 @@ func sameJSON(a, b any) bool {
 		return true
 	case nil:
 		return b == nil
+	case string:
+		bv, ok := b.(string)
+		return ok && av == bv
+	case float64:
+		bv, ok := b.(float64)
+		return ok && av == bv
+	case bool:
+		bv, ok := b.(bool)
+		return ok && av == bv
 	default:
-		return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
+		return false
 	}
 }
