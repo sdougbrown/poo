@@ -1206,3 +1206,59 @@ func TestTheContinuationLimitTextNamesTheConfiguredLimit(t *testing.T) {
 		t.Errorf("the detail text is %q, want it to name the limit 1", res.Detail.Text)
 	}
 }
+
+// lateStreamTransport hands out its stream only after the test lets it,
+// which is the shape of a request that is still being made when the run
+// settles.
+type lateStreamTransport struct {
+	// release is closed to let Stream return.
+	release chan struct{}
+	// reading is closed when the stream is first read.
+	reading chan struct{}
+}
+
+// Stream waits for the release and then hands out a one-answer stream.
+func (t *lateStreamTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	<-t.release
+	r := fakeResponse{text: "late answer"}
+	return &signalReader{fakeReader: fakeReader{events: r.events()}, reading: t.reading}, poo.Rendered{API: poo.APIChatCompletions}, nil
+}
+
+// Fork is not implemented by the fake.
+func (t *lateStreamTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return nil, errNoFork
+}
+
+// signalReader closes a channel the first time it is read.
+type signalReader struct {
+	fakeReader
+	once    sync.Once
+	reading chan struct{}
+}
+
+// Next signals the first read.
+func (r *signalReader) Next() (poo.StreamEvent, error) {
+	r.once.Do(func() { close(r.reading) })
+	return r.fakeReader.Next()
+}
+
+// TestARunThatWindsDownAfterTheSettleDoesNotMoveTheState covers the
+// settled state: the run's goroutine may still be inside a request when
+// the duration timer settles the run, and what it does afterwards must
+// not move the session out of settled.
+func TestARunThatWindsDownAfterTheSettleDoesNotMoveTheState(t *testing.T) {
+	tr := &lateStreamTransport{release: make(chan struct{}), reading: make(chan struct{})}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.MaxDuration = 30 * time.Millisecond
+
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonBudgetExhausted {
+		t.Fatalf("the run settled %q, want budget_exhausted", res.Reason)
+	}
+	close(tr.release)
+	<-tr.reading
+	if got := s.State(); got != poo.StateSettled {
+		t.Errorf("the session is %q after the late stream started, want settled", got)
+	}
+}

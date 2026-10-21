@@ -83,6 +83,13 @@ func (s *Session) transitionLocked(to State) {
 	if s.state == to {
 		return
 	}
+	// A run's goroutine can still be winding down after the finalization
+	// began, and what it does then never moves the session out of
+	// settling or settled: the finalization settles it, and only the next
+	// run leaves settled.
+	if (s.state == StateSettling || s.state == StateSettled) && !IsLegal(s.state, to) {
+		return
+	}
 	s.state = to
 	s.transitions = append(s.transitions, to)
 }
