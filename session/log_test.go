@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -343,5 +345,88 @@ func TestTheDefaultPathIsInTheWorkingDirectory(t *testing.T) {
 	}
 	if !strings.HasSuffix(path, ".jsonl") {
 		t.Errorf("the default path is %q, want it to end with .jsonl", path)
+	}
+}
+
+// TestConcurrentAppendsNeverInterleave covers the log's concurrency
+// contract: Append may be called from many goroutines at once, and the
+// log serializes the writes, so a reader of the log never sees half a
+// record.
+func TestConcurrentAppendsNeverInterleave(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	log, err := session.Open(path)
+	if err != nil {
+		t.Fatalf("opening the log: %v", err)
+	}
+	ctx := context.Background()
+
+	// A record big enough that a write that was not serialized would
+	// interleave with another one.
+	text := strings.Repeat("x", 4096)
+	writers := 16
+	perWriter := 50
+
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < perWriter; i++ {
+				if err := log.Append(ctx, &poo.MessageRecord{
+					RecordMeta: poo.NewRecordMetaFrom("message", poo.OriginUser),
+					RunID:      "r1",
+					Turn:       i,
+					Role:       poo.RoleUser,
+					Content: []poo.ContentBlock{{
+						Kind: poo.ContentText,
+						Text: fmt.Sprintf("writer %d: %s", w, text),
+					}},
+				}); err != nil {
+					t.Errorf("appending: %v", err)
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	if err := log.Close(); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+
+	recs := records(t, path)
+	if len(recs) != writers*perWriter {
+		t.Fatalf("the log holds %d records, want %d", len(recs), writers*perWriter)
+	}
+
+	// Every line is a whole record, and the sequence numbers are
+	// unique: a write that was not serialized would have broken both.
+	seen := make(map[float64]bool, len(recs))
+	for i, rec := range recs {
+		seq, ok := rec["seq"].(float64)
+		if !ok {
+			t.Fatalf("record %d has no sequence number: %v", i, rec)
+		}
+		if seen[seq] {
+			t.Fatalf("the sequence number %v is repeated", seq)
+		}
+		seen[seq] = true
+
+		content, ok := rec["content"].([]any)
+		if !ok || len(content) != 1 {
+			t.Fatalf("record %d's content is %v, want one block", i, rec["content"])
+		}
+		block, ok := content[0].(map[string]any)
+		if !ok {
+			t.Fatalf("record %d's block is %v, want an object", i, content[0])
+		}
+		got, ok := block["text"].(string)
+		if !ok {
+			t.Fatalf("record %d's block has no text: %v", i, block)
+		}
+		if !strings.HasPrefix(got, "writer ") || !strings.HasSuffix(got, text) {
+			t.Fatalf("record %d's text is %q, want a whole record", i, got[:min(len(got), 64)])
+		}
 	}
 }
