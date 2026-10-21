@@ -216,7 +216,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 
 	return &streamReader{
 		body:    resp.Body,
-		scanner: bufio.NewScanner(br),
+		scanner: newSSEScanner(br),
 		parser:  newParser(t.cfg.ToolsMode),
 		ctx:     ctx,
 		cancel:  cancel,

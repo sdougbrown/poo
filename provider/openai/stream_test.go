@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -329,5 +330,37 @@ func TestAnErrorBodyIsReadBeforeTheTimeoutIsReleased(t *testing.T) {
 				t.Errorf("the kind is %q (%s), want the context-length kind", pe.Kind, pe.Message)
 			}
 		})
+	}
+}
+
+// TestAnEventLineOver64KiBIsRead covers a single SSE data line larger
+// than bufio's default token limit.
+func TestAnEventLineOver64KiBIsRead(t *testing.T) {
+	big := strings.Repeat("x", 100*1024)
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"`+big+`"}}]}`) +
+		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	got := 0
+	for {
+		ev, err := reader.Next()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				t.Fatalf("the stream failed: %v", err)
+			}
+			break
+		}
+		if ev.Kind == "delta" && ev.Delta != nil {
+			got += len(ev.Delta.Text)
+		}
+	}
+	if got != len(big) {
+		t.Errorf("the stream delivered %d characters, want %d", got, len(big))
 	}
 }

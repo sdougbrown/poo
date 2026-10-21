@@ -101,11 +101,18 @@ type streamReader struct {
 	usage *poo.UsageReport
 }
 
-// newScanner configures a scanner for SSE lines.
+// newSSEScanner returns a scanner for SSE lines. A single event line can
+// be large, so the line limit is 16 MiB.
+func newSSEScanner(r io.Reader) *bufio.Scanner {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	return sc
+}
+
+// init makes the scanner when the reader was built without one.
 func (r *streamReader) init() {
 	if r.scanner == nil {
-		r.scanner = bufio.NewScanner(r.body)
-		r.scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		r.scanner = newSSEScanner(r.body)
 	}
 }
 
