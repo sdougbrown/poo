@@ -434,7 +434,7 @@ while [ "$#" -gt 0 ]; do
 done
 cat > "$log" <<'JSON'
 {"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s"}
-{"record":"run.settled","seq":2,"ts":"2026-10-20T00:00:01Z","run_id":"r","reason":"cancelled","detail":{"source":"cancel:context","text":"context deadline exceeded"},"turns":1}
+{"record":"run.settled","seq":2,"ts":"2026-10-20T00:00:01Z","run_id":"r","reason":"cancelled","detail":{"source":"cancel:deadline","text":"context deadline exceeded"},"turns":1}
 JSON
 exit 130
 `)
@@ -479,5 +479,23 @@ func TestARunTheHarnessKilledQuotesTheDeadlineItEnforced(t *testing.T) {
 	}
 	if got := report.Results[0].Error; !strings.HasPrefix(got, "the run timed out after 1s") {
 		t.Errorf("the error is %q, want it to name the 1s deadline the harness enforced", got)
+	}
+}
+
+func TestOnlyTheDeadlineSourceIsATimeout(t *testing.T) {
+	settled := func(source, text string) *Log {
+		rec := LogRecord{Record: "run.settled", Reason: "cancelled"}
+		rec.Details.Source = source
+		rec.Details.Text = text
+		return &Log{Records: []LogRecord{rec}}
+	}
+	if !pooTimedOut(settled("cancel:deadline", "")) {
+		t.Error("a deadline source is not a timeout")
+	}
+	if pooTimedOut(settled("cancel:context", "context deadline exceeded")) {
+		t.Error("a plain cancel whose text mentions a deadline is a timeout")
+	}
+	if pooTimedOut(nil) {
+		t.Error("a missing log is a timeout")
 	}
 }

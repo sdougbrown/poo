@@ -529,9 +529,12 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 
 	pooExit, runErr := r.runPoo(runCtx, j, workdir, logPath)
 	result.RunExit = pooExit
+	// The log is read once, and the timeout note and the metrics both
+	// come from it. A log that cannot be read is nil.
+	log, _ := ParseLog(logPath)
 	if runErr != nil {
 		result.Error = runErr.Error()
-	} else if pooTimedOut(logPath) {
+	} else if pooTimedOut(log) {
 		result.Error = fmt.Sprintf("the run timed out after %s", r.pooTimeout(j.task))
 	}
 
@@ -567,7 +570,7 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 		result.Error = checkErr.Error()
 	}
 
-	result.Metrics = r.metrics(j, logPath, diff)
+	result.Metrics = r.metrics(j, log, diff)
 
 	result.DurationMS = time.Since(started).Milliseconds()
 	return result
@@ -776,15 +779,14 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 }
 
 // pooTimedOut reports whether poo settled the run because its own
-// --timeout ran out: the settle record says the run was cancelled, and
-// the cause is the context's deadline.
-func pooTimedOut(logPath string) bool {
-	log, err := ParseLog(logPath)
-	if err != nil {
+// --timeout ran out: the settle record says the run was cancelled with
+// the deadline as its source. A nil log is not a timeout.
+func pooTimedOut(log *Log) bool {
+	if log == nil {
 		return false
 	}
 	s := log.Settle()
-	return s != nil && s.Reason == string(poo.ReasonCancelled) && strings.Contains(s.Details.Text, context.DeadlineExceeded.Error())
+	return s != nil && s.Reason == string(poo.ReasonCancelled) && s.Details.Source == "cancel:deadline"
 }
 
 // hasLog reports whether a session log exists and holds something.
@@ -873,9 +875,8 @@ func (r *Runner) runCheck(ctx context.Context, t Task, workdir, logPath string, 
 //
 // A run whose log could not be read still gets metrics: the ones that do
 // not need a log, like the diff.
-func (r *Runner) metrics(j job, logPath string, diff Diff) Metrics {
-	log, err := ParseLog(logPath)
-	if err != nil {
+func (r *Runner) metrics(j job, log *Log, diff Diff) Metrics {
+	if log == nil {
 		return Metrics{
 			SettleReason:    "unknown",
 			ChangedFiles:    diff.Files,
