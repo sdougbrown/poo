@@ -107,6 +107,10 @@ type Session struct {
 
 	// handleSeq numbers the tool-result handles the session assigned.
 	handleSeq int
+	// inputSeq numbers the job results' input identifiers. A client
+	// input's id is a ULID; a job result's id keeps the session's
+	// prefix so a log reader can tell where it came from.
+	inputSeq int
 
 	// est is the context-budget estimator.
 	est estimator
