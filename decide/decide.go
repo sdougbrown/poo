@@ -200,6 +200,9 @@ type questionWire struct {
 // some prose.
 func (q Question) MarshalJSON() ([]byte, error) {
 	w := questionWire{ID: q.ID, Instructions: q.Instructions}
+	if isNilKind(q.Kind) {
+		return nil, fmt.Errorf("decide: question %q has a nil pointer kind", q.ID)
+	}
 	// A pointer kind satisfies Kind and passes Validate, so it is
 	// recorded as its value.
 	kind := q.Kind
@@ -257,6 +260,19 @@ func (q *Question) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// isNilKind reports whether a kind is a nil pointer to one of the kinds.
+func isNilKind(k Kind) bool {
+	switch p := k.(type) {
+	case *Bool:
+		return p == nil
+	case *Choice:
+		return p == nil
+	case *Score:
+		return p == nil
+	}
+	return false
+}
+
 // Validate checks the question.
 //
 // A question that is wrong is a caller bug, so the failure is
@@ -270,6 +286,9 @@ func (q Question) Validate() error {
 	}
 	if q.Kind == nil {
 		return fmt.Errorf("%w: question %q has no kind", ErrInvalidQuestion, q.ID)
+	}
+	if isNilKind(q.Kind) {
+		return fmt.Errorf("%w: question %q has a nil pointer kind", ErrInvalidQuestion, q.ID)
 	}
 	if err := q.Kind.validate(); err != nil {
 		return fmt.Errorf("%w: question %q: %v", ErrInvalidQuestion, q.ID, err)

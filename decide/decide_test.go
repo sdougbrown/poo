@@ -563,3 +563,24 @@ func TestAPointerKindIsRecordedLikeItsValue(t *testing.T) {
 		}
 	}
 }
+
+// TestANilPointerKindIsInvalidAndDoesNotPanic covers a typed-nil kind: it
+// satisfies Kind, so only a check on the pointer catches it.
+func TestANilPointerKindIsInvalidAndDoesNotPanic(t *testing.T) {
+	kinds := map[string]decide.Kind{
+		"bool":   (*decide.Bool)(nil),
+		"choice": (*decide.Choice)(nil),
+		"score":  (*decide.Score)(nil),
+	}
+	for name, kind := range kinds {
+		t.Run(name, func(t *testing.T) {
+			q := decide.Question{ID: "q1", Instructions: "which?", Kind: kind}
+			if err := q.Validate(); !errors.Is(err, decide.ErrInvalidQuestion) {
+				t.Errorf("the validation returned %v, want ErrInvalidQuestion", err)
+			}
+			if _, err := json.Marshal(q); err == nil {
+				t.Error("the question encoded, want an error")
+			}
+		})
+	}
+}
