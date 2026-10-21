@@ -292,3 +292,45 @@ func TestProseWithABraceIsNotACall(t *testing.T) {
 		t.Errorf("the prose is %q, want the whole text", prose)
 	}
 }
+
+func TestAnInlineObjectSplitAcrossChunksStaysProse(t *testing.T) {
+	// The prose before the object does not end in a newline, so the
+	// object does not start a line, wherever the chunk boundary falls.
+	p := newParser("text")
+	var events []poo.StreamEvent
+	events = append(events, p.feed("use ")...)
+	events = append(events, p.feed(`{"name":"bash","arguments":{"command":"ls"}} now`)...)
+	events = append(events, p.flush()...)
+	var prose string
+	for _, ev := range events {
+		switch ev.Kind {
+		case "tool_call":
+			t.Errorf("an inline object was parsed as a call: %+v", ev.ToolCall)
+		case "delta":
+			prose += ev.Delta.Text
+		}
+	}
+	if want := `use {"name":"bash","arguments":{"command":"ls"}} now`; prose != want {
+		t.Errorf("the prose is %q, want %q", prose, want)
+	}
+}
+
+func TestAnObjectAfterANewlineInAnEarlierChunkIsStillACall(t *testing.T) {
+	p := newParser("text")
+	var calls int
+	for _, chunk := range []string{"ok\n", `{"name":"bash","arguments":{"command":"ls"}}` + "\n"} {
+		for _, ev := range p.feed(chunk) {
+			if ev.Kind == "tool_call" {
+				calls++
+			}
+		}
+	}
+	for _, ev := range p.flush() {
+		if ev.Kind == "tool_call" {
+			calls++
+		}
+	}
+	if calls != 1 {
+		t.Errorf("found %d calls, want 1", calls)
+	}
+}

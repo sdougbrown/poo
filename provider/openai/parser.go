@@ -63,6 +63,10 @@ type parser struct {
 	escaped bool
 	// seq numbers the calls the parser finds.
 	seq int
+	// midLine reports that the last prose the parser emitted did not end
+	// in a newline, so the start of the buffer is in the middle of a
+	// line.
+	midLine bool
 }
 
 // newParser returns a parser for a tools mode.
@@ -155,7 +159,7 @@ func (p *parser) drain() []poo.StreamEvent {
 			if !done {
 				break
 			}
-			out = append(out, ev...)
+			out = append(out, p.track(ev...)...)
 			continue
 		}
 
@@ -168,13 +172,13 @@ func (p *parser) drain() []poo.StreamEvent {
 			// block is a json call is not known yet. The prose before it
 			// is emitted, and the rest waits for more text.
 			if idx > 0 {
-				out = append(out, textEvent(p.buf[:idx]))
+				out = append(out, p.track(textEvent(p.buf[:idx]))...)
 				p.buf = p.buf[idx:]
 			}
 			return out
 		}
 		if idx > 0 {
-			out = append(out, textEvent(p.buf[:idx]))
+			out = append(out, p.track(textEvent(p.buf[:idx]))...)
 			p.buf = p.buf[idx:]
 		}
 		p.openCall(kind)
@@ -185,7 +189,7 @@ func (p *parser) drain() []poo.StreamEvent {
 	if !p.inCall {
 		safe := p.safePrefix()
 		if safe > 0 {
-			out = append(out, textEvent(p.buf[:safe]))
+			out = append(out, p.track(textEvent(p.buf[:safe]))...)
 			p.buf = p.buf[safe:]
 		}
 	}
@@ -354,13 +358,34 @@ func (p *parser) findCallStart() (int, callKind, bool) {
 	return best, kind, true
 }
 
+// track records what a batch of events leaves behind: prose that does
+// not end in a newline leaves the buffer mid-line, and a call does not.
+// It returns the events unchanged.
+func (p *parser) track(events ...poo.StreamEvent) []poo.StreamEvent {
+	for _, ev := range events {
+		switch ev.Kind {
+		case "delta":
+			if ev.Delta != nil && ev.Delta.Text != "" {
+				p.midLine = !strings.HasSuffix(ev.Delta.Text, "\n")
+			}
+		case "tool_call":
+			p.midLine = false
+		}
+	}
+	return events
+}
+
 // findBareStart locates a JSON object that stands on its own.
 //
 // The object must start a line, so that prose with a brace in it is not
-// mistaken for a call.
+// mistaken for a call. The start of the buffer is a line start only when
+// the prose emitted before it ended in a newline.
 func (p *parser) findBareStart() int {
 	for i := 0; i < len(p.buf); i++ {
 		if p.buf[i] != '{' {
+			continue
+		}
+		if i == 0 && p.midLine {
 			continue
 		}
 		if i != 0 && p.buf[i-1] != '\n' {
