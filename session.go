@@ -73,10 +73,6 @@ type Session struct {
 
 	// handleSeq numbers the tool-result handles the session assigned.
 	handleSeq int
-	// inputSeq numbers the inputs the session accepts.
-	inputSeq int
-	// runSeq numbers the runs the session starts.
-	runSeq int
 
 	// est is the context-budget estimator.
 	est estimator

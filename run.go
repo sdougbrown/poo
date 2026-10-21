@@ -46,8 +46,7 @@ func (s *Session) Prompt(ctx context.Context, text string, opts ...InputOption) 
 // The caller has checked the session's state.
 func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, note *DeliveryNote) (string, error) {
 	s.mu.Lock()
-	s.runSeq++
-	runID := fmt.Sprintf("%s-r%d", s.opts.SessionID, s.runSeq)
+	runID := NewULID()
 	runCtx, cancel := context.WithCancelCause(ctx)
 	run := &runState{
 		id:              runID,

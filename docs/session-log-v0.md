@@ -99,7 +99,7 @@ Each entry of `tools` holds:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `run_id` | string | The run's identifier. |
+| `run_id` | string | The run's identifier: a ULID (26 characters of Crockford base32, the time first). |
 | `prompt_hash` | string | The hex SHA-256 of the prompt text. |
 | `started_at` | string | RFC 3339, UTC. |
 | `model_id` | string | The model the run talks to. |
@@ -226,7 +226,7 @@ fate is in the records.
 |---|---|---|
 | `session_id` | string | The session's identifier. |
 | `run_id` | string | The run the input belongs to. Absent when the session had no run. |
-| `input_id` | string | The input's identifier. |
+| `input_id` | string | The input's identifier: a ULID. |
 | `mode` | string | How the input is delivered: `"steer"`, `"interrupt"` or `"follow_up"`. |
 | `text` | string | The message text. |
 | `delivery_note` | object | How much of the previous reply the user had seen. Absent when the input carries none. Its `text` is empty when the reply was still streaming at acceptance; the delivered message carries the note rendered at delivery. |
@@ -240,7 +240,7 @@ An input that reached the model.
 |---|---|---|
 | `session_id` | string | The session's identifier. |
 | `run_id` | string | The run the input was delivered to. |
-| `input_id` | string | The input's identifier. |
+| `input_id` | string | The input's identifier: a ULID. |
 | `mode` | string | How the input was delivered. |
 | `delivered_at` | string | RFC 3339, UTC. |
 
@@ -253,7 +253,7 @@ settle reason.
 |---|---|---|
 | `session_id` | string | The session's identifier. |
 | `run_id` | string | The run the input belonged to. Absent when the session had no run. |
-| `input_id` | string | The input's identifier. |
+| `input_id` | string | The input's identifier: a ULID. |
 | `mode` | string | How the input was accepted. |
 | `reason` | string | Why the input was dropped. |
 | `dropped_at` | string | RFC 3339, UTC. |
@@ -314,7 +314,7 @@ The end of a run. It is the last record of a run.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `run_id` | string | The run's identifier. |
+| `run_id` | string | The run's identifier: a ULID (26 characters of Crockford base32, the time first). |
 | `reason` | string | The settle reason. See below. |
 | `detail` | object | Why the run settled. |
 | `turns` | integer | The number of provider requests the run made. |
@@ -337,7 +337,7 @@ A `undelivered_input` entry holds:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `input_id` | string | The input's identifier. |
+| `input_id` | string | The input's identifier: a ULID. |
 | `mode` | string | How the input was accepted: `"steer"`, `"interrupt"` or `"follow_up"`. |
 
 `provider` holds:

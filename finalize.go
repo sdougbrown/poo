@@ -440,8 +440,7 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		s.mu.Unlock()
 		return "", err
 	}
-	s.inputSeq++
-	id := fmt.Sprintf("%s-i%d", s.opts.SessionID, s.inputSeq)
+	id := NewULID()
 	input := queuedInput{id: id, mode: mode, text: text, note: note}
 
 	switch mode {
