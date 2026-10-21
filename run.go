@@ -565,8 +565,14 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 		input := s.steerQueue[0]
 		s.steerQueue = s.steerQueue[1:]
 		s.mu.Unlock()
-		s.deliverInput(run, input)
+		ok := s.deliverInput(run, input)
 		delivered = true
+		if !ok {
+			// The store refused a delivery's record. The inputs still
+			// queued stay there, so the finalization reports them
+			// instead of losing them.
+			return delivered
+		}
 	}
 	if !includeFollowUp {
 		return delivered
@@ -580,8 +586,11 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 		input := s.followUpQueue[0]
 		s.followUpQueue = s.followUpQueue[1:]
 		s.mu.Unlock()
-		s.deliverInput(run, input)
+		ok := s.deliverInput(run, input)
 		delivered = true
+		if !ok {
+			return delivered
+		}
 	}
 	return delivered
 }
@@ -592,7 +601,7 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 // The delivery note is rendered here, from the reply as it was recorded:
 // a reference accepted while the reply was still streaming is resolved
 // once the stream has been finalized.
-func (s *Session) deliverInput(run *runState, input queuedInput) {
+func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 	note := s.renderForDelivery(input.note)
 	msg := NewTextMessage(RoleUser, withDeliveryNote(input.text, note))
 	msg.Origin = originForMode(input.mode)
@@ -600,7 +609,9 @@ func (s *Session) deliverInput(run *runState, input queuedInput) {
 	s.appendMessages(msg)
 	// A record the store refuses is a store_error candidate: the input
 	// is in the model's view, and the run does not go on to ask the
-	// model about a log that cannot hold it.
+	// model about a log that cannot hold it. The drain stops there, so
+	// the rest of the queue is reported rather than delivered into a
+	// log that cannot hold it.
 	if err := s.write(run.ctx, &MessageRecord{
 		RecordMeta:   NewRecordMetaFrom("message", msg.Origin),
 		RunID:        run.id,
@@ -609,6 +620,7 @@ func (s *Session) deliverInput(run *runState, input queuedInput) {
 		DeliveryNote: note,
 	}); err != nil {
 		s.addCandidate(run, storeErrorCandidate(err))
+		return false
 	}
 	if err := s.write(run.ctx, &InputDelivered{
 		RecordMeta:  NewRecordMeta("input.delivered"),
@@ -619,12 +631,14 @@ func (s *Session) deliverInput(run *runState, input queuedInput) {
 		DeliveredAt: nowRFC3339(),
 	}); err != nil {
 		s.addCandidate(run, storeErrorCandidate(err))
+		return false
 	}
 	s.events.emit(EventInputDelivered, map[string]any{
 		"run_id":   run.id,
 		"input_id": input.id,
 		"mode":     string(input.mode),
 	})
+	return true
 }
 
 // storeErrorCandidate is the settle candidate for a record the store

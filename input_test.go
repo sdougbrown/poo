@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -1290,5 +1291,151 @@ func TestARefusedDeliveryRecordEndsTheRunWithoutAnotherRequest(t *testing.T) {
 	}
 	if n := len(tr.Requests()); n != 1 {
 		t.Errorf("the run made %d requests, want 1: the refused record ends the run", n)
+	}
+}
+
+// cancellingDeliverySink blocks a follow-up's message record until its
+// write context ends, which is the shape of a store that is slow while
+// the run is settling.
+type cancellingDeliverySink struct {
+	*recordingSink
+	// entered is closed when the follow-up's write begins.
+	entered chan struct{}
+	// once guards the entered channel.
+	once sync.Once
+}
+
+// Append holds the follow-up message until the write context ends.
+func (s *cancellingDeliverySink) Append(ctx context.Context, rec poo.Record) error {
+	if m, ok := rec.(*poo.MessageRecord); ok && m.Origin == poo.OriginFollowUp {
+		s.once.Do(func() { close(s.entered) })
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return s.recordingSink.Append(ctx, rec)
+}
+
+// TestADeliveryDuringASecondFinalizeIsDropped covers the plan's rule
+// that an input which a resumed drain cannot record is reported as
+// input.dropped: a cancel that commits while the drain is writing must
+// not leave the input delivered, and the input is never silently lost.
+func TestADeliveryDuringASecondFinalizeIsDropped(t *testing.T) {
+	defer poo.SetRecordWriteBudget(100 * time.Millisecond)()
+	hookStarted := make(chan struct{})
+	release := make(chan struct{})
+	hook := &blockingBeforeSettle{started: hookStarted, release: release}
+	tr := scripted([]fakeResponse{{text: "the first answer"}, {text: "the second answer"}})
+	sink := &cancellingDeliverySink{recordingSink: &recordingSink{}, entered: make(chan struct{})}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-hookStarted
+	if _, err := s.Send("and then this", poo.FollowUp); err != nil {
+		t.Fatalf("sending the follow-up: %v", err)
+	}
+	close(release)
+	select {
+	case <-sink.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the follow-up was never delivered")
+	}
+	done := make(chan struct{})
+	go func() {
+		s.Cancel("probe")
+		close(done)
+	}()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	<-done
+
+	if res.Reason != poo.ReasonCancelled {
+		t.Fatalf("the run settled %q, want cancelled", res.Reason)
+	}
+	if len(res.Detail.UndeliveredInput) != 1 {
+		t.Errorf("the settle detail lists %d undelivered inputs, want 1", len(res.Detail.UndeliveredInput))
+	}
+	if n := sink.count("input.dropped"); n != 1 {
+		t.Errorf("the log holds %d input.dropped records, want 1", n)
+	}
+	if n := sink.count("input.delivered"); n != 0 {
+		t.Errorf("the log holds %d input.delivered records, want none", n)
+	}
+	for _, m := range sink.messages() {
+		if m.Origin == poo.OriginFollowUp {
+			t.Errorf("the follow-up was recorded after the finalization took the run over: %q", m.Content[0].Text)
+		}
+	}
+	if n := len(tr.Requests()); n != 1 {
+		t.Errorf("the run made %d requests, want 1", n)
+	}
+}
+
+// refusingSteerSink refuses a steer's message record, and accepts
+// everything else.
+type refusingSteerSink struct {
+	*recordingSink
+}
+
+// Append refuses the steer's message record.
+func (s *refusingSteerSink) Append(ctx context.Context, rec poo.Record) error {
+	if m, ok := rec.(*poo.MessageRecord); ok && m.Origin == poo.OriginSteer {
+		return errors.New("the store refused the steer record")
+	}
+	return s.recordingSink.Append(ctx, rec)
+}
+
+// TestADrainStopsWhenADeliveryWriteFails covers the plan's rule that
+// accepted input is never silently lost: once a delivery's write fails,
+// the rest of the drain stays queued and is reported in the settle
+// detail.
+func TestADrainStopsWhenADeliveryWriteFails(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the first answer", calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the second answer"},
+	})
+	sink := &refusingSteerSink{recordingSink: &recordingSink{}}
+	tool := &echoTool{result: "echoed"}
+	hold := newNoteHold(tool)
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	hold.wait(t)
+	if _, err := s.Send("the first steer", poo.Steer); err != nil {
+		t.Fatalf("sending the first steer: %v", err)
+	}
+	if _, err := s.Send("the second steer", poo.Steer); err != nil {
+		t.Fatalf("sending the second steer: %v", err)
+	}
+	hold.finish()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonStoreError {
+		t.Fatalf("the run settled %q, want store_error", res.Reason)
+	}
+	if len(res.Detail.UndeliveredInput) != 1 {
+		t.Fatalf("the settle detail lists %d undelivered inputs, want 1", len(res.Detail.UndeliveredInput))
+	}
+	if got := res.Detail.UndeliveredInput[0]; got.Mode != string(poo.Steer) {
+		t.Errorf("the undelivered input's mode is %q, want steer", got.Mode)
+	}
+	droppedEvents := 0
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventInputDropped {
+			droppedEvents++
+		}
+	}
+	if droppedEvents != 1 {
+		t.Errorf("the session emitted %d input.dropped events, want 1", droppedEvents)
 	}
 }
