@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -408,4 +409,41 @@ func TestWaitRunAnswersForTheClientsRun(t *testing.T) {
 	}
 	close(tr.release)
 	_, _ = s.Wait(context.Background())
+}
+
+// TestTheJobsToolListsOnlyRunningAndHeldJobs covers the plan's rule: the
+// jobs tool lists the running and the held jobs. A delivered result is
+// neither, and a held result is listed once.
+func TestTheJobsToolListsOnlyRunningAndHeldJobs(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting now"},
+		{calls: []poo.ToolCall{{ID: "call_list", Name: "jobs", Arguments: json.RawMessage(`{}`)}}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	waitFor(t, "the run to wait", func() bool { return s.State() == poo.StateWaiting })
+	tool.Release()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	var listing *poo.ToolResultRecord
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolResultRecord); ok && r.Tool == "jobs" {
+			listing = r
+		}
+	}
+	if listing == nil {
+		t.Fatal("the jobs tool never ran")
+	}
+	if strings.Contains(listing.Text, "j1") {
+		t.Errorf("the jobs tool lists the delivered job j1: %q", listing.Text)
+	}
 }

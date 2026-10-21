@@ -1250,30 +1250,38 @@ func (s *Session) jobSummaries() []jobSummary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []jobSummary
+	listed := map[string]bool{}
 	for _, id := range s.jobOrder {
 		job, ok := s.jobs[id]
-		if !ok {
+		if !ok || job.ended {
+			// A delivered job is neither running nor held.
 			continue
 		}
-		status := "running"
-		if job.ended {
-			status = "held"
-		}
+		listed[job.id] = true
 		out = append(out, jobSummary{
 			Job:       job.id,
 			Handle:    job.handle,
 			Tool:      job.tool,
 			Summary:   job.summary,
-			Status:    status,
+			Status:    "running",
 			ElapsedMS: time.Since(job.startedAt).Milliseconds(),
 		})
 	}
 	for _, item := range s.jobQueue {
+		if listed[item.result.job] {
+			continue
+		}
+		listed[item.result.job] = true
+		summary := ""
+		if job, ok := s.jobs[item.result.job]; ok {
+			summary = job.summary
+		}
 		out = append(out, jobSummary{
-			Job:    item.result.job,
-			Handle: item.result.handle,
-			Tool:   item.result.tool,
-			Status: "held",
+			Job:     item.result.job,
+			Handle:  item.result.handle,
+			Tool:    item.result.tool,
+			Summary: summary,
+			Status:  "held",
 		})
 	}
 	return out
