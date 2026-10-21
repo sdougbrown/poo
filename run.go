@@ -109,7 +109,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		msg.Origin = OriginSystem
 		s.appendMessages(msg)
 		if err := s.write(ctx, &MessageRecord{
-			RecordMeta: NewRecordMetaFrom("message", OriginSystem),
+			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 			RunID:      runID,
 			Role:       msg.Role,
 			Content:    msg.Content,
@@ -127,7 +127,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	user.DeliveryNote = note
 	s.appendMessages(user)
 	if err := s.write(ctx, &MessageRecord{
-		RecordMeta:   NewRecordMetaFrom("message", OriginUser),
+		RecordMeta:   NewRecordMetaFrom("message", user.Origin),
 		RunID:        runID,
 		Turn:         0,
 		Role:         user.Role,
@@ -273,11 +273,6 @@ func (s *Session) loop(run *runState) []candidate {
 		// The model's response is part of the history whether or not
 		// it asked for tool calls.
 		assistant := Message{Role: RoleAssistant, Content: resp.content, Origin: OriginModel}
-		if resp.messageID != "" {
-			assistant.ID = resp.messageID
-		} else {
-			assistant.ID = s.messageIDs.Next()
-		}
 		for _, call := range resp.calls {
 			assistant.Content = append(assistant.Content, ContentBlock{
 				Kind:       ContentToolCall,
@@ -287,9 +282,15 @@ func (s *Session) loop(run *runState) []candidate {
 			})
 		}
 		if len(assistant.Content) > 0 {
+			// The id is taken only for a message that is recorded.
+			if resp.messageID != "" {
+				assistant.ID = resp.messageID
+			} else {
+				assistant.ID = s.messageIDs.Next()
+			}
 			s.appendMessages(assistant)
 			if err := s.write(run.ctx, &MessageRecord{
-				RecordMeta: NewRecordMetaFrom("message", OriginModel),
+				RecordMeta: NewRecordMetaFrom("message", assistant.Origin),
 				RunID:      run.id,
 				Turn:       turn,
 				Role:       assistant.Role,

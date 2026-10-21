@@ -85,6 +85,29 @@ func TestTheRunsIdsContinueAcrossRuns(t *testing.T) {
 	}
 }
 
+// TestAnEmptyResponseBurnsNoId covers the ids of recorded messages: a
+// response with no content is not recorded, so the next message that is
+// recorded takes the id it would have taken anyway.
+func TestAnEmptyResponseBurnsNoId(t *testing.T) {
+	tr := &fakeTransport{responses: []fakeResponse{{}, {text: "the answer"}}}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	runSession(t, s, "first")
+	runSession(t, s, "second")
+
+	var got []string
+	for _, m := range sink.messages() {
+		if m.Origin == poo.OriginModel {
+			got = append(got, m.MessageID)
+		}
+	}
+	if len(got) != 1 || got[0] != "m1" {
+		t.Errorf("the recorded model messages carry the ids %v, want [m1]", got)
+	}
+}
+
 // TestTheMessageRecordCarriesTheId covers the record: the model's
 // message carries the id, and the user's does not.
 func TestTheMessageRecordCarriesTheId(t *testing.T) {

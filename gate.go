@@ -134,7 +134,7 @@ func (s *Session) maybeNotice(run *runState) {
 	msg.Origin = OriginUser
 	s.appendMessages(msg)
 	_ = s.write(run.ctx, &MessageRecord{
-		RecordMeta: NewRecordMetaFrom("message", OriginUser),
+		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
 		Role:       msg.Role,
 		Content:    msg.Content,

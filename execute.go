@@ -478,7 +478,7 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 	s.rememberResult(run, turn, handle, tool, outcome)
 
 	_ = s.write(run.ctx, &MessageRecord{
-		RecordMeta: NewRecordMetaFrom("message", OriginTool),
+		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
 		Turn:       turn,
 		Role:       msg.Role,

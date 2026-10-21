@@ -685,6 +685,12 @@ func estimateMessageChars(m Message) int {
 		if len(c.Arguments) > 0 {
 			chars += len(c.Arguments)
 		}
+		if c.Provider != nil {
+			chars += len(c.Provider.Data)
+		}
+	}
+	if m.DeliveryNote != nil {
+		chars += len(m.DeliveryNote.Text)
 	}
 	return chars
 }
