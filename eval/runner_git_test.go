@@ -73,6 +73,15 @@ func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	// The host's git configuration and repository variables are not the
+	// test's: the environment holds only a home of its own and no
+	// configuration files.
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + t.TempDir(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
