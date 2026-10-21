@@ -51,6 +51,9 @@ type parser struct {
 	// callText holds the open call's raw text, so a body that turns out
 	// not to be a call can be put back into the prose.
 	callText string
+	// callOpen holds the open call's opening marker, as the model wrote
+	// it, so the raw text can be rebuilt from the opening and the body.
+	callOpen string
 	// depth is the brace depth of an open bare-JSON call.
 	depth int
 	// inString reports whether a bare-JSON call is inside a string.
@@ -160,6 +163,16 @@ func (p *parser) drain() []poo.StreamEvent {
 		if !ok {
 			break
 		}
+		if kind == kindFence && !strings.Contains(p.buf[idx+len("```"):], "\n") {
+			// The fence's language line has not ended, so whether the
+			// block is a json call is not known yet. The prose before it
+			// is emitted, and the rest waits for more text.
+			if idx > 0 {
+				out = append(out, textEvent(p.buf[:idx]))
+				p.buf = p.buf[idx:]
+			}
+			return out
+		}
 		if idx > 0 {
 			out = append(out, textEvent(p.buf[:idx]))
 			p.buf = p.buf[idx:]
@@ -190,6 +203,7 @@ func (p *parser) openCall(kind callKind) {
 	p.callKind = kind
 	p.callBody = ""
 	p.callText = ""
+	p.callOpen = ""
 	p.depth = 0
 	p.inString = false
 	p.escaped = false
@@ -197,6 +211,7 @@ func (p *parser) openCall(kind callKind) {
 	switch kind {
 	case kindTagged:
 		p.callText = p.buf[:len(taggedOpen)]
+		p.callOpen = p.callText
 		p.buf = p.buf[len(taggedOpen):]
 	case kindFence:
 		open := p.buf[:len("```")]
@@ -209,6 +224,7 @@ func (p *parser) openCall(kind callKind) {
 			p.buf = ""
 		}
 		p.callText = open
+		p.callOpen = open
 	}
 }
 
@@ -250,14 +266,16 @@ func (p *parser) consumeUntil(marker string) ([]poo.StreamEvent, bool) {
 			keep = len(combined)
 		}
 		split := len(combined) - keep
+		// The raw text is rebuilt rather than appended to: the body is
+		// the whole of the call so far, not only what arrived now.
 		p.callBody = combined[:split]
-		p.callText += combined[:split]
+		p.callText = p.callOpen + p.callBody
 		p.buf = combined[split:]
 		return nil, false
 	}
 	i += start
 	p.callBody = combined[:i]
-	p.callText += combined[:i] + marker
+	p.callText = p.callOpen + p.callBody + marker
 	p.buf = combined[i+len(marker):]
 	p.inCall = false
 	if ev, ok := p.parseBody(p.callBody); ok {

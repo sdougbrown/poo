@@ -132,3 +132,73 @@ func TestTheXMLCallWithoutArgumentsIsStillACall(t *testing.T) {
 }
 
 var _ = poo.ToolCallDelta{}
+
+// TestAFencedBlockThatIsNotACallComesBackOnceWhenStreamed covers a code
+// block in the model's prose that arrives a few characters at a time:
+// the prose is the text the model wrote, once, not every prefix of it.
+func TestAFencedBlockThatIsNotACallComesBackOnceWhenStreamed(t *testing.T) {
+	text := "The fix:\n```python\ndef parse_csv(text):\n    return rows\n```\nDone."
+	for _, mode := range []string{"text", "auto"} {
+		for _, size := range []int{1, 3, 7} {
+			p := newParser(mode)
+			var prose strings.Builder
+			var calls int
+			collect := func(evs []poo.StreamEvent) {
+				for _, ev := range evs {
+					switch ev.Kind {
+					case "delta":
+						prose.WriteString(ev.Delta.Text)
+					case "tool_call":
+						calls++
+					}
+				}
+			}
+			for i := 0; i < len(text); i += size {
+				end := i + size
+				if end > len(text) {
+					end = len(text)
+				}
+				collect(p.feed(text[i:end]))
+			}
+			collect(p.flush())
+			if calls != 0 {
+				t.Errorf("%s/%d: the parser found %d calls, want none", mode, size, calls)
+			}
+			if prose.String() != text {
+				t.Errorf("%s/%d: the prose is %q, want the model's text once: %q", mode, size, prose.String(), text)
+			}
+		}
+	}
+}
+
+// TestAFencedCallStillParsesWhenStreamed covers a fenced json tool call
+// that arrives a few characters at a time: it is still one call.
+func TestAFencedCallStillParsesWhenStreamed(t *testing.T) {
+	text := "Running it.\n```json\n{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}\n```\n"
+	for _, size := range []int{1, 2, 5} {
+		p := newParser("text")
+		var calls []string
+		var prose strings.Builder
+		collect := func(evs []poo.StreamEvent) {
+			for _, ev := range evs {
+				switch ev.Kind {
+				case "delta":
+					prose.WriteString(ev.Delta.Text)
+				case "tool_call":
+					calls = append(calls, ev.ToolCall.Name)
+				}
+			}
+		}
+		for i := 0; i < len(text); i += size {
+			end := min(i+size, len(text))
+			collect(p.feed(text[i:end]))
+		}
+		collect(p.flush())
+		if len(calls) != 1 || calls[0] != "bash" {
+			t.Errorf("%d: the calls are %v, want one bash call", size, calls)
+		}
+		if strings.Contains(prose.String(), "```") {
+			t.Errorf("%d: the prose %q holds the call's fence", size, prose.String())
+		}
+	}
+}
