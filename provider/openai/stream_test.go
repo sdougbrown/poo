@@ -364,3 +364,20 @@ func TestAnEventLineOver64KiBIsRead(t *testing.T) {
 		t.Errorf("the stream delivered %d characters, want %d", got, len(big))
 	}
 }
+
+// TestAFinalMessageChunkIsRead covers the chunk shape some servers send:
+// a full message instead of deltas. Its content must reach the stream.
+func TestAFinalMessageChunkIsRead(t *testing.T) {
+	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"message":{"role":"assistant","content":"the answer"}}]}`))
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+
+	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	if got := textOf(read(t, reader)); got != "the answer" {
+		t.Errorf("the text is %q, want the message's content", got)
+	}
+}

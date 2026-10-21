@@ -80,3 +80,43 @@ func TestAnErrorBodyWithItsOwnKindKeepsIt(t *testing.T) {
 		t.Errorf("the error kind is %q, want context_length", pe.Kind)
 	}
 }
+
+// TestTheStatusMapsTheErrorKind covers classifyStatus's status table and
+// the payload's refinement of it: the same error words classify the same
+// way whichever door they came through.
+func TestTheStatusMapsTheErrorKind(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   poo.ProviderKind
+	}{
+		{"a bare 429", http.StatusTooManyRequests, `{"error":{"message":"slow down"}}`, poo.ProviderKindRateLimited},
+		{"a 429 with a quota code", http.StatusTooManyRequests, `{"error":{"code":"quota_exceeded","message":"out of quota"}}`, poo.ProviderKindUsageLimit},
+		{"a 429 with a usage_limit code", http.StatusTooManyRequests, `{"error":{"code":"usage_limit","message":"limit"}}`, poo.ProviderKindUsageLimit},
+		{"a 402", http.StatusPaymentRequired, `{"error":{"message":"payment required"}}`, poo.ProviderKindPlanInactive},
+		{"a 401", http.StatusUnauthorized, `{"error":{"message":"no key"}}`, poo.ProviderKindAuthFailed},
+		{"a 400 whose payload names the rate limit", http.StatusBadRequest, `{"error":{"code":"rate_limit_exceeded","message":"limit"}}`, poo.ProviderKindRateLimited},
+		{"a 400 whose payload names the context length", http.StatusBadRequest, `{"error":{"code":"context_length_exceeded","message":"too long"}}`, poo.ProviderKindContextLength},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(c.status)
+				_, _ = w.Write([]byte(c.body))
+			}))
+			defer srv.Close()
+
+			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+			_, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+			pe, ok := err.(*poo.ProviderError)
+			if !ok {
+				t.Fatalf("the error is %T, want a provider error", err)
+			}
+			if pe.Kind != c.want {
+				t.Errorf("the kind is %q, want %q", pe.Kind, c.want)
+			}
+		})
+	}
+}

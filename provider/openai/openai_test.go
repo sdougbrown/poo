@@ -1002,3 +1002,20 @@ func TestTheReasoningEffortIsSentOnlyWhenSet(t *testing.T) {
 		}
 	}
 }
+
+// TestChatURLAppendsThePathOnlyOnce covers the documented branch: a base
+// URL that already ends in /chat/completions is used as it is, so the
+// path is never appended twice.
+func TestChatURLAppendsThePathOnlyOnce(t *testing.T) {
+	cases := []struct{ base, want string }{
+		{"http://x:1/v1", "http://x:1/v1/chat/completions"},
+		{"http://x:1/v1/", "http://x:1/v1/chat/completions"},
+		{"http://x:1/v1/chat/completions", "http://x:1/v1/chat/completions"},
+		{"http://x:1/v1/chat/completions/", "http://x:1/v1/chat/completions"},
+	}
+	for _, c := range cases {
+		if got := openai.ChatURL(c.base); got != c.want {
+			t.Errorf("ChatURL(%q) is %q, want %q", c.base, got, c.want)
+		}
+	}
+}

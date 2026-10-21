@@ -195,7 +195,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	}
 	if first == '{' {
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(br)
+		body, _ := io.ReadAll(io.LimitReader(br, 1<<20))
 		if cancel != nil {
 			cancel()
 		}
@@ -292,7 +292,7 @@ func classifyError(code, message string, fallback poo.ProviderKind) poo.Provider
 		return poo.ProviderKindContextLength
 	case strings.Contains(lower, "rate_limit"):
 		return poo.ProviderKindRateLimited
-	case strings.Contains(lower, "quota"):
+	case strings.Contains(lower, "quota"), strings.Contains(lower, "usage_limit"):
 		return poo.ProviderKindUsageLimit
 	case strings.Contains(lower, "authentication"):
 		return poo.ProviderKindAuthFailed
@@ -326,11 +326,7 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	}
 
 	for _, m := range req.Messages {
-		cm, err := convertMessage(m)
-		if err != nil {
-			return nil, err
-		}
-		out.Messages = append(out.Messages, cm)
+		out.Messages = append(out.Messages, convertMessage(m))
 	}
 
 	// In native mode the tools go in the request, and the model answers
@@ -355,7 +351,7 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 }
 
 // convertMessage turns a core message into the wire shape.
-func convertMessage(m poo.Message) (chatMessage, error) {
+func convertMessage(m poo.Message) chatMessage {
 	cm := chatMessage{Role: string(m.Role)}
 
 	var text strings.Builder
@@ -379,13 +375,13 @@ func convertMessage(m poo.Message) (chatMessage, error) {
 			cm.Role = "tool"
 			cm.ToolCallID = c.ToolCallID
 			cm.Content = c.Text
-			return cm, nil
+			return cm
 		}
 	}
 
 	cm.Content = text.String()
 	cm.ToolCalls = calls
-	return cm, nil
+	return cm
 }
 
 // classifyStatus turns a non-200 response into a provider error.
@@ -412,18 +408,12 @@ func classifyStatus(resp *http.Response) error {
 		kind = poo.ProviderKindPlanInactive
 	case resp.StatusCode == http.StatusTooManyRequests:
 		kind = poo.ProviderKindRateLimited
-		if strings.Contains(strings.ToLower(code+" "+message), "quota") ||
-			strings.Contains(strings.ToLower(code+" "+message), "usage_limit") {
-			kind = poo.ProviderKindUsageLimit
-		}
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
 		kind = poo.ProviderKindInvalidRequest
 	}
-	// A context-length failure is a context-length failure whatever
-	// status it arrived with.
-	if isContextLength(code, message) {
-		kind = poo.ProviderKindContextLength
-	}
+	// The payload's own words refine the status's guess, so the same
+	// error classifies the same way whichever door it came through.
+	kind = classifyError(code, message, kind)
 
 	return &poo.ProviderError{
 		Kind:    kind,
