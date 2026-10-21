@@ -10,6 +10,10 @@
 // package's whole dependency closure. A violation is reported against the
 // package that makes the offending direct import.
 //
+// The check reads the host build configuration: files excluded by GOOS,
+// GOARCH, CGO_ENABLED or build tags (taken from GOFLAGS) are not seen, and
+// neither are files marked "//go:build ignore".
+//
 // A checked package whose directory does not exist, or holds no non-test Go
 // files, is skipped.
 package depcheck
@@ -117,10 +121,13 @@ func (c Checker) check(r rule, checked []string, pkgs []listPackage) []string {
 		if p.Error != nil {
 			// A package that does not exist has no directory; it is
 			// reported against its importers below.
-			if p.Dir != "" {
-				findings = append(findings, fmt.Sprintf("cannot check %s: %s", p.ImportPath, c.localize(p.Error.Err)))
+			if p.Dir == "" {
+				continue
 			}
-			continue
+			// Its imports are still scanned: an import cycle, which any
+			// forbidden import of the core package closes, sets this
+			// error and leaves the offending import in Imports.
+			findings = append(findings, fmt.Sprintf("cannot check %s: %s", p.ImportPath, c.localize(p.Error.Err)))
 		}
 		if p.ImportPath != r.path && slices.Contains(checked, p.ImportPath) {
 			continue
@@ -134,7 +141,11 @@ func (c Checker) check(r rule, checked []string, pkgs []listPackage) []string {
 					findings = append(findings, fmt.Sprintf("cannot resolve %s (imported by %s)", imp, p.ImportPath))
 				}
 			case !slices.Contains(r.allowed, imp):
-				findings = append(findings, fmt.Sprintf("%s imports %s", p.ImportPath, imp))
+				finding := fmt.Sprintf("%s imports %s", p.ImportPath, imp)
+				if p.ImportPath != r.path {
+					finding += fmt.Sprintf(" (in the closure of %s)", r.path)
+				}
+				findings = append(findings, finding)
 			}
 		}
 	}
@@ -167,7 +178,7 @@ func (c Checker) skipReason(pkgPath string) (string, error) {
 func (c Checker) list(pkgPath string) ([]listPackage, error) {
 	cmd := exec.Command("go", "list", "-e", "-deps", "-json", pkgPath)
 	cmd.Dir = c.ModuleRoot
-	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "GOPROXY=off", "GOWORK=off")
+	cmd.Env = append(os.Environ(), "GOFLAGS="+goflags(os.Getenv("GOFLAGS")), "GOPROXY=off", "GOWORK=off")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -203,4 +214,17 @@ type listPackage struct {
 	Standard   bool
 	Imports    []string
 	Error      *struct{ Err string }
+}
+
+// goflags returns an inherited GOFLAGS value with its -mod flag replaced by
+// -mod=readonly, so the check never rewrites go.mod and keeps flags such as
+// -tags.
+func goflags(inherited string) string {
+	var flags []string
+	for _, f := range strings.Fields(inherited) {
+		if !strings.HasPrefix(f, "-mod=") {
+			flags = append(flags, f)
+		}
+	}
+	return strings.Join(append(flags, "-mod=readonly"), " ")
 }
