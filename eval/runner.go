@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // Defaults for the runner.
@@ -974,12 +975,17 @@ func matchDoubleStar(glob, filePath string) bool {
 	return true
 }
 
-// tail returns the last n characters of a string.
+// tail returns the last n bytes of a string, less the partial character
+// the cut would leave at its start.
 func tail(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[len(s)-n:]
+	k := len(s) - n
+	for k < len(s) && !utf8.RuneStart(s[k]) {
+		k++
+	}
+	return s[k:]
 }
 
 // gitSHA returns the commit the harness ran against, or the empty string

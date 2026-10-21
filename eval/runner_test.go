@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // fakePoo writes a shell script that stands in for the poo binary.
@@ -403,5 +404,16 @@ func TestAFixtureRootOfItsOwnIsUsedWhenTheTaskSetIsElsewhere(t *testing.T) {
 	}
 	if len(report.Results) != 1 || !report.Results[0].Success {
 		t.Errorf("the run did not pass with the fixtures root named: %+v", report.Results)
+	}
+}
+
+func TestTheTailKeepsWholeCharacters(t *testing.T) {
+	for n := 1; n < 8; n++ {
+		if got := tail("a…b…c", n); !utf8.ValidString(got) || len(got) > n {
+			t.Errorf("tail to %d gave %q", n, got)
+		}
+	}
+	if got := tail("short", 10); got != "short" {
+		t.Errorf("tail of a short string gave %q", got)
 	}
 }
