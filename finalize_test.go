@@ -1044,3 +1044,29 @@ func TestAFailedRunStartStillSettles(t *testing.T) {
 		t.Errorf("settle codes = %v, want [23]", codes)
 	}
 }
+
+// TestAUsageWriteFailureIsTerminal covers the failure table's RecordSink
+// row: a refused usage record is a store_error candidate and breaks the
+// session, like every other record.
+func TestAUsageWriteFailureIsTerminal(t *testing.T) {
+	sink := &failingSink{failRecord: "usage"}
+	tr := scripted([]fakeResponse{{
+		text:  "done",
+		usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 20},
+	}})
+	s := newTestSession(t, poo.Options{
+		Transport:    tr,
+		Sink:         sink,
+		ContextLimit: 32768,
+	})
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonStoreError || !s.Broken() {
+		t.Fatalf("usage append failed: reason=%s broken=%v; want store_error and broken", res.Reason, s.Broken())
+	}
+}

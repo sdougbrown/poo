@@ -374,7 +374,11 @@ func (s *Session) loop(run *runState) []candidate {
 		}
 
 		if resp.usage != nil {
-			s.writeUsage(run, turn, resp.usage, resp.requestChars)
+			if !s.writeUsage(run, turn, resp.usage, resp.requestChars) {
+				// The refused record is the run's candidate; the
+				// finalization settles it.
+				return nil
+			}
 		} else {
 			// The endpoint reported no usage, and the run's token
 			// budget still has to count the turn.
@@ -892,15 +896,15 @@ func (s *Session) toolSpecs() []ToolSpec {
 
 // writeUsage writes a request's token accounting.
 //
-// The accounting of a request is worth less than the record that says
-// the run ended, so a refused write is dropped rather than ending the
-// run.
-func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, requestChars int) {
+// A refused write follows the failure table: it is the store_error
+// candidate, and the session is broken. The call reports whether the
+// record was written.
+func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
 	s.mu.Lock()
 	run.tokens += usage.InputTokens + usage.OutputTokens
 	s.mu.Unlock()
 	s.observeUsage(usage, requestChars)
-	s.writeBestEffort(run.ctx, &Usage{
+	if err := s.write(run.ctx, &Usage{
 		RecordMeta:      NewRecordMeta("usage"),
 		RunID:           run.id,
 		Turn:            turn,
@@ -909,7 +913,10 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 		OutputTokens:    usage.OutputTokens,
 		CacheReadTokens: usage.CacheReadTokens,
 		TTFTMS:          usage.TTFTMS,
-	})
+	}); err != nil {
+		s.addCandidate(run, storeErrorCandidate(err))
+		return false
+	}
 	s.events.emit(EventUsage, map[string]any{
 		"run_id":            run.id,
 		"turn":              turn,
@@ -918,6 +925,7 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 		"output_tokens":     usage.OutputTokens,
 		"cache_read_tokens": usage.CacheReadTokens,
 	})
+	return true
 }
 
 // addEstimatedUsage counts a turn the endpoint reported no usage for.

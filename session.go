@@ -704,28 +704,6 @@ func (s *Session) write(ctx context.Context, rec Record) error {
 	return nil
 }
 
-// writeBestEffort appends one record to the sink and ignores the
-// failure.
-//
-// The accounting of a request that failed is worth less than the record
-// that says the run ended, so a write that fails here neither stops the
-// run nor marks the store broken.
-func (s *Session) writeBestEffort(ctx context.Context, rec Record) {
-	if s.opts.Sink == nil {
-		return
-	}
-	s.mu.Lock()
-	if s.sunk {
-		s.mu.Unlock()
-		return
-	}
-	s.mu.Unlock()
-
-	wctx, cancel := recordContext(ctx)
-	defer cancel()
-	_ = s.opts.Sink.Append(wctx, rec)
-}
-
 // recordWriteBudget bounds one record write or flush.
 var recordWriteBudget = 5 * time.Second
 
