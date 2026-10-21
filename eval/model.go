@@ -21,9 +21,10 @@ type Model struct {
 	// ModelID is the identifier the endpoint knows the model by.
 	ModelID string `yaml:"model_id" json:"model_id"`
 	// APIKeyEnv names the environment variable holding the API key. The
-	// harness never reads the value: it passes the name to the poo
-	// subprocess, which reads it and scrubs it from the tools' child
-	// environment.
+	// runner never reads the value of a model's key: it passes the name
+	// to the poo subprocess, which reads it and scrubs it from the
+	// tools' child environment. (The judge reads its own key; see
+	// JudgeOptions.)
 	APIKeyEnv string `yaml:"api_key_env,omitempty" json:"api_key_env,omitempty"`
 	// ContextLimit is the model's context window, in tokens.
 	ContextLimit int `yaml:"context_limit" json:"context_limit"`
