@@ -1151,21 +1151,30 @@ func (s *Session) signalWake(run *runState) {
 // the gate. The jobs keep running.
 func (s *Session) deliverWaitingInput(run *runState, input queuedInput) {
 	s.mu.Lock()
-	if s.run != run || s.state != StateWaiting {
+	// The take is a claim on the input, so it checks the seal like any
+	// other. An input the finalization owns is not delivered: it is
+	// reported with the run's reason instead.
+	if s.run != run || s.state != StateWaiting || run.committed || run.finalizing || run.sealed {
 		s.mu.Unlock()
 		return
 	}
 	// The message was queued with the other steers; it is taken out
 	// again so it is delivered exactly once, and tied to the run so the
 	// finalization waits for the delivery or reports it.
+	taken := false
 	for i, queued := range s.steerQueue {
 		if queued.id == input.id {
 			s.steerQueue = append(s.steerQueue[:i], s.steerQueue[i+1:]...)
 			run.delivering = append(run.delivering, input)
+			taken = true
 			break
 		}
 	}
 	s.mu.Unlock()
+	if !taken {
+		// A drain or the finalization already took the input.
+		return
+	}
 
 	s.deliverInput(run, input)
 	s.signalWake(run)
