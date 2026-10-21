@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // judgePrompt is the judge's prompt.
@@ -747,9 +748,21 @@ func crop(s string, limit int) string {
 		return s
 	}
 	if limit <= 3 {
-		return s[:limit]
+		return prefix(s, limit)
 	}
-	return s[:limit-3] + "..."
+	return prefix(s, limit-3) + "..."
+}
+
+// prefix returns the longest prefix of s that is at most n bytes and
+// ends on a character boundary.
+func prefix(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // rawVerdict is the judge's answer, as the judge writes it.
@@ -926,5 +939,5 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return prefix(s, n) + "…"
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // The judge reads a transcript and reports what it sees.
@@ -428,5 +429,17 @@ func TestTheJudgePayloadNamesTheRun(t *testing.T) {
 	payload := j.buildPayload(&Log{}, "the transcript", transcript{task: "fix-a", model: "m", seed: 2}, nil)
 	if payload.Task != "fix-a" || payload.Model != "m" || payload.Seed != 2 {
 		t.Errorf("the payload names task %q, model %q, seed %d; want fix-a, m, 2", payload.Task, payload.Model, payload.Seed)
+	}
+}
+
+func TestCroppingAndTruncatingKeepWholeCharacters(t *testing.T) {
+	text := strings.Repeat("é…", 50)
+	for limit := 1; limit < 40; limit++ {
+		if got := crop(text, limit); !utf8.ValidString(got) || len(got) > limit {
+			t.Errorf("crop to %d gave %q (%d bytes)", limit, got, len(got))
+		}
+		if got := truncate(text, limit); !utf8.ValidString(got) {
+			t.Errorf("truncate to %d gave invalid UTF-8: %q", limit, got)
+		}
 	}
 }
