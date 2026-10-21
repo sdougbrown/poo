@@ -92,7 +92,8 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	s.mu.Lock()
 	reason, detail := s.commitLocked(run)
 	run.committed = true
-	run.result = Result{Reason: reason, Detail: detail, Turns: run.turn}
+	turns := run.turn
+	run.result = Result{Reason: reason, Detail: detail, Turns: turns}
 	s.mu.Unlock()
 
 	// The dropped inputs are reported with the reason the run settled
@@ -107,7 +108,7 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 		RunID:     run.id,
 		Reason:    reason,
 		Detail:    detail,
-		Turns:     run.turn,
+		Turns:     turns,
 		SettledAt: nowRFC3339(),
 	}
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), recordWriteBudget)
@@ -145,8 +146,8 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// The dropped inputs are reported after the settle event, so the
 	// client learns the run's outcome first.
 	s.dropUndelivered(run, undelivered, reason)
-	s.wakeWaiters(run, Result{Reason: reason, Detail: detail, Turns: run.turn})
-	return Result{Reason: reason, Detail: detail, Turns: run.turn}, false
+	s.wakeWaiters(run, Result{Reason: reason, Detail: detail, Turns: turns})
+	return Result{Reason: reason, Detail: detail, Turns: turns}, false
 }
 
 // abandonFinalize reports whether the finalization is abandoned because

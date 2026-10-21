@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -361,4 +362,73 @@ func (c *blockingCompactor) Compact(ctx context.Context, view poo.View, fork poo
 	c.once.Do(func() { close(c.started) })
 	<-ctx.Done()
 	return poo.Compaction{}, ctx.Err()
+}
+
+// releasingCompactor blocks inside Compact until the test releases it,
+// independent of its context, which lets a timer settle the run while
+// the gate is inside the compaction.
+type releasingCompactor struct {
+	// started is closed once the compaction is running.
+	started chan struct{}
+	// release is closed to let the compaction return.
+	release chan struct{}
+	// once guards the started channel.
+	once sync.Once
+}
+
+// ShouldCompact says yes.
+func (c *releasingCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+	return true
+}
+
+// Compact waits for the release and then fails.
+func (c *releasingCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+	c.once.Do(func() { close(c.started) })
+	<-c.release
+	return poo.Compaction{}, errors.New("the compaction failed")
+}
+
+// TestARunWindingDownAfterTheSettleDoesNotMoveTheStateOrRecord covers
+// the plan's rule that a run-owned completion after the commit point
+// never mutates a settled run: a duration timer settles a run whose gate
+// is inside a compaction, and the compaction's return must not move the
+// state, open a request, or write a record.
+func TestARunWindingDownAfterTheSettleDoesNotMoveTheStateOrRecord(t *testing.T) {
+	compactor := &releasingCompactor{started: make(chan struct{}), release: make(chan struct{})}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = compactor
+	opts.MaxDuration = 30 * time.Millisecond
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-compactor.started
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonBudgetExhausted {
+		t.Fatalf("the run settled %q, want budget_exhausted", res.Reason)
+	}
+	recordsBefore := len(sink.allRecords())
+	eventsBefore := len(s.Events())
+
+	close(compactor.release)
+	time.Sleep(200 * time.Millisecond)
+
+	if got := s.State(); got != poo.StateSettled {
+		t.Errorf("the session is %q after the compaction returned, want settled", got)
+	}
+	if n := len(tr.Requests()); n != 0 {
+		t.Errorf("the winding-down run made %d requests, want none", n)
+	}
+	if got := len(sink.allRecords()); got != recordsBefore {
+		t.Errorf("the winding-down run wrote %d records, want none", got-recordsBefore)
+	}
+	if got := len(s.Events()); got != eventsBefore {
+		t.Errorf("the winding-down run emitted %d events, want none", got-eventsBefore)
+	}
 }

@@ -272,6 +272,12 @@ func (s *Session) loop(run *runState) []candidate {
 		s.events.emit(EventTurnStarted, map[string]any{"run_id": run.id, "turn": turn})
 
 		resp, rendered, err := s.request(run, turn)
+		// The run may have settled while the request was in flight.
+		// What the request produced then is a late completion: it
+		// never mutates the history, the records or the events.
+		if s.runWindingDown(run) {
+			return nil
+		}
 		if rendered.Body != nil || rendered.Messages > 0 {
 			s.mu.Lock()
 			run.lastRendered = rendered
@@ -860,6 +866,18 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 		"output_tokens":     usage.OutputTokens,
 		"cache_read_tokens": usage.CacheReadTokens,
 	})
+}
+
+// errRunWindingDown reports that a run settled while a step of the loop
+// was still running.
+var errRunWindingDown = errors.New("poo: the run is winding down")
+
+// runWindingDown reports that the run has started or finished
+// finalizing, so nothing else may mutate it.
+func (s *Session) runWindingDown(run *runState) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return run.committed || run.finalizing
 }
 
 // cancelledByFinalize reports that the run's context ended because the

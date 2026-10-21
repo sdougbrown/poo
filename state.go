@@ -90,6 +90,11 @@ func (s *Session) transitionLocked(to State) {
 	if (s.state == StateSettling || s.state == StateSettled) && !IsLegal(s.state, to) {
 		return
 	}
+	// settled -> requesting is the next run's move, not the old run's.
+	// The old run is winding down, so it has settled or is finalizing.
+	if s.state == StateSettled && to == StateRequesting && (s.run == nil || s.run.committed || s.run.finalizing) {
+		return
+	}
 	s.state = to
 	s.transitions = append(s.transitions, to)
 }

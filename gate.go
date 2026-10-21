@@ -2,6 +2,7 @@ package poo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -44,6 +45,12 @@ func (s *Session) gate(run *runState) gateResult {
 		if should {
 			s.transition(StateCompacting)
 			compacted, err := s.compact(run)
+			// The run may have settled while the compactor was
+			// running. Nothing the gate does after that may move the
+			// state, open a request, or record anything.
+			if errors.Is(err, errRunWindingDown) || s.runWindingDown(run) {
+				return gateResult{held: true}
+			}
 			if err != nil {
 				// An interrupt that cancelled the compaction is not
 				// a compaction failure: the run carries on, and no
@@ -169,6 +176,12 @@ func (s *Session) compact(run *runState) (bool, error) {
 	defer s.endActivity(run)
 
 	compaction, err := s.opts.Compactor.Compact(ctx, view, fork)
+	// The run may have settled while the compactor was running. The
+	// compaction's own record is not written, and the ended event is
+	// not emitted, for a run that has already settled.
+	if s.runWindingDown(run) {
+		return false, errRunWindingDown
+	}
 	if err != nil {
 		s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
 		return false, err
