@@ -871,6 +871,12 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	// still streaming.
 	ids := s.messageIDs
 	resp, err := readResponse(actCtx, reader, ids, run.id, turn, run.requests, s.opts.Sink, func(name EventName, payload map[string]any) {
+		// A stream that outlives the run is a late completion: what it
+		// carries never reaches the history, the records or the
+		// events.
+		if s.runWindingDown(run) {
+			return
+		}
 		s.events.emit(name, payload)
 	})
 	if resp != nil {
