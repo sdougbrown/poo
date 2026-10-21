@@ -149,6 +149,30 @@ func TestAnImprovementIsNotARegression(t *testing.T) {
 	}
 }
 
+func TestABetterCandidateIsOneImprovementAndNoRegression(t *testing.T) {
+	baseline := makeReport("base",
+		makeRun("m", 1, false, Metrics{}),
+		makeRun("m", 2, false, Metrics{}),
+		makeRun("m", 3, false, Metrics{}),
+	)
+	candidate := makeReport("cand",
+		makeRun("m", 1, true, Metrics{}),
+		makeRun("m", 2, true, Metrics{}),
+		makeRun("m", 3, true, Metrics{}),
+	)
+
+	cmp := Compare(baseline, candidate)
+	if len(cmp.Regressions) != 0 {
+		t.Errorf("the comparison found %d regressions, want none: %+v", len(cmp.Regressions), cmp.Regressions)
+	}
+	if len(cmp.Improvements) != 1 {
+		t.Fatalf("the comparison found %d improvements, want 1: %+v", len(cmp.Improvements), cmp.Improvements)
+	}
+	if !strings.Contains(RenderComparison(cmp), "better (") {
+		t.Errorf("the rendered comparison does not show the improvement")
+	}
+}
+
 func TestTheReportIsWrittenAndRead(t *testing.T) {
 	dir := t.TempDir()
 	report := makeReport(dir,
