@@ -567,9 +567,9 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 	// The check runs in the workdir, whatever the run did.
 	checkExit, checkOut, checkErr := r.runCheck(runCtx, j.task, workdir, logPath, diff.Files)
 	result.CheckExit = checkExit
-	// The workdir is scratch on this machine, so the report names it
-	// $WORKDIR rather than by a path that holds a home directory.
-	result.CheckOutput = tail(strings.ReplaceAll(checkOut, workdir, "$WORKDIR"), 4000)
+	// The scratch directories are named by placeholders, as in every
+	// other stored text, so the report holds no machine's paths.
+	result.CheckOutput = tail(r.portableText(checkOut, workRoot, j), 4000)
 	result.Success = checkExit == 0 && checkErr == nil
 	if checkErr != nil && result.Error == "" {
 		result.Error = checkErr.Error()

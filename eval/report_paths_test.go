@@ -149,3 +149,33 @@ func TestAWrittenComparisonHoldsNoAbsolutePaths(t *testing.T) {
 		}
 	}
 }
+
+func TestTheCheckOutputNamesNoWorkRootEither(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	// The check prints a path above its workdir: the work root.
+	check := "#!/usr/bin/env bash\necho \"root: $(dirname \"$(dirname \"$(dirname \"$(dirname \"$(pwd)\")\")\")\")\"\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(task.Dir, "check.sh"), []byte(check), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	workRoot := filepath.Join(t.TempDir(), "work")
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  workRoot,
+		PooBinary: fakePoo(t, logWritingPoo),
+	})
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	got := report.Results[0].CheckOutput
+	if strings.Contains(got, workRoot) || !strings.Contains(got, "$WORKROOT") {
+		t.Errorf("the check output is %q, want the work root written as $WORKROOT", got)
+	}
+}
