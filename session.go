@@ -479,6 +479,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	for _, o := range opts.Observers {
 		s.events.addObserver(o)
 	}
+	// The overflow records are the store's, and they are written by the
+	// event bus's own reporter.
+	s.events.setDropReporter(s.writeObserverDropped)
 
 	// The session-start hooks' output is buffered: a construction that
 	// fails leaves nothing written.

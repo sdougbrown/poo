@@ -1,6 +1,7 @@
 package poo
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -21,6 +22,14 @@ type eventBus struct {
 	closed bool
 	// log holds the events, so a client can page through them.
 	log []Event
+	// reportDrop writes the coalesced overflow record of one observer.
+	reportDrop func(observer string, count int)
+	// reportDone ends the overflow reporter.
+	reportDone chan struct{}
+	// reporterDone is closed when the overflow reporter has ended.
+	reporterDone chan struct{}
+	// interval is how often the overflow records are written.
+	interval time.Duration
 }
 
 // observerSlot is one observer's slot on the bus.
@@ -32,6 +41,8 @@ type observerSlot struct {
 	mu sync.Mutex
 	// observer is the observer itself.
 	observer Observer
+	// name is the observer's name, for the overflow record.
+	name string
 	// ch is the observer's buffer.
 	ch chan Event
 	// dropped counts the events the observer missed.
@@ -46,9 +57,26 @@ type observerSlot struct {
 // before the bus drops them for that observer.
 const DefaultObserverBuffer = 1024
 
+// observerBuffer is the buffer a new observer gets.
+//
+// It is the default unless a test shortens it.
+var observerBuffer = DefaultObserverBuffer
+
+// observerDropInterval is how often the overflow records are written.
+//
+// The plan's rule is at most one record per second per observer, and
+// one more at the close. It is a variable so a test can shorten it.
+var observerDropInterval = time.Second
+
 // newEventBus returns an empty bus.
 func newEventBus() *eventBus {
-	return &eventBus{}
+	b := &eventBus{
+		reportDone:   make(chan struct{}),
+		reporterDone: make(chan struct{}),
+		interval:     observerDropInterval,
+	}
+	go b.reportDrops()
+	return b
 }
 
 // addObserver registers an observer and starts its goroutine.
@@ -60,7 +88,8 @@ func (b *eventBus) addObserver(o Observer) {
 	defer b.mu.Unlock()
 	slot := &observerSlot{
 		observer: o,
-		ch:       make(chan Event, DefaultObserverBuffer),
+		name:     hookName(o),
+		ch:       make(chan Event, observerBuffer),
 		done:     make(chan struct{}),
 		stop:     make(chan struct{}),
 	}
@@ -132,6 +161,97 @@ func (b *eventBus) emit(name EventName, payload map[string]any) Event {
 	return ev
 }
 
+// emitLogOnly publishes one event to the log without delivering it to
+// the observers.
+//
+// The overflow diagnostics are the core's own: an observer that fell
+// behind must not be handed the report of its own overflow, or the
+// report would cause more overflow.
+//
+// The log is written even when the bus has stopped, so the last report
+// is in the log.
+func (b *eventBus) emitLogOnly(name EventName, payload map[string]any) Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.seq++
+	ev := Event{
+		Seq:     b.seq,
+		Name:    name,
+		At:      time.Now().UTC().Format(time.RFC3339Nano),
+		Payload: payload,
+	}
+	b.log = append(b.log, ev)
+	return ev
+}
+
+// setDropReporter sets the writer of the overflow records.
+//
+// The writer is called from the reporter's goroutine, so a store that
+// is slow to answer never holds the loop up.
+func (b *eventBus) setDropReporter(fn func(observer string, count int)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.reportDrop = fn
+}
+
+// reportDrops writes the coalesced overflow records.
+//
+// The records are written at most once a second per observer, so an
+// observer that fell behind does not flood the store. The reporter runs
+// on its own goroutine: a stalled observer must not stop the reports.
+func (b *eventBus) reportDrops() {
+	defer close(b.reporterDone)
+	ticker := time.NewTicker(b.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			b.flushDrops(b.observerSlots())
+		case <-b.reportDone:
+			return
+		}
+	}
+}
+
+// observerSlots returns the registered observers.
+func (b *eventBus) observerSlots() []*observerSlot {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]*observerSlot, len(b.observers))
+	copy(out, b.observers)
+	return out
+}
+
+// flushDrops writes the overflow record of every observer that missed
+// events.
+//
+// The count of each observer is taken and reset, so a report never
+// counts the same event twice.
+func (b *eventBus) flushDrops(observers []*observerSlot) {
+	b.mu.Lock()
+	report := b.reportDrop
+	b.mu.Unlock()
+	if report == nil {
+		return
+	}
+	for _, o := range observers {
+		o.mu.Lock()
+		count := o.dropped
+		o.dropped = 0
+		o.mu.Unlock()
+		if count == 0 {
+			continue
+		}
+		// The diagnostic is in the log, and it is never delivered to
+		// an observer.
+		b.emitLogOnly(EventObserverDropped, map[string]any{
+			"observer": o.name,
+			"count":    count,
+		})
+		report(o.name, count)
+	}
+}
+
 // Events returns the events the bus published, in order.
 func (b *eventBus) events() []Event {
 	b.mu.Lock()
@@ -141,7 +261,9 @@ func (b *eventBus) events() []Event {
 
 // stop stops every observer and waits for them, bounded at two seconds.
 //
-// A stalled observer never holds the session's teardown up.
+// A stalled observer never holds the session's teardown up. The last
+// overflow report is written before the stop returns, so the record is
+// in the store before the store is flushed.
 func (b *eventBus) stop() {
 	b.mu.Lock()
 	if b.closed {
@@ -164,4 +286,30 @@ func (b *eventBus) stop() {
 		case <-deadline:
 		}
 	}
+	// The reporter ends with the bus, and the last report is written
+	// here.
+	close(b.reportDone)
+	<-b.reporterDone
+	b.flushDrops(observers)
+}
+
+// writeObserverDropped writes the coalesced overflow record of one
+// observer.
+//
+// The record is the store's, not a run's: an observer that fell behind
+// says nothing about the run, and a store that refuses the record does
+// not break the session.
+func (s *Session) writeObserverDropped(observer string, count int) {
+	if s.opts.Sink == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), recordWriteBudget)
+	defer cancel()
+	_ = s.opts.Sink.Append(ctx, &ObserverDropped{
+		RecordMeta: NewRecordMeta("observer.dropped"),
+		SessionID:  s.opts.SessionID,
+		Observer:   observer,
+		Count:      count,
+		DroppedAt:  nowRFC3339(),
+	})
 }
