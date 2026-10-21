@@ -1,0 +1,97 @@
+"""beta module 4."""
+
+from ..common import helper
+
+def beta_4_0(value):
+    """Handle the beta case 0."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 0
+
+def beta_4_1(value):
+    """Handle the beta case 1."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 1
+
+def beta_4_2(value):
+    """Handle the beta case 2."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 2
+
+def beta_4_3(value):
+    """Handle the beta case 3."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 3
+
+def beta_4_4(value):
+    """Handle the beta case 4."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 4
+
+def beta_4_5(value):
+    """Handle the beta case 5."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 5
+
+def beta_4_6(value):
+    """Handle the beta case 6."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 6
+
+def beta_4_7(value):
+    """Handle the beta case 7."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 7
+
+def beta_4_8(value):
+    """Handle the beta case 8."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 8
+
+def beta_4_9(value):
+    """Handle the beta case 9."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 9
+
+def beta_4_10(value):
+    """Handle the beta case 10."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 10
+
+def beta_4_11(value):
+    """Handle the beta case 11."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 11
+
+def beta_4_12(value):
+    """Handle the beta case 12."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 12
+
+def beta_4_13(value):
+    """Handle the beta case 13."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 13
+
+def beta_4_14(value):
+    """Handle the beta case 14."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 14
+
+def beta_4_15(value):
+    """Handle the beta case 15."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 15
+
+def beta_4_16(value):
+    """Handle the beta case 16."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 16
+
+def beta_4_17(value):
+    """Handle the beta case 17."""
+    # This is not parse_manifest; it only shares its prefix.
+    return helper(value) + 17
+
+def call_4(payload):
+    """Call parse_manifest with the payload."""
+    return parse_manifest(payload)

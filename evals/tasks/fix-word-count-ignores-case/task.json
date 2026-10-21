@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-word-count-ignores-case",
+  "prompt": "The `count_words` function in `textkit/__init__.py` should count the words of a text no matter how they are capitalised: `Hello` and `hello` are one word each. Right now it counts capitalised words twice. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "textkit/__init__.py"
+  ],
+  "description": "Capitalised words are counted twice."
+}

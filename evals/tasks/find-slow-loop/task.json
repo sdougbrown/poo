@@ -1,0 +1,12 @@
+{
+  "repo": "fixture:find-slow-loop",
+  "prompt": "Looking a key up in this repository's record store takes time that grows with the number of records held, because every lookup walks all of them. Find the lookup, and say which data structure would replace the walk so that a lookup does not scan the whole list. Do not change any file.",
+  "timeout_s": 300,
+  "tags": [
+    "readonly",
+    "explain",
+    "small"
+  ],
+  "expected_paths": [],
+  "description": "A store scans its whole list on every lookup."
+}

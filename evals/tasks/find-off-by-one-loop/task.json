@@ -1,0 +1,12 @@
+{
+  "repo": "fixture:find-off-by-one-loop",
+  "prompt": "The chunking helper in this repository splits a list into batches, and a batch that is not a full size comes out with items missing from it. Find the helper, and say what it does wrong and which comparison in it is off by one. Do not change any file.",
+  "timeout_s": 300,
+  "tags": [
+    "readonly",
+    "explain",
+    "small"
+  ],
+  "expected_paths": [],
+  "description": "A chunking function drops the last item."
+}

@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-retry-backoff",
+  "prompt": "The `should_retry` method of `RetryPolicy` in `netclient/__init__.py` allows one retry too many: a policy of 3 attempts should retry after attempts 1 and 2, not after attempt 3. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "netclient/__init__.py"
+  ],
+  "description": "A retry policy allows one retry too many."
+}

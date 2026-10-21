@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-division-by-zero",
+  "prompt": "The `average` function in `rates/__init__.py` raises ZeroDivisionError when it is given an empty list. It should return None instead, as its docstring says. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "rates/__init__.py"
+  ],
+  "description": "Averaging an empty list divides by zero."
+}

@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-sort-mutates-input",
+  "prompt": "The `sorted_copy` function in `collection/__init__.py` sorts the caller's list in place, so the caller's list is changed even though the docstring promises it is not. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "collection/__init__.py"
+  ],
+  "description": "A sort helper changes the caller's list."
+}

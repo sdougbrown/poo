@@ -1,0 +1,14 @@
+{
+  "repo": "fixture:fix-stack-push-order",
+  "prompt": "The `pop` method of `Stack` in `stackkit/__init__.py` returns the oldest item instead of the newest, so the stack behaves like a queue. Fix it and make the tests in `tests/` pass.",
+  "timeout_s": 300,
+  "tags": [
+    "bugfix",
+    "python",
+    "small"
+  ],
+  "expected_paths": [
+    "stackkit/__init__.py"
+  ],
+  "description": "A stack pops the oldest item."
+}
