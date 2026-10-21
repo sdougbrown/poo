@@ -41,3 +41,12 @@ func ExitCode(r Reason) int {
 		return 1
 	}
 }
+
+// The settle sources a cancelled run records. A consumer tells a
+// deadline from a plain cancel by the source, not by the text.
+const (
+	// SourceCancelContext is a run whose context was cancelled.
+	SourceCancelContext = "cancel:context"
+	// SourceCancelDeadline is a run whose context deadline passed.
+	SourceCancelDeadline = "cancel:deadline"
+)

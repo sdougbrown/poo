@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/sdougbrown/poo"
 )
 
 // fakePoo writes a shell script that stands in for the poo binary.
@@ -489,10 +491,10 @@ func TestOnlyTheDeadlineSourceIsATimeout(t *testing.T) {
 		rec.Details.Text = text
 		return &Log{Records: []LogRecord{rec}}
 	}
-	if !pooTimedOut(settled("cancel:deadline", "")) {
+	if !pooTimedOut(settled(poo.SourceCancelDeadline, "")) {
 		t.Error("a deadline source is not a timeout")
 	}
-	if pooTimedOut(settled("cancel:context", "context deadline exceeded")) {
+	if pooTimedOut(settled(poo.SourceCancelContext, "context deadline exceeded")) {
 		t.Error("a plain cancel whose text mentions a deadline is a timeout")
 	}
 	if pooTimedOut(nil) {

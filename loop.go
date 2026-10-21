@@ -525,9 +525,9 @@ func (r *Run) writeBestEffort(ctx context.Context, rec Record) {
 // source, so a consumer can tell it from a plain cancel without reading
 // the text.
 func cancelDetail(err error) SettleDetail {
-	source := "cancel:context"
+	source := SourceCancelContext
 	if errors.Is(err, context.DeadlineExceeded) {
-		source = "cancel:deadline"
+		source = SourceCancelDeadline
 	}
 	return SettleDetail{Source: source, Text: err.Error()}
 }

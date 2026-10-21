@@ -791,7 +791,7 @@ func pooTimedOut(log *Log) bool {
 		return false
 	}
 	s := log.Settle()
-	return s != nil && s.Reason == string(poo.ReasonCancelled) && s.Details.Source == "cancel:deadline"
+	return s != nil && s.Reason == string(poo.ReasonCancelled) && s.Details.Source == poo.SourceCancelDeadline
 }
 
 // hasLog reports whether a session log exists and holds something.
