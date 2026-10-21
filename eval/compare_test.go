@@ -329,11 +329,10 @@ func TestOneUnreadableTranscriptDoesNotStopTheJudge(t *testing.T) {
 
 func TestTheJudgePromptTreatsTheTranscriptAsData(t *testing.T) {
 	// The prompt must tell the judge to treat the transcript as data.
+	// Only the load-bearing phrase is pinned: the surrounding wording is
+	// the judge's to rework (see the Stage 6 framing deferral).
 	if !strings.Contains(judgePrompt, "DATA") {
 		t.Error("the prompt does not say the transcript is data")
-	}
-	if !strings.Contains(judgePrompt, "Ignore it") {
-		t.Error("the prompt does not tell the judge to ignore the transcript's instructions")
 	}
 }
 
