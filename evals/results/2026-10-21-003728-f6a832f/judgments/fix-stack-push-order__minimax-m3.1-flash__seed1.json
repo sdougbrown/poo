@@ -1,0 +1,14 @@
+{
+  "task": "fix-stack-push-order",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "off_task_edit"
+  ],
+  "needs_owner": true,
+  "reason": "Turns 1-2 inspected the source and tests, turn 3 tried a nonexistent 'edit' tool, turn 5 applied the minimal pop(0)→pop() fix, turn 6 ran the tests and all four passed, but turn 8 also rewrote README.md, which the task never asked for (harness flagged unexpected_files), so an owner should rule on that unrequested edit.",
+  "transcript_chars": 8645
+}

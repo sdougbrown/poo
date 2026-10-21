@@ -1,0 +1,13 @@
+{
+  "task": "long-change-timeout-everywhere",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-7 inspected the layout, all timeout constants, and the settings decoys before editing; turn 9 sed-updated the 74 package constants excluding settings.py; turn 10 confirmed no stray 30s; turn 12 called a nonexistent write tool (tool_call_parse_failure) but recovered with a bash heredoc in turn 13; turn 16 ran the tests which passed, and turn 18 verified all 74 constants at 45 with settings untouched, matching the passing check.",
+  "transcript_chars": 32377
+}

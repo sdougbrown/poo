@@ -1,0 +1,13 @@
+{
+  "task": "fix-retry-backoff",
+  "model": "minimax-m3.1-flash",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-2 read the module and tests, turn 3 tried a nonexistent 'edit' tool (tool_call_parse_failure), turn 4 applied the correct one-line fix via sed, turns 5-6 ran the tests and manual checks which passed, turn 7 ended.",
+  "transcript_chars": 7486
+}

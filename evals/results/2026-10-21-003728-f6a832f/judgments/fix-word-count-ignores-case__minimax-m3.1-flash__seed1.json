@@ -1,0 +1,13 @@
+{
+  "task": "fix-word-count-ignores-case",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 read the relevant files, turn 3 called a nonexistent 'edit' tool (tool_call_parse_failure), turn 4-5 adapted and applied the fix via bash heredoc, turn 6 ran the tests and they all passed, matching the check's pass verdict.",
+  "transcript_chars": 7412
+}

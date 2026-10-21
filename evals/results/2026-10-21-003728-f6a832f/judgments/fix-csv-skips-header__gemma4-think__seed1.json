@@ -1,0 +1,14 @@
+{
+  "task": "fix-csv-skips-header",
+  "model": "gemma4-think",
+  "seed": 1,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "premature_end_turn"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 1 only listed files; turn 2 emitted a fabricated tool-result-looking blob instead of a real read or edit, then ended the run with no change made, and the check failed on the unmodified header behavior, matching the unfinished trajectory.",
+  "transcript_chars": 3122
+}

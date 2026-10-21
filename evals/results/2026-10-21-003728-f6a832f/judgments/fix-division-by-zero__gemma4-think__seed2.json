@@ -1,0 +1,14 @@
+{
+  "task": "fix-division-by-zero",
+  "model": "gemma4-think",
+  "seed": 2,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "premature_end_turn"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 1 emitted only a malformed tool call (not the required JSON format) and the run ended there with no reads, no edits, and no verification, so the task was never attempted; the check's ZeroDivisionError failure matches the untouched code.",
+  "transcript_chars": 1936
+}

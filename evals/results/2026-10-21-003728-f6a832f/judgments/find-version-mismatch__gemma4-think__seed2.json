@@ -1,0 +1,11 @@
+{
+  "task": "find-version-mismatch",
+  "model": "gemma4-think",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 1-4 inspected with narrow greps and the changelog, turn 5 reported both declared versions and the out-of-step file without editing anything, matching the passing check.",
+  "transcript_chars": 3063
+}

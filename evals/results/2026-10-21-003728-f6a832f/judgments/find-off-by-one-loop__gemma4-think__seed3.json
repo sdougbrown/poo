@@ -1,0 +1,13 @@
+{
+  "task": "find-off-by-one-loop",
+  "model": "gemma4-think",
+  "seed": 3,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "off_task_edit"
+  ],
+  "needs_owner": true,
+  "reason": "Turns 1-3 sensibly located the chunks helper and turn 5 correctly identified the off-by-one comparison, but turn 4 created test_chunks.py despite the task explicitly forbidding any file change, which is exactly what the check flagged.",
+  "transcript_chars": 4998
+}

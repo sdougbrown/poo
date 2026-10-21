@@ -1,0 +1,13 @@
+{
+  "task": "fix-stack-push-order",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-3 inspected the source and tests, turn 5 ran the tests to confirm the failure, turn 6 applied the minimal pop(0)-\u003epop() fix, and turn 9 reran the tests which all passed, matching the check; turns 4 and 8 sent malformed empty bash calls, and turn 10 redundantly reran the already-passing tests.",
+  "transcript_chars": 6956
+}

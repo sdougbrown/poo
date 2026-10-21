@@ -1,0 +1,13 @@
+{
+  "task": "fix-stack-push-order",
+  "model": "minimax-m3.1-flash",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-2 read the source and tests before editing, turn 3 failed by calling a nonexistent edit tool, turn 4 made the one-line pop(0)-\u003epop() fix via bash, turns 5-6 ran the 4 tests (all ok) plus a manual LIFO check, matching the check's OK.",
+  "transcript_chars": 7325
+}

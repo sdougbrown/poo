@@ -1,0 +1,11 @@
+{
+  "task": "long-find-error-in-log",
+  "model": "qwen",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 grepped for ERROR and found line 622, turn 2 verified it with a one-line read, turn 3 reported req-8f2a41c9, matching the passing check.",
+  "transcript_chars": 2401
+}

@@ -1,0 +1,13 @@
+{
+  "task": "fix-sort-mutates-input",
+  "model": "gemma4-think",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-3 inspected the function and tests, turn 5 reproduced the failure, turn 6 fixed it but left a dead line, turn 8 cleaned that up, turn 10 verified all tests pass; turn 11 then re-ran the identical test command with no change in between, a minor repeat, and the passing check matches the trajectory.",
+  "transcript_chars": 7033
+}

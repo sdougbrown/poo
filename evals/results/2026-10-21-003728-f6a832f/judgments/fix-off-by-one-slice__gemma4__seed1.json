@@ -1,0 +1,13 @@
+{
+  "task": "fix-off-by-one-slice",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-4 read the source and tests and ran the tests (2 failures), turn 6 applied the one-line off-by-one fix, turn 8 reran the tests and they passed, matching the check output; turns 13-16 and 20-24 repeated the identical clamp_slice([0,1,2],3,3) probe with no change, a wasteful loop after the task was already done.",
+  "transcript_chars": 11264
+}

@@ -1,0 +1,14 @@
+{
+  "task": "fix-unicode-decode-error",
+  "model": "minimax-m3.1-flash",
+  "seed": 2,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "off_task_edit"
+  ],
+  "needs_owner": true,
+  "reason": "Turns 1–2 sensibly inspected code and tests, but turn 3 called a nonexistent 'edit' tool; the fix at turn 6 and passing tests at turns 7 and 9 match the check, yet turn 9 also rewrote README.md, an out-of-scope change the harness flagged via unexpected_files, so a human should review the touched files.",
+  "transcript_chars": 8667
+}

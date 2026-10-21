@@ -1,0 +1,14 @@
+{
+  "task": "find-dead-code",
+  "model": "gemma4-think",
+  "seed": 2,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "premature_end_turn"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 1 emitted a malformed tool-call string ('decalration:bash...\u003c|\"|\u003els -R\u003c|\"|\u003e') that registered as zero tool calls, then the run ended with no inspection or answer, so the check's failure verdict matches the empty trajectory.",
+  "transcript_chars": 1942
+}

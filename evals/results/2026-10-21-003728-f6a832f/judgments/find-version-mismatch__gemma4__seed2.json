@@ -1,0 +1,11 @@
+{
+  "task": "find-version-mismatch",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 listed the repo, turns 2-4 read pyproject.toml (1.4.0), src/shop/__init__.py (1.3.0) and the changelog, turn 5 named both versions and the out-of-step file without editing anything, matching the passing check.",
+  "transcript_chars": 3165
+}

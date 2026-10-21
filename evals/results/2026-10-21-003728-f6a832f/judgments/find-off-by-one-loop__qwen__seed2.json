@@ -1,0 +1,13 @@
+{
+  "task": "find-off-by-one-loop",
+  "model": "qwen",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 1 grep located the chunking helper, turn 2 read lib/pipeline.py and turn 3 read its caller, turn 5 verified the off-by-one with a python one-liner, turn 6 named chunks() and the bad comparison without editing files; turn 4 sent an empty bash command that errored, a single malformed call.",
+  "transcript_chars": 4353
+}

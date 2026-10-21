@@ -1,0 +1,11 @@
+{
+  "task": "fix-stack-push-order",
+  "model": "qwen",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 read the source and tests, turn 2 applied the one-line pop(0)→pop() fix, turn 3 recovered from the missing python command by locating python3, turn 4 ran the tests which all passed, and turn 5 verified the edit before ending.",
+  "transcript_chars": 5012
+}

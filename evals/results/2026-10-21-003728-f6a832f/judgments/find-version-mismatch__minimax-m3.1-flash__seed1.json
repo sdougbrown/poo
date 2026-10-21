@@ -1,0 +1,11 @@
+{
+  "task": "find-version-mismatch",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 1-3 read pyproject.toml, src/shop/__init__.py, cli.py and the changelog; turn 4 swept for other version strings; turn 5 reported 1.4.0 vs 1.3.0, named src/shop/__init__.py as out of step, and changed no files, matching the passing check.",
+  "transcript_chars": 5752
+}

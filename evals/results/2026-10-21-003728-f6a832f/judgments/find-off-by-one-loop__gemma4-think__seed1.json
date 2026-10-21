@@ -1,0 +1,14 @@
+{
+  "task": "find-off-by-one-loop",
+  "model": "gemma4-think",
+  "seed": 1,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "premature_end_turn"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 1 sensibly listed the repo, but turn 2 emitted its bash call as raw text instead of a ⟨tool_call⟩ block so it never executed, and the run ended there without reading the chunking helper or naming the off-by-one, which matches the check's failure.",
+  "transcript_chars": 2250
+}

@@ -1,0 +1,11 @@
+{
+  "task": "find-version-mismatch",
+  "model": "gemma4",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 2 read pyproject.toml (1.4.0), turn 4 read src/shop/__init__.py (1.3.0), turn 7 located docs/CHANGELOG.md after turn 5's failed cat, turn 8 read the changelog (1.4.0), and turn 9 named src/shop/__init__.py as out of step without editing any file, matching the check's passed verdict.",
+  "transcript_chars": 4577
+}

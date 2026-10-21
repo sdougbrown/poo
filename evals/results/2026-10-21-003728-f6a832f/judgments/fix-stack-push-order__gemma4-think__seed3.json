@@ -1,0 +1,13 @@
+{
+  "task": "fix-stack-push-order",
+  "model": "gemma4-think",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 read the buggy pop, turns 3-8 worked around missing pytest/PYTHONPATH and confirmed the failure, turn 9 re-ran the identical failing command with no change (and turn 14 re-ran the already-passing tests), turn 11 made the minimal one-line fix, turn 13 all four tests passed, matching the check's OK.",
+  "transcript_chars": 10024
+}

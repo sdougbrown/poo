@@ -1,0 +1,13 @@
+{
+  "task": "find-dead-code",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "premature_end_turn"
+  ],
+  "needs_owner": false,
+  "reason": "The sole turn (turn 0) ended immediately with zero tool calls and no answer recorded, the handler was never searched for, and the check's 'no answer' failure matches the empty trajectory.",
+  "transcript_chars": 1882
+}

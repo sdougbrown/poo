@@ -1,0 +1,14 @@
+{
+  "task": "fix-cache-never-expires",
+  "model": "gemma4",
+  "seed": 3,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-5 sensibly read the tests and ran them, turn 6 read the source, but turns 7 and 9 were malformed empty bash calls and turns 8-19 re-cat the unchanged file eleven times before the turn 20 edit; turn 20's heredoc broke quoting (SyntaxError at turn 21), turn 23 rewrote it correctly, and turn 24's test run passed, matching the check's OK verdict.",
+  "transcript_chars": 20756
+}

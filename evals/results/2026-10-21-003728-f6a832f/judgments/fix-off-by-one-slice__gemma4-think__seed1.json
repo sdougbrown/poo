@@ -1,0 +1,15 @@
+{
+  "task": "fix-off-by-one-slice",
+  "model": "gemma4-think",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread",
+    "off_task_edit"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-3 read the helper and tests, turn 5 reproduced the two failures, turns 9-11 prototyped the fix in a scratch file, turn 12 applied it and turn 14 verified the 4 tests pass (check agrees), but the run shows an empty malformed bash call at turn 7, redundant re-reads of slacelib/__init__.py at turns 6 and 8, duplicate identical test runs after success at turn 15, and a leftover scratch file fix_attempt.py the task never asked for.",
+  "transcript_chars": 11780
+}

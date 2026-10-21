@@ -1,0 +1,11 @@
+{
+  "task": "long-change-timeout-everywhere",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 2 and 7 grep'd all 30-second constants, turn 10 sed-updated each package's request timeout, turn 11 verified only the settings decoys stayed at 30, turn 13 updated the tests, and turn 14 ran the suite green, matching the check's pass.",
+  "transcript_chars": 12369
+}

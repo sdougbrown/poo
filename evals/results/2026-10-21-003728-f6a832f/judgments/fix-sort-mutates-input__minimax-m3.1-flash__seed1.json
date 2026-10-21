@@ -1,0 +1,13 @@
+{
+  "task": "fix-sort-mutates-input",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-2 inspected the module and tests, turn 3 called a nonexistent 'edit' tool (tool error), turn 5 applied the sorted() fix via bash heredoc, turn 6 ran the tests and all 3 passed, turn 7 spot-checked edge cases; the check's pass verdict matches the trajectory.",
+  "transcript_chars": 7372
+}

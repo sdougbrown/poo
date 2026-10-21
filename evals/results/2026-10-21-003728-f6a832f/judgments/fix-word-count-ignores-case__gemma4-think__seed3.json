@@ -1,0 +1,14 @@
+{
+  "task": "fix-word-count-ignores-case",
+  "model": "gemma4-think",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 read the buggy function, turn 10 ran the failing tests, turn 12's sed silently failed and turn 13 confirmed it, turn 14 rewrote the file and turn 15's test run passed, matching the check; minor pathologies: turn 9's empty bash call was malformed and turn 16 reran the same passing tests without any change.",
+  "transcript_chars": 9149
+}

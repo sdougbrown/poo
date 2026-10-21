@@ -1,0 +1,13 @@
+{
+  "task": "fix-stack-push-order",
+  "model": "gemma4-think",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 read the buggy pop, turn 8 ran the failing tests, turn 9 read the tests before editing, turn 10 applied the minimal pop(0)-\u003epop() fix, turn 12 verified all 4 tests pass, though turn 13 re-ran the identical pytest command with no changes in between; the check's pass verdict matches the trajectory, and the pip install of pytest (turn 7) was a necessary environment step, not an off-task edit.",
+  "transcript_chars": 11589
+}
