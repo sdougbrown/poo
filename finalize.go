@@ -353,7 +353,16 @@ func (s *Session) waitForWork(run *runState) {
 	deadline := time.After(recordWriteBudget)
 	for {
 		s.mu.Lock()
-		pending := len(run.pendingCalls) + run.resultWrites + run.jobStarts + len(run.delivering) + len(run.deliveringJobs)
+		// An unstarted call has no effect to abandon: the finalization
+		// settles it. Only a call whose tool is running is work to
+		// wait for.
+		started := 0
+		for _, call := range run.pendingCalls {
+			if call.started {
+				started++
+			}
+		}
+		pending := started + run.resultWrites + run.jobStarts + len(run.delivering) + len(run.deliveringJobs)
 		done := run.workDone
 		s.mu.Unlock()
 		if pending == 0 {

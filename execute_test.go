@@ -1,9 +1,13 @@
 package poo_test
 
 import (
+	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // TestACallWhoseRecordFailsStartsNoEffect covers the failure table: a
@@ -23,5 +27,71 @@ func TestACallWhoseRecordFailsStartsNoEffect(t *testing.T) {
 	}
 	if res.Reason != poo.ReasonStoreError {
 		t.Errorf("the run settled %q, want store_error", res.Reason)
+	}
+}
+
+// blockingRecordSink holds one record until the test releases it.
+type blockingRecordSink struct {
+	recordingSink
+	kind    string
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+// Append holds the named record.
+func (s *blockingRecordSink) Append(ctx context.Context, rec poo.Record) error {
+	if rec.Meta().Record == s.kind {
+		s.once.Do(func() {
+			close(s.entered)
+			<-s.release
+		})
+	}
+	return s.recordingSink.Append(ctx, rec)
+}
+
+// TestACancelDuringTheCallRecordStillGetsAResult covers the rule that
+// every call gets exactly one result: a call whose tool.call write is in
+// flight when the run settles is registered first, so the finalization
+// settles it.
+func TestACancelDuringTheCallRecordStillGetsAResult(t *testing.T) {
+	for _, background := range []bool{false, true} {
+		t.Run(fmt.Sprint(background), func(t *testing.T) {
+			sink := &blockingRecordSink{
+				kind:    "tool.call",
+				entered: make(chan struct{}),
+				release: make(chan struct{}),
+			}
+			tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+			tr := scripted([]fakeResponse{
+				{calls: []poo.ToolCall{jobCall("one", background)}},
+				{text: "done"},
+			})
+			s := newTestSession(t, jobOptions(t, tr, tool, sink))
+			id, err := s.Prompt(context.Background(), "start")
+			if err != nil {
+				t.Fatal(err)
+			}
+			<-sink.entered
+			s.Cancel("probe")
+			if _, err := s.WaitRun(context.Background(), id); err != nil {
+				t.Fatal(err)
+			}
+			close(sink.release)
+			waitFor(t, "the late turn end", func() bool {
+				for _, e := range s.Events() {
+					if e.Name == poo.EventTurnEnded {
+						return true
+					}
+				}
+				return false
+			})
+			if got := sink.count("tool.result"); got != 1 {
+				t.Fatalf("the recorded call has %d result(s) after cancellation, want 1; records: %v", got, sink.names())
+			}
+			if got := tool.Calls(); got != 0 {
+				t.Errorf("the tool ran %d time(s) after the run settled, want 0", got)
+			}
+		})
 	}
 }

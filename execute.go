@@ -338,6 +338,12 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	handle := plan.handle
 	call := plan.call
 
+	// The call is registered before the blocking record write, so a run
+	// that settles while the write is in flight still has a call for
+	// the finalization to settle. It is not marked started until the
+	// record is written.
+	s.issueCall(run, turn, handle, call.Name, call.ID)
+
 	// The call is recorded before it runs, so a log shows what the
 	// model asked for even when the call never finished. The record
 	// carries the original arguments and the mode the call ran in.
@@ -485,7 +491,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	if !record(CallModeSync) {
 		return
 	}
-	s.issueCall(run, turn, handle, call.Name, call.ID)
+	s.markCallStarted(run, handle)
 	if s.runWindingDown(run) {
 		// The finalization owns the issued call's result.
 		return
@@ -752,14 +758,23 @@ func (s *Session) issueCall(run *runState, turn int, handle, tool, callID string
 		run.pendingCalls = map[string]*issuedCall{}
 	}
 	run.pendingCalls[handle] = &issuedCall{
-		handle:  handle,
-		tool:    tool,
-		id:      callID,
-		turn:    turn,
-		started: true,
+		handle: handle,
+		tool:   tool,
+		id:     callID,
+		turn:   turn,
 	}
 	if run.workDone == nil {
 		run.workDone = make(chan struct{}, 1)
+	}
+}
+
+// markCallStarted reports that a registered call's tool is running, so
+// the finalization knows it may have an effect to abandon.
+func (s *Session) markCallStarted(run *runState, handle string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if call, ok := run.pendingCalls[handle]; ok {
+		call.started = true
 	}
 }
 
