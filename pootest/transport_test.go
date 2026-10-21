@@ -392,3 +392,33 @@ func TestTheSnapshotDistinguishesTheRequestsItHolds(t *testing.T) {
 		t.Errorf("the body does not carry the thinking: %s", thinkingBody)
 	}
 }
+
+// TestATurnWithoutTokenCountsReportsNoUsage covers a replay: a turn that
+// recorded no token counts must not write a zero-token usage record.
+func TestATurnWithoutTokenCountsReportsNoUsage(t *testing.T) {
+	counted := func(turn pootest.Turn) bool {
+		tr := pootest.NewTransport(turn)
+		reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m"})
+		if err != nil {
+			t.Fatalf("streaming: %v", err)
+		}
+		for {
+			ev, err := reader.Next()
+			if err == io.EOF {
+				return false
+			}
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			if ev.Kind == "usage" {
+				return true
+			}
+		}
+	}
+	if counted(pootest.Turn{Text: "hi"}) {
+		t.Error("a turn with no token counts reported usage")
+	}
+	if !counted(pootest.Turn{Text: "hi", OutputTokens: 3}) {
+		t.Error("a turn with token counts reported no usage")
+	}
+}

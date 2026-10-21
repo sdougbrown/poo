@@ -6,7 +6,8 @@
 // consumer that links poo cannot reach an unexported test helper, and a
 // consumer that drives a session needs exactly these.
 //
-// The package imports core and the standard library, and nothing else.
+// The package imports core, the decide package and the standard library,
+// and nothing else.
 package pootest
 
 import (
@@ -381,6 +382,11 @@ func (r *reader) Next() (poo.StreamEvent, error) {
 			return poo.StreamEvent{Kind: "finish", FinishReason: poo.FinishReason(finish)}, nil
 		case 4:
 			r.stage++
+			if r.turn.InputTokens == 0 && r.turn.OutputTokens == 0 {
+				// A turn with no token counts reports no usage, so a
+				// replay writes no zero-token usage record.
+				continue
+			}
 			return poo.StreamEvent{
 				Kind: "usage",
 				Usage: &poo.UsageReport{
