@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -160,8 +161,16 @@ func TestConcurrentSeedsKeepTheirOwnWorkdir(t *testing.T) {
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 
 	// The fake poo records the workdir it ran in, and checks that the
-	// directory is still there when it runs.
-	marker := filepath.Join(t.TempDir(), "seen.txt")
+	// directory is still there when it runs. Each run records its start
+	// and then waits until MaxParallelPerEndpoint runs have started, so
+	// the runs overlap whatever the machine's load. A run that waits
+	// too long records "timeout", and the test fails.
+	scratch := t.TempDir()
+	marker := filepath.Join(scratch, "seen.txt")
+	starts := filepath.Join(scratch, "starts")
+	if err := os.MkdirAll(starts, 0o755); err != nil {
+		t.Fatalf("making the barrier: %v", err)
+	}
 	binary := fakePoo(t, `
 dir=""
 while [ "$#" -gt 0 ]; do
@@ -171,10 +180,16 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
-# The first run holds the directory for a while, and the later ones
-# check it after it: the first run's cleanup is what would pull the
-# directory away from the others.
-sleep 0.6
+touch "`+starts+`/$$"
+waited=0
+while [ "$(ls "`+starts+`" | wc -l)" -lt `+strconv.Itoa(MaxParallelPerEndpoint)+` ]; do
+  if [ "$waited" -ge 400 ]; then
+    echo "timeout" >> "`+marker+`"
+    exit 1
+  fi
+  sleep 0.05
+  waited=$((waited + 1))
+done
 if [ -f "$dir/a.txt" ]; then
   echo "present" >> "`+marker+`"
 else
@@ -206,8 +221,14 @@ exit 0
 	if err != nil {
 		t.Fatalf("reading the marker: %v", err)
 	}
+	if strings.Contains(string(seen), "timeout") {
+		t.Fatalf("the runs never overlapped:\n%s", seen)
+	}
 	if strings.Contains(string(seen), "gone") {
 		t.Errorf("a run found its workdir gone:\n%s", seen)
+	}
+	if n := strings.Count(string(seen), "present"); n != 3 {
+		t.Errorf("%d runs found their workdir, want 3:\n%s", n, seen)
 	}
 }
 
