@@ -595,3 +595,25 @@ func TestTheTokenBudgetUsesTheEstimateWithoutProviderUsage(t *testing.T) {
 		t.Errorf("the budget source is %q, want max_run_tokens", res.Detail.Source)
 	}
 }
+
+// TestAnInterruptedRequestCountsItsTokens covers the token budget: a
+// request an interrupt aborted is charged once, from the reported usage
+// or the estimate, before the interrupted turn's budget check.
+func TestAnInterruptedRequestCountsItsTokens(t *testing.T) {
+	tr := newStallingTransport()
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.MaxRunTokens = 1
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), strings.Repeat("prompt ", 100)); err != nil {
+		t.Fatal(err)
+	}
+	<-tr.streaming
+	sendWhenKnown(t, s, "interrupt", poo.Interrupt, "m1", 0)
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Turns != 1 || res.Reason != poo.ReasonBudgetExhausted {
+		t.Fatalf("the interrupted run settled %q after %d turn(s), want budget_exhausted after 1", res.Reason, res.Turns)
+	}
+}

@@ -321,6 +321,11 @@ func (s *Session) loop(run *runState) []candidate {
 			// and turns it into an interrupted turn. The attempt
 			// does not count against the retry budget.
 			if s.interruptPending(run) {
+				// The aborted request is still charged once before the
+				// interrupted turn's budget check.
+				if !s.accountInterruptedRequest(run, turn, resp) {
+					return nil
+				}
 				s.interruptedActivityTurn(run, turn, resp, false)
 				continue
 			}
@@ -944,7 +949,35 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 // ratio. A turn always counts at least one token, so a budget of one is
 // spent by the first request.
 func (s *Session) addEstimatedUsage(run *runState, resp *response, assistant Message) {
-	chars := resp.requestChars + estimateMessageChars(assistant)
+	s.addEstimatedChars(run, resp.requestChars+estimateMessageChars(assistant))
+}
+
+// accountInterruptedRequest charges a request that an interrupt aborted,
+// exactly once: the reported usage when there is one, and the estimate
+// otherwise.
+//
+// It reports whether the charge was recorded. A refused usage write is
+// the store_error candidate, and the finalization settles it.
+func (s *Session) accountInterruptedRequest(run *runState, turn int, resp *response) bool {
+	if resp == nil {
+		return true
+	}
+	if resp.usage != nil {
+		return s.writeUsage(run, turn, resp.usage, resp.requestChars)
+	}
+	chars := resp.requestChars
+	for _, block := range resp.content {
+		chars += len(block.Text) + len(block.Name) + len(block.ToolCallID) + len(block.Arguments)
+	}
+	for _, call := range resp.calls {
+		chars += len(call.ID) + len(call.Name) + len(call.Arguments)
+	}
+	s.addEstimatedChars(run, chars)
+	return true
+}
+
+// addEstimatedChars counts a request's estimated tokens.
+func (s *Session) addEstimatedChars(run *runState, chars int) {
 	s.mu.Lock()
 	tokens := int(math.Ceil(float64(chars) / s.est.charsPerToken))
 	if tokens < 1 {
