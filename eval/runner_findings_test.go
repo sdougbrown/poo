@@ -136,22 +136,33 @@ func TestAFileUnderTestsIsAlwaysUnexpected(t *testing.T) {
 }
 
 func TestAWorkRootInsideTheTaskSetsRepositoryIsRefused(t *testing.T) {
-	repo := t.TempDir()
-	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/r\n"), 0o644); err != nil {
-		t.Fatal(err)
+	for name, marker := range map[string]func(repo string) error{
+		"go.mod": func(repo string) error {
+			return os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/r\n"), 0o644)
+		},
+		".git dir": func(repo string) error { return os.Mkdir(filepath.Join(repo, ".git"), 0o755) },
+		".git file": func(repo string) error {
+			return os.WriteFile(filepath.Join(repo, ".git"), []byte("gitdir: elsewhere\n"), 0o644)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := t.TempDir()
+			if err := marker(repo); err != nil {
+				t.Fatal(err)
+			}
+			refusesWorkRootIn(t, repo)
+		})
 	}
-	taskRoot := filepath.Join(repo, "evals", "tasks")
-	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+}
+
+func refusesWorkRootIn(t *testing.T, repo string) {
+	t.Helper()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
-		Tasks:     []Task{task},
-		TaskRoot:  taskRoot,
-		Seeds:     1,
-		Out:       t.TempDir(),
-		WorkRoot:  filepath.Join(repo, ".cache", "eval-work"),
-		PooBinary: fakePoo(t, logWritingPoo),
+		TaskRoot: filepath.Join(repo, "evals", "tasks"),
+		WorkRoot: filepath.Join(repo, ".cache", "eval-work"),
 	})
-	if _, err := runner.Run(context.Background()); err == nil {
-		t.Error("a work root inside the task set's repository was accepted")
+	err := runner.checkWorkRoot()
+	if err == nil || !strings.Contains(err.Error(), "inside the task set's repository") {
+		t.Errorf("a work root inside the task set's repository gave %v, want a refusal", err)
 	}
 }

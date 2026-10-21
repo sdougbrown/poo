@@ -341,11 +341,14 @@ func (r *Runner) checkWorkRoot() error {
 }
 
 // repositoryRoot returns the nearest directory at or above dir that
-// holds a go.mod, or the empty string when there is none.
+// holds a go.mod or a .git (a file, in a worktree, or a directory), or
+// the empty string when there is none.
 func repositoryRoot(dir string) string {
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
+		for _, marker := range []string{"go.mod", ".git"} {
+			if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+				return dir
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
