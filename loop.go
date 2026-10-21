@@ -575,6 +575,16 @@ func (r *response) collect(text, thinking string, calls map[int]*ToolCall, order
 	}
 }
 
+// splitKeyBase is where the keys of calls that share a provider's index
+// start, above the text parser's own.
+const splitKeyBase = 1 << 20
+
+// callSlot names a call by the index and the id a provider sent it with.
+type callSlot struct {
+	index int
+	id    string
+}
+
 // readResponse drains a stream into a response.
 //
 // The usage is collected rather than written, so the caller can write it
@@ -589,10 +599,14 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 	var thinking strings.Builder
 	calls := make(map[int]*ToolCall)
 	var order []int
-	// current maps a provider index to the call its fragments now join.
+	// current maps a provider index to the call its latest fragment joined.
 	current := make(map[int]int)
-	// splitKey numbers a second call that arrived at an index in use.
-	splitKey := 500
+	// byID maps a provider index and a call id to the call they name.
+	byID := make(map[callSlot]int)
+	// splitKey numbers a call that arrived at an index in use. It starts
+	// above the text parser's calls, which are numbered from 1000, and
+	// skips any key a provider's own index has taken.
+	splitKey := splitKeyBase
 
 	for {
 		ev, err := reader.Next()
@@ -619,29 +633,38 @@ func readResponse(ctx context.Context, reader StreamReader, runID string, turn, 
 				continue
 			}
 			// A provider may split one call across several events, and
-			// may send several calls in one event. The index the
-			// provider sends groups the fragments of one call. Some
-			// providers send every parallel call at index 0, each with
-			// its own id, so a new id at an index starts a new call.
-			idx := ev.ToolCall.Index
+			// may send several calls in one event. The index groups the
+			// fragments of one call, but some providers send every
+			// parallel call at index 0, each with its own id. So a
+			// fragment with an id already seen at its index continues
+			// that call, a fragment with a new id at an index in use
+			// starts a new call, and a fragment with no id continues the
+			// latest call at its index.
+			idx, id := ev.ToolCall.Index, ev.ToolCall.ID
 			key, ok := current[idx]
-			existing := calls[key]
-			if ok && ev.ToolCall.ID != "" && existing.ID != "" && ev.ToolCall.ID != existing.ID {
-				ok = false
+			if id != "" {
+				if k, seen := byID[callSlot{idx, id}]; seen {
+					key, ok = k, true
+				} else if ok && calls[key].ID != "" {
+					ok = false
+				}
 			}
 			if !ok {
 				key = idx
-				if _, taken := calls[key]; taken {
-					// Between the native indexes and the text
-					// parser's calls, which are numbered from 1000,
-					// in arrival order.
+				for {
+					if _, taken := calls[key]; !taken {
+						break
+					}
 					key = splitKey
 					splitKey++
 				}
-				existing = &ToolCall{}
-				calls[key] = existing
-				current[idx] = key
+				calls[key] = &ToolCall{}
 				order = append(order, key)
+			}
+			existing := calls[key]
+			current[idx] = key
+			if id != "" {
+				byID[callSlot{idx, id}] = key
 			}
 			if ev.ToolCall.ID != "" {
 				existing.ID = ev.ToolCall.ID

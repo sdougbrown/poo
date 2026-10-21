@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -139,5 +140,73 @@ func TestTwoCallsAtOneIndexAreTwoCalls(t *testing.T) {
 	}
 	if !strings.Contains(tool.calls[0], "one") || !strings.Contains(tool.calls[1], "two") {
 		t.Errorf("the calls are %q, want one then two", tool.calls)
+	}
+}
+
+// runToolCalls runs one turn that streams the fragments and returns the
+// arguments the tool ran with.
+func runToolCalls(t *testing.T, fragments ...poo.ToolCallDelta) []string {
+	t.Helper()
+	var events []poo.StreamEvent
+	for i := range fragments {
+		events = append(events, poo.StreamEvent{Kind: "tool_call", ToolCall: &fragments[i]})
+	}
+	events = append(events, poo.StreamEvent{Kind: "finish", FinishReason: poo.FinishToolCalls})
+	tr := &scriptedTransport{turns: [][]poo.StreamEvent{
+		events,
+		{{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "done"}}, {Kind: "finish", FinishReason: poo.FinishStop}},
+	}}
+	tool := &echoTool{result: "echoed"}
+	if _, err := poo.NewRun(testOptions(t, tr, tool, &recordingSink{})).Execute(context.Background(), "go"); err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	return tool.calls
+}
+
+func fragment(index int, id, name, args string) poo.ToolCallDelta {
+	return poo.ToolCallDelta{Index: index, ID: id, Name: name, Arguments: json.RawMessage(args)}
+}
+
+func TestInterleavedFragmentsAtOneIndexRejoinTheirCalls(t *testing.T) {
+	got := runToolCalls(t,
+		fragment(0, "a", "echo", `{"text":"on`),
+		fragment(0, "b", "echo", `{"text":"tw`),
+		fragment(0, "a", "", `e"}`),
+		fragment(0, "b", "", `o"}`),
+	)
+	want := []string{`{"text":"one"}`, `{"text":"two"}`}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the tool ran with %q, want %q", got, want)
+	}
+}
+
+func TestACallAtAHighProviderIndexIsNotOverwrittenBySplitCalls(t *testing.T) {
+	got := runToolCalls(t,
+		fragment(500, "x", "echo", `{"text":"x"}`),
+		fragment(0, "a", "echo", `{"text":"a"}`),
+		fragment(0, "b", "echo", `{"text":"b"}`),
+	)
+	if len(got) != 3 {
+		t.Fatalf("the tool ran with %q, want three distinct calls", got)
+	}
+	seen := map[string]bool{}
+	for _, c := range got {
+		seen[c] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("the tool ran with %q, want x, a and b once each", got)
+	}
+}
+
+func TestOnlyTheFirstFragmentCarriesTheID(t *testing.T) {
+	got := runToolCalls(t,
+		fragment(0, "a", "echo", `{"text":"on`),
+		fragment(0, "", "", `e"}`),
+		fragment(0, "b", "echo", `{"text":"tw`),
+		fragment(0, "", "", `o"}`),
+	)
+	want := []string{`{"text":"one"}`, `{"text":"two"}`}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the tool ran with %q, want %q", got, want)
 	}
 }
