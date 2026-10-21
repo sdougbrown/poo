@@ -370,8 +370,8 @@ func TestPooIsGivenATimeoutShorterThanTheHarnessDeadline(t *testing.T) {
 		want     time.Duration
 	}{
 		{600, 590 * time.Second},
-		{12, 6 * time.Second},
-		{1, 500 * time.Millisecond},
+		{20, 18 * time.Second},
+		{1, 900 * time.Millisecond},
 	} {
 		if got := r.pooTimeout(Task{TimeoutS: tc.timeoutS}); got != tc.want {
 			t.Errorf("a %ds task gives poo %s, want %s", tc.timeoutS, got, tc.want)

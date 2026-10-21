@@ -198,8 +198,22 @@ printf '%s' "$args" > "`+capture+`"
 	if err != nil {
 		t.Fatalf("reading the arguments: %v", err)
 	}
-	if !strings.Contains(string(args), "--timeout") {
-		t.Errorf("the arguments are %q, want a --timeout", string(args))
+	fields := strings.Fields(string(args))
+	var passed time.Duration
+	for i, f := range fields {
+		if f == "--timeout" && i+1 < len(fields) {
+			d, err := time.ParseDuration(fields[i+1])
+			if err != nil {
+				t.Fatalf("the --timeout %q is not a duration: %v", fields[i+1], err)
+			}
+			passed = d
+		}
+	}
+	if passed != runner.pooTimeout(task) {
+		t.Errorf("poo was given --timeout %s, want %s", passed, runner.pooTimeout(task))
+	}
+	if passed <= 0 || passed >= runner.timeout(task) {
+		t.Errorf("poo was given --timeout %s, want it shorter than the harness deadline %s", passed, runner.timeout(task))
 	}
 }
 

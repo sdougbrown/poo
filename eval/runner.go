@@ -581,10 +581,11 @@ func (r *Runner) timeout(t Task) time.Duration {
 const PooTimeoutMargin = 10 * time.Second
 
 // pooTimeout returns the timeout handed to poo: the harness's deadline
-// less PooTimeoutMargin, and never less than half of it.
+// less PooTimeoutMargin, or less a tenth of it when the deadline is
+// short, so a small task keeps most of its budget.
 func (r *Runner) pooTimeout(t Task) time.Duration {
 	full := r.timeout(t)
-	return max(full-PooTimeoutMargin, full/2)
+	return full - min(PooTimeoutMargin, full/10)
 }
 
 // fixtureRoot returns the directory the fixture repos are resolved from.
