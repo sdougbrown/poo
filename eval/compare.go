@@ -36,6 +36,9 @@ type Comparison struct {
 	Improvements []Regression `json:"improvements"`
 	// PerModel holds the compared numbers, per model.
 	PerModel []ModelComparison `json:"per_model"`
+	// OneSided names the models that ran on only one side: a missing
+	// side would compare against zeros and read as a catastrophe.
+	OneSided []string `json:"one_sided,omitempty"`
 }
 
 // Regression is one difference between two reports.
@@ -171,6 +174,12 @@ func Compare(baseline, candidate *Report) Comparison {
 
 	for _, name := range order {
 		pair := byModel[name]
+		// A model with a missing side has no honest comparison: the zero
+		// aggregate would read as a catastrophe in both directions.
+		if pair[0].Runs == 0 || pair[1].Runs == 0 {
+			cmp.OneSided = append(cmp.OneSided, name)
+			continue
+		}
 		mc := ModelComparison{Model: name, Baseline: pair[0], Candidate: pair[1]}
 		cmp.PerModel = append(cmp.PerModel, mc)
 
@@ -258,6 +267,9 @@ func RenderComparison(cmp Comparison) string {
 	}
 	if len(cmp.Regressions) == 0 && len(cmp.Improvements) == 0 {
 		b.WriteString("| - | - | - | - | - | - | no difference above the noise floor |\n")
+	}
+	for _, name := range cmp.OneSided {
+		fmt.Fprintf(&b, "\n%s ran on one side only: it is not compared.\n", name)
 	}
 
 	return b.String()

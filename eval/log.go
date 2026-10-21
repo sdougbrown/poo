@@ -83,8 +83,9 @@ type Log struct {
 // A record that does not decode is an error: a metric computed from a
 // half-read log is worse than no metric. The one exception is the last
 // line: a run that was killed mid-write leaves a partial record there,
-// and the records before it are good. The tail is kept as it was found,
-// so a reader can see that the run did not finish.
+// and the records before it are good. The tail is not kept as a record
+// — it cannot be trusted — but the log is marked Torn, so a reader can
+// see that the run did not finish.
 func ParseLog(path string) (*Log, error) {
 	f, err := os.Open(path)
 	if err != nil {

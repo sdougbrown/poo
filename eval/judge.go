@@ -302,6 +302,14 @@ type transcript struct {
 // for an empty set of verdicts.
 func (j *Judge) findTranscripts() ([]transcript, error) {
 	runsDir := filepath.Join(j.opts.ResultsDir, runsDirName)
+	// A runs directory that does not exist is a mistake, not an empty
+	// set of verdicts: a mistyped --results path must not judge nothing.
+	if _, err := os.Stat(runsDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("eval: the runs directory %s does not exist", runsDir)
+		}
+		return nil, fmt.Errorf("eval: reading %s: %w", runsDir, err)
+	}
 	var out []transcript
 	err := filepath.WalkDir(runsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -326,9 +334,6 @@ func (j *Judge) findTranscripts() ([]transcript, error) {
 		return nil
 	})
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("eval: reading %s: %w", runsDir, err)
 	}
 	if len(out) == 0 {
@@ -938,7 +943,10 @@ func normalizePathologies(names []string) []Pathology {
 
 // verdictFileName returns the file name a verdict is written under.
 func verdictFileName(v Verdict) string {
-	return fmt.Sprintf("%s__%s__seed%d.json", v.Task, v.Model, v.Seed)
+	// A model id may carry a path separator (org/model); the verdict
+	// file lives flat in one directory, so the separators are flattened.
+	name := fmt.Sprintf("%s__%s__seed%d.json", v.Task, v.Model, v.Seed)
+	return strings.NewReplacer("/", "_", string(os.PathSeparator), "_").Replace(name)
 }
 
 // truncate shortens a string to n characters.

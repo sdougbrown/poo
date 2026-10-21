@@ -109,7 +109,7 @@ func newScriptedTransport(turns []ScriptedTurn) *scriptedTransport {
 // Stream returns the next recorded response.
 func (t *scriptedTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, error) {
 	if len(t.turns) == 0 {
-		return nil, fmt.Errorf("eval: the script holds no response")
+		return nil, errors.New("eval: the script holds no response")
 	}
 	if t.index >= len(t.turns) {
 		return nil, ErrScriptExhausted

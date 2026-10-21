@@ -73,7 +73,7 @@ type RunOptions struct {
 	// WorkRoot is the directory the workdirs are created under. It must
 	// be on the same filesystem as the report, and it is never /tmp.
 	WorkRoot string
-	// PoоBinary is the poo executable the runs use.
+	// PooBinary is the poo executable the runs use.
 	PooBinary string
 	// KeepWorkdirs leaves the workdirs behind after the run.
 	KeepWorkdirs bool

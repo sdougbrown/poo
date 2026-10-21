@@ -282,5 +282,4 @@ echo fixed > "$dir/a.txt"
 	if report.Results[0].CheckExit != 0 {
 		t.Errorf("the check exited %d, want 0", report.Results[0].CheckExit)
 	}
-	_ = time.Now
 }
