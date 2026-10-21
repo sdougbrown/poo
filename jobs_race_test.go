@@ -701,3 +701,61 @@ func TestARefusedBackgroundCallIsRecordedSync(t *testing.T) {
 		})
 	}
 }
+
+// acceptingJobStartSink stores the job.started record and then waits
+// for its context, so a test can cancel the run after the job was
+// accepted.
+type acceptingJobStartSink struct {
+	recordingSink
+	entered chan struct{}
+}
+
+// Append stores job.started and then waits for cancellation.
+func (s *acceptingJobStartSink) Append(ctx context.Context, rec poo.Record) error {
+	if rec.Meta().Record == "job.started" {
+		if err := s.recordingSink.Append(ctx, rec); err != nil {
+			return err
+		}
+		close(s.entered)
+		<-ctx.Done()
+		return nil
+	}
+	return s.recordingSink.Append(ctx, rec)
+}
+
+// TestAnAcceptedJobGetsTerminalOutcomes covers the exactly-one-outcome
+// rule: a job whose acceptance record was written while the run settles
+// gets a job.ended record, and its originating call gets a result.
+func TestAnAcceptedJobGetsTerminalOutcomes(t *testing.T) {
+	sink := &acceptingJobStartSink{entered: make(chan struct{})}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "done"},
+	})
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	id, err := s.Prompt(context.Background(), "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-sink.entered
+	s.Cancel("probe")
+	if _, err := s.WaitRun(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := sink.count("job.started"); got != 1 {
+		t.Fatalf("the log holds %d job.started record(s), want 1", got)
+	}
+	if got := sink.count("job.ended"); got != 1 {
+		t.Fatalf("the accepted job has %d job.ended record(s), want 1; records: %v", got, sink.names())
+	}
+	if got := sink.count("tool.result"); got != 1 {
+		t.Fatalf("the accepted job's call has %d result(s), want 1; records: %v", got, sink.names())
+	}
+	if got := tool.Calls(); got != 0 {
+		t.Errorf("the job ran %d time(s) after the run settled, want 0", got)
+	}
+}

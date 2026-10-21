@@ -309,11 +309,13 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 		StartedAt:  nowRFC3339(),
 	})
 	s.mu.Lock()
-	run.jobStarts--
 	winding := run.committed || run.finalizing
 	s.mu.Unlock()
-	s.signalWorkLocked(run)
 	if err != nil {
+		s.mu.Lock()
+		run.jobStarts--
+		s.mu.Unlock()
+		s.signalWorkLocked(run)
 		s.removeJobLocked(jobID)
 		cancel(errFinalizing)
 		if errors.Is(err, errDeliveryAbandoned) || winding {
@@ -323,18 +325,65 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 		return "", false, false
 	}
 	if winding {
-		// The run went down while the acceptance was being recorded. Do
-		// not launch the job.
+		// The run went down while the acceptance was being recorded, so
+		// the job never launches. It was accepted, so it still gets its
+		// terminal outcome. The acceptance claim is held until the
+		// terminal record is written, so the finalization cannot commit
+		// before the job has one.
+		s.finishUnlaunchedJob(job)
 		s.mu.Lock()
-		job.ended = true
+		run.jobStarts--
 		s.mu.Unlock()
-		s.removeJobLocked(jobID)
+		s.signalWorkLocked(run)
 		cancel(errFinalizing)
-		return "", false, true
+		return jobID, false, true
 	}
+	s.mu.Lock()
+	run.jobStarts--
+	s.mu.Unlock()
+	s.signalWorkLocked(run)
 
 	go s.runJob(job, prepared)
 	return jobID, true, false
+}
+
+// finishUnlaunchedJob gives an accepted job that never started its
+// terminal record.
+//
+// The job is stopped, and its outcome is cancelled: it never ran, so
+// there is no result to deliver. The record is what makes the job's
+// lifecycle complete.
+func (s *Session) finishUnlaunchedJob(job *jobState) {
+	s.mu.Lock()
+	if job.ended {
+		s.mu.Unlock()
+		return
+	}
+	job.ended = true
+	s.mu.Unlock()
+
+	err := s.write(context.WithoutCancel(job.ctx), &JobEnded{
+		RecordMeta: NewRecordMeta("job.ended"),
+		SessionID:  s.opts.SessionID,
+		Job:        job.id,
+		Handle:     job.handle,
+		Tool:       job.tool,
+		RunID:      job.runID,
+		Outcome:    JobOutcomeCancelled,
+		Text:       "the run settled before the job started",
+		EndedAt:    nowRFC3339(),
+	})
+	if err != nil {
+		s.markBroken()
+		s.addStoreError(job.runID)
+	}
+	s.events.emit(EventJobEnded, map[string]any{
+		"job":     job.id,
+		"handle":  job.handle,
+		"tool":    job.tool,
+		"outcome": string(JobOutcomeCancelled),
+	})
+	close(job.done)
 }
 
 // removeJobLocked forgets a job that never ran.
