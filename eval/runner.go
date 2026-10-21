@@ -573,6 +573,17 @@ func (r *Runner) timeout(t Task) time.Duration {
 	return DefaultTimeoutS * time.Second
 }
 
+// PooTimeoutMargin is how much sooner than the harness's deadline poo's
+// own timeout fires.
+const PooTimeoutMargin = 10 * time.Second
+
+// pooTimeout returns the timeout handed to poo: the harness's deadline
+// less PooTimeoutMargin, and never less than half of it.
+func (r *Runner) pooTimeout(t Task) time.Duration {
+	full := r.timeout(t)
+	return max(full-PooTimeoutMargin, full/2)
+}
+
 // checkout prepares the workdir for a run.
 //
 // A git repo is cloned at its pinned sha. The directory is the one the
@@ -664,10 +675,10 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 		"--max-turns", strconv.Itoa(r.opts.MaxTurns),
 		"--log", logPath,
 		"--working-dir", workdir,
-		// poo is given the run's own deadline, so it can settle by
-		// itself and write its settle record rather than being killed
-		// mid-write.
-		"--timeout", r.timeout(j.task).String(),
+		// poo is given a deadline shorter than the harness's by a
+		// margin, so it settles and writes its settle record before
+		// the group kill rather than being killed mid-write.
+		"--timeout", r.pooTimeout(j.task).String(),
 	}
 	if j.model.APIKeyEnv != "" {
 		args = append(args, "--api-key-env", j.model.APIKeyEnv)

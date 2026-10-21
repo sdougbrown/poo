@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakePoo writes a shell script that stands in for the poo binary.
@@ -359,5 +360,21 @@ func TestTheReplayNeedsARecordedConversation(t *testing.T) {
 	}
 	if _, err := Replay(path, ReplayOptions{Context: context.Background()}); err == nil {
 		t.Fatal("the replay was accepted, want an error")
+	}
+}
+
+func TestPooIsGivenATimeoutShorterThanTheHarnessDeadline(t *testing.T) {
+	r := NewRunner(RunOptions{})
+	for _, tc := range []struct {
+		timeoutS int
+		want     time.Duration
+	}{
+		{600, 590 * time.Second},
+		{12, 6 * time.Second},
+		{1, 500 * time.Millisecond},
+	} {
+		if got := r.pooTimeout(Task{TimeoutS: tc.timeoutS}); got != tc.want {
+			t.Errorf("a %ds task gives poo %s, want %s", tc.timeoutS, got, tc.want)
+		}
 	}
 }
