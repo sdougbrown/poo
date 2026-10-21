@@ -148,6 +148,15 @@ type runState struct {
 	// workDone is signalled when a pending call gets its result.
 	workDone chan struct{}
 
+	// delivering are the inputs taken from the queues whose delivery
+	// records are still being written, in delivery order. The
+	// finalization waits for them, and reports the ones it abandons.
+	delivering []queuedInput
+	// abandonedInputs are taken inputs whose delivery was abandoned
+	// because the run settled; the finalization reports them as
+	// undelivered.
+	abandonedInputs []queuedInput
+
 	// candidates are the settle candidates the run has collected.
 	candidates []candidate
 	// finalizing reports that the finalization is under way.

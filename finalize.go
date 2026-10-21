@@ -78,6 +78,10 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// result; the work that is still running is abandoned.
 	s.waitForWork(run)
 
+	// A delivery the finalization abandoned during the wait never
+	// reached the model, so it is reported with the queued inputs.
+	undelivered = append(undelivered, s.collectAbandonedDeliveries(run)...)
+
 	// Steps 4 and 5: every call that was issued but has no result
 	// gets a synthetic one, and every pending ask resolves as
 	// cancelled.
@@ -226,6 +230,24 @@ func (s *Session) collectUndelivered(run *runState) []UndeliveredInput {
 	return out
 }
 
+// collectAbandonedDeliveries takes the inputs whose delivery was in
+// flight when the finalization abandoned it.
+func (s *Session) collectAbandonedDeliveries(run *runState) []UndeliveredInput {
+	s.mu.Lock()
+	pending := run.abandonedInputs
+	run.abandonedInputs = nil
+	s.mu.Unlock()
+
+	if len(pending) == 0 {
+		return nil
+	}
+	out := make([]UndeliveredInput, 0, len(pending))
+	for _, input := range pending {
+		out = append(out, UndeliveredInput{InputID: input.id, Mode: string(input.mode)})
+	}
+	return out
+}
+
 // dropUndelivered records the inputs that never reached the model.
 //
 // The drop events are emitted even if the store write fails, so the
@@ -297,7 +319,7 @@ func (s *Session) waitForWork(run *runState) {
 	deadline := time.After(recordWriteBudget)
 	for {
 		s.mu.Lock()
-		pending := len(run.pendingCalls) + run.resultWrites
+		pending := len(run.pendingCalls) + run.resultWrites + len(run.delivering)
 		done := run.workDone
 		s.mu.Unlock()
 		if pending == 0 {

@@ -558,17 +558,22 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 	delivered := false
 	for {
 		s.mu.Lock()
-		if len(s.steerQueue) == 0 {
+		if run.committed || run.finalizing || len(s.steerQueue) == 0 {
 			s.mu.Unlock()
 			break
 		}
 		input := s.steerQueue[0]
 		s.steerQueue = s.steerQueue[1:]
+		// The input is taken under the same lock as the queue, so the
+		// finalization can see that it is in flight and report it if
+		// the delivery is abandoned.
+		run.delivering = append(run.delivering, input)
 		s.mu.Unlock()
 		ok := s.deliverInput(run, input)
 		delivered = true
 		if !ok {
-			// The store refused a delivery's record. The inputs still
+			// The store refused a delivery's record, or the run settled
+			// while the delivery was in flight. The inputs still
 			// queued stay there, so the finalization reports them
 			// instead of losing them.
 			return delivered
@@ -579,12 +584,13 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 	}
 	for {
 		s.mu.Lock()
-		if len(s.followUpQueue) == 0 {
+		if run.committed || run.finalizing || len(s.followUpQueue) == 0 {
 			s.mu.Unlock()
 			break
 		}
 		input := s.followUpQueue[0]
 		s.followUpQueue = s.followUpQueue[1:]
+		run.delivering = append(run.delivering, input)
 		s.mu.Unlock()
 		ok := s.deliverInput(run, input)
 		delivered = true
@@ -602,27 +608,39 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 // a reference accepted while the reply was still streaming is resolved
 // once the stream has been finalized.
 func (s *Session) deliverInput(run *runState, input queuedInput) bool {
+	s.mu.Lock()
+	if run.committed || run.finalizing {
+		s.abandonDeliveryLocked(run, input)
+		s.mu.Unlock()
+		return false
+	}
+	s.mu.Unlock()
+
 	note := s.renderForDelivery(input.note)
 	msg := NewTextMessage(RoleUser, withDeliveryNote(input.text, note))
 	msg.Origin = originForMode(input.mode)
 	msg.DeliveryNote = note
-	s.appendMessages(msg)
-	// A record the store refuses is a store_error candidate: the input
-	// is in the model's view, and the run does not go on to ask the
-	// model about a log that cannot hold it. The drain stops there, so
-	// the rest of the queue is reported rather than delivered into a
-	// log that cannot hold it.
-	if err := s.write(run.ctx, &MessageRecord{
+
+	// The records come before the history append: a delivery that the
+	// finalization abandons must not mutate the view. A record the
+	// store refuses is a store_error candidate, and the drain stops
+	// there.
+	if err := s.writeDelivery(run.ctx, run, &MessageRecord{
 		RecordMeta:   NewRecordMetaFrom("message", msg.Origin),
 		RunID:        run.id,
 		Role:         msg.Role,
 		Content:      msg.Content,
 		DeliveryNote: note,
 	}); err != nil {
-		s.addCandidate(run, storeErrorCandidate(err))
+		if errors.Is(err, errDeliveryAbandoned) {
+			s.abandonDelivery(run, input)
+		} else {
+			s.finishDelivery(run, input)
+			s.addCandidate(run, storeErrorCandidate(err))
+		}
 		return false
 	}
-	if err := s.write(run.ctx, &InputDelivered{
+	if err := s.writeDelivery(run.ctx, run, &InputDelivered{
 		RecordMeta:  NewRecordMeta("input.delivered"),
 		SessionID:   s.opts.SessionID,
 		RunID:       run.id,
@@ -630,15 +648,113 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 		Mode:        input.mode,
 		DeliveredAt: nowRFC3339(),
 	}); err != nil {
-		s.addCandidate(run, storeErrorCandidate(err))
+		if errors.Is(err, errDeliveryAbandoned) {
+			s.abandonDelivery(run, input)
+		} else {
+			s.finishDelivery(run, input)
+			s.addCandidate(run, storeErrorCandidate(err))
+		}
 		return false
 	}
+	s.appendMessages(msg)
+	s.finishDelivery(run, input)
 	s.events.emit(EventInputDelivered, map[string]any{
 		"run_id":   run.id,
 		"input_id": input.id,
 		"mode":     string(input.mode),
 	})
 	return true
+}
+
+// errDeliveryAbandoned reports that a delivery write was abandoned
+// because the run settled before the write finished.
+var errDeliveryAbandoned = errors.New("poo: the delivery was abandoned")
+
+// writeDelivery writes a record for an input's delivery.
+//
+// Unlike write, a cancellation from the run's finalization abandons the
+// write instead of breaking the session: the delivery is in-flight work
+// that finalization step 3 may abandon.
+func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) error {
+	if s.opts.Sink == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.sunk {
+		s.mu.Unlock()
+		return errors.New("poo: the session store is broken")
+	}
+	abandoned := run.committed || run.finalizing || ctx.Err() != nil
+	s.mu.Unlock()
+	if abandoned {
+		return errDeliveryAbandoned
+	}
+	wctx, cancel := context.WithTimeout(ctx, recordWriteBudget)
+	defer cancel()
+	if err := s.opts.Sink.Append(wctx, rec); err != nil {
+		s.mu.Lock()
+		abandoned := run.committed || run.finalizing || ctx.Err() != nil
+		if !abandoned {
+			s.sunk = true
+			s.broken = true
+		}
+		s.mu.Unlock()
+		if abandoned {
+			return errDeliveryAbandoned
+		}
+		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
+	}
+	return nil
+}
+
+// finishDelivery releases a delivered input's in-flight claim.
+func (s *Session) finishDelivery(run *runState, input queuedInput) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range run.delivering {
+		if run.delivering[i].id == input.id {
+			run.delivering = append(run.delivering[:i], run.delivering[i+1:]...)
+			break
+		}
+	}
+	s.signalWorkLocked(run)
+}
+
+// abandonDelivery moves an in-flight delivery to the inputs the
+// finalization reports as dropped.
+func (s *Session) abandonDelivery(run *runState, input queuedInput) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.abandonDeliveryLocked(run, input)
+}
+
+// abandonDeliveryLocked moves an in-flight delivery to the inputs the
+// finalization reports as dropped.
+//
+// The caller holds the session's lock.
+func (s *Session) abandonDeliveryLocked(run *runState, input queuedInput) {
+	for i := range run.delivering {
+		if run.delivering[i].id == input.id {
+			run.delivering = append(run.delivering[:i], run.delivering[i+1:]...)
+			run.abandonedInputs = append(run.abandonedInputs, input)
+			s.signalWorkLocked(run)
+			return
+		}
+	}
+}
+
+// signalWorkLocked wakes the finalization, which waits for in-flight
+// work.
+//
+// The caller holds the session's lock.
+func (s *Session) signalWorkLocked(run *runState) {
+	if run.workDone == nil {
+		return
+	}
+	select {
+	case run.workDone <- struct{}{}:
+	default:
+	}
 }
 
 // storeErrorCandidate is the settle candidate for a record the store
