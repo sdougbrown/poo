@@ -100,6 +100,16 @@ func (s *Session) recordPartial(run *runState, turn int, resp *response) {
 		return
 	}
 	content := append([]ContentBlock(nil), resp.content...)
+	// The calls the model had asked for belong to the message, so the
+	// skipped results that follow have a call to answer.
+	for _, call := range resp.calls {
+		content = append(content, ContentBlock{
+			Kind:       ContentToolCall,
+			ToolCallID: call.ID,
+			Name:       call.Name,
+			Arguments:  recordArgs(call.Arguments),
+		})
+	}
 	if len(content) == 0 {
 		return
 	}

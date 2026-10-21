@@ -967,6 +967,26 @@ func TestThePartialMessageKeepsTheToolCallsVisible(t *testing.T) {
 	if skipped.Text != poo.SkippedInterruptedText {
 		t.Errorf("the result's text is %q, want the visible note", skipped.Text)
 	}
+	// The partial assistant message declares the call, so the skipped
+	// result has a call to answer.
+	var partial *poo.MessageRecord
+	for _, m := range sink.messages() {
+		if m.Partial {
+			partial = m
+		}
+	}
+	if partial == nil {
+		t.Fatal("the log holds no partial message")
+	}
+	calls := 0
+	for _, b := range partial.Content {
+		if b.Kind == poo.ContentToolCall {
+			calls++
+		}
+	}
+	if calls != 1 {
+		t.Errorf("the partial assistant message holds %d tool calls, want 1", calls)
+	}
 }
 
 // partialTransport answers with a response that carries text and a tool
