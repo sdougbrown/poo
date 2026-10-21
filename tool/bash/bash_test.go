@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -80,10 +81,15 @@ func TestATimeoutReturnsPartialOutputWithTimedOut(t *testing.T) {
 	dir := t.TempDir()
 	tool := &bash.Tool{Timeout: 300 * time.Millisecond}
 
+	// A timed-out call is a recoverable error: the model has to see that
+	// it failed, with the partial output it produced before the kill.
 	res := call(t, tool, "echo before-the-sleep; sleep 30; echo after-the-sleep", poo.ToolEnv{
 		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
 		Env:        os.Environ(),
 	})
+	if !res.IsError {
+		t.Errorf("the timed-out call is not an error: %s", res.Text)
+	}
 
 	obs := structured(t, res)
 	timedOut, _ := obs["timed_out"].(bool)
@@ -122,7 +128,7 @@ func TestABackgroundJobDoesNotSurviveTheCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the pid: %v", err)
 	}
-	pid := strings.TrimSpace(string(raw))
+	pid := atoi(t, strings.TrimSpace(string(raw)))
 
 	// The call kills the group, so give it a moment to take effect.
 	deadline := time.Now().Add(3 * time.Second)
@@ -132,12 +138,87 @@ func TestABackgroundJobDoesNotSurviveTheCall(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Errorf("the background process %s survived the call", pid)
+	t.Errorf("the background process %d survived the call", pid)
+}
+
+// TestATermIgnoringBackgroundJobDoesNotSurviveTheCall covers the
+// escalation: a background job that ignores SIGTERM (trap ” TERM) is
+// still gone when the call returns, because the teardown SIGKILLs the
+// group once the grace period is up.
+func TestATermIgnoringBackgroundJobDoesNotSurviveTheCall(t *testing.T) {
+	dir := t.TempDir()
+	tool := &bash.Tool{Timeout: 300 * time.Millisecond}
+
+	res := call(t, tool, "trap '' TERM; sleep 300 & echo $! > pid.txt; echo started", poo.ToolEnv{
+		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+		Env:        os.Environ(),
+	})
+	obs := structured(t, res)
+	if output, _ := obs["output"].(string); !strings.Contains(output, "started") {
+		t.Fatalf("the command did not run: %v", obs)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "pid.txt"))
+	if err != nil {
+		t.Fatalf("reading the pid: %v", err)
+	}
+	pid := atoi(t, strings.TrimSpace(string(raw)))
+
+	// The teardown waits out its grace period before the SIGKILL, so the
+	// process may briefly outlive the call.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !processAlive(pid) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Errorf("the TERM-ignoring background process %d survived the call", pid)
+}
+
+// TestACancelledCallReturnsBeforeItsTimeout covers the context branch:
+// a cancelled call tears the group down and returns long before the
+// tool's own timeout would fire.
+func TestACancelledCallReturnsBeforeItsTimeout(t *testing.T) {
+	dir := t.TempDir()
+	tool := &bash.Tool{Timeout: 30 * time.Second}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	raw, err := json.Marshal(map[string]string{"command": "sleep 30"})
+	if err != nil {
+		t.Fatalf("marshalling args: %v", err)
+	}
+	prepared, err := tool.Prepare(raw, poo.PrepareEnv{WorkingDir: dir})
+	if err != nil {
+		t.Fatalf("preparing: %v", err)
+	}
+
+	start := time.Now()
+	res, err := tool.Call(ctx, prepared, poo.ToolEnv{
+		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+		Env:        os.Environ(),
+	})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("calling: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("the cancelled call took %v, want it well under the 30s timeout", elapsed)
+	}
+	if !res.IsError {
+		t.Errorf("the cancelled call is not an error: %s", res.Text)
+	}
+	obs := structured(t, res)
+	if rc, ok := obs["returncode"]; ok && rc != nil {
+		t.Errorf("returncode is %v, want null for a killed process", rc)
+	}
 }
 
 // processAlive reports whether a pid names a live process.
-func processAlive(pid string) bool {
-	p, err := os.FindProcess(atoi(pid))
+func processAlive(pid int) bool {
+	p, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
@@ -145,14 +226,13 @@ func processAlive(pid string) bool {
 	return p.Signal(syscall.Signal(0)) == nil
 }
 
-// atoi parses a decimal number, returning 0 on failure.
-func atoi(s string) int {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0
-		}
-		n = n*10 + int(c-'0')
+// atoi parses a decimal pid, failing the test when the pid file does not
+// hold one: a silent zero would signal the test's own process group.
+func atoi(t *testing.T, s string) int {
+	t.Helper()
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		t.Fatalf("the pid file holds %q, want a positive decimal pid", s)
 	}
 	return n
 }

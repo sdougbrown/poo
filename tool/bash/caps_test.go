@@ -11,55 +11,36 @@ import (
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
-// TestATimedOutCallIsARecoverableError covers a command that hits its
-// timeout: the model has to see that it failed.
-func TestATimedOutCallIsARecoverableError(t *testing.T) {
-	dir := t.TempDir()
-	tool := &bash.Tool{Timeout: 300 * time.Millisecond}
-
-	res := call(t, tool, "echo before-the-sleep; sleep 30", poo.ToolEnv{
-		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
-		Env:        os.Environ(),
-	})
-	if !res.IsError {
-		t.Errorf("the timed-out call is not an error: %s", res.Text)
-	}
-	obs := structured(t, res)
-	if timedOut, _ := obs["timed_out"].(bool); !timedOut {
-		t.Errorf("timed_out is %v, want true", obs["timed_out"])
-	}
-	// The partial output still comes back.
-	if output, _ := obs["output"].(string); output == "" {
-		t.Error("the timed-out call lost its partial output")
-	}
-}
-
 // TestTheObservationCapCountsCharacters covers a cap in characters, not
 // bytes: a multi-byte rune does not eat three of them.
 func TestTheObservationCapCountsCharacters(t *testing.T) {
 	dir := t.TempDir()
-	tool := &bash.Tool{ObservationCap: 101, Timeout: 5 * time.Second}
+	tool := &bash.Tool{ObservationCap: 99, Timeout: 5 * time.Second}
 
-	// 100 euro signs: 100 characters, 300 bytes.
+	// 100 euro signs: 100 characters, 300 bytes. The cap is 99, so the
+	// output must elide: the head and the tail each hold 49 characters
+	// (half the cap) and the middle holds the other two.
 	res := call(t, tool, "for i in $(seq 1 100); do printf '€'; done", poo.ToolEnv{
 		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
 		Env:        os.Environ(),
 	})
 
 	obs := structured(t, res)
+	// The elision happened: the full output is not in the observation.
+	if _, ok := obs["output"]; ok {
+		t.Errorf("the observation holds the plain output, want the elided form")
+	}
 	head, _ := obs["output_head"].(string)
 	tail, _ := obs["output_tail"].(string)
-	elided, _ := obs["elided_chars"].(float64)
-
-	if got := utf8.RuneCountInString(head); got > 51 {
-		t.Errorf("the head holds %d characters, want at most half the cap", got)
+	if got := utf8.RuneCountInString(head); got != 49 {
+		t.Errorf("the head holds %d characters, want 49", got)
 	}
-	if got := utf8.RuneCountInString(tail); got > 51 {
-		t.Errorf("the tail holds %d characters, want at most half the cap", got)
+	if got := utf8.RuneCountInString(tail); got != 49 {
+		t.Errorf("the tail holds %d characters, want 49", got)
 	}
 	// The elided count is in characters, not bytes.
-	if elided != 100-2*50 {
-		t.Errorf("elided_chars is %v, want %d", elided, 100-2*50)
+	if elided, _ := obs["elided_chars"].(float64); elided != 2 {
+		t.Errorf("elided_chars is %v, want 2", elided)
 	}
 	// Every half is valid UTF-8: a cut never splits a rune.
 	if !utf8.ValidString(head) || !utf8.ValidString(tail) {
