@@ -45,33 +45,30 @@ func TestTheReplayStopsWhenTheRecordingRunsOut(t *testing.T) {
 }
 
 func TestTheReplayUsesTheRecordingsOwnLimits(t *testing.T) {
-	// A recording's own context limit and turn count are the defaults:
-	// the caller may override them, but a replay that does not use them
-	// would run on limits the recording never had.
+	// With no limits named, the replay runs on the recording's own: here
+	// the recording settled after one turn, and holds two calls, so a
+	// replay on the recording's turn count stops after the first call.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 	log := strings.Join([]string{
-		`{"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s","context_limit":1234}`,
-		`{"record":"message","seq":2,"ts":"2026-10-20T00:00:00Z","run_id":"r","turn":1,"origin":"model","role":"assistant","content":[{"kind":"text","text":"done"}]}`,
-		`{"record":"run.settled","seq":3,"ts":"2026-10-20T00:00:00Z","run_id":"r","reason":"end_turn","detail":{"source":"end_turn"},"turns":3}`,
+		`{"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s","context_limit":32768}`,
+		`{"record":"message","seq":2,"ts":"2026-10-20T00:00:00Z","run_id":"r","turn":1,"origin":"model","role":"assistant","content":[{"kind":"tool_call","name":"bash","arguments":{"command":"ls"}}]}`,
+		`{"record":"message","seq":3,"ts":"2026-10-20T00:00:00Z","run_id":"r","turn":2,"origin":"model","role":"assistant","content":[{"kind":"tool_call","name":"bash","arguments":{"command":"pwd"}}]}`,
+		`{"record":"run.settled","seq":4,"ts":"2026-10-20T00:00:00Z","run_id":"r","reason":"max_turns","detail":{"source":"max_turns"},"turns":1}`,
 	}, "\n")
 	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
 		t.Fatalf("writing the log: %v", err)
 	}
 
-	log2, err := ParseLog(path)
+	result, err := Replay(path, ReplayOptions{Context: context.Background()})
 	if err != nil {
-		t.Fatalf("parsing the log: %v", err)
+		t.Fatalf("replaying: %v", err)
 	}
-	if got := log2.ContextLimit(); got != 1234 {
-		t.Errorf("the log's context limit is %d, want 1234", got)
+	if len(result.Recorded) != 2 {
+		t.Fatalf("the recording holds %d calls, want 2", len(result.Recorded))
 	}
-	settle := log2.Settle()
-	if settle == nil {
-		t.Fatal("the log has no settle record")
-	}
-	if settle.Turns != 3 {
-		t.Errorf("the settle record's turns are %d, want 3", settle.Turns)
+	if len(result.Replayed) != 1 {
+		t.Errorf("the replay produced %d calls, want 1 (the recording's turn count): %+v", len(result.Replayed), result.Replayed)
 	}
 }
 
