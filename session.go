@@ -199,6 +199,11 @@ type runState struct {
 	// flight. The finalization waits for them, so no record of the run
 	// follows run.settled.
 	callWrites int
+	// sealed reports that the finalization owns the run's remaining
+	// records. A claim that would write a call record or a call result
+	// checks the seal when it is claimed, so nothing is added for the run
+	// after it.
+	sealed bool
 	// jobStarts counts the job acceptance records whose writes are still
 	// in flight. The finalization waits for them as it does for the
 	// pending calls.
@@ -247,6 +252,13 @@ type issuedCall struct {
 	id string
 	// turn is the turn the call belongs to.
 	turn int
+	// arguments are the model's arguments, kept so the finalization can
+	// write the call's record when the call was claimed before its
+	// record was written.
+	arguments json.RawMessage
+	// recorded reports that the tool.call record is written or owned for
+	// writing.
+	recorded bool
 	// started reports that the tool is running.
 	started bool
 }

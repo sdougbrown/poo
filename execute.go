@@ -347,8 +347,11 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// The call is registered before the blocking record write, so a run
 	// that settles while the write is in flight still has a call for
 	// the finalization to settle. It is not marked started until the
-	// record is written.
-	s.issueCall(run, turn, handle, call.Name, call.ID)
+	// record is written. A call claimed after the finalization has
+	// sealed the run is the finalization's.
+	if !s.issueCall(run, turn, handle, call) {
+		return
+	}
 
 	// The call is recorded before it runs, so a log shows what the
 	// model asked for even when the call never finished. The record
@@ -362,8 +365,13 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if recorded {
 			return true
 		}
+		// The write is claimed against the seal, so a dispatch that was
+		// descheduled until the run settled writes nothing: the
+		// finalization owns the call's record then.
+		if !s.reserveCallRecord(run, handle) {
+			return false
+		}
 		recorded = true
-		s.beginCallWrite(run)
 		defer s.finishCallWrite(run)
 		if err := s.write(run.ctx, &ToolCallRecord{
 			RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
@@ -505,8 +513,11 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	}
 	// The call is marked started only once its tool is about to run, so
 	// the finalization never waits for a call that the winding-down run
-	// will not start.
-	s.markCallStarted(run, handle)
+	// will not start. The claim is made against the seal, so nothing
+	// starts after the commit point.
+	if !s.startCall(run, handle) {
+		return
+	}
 
 	callCtx := s.activityContextFor(run)
 	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
@@ -697,14 +708,6 @@ func (s *Session) finishResultWrite(run *runState) {
 	}
 }
 
-// beginCallWrite marks a tool.call record's write as in-flight work, so
-// the finalization waits for it before it writes run.settled.
-func (s *Session) beginCallWrite(run *runState) {
-	s.mu.Lock()
-	run.callWrites++
-	s.mu.Unlock()
-}
-
 // finishCallWrite marks the end of a tool.call record's write.
 func (s *Session) finishCallWrite(run *runState) {
 	s.mu.Lock()
@@ -776,33 +779,71 @@ func (s *Session) rememberResult(run *runState, turn int, handle, tool string, o
 	}
 }
 
-// issueCall records that a call is running, so the finalization can
-// give it a synthetic result if it never finishes.
-func (s *Session) issueCall(run *runState, turn int, handle, tool, callID string) {
+// issueCall records that a call is issued, so the finalization can give
+// it a record and a synthetic result if it never finishes.
+//
+// The claim is made against the seal: it reports false when the run is
+// sealed, because the finalization owns every call that would be added
+// after it.
+func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCall) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if run.sealed || run.settledCalls[handle] {
+		return false
+	}
 	if run.pendingCalls == nil {
 		run.pendingCalls = map[string]*issuedCall{}
 	}
 	run.pendingCalls[handle] = &issuedCall{
-		handle: handle,
-		tool:   tool,
-		id:     callID,
-		turn:   turn,
+		handle:    handle,
+		tool:      call.Name,
+		id:        call.ID,
+		turn:      turn,
+		arguments: call.Arguments,
 	}
 	if run.workDone == nil {
 		run.workDone = make(chan struct{}, 1)
 	}
+	return true
 }
 
-// markCallStarted reports that a registered call's tool is running, so
-// the finalization knows it may have an effect to abandon.
-func (s *Session) markCallStarted(run *runState, handle string) {
+// reserveCallRecord claims a call's tool.call record as in-flight work, so
+// the finalization waits for it before it writes run.settled.
+//
+// The claim is made against the seal: it reports false when the run is
+// sealed, and the finalization writes the record instead.
+func (s *Session) reserveCallRecord(run *runState, handle string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if call, ok := run.pendingCalls[handle]; ok {
-		call.started = true
+	if run.sealed {
+		return false
 	}
+	call, ok := run.pendingCalls[handle]
+	if !ok || call.recorded {
+		return false
+	}
+	call.recorded = true
+	run.callWrites++
+	return true
+}
+
+// startCall claims that a registered call's tool is about to run, so the
+// finalization knows it may have an effect to abandon.
+//
+// The claim is made against the seal: it reports false when the run is
+// sealed, so nothing starts after the commit point.
+func (s *Session) startCall(run *runState, handle string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run.sealed {
+		return false
+	}
+	call, ok := run.pendingCalls[handle]
+	if !ok {
+		return false
+	}
+	call.started = true
+	return true
 }
 
 // claimResult claims a call's result.
@@ -819,6 +860,10 @@ func (s *Session) markCallStarted(run *runState, handle string) {
 func (s *Session) claimResult(run *runState, handle string) (won, tracked bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if run.sealed {
+		// The finalization owns every result that is still outstanding.
+		return false, false
+	}
 	_, pending := run.pendingCalls[handle]
 	delete(run.pendingCalls, handle)
 	if run.settledCalls == nil {

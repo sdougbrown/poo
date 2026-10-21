@@ -82,10 +82,16 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// reached the model, so it is reported with the queued inputs.
 	undelivered = append(undelivered, s.collectAbandonedDeliveries(run)...)
 
+	// The seal: the finalization takes ownership of every claim that is
+	// still outstanding. The calls it takes get their record and their
+	// terminal result, and no other goroutine adds one for the run after
+	// this point.
+	issued := s.sealRun(run)
+
 	// Steps 4 and 5: every call that was issued but has no result
 	// gets a synthetic one, and every pending ask resolves as
 	// cancelled.
-	s.settleIssuedCalls(run)
+	s.settleIssuedCalls(run, issued)
 
 	// The seam the race is tested at: the input check has passed, and
 	// the outcome is not fixed yet.
@@ -394,17 +400,20 @@ func (s *Session) waitForWork(run *runState) {
 	}
 }
 
-// settleIssuedCalls gives every call that was issued but has no result
-// a synthetic one.
+// sealRun seals the run and takes ownership of the calls that were
+// claimed but not finished.
 //
-// A call that was cancelled or abandoned is `cancelled`; a call that
-// never started is `skipped`. Either way the history stays valid for
-// the next run.
-func (s *Session) settleIssuedCalls(run *runState) {
+// The seal and the claims are one step under the lock, so a call that is
+// claimed afterwards is refused instead of slipping past the commit
+// point. The returned calls are the finalization's to settle: each one
+// gets the record its caller had not written and its terminal result.
+func (s *Session) sealRun(run *runState) []*issuedCall {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.sealed = true
 	issued := make([]*issuedCall, 0, len(run.pendingCalls))
-	for _, c := range run.pendingCalls {
-		issued = append(issued, c)
+	for _, call := range run.pendingCalls {
+		issued = append(issued, call)
 	}
 	run.pendingCalls = map[string]*issuedCall{}
 	if run.settledCalls == nil {
@@ -413,13 +422,38 @@ func (s *Session) settleIssuedCalls(run *runState) {
 	// The calls are marked as settled before their records are
 	// written, so a call that finished at the same moment does not get
 	// a second result.
-	for _, c := range issued {
-		run.settledCalls[c.handle] = true
+	for _, call := range issued {
+		run.settledCalls[call.handle] = true
 	}
-	s.mu.Unlock()
+	return issued
+}
 
+// settleIssuedCalls gives every call that was issued but has no result
+// a synthetic one.
+//
+// A call that was cancelled or abandoned is `cancelled`; a call that
+// never started is `skipped`. A call that was claimed before its
+// tool.call record was written gets that record first, so every call
+// keeps the order tool.call, tool.result, run.settled. Either way the
+// history stays valid for the next run.
+func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 	sort.Slice(issued, func(i, j int) bool { return issued[i].handle < issued[j].handle })
 	for _, call := range issued {
+		if !call.recorded {
+			// The call was claimed before its record was written, so the
+			// finalization writes it. The call never fixed a mode: it
+			// never ran.
+			if err := s.write(run.ctx, &ToolCallRecord{
+				RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
+				RunID:      run.id,
+				Turn:       call.turn,
+				Handle:     call.handle,
+				Tool:       call.tool,
+				Arguments:  recordArgs(call.arguments),
+			}); err != nil {
+				s.addCandidate(run, storeErrorCandidate(err))
+			}
+		}
 		outcome := OutcomeSkipped
 		text := SkippedSettlingText
 		if call.started {

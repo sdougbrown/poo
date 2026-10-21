@@ -147,21 +147,15 @@ func (s *Session) skipInterruptedCalls(run *runState, turn int, calls []ToolCall
 // skipCalls records the calls of a batch that never started, with the
 // visible result text given.
 //
-// A call that already has a result, or that is running, is left alone.
+// A call that already has a result, or that is running, is left alone. A
+// call claimed after the finalization has sealed the run is left to the
+// finalization, which writes its record and its result in the plan's
+// order.
 func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text string) {
 	handles := s.handlesOf(turn, len(calls))
 	for i, call := range calls {
 		handle := handles[i]
-		s.mu.Lock()
-		_, issued := run.pendingCalls[handle]
-		summary := s.turnSummaryLocked(turn, handle)
-		s.mu.Unlock()
-		if issued {
-			// The call is running or already has a result.
-			continue
-		}
-		if summary.Outcome != "" {
-			// The call already has an outcome.
+		if !s.claimSkippedCall(run, turn, handle, call) {
 			continue
 		}
 		_ = s.write(run.ctx, &ToolCallRecord{
@@ -172,11 +166,46 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 			Tool:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
 		})
+		s.finishCallWrite(run)
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, OutcomeSkipped)
 	}
+}
+
+// claimSkippedCall registers a call that never started and claims its
+// tool.call record, which is in-flight work.
+//
+// The claim is made against the seal: it reports false when the call
+// already has an owner or the run is sealed.
+func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call ToolCall) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run.sealed {
+		return false
+	}
+	if _, issued := run.pendingCalls[handle]; issued {
+		// The call is running or already has a result.
+		return false
+	}
+	if run.settledCalls[handle] || s.turnSummaryLocked(turn, handle).Outcome != "" {
+		// The call already has an outcome.
+		return false
+	}
+	run.pendingCalls[handle] = &issuedCall{
+		handle:    handle,
+		tool:      call.Name,
+		id:        call.ID,
+		turn:      turn,
+		arguments: call.Arguments,
+		recorded:  true,
+	}
+	if run.workDone == nil {
+		run.workDone = make(chan struct{}, 1)
+	}
+	run.callWrites++
+	return true
 }
 
 // handlesOf returns the handles of a turn's calls.
