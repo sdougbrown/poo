@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,4 +167,43 @@ func (s *failingUsageSink) count(name string) int {
 		}
 	}
 	return n
+}
+
+// flushFailingSink takes every record and fails the flush.
+type flushFailingSink struct {
+	records []poo.Record
+}
+
+func (s *flushFailingSink) Append(ctx context.Context, rec poo.Record) error {
+	s.records = append(s.records, rec)
+	return nil
+}
+
+func (s *flushFailingSink) Flush(ctx context.Context) error {
+	return errors.New("the disk is full")
+}
+
+// TestAFailingFlushAfterTheSettleIsReported covers a sink that cannot
+// flush: the run reports the error, and the settle record was already
+// handed to the sink.
+func TestAFailingFlushAfterTheSettleIsReported(t *testing.T) {
+	tr := &fakeTransport{responses: []fakeResponse{{
+		text:  "all done",
+		usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 2},
+	}}}
+	sink := &flushFailingSink{}
+
+	_, err := poo.NewRun(testOptions(t, tr, &echoTool{result: "echoed"}, sink)).Execute(context.Background(), "do the thing")
+	if err == nil || !strings.Contains(err.Error(), "the disk is full") {
+		t.Fatalf("the run returned %v, want the flush error", err)
+	}
+	settled := 0
+	for _, rec := range sink.records {
+		if rec.Meta().Record == "run.settled" {
+			settled++
+		}
+	}
+	if settled != 1 {
+		t.Errorf("the sink holds %d run.settled records, want 1", settled)
+	}
 }
