@@ -399,17 +399,12 @@ func runJudge(args []string) int {
 // directory that already holds a run's output is refused, and the
 // default name never is one.
 func defaultRunName(root string) string {
-	sha := gitSHA(root)
+	sha := eval.GitSHA(root)
 	stamp := time.Now().UTC().Format("2006-01-02-150405")
 	if sha == "" {
 		return stamp
 	}
 	return stamp + "-" + sha
-}
-
-// gitSHA returns the repository's short commit, or the empty string.
-func gitSHA(root string) string {
-	return eval.GitSHA(root)
 }
 
 // pooBinaryPath returns the poo binary the harness runs.
