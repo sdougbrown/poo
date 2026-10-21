@@ -81,3 +81,73 @@ func TestALaterRunStartsFromTheSnapshotNotTheEditedSource(t *testing.T) {
 		t.Errorf("the runs started from %q, want both from the original content", got)
 	}
 }
+
+func TestARunThatEditsTheSnapshotIsInvalid(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	out := t.TempDir()
+	// The snapshot sits beside the workdirs, under the invocation's work root.
+	poisoner := fakePoo(t, `while [ "$#" -gt 0 ]; do case "$1" in --working-dir) d="$2"; shift 2 ;; *) shift ;; esac; done
+s="$d"
+while [ ! -d "$s/fixtures/fix-a" ]; do s=$(dirname "$s"); done
+echo poisoned >> "$s/fixtures/fix-a/a.txt"
+echo fixed > "$d/a.txt"
+`)
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     2,
+		Parallel:  1,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: poisoner,
+	})
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	for _, got := range report.Results {
+		if !got.SourceChanged || got.Success {
+			t.Errorf("seed %d edited the snapshot and was not flagged: %+v", got.Seed, got)
+		}
+	}
+}
+
+func TestAReportOfARunThatEditedItsSourceHoldsNoAbsolutePaths(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	out := t.TempDir()
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: editingPoo(t, filepath.Join(t.TempDir(), "rec"), filepath.Join(fixtureRoot, "fix-a", "a.txt")),
+	})
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	if !strings.Contains(report.Results[0].Error, "fixtures/fix-a") {
+		t.Errorf("error = %q, want it to name fixtures/fix-a", report.Results[0].Error)
+	}
+	if err := WriteReport(out, report); err != nil {
+		t.Fatalf("writing the report: %v", err)
+	}
+	for _, name := range []string{"report.json", "report.md", "summary.json"} {
+		data, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		for _, root := range []string{filepath.Dir(fixtureRoot), out} {
+			if strings.Contains(string(data), root) {
+				t.Errorf("%s holds the absolute path %s", name, root)
+			}
+		}
+	}
+}

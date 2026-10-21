@@ -50,6 +50,9 @@ func newSourceGuard(tasks []Task, taskRoot, root string) (*sourceGuard, error) {
 		if err := copyTree(src, dst); err != nil {
 			return nil, fmt.Errorf("eval: snapshotting fixture %s: %w", src, err)
 		}
+		if err := g.record(dst); err != nil {
+			return nil, err
+		}
 		g.snapshots[src] = dst
 	}
 	return g, nil
@@ -80,21 +83,38 @@ func (g *sourceGuard) snapshot(t Task, taskRoot string) (string, error) {
 	return dst, nil
 }
 
-// changed returns the source directories of a task whose content differs
-// from what the invocation started with.
+// changed returns the directories of a task whose content differs from
+// what the invocation started with: the task directory, the fixture and
+// the fixture's snapshot. The names are relative to the task set's root,
+// so they hold no machine's paths.
 func (g *sourceGuard) changed(t Task, taskRoot string) []string {
-	dirs := []string{t.Dir}
+	type dir struct{ path, name string }
+	setRoot := filepath.Dir(taskRoot)
+	name := func(d string) string {
+		if rel, err := filepath.Rel(setRoot, d); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+		return filepath.Base(d)
+	}
+	var dirs []dir
+	if t.Dir != "" {
+		dirs = append(dirs, dir{t.Dir, name(t.Dir)})
+	}
 	if src, err := t.FixtureDir(taskRoot); err == nil {
-		dirs = append(dirs, filepath.Clean(src))
+		src = filepath.Clean(src)
+		dirs = append(dirs, dir{src, name(src)})
+		if snap, ok := g.snapshots[src]; ok {
+			dirs = append(dirs, dir{snap, "the snapshot of " + name(src)})
+		}
 	}
 	var out []string
 	for _, d := range dirs {
-		want, ok := g.hashes[d]
+		want, ok := g.hashes[d.path]
 		if !ok {
 			continue
 		}
-		if got, err := hashTree(d); err != nil || got != want {
-			out = append(out, d)
+		if got, err := hashTree(d.path); err != nil || got != want {
+			out = append(out, d.name)
 		}
 	}
 	return out
