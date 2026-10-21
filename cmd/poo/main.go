@@ -1,0 +1,311 @@
+// Command poo runs a poo session.
+//
+// The skeleton ships one command: `poo run`, which takes a prompt, talks to
+// an OpenAI-compatible endpoint, and settles with a reason. The exit code
+// says why the run ended.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"net/url"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/openai"
+	"github.com/sdougbrown/poo/session"
+	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/tool/read"
+)
+
+const usage = `poo runs a session against an OpenAI-compatible endpoint.
+
+Usage:
+  poo run --base-url <url> --model-id <id> --context-limit <n> [flags] "prompt"
+
+Run flags:
+  --base-url <url>       The endpoint's base URL, e.g. http://localhost:4000/v1
+  --model-id <id>        The model identifier
+  --context-limit <n>    The model's context window in tokens (required)
+  --api-key-env <var>    The environment variable holding the API key
+  --tools-mode <mode>    native (default), text or auto
+  --reasoning-effort <e> reasoning_effort to send (e.g. low), for models that think only when asked
+  --max-turns <n>        The turn ceiling; 0 means unlimited
+  --max-output <n>       The model's output-token ceiling
+  --log <path>           The session log path
+  --working-dir <dir>    The directory the tools work in (default: the current one)
+  --timeout <dur>        The wall-clock ceiling for the run, e.g. 5m
+`
+
+func main() {
+	os.Exit(run(os.Args[1:]))
+}
+
+// run dispatches the command and returns the process exit code.
+func run(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, usage)
+		return 2
+	}
+	switch args[0] {
+	case "run":
+		return runRun(args[1:])
+	case "-h", "--help", "help":
+		fmt.Print(usage)
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "poo: unknown command %q\n\n%s", args[0], usage)
+		return 2
+	}
+}
+
+// runOptions are the flags of `poo run`.
+type runOptions struct {
+	baseURL      string
+	modelID      string
+	contextLimit int
+	apiKeyEnv    string
+	toolsMode    string
+	maxTurns     int
+	maxOutput    int
+	// reasoningEffort is sent as the request's reasoning_effort when set.
+	reasoningEffort string
+	logPath         string
+	workingDir      string
+	timeout         time.Duration
+}
+
+// runRun executes `poo run`.
+func runRun(args []string) int {
+	fs := flag.NewFlagSet("poo run", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+
+	var o runOptions
+	fs.StringVar(&o.baseURL, "base-url", "", "The endpoint's base URL")
+	fs.StringVar(&o.modelID, "model-id", "", "The model identifier")
+	fs.IntVar(&o.contextLimit, "context-limit", 0, "The model's context window in tokens")
+	fs.StringVar(&o.apiKeyEnv, "api-key-env", "", "The environment variable holding the API key")
+	fs.StringVar(&o.toolsMode, "tools-mode", "native", "native, text or auto")
+	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn ceiling")
+	fs.IntVar(&o.maxOutput, "max-output", 0, "The model's output-token ceiling")
+	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "The reasoning_effort to send, for models that think only when asked")
+	fs.StringVar(&o.logPath, "log", "", "The session log path")
+	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
+	fs.DurationVar(&o.timeout, "timeout", 0, "The wall-clock ceiling for the run")
+
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if err := o.validate(fs.Args()); err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 2
+	}
+
+	workDir := o.workingDir
+	if workDir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+			return 1
+		}
+		workDir = wd
+	}
+	absWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
+	// The working directory has to exist: a typo would otherwise create
+	// an empty directory and run the task in it.
+	info, err := os.Stat(absWorkDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: --working-dir %s: %v\n", absWorkDir, err)
+		return 2
+	}
+	if !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "poo run: --working-dir %s is not a directory\n", absWorkDir)
+		return 2
+	}
+
+	logPath := o.logPath
+	if logPath == "" {
+		logPath = defaultLogPath(absWorkDir)
+	} else if !filepath.IsAbs(logPath) {
+		logPath = filepath.Join(absWorkDir, logPath)
+	}
+
+	apiKey := ""
+	if o.apiKeyEnv != "" {
+		apiKey = os.Getenv(o.apiKeyEnv)
+	}
+
+	// The child environment drops the API key variable, so a command the
+	// model runs cannot read the credential.
+	scrub := []string{}
+	if o.apiKeyEnv != "" {
+		scrub = append(scrub, o.apiKeyEnv)
+	}
+	childEnv := bash.ChildEnv(os.Environ(), scrub)
+
+	log, err := session.Open(logPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 2
+	}
+	defer log.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if o.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.timeout)
+		defer cancel()
+	}
+
+	transport := openai.New(openai.Config{
+		BaseURL:         o.baseURL,
+		Model:           o.modelID,
+		APIKey:          apiKey,
+		ToolsMode:       o.toolsMode,
+		ReasoningEffort: o.reasoningEffort,
+	})
+
+	bashTool := bash.New()
+	readTool := read.New()
+
+	tools := map[string]poo.Tool{
+		"bash": bashTool,
+		"read": readTool,
+	}
+	toolOrder := []string{"bash", "read"}
+	toolSpecs := make([]poo.ToolSpec, 0, len(toolOrder))
+	for _, name := range toolOrder {
+		toolSpecs = append(toolSpecs, tools[name].Spec())
+	}
+
+	settings := poo.ToolSettings{
+		BashTimeoutSeconds:  120,
+		ObservationCapChars: bash.ObservationCap(o.contextLimit),
+		ReadOutputCapChars:  read.OutputCap(o.contextLimit),
+	}
+
+	sessionID := newSessionID()
+	runID := newSessionID()
+
+	if err := log.Append(ctx, &poo.SessionCreated{
+		RecordMeta: poo.NewRecordMeta("session.created"),
+		Format:     poo.FormatVersion,
+		SessionID:  sessionID,
+		Mode:       "logged",
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		WorkingDir: absWorkDir,
+		Model:      poo.SessionModel{ID: o.modelID, BaseURL: loggedBaseURL(o.baseURL), MaxOutput: o.maxOutput},
+		Tools: []poo.SessionTool{
+			{Name: "bash", Class: poo.ClassSideEffecting},
+			{Name: "read", Class: poo.ClassReadOnly},
+		},
+		ContextLimit: o.contextLimit,
+		ToolsMode:    o.toolsMode,
+
+		ReasoningEffort: o.reasoningEffort,
+		Build:           poo.BuildInfo{Name: "poo", Version: version},
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
+
+	r := poo.NewRun(poo.Options{
+		Transport: transport,
+		Tools:     tools,
+		ToolOrder: toolOrder,
+		Sink:      log,
+		SessionID: sessionID,
+		RunID:     runID,
+		ModelID:   o.modelID,
+
+		ContextLimit: o.contextLimit,
+		MaxOutput:    o.maxOutput,
+		MaxTurns:     o.maxTurns,
+		SystemPrompt: systemPrompt(o.modelID, toolSpecs, o.toolsMode),
+		WorkingDir:   absWorkDir,
+		Env:          childEnv,
+		Settings:     settings,
+		ToolsMode:    o.toolsMode,
+
+		ReasoningEffort: o.reasoningEffort,
+	})
+
+	res, err := r.Execute(ctx, strings.Join(fs.Args(), " "))
+	if err != nil {
+		// The core owns the settle record, so an error here means the
+		// run never settled and the log has no run.settled.
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(os.Stderr, "poo: settled %s after %d turn(s); log: %s\n", res.Reason, res.Turns, logPath)
+	return poo.ExitCode(res.Reason)
+}
+
+// loggedBaseURL returns the base URL the log records.
+//
+// A URL may carry credentials, and the log is a file a consumer reads, so
+// the userinfo is stripped before it is written.
+func loggedBaseURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
+}
+
+// validate checks the flags and the prompt.
+func (o *runOptions) validate(rest []string) error {
+	switch {
+	case o.baseURL == "":
+		return errors.New("--base-url is required")
+	case o.modelID == "":
+		return errors.New("--model-id is required")
+	case o.contextLimit <= 0:
+		return errors.New("--context-limit is required and must be positive")
+	}
+	switch o.toolsMode {
+	case "native", "text", "auto":
+	default:
+		return fmt.Errorf("--tools-mode must be native, text or auto, not %q", o.toolsMode)
+	}
+	if o.maxTurns < 0 {
+		return errors.New("--max-turns must not be negative")
+	}
+	if o.maxOutput < 0 {
+		return errors.New("--max-output must not be negative")
+	}
+	if len(rest) == 0 {
+		return errors.New("a prompt is required")
+	}
+	return nil
+}
+
+// defaultLogPath returns the log path a run uses when none is given.
+//
+// The name carries a timestamp, so two runs in one directory do not
+// collide.
+func defaultLogPath(dir string) string {
+	return session.DefaultPath(dir, time.Now())
+}
+
+// version is the build's version.
+const version = "0.1.0"

@@ -28,6 +28,15 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Format
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
       - name: Test
         run: go test -race ./...
 
