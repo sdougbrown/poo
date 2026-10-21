@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -154,12 +155,15 @@ func (r *fakeReader) Close() error { return nil }
 type recordingSink struct {
 	mu      sync.Mutex
 	records []poo.Record
+	seq     int64
 }
 
-// Append collects one record.
+// Append stamps one record the way a real sink does, and collects it.
 func (s *recordingSink) Append(ctx context.Context, rec poo.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.seq++
+	poo.Stamp(rec, s.seq, time.Now())
 	s.records = append(s.records, rec)
 	return nil
 }

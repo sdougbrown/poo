@@ -68,8 +68,6 @@ type Session struct {
 	// events is the session's event bus.
 	events *eventBus
 
-	// seq numbers the records the session writes.
-	seq int64
 	// sunk reports that the store failed.
 	sunk bool
 
@@ -586,12 +584,10 @@ func (s *Session) write(ctx context.Context, rec Record) error {
 		s.mu.Unlock()
 		return errors.New("poo: the session store is broken")
 	}
-	seq := s.seq + 1
 	s.mu.Unlock()
 
 	wctx, cancel := recordContext(ctx)
 	defer cancel()
-	Stamp(rec, seq, time.Now())
 	if err := s.opts.Sink.Append(wctx, rec); err != nil {
 		s.mu.Lock()
 		s.sunk = true
@@ -599,9 +595,6 @@ func (s *Session) write(ctx context.Context, rec Record) error {
 		s.mu.Unlock()
 		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
 	}
-	s.mu.Lock()
-	s.seq = seq
-	s.mu.Unlock()
 	return nil
 }
 
@@ -620,17 +613,11 @@ func (s *Session) writeBestEffort(ctx context.Context, rec Record) {
 		s.mu.Unlock()
 		return
 	}
-	seq := s.seq + 1
 	s.mu.Unlock()
 
 	wctx, cancel := recordContext(ctx)
 	defer cancel()
-	Stamp(rec, seq, time.Now())
-	if s.opts.Sink.Append(wctx, rec) == nil {
-		s.mu.Lock()
-		s.seq = seq
-		s.mu.Unlock()
-	}
+	_ = s.opts.Sink.Append(wctx, rec)
 }
 
 // recordWriteBudget bounds one record write or flush.
