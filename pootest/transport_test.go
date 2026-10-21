@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -241,5 +242,134 @@ func TestTheRecordedForksAreCopies(t *testing.T) {
 	again := tr.Forks()
 	if string(again[0].Prev.Body) != string(rendered.Body) {
 		t.Errorf("the recorded body is %s, want the original", again[0].Prev.Body)
+	}
+}
+
+// TestTheScriptedTransportFinishesAToolCallTurn covers the finish
+// reason: a turn that made tool calls finishes as a tool call, the way
+// a real provider reports it, so a test can drive the core's tool-call
+// branch.
+func TestTheScriptedTransportFinishesAToolCallTurn(t *testing.T) {
+	tr := pootest.NewTransport(pootest.Turn{
+		Calls: []pootest.Call{{Name: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)}},
+	})
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	var finish poo.FinishReason
+	for _, ev := range read(t, reader) {
+		if ev.Kind == "finish" {
+			finish = ev.FinishReason
+		}
+	}
+	if finish != poo.FinishToolCalls {
+		t.Errorf("the turn finished %q, want tool_calls", finish)
+	}
+}
+
+// TestTheScriptedTransportFinishesAPlainTurnAsAStop covers the other
+// side: a turn with no tool calls finishes as a stop.
+func TestTheScriptedTransportFinishesAPlainTurnAsAStop(t *testing.T) {
+	tr := pootest.NewTransport(pootest.Turn{Text: "the answer"})
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	var finish poo.FinishReason
+	for _, ev := range read(t, reader) {
+		if ev.Kind == "finish" {
+			finish = ev.FinishReason
+		}
+	}
+	if finish != poo.FinishStop {
+		t.Errorf("the turn finished %q, want stop", finish)
+	}
+}
+
+// TestTheScriptedFinishReasonWins covers the script: a turn that names
+// its own finish reason keeps it.
+func TestTheScriptedFinishReasonWins(t *testing.T) {
+	tr := pootest.NewTransport(pootest.Turn{
+		Text:   "the answer",
+		Finish: "length",
+	})
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	var finish poo.FinishReason
+	for _, ev := range read(t, reader) {
+		if ev.Kind == "finish" {
+			finish = ev.FinishReason
+		}
+	}
+	if finish != "length" {
+		t.Errorf("the turn finished %q, want length", finish)
+	}
+}
+
+// TestTheSnapshotDistinguishesTheRequestsItHolds covers the snapshot's
+// body: two requests that differ differ in their bodies, so a test can
+// tell a request with a tool call from one without, and one with
+// thinking from one without.
+func TestTheSnapshotDistinguishesTheRequestsItHolds(t *testing.T) {
+	call := poo.Message{
+		Role: poo.RoleAssistant,
+		Content: []poo.ContentBlock{{
+			Kind:       poo.ContentToolCall,
+			ToolCallID: "call_1",
+			Name:       "bash",
+			Arguments:  json.RawMessage(`{"command":"ls"}`),
+		}},
+	}
+	thinking := poo.Message{
+		Role: poo.RoleAssistant,
+		Content: []poo.ContentBlock{
+			{Kind: poo.ContentThinking, Text: "the thinking"},
+			{Kind: poo.ContentText, Text: "the answer"},
+		},
+	}
+	plain := poo.NewTextMessage(poo.RoleAssistant, "the answer")
+
+	bodyOf := func(messages ...poo.Message) string {
+		tr := pootest.NewTransport(pootest.Turn{Text: "ok"})
+		_, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", Messages: messages})
+		if err != nil {
+			t.Fatalf("starting the request: %v", err)
+		}
+		return string(rendered.Body)
+	}
+
+	plainBody := bodyOf(plain)
+	callBody := bodyOf(call)
+	thinkingBody := bodyOf(thinking)
+
+	if plainBody == callBody {
+		t.Errorf("a request with a tool call has the same body as one without: %s", plainBody)
+	}
+	if plainBody == thinkingBody {
+		t.Errorf("a request with thinking has the same body as one without: %s", plainBody)
+	}
+	if callBody == thinkingBody {
+		t.Errorf("a request with a tool call has the same body as one with thinking: %s", callBody)
+	}
+	// The tool call's name reaches the body, so a test can see what the
+	// model was asked to do.
+	if !strings.Contains(callBody, "bash") {
+		t.Errorf("the body's call does not name the tool: %s", callBody)
+	}
+	// The thinking reaches the body too.
+	if !strings.Contains(thinkingBody, "the thinking") {
+		t.Errorf("the body does not carry the thinking: %s", thinkingBody)
 	}
 }

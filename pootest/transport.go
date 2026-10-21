@@ -274,11 +274,21 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 //
 // The body is not the provider's own JSON: the scripted transport has no
 // wire shape of its own. It is a stable rendering of the request, so two
-// requests that differ differ in their bodies.
+// requests that differ differ in their bodies. Every block kind is
+// rendered, so a body that holds a tool call or thinking is not the same
+// body as one that holds only text.
 func renderBody(req poo.ChatRequest) []byte {
+	type block struct {
+		Kind       string `json:"kind"`
+		Text       string `json:"text,omitempty"`
+		ToolCallID string `json:"tool_call_id,omitempty"`
+		Name       string `json:"name,omitempty"`
+		Arguments  string `json:"arguments,omitempty"`
+	}
 	type message struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role    string  `json:"role"`
+		Content string  `json:"content"`
+		Blocks  []block `json:"blocks,omitempty"`
 	}
 	out := struct {
 		Model     string    `json:"model"`
@@ -289,7 +299,27 @@ func renderBody(req poo.ChatRequest) []byte {
 		MaxTokens: req.MaxTokens,
 	}
 	for _, m := range req.Messages {
-		out.Messages = append(out.Messages, message{Role: string(m.Role), Content: m.Text()})
+		msg := message{Role: string(m.Role), Content: m.Text()}
+		for _, c := range m.Content {
+			switch c.Kind {
+			case poo.ContentText:
+				continue
+			case poo.ContentToolCall, poo.ContentToolResult:
+				msg.Blocks = append(msg.Blocks, block{
+					Kind:       string(c.Kind),
+					Text:       c.Text,
+					ToolCallID: c.ToolCallID,
+					Name:       c.Name,
+					Arguments:  string(c.Arguments),
+				})
+			default:
+				msg.Blocks = append(msg.Blocks, block{
+					Kind: string(c.Kind),
+					Text: c.Text,
+				})
+			}
+		}
+		out.Messages = append(out.Messages, msg)
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
@@ -307,11 +337,15 @@ type reader struct {
 	stage int
 	// callIndex numbers the calls within the turn.
 	callIndex int
+	// callCount is how many calls the turn held before the reader
+	// started handing them out. The reader drains the calls as it goes,
+	// so the count is what says whether the turn asked for any.
+	callCount int
 }
 
 // newReader returns a reader for a scripted turn.
 func newReader(turn Turn, index int) *reader {
-	return &reader{turn: turn, index: index}
+	return &reader{turn: turn, index: index, callCount: len(turn.Calls)}
 }
 
 // Next returns the next piece of the scripted response.
@@ -354,7 +388,11 @@ func (r *reader) Next() (poo.StreamEvent, error) {
 			r.stage++
 			finish := r.turn.Finish
 			if finish == "" {
-				if len(r.turn.Calls) > 0 {
+				// A turn that asked for tool calls finishes as a tool
+				// call, the way a real provider reports it. The count
+				// is the turn's own, because the reader has already
+				// drained the calls it holds.
+				if r.callCount > 0 {
 					finish = "tool_calls"
 				} else {
 					finish = "stop"
