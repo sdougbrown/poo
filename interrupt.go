@@ -147,11 +147,11 @@ func (s *Session) skipInterruptedCalls(run *runState, turn int, calls []ToolCall
 // skipCalls records the calls of a batch that never started, with the
 // visible result text given.
 //
-// A call that already has a result, or that is running, is left alone. A
-// call claimed after the finalization has sealed the run is left to the
-// finalization, which writes its record and its result in the plan's
-// order.
+// A call that another claim already owns — its own dispatch, or the
+// finalization after the seal — is left alone: it gets its records from
+// that claim.
 func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text string) {
+	s.sealRaceHook("skip")
 	handles := s.handlesOf(turn, len(calls))
 	for i, call := range calls {
 		handle := handles[i]
@@ -177,17 +177,26 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 // claimSkippedCall registers a call that never started and claims its
 // tool.call record, which is in-flight work.
 //
-// The claim is made against the seal: it reports false when the call
-// already has an owner or the run is sealed.
+// The call is registered by its batch, so the claim takes over an entry
+// no dispatch owns. The claim is made against the seal: it reports false
+// when the call already has an owner or the run is sealed, and the seal
+// then writes the call's record and its result.
 func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call ToolCall) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if run.sealed {
 		return false
 	}
-	if _, issued := run.pendingCalls[handle]; issued {
-		// The call is running or already has a result.
-		return false
+	if entry, issued := run.pendingCalls[handle]; issued {
+		// The batch registered the call, and its dispatch may already
+		// own the record or have started it: the call is not a skip
+		// then.
+		if entry.recorded || entry.started {
+			return false
+		}
+		entry.recorded = true
+		run.callWrites++
+		return true
 	}
 	if run.settledCalls[handle] || s.turnSummaryLocked(turn, handle).Outcome != "" {
 		// The call already has an outcome.

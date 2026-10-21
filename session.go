@@ -93,6 +93,8 @@ type Session struct {
 	pendingHeld *InputHeld
 	// raceHooks are the seams the job races are tested at.
 	raceHooks *JobRaceHooks
+	// sealHooks are the seams the seal protocol is tested at.
+	sealHooks *SealRaceHooks
 	// jobQueued is signalled when a job result is queued.
 	jobQueued chan struct{}
 	// jobCtx is the session's job context. The jobs run under it, so

@@ -63,12 +63,16 @@ type callPlan struct {
 // It reports whether any call was processed: a call that got a result
 // other than skipped: truncated.
 func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, truncated bool) bool {
-	// A run that is winding down starts no new effect.
-	if s.runWindingDown(run) {
-		return false
-	}
 	plans := s.planCalls(run, turn, calls, truncated)
 	if len(plans) == 0 {
+		return false
+	}
+	// The batch is registered before it runs, so every call in it has an
+	// owner: its own dispatch, the skip path, or the seal. A call the
+	// batch never reaches is the finalization's to settle.
+	s.claimBatch(run, turn, plans)
+	// A run that is winding down starts no new effect.
+	if s.runWindingDown(run) {
 		return false
 	}
 	processed := false
@@ -779,20 +783,61 @@ func (s *Session) rememberResult(run *runState, turn int, handle, tool string, o
 	}
 }
 
-// issueCall records that a call is issued, so the finalization can give
-// it a record and a synthetic result if it never finishes.
+// claimBatch registers a turn's calls with the run, so every call in the
+// batch is owned by exactly one of its own dispatch, the skip path and
+// the seal.
 //
-// The claim is made against the seal: it reports false when the run is
-// sealed, because the finalization owns every call that would be added
-// after it.
-func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCall) bool {
+// A registered call is an issued call with no result yet: the dispatch
+// takes it over when it writes the call's record, the skip path takes it
+// over when the batch never reaches it, and the seal settles whatever is
+// left when the run settles. The claim is made against the seal: a batch
+// that arrives after the finalization has sealed the run is left alone.
+func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed || run.settledCalls[handle] {
-		return false
+	if run.sealed {
+		return
 	}
 	if run.pendingCalls == nil {
 		run.pendingCalls = map[string]*issuedCall{}
+	}
+	for _, p := range plans {
+		if run.settledCalls[p.handle] {
+			continue
+		}
+		if _, issued := run.pendingCalls[p.handle]; issued {
+			continue
+		}
+		run.pendingCalls[p.handle] = &issuedCall{
+			handle:    p.handle,
+			tool:      p.call.Name,
+			id:        p.call.ID,
+			turn:      turn,
+			arguments: p.call.Arguments,
+		}
+	}
+}
+
+// issueCall claims a call for its own dispatch, so the dispatch may write
+// its record and run it.
+//
+// The batch registers every call it plans, so a call that another claim
+// already owns is not the dispatch's. A call that arrives without its
+// batch's registration is registered here and is the dispatch's. The
+// claim is made against the seal: it reports false when the run is
+// sealed, because the finalization owns every call that is still
+// outstanding.
+func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCall) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run.sealed {
+		return false
+	}
+	if entry, issued := run.pendingCalls[handle]; issued {
+		return !entry.recorded && !entry.started
+	}
+	if run.settledCalls[handle] {
+		return false
 	}
 	run.pendingCalls[handle] = &issuedCall{
 		handle:    handle,

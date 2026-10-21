@@ -73,17 +73,18 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// cancelled run.
 	run.cancel(errFinalizing)
 
-	// Step 3: wait for the in-flight work, bounded at five seconds.
-	// The work that finishes before the commit point keeps its real
-	// result; the work that is still running is abandoned.
-	s.waitForWork(run)
-
-	// The seal: the finalization takes ownership of every claim that is
-	// still outstanding. The calls it takes get their record and their
-	// terminal result, the inputs it takes are reported as undelivered,
-	// and no other goroutine adds a record for the run after this point.
+	// Steps 3 to 3.5: wait for the in-flight work, bounded at five
+	// seconds, and seal the run. The work that finishes before the seal
+	// keeps its real result; the work that is still running is
+	// abandoned.
+	//
+	// The seal takes ownership of every claim that is still outstanding.
+	// The calls it takes get their record and their terminal result, the
+	// inputs it takes are reported as undelivered, and no other goroutine
+	// adds a record for the run after this point.
 	issued, sealed := s.sealRun(run)
 	undelivered = append(undelivered, sealed...)
+	s.sealRaceHook("seal")
 
 	// Steps 4 and 5: every call that was issued but has no result
 	// gets a synthetic one, and every pending ask resolves as
@@ -351,36 +352,14 @@ func (s *Session) commitLocked(run *runState) (Reason, SettleDetail) {
 	return winner.reason, detail
 }
 
-// waitForWork waits for the in-flight work, bounded at five seconds.
-func (s *Session) waitForWork(run *runState) {
-	deadline := time.After(recordWriteBudget)
-	for {
-		s.mu.Lock()
-		// An unstarted call has no effect to abandon: the finalization
-		// settles it. Only a call whose tool is running is work to
-		// wait for.
-		started := 0
-		for _, call := range run.pendingCalls {
-			if call.started {
-				started++
-			}
-		}
-		pending := started + run.resultWrites + run.callWrites + run.jobStarts + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
-		done := run.workDone
-		s.mu.Unlock()
-		if pending == 0 {
-			return
-		}
-		select {
-		case <-done:
-		case <-deadline:
-			return
-		}
-	}
-}
-
-// sealRun seals the run and takes ownership of every claim that was
-// made but not finished.
+// sealRun waits for the in-flight work, bounded at the record-write
+// budget, and then seals the run and takes ownership of every claim that
+// was made but not finished.
+//
+// The wait and the seal are one step under the lock: a claim that wins
+// the race is counted as in-flight work before the seal looks, and one
+// that loses it is refused. Nothing therefore slips between the moment
+// the run holds no outstanding work and the seal.
 //
 // The seal and the claims are one step under the lock, so a claim that
 // arrives afterwards is refused instead of slipping past the commit
@@ -390,7 +369,48 @@ func (s *Session) waitForWork(run *runState) {
 // still in flight; they never reached the model, so the finalization
 // reports them with the run's reason.
 func (s *Session) sealRun(run *runState) ([]*issuedCall, []UndeliveredInput) {
-	s.mu.Lock()
+	deadline := time.After(recordWriteBudget)
+	for {
+		s.mu.Lock()
+		if s.inFlightLocked(run) == 0 {
+			issued, undelivered := s.sealLocked(run)
+			s.mu.Unlock()
+			return issued, undelivered
+		}
+		done := run.workDone
+		s.mu.Unlock()
+		select {
+		case <-done:
+		case <-deadline:
+			s.mu.Lock()
+			issued, undelivered := s.sealLocked(run)
+			s.mu.Unlock()
+			return issued, undelivered
+		}
+	}
+}
+
+// inFlightLocked counts the work the finalization waits for.
+//
+// An unstarted call has no effect to abandon: the seal settles it. Only a
+// call whose tool is running is work to wait for.
+//
+// The caller holds the session's lock.
+func (s *Session) inFlightLocked(run *runState) int {
+	started := 0
+	for _, call := range run.pendingCalls {
+		if call.started {
+			started++
+		}
+	}
+	return started + run.resultWrites + run.callWrites + run.jobStarts + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
+}
+
+// sealLocked seals the run and takes ownership of every claim that was
+// made but not finished.
+//
+// The caller holds the session's lock, and the caller releases it.
+func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) {
 	run.sealed = true
 	issued := make([]*issuedCall, 0, len(run.pendingCalls))
 	for _, call := range run.pendingCalls {
@@ -415,7 +435,6 @@ func (s *Session) sealRun(run *runState) ([]*issuedCall, []UndeliveredInput) {
 	for _, input := range pending {
 		s.removeQueuedInputLocked(input)
 	}
-	s.mu.Unlock()
 
 	undelivered := make([]UndeliveredInput, 0, len(pending))
 	for _, input := range pending {

@@ -267,8 +267,13 @@ func (s *skippedCallSink) Append(ctx context.Context, rec poo.Record) error {
 }
 
 // TestSkippedCallRecordsPrecedeTheSettle covers the claim rule for a
-// skipped call: a call that never starts is work the finalization waits
-// for, so its tool.call and tool.result land before run.settled.
+// skipped call: a call that never starts is work the finalization owns,
+// so its tool.call and tool.result land before run.settled.
+//
+// The interleaving is pinned: the seal takes the second call before the
+// batch's skip path is allowed to claim it, so the finalization is the
+// one that writes its records. Without the batch's registration the call
+// would escape both claims.
 func TestSkippedCallRecordsPrecedeTheSettle(t *testing.T) {
 	sink := &skippedCallSink{handle: "r2", entered: make(chan struct{}), release: make(chan struct{})}
 	started := make(chan struct{})
@@ -282,29 +287,49 @@ func TestSkippedCallRecordsPrecedeTheSettle(t *testing.T) {
 		{ID: "b", Name: "echo", Arguments: []byte(`{"text":"two"}`)},
 	}}})
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	sealed := make(chan struct{})
+	skipReached := make(chan struct{})
+	var once sync.Once
+	restore := s.SetSealRaceHooks(&poo.SealRaceHooks{
+		AfterSeal: func() { close(sealed) },
+		BeforeSkipCalls: func() {
+			once.Do(func() { close(skipReached) })
+			<-sealed
+		},
+	})
+	defer restore()
 	id, err := s.Prompt(context.Background(), "start")
 	if err != nil {
 		t.Fatal(err)
 	}
 	<-started
-	settled := make(chan struct{})
+	cancelled := make(chan struct{})
 	go func() {
 		s.Cancel("probe")
-		close(settled)
+		close(cancelled)
 	}()
-	<-sink.entered
+	// The batch reaches the skip path after the first call's result, and
+	// the seal has taken the second call by then.
+	<-skipReached
+	<-sealed
+	waitFor(t, "the sealed call's tool.call record", func() bool {
+		select {
+		case <-sink.entered:
+			return true
+		default:
+			return false
+		}
+	})
 	// The run must not settle while a skipped call's record is being
 	// written: the record is tracked work.
-	select {
-	case <-settled:
-		t.Fatal("the run settled while a skipped call's tool.call record was still being written")
-	case <-time.After(50 * time.Millisecond):
+	if got := sink.count("run.settled"); got != 0 {
+		t.Fatalf("the run settled while a skipped call's tool.call record was still being written")
 	}
 	close(sink.release)
 	if _, err := s.WaitRun(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
-	<-settled
+	<-cancelled
 	waitFor(t, "the skipped call's result", func() bool { return sink.count("tool.result") == 2 })
 
 	names := sink.names()
