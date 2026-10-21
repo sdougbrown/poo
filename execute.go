@@ -238,14 +238,21 @@ func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated
 		}
 		// The reserved background argument is validated and removed
 		// before the tool's own decoder sees the arguments, so a
-		// strict decoder never sees it. The tool.call record keeps the
+		// strict decoder never sees it. Only a tool that may become a
+		// job reserves the name: a never-background tool may define its
+		// own background property. The tool.call record keeps the
 		// original arguments.
-		asked, stripped, err := backgroundArg(call.Arguments)
-		if err != nil {
-			plan.invalid = true
-			plan.prepareErr = err
-			plans = append(plans, plan)
-			continue
+		asked := false
+		stripped := call.Arguments
+		if s.backgroundModeOf(call.Name) != BackgroundNever {
+			var err error
+			asked, stripped, err = backgroundArg(call.Arguments)
+			if err != nil {
+				plan.invalid = true
+				plan.prepareErr = err
+				plans = append(plans, plan)
+				continue
+			}
 		}
 		plan.background = asked
 		prepared, err := tool.Prepare(stripped, s.prepareEnv())

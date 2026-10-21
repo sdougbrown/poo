@@ -409,3 +409,94 @@ func TestNewDoesNotMutateTheCallersTools(t *testing.T) {
 	}
 	defer s2.Close()
 }
+
+// ownBackgroundTool declares its own background argument and never runs
+// as a job: the core's reserved argument belongs only to tools that
+// allow jobs.
+type ownBackgroundTool struct {
+	got string
+}
+
+// Spec declares the tool's own background property.
+func (t *ownBackgroundTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:   "own",
+		Schema: json.RawMessage(`{"type":"object","properties":{"background":{"type":"boolean"}}}`),
+		Class:  poo.ClassReadOnly,
+	}
+}
+
+// ownPrepared is the prepared call.
+type ownPrepared struct{ raw string }
+
+// Summary describes the call.
+func (p ownPrepared) Summary() string { return p.raw }
+
+// Prepare keeps the arguments it saw.
+func (t *ownBackgroundTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	t.got = string(raw)
+	return ownPrepared{raw: string(raw)}, nil
+}
+
+// Call answers.
+func (t *ownBackgroundTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	return poo.ToolResult{Text: "ok"}, nil
+}
+
+// TestANeverToolKeepsItsOwnBackgroundArgument covers the plan's rule:
+// the reserved argument is stripped only for a tool that may become a
+// job. A never-background tool may define its own background property.
+func TestANeverToolKeepsItsOwnBackgroundArgument(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c1", Name: "own", Arguments: []byte(`{"background":true}`)}}},
+		{text: "done"},
+	})
+	tool := &ownBackgroundTool{}
+	opts := poo.Options{
+		Transport:    tr,
+		Tools:        map[string]poo.Tool{"own": tool},
+		ToolOrder:    []string{"own"},
+		Sink:         &recordingSink{},
+		SessionID:    "s1",
+		ModelID:      "m",
+		ContextLimit: 32768,
+		WorkingDir:   t.TempDir(),
+	}
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "go"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !strings.Contains(tool.got, "background") {
+		t.Errorf("the never-background tool's Prepare saw %q, want its own background argument", tool.got)
+	}
+}
+
+// TestANullBackgroundArgumentIsRefused covers the plan's rule: the
+// reserved argument is a boolean. Null is not a boolean, so the call is
+// a recoverable argument error and the tool never runs.
+func TestANullBackgroundArgumentIsRefused(t *testing.T) {
+	tr := scripted([]fakeResponse{{
+		calls: []poo.ToolCall{{
+			ID:        "null",
+			Name:      "job",
+			Arguments: json.RawMessage(`{"text":"one","background":null}`),
+		}},
+	}})
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.ReleaseAll()
+	opts := jobOptions(t, tr, tool, &recordingSink{})
+	opts.MaxTurns = 1
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if tool.Calls() != 0 {
+		t.Fatalf("background:null invoked the tool %d times; a non-boolean must be a recoverable argument error", tool.Calls())
+	}
+}

@@ -1305,8 +1305,12 @@ func backgroundArg(raw json.RawMessage) (bool, json.RawMessage, error) {
 	if !ok {
 		return false, raw, nil
 	}
-	var flag bool
-	if err := json.Unmarshal(value, &flag); err != nil {
+	var decoded any
+	if err := json.Unmarshal(value, &decoded); err != nil {
+		return false, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
+	}
+	flag, ok := decoded.(bool)
+	if !ok {
 		return false, raw, InvalidArgsf("the %q argument must be true or false", BackgroundArgName)
 	}
 	delete(obj, BackgroundArgName)
