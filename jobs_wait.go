@@ -41,10 +41,15 @@ func (s *Session) WaitJobs(ctx context.Context) error {
 	for {
 		s.mu.Lock()
 		running := s.runningJobCountLocked()
+		// A result that is queued while a run is open is delivered to
+		// that run, so it does not keep the wait alive. Only a result
+		// that is waiting for a wake does.
 		pending := 0
-		for _, item := range s.jobQueue {
-			if !item.held {
-				pending++
+		if s.run == nil {
+			for _, item := range s.jobQueue {
+				if !item.held {
+					pending++
+				}
 			}
 		}
 		closed := s.closed

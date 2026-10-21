@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -415,7 +416,6 @@ func TestTheHeldResultIsDeliveredBeforeTheNextPrompt(t *testing.T) {
 func TestTheJobLimitIsPerSession(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
-		{text: "the answer"},
 	})
 	sink := &recordingSink{}
 	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
@@ -434,31 +434,30 @@ func TestTheJobLimitIsPerSession(t *testing.T) {
 		t.Fatalf("waiting for the run: %v", err)
 	}
 	// The first run's job is still running, so the second run's job has
-	// no slot.
-	tr2 := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{jobCall("two", true)}},
-		{text: "the answer"},
-	})
-	sink2 := &recordingSink{}
-	tool2 := pootest.NewJobTool("job", poo.BackgroundAllowed)
-	tool2.SetResult("the job's output")
-	opts2 := jobOptions(t, tr2, tool2, sink2)
-	opts2.Jobs = poo.JobOptions{MaxRunning: 1}
-	opts2.MaxTurns = 1
-
-	s2 := newTestSession(t, opts2)
-	if _, err := s2.Prompt(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("starting the run: %v", err)
+	// no slot: the limit belongs to the session, not to the run.
+	if _, err := s.Prompt(context.Background(), "and this"); err != nil {
+		t.Fatalf("starting the second run: %v", err)
 	}
-	if _, err := s2.Wait(context.Background()); err != nil {
+	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
-	// The second session has its own limit, so its job started.
-	if sink2.count("job.started") != 1 {
-		t.Errorf("the second session's log holds %d job.started records, want 1", sink2.count("job.started"))
+	if sink.count("job.started") != 1 {
+		t.Errorf("the log holds %d job.started records, want 1", sink.count("job.started"))
 	}
-	// The first session's job is still running, and the session counts
-	// it.
+	limit := false
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok {
+			continue
+		}
+		if r.Outcome == poo.OutcomeError && strings.Contains(r.Text, "too many jobs running") {
+			limit = true
+		}
+	}
+	if !limit {
+		t.Error("the model did not see the limit error")
+	}
+	// The first run's job is still running, and the session counts it.
 	running := s.JobsRunning()
 	if len(running) != 1 || running[0] != "j1" {
 		t.Errorf("the session's running jobs are %v, want [j1]", running)
