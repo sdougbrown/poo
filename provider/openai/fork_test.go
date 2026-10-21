@@ -3,6 +3,7 @@ package openai_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -156,5 +157,21 @@ func TestTheForkKeepsTheBodyKeyOrder(t *testing.T) {
 	// A fork that appends nothing and changes nothing is the same body.
 	if srv.bodies[0] != srv.bodies[1] {
 		t.Errorf("the fork's body differs from the original:\n%s\n%s", srv.bodies[0], srv.bodies[1])
+	}
+}
+
+// TestAForkOfAnotherAPIsSnapshotIsRefused covers a snapshot that another
+// transport rendered.
+func TestAForkOfAnotherAPIsSnapshotIsRefused(t *testing.T) {
+	srv := newForkServer(t)
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+
+	_, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIResponses, Body: []byte(`{"messages":[]}`)}, nil, 16)
+	var pe *poo.ProviderError
+	if !errors.As(err, &pe) || pe.Kind != poo.ProviderKindInvalidRequest {
+		t.Fatalf("the error is %v, want an invalid_request provider error", err)
+	}
+	if len(srv.bodies) != 0 {
+		t.Errorf("the server received %d bodies, want none", len(srv.bodies))
 	}
 }

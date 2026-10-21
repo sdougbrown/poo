@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -159,6 +158,12 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 // every other field are unchanged, because the body was serialized once
 // and only the two changed fields are rewritten.
 func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	if prev.API != poo.APIChatCompletions {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: fmt.Sprintf("the request snapshot belongs to the %q API, not Chat Completions", prev.API),
+		}
+	}
 	if len(prev.Body) == 0 {
 		return nil, &poo.ProviderError{
 			Kind:    poo.ProviderKindInvalidRequest,
@@ -332,8 +337,9 @@ func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error
 	}
 
 	// The keys are written in the order the body had them, so the fork's
-	// prefix is byte-identical to the original. A key the body did not
-	// have goes last, in the order it was added.
+	// prefix is byte-identical to the original. Every key the payload
+	// holds came from the body, except the two the fork may add; those
+	// go last, in the order they are named.
 	order, err := jsonKeyOrder(body)
 	if err != nil {
 		return nil, err
@@ -350,28 +356,14 @@ func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error
 			}
 		}
 	}
-	// A key the transport does not know keeps its place: the body is
-	// decoded into a map, so the remaining keys are ordered by the
-	// transport's own order and then alphabetically.
-	rest := make([]string, 0, len(payload))
-	for k := range payload {
-		if !seen[k] {
-			rest = append(rest, k)
-		}
-	}
-	sort.Strings(rest)
-	order = append(order, rest...)
-
 	var b bytes.Buffer
 	b.WriteByte('{')
 	for i, k := range order {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		key, err := json.Marshal(k)
-		if err != nil {
-			continue
-		}
+		// A string always encodes.
+		key, _ := json.Marshal(k)
 		b.Write(key)
 		b.WriteByte(':')
 		b.Write(payload[k])
