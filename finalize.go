@@ -188,6 +188,11 @@ func (s *Session) resume(run *runState) ([]candidate, bool) {
 	for _, c := range run.candidates {
 		if !IsNatural(c.reason) {
 			s.mu.Unlock()
+			// A non-natural candidate appeared between the abandonment
+			// and the resume, and no finalization owns it yet. The run
+			// still needs a settler, so settle it here; the candidate
+			// makes this finalization non-resumable.
+			s.finalize(run)
 			return nil, false
 		}
 	}
