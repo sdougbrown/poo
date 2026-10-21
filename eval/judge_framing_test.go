@@ -224,3 +224,69 @@ func TestAFilenameCannotInjectLinesIntoTheJudgeMessage(t *testing.T) {
 		}
 	}
 }
+
+func TestAnEmptyAnswerIsAskedAgainWithoutTheToolCallTag(t *testing.T) {
+	// An endpoint that cuts a reply at a literal tool-call tag answers
+	// with no content. The judge asks once more, and the transcript it
+	// sends does not hold the tag for the model to copy.
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		requests = append(requests, string(data))
+		w.Header().Set("Content-Type", "application/json")
+		if len(requests) == 1 {
+			_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":null,"reasoning_content":"the call was not wrapped in a proper "}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"logical_path\":true,\"agrees_with_check\":true,\"pathologies\":[],\"needs_owner\":false,\"reason\":\"ok\"}"}}]}`))
+	}))
+	defer server.Close()
+
+	resultsDir := t.TempDir()
+	runDir := filepath.Join(resultsDir, "runs", "run-abc", "t", "m", "seed1")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("making the run directory: %v", err)
+	}
+	log := `{"record":"message","seq":1,"ts":"2026-10-20T00:00:00Z","run_id":"r","turn":1,"origin":"model","role":"assistant","content":[{"kind":"text","text":"<tool_call>{\"name\": \"bash\"</tool_call>"}]}` + "\n" +
+		`{"record":"run.settled","seq":2,"ts":"2026-10-20T00:00:00Z","run_id":"r","reason":"end_turn","detail":{"source":"end_turn"},"turns":1}`
+	if err := os.WriteFile(filepath.Join(runDir, "session.jsonl"), []byte(log), 0o644); err != nil {
+		t.Fatalf("writing the log: %v", err)
+	}
+
+	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: resultsDir})
+	if err != nil {
+		t.Fatalf("making the judge: %v", err)
+	}
+	result, err := judge.Run(t.Context())
+	if err != nil {
+		t.Fatalf("running the judge: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("the judge sent %d requests, want 2", len(requests))
+	}
+	if v := result.Verdicts[0]; v.Error != "" || v.NeedsOwner {
+		t.Errorf("the verdict is %+v, want the second answer", v)
+	}
+
+	var req struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(requests[0]), &req); err != nil {
+		t.Fatalf("decoding the request: %v", err)
+	}
+	user := req.Messages[len(req.Messages)-1].Content
+	if !strings.Contains(user, "bash") {
+		t.Fatalf("the request does not hold the transcript: %s", user)
+	}
+	var data string
+	start := strings.Index(user, "---\n") + len("---\n")
+	end := strings.Index(user[start:], "\n--- END")
+	if err := json.Unmarshal([]byte(user[start:start+end]), &data); err != nil {
+		t.Fatalf("decoding the transcript: %v", err)
+	}
+	if strings.Contains(data, "<tool_call>") {
+		t.Errorf("the transcript the judge sees holds a literal tool_call tag: %s", data)
+	}
+}

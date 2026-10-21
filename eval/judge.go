@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -327,6 +328,9 @@ func (j *Judge) judgeOne(ctx context.Context, t transcript) (*Verdict, error) {
 
 	payload := j.buildPayload(log, text, t)
 	answer, err := j.ask(ctx, payload)
+	if errors.Is(err, errEmptyAnswer) {
+		answer, err = j.ask(ctx, payload)
+	}
 	if err != nil {
 		j.markError(verdict, err)
 		return verdict, nil
@@ -468,8 +472,10 @@ func (j *Judge) ask(ctx context.Context, payload judgePayload) (string, error) {
 	var answer struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(data, &answer); err != nil {
@@ -478,8 +484,24 @@ func (j *Judge) ask(ctx context.Context, payload judgePayload) (string, error) {
 	if len(answer.Choices) == 0 {
 		return "", fmt.Errorf("eval: the judge returned no choice")
 	}
-	return answer.Choices[0].Message.Content, nil
+	choice := answer.Choices[0]
+	if strings.TrimSpace(choice.Message.Content) == "" {
+		return "", fmt.Errorf("%w (finish_reason %q, %d chars of reasoning)",
+			errEmptyAnswer, choice.FinishReason, len(choice.Message.ReasoningContent))
+	}
+	return choice.Message.Content, nil
 }
+
+// errEmptyAnswer is a judge reply with no content.
+//
+// Some endpoints cut a reply at the first literal tool-call tag the
+// model writes, even inside its reasoning, and return what is left as
+// an empty answer. The model's next sample usually avoids the tag.
+var errEmptyAnswer = errors.New("eval: the judge returned an empty answer")
+
+// markupQuoter rewrites tool-call tags so the judge does not copy them
+// into its reply. See errEmptyAnswer.
+var markupQuoter = strings.NewReplacer("<tool_call>", "⟨tool_call⟩", "</tool_call>", "⟨/tool_call⟩")
 
 // judgeUserMessage renders the payload for the judge.
 //
@@ -491,11 +513,11 @@ func (j *Judge) ask(ctx context.Context, payload judgePayload) (string, error) {
 //
 // The metrics are in front of it.
 func judgeUserMessage(payload judgePayload, nonce string) string {
-	transcript, err := json.Marshal(payload.Transcript)
+	transcript, err := json.Marshal(markupQuoter.Replace(payload.Transcript))
 	if err != nil {
 		transcript = []byte(`""`)
 	}
-	checkOutput, err := json.Marshal(payload.CheckOutput)
+	checkOutput, err := json.Marshal(markupQuoter.Replace(payload.CheckOutput))
 	if err != nil {
 		checkOutput = []byte(`""`)
 	}
@@ -714,7 +736,7 @@ func (j *Judge) writeSummary(result *JudgeResult) error {
 	for _, p := range allPathologies() {
 		fmt.Fprintf(&b, " %s |", p)
 	}
-	b.WriteString(" transcripts |\n|")
+	b.WriteString(" transcripts |\n|---|")
 	for range allPathologies() {
 		b.WriteString("---|")
 	}
