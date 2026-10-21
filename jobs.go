@@ -253,18 +253,23 @@ func WithJobs(o JobOptions) Option {
 // so two calls that race for the last slot admit exactly one of them.
 // The job.started record is written before the goroutine starts, so a
 // log shows the job was accepted even when it never ran.
-func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared, summary string) (string, bool) {
+func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared, summary string) (string, bool, bool) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
-	// about.
+	// about. A run that is winding down admits nothing: no new effect
+	// starts after the finalization has begun.
 	s.mu.Lock()
+	if run.committed || run.finalizing {
+		s.mu.Unlock()
+		return "", false, true
+	}
 	if s.closed || s.broken {
 		s.mu.Unlock()
-		return "", false
+		return "", false, false
 	}
 	if s.runningJobCountLocked() >= s.jobLimit() {
 		s.mu.Unlock()
-		return "", false
+		return "", false, false
 	}
 	s.jobSeq++
 	jobID := fmt.Sprintf("j%d", s.jobSeq)
@@ -282,10 +287,16 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	}
 	s.jobs[jobID] = job
 	s.jobOrder = append(s.jobOrder, jobID)
+	// The acceptance record is tracked work: the finalization waits for
+	// it, because a job that is accepted must have its record before
+	// the run settles.
+	run.jobStarts++
 	s.mu.Unlock()
 
-	// The acceptance record is written before the goroutine starts.
-	if err := s.write(run.ctx, &JobStarted{
+	// The acceptance record is written before the goroutine starts. A
+	// write the run's finalization abandons is not a store failure: the
+	// run settled while the record was in flight.
+	err := s.writeDelivery(run.ctx, run, &JobStarted{
 		RecordMeta: NewRecordMeta("job.started"),
 		SessionID:  s.opts.SessionID,
 		Job:        jobID,
@@ -293,16 +304,49 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 		Tool:       tool,
 		RunID:      run.id,
 		StartedAt:  nowRFC3339(),
-	}); err != nil {
-		s.mu.Lock()
-		delete(s.jobs, jobID)
-		s.mu.Unlock()
+	})
+	s.mu.Lock()
+	run.jobStarts--
+	winding := run.committed || run.finalizing
+	s.mu.Unlock()
+	s.signalWorkLocked(run)
+	if err != nil {
+		s.removeJobLocked(jobID)
 		cancel(errFinalizing)
-		return "", false
+		if errors.Is(err, errDeliveryAbandoned) || winding {
+			return "", false, true
+		}
+		s.addCandidate(run, storeErrorCandidate(err))
+		return "", false, false
+	}
+	if winding {
+		// The run went down while the acceptance was being recorded. Do
+		// not launch the job.
+		s.mu.Lock()
+		job.ended = true
+		s.mu.Unlock()
+		s.removeJobLocked(jobID)
+		cancel(errFinalizing)
+		return "", false, true
 	}
 
 	go s.runJob(job, prepared)
-	return jobID, true
+	return jobID, true, false
+}
+
+// removeJobLocked forgets a job that never ran.
+//
+// The caller holds the session's lock.
+func (s *Session) removeJobLocked(jobID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.jobs, jobID)
+	for i, id := range s.jobOrder {
+		if id == jobID {
+			s.jobOrder = append(s.jobOrder[:i], s.jobOrder[i+1:]...)
+			return
+		}
+	}
 }
 
 // runningJobCountLocked returns how many jobs are running.

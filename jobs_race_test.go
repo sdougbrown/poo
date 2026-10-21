@@ -546,3 +546,105 @@ var _ = json.RawMessage(nil)
 
 // unusedTime keeps the time import honest when the file changes.
 var _ = time.Second
+
+// blockingBeforeToolHook holds a call after its validation until the test
+// lets it go.
+type blockingBeforeToolHook struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+// BeforeTool blocks until the test releases it.
+func (h *blockingBeforeToolHook) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	close(h.started)
+	<-h.release
+	return poo.Allow(), nil
+}
+
+// TestNoJobStartsAfterTheCommitPoint covers the plan's rule: no new
+// effect starts after the commit point. A cancel that commits while a
+// before-tool hook runs must not let the call become a job.
+func TestNoJobStartsAfterTheCommitPoint(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+	hook := &blockingBeforeToolHook{started: make(chan struct{}), release: make(chan struct{})}
+
+	opts := jobOptions(t, tr, tool, sink)
+	opts.BeforeTool = []poo.BeforeToolHook{hook}
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-hook.started
+	go s.Cancel("cancel:test")
+	waitFor(t, "the run to settle", func() bool { return !s.Running() })
+	close(hook.release)
+
+	if sink.count("job.started") != 0 {
+		t.Errorf("the log holds %d job.started records after the run settled, want 0", sink.count("job.started"))
+	}
+	if len(s.JobsRunning()) != 0 {
+		t.Errorf("a job is running for a settled run: %v", s.JobsRunning())
+	}
+	if tool.Calls() != 0 {
+		t.Errorf("the tool ran %d times after the settle, want 0", tool.Calls())
+	}
+}
+
+// blockingJobStartSink holds the job's acceptance record until the test
+// releases it.
+type blockingJobStartSink struct {
+	entered chan struct{}
+	release chan struct{}
+	inner   recordingSink
+}
+
+// Append holds a job.started record.
+func (s *blockingJobStartSink) Append(ctx context.Context, rec poo.Record) error {
+	if rec.Meta().Record == "job.started" {
+		close(s.entered)
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return s.inner.Append(ctx, rec)
+}
+
+// Flush does nothing.
+func (s *blockingJobStartSink) Flush(ctx context.Context) error { return nil }
+
+// TestNoJobLaunchesAfterTheSettle covers the acceptance record as
+// tracked work: a job whose job.started write is still in flight when
+// the run settles never launches its tool.
+func TestNoJobLaunchesAfterTheSettle(t *testing.T) {
+	sink := &blockingJobStartSink{entered: make(chan struct{}), release: make(chan struct{})}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-sink.entered
+	s.Cancel("cancel:test")
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	close(sink.release)
+	select {
+	case <-tool.Started():
+		t.Fatalf("the job began executing after the run settled; records: %v", sink.inner.names())
+	case <-time.After(100 * time.Millisecond):
+	}
+}

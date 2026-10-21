@@ -187,6 +187,10 @@ type runState struct {
 	// being written. The finalization waits for them as it does for the
 	// pending calls.
 	resultWrites int
+	// jobStarts counts the job acceptance records whose writes are still
+	// in flight. The finalization waits for them as it does for the
+	// pending calls.
+	jobStarts int
 	// workDone is signalled when a pending call gets its result.
 	workDone chan struct{}
 

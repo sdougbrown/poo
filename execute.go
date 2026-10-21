@@ -63,6 +63,10 @@ type callPlan struct {
 // It reports whether any call was processed: a call that got a result
 // other than skipped: truncated.
 func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, truncated bool) bool {
+	// A run that is winding down starts no new effect.
+	if s.runWindingDown(run) {
+		return false
+	}
 	plans := s.planCalls(run, turn, calls, truncated)
 	if len(plans) == 0 {
 		return false
@@ -321,6 +325,9 @@ func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
 // response whose arguments are incomplete is skipped with a visible
 // result.
 func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
+	if s.runWindingDown(run) {
+		return
+	}
 	handle := plan.handle
 	call := plan.call
 
@@ -402,6 +409,11 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// The before-tool hooks run after the validation and before the
 	// call, and they may refuse it or answer it themselves.
 	decision, err := s.runBeforeTool(run, turn, handle, call.Name, prepared, plan)
+	// The hook may have outlived the run: a decision that arrives after
+	// the finalization began is discarded, and the call starts nothing.
+	if s.runWindingDown(run) {
+		return
+	}
 	if err != nil {
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
 			Text:    err.Error(),
@@ -449,6 +461,10 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// The call has been issued, so it needs a result even if the run
 	// settles before it finishes.
 	s.issueCall(run, turn, handle, call.Name, call.ID)
+	if s.runWindingDown(run) {
+		// The finalization owns the issued call's result.
+		return
+	}
 
 	callCtx := s.activityContextFor(run)
 	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
@@ -541,7 +557,12 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(run *runState, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok := s.startJob(run, handle, call.Name, plan.prepared, plan.summary)
+	jobID, ok, winding := s.startJob(run, handle, call.Name, plan.prepared, plan.summary)
+	if winding {
+		// The run settled while the job was being accepted; nothing
+		// else starts, and the finalization owns the run.
+		return
+	}
 	if !ok {
 		// There was no free slot. The failure is recoverable: the
 		// model sees the message and may wait or cancel one.
