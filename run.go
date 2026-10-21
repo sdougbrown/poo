@@ -101,20 +101,11 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		Jobs:            publicJobResults(jobs),
 	}); err != nil {
 		// The store refused the run's first record. The run cannot
-		// continue, and the session is broken. The run settles
-		// store_error, so the caller sees the outcome in the settle
-		// record rather than as a failed call.
-		s.mu.Lock()
-		s.run = nil
-		s.transitionLocked(StateSettling)
-		s.transitionLocked(StateSettled)
-		s.lastResult = Result{Reason: ReasonStoreError, Detail: SettleDetail{
-			Source: "store",
-			Text:   err.Error(),
-		}}
-		s.lastRunID = runID
-		s.mu.Unlock()
-		cancel(nil)
+		// continue, so it goes through the normal finalization: it
+		// emits run.settled and takes the store_error code, rather
+		// than leaving the caller with a result the table cannot
+		// explain.
+		s.finalize(run, storeErrorCandidate(err))
 		return runID, nil
 	}
 	s.events.emit(EventRunStarted, map[string]any{

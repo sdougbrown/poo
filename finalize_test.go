@@ -1010,3 +1010,37 @@ func TestTheFinalizesOwnCancelIsNotACandidate(t *testing.T) {
 		}
 	}
 }
+
+// TestAFailedRunStartStillSettles covers the failure table's RecordSink
+// row at the run's first write: the run still goes through finalize, so
+// it emits run.settled and takes the store_error exit code.
+func TestAFailedRunStartStillSettles(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "hi"}})
+	tool := &echoTool{result: "ok"}
+	sink := &failingSink{failAt: 1}
+	opts := testOptions(t, tr, tool, sink)
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "go"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if res.Reason != poo.ReasonStoreError {
+		t.Errorf("reason = %q, want store_error", res.Reason)
+	}
+	settled := 0
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventRunSettled {
+			settled++
+		}
+	}
+	if settled != 1 {
+		t.Errorf("the session emitted %d run.settled events, want 1", settled)
+	}
+	codes := s.SettleCodes()
+	if len(codes) != 1 || codes[0] != 23 {
+		t.Errorf("settle codes = %v, want [23]", codes)
+	}
+}
