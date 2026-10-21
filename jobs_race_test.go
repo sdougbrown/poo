@@ -296,7 +296,8 @@ func TestAWakeRacingAPromptStartsOneRun(t *testing.T) {
 	tool.SetResult("the job's output")
 
 	s := newTestSession(t, jobOptions(t, tr, tool, sink))
-	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+	firstRunID, err := s.Prompt(context.Background(), "do the thing")
+	if err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tool.Started()
@@ -334,7 +335,7 @@ func TestAWakeRacingAPromptStartsOneRun(t *testing.T) {
 	// Exactly one run started after the first one: the wake's.
 	waitFor(t, "the woken run to settle", func() bool {
 		settled := sink.settled()
-		return settled != nil && settled.RunID != "s1-r1"
+		return settled != nil && settled.RunID != firstRunID
 	})
 	starts := 0
 	for _, rec := range sink.allRecords() {
