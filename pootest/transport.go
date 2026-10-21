@@ -148,37 +148,12 @@ func (t *Transport) Rendered() []poo.Rendered {
 
 // copyRequest copies a request and the messages under it.
 //
-// The copy is deep: the content blocks, the raw arguments and the opaque
-// provider payloads are copied, so a test that changes what it got back
-// does not change what the transport recorded.
+// The copy is deep (the messages go through poo.CloneMessages), so a
+// test that changes what it got back does not change what the transport
+// recorded.
 func copyRequest(req poo.ChatRequest) poo.ChatRequest {
 	out := req
-	if req.Messages != nil {
-		out.Messages = make([]poo.Message, len(req.Messages))
-		for i, m := range req.Messages {
-			out.Messages[i] = m
-			if m.Content != nil {
-				out.Messages[i].Content = make([]poo.ContentBlock, len(m.Content))
-				for j, c := range m.Content {
-					out.Messages[i].Content[j] = c
-					if c.Arguments != nil {
-						out.Messages[i].Content[j].Arguments = append([]byte(nil), c.Arguments...)
-					}
-					if c.Provider != nil {
-						p := *c.Provider
-						if p.Data != nil {
-							p.Data = append([]byte(nil), p.Data...)
-						}
-						out.Messages[i].Content[j].Provider = &p
-					}
-				}
-			}
-			if m.DeliveryNote != nil {
-				note := *m.DeliveryNote
-				out.Messages[i].DeliveryNote = &note
-			}
-		}
-	}
+	out.Messages = poo.CloneMessages(req.Messages)
 	if req.Tools != nil {
 		out.Tools = make([]poo.ToolSpec, len(req.Tools))
 		for i, s := range req.Tools {
@@ -208,7 +183,7 @@ func (t *Transport) Forks() []Fork {
 	for _, f := range t.forks {
 		out = append(out, Fork{
 			Prev:      copyRendered(f.Prev),
-			Appended:  copyRequest(poo.ChatRequest{Messages: f.Appended}).Messages,
+			Appended:  poo.CloneMessages(f.Appended),
 			MaxTokens: f.MaxTokens,
 		})
 	}

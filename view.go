@@ -21,7 +21,7 @@ type History struct {
 // caller cannot change the view by changing what it passed in.
 func NewHistory(messages []Message, results map[string]ToolResult, turns []TurnSummary) *History {
 	h := &History{
-		messages: copyMessages(messages),
+		messages: CloneMessages(messages),
 		results:  map[string]ToolResult{},
 	}
 	for handle, r := range results {
@@ -37,7 +37,7 @@ func NewHistory(messages []Message, results map[string]ToolResult, turns []TurnS
 
 // Messages returns the model's history, in model order.
 func (h *History) Messages() []Message {
-	return copyMessages(h.messages)
+	return CloneMessages(h.messages)
 }
 
 // Turns returns a summary of each turn.
@@ -59,12 +59,12 @@ func (h *History) Result(handle string) (ToolResult, bool) {
 	return copyResult(r), true
 }
 
-// copyMessages copies a list of messages, and everything under them.
+// CloneMessages copies a list of messages, and everything under them.
 //
 // The copy is deep: the content blocks, the raw arguments, the opaque
 // provider payloads and the delivery note are all copied, so a caller
 // that changes one cannot reach the original.
-func copyMessages(in []Message) []Message {
+func CloneMessages(in []Message) []Message {
 	if in == nil {
 		return nil
 	}
