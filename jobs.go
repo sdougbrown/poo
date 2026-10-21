@@ -520,7 +520,9 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 // addStoreError gives the open run the store_error candidate.
 //
 // The run that owns the job may already have settled, and then the
-// candidate is dropped: a settled run is never mutated.
+// candidate is dropped: a settled run is never mutated. The candidate
+// goes through finalize, so a waiting run is woken and settles instead
+// of waiting for a job that will never deliver.
 func (s *Session) addStoreError(runID string) {
 	s.mu.Lock()
 	run := s.run
@@ -528,7 +530,7 @@ func (s *Session) addStoreError(runID string) {
 	if run == nil || run.id != runID {
 		return
 	}
-	s.addCandidate(run, newCandidate(ReasonStoreError, SettleDetail{
+	s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
 		Source: "store",
 		Text:   "the store refused the job's end",
 	}))

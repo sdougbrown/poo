@@ -547,6 +547,13 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		DeliveryNote: note,
 		QueuedAt:     nowRFC3339(),
 	}); err != nil {
+		// The message was never accepted, so it comes back off the
+		// queue. The refused record ends the run, as the failure table
+		// says, so a waiting run does not sleep on a lost message.
+		s.mu.Lock()
+		s.removeQueuedInputLocked(input)
+		s.mu.Unlock()
+		s.finalize(run, storeErrorCandidate(err))
 		return "", err
 	}
 	s.events.emit(EventInputQueued, map[string]any{
@@ -568,6 +575,24 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		s.addInterrupt(run, id)
 	}
 	return id, nil
+}
+
+// removeQueuedInputLocked takes one input back off its queue.
+//
+// The caller holds the session's lock.
+func (s *Session) removeQueuedInputLocked(input queuedInput) {
+	for i, queued := range s.steerQueue {
+		if queued.id == input.id {
+			s.steerQueue = append(s.steerQueue[:i], s.steerQueue[i+1:]...)
+			return
+		}
+	}
+	for i, queued := range s.followUpQueue {
+		if queued.id == input.id {
+			s.followUpQueue = append(s.followUpQueue[:i], s.followUpQueue[i+1:]...)
+			return
+		}
+	}
 }
 
 // prepareDeliveryNoteLocked validates a delivery note against the

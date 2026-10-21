@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // The input path: a steer reaches the model at the next turn end, an
@@ -1393,7 +1394,7 @@ func (s *refusingSteerSink) Append(ctx context.Context, rec poo.Record) error {
 
 // TestADrainStopsWhenADeliveryWriteFails covers the plan's rule that
 // accepted input is never silently lost: once a delivery's write fails,
-// the rest of the drain stays queued and is reported in the settle
+// the failed input and the rest of the drain are reported in the settle
 // detail.
 func TestADrainStopsWhenADeliveryWriteFails(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -1423,11 +1424,13 @@ func TestADrainStopsWhenADeliveryWriteFails(t *testing.T) {
 	if res.Reason != poo.ReasonStoreError {
 		t.Fatalf("the run settled %q, want store_error", res.Reason)
 	}
-	if len(res.Detail.UndeliveredInput) != 1 {
-		t.Fatalf("the settle detail lists %d undelivered inputs, want 1", len(res.Detail.UndeliveredInput))
+	if len(res.Detail.UndeliveredInput) != 2 {
+		t.Fatalf("the settle detail lists %d undelivered inputs, want 2", len(res.Detail.UndeliveredInput))
 	}
-	if got := res.Detail.UndeliveredInput[0]; got.Mode != string(poo.Steer) {
-		t.Errorf("the undelivered input's mode is %q, want steer", got.Mode)
+	for _, got := range res.Detail.UndeliveredInput {
+		if got.Mode != string(poo.Steer) {
+			t.Errorf("the undelivered input's mode is %q, want steer", got.Mode)
+		}
 	}
 	droppedEvents := 0
 	for _, ev := range s.Events() {
@@ -1435,7 +1438,86 @@ func TestADrainStopsWhenADeliveryWriteFails(t *testing.T) {
 			droppedEvents++
 		}
 	}
-	if droppedEvents != 1 {
-		t.Errorf("the session emitted %d input.dropped events, want 1", droppedEvents)
+	if droppedEvents != 2 {
+		t.Errorf("the session emitted %d input.dropped events, want 2", droppedEvents)
+	}
+}
+
+// TestSendQueuedWriteFailureRefusesAndSettles covers the plan's rule: a
+// message is recorded before Send returns, and a store failure is a
+// store_error candidate for the active run, not a stuck queue entry.
+func TestSendQueuedWriteFailureRefusesAndSettles(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting now"},
+		{text: "the answer"},
+	})
+	sink := &failingSink{failRecord: "input.queued"}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	waitFor(t, "the run to wait", func() bool { return s.State() == poo.StateWaiting })
+	if _, err := s.Send("a steer", poo.Steer); err == nil {
+		t.Fatal("Send accepted the message although the record failed")
+	}
+	if s.QueuedJobResults() != 0 {
+		// The job's own result is not what Send queued.
+	}
+	tool.Release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := s.Wait(ctx)
+	if err != nil {
+		t.Fatalf("the run did not settle after the store failure: %v (state %s)", err, s.State())
+	}
+	if res.Reason != poo.ReasonStoreError {
+		t.Errorf("the run settled %q, want store_error", res.Reason)
+	}
+}
+
+// TestFailedInputDeliveryIsDropped covers the plan's rule: every
+// accepted input ends as exactly one of delivered or dropped. A delivery
+// whose write fails is dropped and reported, not silently lost.
+func TestFailedInputDeliveryIsDropped(t *testing.T) {
+	sink := &failingSink{failRecord: "input.delivered"}
+	tool := pootest.NewJobTool("job", poo.BackgroundNever)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", false)}},
+		{text: "done"},
+	})
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	id, err := s.Send("accepted", poo.Steer)
+	if err != nil {
+		t.Fatalf("sending the steer: %v", err)
+	}
+	tool.Release()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	delivered, dropped := 0, 0
+	for _, ev := range s.Events() {
+		if ev.Payload["input_id"] != id {
+			continue
+		}
+		switch ev.Name {
+		case poo.EventInputDelivered:
+			delivered++
+		case poo.EventInputDropped:
+			dropped++
+		}
+	}
+	if delivered+dropped != 1 || len(res.Detail.UndeliveredInput) != 1 {
+		t.Fatalf("accepted %s: reason=%s delivered=%d dropped=%d undelivered=%v; want one terminal disposition",
+			id, res.Reason, delivered, dropped, res.Detail.UndeliveredInput)
 	}
 }

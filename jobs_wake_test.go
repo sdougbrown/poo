@@ -536,3 +536,36 @@ func TestTheJobsOptionsMatchTheSettings(t *testing.T) {
 		t.Errorf("the log holds %d job.started records, want 1", sink.count("job.started"))
 	}
 }
+
+// TestAJobEndStoreFailureSettlesAWaitingRun covers the plan's rule: a
+// sink failure while job.ended is written gives the active run the
+// store_error candidate, so a waiting run settles instead of waiting
+// forever.
+func TestAJobEndStoreFailureSettlesAWaitingRun(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting now"},
+		{text: "the answer"},
+	})
+	sink := &failingSink{failRecord: "job.ended"}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	waitFor(t, "the run to wait", func() bool { return s.State() == poo.StateWaiting })
+	tool.Release()
+	waitFor(t, "the session to break", func() bool { return s.Broken() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := s.Wait(ctx)
+	if err != nil {
+		t.Fatalf("the run did not settle after the store failure: %v (state %s)", err, s.State())
+	}
+	if res.Reason != poo.ReasonStoreError {
+		t.Errorf("the run settled %q, want store_error", res.Reason)
+	}
+}

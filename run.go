@@ -687,10 +687,10 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 		Content:      msg.Content,
 		DeliveryNote: note,
 	}); err != nil {
-		if errors.Is(err, errDeliveryAbandoned) {
-			s.abandonDelivery(run, input)
-		} else {
-			s.finishDelivery(run, input)
+		// The message never reached the model, so the input is
+		// dropped and reported, even though the store is what failed.
+		s.abandonDelivery(run, input)
+		if !errors.Is(err, errDeliveryAbandoned) {
 			s.addCandidate(run, storeErrorCandidate(err))
 		}
 		return false
@@ -703,10 +703,8 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 		Mode:        input.mode,
 		DeliveredAt: nowRFC3339(),
 	}); err != nil {
-		if errors.Is(err, errDeliveryAbandoned) {
-			s.abandonDelivery(run, input)
-		} else {
-			s.finishDelivery(run, input)
+		s.abandonDelivery(run, input)
+		if !errors.Is(err, errDeliveryAbandoned) {
 			s.addCandidate(run, storeErrorCandidate(err))
 		}
 		return false
