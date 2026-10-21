@@ -383,8 +383,7 @@ type Options struct {
 	BeforeSettle []BeforeSettleHook
 	// BeforeTool runs after a call is validated and before it runs.
 	//
-	// The policy slot is a before-tool hook that only ever allows or
-	// denies, and it is installed here as the first one.
+	// The hooks run after the policy slot, in registration order.
 	BeforeTool []BeforeToolHook
 	// Policy is the policy slot: the before-tool hook the permission
 	// engine fills.
