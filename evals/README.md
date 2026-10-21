@@ -33,11 +33,17 @@ Each invocation copies the fixtures its tasks use into
 `<work root>/<invocation>/fixtures/` before the first run and makes
 every workdir from that snapshot, so a model that edits
 `evals/fixtures` cannot change the start of a later run. The runner
-also hashes each fixture and task directory at the start and again
+also hashes each fixture, its snapshot and each task directory at the start and again
 after each run. A run that finds one changed is marked invalid
 (`source_changed`, success false, an error saying so), a warning
 naming the run goes to stderr, and `poo-eval run` exits non-zero. The
 source is not restored; that is the operator's call.
+
+The sandboxed process can write its own session log: the log directory
+is writable, and a process of the same user can reach an open file
+through `/proc`. The metrics and the judge's transcripts come from that
+log, so they come from data the model could alter. Success does not:
+it comes from `check.sh`, which runs outside the sandbox.
 
 The limit that remains: a model can still search the filesystem, and
 the derivations in `check_answer.py` and the checks are files on the
