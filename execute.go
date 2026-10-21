@@ -507,16 +507,23 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errInterrupted) {
 			// The call was cut short. The outcome says which: a call
 			// that never started is skipped, and one that was running
-			// is cancelled.
+			// is cancelled. The partial output the tool returned stays
+			// in the result, with the note.
 			if s.wasInterrupted(run) {
 				s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-					Text:    CancelledInterruptedText,
+					Text:    interruptNote(result.Text),
 					IsError: true,
 				}, OutcomeCancelled)
 				return
 			}
+			text := result.Text
+			if text == "" {
+				text = err.Error()
+			} else {
+				text = text + "\n" + err.Error()
+			}
 			s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-				Text:    err.Error(),
+				Text:    text,
 				IsError: true,
 			}, OutcomeCancelled)
 			return

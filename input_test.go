@@ -1541,3 +1541,35 @@ func TestFailedInputDeliveryIsDropped(t *testing.T) {
 			id, res.Reason, delivered, dropped, res.Detail.UndeliveredInput)
 	}
 }
+
+// TestAnInterruptedSyncCallKeepsItsPartialOutput covers the plan's rule:
+// a synchronous call an interrupt stops keeps the partial output the
+// tool returned, with the note saying why it ended.
+func TestAnInterruptedSyncCallKeepsItsPartialOutput(t *testing.T) {
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundNever)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", false)}},
+		{text: "done"},
+	})
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	if _, err := s.Send("stop it", poo.Interrupt); err != nil {
+		t.Fatalf("sending the interrupt: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	for _, rec := range sink.allRecords() {
+		out, ok := rec.(*poo.ToolResultRecord)
+		if !ok || out.Tool != "job" {
+			continue
+		}
+		if !strings.Contains(out.Text, "the call was stopped") {
+			t.Fatalf("the interrupted result %q lost the partial output %q", out.Text, "the call was stopped")
+		}
+	}
+}

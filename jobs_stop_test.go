@@ -636,3 +636,87 @@ func TestTheCloseIsBoundedWithTwoUncooperativeJobs(t *testing.T) {
 		t.Fatal("Close still blocked after 6s with two jobs; the teardown bound must cover the whole wait")
 	}
 }
+
+// partialThenNilJobTool waits for its context to end, then returns a
+// partial result with a nil error, which is how a cooperative tool
+// reports that it was stopped.
+type partialThenNilJobTool struct {
+	*pootest.JobTool
+	entered chan struct{}
+}
+
+// Call waits for the context and returns the partial output.
+func (t *partialThenNilJobTool) Call(ctx context.Context, p poo.Prepared, e poo.ToolEnv) (poo.ToolResult, error) {
+	close(t.entered)
+	<-ctx.Done()
+	return poo.ToolResult{Text: "the partial output"}, nil
+}
+
+// TestAJobTimeoutBeatsANilError covers the plan's rule: the job's
+// context decides a timeout before a nil error can call the job
+// successful.
+func TestAJobTimeoutBeatsANilError(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	tool := &partialThenNilJobTool{
+		JobTool: pootest.NewJobTool("job", poo.BackgroundAllowed),
+		entered: make(chan struct{}),
+	}
+	opts := jobOptions(t, tr, tool, sink)
+	opts.MaxTurns = 1
+	s := newTestSession(t, opts, poo.WithJobs(poo.JobOptions{
+		Timeout: 10 * time.Millisecond,
+		OnIdle:  poo.OnIdleHold,
+	}))
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.entered
+	waitFor(t, "job completion", func() bool { return sink.count("job.ended") == 1 })
+	for _, rec := range sink.allRecords() {
+		end, ok := rec.(*poo.JobEnded)
+		if !ok {
+			continue
+		}
+		if end.Outcome != poo.JobOutcomeError || !end.TimedOut {
+			t.Errorf("job.ended outcome=%s timed_out=%v; want error/timed_out", end.Outcome, end.TimedOut)
+		}
+		if !strings.Contains(end.Text, "the partial output") {
+			t.Errorf("job.ended text=%q; want the partial output", end.Text)
+		}
+	}
+}
+
+// TestTheCloseKeepsAJobsPartialOutput covers the plan's close: the
+// job.ended the close writes keeps what the job had produced, plus the
+// note that the session closed.
+func TestTheCloseKeepsAJobsPartialOutput(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "waiting"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	if err := s.Close(); err != nil {
+		t.Fatalf("closing: %v", err)
+	}
+	for _, rec := range sink.allRecords() {
+		end, ok := rec.(*poo.JobEnded)
+		if !ok {
+			continue
+		}
+		if !strings.Contains(end.Text, "the call was stopped") {
+			t.Fatalf("job.ended text=%q; lost the partial output %q", end.Text, "the call was stopped")
+		}
+		return
+	}
+	t.Fatal("no job.ended")
+}

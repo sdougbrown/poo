@@ -206,6 +206,9 @@ type jobState struct {
 	done chan struct{}
 	// ended reports that the job has a job.ended record.
 	ended bool
+	// partialText is what the job's tool had produced when it stopped.
+	// The close keeps it in the job.ended record it writes.
+	partialText string
 }
 
 // jobResult is a job's finished result, waiting for its delivery.
@@ -408,6 +411,12 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 
 	env := s.jobToolEnv(job)
 	result, err := tool.Call(ctx, prepared, env)
+	// The partial output is kept even when the close writes the record:
+	// the close stopped the job, but what it produced is still its
+	// result.
+	s.mu.Lock()
+	job.partialText = result.Text
+	s.mu.Unlock()
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	// A fatal error means the environment is unusable. The failure
 	// belongs to the job, and the receiving run settles tool_fatal.
@@ -420,27 +429,36 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 		return
 	}
 
+	// The job's context decides a timeout or a cancellation before a
+	// nil error can call the job successful: a cooperative tool returns
+	// its partial output and no error when it is stopped.
 	switch {
-	case err == nil:
-		s.finishJob(job, OutcomeOK, result.Text, false, false)
 	case timedOut:
 		// The job ran out of time. The outcome is an error with the
 		// timeout flag, and the partial output is the result.
-		text := result.Text
-		if text == "" {
-			text = err.Error()
-		}
-		s.finishJob(job, OutcomeError, text, true, fatal)
-	case errors.Is(err, context.Canceled):
+		s.finishJob(job, OutcomeError, stoppedText(result.Text, err, "the job ran out of time"), true, fatal)
+	case errors.Is(ctx.Err(), context.Canceled):
 		// The job was stopped on purpose.
-		text := result.Text
-		if text == "" {
-			text = "the job was cancelled"
-		}
-		s.finishJob(job, OutcomeCancelled, text, false, fatal)
+		s.finishJob(job, OutcomeCancelled, stoppedText(result.Text, err, "the job was cancelled"), false, fatal)
+	case err == nil:
+		s.finishJob(job, OutcomeOK, result.Text, false, false)
+	case errors.Is(err, context.Canceled):
+		s.finishJob(job, OutcomeCancelled, stoppedText(result.Text, err, "the job was cancelled"), false, fatal)
 	default:
 		s.finishJob(job, OutcomeError, err.Error(), false, fatal)
 	}
+}
+
+// stoppedText returns the partial output a stopped job produced, and the
+// reason when it produced none.
+func stoppedText(partial string, err error, reason string) string {
+	if partial != "" {
+		return partial
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return reason
 }
 
 // jobToolEnv builds the environment a job runs in.
@@ -1202,8 +1220,13 @@ func (s *Session) writeJobEndedOnClose(job *jobState) {
 	handle := job.handle
 	tool := job.tool
 	runID := job.runID
+	partial := job.partialText
 	s.mu.Unlock()
 
+	text := "the session closed while the job was running"
+	if partial != "" {
+		text = partial + "\n" + text
+	}
 	s.write(context.Background(), &JobEnded{
 		RecordMeta: NewRecordMeta("job.ended"),
 		SessionID:  s.opts.SessionID,
@@ -1214,7 +1237,7 @@ func (s *Session) writeJobEndedOnClose(job *jobState) {
 		Outcome:    JobOutcomeCancelled,
 		Cause:      CauseSessionClosed,
 		InputID:    inputID,
-		Text:       "the session closed while the job was running",
+		Text:       text,
 		EndedAt:    nowRFC3339(),
 	})
 	s.events.emit(EventJobEnded, map[string]any{
