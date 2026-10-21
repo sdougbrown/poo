@@ -191,8 +191,12 @@ func Annotate(text string) ResultDecision { return ResultDecision{Kept: true, An
 // the session record.
 func Replace(r ToolResult) ResultDecision { return ResultDecision{Replaced: &r} }
 
-// Redact drops the original from the record. Use it for secrets.
-func Redact() ResultDecision { return ResultDecision{Redacted: true} }
+// Redact drops the original from the record and shows the model the
+// given result instead. Use it for secrets.
+//
+// The original never reaches the record, the events or the store, so
+// the result the hook names is all that is left of it.
+func Redact(r ToolResult) ResultDecision { return ResultDecision{Redacted: true, Replaced: &r} }
 
 // TurnDecision is what an after-turn hook returns.
 //

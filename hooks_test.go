@@ -63,9 +63,15 @@ func TestTheResultDecisions(t *testing.T) {
 		t.Errorf("the replacement is %q, want the replacement", replace.Replaced.Text)
 	}
 
-	redact := poo.Redact()
+	redact := poo.Redact(poo.ToolResult{Text: "[redacted]"})
 	if !redact.Redacted {
 		t.Errorf("the redact decision is %+v, want a redaction", redact)
+	}
+	if redact.Replaced == nil {
+		t.Fatal("the redact decision holds no replacement")
+	}
+	if redact.Replaced.Text != "[redacted]" {
+		t.Errorf("the redaction's replacement is %q, want the replacement", redact.Replaced.Text)
 	}
 }
 

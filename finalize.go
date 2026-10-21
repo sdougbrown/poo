@@ -463,7 +463,7 @@ func (s *Session) inFlightLocked(run *runState) int {
 			started++
 		}
 	}
-	return started + run.resultWrites + run.callWrites + run.jobStarts + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
+	return started + run.resultWrites + run.callWrites + run.jobStarts + run.runWrites + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
 }
 
 // sealLocked seals the run and takes ownership of every claim that was
@@ -548,7 +548,10 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 		s.writeResult(run, call.turn, call.handle, call.tool, call.id, ToolResult{
 			Text:    text,
 			IsError: true,
-		}, outcome)
+		}, outcome, afterToolOutcome{result: ToolResult{
+			Text:    text,
+			IsError: true,
+		}})
 	}
 }
 

@@ -532,7 +532,10 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 
 	callCtx := s.activityContextFor(run)
 	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
-	if err == nil && callCtx.Err() != nil {
+	// The outcome is decided by the core, not by the tool.
+	outcome := OutcomeOK
+	switch {
+	case err == nil && callCtx.Err() != nil:
 		// The call's context ended while the call ran: the tool saw
 		// the cancellation and gave back what it had. The outcome says
 		// the call was cancelled, and the result carries the partial
@@ -543,72 +546,53 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		} else {
 			text = text + "\n" + CancelledInterruptedText
 		}
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-			Text:    text,
-			IsError: true,
-		}, OutcomeCancelled)
-		return
-	}
-	if err == nil && s.wasInterrupted(run) {
+		result = ToolResult{Text: text, IsError: true}
+		outcome = OutcomeCancelled
+	case err == nil && s.wasInterrupted(run):
 		// The call was cut short by an interrupt, even though the tool
 		// returned a result: the tool saw the cancellation and gave
 		// back what it had. The outcome says the call was cancelled,
 		// and the result carries the partial output with the note.
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-			Text:    interruptNote(result.Text),
-			IsError: true,
-		}, OutcomeCancelled)
-		return
-	}
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, errInterrupted) {
+		result = ToolResult{Text: interruptNote(result.Text), IsError: true}
+		outcome = OutcomeCancelled
+	case err != nil:
+		switch {
+		case errors.Is(err, context.Canceled) || errors.Is(err, errInterrupted):
 			// The call was cut short. The outcome says which: a call
 			// that never started is skipped, and one that was running
 			// is cancelled. The partial output the tool returned stays
 			// in the result, with the note.
 			if s.wasInterrupted(run) {
-				s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-					Text:    interruptNote(result.Text),
-					IsError: true,
-				}, OutcomeCancelled)
-				return
-			}
-			text := result.Text
-			if text == "" {
-				text = err.Error()
+				result = ToolResult{Text: interruptNote(result.Text), IsError: true}
 			} else {
-				text = text + "\n" + err.Error()
+				text := result.Text
+				if text == "" {
+					text = err.Error()
+				} else {
+					text = text + "\n" + err.Error()
+				}
+				result = ToolResult{Text: text, IsError: true}
 			}
-			s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-				Text:    text,
-				IsError: true,
-			}, OutcomeCancelled)
-			return
-		}
-		// A tool error that wraps ErrFatal is the environment being
-		// unusable: the run settles tool_fatal.
-		if errors.Is(err, ErrFatal) {
-			s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-				Text:    err.Error(),
-				IsError: true,
-			}, OutcomeError)
+			outcome = OutcomeCancelled
+		case errors.Is(err, ErrFatal):
+			// A tool error that wraps ErrFatal is the environment being
+			// unusable: the run settles tool_fatal.
+			result = ToolResult{Text: err.Error(), IsError: true}
+			outcome = OutcomeError
 			s.addCandidate(run, newCandidate(ReasonToolFatal, SettleDetail{
 				Source: "tool:" + call.Name,
 				Text:   err.Error(),
 			}))
-			return
+		default:
+			// Any other error is recoverable: it goes back to the model
+			// and the run continues.
+			result = ToolResult{Text: err.Error(), IsError: true}
+			outcome = OutcomeError
 		}
-		// Any other error is recoverable: it goes back to the model
-		// and the run continues.
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-			Text:    err.Error(),
-			IsError: true,
-		}, OutcomeError)
-		return
 	}
 
 	// A valid finish call settles the run as finished, with the result.
-	if call.Name == FinishToolName {
+	if outcome == OutcomeOK && call.Name == FinishToolName {
 		if raw, ok := prepared.(FinishResult); ok {
 			s.addCandidate(run, newCandidate(ReasonFinished, SettleDetail{
 				Source: "finish",
@@ -618,7 +602,10 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		}
 	}
 
-	s.recordResult(run, turn, handle, call.Name, call.ID, result, OutcomeOK)
+	// The after-tool chain runs before the result is recorded or
+	// emitted, so the record, the event and the model see the same
+	// sanitized result.
+	s.recordToolResult(run, turn, handle, call.Name, call.ID, s.toolCallInfo(turn, handle, call.Name, prepared, plan), result, outcome)
 }
 
 // startJobCall turns a call into a background job.
@@ -698,7 +685,32 @@ func (s *Session) recordResult(run *runState, turn int, handle, tool, callID str
 		// The finalization already gave the call a synthetic result.
 		return
 	}
-	s.writeResult(run, turn, handle, tool, callID, result, outcome)
+	s.writeResult(run, turn, handle, tool, callID, result, outcome, afterToolOutcome{result: result})
+	if tracked {
+		s.finishResultWrite(run)
+	}
+}
+
+// recordToolResult runs the after-tool chain and records the result.
+//
+// The chain runs before the result is recorded or emitted, so the
+// record, the event and the model all see the same sanitized result. A
+// hook that fails settles the run with hook_error, and the call keeps
+// the result the tool gave.
+func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID string, info ToolCallInfo, result ToolResult, outcome Outcome) {
+	out, err := s.runAfterTool(s.activityContextFor(run), run.id, "", turn, info, result)
+	if err != nil {
+		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
+			Source: "after_tool",
+			Text:   err.Error(),
+		}))
+	}
+	won, tracked := s.claimResult(run, handle)
+	if !won {
+		// The finalization already gave the call a synthetic result.
+		return
+	}
+	s.writeResult(run, turn, handle, tool, callID, out.result, outcome, out)
 	if tracked {
 		s.finishResultWrite(run)
 	}
@@ -759,9 +771,11 @@ func (s *Session) beginCallRecordLocked(run *runState, call *issuedCall) {
 // writeResult writes a call's result record and puts it in the model's
 // view.
 //
-// The caller has claimed the call's result.
-func (s *Session) writeResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome) {
-	if err := s.write(run.ctx, &ToolResultRecord{
+// The caller has claimed the call's result. The chain's outcome
+// carries the original the hooks replaced and the decisions they made:
+// a redacted result's record holds no original at all.
+func (s *Session) writeResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome, out afterToolOutcome) {
+	rec := &ToolResultRecord{
 		RecordMeta: NewRecordMetaFrom("tool.result", OriginTool),
 		RunID:      run.id,
 		Turn:       turn,
@@ -770,7 +784,18 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		Outcome:    outcome,
 		Text:       result.Text,
 		Structured: result.Structured,
-	}); err != nil {
+		Redacted:   out.redacted,
+		RedactedBy: out.redactedBy,
+		Hooks:      out.decisions,
+	}
+	if out.original != nil {
+		rec.Original = &ToolResultData{
+			Text:       out.original.Text,
+			Structured: out.original.Structured,
+			IsError:    out.original.IsError,
+		}
+	}
+	if err := s.write(run.ctx, rec); err != nil {
 		s.addCandidate(run, newCandidate(ReasonStoreError, SettleDetail{
 			Source: "store",
 			Text:   err.Error(),

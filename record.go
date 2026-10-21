@@ -207,6 +207,61 @@ type ToolResultRecord struct {
 	Text string `json:"text"`
 	// Structured is the optional side-channel payload.
 	Structured json.RawMessage `json:"structured,omitempty"`
+	// Original is the result the tool produced, when a hook replaced
+	// it. The model has not seen that result yet, so the log keeps it.
+	//
+	// It is absent for a redacted result: the original never reaches
+	// the record.
+	Original *ToolResultData `json:"original,omitempty"`
+	// Redacted reports that a hook redacted the result.
+	Redacted bool `json:"redacted,omitempty"`
+	// RedactedBy names the hook that redacted the result.
+	RedactedBy string `json:"redacted_by,omitempty"`
+	// Hooks are the after-tool hooks' decisions, in the order the
+	// hooks ran. A redacted chain's decisions carry no contents.
+	Hooks []HookDecision `json:"hooks,omitempty"`
+}
+
+// ToolResultData is a tool result's own data.
+//
+// It is the payload of the original result a hook replaced.
+type ToolResultData struct {
+	// Text is the model-facing text of the result.
+	Text string `json:"text"`
+	// Structured is the optional side-channel payload.
+	Structured json.RawMessage `json:"structured,omitempty"`
+	// IsError marks a recoverable failure.
+	IsError bool `json:"is_error,omitempty"`
+}
+
+// HookDecision is what an after-tool hook decided about a result.
+type HookDecision struct {
+	// Hook names the hook that decided.
+	Hook string `json:"hook"`
+	// Action is what the hook did: "keep", "annotate", "replace" or
+	// "redact".
+	Action string `json:"action"`
+	// Text is the text the hook added or substituted. It is absent
+	// when the chain was redacted: the record must not carry what a
+	// redaction removed.
+	Text string `json:"text,omitempty"`
+}
+
+// ObserverDropped records the events an observer missed.
+//
+// The record is written at most once a second per observer, and it is
+// never delivered to an observer: overflow diagnostics must not cause
+// more overflow.
+type ObserverDropped struct {
+	RecordMeta
+	// SessionID identifies the session.
+	SessionID string `json:"session_id"`
+	// Observer names the observer that fell behind.
+	Observer string `json:"observer"`
+	// Count is how many events the observer missed.
+	Count int `json:"count"`
+	// DroppedAt is the RFC 3339 time of the report, in UTC.
+	DroppedAt string `json:"dropped_at"`
 }
 
 // Usage records the token accounting of one provider request.
