@@ -458,6 +458,11 @@ func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool) tu
 	if stop != nil {
 		cands = append(cands, *stop)
 	}
+	// A parent context that ended while the hooks ran is external
+	// cancellation, and it outranks the hooks' own outcomes.
+	if detail, ok := s.externalCancellation(run); ok {
+		cands = append(cands, newCandidate(ReasonCancelled, detail))
+	}
 	cands = append(cands, s.evaluateStopConditions(run, turn)...)
 	cands = append(cands, s.evaluateBudgets(run, turn)...)
 
@@ -502,6 +507,12 @@ func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool) tu
 		// second turn end.
 		s.interruptedTurnEnd(run, turn)
 		return turnOutcome{}
+	}
+	// A parent context that ended while the settle hooks ran is
+	// external cancellation: it becomes the cancelled candidate, unlike
+	// the hook interruption above, which is internal.
+	if detail, ok := s.externalCancellation(run); ok {
+		return turnOutcome{candidates: []candidate{newCandidate(ReasonCancelled, detail)}}
 	}
 	if err != nil {
 		// A hook that asked for more continuations than the run may
@@ -1003,6 +1014,29 @@ func (s *Session) runWindingDown(run *runState) bool {
 // run is being finalized, which is never a cancelled candidate.
 func cancelledByFinalize(run *runState) bool {
 	return context.Cause(run.ctx) == errFinalizing
+}
+
+// externalCancellation reports that the run's own context ended for a
+// reason other than the finalization's own cancellation.
+//
+// A client interrupt ends the activity, not the run, and the
+// finalization's cause is never a candidate. Any other ending is the
+// consumer's parent context, which is external cancellation.
+func (s *Session) externalCancellation(run *runState) (SettleDetail, bool) {
+	s.mu.Lock()
+	err := run.ctx.Err()
+	s.mu.Unlock()
+	if err == nil {
+		return SettleDetail{}, false
+	}
+	cause := context.Cause(run.ctx)
+	if cause == errFinalizing {
+		return SettleDetail{}, false
+	}
+	if cause == nil {
+		cause = err
+	}
+	return cancelDetail(cause), true
 }
 
 // cancelDetail explains a cancelled settle. A deadline has its own

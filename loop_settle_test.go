@@ -434,3 +434,41 @@ func TestTheArgumentsAreRecordedAsTheModelSentThem(t *testing.T) {
 		t.Errorf("the recorded arguments are %q, want the raw text", text)
 	}
 }
+
+// cancelAtSettleHook waits for its context and then accepts the settle.
+type cancelAtSettleHook struct {
+	entered chan struct{}
+}
+
+// BeforeSettle waits until the parent context is cancelled.
+func (h *cancelAtSettleHook) BeforeSettle(ctx poo.HookContext, reason poo.Reason) (poo.SettleDecision, error) {
+	close(h.entered)
+	<-ctx.Done()
+	return poo.Accept(), nil
+}
+
+// TestAParentCancelDuringTheSettleHookWins covers external cancellation:
+// a parent context that ends while BeforeSettle runs produces a
+// cancelled candidate that wins, unlike an internal hook interruption.
+func TestAParentCancelDuringTheSettleHookWins(t *testing.T) {
+	h := &cancelAtSettleHook{entered: make(chan struct{})}
+	s := newTestSession(t, poo.Options{
+		Transport:    scripted([]fakeResponse{{text: "done"}}),
+		ContextLimit: 32768,
+		BeforeSettle: []poo.BeforeSettleHook{h},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := s.Prompt(ctx, "start"); err != nil {
+		t.Fatal(err)
+	}
+	<-h.entered
+	cancel()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reason != poo.ReasonCancelled {
+		t.Fatalf("the parent-cancelled run settled %q with losing %v, want cancelled", res.Reason, res.Detail.Losing)
+	}
+}
