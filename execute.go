@@ -346,9 +346,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// because a refusal never starts a job. The record is therefore
 	// written once, at the point the mode is fixed.
 	recorded := false
-	record := func(m CallMode) {
+	record := func(m CallMode) bool {
 		if recorded {
-			return
+			return true
 		}
 		recorded = true
 		if err := s.write(run.ctx, &ToolCallRecord{
@@ -364,7 +364,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 				Source: "store",
 				Text:   err.Error(),
 			}))
+			return false
 		}
+		return true
 	}
 	s.events.emit(EventToolCall, map[string]any{
 		"run_id": run.id,
@@ -375,7 +377,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// An incomplete call in a truncated response is skipped: the model
 	// was cut off before it could finish the call.
 	if !plan.complete {
-		record(CallModeSync)
+		if !record(CallModeSync) {
+			return
+		}
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
 			Text:    SkippedTruncatedText,
 			IsError: true,
@@ -385,7 +389,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 
 	tool, ok := s.opts.Tools[call.Name]
 	if !ok {
-		record(CallModeSync)
+		if !record(CallModeSync) {
+			return
+		}
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
 			Text:    fmt.Sprintf("unknown tool %q", call.Name),
 			IsError: true,
@@ -402,7 +408,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if plan.prepareErr != nil {
 			text = plan.prepareErr.Error()
 		}
-		record(CallModeSync)
+		if !record(CallModeSync) {
+			return
+		}
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
 			Text:    text,
 			IsError: true,
@@ -419,7 +427,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		return
 	}
 	if err != nil {
-		record(CallModeSync)
+		if !record(CallModeSync) {
+			return
+		}
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
 			Text:    err.Error(),
 			IsError: true,
@@ -433,7 +443,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	if decision.Denied {
 		// A refused call is a model-visible error result, and it
 		// never becomes a job.
-		record(CallModeSync)
+		if !record(CallModeSync) {
+			return
+		}
 		text := decision.Detail
 		if text == "" {
 			text = "The call was refused."
@@ -447,7 +459,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	if decision.Result != nil {
 		// A hook answered the call itself, and it never becomes a
 		// job.
-		record(CallModeSync)
+		if !record(CallModeSync) {
+			return
+		}
 		s.recordResult(run, turn, handle, call.Name, call.ID, *decision.Result, OutcomeOK)
 		return
 	}
@@ -459,14 +473,18 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// A call that becomes a job returns at once, and its result
 	// arrives later as an input.
 	if s.callBecomesJob(call.Name, plan.background) {
-		record(CallModeJob)
+		if !record(CallModeJob) {
+			return
+		}
 		s.startJobCall(run, turn, handle, call, plan)
 		return
 	}
 
 	// The call has been issued, so it needs a result even if the run
 	// settles before it finishes.
-	record(CallModeSync)
+	if !record(CallModeSync) {
+		return
+	}
 	s.issueCall(run, turn, handle, call.Name, call.ID)
 	if s.runWindingDown(run) {
 		// The finalization owns the issued call's result.
