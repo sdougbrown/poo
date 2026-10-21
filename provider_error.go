@@ -80,6 +80,9 @@ func (e *ProviderError) Error() string {
 // none means it asked for no wait at all. A server failure and a network
 // failure always are. A rejection is not: the same request would be
 // refused again.
+//
+// Stage 6's retry budget consumes this and MaxRetryAfter; nothing calls
+// them yet.
 func (e *ProviderError) Retryable() bool {
 	switch e.Kind {
 	case ProviderKindRateLimited:
@@ -95,5 +98,6 @@ func (e *ProviderError) Retryable() bool {
 // be worth retrying.
 //
 // A limit that asks for longer is a provider limit, not a transient
-// failure: the run settles and a later run may succeed.
+// failure: the run settles and a later run may succeed. Stage 6's retry
+// budget consumes it; nothing reads it yet.
 const MaxRetryAfter = 30 * time.Second
