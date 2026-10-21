@@ -40,4 +40,4 @@ go.work.sum
 # .vscode/
 
 # Raw eval transcripts hold local paths; the reports and verdicts are committed.
-evals/results/*/runs/
+evals/results/**/runs/
