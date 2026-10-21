@@ -249,6 +249,37 @@ func (j *Judge) Run(ctx context.Context) (*JudgeResult, error) {
 	return result, nil
 }
 
+// noRunWroteALog reports whether the results directory's report shows
+// that no run wrote a log: it names runs, and none of the logs it names
+// exists. The runner makes a run's directory before poo writes its log,
+// so a run in which every seed timed out leaves a runs directory with
+// no transcript in it. That is the harness's own output, and there is
+// nothing to judge. The judge says so on stderr, with the first error
+// the report holds.
+func (j *Judge) noRunWroteALog() bool {
+	report, err := LoadReport(j.opts.ResultsDir)
+	if err != nil || len(report.Results) == 0 {
+		return false
+	}
+	firstError := ""
+	for _, r := range report.Results {
+		if r.LogPath != "" {
+			path := r.LogPath
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(j.opts.ResultsDir, path)
+			}
+			if _, err := os.Stat(path); err == nil {
+				return false
+			}
+		}
+		if firstError == "" {
+			firstError = r.Error
+		}
+	}
+	fmt.Fprintf(os.Stderr, "poo-eval: no run wrote a log (%d run(s) in the report); the first error: %s\n", len(report.Results), firstError)
+	return true
+}
+
 // transcript is one transcript to judge.
 type transcript struct {
 	// path is the session log.
@@ -296,9 +327,9 @@ func (j *Judge) findTranscripts() ([]transcript, error) {
 		return nil, fmt.Errorf("eval: reading %s: %w", runsDir, err)
 	}
 	if len(out) == 0 {
-		if entries, err := os.ReadDir(runsDir); err == nil && len(entries) > 0 {
+		if entries, err := os.ReadDir(runsDir); err == nil && len(entries) > 0 && !j.noRunWroteALog() {
 			return nil, fmt.Errorf("eval: %s holds files but no run's transcript; "+
-				"the run directories should be <task>/<model>/%s<N>/session.jsonl", runsDir, seedDirPrefix)
+				"the run directories should be [run-<id>/]<task>/<model>/%s<N>/session.jsonl", runsDir, seedDirPrefix)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
