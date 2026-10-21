@@ -317,15 +317,6 @@ func (l *Log) TranscriptSegments() []TranscriptSegment {
 	return out
 }
 
-// Transcript renders the log as a transcript the judge can read.
-func (l *Log) Transcript() string {
-	var b strings.Builder
-	for _, seg := range l.TranscriptSegments() {
-		b.WriteString(seg.Text)
-	}
-	return b.String()
-}
-
 // Turns counts the provider requests the run made.
 //
 // The settle record counts them, and the usage records count them
