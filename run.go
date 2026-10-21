@@ -122,7 +122,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		}
 	}
 
-	user := NewTextMessage(RoleUser, text)
+	user := NewTextMessage(RoleUser, withDeliveryNote(text, note))
 	user.Origin = OriginUser
 	user.DeliveryNote = note
 	s.appendMessages(user)
@@ -582,17 +582,22 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 
 // deliverInput appends one input's message to the model's view and
 // records the delivery.
+//
+// The delivery note is rendered here, from the reply as it was recorded:
+// a reference accepted while the reply was still streaming is resolved
+// once the stream has been finalized.
 func (s *Session) deliverInput(run *runState, input queuedInput) {
-	msg := NewTextMessage(RoleUser, input.text)
+	note := s.renderForDelivery(input.note)
+	msg := NewTextMessage(RoleUser, withDeliveryNote(input.text, note))
 	msg.Origin = originForMode(input.mode)
-	msg.DeliveryNote = input.note
+	msg.DeliveryNote = note
 	s.appendMessages(msg)
 	_ = s.write(run.ctx, &MessageRecord{
 		RecordMeta:   NewRecordMetaFrom("message", msg.Origin),
 		RunID:        run.id,
 		Role:         msg.Role,
 		Content:      msg.Content,
-		DeliveryNote: input.note,
+		DeliveryNote: note,
 	})
 	_ = s.write(run.ctx, &InputDelivered{
 		RecordMeta:  NewRecordMeta("input.delivered"),

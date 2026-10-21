@@ -60,8 +60,9 @@ type InputOption func(*inputRequest)
 // says how many of its characters the user had seen, counted in code
 // points over its text blocks.
 //
-// The note is rendered when the input is accepted, and it is part of the
-// recorded message, so a replay shows exactly what the user saw.
+// The note is rendered from the recorded reply when the input is
+// delivered, prefixed to the user's message, and recorded with it, so a
+// replay shows exactly what the user saw.
 func WithDelivered(messageID string, uptoChars int) InputOption {
 	return func(r *inputRequest) {
 		r.delivered = &DeliveryNote{MessageID: messageID, UpToChars: uptoChars}
@@ -160,16 +161,16 @@ type queuedInput struct {
 	mode InputMode
 	// text is the message text.
 	text string
-	// note is the rendered delivery note, when the input carries one.
+	// note is the delivery note the input was accepted with, when it
+	// carries one. Its text is rendered again at delivery.
 	note *DeliveryNote
 }
 
 // renderDeliveryNote renders the note that says how much of a reply the
 // user had seen.
 //
-// The note is rendered when the input is accepted, and it becomes part
-// of the recorded message: the assistant message is never trimmed, and
-// the note is the record.
+// The note becomes part of the recorded message: the assistant message
+// is never trimmed, and the note is the record.
 func renderDeliveryNote(note *DeliveryNote, message Message) string {
 	if note == nil {
 		return ""
@@ -192,6 +193,17 @@ func renderDeliveryNote(note *DeliveryNote, message Message) string {
 		shown = shown[len(shown)-80:]
 	}
 	return "[The user saw or heard your reply " + note.MessageID + " only up to: \"" + escapeNoteText(string(shown)) + "\"]"
+}
+
+// withDeliveryNote prefixes a user message with its rendered note.
+//
+// A note that renders to nothing (the whole reply was presented) adds
+// nothing.
+func withDeliveryNote(text string, note *DeliveryNote) string {
+	if note == nil || note.Text == "" {
+		return text
+	}
+	return note.Text + "\n\n" + text
 }
 
 // escapeNoteText escapes the quotes and newlines of a quoted reply.

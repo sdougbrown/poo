@@ -458,3 +458,89 @@ func asInvalidInput(err error, target **poo.ErrInvalidInput) bool {
 	}
 	return false
 }
+
+// TestTheDeliveryNoteReachesTheModel covers the plan's rule: the note is
+// prefixed to the user message, so the next request carries it.
+func TestTheDeliveryNoteReachesTheModel(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{
+			text:  "the first answer",
+			calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
+		},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	hold := newNoteHold(tool)
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	hold.wait(t)
+	if _, err := s.Send("and this", poo.Steer, poo.WithDelivered("m1", 9)); err != nil {
+		t.Fatalf("sending the steer: %v", err)
+	}
+	hold.finish()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	reqs := tr.Requests()
+	if len(reqs) < 2 {
+		t.Fatalf("the run made %d requests, want 2", len(reqs))
+	}
+	var steered string
+	for _, m := range reqs[1].Messages {
+		if m.Origin == poo.OriginSteer {
+			steered = m.Text()
+		}
+	}
+	want := `[The user saw or heard your reply m1 only up to: "the first"]`
+	if !strings.HasPrefix(steered, want) {
+		t.Errorf("the steered message is %q, want it to start with %q", steered, want)
+	}
+	if !strings.HasSuffix(steered, "and this") {
+		t.Errorf("the steered message is %q, want it to end with the user's text", steered)
+	}
+	// The record holds the same message the model saw.
+	for _, m := range sink.messages() {
+		if m.Origin == poo.OriginSteer && m.Content[0].Text != steered {
+			t.Errorf("the recorded message is %q, but the model saw %q", m.Content[0].Text, steered)
+		}
+	}
+}
+
+// TestTheNoteForAStreamingReplyIsRenderedAtDelivery covers a reference
+// accepted mid-stream: the note is rendered from the reply once the
+// interrupted stream has been recorded.
+func TestTheNoteForAStreamingReplyIsRenderedAtDelivery(t *testing.T) {
+	tr := newStallingTransport()
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tr.streaming
+	sendWhenKnown(t, s, "stop that", poo.Interrupt, "m1", 4)
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	want := `[The user saw or heard your reply m1 only up to: "part"]`
+	found := false
+	for _, m := range sink.messages() {
+		if m.Origin != poo.OriginInterrupt {
+			continue
+		}
+		found = true
+		if m.DeliveryNote == nil || m.DeliveryNote.Text != want {
+			t.Errorf("the delivered message carries note %+v, want %q", m.DeliveryNote, want)
+		}
+	}
+	if !found {
+		t.Fatal("the log holds no interrupt message")
+	}
+}

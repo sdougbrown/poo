@@ -146,7 +146,7 @@ calls that did not run are recorded as `skipped`.
 |---|---|---|
 | `message_id` | string | The assistant message the user had seen part of. |
 | `upto_chars` | integer | How many characters of that message the user had seen, in code points over its text blocks. |
-| `text` | string | The rendered note, as it was prefixed to the message. |
+| `text` | string | The rendered note. It is prefixed to the text of the message, followed by a blank line, so the message's `content` holds it too. Empty when the whole reply was presented. |
 
 The note is part of the record, so a replay shows exactly what the user
 saw. The assistant message itself is never trimmed: the note is the
@@ -229,7 +229,7 @@ fate is in the records.
 | `input_id` | string | The input's identifier. |
 | `mode` | string | How the input is delivered: `"steer"`, `"interrupt"` or `"follow_up"`. |
 | `text` | string | The message text. |
-| `delivery_note` | object | How much of the previous reply the user had seen. Absent when the input carries none. |
+| `delivery_note` | object | How much of the previous reply the user had seen. Absent when the input carries none. Its `text` is empty when the reply was still streaming at acceptance; the delivered message carries the note rendered at delivery. |
 | `queued_at` | string | RFC 3339, UTC. |
 
 ## `input.delivered`

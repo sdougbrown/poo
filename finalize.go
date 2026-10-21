@@ -504,8 +504,9 @@ func (s *Session) prepareDeliveryNoteLocked(opts []InputOption) (*DeliveryNote, 
 	if !s.messageIDs.Knows(note.MessageID) {
 		return nil, &ErrInvalidInput{Message: fmt.Sprintf("poo: the message %s is not in this session", note.MessageID)}
 	}
-	// The note is rendered when the input is accepted, so a replay
-	// shows exactly what the user saw.
+	// The note is rendered now when the reply is already recorded, so the
+	// accepted input shows it. A reply that is still streaming is
+	// rendered again at delivery.
 	note.Text = s.renderDeliveryNoteLocked(note)
 	return note, nil
 }
@@ -520,6 +521,21 @@ func (s *Session) renderDeliveryNoteLocked(note *DeliveryNote) string {
 		return ""
 	}
 	return renderDeliveryNote(note, msg)
+}
+
+// renderForDelivery returns the note an input is delivered with.
+//
+// The note is rendered from the original recorded message when the input
+// is delivered, after any interrupted stream has been finalized.
+func (s *Session) renderForDelivery(note *DeliveryNote) *DeliveryNote {
+	if note == nil {
+		return nil
+	}
+	rendered := *note
+	s.mu.Lock()
+	rendered.Text = s.renderDeliveryNoteLocked(&rendered)
+	s.mu.Unlock()
+	return &rendered
 }
 
 // messagesByIDLocked returns the message an id names.

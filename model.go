@@ -141,16 +141,18 @@ type ContentBlock struct {
 
 // DeliveryNote says how much of a reply the user had seen.
 //
-// The note is rendered when the input is accepted and is part of the
-// recorded message, so a replay shows exactly what the user saw. It is
-// never a trimmed assistant message: the note is the record.
+// The note is rendered from the recorded reply when the input is
+// delivered and is part of the recorded message, so a replay shows
+// exactly what the user saw. It is never a trimmed assistant message:
+// the note is the record.
 type DeliveryNote struct {
 	// MessageID names the assistant message the user had seen part of.
 	MessageID string `json:"message_id"`
 	// UpToChars is how many characters of that message the user had
 	// seen, counted in code points over its text blocks.
 	UpToChars int `json:"upto_chars"`
-	// Text is the rendered note, as it was prefixed to the message.
+	// Text is the rendered note, as it was prefixed to the message's text.
+	// It is empty when the whole reply was presented.
 	Text string `json:"text"`
 }
 
