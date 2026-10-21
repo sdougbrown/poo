@@ -172,11 +172,25 @@ func (s *Session) drive(run *runState) {
 	stopTimer := s.startDurationTimer(run)
 	defer stopTimer()
 
-	cands := s.loop(run)
-	if len(cands) == 0 {
-		cands = []candidate{newCandidate(ReasonEndTurn, SettleDetail{Source: "end_turn"})}
+	s.finalize(run, s.settleCandidates(run, s.loop(run))...)
+}
+
+// settleCandidates returns the candidates a loop that ended hands to the
+// finalization.
+//
+// A loop that ended with nothing to say, and with no candidate held by
+// the run, ended naturally.
+func (s *Session) settleCandidates(run *runState, cands []candidate) []candidate {
+	if len(cands) > 0 {
+		return cands
 	}
-	s.finalize(run, cands...)
+	s.mu.Lock()
+	held := len(run.candidates) > 0
+	s.mu.Unlock()
+	if held {
+		return nil
+	}
+	return []candidate{newCandidate(ReasonEndTurn, SettleDetail{Source: "end_turn"})}
 }
 
 // startDurationTimer starts the run's wall-clock budget.
@@ -202,8 +216,12 @@ func (s *Session) startDurationTimer(run *runState) func() {
 	return func() { close(stop) }
 }
 
-// loop drives the requesting/executing cycle and returns the run's
-// candidates.
+// loop drives the requesting/executing cycle and returns the candidates
+// the run's end produced.
+//
+// The candidates the run already holds (a fatal tool error, a refused
+// write) are not returned again: the finalization reads them from the
+// run.
 //
 // The loop is the plan's FSM: requesting, streaming, executing,
 // compacting, settling. Every path to a new request goes through the
@@ -217,21 +235,16 @@ func (s *Session) loop(run *runState) []candidate {
 
 		// The next-request gate. Every path to a new request comes
 		// through it.
+		//
+		// A pending candidate settles the run: the gate never opens a
+		// request while a candidate is pending. The run already holds
+		// it, so the loop returns nothing new.
 		gate := s.gate(run)
+		if gate.held {
+			return nil
+		}
 		if len(gate.candidates) > 0 {
 			return gate.candidates
-		}
-
-		// A pending candidate settles the run: the gate never opens a
-		// request while a candidate is pending.
-		s.mu.Lock()
-		pending := len(run.candidates) > 0
-		s.mu.Unlock()
-		if pending {
-			s.mu.Lock()
-			cands := append([]candidate(nil), run.candidates...)
-			s.mu.Unlock()
-			return cands
 		}
 
 		s.mu.Lock()

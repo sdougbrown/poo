@@ -726,3 +726,53 @@ func TestAHandleNamesOneCallForTheLifeOfTheSession(t *testing.T) {
 		t.Errorf("the calls' handles are %v, want %v", got, want)
 	}
 }
+
+// TestACandidateRaisedInTheBatchIsListedOnce covers detail.losing: it
+// holds the other candidates, so a lone tool_fatal has no losers and the
+// winner is never among them.
+func TestACandidateRaisedInTheBatchIsListedOnce(t *testing.T) {
+	tr := scripted([]fakeResponse{{
+		calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
+	}})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		return poo.ToolResult{}, poo.Fatalf("the working directory is gone")
+	}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
+
+	if res.Reason != poo.ReasonToolFatal {
+		t.Fatalf("the run settled %q, want tool_fatal", res.Reason)
+	}
+	if len(res.Detail.Losing) != 0 {
+		t.Errorf("detail.losing is %v, want none", res.Detail.Losing)
+	}
+}
+
+// TestALosingCandidateIsListedOnce covers detail.losing for a run that
+// holds a candidate raised in the batch and a later one: the
+// loser appears once.
+func TestALosingCandidateIsListedOnce(t *testing.T) {
+	tr := scripted([]fakeResponse{{
+		calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
+	}})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		return poo.ToolResult{}, poo.Fatalf("the working directory is gone")
+	}
+	opts := testOptions(t, tr, tool, sink)
+	opts.MaxTurns = 1
+
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+
+	if res.Reason != poo.ReasonToolFatal {
+		t.Fatalf("the run settled %q, want tool_fatal", res.Reason)
+	}
+	if got := res.Detail.Losing; len(got) != 1 || got[0] != string(poo.ReasonMaxTurns) {
+		t.Errorf("detail.losing is %v, want [max_turns]", got)
+	}
+}

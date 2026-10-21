@@ -182,11 +182,7 @@ func (s *Session) resumeRun(run *runState) {
 	s.transitionLocked(StateRequesting)
 	s.mu.Unlock()
 
-	cands := s.loop(run)
-	if len(cands) == 0 {
-		cands = []candidate{newCandidate(ReasonEndTurn, SettleDetail{Source: "end_turn"})}
-	}
-	s.finalize(run, cands...)
+	s.finalize(run, s.settleCandidates(run, s.loop(run))...)
 }
 
 // collectUndelivered takes the queued client messages that will never
@@ -243,6 +239,11 @@ func (s *Session) dropUndelivered(run *runState, inputs []UndeliveredInput, reas
 func (s *Session) commitLocked(run *runState) (Reason, SettleDetail) {
 	ordered := make([]candidate, len(run.candidates))
 	copy(ordered, run.candidates)
+	if len(ordered) == 0 {
+		// A run that commits holds a candidate. If it holds none, the
+		// run ended naturally.
+		ordered = append(ordered, newCandidate(ReasonEndTurn, SettleDetail{Source: "end_turn"}))
+	}
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return Precedence(ordered[i].reason) < Precedence(ordered[j].reason)
 	})

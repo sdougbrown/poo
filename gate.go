@@ -8,8 +8,12 @@ import (
 // gateResult is what the next-request gate decided.
 type gateResult struct {
 	// candidates are the settle candidates the gate produced. An empty
-	// list means the gate opened a request.
+	// list with held unset means the gate opened a request.
 	candidates []candidate
+	// held reports that the run already holds a candidate, which the
+	// finalization will pick up from the run: the gate does not hand it
+	// back, so no candidate is counted twice.
+	held bool
 }
 
 // gate is the next-request gate.
@@ -23,10 +27,10 @@ type gateResult struct {
 func (s *Session) gate(run *runState) gateResult {
 	// Step 0: a pending candidate settles the run.
 	s.mu.Lock()
-	pending := append([]candidate(nil), run.candidates...)
+	held := len(run.candidates) > 0
 	s.mu.Unlock()
-	if len(pending) > 0 {
-		return gateResult{candidates: pending}
+	if held {
+		return gateResult{held: true}
 	}
 
 	// Step 1: the compactor.
