@@ -351,6 +351,17 @@ func New(opts Options, fns ...Option) (*Session, error) {
 			fn(&opts)
 		}
 	}
+	// The core adds its own job tools and the order they are offered
+	// in, so it works on copies: a caller may build two sessions from
+	// one tools map and one order.
+	if opts.Tools != nil {
+		tools := make(map[string]Tool, len(opts.Tools))
+		for name, tool := range opts.Tools {
+			tools[name] = tool
+		}
+		opts.Tools = tools
+	}
+	opts.ToolOrder = append([]string(nil), opts.ToolOrder...)
 	if opts.Transport == nil {
 		return nil, &ErrSessionInit{Cause: errors.New("poo: the session has no chat transport")}
 	}

@@ -375,3 +375,37 @@ func TestTheJobsToolContributesItsPromptSection(t *testing.T) {
 		t.Errorf("the section is %q, want it to name the cancel_job tool", section)
 	}
 }
+
+// TestNewDoesNotMutateTheCallersTools covers the construction contract:
+// the core registers its own job tools in the session's copies, not in
+// the caller's map or order, so one tools map can build two sessions.
+func TestNewDoesNotMutateTheCallersTools(t *testing.T) {
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tools := map[string]poo.Tool{"job": tool}
+	order := []string{"job"}
+	opts := poo.Options{
+		Transport:    scripted([]fakeResponse{{text: "hi"}}),
+		Tools:        tools,
+		ToolOrder:    order,
+		SessionID:    "s1",
+		ModelID:      "m",
+		ContextLimit: 32768,
+	}
+	s1, err := poo.New(opts)
+	if err != nil {
+		t.Fatalf("first New: %v", err)
+	}
+	defer s1.Close()
+	if len(tools) != 1 {
+		t.Errorf("New added %d tools to the caller's map: %v", len(tools)-1, tools)
+	}
+	if len(order) != 1 {
+		t.Errorf("New appended to the caller's ToolOrder: %v", order)
+	}
+	opts.SessionID = "s2"
+	s2, err := poo.New(opts)
+	if err != nil {
+		t.Fatalf("second New with the same map: %v", err)
+	}
+	defer s2.Close()
+}
