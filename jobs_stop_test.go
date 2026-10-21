@@ -58,15 +58,17 @@ func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
 	if !found {
 		t.Error("the log holds no job.ended record")
 	}
-	delivered := false
-	for _, m := range sink.messages() {
-		if m.Origin == poo.OriginJob {
-			delivered = true
+	// A result that finishes after the commit point is delivered by a
+	// woken run, so the wait is for the message rather than for a
+	// particular run.
+	waitFor(t, "the cancelled job's result to reach the model", func() bool {
+		for _, m := range sink.messages() {
+			if m.Origin == poo.OriginJob {
+				return true
+			}
 		}
-	}
-	if !delivered {
-		t.Error("the cancelled job's result did not reach the model")
-	}
+		return false
+	})
 }
 
 // TestTheJobTimeoutStopsTheJob covers the plan's rule: the job timeout
@@ -251,10 +253,17 @@ func TestTheJobsToolListsTheRunningJobs(t *testing.T) {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tool.Started()
-	tool.Release()
-	if _, err := s.Wait(context.Background()); err != nil {
-		t.Fatalf("waiting for the run: %v", err)
-	}
+	// The job stays running while the model lists it: releasing it
+	// before the jobs call would make it a finished result, not a
+	// running job.
+	waitFor(t, "the jobs tool to run", func() bool {
+		for _, rec := range sink.allRecords() {
+			if r, ok := rec.(*poo.ToolResultRecord); ok && r.Tool == "jobs" {
+				return true
+			}
+		}
+		return false
+	})
 	found := false
 	for _, rec := range sink.allRecords() {
 		r, ok := rec.(*poo.ToolResultRecord)
@@ -267,6 +276,10 @@ func TestTheJobsToolListsTheRunningJobs(t *testing.T) {
 	}
 	if !found {
 		t.Error("the jobs tool did not name the job")
+	}
+	tool.Release()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
 	}
 }
 
