@@ -74,7 +74,7 @@ func TestABadModelCatalogIsRejected(t *testing.T) {
 			if err == nil {
 				t.Fatal("the catalog was accepted, want an error")
 			}
-			if !contains(err.Error(), c.want) {
+			if !strings.Contains(err.Error(), c.want) {
 				t.Errorf("the error is %q, want it to name %q", err.Error(), c.want)
 			}
 		})
@@ -194,7 +194,7 @@ func TestABadTaskIsRejected(t *testing.T) {
 			if err == nil {
 				t.Fatal("the task was accepted, want an error")
 			}
-			if !contains(err.Error(), c.want) {
+			if !strings.Contains(err.Error(), c.want) {
 				t.Errorf("the error is %q, want it to name %q", err.Error(), c.want)
 			}
 		})
