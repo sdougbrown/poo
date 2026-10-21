@@ -40,8 +40,9 @@ naming the run goes to stderr, and `poo-eval run` exits non-zero. The
 source is not restored; that is the operator's call.
 
 The sandboxed process can write its own session log: the log directory
-is writable, and a process of the same user can reach an open file
-through `/proc`. The metrics and the judge's transcripts come from that
+is writable. Without the sandbox, a process of the same user can also
+reach the open log file through `/proc`; the sandbox has its own pid
+namespace, so that route is closed inside it. The metrics and the judge's transcripts come from that
 log, so they come from data the model could alter. Success does not:
 it comes from `check.sh`, which runs outside the sandbox.
 
