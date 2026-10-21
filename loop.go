@@ -42,7 +42,10 @@ type Options struct {
 	RunID string
 	// ModelID is the provider's model identifier.
 	ModelID string
-	// ContextLimit is the model's context window in tokens.
+	// ContextLimit is the model's context window in tokens. It is
+	// required: 0 leaves no room for an answer, so the run settles
+	// context_exhausted (source no_output_room) before it sends a
+	// request.
 	ContextLimit int
 	// MaxOutput is the model's output-token ceiling, 0 when unknown.
 	MaxOutput int
