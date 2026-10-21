@@ -593,26 +593,39 @@ func (s *Session) deliverInput(run *runState, input queuedInput) {
 	msg.Origin = originForMode(input.mode)
 	msg.DeliveryNote = note
 	s.appendMessages(msg)
-	_ = s.write(run.ctx, &MessageRecord{
+	// A record the store refuses is a store_error candidate: the input
+	// is in the model's view, and the run does not go on to ask the
+	// model about a log that cannot hold it.
+	if err := s.write(run.ctx, &MessageRecord{
 		RecordMeta:   NewRecordMetaFrom("message", msg.Origin),
 		RunID:        run.id,
 		Role:         msg.Role,
 		Content:      msg.Content,
 		DeliveryNote: note,
-	})
-	_ = s.write(run.ctx, &InputDelivered{
+	}); err != nil {
+		s.addCandidate(run, storeErrorCandidate(err))
+	}
+	if err := s.write(run.ctx, &InputDelivered{
 		RecordMeta:  NewRecordMeta("input.delivered"),
 		SessionID:   s.opts.SessionID,
 		RunID:       run.id,
 		InputID:     input.id,
 		Mode:        input.mode,
 		DeliveredAt: nowRFC3339(),
-	})
+	}); err != nil {
+		s.addCandidate(run, storeErrorCandidate(err))
+	}
 	s.events.emit(EventInputDelivered, map[string]any{
 		"run_id":   run.id,
 		"input_id": input.id,
 		"mode":     string(input.mode),
 	})
+}
+
+// storeErrorCandidate is the settle candidate for a record the store
+// refused.
+func storeErrorCandidate(err error) candidate {
+	return newCandidate(ReasonStoreError, SettleDetail{Source: "store", Text: err.Error()})
 }
 
 // originForMode returns the origin an input's message carries.

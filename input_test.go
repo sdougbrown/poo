@@ -1258,3 +1258,37 @@ func TestThePartialMessageKeepsTheIDTheStreamAssigned(t *testing.T) {
 		t.Errorf("the partial message's id is %q, want m1, the id the stream assigned", partial.MessageID)
 	}
 }
+
+// TestARefusedDeliveryRecordEndsTheRunWithoutAnotherRequest covers the
+// failure table's RecordSink row for an accepted input: a store that
+// refuses the delivery record is a store_error candidate at once, not a
+// failure left to the next write.
+func TestARefusedDeliveryRecordEndsTheRunWithoutAnotherRequest(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
+		{text: "the second answer"},
+	})
+	sink := &failingSink{failRecord: "input.delivered"}
+	tool := &echoTool{result: "echoed"}
+	hold := newNoteHold(tool)
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	hold.wait(t)
+	if _, err := s.Send("and this", poo.Steer); err != nil {
+		t.Fatalf("sending the steer: %v", err)
+	}
+	hold.finish()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonStoreError {
+		t.Errorf("the run settled %q, want store_error", res.Reason)
+	}
+	if n := len(tr.Requests()); n != 1 {
+		t.Errorf("the run made %d requests, want 1: the refused record ends the run", n)
+	}
+}
