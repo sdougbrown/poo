@@ -100,3 +100,26 @@ func TestACancelDuringTheCallRecordStillGetsAResult(t *testing.T) {
 		})
 	}
 }
+
+// TestATruncatedInvalidBackgroundIsSkipped covers the truncation
+// completeness rule: a call whose arguments parse but whose reserved
+// background argument fails validation did not pass preparation, so in
+// a truncated response it is skipped rather than counted as processed.
+func TestATruncatedInvalidBackgroundIsSkipped(t *testing.T) {
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tr := scripted([]fakeResponse{
+		{
+			finish: poo.FinishLength,
+			calls:  []poo.ToolCall{{ID: "c", Name: "job", Arguments: []byte(`{"text":"one","background":null}`)}},
+		},
+		{text: "done"},
+	})
+	s := newTestSession(t, jobOptions(t, tr, tool, &recordingSink{}))
+	res := runSession(t, s, "start")
+	if res.Reason != poo.ReasonOutputTruncated || res.Turns != 1 {
+		t.Fatalf("the truncated call settled %q after %d turn(s), want output_truncated after 1", res.Reason, res.Turns)
+	}
+	if got := tool.Calls(); got != 0 {
+		t.Errorf("the invalid call ran %d time(s), want 0", got)
+	}
+}

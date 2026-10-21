@@ -250,6 +250,12 @@ func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated
 			if err != nil {
 				plan.invalid = true
 				plan.prepareErr = err
+				// A call that failed the reserved argument did not
+				// pass preparation, so in a truncated response it is
+				// incomplete.
+				if truncated {
+					plan.complete = false
+				}
 				plans = append(plans, plan)
 				continue
 			}
