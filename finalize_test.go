@@ -389,10 +389,14 @@ func TestEveryIssuedCallGetsAResult(t *testing.T) {
 			}},
 		},
 	}}
+	started := make(chan struct{})
 	tool := &echoTool{result: "echoed"}
 	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
-		// The call never returns: the run settles underneath it.
-		select {}
+		close(started)
+		// The call waits for the run's context, so the finalization
+		// abandons it.
+		<-ctx.Done()
+		return poo.ToolResult{Text: "interrupted", IsError: true}, nil
 	}
 	sink := &recordingSink{}
 
@@ -400,8 +404,8 @@ func TestEveryIssuedCallGetsAResult(t *testing.T) {
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	<-started
 	// The run is cancelled, which abandons the call.
-	time.Sleep(50 * time.Millisecond)
 	s.Cancel("cancel:test")
 	res, err := s.Wait(context.Background())
 	if err != nil {

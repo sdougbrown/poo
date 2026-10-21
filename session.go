@@ -141,6 +141,10 @@ type runState struct {
 	// pendingCalls are the calls that were issued but have no result
 	// yet.
 	pendingCalls map[string]*issuedCall
+	// settledCalls are the calls that have a result, by handle. A call
+	// gets exactly one result, so a call that finished at the same
+	// moment the run settled does not get a second one.
+	settledCalls map[string]bool
 	// workDone is signalled when a pending call gets its result.
 	workDone chan struct{}
 

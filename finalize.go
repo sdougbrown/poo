@@ -289,6 +289,15 @@ func (s *Session) settleIssuedCalls(run *runState) {
 		issued = append(issued, c)
 	}
 	run.pendingCalls = map[string]*issuedCall{}
+	if run.settledCalls == nil {
+		run.settledCalls = map[string]bool{}
+	}
+	// The calls are marked as settled before their records are
+	// written, so a call that finished at the same moment does not get
+	// a second result.
+	for _, c := range issued {
+		run.settledCalls[c.handle] = true
+	}
 	s.mu.Unlock()
 
 	sort.Slice(issued, func(i, j int) bool { return issued[i].handle < issued[j].handle })
@@ -299,7 +308,9 @@ func (s *Session) settleIssuedCalls(run *runState) {
 			outcome = OutcomeCancelled
 			text = "Cancelled: the run settled before the call finished."
 		}
-		s.recordResult(run, call.turn, call.handle, call.tool, call.id, ToolResult{
+		// The call is already marked as settled, so the record is
+		// written directly.
+		s.writeResult(run, call.turn, call.handle, call.tool, call.id, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, outcome)

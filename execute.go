@@ -438,11 +438,23 @@ func (s *Session) toolEnv(run *runState, handle string) ToolEnv {
 //
 // The result goes back to the model under the call's provider-side id,
 // because that is the id the provider matches it against.
+//
+// A call gets exactly one result. The call claims its result before the
+// record is written, so a call that the finalization already gave a
+// synthetic result to is not given a second one.
 func (s *Session) recordResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome) {
-	// The call has its result now, so it no longer needs a synthetic
-	// one from the finalization.
-	s.completeCall(run, handle)
+	if !s.claimResult(run, handle) {
+		// The finalization already gave the call a synthetic result.
+		return
+	}
+	s.writeResult(run, turn, handle, tool, callID, result, outcome)
+}
 
+// writeResult writes a call's result record and puts it in the model's
+// view.
+//
+// The caller has claimed the call's result.
+func (s *Session) writeResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome) {
 	if err := s.write(run.ctx, &ToolResultRecord{
 		RecordMeta: NewRecordMetaFrom("tool.result", OriginTool),
 		RunID:      run.id,
@@ -520,17 +532,33 @@ func (s *Session) issueCall(run *runState, turn int, handle, tool, callID string
 	}
 }
 
-// completeCall forgets a call that has its result.
-func (s *Session) completeCall(run *runState, handle string) {
+// claimResult claims a call's result.
+//
+// It reports whether the caller won the claim: a call that the
+// finalization already gave a synthetic result to is not given a second
+// one. A call that was never issued — a call that was skipped before it
+// started — is always claimed.
+func (s *Session) claimResult(run *runState, handle string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	_, pending := run.pendingCalls[handle]
 	delete(run.pendingCalls, handle)
+	if run.settledCalls == nil {
+		run.settledCalls = map[string]bool{}
+	}
+	taken := run.settledCalls[handle]
+	if pending {
+		// The call was issued, and the finalization may have given
+		// it a synthetic result already.
+		run.settledCalls[handle] = true
+	}
 	if run.workDone != nil {
 		select {
 		case run.workDone <- struct{}{}:
 		default:
 		}
 	}
+	return !taken
 }
 
 // addCandidate adds a settle candidate to the run.
