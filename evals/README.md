@@ -15,6 +15,15 @@ Run the set with:
 
 ## Isolation
 
+A baseline runs with `--sandbox bwrap`, which needs bubblewrap. Each run's
+poo process sees the system's read-only `/usr` and `/etc`, its own workdir
+at `/work`, its log directory at `/log`, and nothing else: no home
+directory, no repository and no task set. The network is shared, so the
+model's endpoint is still reachable. `check.sh` runs outside the sandbox,
+because it needs the task set. Without the sandbox, a model that searches
+the filesystem can find the task set's checks, as minimax did in the
+first baseline with `find /`, and its result does not measure the task.
+
 The workdirs are made under `<user cache dir>/poo-eval/work`, outside
 the repository. `--work-root` overrides it, and the runner refuses a
 work root that holds the task set or lies inside it, so the task set

@@ -66,6 +66,9 @@ type RunOptions struct {
 	PooBinary string
 	// KeepWorkdirs leaves the workdirs behind after the run.
 	KeepWorkdirs bool
+	// Sandbox is how a run is isolated from the rest of the machine:
+	// SandboxNone or SandboxBwrap.
+	Sandbox string
 	// Force clears the out directory's runs directory before the run.
 	// A run into a directory that already holds a run's output is
 	// refused without it.
@@ -117,6 +120,8 @@ type Report struct {
 	FinishedAt string `json:"finished_at"`
 	// GitSHA is the commit the harness ran against.
 	GitSHA string `json:"git_sha"`
+	// Sandbox is how the runs were isolated.
+	Sandbox string `json:"sandbox,omitempty"`
 	// Dir is where the report was written.
 	Dir string `json:"dir"`
 	// Results are the runs, in a stable order.
@@ -208,6 +213,9 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 	if r.pooErr != nil {
 		return nil, r.pooErr
 	}
+	if err := checkSandbox(r.opts.Sandbox); err != nil {
+		return nil, err
+	}
 	if err := r.checkWorkRoot(); err != nil {
 		return nil, err
 	}
@@ -218,6 +226,7 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 		StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Dir:       r.opts.Out,
 		GitSHA:    gitSHA(),
+		Sandbox:   r.opts.Sandbox,
 	}
 	if err := os.MkdirAll(r.opts.Out, 0o755); err != nil {
 		return nil, fmt.Errorf("eval: creating %s: %w", r.opts.Out, err)
@@ -650,6 +659,9 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 	args = append(args, j.task.Prompt)
 
 	cmd := exec.CommandContext(ctx, r.opts.PooBinary, args...)
+	if r.opts.Sandbox == SandboxBwrap {
+		cmd = exec.CommandContext(ctx, "bwrap", bwrapArgs(r.opts.PooBinary, workdir, logPath, args)...)
+	}
 	cmd.Dir = workdir
 	// The run inherits the environment, so the key variable is there for
 	// the binary to read. Every other key variable the catalog names is
@@ -659,6 +671,11 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 	// The python the model runs must not leave bytecode behind, and the
 	// check's own python must not either.
 	cmd.Env = append(cmd.Env, "PYTHONDONTWRITEBYTECODE=1")
+	if r.opts.Sandbox == SandboxBwrap {
+		// Inside the sandbox the home directory and the tools' paths
+		// are the sandbox's own: nothing under the real home exists.
+		cmd.Env = append(cmd.Env, "HOME="+sandboxWork, "PATH=/usr/bin:/bin")
+	}
 	// The child runs in its own process group, and the group is killed
 	// when the run's context ends. Killing only the process would leave
 	// its children holding the output pipe, and the harness would wait
