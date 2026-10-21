@@ -157,21 +157,31 @@ func TestTheHookOriginNamesTheHook(t *testing.T) {
 	}
 }
 
-// TestTheToolResultOutcomeDefaults covers the outcome a tool result
-// carries when the tool names none: an ordinary success, and an ordinary
-// recoverable failure.
-func TestTheToolResultOutcomeDefaults(t *testing.T) {
-	ok := poo.ToolResult{Text: "fine"}
-	if got := ok.EffectiveOutcome(); got != poo.OutcomeOK {
-		t.Errorf("the outcome is %q, want ok", got)
+// TestTheToolResultOutcomeLivesOnTheRecord covers where the outcome
+// lives: a tool does not choose it, the core assigns it, and it lands on
+// the record.
+func TestTheToolResultOutcomeLivesOnTheRecord(t *testing.T) {
+	// The enum is the plan's: every outcome the events and the records
+	// name.
+	for _, outcome := range []poo.Outcome{
+		poo.OutcomeOK,
+		poo.OutcomeError,
+		poo.OutcomeDenied,
+		poo.OutcomeSkipped,
+		poo.OutcomeCancelled,
+		poo.OutcomeInterrupted,
+		poo.OutcomeStarted,
+	} {
+		if outcome == "" {
+			t.Error("an outcome is the empty string")
+		}
 	}
-	bad := poo.ToolResult{Text: "broken", IsError: true}
-	if got := bad.EffectiveOutcome(); got != poo.OutcomeError {
-		t.Errorf("the outcome is %q, want error", got)
-	}
-	started := poo.ToolResult{Text: "started", Outcome: poo.OutcomeStarted}
-	if got := started.EffectiveOutcome(); got != poo.OutcomeStarted {
-		t.Errorf("the outcome is %q, want started", got)
+
+	// A tool result carries the text and whether it failed. It does not
+	// carry an outcome: the core assigns that.
+	result := poo.ToolResult{Text: "broken", IsError: true}
+	if result.Text != "broken" || !result.IsError {
+		t.Errorf("the result is %+v, want the text and the error flag", result)
 	}
 }
 

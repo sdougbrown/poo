@@ -43,6 +43,10 @@ const (
 	OriginInterrupt Origin = "interrupt"
 	// OriginFollowUp is a message the user sent for the next turn.
 	OriginFollowUp Origin = "follow_up"
+	// OriginCompaction is a message a compactor wrote to replace a
+	// range of the history. The replacement is visible: the model sees
+	// that its history was replaced.
+	OriginCompaction Origin = "compaction"
 )
 
 // HookOrigin returns the origin a hook's appended messages carry.
@@ -242,6 +246,11 @@ const (
 )
 
 // ToolResult is what a tool returns to the model.
+//
+// The outcome is not here: a tool does not choose it. The core assigns
+// it — a denial comes from the policy hook, a skip from a truncated
+// response, a cancellation from an interrupt, and a "started" from the
+// job machinery. The outcome lives on the record and on the event.
 type ToolResult struct {
 	// Text is the model-facing text.
 	Text string `json:"text"`
@@ -250,20 +259,4 @@ type ToolResult struct {
 	// IsError marks a recoverable failure. The model sees the text and
 	// may correct itself; the run continues.
 	IsError bool `json:"is_error,omitempty"`
-	// Outcome is the call's outcome. An empty outcome means the
-	// ordinary success or failure that IsError already says.
-	Outcome Outcome `json:"outcome,omitempty"`
-}
-
-// EffectiveOutcome returns the outcome the result carries.
-//
-// A result that names no outcome is ok, unless it is an error.
-func (r ToolResult) EffectiveOutcome() Outcome {
-	if r.Outcome != "" {
-		return r.Outcome
-	}
-	if r.IsError {
-		return OutcomeError
-	}
-	return OutcomeOK
 }

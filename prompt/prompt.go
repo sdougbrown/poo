@@ -37,6 +37,11 @@ type Env struct {
 // A hook that changes the system prompt edits a Sections, and never sees
 // the whole prompt: the render order, the defaults and the sections the
 // consumer added are the builder's business.
+//
+// A section is always text. A dynamic section — one that renders from
+// the environment — is contributed by the core or by a tool, and a
+// consumer that wants one sets it through the builder rather than
+// through this surface.
 type Sections interface {
 	// Set replaces a section's text. A section that does not exist yet
 	// is added.
@@ -62,14 +67,28 @@ type Sections interface {
 // so a section can be dynamic without a template engine.
 type Section struct {
 	// Name is the section's name.
-	Name string `json:"name"`
+	Name string
 	// Text is the section's text, when it is static.
-	Text string `json:"text,omitempty"`
+	Text string
 	// Render renders the section, when it is dynamic.
-	Render func(Env) string `json:"-"`
+	Render func(Env) string
 }
 
 // DefaultOrder is the order the sections render in.
 //
-// A consumer's own sections come last, in the order they were added.
+// "tools" stands for the per-tool sections, which are named
+// "tools.<name>" and render together where "tools" sits, in the order
+// the tools are offered in. A consumer's own sections come last, in the
+// order they were added.
+//
+// The slice is read-only: a consumer that changes it changes the prompt
+// for everybody.
 var DefaultOrder = []string{"base", "tools", "catalog", "environment", "project"}
+
+// Order returns the order the sections render in.
+//
+// The caller gets a copy, so a change to it does not change the order
+// everybody else sees.
+func Order() []string {
+	return append([]string(nil), DefaultOrder...)
+}

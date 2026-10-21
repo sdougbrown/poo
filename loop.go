@@ -149,9 +149,8 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 		msg.Origin = OriginSystem
 		r.history = append(r.history, msg)
 		if err := r.write(ctx, &MessageRecord{
-			RecordMeta: NewRecordMeta("message"),
+			RecordMeta: NewRecordMetaFrom("message", OriginSystem),
 			RunID:      r.opts.RunID,
-			Origin:     OriginSystem,
 			Role:       msg.Role,
 			Content:    msg.Content,
 		}); err != nil {
@@ -163,10 +162,9 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 	user.Origin = OriginUser
 	r.history = append(r.history, user)
 	if err := r.write(ctx, &MessageRecord{
-		RecordMeta: NewRecordMeta("message"),
+		RecordMeta: NewRecordMetaFrom("message", OriginUser),
 		RunID:      r.opts.RunID,
 		Turn:       0,
-		Origin:     OriginUser,
 		Role:       user.Role,
 		Content:    user.Content,
 	}); err != nil {
@@ -273,10 +271,9 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 		if len(assistant.Content) > 0 {
 			r.history = append(r.history, assistant)
 			if err := r.write(ctx, &MessageRecord{
-				RecordMeta: NewRecordMeta("message"),
+				RecordMeta: NewRecordMetaFrom("message", OriginModel),
 				RunID:      r.opts.RunID,
 				Turn:       r.turn,
-				Origin:     OriginModel,
 				Role:       assistant.Role,
 				Content:    assistant.Content,
 				MessageID:  assistant.ID,
@@ -363,7 +360,7 @@ func (r *Run) execute(ctx context.Context, index int, call ToolCall) error {
 	}
 
 	if err := r.write(ctx, &ToolCallRecord{
-		RecordMeta: NewRecordMeta("tool.call"),
+		RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 		RunID:      r.opts.RunID,
 		Turn:       r.turn,
 		Handle:     handle,
@@ -405,7 +402,7 @@ func (r *Run) execute(ctx context.Context, index int, call ToolCall) error {
 // recordCall records a call that never reached the tool.
 func (r *Run) recordCall(ctx context.Context, turn int, handle string, call ToolCall, text string) error {
 	if err := r.write(ctx, &ToolCallRecord{
-		RecordMeta: NewRecordMeta("tool.call"),
+		RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 		RunID:      r.opts.RunID,
 		Turn:       turn,
 		Handle:     handle,
@@ -424,7 +421,7 @@ func (r *Run) recordResult(ctx context.Context, turn int, handle string, call To
 		outcome = OutcomeError
 	}
 	if err := r.write(ctx, &ToolResultRecord{
-		RecordMeta: NewRecordMeta("tool.result"),
+		RecordMeta: NewRecordMetaFrom("tool.result", OriginTool),
 		RunID:      r.opts.RunID,
 		Turn:       turn,
 		Handle:     handle,
@@ -442,10 +439,9 @@ func (r *Run) recordResult(ctx context.Context, turn int, handle string, call To
 	msg.Origin = OriginTool
 	r.history = append(r.history, msg)
 	return r.write(ctx, &MessageRecord{
-		RecordMeta: NewRecordMeta("message"),
+		RecordMeta: NewRecordMetaFrom("message", OriginTool),
 		RunID:      r.opts.RunID,
 		Turn:       turn,
-		Origin:     OriginTool,
 		Role:       msg.Role,
 		Content:    msg.Content,
 	})

@@ -131,9 +131,13 @@ type ToolCallInfo struct {
 // ToolDecision is what a before-tool hook returns.
 //
 // The decision types are the plan's: Allow, Deny and Result.
+//
+// A decision that names nothing allows the call. When a decision names
+// more than one thing, a denial wins over a result, and a result wins
+// over an allowance: a hook that both refuses and short-circuits
+// refuses.
 type ToolDecision struct {
-	// Allowed reports that the call may run. It is the zero value, so a
-	// hook that returns nothing allows the call.
+	// Allowed reports that the call may run.
 	Allowed bool
 	// Denied reports that the call may not run.
 	Denied bool
@@ -160,9 +164,13 @@ func ShortCircuit(r ToolResult) ToolDecision { return ToolDecision{Allowed: true
 // ResultDecision is what an after-tool hook returns.
 //
 // The decision types are the plan's: Keep, Annotate, Replace and Redact.
+//
+// A decision that names nothing keeps the result. When a decision names
+// more than one thing, a redaction wins over a replacement, and a
+// replacement wins over an annotation: the chain sees the most
+// consequential change.
 type ResultDecision struct {
-	// Kept reports that the result stands as it is. It is the zero
-	// value, so a hook that returns nothing keeps the result.
+	// Kept reports that the result stands as it is.
 	Kept bool
 	// Annotated is text added to the result the model reads.
 	Annotated string
@@ -208,9 +216,12 @@ func StopTurn(detail string) TurnDecision { return TurnDecision{Stop: true, Deta
 // SettleDecision is what a before-settle hook returns.
 //
 // The decision types are the plan's: Accept, Continue and Stop.
+//
+// A decision that names nothing accepts the settle. When a decision
+// names more than one thing, a stop wins over a continuation: a hook
+// that both stops and continues stops.
 type SettleDecision struct {
-	// Accepted reports that the run may settle as it would. It is the
-	// zero value, so a hook that returns nothing accepts.
+	// Accepted reports that the run may settle as it would.
 	Accepted bool
 	// Continue is a message that sends the run back to the model.
 	Continue *Message
@@ -270,7 +281,9 @@ type BeforeSettleHook interface {
 // PolicyHook is the before-tool slot the permission engine fills.
 //
 // The policy slot is a BeforeTool hook that only ever allows or denies: an
-// ask happens inside the hook, not in a decision of its own.
+// ask happens inside the hook, not in a decision of its own. A result
+// returned by a policy hook is ignored, because the policy slot decides
+// whether the call runs at all, not what it returns.
 type PolicyHook = BeforeToolHook
 
 // Observer sees every event.

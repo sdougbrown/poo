@@ -21,6 +21,12 @@ type RecordMeta struct {
 	Seq int64 `json:"seq"`
 	// TS is the RFC 3339 timestamp with nanosecond precision, in UTC.
 	TS string `json:"ts"`
+	// Origin says who produced the record: "model", "tool", "user",
+	// "steer", "hook:<name>" and the rest of the closed set.
+	//
+	// It is empty on the records that no one produced: the session's own
+	// header, a run's boundaries, the usage accounting.
+	Origin Origin `json:"origin,omitempty"`
 }
 
 // Meta returns the record's header, so a sink can stamp it.
@@ -65,6 +71,10 @@ type SessionTool struct {
 	Name string `json:"name"`
 	// Class is the tool's side-effect class.
 	Class ToolClass `json:"class"`
+	// Background is the tool's background mode. A session loaded from
+	// the record is incompatible with the current build when a tool's
+	// mode changed.
+	Background Background `json:"background,omitempty"`
 }
 
 // BuildInfo names the binary that produced a session.
@@ -133,9 +143,6 @@ type MessageRecord struct {
 	RunID string `json:"run_id"`
 	// Turn is the turn the message belongs to, 0 for the run's input.
 	Turn int `json:"turn"`
-	// Origin says who produced the message: "user", "model", "tool",
-	// "system", "job" or "hook:<name>".
-	Origin Origin `json:"origin"`
 	// Role is the message's role.
 	Role Role `json:"role"`
 	// Content is the message's content blocks.
@@ -228,6 +235,31 @@ type SettleDetail struct {
 	Losing []string `json:"losing,omitempty"`
 	// Provider is set when a provider request failed.
 	Provider *ProviderDetail `json:"provider,omitempty"`
+	// Handoff is the note a compactor wrote when it refused to
+	// compact. It is set when the run settled as context_exhausted
+	// because a Compactor ended it.
+	Handoff string `json:"handoff,omitempty"`
+	// UndeliveredInput lists the accepted inputs that never reached the
+	// model, with the mode they were accepted in.
+	UndeliveredInput []UndeliveredInput `json:"undelivered_input,omitempty"`
+	// JobsRunning lists the jobs that were still running when the run
+	// settled.
+	JobsRunning []string `json:"jobs_running,omitempty"`
+	// Result is the payload of a valid finish call, when the run
+	// settled as finished.
+	Result json.RawMessage `json:"result,omitempty"`
+}
+
+// UndeliveredInput is an accepted input that never reached the model.
+//
+// The input was accepted and recorded, so it is never lost: it is
+// reported here with the reason the run settled.
+type UndeliveredInput struct {
+	// InputID is the input's identifier.
+	InputID string `json:"input_id"`
+	// Mode is how the input was accepted: "steer", "interrupt" or
+	// "follow_up".
+	Mode string `json:"mode"`
 }
 
 // RunSettled records the end of a run.
@@ -248,6 +280,17 @@ type RunSettled struct {
 // NewRecordMeta returns a header for a record of the given type.
 func NewRecordMeta(name string) RecordMeta {
 	return RecordMeta{Record: name}
+}
+
+// NewRecordMetaFrom returns a header for a record of the given type and
+// origin.
+//
+// The origin says who produced the record, and every record carries one:
+// "model", "tool", "user", "steer", "hook:<name>" and the rest of the
+// closed set. A record that no one produced — the session's own header, a
+// run's boundaries — has no origin.
+func NewRecordMetaFrom(name string, origin Origin) RecordMeta {
+	return RecordMeta{Record: name, Origin: origin}
 }
 
 // Stamp fills in the sequence number and timestamp of a record.

@@ -24,6 +24,12 @@ Every record carries these three fields, from the same envelope:
 
 The record's own fields follow the envelope.
 
+A record that someone produced also carries an `origin`:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `origin` | string | Who produced the record: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"` or `"hook:<name>"`. **Absent** on the records that no one produced: the session's own header, a run's boundaries, the usage accounting. |
+
 ## Record names
 
 | Name | Written when |
@@ -245,6 +251,17 @@ The end of a run. It is the last record of a run.
 | `text` | string | The human-readable explanation. Absent when there is none. |
 | `losing` | array of strings | Other candidates that lost the precedence order. Absent when there were none. |
 | `provider` | object | Set when a provider request failed. |
+| `handoff` | string | The note a compactor wrote when it refused to compact. Absent when the run did not settle that way. |
+| `undelivered_input` | array of objects | The accepted inputs that never reached the model. Absent when there were none. |
+| `jobs_running` | array of strings | The jobs that were still running when the run settled. Absent when there were none. |
+| `result` | any | The payload of a valid `finish` call, when the run settled as finished. Absent otherwise. |
+
+A `undelivered_input` entry holds:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `input_id` | string | The input's identifier. |
+| `mode` | string | How the input was accepted: `"steer"`, `"interrupt"` or `"follow_up"`. |
 
 `provider` holds:
 

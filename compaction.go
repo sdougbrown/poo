@@ -77,8 +77,9 @@ type ToolResultRewrite struct {
 // ProviderWindow is a provider-native compaction: the model's own
 // compacted state.
 //
-// The items are opaque provider blocks, and they are required: the window
-// cannot be rebuilt from anything else.
+// Every item is a `provider` content block, and every one of them is
+// required: the window cannot be rebuilt from anything else. The core
+// checks this before it accepts a window.
 type ProviderWindow struct {
 	// Items are the window's blocks.
 	Items []ContentBlock
