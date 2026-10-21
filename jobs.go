@@ -885,6 +885,12 @@ func (s *Session) enterWaiting(run *runState) bool {
 	// arrives at the same time either finds the run waiting and wakes
 	// it, or is seen here and drained.
 	s.transitionLocked(StateWaiting)
+	// A wake that arrived before the run waited is stale, and it is
+	// dropped here: the run must wait for something new.
+	select {
+	case <-run.wake:
+	default:
+	}
 	s.mu.Unlock()
 	return true
 }
@@ -922,12 +928,17 @@ func (s *Session) waitWhileWaiting(run *runState) bool {
 // signalWake wakes a waiting run.
 //
 // The signal is what tells the run's goroutine that something arrived
-// while it waited.
+// while it waited. A run that is not waiting drops the signal, so a
+// stale one never makes a run leave the waiting state for nothing.
 func (s *Session) signalWake(run *runState) {
 	if run == nil {
 		return
 	}
 	s.mu.Lock()
+	if s.run != run || s.state != StateWaiting {
+		s.mu.Unlock()
+		return
+	}
 	wake := run.wake
 	s.mu.Unlock()
 	if wake == nil {
