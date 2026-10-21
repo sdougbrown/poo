@@ -43,8 +43,8 @@ func (s *Session) registerJobTools() error {
 	if _, taken := s.opts.Tools[CancelJobToolName]; taken {
 		return fmt.Errorf("poo: the tool %q is the core's own", CancelJobToolName)
 	}
-	s.opts.Tools[JobsToolName] = &jobTool{session: s, name: JobsToolName}
-	s.opts.Tools[CancelJobToolName] = &jobTool{session: s, name: CancelJobToolName}
+	s.opts.Tools[JobsToolName] = &JobTool{session: s, name: JobsToolName}
+	s.opts.Tools[CancelJobToolName] = &JobTool{session: s, name: CancelJobToolName}
 	s.opts.ToolOrder = append(s.opts.ToolOrder, JobsToolName, CancelJobToolName)
 	return nil
 }

@@ -171,13 +171,18 @@ func TestAJobThatFailsFatallySettlesTheReceivingRun(t *testing.T) {
 	sink := &recordingSink{}
 	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
 	tool.SetError(poo.Fatalf("the working directory is gone"))
-	tool.Release()
 
 	s := newTestSession(t, jobOptions(t, tr, tool, sink))
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tool.Started()
+	waitFor(t, "the run to wait", func() bool {
+		return s.State() == poo.StateWaiting
+	})
+	// The job fails fatally while the run is waiting, and the run
+	// settles with the candidate.
+	tool.Release()
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)

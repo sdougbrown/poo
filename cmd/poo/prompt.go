@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // systemPrompt is the operating contract the model works under.
@@ -75,12 +76,10 @@ func jobsSection(tools []poo.ToolSpec) string {
 	if !allowed {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("Background jobs:\n")
-	b.WriteString("- A tool that says it may run in the background takes a \"background\": true argument. The call returns at once with a job handle, and the job's result arrives later as a message.\n")
-	b.WriteString("- Use the jobs tool to see the jobs that are running, and cancel_job to stop one. There is no wait_job: ending your turn is how you wait.\n")
-	b.WriteString("- A job keeps running when the turn ends and when the run is cancelled, so a long command belongs in one.\n\n")
-	return b.String()
+	// The core's own jobs tool contributes the section, so the model
+	// reads the same guidance whatever built the prompt.
+	tool := &poo.JobTool{}
+	return tool.PromptSection(prompt.Env{})
 }
 
 // newSessionID returns a fresh identifier for a session or a run.

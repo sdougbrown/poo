@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // A job is a background tool call. It belongs to the session, not to the
@@ -1222,11 +1224,15 @@ const (
 	CancelJobToolName = "cancel_job"
 )
 
-// jobTool is one of the core's own job tools.
+// JobTool is one of the core's own job tools.
 //
 // The tools are read-only: they only look at the session's jobs, and the
 // one that cancels a job stops work this session started.
-type jobTool struct {
+//
+// A consumer does not build one: the core registers the tools when a
+// linked tool may run in the background. The type is exported so a
+// prompt builder can ask the tool for its section.
+type JobTool struct {
 	// session is the session the tool belongs to.
 	session *Session
 	// name is the tool's name.
@@ -1234,7 +1240,7 @@ type jobTool struct {
 }
 
 // Spec describes the tool.
-func (t *jobTool) Spec() ToolSpec {
+func (t *JobTool) Spec() ToolSpec {
 	switch t.name {
 	case CancelJobToolName:
 		return ToolSpec{
@@ -1263,7 +1269,7 @@ func (t *jobTool) Spec() ToolSpec {
 }
 
 // Prepare decodes the call's arguments.
-func (t *jobTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepared, error) {
+func (t *JobTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepared, error) {
 	if t.name == CancelJobToolName {
 		var a struct {
 			Job string `json:"job"`
@@ -1280,7 +1286,7 @@ func (t *jobTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepared, error)
 }
 
 // Call runs the tool.
-func (t *jobTool) Call(ctx context.Context, in Prepared, env ToolEnv) (ToolResult, error) {
+func (t *JobTool) Call(ctx context.Context, in Prepared, env ToolEnv) (ToolResult, error) {
 	if t.name == CancelJobToolName {
 		p, ok := in.(*jobPrepared)
 		if !ok {
@@ -1313,6 +1319,24 @@ type jobPrepared struct {
 
 // Summary describes the call.
 func (p *jobPrepared) Summary() string { return p.job }
+
+// PromptSection renders the section that tells the model about the
+// background jobs.
+//
+// The section is the model's guidance, and it names the two tools the
+// core registers for it. The cancel_job tool has no section of its
+// own: the jobs tool's section names both.
+func (t *JobTool) PromptSection(env prompt.Env) string {
+	if t.name == CancelJobToolName {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Background jobs:\n")
+	b.WriteString("- A tool that says it may run in the background takes a \"background\": true argument. The call returns at once with a job handle, and the job's result arrives later as a message.\n")
+	b.WriteString("- Use the jobs tool to see the jobs that are running, and cancel_job to stop one. There is no wait_job: ending your turn is how you wait.\n")
+	b.WriteString("- A job keeps running when the turn ends and when the run is cancelled, so a long command belongs in one.\n")
+	return b.String()
+}
 
 // decodeStrictJSON decodes one JSON value and nothing else.
 func decodeStrictJSON(raw json.RawMessage, into any) error {

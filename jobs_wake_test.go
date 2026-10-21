@@ -70,6 +70,11 @@ func TestTwoResultsFinishingWhileIdleStartOneWokenRun(t *testing.T) {
 
 	tool.ReleaseAll()
 	<-reached
+	// The second result is queued before the wake collects the
+	// results, so the woken run carries both.
+	waitFor(t, "the second result to be queued", func() bool {
+		return s.QueuedJobResults() == 2
+	})
 	waitFor(t, "the jobs to end", func() bool {
 		return sink.count("job.ended") == 2
 	})

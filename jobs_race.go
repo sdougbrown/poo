@@ -106,3 +106,20 @@ func (s *Session) waitForJobResult() bool {
 		return false
 	}
 }
+
+// WaitForJobResult blocks until a job result is queued, and reports that
+// one was.
+//
+// The wait is bounded, so a test that never finishes its job fails
+// instead of hanging.
+func (s *Session) WaitForJobResult() bool {
+	return s.waitForJobResult()
+}
+
+// QueuedJobResults returns how many job results are queued and waiting
+// for their delivery.
+func (s *Session) QueuedJobResults() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.jobQueue)
+}

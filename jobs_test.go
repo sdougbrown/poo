@@ -9,6 +9,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // The jobs: a call that becomes a job returns at once, and its result
@@ -360,4 +361,17 @@ func (t *backgroundSchemaTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) 
 // Call answers with a fixed text.
 func (t *backgroundSchemaTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
 	return poo.ToolResult{Text: "done"}, nil
+}
+
+// TestTheJobsToolContributesItsPromptSection covers the plan's rule: the
+// jobs prompt section tells the model about the background jobs.
+func TestTheJobsToolContributesItsPromptSection(t *testing.T) {
+	tool := &poo.JobTool{}
+	section := tool.PromptSection(prompt.Env{})
+	if !strings.Contains(section, "background") {
+		t.Errorf("the section is %q, want it to name the background argument", section)
+	}
+	if !strings.Contains(section, "cancel_job") {
+		t.Errorf("the section is %q, want it to name the cancel_job tool", section)
+	}
 }
