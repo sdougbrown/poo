@@ -58,6 +58,9 @@ type Options struct {
 	Settings ToolSettings
 	// ToolsMode is how the run asks for tool calls.
 	ToolsMode string
+	// ReasoningEffort is the reasoning_effort the run sends, empty when
+	// it sends none.
+	ReasoningEffort string
 }
 
 // Run is one prompt through to settled.
@@ -115,6 +118,8 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 		ModelID:    r.opts.ModelID,
 		MaxTurns:   r.opts.MaxTurns,
 		ToolsMode:  r.opts.ToolsMode,
+
+		ReasoningEffort: r.opts.ReasoningEffort,
 	}); err != nil {
 		return Result{}, err
 	}

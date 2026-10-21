@@ -354,3 +354,31 @@ func TestTheAPIKeyIsScrubbedFromTheChildEnvironment(t *testing.T) {
 	}
 	t.Fatal("the log holds no tool.result record")
 }
+
+func TestTheReasoningEffortIsRecordedInTheLog(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	for _, tc := range []struct {
+		args []string
+		want any
+	}{
+		{[]string{"--reasoning-effort", "high"}, "high"},
+		{nil, nil},
+	} {
+		endpoint := newFakeEndpoint(t, body)
+		dir := t.TempDir()
+		logPath := filepath.Join(dir, "run.jsonl")
+		args := append([]string{"run", "--base-url", endpoint.URL + "/v1", "--model-id", "m", "--context-limit", "32768", "--working-dir", dir, "--log", logPath}, tc.args...)
+		if code, stderr := runCLI(t, append(args, "hi")...); code != 0 {
+			t.Fatalf("the exit code is %d; stderr: %s", code, stderr)
+		}
+		for _, rec := range readLog(t, logPath) {
+			switch rec["record"] {
+			case "session.created", "run.started":
+				if rec["reasoning_effort"] != tc.want {
+					t.Errorf("%v records reasoning_effort %v, want %v", rec["record"], rec["reasoning_effort"], tc.want)
+				}
+			}
+		}
+	}
+}

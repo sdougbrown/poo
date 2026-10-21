@@ -87,6 +87,9 @@ type SessionCreated struct {
 	// ToolsMode is how the session asks for tool calls: "native", "text"
 	// or "auto".
 	ToolsMode string `json:"tools_mode"`
+	// ReasoningEffort is the reasoning_effort the session sends, empty
+	// when it sends none.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// Build names the binary that produced the session.
 	Build BuildInfo `json:"build"`
 }
@@ -106,6 +109,9 @@ type RunStarted struct {
 	MaxTurns int `json:"max_turns"`
 	// ToolsMode is how the run asks for tool calls.
 	ToolsMode string `json:"tools_mode"`
+	// ReasoningEffort is the reasoning_effort the run sends, empty when
+	// it sends none.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // MessageRecord records one message in the model's history.

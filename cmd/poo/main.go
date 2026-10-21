@@ -215,7 +215,9 @@ func runRun(args []string) int {
 		},
 		ContextLimit: o.contextLimit,
 		ToolsMode:    o.toolsMode,
-		Build:        poo.BuildInfo{Name: "poo", Version: version},
+
+		ReasoningEffort: o.reasoningEffort,
+		Build:           poo.BuildInfo{Name: "poo", Version: version},
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1
@@ -238,6 +240,8 @@ func runRun(args []string) int {
 		Env:          childEnv,
 		Settings:     settings,
 		ToolsMode:    o.toolsMode,
+
+		ReasoningEffort: o.reasoningEffort,
 	})
 
 	res, err := r.Execute(ctx, strings.Join(fs.Args(), " "))

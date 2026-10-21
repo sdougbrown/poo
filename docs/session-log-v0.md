@@ -51,6 +51,7 @@ The first record of a log.
 | `tools` | array of objects | The tools linked into the session, in call order. |
 | `context_limit` | integer | The model's context window, in tokens. |
 | `tools_mode` | string | How the run asks for tool calls: `"native"`, `"text"` or `"auto"`. |
+| `reasoning_effort` | string | The `reasoning_effort` the run sends. Absent when it sends none. |
 | `build` | object | The binary that produced the session. |
 
 `model` holds:
@@ -89,6 +90,7 @@ Each entry of `tools` holds:
 | `model_id` | string | The model the run talks to. |
 | `max_turns` | integer | The turn ceiling. `0` means the run is unlimited. |
 | `tools_mode` | string | How the run asks for tool calls. |
+| `reasoning_effort` | string | The `reasoning_effort` the run sends. Absent when it sends none. |
 
 ## `message`
 
