@@ -155,10 +155,11 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 	handles := s.handlesOf(turn, len(calls))
 	for i, call := range calls {
 		handle := handles[i]
-		if !s.claimSkippedCall(run, turn, handle, call) {
+		callRecord, ok := s.claimSkippedCall(run, turn, handle, call)
+		if !ok {
 			continue
 		}
-		_ = s.write(run.ctx, &ToolCallRecord{
+		_ = s.writeCallRecord(run, callRecord, &ToolCallRecord{
 			RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 			RunID:      run.id,
 			Turn:       turn,
@@ -166,7 +167,7 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 			Tool:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
 		})
-		s.finishCallWrite(run)
+		s.finishCallWrite(run, callRecord)
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
 			Text:    text,
 			IsError: true,
@@ -180,41 +181,38 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 // The call is registered by its batch, so the claim takes over an entry
 // no dispatch owns. The claim is made against the seal: it reports false
 // when the call already has an owner or the run is sealed, and the seal
-// then writes the call's record and its result.
-func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call ToolCall) bool {
+// then writes the call's record and its result. The returned call holds
+// the context the record is written under.
+func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call ToolCall) (*issuedCall, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if run.sealed {
-		return false
+		return nil, false
 	}
 	if entry, issued := run.pendingCalls[handle]; issued {
 		// The batch registered the call, and its dispatch may already
 		// own the record or have started it: the call is not a skip
 		// then.
 		if entry.recorded || entry.started {
-			return false
+			return nil, false
 		}
-		entry.recorded = true
-		run.callWrites++
-		return true
+		s.beginCallRecordLocked(run, entry)
+		return entry, true
 	}
 	if run.settledCalls[handle] || s.turnSummaryLocked(turn, handle).Outcome != "" {
 		// The call already has an outcome.
-		return false
+		return nil, false
 	}
-	run.pendingCalls[handle] = &issuedCall{
+	entry := &issuedCall{
 		handle:    handle,
 		tool:      call.Name,
 		id:        call.ID,
 		turn:      turn,
 		arguments: call.Arguments,
-		recorded:  true,
 	}
-	if run.workDone == nil {
-		run.workDone = make(chan struct{}, 1)
-	}
-	run.callWrites++
-	return true
+	run.pendingCalls[handle] = entry
+	s.beginCallRecordLocked(run, entry)
+	return entry, true
 }
 
 // handlesOf returns the handles of a turn's calls.

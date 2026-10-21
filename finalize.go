@@ -2,6 +2,7 @@ package poo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -412,6 +413,14 @@ func (s *Session) inFlightLocked(run *runState) int {
 // The caller holds the session's lock, and the caller releases it.
 func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) {
 	run.sealed = true
+	// A call record whose write the finalization stopped waiting for is
+	// ended here, so the record cannot land after run.settled. The claim
+	// keeps the call, so the record is not written twice.
+	for _, call := range run.pendingCalls {
+		if call.writing && call.recordCancel != nil {
+			call.recordCancel(errCallRecordSealed)
+		}
+	}
 	issued := make([]*issuedCall, 0, len(run.pendingCalls))
 	for _, call := range run.pendingCalls {
 		issued = append(issued, call)
@@ -458,14 +467,14 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 			// The call was claimed before its record was written, so the
 			// finalization writes it. The call never fixed a mode: it
 			// never ran.
-			if err := s.write(run.ctx, &ToolCallRecord{
+			if err := s.writeCallRecord(run, call, &ToolCallRecord{
 				RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 				RunID:      run.id,
 				Turn:       call.turn,
 				Handle:     call.handle,
 				Tool:       call.tool,
 				Arguments:  recordArgs(call.arguments),
-			}); err != nil {
+			}); err != nil && !errors.Is(err, errCallRecordSealed) {
 				s.addCandidate(run, storeErrorCandidate(err))
 			}
 		}

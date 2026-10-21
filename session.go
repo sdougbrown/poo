@@ -266,6 +266,14 @@ type issuedCall struct {
 	// recorded reports that the tool.call record is written or owned for
 	// writing.
 	recorded bool
+	// writing reports that the call's tool.call record write is in flight.
+	writing bool
+	// recordCtx is the context the call's tool.call record is written
+	// under. The claim makes it, so the finalization can end the write
+	// when it seals the call.
+	recordCtx context.Context
+	// recordCancel ends recordCtx.
+	recordCancel context.CancelCauseFunc
 	// started reports that the tool is running.
 	started bool
 }
@@ -724,6 +732,18 @@ func (s *Session) markBroken() {
 // A refused write marks the session broken: the store is the session's
 // memory, and a session that cannot write cannot be trusted.
 func (s *Session) write(ctx context.Context, rec Record) error {
+	wctx, cancel := recordContext(ctx)
+	defer cancel()
+	return s.appendRecord(wctx, rec, nil)
+}
+
+// appendRecord appends one record under the context given.
+//
+// A refused write marks the session broken, unless the run the record
+// belongs to is sealed: a record the finalization ended at the seal, or
+// stopped waiting for, is abandoned, and its sink's refusal says nothing
+// about the store. A record that belongs to no run is never abandoned.
+func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runState) error {
 	if s.opts.Sink == nil {
 		return nil
 	}
@@ -734,9 +754,10 @@ func (s *Session) write(ctx context.Context, rec Record) error {
 	}
 	s.mu.Unlock()
 
-	wctx, cancel := recordContext(ctx)
-	defer cancel()
-	if err := s.opts.Sink.Append(wctx, rec); err != nil {
+	if err := s.opts.Sink.Append(ctx, rec); err != nil {
+		if errors.Is(context.Cause(ctx), errCallRecordSealed) || s.sealedRun(sealedRun) {
+			return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
+		}
 		s.mu.Lock()
 		s.sunk = true
 		s.broken = true
@@ -744,6 +765,45 @@ func (s *Session) write(ctx context.Context, rec Record) error {
 		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
 	}
 	return nil
+}
+
+// sealedRun reports that the finalization has sealed a run.
+func (s *Session) sealedRun(run *runState) bool {
+	if run == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return run.sealed
+}
+
+// errCallRecordSealed reports that the finalization ended a call record's
+// write at the seal: the record is abandoned, not refused.
+var errCallRecordSealed = errors.New("poo: the finalization sealed the call record")
+
+// writeCallRecord appends a call's tool.call record.
+//
+// A record a claim is writing runs under the claim's own context: it
+// ignores the run's own cancellation, so the record is still written when
+// the run ends, and the finalization ends it at the seal, so a record it
+// stopped waiting for never follows run.settled. The claim's context has
+// no bound of its own, because the finalization's wait bounds it.
+//
+// A record the finalization writes itself is bounded by the record-write
+// budget, because no claim is waiting for it any more. Either way, a
+// record the store does not take after the seal is abandoned rather than
+// a store failure: the run's outcome is already fixed.
+func (s *Session) writeCallRecord(run *runState, call *issuedCall, rec Record) error {
+	if call.recordCtx != nil {
+		return s.appendRecord(call.recordCtx, rec, run)
+	}
+	base := run.ctx
+	if base == nil {
+		base = context.Background()
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(base), recordWriteBudget)
+	defer cancel()
+	return s.appendRecord(wctx, rec, run)
 }
 
 // recordWriteBudget bounds one record write or flush.
