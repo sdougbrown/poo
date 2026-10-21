@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // requireBwrap skips a test on a machine where bubblewrap is missing or
@@ -175,5 +176,13 @@ func TestAPooThatExitsWithoutALogSaysSoWhateverTheSandbox(t *testing.T) {
 				t.Errorf("error = %q, want poo's exit code and output", got)
 			}
 		})
+	}
+}
+
+func TestTheWaitDelayOutlastsTheKillGrace(t *testing.T) {
+	// The kill sleeps KillGrace between SIGTERM and SIGKILL, and Wait
+	// must still be waiting when the SIGKILL lands.
+	if KillWaitDelay < KillGrace+time.Second {
+		t.Errorf("KillWaitDelay is %s, want it at least a second over KillGrace (%s)", KillWaitDelay, KillGrace)
 	}
 }

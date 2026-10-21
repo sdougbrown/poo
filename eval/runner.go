@@ -39,6 +39,11 @@ const (
 	// own before it is killed outright. The plan's process rule is
 	// SIGTERM, wait two seconds, then SIGKILL.
 	KillGrace = 2 * time.Second
+	// KillWaitDelay is how long Wait lets a killed command's pipes stay
+	// open. It is longer than KillGrace by a margin, because the kill
+	// itself takes KillGrace to reach SIGKILL and Wait must see the
+	// exit that follows rather than give up first.
+	KillWaitDelay = KillGrace + 3*time.Second
 	// CheckTimeout bounds one check script. The check runs on its own
 	// clock, not the run's, so a run that used its whole budget does
 	// not starve the check.
@@ -739,7 +744,7 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 	// bounds the time after it: the pipes are closed even if a child
 	// holds them.
 	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
-	cmd.WaitDelay = 2 * time.Second
+	cmd.WaitDelay = KillWaitDelay
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -822,8 +827,10 @@ func killGroup(pid int) error {
 //     task greps it for the answer the run recorded.
 //   - POO_CHANGED_FILES: the paths the run changed, one per line.
 //
-// The check gets no network and a small timeout: a check that hangs must
-// not hang the harness.
+// The check has a small timeout: a check that hangs must not hang the
+// harness. It runs outside the sandbox, whatever the run's sandbox mode:
+// only poo is wrapped, so nothing here isolates the check's network or
+// filesystem.
 //
 // The check runs on its own clock, not the run's. A run that used its
 // whole budget would otherwise leave the check no time at all, and the
@@ -853,7 +860,7 @@ func (r *Runner) runCheck(ctx context.Context, t Task, workdir, logPath string, 
 	// must not hold the harness up.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
-	cmd.WaitDelay = 2 * time.Second
+	cmd.WaitDelay = KillWaitDelay
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
