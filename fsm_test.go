@@ -1159,6 +1159,36 @@ func TestATruncatedTurnWhoseCallsAreAllIncompleteReachesBeforeSettle(t *testing.
 	}
 }
 
+// TestATruncatedCallThatFailsPrepareIsIncomplete covers the plan's
+// definition of a complete call in a truncated response: it must parse
+// as a JSON object and pass Prepare. A call that parses but fails
+// Prepare is skipped, so the turn is a natural stop.
+func TestATruncatedCallThatFailsPrepareIsIncomplete(t *testing.T) {
+	tr := scripted([]fakeResponse{{
+		text:   "writing",
+		finish: poo.FinishLength,
+		calls:  []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"half"}`)}},
+	}, {text: "the second answer"}})
+	tool := &echoTool{result: "echoed", prepareErr: errors.New("the arguments are wrong")}
+	hook := &recordingBeforeSettle{}
+
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+
+	if res.Reason != poo.ReasonOutputTruncated {
+		t.Errorf("the run settled %q, want output_truncated: the call did not pass Prepare", res.Reason)
+	}
+	if n := len(tr.Requests()); n != 1 {
+		t.Errorf("the run made %d requests, want 1", n)
+	}
+	if hook.calls != 1 || hook.candidate != poo.ReasonOutputTruncated {
+		t.Errorf("the BeforeSettle hook ran %d times and saw %q, want once with output_truncated", hook.calls, hook.candidate)
+	}
+}
+
 // TestEveryTransitionOfAMultiRunSessionIsInTheTable covers the plan's
 // rule that the table is the FSM: a session that runs twice takes
 // settled -> requesting, and every move it makes is listed.

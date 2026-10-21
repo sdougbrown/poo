@@ -34,8 +34,8 @@ type callPlan struct {
 	call ToolCall
 	// index is the call's position in the batch, counting from zero.
 	index int
-	// complete reports that the call's arguments are a complete JSON
-	// object.
+	// complete reports that the call is complete: its arguments parse
+	// as a JSON object and, in a truncated response, it passed Prepare.
 	complete bool
 	// invalid reports that the call failed its validation, so it
 	// counts toward the invalid near key.
@@ -203,9 +203,9 @@ func (s *Session) nextHandle() string {
 
 // planCalls turns a turn's calls into the plan the core runs.
 //
-// A call in a truncated response is complete when its arguments parse as
-// a complete JSON object and pass Prepare. An incomplete call is
-// skipped with a visible result.
+// A call in a truncated response is complete only when its arguments
+// parse as a complete JSON object and pass Prepare. An incomplete call
+// is skipped with a visible result and does not count as processed.
 //
 // The plan validates every call, so the repeat counters are asked about
 // the calls in the model order and a call that failed its validation is
@@ -231,6 +231,11 @@ func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated
 		if err != nil {
 			plan.invalid = true
 			plan.prepareErr = err
+			// A call that fails Prepare did not pass the plan's
+			// completeness test.
+			if truncated {
+				plan.complete = false
+			}
 		} else {
 			plan.prepared = prepared
 		}
