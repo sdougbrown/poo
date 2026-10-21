@@ -51,7 +51,9 @@ type ProviderError struct {
 	Message string
 	// Status is the HTTP status, 0 when the failure was not a response.
 	Status int
-	// Code is the provider's own error code, when it sent one.
+	// Code is the provider's own error code, when it sent one. It also
+	// holds the kind a failure had before it was reclassified: an
+	// interrupted stream keeps the kind it broke in here.
 	Code string
 	// RetryAfter is how long the endpoint asked the client to wait, when
 	// it said so.

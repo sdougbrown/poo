@@ -269,7 +269,7 @@ A `undelivered_input` entry holds:
 |---|---|---|
 | `kind` | string | The failure class, e.g. `"context_length"` or `"server"`. |
 | `status` | integer | The HTTP status. Absent when the failure was not a response. |
-| `code` | string | The provider's own error code. Absent when it sent none. |
+| `code` | string | The provider's own error code. Absent when it sent none. It also holds the kind a failure had before it was reclassified: an `interrupted_stream` keeps the kind it broke in here. |
 | `retry_after_s` | integer | How long the endpoint asked the client to wait, in seconds. Absent when it said nothing. |
 
 ### Settle reasons
