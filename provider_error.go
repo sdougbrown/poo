@@ -1,5 +1,7 @@
 package poo
 
+import "fmt"
+
 // ProviderKind classifies a provider failure.
 type ProviderKind string
 
@@ -43,7 +45,7 @@ type ProviderError struct {
 
 func (e *ProviderError) Error() string {
 	if e.Status != 0 {
-		return e.Message
+		return fmt.Sprintf("%s (status %d)", e.Message, e.Status)
 	}
 	return e.Message
 }
