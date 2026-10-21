@@ -36,6 +36,11 @@ const (
 	// DefaultJudgeMaxChars is the size a transcript may have before it
 	// is summarized before it is sent.
 	DefaultJudgeMaxChars = 60000
+	// DefaultJudgeMaxTokens is the reply budget sent with every judge
+	// request. The judge model reasons for several thousand tokens
+	// before it answers, and a local server's own default (some use
+	// 512) would cut the verdict off.
+	DefaultJudgeMaxTokens = 16384
 	// JudgeKeepHead is the number of segments kept from the front of a
 	// summarized transcript.
 	JudgeKeepHead = 3
@@ -125,6 +130,9 @@ type JudgeOptions struct {
 	// MaxChars is the size a transcript may have before it is
 	// summarized.
 	MaxChars int
+	// MaxTokens is the reply budget sent as max_tokens. Zero means
+	// DefaultJudgeMaxTokens.
+	MaxTokens int
 	// PromptPath is the file holding the judge's prompt.
 	PromptPath string
 	// HTTPClient is the client the judge uses. Nil means a default.
@@ -154,6 +162,9 @@ func NewJudge(opts JudgeOptions) (*Judge, error) {
 	}
 	if opts.MaxChars <= 0 {
 		opts.MaxChars = DefaultJudgeMaxChars
+	}
+	if opts.MaxTokens <= 0 {
+		opts.MaxTokens = DefaultJudgeMaxTokens
 	}
 	if opts.PromptPath == "" {
 		opts.PromptPath = DefaultJudgePromptPath
@@ -438,7 +449,8 @@ func (j *Judge) ask(ctx context.Context, payload judgePayload) (string, error) {
 			{"role": "system", "content": j.prompt},
 			{"role": "user", "content": judgeUserMessage(payload, nonce)},
 		},
-		"stream": false,
+		"max_tokens": j.opts.MaxTokens,
+		"stream":     false,
 	})
 	if err != nil {
 		return "", fmt.Errorf("eval: encoding the judge request: %w", err)

@@ -56,6 +56,7 @@ Judge flags:
   --api-key-env <var>  The environment variable holding the judge's API key
   --out <dir>          Where the verdicts go (default: <results-dir>/judgments)
   --max-chars <n>      The size a transcript may have before it is summarized (default: 60000)
+  --max-tokens <n>     The reply budget sent as max_tokens (default: 16384)
 `
 
 func main() {
@@ -357,6 +358,7 @@ func runJudge(args []string) int {
 	fs.StringVar(&opts.APIKeyEnv, "api-key-env", "", "The environment variable holding the judge's API key")
 	fs.StringVar(&opts.OutDir, "out", "", "Where the verdicts go")
 	fs.IntVar(&opts.MaxChars, "max-chars", 0, "The size a transcript may have before it is summarized")
+	fs.IntVar(&opts.MaxTokens, "max-tokens", 0, "The reply budget sent as max_tokens")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

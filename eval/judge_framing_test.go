@@ -312,3 +312,36 @@ func TestACroppedSummaryDoesNotClaimElidedTurns(t *testing.T) {
 		t.Errorf("the summary is %d characters, want at most 1000", len(text))
 	}
 }
+
+func TestTheJudgeRequestCarriesMaxTokens(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  int
+		want float64
+	}{
+		{"default", 0, DefaultJudgeMaxTokens},
+		{"override", 4096, 4096},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var decoded map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				data, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(data, &decoded)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"x"}}]}`))
+			}))
+			defer server.Close()
+
+			judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: t.TempDir(), MaxTokens: tc.set})
+			if err != nil {
+				t.Fatalf("making the judge: %v", err)
+			}
+			if _, err := judge.ask(t.Context(), judgePayload{Task: "t", Transcript: "hello"}); err != nil {
+				t.Fatalf("asking: %v", err)
+			}
+			if decoded["max_tokens"] != tc.want {
+				t.Errorf("max_tokens is %v, want %v", decoded["max_tokens"], tc.want)
+			}
+		})
+	}
+}
