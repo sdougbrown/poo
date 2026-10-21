@@ -42,6 +42,7 @@ Run flags:
   --log <path>           The session log path
   --working-dir <dir>    The directory the tools work in (default: the current one)
   --timeout <dur>        The wall-clock ceiling for the run, e.g. 5m
+  --no-wait-jobs         Exit at the first settle; the running jobs stop through the session's close
 `
 
 func main() {

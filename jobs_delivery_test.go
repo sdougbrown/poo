@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -429,4 +430,64 @@ func (h *countingBeforeSettle) Calls() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.calls
+}
+
+// TestAnInterruptDuringExecutingStopsTheCallAndNotTheJob covers the
+// plan's rule: an interrupt during executing stops the synchronous
+// call, and the job keeps running.
+func TestAnInterruptDuringExecutingStopsTheCallAndNotTheJob(t *testing.T) {
+	started := make(chan struct{})
+	tool := &echoTool{result: "echoed"}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		close(started)
+		<-ctx.Done()
+		return poo.ToolResult{Text: "partial output", IsError: true}, nil
+	}
+
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{
+			jobCall("one", true),
+			{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)},
+		}},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+	jobTool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	jobTool.SetResult("the job's output")
+
+	opts := poo.Options{
+		Transport: tr,
+		Tools: map[string]poo.Tool{
+			"job":  jobTool,
+			"echo": tool,
+		},
+		ToolOrder:    []string{"job", "echo"},
+		Sink:         sink,
+		SessionID:    "s1",
+		ModelID:      "test-model",
+		ContextLimit: 32768,
+	}
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-started
+	if _, err := s.Send("stop that", poo.Interrupt); err != nil {
+		t.Fatalf("sending the interrupt: %v", err)
+	}
+	// The job is still running: the interrupt did not stop it.
+	if len(s.JobsRunning()) != 1 {
+		t.Errorf("the session's running jobs are %v, want one", s.JobsRunning())
+	}
+	jobTool.Release()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason == poo.ReasonCancelled {
+		t.Errorf("the run settled %q: an interrupt does not end the run", res.Reason)
+	}
+	waitFor(t, "the job to end", func() bool {
+		return sink.count("job.ended") == 1
+	})
 }

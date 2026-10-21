@@ -106,3 +106,31 @@ func TestTheExitCodeComesFromTheSettleReason(t *testing.T) {
 		t.Errorf("the exit code is %d, want %d; stderr: %s", code, poo.ExitCode(poo.ReasonMaxTurns), stderr)
 	}
 }
+
+// TestTheNoWaitJobsFlagIsAccepted covers the flag: the one-shot exits at
+// the first settle when it is given.
+func TestTheNoWaitJobsFlagIsAccepted(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"the answer"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+
+	code, stderr, stdout := runCLIWithStdout(t,
+		"run",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--no-wait-jobs",
+		"--working-dir", dir,
+		"--log", logPath,
+		"say hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "the answer") {
+		t.Errorf("stdout is %q, want it to hold the answer", stdout)
+	}
+}

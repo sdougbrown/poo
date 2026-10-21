@@ -459,3 +459,78 @@ func TestAJobThatFailsFatallyWhileTheRunWaitsSettlesIt(t *testing.T) {
 		t.Errorf("the run made %d requests, want 2: none after the fatal result", requests)
 	}
 }
+
+// TestACancelWithASynchronousCallAndAJobSettlesTheRun covers the
+// plan's rule: a cancel stops the synchronous call, the run settles
+// cancelled with the running job listed, and the job's later result
+// wakes the session.
+func TestACancelWithASynchronousCallAndAJobSettlesTheRun(t *testing.T) {
+	started := make(chan struct{})
+	slow := &echoTool{result: "echoed"}
+	slow.call = func(ctx context.Context) (poo.ToolResult, error) {
+		close(started)
+		<-ctx.Done()
+		return poo.ToolResult{Text: "partial output", IsError: true}, nil
+	}
+
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{
+			jobCall("one", true),
+			{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)},
+		}},
+		{text: "the woken answer"},
+	})
+	sink := &recordingSink{}
+	jobTool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	jobTool.SetResult("the job's output")
+
+	opts := poo.Options{
+		Transport: tr,
+		Tools: map[string]poo.Tool{
+			"job":  jobTool,
+			"echo": slow,
+		},
+		ToolOrder:    []string{"job", "echo"},
+		Sink:         sink,
+		SessionID:    "s1",
+		ModelID:      "test-model",
+		ContextLimit: 32768,
+	}
+	s := newTestSession(t, opts)
+	firstRunID, err := s.Prompt(context.Background(), "do the thing")
+	if err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-started
+	s.Cancel("cancel:test")
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonCancelled {
+		t.Errorf("the run settled %q, want cancelled", res.Reason)
+	}
+	// The synchronous call was cancelled.
+	var result *poo.ToolResultRecord
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolResultRecord); ok && r.Tool == "echo" {
+			result = r
+		}
+	}
+	if result == nil {
+		t.Fatal("the log holds no result for the synchronous call")
+	}
+	if result.Outcome != poo.OutcomeCancelled {
+		t.Errorf("the outcome is %q, want cancelled", result.Outcome)
+	}
+	// The settle detail lists the job that is still running.
+	if len(res.Detail.JobsRunning) != 1 || res.Detail.JobsRunning[0] != "j1" {
+		t.Errorf("the settle detail lists %v, want [j1]", res.Detail.JobsRunning)
+	}
+	// The job keeps running, and its result wakes the session.
+	jobTool.Release()
+	waitFor(t, "the woken run to settle", func() bool {
+		settled := sink.settled()
+		return settled != nil && settled.RunID != firstRunID
+	})
+}

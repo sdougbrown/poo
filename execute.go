@@ -450,7 +450,25 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// settles before it finishes.
 	s.issueCall(run, turn, handle, call.Name, call.ID)
 
-	result, err := tool.Call(s.activityContextFor(run), prepared, s.toolEnv(run, handle))
+	callCtx := s.activityContextFor(run)
+	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
+	if err == nil && callCtx.Err() != nil {
+		// The call's context ended while the call ran: the tool saw
+		// the cancellation and gave back what it had. The outcome says
+		// the call was cancelled, and the result carries the partial
+		// output with the note.
+		text := result.Text
+		if s.wasInterrupted(run) {
+			text = interruptNote(text)
+		} else {
+			text = text + "\n" + CancelledInterruptedText
+		}
+		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+			Text:    text,
+			IsError: true,
+		}, OutcomeCancelled)
+		return
+	}
 	if err == nil && s.wasInterrupted(run) {
 		// The call was cut short by an interrupt, even though the tool
 		// returned a result: the tool saw the cancellation and gave
