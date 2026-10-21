@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	readtool "github.com/sdougbrown/poo/tool/read"
 )
 
 // Metrics is everything the harness measures about one run.
@@ -233,11 +235,11 @@ func readArgs(args json.RawMessage) (path string, offset, limit int, ok bool) {
 	}
 	offset = a.Offset
 	if offset < 1 {
-		offset = 1
+		offset = readtool.DefaultOffset
 	}
 	limit = a.Limit
 	if limit <= 0 {
-		limit = 2000
+		limit = readtool.DefaultLimit
 	}
 	return a.Path, offset, limit, true
 }

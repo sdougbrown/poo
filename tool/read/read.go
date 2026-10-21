@@ -21,6 +21,9 @@ import (
 
 // Defaults for the read tool.
 const (
+	// DefaultOffset is the line a read starts at when the model does
+	// not ask for an offset.
+	DefaultOffset = 1
 	// DefaultLimit is the number of lines a read shows when the model
 	// does not ask for a limit.
 	DefaultLimit = 2000
@@ -117,7 +120,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	}
 	offset := a.Offset
 	if offset == 0 {
-		offset = 1
+		offset = DefaultOffset
 	}
 	limit := a.Limit
 	if limit == 0 {
