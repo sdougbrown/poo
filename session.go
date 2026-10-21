@@ -195,6 +195,10 @@ type runState struct {
 	// being written. The finalization waits for them as it does for the
 	// pending calls.
 	resultWrites int
+	// callWrites counts the tool.call records whose writes are still in
+	// flight. The finalization waits for them, so no record of the run
+	// follows run.settled.
+	callWrites int
 	// jobStarts counts the job acceptance records whose writes are still
 	// in flight. The finalization waits for them as it does for the
 	// pending calls.

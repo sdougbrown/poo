@@ -363,6 +363,8 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			return true
 		}
 		recorded = true
+		s.beginCallWrite(run)
+		defer s.finishCallWrite(run)
 		if err := s.write(run.ctx, &ToolCallRecord{
 			RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 			RunID:      run.id,
@@ -497,11 +499,14 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	if !record(CallModeSync) {
 		return
 	}
-	s.markCallStarted(run, handle)
 	if s.runWindingDown(run) {
 		// The finalization owns the issued call's result.
 		return
 	}
+	// The call is marked started only once its tool is about to run, so
+	// the finalization never waits for a call that the winding-down run
+	// will not start.
+	s.markCallStarted(run, handle)
 
 	callCtx := s.activityContextFor(run)
 	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
@@ -690,6 +695,22 @@ func (s *Session) finishResultWrite(run *runState) {
 		default:
 		}
 	}
+}
+
+// beginCallWrite marks a tool.call record's write as in-flight work, so
+// the finalization waits for it before it writes run.settled.
+func (s *Session) beginCallWrite(run *runState) {
+	s.mu.Lock()
+	run.callWrites++
+	s.mu.Unlock()
+}
+
+// finishCallWrite marks the end of a tool.call record's write.
+func (s *Session) finishCallWrite(run *runState) {
+	s.mu.Lock()
+	run.callWrites--
+	s.signalWorkLocked(run)
+	s.mu.Unlock()
 }
 
 // writeResult writes a call's result record and puts it in the model's

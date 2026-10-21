@@ -380,7 +380,7 @@ func (s *Session) waitForWork(run *runState) {
 				started++
 			}
 		}
-		pending := started + run.resultWrites + run.jobStarts + len(run.delivering) + len(run.deliveringJobs)
+		pending := started + run.resultWrites + run.callWrites + run.jobStarts + len(run.delivering) + len(run.deliveringJobs)
 		done := run.workDone
 		s.mu.Unlock()
 		if pending == 0 {

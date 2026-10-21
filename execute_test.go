@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
@@ -78,11 +79,18 @@ func TestACancelDuringTheCallRecordStillGetsAResult(t *testing.T) {
 				t.Fatal(err)
 			}
 			<-sink.entered
+			// The record write stays in flight while the finalization
+			// starts. It is released shortly after, so the call record can
+			// land before the settle only if the finalization waits for
+			// the write.
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				close(sink.release)
+			}()
 			s.Cancel("probe")
 			if _, err := s.WaitRun(context.Background(), id); err != nil {
 				t.Fatal(err)
 			}
-			close(sink.release)
 			waitFor(t, "the late turn end", func() bool {
 				for _, e := range s.Events() {
 					if e.Name == poo.EventTurnEnded {
@@ -91,6 +99,20 @@ func TestACancelDuringTheCallRecordStillGetsAResult(t *testing.T) {
 				}
 				return false
 			})
+			call, result, settled := -1, -1, -1
+			for i, name := range sink.names() {
+				switch name {
+				case "tool.call":
+					call = i
+				case "tool.result":
+					result = i
+				case "run.settled":
+					settled = i
+				}
+			}
+			if call < 0 || !(call < result && result < settled) {
+				t.Fatalf("records are %v; want tool.call before tool.result before run.settled", sink.names())
+			}
 			if got := sink.count("tool.result"); got != 1 {
 				t.Fatalf("the recorded call has %d result(s) after cancellation, want 1; records: %v", got, sink.names())
 			}
