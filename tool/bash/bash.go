@@ -249,14 +249,10 @@ func render(fields []field) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		key, err := json.Marshal(f.key)
-		if err != nil {
-			continue
-		}
-		value, err := json.Marshal(f.value)
-		if err != nil {
-			continue
-		}
+		// The field vocabulary is a string and the values are string,
+		// int, bool or nil, so neither marshal can fail.
+		key, _ := json.Marshal(f.key)
+		value, _ := json.Marshal(f.value)
 		b.Write(key)
 		b.WriteString(": ")
 		b.Write(value)

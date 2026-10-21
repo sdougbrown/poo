@@ -257,3 +257,66 @@ func TestACancelledReadIsAnErrorBeforeItScans(t *testing.T) {
 		t.Errorf("the cancelled read is not an error: %s", res.Text)
 	}
 }
+
+// TestTheOutputCapChain covers the cap's fallback chain: the tool's cap
+// wins, the settings fill an unset cap, and with neither the default
+// holds. The file is long enough that only a small cap truncates it.
+func TestTheOutputCapChain(t *testing.T) {
+	cases := []struct {
+		name       string
+		tool       read.Tool
+		settings   poo.ToolSettings
+		wantCapped bool
+	}{
+		{
+			name:       "the tool's cap, with the settings empty",
+			tool:       read.Tool{OutputCap: 40},
+			settings:   poo.ToolSettings{},
+			wantCapped: true,
+		},
+		{
+			name:       "the settings fill what the tool leaves unset",
+			tool:       read.Tool{},
+			settings:   poo.ToolSettings{ReadOutputCapChars: 40},
+			wantCapped: true,
+		},
+		{
+			name:       "a set tool cap wins over the settings",
+			tool:       read.Tool{OutputCap: 40},
+			settings:   poo.ToolSettings{ReadOutputCapChars: 400},
+			wantCapped: true,
+		},
+		{
+			name:       "neither, so the default holds",
+			tool:       read.Tool{},
+			settings:   poo.ToolSettings{},
+			wantCapped: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "a.txt", strings.Repeat("x\n", 100))
+
+			raw, err := json.Marshal(map[string]any{"path": "a.txt"})
+			if err != nil {
+				t.Fatalf("marshalling args: %v", err)
+			}
+			prepared, err := c.tool.Prepare(json.RawMessage(raw), poo.PrepareEnv{WorkingDir: dir})
+			if err != nil {
+				t.Fatalf("preparing: %v", err)
+			}
+			res, err := c.tool.Call(context.Background(), prepared, poo.ToolEnv{
+				PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+				Settings:   c.settings,
+			})
+			if err != nil {
+				t.Fatalf("calling: %v", err)
+			}
+			header := strings.SplitN(res.Text, "\n", 2)[0]
+			if got := strings.Contains(header, "capped"); got != c.wantCapped {
+				t.Errorf("the header is %q, want capped=%v", header, c.wantCapped)
+			}
+		})
+	}
+}

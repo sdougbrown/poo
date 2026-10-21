@@ -306,6 +306,7 @@ func TestPrepareRejectsUnknownFieldsAndEmptyCommands(t *testing.T) {
 	for _, raw := range []string{
 		`{"command":"ls","extra":1}`,
 		`{"command":""}`,
+		`{"command":"   "}`,
 		`{}`,
 		`not json`,
 	} {
@@ -395,5 +396,135 @@ func TestAProcessKilledBySignalIsAnError(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Error("a process killed by a signal is not marked as an error")
+	}
+}
+
+// TestStderrJoinsTheOutput covers the merge: the tool points both
+// stdout and stderr at the same pipe, so what a command prints to
+// stderr reaches the model.
+func TestStderrJoinsTheOutput(t *testing.T) {
+	dir := t.TempDir()
+	tool := &bash.Tool{Timeout: 5 * time.Second}
+
+	res := call(t, tool, "echo to-the-stdout; echo to-the-stderr 1>&2", poo.ToolEnv{
+		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+		Env:        os.Environ(),
+	})
+
+	obs := structured(t, res)
+	output, _ := obs["output"].(string)
+	if !strings.Contains(output, "to-the-stdout") {
+		t.Errorf("the output lost the command's stdout: %q", output)
+	}
+	if !strings.Contains(output, "to-the-stderr") {
+		t.Errorf("the output lost the command's stderr: %q", output)
+	}
+}
+
+// TestTheTimeoutComesFromTheSettingsOrTheTool covers the timeout's
+// fallback chain: the settings override a set tool field, and fill a
+// field the tool leaves unset. The sleep lengths sit between the two
+// timeouts, so the timed_out bit says which one won.
+func TestTheTimeoutComesFromTheSettingsOrTheTool(t *testing.T) {
+	cases := []struct {
+		name         string
+		tool         bash.Tool
+		settings     poo.ToolSettings
+		sleep        string
+		wantTimedOut bool
+	}{
+		{
+			name:         "the tool's timeout, with the settings empty",
+			tool:         bash.Tool{Timeout: 300 * time.Millisecond},
+			settings:     poo.ToolSettings{},
+			sleep:        "1",
+			wantTimedOut: true,
+		},
+		{
+			name:         "the settings fill what the tool leaves unset",
+			tool:         bash.Tool{},
+			settings:     poo.ToolSettings{BashTimeoutSeconds: 1},
+			sleep:        "2",
+			wantTimedOut: true,
+		},
+		{
+			name:         "the settings override a set tool field",
+			tool:         bash.Tool{Timeout: time.Second},
+			settings:     poo.ToolSettings{BashTimeoutSeconds: 2},
+			sleep:        "1.5",
+			wantTimedOut: false,
+		},
+		{
+			name:         "neither, so the default holds",
+			tool:         bash.Tool{},
+			settings:     poo.ToolSettings{},
+			sleep:        "2",
+			wantTimedOut: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			res := call(t, &c.tool, "printf 'late'; sleep "+c.sleep, poo.ToolEnv{
+				PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+				Env:        os.Environ(),
+				Settings:   c.settings,
+			})
+			obs := structured(t, res)
+			if timedOut, _ := obs["timed_out"].(bool); timedOut != c.wantTimedOut {
+				t.Errorf("timed_out is %v, want %v", timedOut, c.wantTimedOut)
+			}
+		})
+	}
+}
+
+// TestTheObservationCapChain covers the cap's fallback chain: the tool's
+// cap wins, the settings fill an unset cap, and with neither the
+// default holds.
+func TestTheObservationCapChain(t *testing.T) {
+	cases := []struct {
+		name       string
+		tool       bash.Tool
+		settings   poo.ToolSettings
+		wantElided float64
+	}{
+		{
+			name:       "the tool's cap, with the settings empty",
+			tool:       bash.Tool{ObservationCap: 6},
+			settings:   poo.ToolSettings{},
+			wantElided: 4,
+		},
+		{
+			name:       "the settings fill what the tool leaves unset",
+			tool:       bash.Tool{},
+			settings:   poo.ToolSettings{ObservationCapChars: 8},
+			wantElided: 2,
+		},
+		{
+			name:       "a set tool cap wins over the settings",
+			tool:       bash.Tool{ObservationCap: 6},
+			settings:   poo.ToolSettings{ObservationCapChars: 8},
+			wantElided: 4,
+		},
+		{
+			name:       "neither, so the default holds",
+			tool:       bash.Tool{},
+			settings:   poo.ToolSettings{},
+			wantElided: 0,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			res := call(t, &c.tool, "printf '0123456789'", poo.ToolEnv{
+				PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+				Env:        os.Environ(),
+				Settings:   c.settings,
+			})
+			obs := structured(t, res)
+			if elided, _ := obs["elided_chars"].(float64); elided != c.wantElided {
+				t.Errorf("elided_chars is %v, want %v", elided, c.wantElided)
+			}
+		})
 	}
 }
