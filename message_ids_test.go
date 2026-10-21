@@ -184,3 +184,21 @@ func TestTheMessageIdsAreSafeForConcurrentUse(t *testing.T) {
 		}
 	}
 }
+
+// TestOnlyAnAssignedIDInItsCanonicalFormIsKnown covers the registry: an
+// id is the letter m and a decimal number without a sign or a leading
+// zero, so a malformed id is not accepted for a number it starts with.
+func TestOnlyAnAssignedIDInItsCanonicalFormIsKnown(t *testing.T) {
+	var ids poo.MessageIDs
+	ids.Next()
+	ids.Next()
+	for id, want := range map[string]bool{
+		"m1": true, "m2": true, "m3": false, "m0": false, "m": false, "": false,
+		"m1x": false, "m1;junk": false, "m01": false, "m+1": false, "m-1": false,
+		"m 1": false, "M1": false, "m1 ": false, "m١": false,
+	} {
+		if got := ids.Knows(id); got != want {
+			t.Errorf("Knows(%q) is %v, want %v", id, got, want)
+		}
+	}
+}

@@ -60,14 +60,22 @@ func (ids *MessageIDs) Set(n int) {
 // streaming. A reference is validated once, at acceptance, and is never
 // re-validated however late the delivery is.
 func (ids *MessageIDs) Knows(id string) bool {
-	if id == "" {
+	// The id is the letter m and a decimal number with no sign and no
+	// leading zero, which is the one form Next hands out.
+	if len(id) < 2 || id[0] != 'm' || id[1] == '0' {
 		return false
+	}
+	n := 0
+	for i := 1; i < len(id); i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return false
+		}
+		n = n*10 + int(id[i]-'0')
+		if n > 1<<40 {
+			return false
+		}
 	}
 	ids.mu.Lock()
 	defer ids.mu.Unlock()
-	var n int
-	if _, err := fmt.Sscanf(id, "m%d", &n); err != nil {
-		return false
-	}
-	return n > 0 && n <= ids.next
+	return n <= ids.next
 }
