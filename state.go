@@ -36,13 +36,16 @@ const (
 //
 // The table is the FSM: a transition that is not in it is a bug in the
 // core, and the transition function is the only place that moves.
+//
+// The waiting state is in the set for the jobs stage, and nothing
+// enters it yet.
 var legalStates = map[State][]State{
-	StateIdle:       {StateRequesting, StateSettled},
-	StateRequesting: {StateStreaming, StateExecuting, StateCompacting, StateRequesting, StateSettling, StateSettled},
-	StateStreaming:  {StateExecuting, StateRequesting, StateCompacting, StateSettling, StateSettled},
-	StateExecuting:  {StateExecuting, StateRequesting, StateCompacting, StateSettling, StateSettled},
-	StateCompacting: {StateRequesting, StateSettling, StateSettled},
-	StateWaiting:    {StateRequesting, StateCompacting, StateSettling, StateSettled},
+	StateIdle:       {StateRequesting},
+	StateRequesting: {StateStreaming, StateExecuting, StateCompacting, StateRequesting, StateSettling},
+	StateStreaming:  {StateExecuting, StateRequesting, StateCompacting, StateSettling},
+	StateExecuting:  {StateExecuting, StateRequesting, StateCompacting, StateSettling},
+	StateCompacting: {StateRequesting, StateSettling},
+	StateWaiting:    {StateRequesting, StateCompacting, StateSettling},
 	StateSettling:   {StateSettled},
 	StateSettled:    {},
 }

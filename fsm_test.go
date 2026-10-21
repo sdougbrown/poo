@@ -1017,3 +1017,69 @@ func newFinishTool(t *testing.T, schema string) poo.Tool {
 	}
 	return tool
 }
+
+// TestTheTransitionTableIsClosed covers the FSM's table: every state
+// has an entry, the settled state goes nowhere, and the states the
+// core moves between are all in it.
+func TestTheTransitionTableIsClosed(t *testing.T) {
+	states := []poo.State{
+		poo.StateIdle,
+		poo.StateRequesting,
+		poo.StateStreaming,
+		poo.StateExecuting,
+		poo.StateCompacting,
+		poo.StateWaiting,
+		poo.StateSettling,
+		poo.StateSettled,
+	}
+	// The settled state goes nowhere: a settled run does not move
+	// again.
+	for _, to := range states {
+		if poo.IsLegal(poo.StateSettled, to) {
+			t.Errorf("the settled state may move to %q, want nowhere", to)
+		}
+	}
+	// Every state that can hold a run may settle.
+	for _, from := range states {
+		switch from {
+		case poo.StateSettled, poo.StateIdle, poo.StateSettling:
+			// A settled run does not settle again, an idle
+			// session has no run to settle, and a settling run
+			// settles once.
+			continue
+		}
+		if !poo.IsLegal(from, poo.StateSettling) {
+			t.Errorf("the state %q may not move to settling, want it to", from)
+		}
+	}
+	// Every state that holds a run is entered from somewhere.
+	for _, to := range states {
+		switch to {
+		case poo.StateSettled, poo.StateIdle, poo.StateWaiting:
+			// The settled state is entered from settling, the idle
+			// state from nowhere, and the waiting state belongs to
+			// the jobs stage.
+			continue
+		}
+		reachable := false
+		for _, from := range states {
+			if poo.IsLegal(from, to) {
+				reachable = true
+				break
+			}
+		}
+		if !reachable {
+			t.Errorf("no state may move to %q, want one to", to)
+		}
+	}
+	// The waiting state belongs to the jobs stage: nothing enters it
+	// yet, and the wake path is the same seam.
+	for _, from := range states {
+		if from == poo.StateWaiting {
+			continue
+		}
+		if poo.IsLegal(from, poo.StateWaiting) {
+			t.Errorf("the state %q may move to waiting, want it to wait for the jobs stage", from)
+		}
+	}
+}
