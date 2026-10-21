@@ -331,6 +331,12 @@ type CompactionRecord struct {
 	RunID string `json:"run_id"`
 	// Strategy names the strategy that produced the compaction.
 	Strategy string `json:"strategy"`
+	// Form is the compaction's form: replace, rewrite, window or end.
+	Form string `json:"form"`
+	// TokensBefore is the estimated input before the compaction.
+	TokensBefore int `json:"tokens_before"`
+	// TokensAfter is the estimated input after the compaction.
+	TokensAfter int `json:"tokens_after"`
 	// Compaction is the compaction itself.
 	Compaction Compaction `json:"compaction"`
 }

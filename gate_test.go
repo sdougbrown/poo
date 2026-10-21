@@ -432,3 +432,46 @@ func TestARunWindingDownAfterTheSettleDoesNotMoveTheStateOrRecord(t *testing.T) 
 		t.Errorf("the winding-down run emitted %d events, want none", got-eventsBefore)
 	}
 }
+
+// TestTheCompactionRecordNamesItsFormAndTokens covers the plan's
+// compaction record: it carries the form of the compaction and the
+// token estimate before and after it.
+func TestTheCompactionRecordNamesItsFormAndTokens(t *testing.T) {
+	compaction := poo.Compaction{
+		Strategy: "summarize",
+		Replace: &poo.RangeReplacement{
+			Cut:      poo.TurnRange{First: 1, Last: 1},
+			Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "the summary")},
+		},
+	}
+	compactor := pootest.NewCompactor(true, compaction)
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	tool := &echoTool{result: "echoed"}
+	sink := &recordingSink{}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.Compactor = compactor
+
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	var rec *poo.CompactionRecord
+	for _, r := range sink.allRecords() {
+		if c, ok := r.(*poo.CompactionRecord); ok {
+			rec = c
+		}
+	}
+	if rec == nil {
+		t.Fatal("the log holds no compaction record")
+	}
+	if rec.Form != "replace" {
+		t.Errorf("the compaction's form is %q, want replace", rec.Form)
+	}
+	if rec.TokensBefore <= 0 {
+		t.Errorf("the compaction's tokens_before is %d, want a positive estimate", rec.TokensBefore)
+	}
+	if rec.TokensAfter != rec.TokensBefore {
+		t.Errorf("the compaction's tokens_after is %d, want %d while the view is not applied",
+			rec.TokensAfter, rec.TokensBefore)
+	}
+}

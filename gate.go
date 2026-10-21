@@ -167,6 +167,7 @@ func (s *Session) maybeNotice(run *runState) {
 func (s *Session) compact(run *runState) (bool, error) {
 	s.events.emit(EventCompactionStarted, map[string]any{"run_id": run.id})
 
+	tokensBefore := s.estimatedInput()
 	view := s.view()
 	fork := s.forkFunc(run)
 
@@ -191,16 +192,38 @@ func (s *Session) compact(run *runState) (bool, error) {
 	// view change is applied by the next stage: the store keeps the
 	// original history either way.
 	_ = s.write(run.ctx, &CompactionRecord{
-		RecordMeta: NewRecordMeta("compaction"),
-		RunID:      run.id,
-		Strategy:   compaction.Strategy,
-		Compaction: compaction,
+		RecordMeta:   NewRecordMeta("compaction"),
+		RunID:        run.id,
+		Strategy:     compaction.Strategy,
+		Form:         compactionForm(compaction),
+		TokensBefore: tokensBefore,
+		TokensAfter:  s.estimatedInput(),
+		Compaction:   compaction,
 	})
 	s.events.emit(EventCompactionEnded, map[string]any{
 		"run_id":   run.id,
 		"strategy": compaction.Strategy,
 	})
 	return true, nil
+}
+
+// compactionForm names the compaction's form.
+//
+// Exactly one of the four forms is set; the first one that is present
+// names the record.
+func compactionForm(c Compaction) string {
+	switch {
+	case c.Replace != nil:
+		return "replace"
+	case len(c.Rewrite) > 0:
+		return "rewrite"
+	case c.Window != nil:
+		return "window"
+	case c.End != nil:
+		return "end"
+	default:
+		return ""
+	}
 }
 
 // forkFunc returns the fork a compactor uses to reach the provider.
