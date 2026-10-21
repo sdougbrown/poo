@@ -379,3 +379,46 @@ func TestTheUsageEventIsEmitted(t *testing.T) {
 		t.Error("the run emitted no usage event")
 	}
 }
+
+// TestTheMessageDeltasReachTheClient covers the plan's streaming event:
+// every text and thinking delta is emitted with the message id assigned
+// at the first delta, so a client can name a reply that is still
+// streaming.
+func TestTheMessageDeltasReachTheClient(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "visible", thinking: "reasoning"}})
+	s := newTestSession(t, poo.Options{
+		Transport:    tr,
+		ContextLimit: 32768,
+	})
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	kinds := map[string]bool{}
+	id := ""
+	ids := map[string]bool{}
+	for _, ev := range s.Events() {
+		if ev.Name != poo.EventMessageDelta {
+			continue
+		}
+		kind, _ := ev.Payload["kind"].(string)
+		kinds[kind] = true
+		if got, _ := ev.Payload["message_id"].(string); got != "" {
+			ids[got] = true
+		}
+	}
+	if !kinds["text"] || !kinds["thinking"] {
+		t.Errorf("the message.delta kinds are %v, want text and thinking", kinds)
+	}
+	if len(ids) != 1 {
+		t.Errorf("the deltas carry %d message ids, want one", len(ids))
+	}
+	for got := range ids {
+		id = got
+	}
+	if id != "m1" {
+		t.Errorf("the delta's message id is %q, want m1", id)
+	}
+}

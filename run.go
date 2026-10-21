@@ -870,7 +870,9 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	// message is recorded: a delivery note may name a message that is
 	// still streaming.
 	ids := s.messageIDs
-	resp, err := readResponse(actCtx, reader, ids, run.id, turn, run.requests, s.opts.Sink)
+	resp, err := readResponse(actCtx, reader, ids, run.id, turn, run.requests, s.opts.Sink, func(name EventName, payload map[string]any) {
+		s.events.emit(name, payload)
+	})
 	if resp != nil {
 		resp.requestChars = requestChars
 	}
@@ -1095,7 +1097,7 @@ type callSlot struct {
 //
 // A stream that fails part way through returns the response it managed to
 // read along with the failure, so the caller can still write the usage.
-func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, runID string, turn, request int, sink RecordSink) (*response, error) {
+func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, runID string, turn, request int, sink RecordSink, emit func(EventName, map[string]any)) (*response, error) {
 	resp := &response{finish: FinishStop}
 	var text strings.Builder
 	var thinking strings.Builder
@@ -1126,11 +1128,24 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 				continue
 			}
 			// The message id is assigned at the first delta, before
-			// the message is recorded.
+			// the message is recorded, so a client can name a reply
+			// that is still streaming.
 			if resp.messageID == "" && ids != nil {
 				resp.messageID = ids.Next()
 			}
-			switch ev.Delta.Kind {
+			kind := ev.Delta.Kind
+			if kind != "thinking" {
+				kind = "text"
+			}
+			if emit != nil && resp.messageID != "" {
+				emit(EventMessageDelta, map[string]any{
+					"run_id":     runID,
+					"message_id": resp.messageID,
+					"attempt":    request,
+					"kind":       kind,
+				})
+			}
+			switch kind {
 			case "thinking":
 				thinking.WriteString(ev.Delta.Text)
 			default:
