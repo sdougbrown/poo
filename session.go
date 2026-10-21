@@ -258,6 +258,11 @@ type Options struct {
 	AfterTurn []AfterTurnHook
 	// BeforeSettle runs when the model stopped on its own.
 	BeforeSettle []BeforeSettleHook
+	// BeforeTool runs after a call is validated and before it runs.
+	//
+	// The policy slot is a before-tool hook that only ever allows or
+	// denies, and it is installed here as the first one.
+	BeforeTool []BeforeToolHook
 }
 
 // New builds a session.

@@ -353,30 +353,53 @@ func TestAPlainToolFreeTurnReachesBeforeSettle(t *testing.T) {
 // continuation predicate: a batch where every call was denied, failed
 // Prepare, or got a BeforeTool result still goes to a new request, and
 // that request carries the results.
-//
-// The BeforeTool hook belongs to the permissions stage, so the result
-// kind is exercised through the core's own call kinds: a Prepare
-// failure and a denied call.
 func TestTheContinuationPredicateCoversTheResultKinds(t *testing.T) {
 	tr := &fakeTransport{responses: []fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
+				{ID: "call_1", Name: "denied", Arguments: json.RawMessage(`{}`)},
 				{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
+				{ID: "call_3", Name: "short", Arguments: json.RawMessage(`{}`)},
 			},
 		},
 		{text: "the answer"},
 	}}
 	sink := &recordingSink{}
-	// The tool's validation fails, so every call is a recoverable
+	tool := &echoTool{result: "echoed"}
+	// The tool's validation fails, so the second call is a recoverable
 	// error result.
-	tool := &echoTool{result: "echoed", prepareErr: errors.New("the arguments are wrong")}
+	tool.prepareErr = errors.New("the arguments are wrong")
 
-	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	opts := testOptions(t, tr, tool, sink)
+	opts.Tools["denied"] = &namedTool{echoTool: echoTool{result: "never runs"}, name: "denied"}
+	opts.Tools["short"] = &namedTool{echoTool: echoTool{result: "never runs"}, name: "short"}
+	opts.ToolOrder = []string{"echo", "denied", "short"}
+	// The hook refuses the first call and answers the third itself.
+	opts.BeforeTool = []poo.BeforeToolHook{&selectiveBeforeTool{}}
+
+	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")
 
 	if res.Turns != 2 {
 		t.Errorf("the run made %d turns, want 2: the batch continues to a new request", res.Turns)
+	}
+	// The three calls have their three outcomes.
+	outcomes := map[string]poo.Outcome{}
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok {
+			continue
+		}
+		outcomes[r.Handle] = r.Outcome
+	}
+	if outcomes["r1"] != poo.OutcomeDenied {
+		t.Errorf("the refused call's outcome is %q, want denied", outcomes["r1"])
+	}
+	if outcomes["r2"] != poo.OutcomeError {
+		t.Errorf("the failed call's outcome is %q, want error", outcomes["r2"])
+	}
+	if outcomes["r3"] != poo.OutcomeOK {
+		t.Errorf("the short-circuited call's outcome is %q, want ok", outcomes["r3"])
 	}
 	// The second request carries the results.
 	reqs := tr.requestsOf()
@@ -387,6 +410,21 @@ func TestTheContinuationPredicateCoversTheResultKinds(t *testing.T) {
 	if len(second) < 4 {
 		t.Fatalf("the second request carried %d messages, want the results", len(second))
 	}
+}
+
+// selectiveBeforeTool refuses one call and answers another.
+type selectiveBeforeTool struct{}
+
+// BeforeTool refuses the call to "denied" and answers the call to
+// "short".
+func (h *selectiveBeforeTool) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	switch info.Spec.Name {
+	case "denied":
+		return poo.Deny("the call was refused"), nil
+	case "short":
+		return poo.ShortCircuit(poo.ToolResult{Text: "the hook's own answer"}), nil
+	}
+	return poo.Allow(), nil
 }
 
 // TestTheBeforeSettleContinueSendsTheRunBackToTheModel covers the

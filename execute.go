@@ -308,6 +308,38 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		return
 	}
 
+	// The before-tool hooks run after the validation and before the
+	// call, and they may refuse it or answer it themselves.
+	decision, err := s.runBeforeTool(run, turn, handle, call.Name, prepared, plan)
+	if err != nil {
+		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+			Text:    err.Error(),
+			IsError: true,
+		}, OutcomeError)
+		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
+			Source: "before_tool",
+			Text:   err.Error(),
+		}))
+		return
+	}
+	if decision.Denied {
+		// A refused call is a model-visible error result.
+		text := decision.Detail
+		if text == "" {
+			text = "The call was refused."
+		}
+		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+			Text:    text,
+			IsError: true,
+		}, OutcomeDenied)
+		return
+	}
+	if decision.Result != nil {
+		// A hook answered the call itself.
+		s.recordResult(run, turn, handle, call.Name, call.ID, *decision.Result, OutcomeOK)
+		return
+	}
+
 	// The repeat counters were asked about the call before the batch
 	// ran, so the counts the policy slot sees are the ones the plan
 	// names.

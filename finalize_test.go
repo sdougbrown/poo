@@ -545,3 +545,41 @@ func (o *countingObserver) Observe(ev poo.Event) error {
 	o.mu.Unlock()
 	return nil
 }
+
+// TestABeforeToolHookErrorSettlesTheRun covers the hook row of the
+// failure table for the before-tool slot: a hook that fails settles the
+// run, and the run settles once.
+func TestABeforeToolHookErrorSettlesTheRun(t *testing.T) {
+	tr := &fakeTransport{responses: []fakeResponse{
+		{
+			calls: []poo.ToolCall{{
+				ID:        "call_1",
+				Name:      "echo",
+				Arguments: []byte(`{"text":"hello"}`),
+			}},
+		},
+	}}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.BeforeTool = []poo.BeforeToolHook{&failingBeforeTool{}}
+
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+
+	if res.Reason != poo.ReasonHookError {
+		t.Errorf("the run settled %q, want hook_error", res.Reason)
+	}
+	if sink.count("run.settled") != 1 {
+		t.Errorf("the log holds %d run.settled records, want 1", sink.count("run.settled"))
+	}
+}
+
+// failingBeforeTool is a before-tool hook that always fails.
+type failingBeforeTool struct{}
+
+// BeforeTool fails.
+func (h *failingBeforeTool) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	return poo.ToolDecision{}, errors.New("the hook failed")
+}

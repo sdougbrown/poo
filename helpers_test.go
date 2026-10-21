@@ -223,6 +223,23 @@ func (s *recordingSink) allRecords() []poo.Record {
 	return append([]poo.Record(nil), s.records...)
 }
 
+// namedTool is an echo tool under a different name.
+//
+// The name is what the model calls it by, and the before-tool hooks
+// see it.
+type namedTool struct {
+	echoTool
+	// name is the tool's name.
+	name string
+}
+
+// Spec describes the tool under its own name.
+func (t *namedTool) Spec() poo.ToolSpec {
+	spec := t.echoTool.Spec()
+	spec.Name = t.name
+	return spec
+}
+
 // echoTool is a tool that records what it was asked to do.
 //
 // The recording is guarded, because a read-only batch runs its calls at
