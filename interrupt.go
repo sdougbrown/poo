@@ -19,11 +19,14 @@ const (
 //
 // The turn's partial text is recorded as a message with partial set and
 // cause "interrupt", and the calls that did not run get a visible
-// result.
-func (s *Session) interruptedActivityTurn(run *runState, turn int, resp *response) {
+// result. A response the turn had already recorded in full (an interrupt
+// during the tool batch) is not recorded again.
+func (s *Session) interruptedActivityTurn(run *runState, turn int, resp *response, recorded bool) {
 	// The partial text is recorded before the turn ends, so the log
 	// shows what the model had said.
-	s.recordPartial(run, turn, resp)
+	if !recorded {
+		s.recordPartial(run, turn, resp)
+	}
 
 	// The calls in the partial response did not run, and they get a
 	// visible result.
@@ -101,7 +104,12 @@ func (s *Session) recordPartial(run *runState, turn int, resp *response) {
 		return
 	}
 	msg := Message{Role: RoleAssistant, Content: content, Origin: OriginModel}
-	msg.ID = s.messageIDs.Next()
+	// The id the stream assigned at its first delta is the one this
+	// message carries, so a reference to the streaming reply names it.
+	msg.ID = resp.messageID
+	if msg.ID == "" {
+		msg.ID = s.messageIDs.Next()
+	}
 	msg.Partial = true
 	msg.Cause = CauseInterrupt
 	s.appendMessages(msg)

@@ -1147,3 +1147,114 @@ func TestAPanicInAResumedRunStillSettles(t *testing.T) {
 		t.Errorf("the log holds %d run.settled records, want 1", sink.count("run.settled"))
 	}
 }
+
+// TestAnInterruptDuringTheBatchRecordsTheReplyOnce covers the plan's
+// rule that partial is for a reply that was not recorded: an interrupt
+// in the executing state leaves the one complete assistant message.
+func TestAnInterruptDuringTheBatchRecordsTheReplyOnce(t *testing.T) {
+	started := make(chan struct{})
+	tool := &echoTool{result: "echoed"}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		close(started)
+		<-ctx.Done()
+		return poo.ToolResult{Text: "partial output", IsError: true}, nil
+	}
+	tr := scripted([]fakeResponse{
+		{
+			text:  "let me look",
+			calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)}},
+		},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-started
+	if _, err := s.Send("stop that", poo.Interrupt); err != nil {
+		t.Fatalf("sending the interrupt: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	var first []*poo.MessageRecord
+	for _, m := range sink.messages() {
+		if m.Role == poo.RoleAssistant && m.Turn == 1 {
+			first = append(first, m)
+		}
+	}
+	if len(first) != 1 {
+		t.Fatalf("the log holds %d assistant messages for the first reply, want 1", len(first))
+	}
+	if first[0].Partial {
+		t.Error("the one assistant message is marked partial, want a complete message")
+	}
+	n := 0
+	reqs := tr.Requests()
+	if len(reqs) < 2 {
+		t.Fatalf("the run made %d requests, want a second one", len(reqs))
+	}
+	for _, m := range reqs[1].Messages {
+		if m.Role == poo.RoleAssistant && m.Text() == "let me look" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the history holds the reply %d times, want 1", n)
+	}
+}
+
+// sendWhenKnown sends a message that references a streaming reply,
+// retrying until the session has assigned the reply's id at its first
+// delta.
+func sendWhenKnown(t *testing.T, s *poo.Session, text string, mode poo.InputMode, id string, upto int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, err := s.Send(text, mode, poo.WithDelivered(id, upto))
+		if err == nil {
+			return
+		}
+		var invalid *poo.ErrInvalidInput
+		if !asInvalidInput(err, &invalid) || time.Now().After(deadline) {
+			t.Fatalf("sending the message: %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestThePartialMessageKeepsTheIDTheStreamAssigned covers the message id
+// registry: the id assigned at the first delta is the id recorded on the
+// partial message, so a reference to the streaming reply names it.
+func TestThePartialMessageKeepsTheIDTheStreamAssigned(t *testing.T) {
+	tr := newStallingTransport()
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tr.streaming
+	// The only id the session has assigned is the streaming reply's.
+	sendWhenKnown(t, s, "stop that", poo.Interrupt, "m1", 4)
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	var partial *poo.MessageRecord
+	for _, m := range sink.messages() {
+		if m.Partial {
+			partial = m
+		}
+	}
+	if partial == nil {
+		t.Fatal("the log holds no partial message")
+	}
+	if partial.MessageID != "m1" {
+		t.Errorf("the partial message's id is %q, want m1, the id the stream assigned", partial.MessageID)
+	}
+}

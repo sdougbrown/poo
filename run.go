@@ -280,7 +280,7 @@ func (s *Session) loop(run *runState) []candidate {
 			// and turns it into an interrupted turn. The attempt
 			// does not count against the retry budget.
 			if s.interruptPending(run) {
-				s.interruptedActivityTurn(run, turn, resp)
+				s.interruptedActivityTurn(run, turn, resp, false)
 				continue
 			}
 			reason, detail, serr := s.settleForError(err)
@@ -344,7 +344,7 @@ func (s *Session) loop(run *runState) []candidate {
 			// An interrupt during the batch cut the turn short. The
 			// unstarted calls are skipped, and the run continues.
 			if s.interruptPending(run) {
-				s.interruptedActivityTurn(run, turn, resp)
+				s.interruptedActivityTurn(run, turn, resp, true)
 				continue
 			}
 		}
