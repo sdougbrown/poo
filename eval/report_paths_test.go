@@ -86,3 +86,31 @@ func TestTheCheckOutputNamesNoWorkdir(t *testing.T) {
 		t.Errorf("the check output is %q, want the workdir written as $WORKDIR", got)
 	}
 }
+
+func TestACompareOfTwoWrittenReportsNamesBothDirectories(t *testing.T) {
+	base, cand := t.TempDir(), t.TempDir()
+	for _, dir := range []string{base, cand} {
+		if err := WriteReport(dir, &Report{Dir: dir}); err != nil {
+			t.Fatalf("writing the report: %v", err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(base, "report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"dir": "."`) {
+		t.Errorf("report.json should keep a relative dir, got:\n%s", data)
+	}
+	a, err := LoadReport(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := LoadReport(cand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmp := Compare(a, b)
+	if cmp.Baseline != base || cmp.Candidate != cand {
+		t.Errorf("the comparison names %q and %q, want %q and %q", cmp.Baseline, cmp.Candidate, base, cand)
+	}
+}

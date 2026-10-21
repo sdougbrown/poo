@@ -232,9 +232,7 @@ func LoadReport(dir string) (*Report, error) {
 	if err := json.Unmarshal(data, &report); err != nil {
 		return nil, fmt.Errorf("eval: parsing %s: %w", path, err)
 	}
-	if report.Dir == "" {
-		report.Dir = dir
-	}
+	report.Dir = dir
 	return &report, nil
 }
 
