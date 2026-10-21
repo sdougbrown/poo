@@ -208,7 +208,7 @@ func collectReads(calls []LogRecord) []read {
 			if !ok {
 				continue
 			}
-			out = append(out, read{path: normalizePath(path), start: offset, end: offset + limit - 1, whole: offset == 1 && limit >= 2000})
+			out = append(out, read{path: normalizePath(path), start: offset, end: offset + limit - 1, whole: offset == readtool.DefaultOffset && limit >= readtool.DefaultLimit})
 		case "bash":
 			command, ok := stringArg(c.Arguments, "command")
 			if !ok {
