@@ -300,3 +300,20 @@ func TestObservationCapIsContextRelative(t *testing.T) {
 		t.Errorf("ObservationCap(262144) is %d, want 30000", got)
 	}
 }
+
+func TestAProcessKilledBySignalIsAnError(t *testing.T) {
+	tool := &bash.Tool{Timeout: 5 * time.Second}
+
+	res := call(t, tool, "echo about-to-die; kill -9 $$", poo.ToolEnv{
+		PrepareEnv: poo.PrepareEnv{WorkingDir: t.TempDir()},
+		Env:        os.Environ(),
+	})
+
+	obs := structured(t, res)
+	if rc, ok := obs["returncode"]; ok && rc != nil {
+		t.Fatalf("returncode is %v, want null for a process killed by a signal", rc)
+	}
+	if !res.IsError {
+		t.Error("a process killed by a signal is not marked as an error")
+	}
+}

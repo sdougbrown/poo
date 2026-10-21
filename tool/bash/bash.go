@@ -226,8 +226,9 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		Structured: mustJSON(structured),
 		// A timed-out call is a recoverable error: the model has to see
 		// that it failed, or it will read the partial output as a
-		// finished command.
-		IsError: res.timedOut || res.cancelled,
+		// finished command. A process that died by a signal has no return
+		// code and failed the same way.
+		IsError: res.timedOut || res.cancelled || res.returncode == nil,
 	}, nil
 }
 
