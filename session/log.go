@@ -42,7 +42,7 @@ func Open(path string) (*Log, error) {
 			return nil, fmt.Errorf("session: creating %s: %w", dir, err)
 		}
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return nil, fmt.Errorf("session: %s already exists", path)
@@ -53,11 +53,18 @@ func Open(path string) (*Log, error) {
 }
 
 // Append writes one record.
+//
+// A context that is already done is refused before any write work,
+// without consuming a sequence number, so the log's numbering stays
+// dense. The closed-log check below is a precondition, not write work.
 func (l *Log) Append(ctx context.Context, rec poo.Record) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.f == nil {
 		return fmt.Errorf("session: the log is closed")
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("session: appending %s: %w", rec.Meta().Record, err)
 	}
 	l.seq++
 	poo.Stamp(rec, l.seq, time.Now())
@@ -79,6 +86,9 @@ func (l *Log) Flush(ctx context.Context) error {
 	defer l.mu.Unlock()
 	if l.f == nil {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("session: flushing: %w", err)
 	}
 	return l.w.Flush()
 }

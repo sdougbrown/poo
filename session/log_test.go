@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -268,6 +269,66 @@ func TestTheToolCallRecordHoldsTheFullArguments(t *testing.T) {
 	}
 	if args["command"] != "ls -la /tmp" {
 		t.Errorf("the command is %v, want the full arguments", args["command"])
+	}
+}
+
+func TestALogFileIsReadableOnlyByItsOwner(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	log, err := session.Open(path)
+	if err != nil {
+		t.Fatalf("opening the log: %v", err)
+	}
+	defer log.Close()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stating the log: %v", err)
+	}
+	// The log carries prompts, responses and tool arguments. Group and
+	// other must hold no access; the exact owner bits are the caller's
+	// umask's business.
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		t.Errorf("the log's mode is %#o, want no group or other access", perm)
+	}
+}
+
+func TestAnAppendAfterTheContextIsDoneFailsAndLeavesTheLogEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+
+	log, err := session.Open(path)
+	if err != nil {
+		t.Fatalf("opening the log: %v", err)
+	}
+	defer log.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rec := &poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started")}
+	if err := log.Append(ctx, rec); !errors.Is(err, context.Canceled) {
+		t.Errorf("the append returned %v, want context.Canceled", err)
+	}
+	if err := log.Flush(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("the flush returned %v, want context.Canceled", err)
+	}
+
+	// The refused append consumed no sequence number: the next live
+	// append writes the first record.
+	if err := log.Append(context.Background(), rec); err != nil {
+		t.Fatalf("appending after the cancelled one: %v", err)
+	}
+	if err := log.Flush(context.Background()); err != nil {
+		t.Fatalf("flushing: %v", err)
+	}
+	recs := records(t, path)
+	if len(recs) != 1 {
+		t.Fatalf("the log holds %d records, want 1", len(recs))
+	}
+	if seq, ok := recs[0]["seq"].(float64); !ok || seq != 1 {
+		t.Errorf("the record's seq is %v, want 1", recs[0]["seq"])
 	}
 }
 
