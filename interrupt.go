@@ -1,7 +1,5 @@
 package poo
 
-import "fmt"
-
 // Cause names why a message was cut short.
 type Cause string
 
@@ -125,8 +123,9 @@ func (s *Session) recordPartial(run *runState, turn int, resp *response) {
 // A call that never ran gets a visible result, so the model can see
 // that the call was not made.
 func (s *Session) skipInterruptedCalls(run *runState, turn int, calls []ToolCall) {
+	handles := s.handlesOf(turn, len(calls))
 	for i, call := range calls {
-		handle := fmt.Sprintf("r%d", i+1)
+		handle := handles[i]
 		s.mu.Lock()
 		_, issued := run.pendingCalls[handle]
 		summary := s.turnSummaryLocked(turn, handle)
@@ -152,6 +151,31 @@ func (s *Session) skipInterruptedCalls(run *runState, turn int, calls []ToolCall
 			IsError: true,
 		}, OutcomeSkipped)
 	}
+}
+
+// handlesOf returns the handles of a turn's calls.
+//
+// A turn whose calls were planned already has its handles in the turn's
+// summary. A turn that an interrupt cut short before the plan has none
+// yet, and its calls get fresh ones.
+func (s *Session) handlesOf(turn, n int) []string {
+	s.mu.Lock()
+	for _, t := range s.turns {
+		if t.Index == turn && len(t.Calls) == n {
+			handles := make([]string, n)
+			for i, c := range t.Calls {
+				handles[i] = c.Handle
+			}
+			s.mu.Unlock()
+			return handles
+		}
+	}
+	s.mu.Unlock()
+	handles := make([]string, n)
+	for i := range handles {
+		handles[i] = s.nextHandle()
+	}
+	return handles
 }
 
 // turnSummaryLocked returns the summary of one call of a turn.

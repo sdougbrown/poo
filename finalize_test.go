@@ -636,6 +636,7 @@ func TestACallThatFinishesAsTheRunSettlesGetsOneResult(t *testing.T) {
 					Arguments: []byte(`{"text":"hello"}`),
 				}},
 			},
+			{text: "done"},
 		})
 		sink := &recordingSink{}
 
@@ -694,5 +695,34 @@ func TestAFailingFlushAfterTheSettleIsReported(t *testing.T) {
 	}
 	if sink.count("run.settled") != 1 {
 		t.Errorf("the sink holds %d run.settled records, want 1", sink.count("run.settled"))
+	}
+}
+
+// TestAHandleNamesOneCallForTheLifeOfTheSession covers the plan's
+// session-monotonic handles: the second turn's call does not reuse the
+// first turn's handle, and the second run's does not reuse either.
+func TestAHandleNamesOneCallForTheLifeOfTheSession(t *testing.T) {
+	call := poo.ToolCall{ID: "call", Name: "echo", Arguments: []byte(`{}`)}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{call}},
+		{calls: []poo.ToolCall{call}},
+		{text: "done"},
+		{calls: []poo.ToolCall{call}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{result: "echoed"}, sink))
+	runSession(t, s, "first")
+	runSession(t, s, "second")
+
+	var got []string
+	for _, rec := range sink.allRecords() {
+		if c, ok := rec.(*poo.ToolCallRecord); ok {
+			got = append(got, c.Handle)
+		}
+	}
+	want := []string{"r1", "r2", "r3"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("the calls' handles are %v, want %v", got, want)
 	}
 }

@@ -151,6 +151,17 @@ func (s *Session) beginTurn(run *runState, turn int, plans []callPlan) {
 	s.turns = append(s.turns, summary)
 }
 
+// nextHandle returns the next tool-result handle, r<n>.
+//
+// The number is session-monotonic, so a handle names one call for the
+// life of the session, whatever run and turn the call was made in.
+func (s *Session) nextHandle() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.handleSeq++
+	return fmt.Sprintf("r%d", s.handleSeq)
+}
+
 // planCalls turns a turn's calls into the plan the core runs.
 //
 // A call in a truncated response is complete when its arguments parse as
@@ -163,7 +174,7 @@ func (s *Session) beginTurn(run *runState, turn int, plans []callPlan) {
 func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated bool) []callPlan {
 	var plans []callPlan
 	for i, call := range calls {
-		handle := fmt.Sprintf("r%d", i+1)
+		handle := s.nextHandle()
 		plan := callPlan{handle: handle, call: call, index: i, complete: true}
 		if truncated && !isCompleteJSONObject(call.Arguments) {
 			plan.complete = false
@@ -443,11 +454,30 @@ func (s *Session) toolEnv(run *runState, handle string) ToolEnv {
 // record is written, so a call that the finalization already gave a
 // synthetic result to is not given a second one.
 func (s *Session) recordResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome) {
-	if !s.claimResult(run, handle) {
+	won, tracked := s.claimResult(run, handle)
+	if !won {
 		// The finalization already gave the call a synthetic result.
 		return
 	}
 	s.writeResult(run, turn, handle, tool, callID, result, outcome)
+	if tracked {
+		s.finishResultWrite(run)
+	}
+}
+
+// finishResultWrite marks the end of a claimed result's write, so the
+// finalization, which waits for it, can go on.
+func (s *Session) finishResultWrite(run *runState) {
+	s.mu.Lock()
+	run.resultWrites--
+	done := run.workDone
+	s.mu.Unlock()
+	if done != nil {
+		select {
+		case done <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // writeResult writes a call's result record and puts it in the model's
@@ -538,7 +568,12 @@ func (s *Session) issueCall(run *runState, turn int, handle, tool, callID string
 // finalization already gave a synthetic result to is not given a second
 // one. A call that was never issued — a call that was skipped before it
 // started — is always claimed.
-func (s *Session) claimResult(run *runState, handle string) bool {
+//
+// The second value reports that the claim was of an issued call: its
+// write is then counted in run.resultWrites until finishResultWrite, so
+// the finalization does not write run.settled while the result is still
+// being written.
+func (s *Session) claimResult(run *runState, handle string) (won, tracked bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, pending := run.pendingCalls[handle]
@@ -552,13 +587,17 @@ func (s *Session) claimResult(run *runState, handle string) bool {
 		// it a synthetic result already.
 		run.settledCalls[handle] = true
 	}
+	tracked = pending && !taken
+	if tracked {
+		run.resultWrites++
+	}
 	if run.workDone != nil {
 		select {
 		case run.workDone <- struct{}{}:
 		default:
 		}
 	}
-	return !taken
+	return !taken, tracked
 }
 
 // addCandidate adds a settle candidate to the run.

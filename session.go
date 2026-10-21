@@ -71,6 +71,8 @@ type Session struct {
 	// sunk reports that the store failed.
 	sunk bool
 
+	// handleSeq numbers the tool-result handles the session assigned.
+	handleSeq int
 	// inputSeq numbers the inputs the session accepts.
 	inputSeq int
 	// runSeq numbers the runs the session starts.
@@ -143,6 +145,10 @@ type runState struct {
 	// gets exactly one result, so a call that finished at the same
 	// moment the run settled does not get a second one.
 	settledCalls map[string]bool
+	// resultWrites counts the claimed results whose records are still
+	// being written. The finalization waits for them as it does for the
+	// pending calls.
+	resultWrites int
 	// workDone is signalled when a pending call gets its result.
 	workDone chan struct{}
 
@@ -195,7 +201,9 @@ type Options struct {
 	// ModelID is the provider's model identifier.
 	ModelID string
 	// ContextLimit is the model's context window in tokens. It is
-	// required: a session without one cannot be built.
+	// required: a value of 0 or less is a construction error
+	// (ErrSessionInit), so no run starts without a window to measure
+	// against.
 	ContextLimit int
 	// MaxOutput is the model's output-token ceiling, 0 when unknown.
 	MaxOutput int

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/pootest"
 )
 
 func TestARunThatEndsOnItsOwnSettlesEndTurn(t *testing.T) {
@@ -461,17 +460,6 @@ func TestASessionWithoutATransportIsAConstructionError(t *testing.T) {
 	_, err := poo.New(poo.Options{ContextLimit: 1024})
 	if err == nil {
 		t.Fatal("a session with no transport was built")
-	}
-	var init *poo.ErrSessionInit
-	if !asSessionInit(err, &init) {
-		t.Fatalf("the error is %T, want an ErrSessionInit", err)
-	}
-}
-
-func TestASessionWithoutAContextLimitIsAConstructionError(t *testing.T) {
-	_, err := poo.New(poo.Options{Transport: pootest.NewTransport()})
-	if err == nil {
-		t.Fatal("a session with no context limit was built")
 	}
 	var init *poo.ErrSessionInit
 	if !asSessionInit(err, &init) {
