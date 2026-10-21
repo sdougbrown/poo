@@ -85,10 +85,11 @@ func newParser(mode string) *parser {
 // content delta itself.
 func (p *parser) on() bool { return p != nil && p.enabled }
 
-// taggedOpen and taggedClose mark a tool call block.
+// ToolCallOpen and ToolCallClose are the tags that mark a tool call
+// block in text mode.
 const (
-	taggedOpen  = "<tool_call>"
-	taggedClose = "</tool_call>"
+	ToolCallOpen  = "<tool_call>"
+	ToolCallClose = "</tool_call>"
 )
 
 // textCallIndexBase is where a parsed call's index starts.
@@ -214,9 +215,9 @@ func (p *parser) openCall(kind callKind) {
 
 	switch kind {
 	case kindTagged:
-		p.callText = p.buf[:len(taggedOpen)]
+		p.callText = p.buf[:len(ToolCallOpen)]
 		p.callOpen = p.callText
-		p.buf = p.buf[len(taggedOpen):]
+		p.buf = p.buf[len(ToolCallOpen):]
 	case kindFence:
 		open := p.buf[:len("```")]
 		p.buf = p.buf[len("```"):]
@@ -241,7 +242,7 @@ func (p *parser) openCall(kind callKind) {
 func (p *parser) consumeCall() ([]poo.StreamEvent, bool) {
 	switch p.callKind {
 	case kindTagged:
-		return p.consumeUntil(taggedClose)
+		return p.consumeUntil(ToolCallClose)
 	case kindFence:
 		return p.consumeUntil("```")
 	default:
@@ -338,7 +339,7 @@ func (p *parser) consumeJSON() ([]poo.StreamEvent, bool) {
 //
 // It returns the index, the shape, and whether a call was found.
 func (p *parser) findCallStart() (int, callKind, bool) {
-	tagged := strings.Index(p.buf, taggedOpen)
+	tagged := strings.Index(p.buf, ToolCallOpen)
 	fence := strings.Index(p.buf, "```")
 	bare := p.findBareStart()
 
@@ -404,7 +405,7 @@ func (p *parser) findBareStart() int {
 // start of a call.
 func (p *parser) safePrefix() int {
 	keep := 0
-	for _, marker := range []string{taggedOpen, "```"} {
+	for _, marker := range []string{ToolCallOpen, "```"} {
 		for n := 1; n < len(marker); n++ {
 			if strings.HasSuffix(p.buf, marker[:n]) {
 				if n > keep {

@@ -581,7 +581,10 @@ var errEmptyAnswer = errors.New("eval: the judge returned an empty answer")
 
 // markupQuoter rewrites tool-call tags so the judge does not copy them
 // into its reply. See errEmptyAnswer.
-var markupQuoter = strings.NewReplacer("<tool_call>", "⟨tool_call⟩", "</tool_call>", "⟨/tool_call⟩")
+var markupQuoter = strings.NewReplacer(
+	openai.ToolCallOpen, "⟨tool_call⟩",
+	openai.ToolCallClose, "⟨/tool_call⟩",
+)
 
 // judgeUserMessage renders the payload for the judge.
 //
