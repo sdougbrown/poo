@@ -1,0 +1,13 @@
+{
+  "task": "fix-json-missing-key",
+  "model": "minimax-m3.1-flash",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-2 inspected the module and tests, turn 3 tried a nonexistent 'edit' tool (tool error), turn 4 redid the one-line fix via bash and confirmed it, turn 5 ran the tests and all 5 passed, matching the check output.",
+  "transcript_chars": 7775
+}

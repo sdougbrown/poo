@@ -1,0 +1,14 @@
+{
+  "task": "find-off-by-one-loop",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": false,
+  "agrees_with_check": false,
+  "pathologies": [
+    "other"
+  ],
+  "needs_owner": true,
+  "reason": "the judge could not read this transcript: eval: calling the judge: Post \"http://localhost:4000/v1/chat/completions\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)",
+  "transcript_chars": 9329,
+  "error": "eval: calling the judge: Post \"http://localhost:4000/v1/chat/completions\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+}

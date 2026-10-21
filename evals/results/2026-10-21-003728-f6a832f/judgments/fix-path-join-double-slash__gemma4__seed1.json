@@ -1,0 +1,13 @@
+{
+  "task": "fix-path-join-double-slash",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-3 read the module and tests, turn 5 reproduced the failure, turn 8 fixed join, turn 9 ran the tests and they passed, matching the check; but turns 11-50 then repeated the identical verification command with no changes until max_turns cut the run off.",
+  "transcript_chars": 20119
+}

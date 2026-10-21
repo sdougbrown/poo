@@ -1,0 +1,11 @@
+{
+  "task": "find-version-mismatch",
+  "model": "minimax-m3.1-flash",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 1-3 read the changelog, packaging metadata, and package version; turn 4 swept for other declarations; turn 5 answered all three required facts with no edits, matching the passing check.",
+  "transcript_chars": 6328
+}

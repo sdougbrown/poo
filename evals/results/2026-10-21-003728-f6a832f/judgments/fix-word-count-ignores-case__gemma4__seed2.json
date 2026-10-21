@@ -1,0 +1,16 @@
+{
+  "task": "fix-word-count-ignores-case",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread",
+    "other"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-2 sensibly inspected the file, but no edit ever landed (0 diff lines) and turns 48-50 repeated the identical failing test run until max_turns; the check's failure matches the final failing tests, so this is an unsolved task, not a harness disagreement.",
+  "summarized": true,
+  "transcript_chars": 6574,
+  "elided_turns": 45
+}

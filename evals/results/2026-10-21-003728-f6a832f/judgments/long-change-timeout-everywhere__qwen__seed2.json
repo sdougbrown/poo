@@ -1,0 +1,11 @@
+{
+  "task": "long-change-timeout-everywhere",
+  "model": "qwen",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 1-4 inventoried all TIMEOUT constants and confirmed only request timeouts were 30, turn 5 ran a targeted sed raising them to 45 while excluding settings.py and verified counts, turn 6 rewrote the test assertions, turn 7 reran with python3 after the python failure and both tests passed, matching the check's pass.",
+  "transcript_chars": 11447
+}

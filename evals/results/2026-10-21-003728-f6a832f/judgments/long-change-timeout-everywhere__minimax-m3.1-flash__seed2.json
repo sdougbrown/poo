@@ -1,0 +1,11 @@
+{
+  "task": "long-change-timeout-everywhere",
+  "model": "minimax-m3.1-flash",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 2-4 mapped all 76 timeout constants and identified the two decoys in shop/settings.py, turn 6 sed-edited exactly the 74 request constants to 45 while excluding settings.py, turns 8-9 updated the test assertions to 45, turn 12 ran the tests (passed) and verified all constants by import walk, and turn 15 confirmed settings.py still holds the two 30s values — matching the check's pass verdict.",
+  "transcript_chars": 24232
+}

@@ -1,0 +1,13 @@
+{
+  "task": "fix-word-count-ignores-case",
+  "model": "qwen",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 1 read the function and tests, turn 2 re-read lines 12-14 already seen in turn 1, turn 4 removed the double-counting lines (python not found), turn 5 reran with python3 and all 5 tests passed, matching the check.",
+  "transcript_chars": 5089
+}

@@ -1,0 +1,13 @@
+{
+  "task": "find-off-by-one-loop",
+  "model": "gemma4",
+  "seed": 3,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "premature_end_turn"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 0 delivered the task, but the agent made zero tool calls, never inspected the repository, and ended the turn with no recorded answer, so the check's 'no answer' failure matches the trajectory.",
+  "transcript_chars": 1933
+}

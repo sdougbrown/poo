@@ -1,0 +1,13 @@
+{
+  "task": "fix-cache-never-expires",
+  "model": "minimax-m3.1-flash",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-2 read the cache and tests, turn 5 wrote the eviction fix via bash (after the non-existent 'edit' tool failed in turns 3 and 7) and all tests passed, turns 9-10 verified with manual and fuzz checks, matching the check's passing verdict; the only flaws are the two unknown-tool call errors.",
+  "transcript_chars": 14320
+}

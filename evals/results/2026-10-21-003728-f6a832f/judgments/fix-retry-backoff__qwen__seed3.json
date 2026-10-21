@@ -1,0 +1,11 @@
+{
+  "task": "fix-retry-backoff",
+  "model": "qwen",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 1-2 read the source and tests, turn 3 applied the one-line \u003c= to \u003c fix with sed, turn 4 re-ran the tests with python3 after the python not found error and all 4 passed, turn 5 stopped.",
+  "transcript_chars": 4845
+}

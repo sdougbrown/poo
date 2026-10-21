@@ -1,0 +1,15 @@
+{
+  "task": "fix-json-missing-key",
+  "model": "gemma4",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread",
+    "off_task_edit"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 read the module, turn 6 found the failing test, turn 8 sent an empty bash call, turn 9 reran the unchanged failing suite, turn 10 created a scratch fix_require.py that was left behind, turn 11 made the one-line fix, and turns 12/14 reran the tests to green, matching the check's pass.",
+  "transcript_chars": 11294
+}

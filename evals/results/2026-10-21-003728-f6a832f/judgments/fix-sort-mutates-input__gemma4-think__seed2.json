@@ -1,0 +1,13 @@
+{
+  "task": "fix-sort-mutates-input",
+  "model": "gemma4-think",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-3 inspected the function and tests, turn 5 reproduced the failure, turn 6 applied the targeted sed fix, turn 9 removed the dead return, turn 10 confirmed all tests pass; but turn 8 re-read the file just read in turn 7 and turn 11 re-ran the already-passing tests with no change in between.",
+  "transcript_chars": 7175
+}

@@ -1,0 +1,13 @@
+{
+  "task": "fix-csv-skips-header",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-8 sensibly inspected the code, ran the tests and diagnosed the header-in-rows failure, turn 11 applied the minimal lines[1:] fix and turn 13 verified all tests pass, matching the check; but turn 9 reran the identical failing test command and turns 14-15 reran the passing suite twice more with no change between, a mild repeat pathology.",
+  "transcript_chars": 10762
+}

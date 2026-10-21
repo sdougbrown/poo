@@ -1,0 +1,13 @@
+{
+  "task": "fix-date-format-pad",
+  "model": "gemma4-think",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-3 read the source and tests, turn 5 reproduced the year-padding failure, turn 6 applied the one-line {year:04d} fix, turn 7 verified all tests pass; turn 8 then re-ran the identical test command with no change in between and repeated the same closing summary twice (turns 8 and 9), a harmless repetition.",
+  "transcript_chars": 5472
+}

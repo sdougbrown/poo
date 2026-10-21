@@ -1,0 +1,15 @@
+{
+  "task": "fix-sort-mutates-input",
+  "model": "gemma4",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread",
+    "other"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 read the buggy function, turn 9 replaced items.sort with sorted(), turn 11's sed mistakenly gutted the file and turn 12 rewrote it, turn 14 tests passed, then turns 15-18 re-ran the same tests and summaries after completion; turn 7 sent an empty bash call (malformed tool call).",
+  "transcript_chars": 11275
+}

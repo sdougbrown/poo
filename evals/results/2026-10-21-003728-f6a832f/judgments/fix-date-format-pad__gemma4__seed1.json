@@ -1,0 +1,13 @@
+{
+  "task": "fix-date-format-pad",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-3 inspected the source and tests, turn 4 reproduced the failing test, turn 5 made the minimal :04d edit, turn 6 confirmed the edit, turn 7 ran the tests and they passed; turn 8 then re-ran the identical test command with no change in between, a redundant repeat.",
+  "transcript_chars": 5772
+}

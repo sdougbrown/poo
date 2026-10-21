@@ -1,0 +1,13 @@
+{
+  "task": "fix-word-count-ignores-case",
+  "model": "gemma4-think",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-5 inspected the repo and tests, turn 7 reproduced the two capitalisation failures, turns 9 and 11 repeated an identical no-op sed, turn 12's sed broke the file and turn 14 rewrote it correctly, turns 15-17 re-ran the same passing test suite three extra times; final state matches the check's OK.",
+  "transcript_chars": 11604
+}

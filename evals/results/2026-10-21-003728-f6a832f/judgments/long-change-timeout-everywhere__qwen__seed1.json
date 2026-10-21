@@ -1,0 +1,11 @@
+{
+  "task": "long-change-timeout-everywhere",
+  "model": "qwen",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 1-5 inspected the timeout constants and decoys, turn 6 sed-bumped all 74 request timeouts to 45 excluding settings.py and verified the counts, turn 7 updated the tests, turn 9 reran the tests with python3 and they passed, matching the check's pass.",
+  "transcript_chars": 13979
+}

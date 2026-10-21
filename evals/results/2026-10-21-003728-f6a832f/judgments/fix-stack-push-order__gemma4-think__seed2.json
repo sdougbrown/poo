@@ -1,0 +1,13 @@
+{
+  "task": "fix-stack-push-order",
+  "model": "gemma4-think",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 read the module, turn 6 reproduced the failing test, turn 7 made the minimal pop(0)→pop() fix, and turn 8 verified all 4 tests pass matching the check; turn 9 re-ran the identical test command with no changes before repeating the summary in turn 10.",
+  "transcript_chars": 6187
+}

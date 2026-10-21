@@ -1,0 +1,11 @@
+{
+  "task": "fix-csv-skips-header",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 2-3 read the source and tests before editing, turn 5 reproduced the header bug, turn 6 applied a one-line fix returning rows[1:], turn 7 re-ran the tests and all passed, and turn 8 verified the edited file; the check's pass verdict matches the trajectory.",
+  "transcript_chars": 6834
+}

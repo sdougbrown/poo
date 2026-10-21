@@ -1,0 +1,13 @@
+{
+  "task": "find-off-by-one-loop",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "off_task_edit"
+  ],
+  "needs_owner": true,
+  "reason": "Turns 1-3 sensibly located the off-by-one (while index \u003c len(items) - 1) in lib/pipeline.py, but turn 4 created and ran test_chunks.py despite the task's explicit 'do not change any file' instruction, which is exactly why the check failed, even though turn 5's diagnosis was correct.",
+  "transcript_chars": 4624
+}

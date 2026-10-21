@@ -1,0 +1,13 @@
+{
+  "task": "find-dead-code",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "premature_end_turn"
+  ],
+  "needs_owner": false,
+  "reason": "After the turn 0 task message the agent ended its single turn with 0 tool calls, 0 reads, and no recorded answer, so the repository was never inspected and the check's failure ('the run recorded no answer') matches the trajectory.",
+  "transcript_chars": 1882
+}

@@ -1,0 +1,11 @@
+{
+  "task": "find-slow-loop",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1-2 located the lookup with ls and grep, turns 3-4 read store.py and lookup.py to find the find/find_all walk, turn 5 answered with the dict/hash-map replacement and made no edits, matching the passing check.",
+  "transcript_chars": 3938
+}

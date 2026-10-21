@@ -1,0 +1,11 @@
+{
+  "task": "find-version-mismatch",
+  "model": "gemma4-think",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 listed the repo, turns 2-3 grepped the two version declarations, turn 4 read the changelog to identify the mismatch, and turn 5 answered all three facts without editing; the check confirms the answer.",
+  "transcript_chars": 3132
+}

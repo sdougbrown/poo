@@ -1,0 +1,13 @@
+{
+  "task": "fix-sort-mutates-input",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 read the target file and turn 7 read the tests before editing; turn 8 applied the minimal fix, turn 9 caught the leftover dead 'return items' line and turn 10 removed it, and turn 12 ran the tests which passed, matching the check's OK; pathologies are minor repeats: turns 10-11 re-ran the identical no-op sed (the agent even noted 'Wait, I already did that') and turn 13 re-ran the test suite after turn 12 had already passed with no changes in between.",
+  "transcript_chars": 8758
+}

@@ -1,0 +1,13 @@
+{
+  "task": "fix-word-count-ignores-case",
+  "model": "qwen",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 located the repo after a wrong path guess, turn 4 read the function and tests, turn 6 applied the minimal fix (turn 3 was a stray unknown-tool call and turn 5 hit a missing python binary, both recovered), and turn 7 ran the tests which all passed, matching the check's pass verdict.",
+  "transcript_chars": 6287
+}

@@ -1,0 +1,13 @@
+{
+  "task": "long-change-timeout-everywhere",
+  "model": "minimax-m3.1-flash",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-6 inspected the constants and identified the settings.py decoys, turn 7 sed-edited the 74 request timeout files, turn 10 called a nonexistent 'edit' tool (the one tool error) and turn 11 hit a missing python before recovering, turn 13 updated the tests via python3, turn 14 ran unittest and both tests passed, turn 15 verified all 76 constants at runtime; the trajectory matches the passing check.",
+  "transcript_chars": 25001
+}

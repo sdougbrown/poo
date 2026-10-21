@@ -1,0 +1,13 @@
+{
+  "task": "fix-csv-skips-header",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-4 inspected the repo structure and read the source and tests, turn 5 tried a nonexistent 'edit' tool (tool_call_parse_failure), turn 6 applied the same minimal fix via a bash heredoc, turn 7 ran the test suite and all 3 tests passed, matching the check's OK verdict, and turns 8-9 verified edge cases and summarized.",
+  "transcript_chars": 8599
+}
