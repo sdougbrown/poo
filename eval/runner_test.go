@@ -378,3 +378,30 @@ func TestPooIsGivenATimeoutShorterThanTheHarnessDeadline(t *testing.T) {
 		}
 	}
 }
+
+func TestAFixtureRootOfItsOwnIsUsedWhenTheTaskSetIsElsewhere(t *testing.T) {
+	// The task set and the fixtures live in unrelated directories, as
+	// they do with a custom --tasks-dir and --fixtures-dir.
+	fixtures := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(t.TempDir(), "mytasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+
+	out := t.TempDir()
+	runner := NewRunner(RunOptions{
+		Models:      []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:       []Task{task},
+		TaskRoot:    taskRoot,
+		FixtureRoot: fixtures,
+		Seeds:       1,
+		Out:         out,
+		WorkRoot:    filepath.Join(out, "work"),
+		PooBinary:   fakePoo(t, logWritingPoo),
+	})
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	if len(report.Results) != 1 || !report.Results[0].Success {
+		t.Errorf("the run did not pass with the fixtures root named: %+v", report.Results)
+	}
+}

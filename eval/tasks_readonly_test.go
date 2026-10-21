@@ -102,7 +102,7 @@ func TestTheWorkdirHoldsNoAnswerFile(t *testing.T) {
 			continue
 		}
 		t.Run(task.ID, func(t *testing.T) {
-			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 			if err != nil {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
@@ -153,7 +153,7 @@ func TestTheReadOnlyChecksWantEveryFact(t *testing.T) {
 			continue
 		}
 		t.Run(task.ID, func(t *testing.T) {
-			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 			if err != nil {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
@@ -196,7 +196,7 @@ func TestTheReadOnlyChecksAcceptTheRightAnswer(t *testing.T) {
 			continue
 		}
 		t.Run(task.ID, func(t *testing.T) {
-			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 			if err != nil {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
@@ -240,7 +240,7 @@ func TestTheReadOnlyChecksAcceptAnotherPhrasing(t *testing.T) {
 			continue
 		}
 		t.Run(task.ID, func(t *testing.T) {
-			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 			if err != nil {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
@@ -340,7 +340,7 @@ func TestTheReadOnlyChecksJudgeTheFactNotTheWord(t *testing.T) {
 	}
 	for _, c := range cases {
 		task := byID[c.task]
-		fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+		fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 		if err != nil {
 			t.Fatalf("resolving the fixture: %v", err)
 		}

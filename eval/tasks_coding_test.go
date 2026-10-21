@@ -154,7 +154,7 @@ func TestTheLongChangeCheckWantsEveryTimeout(t *testing.T) {
 		t.Fatal("the long change task is missing")
 	}
 
-	fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+	fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 	if err != nil {
 		t.Fatalf("resolving the fixture: %v", err)
 	}

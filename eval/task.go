@@ -187,9 +187,9 @@ func SelectTasks(tasks []Task, terms []string) []Task {
 
 // FixtureDir returns the directory a "fixture:<dir>" task works in.
 //
-// The path is relative to the task set's root, so a task set is portable
+// The path is relative to the fixtures root, so a task set is portable
 // and a fixture is never picked up from somewhere else on the machine.
-func (t Task) FixtureDir(taskRoot string) (string, error) {
+func (t Task) FixtureDir(fixtureRoot string) (string, error) {
 	const prefix = "fixture:"
 	if !strings.HasPrefix(t.Repo, prefix) {
 		return "", fmt.Errorf("eval: task %q: %q is not a fixture repo", t.ID, t.Repo)
@@ -198,5 +198,11 @@ func (t Task) FixtureDir(taskRoot string) (string, error) {
 	if rel == "" {
 		return "", fmt.Errorf("eval: task %q: the fixture repo names no directory", t.ID)
 	}
-	return filepath.Join(taskRoot, "..", "fixtures", rel), nil
+	return filepath.Join(fixtureRoot, rel), nil
+}
+
+// DefaultFixtureRoot returns the fixtures root a task set has when none
+// is named: the "fixtures" directory beside the task set's directory.
+func DefaultFixtureRoot(taskRoot string) string {
+	return filepath.Join(taskRoot, "..", "fixtures")
 }

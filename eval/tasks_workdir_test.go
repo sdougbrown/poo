@@ -73,7 +73,7 @@ func TestTheWorkdirIsTheFixtureAndNothingElse(t *testing.T) {
 	}
 	for _, task := range tasks {
 		t.Run(task.ID, func(t *testing.T) {
-			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 			if err != nil {
 				t.Fatalf("resolving the fixture: %v", err)
 			}

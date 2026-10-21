@@ -121,7 +121,7 @@ func TestEveryTaskHasItsFixtureAndCheck(t *testing.T) {
 		t.Fatalf("loading the tasks: %v", err)
 	}
 	for _, task := range tasks {
-		fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+		fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 		if err != nil {
 			t.Errorf("task %q: %v", task.ID, err)
 			continue
@@ -156,7 +156,7 @@ func TestTheReadOnlyChecksHoldTheirConditions(t *testing.T) {
 			continue
 		}
 		t.Run(task.ID, func(t *testing.T) {
-			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 			if err != nil {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
@@ -230,7 +230,7 @@ func TestTheCodingChecksFailBeforeTheFix(t *testing.T) {
 			continue
 		}
 		t.Run(task.ID, func(t *testing.T) {
-			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "tasks"))
+			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
 			if err != nil {
 				t.Fatalf("resolving the fixture: %v", err)
 			}

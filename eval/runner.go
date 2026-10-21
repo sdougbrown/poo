@@ -48,9 +48,12 @@ type RunOptions struct {
 	Models []Model
 	// Tasks is the task set to run.
 	Tasks []Task
-	// TaskRoot is the directory the task set lives in. A fixture repo
-	// is resolved relative to it.
+	// TaskRoot is the directory the task set lives in. The work root
+	// may not contain it or sit inside its repository.
 	TaskRoot string
+	// FixtureRoot is the directory a "fixture:<dir>" repo is resolved
+	// relative to. Empty means the "fixtures" directory beside TaskRoot.
+	FixtureRoot string
 	// Seeds is the number of times each task runs against each model.
 	Seeds int
 	// Parallel is the most runs that may be in flight at the same time.
@@ -250,7 +253,7 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 		defer os.RemoveAll(workRoot)
 	}
 
-	guard, err := newSourceGuard(r.opts.Tasks, r.opts.TaskRoot, workRoot)
+	guard, err := newSourceGuard(r.opts.Tasks, r.fixtureRoot(), workRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -437,7 +440,7 @@ func (r *Runner) execute(ctx context.Context, jobs []job, runsDir, workRoot stri
 // runOne makes one run: check out, run poo, run the check.
 func (r *Runner) runOne(ctx context.Context, j job, runsDir, workRoot string, guard *sourceGuard) RunResult {
 	result := r.runJob(ctx, j, runsDir, workRoot, guard)
-	if changed := guard.changed(j.task, r.opts.TaskRoot); len(changed) > 0 {
+	if changed := guard.changed(j.task, r.fixtureRoot()); len(changed) > 0 {
 		result.SourceChanged = true
 		result.Success = false
 		msg := "the source fixture changed during the run: " + strings.Join(changed, ", ")
@@ -499,7 +502,7 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 		// The workdir comes from the invocation's snapshot, never from
 		// the repository's fixture, which a run may have edited.
 		var snap string
-		if snap, err = guard.snapshot(j.task, r.opts.TaskRoot); err == nil {
+		if snap, err = guard.snapshot(j.task, r.fixtureRoot()); err == nil {
 			err = copyTree(snap, workdir)
 		}
 	} else {
@@ -582,6 +585,14 @@ const PooTimeoutMargin = 10 * time.Second
 func (r *Runner) pooTimeout(t Task) time.Duration {
 	full := r.timeout(t)
 	return max(full-PooTimeoutMargin, full/2)
+}
+
+// fixtureRoot returns the directory the fixture repos are resolved from.
+func (r *Runner) fixtureRoot() string {
+	if r.opts.FixtureRoot != "" {
+		return r.opts.FixtureRoot
+	}
+	return DefaultFixtureRoot(r.opts.TaskRoot)
 }
 
 // checkout prepares the workdir for a run.

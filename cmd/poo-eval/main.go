@@ -37,6 +37,7 @@ Run flags:
   --out <dir>          Where the report goes (default: evals/results/<date>-<git sha>)
   --models-file <path> The model catalog (default: evals/models.yaml)
   --tasks-dir <path>   The task set (default: evals/tasks)
+  --fixtures-dir <path> The fixtures (default: the fixtures directory beside the task set)
   --poo <path>         The poo binary to run (default: poo)
   --work-root DIR      Where the workdirs are made (default: the user cache directory)
   --keep-workdirs      Leave the workdirs behind after the run
@@ -111,19 +112,20 @@ func repoRoot() (string, error) {
 
 // runOptions are the flags of `poo-eval run`.
 type runOptions struct {
-	models     string
-	tasks      string
-	seeds      int
-	parallel   int
-	maxTurns   int
-	out        string
-	modelsFile string
-	tasksDir   string
-	pooBinary  string
-	workRoot   string
-	keepWork   bool
-	sandbox    string
-	force      bool
+	models      string
+	tasks       string
+	seeds       int
+	parallel    int
+	maxTurns    int
+	out         string
+	modelsFile  string
+	tasksDir    string
+	fixturesDir string
+	pooBinary   string
+	workRoot    string
+	keepWork    bool
+	sandbox     string
+	force       bool
 }
 
 // runRun executes `poo-eval run`.
@@ -141,6 +143,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.out, "out", "", "Where the report goes")
 	fs.StringVar(&o.modelsFile, "models-file", "", "The model catalog")
 	fs.StringVar(&o.tasksDir, "tasks-dir", "", "The task set")
+	fs.StringVar(&o.fixturesDir, "fixtures-dir", "", "The fixtures the task set's fixture repos name")
 	fs.StringVar(&o.pooBinary, "poo", "", "The poo binary to run")
 	fs.StringVar(&o.workRoot, "work-root", "", "Where the workdirs are made (default: the user cache directory)")
 	fs.BoolVar(&o.keepWork, "keep-workdirs", false, "Leave the workdirs behind")
@@ -161,6 +164,9 @@ func runRun(args []string) int {
 	}
 	if o.tasksDir == "" {
 		o.tasksDir = filepath.Join(root, "evals", "tasks")
+	}
+	if o.fixturesDir == "" {
+		o.fixturesDir = eval.DefaultFixtureRoot(o.tasksDir)
 	}
 	if o.out == "" {
 		o.out = filepath.Join(root, "evals", "results", defaultRunName(root))
@@ -220,6 +226,7 @@ func runRun(args []string) int {
 		Catalog:      catalog,
 		Tasks:        tasks,
 		TaskRoot:     o.tasksDir,
+		FixtureRoot:  o.fixturesDir,
 		Seeds:        o.seeds,
 		Parallel:     o.parallel,
 		MaxTurns:     o.maxTurns,

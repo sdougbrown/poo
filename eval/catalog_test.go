@@ -234,9 +234,9 @@ func TestTheTasksAreSelectedByIDOrTag(t *testing.T) {
 	}
 }
 
-func TestTheFixturePathIsRelativeToTheTaskRoot(t *testing.T) {
+func TestTheDefaultFixtureRootIsBesideTheTaskRoot(t *testing.T) {
 	task := Task{ID: "t", Repo: "fixture:fix-a"}
-	got, err := task.FixtureDir("/repo/evals/tasks")
+	got, err := task.FixtureDir(DefaultFixtureRoot("/repo/evals/tasks"))
 	if err != nil {
 		t.Fatalf("resolving the fixture: %v", err)
 	}

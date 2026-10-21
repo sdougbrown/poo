@@ -24,7 +24,7 @@ type sourceGuard struct {
 
 // newSourceGuard snapshots the fixtures the tasks use under root and
 // hashes the fixtures and the task directories they come from.
-func newSourceGuard(tasks []Task, taskRoot, root string) (*sourceGuard, error) {
+func newSourceGuard(tasks []Task, fixtureRoot, root string) (*sourceGuard, error) {
 	g := &sourceGuard{snapshots: map[string]string{}, hashes: map[string]string{}}
 	for _, t := range tasks {
 		if t.Dir != "" {
@@ -35,7 +35,7 @@ func newSourceGuard(tasks []Task, taskRoot, root string) (*sourceGuard, error) {
 		if !strings.HasPrefix(t.Repo, "fixture:") {
 			continue
 		}
-		src, err := t.FixtureDir(taskRoot)
+		src, err := t.FixtureDir(fixtureRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -71,8 +71,8 @@ func (g *sourceGuard) record(dir string, all bool) error {
 }
 
 // snapshot returns the snapshot of a task's fixture.
-func (g *sourceGuard) snapshot(t Task, taskRoot string) (string, error) {
-	src, err := t.FixtureDir(taskRoot)
+func (g *sourceGuard) snapshot(t Task, fixtureRoot string) (string, error) {
+	src, err := t.FixtureDir(fixtureRoot)
 	if err != nil {
 		return "", err
 	}
@@ -87,12 +87,12 @@ func (g *sourceGuard) snapshot(t Task, taskRoot string) (string, error) {
 // what the invocation started with: the task directory, the fixture and
 // the fixture's snapshot. The names are relative to the task set's root,
 // so they hold no machine's paths.
-func (g *sourceGuard) changed(t Task, taskRoot string) []string {
+func (g *sourceGuard) changed(t Task, fixtureRoot string) []string {
 	type dir struct {
 		path, name string
 		all        bool
 	}
-	setRoot := filepath.Dir(taskRoot)
+	setRoot := filepath.Dir(fixtureRoot)
 	name := func(d string) string {
 		if rel, err := filepath.Rel(setRoot, d); err == nil && !strings.HasPrefix(rel, "..") {
 			return rel
@@ -103,7 +103,7 @@ func (g *sourceGuard) changed(t Task, taskRoot string) []string {
 	if t.Dir != "" {
 		dirs = append(dirs, dir{t.Dir, name(t.Dir), false})
 	}
-	if src, err := t.FixtureDir(taskRoot); err == nil {
+	if src, err := t.FixtureDir(fixtureRoot); err == nil {
 		src = filepath.Clean(src)
 		dirs = append(dirs, dir{src, name(src), false})
 		if snap, ok := g.snapshots[src]; ok {
