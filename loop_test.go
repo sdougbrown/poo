@@ -473,12 +473,14 @@ func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
 	}
 	mt := tr.requests[0].MaxTokens
 	// The room is the limit minus the estimated input minus 256, and the
-	// model's own ceiling is 8192 by default.
-	if mt <= 0 || mt > 4096 {
-		t.Errorf("max_tokens is %d, want it under the context limit", mt)
-	}
-	if mt >= 4096 {
-		t.Errorf("max_tokens is %d, want the 256-token reserve taken off", mt)
+	// model's own ceiling is 8192 by default. The estimate covers the
+	// history at request time: the system message ("the system prompt")
+	// and the user message ("a short prompt") hold 23 and 18 chars, and
+	// the plan estimates at 3.5 chars per token, so 41*10/35 = 11.
+	estimate := (len("system") + len("the system prompt") + len("user") + len("a short prompt")) * 10 / 35
+	want := 4096 - estimate - 256
+	if mt != want {
+		t.Errorf("max_tokens is %d, want %d (context limit minus the %d-token estimate minus the 256-token reserve)", mt, want, estimate)
 	}
 }
 
