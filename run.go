@@ -1149,6 +1149,7 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 					"message_id": resp.messageID,
 					"attempt":    request,
 					"kind":       kind,
+					"text":       ev.Delta.Text,
 				})
 			}
 			switch kind {
