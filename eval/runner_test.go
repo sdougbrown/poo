@@ -501,3 +501,34 @@ func TestOnlyTheDeadlineSourceIsATimeout(t *testing.T) {
 		t.Error("a missing log is a timeout")
 	}
 }
+
+// TestANonZeroExitWithALogKeepsItsCause covers a run whose poo failed
+// for its own reasons but still wrote a log: the report names the exit
+// instead of showing a cause-less failure.
+func TestANonZeroExitWithALogKeepsItsCause(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+
+	out := t.TempDir()
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: fakePoo(t, strings.Replace(logWritingPoo, "exit 0", "exit 1", 1)),
+	})
+
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	if len(report.Results) != 1 {
+		t.Fatalf("the harness made %d runs, want 1", len(report.Results))
+	}
+	if !strings.Contains(report.Results[0].Error, "poo exited 1") {
+		t.Errorf("the error is %q, want it to name the exit", report.Results[0].Error)
+	}
+}

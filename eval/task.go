@@ -198,6 +198,12 @@ func (t Task) FixtureDir(fixtureRoot string) (string, error) {
 	if rel == "" {
 		return "", fmt.Errorf("eval: task %q: the fixture repo names no directory", t.ID)
 	}
+	// The fixture has to live under the fixtures root: a relative repo
+	// path cannot reach outside it.
+	rel = filepath.Clean(rel)
+	if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("eval: task %q: the fixture repo %q escapes the fixtures root", t.ID, t.Repo)
+	}
 	return filepath.Join(fixtureRoot, rel), nil
 }
 

@@ -541,6 +541,10 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 		result.Error = runErr.Error()
 	} else if pooTimedOut(log) {
 		result.Error = fmt.Sprintf("the run timed out after %s", r.pooTimeout(j.task))
+	} else if pooExit != 0 {
+		// The run settled, but poo still failed: the exit says why the
+		// harness saw a failure instead of a clean end.
+		result.Error = fmt.Sprintf("poo exited %d", pooExit)
 	}
 
 	// The diff, measured against the pristine tree. It is measured

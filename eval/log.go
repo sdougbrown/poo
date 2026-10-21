@@ -302,9 +302,9 @@ func (l *Log) TranscriptSegments() []TranscriptSegment {
 			}
 		case "tool.result":
 			text := r.Text
-			if len(text) > 2000 {
-				text = text[:2000] + " …"
-			}
+			// The cut ends on a character boundary: a byte split would
+			// put invalid UTF-8 into the judge's prompt.
+			text = prefix(text, 2000) + " …"
 			appendTo(r.Turn, fmt.Sprintf("turn %d tool %s (%s): %s\n", r.Turn, r.Tool, r.Outcome, text))
 		}
 	}

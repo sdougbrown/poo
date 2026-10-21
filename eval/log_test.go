@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // writeLog writes a session log and returns its path.
@@ -271,10 +273,10 @@ func TestTheTranscriptKeepsTheTurnsApart(t *testing.T) {
 		t.Errorf("the segments are in turns %d, %d, %d, want 0, 1, 2",
 			segments[0].Turn, segments[1].Turn, segments[2].Turn)
 	}
-	if !contains(segments[1].Text, "calls bash") {
+	if !strings.Contains(segments[1].Text, "calls bash") {
 		t.Errorf("the second segment does not hold the tool call: %q", segments[1].Text)
 	}
-	if !contains(segments[2].Text, "done") {
+	if !strings.Contains(segments[2].Text, "done") {
 		t.Errorf("the third segment does not hold the answer: %q", segments[2].Text)
 	}
 }
@@ -294,19 +296,28 @@ func TestTheFinalMessageIsTheLastOne(t *testing.T) {
 	}
 }
 
-// contains reports whether a string holds a substring.
-func contains(haystack, needle string) bool {
-	return len(haystack) >= len(needle) && (haystack == needle ||
-		len(needle) == 0 ||
-		indexOf(haystack, needle) >= 0)
-}
-
-// indexOf returns the index of a substring, or -1.
-func indexOf(haystack, needle string) int {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return i
+// TestATruncatedToolResultEndsOnARuneBoundary covers the transcript's
+// truncation of long tool results: the cut ends on a character
+// boundary, so the judge never reads invalid UTF-8.
+func TestATruncatedToolResultEndsOnARuneBoundary(t *testing.T) {
+	text := strings.Repeat("x", 1999) + "€€€"
+	raw, err := json.Marshal(text)
+	if err != nil {
+		t.Fatalf("marshalling the text: %v", err)
+	}
+	path := writeLog(t,
+		`{"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s","context_limit":32768}`,
+		`{"record":"run.started","seq":2,"ts":"2026-10-20T00:00:00Z","run_id":"r","model_id":"m","max_turns":50}`,
+		callRecord(1, "read", `{"path":"a.txt"}`),
+		`{"record":"tool.result","seq":3,"ts":"2026-10-20T00:00:01Z","run_id":"r","turn":1,"handle":"r1","tool":"read","outcome":"ok","text":`+string(raw)+`}`,
+	)
+	log, err := ParseLog(path)
+	if err != nil {
+		t.Fatalf("parsing the log: %v", err)
+	}
+	for _, seg := range log.TranscriptSegments() {
+		if !utf8.ValidString(seg.Text) {
+			t.Errorf("the segment is not valid UTF-8: %q", seg.Text[len(seg.Text)-40:])
 		}
 	}
-	return -1
 }

@@ -46,7 +46,15 @@ func newSourceGuard(tasks []Task, fixtureRoot, root string) (*sourceGuard, error
 		if err := g.record(src, false); err != nil {
 			return nil, err
 		}
-		dst := filepath.Join(root, "fixtures", strings.TrimPrefix(t.Repo, "fixture:"))
+		rel := strings.TrimPrefix(t.Repo, "fixture:")
+		// The snapshot destination is checked against the work root: a
+		// relative repo path cannot reach outside it. (FixtureDir has
+		// already refused an escaping repo, so this is belt and braces.)
+		rel = filepath.Clean(rel)
+		if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("eval: task %q: the fixture repo %q escapes the work root", t.ID, t.Repo)
+		}
+		dst := filepath.Join(root, "fixtures", rel)
 		if err := copyTree(src, dst); err != nil {
 			return nil, fmt.Errorf("eval: snapshotting fixture %s: %w", src, err)
 		}
