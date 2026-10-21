@@ -16,6 +16,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -150,6 +151,9 @@ type Judge struct {
 	prompt string
 	// client is the HTTP client the judge uses.
 	client *http.Client
+	// noMaxTokens is set once the endpoint has refused max_tokens, and
+	// the judge sends none after that.
+	noMaxTokens atomic.Bool
 }
 
 // NewJudge returns a judge with the options filled in.
@@ -443,41 +447,24 @@ func (j *Judge) ask(ctx context.Context, payload judgePayload) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	body, err := json.Marshal(map[string]any{
-		"model": j.opts.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": j.prompt},
-			{"role": "user", "content": judgeUserMessage(payload, nonce)},
-		},
-		"max_tokens": j.opts.MaxTokens,
-		"stream":     false,
-	})
+	message := judgeUserMessage(payload, nonce)
+	status, data, err := j.post(ctx, message, !j.noMaxTokens.Load())
 	if err != nil {
-		return "", fmt.Errorf("eval: encoding the judge request: %w", err)
+		return "", err
 	}
-
-	url := strings.TrimRight(j.opts.BaseURL, "/") + "/chat/completions"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("eval: making the judge request: %w", err)
+	if status == http.StatusBadRequest && !j.noMaxTokens.Load() && strings.Contains(string(data), "max_tokens") {
+		// The endpoint's model caps its output below the budget this
+		// judge asks for. The judge stops sending the field, so the
+		// endpoint's own default applies, and says so once.
+		j.noMaxTokens.Store(true)
+		fmt.Fprintf(os.Stderr, "poo-eval: the judge endpoint refused max_tokens %d; asking without it (use --max-tokens to set a cap it accepts)\n", j.opts.MaxTokens)
+		status, data, err = j.post(ctx, message, false)
+		if err != nil {
+			return "", err
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if key, ok := os.LookupEnv(j.opts.APIKeyEnv); ok && j.opts.APIKeyEnv != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
-	}
-
-	resp, err := j.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("eval: calling the judge: %w", err)
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return "", fmt.Errorf("eval: reading the judge's answer: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("eval: the judge answered %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	if status != http.StatusOK {
+		return "", fmt.Errorf("eval: the judge answered %d: %s", status, strings.TrimSpace(string(data)))
 	}
 
 	var answer struct {
@@ -501,6 +488,47 @@ func (j *Judge) ask(ctx context.Context, payload judgePayload) (string, error) {
 			errEmptyAnswer, choice.FinishReason, len(choice.Message.ReasoningContent))
 	}
 	return choice.Message.Content, nil
+}
+
+// post sends one judge request and returns the status and the body.
+func (j *Judge) post(ctx context.Context, userMessage string, withMaxTokens bool) (int, []byte, error) {
+	request := map[string]any{
+		"model": j.opts.Model,
+		"messages": []map[string]string{
+			{"role": "system", "content": j.prompt},
+			{"role": "user", "content": userMessage},
+		},
+		"stream": false,
+	}
+	if withMaxTokens {
+		request["max_tokens"] = j.opts.MaxTokens
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return 0, nil, fmt.Errorf("eval: encoding the judge request: %w", err)
+	}
+
+	url := strings.TrimRight(j.opts.BaseURL, "/") + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, fmt.Errorf("eval: making the judge request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key, ok := os.LookupEnv(j.opts.APIKeyEnv); ok && j.opts.APIKeyEnv != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+
+	resp, err := j.client.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("eval: calling the judge: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return 0, nil, fmt.Errorf("eval: reading the judge's answer: %w", err)
+	}
+	return resp.StatusCode, data, nil
 }
 
 // errEmptyAnswer is a judge reply with no content.

@@ -345,3 +345,63 @@ func TestTheJudgeRequestCarriesMaxTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestAnEndpointThatCapsMaxTokensIsAskedAgainWithoutIt(t *testing.T) {
+	var sent []bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		var body map[string]any
+		_ = json.Unmarshal(data, &body)
+		_, has := body["max_tokens"]
+		sent = append(sent, has)
+		w.Header().Set("Content-Type", "application/json")
+		if has {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"max_tokens is too large: 16384"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer server.Close()
+
+	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("making the judge: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		answer, err := judge.ask(t.Context(), judgePayload{Task: "t", Transcript: "hello"})
+		if err != nil || answer != "ok" {
+			t.Fatalf("asking: %q, %v", answer, err)
+		}
+	}
+	// The first ask learns the cap by being refused; the second does not
+	// send the field at all.
+	want := []bool{true, false, false}
+	if len(sent) != len(want) {
+		t.Fatalf("the endpoint saw %d requests (max_tokens %v), want %v", len(sent), sent, want)
+	}
+	for i := range want {
+		if sent[i] != want[i] {
+			t.Errorf("request %d carried max_tokens: %v, want %v", i, sent[i], want[i])
+		}
+	}
+}
+
+func TestAnUnrelatedBadRequestIsNotRetried(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "unknown model", http.StatusBadRequest)
+	}))
+	defer server.Close()
+	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := judge.ask(t.Context(), judgePayload{Task: "t"}); err == nil {
+		t.Error("a 400 about something else was not an error")
+	}
+	if calls != 1 {
+		t.Errorf("the endpoint saw %d requests, want 1", calls)
+	}
+}
