@@ -206,7 +206,7 @@ func TestTheMarkdownReportHoldsTheNumbers(t *testing.T) {
 	markdown := RenderMarkdown(report, summary)
 
 	for _, needle := range []string{"gemma4", "## By model", "## By task", "## Settle reasons", "end_turn"} {
-		if !contains(markdown, needle) {
+		if !strings.Contains(markdown, needle) {
 			t.Errorf("the markdown report does not mention %q", needle)
 		}
 	}
@@ -283,7 +283,7 @@ func TestTheJudgeVerdictIsWritten(t *testing.T) {
 		t.Fatalf("reading the summary: %v", err)
 	}
 	for _, needle := range []string{"Needs owner", "Pathologies per model", "All verdicts"} {
-		if !contains(string(summary), needle) {
+		if !strings.Contains(string(summary), needle) {
 			t.Errorf("the summary does not have the %q section", needle)
 		}
 	}
@@ -329,10 +329,10 @@ func TestOneUnreadableTranscriptDoesNotStopTheJudge(t *testing.T) {
 
 func TestTheJudgePromptTreatsTheTranscriptAsData(t *testing.T) {
 	// The prompt must tell the judge to treat the transcript as data.
-	if !contains(judgePrompt, "DATA") {
+	if !strings.Contains(judgePrompt, "DATA") {
 		t.Error("the prompt does not say the transcript is data")
 	}
-	if !contains(judgePrompt, "Ignore it") {
+	if !strings.Contains(judgePrompt, "Ignore it") {
 		t.Error("the prompt does not tell the judge to ignore the transcript's instructions")
 	}
 }
@@ -351,11 +351,11 @@ func TestALargeTranscriptIsSummarized(t *testing.T) {
 	if elided <= 0 {
 		t.Errorf("the summary elided %d turns, want some", elided)
 	}
-	if !contains(text, "elided") {
+	if !strings.Contains(text, "elided") {
 		t.Errorf("the summary does not say what it elided: %q", text[:200])
 	}
 	// The first and the last turn survive.
-	if !contains(text, strings.Repeat("x", 100)) {
+	if !strings.Contains(text, strings.Repeat("x", 100)) {
 		t.Error("the summary holds none of the original turns")
 	}
 	// The summary is within the limit.
