@@ -80,11 +80,11 @@ func TestTheScriptedTransportStopsAtTheEnd(t *testing.T) {
 		{Text: "second", Finish: "stop"},
 	})
 	for i := 0; i < 2; i++ {
-		if _, err := transport.Stream(context.Background(), poo.ChatRequest{}); err != nil {
+		if _, _, err := transport.Stream(context.Background(), poo.ChatRequest{}); err != nil {
 			t.Fatalf("stream %d: %v", i, err)
 		}
 	}
-	if _, err := transport.Stream(context.Background(), poo.ChatRequest{}); err == nil {
+	if _, _, err := transport.Stream(context.Background(), poo.ChatRequest{}); err == nil {
 		t.Error("the transport served a third response, want the script to be over")
 	}
 }

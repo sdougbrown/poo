@@ -36,6 +36,10 @@ The record's own fields follow the envelope.
 | `usage` | Once per provider request. |
 | `run.settled` | Once per run, when the run ends. |
 
+The fields of the records grow over time. A consumer must tolerate a field
+it does not recognise: the fields below are the ones the current core
+writes, and a later stage adds more.
+
 ## `session.created`
 
 The first record of a log.
@@ -91,6 +95,18 @@ Each entry of `tools` holds:
 | `max_turns` | integer | The turn ceiling. `0` means the run is unlimited. |
 | `tools_mode` | string | How the run asks for tool calls. |
 | `reasoning_effort` | string | The `reasoning_effort` the run sends. Absent when it sends none. |
+| `trigger` | string | What started the run: `"prompt"` or `"job"`. Absent on a log written before the field existed. |
+| `jobs` | array of objects | The job results that started a job run. Absent on a prompt run. |
+
+A `jobs` entry holds:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `job` | string | The job's identifier. |
+| `handle` | string | The job's public handle. |
+| `tool` | string | The tool the job ran. |
+| `text` | string | The job's result, as the model reads it. |
+| `outcome` | string | The job's outcome. |
 
 ## `message`
 
@@ -101,22 +117,50 @@ list the model sees: nothing is trimmed, rewritten or summarised.
 |---|---|---|
 | `run_id` | string | The run the message belongs to. |
 | `turn` | integer | The turn the message belongs to. `0` for the run's input. |
-| `origin` | string | Who produced the message: `"user"`, `"model"`, `"tool"` or `"system"`. |
+| `origin` | string | Who produced the message: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"` or `"hook:<name>"`. |
 | `role` | string | The message's role: `"system"`, `"user"`, `"assistant"` or `"tool"`. |
 | `content` | array of objects | The message's content blocks. |
+| `message_id` | string | The message's session-monotonic id, e.g. `"m7"`. Absent when the message has none. |
+| `delivery_note` | object | How much of the previous reply the user had seen. Absent when the message carries none. |
+
+`delivery_note` holds:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `message_id` | string | The assistant message the user had seen part of. |
+| `upto_chars` | integer | How many characters of that message the user had seen, in code points over its text blocks. |
+| `text` | string | The rendered note, as it was prefixed to the message. |
+
+The note is part of the record, so a replay shows exactly what the user
+saw. The assistant message itself is never trimmed: the note is the
+record.
 
 Each content block holds:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `kind` | string | `"text"`, `"thinking"`, `"tool_call"` or `"tool_result"`. |
+| `kind` | string | `"text"`, `"thinking"`, `"tool_call"`, `"tool_result"` or `"provider"`. |
 | `text` | string | The block's text. Absent when empty. |
 | `tool_call_id` | string | The provider's id for the call. Set on `tool_call` and `tool_result` blocks. |
 | `name` | string | The tool's name. Set on `tool_call` and `tool_result` blocks. |
 | `arguments` | object or string | A `tool_call` block's arguments. A JSON object when the model sent valid JSON, and a JSON string holding the raw text when it did not. |
 | `is_error` | boolean | `true` when a `tool_result` reports a failure. Absent when false. |
+| `provider` | object | The block's opaque provider companion. Absent when the block has none. |
 
 A `tool_result` block's `text` is the model-facing text of the result.
+
+A `provider` block holds:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `api` | string | The wire API the payload belongs to: `"chat_completions"`, `"responses"` or `"anthropic_messages"`. |
+| `type` | string | The provider's own name for the payload, e.g. `"thinking_signature"`, `"reasoning"`, `"redacted_thinking"` or `"compaction"`. |
+| `data` | any | The payload, verbatim. The core never interprets it. |
+| `required` | boolean | `true` when a request cannot be made without the payload. Absent when false. |
+
+A `provider` payload may also ride as the `provider` field of a `thinking`
+block: an Anthropic thinking block is one block on the wire, with a text
+part and a signature, and poo keeps the two together.
 
 ## `tool.call`
 
@@ -141,7 +185,7 @@ The outcome of a tool call.
 | `turn` | integer | The turn the result belongs to. |
 | `handle` | string | The call's handle within the turn. |
 | `tool` | string | The tool that ran. |
-| `outcome` | string | `"ok"` or `"error"`. |
+| `outcome` | string | `"ok"`, `"error"`, `"denied"`, `"skipped"`, `"cancelled"`, `"interrupted"` or `"started"`. |
 | `text` | string | The model-facing text of the result. |
 | `structured` | any | The tool's side-channel payload. Absent when the tool has none. |
 
@@ -149,6 +193,11 @@ An `error` outcome is recoverable: the model saw the text and the run
 continued. A bash call that hit its timeout is an `error` outcome, because
 the model has to see that the command failed rather than read its partial
 output as a finished command.
+
+The `started` outcome belongs to a background job: the call returned at
+once and its result arrives later as a message. The `denied`, `skipped`,
+`cancelled` and `interrupted` outcomes arrive with the later stages that
+produce them.
 
 ## `usage`
 
@@ -204,6 +253,7 @@ The end of a run. It is the last record of a run.
 | `kind` | string | The failure class, e.g. `"context_length"` or `"server"`. |
 | `status` | integer | The HTTP status. Absent when the failure was not a response. |
 | `code` | string | The provider's own error code. Absent when it sent none. |
+| `retry_after_s` | integer | How long the endpoint asked the client to wait, in seconds. Absent when it said nothing. |
 
 ### Settle reasons
 
@@ -240,6 +290,12 @@ A consumer reads the file line by line and decodes each line as a JSON
 object. It keys off `record`, and it must tolerate fields it does not
 recognise: a later stage adds records and fields, and a consumer that
 fails on an unknown field breaks on a newer log.
+
+A log written by an earlier core is still readable. The fields added
+after the first version are all optional: `message_id`,
+`delivery_note` and `trigger` are absent from an older log, and a
+consumer that needs them must treat an absent field as "the log does not
+say".
 
 The order of the records is the order of the events. A `tool.call` is
 always followed by its `tool.result`, and a `run.started` is always

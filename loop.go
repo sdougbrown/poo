@@ -81,6 +81,9 @@ type Run struct {
 	sunk bool
 	// state is where the run is in the loop.
 	state State
+	// messageSeq numbers the messages the model produced. The ids are
+	// session-monotonic, so a delivery note can name one.
+	messageSeq int
 }
 
 // State returns where the run is in the loop.
@@ -123,6 +126,7 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 		ToolsMode:  r.opts.ToolsMode,
 
 		ReasoningEffort: r.opts.ReasoningEffort,
+		Trigger:         TriggerPrompt,
 	}); err != nil {
 		return Result{}, err
 	}
@@ -131,11 +135,12 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 	// frozen for the length of the run.
 	if r.opts.SystemPrompt != "" {
 		msg := NewTextMessage(RoleSystem, r.opts.SystemPrompt)
+		msg.Origin = OriginSystem
 		r.history = append(r.history, msg)
 		if err := r.write(ctx, &MessageRecord{
 			RecordMeta: NewRecordMeta("message"),
 			RunID:      r.opts.RunID,
-			Origin:     "system",
+			Origin:     OriginSystem,
 			Role:       msg.Role,
 			Content:    msg.Content,
 		}); err != nil {
@@ -144,12 +149,13 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 	}
 
 	user := NewTextMessage(RoleUser, prompt)
+	user.Origin = OriginUser
 	r.history = append(r.history, user)
 	if err := r.write(ctx, &MessageRecord{
 		RecordMeta: NewRecordMeta("message"),
 		RunID:      r.opts.RunID,
 		Turn:       0,
-		Origin:     "user",
+		Origin:     OriginUser,
 		Role:       user.Role,
 		Content:    user.Content,
 	}); err != nil {
@@ -243,7 +249,9 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 
 		// The model's response is part of the history whether or not it
 		// asked for tool calls.
-		assistant := Message{Role: RoleAssistant, Content: resp.content}
+		assistant := Message{Role: RoleAssistant, Content: resp.content, Origin: OriginModel}
+		r.messageSeq++
+		assistant.ID = fmt.Sprintf("m%d", r.messageSeq)
 		for _, call := range resp.calls {
 			assistant.Content = append(assistant.Content, ContentBlock{
 				Kind:       ContentToolCall,
@@ -258,9 +266,10 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 				RecordMeta: NewRecordMeta("message"),
 				RunID:      r.opts.RunID,
 				Turn:       r.turn,
-				Origin:     "model",
+				Origin:     OriginModel,
 				Role:       assistant.Role,
 				Content:    assistant.Content,
+				MessageID:  assistant.ID,
 			}); err != nil {
 				return "", SettleDetail{}, err
 			}
@@ -420,12 +429,13 @@ func (r *Run) recordResult(ctx context.Context, turn int, handle string, call To
 	// The result goes back to the model under the call's provider-side id,
 	// because that is the id the provider matches it against.
 	msg := ToolResultMessage(call.ID, call.Name, result.Text, result.IsError)
+	msg.Origin = OriginTool
 	r.history = append(r.history, msg)
 	return r.write(ctx, &MessageRecord{
 		RecordMeta: NewRecordMeta("message"),
 		RunID:      r.opts.RunID,
 		Turn:       turn,
-		Origin:     "tool",
+		Origin:     OriginTool,
 		Role:       msg.Role,
 		Content:    msg.Content,
 	})
@@ -436,7 +446,7 @@ func (r *Run) recordResult(ctx context.Context, turn int, handle string, call To
 // A response that broke part way through is returned along with the error,
 // so the caller can still write the usage it produced.
 func (r *Run) request(ctx context.Context, maxTokens int) (*response, error) {
-	reader, err := r.opts.Transport.Stream(ctx, ChatRequest{
+	reader, _, err := r.opts.Transport.Stream(ctx, ChatRequest{
 		Model:     r.opts.ModelID,
 		Messages:  r.history,
 		Tools:     r.toolSpecs(),

@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -128,10 +130,18 @@ type errorBody struct {
 }
 
 // Stream starts a chat completion request and returns the response stream.
-func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, error) {
+//
+// The snapshot is the serialized request body, exactly as it went out. A
+// fork is built from it, so the fork sends the same prefix.
+func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
 	body, err := t.buildBody(req)
 	if err != nil {
-		return nil, err
+		return nil, poo.Rendered{}, err
+	}
+	rendered := poo.Rendered{
+		API:      poo.APIChatCompletions,
+		Body:     body,
+		Messages: len(req.Messages),
 	}
 
 	// The timeout bounds the whole request, streaming included, so the
@@ -146,7 +156,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		if cancel != nil {
 			cancel()
 		}
-		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
+		return nil, rendered, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
@@ -167,6 +177,102 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		if cancel != nil {
 			cancel()
 		}
+		return nil, rendered, perr
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		if cancel != nil {
+			cancel()
+		}
+		return nil, rendered, classifyStatus(resp)
+	}
+
+	// Some servers answer a failed request with a 200 and a JSON error
+	// body instead of the SSE stream. The first byte tells the two apart,
+	// so the stream is not buffered and the time to the first token
+	// measures the endpoint's latency rather than the reader's.
+	br := bufio.NewReader(resp.Body)
+	first, err := peekFirstByte(br)
+	if err != nil {
+		resp.Body.Close()
+		if cancel != nil {
+			cancel()
+		}
+		return nil, rendered, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
+	}
+	if first == '{' {
+		defer resp.Body.Close()
+		if cancel != nil {
+			cancel()
+		}
+		body, _ := io.ReadAll(br)
+		if kind, msg, code, ok := errorInBody(body); ok {
+			return nil, rendered, &poo.ProviderError{
+				Kind:    kind,
+				Message: msg,
+				Code:    code,
+				Status:  resp.StatusCode,
+			}
+		}
+		return nil, rendered, &poo.ProviderError{
+			Kind:    poo.ProviderKindServer,
+			Message: "the endpoint returned a body that is not a stream",
+			Status:  resp.StatusCode,
+		}
+	}
+
+	return &streamReader{
+		body:    resp.Body,
+		scanner: bufio.NewScanner(br),
+		parser:  newParser(t.cfg.ToolsMode),
+		ctx:     ctx,
+		cancel:  cancel,
+		started: started,
+	}, rendered, nil
+}
+
+// Fork sends a body that is byte-identical to the snapshot, apart from
+// the appended messages and the output ceiling.
+//
+// The snapshot holds the serialized body, so the fork re-sends it with
+// the last message replaced by the appended ones. The key order and every
+// other field are unchanged, because the body was serialized once.
+func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	if len(prev.Body) == 0 {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot holds no body to fork",
+		}
+	}
+	body, err := forkBody(prev.Body, appended, maxTokens)
+	if err != nil {
+		return nil, err
+	}
+
+	var cancel context.CancelFunc
+	if t.cfg.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.BaseURL), bytes.NewReader(body))
+	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
+		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	if t.cfg.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
+	}
+
+	resp, err := t.http.Do(httpReq)
+	if err != nil {
+		perr := classifyTransportError(ctx, err)
+		if cancel != nil {
+			cancel()
+		}
 		return nil, perr
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -180,10 +286,6 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		return nil, perr
 	}
 
-	// Some servers answer a failed request with a 200 and a JSON error
-	// body instead of the SSE stream. The first byte tells the two apart,
-	// so the stream is not buffered and the time to the first token
-	// measures the endpoint's latency rather than the reader's.
 	br := bufio.NewReader(resp.Body)
 	first, err := peekFirstByte(br)
 	if err != nil {
@@ -220,8 +322,117 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		parser:  newParser(t.cfg.ToolsMode),
 		ctx:     ctx,
 		cancel:  cancel,
-		started: started,
+		started: time.Now(),
 	}, nil
+}
+
+// forkBody appends messages to a serialized request body.
+//
+// The body is decoded, the messages are appended and the output ceiling
+// is replaced, and the result is serialized again. The key order is the
+// one the body already had, because the body is decoded into a struct
+// whose fields are in that order.
+func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot does not hold a JSON body",
+		}
+	}
+
+	if len(appended) > 0 {
+		var messages []json.RawMessage
+		if raw, ok := payload["messages"]; ok {
+			if err := json.Unmarshal(raw, &messages); err != nil {
+				return nil, &poo.ProviderError{
+					Kind:    poo.ProviderKindInvalidRequest,
+					Message: "the request snapshot's messages do not decode",
+				}
+			}
+		}
+		for _, m := range appended {
+			cm, err := convertMessage(m)
+			if err != nil {
+				return nil, err
+			}
+			raw, err := json.Marshal(cm)
+			if err != nil {
+				return nil, &poo.ProviderError{
+					Kind:    poo.ProviderKindInvalidRequest,
+					Message: "the appended message does not encode",
+				}
+			}
+			messages = append(messages, raw)
+		}
+		raw, err := json.Marshal(messages)
+		if err != nil {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the messages do not encode",
+			}
+		}
+		payload["messages"] = raw
+	}
+
+	if maxTokens > 0 {
+		raw, err := json.Marshal(maxTokens)
+		if err != nil {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the output ceiling does not encode",
+			}
+		}
+		payload["max_tokens"] = raw
+	}
+
+	// The keys are written in the order the body had them, so the fork's
+	// prefix is byte-identical to the original.
+	keys := make([]string, 0, len(payload))
+	for k := range payload {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keyRank(keys[i]) < keyRank(keys[j]) })
+
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		key, err := json.Marshal(k)
+		if err != nil {
+			continue
+		}
+		b.Write(key)
+		b.WriteByte(':')
+		b.Write(payload[k])
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
+// keyOrder is the order the request body's keys are written in.
+//
+// The order is fixed, so a fork's body is byte-identical to the body it
+// was forked from, apart from the fields that changed.
+var keyOrder = map[string]int{
+	"model":            0,
+	"messages":         1,
+	"tools":            2,
+	"max_tokens":       3,
+	"stream":           4,
+	"reasoning_effort": 5,
+	"stream_options":   6,
+}
+
+// keyRank returns the order of a key, and a rank past the known ones for
+// a key the transport does not know.
+func keyRank(key string) int {
+	if r, ok := keyOrder[key]; ok {
+		return r
+	}
+	return len(keyOrder)
 }
 
 // peekFirstByte returns the first non-space byte of the body, without
@@ -326,7 +537,11 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	}
 
 	for _, m := range req.Messages {
-		out.Messages = append(out.Messages, convertMessage(m))
+		cm, err := convertMessage(m)
+		if err != nil {
+			return nil, err
+		}
+		out.Messages = append(out.Messages, cm)
 	}
 
 	// In native mode the tools go in the request, and the model answers
@@ -351,7 +566,7 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 }
 
 // convertMessage turns a core message into the wire shape.
-func convertMessage(m poo.Message) chatMessage {
+func convertMessage(m poo.Message) (chatMessage, error) {
 	cm := chatMessage{Role: string(m.Role)}
 
 	var text strings.Builder
@@ -375,13 +590,13 @@ func convertMessage(m poo.Message) chatMessage {
 			cm.Role = "tool"
 			cm.ToolCallID = c.ToolCallID
 			cm.Content = c.Text
-			return cm
+			return cm, nil
 		}
 	}
 
 	cm.Content = text.String()
 	cm.ToolCalls = calls
-	return cm
+	return cm, nil
 }
 
 // classifyStatus turns a non-200 response into a provider error.
@@ -416,11 +631,39 @@ func classifyStatus(resp *http.Response) error {
 	kind = classifyError(code, message, kind)
 
 	return &poo.ProviderError{
-		Kind:    kind,
-		Message: message,
-		Status:  resp.StatusCode,
-		Code:    code,
+		Kind:       kind,
+		Message:    message,
+		Status:     resp.StatusCode,
+		Code:       code,
+		RetryAfter: retryAfter(resp),
 	}
+}
+
+// retryAfter returns how long the endpoint asked the client to wait.
+//
+// The header is either a number of seconds or an HTTP date, and the plan
+// reads a Retry-After over thirty seconds as a provider limit rather than
+// a failure to retry.
+func retryAfter(resp *http.Response) time.Duration {
+	raw := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if raw == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(raw); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil {
+		return 0
+	}
+	d := time.Until(when)
+	if d <= 0 {
+		return 0
+	}
+	return d
 }
 
 // isContextLength reports whether an error means the request was too long.

@@ -24,7 +24,7 @@ func TestANetworkFailureIsNotReportedAsACancellation(t *testing.T) {
 	srv.Close()
 
 	tr := openai.New(openai.Config{BaseURL: url, Model: "m", Timeout: 3 * time.Second})
-	_, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err == nil {
 		t.Fatal("the request succeeded, want a network failure")
 	}
@@ -52,7 +52,7 @@ func TestAnErrorBodyWithA200IsAnInvalidRequest(t *testing.T) {
 	srv := newSSEServer(t, `{"error":{"message":"something odd"}}`)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	_, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
 	if !ok {
 		t.Fatalf("the error is %T, want a provider error", err)
@@ -71,7 +71,7 @@ func TestAnErrorBodyWithItsOwnKindKeepsIt(t *testing.T) {
 	srv := newSSEServer(t, `{"error":{"message":"maximum context length exceeded","code":"context_length_exceeded"}}`)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	_, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
 	if !ok {
 		t.Fatalf("the error is %T, want a provider error", err)
@@ -109,7 +109,7 @@ func TestTheStatusMapsTheErrorKind(t *testing.T) {
 			defer srv.Close()
 
 			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
-			_, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+			_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			pe, ok := err.(*poo.ProviderError)
 			if !ok {
 				t.Fatalf("the error is %T, want a provider error", err)

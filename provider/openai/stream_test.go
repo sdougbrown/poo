@@ -24,7 +24,7 @@ func TestAnEventSplitOverTwoDataLinesIsRead(t *testing.T) {
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestTheTimeToTheFirstTokenIgnoresARoleOnlyChunk(t *testing.T) {
 	defer srv.Close()
 
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestTheTimeoutBoundsTheWholeRequest(t *testing.T) {
 	defer srv.Close()
 
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", Timeout: 60 * time.Millisecond})
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestACancelledStreamEndsWithTheContextsError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
-	reader, err := tr.Stream(ctx, poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(ctx, poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestAStreamThatFailsAfterItsDeltasStillReportsItsUsage(t *testing.T) {
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestTheEventAfterTheUsageIsTheEndOfTheStream(t *testing.T) {
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestAContextLengthErrorInAStreamChunkIsMapped(t *testing.T) {
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestAContextLengthErrorInAServerResponseIsMapped(t *testing.T) {
 	srv.status = http.StatusInternalServerError
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	_, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
 	if !ok {
 		t.Fatalf("the error is %T, want a provider error", err)

@@ -35,14 +35,21 @@ type LogRecord struct {
 	Turn    int    `json:"turn"`
 	Reason  string `json:"reason"`
 	Turns   int    `json:"turns"`
+	Trigger string `json:"trigger"`
 	Details struct {
 		Source string `json:"source"`
 		Text   string `json:"text"`
 	} `json:"detail"`
 
 	// The message's fields.
-	Origin  string `json:"origin"`
-	Role    string `json:"role"`
+	Origin       string `json:"origin"`
+	Role         string `json:"role"`
+	MessageID    string `json:"message_id"`
+	DeliveryNote *struct {
+		MessageID string `json:"message_id"`
+		UpToChars int    `json:"upto_chars"`
+		Text      string `json:"text"`
+	} `json:"delivery_note"`
 	Content []struct {
 		Kind       string          `json:"kind"`
 		Text       string          `json:"text"`

@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // ScriptedTurn is one recorded provider response.
@@ -78,113 +78,52 @@ func ScriptFromLog(log *Log) (*Script, error) {
 	return script, nil
 }
 
+// ToScript turns the recorded script into a pootest script.
+//
+// The recorded format stays the eval's own, so a recording from an older
+// harness still replays. The transport is pootest's.
+func (s *Script) ToScript() pootest.Script {
+	out := pootest.Script{Turns: make([]pootest.Turn, 0, len(s.Turns))}
+	for _, t := range s.Turns {
+		turn := pootest.Turn{
+			Text:         t.Text,
+			Thinking:     t.Thinking,
+			Finish:       t.Finish,
+			InputTokens:  t.InputTokens,
+			OutputTokens: t.OutputTokens,
+		}
+		for _, c := range t.Calls {
+			turn.Calls = append(turn.Calls, pootest.Call{
+				Name:      c.Name,
+				Arguments: c.Arguments,
+			})
+		}
+		out.Turns = append(out.Turns, turn)
+	}
+	return out
+}
+
 // scriptedTransport replays a recorded conversation.
 //
-// The transport hands out the recorded responses in order. When the
-// recorded conversation runs out, it says so: a transport that repeated
-// the last response would turn a one-turn recording into an endless
-// loop, and the comparison would then report a difference that is only
-// the loop.
-type scriptedTransport struct {
-	// turns are the recorded responses.
-	turns []ScriptedTurn
-	// index is the next response to hand out.
-	index int
-	// requests counts the requests the transport served.
-	requests int
-}
+// The transport is pootest's scripted transport: it hands out the
+// recorded responses in order, and when the recording runs out it says
+// so. A transport that repeated the last response would turn a one-turn
+// recording into an endless loop, and the comparison would then report a
+// difference that is only the loop.
+type scriptedTransport = pootest.Transport
 
 // ErrScriptExhausted is the error the transport returns when the
 // recording holds no more responses.
 //
 // It is a typed error, so a caller can tell an exhausted script from a
 // broken one.
-var ErrScriptExhausted = errors.New("eval: the script holds no more responses")
+var ErrScriptExhausted = pootest.ErrScriptExhausted
 
 // newScriptedTransport returns a transport that replays a script.
 func newScriptedTransport(turns []ScriptedTurn) *scriptedTransport {
-	return &scriptedTransport{turns: turns}
+	script := Script{Turns: turns}
+	return pootest.NewTransportFromScript(script.ToScript())
 }
-
-// Stream returns the next recorded response.
-func (t *scriptedTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, error) {
-	if len(t.turns) == 0 {
-		return nil, errors.New("eval: the script holds no response")
-	}
-	if t.index >= len(t.turns) {
-		return nil, ErrScriptExhausted
-	}
-	idx := t.index
-	t.index++
-	t.requests++
-
-	turn := t.turns[idx]
-	reader := &scriptedReader{turn: turn, index: idx}
-	return reader, nil
-}
-
-// scriptedReader is the read side of one recorded response.
-type scriptedReader struct {
-	turn  ScriptedTurn
-	index int
-	// stage is what the reader hands out next.
-	stage int
-	// callIndex numbers the calls within the turn.
-	callIndex int
-}
-
-// Next returns the next piece of the recorded response.
-func (r *scriptedReader) Next() (poo.StreamEvent, error) {
-	for {
-		switch r.stage {
-		case 0:
-			r.stage++
-			if r.turn.Thinking != "" {
-				return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "thinking", Text: r.turn.Thinking}}, nil
-			}
-		case 1:
-			r.stage++
-			if r.turn.Text != "" {
-				return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: r.turn.Text}}, nil
-			}
-		case 2:
-			r.stage++
-			if len(r.turn.Calls) == 0 {
-				continue
-			}
-			call := r.turn.Calls[0]
-			r.turn.Calls = r.turn.Calls[1:]
-			r.callIndex++
-			return poo.StreamEvent{
-				Kind: "tool_call",
-				ToolCall: &poo.ToolCallDelta{
-					Index:     r.callIndex - 1,
-					ID:        fmt.Sprintf("replay_%d_%d", r.index, r.callIndex),
-					Name:      call.Name,
-					Arguments: call.Arguments,
-					Complete:  true,
-				},
-			}, nil
-		case 3:
-			r.stage++
-			if r.turn.InputTokens == 0 && r.turn.OutputTokens == 0 {
-				continue
-			}
-			return poo.StreamEvent{
-				Kind: "usage",
-				Usage: &poo.UsageReport{
-					InputTokens:  r.turn.InputTokens,
-					OutputTokens: r.turn.OutputTokens,
-				},
-			}, nil
-		default:
-			return poo.StreamEvent{}, io.EOF
-		}
-	}
-}
-
-// Close releases the response.
-func (r *scriptedReader) Close() error { return nil }
 
 // CallStep is one tool call in a replayed sequence.
 type CallStep struct {

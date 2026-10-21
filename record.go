@@ -33,6 +33,14 @@ type Record interface {
 }
 
 // RecordSink receives the records a run produces, in order.
+//
+// Append may be called concurrently: the loop, a job's completion and the
+// finalization's cleanup path all write, and an observer may write too. An
+// implementation serializes internally and never interleaves two records'
+// bytes, so a reader of the log never sees half a record.
+//
+// Core never depends on the order of records written concurrently, except
+// that a run's settle record follows that run's own outcome records.
 type RecordSink interface {
 	// Append writes one record. It returns an error when the record could
 	// not be stored.
@@ -112,6 +120,10 @@ type RunStarted struct {
 	// ReasoningEffort is the reasoning_effort the run sends, empty when
 	// it sends none.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Trigger says what started the run: "prompt" or "job".
+	Trigger TriggerKind `json:"trigger,omitempty"`
+	// Jobs are the job results that started a job run.
+	Jobs []JobResult `json:"jobs,omitempty"`
 }
 
 // MessageRecord records one message in the model's history.
@@ -121,13 +133,19 @@ type MessageRecord struct {
 	RunID string `json:"run_id"`
 	// Turn is the turn the message belongs to, 0 for the run's input.
 	Turn int `json:"turn"`
-	// Origin says who produced the message: "user", "model", "tool" or
-	// "system".
-	Origin string `json:"origin"`
+	// Origin says who produced the message: "user", "model", "tool",
+	// "system", "job" or "hook:<name>".
+	Origin Origin `json:"origin"`
 	// Role is the message's role.
 	Role Role `json:"role"`
 	// Content is the message's content blocks.
 	Content []ContentBlock `json:"content"`
+	// MessageID is the message's session-monotonic id, e.g. "m7". It is
+	// set on the messages the model produced.
+	MessageID string `json:"message_id,omitempty"`
+	// DeliveryNote says how much of the previous reply the user had
+	// seen, when the message carries one.
+	DeliveryNote *DeliveryNote `json:"delivery_note,omitempty"`
 }
 
 // ToolCallRecord records a tool call the model made, with its full arguments.
@@ -147,16 +165,6 @@ type ToolCallRecord struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
-// Outcome is the result of a tool call.
-type Outcome string
-
-const (
-	// OutcomeOK means the call succeeded.
-	OutcomeOK Outcome = "ok"
-	// OutcomeError means the call failed recoverably.
-	OutcomeError Outcome = "error"
-)
-
 // ToolResultRecord records the outcome of a tool call.
 type ToolResultRecord struct {
 	RecordMeta
@@ -168,7 +176,7 @@ type ToolResultRecord struct {
 	Handle string `json:"handle"`
 	// Tool is the name of the tool that ran.
 	Tool string `json:"tool"`
-	// Outcome is "ok" or "error".
+	// Outcome is the call's outcome.
 	Outcome Outcome `json:"outcome"`
 	// Text is the model-facing text of the result.
 	Text string `json:"text"`
@@ -205,6 +213,9 @@ type ProviderDetail struct {
 	Status int `json:"status,omitempty"`
 	// Code is the provider's own error code, when it sent one.
 	Code string `json:"code,omitempty"`
+	// RetryAfterSec is how long the endpoint asked the client to wait, in
+	// seconds, when it said so.
+	RetryAfterSec int `json:"retry_after_s,omitempty"`
 }
 
 // SettleDetail explains why a run settled.

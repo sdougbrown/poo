@@ -21,6 +21,10 @@ import (
 )
 
 // Log is an append-only session log.
+//
+// The log implements poo.RecordSink: Append may be called concurrently,
+// and the log serializes the writes, so two records' bytes never
+// interleave.
 type Log struct {
 	mu sync.Mutex
 	f  *os.File
@@ -53,6 +57,9 @@ func Open(path string) (*Log, error) {
 }
 
 // Append writes one record.
+//
+// The write is serialized, so a concurrent append never interleaves two
+// records' bytes: a reader of the log never sees half a record.
 //
 // A context that is already done is refused before any write work,
 // without consuming a sequence number, so the log's numbering stays
