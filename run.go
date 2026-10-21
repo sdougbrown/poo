@@ -212,10 +212,7 @@ func (s *Session) loop(run *runState) []candidate {
 	for {
 		// A cancellation of the run's own context ends the run.
 		if err := run.ctx.Err(); err != nil {
-			return []candidate{newCandidate(ReasonCancelled, SettleDetail{
-				Source: "cancel:context",
-				Text:   err.Error(),
-			})}
+			return []candidate{newCandidate(ReasonCancelled, cancelDetail(err))}
 		}
 
 		// The next-request gate. Every path to a new request comes
@@ -263,10 +260,7 @@ func (s *Session) loop(run *runState) []candidate {
 			}
 			reason, detail, serr := s.settleForError(err)
 			if serr != nil {
-				return []candidate{newCandidate(ReasonCancelled, SettleDetail{
-					Source: "cancel:context",
-					Text:   serr.Error(),
-				})}
+				return []candidate{newCandidate(ReasonCancelled, cancelDetail(serr))}
 			}
 			// The request failed, but the usage it produced is still
 			// written: every request gets a usage record.
@@ -605,7 +599,7 @@ func originForMode(mode InputMode) Origin {
 // error, so the caller can still write the usage it produced.
 func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
 	s.mu.Lock()
-	messages := copyMessages(s.history)
+	messages := CloneMessages(s.history)
 	tools := s.toolSpecs()
 	s.mu.Unlock()
 
@@ -682,12 +676,23 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport) {
 	})
 }
 
+// cancelDetail explains a cancelled settle. A deadline has its own
+// source, so a consumer can tell it from a plain cancel without reading
+// the text.
+func cancelDetail(err error) SettleDetail {
+	source := SourceCancelContext
+	if errors.Is(err, context.DeadlineExceeded) {
+		source = SourceCancelDeadline
+	}
+	return SettleDetail{Source: source, Text: err.Error()}
+}
+
 // settleForError maps a request error to a settle reason.
 func (s *Session) settleForError(err error) (Reason, SettleDetail, error) {
 	// A cancellation and a deadline are the same outcome: the run was
 	// stopped before the model finished.
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return ReasonCancelled, SettleDetail{Source: "cancel:context", Text: err.Error()}, nil
+		return ReasonCancelled, cancelDetail(err), nil
 	}
 	var pe *ProviderError
 	if errors.As(err, &pe) {

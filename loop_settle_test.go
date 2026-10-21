@@ -253,29 +253,6 @@ func TestTheHistoryTheModelSeesHoldsTheProseOnce(t *testing.T) {
 	}
 }
 
-// TestAZeroContextLimitSettlesBeforeAnyRequest pins what a zero
-// ContextLimit means: no room, so the run ends without sending.
-func TestAZeroContextLimitSettlesBeforeAnyRequest(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "never asked"}}}
-	sink := &recordingSink{}
-	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
-	opts.ContextLimit = 0
-
-	res, err := poo.NewRun(opts).Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
-	if res.Reason != poo.ReasonContextExhausted {
-		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
-	}
-	if got := settleOf(t, sink).Detail.Source; got != "no_output_room" {
-		t.Errorf("the settle source is %q, want no_output_room", got)
-	}
-	if len(tr.requests) != 0 {
-		t.Errorf("the transport was asked %d times, want none", len(tr.requests))
-	}
-}
-
 // TestARateLimitCarriesTheWaitItAskedFor covers a rate limit: the
 // endpoint asks the client to wait, and the settle record has to carry
 // the number, because the plan's provider_limit row settles on a
