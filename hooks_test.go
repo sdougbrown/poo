@@ -332,7 +332,7 @@ func TestTheRunTriggerCarriesTheJobs(t *testing.T) {
 		Kind: poo.TriggerJob,
 		Jobs: []poo.JobResult{{
 			Job:     "j3",
-			Handle:  "j3",
+			Handle:  "r1",
 			Tool:    "bash",
 			Text:    "the result",
 			Outcome: poo.OutcomeOK,
@@ -358,7 +358,7 @@ func TestTheJobResultRecordsRoundTrip(t *testing.T) {
 		Trigger:    poo.TriggerJob,
 		Jobs: []poo.JobResult{{
 			Job:     "j3",
-			Handle:  "j3",
+			Handle:  "r1",
 			Tool:    "bash",
 			Text:    "the result",
 			Outcome: poo.OutcomeOK,
@@ -377,5 +377,54 @@ func TestTheJobResultRecordsRoundTrip(t *testing.T) {
 	}
 	if len(back.Jobs) != 1 || back.Jobs[0].Job != "j3" {
 		t.Errorf("the jobs are %+v, want one j3", back.Jobs)
+	}
+}
+
+// TestTheJobResultUsesTheRecordVocabulary covers the job result's own
+// field names: a record is snake_case, and a job entry that reached the
+// log with Go's field names would not be readable by a consumer that
+// follows the documented vocabulary.
+func TestTheJobResultUsesTheRecordVocabulary(t *testing.T) {
+	started := &poo.RunStarted{
+		RecordMeta: poo.NewRecordMeta("run.started"),
+		RunID:      "r1",
+		Trigger:    poo.TriggerJob,
+		Jobs: []poo.JobResult{{
+			Job:     "j3",
+			Handle:  "r1",
+			Tool:    "bash",
+			Text:    "the result",
+			Outcome: poo.OutcomeOK,
+		}},
+	}
+	raw, err := json.Marshal(started)
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	jobs, ok := decoded["jobs"].([]any)
+	if !ok || len(jobs) != 1 {
+		t.Fatalf("the record's jobs are %v, want one entry", decoded["jobs"])
+	}
+	entry, ok := jobs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("the job entry is %v, want an object", jobs[0])
+	}
+	for _, field := range []string{"job", "handle", "tool", "text", "outcome"} {
+		if _, ok := entry[field]; !ok {
+			t.Errorf("the job entry has no %q field: %v", field, entry)
+		}
+	}
+	if entry["job"] != "j3" {
+		t.Errorf("the job entry's job is %v, want j3", entry["job"])
+	}
+	if entry["handle"] != "r1" {
+		t.Errorf("the job entry's handle is %v, want r1", entry["handle"])
+	}
+	if entry["outcome"] != "ok" {
+		t.Errorf("the job entry's outcome is %v, want ok", entry["outcome"])
 	}
 }

@@ -31,24 +31,24 @@ type ForkFunc func(ctx context.Context, appended []Message, maxTokens int) (Mess
 // in different ways, and the core validates which one it got.
 type Compaction struct {
 	// Strategy names the strategy that produced the compaction.
-	Strategy string
+	Strategy string `json:"strategy"`
 	// Replace turns a range of completed turns into visible messages.
-	Replace *RangeReplacement
+	Replace *RangeReplacement `json:"replace,omitempty"`
 	// Rewrite changes the content of tool results, by handle.
-	Rewrite []ToolResultRewrite
+	Rewrite []ToolResultRewrite `json:"rewrite,omitempty"`
 	// Window is a provider-native window: the model's own compacted
 	// state, used as it is.
-	Window *ProviderWindow
+	Window *ProviderWindow `json:"window,omitempty"`
 	// End refuses to compact: the run settles with the handoff.
-	End *EndRun
+	End *EndRun `json:"end,omitempty"`
 }
 
 // TurnRange is a range of turns, counting from one.
 type TurnRange struct {
 	// First is the range's first turn.
-	First int
+	First int `json:"first"`
 	// Last is the range's last turn.
-	Last int
+	Last int `json:"last"`
 }
 
 // RangeReplacement replaces a range of completed turns with messages the
@@ -58,9 +58,9 @@ type TurnRange struct {
 // was replaced, not have it happen silently.
 type RangeReplacement struct {
 	// Cut is the range of turns the replacement covers.
-	Cut TurnRange
+	Cut TurnRange `json:"cut"`
 	// Messages are the messages that replace the range.
-	Messages []Message
+	Messages []Message `json:"replacement"`
 }
 
 // ToolResultRewrite changes the content of one tool result.
@@ -69,9 +69,9 @@ type RangeReplacement struct {
 // so the model can tell the result was rewritten.
 type ToolResultRewrite struct {
 	// Handle is the tool result's handle, e.g. "r1".
-	Handle string
+	Handle string `json:"handle"`
 	// Content is the result's new content.
-	Content string
+	Content string `json:"content"`
 }
 
 // ProviderWindow is a provider-native compaction: the model's own
@@ -82,7 +82,7 @@ type ToolResultRewrite struct {
 // checks this before it accepts a window.
 type ProviderWindow struct {
 	// Items are the window's blocks.
-	Items []ContentBlock
+	Items []ContentBlock `json:"items"`
 }
 
 // EndRun is a compactor's refusal to compact.
@@ -91,7 +91,7 @@ type ProviderWindow struct {
 // detail, so a consumer can carry the work on.
 type EndRun struct {
 	// Handoff is the note the next agent picks up.
-	Handoff string
+	Handoff string `json:"handoff"`
 }
 
 // NativeCompactor is implemented by a transport that can compact the

@@ -28,7 +28,7 @@ A record that someone produced also carries an `origin`:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `origin` | string | Who produced the record: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"` or `"hook:<name>"`. **Absent** on the records that no one produced: the session's own header, a run's boundaries, the usage accounting. |
+| `origin` | string | Who produced the record: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"`, `"compaction"` or `"hook:<name>"`. **Absent** on the records that no one produced: the session's own header, a run's boundaries, the usage accounting. |
 
 ## Record names
 
@@ -108,8 +108,8 @@ A `jobs` entry holds:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `job` | string | The job's identifier. |
-| `handle` | string | The job's public handle. |
+| `job` | string | The job's identifier, e.g. `"j3"`. |
+| `handle` | string | The handle of the tool call the job came from, e.g. `"r1"`. The call returned at once with a `started` outcome, and the job carries that call's handle. |
 | `tool` | string | The tool the job ran. |
 | `text` | string | The job's result, as the model reads it. |
 | `outcome` | string | The job's outcome. |
@@ -123,7 +123,7 @@ list the model sees: nothing is trimmed, rewritten or summarised.
 |---|---|---|
 | `run_id` | string | The run the message belongs to. |
 | `turn` | integer | The turn the message belongs to. `0` for the run's input. |
-| `origin` | string | Who produced the message: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"` or `"hook:<name>"`. |
+| `origin` | string | Who produced the message: `"user"`, `"model"`, `"tool"`, `"system"`, `"job"`, `"steer"`, `"interrupt"`, `"follow_up"`, `"compaction"` or `"hook:<name>"`. |
 | `role` | string | The message's role: `"system"`, `"user"`, `"assistant"` or `"tool"`. |
 | `content` | array of objects | The message's content blocks. |
 | `message_id` | string | The message's session-monotonic id, e.g. `"m7"`. Absent when the message has none. |

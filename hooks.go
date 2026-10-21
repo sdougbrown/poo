@@ -388,15 +388,22 @@ const (
 )
 
 // JobResult is a background job's result.
+//
+// The job and the handle are two different things. The job is the
+// background job itself, named j<n>. The handle is the tool call the
+// job came from, named r<n>: the call returned at once with a "started"
+// outcome, and the job carries that call's handle, so a reader can tie
+// the job back to the call that started it.
 type JobResult struct {
 	// Job is the job's identifier, e.g. "j3".
-	Job string
-	// Handle is the job's public handle, e.g. "j3".
-	Handle string
+	Job string `json:"job"`
+	// Handle is the handle of the tool call the job came from, e.g.
+	// "r1".
+	Handle string `json:"handle"`
 	// Tool is the name of the tool the job ran.
-	Tool string
+	Tool string `json:"tool"`
 	// Text is the job's result, as the model reads it.
-	Text string
+	Text string `json:"text"`
 	// Outcome is the job's outcome.
-	Outcome Outcome
+	Outcome Outcome `json:"outcome"`
 }
