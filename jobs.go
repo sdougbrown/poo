@@ -447,21 +447,46 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	// The job's context decides a timeout or a cancellation before a
 	// nil error can call the job successful: a cooperative tool returns
 	// its partial output and no error when it is stopped.
+	outcome := OutcomeOK
+	text := result.Text
 	switch {
 	case timedOut:
 		// The job ran out of time. The outcome is an error with the
 		// timeout flag, and the partial output is the result.
-		s.finishJob(job, OutcomeError, stoppedText(result.Text, err, "the job ran out of time"), true, fatal)
+		outcome = OutcomeError
+		text = stoppedText(result.Text, err, "the job ran out of time")
 	case errors.Is(ctx.Err(), context.Canceled):
 		// The job was stopped on purpose.
-		s.finishJob(job, OutcomeCancelled, stoppedText(result.Text, err, "the job was cancelled"), false, fatal)
+		outcome = OutcomeCancelled
+		text = stoppedText(result.Text, err, "the job was cancelled")
 	case err == nil:
-		s.finishJob(job, OutcomeOK, result.Text, false, false)
 	case errors.Is(err, context.Canceled):
-		s.finishJob(job, OutcomeCancelled, stoppedText(result.Text, err, "the job was cancelled"), false, fatal)
+		outcome = OutcomeCancelled
+		text = stoppedText(result.Text, err, "the job was cancelled")
 	default:
-		s.finishJob(job, OutcomeError, err.Error(), false, fatal)
+		outcome = OutcomeError
+		text = err.Error()
 	}
+
+	// The after-tool chain runs once, at the job's completion, under
+	// the session's own context. There may be no active run: the run
+	// that started the job may have settled long ago.
+	//
+	// Only the chain's result is recorded and emitted, so a held result
+	// never leaks what a hook would have redacted.
+	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{})
+	info.Job = job.id
+	chain, hookErr := s.runAfterTool(ctx, job.runID, job.id, 0, info, ToolResult{
+		Text:    text,
+		IsError: outcome == OutcomeError,
+	})
+	if hookErr != nil {
+		// The failure belongs to the job: no run owns it, so it is
+		// not a hook_error.
+		s.finishJob(job, OutcomeError, hookErr.Error(), false, fatal)
+		return
+	}
+	s.finishJob(job, outcome, chain.result.Text, timedOut, fatal)
 }
 
 // stoppedText returns the partial output a stopped job produced, and the
