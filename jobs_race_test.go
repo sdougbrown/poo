@@ -657,3 +657,47 @@ func TestNoJobLaunchesAfterTheSettle(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+// TestARefusedBackgroundCallIsRecordedSync covers the plan's rule: a
+// BeforeTool denial or Result never creates a job, so the call's record
+// says sync.
+func TestARefusedBackgroundCallIsRecordedSync(t *testing.T) {
+	cases := []struct {
+		name string
+		hook poo.BeforeToolHook
+	}{
+		{name: "denied", hook: denyingBeforeTool{}},
+		{name: "answered", hook: answeringBeforeTool{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tr := scripted([]fakeResponse{
+				{calls: []poo.ToolCall{jobCall("one", true)}},
+				{text: "the answer"},
+			})
+			sink := &recordingSink{}
+			tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+			tool.SetResult("the job's output")
+			tool.Release()
+
+			opts := jobOptions(t, tr, tool, sink)
+			opts.BeforeTool = []poo.BeforeToolHook{c.hook}
+			s := newTestSession(t, opts)
+			if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+				t.Fatalf("starting the run: %v", err)
+			}
+			if _, err := s.Wait(context.Background()); err != nil {
+				t.Fatalf("waiting for the run: %v", err)
+			}
+			for _, rec := range sink.allRecords() {
+				call, ok := rec.(*poo.ToolCallRecord)
+				if !ok {
+					continue
+				}
+				if call.Mode != poo.CallModeSync {
+					t.Errorf("the refused call's mode is %q, want sync", call.Mode)
+				}
+			}
+		})
+	}
+}
