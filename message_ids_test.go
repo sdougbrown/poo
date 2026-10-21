@@ -3,6 +3,8 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -118,5 +120,47 @@ func TestTheMessageRecordCarriesTheId(t *testing.T) {
 	}
 	if decoded["message_id"] != "m1" {
 		t.Errorf("the record's message id is %v, want m1", decoded["message_id"])
+	}
+}
+
+// TestTheMessageIdsAreSafeForConcurrentUse covers the counter under
+// concurrent use: a run's streaming goroutine and a job's completion can
+// both ask for an id, and no id is ever handed out twice.
+func TestTheMessageIdsAreSafeForConcurrentUse(t *testing.T) {
+	ids := &poo.MessageIDs{}
+	workers := 16
+	perWorker := 50
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	seen := make(map[string]bool, workers*perWorker)
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perWorker; i++ {
+				id := ids.Next()
+				mu.Lock()
+				if seen[id] {
+					t.Errorf("the id %q was handed out twice", id)
+				}
+				seen[id] = true
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if len(seen) != workers*perWorker {
+		t.Errorf("the counter handed out %d ids, want %d", len(seen), workers*perWorker)
+	}
+	// The ids are the ones the plan names, and they run from one to the
+	// number of ids handed out.
+	for i := 1; i <= workers*perWorker; i++ {
+		if _, ok := seen[fmt.Sprintf("m%d", i)]; !ok {
+			t.Errorf("the id m%d was never handed out", i)
+			break
+		}
 	}
 }

@@ -1,6 +1,9 @@
 package poo
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 // MessageIDs hands out the session-monotonic message ids.
 //
@@ -9,8 +12,12 @@ import "fmt"
 // compaction and reload. A session owns one counter, so the ids never
 // repeat within a session.
 //
+// The counter is safe for concurrent use: a run's streaming goroutine
+// and a job's completion can both ask for an id.
+//
 // The zero value is ready to use.
 type MessageIDs struct {
+	mu sync.Mutex
 	// next is the number the next id gets.
 	next int
 }
@@ -19,6 +26,8 @@ type MessageIDs struct {
 //
 // The first id is "m1".
 func (ids *MessageIDs) Next() string {
+	ids.mu.Lock()
+	defer ids.mu.Unlock()
 	ids.next++
 	return fmt.Sprintf("m%d", ids.next)
 }
@@ -26,6 +35,8 @@ func (ids *MessageIDs) Next() string {
 // Peek returns the id the next call to Next will return, without
 // handing it out.
 func (ids *MessageIDs) Peek() string {
+	ids.mu.Lock()
+	defer ids.mu.Unlock()
 	return fmt.Sprintf("m%d", ids.next+1)
 }
 
@@ -35,6 +46,8 @@ func (ids *MessageIDs) Peek() string {
 // ids it already assigned. A number below the current one is ignored, so
 // the ids never go backwards.
 func (ids *MessageIDs) Set(n int) {
+	ids.mu.Lock()
+	defer ids.mu.Unlock()
 	if n > ids.next {
 		ids.next = n
 	}
