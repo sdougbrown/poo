@@ -7,8 +7,10 @@ import (
 
 // ProviderKind classifies a provider failure.
 //
-// The kinds are the plan's: a settle reason is derived from them, so the
-// set is closed and every kind means one thing.
+// A settle reason is derived from the kind, and every kind means one
+// thing. Not every kind appears in the plan's settle table:
+// session_incompatible currently settles as provider_error, and its
+// settle placement is pending an owner decision.
 type ProviderKind string
 
 const (
