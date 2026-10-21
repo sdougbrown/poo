@@ -235,8 +235,9 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 // the appended messages and the output ceiling.
 //
 // The snapshot holds the serialized body, so the fork re-sends it with
-// the last message replaced by the appended ones. The key order and every
-// other field are unchanged, because the body was serialized once.
+// the appended messages added after the last one. The key order and
+// every other field are unchanged, because the body was serialized once
+// and only the two changed fields are rewritten.
 func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
 	if len(prev.Body) == 0 {
 		return nil, &poo.ProviderError{

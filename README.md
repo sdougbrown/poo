@@ -39,6 +39,9 @@ that already exists, rather than appending a second session to it.
 | Package | Role |
 |---|---|
 | `poo` | Core: agent loop FSM, tool registry, hooks, event stream, session lifecycle |
+| `poo/decide` | Decision-model types: questions, answers, the decider, the recording wrapper |
+| `poo/prompt` | The system prompt's vocabulary: named sections and the environment they read |
+| `poo/pootest` | Exported test helpers: a scripted transport, an in-memory sink, a stub decider, a scripted compactor |
 | `poo/tool/*` | Opt-in tools: `read`, `edit`, `grep`, `bash`, `cliregistry` |
 | `poo/provider/*` | Provider seam and transports |
 | `poo/perm` | Permission engine: policy over tool calls |
@@ -49,6 +52,11 @@ that already exists, rather than appending a second session to it.
 
 The core depends on the standard library only (plus `poo/prompt` and
 `poo/decide`). `scripts/check-imports.sh` enforces this in CI.
+
+The message model is provider-neutral and carries what the three wire
+APIs need. The round trip through Chat Completions, OpenAI Responses and
+Anthropic Messages is written down in
+[docs/wire-api-mapping.md](docs/wire-api-mapping.md).
 
 ## Development
 

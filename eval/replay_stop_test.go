@@ -116,3 +116,40 @@ func TestTheReplayDifferencesAreExact(t *testing.T) {
 		t.Errorf("the sequences differ: %v", result.Differences)
 	}
 }
+
+// TestTheReplayReplaysEveryCallOfATurn covers a turn with more than one
+// tool call: the replay makes them all.
+//
+// The replay reader the harness used before pootest advanced past the
+// calls stage as soon as it handed out the first call, so a turn with
+// two calls replayed as one. The scripted transport hands out every call
+// in the turn.
+func TestTheReplayReplaysEveryCallOfATurn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	log := strings.Join([]string{
+		`{"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s","context_limit":32768}`,
+		`{"record":"message","seq":2,"ts":"2026-10-20T00:00:00Z","run_id":"r","turn":1,"origin":"model","role":"assistant","content":[{"kind":"tool_call","name":"bash","arguments":{"command":"ls"}},{"kind":"tool_call","name":"read","arguments":{"path":"a.go"}}]}`,
+		`{"record":"run.settled","seq":3,"ts":"2026-10-20T00:00:00Z","run_id":"r","reason":"end_turn","detail":{"source":"end_turn"},"turns":1}`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
+		t.Fatalf("writing the log: %v", err)
+	}
+
+	result, err := Replay(path, ReplayOptions{Context: context.Background(), ContextLimit: 32768})
+	if err != nil {
+		t.Fatalf("replaying: %v", err)
+	}
+	if len(result.Recorded) != 2 {
+		t.Fatalf("the recording holds %d calls, want 2", len(result.Recorded))
+	}
+	if len(result.Replayed) != 2 {
+		t.Fatalf("the replay produced %d calls, want 2: %+v", len(result.Replayed), result.Replayed)
+	}
+	if result.Replayed[0].Tool != "bash" || result.Replayed[1].Tool != "read" {
+		t.Errorf("the replayed calls are %+v, want bash and read", result.Replayed)
+	}
+	if !result.Match {
+		t.Errorf("the sequences differ: %v", result.Differences)
+	}
+}
