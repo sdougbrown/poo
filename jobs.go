@@ -1161,13 +1161,15 @@ func (s *Session) closeJobs() {
 		s.jobCancel(ErrJobCancelled)
 	}
 
-	// The teardown is bounded, so a job that ignores its context never
-	// holds the close up.
-	deadline := time.After(recordWriteBudget)
+	// The teardown is bounded once for the whole wait, so a job that
+	// ignores its context never holds the close up, however many jobs
+	// are still running.
+	teardown, stopTeardown := context.WithTimeout(context.Background(), recordWriteBudget)
+	defer stopTeardown()
 	for _, job := range jobs {
 		select {
 		case <-job.done:
-		case <-deadline:
+		case <-teardown.Done():
 		}
 	}
 

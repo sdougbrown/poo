@@ -582,3 +582,57 @@ func TestAFinishWithAJobRunningSettlesFinished(t *testing.T) {
 		t.Errorf("the settle detail lists %v, want [j1]", res.Detail.JobsRunning)
 	}
 }
+
+// uncooperativeJobTool ignores its context, so the close's teardown
+// deadline is the only thing that bounds it.
+type uncooperativeJobTool struct {
+	*pootest.JobTool
+	gate    chan struct{}
+	entered chan struct{}
+}
+
+// Call blocks until the test releases it, whatever the context says.
+func (t *uncooperativeJobTool) Call(ctx context.Context, p poo.Prepared, e poo.ToolEnv) (poo.ToolResult, error) {
+	t.entered <- struct{}{}
+	<-t.gate
+	return poo.ToolResult{Text: "done"}, nil
+}
+
+// TestTheCloseIsBoundedWithTwoUncooperativeJobs covers the plan's close:
+// the teardown bound is one deadline for the whole wait, so a second job
+// that ignores its context does not hold the close forever.
+func TestTheCloseIsBoundedWithTwoUncooperativeJobs(t *testing.T) {
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{
+		jobCall("one", true),
+		jobCall("two", true),
+	}}})
+	tool := &uncooperativeJobTool{
+		JobTool: pootest.NewJobTool("job", poo.BackgroundAllowed),
+		gate:    make(chan struct{}),
+		entered: make(chan struct{}, 2),
+	}
+	opts := jobOptions(t, tr, tool, &recordingSink{})
+	opts.MaxTurns = 1
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.entered
+	<-tool.entered
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.Close() }()
+	select {
+	case err := <-done:
+		close(tool.gate)
+		if err != nil {
+			t.Errorf("closing: %v", err)
+		}
+	case <-time.After(6 * time.Second):
+		close(tool.gate)
+		<-done
+		t.Fatal("Close still blocked after 6s with two jobs; the teardown bound must cover the whole wait")
+	}
+}
