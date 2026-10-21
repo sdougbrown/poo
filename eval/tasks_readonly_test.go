@@ -329,6 +329,8 @@ func TestTheReadOnlyChecksJudgeTheFactNotTheWord(t *testing.T) {
 	}{
 		{"find-slow-loop", "Store.get scans every record. Use a dict.", true},
 		{"find-slow-loop", "Each lookup scans, so you get slow behaviour. Use a dict.", false},
+		{"find-slow-loop", "find_all does the scan, and a dict keyed by id would replace it.", true},
+		{"find-slow-loop", "Store.put does the scan, and a dict keyed by id would replace it.", false},
 		{"find-off-by-one-loop", "chunks() stops early: it should be `index < len(items)`.", true},
 		{"find-off-by-one-loop", "chunks() stops early: it should be `index <= len(items) - 1`.", true},
 		{"find-off-by-one-loop", "chunks() stops early: it should be `index < len(items) - 2`.", false},

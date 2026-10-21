@@ -1,8 +1,10 @@
 package eval
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -241,5 +243,57 @@ func TestTheFixturePathIsRelativeToTheTaskRoot(t *testing.T) {
 	want := filepath.Join("/repo/evals/fixtures", "fix-a")
 	if got != want {
 		t.Errorf("the fixture path is %q, want %q", got, want)
+	}
+}
+
+func TestTheShippedModelCatalogIsValid(t *testing.T) {
+	models, err := LoadModels(filepath.Join(repoRoot(t), "evals", "models.yaml"))
+	if err != nil {
+		t.Fatalf("loading evals/models.yaml: %v", err)
+	}
+	byName := map[string]Model{}
+	for _, m := range models {
+		byName[m.Name] = m
+	}
+	if got := byName["gemma4-think"].ReasoningEffort; got == "" {
+		t.Errorf("gemma4-think sends no reasoning_effort")
+	}
+}
+
+func TestTheRunnerPassesTheReasoningEffort(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	argv := filepath.Join(t.TempDir(), "argv")
+	poo := fakePoo(t, `printf '%s\n' "$@" > '`+argv+`'
+`+logWritingPoo)
+	out := t.TempDir()
+	runner := NewRunner(RunOptions{
+		Models: []Model{
+			{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768, ReasoningEffort: "low"},
+		},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: poo,
+	})
+	if _, err := runner.Run(context.Background()); err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	data, err := os.ReadFile(argv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Split(strings.TrimSpace(string(data)), "\n")
+	found := false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--reasoning-effort" && args[i+1] == "low" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("poo was run with %q, want --reasoning-effort low", args)
 	}
 }
