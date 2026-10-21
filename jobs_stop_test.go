@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,61 +15,158 @@ import (
 // The stopping of a job: the model may cancel one, the jobs timeout
 // stops one, and the session's limit refuses a new one.
 
+// gatedSink is the recording sink with a hold on the first job.ended
+// record.
+//
+// A job is marked ended before its terminal record is written, so the
+// run that started it can end in that window. The gate pins the window:
+// writing is closed once the record's write has started, and the write
+// waits for the test to open the gate. The ordering is therefore the
+// same on every run, not only under load.
+type gatedSink struct {
+	*recordingSink
+
+	// writing is closed when the job.ended write starts, which is after
+	// the job is marked ended.
+	writing chan struct{}
+	// gate holds the write until the test opens it.
+	gate chan struct{}
+	// wrote guards writing's close.
+	wrote sync.Once
+	// opened guards gate's close.
+	opened sync.Once
+}
+
+// newGatedSink builds a recording sink whose first job.ended write waits
+// for the gate.
+func newGatedSink() *gatedSink {
+	return &gatedSink{
+		recordingSink: &recordingSink{},
+		writing:       make(chan struct{}),
+		gate:          make(chan struct{}),
+	}
+}
+
+// Append holds the first job.ended record until the gate opens, and
+// collects every other record at once.
+func (s *gatedSink) Append(ctx context.Context, rec poo.Record) error {
+	if _, ok := rec.(*poo.JobEnded); ok {
+		s.wrote.Do(func() { close(s.writing) })
+		<-s.gate
+	}
+	return s.recordingSink.Append(ctx, rec)
+}
+
+// open releases the held job.ended write.
+func (s *gatedSink) open() {
+	s.opened.Do(func() { close(s.gate) })
+}
+
 // TestCancelJobStopsTheJobAndDeliversItsPartialOutput covers the
 // plan's rule: cancel_job stops the job, and its partial output is
 // delivered like any result.
 func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
+	sink := newGatedSink()
+	// The echo call holds the turn open until the cancelled job's
+	// terminal record is being written, so the run's turn end never
+	// sees a job that is still running: the job is ended, and its
+	// record is on its way to the store.
+	hold := &echoTool{}
+	hold.call = func(ctx context.Context) (poo.ToolResult, error) {
+		<-sink.writing
+		return poo.ToolResult{Text: "echoed"}, nil
+	}
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
-		{calls: []poo.ToolCall{{
-			ID:        "call_2",
-			Name:      "cancel_job",
-			Arguments: json.RawMessage(`{"job":"j1"}`),
-		}}},
+		{calls: []poo.ToolCall{
+			{
+				ID:        "call_2",
+				Name:      "cancel_job",
+				Arguments: json.RawMessage(`{"job":"j1"}`),
+			},
+			{ID: "call_3", Name: "echo", Arguments: json.RawMessage(`{"text":"hold"}`)},
+		}},
 		{text: "the answer"},
 	})
-	sink := &recordingSink{}
 	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
 	tool.SetResult("the job's output")
 
-	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	opts := jobOptions(t, tr, tool, sink)
+	opts.Tools["echo"] = hold
+	opts.ToolOrder = append(opts.ToolOrder, "echo")
+
+	s := newTestSession(t, opts)
+	t.Cleanup(sink.open)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tool.Started()
-	res, err := s.Wait(context.Background())
+	// The bound is a failure guard, not the pin: the ordering comes from
+	// the channels, so the wait ends as soon as the run settles.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := s.Wait(ctx)
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the run settled %q, want end_turn", res.Reason)
 	}
-	// The job ended as cancelled, and the result was delivered.
-	found := false
+	// The job is ended, and the write of its terminal record is held, so
+	// the run settled before the record landed. The plan allows that
+	// order: a job belongs to the session, not the run, and a result
+	// that arrives after the commit point is delivered after run.settled
+	// by the wake row of the delivery table.
+	if n := sink.count("job.ended"); n != 0 {
+		t.Fatalf("the log holds %d job.ended records while the write is held, want 0", n)
+	}
+	// The wait is for the delivery, not for a particular run: opening
+	// the gate lets the record land and the queued result wake a run
+	// that delivers it. WaitJobs ends when the session has no open run,
+	// no running job and no eligible result left, which is past both
+	// writes.
+	sink.open()
+	if err := s.WaitJobs(ctx); err != nil {
+		t.Fatalf("waiting for the cancelled job's delivery: %v", err)
+	}
+	var ended *poo.JobEnded
 	for _, rec := range sink.allRecords() {
-		ended, ok := rec.(*poo.JobEnded)
-		if !ok {
+		if e, ok := rec.(*poo.JobEnded); ok {
+			ended = e
+		}
+	}
+	if ended == nil {
+		t.Fatal("the log holds no job.ended record")
+	}
+	if ended.Outcome != poo.JobOutcomeCancelled {
+		t.Errorf("the job ended %q, want cancelled", ended.Outcome)
+	}
+	// The result keeps the partial output the stopped call produced.
+	if !strings.Contains(ended.Text, "the call was stopped") {
+		t.Errorf("the job.ended text is %q, want the partial output", ended.Text)
+	}
+	// The result was delivered as a job input, and the model read it.
+	delivered := false
+	for _, rec := range sink.allRecords() {
+		if d, ok := rec.(*poo.InputDelivered); ok && d.InputID == ended.InputID {
+			delivered = d.Mode == poo.InputModeJob
+		}
+	}
+	if !delivered {
+		t.Error("the log holds no job delivery of the cancelled job's result")
+	}
+	shown := false
+	for _, m := range sink.messages() {
+		if m.Origin != poo.OriginJob {
 			continue
 		}
-		if ended.Outcome != poo.JobOutcomeCancelled {
-			t.Errorf("the job ended %q, want cancelled", ended.Outcome)
+		if strings.Contains(m.Content[0].Text, "the call was stopped") {
+			shown = true
 		}
-		found = true
 	}
-	if !found {
-		t.Error("the log holds no job.ended record")
+	if !shown {
+		t.Error("the cancelled job's partial output did not reach the model")
 	}
-	// A result that finishes after the commit point is delivered by a
-	// woken run, so the wait is for the message rather than for a
-	// particular run.
-	waitFor(t, "the cancelled job's result to reach the model", func() bool {
-		for _, m := range sink.messages() {
-			if m.Origin == poo.OriginJob {
-				return true
-			}
-		}
-		return false
-	})
 }
 
 // TestTheJobTimeoutStopsTheJob covers the plan's rule: the job timeout
