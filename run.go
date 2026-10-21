@@ -116,13 +116,43 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		"jobs":        jobPayload(jobs),
 	})
 
-	// The system prompt is the first thing the model sees, and it is
-	// frozen for the length of the run.
-	if s.opts.SystemPrompt != "" {
-		msg := NewTextMessage(RoleSystem, s.opts.SystemPrompt)
+	// The held results are delivered before the prompt's text, so the
+	// model sees them first. A woken run's job results are appended
+	// before its first request too, and they are recorded with the
+	// delivery the queue gave them.
+	//
+	// The results are delivered before the before-run hooks, so a woken
+	// run's hooks see the results that woke the run.
+	for _, result := range held {
+		s.deliverJobResult(run, result)
+	}
+	for _, result := range jobs {
+		s.deliverJobResult(run, result)
+	}
+
+	// The before-run hooks run at the start of every run, before the
+	// first request. The trigger says what started the run.
+	decisions, err := s.runBeforeRun(run, RunTrigger{
+		Kind:   trigger,
+		Prompt: text,
+		Jobs:   publicJobResults(jobs),
+	})
+	if err != nil {
+		// A hook that failed settles the run with hook_error.
+		s.finalize(run, newCandidate(ReasonHookError, SettleDetail{
+			Source: "before_run",
+			Text:   err.Error(),
+		}))
+		return runID, nil
+	}
+
+	// The system prompt is rendered once per run, after the before-run
+	// hooks, and it is frozen for the length of the run.
+	if promptText := s.renderPrompt(decisions.edits); promptText != "" {
+		msg := NewTextMessage(RoleSystem, promptText)
 		msg.Origin = OriginSystem
 		s.appendMessages(msg)
-		if err := s.write(ctx, &MessageRecord{
+		if err := s.writeRun(run, &MessageRecord{
 			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 			RunID:      runID,
 			Role:       msg.Role,
@@ -136,16 +166,9 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		}
 	}
 
-	// The held results are delivered before the prompt's text, so the
-	// model sees them first. A woken run's job results are appended
-	// before its first request too, and they are recorded with the
-	// delivery the queue gave them.
-	for _, result := range held {
-		s.deliverJobResult(run, result)
-	}
-	for _, result := range jobs {
-		s.deliverJobResult(run, result)
-	}
+	// The messages the before-run hooks appended follow the system
+	// prompt.
+	s.appendStartMessages(run, decisions)
 
 	user := NewTextMessage(RoleUser, withDeliveryNote(text, note))
 	user.Origin = OriginUser

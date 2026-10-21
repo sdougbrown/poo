@@ -652,35 +652,6 @@ type RepeatCounts struct {
 	Near int
 }
 
-// runSessionStart runs the session-start hooks.
-//
-// The hooks' output is buffered in memory: a construction that fails
-// leaves nothing written.
-func (s *Session) runSessionStart() ([]Record, error) {
-	if len(s.opts.SessionStart) == 0 {
-		return nil, nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.opts.HookTimeout)
-	defer cancel()
-	var buffered []Record
-	for _, h := range s.opts.SessionStart {
-		decision, err := h.SessionStart(s.hookContext(ctx, 0, false))
-		if err != nil {
-			return nil, &ErrSessionInit{Cause: fmt.Errorf("poo: the session_start hook: %w", err)}
-		}
-		for _, msg := range decision.Append {
-			msg = hookMessage(msg, hookName(h))
-			s.appendMessages(msg)
-			buffered = append(buffered, &MessageRecord{
-				RecordMeta: NewRecordMetaFrom("message", msg.Origin),
-				Role:       msg.Role,
-				Content:    msg.Content,
-			})
-		}
-	}
-	return buffered, nil
-}
-
 // hookMessage turns a hook's appended message into a user message.
 //
 // The step's output enters the history as a user-role message tagged
