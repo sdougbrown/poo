@@ -159,7 +159,7 @@ func (s *Session) countRepeats(plans []callPlan) {
 			exact = "invalid:" + p.call.Name
 			near = nearKeyOf(p.call.Name, primary, p.call.Arguments, true)
 		}
-		counts := s.repeats.count(p.call.Name, exact, near)
+		counts := s.repeats.count(exact, near)
 		s.repeatCounts[p.handle] = counts
 		s.repeatOrder = append(s.repeatOrder, p.handle)
 	}
@@ -698,16 +698,15 @@ func Fatalf(format string, args ...any) error {
 // argument. A Prepare failure counts toward the near key, because the
 // same malformed call repeated is the same loop.
 //
-// The counters count consecutive repeats, and a call to another tool
-// does not break the streak: a run that reads the same file five times
-// with another tool in between is still a loop.
+// The counters are kept per key, and a call to another tool does not
+// break the streak: a run that reads the same file five times with
+// another tool in between is still a loop. The keys name the tool, so
+// calls to different tools never share a count.
 type repeatCounter struct {
 	// exact counts the repeats of each exact key.
 	exact map[string]int
 	// near counts the repeats of each near key.
 	near map[string]int
-	// lastTool is the tool the last call was for.
-	lastTool string
 }
 
 // repeatCounts is what a call's repeat counters hold.
@@ -728,14 +727,8 @@ func newRepeatCounter() *repeatCounter {
 //
 // The counts are the number of times the model has made this call, and
 // the number of times it has made a call with the same primary
-// argument, since the last call to another tool.
-func (c *repeatCounter) count(tool, exactKey, nearKey string) repeatCounts {
-	if tool != c.lastTool {
-		// A call to another tool breaks the streak.
-		c.exact = map[string]int{}
-		c.near = map[string]int{}
-		c.lastTool = tool
-	}
+// argument, in the run.
+func (c *repeatCounter) count(exactKey, nearKey string) repeatCounts {
 	c.exact[exactKey]++
 	c.near[nearKey]++
 	return repeatCounts{exact: c.exact[exactKey], near: c.near[nearKey]}

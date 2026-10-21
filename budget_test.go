@@ -534,3 +534,31 @@ func TestTheEstimateCountsTheReplyTheUsageReportLeftOut(t *testing.T) {
 		t.Errorf("the second request's max_tokens is %d, want under 1500: the reply counts toward the estimate", reqs[1].MaxTokens)
 	}
 }
+
+// TestACallToAnotherToolDoesNotBreakTheStreak covers the plan's doom
+// loop counters: "consecutive" ignores calls to other tools, so a call
+// repeated around an unrelated one keeps counting.
+func TestACallToAnotherToolDoesNotBreakTheStreak(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{
+			calls: []poo.ToolCall{
+				{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
+				{ID: "call_2", Name: "other", Arguments: []byte(`{"text":"two"}`)},
+				{ID: "call_3", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
+			},
+		},
+		{text: "the answer"},
+	})
+	tool := &echoTool{result: "echoed", primaryArg: "text"}
+
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	opts.Tools["other"] = &namedTool{echoTool: echoTool{result: "other", primaryArg: "text"}, name: "other"}
+	opts.ToolOrder = []string{"echo", "other"}
+
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	if got := s.RepeatCountsFor("r3"); got.Exact != 2 || got.Near != 2 {
+		t.Errorf("the third call's counts are %+v, want exact 2 and near 2", got)
+	}
+}
