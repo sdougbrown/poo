@@ -293,3 +293,41 @@ func TestAnErrorChunkWithoutAMessageIsStillAnError(t *testing.T) {
 		})
 	}
 }
+
+// slowErrorServer answers with a status and a JSON body in two parts,
+// with a pause between them.
+func slowErrorServer(t *testing.T, status int, first, rest string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(first))
+		w.(http.Flusher).Flush()
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte(rest))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestAnErrorBodyIsReadBeforeTheTimeoutIsReleased covers a request with
+// a timeout whose error body arrives in two parts: the body is read in
+// full, so the error keeps the endpoint's message and its kind.
+func TestAnErrorBodyIsReadBeforeTheTimeoutIsReleased(t *testing.T) {
+	const first = `{"error":{"message":"This model's maximum context `
+	const rest = `length is 8192 tokens","code":"context_length_exceeded"}}`
+	for name, status := range map[string]int{"a non-200 status": http.StatusBadRequest, "a 200 with a JSON error": http.StatusOK} {
+		t.Run(name, func(t *testing.T) {
+			srv := slowErrorServer(t, status, first, rest)
+			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", Timeout: 5 * time.Second})
+			_, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+			var pe *poo.ProviderError
+			if !errors.As(err, &pe) {
+				t.Fatalf("the error is %v, want a provider error", err)
+			}
+			if pe.Kind != poo.ProviderKindContextLength {
+				t.Errorf("the kind is %q (%s), want the context-length kind", pe.Kind, pe.Message)
+			}
+		})
+	}
+}

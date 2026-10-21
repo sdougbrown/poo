@@ -171,10 +171,13 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
+		// The body is read before the context is released: releasing
+		// it aborts the read and leaves an error with no message.
+		perr := classifyStatus(resp)
 		if cancel != nil {
 			cancel()
 		}
-		return nil, classifyStatus(resp)
+		return nil, perr
 	}
 
 	// Some servers answer a failed request with a 200 and a JSON error
@@ -192,10 +195,10 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	}
 	if first == '{' {
 		defer resp.Body.Close()
+		body, _ := io.ReadAll(br)
 		if cancel != nil {
 			cancel()
 		}
-		body, _ := io.ReadAll(br)
 		if kind, msg, code, ok := errorInBody(body); ok {
 			return nil, &poo.ProviderError{
 				Kind:    kind,
