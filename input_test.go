@@ -233,6 +233,9 @@ func TestAnInterruptDuringALongCallCancelsIt(t *testing.T) {
 	if !strings.Contains(result.Text, "partial output") {
 		t.Errorf("the result's text is %q, want the partial output", result.Text)
 	}
+	if !strings.Contains(result.Text, poo.CancelledInterruptedText) {
+		t.Errorf("the result's text is %q, want the interrupt's note", result.Text)
+	}
 }
 
 // TestAnInterruptSkipsTheUnstartedCalls covers the rest of the batch:

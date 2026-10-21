@@ -333,9 +333,9 @@ func testOptions(t *testing.T, tr poo.ChatTransport, tool *echoTool, sink poo.Re
 // newTestSession builds a session for a test.
 //
 // The session is closed when the test ends.
-func newTestSession(t *testing.T, opts poo.Options) *poo.Session {
+func newTestSession(t *testing.T, opts poo.Options, fns ...poo.Option) *poo.Session {
 	t.Helper()
-	s, err := poo.New(opts)
+	s, err := poo.New(opts, fns...)
 	if err != nil {
 		t.Fatalf("building the session: %v", err)
 	}

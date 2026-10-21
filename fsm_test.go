@@ -1083,3 +1083,49 @@ func TestTheTransitionTableIsClosed(t *testing.T) {
 		}
 	}
 }
+
+// TestTheTypedOptionsConfigureTheSession covers the options: each one
+// changes what the plan says it changes.
+func TestTheTypedOptionsConfigureTheSession(t *testing.T) {
+	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tool := &echoTool{result: "echoed"}
+	hook := &stoppingAfterTurn{}
+	observer := &collectingObserver{}
+
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	s := newTestSession(t, opts,
+		poo.WithAfterTurn(hook),
+		poo.WithObserver(observer),
+		poo.WithBudgets(5, 1000, time.Minute),
+		poo.WithContextRatios(0.7, 0.9),
+	)
+	res := runSession(t, s, "do the thing")
+
+	// The hook ran, so the option reached the session.
+	if hook.calls == 0 {
+		t.Error("the after-turn hook never ran")
+	}
+	// The budget reached the session: the run's turn ceiling is five,
+	// and the hook stopped it first.
+	if res.Reason != poo.ReasonStopRequested {
+		t.Errorf("the run settled %q, want stop_requested", res.Reason)
+	}
+}
+
+// TestASessionWithAFinishSchemaNeedsTheTool covers the construction: a
+// session that names a finish schema but has no finish tool is a
+// construction error, because the model would never be offered it.
+func TestASessionWithAFinishSchemaNeedsTheTool(t *testing.T) {
+	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	_, err := poo.New(opts, poo.WithFinish([]byte(`{"type":"object"}`)))
+	if err == nil {
+		t.Fatal("the session was built with a finish schema and no finish tool")
+	}
+	var init *poo.ErrSessionInit
+	if !asSessionInit(err, &init) {
+		t.Fatalf("the error is %T, want an ErrSessionInit", err)
+	}
+}

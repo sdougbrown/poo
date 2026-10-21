@@ -352,9 +352,10 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	if err == nil && s.wasInterrupted(run) {
 		// The call was cut short by an interrupt, even though the tool
 		// returned a result: the tool saw the cancellation and gave
-		// back what it had. The outcome says the call was cancelled.
+		// back what it had. The outcome says the call was cancelled,
+		// and the result carries the partial output with the note.
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-			Text:    result.Text,
+			Text:    interruptNote(result.Text),
 			IsError: true,
 		}, OutcomeCancelled)
 		return
@@ -560,6 +561,17 @@ const FinishToolName = "finish"
 type FinishResult interface {
 	// FinishResult returns the validated result.
 	FinishResult() json.RawMessage
+}
+
+// interruptNote adds the interrupt's note to a result's text.
+//
+// The result keeps whatever the tool managed to produce, and the note
+// says why the call ended.
+func interruptNote(text string) string {
+	if text == "" {
+		return CancelledInterruptedText
+	}
+	return text + "\n" + CancelledInterruptedText
 }
 
 // ErrFatal marks a tool error as fatal.

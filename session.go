@@ -272,12 +272,20 @@ type Options struct {
 // without a context window is a typed error, because a session that
 // cannot talk to a model, or that cannot measure its context, would
 // fail later in a way that is much harder to see.
-func New(opts Options) (*Session, error) {
+func New(opts Options, fns ...Option) (*Session, error) {
+	for _, fn := range fns {
+		if fn != nil {
+			fn(&opts)
+		}
+	}
 	if opts.Transport == nil {
 		return nil, &ErrSessionInit{Cause: errors.New("poo: the session has no chat transport")}
 	}
 	if opts.ContextLimit <= 0 {
 		return nil, &ErrSessionInit{Cause: errors.New("poo: the session has no context limit")}
+	}
+	if err := checkFinishTool(&opts); err != nil {
+		return nil, &ErrSessionInit{Cause: err}
 	}
 	if opts.MaxContinuations <= 0 {
 		opts.MaxContinuations = DefaultMaxContinuations
