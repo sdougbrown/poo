@@ -41,7 +41,7 @@ Run flags:
   --poo <path>         The poo binary to run (default: poo)
   --work-root DIR      Where the workdirs are made (default: the user cache directory)
   --keep-workdirs      Leave the workdirs behind after the run
-  --sandbox <mode>     How a run is isolated: none (default) or bwrap
+  --sandbox <mode>     How a run is isolated: bwrap (default, needs bubblewrap) or none
   --force              Clear the out directory's runs before the run
 
 Compare flags:
@@ -147,7 +147,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.pooBinary, "poo", "", "The poo binary to run")
 	fs.StringVar(&o.workRoot, "work-root", "", "Where the workdirs are made (default: the user cache directory)")
 	fs.BoolVar(&o.keepWork, "keep-workdirs", false, "Leave the workdirs behind")
-	fs.StringVar(&o.sandbox, "sandbox", eval.SandboxNone, "How a run is isolated: none or bwrap")
+	fs.StringVar(&o.sandbox, "sandbox", eval.SandboxBwrap, "How a run is isolated: bwrap or none")
 	fs.BoolVar(&o.force, "force", false, "Clear the out directory's runs before the run")
 
 	if err := fs.Parse(args); err != nil {
