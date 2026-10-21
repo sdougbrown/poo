@@ -9,7 +9,9 @@ import (
 func TestTheJudgeReadsTheDirectoryTheRunnerNames(t *testing.T) {
 	j := job{task: Task{ID: "t"}, model: Model{Name: "m"}, seed: 7}
 	runsDir := filepath.Join(t.TempDir(), runsDirName)
-	task, model, seed, ok := parseRunDir(runsDir, jobDir(runsDir, j))
+	// The runner writes each invocation's runs under a run-<id>
+	// directory of its own.
+	task, model, seed, ok := parseRunDir(runsDir, jobDir(filepath.Join(runsDir, "run-abc"), j))
 	if !ok || task != "t" || model != "m" || seed != 7 {
 		t.Errorf("parsed %q %q %d %v, want t m 7 true", task, model, seed, ok)
 	}
