@@ -43,7 +43,7 @@ func TestTheStateTableCoversEveryState(t *testing.T) {
 // TestTheRunMovesThroughTheStatesItUses walks a run that calls a tool
 // and reads the states it passed through.
 func TestTheRunMovesThroughTheStatesItUses(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -52,7 +52,7 @@ func TestTheRunMovesThroughTheStatesItUses(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -143,7 +143,7 @@ func TestTheExitCodesAreThePlanTable(t *testing.T) {
 // rule: a complete call runs, and an incomplete one is recorded skipped
 // with the visible note.
 func TestATruncatedResponseRunsTheCompleteCalls(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			finish: poo.FinishLength,
 			calls: []poo.ToolCall{
@@ -152,7 +152,7 @@ func TestATruncatedResponseRunsTheCompleteCalls(t *testing.T) {
 			},
 		},
 		{text: "finished"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -191,10 +191,10 @@ func TestATruncatedResponseRunsTheCompleteCalls(t *testing.T) {
 // natural stop: a truncated turn with no complete call reaches the
 // BeforeSettle hook as output_truncated.
 func TestATruncatedTurnWithNoCompleteCallReachesBeforeSettle(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		text:   "a truncated ans",
 		finish: poo.FinishLength,
-	}}}
+	}})
 	tool := &echoTool{result: "echoed"}
 	hook := &recordingBeforeSettle{}
 
@@ -218,7 +218,7 @@ func TestATruncatedTurnWithNoCompleteCallReachesBeforeSettle(t *testing.T) {
 // TestABatchCompletesBeforeHasToolCallStopsTheRun covers the plan's
 // rule: the whole batch runs, and then the stop condition is asked.
 func TestABatchCompletesBeforeHasToolCallStopsTheRun(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
 				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
@@ -226,7 +226,7 @@ func TestABatchCompletesBeforeHasToolCallStopsTheRun(t *testing.T) {
 			},
 		},
 		{text: "finished"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -249,14 +249,14 @@ func TestABatchCompletesBeforeHasToolCallStopsTheRun(t *testing.T) {
 // TestHasToolCallIgnoresErroredResults covers the other half of the
 // rule: a call whose result was an error does not stop the run.
 func TestHasToolCallIgnoresErroredResults(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
 				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
 			},
 		},
 		{text: "finished"},
-	}}
+	})
 	// The tool fails, so its result is an error.
 	tool := &echoTool{result: "echoed", prepareErr: errors.New("the arguments are wrong")}
 
@@ -275,10 +275,10 @@ func TestHasToolCallIgnoresErroredResults(t *testing.T) {
 // algorithm's step 6: a turn that appended something goes to the gate
 // again.
 func TestAToolFreeTurnWithSteeringContinues(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{text: "the first answer"},
 		{text: "the second answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -297,18 +297,18 @@ func TestAToolFreeTurnWithSteeringContinues(t *testing.T) {
 	if res.Turns != 2 {
 		t.Errorf("the run made %d turns, want 2", res.Turns)
 	}
-	if tr.requestCount() != 2 {
-		t.Errorf("the transport got %d requests, want 2", tr.requestCount())
+	if len(tr.Requests()) != 2 {
+		t.Errorf("the transport got %d requests, want 2", len(tr.Requests()))
 	}
 }
 
 // TestAToolFreeTurnWithAnAfterTurnAppendContinues covers the same step
 // from the hook's side.
 func TestAToolFreeTurnWithAnAfterTurnAppendContinues(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{text: "the first answer"},
 		{text: "the second answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 	// The hook appends on the first turn only, so the run goes to the
 	// gate again once and then stops.
@@ -331,7 +331,7 @@ func TestAToolFreeTurnWithAnAfterTurnAppendContinues(t *testing.T) {
 // TestAPlainToolFreeTurnReachesBeforeSettle covers the last turn-end
 // path: a turn with nothing in it reaches the BeforeSettle hook.
 func TestAPlainToolFreeTurnReachesBeforeSettle(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	hook := &recordingBeforeSettle{}
 
@@ -354,7 +354,7 @@ func TestAPlainToolFreeTurnReachesBeforeSettle(t *testing.T) {
 // Prepare, or got a BeforeTool result still goes to a new request, and
 // that request carries the results.
 func TestTheContinuationPredicateCoversTheResultKinds(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
 				{ID: "call_1", Name: "denied", Arguments: json.RawMessage(`{}`)},
@@ -363,7 +363,7 @@ func TestTheContinuationPredicateCoversTheResultKinds(t *testing.T) {
 			},
 		},
 		{text: "the answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	// The tool's validation fails, so the second call is a recoverable
@@ -402,7 +402,7 @@ func TestTheContinuationPredicateCoversTheResultKinds(t *testing.T) {
 		t.Errorf("the short-circuited call's outcome is %q, want ok", outcomes["r3"])
 	}
 	// The second request carries the results.
-	reqs := tr.requestsOf()
+	reqs := tr.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("the transport got %d requests, want 2", len(reqs))
 	}
@@ -430,10 +430,10 @@ func (h *selectiveBeforeTool) BeforeTool(ctx poo.HookContext, info poo.ToolCallI
 // TestTheBeforeSettleContinueSendsTheRunBackToTheModel covers the
 // BeforeSettle hook's Continue decision.
 func TestTheBeforeSettleContinueSendsTheRunBackToTheModel(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{text: "the first answer"},
 		{text: "the second answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 	// The hook asks for a continuation on the first turn only.
 	hook := &continuingBeforeSettle{stopAfter: 1}
@@ -453,7 +453,7 @@ func TestTheBeforeSettleContinueSendsTheRunBackToTheModel(t *testing.T) {
 		t.Errorf("the BeforeSettle hook ran %d times, want 2", hook.calls)
 	}
 	// The continuation message is in the model's view.
-	reqs := tr.requestsOf()
+	reqs := tr.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("the transport got %d requests, want 2", len(reqs))
 	}
@@ -471,7 +471,7 @@ func TestTheBeforeSettleContinueSendsTheRunBackToTheModel(t *testing.T) {
 // TestTheContinuationLimitSettlesTheRun covers the plan's limit: the
 // next Continue after the allowed ones settles hook_continue_limit.
 func TestTheContinuationLimitSettlesTheRun(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	hook := &continuingBeforeSettle{}
 
@@ -494,7 +494,7 @@ func TestTheContinuationLimitSettlesTheRun(t *testing.T) {
 // TestTheAfterTurnStopSettlesTheRun covers the AfterTurn hook's Stop
 // decision.
 func TestTheAfterTurnStopSettlesTheRun(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	hook := &stoppingAfterTurn{}
 
@@ -515,7 +515,7 @@ func TestTheAfterTurnStopSettlesTheRun(t *testing.T) {
 // TestMaxTurnsBeatsAnAfterTurnStop covers the precedence: the turn
 // ceiling wins over a hook's stop.
 func TestMaxTurnsBeatsAnAfterTurnStop(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -523,7 +523,7 @@ func TestMaxTurnsBeatsAnAfterTurnStop(t *testing.T) {
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
 		},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 	hook := &stoppingAfterTurn{}
 
@@ -545,7 +545,7 @@ func TestMaxTurnsBeatsAnAfterTurnStop(t *testing.T) {
 // TestACancelBeatsEveryOtherCandidate covers the precedence: a cancel
 // wins over a failure.
 func TestACancelBeatsEveryOtherCandidate(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	hook := &stoppingAfterTurn{}
 
@@ -570,7 +570,7 @@ func TestACancelBeatsEveryOtherCandidate(t *testing.T) {
 // a valid call settles the run as finished, and the result is in the
 // settle detail.
 func TestTheFinishToolSettlesTheRunWithItsResult(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -579,7 +579,7 @@ func TestTheFinishToolSettlesTheRunWithItsResult(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
 
@@ -608,7 +608,7 @@ func TestTheFinishToolSettlesTheRunWithItsResult(t *testing.T) {
 // TestAnInvalidFinishResultIsARecoverableError covers the other half:
 // a result that does not match the schema is an error the model can fix.
 func TestAnInvalidFinishResultIsARecoverableError(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -617,7 +617,7 @@ func TestAnInvalidFinishResultIsARecoverableError(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
@@ -655,7 +655,7 @@ func TestAnInvalidFinishResultIsARecoverableError(t *testing.T) {
 // TestTheOtherCallsInTheBatchCompleteFirst covers the plan's rule: the
 // batch completes, and then the run settles.
 func TestTheOtherCallsInTheBatchCompleteFirst(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
 				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
@@ -663,7 +663,7 @@ func TestTheOtherCallsInTheBatchCompleteFirst(t *testing.T) {
 			},
 		},
 		{text: "finished"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
 
@@ -685,7 +685,7 @@ func TestTheOtherCallsInTheBatchCompleteFirst(t *testing.T) {
 
 // TestTheMaxRunTokensBudgetSettlesTheRun covers the token budget.
 func TestTheMaxRunTokensBudgetSettlesTheRun(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 20},
 			calls: []poo.ToolCall{{
@@ -695,7 +695,7 @@ func TestTheMaxRunTokensBudgetSettlesTheRun(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -714,7 +714,7 @@ func TestTheMaxRunTokensBudgetSettlesTheRun(t *testing.T) {
 
 // TestTheMaxDurationBudgetSettlesTheRun covers the time budget.
 func TestTheMaxDurationBudgetSettlesTheRun(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -742,7 +742,7 @@ func TestTheMaxDurationBudgetFiringMidToolSettlesTheRun(t *testing.T) {
 		<-ctx.Done()
 		return poo.ToolResult{Text: "interrupted", IsError: true}, nil
 	}
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -750,7 +750,7 @@ func TestTheMaxDurationBudgetFiringMidToolSettlesTheRun(t *testing.T) {
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
 		},
-	}}
+	})
 	sink := &recordingSink{}
 
 	opts := testOptions(t, tr, tool, sink)
@@ -787,7 +787,7 @@ func TestTheGateChecksTheBudgetOnEveryPath(t *testing.T) {
 	// The compactor says yes, so the gate enters the compacting state
 	// and then comes back to the budget check.
 	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "test"})
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -823,7 +823,7 @@ func TestTheGateChecksTheBudgetOnEveryPath(t *testing.T) {
 // TestASessionWithoutACompactorNeverEntersCompacting covers the plan's
 // rule: the compacting state is reachable only with a compactor.
 func TestASessionWithoutACompactorNeverEntersCompacting(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -851,7 +851,7 @@ func TestAReadOnlyBatchRunsInParallel(t *testing.T) {
 		return poo.ToolResult{Text: "done"}, nil
 	}
 
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
 				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
@@ -859,7 +859,7 @@ func TestAReadOnlyBatchRunsInParallel(t *testing.T) {
 			},
 		},
 		{text: "finished"},
-	}}
+	})
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	s := newTestSession(t, opts)
@@ -904,7 +904,7 @@ func TestAMixedBatchRunsSequentially(t *testing.T) {
 		return poo.ToolResult{Text: "done"}, nil
 	}
 
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
 				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
@@ -912,7 +912,7 @@ func TestAMixedBatchRunsSequentially(t *testing.T) {
 			},
 		},
 		{text: "finished"},
-	}}
+	})
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Tools["read"] = readTool
@@ -1087,7 +1087,7 @@ func TestTheTransitionTableIsClosed(t *testing.T) {
 // TestTheTypedOptionsConfigureTheSession covers the options: each one
 // changes what the plan says it changes.
 func TestTheTypedOptionsConfigureTheSession(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	hook := &stoppingAfterTurn{}
 	observer := &collectingObserver{}
@@ -1116,7 +1116,7 @@ func TestTheTypedOptionsConfigureTheSession(t *testing.T) {
 // session that names a finish schema but has no finish tool is a
 // construction error, because the model would never be offered it.
 func TestASessionWithAFinishSchemaNeedsTheTool(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})

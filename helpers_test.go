@@ -7,28 +7,15 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // The tests drive a session through the public API: a session is built,
 // a prompt starts a run, and the run's result says how it ended.
-
-// fakeTransport answers requests from a script.
-type fakeTransport struct {
-	mu sync.Mutex
-	// responses holds one response per request. The last one repeats.
-	responses []fakeResponse
-	// requests holds the requests the transport received.
-	requests []poo.ChatRequest
-	// index is the next response to serve.
-	index int
-	// before is called before each response is served, so a test can
-	// act at a known point without a sleep.
-	before func(req poo.ChatRequest)
-}
 
 // fakeResponse is one scripted response.
 type fakeResponse struct {
@@ -46,52 +33,42 @@ type fakeResponse struct {
 	usage *poo.UsageReport
 }
 
-// Stream answers the next scripted response.
-func (f *fakeTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
-	f.mu.Lock()
-	f.requests = append(f.requests, req)
-	if f.before != nil {
-		f.before(req)
+// scriptedLen is how many turns a scripted transport holds.
+//
+// The last response repeats up to it, so a test that scripts one answer
+// for a run of many turns does not have to write the answer out each time.
+const scriptedLen = 256
+
+// scripted returns a pootest transport that serves the responses in order
+// and then repeats the last one.
+func scripted(responses []fakeResponse) *pootest.Transport {
+	turns := make([]pootest.Turn, 0, scriptedLen)
+	for i := 0; i < scriptedLen && len(responses) > 0; i++ {
+		r := responses[len(responses)-1]
+		if i < len(responses) {
+			r = responses[i]
+		}
+		turns = append(turns, r.turn())
 	}
-	rendered := poo.Rendered{
-		API:      poo.APIChatCompletions,
-		Messages: len(req.Messages),
-	}
-	i := f.index
-	if i >= len(f.responses) {
-		i = len(f.responses) - 1
-	} else {
-		f.index++
-	}
-	f.mu.Unlock()
-	if i < 0 {
-		return nil, rendered, fmt.Errorf("fakeTransport: no scripted response")
-	}
-	resp := f.responses[i]
-	if resp.err != nil {
-		return nil, rendered, resp.err
-	}
-	return &fakeReader{events: resp.events()}, rendered, nil
+	return pootest.NewTransport(turns...)
 }
 
-// Fork is not implemented by the fake: the compaction seam's fork is
-// exercised with the scripted transport.
-func (f *fakeTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
-	return nil, fmt.Errorf("fakeTransport: no fork")
-}
-
-// requestCount returns how many requests the transport received.
-func (f *fakeTransport) requestCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.requests)
-}
-
-// requestsOf returns the requests the transport received.
-func (f *fakeTransport) requestsOf() []poo.ChatRequest {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]poo.ChatRequest(nil), f.requests...)
+// turn converts a response into the scripted transport's turn.
+func (r fakeResponse) turn() pootest.Turn {
+	t := pootest.Turn{
+		Text:     r.text,
+		Thinking: r.thinking,
+		Finish:   string(r.finish),
+		Err:      r.err,
+	}
+	for _, c := range r.calls {
+		t.Calls = append(t.Calls, pootest.Call{Name: c.Name, Arguments: c.Arguments, ID: c.ID})
+	}
+	if r.usage != nil {
+		t.InputTokens = r.usage.InputTokens
+		t.OutputTokens = r.usage.OutputTokens
+	}
+	return t
 }
 
 // events turns a response into the events a stream yields.

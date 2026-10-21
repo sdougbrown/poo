@@ -16,7 +16,7 @@ import (
 // TestTheEventsCarrySessionMonotonicNumbers covers the bus: the
 // sequence numbers start at one and never go backwards.
 func TestTheEventsCarrySessionMonotonicNumbers(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -25,7 +25,7 @@ func TestTheEventsCarrySessionMonotonicNumbers(t *testing.T) {
 			}},
 		},
 		{text: "the answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -51,7 +51,7 @@ func TestTheEventsCarrySessionMonotonicNumbers(t *testing.T) {
 // TestTheObserverSeesTheEventsInOrder covers the observer: it sees
 // every event, in the session's order.
 func TestTheObserverSeesTheEventsInOrder(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	observer := &collectingObserver{done: make(chan struct{})}
 
@@ -94,7 +94,7 @@ func TestTheObserverSeesTheEventsInOrder(t *testing.T) {
 // TestTheObserverErrorDoesNotSettleTheRun covers the plan's rule: an
 // observer's error never settles a run.
 func TestTheObserverErrorDoesNotSettleTheRun(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	observer := &failingObserver{}
 
@@ -114,7 +114,7 @@ func TestTheObserverErrorDoesNotSettleTheRun(t *testing.T) {
 // check fires on that path.
 func TestTheGateRunsOnTheBeforeSettleContinuePath(t *testing.T) {
 	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "test"})
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	hook := &continuingBeforeSettle{stopAfter: 1}
 
@@ -174,7 +174,7 @@ func TestTheGateRunsOnTheInterruptedTurnPath(t *testing.T) {
 // continuation: a turn that processed a call goes to the gate.
 func TestTheGateRunsOnTheStepSixPath(t *testing.T) {
 	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "test"})
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -183,7 +183,7 @@ func TestTheGateRunsOnTheStepSixPath(t *testing.T) {
 			}},
 		},
 		{text: "the answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -206,10 +206,10 @@ func TestTheGateRunsOnTheStepSixPath(t *testing.T) {
 // to the gate.
 func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
 	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "test"})
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{text: "the first answer"},
 		{text: "the second answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -247,7 +247,7 @@ func TestTheCompactingStateIsCancelledByAnInterrupt(t *testing.T) {
 	// The compactor waits for its context, so the interrupt is what
 	// ends it.
 	compactor := &blockingCompactor{started: make(chan struct{})}
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -301,7 +301,7 @@ func TestTheCompactingStateIsCancelledByAnInterrupt(t *testing.T) {
 // recorded, so a replay knows what the compactor did.
 func TestTheCompactionIsRecorded(t *testing.T) {
 	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "handoff"})
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	sink := &recordingSink{}
 

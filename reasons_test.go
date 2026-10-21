@@ -39,10 +39,10 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			want:   poo.ReasonOutputTruncated,
 			source: "output_truncated",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
-				opts.Transport = &fakeTransport{responses: []fakeResponse{{
+				opts.Transport = scripted([]fakeResponse{{
 					text:   "half an ans",
 					finish: poo.FinishLength,
-				}}}
+				}})
 				return newTestSession(t, *opts)
 			},
 			act: func(t *testing.T, s *poo.Session) {},
@@ -52,13 +52,13 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			want:   poo.ReasonMaxTurns,
 			source: "max_turns",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
-				opts.Transport = &fakeTransport{responses: []fakeResponse{{
+				opts.Transport = scripted([]fakeResponse{{
 					calls: []poo.ToolCall{{
 						ID:        "call_1",
 						Name:      "echo",
 						Arguments: []byte(`{"text":"hello"}`),
 					}},
-				}}}
+				}})
 				opts.MaxTurns = 1
 				return newTestSession(t, *opts)
 			},
@@ -69,14 +69,14 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			want:   poo.ReasonBudgetExhausted,
 			source: "max_run_tokens",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
-				opts.Transport = &fakeTransport{responses: []fakeResponse{{
+				opts.Transport = scripted([]fakeResponse{{
 					usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 20},
 					calls: []poo.ToolCall{{
 						ID:        "call_1",
 						Name:      "echo",
 						Arguments: []byte(`{"text":"hello"}`),
 					}},
-				}}}
+				}})
 				opts.MaxRunTokens = 50
 				return newTestSession(t, *opts)
 			},
@@ -87,13 +87,13 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			want:   poo.ReasonStopRequested,
 			source: "stop_condition",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
-				opts.Transport = &fakeTransport{responses: []fakeResponse{{
+				opts.Transport = scripted([]fakeResponse{{
 					calls: []poo.ToolCall{{
 						ID:        "call_1",
 						Name:      "echo",
 						Arguments: []byte(`{"text":"hello"}`),
 					}},
-				}}}
+				}})
 				opts.StopConditions = []poo.StopCondition{poo.HasToolCall("echo")}
 				return newTestSession(t, *opts)
 			},
@@ -125,13 +125,13 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			want:   poo.ReasonToolFatal,
 			source: "tool:echo",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
-				opts.Transport = &fakeTransport{responses: []fakeResponse{{
+				opts.Transport = scripted([]fakeResponse{{
 					calls: []poo.ToolCall{{
 						ID:        "call_1",
 						Name:      "echo",
 						Arguments: []byte(`{"text":"hello"}`),
 					}},
-				}}}
+				}})
 				opts.Tools["echo"] = &fatalTool{}
 				return newTestSession(t, *opts)
 			},
@@ -152,9 +152,9 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			want:   poo.ReasonProviderError,
 			source: "provider:server",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
-				opts.Transport = &fakeTransport{responses: []fakeResponse{{
+				opts.Transport = scripted([]fakeResponse{{
 					err: &poo.ProviderError{Kind: poo.ProviderKindServer, Message: "the endpoint is down"},
-				}}}
+				}})
 				return newTestSession(t, *opts)
 			},
 			act: func(t *testing.T, s *poo.Session) {},
@@ -164,9 +164,9 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			want:   poo.ReasonProviderLimit,
 			source: "provider:usage_limit",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
-				opts.Transport = &fakeTransport{responses: []fakeResponse{{
+				opts.Transport = scripted([]fakeResponse{{
 					err: &poo.ProviderError{Kind: poo.ProviderKindUsageLimit, Message: "you are out of credits"},
-				}}}
+				}})
 				return newTestSession(t, *opts)
 			},
 			act: func(t *testing.T, s *poo.Session) {},
@@ -201,13 +201,13 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			want:   poo.ReasonFinished,
 			source: "finish",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
-				opts.Transport = &fakeTransport{responses: []fakeResponse{{
+				opts.Transport = scripted([]fakeResponse{{
 					calls: []poo.ToolCall{{
 						ID:        "call_1",
 						Name:      "finish",
 						Arguments: []byte(`{"result":{"answer":"42"}}`),
 					}},
-				}}}
+				}})
 				opts.Tools["finish"] = newFinishTool(t, `{"type":"object"}`)
 				opts.ToolOrder = []string{"echo", "finish"}
 				return newTestSession(t, *opts)
@@ -218,7 +218,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+			tr := scripted([]fakeResponse{{text: "the answer"}})
 			sink := &recordingSink{}
 			tool := &echoTool{result: "echoed"}
 			opts := testOptions(t, tr, tool, sink)
@@ -258,7 +258,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 // plainSession builds a session that answers with one text response.
 func plainSession(t *testing.T, opts *poo.Options) *poo.Session {
 	t.Helper()
-	opts.Transport = &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	opts.Transport = scripted([]fakeResponse{{text: "the answer"}})
 	return newTestSession(t, *opts)
 }
 
@@ -275,7 +275,7 @@ func (t *fatalTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) 
 // TestTheInputEventsAreEmitted covers the plan's event list: the input
 // records have their events.
 func TestTheInputEventsAreEmitted(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -284,7 +284,7 @@ func TestTheInputEventsAreEmitted(t *testing.T) {
 			}},
 		},
 		{text: "the answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 	hold := newNoteHold(tool)
 
@@ -322,7 +322,7 @@ func TestTheInputEventsAreEmitted(t *testing.T) {
 // TestTheRunAndTurnEventsAreEmitted covers the plan's event list for
 // the run and the turn.
 func TestTheRunAndTurnEventsAreEmitted(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -331,7 +331,7 @@ func TestTheRunAndTurnEventsAreEmitted(t *testing.T) {
 			}},
 		},
 		{text: "the answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -360,10 +360,10 @@ func TestTheRunAndTurnEventsAreEmitted(t *testing.T) {
 // TestTheUsageEventIsEmitted covers the plan's event list for the
 // accounting.
 func TestTheUsageEventIsEmitted(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		text:  "the answer",
 		usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 5},
-	}}}
+	}})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))

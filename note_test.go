@@ -18,7 +18,7 @@ import (
 // TestASteerWithADeliveryNoteCarriesIt covers the note: the delivered
 // message carries the note, and the assistant's message is untouched.
 func TestASteerWithADeliveryNoteCarriesIt(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			text: "the first answer",
 			calls: []poo.ToolCall{{
@@ -28,7 +28,7 @@ func TestASteerWithADeliveryNoteCarriesIt(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	hold := newNoteHold(tool)
@@ -93,7 +93,7 @@ func TestASteerWithADeliveryNoteCarriesIt(t *testing.T) {
 // at or past the end means the whole reply was presented, and no note
 // is added.
 func TestADeliveryNoteAtTheEndAddsNothing(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -102,7 +102,7 @@ func TestADeliveryNoteAtTheEndAddsNothing(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	hold := newNoteHold(tool)
@@ -134,7 +134,7 @@ func TestADeliveryNoteAtTheEndAddsNothing(t *testing.T) {
 // TestADeliveryNoteOfZeroSaysNothingWasSeen covers the plan's rule: a
 // count of zero has its own wording.
 func TestADeliveryNoteOfZeroSaysNothingWasSeen(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -143,7 +143,7 @@ func TestADeliveryNoteOfZeroSaysNothingWasSeen(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	hold := newNoteHold(tool)
@@ -178,7 +178,7 @@ func TestADeliveryNoteOfZeroSaysNothingWasSeen(t *testing.T) {
 // TestAnUnknownMessageIDIsRefused covers the plan's rule: an unknown id
 // is refused, and nothing is queued.
 func TestAnUnknownMessageIDIsRefused(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -206,7 +206,7 @@ func TestAnUnknownMessageIDIsRefused(t *testing.T) {
 // TestANegativeCharacterCountIsRefused covers the other half of the
 // rule: a negative count is refused.
 func TestANegativeCharacterCountIsRefused(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -229,7 +229,7 @@ func TestANegativeCharacterCountIsRefused(t *testing.T) {
 // TestTheNoteCountsCodePointsOverTheTextBlocks covers the plan's rule:
 // the count is over the text blocks, and the thinking is left out.
 func TestTheNoteCountsCodePointsOverTheTextBlocks(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			text:     "héllo wörld",
 			thinking: "a long thought that is not counted",
@@ -240,7 +240,7 @@ func TestTheNoteCountsCodePointsOverTheTextBlocks(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	hold := newNoteHold(tool)
@@ -277,7 +277,7 @@ func TestTheNoteCountsCodePointsOverTheTextBlocks(t *testing.T) {
 // TestTheQuoteEscapesTheQuotesAndNewlines covers the plan's rule: the
 // quoted text cannot break the note's own quoting.
 func TestTheQuoteEscapesTheQuotesAndNewlines(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			text: "he said \"hi\"\nthen left",
 			calls: []poo.ToolCall{{
@@ -287,7 +287,7 @@ func TestTheQuoteEscapesTheQuotesAndNewlines(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	hold := newNoteHold(tool)
@@ -330,7 +330,7 @@ func TestTheQuoteEscapesTheQuotesAndNewlines(t *testing.T) {
 // TestADeliveryNoteOnAPrompt covers the note on a new run: the prompt
 // carries it.
 func TestADeliveryNoteOnAPrompt(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 

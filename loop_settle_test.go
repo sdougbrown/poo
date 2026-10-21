@@ -401,7 +401,7 @@ func TestTheUsageFallbackFillsTheUsageRecord(t *testing.T) {
 // TestTheArgumentsAreRecordedAsTheModelSentThem covers the record's
 // shape for a call with malformed arguments.
 func TestTheArgumentsAreRecordedAsTheModelSentThem(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -410,7 +410,7 @@ func TestTheArgumentsAreRecordedAsTheModelSentThem(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 

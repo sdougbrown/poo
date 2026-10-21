@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 func TestARunThatEndsOnItsOwnSettlesEndTurn(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "all done"}}}
+	tr := scripted([]fakeResponse{{text: "all done"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -33,7 +34,7 @@ func TestARunThatEndsOnItsOwnSettlesEndTurn(t *testing.T) {
 }
 
 func TestARunThatCallsAToolExecutesIt(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -42,7 +43,7 @@ func TestARunThatCallsAToolExecutesIt(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -71,7 +72,7 @@ func TestARunThatCallsAToolExecutesIt(t *testing.T) {
 }
 
 func TestTheSecondRequestCarriesTheToolResult(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -80,13 +81,13 @@ func TestTheSecondRequestCarriesTheToolResult(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	tool := &echoTool{result: "the echoed text"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
 	runSession(t, s, "do the thing")
 
-	reqs := tr.requestsOf()
+	reqs := tr.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("the transport got %d requests, want 2", len(reqs))
 	}
@@ -121,13 +122,13 @@ func TestTheSecondRequestCarriesTheToolResult(t *testing.T) {
 func TestTheMaxTurnsCeilingSettlesMaxTurns(t *testing.T) {
 	// Every response asks for another tool call, so the run only stops
 	// at its ceiling.
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		calls: []poo.ToolCall{{
 			ID:        "call_1",
 			Name:      "echo",
 			Arguments: json.RawMessage(`{"text":"again"}`),
 		}},
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -152,7 +153,7 @@ func TestTheMaxTurnsCeilingSettlesMaxTurns(t *testing.T) {
 }
 
 func TestACancelledContextSettlesCancelled(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -173,13 +174,13 @@ func TestACancelledContextSettlesCancelled(t *testing.T) {
 }
 
 func TestAProviderErrorSettlesProviderError(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		err: &poo.ProviderError{
 			Kind:    poo.ProviderKindServer,
 			Message: "the endpoint is down",
 			Status:  500,
 		},
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -197,13 +198,13 @@ func TestAProviderErrorSettlesProviderError(t *testing.T) {
 }
 
 func TestAContextLengthErrorSettlesContextExhausted(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		err: &poo.ProviderError{
 			Kind:    poo.ProviderKindContextLength,
 			Message: "the prompt is too long",
 			Status:  400,
 		},
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -217,10 +218,10 @@ func TestAContextLengthErrorSettlesContextExhausted(t *testing.T) {
 func TestAFinishReasonOfLengthReachesBeforeSettle(t *testing.T) {
 	// A truncated response is a natural stop, and the plan's
 	// `output_truncated` reason is what it settles as.
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		text:   "a truncated ans",
 		finish: poo.FinishLength,
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -232,7 +233,7 @@ func TestAFinishReasonOfLengthReachesBeforeSettle(t *testing.T) {
 }
 
 func TestNoOutputRoomSettlesContextExhaustedWithoutSending(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -249,13 +250,13 @@ func TestNoOutputRoomSettlesContextExhaustedWithoutSending(t *testing.T) {
 	if res.Detail.Source != "no_output_room" {
 		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
 	}
-	if tr.requestCount() != 0 {
-		t.Errorf("the transport got %d requests, want none", tr.requestCount())
+	if len(tr.Requests()) != 0 {
+		t.Errorf("the transport got %d requests, want none", len(tr.Requests()))
 	}
 }
 
 func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -264,7 +265,7 @@ func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "a short prompt")
-	reqs := tr.requestsOf()
+	reqs := tr.Requests()
 	if len(reqs) != 1 {
 		t.Fatalf("the transport got %d requests, want 1", len(reqs))
 	}
@@ -282,7 +283,7 @@ func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
 }
 
 func TestTheMaxOutputCapsTheMaxTokens(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -291,13 +292,13 @@ func TestTheMaxOutputCapsTheMaxTokens(t *testing.T) {
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "a short prompt")
-	if got := tr.requestsOf()[0].MaxTokens; got != 512 {
+	if got := tr.Requests()[0].MaxTokens; got != 512 {
 		t.Errorf("max_tokens is %d, want 512", got)
 	}
 }
 
 func TestTheDefaultMaxTokensIsEightThousandAndNinetyTwo(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -306,13 +307,13 @@ func TestTheDefaultMaxTokensIsEightThousandAndNinetyTwo(t *testing.T) {
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "a short prompt")
-	if got := tr.requestsOf()[0].MaxTokens; got != 8192 {
+	if got := tr.Requests()[0].MaxTokens; got != 8192 {
 		t.Errorf("max_tokens is %d, want 8192", got)
 	}
 }
 
 func TestAnUnknownToolIsARecoverableError(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -321,7 +322,7 @@ func TestAnUnknownToolIsARecoverableError(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -336,7 +337,7 @@ func TestAnUnknownToolIsARecoverableError(t *testing.T) {
 }
 
 func TestTheSessionMovesThroughTheLoopStates(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -345,7 +346,7 @@ func TestTheSessionMovesThroughTheLoopStates(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -361,13 +362,13 @@ func TestTheSessionMovesThroughTheLoopStates(t *testing.T) {
 func TestTheContextRunningOutMidRunSettlesContextExhausted(t *testing.T) {
 	// The model asks for a call whose result is large, so the next
 	// request has no room left.
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		calls: []poo.ToolCall{{
 			ID:        "call_1",
 			Name:      "echo",
 			Arguments: json.RawMessage(`{"text":"hello"}`),
 		}},
-	}}}
+	}})
 	tool := &echoTool{result: string(make([]byte, 20000))}
 	sink := &recordingSink{}
 
@@ -383,13 +384,13 @@ func TestTheContextRunningOutMidRunSettlesContextExhausted(t *testing.T) {
 		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
 	}
 	// The first request went out, and the second did not.
-	if tr.requestCount() != 1 {
-		t.Errorf("the transport got %d requests, want 1", tr.requestCount())
+	if len(tr.Requests()) != 1 {
+		t.Errorf("the transport got %d requests, want 1", len(tr.Requests()))
 	}
 }
 
 func TestTheSettleRecordCarriesTheReason(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -419,7 +420,7 @@ func TestMalformedArgumentsAreRecordedAsText(t *testing.T) {
 	// The model sent arguments that are not valid JSON. The record
 	// still holds valid JSON, so a consumer can decode it without a
 	// special case, and the raw text is preserved.
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -428,7 +429,7 @@ func TestMalformedArgumentsAreRecordedAsText(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -468,7 +469,7 @@ func TestASessionWithoutATransportIsAConstructionError(t *testing.T) {
 }
 
 func TestASessionWithoutAContextLimitIsAConstructionError(t *testing.T) {
-	_, err := poo.New(poo.Options{Transport: &fakeTransport{}})
+	_, err := poo.New(poo.Options{Transport: pootest.NewTransport()})
 	if err == nil {
 		t.Fatal("a session with no context limit was built")
 	}
@@ -495,7 +496,7 @@ func asSessionInit(err error, target **poo.ErrSessionInit) bool {
 }
 
 func TestTheSessionRefusesASecondPromptWhileARunIsActive(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))

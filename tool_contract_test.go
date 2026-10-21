@@ -32,9 +32,9 @@ func (t *recordingPrepareTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) 
 // Prepare is given the environment, and the run's working directory
 // reaches it.
 func TestPrepareReceivesThePrepareEnv(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{}`)}},
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &recordingPrepareTool{}
 

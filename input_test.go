@@ -19,7 +19,7 @@ import (
 // TestASteerIsDeliveredAtTheNextTurnEnd covers the steer: the message
 // reaches the model at the turn end, and the turn's work is untouched.
 func TestASteerIsDeliveredAtTheNextTurnEnd(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -28,7 +28,7 @@ func TestASteerIsDeliveredAtTheNextTurnEnd(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -78,7 +78,7 @@ func TestTheSteerWaitsForTheBatchToFinish(t *testing.T) {
 		return poo.ToolResult{Text: "done"}, nil
 	}
 
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -87,7 +87,7 @@ func TestTheSteerWaitsForTheBatchToFinish(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
@@ -189,7 +189,7 @@ func TestAnInterruptDuringALongCallCancelsIt(t *testing.T) {
 		return poo.ToolResult{Text: "partial output", IsError: true}, nil
 	}
 
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -198,7 +198,7 @@ func TestAnInterruptDuringALongCallCancelsIt(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
@@ -252,7 +252,7 @@ func TestAnInterruptSkipsTheUnstartedCalls(t *testing.T) {
 		return poo.ToolResult{Text: "partial output", IsError: true}, nil
 	}
 
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
 				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
@@ -260,7 +260,7 @@ func TestAnInterruptSkipsTheUnstartedCalls(t *testing.T) {
 			},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
@@ -304,7 +304,7 @@ func TestAnInterruptDuringTheHooksDiscardsTheirDecision(t *testing.T) {
 	release := make(chan struct{})
 	hook := &blockingAfterTurn{started: hookStarted, release: release}
 
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -340,7 +340,7 @@ func TestAnInterruptDuringBeforeSettleEmitsNoSecondTurnEnd(t *testing.T) {
 	release := make(chan struct{})
 	hook := &blockingBeforeSettle{started: hookStarted, release: release}
 
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -380,7 +380,7 @@ func TestAnInterruptDuringBeforeSettleEmitsNoSecondTurnEnd(t *testing.T) {
 // TestAFollowUpIsDeliveredAtANaturalStop covers the follow-up: it waits
 // for the run to settle naturally, and then it is delivered.
 func TestAFollowUpIsDeliveredAtANaturalStop(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -460,10 +460,10 @@ func TestASteerDuringBeforeSettleAbandonsTheFinalize(t *testing.T) {
 	// reaches the settle hooks.
 	after := &countingAfterTurn{stopAfter: 1}
 
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{text: "the first answer"},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -497,7 +497,7 @@ func TestASteerDuringBeforeSettleAbandonsTheFinalize(t *testing.T) {
 	// The abandoned finalization does not re-run the AfterTurn hooks
 	// for the turn it abandoned: the hook ran once per turn, and the
 	// run made one turn per request.
-	turns := tr.requestCount()
+	turns := len(tr.Requests())
 	if after.calls != turns {
 		t.Errorf("the AfterTurn hook ran %d times, want %d: one per turn", after.calls, turns)
 	}
@@ -506,7 +506,7 @@ func TestASteerDuringBeforeSettleAbandonsTheFinalize(t *testing.T) {
 // TestAMessageWhileIdleIsRefused covers the plan's rule: a message for a
 // session with no run is refused.
 func TestAMessageWhileIdleIsRefused(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -596,7 +596,7 @@ func TestACancelDuringAnInterruptWins(t *testing.T) {
 // steer that arrives just before an AfterTurn stop is dropped and
 // reported with the run's reason.
 func TestASteerBeforeAnAfterTurnStopIsDropped(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	hook := &stoppingAfterTurn{}
@@ -833,7 +833,7 @@ func TestAMessageWhileSettlingIsRefused(t *testing.T) {
 	// settling state while the test sends a message.
 	sink := &blockingSink{started: make(chan struct{}), release: make(chan struct{})}
 
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, sink)

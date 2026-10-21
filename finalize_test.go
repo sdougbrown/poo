@@ -74,7 +74,7 @@ func (s *failingSink) Flush(ctx context.Context) error { return nil }
 // TestAHookErrorSettlesTheRunOnce covers the hook row of the failure
 // table: a hook that fails settles the run, and the run settles once.
 func TestAHookErrorSettlesTheRunOnce(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	hook := &failingAfterTurn{}
@@ -96,7 +96,7 @@ func TestAHookErrorSettlesTheRunOnce(t *testing.T) {
 // TestAHookDeadlineSettlesTheRunOnce covers the deadline row: a hook
 // that misses its deadline settles the run, and it settles once.
 func TestAHookDeadlineSettlesTheRunOnce(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	hook := &stallingAfterTurn{}
@@ -119,7 +119,7 @@ func TestAHookDeadlineSettlesTheRunOnce(t *testing.T) {
 // TestAToolFatalSettlesTheRunOnce covers the tool row: an error that
 // wraps `ErrFatal` settles the run.
 func TestAToolFatalSettlesTheRunOnce(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -127,7 +127,7 @@ func TestAToolFatalSettlesTheRunOnce(t *testing.T) {
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
 		},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
@@ -147,9 +147,9 @@ func TestAToolFatalSettlesTheRunOnce(t *testing.T) {
 
 // TestATransportErrorSettlesTheRunOnce covers the transport row.
 func TestATransportErrorSettlesTheRunOnce(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		err: &poo.ProviderError{Kind: poo.ProviderKindServer, Message: "the endpoint is down"},
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -168,7 +168,7 @@ func TestATransportErrorSettlesTheRunOnce(t *testing.T) {
 // store row: a sink that fails settles the run as store_error, and the
 // session becomes broken.
 func TestASinkFailureSettlesTheRunOnceAndBreaksTheSession(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	// The sink refuses the third write, which is the model's message.
 	sink := &failingSink{failAt: 3}
 	tool := &echoTool{result: "echoed"}
@@ -197,7 +197,7 @@ func TestACancelDuringAToolSettlesTheRunOnce(t *testing.T) {
 		<-ctx.Done()
 		return poo.ToolResult{Text: "interrupted", IsError: true}, nil
 	}
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -205,7 +205,7 @@ func TestACancelDuringAToolSettlesTheRunOnce(t *testing.T) {
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
 		},
-	}}
+	})
 	sink := &recordingSink{}
 
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
@@ -234,7 +234,7 @@ func TestACancelDuringAToolSettlesTheRunOnce(t *testing.T) {
 // row: an ordinary tool error goes back to the model, and the run
 // continues.
 func TestARecoverableToolErrorLeavesTheRunRunning(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -243,7 +243,7 @@ func TestARecoverableToolErrorLeavesTheRunRunning(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
@@ -294,7 +294,7 @@ func TestAConcurrentCancelAndStoreFailureArbitrateByPrecedence(t *testing.T) {
 func TestAStuckSinkStillLetsTheWaitersWake(t *testing.T) {
 	defer poo.SetRecordWriteBudget(50 * time.Millisecond)()
 
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	sink := &failingSink{blockUntilContextEnd: true}
 
@@ -318,7 +318,7 @@ func TestAStuckSinkStillLetsTheWaitersWake(t *testing.T) {
 // `SessionStart` error returns `ErrSessionInit`, the observers are
 // stopped, and nothing is written.
 func TestTheConstructionRollsBack(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	observer := &countingObserver{}
@@ -356,7 +356,7 @@ func TestTheConstructionRollsBack(t *testing.T) {
 // hook that appends puts its message in the model's view, with its own
 // origin.
 func TestTheSessionStartHookAppendsToTheHistory(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -381,7 +381,7 @@ func TestTheSessionStartHookAppendsToTheHistory(t *testing.T) {
 // was issued but has no result gets a synthetic one, so the history
 // stays valid for the next run.
 func TestEveryIssuedCallGetsAResult(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -389,7 +389,7 @@ func TestEveryIssuedCallGetsAResult(t *testing.T) {
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
 		},
-	}}
+	})
 	started := make(chan struct{})
 	tool := &echoTool{result: "echoed"}
 	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
@@ -432,7 +432,7 @@ func TestALateCompletionDoesNotMutateTheSettledRun(t *testing.T) {
 		<-release
 		return poo.ToolResult{Text: "the late result"}, nil
 	}
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -440,7 +440,7 @@ func TestALateCompletionDoesNotMutateTheSettledRun(t *testing.T) {
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
 		},
-	}}
+	})
 	sink := &recordingSink{}
 
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
@@ -468,10 +468,10 @@ func TestALateCompletionDoesNotMutateTheSettledRun(t *testing.T) {
 // TestTheBusyFlagClearsAfterTheRun covers the plan's rule: the busy
 // flag clears when the run settles, so a new prompt is accepted.
 func TestTheBusyFlagClearsAfterTheRun(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{text: "the first answer"},
 		{text: "the second answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -576,7 +576,7 @@ func (o *countingObserver) eventCount() int {
 // failure table for the before-tool slot: a hook that fails settles the
 // run, and the run settles once.
 func TestABeforeToolHookErrorSettlesTheRun(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -584,7 +584,7 @@ func TestABeforeToolHookErrorSettlesTheRun(t *testing.T) {
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
 		},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -628,7 +628,7 @@ func TestACallThatFinishesAsTheRunSettlesGetsOneResult(t *testing.T) {
 			}
 			return poo.ToolResult{Text: "the result"}, nil
 		}
-		tr := &fakeTransport{responses: []fakeResponse{
+		tr := scripted([]fakeResponse{
 			{
 				calls: []poo.ToolCall{{
 					ID:        "call_1",
@@ -636,7 +636,7 @@ func TestACallThatFinishesAsTheRunSettlesGetsOneResult(t *testing.T) {
 					Arguments: []byte(`{"text":"hello"}`),
 				}},
 			},
-		}}
+		})
 		sink := &recordingSink{}
 
 		s := newTestSession(t, testOptions(t, tr, tool, sink))
@@ -674,10 +674,10 @@ func (s *flushFailingSink) Flush(ctx context.Context) error {
 // flush: the run reports the store failure, the session is broken, and
 // the sink holds exactly one run.settled record.
 func TestAFailingFlushAfterTheSettleIsReported(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		text:  "all done",
 		usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 2},
-	}}}
+	}})
 	sink := &flushFailingSink{}
 
 	s := newTestSession(t, testOptions(t, tr, &echoTool{result: "echoed"}, sink))

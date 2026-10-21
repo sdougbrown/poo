@@ -14,7 +14,7 @@ import (
 // TestTheNoticeFiresOncePerRun covers the plan's rule: the notice fires
 // at most once per run.
 func TestTheNoticeFiresOncePerRun(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -30,7 +30,7 @@ func TestTheNoticeFiresOncePerRun(t *testing.T) {
 			}},
 		},
 		{text: "the answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: strings.Repeat("x", 4000)}
 
@@ -69,7 +69,7 @@ func TestTheNoticeFiresOncePerRun(t *testing.T) {
 // rule: the notice fires again in a later run only if the usage has
 // dropped back below the notice ratio.
 func TestTheNoticeRearmsAfterTheUsageDrops(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 10},
 			text:  "the first answer",
@@ -78,7 +78,7 @@ func TestTheNoticeRearmsAfterTheUsageDrops(t *testing.T) {
 			usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 10},
 			text:  "the second answer",
 		},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -107,7 +107,7 @@ func TestTheNoticeRearmsAfterTheUsageDrops(t *testing.T) {
 // TestTheEstimateGrowsWithTheAppendedOutput covers the plan's rule: the
 // estimate grows with what was appended between usage reports.
 func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 10},
 			calls: []poo.ToolCall{{
@@ -117,7 +117,7 @@ func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {
 			}},
 		},
 		{text: "the second answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -130,7 +130,7 @@ func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {
 
 	// The second request's max_tokens is smaller than the first's,
 	// because the estimate grew.
-	reqs := tr.requestsOf()
+	reqs := tr.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("the transport got %d requests, want 2", len(reqs))
 	}
@@ -145,12 +145,12 @@ func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {
 func TestTheEstimateUsesTheObservedRatio(t *testing.T) {
 	// The endpoint reports a ratio of 1.0 characters per token, which
 	// the calibration clamps to 2.0.
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 0},
 			text:  "the answer",
 		},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -161,7 +161,7 @@ func TestTheEstimateUsesTheObservedRatio(t *testing.T) {
 
 	// The first request's max_tokens used the starting ratio, and the
 	// second used the calibrated one.
-	reqs := tr.requestsOf()
+	reqs := tr.Requests()
 	if len(reqs) != 1 {
 		t.Fatalf("the transport got %d requests, want 1", len(reqs))
 	}
@@ -176,7 +176,7 @@ func TestTheEstimateUsesTheObservedRatio(t *testing.T) {
 // hard stop: with no compactor, crossing the hard ratio settles the run
 // as context_exhausted.
 func TestCrossingTheHardRatioSettlesContextExhausted(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -185,7 +185,7 @@ func TestCrossingTheHardRatioSettlesContextExhausted(t *testing.T) {
 			}},
 		},
 		{text: "the answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	// The tool's result is big enough to fill the window.
 	tool := &echoTool{result: strings.Repeat("x", 2000)}
@@ -211,7 +211,7 @@ func TestCrossingTheHardRatioSettlesContextExhausted(t *testing.T) {
 // source: the run stops with detail.source "hard_limit" when the
 // estimate is over the ratio but the output room is still there.
 func TestTheHardLimitSettlesWithItsOwnSource(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -220,7 +220,7 @@ func TestTheHardLimitSettlesWithItsOwnSource(t *testing.T) {
 			}},
 		},
 		{text: "the answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	// The result is big enough to push the estimate over the hard
 	// ratio, and small enough to leave output room.
@@ -247,13 +247,13 @@ func TestTheHardLimitSettlesWithItsOwnSource(t *testing.T) {
 // other half of the rule: the provider's own context-length error
 // settles the run the same way.
 func TestAProviderContextLengthErrorSettlesContextExhausted(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		err: &poo.ProviderError{
 			Kind:    poo.ProviderKindContextLength,
 			Message: "the prompt is too long",
 			Status:  400,
 		},
-	}}}
+	}})
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
@@ -269,7 +269,7 @@ func TestAProviderContextLengthErrorSettlesContextExhausted(t *testing.T) {
 
 // TestAMissingContextLimitIsAConstructionError covers the plan's rule.
 func TestAMissingContextLimitIsAConstructionError(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	_, err := poo.New(poo.Options{Transport: tr})
 	if err == nil {
 		t.Fatal("a session with no context limit was built")
@@ -283,22 +283,21 @@ func TestAMissingContextLimitIsAConstructionError(t *testing.T) {
 // TestTheMaxTokensIsAlwaysComputed covers the plan's rule: the value is
 // never left to the endpoint's default.
 func TestTheMaxTokensIsAlwaysComputed(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
 	tool := &echoTool{result: "echoed"}
 
 	for _, limit := range []int{1024, 4096, 32768, 262144} {
+		tr := scripted([]fakeResponse{{text: "the answer"}})
 		opts := testOptions(t, tr, tool, &recordingSink{})
 		opts.ContextLimit = limit
 		s := newTestSession(t, opts)
 		runSession(t, s, "do the thing")
-		reqs := tr.requestsOf()
+		reqs := tr.Requests()
 		if len(reqs) == 0 {
 			t.Fatalf("the transport got no requests")
 		}
 		if reqs[len(reqs)-1].MaxTokens <= 0 {
 			t.Errorf("the request's max_tokens is %d, want a computed value", reqs[len(reqs)-1].MaxTokens)
 		}
-		tr.requests = nil
 	}
 }
 
@@ -306,7 +305,7 @@ func TestTheMaxTokensIsAlwaysComputed(t *testing.T) {
 // counting: the exact key is the call, and the near key is the call's
 // primary argument.
 func TestTheRepeatCountsCoverTheExactAndNearKeys(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
 				{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one","offset":1}`)},
@@ -315,7 +314,7 @@ func TestTheRepeatCountsCoverTheExactAndNearKeys(t *testing.T) {
 			},
 		},
 		{text: "the answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed", primaryArg: "text"}
 
@@ -354,7 +353,7 @@ func TestTheRepeatCountsCoverTheExactAndNearKeys(t *testing.T) {
 // TestAPrepareFailureCountsTowardTheNearKey covers the plan's rule: a
 // call that failed its validation counts toward the near key.
 func TestAPrepareFailureCountsTowardTheNearKey(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
 				{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
@@ -362,7 +361,7 @@ func TestAPrepareFailureCountsTowardTheNearKey(t *testing.T) {
 			},
 		},
 		{text: "the answer"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed", primaryArg: "text", prepareErr: fmt.Errorf("the arguments are wrong")}
 
@@ -389,7 +388,7 @@ func TestAPrepareFailureCountsTowardTheNearKey(t *testing.T) {
 // count suggests, so the calibrated ratio is large and the estimate
 // grows: the second request asks for less output room than the first.
 func TestTheCalibrationChangesTheOutputRoom(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 1},
 			calls: []poo.ToolCall{{
@@ -399,7 +398,7 @@ func TestTheCalibrationChangesTheOutputRoom(t *testing.T) {
 			}},
 		},
 		{text: "the answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -409,7 +408,7 @@ func TestTheCalibrationChangesTheOutputRoom(t *testing.T) {
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
 
-	reqs := tr.requestsOf()
+	reqs := tr.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("the transport got %d requests, want 2", len(reqs))
 	}
@@ -426,7 +425,7 @@ func TestTheCalibrationChangesTheOutputRoom(t *testing.T) {
 // TestTheCalibrationIsClamped covers the plan's bounds: the observed
 // ratio is clamped to [2.0, 5.0].
 func TestTheCalibrationIsClamped(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			usage: &poo.UsageReport{InputTokens: 1, OutputTokens: 1},
 			calls: []poo.ToolCall{{
@@ -436,7 +435,7 @@ func TestTheCalibrationIsClamped(t *testing.T) {
 			}},
 		},
 		{text: "the answer"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -445,7 +444,7 @@ func TestTheCalibrationIsClamped(t *testing.T) {
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
 
-	reqs := tr.requestsOf()
+	reqs := tr.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("the transport got %d requests, want 2", len(reqs))
 	}

@@ -58,7 +58,7 @@ func TestTheMessageIdsCarryOnAfterAReload(t *testing.T) {
 // run's ids do not repeat the first run's.
 func TestTheRunsIdsContinueAcrossRuns(t *testing.T) {
 	ids := &poo.MessageIDs{}
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -89,7 +89,7 @@ func TestTheRunsIdsContinueAcrossRuns(t *testing.T) {
 // response with no content is not recorded, so the next message that is
 // recorded takes the id it would have taken anyway.
 func TestAnEmptyResponseBurnsNoId(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{}, {text: "the answer"}}}
+	tr := scripted([]fakeResponse{{}, {text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -111,7 +111,7 @@ func TestAnEmptyResponseBurnsNoId(t *testing.T) {
 // TestTheMessageRecordCarriesTheId covers the record: the model's
 // message carries the id, and the user's does not.
 func TestTheMessageRecordCarriesTheId(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
