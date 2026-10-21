@@ -684,9 +684,8 @@ func estimateMessageChars(m Message) int {
 			chars += len(c.Provider.Data)
 		}
 	}
-	if m.DeliveryNote != nil {
-		chars += len(m.DeliveryNote.Text)
-	}
+	// The delivery note's text is already part of the message's content,
+	// where it was prefixed, so it is not counted again.
 	return chars
 }
 
