@@ -63,12 +63,13 @@ func TestTheReadOnlyPromptsDoNotNameTheAnswer(t *testing.T) {
 
 	// The words that would give a read-only task's answer away.
 	forbidden := map[string][]string{
-		"find-secret-in-config":  {"APP_TOKEN"},
-		"find-dead-code":         {"handle_legacy_ping"},
-		"find-off-by-one-loop":   {"chunks"},
-		"find-slow-loop":         {"find_all"},
-		"find-version-mismatch":  {"__version__"},
-		"long-find-error-in-log": {"req-8f2a41c9"},
+		"find-secret-in-config":        {"APP_TOKEN"},
+		"find-dead-code":               {"handle_legacy_ping"},
+		"find-off-by-one-loop":         {"chunks"},
+		"find-slow-loop":               {"find_all"},
+		"find-version-mismatch":        {"__version__"},
+		"long-find-error-in-log":       {"req-8f2a41c9"},
+		"long-find-definition-in-tree": {"src/pipeline/ingest/handlers/loader.py"},
 	}
 
 	for _, task := range tasks {
@@ -76,52 +77,14 @@ func TestTheReadOnlyPromptsDoNotNameTheAnswer(t *testing.T) {
 			continue
 		}
 		t.Run(task.ID, func(t *testing.T) {
-			for _, word := range forbidden[task.ID] {
+			words, ok := forbidden[task.ID]
+			if !ok {
+				t.Fatalf("the task %q has no forbidden words in the test's map", task.ID)
+			}
+			for _, word := range words {
 				if strings.Contains(task.Prompt, word) {
 					t.Errorf("the prompt names %q, which is the answer", word)
 				}
-			}
-		})
-	}
-}
-
-// The workdir must not hold the check, the task file or the answer.
-//
-// The model works in the workdir, and anything in there is something it
-// can read. A copy of the check script, the task file or the answer
-// derivation would hand the answer to a model that looks for one.
-func TestTheWorkdirHoldsNoAnswerFile(t *testing.T) {
-	root := repoRoot(t)
-	tasks, err := LoadTasks(filepath.Join(root, "evals", "tasks"))
-	if err != nil {
-		t.Fatalf("loading the tasks: %v", err)
-	}
-
-	for _, task := range tasks {
-		if !task.HasTag("readonly") {
-			continue
-		}
-		t.Run(task.ID, func(t *testing.T) {
-			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
-			if err != nil {
-				t.Fatalf("resolving the fixture: %v", err)
-			}
-			err = filepath.Walk(fixture, func(path string, info os.FileInfo, err error) error {
-				if err != nil {
-					return err
-				}
-				if info.IsDir() {
-					return nil
-				}
-				base := filepath.Base(path)
-				switch base {
-				case "check.sh", "check_answer.py", "task.json":
-					t.Errorf("the fixture holds %q, which belongs to the task, not the workdir", base)
-				}
-				return nil
-			})
-			if err != nil {
-				t.Fatalf("walking the fixture: %v", err)
 			}
 		})
 	}
@@ -140,12 +103,12 @@ func TestTheReadOnlyChecksWantEveryFact(t *testing.T) {
 
 	// The answers that name only some of the facts.
 	partial := map[string]string{
-		"find-secret-in-config":  "The token comes from APP_TOKEN.",
-		"find-dead-code":         "The unreachable handler is handle_legacy_ping.",
-		"find-off-by-one-loop":   "The helper is chunks.",
-		"find-slow-loop":         "The slow method is get.",
-		"find-version-mismatch":  "The package declares 1.3.0.",
-		"long-find-error-in-log": "",
+		"find-secret-in-config":        "The token comes from APP_TOKEN.",
+		"find-dead-code":               "The unreachable handler is handle_legacy_ping.",
+		"find-off-by-one-loop":         "The helper is chunks.",
+		"find-slow-loop":               "The slow method is get.",
+		"find-version-mismatch":        "The package declares 1.3.0.",
+		"long-find-definition-in-tree": "The definition is somewhere under src/pipeline.",
 	}
 
 	for _, task := range tasks {
@@ -158,7 +121,9 @@ func TestTheReadOnlyChecksWantEveryFact(t *testing.T) {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
 			workdir := t.TempDir()
-			copyDir(t, fixture, workdir)
+			if err := copyTree(fixture, workdir); err != nil {
+				t.Fatalf("copying the fixture: %v", err)
+			}
 			log := filepath.Join(workdir, "session.jsonl")
 
 			// An answer that names only some of the facts fails.
@@ -201,7 +166,9 @@ func TestTheReadOnlyChecksAcceptTheRightAnswer(t *testing.T) {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
 			workdir := t.TempDir()
-			copyDir(t, fixture, workdir)
+			if err := copyTree(fixture, workdir); err != nil {
+				t.Fatalf("copying the fixture: %v", err)
+			}
 			log := filepath.Join(workdir, "session.jsonl")
 
 			writeSessionLog(t, log, answers[task.ID])
@@ -245,7 +212,9 @@ func TestTheReadOnlyChecksAcceptAnotherPhrasing(t *testing.T) {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
 			workdir := t.TempDir()
-			copyDir(t, fixture, workdir)
+			if err := copyTree(fixture, workdir); err != nil {
+				t.Fatalf("copying the fixture: %v", err)
+			}
 			log := filepath.Join(workdir, "session.jsonl")
 
 			writeSessionLog(t, log, answer)
@@ -345,7 +314,9 @@ func TestTheReadOnlyChecksJudgeTheFactNotTheWord(t *testing.T) {
 			t.Fatalf("resolving the fixture: %v", err)
 		}
 		workdir := t.TempDir()
-		copyDir(t, fixture, workdir)
+		if err := copyTree(fixture, workdir); err != nil {
+			t.Fatalf("copying the fixture: %v", err)
+		}
 		log := filepath.Join(workdir, "session.jsonl")
 		writeSessionLog(t, log, c.answer)
 		code := runCheck(t, task.Dir, workdir, log, "")

@@ -162,7 +162,9 @@ func TestTheLongChangeCheckWantsEveryTimeout(t *testing.T) {
 	// The fixture as it stands: every timeout is 30, so the check
 	// fails.
 	workdir := t.TempDir()
-	copyDir(t, fixture, workdir)
+	if err := copyTree(fixture, workdir); err != nil {
+		t.Fatalf("copying the fixture: %v", err)
+	}
 	if code := runCheck(t, task.Dir, workdir, "", ""); code == 0 {
 		t.Error("the check passed before the change")
 	}
@@ -170,7 +172,9 @@ func TestTheLongChangeCheckWantsEveryTimeout(t *testing.T) {
 	// Every timeout raised to 45, with the tests updated: the check
 	// passes.
 	workdir = t.TempDir()
-	copyDir(t, fixture, workdir)
+	if err := copyTree(fixture, workdir); err != nil {
+		t.Fatalf("copying the fixture: %v", err)
+	}
 	raiseTimeouts(t, workdir, 45)
 	updateTests(t, workdir, 45)
 	if code := runCheck(t, task.Dir, workdir, "", ""); code != 0 {
@@ -180,7 +184,9 @@ func TestTheLongChangeCheckWantsEveryTimeout(t *testing.T) {
 	// One timeout at 46 and the rest at 45: the check fails, because
 	// every request timeout has to be exactly 45.
 	workdir = t.TempDir()
-	copyDir(t, fixture, workdir)
+	if err := copyTree(fixture, workdir); err != nil {
+		t.Fatalf("copying the fixture: %v", err)
+	}
 	raiseTimeouts(t, workdir, 45)
 	updateTests(t, workdir, 45)
 	setTimeout(t, filepath.Join(workdir, "shop", "api", "api_1.py"), 46)
@@ -190,7 +196,9 @@ func TestTheLongChangeCheckWantsEveryTimeout(t *testing.T) {
 
 	// The decoys must not move.
 	workdir = t.TempDir()
-	copyDir(t, fixture, workdir)
+	if err := copyTree(fixture, workdir); err != nil {
+		t.Fatalf("copying the fixture: %v", err)
+	}
 	raiseTimeouts(t, workdir, 45)
 	updateTests(t, workdir, 45)
 	settings := filepath.Join(workdir, "shop", "settings.py")

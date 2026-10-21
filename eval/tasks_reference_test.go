@@ -38,7 +38,9 @@ func TestTheCodingChecksFailBeforeTheFixAndPassAfterIt(t *testing.T) {
 
 			// Before the fix, the check fails.
 			workdir := t.TempDir()
-			copyDir(t, fixture, workdir)
+			if err := copyTree(fixture, workdir); err != nil {
+				t.Fatalf("copying the fixture: %v", err)
+			}
 			if code := runCheck(t, task.Dir, workdir, "", ""); code == 0 {
 				t.Error("the check passed before the fix")
 			}
@@ -50,7 +52,9 @@ func TestTheCodingChecksFailBeforeTheFixAndPassAfterIt(t *testing.T) {
 				t.Skipf("the reference fix is not reachable: %v", err)
 			}
 			workdir = t.TempDir()
-			copyDir(t, fixture, workdir)
+			if err := copyTree(fixture, workdir); err != nil {
+				t.Fatalf("copying the fixture: %v", err)
+			}
 			target := packageInit(t, workdir)
 			if err := os.WriteFile(target, source, 0o644); err != nil {
 				t.Fatalf("writing the fix: %v", err)

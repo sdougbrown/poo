@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,15 +29,6 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// copyDir copies a directory tree for a test.
-func copyDir(t *testing.T, src, dst string) {
-	t.Helper()
-	cmd := exec.Command("cp", "-r", src+"/.", dst)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("copying %s: %v: %s", src, err, out)
-	}
-}
-
 // runCheck runs a task's check.sh in a workdir and returns its exit code.
 func runCheck(t *testing.T, taskDir, workdir, sessionLog, changed string) int {
 	t.Helper()
@@ -52,20 +44,11 @@ func runCheck(t *testing.T, taskDir, workdir, sessionLog, changed string) int {
 		return 0
 	}
 	var exitErr *exec.ExitError
-	if ok := asExitError(err, &exitErr); ok {
+	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode()
 	}
 	t.Fatalf("running the check: %v: %s", err, out)
 	return 1
-}
-
-// asExitError reports whether an error is an exit error.
-func asExitError(err error, target **exec.ExitError) bool {
-	if e, ok := err.(*exec.ExitError); ok {
-		*target = e
-		return true
-	}
-	return false
 }
 
 // The task set's shape is the plan's: twelve coding fixes, five
@@ -161,7 +144,9 @@ func TestTheReadOnlyChecksHoldTheirConditions(t *testing.T) {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
 			workdir := t.TempDir()
-			copyDir(t, fixture, workdir)
+			if err := copyTree(fixture, workdir); err != nil {
+				t.Fatalf("copying the fixture: %v", err)
+			}
 			log := filepath.Join(workdir, "session.jsonl")
 
 			// A run that changed a file fails, whatever it answered.
@@ -235,7 +220,9 @@ func TestTheCodingChecksFailBeforeTheFix(t *testing.T) {
 				t.Fatalf("resolving the fixture: %v", err)
 			}
 			workdir := t.TempDir()
-			copyDir(t, fixture, workdir)
+			if err := copyTree(fixture, workdir); err != nil {
+				t.Fatalf("copying the fixture: %v", err)
+			}
 			if code := runCheck(t, task.Dir, workdir, "", ""); code == 0 {
 				t.Error("the check passed before the fix")
 			}

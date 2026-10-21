@@ -73,13 +73,21 @@ func TestTheWorkdirIsTheFixtureAndNothingElse(t *testing.T) {
 	}
 	for _, task := range tasks {
 		t.Run(task.ID, func(t *testing.T) {
-			fixture, err := task.FixtureDir(filepath.Join(root, "evals", "fixtures"))
+			// The workdir is made the way the harness makes it: the
+			// fixture is snapshotted into the work root, and the run
+			// copies the snapshot.
+			fixtures := filepath.Join(root, "evals", "fixtures")
+			guard, err := newSourceGuard(tasks, fixtures, t.TempDir())
 			if err != nil {
-				t.Fatalf("resolving the fixture: %v", err)
+				t.Fatalf("guarding the fixtures: %v", err)
+			}
+			snap, err := guard.snapshot(task, fixtures)
+			if err != nil {
+				t.Fatalf("snapshotting the fixture: %v", err)
 			}
 			workdir := t.TempDir()
-			if err := copyTree(fixture, workdir); err != nil {
-				t.Fatalf("copying the fixture: %v", err)
+			if err := copyTree(snap, workdir); err != nil {
+				t.Fatalf("copying the snapshot: %v", err)
 			}
 
 			var found []string
