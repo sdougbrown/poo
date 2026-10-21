@@ -265,6 +265,8 @@ func RenderComparison(cmp Comparison) string {
 
 // WriteComparison writes a comparison as JSON and as markdown.
 func WriteComparison(dir string, cmp Comparison) error {
+	cmp.Baseline = relativeTo(dir, cmp.Baseline)
+	cmp.Candidate = relativeTo(dir, cmp.Candidate)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("eval: creating %s: %w", dir, err)
 	}
@@ -280,4 +282,22 @@ func WriteComparison(dir string, cmp Comparison) error {
 		return fmt.Errorf("eval: writing the comparison: %w", err)
 	}
 	return nil
+}
+
+// relativeTo returns path relative to dir, so a committed comparison
+// names no machine's home directory. A path that cannot be made
+// relative stays as it is.
+func relativeTo(dir, path string) string {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return path
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	if rel, err := filepath.Rel(absDir, absPath); err == nil {
+		return rel
+	}
+	return path
 }

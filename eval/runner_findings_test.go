@@ -166,3 +166,26 @@ func refusesWorkRootIn(t *testing.T, repo string) {
 		t.Errorf("a work root inside the task set's repository gave %v, want a refusal", err)
 	}
 }
+
+func TestARunWithAWorkRootInsideTheRepositoryIsRefused(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	repo := filepath.Dir(fixtureRoot)
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taskRoot := filepath.Join(repo, "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       t.TempDir(),
+		WorkRoot:  filepath.Join(repo, ".cache", "eval-work"),
+		PooBinary: fakePoo(t, logWritingPoo),
+	})
+	_, err := runner.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "inside the task set's repository") {
+		t.Errorf("Run returned %v, want the repository refusal", err)
+	}
+}

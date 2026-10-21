@@ -447,7 +447,23 @@ func (r *Runner) runOne(ctx context.Context, j job, runsDir, workRoot string, gu
 		result.Error = msg
 		fmt.Fprintf(os.Stderr, "poo-eval: WARNING: %s\n", msg+" (run "+j.task.ID+"/"+j.model.Name+"/seed"+strconv.Itoa(j.seed)+" is invalid)")
 	}
+	result.Error = r.portableText(result.Error, workRoot, j)
 	return result
+}
+
+// portableText names the run's scratch directories by placeholders, so
+// a stored message holds no machine's paths: the workdir is $WORKDIR,
+// the work root is $WORKROOT and the output directory is $OUT.
+func (r *Runner) portableText(text, workRoot string, j job) string {
+	if text == "" {
+		return text
+	}
+	workdir := filepath.Join(workRoot, j.task.ID, j.model.Name, "seed"+strconv.Itoa(j.seed), "work")
+	pairs := []string{workdir, "$WORKDIR", workRoot, "$WORKROOT"}
+	if out, err := filepath.Abs(r.opts.Out); err == nil {
+		pairs = append(pairs, out, "$OUT")
+	}
+	return strings.NewReplacer(pairs...).Replace(text)
 }
 
 // runJob makes one run and leaves the source check to its caller.
@@ -719,10 +735,10 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 		// poo left nothing to read, so what it printed is all there is
 		// to say why.
 		msg := strings.TrimSpace(out.String())
-		if r.opts.Sandbox == SandboxBwrap {
-			msg = "the bwrap sandbox failed to start poo: " + msg
+		if r.opts.Sandbox == SandboxBwrap && strings.HasPrefix(msg, "bwrap:") {
+			return exit, errors.New("the bwrap sandbox failed to start poo: " + msg)
 		}
-		return exit, errors.New(msg)
+		return exit, fmt.Errorf("poo exited %d without writing a log: %s", exit, msg)
 	}
 	return exit, nil
 }

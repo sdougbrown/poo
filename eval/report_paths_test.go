@@ -114,3 +114,38 @@ func TestACompareOfTwoWrittenReportsNamesBothDirectories(t *testing.T) {
 		t.Errorf("the comparison names %q and %q, want %q and %q", cmp.Baseline, cmp.Candidate, base, cand)
 	}
 }
+
+func TestAWrittenComparisonHoldsNoAbsolutePaths(t *testing.T) {
+	base, cand := t.TempDir(), t.TempDir()
+	for _, dir := range []string{base, cand} {
+		if err := WriteReport(dir, &Report{Dir: dir}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := LoadReport(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := LoadReport(cand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(cand, "comparison")
+	if err := WriteComparison(out, Compare(a, b)); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"comparison.json", "comparison.md"} {
+		data, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, dir := range []string{base, cand} {
+			if strings.Contains(string(data), dir) {
+				t.Errorf("%s holds the absolute path %s", name, dir)
+			}
+		}
+		if !strings.Contains(string(data), "..") {
+			t.Errorf("%s names neither report relative to the comparison:\n%s", name, data)
+		}
+	}
+}

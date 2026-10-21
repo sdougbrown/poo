@@ -28,7 +28,7 @@ func newSourceGuard(tasks []Task, taskRoot, root string) (*sourceGuard, error) {
 	g := &sourceGuard{snapshots: map[string]string{}, hashes: map[string]string{}}
 	for _, t := range tasks {
 		if t.Dir != "" {
-			if err := g.record(t.Dir); err != nil {
+			if err := g.record(t.Dir, false); err != nil {
 				return nil, err
 			}
 		}
@@ -43,14 +43,14 @@ func newSourceGuard(tasks []Task, taskRoot, root string) (*sourceGuard, error) {
 		if _, done := g.snapshots[src]; done {
 			continue
 		}
-		if err := g.record(src); err != nil {
+		if err := g.record(src, false); err != nil {
 			return nil, err
 		}
 		dst := filepath.Join(root, "fixtures", strings.TrimPrefix(t.Repo, "fixture:"))
 		if err := copyTree(src, dst); err != nil {
 			return nil, fmt.Errorf("eval: snapshotting fixture %s: %w", src, err)
 		}
-		if err := g.record(dst); err != nil {
+		if err := g.record(dst, true); err != nil {
 			return nil, err
 		}
 		g.snapshots[src] = dst
@@ -58,11 +58,11 @@ func newSourceGuard(tasks []Task, taskRoot, root string) (*sourceGuard, error) {
 	return g, nil
 }
 
-func (g *sourceGuard) record(dir string) error {
+func (g *sourceGuard) record(dir string, all bool) error {
 	if _, ok := g.hashes[dir]; ok {
 		return nil
 	}
-	h, err := hashTree(dir)
+	h, err := hashTree(dir, all)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,10 @@ func (g *sourceGuard) snapshot(t Task, taskRoot string) (string, error) {
 // the fixture's snapshot. The names are relative to the task set's root,
 // so they hold no machine's paths.
 func (g *sourceGuard) changed(t Task, taskRoot string) []string {
-	type dir struct{ path, name string }
+	type dir struct {
+		path, name string
+		all        bool
+	}
 	setRoot := filepath.Dir(taskRoot)
 	name := func(d string) string {
 		if rel, err := filepath.Rel(setRoot, d); err == nil && !strings.HasPrefix(rel, "..") {
@@ -98,13 +101,13 @@ func (g *sourceGuard) changed(t Task, taskRoot string) []string {
 	}
 	var dirs []dir
 	if t.Dir != "" {
-		dirs = append(dirs, dir{t.Dir, name(t.Dir)})
+		dirs = append(dirs, dir{t.Dir, name(t.Dir), false})
 	}
 	if src, err := t.FixtureDir(taskRoot); err == nil {
 		src = filepath.Clean(src)
-		dirs = append(dirs, dir{src, name(src)})
+		dirs = append(dirs, dir{src, name(src), false})
 		if snap, ok := g.snapshots[src]; ok {
-			dirs = append(dirs, dir{snap, "the snapshot of " + name(src)})
+			dirs = append(dirs, dir{snap, "the snapshot of " + name(src), true})
 		}
 	}
 	var out []string
@@ -113,7 +116,7 @@ func (g *sourceGuard) changed(t Task, taskRoot string) []string {
 		if !ok {
 			continue
 		}
-		if got, err := hashTree(d.path); err != nil || got != want {
+		if got, err := hashTree(d.path, d.all); err != nil || got != want {
 			out = append(out, d.name)
 		}
 	}
@@ -122,8 +125,12 @@ func (g *sourceGuard) changed(t Task, taskRoot string) []string {
 
 // hashTree returns a content hash of a tree, over the files treeFiles
 // reports.
-func hashTree(dir string) (string, error) {
-	files, err := treeFiles(dir)
+func hashTree(dir string, all bool) (string, error) {
+	walk := treeFiles
+	if all {
+		walk = allFiles
+	}
+	files, err := walk(dir)
 	if err != nil {
 		return "", err
 	}

@@ -75,6 +75,16 @@ func copyFile(src, dst string) error {
 // the bytecode a python run leaves behind and the cache a test run
 // leaves behind are not the model's changes. The paths are sorted.
 func treeFiles(dir string) (map[string]string, error) {
+	return walkFiles(dir, false)
+}
+
+// allFiles is treeFiles without the generated files: it hashes every
+// regular file copyTree would copy.
+func allFiles(dir string) (map[string]string, error) {
+	return walkFiles(dir, true)
+}
+
+func walkFiles(dir string, all bool) (map[string]string, error) {
 	files := map[string]string{}
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -88,7 +98,7 @@ func treeFiles(dir string) (map[string]string, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" || generatedDir(d.Name()) {
+			if d.Name() == ".git" || (!all && generatedDir(d.Name())) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -96,7 +106,7 @@ func treeFiles(dir string) (map[string]string, error) {
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		if generatedFile(rel) {
+		if !all && generatedFile(rel) {
 			return nil
 		}
 		hash, err := hashFile(path)

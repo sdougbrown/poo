@@ -139,3 +139,35 @@ func repositoryRootOfTests(t *testing.T) string {
 		dir = parent
 	}
 }
+
+func TestAPooThatExitsWithoutALogSaysSoWhateverTheSandbox(t *testing.T) {
+	for _, mode := range []string{SandboxNone, SandboxBwrap} {
+		t.Run(mode, func(t *testing.T) {
+			if mode == SandboxBwrap {
+				requireBwrap(t)
+			}
+			fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+			taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+			task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+			out := t.TempDir()
+			runner := NewRunner(RunOptions{
+				Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+				Tasks:     []Task{task},
+				TaskRoot:  taskRoot,
+				Seeds:     1,
+				Out:       out,
+				WorkRoot:  filepath.Join(t.TempDir(), "work"),
+				PooBinary: fakePoo(t, "echo boom >&2\nexit 3\n"),
+				Sandbox:   mode,
+			})
+			report, err := runner.Run(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := report.Results[0].Error
+			if got != "poo exited 3 without writing a log: boom" {
+				t.Errorf("error = %q, want poo's exit code and output", got)
+			}
+		})
+	}
+}

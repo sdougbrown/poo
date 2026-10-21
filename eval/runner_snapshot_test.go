@@ -151,3 +151,76 @@ func TestAReportOfARunThatEditedItsSourceHoldsNoAbsolutePaths(t *testing.T) {
 		}
 	}
 }
+
+func TestARunThatAddsAGeneratedFileToTheSnapshotIsInvalid(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	out := t.TempDir()
+	poisoner := fakePoo(t, `while [ "$#" -gt 0 ]; do case "$1" in --working-dir) d="$2"; shift 2 ;; *) shift ;; esac; done
+s="$d"
+while [ ! -d "$s/fixtures/fix-a" ]; do s=$(dirname "$s"); done
+mkdir -p "$s/fixtures/fix-a/__pycache__"
+echo x > "$s/fixtures/fix-a/__pycache__/a.cpython-312.pyc"
+echo x > "$s/fixtures/fix-a/evil.pyc"
+echo fixed > "$d/a.txt"
+`)
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  filepath.Join(out, "work"),
+		PooBinary: poisoner,
+	})
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	if got := report.Results[0]; !got.SourceChanged || got.Success {
+		t.Errorf("a run that added a .pyc to the snapshot was not flagged: %+v", got)
+	}
+}
+
+func TestARunErrorHoldsNoAbsolutePaths(t *testing.T) {
+	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
+	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
+	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
+	out := t.TempDir()
+	poo := fakePoo(t, `while [ "$#" -gt 0 ]; do case "$1" in --log) l="$2"; shift 2 ;; --working-dir) d="$2"; shift 2 ;; *) shift ;; esac; done
+echo "poo run: cannot write $l in $d" >&2
+exit 2
+`)
+	workRoot := filepath.Join(out, "work")
+	runner := NewRunner(RunOptions{
+		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Tasks:     []Task{task},
+		TaskRoot:  taskRoot,
+		Seeds:     1,
+		Out:       out,
+		WorkRoot:  workRoot,
+		PooBinary: poo,
+	})
+	report, err := runner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the harness: %v", err)
+	}
+	if !strings.Contains(report.Results[0].Error, "cannot write") {
+		t.Fatalf("error = %q, want poo's output", report.Results[0].Error)
+	}
+	if err := WriteReport(out, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"report.json", "report.md", "summary.json"} {
+		data, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, root := range []string{out, workRoot} {
+			if strings.Contains(string(data), root) {
+				t.Errorf("%s holds the absolute path %s", name, root)
+			}
+		}
+	}
+}
