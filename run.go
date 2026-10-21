@@ -482,7 +482,10 @@ func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool) tu
 	// open: the run goes to the waiting state, and the settle hooks do
 	// not run, because the run is not ending.
 	if s.runHasRunningJob(run) {
-		if s.enterWaiting(run) {
+		waiting, drained := s.enterWaiting(run)
+		if waiting || drained {
+			// Waiting holds the run; a drained message goes to the
+			// gate, so the model answers it with another request.
 			return turnOutcome{}
 		}
 	}

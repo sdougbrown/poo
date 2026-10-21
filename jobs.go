@@ -988,8 +988,9 @@ func (s *Session) runHasRunningJob(run *runState) bool {
 // queue is non-empty, the queues are drained, the messages are
 // appended, and the run goes to the gate instead of waiting.
 //
-// The call reports whether the run is waiting.
-func (s *Session) enterWaiting(run *runState) bool {
+// The call reports whether the run is waiting, and whether a queued
+// message was drained instead, in which case the run goes to the gate.
+func (s *Session) enterWaiting(run *runState) (waiting, drained bool) {
 	// The seam the race is tested at: the drain has happened, and the
 	// run has not waited yet.
 	s.raceHook("waiting")
@@ -997,14 +998,16 @@ func (s *Session) enterWaiting(run *runState) bool {
 	s.mu.Lock()
 	if s.run != run {
 		s.mu.Unlock()
-		return false
+		// The run is no longer the session's: it is winding down, and
+		// the loop's next pass sees it.
+		return false, true
 	}
 	if len(s.steerQueue) > 0 || len(s.jobQueue) > 0 {
 		s.mu.Unlock()
 		// A message is waiting, so the run does not wait: the queues
 		// are drained and the run goes to the gate.
 		s.drainInputs(run, false)
-		return false
+		return false, true
 	}
 	// The transition and the check are one step, so a result that
 	// arrives at the same time either finds the run waiting and wakes
@@ -1017,7 +1020,7 @@ func (s *Session) enterWaiting(run *runState) bool {
 	default:
 	}
 	s.mu.Unlock()
-	return true
+	return true, false
 }
 
 // waitWhileWaiting blocks while the run is waiting.

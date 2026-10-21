@@ -25,7 +25,8 @@ import (
 func TestAJobFinishingBeforeTheWaitingEntrySendsTheRunToTheGate(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
-		{text: "the answer"},
+		{text: "answer one"},
+		{text: "answer two"},
 	})
 	sink := &recordingSink{}
 	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
@@ -59,6 +60,14 @@ func TestAJobFinishingBeforeTheWaitingEntrySendsTheRunToTheGate(t *testing.T) {
 	}
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the run settled %q, want end_turn", res.Reason)
+	}
+	// The delivered result goes to the gate, so the model answers it
+	// with another request.
+	if res.Turns != 3 {
+		t.Errorf("the run made %d request(s), want 3: the delivered job result must go to the gate", res.Turns)
+	}
+	if got := s.LastAssistantMessage(); got != "answer two" {
+		t.Errorf("last assistant message = %q, want %q", got, "answer two")
 	}
 	// The result was delivered to the run, and the run never waited.
 	delivered := 0
