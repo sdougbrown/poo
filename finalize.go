@@ -119,10 +119,12 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 		// the run's outcome may not exist. The session is broken, and
 		// the reason changes to store_error, unless the run was
 		// cancelled: a cancelled run stays cancelled, and the store
-		// error goes into the detail.
+		// error becomes a losing candidate. A store_error that is
+		// already the winner is not also its own loser.
 		s.markBroken()
-		detail.Losing = append(detail.Losing, string(ReasonStoreError))
-		if reason != ReasonCancelled {
+		if reason == ReasonCancelled {
+			detail.Losing = append(detail.Losing, string(ReasonStoreError))
+		} else {
 			reason = ReasonStoreError
 			detail.Source = "store"
 			detail.Text = storeErr.Error()
@@ -263,8 +265,20 @@ func (s *Session) commitLocked(run *runState) (Reason, SettleDetail) {
 	if detail.Source == "" {
 		detail.Source = string(winner.reason)
 	}
+	// The losing list holds the other candidates: the winner's own
+	// reason is not a loser, and the same (reason, source) pair is
+	// listed once even when two writes raised it.
 	var losing []string
+	seen := make(map[string]bool, len(ordered)-1)
 	for _, c := range ordered[1:] {
+		if c.reason == winner.reason {
+			continue
+		}
+		key := string(c.reason) + "\x00" + c.detail.Source
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		losing = append(losing, string(c.reason))
 	}
 	if len(losing) > 0 {

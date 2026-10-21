@@ -812,3 +812,179 @@ func TestAFatalToolErrorSkipsTheRestOfTheBatch(t *testing.T) {
 		t.Errorf("the outcomes are %v, want r1 error and r2 skipped", outcomes)
 	}
 }
+
+// lateAnswerTransport holds the stream until the test releases it, then
+// answers with text and one tool call. It is the shape of a response
+// that arrives after the run has already settled.
+type lateAnswerTransport struct {
+	// entered is closed when the request reaches the transport.
+	entered chan struct{}
+	// release is closed to let the stream be handed out.
+	release chan struct{}
+	// once guards the entered channel.
+	once sync.Once
+}
+
+// Stream waits for the release.
+func (t *lateAnswerTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	t.once.Do(func() { close(t.entered) })
+	<-t.release
+	r := fakeResponse{text: "late answer", calls: []poo.ToolCall{{
+		ID:        "call_1",
+		Name:      "echo",
+		Arguments: []byte(`{"text":"late"}`),
+	}}}
+	return &fakeReader{events: r.events()}, poo.Rendered{API: poo.APIChatCompletions}, nil
+}
+
+// Fork is not implemented by the fake.
+func (t *lateAnswerTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return nil, errNoFork
+}
+
+// TestALateResponseAfterTheSettleDoesNotRecord covers the plan's rule
+// that a run-owned completion arriving after the commit point never
+// mutates a settled run: a provider response that arrives after the
+// settle must not append a message, run a tool, or write a record.
+func TestALateResponseAfterTheSettleDoesNotRecord(t *testing.T) {
+	tr := &lateAnswerTransport{entered: make(chan struct{}), release: make(chan struct{})}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.MaxDuration = 30 * time.Millisecond
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tr.entered
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonBudgetExhausted {
+		t.Fatalf("the run settled %q, want budget_exhausted", res.Reason)
+	}
+	recordsBefore := len(sink.allRecords())
+	eventsBefore := len(s.Events())
+
+	close(tr.release)
+	time.Sleep(200 * time.Millisecond)
+
+	if got := len(sink.allRecords()); got != recordsBefore {
+		t.Errorf("the late response wrote %d records, want none", got-recordsBefore)
+	}
+	if n := len(tool.Calls()); n != 0 {
+		t.Errorf("the tool ran %d times after the run settled", n)
+	}
+	if got := s.State(); got != poo.StateSettled {
+		t.Errorf("the session is %q, want settled", got)
+	}
+	if got := len(s.Events()); got != eventsBefore {
+		t.Errorf("the late response emitted %d events, want none", got-eventsBefore)
+	}
+}
+
+// refusingDeliverySink refuses the follow-up message record and the
+// delivered record, and accepts everything else.
+type refusingDeliverySink struct {
+	*recordingSink
+}
+
+// Append refuses the two records a follow-up's delivery writes.
+func (s *refusingDeliverySink) Append(ctx context.Context, rec poo.Record) error {
+	if m, ok := rec.(*poo.MessageRecord); ok && m.Origin == poo.OriginFollowUp {
+		return errors.New("the store refused the follow-up record")
+	}
+	if _, ok := rec.(*poo.InputDelivered); ok {
+		return errors.New("the store refused the delivered record")
+	}
+	return s.recordingSink.Append(ctx, rec)
+}
+
+// TestTheWinnerIsNotListedAsItsOwnLoser covers detail.losing: it holds
+// the other candidates, so a winner that shares its reason with a
+// duplicate is listed neither as a loser nor twice.
+func TestTheWinnerIsNotListedAsItsOwnLoser(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the first answer", calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the second answer"},
+	})
+	sink := &refusingDeliverySink{recordingSink: &recordingSink{}}
+	tool := &echoTool{result: "echoed"}
+	hold := newNoteHold(tool)
+	opts := testOptions(t, tr, tool, sink)
+	opts.MaxTurns = 3
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	hold.wait(t)
+	if _, err := s.Send("and this", poo.FollowUp); err != nil {
+		t.Fatalf("sending the follow-up: %v", err)
+	}
+	hold.finish()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonStoreError {
+		t.Fatalf("the run settled %q, want store_error", res.Reason)
+	}
+	for _, losing := range res.Detail.Losing {
+		if losing == string(res.Reason) {
+			t.Errorf("the winner %q is listed in its own detail.losing %v", res.Reason, res.Detail.Losing)
+		}
+	}
+}
+
+// finalizingContextTransport holds the request until its context ends,
+// and then returns the context's error. It is the shape of a provider
+// request the finalization cancels.
+type finalizingContextTransport struct {
+	// entered is closed when the request reaches the transport.
+	entered chan struct{}
+	// once guards the entered channel.
+	once sync.Once
+}
+
+// Stream waits for the request's context to end.
+func (t *finalizingContextTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	t.once.Do(func() { close(t.entered) })
+	<-ctx.Done()
+	return nil, poo.Rendered{API: poo.APIChatCompletions}, ctx.Err()
+}
+
+// Fork is not implemented by the fake.
+func (t *finalizingContextTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return nil, errNoFork
+}
+
+// TestTheFinalizesOwnCancelIsNotACandidate covers the plan's rule that
+// finalizing never manufactures a cancelled run: the timer settles a run
+// whose request is cancelled by the finalization itself.
+func TestTheFinalizesOwnCancelIsNotACandidate(t *testing.T) {
+	tr := &finalizingContextTransport{entered: make(chan struct{})}
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.MaxDuration = 30 * time.Millisecond
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tr.entered
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason == poo.ReasonCancelled {
+		t.Errorf("the run settled cancelled: the finalization's own cancel became a candidate")
+	}
+	for _, losing := range res.Detail.Losing {
+		if losing == string(poo.ReasonCancelled) {
+			t.Errorf("the finalize's own cancel is a losing candidate: %v", res.Detail.Losing)
+		}
+	}
+}
