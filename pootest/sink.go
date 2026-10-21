@@ -89,6 +89,11 @@ func (s *Sink) Flush(ctx context.Context) error {
 }
 
 // Records returns the records that were accepted, in order.
+//
+// The slice is a copy, but the records in it are the sink's own: they are
+// live, unlike the requests a Transport returns. A test that changes a
+// record it fetched changes what the sink holds, so it should read the
+// records and build its expectations apart from them.
 func (s *Sink) Records() []poo.Record {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -122,6 +127,8 @@ func (s *Sink) Flushed() int {
 }
 
 // Messages returns the message records the sink kept, in order.
+//
+// The records are live, as Records' are.
 func (s *Sink) Messages() []*poo.MessageRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -136,6 +143,8 @@ func (s *Sink) Messages() []*poo.MessageRecord {
 
 // Settled returns the run's settle record, or nil when the run did not
 // settle.
+//
+// The record is live, as Records' are.
 func (s *Sink) Settled() *poo.RunSettled {
 	s.mu.Lock()
 	defer s.mu.Unlock()
