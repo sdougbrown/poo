@@ -1,0 +1,13 @@
+{
+  "task": "fix-csv-skips-header",
+  "model": "minimax-m3.1-flash",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 4 read the parser and tests, turn 5 called a nonexistent tool 'edit' (tool_call_parse_failure), turn 6 applied the minimal lines[1:] fix via bash, turn 7 ran the tests and all 3 passed, matching the check's OK verdict.",
+  "transcript_chars": 7706
+}

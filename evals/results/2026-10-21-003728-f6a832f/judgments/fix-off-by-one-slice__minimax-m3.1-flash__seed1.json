@@ -1,0 +1,14 @@
+{
+  "task": "fix-off-by-one-slice",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "off_task_edit"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-2 inspected the code and tests before editing, turn 5 applied the minimal off-by-one fix, turn 8 ran the tests and all 4 passed (matching the check), turn 12 summarized; turn 3 called a nonexistent 'edit' tool (tool error), and turn 6 briefly added unrequested negative-index handling before reverting to the minimal fix in turn 7.",
+  "transcript_chars": 14185
+}

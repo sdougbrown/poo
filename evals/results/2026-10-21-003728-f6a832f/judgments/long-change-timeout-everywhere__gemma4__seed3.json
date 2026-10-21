@@ -1,0 +1,13 @@
+{
+  "task": "long-change-timeout-everywhere",
+  "model": "gemma4",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2/6 grepped all timeouts, turn 10 read the tests, turn 14 sed-edited the package constants to 45 while leaving settings.py decoys, turn 18-19 updated and passed the tests, turn 20 verified only the decoys remain at 30; but turns 15-16 re-ran the identical sed twice and turns 21-23 re-ran the same passing test three more times after completion.",
+  "transcript_chars": 20905
+}

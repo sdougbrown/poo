@@ -1,0 +1,13 @@
+{
+  "task": "long-change-timeout-everywhere",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2/6 grepped the timeout constants, turn 11 sed-replaced them to 45 (turn 12 re-ran the identical sed, changing nothing), turn 14 verified the settings.py decoys untouched, turn 15 updated the tests to 45, turn 16/18 ran unittest which passed, matching the check's verdict.",
+  "transcript_chars": 17074
+}

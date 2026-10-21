@@ -1,0 +1,11 @@
+{
+  "task": "fix-retry-backoff",
+  "model": "qwen",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 1-2 read the source and tests, turn 3's sed failed from a stray 'cd /' but turn 4 relocated the file, turn 5 applied the one-line fix and turn 6 ran all 4 tests which passed, matching the check's OK.",
+  "transcript_chars": 5232
+}

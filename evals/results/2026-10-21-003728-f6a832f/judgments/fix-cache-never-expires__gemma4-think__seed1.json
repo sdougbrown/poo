@@ -1,0 +1,14 @@
+{
+  "task": "fix-cache-never-expires",
+  "model": "gemma4-think",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 3-4 read the code and tests, turn 6 reproduced the LRU failure, turns 7-13 re-read the same 29-line file repeatedly without progress, turns 10/12 sent empty bash calls and turn 14 a malformed sed command (both erroring), turn 16 applied the capacity fix via heredoc and turn 17 ran the tests which all passed, matching the check's OK.",
+  "transcript_chars": 14375
+}

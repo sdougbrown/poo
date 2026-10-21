@@ -1,0 +1,15 @@
+{
+  "task": "fix-unicode-decode-error",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread",
+    "off_task_edit"
+  ],
+  "needs_owner": true,
+  "reason": "Turns 1-2 sensibly inspected the code and tests, turn 4 called a nonexistent 'edit' tool (tool error), turns 5-3 re-read the unchanged file, turn 6 applied the correct len(text) fix and turn 7 verified all 4 tests pass (matching the passing check), but turn 8 rewrote README.md, a change the task never asked for (harness flagged unexpected_files: README.md), so a human should confirm whether to keep or revert it.",
+  "transcript_chars": 8411
+}

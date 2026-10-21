@@ -1,0 +1,13 @@
+{
+  "task": "long-change-timeout-everywhere",
+  "model": "gemma4-think",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-5 inspected, turn 8 sed-edited all six packages, turn 9-10 verified the settings decoys untouched, turn 12 updated test assertions, turn 14/20/21 reran the passing tests, but turn 15 re-applied already-done seds, turn 16 re-grepped, turn 19 issued a duplicate cat (with garbled \u003c|thought text), and turn 21-22 repeated the summary after already finishing.",
+  "transcript_chars": 14979
+}

@@ -1,0 +1,13 @@
+{
+  "task": "fix-cache-never-expires",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-2 inspected the repo and tests, turn 4 tried a nonexistent \"edit\" tool (error recovered by a bash-based edit in turn 5), turn 6 ran the tests and they passed, turns 7-8 caught and fixed a negative-capacity IndexError, turn 9 re-ran the tests successfully, matching the check's OK on all 3 tests.",
+  "transcript_chars": 14263
+}

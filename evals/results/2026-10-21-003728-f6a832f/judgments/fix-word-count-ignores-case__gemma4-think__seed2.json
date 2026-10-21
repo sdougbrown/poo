@@ -1,0 +1,14 @@
+{
+  "task": "fix-word-count-ignores-case",
+  "model": "gemma4-think",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-5 inspected the code and reproduced the two failures, turn 11 rewrote count_words correctly and turn 13 tests passed, but turn 9 sent an empty bash call and turns 14-50 repeated the identical done-message plus test command until the run hit max_turns.",
+  "transcript_chars": 35664
+}

@@ -1,0 +1,14 @@
+{
+  "task": "fix-retry-backoff",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-3 read the source and tests, turn 4 ran tests to confirm the failure, turn 5 made the minimal one-line fix, turn 8 re-ran the tests and they passed (matching the check); turn 7 sent an empty malformed bash call and turn 9 needlessly repeated the identical test run.",
+  "transcript_chars": 7220
+}

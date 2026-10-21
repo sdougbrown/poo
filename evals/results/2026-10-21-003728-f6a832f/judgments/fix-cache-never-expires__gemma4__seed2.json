@@ -1,0 +1,14 @@
+{
+  "task": "fix-cache-never-expires",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-6 sensibly inspected and reproduced the failure, but turns 7 and 9 sent empty bash calls and turns 8-19 re-read the same file eleven times without changing anything; turn 20 wrote over-escaped quotes that broke the module (SyntaxError at turn 21), turn 23 rewrote it correctly, and turns 24-25 show the tests passing, matching the check's OK verdict.",
+  "transcript_chars": 21087
+}

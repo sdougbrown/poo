@@ -1,0 +1,11 @@
+{
+  "task": "long-find-definition-in-tree",
+  "model": "qwen",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 grepped to list mentioners, turn 2 narrowed to the single 'def parse_manifest' in src/pipeline/ingest/handlers/loader.py, turn 3 read that file to confirm, turn 4 gave the path with zero edits, matching the passing check.",
+  "transcript_chars": 7256
+}

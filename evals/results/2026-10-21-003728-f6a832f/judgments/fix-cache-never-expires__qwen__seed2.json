@@ -1,0 +1,11 @@
+{
+  "task": "fix-cache-never-expires",
+  "model": "qwen",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 1-3 read the cache source and tests, turn 5 applied a minimal LRU eviction patch to Cache.put and all 3 tests passed, turn 6 re-read the patched lines to verify, and turn 7 stopped; the check's OK matches the trajectory, with only trivial recoverable hiccups (wrong /testbed path in turn 1, python vs python3 in turn 4).",
+  "transcript_chars": 7029
+}

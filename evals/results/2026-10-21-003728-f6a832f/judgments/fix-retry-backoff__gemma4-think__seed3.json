@@ -1,0 +1,13 @@
+{
+  "task": "fix-retry-backoff",
+  "model": "gemma4-think",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2/6 read the module and tests, turn 8 confirmed the failing test, turn 10 made the minimal \u003c= to \u003c fix, turn 11 passed all tests; turn 9 re-read an already-read range and turns 12-13 redundantly re-ran the same passing tests and repeated the identical summary, though the check's OK verdict matches the trajectory.",
+  "transcript_chars": 8511
+}

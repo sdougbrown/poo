@@ -1,0 +1,13 @@
+{
+  "task": "fix-unicode-decode-error",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-5 sensibly inspected the code and reproduced the failures, but the turn 6 sed left a stray paren ('return len(text))') and turns 7-10 re-read the identical broken file four times without acting; turn 11 fixed it, turn 13's test run passed, matching the check's OK verdict.",
+  "transcript_chars": 8751
+}

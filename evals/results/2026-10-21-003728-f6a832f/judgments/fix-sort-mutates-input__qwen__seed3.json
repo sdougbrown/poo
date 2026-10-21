@@ -1,0 +1,11 @@
+{
+  "task": "fix-sort-mutates-input",
+  "model": "qwen",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 read the buggy function and grepped the tests, turn 2 read the test file, turn 3's edit attempt failed on a wrong path but was cleanly recovered, turn 4 applied the one-line fix (return sorted(items, key=key)) and all three tests passed, turn 5 summarized and stopped; the check's pass matches the trajectory.",
+  "transcript_chars": 5951
+}

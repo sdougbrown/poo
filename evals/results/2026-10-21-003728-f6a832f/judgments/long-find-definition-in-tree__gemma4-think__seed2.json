@@ -1,0 +1,11 @@
+{
+  "task": "long-find-definition-in-tree",
+  "model": "gemma4-think",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 ran a single grep that located the sole definition of parse_manifest, turn 2 answered with the path without touching any file, and the check confirms the answer names the defining file.",
+  "transcript_chars": 2310
+}

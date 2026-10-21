@@ -1,0 +1,15 @@
+{
+  "task": "fix-cache-never-expires",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": false,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread",
+    "other"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-6 sensibly inspected the repo and reproduced the LRU failure, but turns 7 and 9 sent malformed empty bash calls and turns 8-19 reread the unchanged file a dozen times without acting; turn 20's mangled heredoc escaping broke the source (turn 21 SyntaxError, the 'other' pathology), turn 22 rewrote it cleanly and turns 23-24 show the tests passing, matching the check's OK.",
+  "transcript_chars": 19590
+}

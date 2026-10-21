@@ -1,0 +1,11 @@
+{
+  "task": "fix-date-format-pad",
+  "model": "qwen",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 inspected format_date and the tests, turns 2-3 had two recoverable failed edit attempts (malformed sed, stray cd /tmp), turn 5 applied the one-line year-padding fix via absolute path, turn 6 ran the unittest suite with all 3 tests passing, matching the check's OK.",
+  "transcript_chars": 5273
+}

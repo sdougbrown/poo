@@ -1,0 +1,11 @@
+{
+  "task": "long-find-definition-in-tree",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1-2 grepped to narrow to one `def parse_manifest`, turn 3 read the candidate loader.py and ruled out other definition forms, turns 4-5 verified decoys, turn 6 answered src/pipeline/ingest/handlers/loader.py with no edits; check passed.",
+  "transcript_chars": 11765
+}

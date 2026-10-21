@@ -1,0 +1,11 @@
+{
+  "task": "fix-retry-backoff",
+  "model": "qwen",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turns 1-2 read the source and the tests to understand the off-by-one, turn 3 applied the one-line fix but hit a python-not-found error, turn 4 verified the edit via grep and all 4 tests passed with python3, turn 5 gave a correct summary; check output matches the passing run.",
+  "transcript_chars": 4776
+}

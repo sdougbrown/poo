@@ -1,0 +1,13 @@
+{
+  "task": "fix-sort-mutates-input",
+  "model": "minimax-m3.1-flash",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-2 inspected collection/__init__.py and the tests, turn 3 tried a nonexistent 'edit' tool (error), turn 4 recovered by applying the copy-before-sort fix via a bash python one-liner, turn 5 ran the suite and all 3 tests passed matching the check, turns 6-7 verified extra behaviour and concluded.",
+  "transcript_chars": 7035
+}

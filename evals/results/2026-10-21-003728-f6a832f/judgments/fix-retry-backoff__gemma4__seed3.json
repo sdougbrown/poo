@@ -1,0 +1,14 @@
+{
+  "task": "fix-retry-backoff",
+  "model": "gemma4",
+  "seed": 3,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 2-3 read the source and tests, turn 4 ran the tests to confirm the failure, turn 5 made the one-line fix, turn 8 verified all tests pass, matching the passing check; turn 7 sent an empty bash command (tool error) and turn 9 re-ran the already-passing test suite with no change in between.",
+  "transcript_chars": 7230
+}

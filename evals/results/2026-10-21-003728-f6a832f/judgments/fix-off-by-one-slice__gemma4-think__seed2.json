@@ -1,0 +1,14 @@
+{
+  "task": "fix-off-by-one-slice",
+  "model": "gemma4-think",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure",
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turns 1-3 inspected the source and tests, turn 5 reproduced the off-by-one failures, turn 7 applied the one-line sed fix and turn 9 verified all 4 tests pass, but turn 10 emitted a truncated tool_call tag followed by ~40 turns (10-50) re-running the identical passing test until max_turns.",
+  "transcript_chars": 41136
+}

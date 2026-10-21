@@ -1,0 +1,11 @@
+{
+  "task": "long-find-definition-in-tree",
+  "model": "gemma4-think",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 grepped for the definition and got a single unambiguous match, turn 2 answered with that path without editing anything, and the check confirmed the answer.",
+  "transcript_chars": 2310
+}

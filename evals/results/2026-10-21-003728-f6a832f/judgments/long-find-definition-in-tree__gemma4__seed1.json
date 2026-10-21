@@ -1,0 +1,11 @@
+{
+  "task": "long-find-definition-in-tree",
+  "model": "gemma4",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 grepped broadly and hit decoy noise, turn 2 narrowed to 'def parse_manifest' finding one definition, turn 3 read the 27-line candidate to confirm, turn 4 answered the path; no files changed, matching the check's pass.",
+  "transcript_chars": 5232
+}

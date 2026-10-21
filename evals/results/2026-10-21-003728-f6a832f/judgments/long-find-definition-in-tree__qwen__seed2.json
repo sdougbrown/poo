@@ -1,0 +1,11 @@
+{
+  "task": "long-find-definition-in-tree",
+  "model": "qwen",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [],
+  "needs_owner": false,
+  "reason": "Turn 1 grepped to narrow candidates, turn 2's targeted grep for 'def parse_manifest' found the single definition, turn 3 read loader.py to confirm it, turn 4 answered the path with no file changes; check passed.",
+  "transcript_chars": 7609
+}

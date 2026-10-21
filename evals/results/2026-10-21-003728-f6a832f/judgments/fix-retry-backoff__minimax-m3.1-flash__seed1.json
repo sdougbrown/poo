@@ -1,0 +1,13 @@
+{
+  "task": "fix-retry-backoff",
+  "model": "minimax-m3.1-flash",
+  "seed": 1,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "tool_call_parse_failure"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 1-2 inspected with grep and read both small files, turn 3 diagnosed the off-by-one but called a nonexistent 'edit' tool (error), turn 5's fix failed on missing 'python' and the agent noticed the file was unchanged, turn 6 applied the one-line fix with python3 and verified it, turns 7-8 ran the tests (4/4 OK, including the README command), matching the passing check.",
+  "transcript_chars": 9543
+}

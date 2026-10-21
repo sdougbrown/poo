@@ -1,0 +1,13 @@
+{
+  "task": "fix-json-missing-key",
+  "model": "gemma4-think",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 4 ran the tests to confirm the failure, turn 5 applied the minimal one-line fix, turn 6 verified all 5 tests pass; turns 7 and 8 then re-ran the identical test command and repeated the final summary after the task was already complete.",
+  "transcript_chars": 6724
+}

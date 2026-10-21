@@ -24,6 +24,10 @@ profile.cov
 # Scratch space (cloned prior art, local notes, cached builds)
 .cache/
 
+# Python bytecode, from running the eval fixtures' tests
+__pycache__/
+*.pyc
+
 # Go workspace file
 go.work
 go.work.sum
@@ -35,6 +39,5 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Python bytecode, from running the eval fixtures' tests
-__pycache__/
-*.pyc
+# Raw eval transcripts hold local paths; the reports and verdicts are committed.
+evals/results/**/runs/

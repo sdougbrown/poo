@@ -1,0 +1,13 @@
+{
+  "task": "fix-json-missing-key",
+  "model": "gemma4",
+  "seed": 2,
+  "logical_path": true,
+  "agrees_with_check": true,
+  "pathologies": [
+    "loop_or_reread"
+  ],
+  "needs_owner": false,
+  "reason": "Turn 2 read the buggy require, turn 8 ran the tests and saw the expected KeyError failure, but turn 10 re-ran pytest and turn 11 re-read the unchanged confload/__init__.py before the turn 12 one-line fix; turn 13 shows all 5 tests passing, matching the check.",
+  "transcript_chars": 10895
+}
