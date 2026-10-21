@@ -984,6 +984,23 @@ func (s *Session) takeJobResultLocked(run *runState) (jobQueueItem, bool) {
 	return jobQueueItem{}, false
 }
 
+// hasDeliverableJobLocked reports that the job queue holds a result the
+// drain would take.
+//
+// A held result waits for the next client prompt, so it is not queued
+// work: a caller that checks whether to drain and wait has to ask for an
+// unheld result.
+//
+// The caller holds the session's lock.
+func (s *Session) hasDeliverableJobLocked() bool {
+	for _, item := range s.jobQueue {
+		if !item.held {
+			return true
+		}
+	}
+	return false
+}
+
 // jobsRunningFor returns the jobs a run started that are still running.
 //
 // The jobs of an earlier run never hold a run open, so the list is the
@@ -1048,7 +1065,10 @@ func (s *Session) enterWaiting(run *runState) (waiting, drained bool) {
 		// the loop's next pass sees it.
 		return false, true
 	}
-	if s.hasDrainableInputLocked() || len(s.jobQueue) > 0 {
+	// The check asks for what the drain delivers: the steer queue and the
+	// job queue. A follow-up is delivered only at a natural stop, so a
+	// run with it queued still waits for its jobs.
+	if s.hasDrainableSteerLocked() || s.hasDeliverableJobLocked() {
 		s.mu.Unlock()
 		// A message is waiting, so the run does not wait: the queues
 		// are drained and the run goes to the gate.

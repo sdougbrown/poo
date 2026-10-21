@@ -202,7 +202,7 @@ func (s *Session) abandonFinalize(run *runState) bool {
 			return false
 		}
 	}
-	if !s.hasDrainableInputLocked() && len(s.jobQueue) == 0 {
+	if !s.hasDrainableInputLocked() && !s.hasDeliverableJobLocked() {
 		return false
 	}
 	// The natural candidates are discarded, and the run goes back to
@@ -764,10 +764,21 @@ func (s *Session) finishInputAcceptanceLocked(run *runState, input queuedInput) 
 //
 // The caller holds the session's lock.
 func (s *Session) hasDrainableInputLocked() bool {
-	if len(s.steerQueue) > 0 && s.steerQueue[0].accepted {
+	if s.hasDrainableSteerLocked() {
 		return true
 	}
 	return len(s.followUpQueue) > 0 && s.followUpQueue[0].accepted
+}
+
+// hasDrainableSteerLocked reports that the front of the steer queue can
+// be delivered.
+//
+// A follow-up is not drainable outside a natural stop, so a caller that
+// drains steers and job results has to ask for the steer queue alone.
+//
+// The caller holds the session's lock.
+func (s *Session) hasDrainableSteerLocked() bool {
+	return len(s.steerQueue) > 0 && s.steerQueue[0].accepted
 }
 
 // removeQueuedInputLocked takes one input back off its queue.
