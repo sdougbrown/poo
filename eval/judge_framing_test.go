@@ -2,6 +2,7 @@ package eval
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -132,11 +133,14 @@ func TestTheSummaryKeepsBothEnds(t *testing.T) {
 	// last turn.
 	var segments []TranscriptSegment
 	for i := 0; i < 20; i++ {
-		segments = append(segments, TranscriptSegment{Turn: i, Text: strings.Repeat("x", 1000)})
+		segments = append(segments, TranscriptSegment{Turn: i, Text: fmt.Sprintf("TURN-%02d-", i) + strings.Repeat("x", 1000)})
 	}
 	text, _, _ := summarizeTranscript(segments, 5000)
-	if !strings.Contains(text, "turn 0") && !strings.Contains(text, strings.Repeat("x", 100)) {
-		t.Errorf("the summary does not hold the first turn: %q", text[:200])
+	if !strings.Contains(text, "TURN-00-") {
+		t.Errorf("the summary does not hold the first turn: %q", text)
+	}
+	if !strings.Contains(text, "TURN-19-") {
+		t.Errorf("the summary does not hold the last turn: %q", text)
 	}
 	if !strings.Contains(text, "elided") {
 		t.Error("the summary does not say what it elided")
