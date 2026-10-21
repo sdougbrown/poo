@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/provider/openai"
 )
 
@@ -455,7 +456,7 @@ func (j *Judge) buildPayload(log *Log, transcript string, t transcript, report *
 	payload.CheckPassed = false
 	for _, r := range log.Records {
 		if r.Record == "run.settled" {
-			payload.CheckPassed = r.Reason == "end_turn"
+			payload.CheckPassed = r.Reason == string(poo.ReasonEndTurn)
 		}
 	}
 	payload.Metrics = ComputeMetrics(log, Diff{})
