@@ -539,3 +539,46 @@ func TestACancelWithASynchronousCallAndAJobSettlesTheRun(t *testing.T) {
 		return settled != nil && settled.RunID != firstRunID
 	})
 }
+
+// TestAFinishWithAJobRunningSettlesFinished covers the plan's rule: a
+// finish call may settle the run while a job is running, and the settle
+// detail lists the job.
+func TestAFinishWithAJobRunningSettlesFinished(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{
+			jobCall("one", true),
+			{
+				ID:        "call_2",
+				Name:      "finish",
+				Arguments: json.RawMessage(`{"result":{"answer":"42"}}`),
+			},
+		}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	jobTool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	jobTool.SetResult("the job's output")
+	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+
+	opts := poo.Options{
+		Transport: tr,
+		Tools: map[string]poo.Tool{
+			"job":    jobTool,
+			"finish": finisher,
+		},
+		ToolOrder:    []string{"job", "finish"},
+		Sink:         sink,
+		SessionID:    "s1",
+		ModelID:      "test-model",
+		ContextLimit: 32768,
+	}
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonFinished {
+		t.Errorf("the run settled %q, want finished", res.Reason)
+	}
+	// The settle detail lists the job that is still running.
+	if len(res.Detail.JobsRunning) != 1 || res.Detail.JobsRunning[0] != "j1" {
+		t.Errorf("the settle detail lists %v, want [j1]", res.Detail.JobsRunning)
+	}
+}
