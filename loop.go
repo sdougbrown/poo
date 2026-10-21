@@ -64,6 +64,12 @@ type Options struct {
 	// ReasoningEffort is the reasoning_effort the run sends, empty when
 	// it sends none.
 	ReasoningEffort string
+	// MessageIDs hands out the session-monotonic message ids. A session
+	// owns one counter, and a run continues it, so a second run's ids
+	// do not repeat the first run's.
+	//
+	// Nil means the run starts its own counter at one.
+	MessageIDs *MessageIDs
 }
 
 // Run is one prompt through to settled.
@@ -81,9 +87,10 @@ type Run struct {
 	sunk bool
 	// state is where the run is in the loop.
 	state State
-	// messageSeq numbers the messages the model produced. The ids are
-	// session-monotonic, so a delivery note can name one.
-	messageSeq int
+	// messageIDs hands out the session-monotonic message ids. The
+	// counter belongs to the session, so a run's ids continue where the
+	// session's last ones stopped.
+	messageIDs *MessageIDs
 }
 
 // State returns where the run is in the loop.
@@ -105,7 +112,11 @@ type Result struct {
 
 // NewRun builds a run. The caller drives it with Run.Execute.
 func NewRun(opts Options) *Run {
-	return &Run{opts: opts, state: StateRequesting}
+	ids := opts.MessageIDs
+	if ids == nil {
+		ids = &MessageIDs{}
+	}
+	return &Run{opts: opts, state: StateRequesting, messageIDs: ids}
 }
 
 // Execute runs the loop until it settles.
@@ -250,8 +261,7 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 		// The model's response is part of the history whether or not it
 		// asked for tool calls.
 		assistant := Message{Role: RoleAssistant, Content: resp.content, Origin: OriginModel}
-		r.messageSeq++
-		assistant.ID = fmt.Sprintf("m%d", r.messageSeq)
+		assistant.ID = r.messageIDs.Next()
 		for _, call := range resp.calls {
 			assistant.Content = append(assistant.Content, ContentBlock{
 				Kind:       ContentToolCall,

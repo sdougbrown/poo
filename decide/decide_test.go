@@ -139,6 +139,19 @@ func TestABadDistributionIsADeferral(t *testing.T) {
 				{ID: "q1", Probabilities: map[string]float64{"yes": 1}},
 			},
 		},
+		{
+			name: "no distribution at all",
+			answers: []decide.Answer{
+				{ID: "q1"},
+			},
+		},
+		{
+			name: "two answers for one question",
+			answers: []decide.Answer{
+				{ID: "q1", Probabilities: map[string]float64{"yes": 1, "no": 0}},
+				{ID: "q1", Probabilities: map[string]float64{"yes": 0, "no": 1}},
+			},
+		},
 	}
 
 	for _, c := range cases {
@@ -249,6 +262,91 @@ func TestTheDeciderFuncAdaptsAFunction(t *testing.T) {
 		t.Errorf("the decider returned %d answers, want 1", len(answers))
 	}
 }
+
+// TestTheAnswersAreSortedInTheOrderOfTheQuestions covers the ordering:
+// the answers read the way the questions were asked, and an answer for a
+// question that was not asked is kept rather than dropped.
+func TestTheAnswersAreSortedInTheOrderOfTheQuestions(t *testing.T) {
+	questions := []decide.Question{
+		{ID: "q2", Instructions: "second?", Kind: decide.Bool{True: "yes", False: "no"}},
+		{ID: "q1", Instructions: "first?", Kind: decide.Bool{True: "yes", False: "no"}},
+	}
+	answers := []decide.Answer{
+		{ID: "q1", Choice: "the first"},
+		{ID: "q2", Choice: "the second"},
+		{ID: "q3", Choice: "the unasked"},
+	}
+
+	sorted := decide.SortAnswers(questions, answers)
+	if len(sorted) != 3 {
+		t.Fatalf("the sorted answers hold %d, want 3", len(sorted))
+	}
+	if sorted[0].ID != "q2" {
+		t.Errorf("the first answer is %q, want q2", sorted[0].ID)
+	}
+	if sorted[1].ID != "q1" {
+		t.Errorf("the second answer is %q, want q1", sorted[1].ID)
+	}
+	if sorted[2].ID != "q3" {
+		t.Errorf("the third answer is %q, want q3: an answer for a question that was not asked is kept", sorted[2].ID)
+	}
+}
+
+// TestTheRequestCountComesFromTheDecider covers the request count: a
+// decider that knows how many wire requests it made reports it, and one
+// that does not leaves the count at zero.
+func TestTheRequestCountComesFromTheDecider(t *testing.T) {
+	sink := &recordingSink{}
+	recorder := decide.Recorded(countingDecider{requests: 3}, sink, "the caller")
+
+	if _, err := recorder.Decide(context.Background(), nil, "", nil); err != nil {
+		t.Fatalf("deciding: %v", err)
+	}
+	records := sink.records
+	if len(records) != 1 {
+		t.Fatalf("the sink holds %d records, want 1", len(records))
+	}
+	if records[0].Requests != 3 {
+		t.Errorf("the record's request count is %d, want 3", records[0].Requests)
+	}
+
+	// A decider that does not report a count leaves it at zero, which is
+	// the truth: the count was never reported.
+	sink2 := &recordingSink{}
+	recorder2 := decide.Recorded(countingDecider{}, sink2, "the caller")
+	if _, err := recorder2.Decide(context.Background(), nil, "", nil); err != nil {
+		t.Fatalf("deciding: %v", err)
+	}
+	if got := sink2.records[0].Requests; got != 0 {
+		t.Errorf("the record's request count is %d, want 0", got)
+	}
+}
+
+// recordingSink keeps the records it receives.
+type recordingSink struct {
+	// records holds the records, in order.
+	records []decide.Record
+}
+
+// Record keeps one record.
+func (s *recordingSink) Record(ctx context.Context, rec decide.Record) error {
+	s.records = append(s.records, rec)
+	return nil
+}
+
+// countingDecider is a decider that reports a request count.
+type countingDecider struct {
+	// requests is the count it reports.
+	requests int
+}
+
+// Decide answers nothing.
+func (d countingDecider) Decide(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+	return nil, nil
+}
+
+// Requests reports the request count.
+func (d countingDecider) Requests() int { return d.requests }
 
 // manyOptions returns n named options.
 func manyOptions(n int) []decide.Option {

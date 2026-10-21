@@ -1,8 +1,13 @@
 // Package session writes the session log.
 //
-// The log is append-only JSONL: one record per line, no lock, no recovery.
-// The record names and fields are the v0 vocabulary, documented in
+// The log is append-only JSONL: one record per line, no recovery. The
+// record names and fields are the v0 vocabulary, documented in
 // docs/session-log-v0.md.
+//
+// The log takes a lock around each write, so a concurrent append never
+// interleaves two records' bytes. The lock is a mutex, not a file lock:
+// the file lock that keeps two processes out of one session arrives with
+// the session seam.
 package session
 
 import (

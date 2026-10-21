@@ -328,10 +328,11 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 
 // forkBody appends messages to a serialized request body.
 //
-// The body is decoded, the messages are appended and the output ceiling
-// is replaced, and the result is serialized again. The key order is the
-// one the body already had, because the body is decoded into a struct
-// whose fields are in that order.
+// The body is decoded, the messages are appended after the last one and
+// the output ceiling is replaced, and the result is serialized again. The
+// key order is the one the body already had, because the keys are
+// written in the transport's own order and any key it does not know
+// keeps its position.
 func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error) {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -387,16 +388,39 @@ func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error
 	}
 
 	// The keys are written in the order the body had them, so the fork's
-	// prefix is byte-identical to the original.
-	keys := make([]string, 0, len(payload))
-	for k := range payload {
-		keys = append(keys, k)
+	// prefix is byte-identical to the original. A key the body did not
+	// have goes last, in the order it was added.
+	order, err := jsonKeyOrder(body)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(keys, func(i, j int) bool { return keyRank(keys[i]) < keyRank(keys[j]) })
+	seen := map[string]bool{}
+	for _, k := range order {
+		seen[k] = true
+	}
+	for _, k := range []string{"messages", "max_tokens"} {
+		if !seen[k] {
+			if _, ok := payload[k]; ok {
+				order = append(order, k)
+				seen[k] = true
+			}
+		}
+	}
+	// A key the transport does not know keeps its place: the body is
+	// decoded into a map, so the remaining keys are ordered by the
+	// transport's own order and then alphabetically.
+	rest := make([]string, 0, len(payload))
+	for k := range payload {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	order = append(order, rest...)
 
 	var b bytes.Buffer
 	b.WriteByte('{')
-	for i, k := range keys {
+	for i, k := range order {
 		if i > 0 {
 			b.WriteByte(',')
 		}
@@ -412,27 +436,54 @@ func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error
 	return b.Bytes(), nil
 }
 
-// keyOrder is the order the request body's keys are written in.
+// jsonKeyOrder returns the top-level keys of a JSON object, in the order
+// the object holds them.
 //
-// The order is fixed, so a fork's body is byte-identical to the body it
-// was forked from, apart from the fields that changed.
-var keyOrder = map[string]int{
-	"model":            0,
-	"messages":         1,
-	"tools":            2,
-	"max_tokens":       3,
-	"stream":           4,
-	"reasoning_effort": 5,
-	"stream_options":   6,
-}
-
-// keyRank returns the order of a key, and a rank past the known ones for
-// a key the transport does not know.
-func keyRank(key string) int {
-	if r, ok := keyOrder[key]; ok {
-		return r
+// The order matters for a fork: the forked body has to be byte-identical
+// to the body it came from, apart from the fields that changed, and a
+// JSON object decoded into a map loses its order.
+func jsonKeyOrder(body []byte) ([]string, error) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot does not hold a JSON body",
+		}
 	}
-	return len(keyOrder)
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot does not hold a JSON object",
+		}
+	}
+	var order []string
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the request snapshot's keys do not decode",
+			}
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the request snapshot's keys do not decode",
+			}
+		}
+		order = append(order, key)
+		// The value is skipped: the payload map already holds it.
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the request snapshot's values do not decode",
+			}
+		}
+	}
+	return order, nil
 }
 
 // peekFirstByte returns the first non-space byte of the body, without

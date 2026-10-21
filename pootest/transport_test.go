@@ -171,3 +171,75 @@ func TestTheScriptedTransportForks(t *testing.T) {
 		t.Errorf("the fork appended %q, want the appended message", forks[0].Appended[0].Text())
 	}
 }
+
+// TestTheRecordedRequestsAreCopies covers the transport's copies: a test
+// that changes what it got back does not change what the transport
+// recorded.
+func TestTheRecordedRequestsAreCopies(t *testing.T) {
+	tr := pootest.NewTransport(pootest.Turn{Text: "ok"})
+
+	req := poo.ChatRequest{
+		Model: "m",
+		Messages: []poo.Message{{
+			Role: poo.RoleAssistant,
+			Content: []poo.ContentBlock{
+				{Kind: poo.ContentToolCall, ToolCallID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)},
+				{
+					Kind: poo.ContentThinking,
+					Text: "the thinking",
+					Provider: &poo.ProviderBlock{
+						API:  poo.APIAnthropicMessages,
+						Type: "thinking_signature",
+						Data: json.RawMessage(`"sig"`),
+					},
+				},
+			},
+		}},
+	}
+	if _, _, err := tr.Stream(context.Background(), req); err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+
+	got := tr.Requests()
+	got[0].Messages[0].Content[0].Arguments[2] = 'X'
+	got[0].Messages[0].Content[1].Provider.Data[1] = 'X'
+
+	again := tr.Requests()
+	if string(again[0].Messages[0].Content[0].Arguments) != `{"command":"ls"}` {
+		t.Errorf("the recorded arguments are %s, want the original", again[0].Messages[0].Content[0].Arguments)
+	}
+	if string(again[0].Messages[0].Content[1].Provider.Data) != `"sig"` {
+		t.Errorf("the recorded provider payload is %s, want the original", again[0].Messages[0].Content[1].Provider.Data)
+	}
+}
+
+// TestTheRecordedForksAreCopies covers the fork's copies: the snapshot's
+// body is copied, so a test that changes it changes nothing.
+func TestTheRecordedForksAreCopies(t *testing.T) {
+	tr := pootest.NewTransport(pootest.Turn{Text: "ok"})
+	tr.SetForkTurns(pootest.Turn{Text: "forked"})
+
+	_, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m"})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	appended := []poo.Message{poo.NewTextMessage(poo.RoleUser, "the appended message")}
+	reader, err := tr.Fork(context.Background(), rendered, appended, 2048)
+	if err != nil {
+		t.Fatalf("forking: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	forks := tr.Forks()
+	if len(forks) != 1 {
+		t.Fatalf("the transport served %d forks, want 1", len(forks))
+	}
+	if len(forks[0].Prev.Body) > 0 {
+		forks[0].Prev.Body[0] = 'X'
+	}
+	again := tr.Forks()
+	if string(again[0].Prev.Body) != string(rendered.Body) {
+		t.Errorf("the recorded body is %s, want the original", again[0].Prev.Body)
+	}
+}

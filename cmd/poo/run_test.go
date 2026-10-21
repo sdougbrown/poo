@@ -382,3 +382,70 @@ func TestTheReasoningEffortIsRecordedInTheLog(t *testing.T) {
 		}
 	}
 }
+
+// The log carries the fields the message model added: the message ids,
+// the origins and the run's trigger.
+
+func TestTheLogCarriesTheNewRecordFields(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+	code, stderr := runCLI(t,
+		"run",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--log", logPath,
+		"say hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+
+	recs := readLog(t, logPath)
+
+	// The run's trigger names what started the run.
+	var started map[string]any
+	for _, rec := range recs {
+		if rec["record"] == "run.started" {
+			started = rec
+		}
+	}
+	if started == nil {
+		t.Fatal("the log holds no run.started record")
+	}
+	if started["trigger"] != "prompt" {
+		t.Errorf("the run's trigger is %v, want prompt", started["trigger"])
+	}
+
+	// Every message carries an origin, and the model's message carries
+	// an id.
+	var userOrigin, modelOrigin, modelID string
+	for _, rec := range recs {
+		if rec["record"] != "message" {
+			continue
+		}
+		switch rec["origin"] {
+		case "user":
+			userOrigin = "user"
+		case "model":
+			modelOrigin = "model"
+			if id, ok := rec["message_id"].(string); ok {
+				modelID = id
+			}
+		}
+	}
+	if userOrigin != "user" {
+		t.Error("the user's message carries no user origin")
+	}
+	if modelOrigin != "model" {
+		t.Error("the model's message carries no model origin")
+	}
+	if modelID == "" {
+		t.Error("the model's message carries no id")
+	}
+}

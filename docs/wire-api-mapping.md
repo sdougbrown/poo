@@ -152,7 +152,8 @@ Two placement rules belong to the API, and a transport has to honour them:
 3. **Messages had no id.** The plan's delivery note names an assistant
    message, and the message id is what the note refers to.
    *Closed:* `Message.ID` holds a session-monotonic `m<n>`, and
-   `MessageIDs` hands them out.
+   `poo.MessageIDs` hands them out. The counter belongs to the session, so
+   a second run's ids continue where the first run's stopped.
 
 4. **Messages had no origin.** A user message can come from a person, a
    steer, an interrupt, a follow-up, a job or a hook, and the model and the

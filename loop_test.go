@@ -149,6 +149,17 @@ func (s *recordingSink) count(name string) int {
 	return n
 }
 
+// messages returns the message records, in order.
+func (s *recordingSink) messages() []*poo.MessageRecord {
+	var out []*poo.MessageRecord
+	for _, rec := range s.records {
+		if m, ok := rec.(*poo.MessageRecord); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // echoTool is a tool that records what it was asked to do.
 type echoTool struct {
 	// calls holds the arguments the tool received.

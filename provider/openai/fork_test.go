@@ -124,3 +124,37 @@ func TestTheForkWithoutASnapshotIsRefused(t *testing.T) {
 		t.Error("the fork of an empty snapshot succeeded, want a failure")
 	}
 }
+
+// TestTheForkKeepsTheBodyKeyOrder covers the key order: the forked body
+// has the same keys in the same order, so the prefix is byte-identical.
+func TestTheForkKeepsTheBodyKeyOrder(t *testing.T) {
+	srv := newForkServer(t)
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+
+	req := poo.ChatRequest{
+		Model:     "m",
+		MaxTokens: 1024,
+		Messages: []poo.Message{
+			poo.NewTextMessage(poo.RoleUser, "the prompt"),
+		},
+	}
+	_, rendered, err := tr.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+
+	reader, err := tr.Fork(context.Background(), rendered, nil, 0)
+	if err != nil {
+		t.Fatalf("forking: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	if len(srv.bodies) != 2 {
+		t.Fatalf("the server received %d bodies, want 2", len(srv.bodies))
+	}
+	// A fork that appends nothing and changes nothing is the same body.
+	if srv.bodies[0] != srv.bodies[1] {
+		t.Errorf("the fork's body differs from the original:\n%s\n%s", srv.bodies[0], srv.bodies[1])
+	}
+}

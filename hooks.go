@@ -70,8 +70,12 @@ type HookContext struct {
 	context.Context
 	// SessionID identifies the session.
 	SessionID string
-	// RunID identifies the run.
+	// RunID identifies the run. A job's completion names the run that
+	// started the job, which may already have settled.
 	RunID string
+	// Job is the handle of the job the hook runs for, e.g. "j3". It is
+	// empty when the hook runs for the run itself.
+	Job string
 	// Turn is the turn the hook is called in, counting from one.
 	Turn int
 	// Interrupted reports that the turn was interrupted. It is set for
@@ -110,6 +114,9 @@ type ToolCallInfo struct {
 	Prepared Prepared
 	// Handle is the call's handle, e.g. "r1".
 	Handle string
+	// Job is the handle of the job the call runs as, e.g. "j3". It is
+	// empty when the call runs in the turn.
+	Job string
 	// RepeatCount is how many times the model has made this exact call
 	// in the run.
 	RepeatCount int

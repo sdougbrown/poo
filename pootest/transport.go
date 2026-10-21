@@ -122,24 +122,97 @@ func (t *Transport) SetForkTurns(turns ...Turn) {
 }
 
 // Requests returns the requests the transport received, in order.
+//
+// The requests are copies: a test that changes what it got back does not
+// change what the transport recorded.
 func (t *Transport) Requests() []poo.ChatRequest {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return append([]poo.ChatRequest(nil), t.requests...)
+	out := make([]poo.ChatRequest, 0, len(t.requests))
+	for _, r := range t.requests {
+		out = append(out, copyRequest(r))
+	}
+	return out
 }
 
 // Rendered returns the snapshots of the requests, in order.
 func (t *Transport) Rendered() []poo.Rendered {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return append([]poo.Rendered(nil), t.rendered...)
+	out := make([]poo.Rendered, 0, len(t.rendered))
+	for _, r := range t.rendered {
+		out = append(out, copyRendered(r))
+	}
+	return out
+}
+
+// copyRequest copies a request and the messages under it.
+//
+// The copy is deep: the content blocks, the raw arguments and the opaque
+// provider payloads are copied, so a test that changes what it got back
+// does not change what the transport recorded.
+func copyRequest(req poo.ChatRequest) poo.ChatRequest {
+	out := req
+	if req.Messages != nil {
+		out.Messages = make([]poo.Message, len(req.Messages))
+		for i, m := range req.Messages {
+			out.Messages[i] = m
+			if m.Content != nil {
+				out.Messages[i].Content = make([]poo.ContentBlock, len(m.Content))
+				for j, c := range m.Content {
+					out.Messages[i].Content[j] = c
+					if c.Arguments != nil {
+						out.Messages[i].Content[j].Arguments = append([]byte(nil), c.Arguments...)
+					}
+					if c.Provider != nil {
+						p := *c.Provider
+						if p.Data != nil {
+							p.Data = append([]byte(nil), p.Data...)
+						}
+						out.Messages[i].Content[j].Provider = &p
+					}
+				}
+			}
+			if m.DeliveryNote != nil {
+				note := *m.DeliveryNote
+				out.Messages[i].DeliveryNote = &note
+			}
+		}
+	}
+	if req.Tools != nil {
+		out.Tools = make([]poo.ToolSpec, len(req.Tools))
+		for i, s := range req.Tools {
+			out.Tools[i] = s
+			if s.Schema != nil {
+				out.Tools[i].Schema = append([]byte(nil), s.Schema...)
+			}
+		}
+	}
+	return out
+}
+
+// copyRendered copies a snapshot and its body.
+func copyRendered(r poo.Rendered) poo.Rendered {
+	out := r
+	if r.Body != nil {
+		out.Body = append([]byte(nil), r.Body...)
+	}
+	return out
 }
 
 // Forks returns the fork requests the transport received, in order.
 func (t *Transport) Forks() []Fork {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return append([]Fork(nil), t.forks...)
+	out := make([]Fork, 0, len(t.forks))
+	for _, f := range t.forks {
+		out = append(out, Fork{
+			Prev:      copyRendered(f.Prev),
+			Appended:  copyRequest(poo.ChatRequest{Messages: f.Appended}).Messages,
+			MaxTokens: f.MaxTokens,
+		})
+	}
+	return out
 }
 
 // Stream serves the next scripted response.
@@ -147,13 +220,13 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.requests = append(t.requests, req)
+	t.requests = append(t.requests, copyRequest(req))
 	rendered := poo.Rendered{
 		API:      poo.APIChatCompletions,
 		Body:     renderBody(req),
 		Messages: len(req.Messages),
 	}
-	t.rendered = append(t.rendered, rendered)
+	t.rendered = append(t.rendered, copyRendered(rendered))
 
 	if t.err != nil {
 		return nil, rendered, t.err

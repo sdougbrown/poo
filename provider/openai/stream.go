@@ -283,11 +283,19 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 
 // contextError turns a read failure into the context's error when the
 // context is what ended the request.
+//
+// A stream that already carried a delta cannot be retried: the model has
+// seen part of the answer. The failure says so, so the settle reason
+// names it.
 func (r *streamReader) contextError(err error) error {
 	if r.ctx != nil && r.ctx.Err() != nil {
 		return r.ctx.Err()
 	}
-	return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
+	kind := poo.ProviderKindNetwork
+	if r.ttftSet {
+		kind = poo.ProviderKindInterruptedStream
+	}
+	return &poo.ProviderError{Kind: kind, Message: err.Error()}
 }
 
 // providerError turns an error chunk into a provider error.

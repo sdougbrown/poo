@@ -230,6 +230,18 @@ type Decider interface {
 	Decide(ctx context.Context, state any, instructions string, qs []Question) ([]Answer, error)
 }
 
+// RequestReporter is implemented by a decider that knows how many wire
+// requests a call took.
+//
+// A call with more than sixty-four questions is split into several
+// requests, so the count is not the number of calls. The recording
+// wrapper consults this interface; a decider that does not implement it
+// records no count.
+type RequestReporter interface {
+	// Requests returns how many wire requests the last call made.
+	Requests() int
+}
+
 // DeciderFunc adapts a function to the Decider interface.
 type DeciderFunc func(ctx context.Context, state any, instructions string, qs []Question) ([]Answer, error)
 
@@ -309,7 +321,8 @@ type Record struct {
 	Error string `json:"error,omitempty"`
 	// LatencyMS is how long the call took, in milliseconds.
 	LatencyMS float64 `json:"latency_ms"`
-	// Requests is the number of wire requests the call made.
+	// Requests is the number of wire requests the call made. It is zero
+	// when the decider did not report one.
 	Requests int `json:"requests"`
 	// At is the RFC 3339 time of the call, in UTC.
 	At string `json:"at"`
@@ -355,8 +368,6 @@ type recordedDecider struct {
 	sink  Sink
 	// origin says who asked the question.
 	origin string
-	// requests counts the wire requests the calls made.
-	requests int
 }
 
 // Decide asks the questions and records the outcome.
@@ -370,8 +381,13 @@ func (d *recordedDecider) Decide(ctx context.Context, state any, instructions st
 	}
 	answers, err := d.inner.Decide(ctx, state, instructions, qs)
 	rec.LatencyMS = float64(time.Since(started).Microseconds()) / 1000
-	rec.Requests = d.requests
 	rec.Answers = answers
+	// A decider that knows how many wire requests it made reports it;
+	// one that does not leaves the count at zero, which is the truth:
+	// the count was never reported.
+	if reporter, ok := d.inner.(RequestReporter); ok {
+		rec.Requests = reporter.Requests()
+	}
 	switch {
 	case err == nil:
 		rec.Outcome = OutcomeOK
@@ -457,25 +473,23 @@ func ValidateAnswers(qs []Question, answers []Answer) error {
 			return fmt.Errorf("%w: the question %q has no answer", ErrDeferred, q.ID)
 		}
 		keys := q.Keys()
-		if len(a.Probabilities) != 0 {
-			if len(a.Probabilities) != len(keys) {
-				return fmt.Errorf("%w: the question %q has %d probabilities, it needs %d",
-					ErrDeferred, q.ID, len(a.Probabilities), len(keys))
+		if len(a.Probabilities) != len(keys) {
+			return fmt.Errorf("%w: the question %q has %d probabilities, it needs %d",
+				ErrDeferred, q.ID, len(a.Probabilities), len(keys))
+		}
+		total := 0.0
+		for _, k := range keys {
+			p, ok := a.Probabilities[k]
+			if !ok {
+				return fmt.Errorf("%w: the question %q has no probability for %q", ErrDeferred, q.ID, k)
 			}
-			total := 0.0
-			for _, k := range keys {
-				p, ok := a.Probabilities[k]
-				if !ok {
-					return fmt.Errorf("%w: the question %q has no probability for %q", ErrDeferred, q.ID, k)
-				}
-				if p < 0 || p > 1 {
-					return fmt.Errorf("%w: the question %q has the probability %v for %q", ErrDeferred, q.ID, p, k)
-				}
-				total += p
+			if p < 0 || p > 1 {
+				return fmt.Errorf("%w: the question %q has the probability %v for %q", ErrDeferred, q.ID, p, k)
 			}
-			if total < 1-1e-3 || total > 1+1e-3 {
-				return fmt.Errorf("%w: the question %q has probabilities summing to %v", ErrDeferred, q.ID, total)
-			}
+			total += p
+		}
+		if total < 1-1e-3 || total > 1+1e-3 {
+			return fmt.Errorf("%w: the question %q has probabilities summing to %v", ErrDeferred, q.ID, total)
 		}
 	}
 	return nil
@@ -512,6 +526,10 @@ func SortAnswers(qs []Question, answers []Answer) []Answer {
 	for _, a := range answers {
 		byID[a.ID] = a
 	}
+	asked := map[string]bool{}
+	for _, q := range qs {
+		asked[q.ID] = true
+	}
 	out := make([]Answer, 0, len(answers))
 	for _, q := range qs {
 		if a, ok := byID[q.ID]; ok {
@@ -521,7 +539,7 @@ func SortAnswers(qs []Question, answers []Answer) []Answer {
 	// An answer for a question that was not asked is kept, so nothing is
 	// silently dropped.
 	for _, a := range answers {
-		if _, ok := byID[a.ID]; !ok {
+		if !asked[a.ID] {
 			out = append(out, a)
 		}
 	}
