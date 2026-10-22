@@ -67,6 +67,10 @@ type PendingCall struct {
 	Handle string
 	// Tool is the name of the tool the model called.
 	Tool string
+	// CallID is the provider's id of the call. It is empty when the
+	// records pair the call with no message: the model never saw the
+	// call, and no result refers to it.
+	CallID string
 }
 
 // PendingAsk is a permission ask with no answer.
@@ -149,6 +153,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 	at := now().UTC().Format(time.RFC3339Nano)
 	for _, run := range pend.Runs {
 		for _, call := range run.Calls {
+			text := poo.HandleLine(call.Handle, call.Tool) + "\n" + InterruptedCallText
 			rec := &poo.ToolResultRecord{
 				RecordMeta: poo.NewRecordMeta("tool.result"),
 				RunID:      call.RunID,
@@ -156,9 +161,25 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 				Handle:     call.Handle,
 				Tool:       call.Tool,
 				Outcome:    poo.OutcomeInterrupted,
-				Text:       InterruptedCallText,
+				Text:       text,
 			}
 			if err := sink.Append(ctx, rec); err != nil {
+				return err
+			}
+			// The result goes into the model's view, so the call the
+			// model made is answered. A call the model never saw has
+			// no message to carry the result.
+			if call.CallID == "" {
+				continue
+			}
+			msg := poo.ToolResultMessage(call.CallID, call.Tool, text, true)
+			if err := sink.Append(ctx, &poo.MessageRecord{
+				RecordMeta: poo.NewRecordMetaFrom("message", poo.OriginTool),
+				RunID:      call.RunID,
+				Turn:       call.Turn,
+				Role:       msg.Role,
+				Content:    msg.Content,
+			}); err != nil {
 				return err
 			}
 		}
@@ -244,6 +265,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		jobEnded: map[string]bool{},
 		inputs:   map[string]poo.InputQueued{},
 		fate:     map[string]bool{},
+		callIDs:  poo.CallIDs(recs),
 	}
 	for _, rec := range recs {
 		switch r := rec.(type) {
@@ -261,6 +283,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 				Turn:   r.Turn,
 				Handle: r.Handle,
 				Tool:   r.Tool,
+				CallID: state.callIDs[r.Handle],
 			})
 		case *poo.ToolResultRecord:
 			state.results[callKey(r.RunID, r.Handle)] = true
@@ -368,6 +391,8 @@ type pendingState struct {
 	inputOrder []string
 	// fate are the inputs that were delivered or dropped.
 	fate map[string]bool
+	// callIDs are the provider's ids of the calls, by handle.
+	callIDs map[string]string
 }
 
 // run returns a run's state, creating it when it is new.

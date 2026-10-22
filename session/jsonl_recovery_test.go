@@ -100,8 +100,8 @@ func TestAnInterruptedRunIsMarkedInterrupted(t *testing.T) {
 			t.Errorf("the call %s has no interrupted result", handle)
 			continue
 		}
-		if result.Text != InterruptedCallText {
-			t.Errorf("the call %s's text is %q, want %q", handle, result.Text, InterruptedCallText)
+		if want := poo.HandleLine(handle, result.Tool) + "\n" + InterruptedCallText; result.Text != want {
+			t.Errorf("the call %s's text is %q, want %q", handle, result.Text, want)
 		}
 	}
 	if _, ok := interrupted["r1"]; ok {

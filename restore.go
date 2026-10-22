@@ -380,6 +380,7 @@ type turnKey struct {
 // applied as they were recorded: the strategy that made one never runs
 // again.
 func (s *Session) rebuild(records []Record, out *Restored) error {
+	s.seedCounters(records)
 	runs, runTurns := scanRuns(records, out)
 	// The session's turn numbers are the ones the records were written
 	// with: the runs in order, and each run's turns in order.
@@ -445,6 +446,34 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 	s.placeRemainingTurns(placed)
 	out.Messages = len(s.history)
 	return nil
+}
+
+// seedCounters continues the session's counters past the ones the
+// records hold.
+//
+// A handle, a message id and a job result's input id each name one
+// thing, and they never repeat within a session. A restored session
+// carries on after the ones the records already used, so its own calls
+// and results are never confused with the earlier ones.
+func (s *Session) seedCounters(records []Record) {
+	handles := 0
+	messages := 0
+	inputs := 0
+	for _, rec := range records {
+		switch r := rec.(type) {
+		case *ToolCallRecord:
+			handles = max(handles, handleSeq(r.Handle))
+		case *ToolResultRecord:
+			handles = max(handles, handleSeq(r.Handle))
+		case *MessageRecord:
+			messages = max(messages, messageSeq(r.MessageID))
+		case *JobEnded:
+			inputs = max(inputs, jobInputSeq(s.opts.SessionID, r.InputID))
+		}
+	}
+	s.handleSeq = handles
+	s.inputSeq = inputs
+	s.messageIDs.Set(messages)
 }
 
 // scanRuns returns the runs the records hold, in the order they

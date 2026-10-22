@@ -599,7 +599,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 	s.jobCompletions++
 	jobOutcome := jobOutcomeOf(outcome)
 	s.inputSeq++
-	inputID := fmt.Sprintf("%s-ji%d", s.opts.SessionID, s.inputSeq)
+	inputID := jobInputID(s.opts.SessionID, s.inputSeq)
 	runID := job.runID
 	handle := job.handle
 	tool := job.tool
@@ -1033,6 +1033,28 @@ func (s *Session) removeJobDeliveryLocked(run *runState, item jobQueueItem) {
 // jobResultText renders the text the model reads for a job result.
 func jobResultText(result jobResult) string {
 	return fmt.Sprintf("[job %s · %s finished (%s): %s]", result.job, result.tool, result.outcome, result.text)
+}
+
+// jobInputID returns the input id a job result is queued under.
+//
+// The id keeps the session's prefix, so a reader of the log can tell
+// where the result came from, and the number names the result in the
+// session's order of job results.
+func jobInputID(sessionID string, seq int) string {
+	return fmt.Sprintf("%s-ji%d", sessionID, seq)
+}
+
+// jobInputSeq returns the number a job result's input id carries.
+//
+// The number is the result's place in the session's order of job
+// results. An id that is not one of the session's has no number: the
+// recovery's own ids name the job they belong to.
+func jobInputSeq(sessionID, inputID string) int {
+	prefix := sessionID + "-ji"
+	if !strings.HasPrefix(inputID, prefix) {
+		return 0
+	}
+	return digits(inputID[len(prefix):])
 }
 
 // publicJobResults turns the internal results into the public ones the
