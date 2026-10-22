@@ -449,3 +449,22 @@ func asError(err error, target **config.Error) bool {
 	}
 	return false
 }
+
+// TestTheExampleSettingsDecode covers the example: the settings file
+// the repository ships decodes, so it stays in step with the settings.
+func TestTheExampleSettingsDecode(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "examples", "code.settings.yaml"))
+	if err != nil {
+		t.Fatalf("reading the example: %v", err)
+	}
+	settings, err := config.Parse(data, config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the example: %v", err)
+	}
+	if settings.Profile != "code" {
+		t.Errorf("the profile is %q, want code", settings.Profile)
+	}
+	if settings.Roles["chat"] == "" {
+		t.Error("the example names no chat model")
+	}
+}

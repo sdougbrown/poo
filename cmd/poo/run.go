@@ -391,9 +391,9 @@ func (o *runOptions) apply(settings *config.Settings) error {
 	if o.maxTurns > 0 {
 		settings.Limits.MaxTurns = o.maxTurns
 	}
-	if o.timeout > 0 {
-		settings.Limits.MaxDurationS = int(o.timeout / time.Second)
-	}
+	// The timeout is the run's deadline, not its budget: the deadline
+	// ends the run, and the settings' limits.max_duration_s is the
+	// budget the run measures itself against.
 	if o.executor != "" {
 		executor := o.executor
 		settings.Tools.Bash.Executor = &executor
