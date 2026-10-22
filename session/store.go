@@ -78,6 +78,12 @@ type Store interface {
 	Close() error
 }
 
+// The stores the package ships.
+var (
+	_ Store = (*FileStore)(nil)
+	_ Store = (*Memory)(nil)
+)
+
 // FileStore is the file-backed store: one JSONL file per session.
 //
 // The store holds one session open at a time: the session it created or

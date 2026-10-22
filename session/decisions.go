@@ -11,6 +11,9 @@ import (
 	"github.com/sdougbrown/poo/decide"
 )
 
+// The sink is a decide.Sink.
+var _ decide.Sink = (*JSONLDecisionSink)(nil)
+
 // JSONLDecisionSink writes decision records to a JSONL file.
 //
 // The sink is for a decision-only caller: a build that runs no session
