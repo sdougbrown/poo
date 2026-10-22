@@ -823,11 +823,12 @@ func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) 
 	}
 	s.mu.Lock()
 	broken := s.sunk
+	abandoned := run.committed || run.finalizing
 	s.mu.Unlock()
 	if broken {
 		return errors.New("poo: the session store is broken")
 	}
-	if run.committed || run.finalizing || ctx.Err() != nil {
+	if abandoned || ctx.Err() != nil {
 		return errDeliveryAbandoned
 	}
 	wctx, cancel := context.WithTimeout(ctx, recordWriteBudget)

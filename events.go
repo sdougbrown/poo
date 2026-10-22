@@ -115,8 +115,9 @@ func (b *eventBus) emit(name EventName, payload map[string]any) Event {
 	b.log = append(b.log, ev)
 	observers := make([]*observerSlot, len(b.observers))
 	copy(observers, b.observers)
-	b.mu.Unlock()
-
+	// The delivery happens under the bus's lock: the sends are
+	// non-blocking, so nothing can stall the emit, and two concurrent
+	// emitters cannot invert the sequence order an observer sees.
 	for _, o := range observers {
 		select {
 		case o.ch <- ev:
@@ -132,6 +133,8 @@ func (b *eventBus) emit(name EventName, payload map[string]any) Event {
 			o.mu.Unlock()
 		}
 	}
+	b.mu.Unlock()
+
 	return ev
 }
 
