@@ -113,7 +113,12 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	if len(transport) == 1 && transport[0] != nil {
 		s.opts.Transport = transport[0]
 	}
-	s.opts.ModelID = modelIdentifier(info)
+	// The model keeps the identifier the endpoint calls it by, and the
+	// name is the fallback. The wire API stays the one the session
+	// speaks, so the descriptor and the session agree.
+	info.ModelID = modelIdentifier(info)
+	info.API = api
+	s.opts.ModelID = info.ModelID
 	s.opts.ModelAPI = api
 	s.opts.ContextLimit = limit
 	s.opts.MaxOutput = info.MaxOutput
