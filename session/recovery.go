@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/sdougbrown/poo"
@@ -57,13 +59,15 @@ type PendingRun struct {
 	Asks []PendingAsk
 }
 
-// PendingCall is a tool call with no result.
+// PendingCall is a tool call whose result record or result message is
+// missing.
 type PendingCall struct {
 	// RunID identifies the run the call belongs to.
 	RunID string
 	// Turn is the turn the call belongs to.
 	Turn int
-	// Handle is the call's handle.
+	// Handle is the call's handle. A call the model saw but whose record
+	// was never written gets a fresh handle from the recovery.
 	Handle string
 	// Tool is the name of the tool the model called.
 	Tool string
@@ -71,6 +75,15 @@ type PendingCall struct {
 	// records pair the call with no message: the model never saw the
 	// call, and no result refers to it.
 	CallID string
+	// MissingResult reports that the call has no result record.
+	MissingResult bool
+	// MissingMessage reports that the call has no result message.
+	MissingMessage bool
+	// ResultText is the text of the call's existing result record, when
+	// it has one. The message the recovery writes carries it.
+	ResultText string
+	// ResultIsError is whether the call's existing result is an error.
+	ResultIsError bool
 }
 
 // PendingAsk is a permission ask with no answer.
@@ -153,26 +166,33 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 	at := now().UTC().Format(time.RFC3339Nano)
 	for _, run := range pend.Runs {
 		for _, call := range run.Calls {
-			text := poo.HandleLine(call.Handle, call.Tool) + "\n" + InterruptedCallText
-			rec := &poo.ToolResultRecord{
-				RecordMeta: poo.NewRecordMeta("tool.result"),
-				RunID:      call.RunID,
-				Turn:       call.Turn,
-				Handle:     call.Handle,
-				Tool:       call.Tool,
-				Outcome:    poo.OutcomeInterrupted,
-				Text:       text,
-			}
-			if err := sink.Append(ctx, rec); err != nil {
-				return err
+			text := call.ResultText
+			isError := call.ResultIsError
+			if call.MissingResult {
+				text = poo.HandleLine(call.Handle, call.Tool) + "\n" + InterruptedCallText
+				isError = true
+				rec := &poo.ToolResultRecord{
+					RecordMeta: poo.NewRecordMeta("tool.result"),
+					RunID:      call.RunID,
+					Turn:       call.Turn,
+					Handle:     call.Handle,
+					CallID:     call.CallID,
+					Tool:       call.Tool,
+					Outcome:    poo.OutcomeInterrupted,
+					Text:       text,
+					IsError:    true,
+				}
+				if err := sink.Append(ctx, rec); err != nil {
+					return err
+				}
 			}
 			// The result goes into the model's view, so the call the
 			// model made is answered. A call the model never saw has
 			// no message to carry the result.
-			if call.CallID == "" {
+			if call.CallID == "" || !call.MissingMessage {
 				continue
 			}
-			msg := poo.ToolResultMessage(call.CallID, call.Tool, text, true)
+			msg := poo.ToolResultMessage(call.CallID, call.Tool, text, isError)
 			if err := sink.Append(ctx, &poo.MessageRecord{
 				RecordMeta: poo.NewRecordMetaFrom("message", poo.OriginTool),
 				RunID:      call.RunID,
@@ -254,11 +274,17 @@ func recoveredInputID(sessionID, job string) string {
 }
 
 // pendingOf computes the operations a session has not resolved.
+//
+// The calls are keyed by the provider's call id, never by the order the
+// records landed in. A call the model saw but whose record was never
+// written is recovered from the message alone.
 func pendingOf(id string, recs []poo.Record) *Pending {
 	state := &pendingState{
 		runs:     map[string]*PendingRun{},
 		settled:  map[string]bool{},
-		results:  map[string]bool{},
+		calls:    map[string]*PendingCall{},
+		results:  map[string]*poo.ToolResultRecord{},
+		messages: map[string]bool{},
 		asks:     map[string]*PendingAsk{},
 		answered: map[string]bool{},
 		jobs:     map[string]poo.JobStarted{},
@@ -270,30 +296,61 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 	for _, rec := range recs {
 		switch r := rec.(type) {
 		case *poo.RunStarted:
-			if _, ok := state.runs[r.RunID]; !ok {
-				state.runs[r.RunID] = &PendingRun{RunID: r.RunID}
-				state.runOrder = append(state.runOrder, r.RunID)
-			}
+			state.run(r.RunID)
 		case *poo.RunSettled:
+			state.run(r.RunID)
 			state.settled[r.RunID] = true
 		case *poo.ToolCallRecord:
-			run := state.run(r.RunID)
-			run.Calls = append(run.Calls, PendingCall{
-				RunID:  r.RunID,
-				Turn:   r.Turn,
-				Handle: r.Handle,
-				Tool:   r.Tool,
-				CallID: state.callIDs[r.Handle],
-			})
+			state.run(r.RunID)
+			call := state.call(callIdentity(r.CallID, r.RunID, r.Handle))
+			call.RunID = r.RunID
+			call.Turn = r.Turn
+			call.Handle = r.Handle
+			call.Tool = r.Tool
+			call.CallID = r.CallID
 		case *poo.ToolResultRecord:
-			state.results[callKey(r.RunID, r.Handle)] = true
+			state.run(r.RunID)
+			key := callIdentity(r.CallID, r.RunID, r.Handle)
+			state.results[key] = r
+			// A result written before the record carried the call's id
+			// belongs to the call with the same handle.
+			if r.CallID == "" {
+				if id := state.callIDs[r.Handle]; id != "" {
+					state.results[callIdentity(id, r.RunID, r.Handle)] = r
+				}
+			}
+		case *poo.MessageRecord:
+			if r.RunID != "" {
+				state.run(r.RunID)
+			}
+			switch r.Role {
+			case poo.RoleAssistant:
+				for _, block := range r.Content {
+					if block.Kind != poo.ContentToolCall || block.ToolCallID == "" {
+						continue
+					}
+					call := state.call(callIdentity(block.ToolCallID, r.RunID, ""))
+					call.RunID = r.RunID
+					call.Turn = r.Turn
+					call.Tool = block.Name
+					call.CallID = block.ToolCallID
+				}
+			case poo.RoleTool:
+				for _, block := range r.Content {
+					if block.Kind != poo.ContentToolResult || block.ToolCallID == "" {
+						continue
+					}
+					state.messages[callIdentity(block.ToolCallID, r.RunID, "")] = true
+				}
+			}
 		case *poo.PermissionAskedRecord:
-			if _, ok := state.asks[r.AskID]; !ok {
-				state.asks[r.AskID] = &PendingAsk{RunID: r.RunID, AskID: r.AskID, Tool: r.Tool}
-				state.askOrder = append(state.askOrder, r.AskID)
+			key := askIdentity(r.RunID, r.AskID)
+			if _, ok := state.asks[key]; !ok {
+				state.asks[key] = &PendingAsk{RunID: r.RunID, AskID: r.AskID, Tool: r.Tool}
+				state.askOrder = append(state.askOrder, key)
 			}
 		case *poo.PermissionAnsweredRecord:
-			state.answered[r.AskID] = true
+			state.answered[askIdentity(r.RunID, r.AskID)] = true
 		case *poo.JobStarted:
 			if _, ok := state.jobs[r.Job]; !ok {
 				state.jobs[r.Job] = *r
@@ -313,22 +370,59 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		}
 	}
 
+	// A call the model saw but whose record was never written has no
+	// handle. It gets the next one, so its result record is placed like
+	// any other.
+	next := 0
+	for _, call := range state.calls {
+		next = max(next, handleNumber(call.Handle))
+	}
+	for _, result := range state.results {
+		next = max(next, handleNumber(result.Handle))
+	}
+	for _, key := range state.callOrder {
+		call := state.calls[key]
+		if call.Handle != "" {
+			continue
+		}
+		if _, ok := state.results[key]; ok {
+			continue
+		}
+		next++
+		call.Handle = fmt.Sprintf("r%d", next)
+	}
+
 	pend := &Pending{SessionID: id}
 	for _, runID := range state.runOrder {
-		run := state.runs[runID]
 		if state.settled[runID] {
 			continue
 		}
 		pending := PendingRun{RunID: runID}
-		for _, call := range run.Calls {
-			if state.results[callKey(call.RunID, call.Handle)] {
+		for _, key := range state.callOrder {
+			call := state.calls[key]
+			if call.RunID != runID {
 				continue
 			}
-			pending.Calls = append(pending.Calls, call)
+			result, hasResult := state.results[key]
+			missingMessage := call.CallID != "" && !state.messages[key]
+			if hasResult && !missingMessage {
+				continue
+			}
+			called := *call
+			called.MissingResult = !hasResult
+			called.MissingMessage = missingMessage
+			if hasResult {
+				called.ResultText = result.Text
+				called.ResultIsError = result.IsError || (!result.IsError && result.Outcome != poo.OutcomeOK && result.Outcome != poo.OutcomeStarted)
+			}
+			pending.Calls = append(pending.Calls, called)
 		}
-		for _, askID := range state.askOrder {
-			ask := state.asks[askID]
-			if ask.RunID != runID || state.answered[askID] {
+		sort.SliceStable(pending.Calls, func(i, j int) bool {
+			return handleNumber(pending.Calls[i].Handle) < handleNumber(pending.Calls[j].Handle)
+		})
+		for _, key := range state.askOrder {
+			ask := state.asks[key]
+			if ask.RunID != runID || state.answered[key] {
 				continue
 			}
 			pending.Asks = append(pending.Asks, *ask)
@@ -370,10 +464,15 @@ type pendingState struct {
 	runOrder []string
 	// settled are the runs that settled.
 	settled map[string]bool
-	// results are the tool calls that have a result, by run and
-	// handle.
-	results map[string]bool
-	// asks are the permission asks, by id.
+	// calls are the tool calls, by call id.
+	calls map[string]*PendingCall
+	// callOrder is the order the calls were recorded in.
+	callOrder []string
+	// results are the tool results, by call id.
+	results map[string]*poo.ToolResultRecord
+	// messages are the calls that have a result message, by call id.
+	messages map[string]bool
+	// asks are the permission asks, by run and id.
 	asks map[string]*PendingAsk
 	// askOrder is the order the asks were made in.
 	askOrder []string
@@ -406,7 +505,45 @@ func (s *pendingState) run(id string) *PendingRun {
 	return run
 }
 
+// call returns a call's state, creating it when it is new.
+func (s *pendingState) call(key string) *PendingCall {
+	call, ok := s.calls[key]
+	if !ok {
+		call = &PendingCall{}
+		s.calls[key] = call
+		s.callOrder = append(s.callOrder, key)
+	}
+	return call
+}
+
+// callIdentity names a call. A call with a provider id is named by it;
+// a call the model never saw is named by its run and handle.
+func callIdentity(callID, runID, handle string) string {
+	if callID != "" {
+		return "id\x00" + callID
+	}
+	return callKey(runID, handle)
+}
+
+// askIdentity names an ask within its run.
+func askIdentity(runID, askID string) string {
+	return runID + "\x00" + askID
+}
+
 // callKey returns the key a tool call's result is filed under.
 func callKey(runID, handle string) string {
-	return runID + "\x00" + handle
+	return "handle\x00" + runID + "\x00" + handle
+}
+
+// handleNumber returns the number a handle carries, or zero when it is
+// not one of the session's handles.
+func handleNumber(handle string) int {
+	if len(handle) < 2 || handle[0] != 'r' {
+		return 0
+	}
+	n, err := strconv.Atoi(handle[1:])
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }

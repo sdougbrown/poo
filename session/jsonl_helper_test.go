@@ -208,3 +208,11 @@ func inputDelivered(inputID string, mode poo.InputMode) *poo.InputDelivered {
 		DeliveredAt: "2026-10-20T00:00:01Z",
 	}
 }
+
+// toolCallWithID returns a tool call's record, with the provider's id of
+// the call.
+func toolCallWithID(runID string, turn int, handle, tool, callID string) *poo.ToolCallRecord {
+	rec := toolCall(runID, turn, handle, tool)
+	rec.CallID = callID
+	return rec
+}
