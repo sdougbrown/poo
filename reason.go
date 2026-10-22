@@ -46,6 +46,12 @@ const (
 	ReasonOutputTruncated Reason = "output_truncated"
 	// ReasonEndTurn means the model stopped on its own.
 	ReasonEndTurn Reason = "end_turn"
+	// ReasonInterrupted means the run's outcome is unknown: the process
+	// stopped while the run was going.
+	//
+	// It is never produced live. It is written on load, for a run that
+	// has no settle record, and it has no exit code of its own.
+	ReasonInterrupted Reason = "interrupted"
 )
 
 // reasonPrecedence is the arbitration order.
