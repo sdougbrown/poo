@@ -20,12 +20,6 @@ const (
 	InterruptedJobText = "outcome unknown; the process stopped during this job"
 )
 
-// ReasonInterrupted is the settle reason of a run a crash ended.
-//
-// The core never produces it: a run that was cut short is marked
-// interrupted when the session is loaded.
-const ReasonInterrupted poo.Reason = "interrupted"
-
 // Pending is the set of operations a session has not resolved.
 //
 // It is what a recovery resolves: a run that started and never settled,
@@ -107,28 +101,6 @@ type PendingInput struct {
 	Mode poo.InputMode
 }
 
-// Requeued is a job result that was never delivered.
-//
-// The result is delivered again when the session runs next: a job's
-// outcome is a fact the model must see, and a crash between the job's
-// end and its delivery loses nothing.
-type Requeued struct {
-	// Job is the job's identifier, e.g. "j3".
-	Job string
-	// InputID identifies the queued result.
-	InputID string
-	// Handle is the handle of the call the job came from.
-	Handle string
-	// Tool is the name of the tool the job ran.
-	Tool string
-	// RunID identifies the run that started the job.
-	RunID string
-	// Outcome is how the job ended.
-	Outcome poo.JobOutcome
-	// Text is the result the model reads.
-	Text string
-}
-
 // RecoveryPolicy resolves a session's pending operations.
 //
 // v1 has one policy: every pending operation is marked interrupted. A
@@ -206,7 +178,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 		rec := &poo.RunSettled{
 			RecordMeta: poo.NewRecordMeta("run.settled"),
 			RunID:      run.RunID,
-			Reason:     ReasonInterrupted,
+			Reason:     poo.ReasonInterrupted,
 			Detail: poo.SettleDetail{
 				Source: "recovery",
 				Text:   "the process stopped during this run",
@@ -241,7 +213,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 			RunID:      input.RunID,
 			InputID:    input.InputID,
 			Mode:       input.Mode,
-			Reason:     ReasonInterrupted,
+			Reason:     poo.ReasonInterrupted,
 			DroppedAt:  at,
 		}
 		if err := sink.Append(ctx, rec); err != nil {
@@ -412,36 +384,4 @@ func (s *pendingState) run(id string) *PendingRun {
 // callKey returns the key a tool call's result is filed under.
 func callKey(runID, handle string) string {
 	return runID + "\x00" + handle
-}
-
-// requeueOf returns the job results that were never delivered.
-//
-// The results are in completion order: the order the jobs ended in.
-func requeueOf(recs []poo.Record) []Requeued {
-	delivered := map[string]bool{}
-	for _, rec := range recs {
-		if d, ok := rec.(*poo.InputDelivered); ok {
-			delivered[d.InputID] = true
-		}
-	}
-	var out []Requeued
-	for _, rec := range recs {
-		ended, ok := rec.(*poo.JobEnded)
-		if !ok {
-			continue
-		}
-		if delivered[ended.InputID] {
-			continue
-		}
-		out = append(out, Requeued{
-			Job:     ended.Job,
-			InputID: ended.InputID,
-			Handle:  ended.Handle,
-			Tool:    ended.Tool,
-			RunID:   ended.RunID,
-			Outcome: ended.Outcome,
-			Text:    ended.Text,
-		})
-	}
-	return out
 }

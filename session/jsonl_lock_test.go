@@ -331,8 +331,8 @@ func TestAJobThatEndedIsQueuedAgainAfterAKill(t *testing.T) {
 	if queued.Text != "the job's result" {
 		t.Errorf("the queued result's text is %q, want the recorded text", queued.Text)
 	}
-	if queued.Outcome != poo.JobOutcomeOK {
-		t.Errorf("the queued result's outcome is %q, want %q", queued.Outcome, poo.JobOutcomeOK)
+	if queued.Outcome != poo.OutcomeOK {
+		t.Errorf("the queued result's outcome is %q, want %q", queued.Outcome, poo.OutcomeOK)
 	}
 	// The job was not run again: the recovery did not end it a second
 	// time.

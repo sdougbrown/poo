@@ -21,7 +21,7 @@ type Loaded struct {
 	// Requeue are the job results that were never delivered, in
 	// completion order. A caller delivers them again: a job's outcome
 	// is a fact the model must see.
-	Requeue []Requeued
+	Requeue []poo.JobResult
 	// Warnings report what changed since the session was written: a
 	// different build, or different settings. The records are still
 	// readable.

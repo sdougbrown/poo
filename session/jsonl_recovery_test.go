@@ -128,8 +128,8 @@ func TestAnInterruptedRunIsMarkedInterrupted(t *testing.T) {
 	if !ok {
 		t.Fatalf("the last record is %T, want a settle record", recs[len(recs)-1])
 	}
-	if settled.Reason != ReasonInterrupted {
-		t.Errorf("the settle reason is %q, want %q", settled.Reason, ReasonInterrupted)
+	if settled.Reason != poo.ReasonInterrupted {
+		t.Errorf("the settle reason is %q, want %q", settled.Reason, poo.ReasonInterrupted)
 	}
 	if settled.RunID != "r1" {
 		t.Errorf("the settle record is for %q, want r1", settled.RunID)
@@ -308,8 +308,8 @@ func TestAnUnfinishedJobIsEndedAndQueued(t *testing.T) {
 	if loaded.Requeue[0].Job != "j1" {
 		t.Errorf("the queued result is for %q, want j1", loaded.Requeue[0].Job)
 	}
-	if loaded.Requeue[0].Outcome != poo.JobOutcomeInterrupted {
-		t.Errorf("the queued result's outcome is %q, want %q", loaded.Requeue[0].Outcome, poo.JobOutcomeInterrupted)
+	if loaded.Requeue[0].Outcome != poo.OutcomeInterrupted {
+		t.Errorf("the queued result's outcome is %q, want %q", loaded.Requeue[0].Outcome, poo.OutcomeInterrupted)
 	}
 }
 
@@ -334,14 +334,14 @@ func TestAJobThatEndedIsQueuedAgain(t *testing.T) {
 		t.Fatalf("the load queues %d job results, want 1", len(loaded.Requeue))
 	}
 	queued := loaded.Requeue[0]
-	if queued.InputID != "s1-ji1" {
-		t.Errorf("the queued result's input id is %q, want s1-ji1", queued.InputID)
+	if queued.Job != "j1" {
+		t.Errorf("the queued result is for %q, want j1", queued.Job)
 	}
 	if queued.Text != "the job's result" {
 		t.Errorf("the queued result's text is %q, want the recorded text", queued.Text)
 	}
-	if queued.Outcome != poo.JobOutcomeOK {
-		t.Errorf("the queued result's outcome is %q, want %q", queued.Outcome, poo.JobOutcomeOK)
+	if queued.Outcome != poo.OutcomeOK {
+		t.Errorf("the queued result's outcome is %q, want %q", queued.Outcome, poo.OutcomeOK)
 	}
 }
 
@@ -427,8 +427,8 @@ func TestAQueuedInputWithNoFateIsDropped(t *testing.T) {
 	if dropped.InputID != "in1" {
 		t.Errorf("the dropped input is %q, want in1", dropped.InputID)
 	}
-	if dropped.Reason != ReasonInterrupted {
-		t.Errorf("the reason is %q, want %q", dropped.Reason, ReasonInterrupted)
+	if dropped.Reason != poo.ReasonInterrupted {
+		t.Errorf("the reason is %q, want %q", dropped.Reason, poo.ReasonInterrupted)
 	}
 }
 

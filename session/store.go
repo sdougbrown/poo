@@ -465,7 +465,7 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) 
 		Metadata:      meta,
 		Records:       recs,
 		RecoveredTail: torn,
-		Requeue:       requeueOf(recs),
+		Requeue:       poo.PendingJobResults(recs),
 		Warnings:      s.warnings(meta),
 	}, nil
 }

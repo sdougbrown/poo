@@ -102,18 +102,7 @@ func (m *Memory) List(ctx context.Context) ([]Summary, error) {
 	if !ok {
 		return nil, &Error{Code: CodeCorruptLog, Message: "the session does not start with a session"}
 	}
-	meta := Metadata{
-		Format:       created.Format,
-		SessionID:    created.SessionID,
-		Mode:         Mode(created.Mode),
-		CreatedAt:    parseTime(created.CreatedAt),
-		WorkingDir:   created.WorkingDir,
-		Tools:        created.Tools,
-		Model:        created.Model,
-		ContextLimit: created.ContextLimit,
-		ToolsMode:    created.ToolsMode,
-		Build:        created.Build,
-	}
+	meta := metadataOfRecord(created)
 	return []Summary{Projection{}.Summarize(meta, recs)}, nil
 }
 

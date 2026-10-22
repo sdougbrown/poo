@@ -28,7 +28,7 @@ type Metadata struct {
 	Profile string
 	// Roles are the effective model roles, when the session names
 	// them: the role and the model that filled it.
-	Roles map[string]string
+	Roles poo.ModelRoles
 	// SettingsHash is the hash of the settings the session was created
 	// with.
 	SettingsHash string
@@ -44,53 +44,36 @@ type Metadata struct {
 	Build poo.BuildInfo
 }
 
-// metadataLine is a session.created record as it is stored.
-//
-// The line is read on its own, so a header field the core's record type
-// does not name yet — the profile, the roles, the settings hash — is
-// still read.
-type metadataLine struct {
-	Format       string            `json:"format"`
-	SessionID    string            `json:"session_id"`
-	Mode         string            `json:"mode"`
-	CreatedAt    string            `json:"created_at"`
-	WorkingDir   string            `json:"working_dir"`
-	Profile      string            `json:"profile"`
-	Roles        map[string]string `json:"roles"`
-	SettingsHash string            `json:"settings_hash"`
-	Tools        []poo.SessionTool `json:"tools"`
-	Model        poo.SessionModel  `json:"model"`
-	ContextLimit int               `json:"context_limit"`
-	ToolsMode    string            `json:"tools_mode"`
-	Build        poo.BuildInfo     `json:"build"`
-}
-
-// metadata returns the header a session.created line carries.
-func (l metadataLine) metadata() Metadata {
-	return Metadata{
-		Format:       l.Format,
-		SessionID:    l.SessionID,
-		Mode:         Mode(l.Mode),
-		CreatedAt:    parseTime(l.CreatedAt),
-		WorkingDir:   l.WorkingDir,
-		Profile:      l.Profile,
-		Roles:        l.Roles,
-		SettingsHash: l.SettingsHash,
-		Tools:        l.Tools,
-		Model:        l.Model,
-		ContextLimit: l.ContextLimit,
-		ToolsMode:    l.ToolsMode,
-		Build:        l.Build,
-	}
-}
-
 // metadataOf reads a session's header from a log's first line.
+//
+// The line is the session's own header record, so the header is read
+// with the core's own type: a field the core names is read as the core
+// reads it.
 func metadataOf(line []byte) (Metadata, error) {
-	var raw metadataLine
-	if err := json.Unmarshal(line, &raw); err != nil {
+	var created poo.SessionCreated
+	if err := json.Unmarshal(line, &created); err != nil {
 		return Metadata{}, &Error{Code: CodeCorruptLog, Message: "the log does not start with a session", Err: err}
 	}
-	return raw.metadata(), nil
+	return metadataOfRecord(&created), nil
+}
+
+// metadataOfRecord returns the header a session's header record holds.
+func metadataOfRecord(created *poo.SessionCreated) Metadata {
+	return Metadata{
+		Format:       created.Format,
+		SessionID:    created.SessionID,
+		Mode:         Mode(created.Mode),
+		CreatedAt:    parseTime(created.CreatedAt),
+		WorkingDir:   created.WorkingDir,
+		Profile:      created.Profile,
+		Roles:        created.Roles,
+		SettingsHash: created.SettingsHash,
+		Tools:        created.Tools,
+		Model:        created.Model,
+		ContextLimit: created.ContextLimit,
+		ToolsMode:    created.ToolsMode,
+		Build:        created.Build,
+	}
 }
 
 // Summary is what a store shows about one session.
