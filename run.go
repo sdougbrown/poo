@@ -511,6 +511,22 @@ func (s *Session) loop(run *runState) []candidate {
 			}
 		}
 
+		// A failure the transport reported about the response is
+		// visible: the model is told, and the record holds it.
+		if len(resp.errors) > 0 {
+			if err := s.reportResponseErrors(run, turn, resp.errors); err != nil {
+				var perr *ProviderError
+				if errors.As(err, &perr) {
+					reason, detail, _ := s.settleForError(perr)
+					return []candidate{newCandidate(reason, detail)}
+				}
+				return []candidate{newCandidate(ReasonStoreError, SettleDetail{
+					Source: "store",
+					Text:   err.Error(),
+				})}
+			}
+		}
+
 		// The turn ended. The turn-end algorithm decides what happens
 		// next: it may settle the run, or it may go to the gate.
 		outcome := s.turnEnd(run, turn, processed, truncated)
@@ -1055,6 +1071,39 @@ func (s *Session) reportAttempt(run *runState, turn int, attempt Attempt) {
 	})
 }
 
+// reportResponseErrors makes the failures the transport reported about
+// the response visible.
+//
+// A recoverable failure is a note for the model: the note goes into the
+// view, so the model reads it in its next turn, and the record holds
+// it. A failure that is not recoverable ends the run.
+//
+// The note comes after the turn's tool results, so the request that
+// follows it keeps the order the wire wants: a tool result follows the
+// assistant's message that asked for it.
+func (s *Session) reportResponseErrors(run *runState, turn int, errs []StreamError) error {
+	notes := make([]string, 0, len(errs))
+	for _, e := range errs {
+		if !e.Recoverable {
+			return &ProviderError{Kind: ProviderKindInvalidRequest, Message: e.Message}
+		}
+		notes = append(notes, e.Message)
+	}
+	if len(notes) == 0 {
+		return nil
+	}
+	msg := NewTextMessage(RoleUser, strings.Join(notes, "\n"))
+	msg.Origin = OriginUser
+	s.appendMessages(msg)
+	return s.write(run.ctx, &MessageRecord{
+		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
+		RunID:      run.id,
+		Turn:       turn,
+		Role:       msg.Role,
+		Content:    msg.Content,
+	})
+}
+
 // toolSpecs returns the tools the model may call, in offer order.
 func (s *Session) toolSpecs() []ToolSpec {
 	specs := make([]ToolSpec, 0, len(s.opts.ToolOrder))
@@ -1280,6 +1329,9 @@ type response struct {
 	// requestChars is the serialized size of the view the request sent,
 	// which is what the endpoint's input token count measures.
 	requestChars int
+	// errors are the failures the transport reported about the
+	// response.
+	errors []StreamError
 }
 
 // collect fills the response with what the stream carried.
@@ -1433,6 +1485,14 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 				usage := *ev.Usage
 				resp.usage = &usage
 			}
+		case "error":
+			// A failure the transport reported about the response: a
+			// tool call the model wrote as text and that could not be
+			// parsed. The text is not lost, and the run carries on.
+			if ev.Error == nil {
+				continue
+			}
+			resp.errors = append(resp.errors, *ev.Error)
 		case "finish":
 			if ev.FinishReason != "" {
 				resp.finish = ev.FinishReason
