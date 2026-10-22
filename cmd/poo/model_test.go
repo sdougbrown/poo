@@ -11,7 +11,32 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/config"
 )
+
+// modelFromFlags returns the model the flags describe.
+//
+// The flags are the settings the command builds when no settings file
+// is given, so the model they name is the model the catalog resolves.
+func modelFromFlags(t *testing.T, o *runOptions) poo.ModelInfo {
+	t.Helper()
+	settings := &config.Settings{Version: 1}
+	if err := o.apply(settings); err != nil {
+		t.Fatalf("applying the flags: %v", err)
+	}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: defaultProfile,
+		Tools:          linkedTools(),
+		Profiles:       linkedProfiles(),
+		Executors:      executorRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	return modelWithFlags(runtime, o)
+}
 
 // The model the run talks to.
 //
@@ -23,13 +48,14 @@ import (
 // its reasoning control.
 func TestTheModelDescriptorComesFromTheFlags(t *testing.T) {
 	o := runOptions{
+		baseURL:         "http://localhost:4000/v1",
 		modelID:         "gemma4",
 		contextLimit:    32768,
 		maxOutput:       4096,
 		toolsMode:       "text",
 		reasoningEffort: "low",
 	}
-	info := o.modelInfo()
+	info := modelFromFlags(t, &o)
 	if info.ModelID != "gemma4" {
 		t.Errorf("the model is %q, want gemma4", info.ModelID)
 	}
@@ -53,12 +79,24 @@ func TestTheModelDescriptorComesFromTheFlags(t *testing.T) {
 	}
 }
 
-// TestTheModelWithoutAReasoningFlagHasNoReasoningControl covers the
-// model that is asked to think by nobody: the command knows no control
-// to send, so the descriptor names none.
-func TestTheModelWithoutAReasoningFlagHasNoReasoningControl(t *testing.T) {
-	o := runOptions{modelID: "gemma4", contextLimit: 32768, toolsMode: "native"}
-	info := o.modelInfo()
+// TestTheModelWithoutAReasoningFlagHasTheFamilyRule covers the model
+// that is asked to think by nobody: the flags name no control, and the
+// catalog's family rule does. The rule knows how the family thinks,
+// and the setting says whether it does.
+func TestTheModelWithoutAReasoningFlagHasTheFamilyRule(t *testing.T) {
+	o := runOptions{baseURL: "http://localhost:4000/v1", modelID: "gemma4", contextLimit: 32768, toolsMode: "native"}
+	info := modelFromFlags(t, &o)
+	if info.Reasoning.Mode != poo.ReasoningToggle {
+		t.Errorf("the reasoning control is %q, want %q", info.Reasoning.Mode, poo.ReasoningToggle)
+	}
+}
+
+// TestAModelWithoutAFamilyRuleHasNoReasoningControl covers the model
+// the catalog knows nothing about: the descriptor names no control,
+// and the request carries no reasoning field.
+func TestAModelWithoutAFamilyRuleHasNoReasoningControl(t *testing.T) {
+	o := runOptions{baseURL: "http://localhost:4000/v1", modelID: "test-model", contextLimit: 32768, toolsMode: "native"}
+	info := modelFromFlags(t, &o)
 	if info.Reasoning.Mode != "" {
 		t.Errorf("the reasoning control is %q, want none", info.Reasoning.Mode)
 	}
@@ -79,7 +117,7 @@ func TestTheRequestBodyCarriesTheModelAndTheCeiling(t *testing.T) {
 	dir := t.TempDir()
 	code, stderr := runCLI(t, "run",
 		"--base-url", srv.URL,
-		"--model-id", "gemma4",
+		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--log", filepath.Join(dir, "session.jsonl"),
 		"--working-dir", dir,
