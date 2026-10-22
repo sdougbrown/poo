@@ -6,6 +6,11 @@
 // shares: the environment a section may read, the surface a section
 // list is edited through, and the builder that renders the prompt.
 //
+// A section holds a default text and, beside it, the named alternatives
+// it offers. The builder renders the prompt in one variant, named by the
+// environment: a section that offers an alternative for that name
+// renders it, and a section that does not renders its default text.
+//
 // The package imports the standard library only.
 package prompt
 
