@@ -272,6 +272,70 @@ type jobQueueItem struct {
 	held bool
 }
 
+// JobInfo describes one of the session's jobs.
+type JobInfo struct {
+	// Job is the job's identifier, e.g. "j3".
+	Job string
+	// Handle is the handle of the tool call the job came from.
+	Handle string
+	// Tool is the name of the tool the job runs.
+	Tool string
+	// RunID identifies the run that started the job.
+	RunID string
+	// StartedAt is when the job started, in RFC 3339.
+	StartedAt string
+	// Status is "running" or "held".
+	//
+	// A held job is a finished job whose result waits for the next
+	// run: the work is done, and the model has not read it yet.
+	Status string
+}
+
+// The statuses a job is reported with.
+const (
+	// JobRunning means the job is still running.
+	JobRunning = "running"
+	// JobHeld means the job's result is waiting for the next run.
+	JobHeld = "held"
+)
+
+// Jobs returns the session's jobs.
+//
+// The running jobs come first, in start order, and the held results
+// follow them.
+func (s *Session) Jobs() []JobInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]JobInfo, 0, len(s.jobOrder)+len(s.jobQueue))
+	for _, id := range s.jobOrder {
+		job, ok := s.jobs[id]
+		if !ok || job.ended {
+			continue
+		}
+		out = append(out, JobInfo{
+			Job:       job.id,
+			Handle:    job.handle,
+			Tool:      job.tool,
+			RunID:     job.runID,
+			StartedAt: job.startedAt.UTC().Format(time.RFC3339Nano),
+			Status:    JobRunning,
+		})
+	}
+	for _, item := range s.jobQueue {
+		if !item.held {
+			continue
+		}
+		out = append(out, JobInfo{
+			Job:    item.result.job,
+			Handle: item.result.handle,
+			Tool:   item.result.tool,
+			RunID:  item.result.runID,
+			Status: JobHeld,
+		})
+	}
+	return out
+}
+
 // WithJobs sets the session's job configuration.
 //
 // The option is the whole configuration: nothing about jobs is hardcoded,

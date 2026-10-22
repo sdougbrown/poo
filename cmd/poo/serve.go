@@ -493,11 +493,11 @@ func (f *serveFactory) openStore(mode, dir string) (session.Store, error) {
 }
 
 // storeDir returns the directory the session logs live in.
+//
+// It is empty when the command keeps its sessions in memory, and the
+// handshake then announces the ephemeral mode alone.
 func (f *serveFactory) storeDir() string {
-	if f.sessionDir != "" {
-		return f.sessionDir
-	}
-	return f.opts.sessionDir
+	return f.sessionDir
 }
 
 // sessionMode returns the mode a session gets when the client names
