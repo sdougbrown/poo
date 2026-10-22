@@ -147,7 +147,7 @@ func (s *Session) recordPartialCause(run *runState, turn int, resp *response, ca
 		Partial:    true,
 		Cause:      cause,
 	}); err != nil && !errors.Is(err, errCallRecordSealed) {
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 	}
 }
 
@@ -180,6 +180,7 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 			RunID:      run.id,
 			Turn:       turn,
 			Handle:     handle,
+			CallID:     call.ID,
 			Tool:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
 		})

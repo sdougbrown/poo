@@ -251,6 +251,11 @@ type ToolCallRecord struct {
 	Turn int `json:"turn"`
 	// Handle is the call's identifier within the turn, e.g. "r1".
 	Handle string `json:"handle"`
+	// CallID is the provider's id of the call. It is the id the model's
+	// message carries and the id the result answers, so a reader pairs a
+	// call with its message and its result by this id, never by the
+	// order the records landed in.
+	CallID string `json:"call_id,omitempty"`
 	// Tool is the name of the tool the model called.
 	Tool string `json:"tool"`
 	// Arguments are the raw arguments the model sent. They are a JSON
@@ -271,10 +276,16 @@ type ToolResultRecord struct {
 	Turn int `json:"turn"`
 	// Handle is the call's identifier within the turn.
 	Handle string `json:"handle"`
+	// CallID is the provider's id of the call. It is the same id the
+	// call's record and the message that carries the result name.
+	CallID string `json:"call_id,omitempty"`
 	// Tool is the name of the tool that ran.
 	Tool string `json:"tool"`
 	// Outcome is the call's outcome.
 	Outcome Outcome `json:"outcome"`
+	// IsError reports that the result is a recoverable failure, as the
+	// message the model sees says.
+	IsError bool `json:"is_error,omitempty"`
 	// Text is the model-facing text of the result.
 	Text string `json:"text"`
 	// Structured is the optional side-channel payload.

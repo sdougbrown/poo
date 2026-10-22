@@ -13,9 +13,8 @@ import (
 // continues.
 
 // TestTheCallIDsPairTheCallsWithTheMessages covers the pairing a
-// recovery needs: a call's provider id is in the assistant message
-// that carries it, and the calls of a turn are the ones the model made,
-// in that order.
+// recovery needs: a call's provider id is on the call's own record, so a
+// batch whose records land in any order is paired correctly.
 func TestTheCallIDsPairTheCallsWithTheMessages(t *testing.T) {
 	records := []poo.Record{
 		&poo.MessageRecord{
@@ -35,6 +34,7 @@ func TestTheCallIDsPairTheCallsWithTheMessages(t *testing.T) {
 			RunID:      "r1",
 			Turn:       1,
 			Handle:     "r2",
+			CallID:     "c2",
 			Tool:       "echo",
 		},
 		&poo.ToolCallRecord{
@@ -42,6 +42,7 @@ func TestTheCallIDsPairTheCallsWithTheMessages(t *testing.T) {
 			RunID:      "r1",
 			Turn:       1,
 			Handle:     "r1",
+			CallID:     "c1",
 			Tool:       "echo",
 		},
 	}
