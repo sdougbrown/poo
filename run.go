@@ -351,9 +351,7 @@ func (s *Session) loop(run *runState) []candidate {
 		// A waiting run blocks until a message or a job result arrives.
 		// Nothing is requested, no tool runs and no hook fires while the
 		// run waits.
-		if s.waitWhileWaiting(run) {
-			continue
-		}
+		s.waitWhileWaiting(run)
 
 		// The next-request gate. Every path to a new request comes
 		// through it.

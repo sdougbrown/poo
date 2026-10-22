@@ -1090,15 +1090,14 @@ func (s *Session) enterWaiting(run *runState) (waiting, drained bool) {
 //
 // A waiting run has nothing to do: no request, no tool and no hook. It
 // wakes when a job result arrives, when the client sends a message, or
-// when the run is cancelled.
-//
-// The call reports that the run is still waiting, so the loop goes
-// round again.
-func (s *Session) waitWhileWaiting(run *runState) bool {
+// when the run is cancelled. The call blocks until one of those, and
+// leaves the run in the requesting state when it is still the session's
+// waiting run.
+func (s *Session) waitWhileWaiting(run *runState) {
 	s.mu.Lock()
 	if s.state != StateWaiting || s.run != run {
 		s.mu.Unlock()
-		return false
+		return
 	}
 	wake := run.wake
 	s.mu.Unlock()
@@ -1113,7 +1112,6 @@ func (s *Session) waitWhileWaiting(run *runState) bool {
 		s.transitionLocked(StateRequesting)
 	}
 	s.mu.Unlock()
-	return false
 }
 
 // signalWake wakes a waiting run.
