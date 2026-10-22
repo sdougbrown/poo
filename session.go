@@ -208,6 +208,9 @@ type runState struct {
 	// a hook that appends a message while the finalization is under
 	// way cannot add a record after run.settled.
 	runWrites int
+	// writeClaims are the claimed hook writes, so the seal can end a
+	// write the finalization stopped waiting for.
+	writeClaims []*runWriteClaim
 	// callWrites counts the tool.call records whose writes are still in
 	// flight. The finalization waits for them, so no record of the run
 	// follows run.settled.
@@ -774,37 +777,58 @@ func (s *Session) writeRun(run *runState, rec Record) error {
 	if run == nil {
 		return s.write(context.Background(), rec)
 	}
-	if !s.beginRunWrite(run) {
+	ctx, release, ok := s.beginRunWrite(run)
+	if !ok {
 		// The finalization sealed the run: the record is abandoned.
 		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
 	}
-	defer s.finishRunWrite(run)
-	wctx, cancel := recordContext(run.ctx)
-	defer cancel()
-	return s.appendRecord(wctx, rec, run)
+	defer release()
+	return s.appendRecord(ctx, rec, run)
+}
+
+// runWriteClaim is one claimed hook write for a run.
+type runWriteClaim struct {
+	// cancel ends the write at the seal.
+	cancel context.CancelCauseFunc
 }
 
 // beginRunWrite claims a record's write against the run's seal.
 //
 // The claim is made under the session's lock, so a write that arrives
 // after the seal is refused, and one that arrives before it is waited
-// for by the finalization.
-func (s *Session) beginRunWrite(run *runState) bool {
+// for by the finalization. The returned context ignores the run's own
+// cancellation, because the record has to say what the run did, and the
+// seal cancels it, so the write never follows run.settled.
+func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if run.sealed {
-		return false
+		s.mu.Unlock()
+		return nil, nil, false
 	}
+	base := run.ctx
+	if base == nil {
+		base = context.Background()
+	}
+	ctx, cancel := context.WithCancelCause(context.WithoutCancel(base))
+	claim := &runWriteClaim{cancel: cancel}
+	run.writeClaims = append(run.writeClaims, claim)
 	run.runWrites++
-	return true
-}
-
-// finishRunWrite releases a claimed write.
-func (s *Session) finishRunWrite(run *runState) {
-	s.mu.Lock()
-	run.runWrites--
-	s.signalWorkLocked(run)
 	s.mu.Unlock()
+
+	release := func() {
+		cancel(nil)
+		s.mu.Lock()
+		for i, held := range run.writeClaims {
+			if held == claim {
+				run.writeClaims = append(run.writeClaims[:i], run.writeClaims[i+1:]...)
+				break
+			}
+		}
+		run.runWrites--
+		s.signalWorkLocked(run)
+		s.mu.Unlock()
+	}
+	return ctx, release, true
 }
 
 // appendRecord appends one record under the context given.

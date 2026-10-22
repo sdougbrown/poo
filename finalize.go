@@ -480,6 +480,9 @@ func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) 
 			call.recordCancel(errCallRecordSealed)
 		}
 	}
+	for _, claim := range run.writeClaims {
+		claim.cancel(errCallRecordSealed)
+	}
 	issued := make([]*issuedCall, 0, len(run.pendingCalls))
 	for _, call := range run.pendingCalls {
 		issued = append(issued, call)

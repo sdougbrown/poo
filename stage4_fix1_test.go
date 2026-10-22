@@ -577,3 +577,89 @@ func TestAReplacedJobKeepsTheOriginalInItsRecord(t *testing.T) {
 		t.Errorf("job.ended.Hooks is %+v, want the replacement decision", ended.Hooks)
 	}
 }
+
+// fixSealSink holds a hook's first message write and lets the second
+// one race the run's seal.
+type fixSealSink struct {
+	recordingSink
+	first        chan struct{}
+	releaseFirst chan struct{}
+	settled      chan struct{}
+	once         sync.Once
+}
+
+// Append holds the first hook message until the test releases it, and
+// the second one until the run settles or its write is ended.
+func (s *fixSealSink) Append(ctx context.Context, rec poo.Record) error {
+	if m, ok := rec.(*poo.MessageRecord); ok && len(m.Content) > 0 {
+		switch m.Content[0].Text {
+		case "first hook message":
+			close(s.first)
+			select {
+			case <-s.releaseFirst:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		case "second hook message":
+			select {
+			case <-s.settled:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	err := s.recordingSink.Append(ctx, rec)
+	if rec.Meta().Record == "run.settled" {
+		s.once.Do(func() { close(s.settled) })
+	}
+	return err
+}
+
+// TestAClaimedHookWriteIsEndedAtTheSeal covers the plan's seal: a hook
+// write claimed before finalization is waited for, and the seal ends it,
+// so it never lands after run.settled. The history mutation follows only
+// a successful record write.
+func TestAClaimedHookWriteIsEndedAtTheSeal(t *testing.T) {
+	restore := poo.SetRecordWriteBudget(80 * time.Millisecond)
+	defer restore()
+	sink := &fixSealSink{first: make(chan struct{}), releaseFirst: make(chan struct{}), settled: make(chan struct{})}
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.BeforeRun = []poo.BeforeRunHook{fixStartFunc(func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error) {
+		return poo.StartDecision{Append: []poo.Message{
+			poo.NewTextMessage(poo.RoleUser, "first hook message"),
+			poo.NewTextMessage(poo.RoleUser, "second hook message"),
+		}}, nil
+	})}
+	s := newTestSession(t, opts)
+	promptDone := make(chan struct{})
+	cancelDone := make(chan struct{})
+	go func() { defer close(promptDone); _, _ = s.Prompt(context.Background(), "start") }()
+	<-sink.first
+	go func() { defer close(cancelDone); s.Cancel("cancel:review") }()
+	waitFor(t, "settling", func() bool { return s.State() == poo.StateSettling })
+	time.Sleep(25 * time.Millisecond)
+	close(sink.releaseFirst)
+	<-promptDone
+	<-cancelDone
+
+	sealed := false
+	for _, rec := range sink.allRecords() {
+		if sealed {
+			if m, ok := rec.(*poo.MessageRecord); ok && len(m.Content) > 0 && m.Content[0].Text == "second hook message" {
+				t.Error("a claimed hook record was appended after run.settled")
+			}
+		}
+		if rec.Meta().Record == "run.settled" {
+			sealed = true
+		}
+	}
+}
+
+// fixStartFunc adapts a function to a before-run hook.
+type fixStartFunc func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error)
+
+// BeforeRun calls the function.
+func (f fixStartFunc) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
+	return f(ctx, trigger)
+}

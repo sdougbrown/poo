@@ -191,13 +191,15 @@ func (s *Session) runBeforeRun(run *runState, trigger RunTrigger) (startDecision
 func (s *Session) appendStartMessages(run *runState, decisions startDecisions) {
 	for _, added := range decisions.messages {
 		msg := hookMessage(added.message, added.name)
-		s.appendMessages(msg)
-		_ = s.writeRun(run, &MessageRecord{
+		if err := s.writeRun(run, &MessageRecord{
 			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 			RunID:      run.id,
 			Role:       msg.Role,
 			Content:    msg.Content,
-		})
+		}); err != nil {
+			continue
+		}
+		s.appendMessages(msg)
 	}
 }
 
@@ -234,14 +236,16 @@ func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appen
 		if len(decision.Append) > 0 {
 			for _, msg := range decision.Append {
 				msg = hookMessage(msg, hookName(h))
-				s.appendMessages(msg)
-				_ = s.writeRun(run, &MessageRecord{
+				if err := s.writeRun(run, &MessageRecord{
 					RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 					RunID:      run.id,
 					Turn:       turn,
 					Role:       msg.Role,
 					Content:    msg.Content,
-				})
+				}); err != nil {
+					continue
+				}
+				s.appendMessages(msg)
 			}
 			appended = true
 		}
@@ -310,14 +314,16 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 	// model.
 	for _, added := range continues {
 		msg := hookMessage(added.message, added.name)
-		s.appendMessages(msg)
-		_ = s.writeRun(run, &MessageRecord{
+		if err := s.writeRun(run, &MessageRecord{
 			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 			RunID:      run.id,
 			Turn:       turn,
 			Role:       msg.Role,
 			Content:    msg.Content,
-		})
+		}); err != nil {
+			continue
+		}
+		s.appendMessages(msg)
 	}
 	return SettleDecision{Accepted: true}, true, nil
 }
