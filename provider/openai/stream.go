@@ -304,6 +304,9 @@ func (r *streamReader) contextError(err error) error {
 }
 
 // providerError turns an error chunk into a provider error.
+//
+// The chunk carries no status, so its class comes from the code and the
+// message, and the server's own failure is the default.
 func (r *streamReader) providerError(body *errorBody) error {
 	code := codeString(body.Code)
 	message := body.Message
@@ -311,7 +314,7 @@ func (r *streamReader) providerError(body *errorBody) error {
 		message = "the endpoint returned an error"
 	}
 	return &poo.ProviderError{
-		Kind:    classifyError(code, message, poo.ProviderKindServer),
+		Kind:    failureKind(0, code, body.Type, message, poo.ProviderKindServer),
 		Message: message,
 		Code:    code,
 	}

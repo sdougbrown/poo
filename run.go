@@ -1176,6 +1176,12 @@ func (s *Session) settleForError(err error) (Reason, SettleDetail, error) {
 		// retryable.
 		retryAfter := int((pe.RetryAfter + time.Second - 1) / time.Second)
 		provider := &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code, RetryAfterSec: retryAfter}
+		// The time the endpoint says its limit resets travels with the
+		// failure too, so a consumer can tell when another attempt
+		// could succeed.
+		if !pe.ResetsAt.IsZero() {
+			provider.ResetsAt = pe.ResetsAt.UTC().Format(time.RFC3339)
+		}
 		switch pe.Kind {
 		case ProviderKindContextLength:
 			return ReasonContextExhausted, SettleDetail{

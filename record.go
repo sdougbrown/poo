@@ -315,6 +315,9 @@ type ProviderDetail struct {
 	// RetryAfterSec is how long the endpoint asked the client to wait, in
 	// seconds, when it said so.
 	RetryAfterSec int `json:"retry_after_s,omitempty"`
+	// ResetsAt is when the endpoint says its limit resets, in RFC 3339.
+	// It is absent when the endpoint said nothing about it.
+	ResetsAt string `json:"resets_at,omitempty"`
 }
 
 // SettleDetail explains why a run settled.

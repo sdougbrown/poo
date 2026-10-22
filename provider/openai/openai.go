@@ -2,8 +2,8 @@
 //
 // The transport speaks SSE over a plain HTTP POST, in the shape every
 // OpenAI-compatible endpoint (llama.cpp, vLLM, sglang, Ollama, LiteLLM)
-// accepts. It has no retries and no request cache: a failed request ends
-// the run.
+// accepts. It has no request cache: a failed request is retried within
+// the plan's budget, and a request that exhausts it ends the run.
 package openai
 
 import (
@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +34,15 @@ type Config struct {
 	// ReasoningEffort is sent as the request's reasoning_effort when it
 	// is set, for endpoints whose models think only when asked to.
 	ReasoningEffort string
+	// OnAttempt is called for every attempt that failed, so a consumer
+	// can write the attempt to the log.
+	OnAttempt func(Attempt)
+	// MaxAttempts is the number of attempts one request gets. Zero
+	// means the plan's three.
+	MaxAttempts int
+	// Backoff is the wait before the second and the third attempt.
+	// Empty means the plan's one second and then two.
+	Backoff []time.Duration
 	// HTTPClient is the client to use. Nil means a default client.
 	HTTPClient *http.Client
 	// Timeout bounds a whole request, streaming included. Zero means no
@@ -46,6 +54,8 @@ type Config struct {
 type Transport struct {
 	cfg  Config
 	http *http.Client
+	// policy is the retry policy.
+	policy retryPolicy
 }
 
 // New returns a transport.
@@ -58,7 +68,14 @@ func New(cfg Config) *Transport {
 			IdleConnTimeout:       90 * time.Second,
 		}}
 	}
-	return &Transport{cfg: cfg, http: client}
+	policy := defaultRetryPolicy()
+	if cfg.MaxAttempts > 0 {
+		policy.attempts = cfg.MaxAttempts
+	}
+	if len(cfg.Backoff) > 0 {
+		policy.backoff = cfg.Backoff
+	}
+	return &Transport{cfg: cfg, http: client, policy: policy}
 }
 
 // chatRequest is the wire shape of a chat completion request.
@@ -118,6 +135,9 @@ type errorResponse struct {
 		Type    string `json:"type"`
 		Code    any    `json:"code"`
 	} `json:"error"`
+	// ResetsAt is when the endpoint says the limit resets. Some
+	// endpoints put it beside the error rather than in it.
+	ResetsAt any `json:"resets_at"`
 }
 
 // errorBody is the wire shape of an error payload, without the envelope.
@@ -132,6 +152,10 @@ type errorBody struct {
 //
 // The snapshot is the serialized request body, exactly as it went out. A
 // fork is built from it, so the fork sends the same prefix.
+//
+// A request that fails before the endpoint answered is retried within
+// the plan's budget, and a stream that breaks before it carried a delta
+// is retried too.
 func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
 	body, err := t.buildBody(req)
 	if err != nil {
@@ -143,11 +167,17 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		Messages: len(req.Messages),
 	}
 
-	reader, err := t.open(ctx, body)
+	reader, attempt, err := t.openWithRetry(ctx, body)
 	if err != nil {
 		return nil, rendered, err
 	}
-	return reader, rendered, nil
+	return &streamWithRetry{
+		transport: t,
+		ctx:       ctx,
+		body:      body,
+		attempt:   attempt,
+		current:   reader,
+	}, rendered, nil
 }
 
 // Fork sends a body that is byte-identical to the snapshot, apart from
@@ -157,6 +187,8 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 // the appended messages added after the last one. The key order and
 // every other field are unchanged, because the body was serialized once
 // and only the two changed fields are rewritten.
+//
+// A fork is retried within the plan's budget, like any other request.
 func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
 	if prev.API != poo.APIChatCompletions {
 		return nil, &poo.ProviderError{
@@ -175,11 +207,17 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		return nil, err
 	}
 
-	reader, err := t.open(ctx, body)
+	reader, attempt, err := t.openWithRetry(ctx, body)
 	if err != nil {
 		return nil, err
 	}
-	return reader, nil
+	return &streamWithRetry{
+		transport: t,
+		ctx:       ctx,
+		body:      body,
+		attempt:   attempt,
+		current:   reader,
+	}, nil
 }
 
 // open sends a serialized body and returns the response stream.
@@ -250,13 +288,8 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 		if err != nil {
 			return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 		}
-		if kind, msg, code, ok := errorInBody(errBody); ok {
-			return nil, &poo.ProviderError{
-				Kind:    kind,
-				Message: msg,
-				Code:    code,
-				Status:  resp.StatusCode,
-			}
+		if perr, ok := errorInBody(errBody, resp.StatusCode, resp.Header); ok {
+			return nil, perr
 		}
 		return nil, &poo.ProviderError{
 			Kind:    poo.ProviderKindServer,
@@ -443,23 +476,32 @@ func peekFirstByte(br *bufio.Reader) (byte, error) {
 
 // errorInBody reports whether a response body is a JSON error rather than
 // an SSE stream.
-func errorInBody(body []byte) (poo.ProviderKind, string, string, bool) {
+//
+// A body that names no failure is not one: the endpoint answered with
+// something the transport cannot read, and the caller says so.
+func errorInBody(body []byte, status int, header http.Header) (*poo.ProviderError, bool) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return "", "", "", false
+		return nil, false
 	}
 	var payload struct {
 		Error *errorBody `json:"error"`
 	}
 	if err := json.Unmarshal(trimmed, &payload); err != nil || payload.Error == nil {
-		return "", "", "", false
+		return nil, false
 	}
 	code := codeString(payload.Error.Code)
 	message := payload.Error.Message
 	if message == "" {
 		message = "the endpoint returned an error"
 	}
-	return classifyError(code, message, poo.ProviderKindInvalidRequest), message, code, true
+	return &poo.ProviderError{
+		Kind:     failureKind(status, code, payload.Error.Type, message, poo.ProviderKindInvalidRequest),
+		Message:  message,
+		Code:     code,
+		Status:   status,
+		ResetsAt: resetAt(header, body),
+	}, true
 }
 
 // codeString renders an error code, which a server may send as a string
@@ -472,30 +514,6 @@ func codeString(v any) string {
 		return fmt.Sprintf("%v", c)
 	default:
 		return ""
-	}
-}
-
-// classifyError names the failure class an error code and message imply.
-//
-// A context-length failure is recognised whatever status it arrived with,
-// because a server that reports one with a 500 still means the request was
-// too long. A failure the body does not describe falls to the default the
-// caller names: a body that answers a request with a refusal is a
-// rejected request, and an error chunk in a stream is the server's own
-// failure.
-func classifyError(code, message string, fallback poo.ProviderKind) poo.ProviderKind {
-	lower := strings.ToLower(code + " " + message)
-	switch {
-	case isContextLength(code, message):
-		return poo.ProviderKindContextLength
-	case strings.Contains(lower, "rate_limit"):
-		return poo.ProviderKindRateLimited
-	case strings.Contains(lower, "quota"), strings.Contains(lower, "usage_limit"):
-		return poo.ProviderKindUsageLimit
-	case strings.Contains(lower, "authentication"):
-		return poo.ProviderKindAuthFailed
-	default:
-		return fallback
 	}
 }
 
@@ -615,94 +633,6 @@ func checkProviderBlock(p *poo.ProviderBlock) error {
 		}
 	}
 	return nil
-}
-
-// classifyStatus turns a non-200 response into a provider error.
-func classifyStatus(resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	er := errorResponse{}
-	_ = json.Unmarshal(body, &er)
-
-	code := codeString(er.Error.Code)
-
-	message := er.Error.Message
-	if message == "" {
-		message = strings.TrimSpace(string(body))
-	}
-	if message == "" {
-		message = resp.Status
-	}
-
-	kind := poo.ProviderKindServer
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		kind = poo.ProviderKindAuthFailed
-	case resp.StatusCode == http.StatusPaymentRequired:
-		kind = poo.ProviderKindPlanInactive
-	case resp.StatusCode == http.StatusTooManyRequests:
-		kind = poo.ProviderKindRateLimited
-	case resp.StatusCode >= 400 && resp.StatusCode < 500:
-		kind = poo.ProviderKindInvalidRequest
-	}
-	// The payload's own words refine the status's guess, so the same
-	// error classifies the same way whichever door it came through.
-	kind = classifyError(code, message, kind)
-
-	return &poo.ProviderError{
-		Kind:       kind,
-		Message:    message,
-		Status:     resp.StatusCode,
-		Code:       code,
-		RetryAfter: retryAfter(resp),
-	}
-}
-
-// retryAfter returns how long the endpoint asked the client to wait.
-//
-// The header is either a number of seconds or an HTTP date, and the plan
-// reads a Retry-After over thirty seconds as a provider limit rather than
-// a failure to retry.
-func retryAfter(resp *http.Response) time.Duration {
-	raw := strings.TrimSpace(resp.Header.Get("Retry-After"))
-	if raw == "" {
-		return 0
-	}
-	if secs, err := strconv.Atoi(raw); err == nil {
-		if secs <= 0 {
-			return 0
-		}
-		return time.Duration(secs) * time.Second
-	}
-	when, err := http.ParseTime(raw)
-	if err != nil {
-		return 0
-	}
-	d := time.Until(when)
-	if d <= 0 {
-		return 0
-	}
-	return d
-}
-
-// isContextLength reports whether an error means the request was too long.
-func isContextLength(code, message string) bool {
-	text := strings.ToLower(code + " " + message)
-	for _, needle := range []string{
-		"context_length",
-		"context length",
-		"maximum context",
-		"max context",
-		"too many tokens",
-		"reduce the length",
-		"prompt is too long",
-		"input is too long",
-		"exceeds the context",
-	} {
-		if strings.Contains(text, needle) {
-			return true
-		}
-	}
-	return false
 }
 
 // classifyTransportError turns a request failure into a provider error.

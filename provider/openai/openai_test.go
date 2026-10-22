@@ -89,6 +89,15 @@ func textOf(events []poo.StreamEvent) string {
 	return b.String()
 }
 
+// fastRetry shortens the wait between the attempts.
+//
+// A test that fails on purpose does not wait the plan's backoff, and
+// the test that covers the backoff waits for it on purpose.
+func fastRetry(cfg openai.Config) openai.Config {
+	cfg.Backoff = []time.Duration{time.Millisecond, time.Millisecond}
+	return cfg
+}
+
 // toolCallsOf returns the tool call events.
 func toolCallsOf(events []poo.StreamEvent) []poo.ToolCallDelta {
 	var calls []poo.ToolCallDelta
@@ -397,7 +406,7 @@ func TestAnAuthFailureIsMapped(t *testing.T) {
 func TestAServerFailureIsMapped(t *testing.T) {
 	srv := newSSEServer(t, `{"error":{"message":"boom"}}`)
 	srv.status = http.StatusInternalServerError
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -568,7 +577,7 @@ func TestAnErrorChunkEndsTheStream(t *testing.T) {
 	body := chunk(`{"error":{"message":"the model died","type":"server_error"}}`)
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -765,7 +774,7 @@ func TestTheRequestIsSentToTheChatCompletionsPath(t *testing.T) {
 func TestTheErrorBodyIsReadWhenTheStatusIsNotOK(t *testing.T) {
 	srv := newSSEServer(t, "not json at all")
 	srv.status = http.StatusBadGateway
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
