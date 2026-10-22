@@ -248,24 +248,38 @@ func (s *Session) applyReplaceLocked(r RangeReplacement) error {
 //
 // The caller holds the session's lock.
 func (s *Session) applyRewriteLocked(rewrites []ToolResultRewrite) error {
+	// Every target is resolved before anything changes: a rewrite whose
+	// later handle is missing leaves the view as it was.
+	type target struct {
+		idx     int
+		content []ContentBlock
+	}
+	targets := make([]target, 0, len(rewrites))
 	for _, rw := range rewrites {
 		idx := s.resultMessageIndexLocked(rw.Handle)
 		if idx < 0 {
 			return fmt.Errorf("%w: the result %q is not in the view", ErrInvalidCompaction, rw.Handle)
 		}
-		msg := &s.history[idx]
+		// The message's blocks are a copy: the recorded message keeps
+		// the slice it was recorded with.
+		content := append([]ContentBlock(nil), s.history[idx].Content...)
 		replaced := false
-		for i := range msg.Content {
-			if msg.Content[i].Kind != ContentToolResult {
+		for i := range content {
+			if content[i].Kind != ContentToolResult {
 				continue
 			}
-			msg.Content[i].Text = rw.Content
+			content[i].Text = rw.Content
 			replaced = true
 		}
 		if !replaced {
 			return fmt.Errorf("%w: the result %q is not in the view", ErrInvalidCompaction, rw.Handle)
 		}
-		// The stored result follows the view.
+		targets = append(targets, target{idx: idx, content: content})
+	}
+	// The targets all exist, so the batch commits together.
+	for i, t := range targets {
+		s.history[t.idx].Content = t.content
+		rw := rewrites[i]
 		result := s.results[rw.Handle]
 		result.Text = rw.Content
 		s.results[rw.Handle] = result
