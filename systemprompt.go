@@ -116,6 +116,17 @@ func buildPrompt(opts *Options) *prompt.Builder {
 	return b
 }
 
+// PromptBuilder returns the prompt builder a session with these options
+// would assemble.
+//
+// The builder is the session's own: the core's own section, the
+// sections the linked tools bring and the consumer's changes, in the
+// order they happen. A consumer that shows the prompt to a person uses
+// this, so the text the person reads is the text the model gets.
+func PromptBuilder(opts Options) *prompt.Builder {
+	return buildPrompt(&opts)
+}
+
 // setPromptVariants puts a tool's alternative texts in the builder.
 //
 // The names are sorted, so the builder holds the alternatives in the

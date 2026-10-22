@@ -308,6 +308,41 @@ func (b *Builder) Names() []string {
 	return names
 }
 
+// SectionText is one section of a prompt: its name and its text.
+type SectionText struct {
+	// Name is the section's name.
+	Name string
+	// Text is the text the section renders.
+	Text string
+}
+
+// Sections returns the sections that render, in render order, with
+// their texts.
+//
+// The texts are the ones Render joins: a section with no text renders
+// nothing, and it is not among them.
+func (b *Builder) Sections() []SectionText {
+	var out []SectionText
+	for _, name := range b.order {
+		if isToolSection(name) {
+			continue
+		}
+		if name == toolSlot {
+			if text := b.sectionText(name); text != "" {
+				out = append(out, SectionText{Name: name, Text: text})
+			}
+			for _, tool := range b.toolNames() {
+				out = append(out, SectionText{Name: tool, Text: b.sectionText(tool)})
+			}
+			continue
+		}
+		if text := b.sectionText(name); text != "" {
+			out = append(out, SectionText{Name: name, Text: text})
+		}
+	}
+	return out
+}
+
 // Render renders the prompt.
 //
 // The sections render in the order the builder holds, and their texts

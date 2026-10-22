@@ -1,0 +1,297 @@
+{
+  "version": 1,
+  "fields": {
+    "version": { "required": true, "isEmpty": "number" },
+    "profile": { "isEmpty": "string" },
+    "roles.chat": { "isEmpty": "string" },
+    "roles.decider": { "isEmpty": "string" },
+    "decider.timeout_ms": { "isEmpty": "number" },
+    "permission.unmatched": { "isEmpty": "string" },
+    "permission.fallback": { "isEmpty": "string" },
+    "permission.doom_loop.threshold": { "isEmpty": "number" },
+    "permission.doom_loop.near_threshold": { "isEmpty": "number" },
+    "permission.doom_loop.action": { "isEmpty": "string" },
+    "permission.askers": { "isEmpty": "array" },
+    "permission.chain_timeout_s": { "isEmpty": "number" },
+    "permission.decide.approve": { "isEmpty": "number" },
+    "permission.decide.deny": { "isEmpty": "number" },
+    "permission.decide.timeout_ms": { "isEmpty": "number" },
+    "system_prompt.base_file": { "isEmpty": "string" },
+    "system_prompt.replace": { "isEmpty": "string" },
+    "system_prompt.append": { "isEmpty": "string" },
+    "system_prompt.remove": { "isEmpty": "array" },
+    "context.notice_ratio": { "isEmpty": "number" },
+    "context.hard_ratio": { "isEmpty": "number" },
+    "context.strategy": { "isEmpty": "string" },
+    "context.handoff.ratio": { "isEmpty": "number" },
+    "context.handoff.max_tokens": { "isEmpty": "number" },
+    "tools.bash.timeout_s": { "isEmpty": "number" },
+    "tools.bash.executor": { "isEmpty": "string" },
+    "tools.bwrap.network": { "isEmpty": "boolean" },
+    "tools.bwrap.ro_binds": { "isEmpty": "array" },
+    "tools.bwrap.rw_binds": { "isEmpty": "array" },
+    "tools.env.scrub": { "isEmpty": "array" },
+    "tools.env.passthrough": { "isEmpty": "array" },
+    "tools.protected_paths": { "isEmpty": "array" },
+    "limits.max_tokens_per_run": { "isEmpty": "number" },
+    "limits.max_duration_s": { "isEmpty": "number" },
+    "limits.max_turns": { "isEmpty": "number" },
+    "limits.max_continuations": { "isEmpty": "number" },
+    "jobs.max_running": { "isEmpty": "number" },
+    "jobs.timeout_s": { "isEmpty": "number" },
+    "jobs.on_idle": { "isEmpty": "string" },
+    "jobs.max_unattended_wakes": { "isEmpty": "number" },
+    "reasoning.chat": { "isEmpty": "string" },
+    "finish.schema_file": { "isEmpty": "string" },
+    "cliregistry.paths": { "isEmpty": "array" },
+    "session.mode": { "isEmpty": "string" },
+    "session.dir": { "isEmpty": "string" },
+    "session.retention.max_age_days": { "isEmpty": "number" },
+    "session.retention.max_sessions": { "isEmpty": "number" }
+  },
+  "conditions": {
+    "has_decider": { "type": "boolean", "description": "the settings name a model for the decider role" },
+    "has_cliregistry": { "type": "boolean", "description": "the settings name a cli registry" }
+  },
+  "rules": [
+    {
+      "type": "requires",
+      "field": "permission.decide.approve",
+      "when": { "op": "cond", "condition": "has_decider" },
+      "reason": "the decide threshold needs a decider model: roles.decider names one"
+    },
+    {
+      "type": "requires",
+      "field": "permission.decide.deny",
+      "when": { "op": "cond", "condition": "has_decider" },
+      "reason": "the decide threshold needs a decider model: roles.decider names one"
+    },
+    {
+      "type": "requires",
+      "field": "permission.decide.timeout_ms",
+      "when": { "op": "cond", "condition": "has_decider" },
+      "reason": "the decide timeout needs a decider model: roles.decider names one"
+    },
+    {
+      "type": "disables",
+      "when": { "op": "present", "field": "system_prompt.base_file" },
+      "targets": ["system_prompt.replace"],
+      "reason": "system_prompt.base_file and system_prompt.replace are mutually exclusive"
+    },
+    {
+      "type": "disables",
+      "when": { "op": "present", "field": "system_prompt.replace" },
+      "targets": ["system_prompt.base_file"],
+      "reason": "system_prompt.base_file and system_prompt.replace are mutually exclusive"
+    },
+    {
+      "type": "check",
+      "field": "version",
+      "op": "range",
+      "min": 1,
+      "max": 1,
+      "reason": "the settings version must be 1"
+    },
+    {
+      "type": "check",
+      "field": "permission.unmatched",
+      "op": "matches",
+      "pattern": "^(allow|ask|deny)$",
+      "reason": "permission.unmatched must be allow, ask or deny"
+    },
+    {
+      "type": "check",
+      "field": "permission.fallback",
+      "op": "matches",
+      "pattern": "^(allow|deny)$",
+      "reason": "permission.fallback must be allow or deny"
+    },
+    {
+      "type": "check",
+      "field": "permission.doom_loop.action",
+      "op": "matches",
+      "pattern": "^(allow|ask|deny)$",
+      "reason": "permission.doom_loop.action must be allow, ask or deny"
+    },
+    {
+      "type": "check",
+      "field": "context.strategy",
+      "op": "matches",
+      "pattern": "^(handoff|none)$",
+      "reason": "context.strategy must be handoff or none"
+    },
+    {
+      "type": "check",
+      "field": "context.notice_ratio",
+      "op": "range",
+      "min": 0,
+      "max": 1,
+      "reason": "context.notice_ratio must be between 0 and 1"
+    },
+    {
+      "type": "check",
+      "field": "context.hard_ratio",
+      "op": "range",
+      "min": 0,
+      "max": 1,
+      "reason": "context.hard_ratio must be between 0 and 1"
+    },
+    {
+      "type": "check",
+      "field": "jobs.on_idle",
+      "op": "matches",
+      "pattern": "^(wake|hold)$",
+      "reason": "jobs.on_idle must be wake or hold"
+    },
+    {
+      "type": "check",
+      "field": "session.mode",
+      "op": "matches",
+      "pattern": "^(logged|ephemeral)$",
+      "reason": "session.mode must be logged or ephemeral"
+    },
+    {
+      "type": "check",
+      "field": "reasoning.chat",
+      "op": "matches",
+      "pattern": "^(off|low|medium|high|[0-9]+)$",
+      "reason": "reasoning.chat must be off, low, medium, high or a budget in tokens"
+    },
+    {
+      "type": "check",
+      "field": "tools.bash.executor",
+      "op": "matches",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "reason": "tools.bash.executor must be the name of a linked executor"
+    },
+    {
+      "type": "check",
+      "field": "permission.chain_timeout_s",
+      "op": "min",
+      "value": 1,
+      "reason": "permission.chain_timeout_s must be at least a second"
+    },
+    {
+      "type": "check",
+      "field": "decider.timeout_ms",
+      "op": "min",
+      "value": 1,
+      "reason": "decider.timeout_ms must be at least a millisecond"
+    },
+    {
+      "type": "check",
+      "field": "permission.decide.timeout_ms",
+      "op": "min",
+      "value": 1,
+      "reason": "permission.decide.timeout_ms must be at least a millisecond"
+    },
+    {
+      "type": "check",
+      "field": "permission.decide.approve",
+      "op": "range",
+      "min": 0,
+      "max": 1,
+      "reason": "permission.decide.approve must be between 0 and 1"
+    },
+    {
+      "type": "check",
+      "field": "permission.decide.deny",
+      "op": "range",
+      "min": 0,
+      "max": 1,
+      "reason": "permission.decide.deny must be between 0 and 1"
+    },
+    {
+      "type": "check",
+      "field": "permission.doom_loop.threshold",
+      "op": "min",
+      "value": 1,
+      "reason": "permission.doom_loop.threshold must be at least one repeat"
+    },
+    {
+      "type": "check",
+      "field": "permission.doom_loop.near_threshold",
+      "op": "min",
+      "value": 1,
+      "reason": "permission.doom_loop.near_threshold must be at least one repeat"
+    },
+    {
+      "type": "check",
+      "field": "limits.max_tokens_per_run",
+      "op": "min",
+      "value": 0,
+      "reason": "limits.max_tokens_per_run must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "limits.max_duration_s",
+      "op": "min",
+      "value": 0,
+      "reason": "limits.max_duration_s must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "limits.max_turns",
+      "op": "min",
+      "value": 0,
+      "reason": "limits.max_turns must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "limits.max_continuations",
+      "op": "min",
+      "value": 0,
+      "reason": "limits.max_continuations must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "jobs.max_running",
+      "op": "min",
+      "value": 0,
+      "reason": "jobs.max_running must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "jobs.timeout_s",
+      "op": "min",
+      "value": 0,
+      "reason": "jobs.timeout_s must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "jobs.max_unattended_wakes",
+      "op": "min",
+      "value": 0,
+      "reason": "jobs.max_unattended_wakes must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "context.handoff.ratio",
+      "op": "range",
+      "min": 0,
+      "max": 1,
+      "reason": "context.handoff.ratio must be between 0 and 1"
+    },
+    {
+      "type": "check",
+      "field": "context.handoff.max_tokens",
+      "op": "min",
+      "value": 0,
+      "reason": "context.handoff.max_tokens must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "session.retention.max_age_days",
+      "op": "min",
+      "value": 0,
+      "reason": "session.retention.max_age_days must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "session.retention.max_sessions",
+      "op": "min",
+      "value": 0,
+      "reason": "session.retention.max_sessions must not be negative"
+    }
+  ]
+}
