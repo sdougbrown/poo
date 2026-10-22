@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // ScriptedTurn is one recorded provider response.
@@ -185,6 +187,14 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	transport := newScriptedTransport(script.Turns)
 	recorder := &callRecorder{}
 
+	// The replay sends the prompt the recording holds. It never renders
+	// the current default again: a prompt change since the recording
+	// would otherwise change the replay's budget and its requests.
+	var beforeRun []poo.BeforeRunHook
+	if prompts := recordedSystemPrompts(log); len(prompts) > 0 {
+		beforeRun = []poo.BeforeRunHook{&recordedPrompt{prompts: prompts}}
+	}
+
 	session, err := poo.New(poo.Options{
 		Transport:    transport,
 		Tools:        map[string]poo.Tool{},
@@ -195,6 +205,7 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 		ContextLimit: contextLimit,
 		MaxTurns:     maxTurns,
 		WorkingDir:   opts.WorkingDir,
+		BeforeRun:    beforeRun,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("eval: replaying %s: %w", path, err)
@@ -223,6 +234,46 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	}
 	result.Match, result.Differences = diffCalls(result.Recorded, result.Replayed)
 	return result, nil
+}
+
+// recordedSystemPrompts returns the session's rendered prompts, in run
+// order.
+func recordedSystemPrompts(log *Log) []string {
+	var out []string
+	for _, r := range log.Records {
+		if r.Record != "message" || r.Origin != "system" {
+			continue
+		}
+		var b strings.Builder
+		for _, c := range r.Content {
+			if c.Kind == "text" {
+				b.WriteString(c.Text)
+			}
+		}
+		out = append(out, b.String())
+	}
+	return out
+}
+
+// recordedPrompt installs each run's recorded prompt in order.
+type recordedPrompt struct {
+	mu      sync.Mutex
+	prompts []string
+	index   int
+}
+
+// BeforeRun replaces the run's prompt with the recorded one.
+func (h *recordedPrompt) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.index >= len(h.prompts) {
+		return poo.StartDecision{}, nil
+	}
+	text := h.prompts[h.index]
+	h.index++
+	return poo.StartDecision{SystemPrompt: func(s prompt.Sections) {
+		s.Replace(text)
+	}}, nil
 }
 
 // DefaultReplayContextLimit is the context window a replay uses when the

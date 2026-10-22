@@ -3,6 +3,8 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/eval"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/prompt"
 )
@@ -954,5 +957,42 @@ func TestAPromptReplacementDoesNotReachTheNextRequest(t *testing.T) {
 	}
 	if len(systems) != 1 || systems[0] != "only instructions for run 2" {
 		t.Errorf("the second request's system instructions are %q, want only run 2", systems)
+	}
+}
+
+// TestReplayUsesTheRecordedPrompt covers the plan's rule: replay uses the
+// recorded system prompt and never re-renders it, so a prompt change
+// between the recording and the replay does not change the replay.
+func TestReplayUsesTheRecordedPrompt(t *testing.T) {
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{}`)}}}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.SystemPrompt = "x"
+	opts.ContextLimit = 530
+	opts.MaxTurns = 1
+	s := newTestSession(t, opts)
+	runSession(t, s, "start")
+	if len(tr.Requests()) != 1 {
+		t.Fatal("the original run did not make its request")
+	}
+	var data []byte
+	for _, rec := range sink.allRecords() {
+		line, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = append(data, line...)
+		data = append(data, '\n')
+	}
+	path := filepath.Join(t.TempDir(), "recording.jsonl")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := eval.Replay(path, eval.ReplayOptions{Context: context.Background(), ContextLimit: 530})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Match {
+		t.Errorf("the replay of a one-request recorded prompt diverged: %v", result.Differences)
 	}
 }
