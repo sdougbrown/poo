@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -37,12 +38,24 @@ func (t *Transport) reasoningSetting() string {
 func (t *Transport) shapeReasoning(shape *requestShape) error {
 	fields, err := t.cfg.Info.ReasoningFields(t.reasoningSetting())
 	if err != nil {
-		return configErrorf("%s", err.Error())
+		return configErrorf("%s", reasonError(err))
 	}
 	for _, field := range fields {
 		shape.setParam(field.Path, field.Value)
 	}
 	return nil
+}
+
+// reasonError renders a configuration error for the request's failure.
+//
+// The error names the setting that is at fault, so the reader knows
+// what to change.
+func reasonError(err error) string {
+	var cfg *poo.ConfigError
+	if errors.As(err, &cfg) {
+		return cfg.Field + ": " + cfg.Message
+	}
+	return err.Error()
 }
 
 // shapeSampling sets the sampling parameters the request carries.
