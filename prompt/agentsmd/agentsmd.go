@@ -15,6 +15,7 @@ package agentsmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -62,9 +63,19 @@ func Load(dir string) (string, error) {
 		if !info.Mode().IsRegular() {
 			return "", fmt.Errorf("agentsmd: %s is not a regular file", path)
 		}
-		data, err := os.ReadFile(path)
+		f, err := os.Open(path)
 		if err != nil {
 			return "", fmt.Errorf("agentsmd: reading %s: %w", path, err)
+		}
+		// The cap is read, and one byte past it says the file was
+		// longer. A runaway file is never held whole.
+		data, err := io.ReadAll(io.LimitReader(f, MaxBytes+1))
+		closeErr := f.Close()
+		if err != nil {
+			return "", fmt.Errorf("agentsmd: reading %s: %w", path, err)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("agentsmd: reading %s: %w", path, closeErr)
 		}
 		return capText(data, name), nil
 	}

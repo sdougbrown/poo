@@ -112,6 +112,7 @@ type args struct {
 // prepared is a validated read call.
 type prepared struct {
 	path   string
+	abs    string
 	offset int
 	limit  int
 }
@@ -136,9 +137,15 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	if a.Limit < 0 {
 		return nil, poo.InvalidArgsf("read: limit must not be negative")
 	}
+	// The path is resolved once, so the file that is read is the file
+	// the protection check named.
+	abs := protect.Resolve(absolutePath(a.Path, env.WorkingDir))
+	if env.WorkingDir != "" && !protect.Within(protect.Resolve(env.WorkingDir), abs) {
+		return nil, poo.InvalidArgsf("read: path is outside the working directory: %s", a.Path)
+	}
 	// A protected path is refused before the file is opened, so the
 	// model never sees what it holds.
-	protected, err := protect.Guarded(env.ProtectedPaths, absolutePath(a.Path, env.WorkingDir))
+	protected, err := protect.Guarded(env.ProtectedPaths, abs)
 	if err != nil {
 		return nil, poo.InvalidArgsf("read: %v", err)
 	}
@@ -153,7 +160,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	if limit == 0 {
 		limit = DefaultLimit
 	}
-	return &prepared{path: a.Path, offset: offset, limit: limit}, nil
+	return &prepared{path: a.Path, abs: abs, offset: offset, limit: limit}, nil
 }
 
 // absolutePath returns the path a call works on.
@@ -199,7 +206,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		return poo.ToolResult{}, errors.New("read: prepared value is not a read call")
 	}
 
-	path := absolutePath(p.path, env.WorkingDir)
+	path := p.abs
 
 	f, err := os.Open(path)
 	if err != nil {

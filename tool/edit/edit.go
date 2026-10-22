@@ -91,7 +91,10 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	if strings.TrimSpace(a.Path) == "" {
 		return nil, poo.InvalidArgsf("edit: path must not be empty")
 	}
-	abs := absolutePath(a.Path, env.WorkingDir)
+	abs := protect.Resolve(absolutePath(a.Path, env.WorkingDir))
+	if env.WorkingDir != "" && !protect.Within(protect.Resolve(env.WorkingDir), abs) {
+		return nil, poo.InvalidArgsf("edit: path is outside the working directory: %s", a.Path)
+	}
 	// A protected path is refused before the file is touched, so the
 	// model never changes what it holds.
 	protected, err := protect.Guarded(env.ProtectedPaths, abs)
@@ -185,7 +188,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	if !p.replaceAll {
 		replaced = strings.Replace(content, p.old, p.new, 1)
 	}
-	if err := os.WriteFile(p.abs, []byte(replaced), mode); err != nil {
+	if err := writeAtomic(p.abs, replaced, mode); err != nil {
 		return poo.ToolResult{Text: fmt.Sprintf("edit: %v", err), IsError: true}, nil
 	}
 	if p.replaceAll {
@@ -222,7 +225,40 @@ func create(path, content string) error {
 	if err := os.MkdirAll(dir, DirMode); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(content), FileMode)
+	return writeAtomic(path, content, FileMode)
+}
+
+// writeAtomic writes a file through a temporary file and a rename in the
+// same directory, so a crash or a full disk leaves the old file in place
+// rather than a partial one. The mode is the file's own.
+func writeAtomic(path, content string, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, ".poo-edit-*")
+	if err != nil {
+		return err
+	}
+	temp := f.Name()
+	cleanup := func() {
+		f.Close()
+		os.Remove(temp)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		cleanup()
+		return err
+	}
+	if err := f.Chmod(mode); err != nil {
+		cleanup()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(temp)
+		return err
+	}
+	if err := os.Rename(temp, path); err != nil {
+		os.Remove(temp)
+		return err
+	}
+	return nil
 }
 
 // absolutePath returns the path a call works on.
