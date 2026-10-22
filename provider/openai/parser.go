@@ -11,10 +11,11 @@ import (
 //
 // Local models emit tool calls in several shapes, and a harness that only
 // understands one of them scores near zero on a baseline for the wrong
-// reason. The three shapes below are the ones that matter:
+// reason. The shapes below are the ones that matter:
 //
 //   - Hermes: <tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>
 //   - Qwen:   <tool_call><name>bash</name><arguments>{"command":"ls"}</arguments></tool_call>
+//   - Mistral: [TOOL_CALLS] [{"name": "bash", "arguments": {"command": "ls"}}]
 //   - bare:    a JSON object on its own, or a fenced ```json block holding one
 //
 // The parser is off by default. The `native` tools mode leaves it disabled,
@@ -23,6 +24,9 @@ import (
 // The parser owns the text: markup that belongs to a tool call is removed
 // from the model's own prose, so the assistant message holds the reasoning
 // and the tool call separately.
+//
+// Text that looks like a call but does not parse is not dropped: it stays
+// in the prose and the parser reports why it could not be read.
 
 // callKind names one of the recognised call shapes.
 type callKind int
@@ -34,7 +38,42 @@ const (
 	kindFence
 	// kindBare is a JSON object standing on its own.
 	kindBare
+	// kindMistral is a [TOOL_CALLS] [...] block.
+	kindMistral
 )
+
+// callFormats holds the shapes the parser reads.
+//
+// A model writes its calls in one shape, and the descriptor names it. A
+// format that names no shape reads them all.
+type callFormats struct {
+	// hermes reads a tagged block with a JSON body.
+	hermes bool
+	// qwen reads a tagged block with an XML body.
+	qwen bool
+	// mistral reads a [TOOL_CALLS] block.
+	mistral bool
+	// json reads a JSON object standing on its own.
+	json bool
+}
+
+// formatsFor returns the shapes a text format names.
+//
+// An empty format, or "auto", reads every shape.
+func formatsFor(format string) callFormats {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "hermes":
+		return callFormats{hermes: true}
+	case "qwen_xml", "qwen":
+		return callFormats{qwen: true}
+	case "mistral":
+		return callFormats{mistral: true}
+	case "json":
+		return callFormats{json: true}
+	default:
+		return callFormats{hermes: true, qwen: true, mistral: true, json: true}
+	}
+}
 
 // parser reads tool calls from a text stream.
 type parser struct {
@@ -67,16 +106,20 @@ type parser struct {
 	// in a newline, so the start of the buffer is in the middle of a
 	// line.
 	midLine bool
+	// formats holds the shapes the parser reads.
+	formats callFormats
+	// lastReason is why the last body the parser read was not a call.
+	lastReason string
 }
 
-// newParser returns a parser for a tools mode.
-func newParser(mode string) *parser {
-	switch mode {
-	case "text", "auto":
-		return &parser{enabled: true}
-	default:
-		return &parser{enabled: false}
-	}
+// newParser returns a parser for a tools mode and a text format.
+//
+// The mode decides whether the parser runs at all, and the format
+// decides which shapes it reads.
+func newParser(mode, format string) *parser {
+	p := &parser{enabled: mode == "text" || mode == "auto"}
+	p.formats = formatsFor(format)
+	return p
 }
 
 // on reports whether the parser runs.
@@ -91,6 +134,11 @@ const (
 	ToolCallOpen  = "<tool_call>"
 	ToolCallClose = "</tool_call>"
 )
+
+// MistralCallsOpen is the marker that opens a Mistral-style call list.
+//
+// The list is a JSON array of calls, and it follows the marker.
+const MistralCallsOpen = "[TOOL_CALLS]"
 
 // textCallIndexBase is where a parsed call's index starts.
 //
@@ -123,13 +171,15 @@ func (p *parser) flush() []poo.StreamEvent {
 		// the parser held back in case it was the start of the closing
 		// marker.
 		body := p.callBody + p.buf
-		if ev, ok := p.parseBody(body); ok {
-			out = append(out, ev)
+		if events, _, ok := p.parseBody(body); ok {
+			out = append(out, events...)
 		} else {
 			// The block is not a call, so the model's own text goes back
 			// into the prose. No closing marker is invented: the model
 			// never wrote one.
-			out = append(out, textEvent(p.callText+p.buf))
+			text := p.callText + p.buf
+			out = append(out, textEvent(text))
+			out = append(out, parseErrorEvent(text, p.lastReason))
 		}
 		p.inCall = false
 		p.callBody = ""
@@ -138,8 +188,8 @@ func (p *parser) flush() []poo.StreamEvent {
 	}
 	if rest := strings.TrimSpace(p.buf); rest != "" {
 		// A bare JSON object that arrived without a trailing newline.
-		if ev, ok := p.parseCallBody(rest); ok {
-			out = append(out, ev)
+		if events, _, ok := p.parseCallBody(rest); ok {
+			out = append(out, events...)
 			p.buf = ""
 			return out
 		}
@@ -218,6 +268,10 @@ func (p *parser) openCall(kind callKind) {
 		p.callText = p.buf[:len(ToolCallOpen)]
 		p.callOpen = p.callText
 		p.buf = p.buf[len(ToolCallOpen):]
+	case kindMistral:
+		p.callText = p.buf[:len(MistralCallsOpen)]
+		p.callOpen = p.callText
+		p.buf = p.buf[len(MistralCallsOpen):]
 	case kindFence:
 		open := p.buf[:len("```")]
 		p.buf = p.buf[len("```"):]
@@ -245,6 +299,8 @@ func (p *parser) consumeCall() ([]poo.StreamEvent, bool) {
 		return p.consumeUntil(ToolCallClose)
 	case kindFence:
 		return p.consumeUntil("```")
+	case kindMistral:
+		return p.consumeArray()
 	default:
 		return p.consumeJSON()
 	}
@@ -283,10 +339,56 @@ func (p *parser) consumeUntil(marker string) ([]poo.StreamEvent, bool) {
 	p.callText = p.callOpen + p.callBody + marker
 	p.buf = combined[i+len(marker):]
 	p.inCall = false
-	if ev, ok := p.parseBody(p.callBody); ok {
-		return []poo.StreamEvent{ev}, true
+	if events, _, ok := p.parseBody(p.callBody); ok {
+		return events, true
 	}
-	return []poo.StreamEvent{textEvent(p.callText)}, true
+	return []poo.StreamEvent{textEvent(p.callText), parseErrorEvent(p.callText, p.lastReason)}, true
+}
+
+// consumeArray advances a call that is a JSON array.
+//
+// The array ends at its matching bracket. The scan runs over the new
+// text only: the body already counted the brackets it holds, and
+// counting them again would unbalance the depth.
+func (p *parser) consumeArray() ([]poo.StreamEvent, bool) {
+	for i := 0; i < len(p.buf); i++ {
+		c := p.buf[i]
+		if p.inString {
+			if p.escaped {
+				p.escaped = false
+				continue
+			}
+			switch c {
+			case '\\':
+				p.escaped = true
+			case '"':
+				p.inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			p.inString = true
+		case '[':
+			p.depth++
+		case ']':
+			p.depth--
+			if p.depth == 0 {
+				p.callBody += p.buf[:i+1]
+				p.callText += p.buf[:i+1]
+				p.buf = p.buf[i+1:]
+				p.inCall = false
+				if events, _, ok := p.parseMistral(p.callBody); ok {
+					return events, true
+				}
+				return []poo.StreamEvent{textEvent(p.callText), parseErrorEvent(p.callText, p.lastReason)}, true
+			}
+		}
+	}
+	p.callBody += p.buf
+	p.callText += p.buf
+	p.buf = ""
+	return nil, false
 }
 
 // consumeJSON advances a call that is a bare JSON object.
@@ -322,10 +424,10 @@ func (p *parser) consumeJSON() ([]poo.StreamEvent, bool) {
 				p.callText += p.buf[:i+1]
 				p.buf = p.buf[i+1:]
 				p.inCall = false
-				if ev, ok := p.parseBody(p.callBody); ok {
-					return []poo.StreamEvent{ev}, true
+				if events, _, ok := p.parseBody(p.callBody); ok {
+					return events, true
 				}
-				return []poo.StreamEvent{textEvent(p.callText)}, true
+				return []poo.StreamEvent{textEvent(p.callText), parseErrorEvent(p.callText, p.lastReason)}, true
 			}
 		}
 	}
@@ -337,26 +439,49 @@ func (p *parser) consumeJSON() ([]poo.StreamEvent, bool) {
 
 // findCallStart locates the next call in the buffer.
 //
-// It returns the index, the shape, and whether a call was found.
+// It returns the index, the shape, and whether a call was found. Only
+// the shapes the parser reads are looked for.
 func (p *parser) findCallStart() (int, callKind, bool) {
-	tagged := strings.Index(p.buf, ToolCallOpen)
-	fence := strings.Index(p.buf, "```")
-	bare := p.findBareStart()
-
-	best := -1
-	kind := kindBare
-	switch {
-	case tagged >= 0 && (fence < 0 || tagged < fence) && (bare < 0 || tagged < bare):
-		best, kind = tagged, kindTagged
-	case fence >= 0 && (bare < 0 || fence < bare):
-		best, kind = fence, kindFence
-	case bare >= 0:
-		best, kind = bare, kindBare
+	var starts []callStart
+	if p.formats.hermes || p.formats.qwen {
+		if i := strings.Index(p.buf, ToolCallOpen); i >= 0 {
+			starts = append(starts, callStart{index: i, kind: kindTagged})
+		}
 	}
-	if best < 0 {
+	if p.formats.json {
+		if i := strings.Index(p.buf, "```"); i >= 0 {
+			starts = append(starts, callStart{index: i, kind: kindFence})
+		}
+	}
+	if p.formats.mistral {
+		if i := strings.Index(p.buf, MistralCallsOpen); i >= 0 {
+			starts = append(starts, callStart{index: i, kind: kindMistral})
+		}
+	}
+	if p.formats.json {
+		if i := p.findBareStart(); i >= 0 {
+			starts = append(starts, callStart{index: i, kind: kindBare})
+		}
+	}
+
+	best := callStart{index: -1}
+	for _, s := range starts {
+		if best.index < 0 || s.index < best.index {
+			best = s
+		}
+	}
+	if best.index < 0 {
 		return 0, 0, false
 	}
-	return best, kind, true
+	return best.index, best.kind, true
+}
+
+// callStart is a call the parser found in its buffer.
+type callStart struct {
+	// index is where the call starts.
+	index int
+	// kind is the shape of the call.
+	kind callKind
 }
 
 // track records what a batch of events leaves behind: prose that does
@@ -405,7 +530,10 @@ func (p *parser) findBareStart() int {
 // start of a call.
 func (p *parser) safePrefix() int {
 	keep := 0
-	for _, marker := range []string{ToolCallOpen, "```"} {
+	for _, marker := range []string{ToolCallOpen, "```", MistralCallsOpen} {
+		if !p.readsMarker(marker) {
+			continue
+		}
 		for n := 1; n < len(marker); n++ {
 			if strings.HasSuffix(p.buf, marker[:n]) {
 				if n > keep {
@@ -420,31 +548,60 @@ func (p *parser) safePrefix() int {
 	return len(p.buf) - keep
 }
 
-// parseBody reads a call body, in either the JSON or the XML shape.
-func (p *parser) parseBody(body string) (poo.StreamEvent, bool) {
+// readsMarker reports whether the parser looks for a marker.
+func (p *parser) readsMarker(marker string) bool {
+	switch marker {
+	case ToolCallOpen:
+		return p.formats.hermes || p.formats.qwen
+	case MistralCallsOpen:
+		return p.formats.mistral
+	default:
+		return p.formats.json
+	}
+}
+
+// parseBody reads a call body, in the shape the formats allow.
+//
+// It returns the events the call produced, the reason the body is not a
+// call, and whether it is one.
+func (p *parser) parseBody(body string) ([]poo.StreamEvent, string, bool) {
 	body = strings.TrimSpace(body)
 	if body == "" {
-		return poo.StreamEvent{}, false
+		p.lastReason = "the call is empty"
+		return nil, p.lastReason, false
 	}
-	if ev, ok := p.parseCallBody(body); ok {
-		return ev, true
+	reason := "the call is not one this model writes"
+	if p.formats.hermes || p.formats.json {
+		events, why, ok := p.parseCallBody(body)
+		if ok {
+			return events, "", true
+		}
+		reason = why
 	}
-	return p.parseXMLCall(body)
+	if p.formats.qwen {
+		events, why, ok := p.parseXMLCall(body)
+		if ok {
+			return events, "", true
+		}
+		reason = why
+	}
+	p.lastReason = reason
+	return nil, reason, false
 }
 
 // parseCallBody reads a JSON call body.
-func (p *parser) parseCallBody(body string) (poo.StreamEvent, bool) {
+func (p *parser) parseCallBody(body string) ([]poo.StreamEvent, string, bool) {
 	body = strings.TrimSpace(body)
 	if body == "" {
-		return poo.StreamEvent{}, false
+		return nil, "the call is empty", false
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(body), &raw); err != nil {
-		return poo.StreamEvent{}, false
+		return nil, "the call is not a JSON object", false
 	}
 	name, ok := rawString(raw, "name")
 	if !ok {
-		return poo.StreamEvent{}, false
+		return nil, "the call has no name", false
 	}
 	args := json.RawMessage("{}")
 	for _, key := range []string{"arguments", "parameters", "args", "input"} {
@@ -455,29 +612,80 @@ func (p *parser) parseCallBody(body string) (poo.StreamEvent, bool) {
 		// The tools take an object, so arguments that are not one are
 		// not a call. The block stays in the model's prose.
 		if !isJSONObject(v) {
-			return poo.StreamEvent{}, false
+			return nil, "the call's arguments are not an object", false
 		}
 		args = v
 		break
 	}
-	return p.toolEvent(name, string(args))
+	ev, ok := p.toolEvent(name, string(args))
+	if !ok {
+		return nil, "the call has no name", false
+	}
+	return []poo.StreamEvent{ev}, "", true
+}
+
+// parseMistral reads a Mistral-style call list.
+//
+// The list is a JSON array of calls, and the arguments of a call may be
+// an object or a string holding one.
+func (p *parser) parseMistral(body string) ([]poo.StreamEvent, string, bool) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil, "the call list is empty", false
+	}
+	var calls []struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal([]byte(body), &calls); err != nil {
+		return nil, "the call list is not a JSON array", false
+	}
+	if len(calls) == 0 {
+		return nil, "the call list is empty", false
+	}
+	var out []poo.StreamEvent
+	for _, c := range calls {
+		args := "{}"
+		if len(c.Arguments) > 0 {
+			raw := c.Arguments
+			// The arguments may be a string holding the object.
+			var text string
+			if err := json.Unmarshal(raw, &text); err == nil {
+				raw = json.RawMessage(text)
+			}
+			if !isJSONObject(raw) {
+				return nil, "the call's arguments are not an object", false
+			}
+			args = string(raw)
+		}
+		ev, ok := p.toolEvent(c.Name, args)
+		if !ok {
+			return nil, "the call has no name", false
+		}
+		out = append(out, ev)
+	}
+	return out, "", true
 }
 
 // parseXMLCall reads a Qwen-style XML call body.
-func (p *parser) parseXMLCall(body string) (poo.StreamEvent, bool) {
+func (p *parser) parseXMLCall(body string) ([]poo.StreamEvent, string, bool) {
 	nm := between(body, "<name>", "</name>")
 	if nm == "" {
-		return poo.StreamEvent{}, false
+		return nil, "the call has no name element", false
 	}
 	args := "{}"
 	if am := between(body, "<arguments>", "</arguments>"); am != "" {
 		am = strings.TrimSpace(am)
 		if !isJSONObject(json.RawMessage(am)) {
-			return poo.StreamEvent{}, false
+			return nil, "the call's arguments are not an object", false
 		}
 		args = am
 	}
-	return p.toolEvent(strings.TrimSpace(nm), args)
+	ev, ok := p.toolEvent(strings.TrimSpace(nm), args)
+	if !ok {
+		return nil, "the call has no name", false
+	}
+	return []poo.StreamEvent{ev}, "", true
 }
 
 // isJSONObject reports whether a raw JSON value is an object.
@@ -532,6 +740,30 @@ func (p *parser) toolEvent(name, args string) (poo.StreamEvent, bool) {
 // textEvent builds a text delta.
 func textEvent(text string) poo.StreamEvent {
 	return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: text}}
+}
+
+// thinkingEvent builds a thinking delta.
+func thinkingEvent(text string) poo.StreamEvent {
+	return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "thinking", Text: text}}
+}
+
+// parseErrorEvent builds the event that reports a tool call the model
+// wrote in text and that could not be parsed.
+//
+// The failure is recoverable: the text is not lost, and the model gets
+// another turn.
+func parseErrorEvent(text, reason string) poo.StreamEvent {
+	if reason == "" {
+		reason = "the call is not one this model writes"
+	}
+	return poo.StreamEvent{
+		Kind: "error",
+		Error: &poo.StreamError{
+			Message:     "your tool call could not be parsed: " + reason,
+			Text:        text,
+			Recoverable: true,
+		},
+	}
 }
 
 // rawString reads a string field out of a decoded object.

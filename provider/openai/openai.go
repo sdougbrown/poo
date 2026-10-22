@@ -301,7 +301,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 	return &streamReader{
 		body:    resp.Body,
 		scanner: newSSEScanner(br),
-		parser:  newParser(t.cfg.ToolsMode),
+		parser:  newParser(t.cfg.ToolsMode, ""),
 		ctx:     ctx,
 		cancel:  cancel,
 		started: started,
