@@ -97,11 +97,11 @@ func (p *provider) next() Turn {
 func (p *provider) serveSystemone(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	answer := map[string]any{
-		"object":   "systemone.response",
-		"id":       "systemone-1",
-		"created":  0,
-		"answers":  map[string]any{},
-		"usage":    nil,
+		"object":  "systemone.response",
+		"id":      "systemone-1",
+		"created": 0,
+		"answers": map[string]any{},
+		"usage":   nil,
 	}
 	_ = json.NewEncoder(w).Encode(answer)
 }
