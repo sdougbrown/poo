@@ -1,6 +1,8 @@
 package perm
 
 import (
+	"encoding/json"
+
 	"github.com/sdougbrown/poo"
 )
 
@@ -32,9 +34,17 @@ type Ask struct {
 	// RepeatCount holds the doom loop's counts. It is set for a
 	// doom-loop ask, and absent for a policy ask.
 	RepeatCount *poo.RepeatCounts `json:"repeat_count,omitempty"`
+	// Arguments are the call's arguments, as the tool allows a decision
+	// model to see them. A tool that names none exposes the raw
+	// arguments the model wrote.
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 	// History is the model's history, for an asker that reads
 	// evidence.
 	History poo.View `json:"-"`
 	// WorkingDir is the directory the run works in.
 	WorkingDir string `json:"-"`
+	// Interrupted reports that an interrupt ended the activity while
+	// the ask was pending. Such an ask resolves as interrupted rather
+	// than cancelled.
+	Interrupted bool `json:"-"`
 }

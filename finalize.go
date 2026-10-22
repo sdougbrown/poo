@@ -109,9 +109,10 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	undelivered = append(undelivered, sealed...)
 	s.sealRaceHook("seal")
 
-	// Steps 4 and 5: every call that was issued but has no result
-	// gets a synthetic one, and every pending ask resolves as
-	// cancelled.
+	// Step 4 and 5: every ask the run left unanswered is resolved as
+	// cancelled, before any result or settle record, and every call that
+	// was issued but has no result gets a synthetic one.
+	s.settlePendingAsks(run)
 	s.settleIssuedCalls(run, issued)
 
 	// The seam the race is tested at: the input check has passed, and

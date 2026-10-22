@@ -3,6 +3,7 @@ package perm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/sdougbrown/poo"
@@ -115,29 +116,31 @@ type resolution struct {
 	// "fallback".
 	answeredBy string
 	// provenance is how the ask was resolved: "answered", "timeout",
-	// "default" or "cancelled".
+	// "default", "cancelled" or "interrupted".
 	provenance string
 }
 
 // ask asks the chain about a call.
 //
-// The chain never waits for an asker that is not available, and it gives
-// up when its own deadline runs out. The fallback decides when the
-// chain has no answer to give.
+// Every way an ask can end goes through the same checks: an answer, a
+// missed deadline, a cancelled run and a panicking asker all resolve
+// here, and only a valid explicit allow survives. An ask resolved
+// because the run ended is never allowed.
 func (c *chain) ask(ctx context.Context, ask Ask) resolution {
 	deadline := c.clock.Now().Add(c.timeout)
 	for _, asker := range c.askers {
 		if asker == nil {
 			continue
 		}
-		if !asker.Available() {
+		if res, done := c.stopped(ctx, ask, deadline); done {
+			return res
+		}
+		if !askerAvailable(asker) {
 			// An asker that is not there is skipped without waiting.
 			continue
 		}
-		if ctx.Err() != nil {
-			// The run ended while the ask was pending. The ask
-			// resolves as cancelled, which denies.
-			return cancelledResolution()
+		if res, done := c.stopped(ctx, ask, deadline); done {
+			return res
 		}
 		remaining := deadline.Sub(c.clock.Now())
 		if remaining <= 0 {
@@ -146,58 +149,104 @@ func (c *chain) ask(ctx context.Context, ask Ask) resolution {
 		decision, err := c.call(ctx, asker, ask, remaining)
 		if err != nil {
 			if errors.Is(err, errCancelled) {
-				return cancelledResolution()
+				return cancelledResolution(poo.Interrupted(ctx) || ask.Interrupted)
 			}
 			// A failure, a missed budget and a disconnect are all
 			// deferrals: the chain moves on.
 			continue
 		}
 		switch decision {
-		case DecisionAllow:
-			return resolution{
-				decision:   DecisionAllow,
-				answeredBy: askerName(asker),
-				provenance: poo.ProvenanceAnswered,
+		case DecisionAllow, DecisionDeny:
+			// The answer is rechecked against the run's end and the
+			// chain's deadline, so which channel a select chose cannot
+			// let an expired or cancelled approval through.
+			if res, done := c.stopped(ctx, ask, deadline); done {
+				return res
 			}
-		case DecisionDeny:
 			return resolution{
-				decision:   DecisionDeny,
+				decision:   decision,
 				answeredBy: askerName(asker),
 				provenance: poo.ProvenanceAnswered,
 			}
 		}
-		// A deferral moves on to the next asker.
+		// Anything that is not an explicit allow or deny — including a
+		// decision the asker made up — is a deferral.
 	}
 	// The chain is exhausted. A deadline that ran out is a timeout, and
 	// anything else is the default.
-	if ctx.Err() != nil {
-		return cancelledResolution()
-	}
-	if !c.clock.Now().Before(deadline) {
-		return c.fallbackResolution(poo.ProvenanceTimeout)
+	if res, done := c.stopped(ctx, ask, deadline); done {
+		return res
 	}
 	return c.fallbackResolution(poo.ProvenanceDefault)
+}
+
+// stopped returns the resolution a run that ended or a chain that
+// missed its deadline has, before any answer is used.
+//
+// Cancellation wins over the deadline: a run that ended never allows a
+// call, whatever the clock says.
+func (c *chain) stopped(ctx context.Context, ask Ask, deadline time.Time) (resolution, bool) {
+	if ctx.Err() != nil {
+		return cancelledResolution(poo.Interrupted(ctx) || ask.Interrupted), true
+	}
+	if !c.clock.Now().Before(deadline) {
+		return c.fallbackResolution(poo.ProvenanceTimeout), true
+	}
+	return resolution{}, false
 }
 
 // cancelledResolution returns the resolution of an ask the run ended
 // before it was answered.
 //
-// The ask is refused: a run that is ending never allows a call.
-func cancelledResolution() resolution {
+// The ask is refused: a run that is ending never allows a call. An
+// interrupt is its own provenance, so a client can tell it from a
+// cancelled run.
+func cancelledResolution(interrupted bool) resolution {
+	provenance := poo.ProvenanceCancelled
+	if interrupted {
+		provenance = poo.ProvenanceInterrupted
+	}
 	return resolution{
 		decision:   DecisionDeny,
 		answeredBy: "cancelled",
-		provenance: poo.ProvenanceCancelled,
+		provenance: provenance,
 	}
+}
+
+// askerAvailable reports whether an asker can answer now.
+//
+// A panicking asker is unavailable: the chain skips it rather than
+// taking the process down.
+func askerAvailable(asker Asker) (available bool) {
+	defer func() {
+		if recover() != nil {
+			available = false
+		}
+	}()
+	return asker.Available()
+}
+
+// askerBudget returns an asker's budget.
+//
+// A panicking asker has no budget of its own, and the chain's deadline
+// is the only limit.
+func askerBudget(asker Asker) (budget time.Duration) {
+	defer func() {
+		if recover() != nil {
+			budget = 0
+		}
+	}()
+	return asker.Budget()
 }
 
 // call asks one asker, under its own budget.
 //
 // The asker runs in its own goroutine, so an asker that ignores its
 // context never holds the chain up: the budget ends the wait, and the
-// answer that arrives after it is dropped.
+// answer that arrives after it is dropped. A panic is a deferral, not a
+// crash: the asker could not answer, so the chain moves on.
 func (c *chain) call(ctx context.Context, asker Asker, ask Ask, remaining time.Duration) (Decision, error) {
-	budget := asker.Budget()
+	budget := askerBudget(asker)
 	if budget <= 0 || budget > remaining {
 		budget = remaining
 	}
@@ -206,6 +255,11 @@ func (c *chain) call(ctx context.Context, asker Asker, ask Ask, remaining time.D
 	timer := c.clock.After(budget)
 	result := make(chan askerResult, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result <- askerResult{decision: DecisionDefer, err: fmt.Errorf("perm: the asker panicked: %v", r)}
+			}
+		}()
 		decision, err := asker.Ask(askerCtx, ask)
 		result <- askerResult{decision: decision, err: err}
 	}()

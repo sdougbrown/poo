@@ -97,6 +97,31 @@ type Prepared interface {
 	Summary() string
 }
 
+// CanonicalKeyer is implemented by a prepared call the core cannot
+// re-encode.
+//
+// The core builds the doom loop's exact key from the prepared call: it
+// re-encodes the value as JSON with sorted keys. A prepared call whose
+// value marshals to no fields returns its canonical key instead, and a
+// call that does neither falls back to its canonicalized raw
+// arguments.
+type CanonicalKeyer interface {
+	// CanonicalKey returns the call's prepared input as a JSON object.
+	// Two calls that prepare to the same input return the same key.
+	CanonicalKey() json.RawMessage
+}
+
+// EvidenceArgumenter is implemented by a prepared call that says which
+// of its arguments a decision model may see.
+//
+// A tool that does not implement it exposes the raw arguments the model
+// wrote.
+type EvidenceArgumenter interface {
+	// EvidenceArguments returns the arguments a decision model may see,
+	// as a JSON object.
+	EvidenceArguments() json.RawMessage
+}
+
 // Tool is a tool the model can call.
 type Tool interface {
 	// Spec describes the tool.

@@ -2,6 +2,8 @@ package poo
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -30,7 +32,9 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 	// the permission engine keeps its own chain deadline and always
 	// returns a decision.
 	if policy := s.opts.Policy; policy != nil {
-		decision, err := s.callPolicy(ctx, policy, turn, info)
+		policyInfo := info
+		policyInfo.Arguments = cloneArguments(info.Arguments)
+		decision, err := s.callPolicy(ctx, run, policy, turn, policyInfo)
 		if err != nil {
 			return ToolDecision{}, false, err
 		}
@@ -44,8 +48,10 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 	// looks for a refusal.
 	var result *ToolResult
 	for _, h := range s.opts.BeforeTool {
+		hookInfo := info
+		hookInfo.Arguments = cloneArguments(info.Arguments)
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
-			return h.BeforeTool(s.hookContext(hctx, turn, false), info)
+			return h.BeforeTool(s.hookContext(hctx, turn, false), hookInfo)
 		})
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
@@ -82,11 +88,13 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 // always returns a decision. A run's cancellation still cancels the
 // slot's context, and a decision that arrives after the cancellation is
 // discarded: the call is refused rather than allowed.
-func (s *Session) callPolicy(ctx context.Context, h PolicyHook, turn int, info ToolCallInfo) (ToolDecision, error) {
+func (s *Session) callPolicy(ctx context.Context, run *runState, h PolicyHook, turn int, info ToolCallInfo) (ToolDecision, error) {
 	// The slot gets the permission seam, so it can report the asks it
-	// made and clear the counters of a loop it allowed.
+	// made and clear the counters of a loop it allowed. An interrupt is
+	// its own provenance, so the slot can tell it from a cancelled run.
 	hctx := s.hookContext(ctx, turn, false)
-	hctx.Permissions = &permissionReporter{session: s}
+	hctx.Permissions = &permissionReporter{session: s, run: run}
+	hctx.Interrupted = errors.Is(context.Cause(ctx), errInterrupted)
 	decision, err := h.BeforeTool(hctx, info)
 	if ctx.Err() != nil {
 		// The run ended while the slot was thinking. Its decision is
@@ -114,7 +122,7 @@ func (s *Session) toolCallInfo(turn int, handle, tool string, prepared Prepared,
 	return ToolCallInfo{
 		Spec:            s.toolSpec(tool),
 		Prepared:        prepared,
-		Arguments:       plan.call.Arguments,
+		Arguments:       cloneArguments(plan.call.Arguments),
 		Handle:          handle,
 		RepeatCount:     counts.exact,
 		NearRepeatCount: counts.near,
@@ -143,16 +151,40 @@ func (s *Session) repeatCountFor(handle string) repeatCounts {
 // resetRepeats clears the repeat counters of one call.
 //
 // The policy slot calls this when it allows a doom loop: the loop starts
-// over, and the next call of the same shape is counted from one.
+// over, and the next call of the same shape is counted from one. A call
+// later in the same batch is rebased, so it is counted from the reset
+// rather than from the batch's frozen counts.
 func (s *Session) resetRepeats(handle string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.repeats == nil {
 		return
 	}
+	for i, plan := range s.repeatBatch {
+		if plan.handle != handle {
+			continue
+		}
+		if s.repeatResets == nil {
+			s.repeatResets = map[int]bool{}
+		}
+		s.repeatResets[i] = true
+		s.recountRepeatsLocked()
+		return
+	}
 	key, ok := s.repeatKeys[handle]
 	if !ok {
 		return
 	}
-	s.repeats.reset(key.exact, key.near)
+	s.repeats.reset(key.tool)
+}
+
+// cloneArguments returns a copy of a call's arguments.
+//
+// A hook gets its own copy, so neither the model's history nor another
+// hook sees what it changes.
+func cloneArguments(raw json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
 }

@@ -93,8 +93,9 @@ type HookContext struct {
 	Job string
 	// Turn is the turn the hook is called in, counting from one.
 	Turn int
-	// Interrupted reports that the turn was interrupted. It is set for
-	// AfterTurn only.
+	// Interrupted reports that the activity was interrupted. It is set
+	// for AfterTurn and for the policy slot, so a pending ask resolves as
+	// interrupted rather than cancelled.
 	Interrupted bool
 	// History is the model's view of the history, as a read-only view.
 	History View
@@ -139,6 +140,10 @@ type ToolCallInfo struct {
 	// The arguments are what a policy rule matches a command against,
 	// and what a doom loop's exact key is built from.
 	Arguments json.RawMessage
+	// PrepareFailed reports that the call failed its preparation, so
+	// there is no prepared value. Only the doom loop judges such a call;
+	// the rules do not, because the call is not a valid call.
+	PrepareFailed bool
 	// Handle is the call's handle, e.g. "r1".
 	Handle string
 	// Job is the identifier of the job the call runs as, e.g. "j3". It is

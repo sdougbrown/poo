@@ -93,6 +93,14 @@ type Session struct {
 	// repeatOrder is the handles the calls were counted in, so the
 	// last call's counts can be named without a map's random order.
 	repeatOrder []string
+	// repeatBatch is the current batch's calls, in model order, so a
+	// reset can rebase the counts the batch already recorded.
+	repeatBatch []repeatPlan
+	// repeatResets marks the calls after which the counter was reset.
+	repeatResets map[int]bool
+	// repeatBase is the counter state before the current batch was
+	// counted, so a reset can recount the batch from where it started.
+	repeatBase *repeatCounter
 
 	// run is the active run, nil when the session is idle.
 	run *runState
@@ -296,12 +304,19 @@ type runState struct {
 	// an input's acceptance checks the seal when it is claimed, so
 	// nothing is added for the run after it.
 	sealed bool
+	// asks are the permission asks the run has published and not yet
+	// answered, by ask id. The finalization resolves the ones still
+	// pending before it settles.
+	asks map[string]*pendingAsk
 	// jobStarts counts the job acceptance records whose writes are still
 	// in flight. The finalization waits for them as it does for the
 	// pending calls.
 	jobStarts int
 	// workDone is signalled when a pending call gets its result.
 	workDone chan struct{}
+	// resultOrder orders a parallel batch's results in model order, so
+	// the model sees the results of its calls in the order it made them.
+	resultOrder *resultOrder
 
 	// accepting are the inputs whose acceptance record is still being
 	// written. The finalization waits for them, and reports the ones it
@@ -1000,8 +1015,17 @@ type runWriteClaim struct {
 // seal cancels it, so the write never follows run.settled.
 func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.beginRunWriteLocked(run)
+}
+
+// beginRunWriteLocked claims a record's write against the run's seal.
+//
+// The caller holds the session's lock. The claim is made under the
+// lock, so a write that registers work and claims its record does so
+// atomically with respect to the seal.
+func (s *Session) beginRunWriteLocked(run *runState) (context.Context, func(), bool) {
 	if run.sealed {
-		s.mu.Unlock()
 		return nil, nil, false
 	}
 	base := run.ctx
@@ -1013,7 +1037,6 @@ func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
 	claim := &runWriteClaim{cancel: cancel, timeout: timeout}
 	run.writeClaims = append(run.writeClaims, claim)
 	run.runWrites++
-	s.mu.Unlock()
 
 	release := func() {
 		cancel(nil)

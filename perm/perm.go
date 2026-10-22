@@ -209,6 +209,13 @@ func checkRule(index int, rule Rule) error {
 	case rule.Tool != "" && rule.Class != "":
 		return fmt.Errorf("perm: %s matches both a tool and a class", where)
 	}
+	if rule.Class != "" {
+		switch rule.Class {
+		case poo.ClassReadOnly, poo.ClassSideEffecting:
+		default:
+			return fmt.Errorf("perm: %s matches the unknown class %q", where, rule.Class)
+		}
+	}
 	if rule.CommandPrefix != "" && rule.Tool != "bash" {
 		return fmt.Errorf("perm: %s has a command prefix, which is only valid for a bash rule", where)
 	}
@@ -264,12 +271,15 @@ func (p *Policy) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.Too
 	switch action {
 	case ActionAllow:
 		if reason == poo.ReasonDoomLoop {
-			// The loop is forgiven, so it starts over.
+			// The loop is forgiven, so it starts over, and the outcome
+			// is visible even though no asker answered.
+			p.answer(ctx, decisionAllow, reason)
 			p.reset(ctx, info)
 		}
 		return poo.Allow(), nil
 	case ActionDeny:
 		if reason == poo.ReasonDoomLoop {
+			p.answer(ctx, decisionDeny, reason)
 			return poo.Deny(fmt.Sprintf(DoomLoopDeniedText, doomLoopCount(counts))), nil
 		}
 		return poo.Deny(DeniedText), nil
@@ -277,8 +287,25 @@ func (p *Policy) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.Too
 	return p.ask(ctx, info, reason, counts)
 }
 
+// The decisions a deterministic action reports.
+const (
+	decisionAllow = "allow"
+	decisionDeny  = "deny"
+)
+
 // decide returns what the policy does with a call.
+//
+// A call that failed its validation is not a call the rules can judge:
+// only the doom loop applies, because the same malformed call repeated
+// is the same loop. The core gives it the preparation failure as its
+// result.
 func (p *Policy) decide(info poo.ToolCallInfo) (Action, string, *poo.RepeatCounts) {
+	if info.PrepareFailed {
+		if counts, ok := p.doomLoopCounts(info); ok {
+			return p.doomLoop.Action, poo.ReasonDoomLoop, counts
+		}
+		return ActionAllow, poo.ReasonPolicy, nil
+	}
 	if counts, ok := p.doomLoopCounts(info); ok {
 		return p.doomLoop.Action, poo.ReasonDoomLoop, counts
 	}
@@ -354,7 +381,9 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	name := info.Spec.PrimaryArg
 	if name == "" {
-		return false
+		// A bash rule matches the bash tool's command whatever the
+		// tool's own spec says.
+		name = "command"
 	}
 	value, ok := stringField(info.Arguments, name)
 	if !ok {
@@ -394,6 +423,26 @@ func (p *Policy) reset(ctx poo.HookContext, info poo.ToolCallInfo) {
 	ctx.Permissions.ResetRepeats(info.Handle)
 }
 
+// answer reports a doom loop's deterministic outcome.
+//
+// The plan makes the outcome visible either way: an allow and a deny
+// through the action are recorded as a permission answer, with the
+// policy as who answered and the loop as the reason.
+func (p *Policy) answer(ctx poo.HookContext, decision, reason string) {
+	if ctx.Permissions == nil {
+		return
+	}
+	ctx.Permissions.Answered(poo.PermissionAnswer{
+		Decision:   decision,
+		AnsweredBy: policyName,
+		Provenance: poo.ProvenanceAnswered,
+		Reason:     reason,
+	})
+}
+
+// policyName names the policy in a deterministic answer.
+const policyName = "policy"
+
 // ask asks the chain about a call.
 //
 // The ask is reported before the chain is asked, so a client knows what
@@ -410,8 +459,10 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason string, 
 		Class:       info.Spec.Class,
 		Reason:      reason,
 		RepeatCount: counts,
+		Arguments:   argumentsOf(info),
 		History:     ctx.History,
 		WorkingDir:  p.workingDir,
+		Interrupted: ctx.Interrupted,
 	}
 	if ctx.Permissions != nil {
 		ctx.Permissions.Asked(poo.PermissionAsk{
@@ -437,6 +488,19 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason string, 
 		return poo.Allow(), nil
 	}
 	return poo.Deny(fmt.Sprintf(AskDeniedText, resolution.answeredBy)), nil
+}
+
+// argumentsOf returns the arguments a decision model may see.
+//
+// A tool that names its evidence arguments chooses what is exposed; any
+// other tool exposes the raw arguments the model wrote.
+func argumentsOf(info poo.ToolCallInfo) json.RawMessage {
+	if evidence, ok := info.Prepared.(poo.EvidenceArgumenter); ok {
+		if args := evidence.EvidenceArguments(); len(args) > 0 {
+			return args
+		}
+	}
+	return append(json.RawMessage(nil), info.Arguments...)
 }
 
 // nextAskID returns the id of the next ask.

@@ -1,6 +1,9 @@
 package poo
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // The activity is the work a run is doing at one moment: the provider
 // request, the tool batch, the compaction, or the turn-end hooks.
@@ -111,4 +114,13 @@ func (s *Session) clearInterrupt(run *runState) {
 	defer s.mu.Unlock()
 	run.interruptPending = false
 	run.pendingInterruptIDs = nil
+}
+
+// Interrupted reports that a context was cut short by a user interrupt.
+//
+// An interrupt ends the activity, not the run, so this is what tells a
+// pending permission ask to resolve as interrupted rather than
+// cancelled.
+func Interrupted(ctx context.Context) bool {
+	return errors.Is(context.Cause(ctx), errInterrupted)
 }

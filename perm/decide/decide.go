@@ -138,11 +138,25 @@ func (a *Asker) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
 	question := a.question()
 	state := decide.Evidence(
 		poo.EvidenceTurns(ask.History, a.turns),
-		decide.EvidenceOptions{Cwd: ask.WorkingDir},
+		decide.EvidenceOptions{
+			Cwd: ask.WorkingDir,
+			Call: &decide.Call{
+				Tool:      ask.Tool,
+				Summary:   ask.Summary,
+				Class:     string(ask.Class),
+				Reason:    ask.Reason,
+				Arguments: ask.Arguments,
+			},
+		},
 	)
 	answers, err := a.decider.Decide(ctx, state, question.Instructions, []decide.Question{question})
 	if err != nil {
 		return perm.DecisionDefer, err
+	}
+	// A malformed answer is never an approval: the model answered, but
+	// the answer cannot be used, so the ask defers to the next asker.
+	if err := decide.ValidateAnswers([]decide.Question{question}, answers); err != nil {
+		return perm.DecisionDefer, nil
 	}
 	answer, ok := answerFor(answers, question.ID)
 	if !ok {
