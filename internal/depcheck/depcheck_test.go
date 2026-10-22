@@ -12,9 +12,10 @@ import (
 )
 
 // TestRepoImports checks the poo module itself: the core package may import
-// the standard library plus poo/prompt and poo/decide, and poo/prompt,
+// the standard library plus poo/prompt and poo/decide, poo/prompt,
 // poo/prompt/agentsmd, poo/decide and poo/wire/protocol may import the
-// standard library only.
+// standard library only, and poo/provider/catalog may import the standard
+// library and the core package.
 func TestRepoImports(t *testing.T) {
 	root := moduleRoot(t)
 	modulePath := modulePathOf(t, root)
@@ -112,6 +113,7 @@ func TestSkippedPackages(t *testing.T) {
 		m + "/decide (no non-test Go files)",
 		m + "/prompt (does not exist yet)",
 		m + "/prompt/agentsmd (does not exist yet)",
+		m + "/provider/catalog (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
