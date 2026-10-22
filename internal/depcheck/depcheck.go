@@ -9,6 +9,8 @@
 //   - the perm package may import the standard library and the core package
 //   - the perm/decide package may import the standard library, the core
 //     package, the perm package and the decide package
+//   - the session package may import the standard library, the core
+//     package and the decide package
 //
 // The import graph comes from "go list -e -deps -json", and the toolchain
 // decides what counts as the standard library. The rules cover each checked
@@ -74,6 +76,7 @@ func (c Checker) rules() []rule {
 		{path: m + "/provider/catalog", allowed: []string{m}},
 		{path: m + "/perm", allowed: []string{m}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
+		{path: m + "/session", allowed: []string{m, m + "/decide"}},
 	}
 }
 
