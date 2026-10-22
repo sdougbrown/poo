@@ -157,6 +157,44 @@ func TestTheExplainAttributesEveryField(t *testing.T) {
 	}
 }
 
+func TestTheHostedModelsAreListed(t *testing.T) {
+	c := catalog.New(catalog.Options{Settings: localSettings()})
+	var hosted *poo.ModelInfo
+	for _, info := range c.List() {
+		if info.Name == "gpt-5" {
+			model := info
+			hosted = &model
+		}
+	}
+	if hosted == nil {
+		t.Fatal("the hosted models are not listed")
+	}
+	if hosted.ContextLimit != 400000 {
+		t.Errorf("the context limit is %d, want the generated 400000", hosted.ContextLimit)
+	}
+	if hosted.Temperature != poo.TempFixed {
+		t.Errorf("the temperature control is %q, want fixed", hosted.Temperature)
+	}
+	if hosted.Reasoning.Mode != poo.ReasoningEffort {
+		t.Errorf("the reasoning control is %q, want effort", hosted.Reasoning.Mode)
+	}
+}
+
+func TestAHostedModelTheSettingsServeIsNotListedTwice(t *testing.T) {
+	settings := localSettings()
+	settings.Models["fast"] = catalog.ModelSettings{Endpoint: "grace", ModelID: "gpt-5"}
+	c := catalog.New(catalog.Options{Settings: settings})
+	count := 0
+	for _, info := range c.List() {
+		if info.ModelID == "gpt-5" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("the model is listed %d times, want once", count)
+	}
+}
+
 func TestTheCatalogListsTheModelsByName(t *testing.T) {
 	settings := localSettings()
 	settings.Models["alpha"] = catalog.ModelSettings{Endpoint: "grace", ModelID: "gemma4"}
@@ -307,6 +345,43 @@ func TestTheCatalogReportsAModelItDoesNotHold(t *testing.T) {
 	var unresolved *catalog.UnresolvedError
 	if !errors.As(err, &unresolved) {
 		t.Fatalf("the error is %v, want an unresolved model", err)
+	}
+}
+
+func TestTheReasoningSettingReachesTheRequest(t *testing.T) {
+	settings := localSettings()
+	settings.Reasoning = "low"
+	c := catalog.New(catalog.Options{Settings: settings})
+	fields, err := c.ReasoningFields("gemma4")
+	if err != nil {
+		t.Fatalf("the fields: %v", err)
+	}
+	if len(fields) != 1 {
+		t.Fatalf("the fields are %v, want one", fields)
+	}
+	if fields[0].Path != poo.ReasoningPathToggle {
+		t.Errorf("the field is %q, want %q", fields[0].Path, poo.ReasoningPathToggle)
+	}
+	if fields[0].Value != true {
+		t.Errorf("the value is %v, want true", fields[0].Value)
+	}
+}
+
+func TestTheReasoningSettingOfAModelThatCannotDoIt(t *testing.T) {
+	settings := localSettings()
+	settings.Reasoning = "high"
+	settings.Models["plain"] = catalog.ModelSettings{
+		Endpoint: "grace",
+		ModelID:  "plain",
+		Reasoning: &poo.ReasoningControl{
+			Mode: poo.ReasoningNone,
+		},
+	}
+	c := catalog.New(catalog.Options{Settings: settings})
+	_, err := c.ReasoningFields("plain")
+	var cfg *poo.ConfigError
+	if !errors.As(err, &cfg) {
+		t.Fatalf("the error is %v, want a config error", err)
 	}
 }
 

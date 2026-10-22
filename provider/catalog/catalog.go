@@ -160,6 +160,11 @@ func (c *Catalog) addSettingsModels() {
 	sort.Strings(names)
 	for _, name := range names {
 		model := c.opts.Settings.Models[name]
+		if model.ModelID == "" {
+			c.warn("the model does not name the model the endpoint calls it",
+				slog.String("model", name))
+			continue
+		}
 		endpoint, ok := c.endpoints[model.Endpoint]
 		if !ok {
 			c.warn("the model names an endpoint that is not configured",
@@ -186,7 +191,7 @@ func (c *Catalog) addSettingsModels() {
 // not added twice: the layers of the one model are merged instead.
 func (c *Catalog) addCuratedModels() {
 	for _, id := range c.curated.modelIDs() {
-		if _, ok := c.entries[id]; ok {
+		if c.hasModelID(id) {
 			continue
 		}
 		curated, endpoint, notes := c.curated.forModel(id)
@@ -221,6 +226,19 @@ func (c *Catalog) entryForModel(endpoint, modelID string) *entry {
 	return nil
 }
 
+// hasModelID reports whether an entry already serves a model id.
+//
+// A model that the settings serve is not listed twice: the curated
+// entry of the same model is merged into the settings' one.
+func (c *Catalog) hasModelID(modelID string) bool {
+	for _, e := range c.entries {
+		if e.modelID == modelID {
+			return true
+		}
+	}
+	return false
+}
+
 // List returns the effective models, sorted by name.
 func (c *Catalog) List() []poo.ModelInfo {
 	names := make([]string, 0, len(c.entries))
@@ -244,6 +262,21 @@ func (c *Catalog) Resolve(name string) (poo.ModelInfo, error) {
 		return poo.ModelInfo{}, &UnresolvedError{Name: name}
 	}
 	return c.effective(name), nil
+}
+
+// ReasoningFields returns the request fields that carry the reasoning
+// setting for a model.
+//
+// The setting is the settings' reasoning.chat value and the model's own
+// control says how it is carried. A model that cannot do what the
+// setting asks for is a configuration error, and the error names the
+// setting.
+func (c *Catalog) ReasoningFields(name string) ([]poo.ReasoningField, error) {
+	info, err := c.Resolve(name)
+	if err != nil {
+		return nil, err
+	}
+	return info.ReasoningFields(c.opts.Settings.Reasoning)
 }
 
 // Explanation is one field of a model and the layer that set it.
