@@ -391,6 +391,7 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 		}
 		offset += runTurns[id]
 	}
+	s.mu.Lock()
 	s.turnSeq = offset
 	s.turns = make([]TurnSummary, 0, offset)
 	s.spans = make([]turnSpan, 0, offset)
@@ -400,6 +401,7 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 			s.spans = append(s.spans, turnSpan{turn: offset - runTurns[id] + t, run: t})
 		}
 	}
+	s.mu.Unlock()
 	out.Turns = offset
 
 	// The turn that is being filled: the session's number and the run's
@@ -440,10 +442,7 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 	}
 	// The turns that produced no message stand where the view stands
 	// when the records end.
-	for t := placed + 1; t <= len(s.spans); t++ {
-		s.spans[t-1].start = len(s.history)
-		s.spans[t-1].end = len(s.history)
-	}
+	s.placeRemainingTurns(placed)
 	out.Messages = len(s.history)
 	return nil
 }
@@ -506,6 +505,8 @@ func (s *Session) placeTurn(placed int, sessionTurn map[turnKey]int, run string,
 	if !ok || st < 1 || st > len(s.spans) {
 		return placed
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// The turns between the last placed one and this one produced no
 	// message: they hold nothing, and they stand where this turn
 	// starts.
@@ -523,12 +524,25 @@ func (s *Session) placeTurn(placed int, sessionTurn map[turnKey]int, run string,
 	return placed
 }
 
+// placeRemainingTurns places the turns that produced no message at the
+// end of the view.
+func (s *Session) placeRemainingTurns(placed int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for t := placed + 1; t <= len(s.spans); t++ {
+		s.spans[t-1].start = len(s.history)
+		s.spans[t-1].end = len(s.history)
+	}
+}
+
 // rememberCall remembers a call the records hold.
 func (s *Session) rememberCall(r *ToolCallRecord, sessionTurn map[turnKey]int) {
 	st := sessionTurn[turnKey{run: r.RunID, turn: r.Turn}]
 	if st < 1 || st > len(s.turns) {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	summary := s.turns[st-1]
 	for _, call := range summary.Calls {
 		if call.Handle == r.Handle {
