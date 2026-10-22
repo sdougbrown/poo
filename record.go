@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/sdougbrown/poo/decide"
 )
 
 // FormatVersion is the version tag written into the first record of a
@@ -438,4 +440,62 @@ type HandoffRecord struct {
 	Handoff string `json:"handoff"`
 	// CreatedAt is the RFC 3339 time the handoff was written.
 	CreatedAt string `json:"created_at"`
+}
+
+// ModelsChanged records that the session switched models.
+//
+// The switch is recorded between the runs, so a reader of the log knows
+// which model answered which turn.
+type ModelsChanged struct {
+	RecordMeta
+	// From is the name of the model the session talked to.
+	From string `json:"from"`
+	// To is the name of the model the session talks to now.
+	To string `json:"to"`
+	// Warnings are the things the caller should know about the switch.
+	Warnings []string `json:"warnings,omitempty"`
+	// Omitted are the provider blocks that are left out of the requests
+	// from now on, because they belong to another API.
+	Omitted []OmittedBlock `json:"omitted,omitempty"`
+}
+
+// OmittedBlock is one kind of provider block left out of the requests.
+//
+// The block stays in the history, and the requests leave it out: the
+// model that made it is not the model the session talks to now.
+type OmittedBlock struct {
+	// API is the API the block belonged to.
+	API API `json:"api"`
+	// Type is the provider's own name for the payload.
+	Type string `json:"type"`
+	// Count is how many blocks of this kind are left out.
+	Count int `json:"count"`
+}
+
+// DecisionRecord records one decision call.
+//
+// One record is written per logical call, whatever the number of wire
+// requests it took. A call that did not answer is recorded too, with
+// the outcome that says why.
+type DecisionRecord struct {
+	RecordMeta
+	// Origin says who asked the questions.
+	Origin string `json:"origin"`
+	// Questions are the questions that were asked.
+	Questions []decide.Question `json:"questions"`
+	// StateHash is the hex SHA-256 of the state payload.
+	StateHash string `json:"state_hash"`
+	// Answers are the answers, when the call succeeded.
+	Answers []decide.Answer `json:"answers,omitempty"`
+	// Outcome is "ok", "deferred" or "invalid".
+	Outcome string `json:"outcome"`
+	// Error is the failure, when the call did not succeed.
+	Error string `json:"error,omitempty"`
+	// LatencyMS is how long the call took, in milliseconds.
+	LatencyMS float64 `json:"latency_ms"`
+	// Requests is the number of wire requests the call made. It is
+	// absent when the decider did not report one.
+	Requests *int `json:"requests,omitempty"`
+	// At is the RFC 3339 time of the call, in UTC.
+	At string `json:"at"`
 }

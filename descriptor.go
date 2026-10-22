@@ -162,3 +162,14 @@ func (m ModelInfo) HasOp(op Op) bool {
 	}
 	return false
 }
+
+// modelLabel names a model.
+//
+// The name is the one the settings and the wire use, and the endpoint's
+// identifier is the fallback.
+func modelLabel(m ModelInfo) string {
+	if m.Name != "" {
+		return m.Name
+	}
+	return m.ModelID
+}

@@ -368,6 +368,8 @@ const (
 	EventCompactionEnded EventName = "compaction.ended"
 	// EventObserverDropped is emitted when an observer's buffer overflows.
 	EventObserverDropped EventName = "observer.dropped"
+	// EventModelsChanged is emitted when the session switches models.
+	EventModelsChanged EventName = "session.models_changed"
 )
 
 // Event is one thing that happened in a session.
