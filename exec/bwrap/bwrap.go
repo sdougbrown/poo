@@ -8,6 +8,12 @@
 // a model's commands inside the task: the kernel is the host's, and
 // with the network on, the network is the host's too. docs/sandbox.md
 // says what it contains and what it does not.
+//
+// The exit status is the one bubblewrap reports: the command's own
+// status, or 128 plus the signal when the command died from one. A
+// local command that dies from a signal has no status at all, so the
+// two executors differ there: the sandbox names the number where the
+// local executor names nothing.
 package bwrap
 
 import (
@@ -118,6 +124,15 @@ func (e *Executor) Name() string { return Name }
 func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (bash.Process, error) {
 	if len(c.Argv) == 0 {
 		return nil, errors.New("bwrap: the command has no arguments")
+	}
+	// An empty directory means the caller's own, and the sandbox binds
+	// it under its own name.
+	if c.Dir == "" {
+		dir, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("bwrap: the working directory: %w", err)
+		}
+		c.Dir = dir
 	}
 	args, err := e.args(c)
 	if err != nil {
@@ -318,16 +333,18 @@ func underAny(dirs []string, path string) bool {
 // probe checks that the binary can create the namespaces the sandbox
 // needs.
 //
-// The check runs a trivial command in a sandbox. A host that does not
-// allow unprivileged user namespaces fails here, and the executor is
-// never handed out.
+// The check runs a trivial command in a sandbox with the same binds the
+// executor uses. A host that does not allow unprivileged user
+// namespaces fails here, and the executor is never handed out.
 func probe(binary string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), ProbeTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary,
-		"--unshare-all",
-		"--ro-bind", "/", "/",
-		"--", "/bin/true")
+	args := []string{"--unshare-all"}
+	for _, dir := range DefaultROBinds {
+		args = append(args, "--ro-bind-try", dir, dir)
+	}
+	args = append(args, "--", "/bin/true")
+	cmd := exec.CommandContext(ctx, binary, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
