@@ -33,6 +33,21 @@ const (
 // result and named no replacement.
 const RedactedResultText = "[the result was redacted]"
 
+// hookCompletionContext returns the context a completion's hook chain
+// runs under.
+//
+// The chain is a completion, not part of the work that was stopped: an
+// interrupt, a cancellation or a timeout that ended the call must not
+// discard the hooks' decisions. The context keeps the run's values and
+// drops its cancellation, and each hook gets its own deadline from
+// callHook.
+func hookCompletionContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
+}
+
 // afterToolOutcome is what the after-tool chain produced.
 type afterToolOutcome struct {
 	// result is the result the model reads.

@@ -711,7 +711,7 @@ func (s *Session) recordResult(run *runState, turn int, handle, tool, callID str
 // hook that fails settles the run with hook_error, and the call keeps
 // the result the tool gave.
 func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID string, info ToolCallInfo, result ToolResult, outcome Outcome) {
-	out, err := s.runAfterTool(s.activityContextFor(run), run.id, "", turn, info, result)
+	out, err := s.runAfterTool(hookCompletionContext(run.ctx), run.id, "", turn, info, result)
 	if err != nil {
 		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
 			Source: "after_tool",

@@ -282,3 +282,60 @@ func TestAPolicyThatFailsOnInterruptDoesNotSettleHookError(t *testing.T) {
 		t.Errorf("the interrupt settled %s (%s), want end_turn", got.Reason, got.Detail.Text)
 	}
 }
+
+// TestAStoppedSyncCallStillRunsItsAfterToolChain covers the plan's rule:
+// the after-tool chain runs for every call whose tool ran, on a context
+// of its own, so an interrupt or a cancellation does not bypass a
+// redaction.
+func TestAStoppedSyncCallStillRunsItsAfterToolChain(t *testing.T) {
+	const secret = "s3cr3t-in-a-call"
+	for _, mode := range []string{"interrupt", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			tr := scripted([]fakeResponse{
+				{calls: []poo.ToolCall{fixCall("slow", "one")}},
+				{text: "done"},
+			})
+			sink := &recordingSink{}
+			tool := newFixTool("slow", "the output with "+secret)
+			tool.block = true
+			opts := fixOpts(t, tr, tool, sink)
+			hook := &recordingAfterTool{decision: poo.Redact(poo.ToolResult{Text: "[the output was redacted]"})}
+			opts.AfterTool = []poo.AfterToolHook{hook}
+			s := newTestSession(t, opts)
+
+			if _, err := s.Prompt(context.Background(), "go"); err != nil {
+				t.Fatalf("starting the run: %v", err)
+			}
+			<-tool.started
+			switch mode {
+			case "interrupt":
+				if _, err := s.Send("stop", poo.Interrupt); err != nil {
+					t.Fatalf("interrupting the run: %v", err)
+				}
+			case "cancel":
+				s.Cancel("cancel:test")
+			}
+			waitFor(t, "the run to settle", func() bool { return sink.settled() != nil })
+
+			if got := hook.Calls(); got != 1 {
+				t.Errorf("the chain ran %d time(s), want 1 at the call's completion", got)
+			}
+			rec := fixResultRecord(t, sink)
+			if strings.Contains(rec.Text, secret) {
+				t.Errorf("the tool.result record holds the secret: %q", rec.Text)
+			}
+			for _, ev := range s.Events() {
+				if ev.Name != poo.EventToolResult {
+					continue
+				}
+				text, _ := ev.Payload["text"].(string)
+				if strings.Contains(text, secret) {
+					t.Errorf("the tool.result event holds the secret: %q", text)
+				}
+			}
+			if store := fixSinkJSON(sink, secret); strings.Contains(store, secret) {
+				t.Errorf("the secret reached the store:\n%s", store)
+			}
+		})
+	}
+}
