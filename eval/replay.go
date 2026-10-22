@@ -10,7 +10,6 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
-	"github.com/sdougbrown/poo/prompt"
 )
 
 // ScriptedTurn is one recorded provider response.
@@ -197,7 +196,7 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	// would otherwise change the replay's budget and its requests.
 	var beforeRun []poo.BeforeRunHook
 	if prompts := recordedSystemPrompts(log); len(prompts) > 0 {
-		beforeRun = []poo.BeforeRunHook{&recordedPrompt{prompts: prompts}}
+		beforeRun = []poo.BeforeRunHook{poo.NewRecordedPrompts(prompts)}
 	}
 
 	// The recording's compactions are applied as they were recorded,
@@ -346,34 +345,6 @@ func recordedCompactions(log *Log) []recordedCompaction {
 		}
 	}
 	return out
-}
-
-// recordedPrompt installs each run's recorded prompt in order.
-type recordedPrompt struct {
-	mu      sync.Mutex
-	prompts []string
-	index   int
-}
-
-// BeforeRun replaces the run's prompt with the recorded one.
-//
-// A replay never renders the current default: a run that has more runs
-// than the recording has prompt changes uses the last recorded prompt,
-// which is the prompt the recording's later runs carried.
-func (h *recordedPrompt) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if len(h.prompts) == 0 {
-		return poo.StartDecision{}, nil
-	}
-	text := h.prompts[len(h.prompts)-1]
-	if h.index < len(h.prompts) {
-		text = h.prompts[h.index]
-		h.index++
-	}
-	return poo.StartDecision{SystemPrompt: func(s prompt.Sections) {
-		s.Replace(text)
-	}}, nil
 }
 
 // recordedCompactor applies the compactions a recording holds.

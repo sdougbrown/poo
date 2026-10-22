@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // The restore: a session rebuilt from the records of an earlier one.
@@ -327,4 +328,60 @@ type countingBeforeRun struct {
 func (h *countingBeforeRun) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
 	h.calls++
 	return poo.StartDecision{}, nil
+}
+
+// TestTheRestoreHoldsTheSteeringAndTheCompactions covers the history a
+// restore rebuilds: the steering the run took, and the compaction the
+// view went through.
+func TestTheRestoreHoldsTheSteeringAndTheCompactions(t *testing.T) {
+	compactor := pootest.NewCompactor(true, poo.Compaction{
+		Strategy: "the scripted one",
+		Replace: &poo.RangeReplacement{
+			Cut:      poo.TurnRange{First: 1, Last: 1},
+			Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "the summary of the first turn")},
+		},
+	})
+	compactor.SetShouldAfter(1)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Send("also do this", poo.Steer); err != nil {
+		t.Fatalf("sending the steer: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	records := append([]poo.Record{header("s1")}, sink.allRecords()...)
+	session, restored, err := poo.Restore(restoreOptions(t, scripted(nil), &recordingSink{}), records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	if restored.Compactions != 1 {
+		t.Errorf("the restore applied %d compactions, want 1", restored.Compactions)
+	}
+
+	var texts []string
+	for _, m := range poo.Messages(session) {
+		texts = append(texts, m.Text())
+	}
+	joined := strings.Join(texts, "|")
+	if !strings.Contains(joined, "also do this") {
+		t.Errorf("the restored history holds no steering: %s", joined)
+	}
+	if !strings.Contains(joined, "the summary of the first turn") {
+		t.Errorf("the restored history holds no compaction: %s", joined)
+	}
+	if strings.Contains(joined, "echoed") {
+		t.Errorf("the restored history holds the replaced turn: %s", joined)
+	}
 }
