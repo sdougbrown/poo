@@ -101,13 +101,14 @@ func (d *Decider) Decide(ctx context.Context, state any, instructions string, qs
 			first = 1
 		}
 		rest := 1 - first
+		if len(keys) == 1 {
+			// One option is certain: a probability of anything else does
+			// not sum to one.
+			first = 1
+		}
 		for i, k := range keys {
 			if i == 0 {
 				probs[k] = first
-				continue
-			}
-			if len(keys) == 1 {
-				probs[k] = 0
 				continue
 			}
 			probs[k] = rest / float64(len(keys)-1)

@@ -19,6 +19,7 @@ func TestRepoImports(t *testing.T) {
 	modulePath := modulePathOf(t, root)
 
 	touchGoFiles(t, root)
+	touchCacheInputs(t, root)
 	res, err := depcheck.Checker{
 		ModuleRoot: root,
 		ModulePath: modulePath,
@@ -39,9 +40,8 @@ func TestRepoImports(t *testing.T) {
 func TestFixtures(t *testing.T) {
 	const m = "example.com/poo/depcheck/"
 	tests := []struct {
-		name    string
-		want    []string
-		skipped []string
+		name string
+		want []string
 	}{
 		{
 			name: "direct",
@@ -73,6 +73,10 @@ func TestFixtures(t *testing.T) {
 			name: "allowed",
 		},
 		{
+			name: "wireproto",
+			want: []string{m + "wireproto/wire/protocol imports " + m + "wireproto/extra"},
+		},
+		{
 			name: "unresolvable",
 			want: []string{"cannot resolve " + m + "unresolvable/missing (imported by " + m + "unresolvable)"},
 		},
@@ -82,6 +86,16 @@ func TestFixtures(t *testing.T) {
 		},
 		{
 			name: "onlytests",
+		},
+		{
+			name: "ignored",
+		},
+		{
+			name: "ignoreonly",
+		},
+		{
+			name: "ignoreddep",
+			want: []string{"cannot resolve " + m + "ignoreddep/gen (imported by " + m + "ignoreddep)"},
 		},
 	}
 	for _, tt := range tests {
@@ -109,11 +123,81 @@ func TestSkippedPackages(t *testing.T) {
 	}
 }
 
+// TestABuildIgnoredFileIsSkipped covers the dot/underscore exemption: a
+// package whose only Go file is build-ignored by an underscore prefix is
+// skipped, not reported and not treated as an error.
+func TestABuildIgnoredFileIsSkipped(t *testing.T) {
+	const m = "example.com/poo/depcheck/ignored"
+	res := checkModule(t, filepath.Join("testdata", "ignored"), m)
+	want := []string{
+		m + " (no non-test Go files)",
+		m + "/decide (does not exist yet)",
+		m + "/prompt (does not exist yet)",
+		m + "/wire/protocol (does not exist yet)",
+	}
+	if !slices.Equal(res.Skipped, want) {
+		t.Errorf("skipped %q, want %q", res.Skipped, want)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("findings:\n%s\nwant none", strings.Join(res.Findings, "\n"))
+	}
+}
+
+// TestAFileWithTheIgnoreBuildTagIsNotSeen covers the doc's promise: a
+// normal-named file carrying //go:build ignore does not fail the check,
+// the way a dot- or underscore-prefixed file does not.
+func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
+	const m = "example.com/poo/depcheck/ignoreonly"
+	res := checkModule(t, filepath.Join("testdata", "ignoreonly"), m)
+	if len(res.Findings) != 0 {
+		t.Errorf("findings:\n%s\nwant none", strings.Join(res.Findings, "\n"))
+	}
+	want := []string{
+		m + "/decide (does not exist yet)",
+		m + "/prompt (does not exist yet)",
+		m + "/wire/protocol (does not exist yet)",
+	}
+	if !slices.Equal(res.Skipped, want) {
+		t.Errorf("skipped %q, want %q", res.Skipped, want)
+	}
+}
+
+// TestABrokenModuleIsAnError covers the child failure: a module whose
+// go.mod does not parse makes Check fail rather than pass silently.
+func TestABrokenModuleIsAnError(t *testing.T) {
+	_, err := (depcheck.Checker{
+		ModuleRoot: filepath.Join("testdata", "brokenmod"),
+		ModulePath: "example.com/poo/depcheck/brokenmod",
+	}.Check())
+	if err == nil {
+		t.Error("the broken module returned no error, want one")
+	}
+}
+
+// touchCacheInputs opens the inputs the Go test cache does not track on
+// its own: the inherited GOFLAGS, which changes which files the build
+// sees, and the module's go.mod and go.sum, which change what the
+// toolchain resolves. Opening them adds them to the test's own cache
+// key, so a run after a change to any of them recomputes instead of
+// serving a stale result.
+func touchCacheInputs(t *testing.T, root string) {
+	t.Helper()
+
+	_ = os.Getenv("GOFLAGS")
+	for _, name := range []string{"go.mod", "go.sum"} {
+		f, err := os.Open(filepath.Join(root, name))
+		if err == nil {
+			f.Close()
+		}
+	}
+}
+
 // checkModule runs the check over a module and returns the result.
 func checkModule(t *testing.T, root, modulePath string) depcheck.Result {
 	t.Helper()
 
 	touchGoFiles(t, root)
+	touchCacheInputs(t, root)
 	res, err := depcheck.Checker{ModuleRoot: root, ModulePath: modulePath}.Check()
 	if err != nil {
 		t.Fatalf("checking %s: %v", modulePath, err)
