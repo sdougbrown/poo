@@ -116,6 +116,22 @@ type PromptContributor interface {
 	PromptSection(env prompt.Env) string
 }
 
+// PromptVariantContributor is implemented by a tool that offers
+// alternative texts for its prompt section.
+//
+// A tool that implements it keeps the same section name: the variants
+// are the alternatives that section's text may take, and the prompt
+// renders the one the session's variant names. A tool that does not
+// implement it is unaffected.
+type PromptVariantContributor interface {
+	// PromptVariants renders the tool's section of the system prompt
+	// for each variant it offers, keyed by variant name.
+	//
+	// A variant that is not among them is not offered: the section
+	// renders its default text for it.
+	PromptVariants(env prompt.Env) map[string]string
+}
+
 // ErrInvalidArgs marks a validation failure. It is recoverable: the model
 // sees the message and may correct the call.
 type ErrInvalidArgs struct {

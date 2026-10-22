@@ -140,6 +140,22 @@ func WithPrompt(edit func(*prompt.Builder)) Option {
 	}
 }
 
+// WithPromptVariant sets the prompt variant the session's prompt
+// renders in.
+//
+// The variant names an alternative text for the sections that offer
+// one: the base section and the tools' sections. A section that offers
+// no alternative for the variant renders its default text, so a
+// variant that no section offers changes nothing.
+//
+// The variant is fixed for the length of a run, like the prompt itself,
+// and it may change between the runs.
+func WithPromptVariant(name string) Option {
+	return func(opts *Options) {
+		opts.PromptVariant = name
+	}
+}
+
 // WithCompactor sets the strategy that compacts the view.
 //
 // A session without one never enters the compacting state.

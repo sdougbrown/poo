@@ -3,6 +3,7 @@ package poo
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,15 +23,20 @@ import (
 // session works, the operating system, the date, the model and the
 // tools the model may call. The date is the session's date, in UTC, so
 // two sessions on the same day read the same.
+//
+// The environment names the variant the prompt renders in, so a section
+// that renders from the environment knows which variant it renders
+// for.
 func systemPromptEnv(opts *Options) prompt.Env {
 	tools := make([]string, 0, len(opts.ToolOrder))
 	tools = append(tools, opts.ToolOrder...)
 	return prompt.Env{
-		Cwd:   opts.WorkingDir,
-		OS:    runtime.GOOS,
-		Date:  time.Now().UTC().Format("2006-01-02"),
-		Model: opts.ModelID,
-		Tools: tools,
+		Cwd:     opts.WorkingDir,
+		OS:      runtime.GOOS,
+		Date:    time.Now().UTC().Format("2006-01-02"),
+		Model:   opts.ModelID,
+		Tools:   tools,
+		Variant: opts.PromptVariant,
 	}
 }
 
@@ -77,6 +83,9 @@ func buildPrompt(opts *Options) *prompt.Builder {
 				continue
 			}
 			b.Set(prompt.ToolSection(name), contributor.PromptSection(env))
+			if variantContributor, ok := tool.(PromptVariantContributor); ok {
+				setPromptVariants(b, prompt.ToolSection(name), variantContributor.PromptVariants(env))
+			}
 		}
 	}
 	for _, edit := range opts.Prompt {
@@ -85,6 +94,21 @@ func buildPrompt(opts *Options) *prompt.Builder {
 		}
 	}
 	return b
+}
+
+// setPromptVariants puts a tool's alternative texts in the builder.
+//
+// The names are sorted, so the builder holds the alternatives in the
+// same order every time.
+func setPromptVariants(b *prompt.Builder, section string, variants map[string]string) {
+	names := make([]string, 0, len(variants))
+	for name := range variants {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		b.SetVariant(section, name, variants[name])
+	}
 }
 
 // renderSystemPrompt renders the prompt for a run.
@@ -113,7 +137,22 @@ func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) string {
 	return rendered
 }
 
-// promptCopy returns a copy of the session's prompt builder.
+// SetPromptVariant sets the variant the prompt renders in.
+//
+// The prompt a run carries is rendered once, at the start of the run,
+// so the change takes effect between the runs and never inside one.
+//
+// A variant picks the alternative text of the sections that offer one:
+// the base section and the tools' sections. A section that offers no
+// alternative for the variant renders its default text.
+func (s *Session) SetPromptVariant(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.promptVariant = name
+}
+
+// promptCopy returns a copy of the session's prompt builder, in the
+// variant the session renders in.
 //
 // The copy is what a run renders. A nil builder means the session has
 // no prompt at all.
@@ -123,7 +162,7 @@ func (s *Session) promptCopy() *prompt.Builder {
 	if s.promptBuilder == nil {
 		return nil
 	}
-	return s.promptBuilder.Copy()
+	return s.promptBuilder.WithVariant(s.promptVariant)
 }
 
 // applyPromptEdit applies a system-prompt edit to the session's prompt.

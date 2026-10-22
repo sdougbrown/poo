@@ -167,6 +167,12 @@ type Session struct {
 	// from. A run renders a copy of it, so a run's prompt may change
 	// without the session's prompt changing.
 	promptBuilder *prompt.Builder
+	// promptVariant is the variant the prompt renders in.
+	//
+	// It may change between the runs: the prompt a run carries is
+	// rendered once, at the start of the run, so a change never
+	// reaches a run that is going.
+	promptVariant string
 
 	// waiters are the goroutines waiting for the run to settle.
 	waiters []chan Result
@@ -387,6 +393,15 @@ type Options struct {
 	// the order they were added, after the core's own sections and the
 	// tools' sections are in it. A mutation that is nil is skipped.
 	Prompt []func(*prompt.Builder)
+	// PromptVariant names the prompt variant the prompt renders in.
+	//
+	// The variant picks the alternative text of the sections that
+	// offer one; a section that offers none renders its default text.
+	// The empty name and "default" mean the default text.
+	//
+	// It is the variant the session starts in. The session's own
+	// variant may change between the runs.
+	PromptVariant string
 	// WorkingDir is the directory the tools work in.
 	WorkingDir string
 	// Env is the scrubbed child environment for the tools.
@@ -568,6 +583,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	// consumer put in the builder. The job tools are registered by
 	// now, so their own sections are in it too.
 	s.promptBuilder = buildPrompt(&s.opts)
+	s.promptVariant = s.opts.PromptVariant
 
 	// The observers start before anything can emit an event, and the
 	// bus's reporter starts with them.
