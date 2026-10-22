@@ -1,6 +1,7 @@
 package poo_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -107,6 +108,15 @@ func TestTheRestoredSessionSendsTheSameNextRequest(t *testing.T) {
 		if len(want[i].Content) != len(got[i].Content) {
 			t.Errorf("the message %d holds %d blocks, want %d", i, len(got[i].Content), len(want[i].Content))
 		}
+	}
+	// The bodies are the same, byte for byte.
+	originalBodies := original.Rendered()
+	restoredBodies := restoredTransport.Rendered()
+	if len(originalBodies) < 3 || len(restoredBodies) < 1 {
+		t.Fatalf("the original rendered %d bodies and the restored %d", len(originalBodies), len(restoredBodies))
+	}
+	if !bytes.Equal(originalBodies[2].Body, restoredBodies[0].Body) {
+		t.Errorf("the restored body is\n%s\nwant\n%s", restoredBodies[0].Body, originalBodies[2].Body)
 	}
 }
 
@@ -430,5 +440,86 @@ func TestTheRestoredSessionHoldsTheUndeliveredJobResults(t *testing.T) {
 	}
 	if !found {
 		t.Error("the model did not read the job's result")
+	}
+}
+
+// backgroundTool is a tool with a background mode.
+type backgroundTool struct {
+	echoTool
+	// background is the tool's background mode.
+	background poo.Background
+}
+
+// Spec describes the tool with its background mode.
+func (t *backgroundTool) Spec() poo.ToolSpec {
+	spec := t.echoTool.Spec()
+	spec.Background = t.background
+	return spec
+}
+
+// TestTheRestoreRejectsAToolThatChangedItsClass covers the
+// compatibility check: a tool that changed its class does not fit.
+func TestTheRestoreRejectsAToolThatChangedItsClass(t *testing.T) {
+	records := []poo.Record{header("s1")}
+	opts := restoreOptions(t, scripted(nil), &recordingSink{})
+	// The recorded tool is read-only, and the linked one is not.
+	opts.Tools["echo"] = &echoTool{class: poo.ClassSideEffecting}
+	_, _, err := poo.Restore(opts, records)
+	if err == nil {
+		t.Fatal("the restore accepted a tool that changed its class")
+	}
+	var incompatible *poo.IncompatibleError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("the restore returned %T, want an incompatible error", err)
+	}
+	if len(incompatible.Differences) != 1 {
+		t.Fatalf("the error names %d differences, want 1: %v", len(incompatible.Differences), incompatible.Differences)
+	}
+	if !strings.Contains(incompatible.Differences[0], "read_only") {
+		t.Errorf("the difference does not name the class: %q", incompatible.Differences[0])
+	}
+}
+
+// TestTheRestoreRejectsAToolThatChangedItsBackgroundMode covers the
+// compatibility check: a tool that changed its background mode does
+// not fit.
+func TestTheRestoreRejectsAToolThatChangedItsBackgroundMode(t *testing.T) {
+	records := []poo.Record{header("s1")}
+	opts := restoreOptions(t, scripted(nil), &recordingSink{})
+	opts.Tools["echo"] = &backgroundTool{background: poo.BackgroundAllowed}
+	_, _, err := poo.Restore(opts, records)
+	if err == nil {
+		t.Fatal("the restore accepted a tool that changed its background mode")
+	}
+	var incompatible *poo.IncompatibleError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("the restore returned %T, want an incompatible error", err)
+	}
+	if len(incompatible.Differences) != 1 {
+		t.Fatalf("the error names %d differences, want 1: %v", len(incompatible.Differences), incompatible.Differences)
+	}
+	if !strings.Contains(incompatible.Differences[0], "background") {
+		t.Errorf("the difference does not name the background mode: %q", incompatible.Differences[0])
+	}
+}
+
+// TestTheRestoreKeepsTheRecordedProfileAndRole covers the rule: the
+// effective profile and the chat role come from the metadata, not from
+// the current defaults.
+func TestTheRestoreKeepsTheRecordedProfileAndRole(t *testing.T) {
+	records := []poo.Record{header("s1")}
+	opts := restoreOptions(t, scripted(nil), &recordingSink{})
+	opts.Profile = "base"
+	opts.Model = poo.ModelInfo{Name: "other", ModelID: "other-model", ContextLimit: 4096}
+	session, _, err := poo.Restore(opts, records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	if got := poo.SessionProfile(session); got != "code" {
+		t.Errorf("the restored session's profile is %q, want the recorded one", got)
+	}
+	if got := poo.SessionChatModel(session); got.Name != "fast" {
+		t.Errorf("the restored session's model is %q, want the recorded one", got.Name)
 	}
 }

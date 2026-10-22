@@ -153,6 +153,11 @@ func Restore(opts Options, records []Record) (*Session, Restored, error) {
 	if opts.WorkingDir == "" {
 		opts.WorkingDir = restored.Metadata.WorkingDir
 	}
+	// The profile is the recorded one: the effective profile comes from
+	// the metadata, not from the current default.
+	if restored.Metadata.Profile != "" {
+		opts.Profile = restored.Metadata.Profile
+	}
 	// The chat role is the recorded one: the effective role comes from
 	// the metadata, not from the current defaults.
 	if role := restored.Metadata.Roles.Chat; role != nil {
