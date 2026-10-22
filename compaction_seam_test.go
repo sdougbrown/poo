@@ -1083,3 +1083,55 @@ func TestAWindowFromATransportThatCannotCompactIsRejected(t *testing.T) {
 		t.Errorf("the log holds %d compaction records, want none", sink.count("compaction"))
 	}
 }
+
+// TestTheSessionKeepsItsJobsAfterAnEnd covers the plan's rule: after a
+// handoff end, the session's jobs stay with that session, and their
+// results still arrive.
+func TestTheSessionKeepsItsJobsAfterAnEnd(t *testing.T) {
+	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
+	tool.SetResult("the job's output")
+	started := tool.Started()
+	compactor := &compactionCompactor{
+		should: afterTurns(1),
+		compaction: func(view poo.View) (poo.Compaction, error) {
+			return poo.Compaction{
+				Strategy: "handoff",
+				End:      &poo.EndRun{Handoff: "the handoff note"},
+			}, nil
+		},
+	}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	opts := jobOptions(t, tr, tool, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-started
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonContextExhausted {
+		t.Fatalf("the run settled %q, want context_exhausted", res.Reason)
+	}
+	if res.Detail.Handoff != "the handoff note" {
+		t.Errorf("the settle detail's handoff is %q, want the note", res.Detail.Handoff)
+	}
+	// The job is still the session's, and its result still reaches the
+	// model: the result wakes the session and is delivered.
+	tool.ReleaseAll()
+	waitFor(t, "the job's result to reach the model", func() bool {
+		for _, m := range sink.messages() {
+			if m.Origin == poo.OriginJob {
+				return true
+			}
+		}
+		return false
+	})
+}
