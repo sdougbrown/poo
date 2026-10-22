@@ -837,7 +837,7 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 	msg.Origin = OriginTool
 	s.appendMessages(msg)
 	result.Text = text
-	s.rememberResult(run, turn, handle, tool, outcome, result)
+	s.rememberResult(handle, tool, outcome, result)
 
 	_ = s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
@@ -858,18 +858,18 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 
 // rememberResult records a call's outcome and result in the turn's
 // summary.
-func (s *Session) rememberResult(run *runState, turn int, handle, tool string, outcome Outcome, result ToolResult) {
+func (s *Session) rememberResult(handle, tool string, outcome Outcome, result ToolResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.results[handle] = copyResult(result)
 	// The turn the call was made in is the turn the summary belongs
 	// to, and the handle knows it.
-	global := turn
-	if meta, ok := s.resultMeta[handle]; ok {
-		global = meta.turn
+	meta, ok := s.resultMeta[handle]
+	if !ok {
+		return
 	}
 	for i := range s.turns {
-		if s.turns[i].Session != global {
+		if s.turns[i].Session != meta.turn {
 			continue
 		}
 		for j := range s.turns[i].Calls {
