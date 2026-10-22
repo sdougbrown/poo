@@ -17,11 +17,13 @@ const lockFileMode = 0o600
 
 // The bounded wait an acquire gives a lock probe.
 //
-// A probe takes the lock shared for a moment. The wait lets an acquire
-// pass a probe without waiting on a real holder, which holds the lock
-// exclusively for the session's life.
+// A probe takes the lock shared for a moment, and a loaded machine can
+// deschedule it while it holds the lock. The wait lets an acquire pass a
+// probe without waiting on a real holder, which holds the lock
+// exclusively for the session's life; a refusal costs at most this
+// long.
 const (
-	acquireProbeWait  = 20 * time.Millisecond
+	acquireProbeWait  = 250 * time.Millisecond
 	acquireProbeRetry = 200 * time.Microsecond
 )
 
