@@ -87,6 +87,9 @@ type Session struct {
 	// not race over them: the counts of the call the core is asking
 	// about are the ones it wrote.
 	repeatCounts map[string]repeatCounts
+	// repeatKeys are the keys each call was counted under, so a policy
+	// that allowed a loop can clear its counters.
+	repeatKeys map[string]repeatKey
 	// repeatOrder is the handles the calls were counted in, so the
 	// last call's counts can be named without a map's random order.
 	repeatOrder []string
@@ -812,10 +815,10 @@ func (s *Session) lastRepeatCountsLocked() RepeatCounts {
 // RepeatCounts are the repeat counters of one call.
 type RepeatCounts struct {
 	// Exact is how many times the model made this exact call.
-	Exact int
+	Exact int `json:"exact"`
 	// Near is how many times the model made a call with the same
 	// primary argument.
-	Near int
+	Near int `json:"near"`
 }
 
 // hookMessage turns a hook's appended message into a user message.

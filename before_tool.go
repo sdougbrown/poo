@@ -83,7 +83,11 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 // slot's context, and a decision that arrives after the cancellation is
 // discarded: the call is refused rather than allowed.
 func (s *Session) callPolicy(ctx context.Context, h PolicyHook, turn int, info ToolCallInfo) (ToolDecision, error) {
-	decision, err := h.BeforeTool(s.hookContext(ctx, turn, false), info)
+	// The slot gets the permission seam, so it can report the asks it
+	// made and clear the counters of a loop it allowed.
+	hctx := s.hookContext(ctx, turn, false)
+	hctx.Permissions = &permissionReporter{session: s}
+	decision, err := h.BeforeTool(hctx, info)
 	if ctx.Err() != nil {
 		// The run ended while the slot was thinking. Its decision is
 		// discarded, and the call is refused: a run that is ending
@@ -110,6 +114,7 @@ func (s *Session) toolCallInfo(turn int, handle, tool string, prepared Prepared,
 	return ToolCallInfo{
 		Spec:            s.toolSpec(tool),
 		Prepared:        prepared,
+		Arguments:       plan.call.Arguments,
 		Handle:          handle,
 		RepeatCount:     counts.exact,
 		NearRepeatCount: counts.near,
@@ -133,4 +138,21 @@ func (s *Session) repeatCountFor(handle string) repeatCounts {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.repeatCounts[handle]
+}
+
+// resetRepeats clears the repeat counters of one call.
+//
+// The policy slot calls this when it allows a doom loop: the loop starts
+// over, and the next call of the same shape is counted from one.
+func (s *Session) resetRepeats(handle string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.repeats == nil {
+		return
+	}
+	key, ok := s.repeatKeys[handle]
+	if !ok {
+		return
+	}
+	s.repeats.reset(key.exact, key.near)
 }

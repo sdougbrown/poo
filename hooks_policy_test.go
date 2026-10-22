@@ -1,6 +1,7 @@
 package poo_test
 
 import (
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -27,18 +28,35 @@ type recordingBeforeTool struct {
 	order *[]string
 	// name is the hook's name.
 	name string
+	// lastInfo is the call the hook was asked about last.
+	lastInfo poo.ToolCallInfo
 }
 
 // BeforeTool records the call and answers.
 func (h *recordingBeforeTool) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
 	h.mu.Lock()
 	h.calls++
+	h.lastInfo = info
 	decision := h.decision
 	h.mu.Unlock()
 	if h.order != nil {
 		*h.order = append(*h.order, h.name)
 	}
 	return decision, nil
+}
+
+// lastArguments returns the arguments the hook saw last.
+func (h *recordingBeforeTool) lastArguments() json.RawMessage {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastInfo.Arguments
+}
+
+// lastCounts returns the repeat counts the hook saw last.
+func (h *recordingBeforeTool) lastCounts() poo.RepeatCounts {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return poo.RepeatCounts{Exact: h.lastInfo.RepeatCount, Near: h.lastInfo.NearRepeatCount}
 }
 
 // Calls returns how many calls the hook saw.

@@ -2,6 +2,7 @@ package poo
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/prompt"
@@ -101,6 +102,13 @@ type HookContext struct {
 	Budget Budget
 	// Decider is the decision model, or nil when there is none.
 	Decider decide.Decider
+	// Permissions is the policy slot's seam to the core.
+	//
+	// The field is set for the policy slot only: the slot reports the
+	// asks it made and the answers that resolved them, and the core
+	// publishes the permission events. It is nil for the consumer's own
+	// hooks, which do not decide permissions.
+	Permissions PermissionReporter
 }
 
 // SystemPromptEdit changes the system prompt.
@@ -126,6 +134,11 @@ type ToolCallInfo struct {
 	Spec ToolSpec
 	// Prepared is the validated call, when the call got that far.
 	Prepared Prepared
+	// Arguments are the call's raw arguments, as the model wrote them.
+	//
+	// The arguments are what a policy rule matches a command against,
+	// and what a doom loop's exact key is built from.
+	Arguments json.RawMessage
 	// Handle is the call's handle, e.g. "r1".
 	Handle string
 	// Job is the identifier of the job the call runs as, e.g. "j3". It is

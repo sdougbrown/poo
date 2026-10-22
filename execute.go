@@ -167,6 +167,9 @@ func (s *Session) countRepeats(plans []callPlan) {
 	if s.repeatCounts == nil {
 		s.repeatCounts = map[string]repeatCounts{}
 	}
+	if s.repeatKeys == nil {
+		s.repeatKeys = map[string]repeatKey{}
+	}
 	for _, p := range plans {
 		primary := s.primaryArgOf(p.call.Name)
 		exact := exactKeyOf(p.call.Name, p.call.Arguments)
@@ -177,6 +180,7 @@ func (s *Session) countRepeats(plans []callPlan) {
 		}
 		counts := s.repeats.count(exact, near)
 		s.repeatCounts[p.handle] = counts
+		s.repeatKeys[p.handle] = repeatKey{exact: exact, near: near}
 		s.repeatOrder = append(s.repeatOrder, p.handle)
 	}
 }
@@ -1133,6 +1137,17 @@ type repeatCounts struct {
 	near int
 }
 
+// repeatKey is the pair of keys a call was counted under.
+//
+// The keys are kept so a policy that allowed a loop can clear the
+// counters: the loop starts over.
+type repeatKey struct {
+	// exact is the call's exact key.
+	exact string
+	// near is the call's near key.
+	near string
+}
+
 // newRepeatCounter returns an empty counter.
 func newRepeatCounter() *repeatCounter {
 	return &repeatCounter{exact: map[string]int{}, near: map[string]int{}}
@@ -1147,6 +1162,15 @@ func (c *repeatCounter) count(exactKey, nearKey string) repeatCounts {
 	c.exact[exactKey]++
 	c.near[nearKey]++
 	return repeatCounts{exact: c.exact[exactKey], near: c.near[nearKey]}
+}
+
+// reset clears the counters of a key pair.
+//
+// The counters are the doom loop's, and a policy that allowed a loop
+// clears them: the next call of the same shape starts the count over.
+func (c *repeatCounter) reset(exactKey, nearKey string) {
+	delete(c.exact, exactKey)
+	delete(c.near, nearKey)
 }
 
 // primaryArgOf returns the name of a tool's primary argument.
