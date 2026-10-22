@@ -708,6 +708,7 @@ func TestAMessageWhileIdleIsRefused(t *testing.T) {
 // their messages are delivered.
 func TestTwoInterruptsCoalesceIntoOneAbort(t *testing.T) {
 	tr := newStallingTransport()
+	tr.hold = make(chan struct{})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -722,6 +723,9 @@ func TestTwoInterruptsCoalesceIntoOneAbort(t *testing.T) {
 	if _, err := s.Send("really stop", poo.Interrupt); err != nil {
 		t.Fatalf("sending the second interrupt: %v", err)
 	}
+	// Both interrupts are accepted before the stream returns, so they
+	// belong to one abort.
+	close(tr.hold)
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
@@ -949,6 +953,10 @@ type stallingTransport struct {
 	responses []fakeResponse
 	// index is the next response to serve.
 	index int
+	// hold keeps the stalled stream from returning after its context
+	// ends, so a test can line up more than one interrupt before the
+	// abort is handled.
+	hold chan struct{}
 }
 
 // newStallingTransport returns a transport that stalls on its first
@@ -965,7 +973,7 @@ func (t *stallingTransport) Stream(ctx context.Context, req poo.ChatRequest) (po
 		t.index++
 		streaming := t.streaming
 		t.mu.Unlock()
-		return &stallingReader{ctx: ctx, started: streaming}, poo.Rendered{API: poo.APIChatCompletions}, nil
+		return &stallingReader{ctx: ctx, started: streaming, hold: t.hold}, poo.Rendered{API: poo.APIChatCompletions}, nil
 	}
 	i := t.index - 1
 	t.index++
@@ -993,6 +1001,9 @@ type stallingReader struct {
 	started chan struct{}
 	// sent reports whether the delta was handed out.
 	sent bool
+	// hold delays the reader's return after its context ends, when it is
+	// set.
+	hold chan struct{}
 }
 
 // Next hands out one delta and then waits for the context.
@@ -1003,6 +1014,9 @@ func (r *stallingReader) Next() (poo.StreamEvent, error) {
 		return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "partial text"}}, nil
 	}
 	<-r.ctx.Done()
+	if r.hold != nil {
+		<-r.hold
+	}
 	return poo.StreamEvent{}, r.ctx.Err()
 }
 
