@@ -374,6 +374,18 @@ func TestAKilledSessionIsRestored(t *testing.T) {
 		}
 	}
 
+	// The restored session writes to the same store: the run it just
+	// made is in the file the session was loaded from.
+	starts := 0
+	for _, rec := range logRecords(t, path) {
+		if _, ok := rec.(*poo.RunStarted); ok {
+			starts++
+		}
+	}
+	if starts != 2 {
+		t.Errorf("the log holds %d run starts, want 2", starts)
+	}
+
 	// The restored session writes to the same store.
 	if err := resumed.Session.Close(); err != nil {
 		t.Fatalf("closing the restored session: %v", err)
