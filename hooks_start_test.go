@@ -216,6 +216,14 @@ func TestTheBeforeRunHookSeesTheJobsThatWokeTheRun(t *testing.T) {
 		return settled != nil && settled.RunID != ""
 	})
 	waitFor(t, "the woken run's hook to run", func() bool { return hook.Calls() >= 2 })
+	waitFor(t, "the woken run's request", func() bool {
+		for _, req := range tr.Requests() {
+			if historyHas(req.Messages, "the job's output") {
+				return true
+			}
+		}
+		return false
+	})
 
 	triggers := hook.Triggers()
 	if len(triggers) < 2 {
@@ -239,6 +247,21 @@ func TestTheBeforeRunHookSeesTheJobsThatWokeTheRun(t *testing.T) {
 	}
 	if histories[1] <= histories[0] {
 		t.Errorf("the woken run's view holds %d messages, want more than the first run's %d", histories[1], histories[0])
+	}
+	// The job results are ahead of the system message in the history,
+	// and the model reads the system prompt first anyway.
+	var wokenMessages []poo.Message
+	for _, req := range tr.Requests() {
+		if historyHas(req.Messages, "the job's output") {
+			wokenMessages = req.Messages
+			break
+		}
+	}
+	if len(wokenMessages) == 0 {
+		t.Fatal("no request carries the job result")
+	}
+	if wokenMessages[0].Role != poo.RoleSystem {
+		t.Errorf("the woken run's request starts with %q, want the system message", wokenMessages[0].Role)
 	}
 }
 
