@@ -433,9 +433,12 @@ func (s *Session) loop(run *runState) []candidate {
 			}
 			// The stream carried part of an answer: what it said
 			// belongs to the history, even though the run ends with
-			// the failure. Its calls are recorded and never run.
+			// the failure. Its calls are recorded and never run, and each
+			// gets a visible result, so a later request pairs every call
+			// with its result.
 			if resp != nil && (len(resp.content) > 0 || len(resp.calls) > 0) {
 				s.recordPartialCause(run, turn, resp, CauseProviderError)
+				s.skipCalls(run, turn, resp.calls, SkippedProviderErrorText)
 			}
 			reason, detail, serr := s.settleForError(err)
 			if serr != nil {
