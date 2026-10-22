@@ -141,6 +141,9 @@ func (t *Tool) Spec() poo.ToolSpec {
 }`),
 		Class:      poo.ClassSideEffecting,
 		PrimaryArg: "command",
+		// A command may be long, and the model may know it is long
+		// before it starts it.
+		Background: poo.BackgroundAllowed,
 	}
 }
 
