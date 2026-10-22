@@ -17,6 +17,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/tool/protect"
 )
 
 // Defaults for the read tool.
@@ -84,6 +86,22 @@ func (t *Tool) Spec() poo.ToolSpec {
 	}
 }
 
+// section is the guidance the tool brings to the system prompt.
+//
+// The tool shows a range of a file and names it, so the model knows
+// where it is in the file and can carry on from there.
+const section = "Read:\n" +
+	"- The read shows a range of lines and names it, e.g. \"[path · lines 1–2000 of 5312]\".\n" +
+	"- Carry on from the last line you saw with offset, instead of reading the file again from the start.\n" +
+	"- A read that says \"capped\" stopped at the context budget: ask for the next range with offset.\n" +
+	"- A range past the end of the file comes back empty, with the file's line count in the header.\n" +
+	"- A binary file is refused, with its size; use grep or a command to look inside it."
+
+// PromptSection renders the tool's own section of the system prompt.
+func (t *Tool) PromptSection(env prompt.Env) string {
+	return section
+}
+
 // args are the tool's arguments.
 type args struct {
 	Path   string `json:"path"`
@@ -118,6 +136,15 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	if a.Limit < 0 {
 		return nil, poo.InvalidArgsf("read: limit must not be negative")
 	}
+	// A protected path is refused before the file is opened, so the
+	// model never sees what it holds.
+	protected, err := protect.Guarded(env.ProtectedPaths, absolutePath(a.Path, env.WorkingDir))
+	if err != nil {
+		return nil, poo.InvalidArgsf("read: %v", err)
+	}
+	if protected {
+		return nil, poo.InvalidArgsf("read: path is protected by configuration: %s", a.Path)
+	}
 	offset := a.Offset
 	if offset == 0 {
 		offset = DefaultOffset
@@ -127,6 +154,16 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 		limit = DefaultLimit
 	}
 	return &prepared{path: a.Path, offset: offset, limit: limit}, nil
+}
+
+// absolutePath returns the path a call works on.
+//
+// A relative path is taken from the working directory of the run.
+func absolutePath(path, workingDir string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Join(workingDir, path)
 }
 
 // decodeStrict decodes one JSON value and nothing else.
@@ -162,10 +199,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		return poo.ToolResult{}, errors.New("read: prepared value is not a read call")
 	}
 
-	path := p.path
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(env.WorkingDir, path)
-	}
+	path := absolutePath(p.path, env.WorkingDir)
 
 	f, err := os.Open(path)
 	if err != nil {
