@@ -64,6 +64,12 @@ type Options struct {
 	// ReasoningEffort is the reasoning_effort the run sends, empty when
 	// it sends none.
 	ReasoningEffort string
+	// MessageIDs hands out the session-monotonic message ids. A session
+	// owns one counter, and a run continues it, so a second run's ids
+	// do not repeat the first run's.
+	//
+	// Nil means the run starts its own counter at one.
+	MessageIDs *MessageIDs
 }
 
 // Run is one prompt through to settled.
@@ -81,6 +87,10 @@ type Run struct {
 	sunk bool
 	// state is where the run is in the loop.
 	state State
+	// messageIDs hands out the session-monotonic message ids. The
+	// counter belongs to the session, so a run's ids continue where the
+	// session's last ones stopped.
+	messageIDs *MessageIDs
 }
 
 // State returns where the run is in the loop.
@@ -102,7 +112,11 @@ type Result struct {
 
 // NewRun builds a run. The caller drives it with Run.Execute.
 func NewRun(opts Options) *Run {
-	return &Run{opts: opts, state: StateRequesting}
+	ids := opts.MessageIDs
+	if ids == nil {
+		ids = &MessageIDs{}
+	}
+	return &Run{opts: opts, state: StateRequesting, messageIDs: ids}
 }
 
 // Execute runs the loop until it settles.
@@ -123,6 +137,7 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 		ToolsMode:  r.opts.ToolsMode,
 
 		ReasoningEffort: r.opts.ReasoningEffort,
+		Trigger:         TriggerPrompt,
 	}); err != nil {
 		return Result{}, err
 	}
@@ -131,11 +146,11 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 	// frozen for the length of the run.
 	if r.opts.SystemPrompt != "" {
 		msg := NewTextMessage(RoleSystem, r.opts.SystemPrompt)
+		msg.Origin = OriginSystem
 		r.history = append(r.history, msg)
 		if err := r.write(ctx, &MessageRecord{
-			RecordMeta: NewRecordMeta("message"),
+			RecordMeta: NewRecordMetaFrom("message", OriginSystem),
 			RunID:      r.opts.RunID,
-			Origin:     "system",
 			Role:       msg.Role,
 			Content:    msg.Content,
 		}); err != nil {
@@ -144,12 +159,12 @@ func (r *Run) Execute(ctx context.Context, prompt string) (Result, error) {
 	}
 
 	user := NewTextMessage(RoleUser, prompt)
+	user.Origin = OriginUser
 	r.history = append(r.history, user)
 	if err := r.write(ctx, &MessageRecord{
-		RecordMeta: NewRecordMeta("message"),
+		RecordMeta: NewRecordMetaFrom("message", OriginUser),
 		RunID:      r.opts.RunID,
 		Turn:       0,
-		Origin:     "user",
 		Role:       user.Role,
 		Content:    user.Content,
 	}); err != nil {
@@ -243,7 +258,8 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 
 		// The model's response is part of the history whether or not it
 		// asked for tool calls.
-		assistant := Message{Role: RoleAssistant, Content: resp.content}
+		assistant := Message{Role: RoleAssistant, Content: resp.content, Origin: OriginModel}
+		assistant.ID = r.messageIDs.Next()
 		for _, call := range resp.calls {
 			assistant.Content = append(assistant.Content, ContentBlock{
 				Kind:       ContentToolCall,
@@ -255,12 +271,12 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 		if len(assistant.Content) > 0 {
 			r.history = append(r.history, assistant)
 			if err := r.write(ctx, &MessageRecord{
-				RecordMeta: NewRecordMeta("message"),
+				RecordMeta: NewRecordMetaFrom("message", OriginModel),
 				RunID:      r.opts.RunID,
 				Turn:       r.turn,
-				Origin:     "model",
 				Role:       assistant.Role,
 				Content:    assistant.Content,
+				MessageID:  assistant.ID,
 			}); err != nil {
 				return "", SettleDetail{}, err
 			}
@@ -344,7 +360,7 @@ func (r *Run) execute(ctx context.Context, index int, call ToolCall) error {
 	}
 
 	if err := r.write(ctx, &ToolCallRecord{
-		RecordMeta: NewRecordMeta("tool.call"),
+		RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 		RunID:      r.opts.RunID,
 		Turn:       r.turn,
 		Handle:     handle,
@@ -386,7 +402,7 @@ func (r *Run) execute(ctx context.Context, index int, call ToolCall) error {
 // recordCall records a call that never reached the tool.
 func (r *Run) recordCall(ctx context.Context, turn int, handle string, call ToolCall, text string) error {
 	if err := r.write(ctx, &ToolCallRecord{
-		RecordMeta: NewRecordMeta("tool.call"),
+		RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 		RunID:      r.opts.RunID,
 		Turn:       turn,
 		Handle:     handle,
@@ -405,7 +421,7 @@ func (r *Run) recordResult(ctx context.Context, turn int, handle string, call To
 		outcome = OutcomeError
 	}
 	if err := r.write(ctx, &ToolResultRecord{
-		RecordMeta: NewRecordMeta("tool.result"),
+		RecordMeta: NewRecordMetaFrom("tool.result", OriginTool),
 		RunID:      r.opts.RunID,
 		Turn:       turn,
 		Handle:     handle,
@@ -420,12 +436,12 @@ func (r *Run) recordResult(ctx context.Context, turn int, handle string, call To
 	// The result goes back to the model under the call's provider-side id,
 	// because that is the id the provider matches it against.
 	msg := ToolResultMessage(call.ID, call.Name, result.Text, result.IsError)
+	msg.Origin = OriginTool
 	r.history = append(r.history, msg)
 	return r.write(ctx, &MessageRecord{
-		RecordMeta: NewRecordMeta("message"),
+		RecordMeta: NewRecordMetaFrom("message", OriginTool),
 		RunID:      r.opts.RunID,
 		Turn:       turn,
-		Origin:     "tool",
 		Role:       msg.Role,
 		Content:    msg.Content,
 	})
@@ -436,7 +452,7 @@ func (r *Run) recordResult(ctx context.Context, turn int, handle string, call To
 // A response that broke part way through is returned along with the error,
 // so the caller can still write the usage it produced.
 func (r *Run) request(ctx context.Context, maxTokens int) (*response, error) {
-	reader, err := r.opts.Transport.Stream(ctx, ChatRequest{
+	reader, _, err := r.opts.Transport.Stream(ctx, ChatRequest{
 		Model:     r.opts.ModelID,
 		Messages:  r.history,
 		Tools:     r.toolSpecs(),
@@ -543,17 +559,24 @@ func (r *Run) settleForError(err error) (Reason, SettleDetail, error) {
 	var pe *ProviderError
 	if errors.As(err, &pe) {
 		kind := string(pe.Kind)
+		// The wait the endpoint asked for travels with the failure:
+		// the plan's provider_limit row settles on a Retry-After over
+		// thirty seconds, so the record has to carry the number it
+		// settles on.
+		// It is rounded up, so a wait just over thirty seconds is not
+		// recorded as thirty, which the rule reads as retryable.
+		retryAfter := int((pe.RetryAfter + time.Second - 1) / time.Second)
 		if pe.Kind == ProviderKindContextLength {
 			return ReasonContextExhausted, SettleDetail{
 				Source:   "provider:context_length",
 				Text:     pe.Message,
-				Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code},
+				Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code, RetryAfterSec: retryAfter},
 			}, nil
 		}
 		return ReasonProviderError, SettleDetail{
 			Source:   "provider:" + kind,
 			Text:     pe.Message,
-			Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code},
+			Provider: &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code, RetryAfterSec: retryAfter},
 		}, nil
 	}
 	return "", SettleDetail{}, err

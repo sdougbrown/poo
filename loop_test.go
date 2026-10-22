@@ -36,8 +36,12 @@ type fakeResponse struct {
 }
 
 // Stream answers the next scripted response.
-func (f *fakeTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, error) {
+func (f *fakeTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
 	f.requests = append(f.requests, req)
+	rendered := poo.Rendered{
+		API:      poo.APIChatCompletions,
+		Messages: len(req.Messages),
+	}
 	i := f.index
 	if i >= len(f.responses) {
 		i = len(f.responses) - 1
@@ -45,13 +49,19 @@ func (f *fakeTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.St
 		f.index++
 	}
 	if i < 0 {
-		return nil, fmt.Errorf("fakeTransport: no scripted response")
+		return nil, rendered, fmt.Errorf("fakeTransport: no scripted response")
 	}
 	resp := f.responses[i]
 	if resp.err != nil {
-		return nil, resp.err
+		return nil, rendered, resp.err
 	}
-	return &fakeReader{events: resp.events()}, nil
+	return &fakeReader{events: resp.events()}, rendered, nil
+}
+
+// Fork is not implemented by the fake: the compaction seam arrives with
+// the fork.
+func (f *fakeTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return nil, fmt.Errorf("fakeTransport: no fork")
 }
 
 // events turns a response into the events a stream yields.
@@ -137,6 +147,17 @@ func (s *recordingSink) count(name string) int {
 		}
 	}
 	return n
+}
+
+// messages returns the message records, in order.
+func (s *recordingSink) messages() []*poo.MessageRecord {
+	var out []*poo.MessageRecord
+	for _, rec := range s.records {
+		if m, ok := rec.(*poo.MessageRecord); ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // echoTool is a tool that records what it was asked to do.

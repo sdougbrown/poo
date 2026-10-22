@@ -1,8 +1,13 @@
 // Package session writes the session log.
 //
-// The log is append-only JSONL: one record per line, no lock, no recovery.
-// The record names and fields are the v0 vocabulary, documented in
+// The log is append-only JSONL: one record per line, no recovery. The
+// record names and fields are the v0 vocabulary, documented in
 // docs/session-log-v0.md.
+//
+// The log takes a lock around each write, so a concurrent append never
+// interleaves two records' bytes. The lock is a mutex, not a file lock:
+// the file lock that keeps two processes out of one session arrives with
+// the session seam.
 package session
 
 import (
@@ -21,6 +26,10 @@ import (
 )
 
 // Log is an append-only session log.
+//
+// The log implements poo.RecordSink: Append may be called concurrently,
+// and the log serializes the writes, so two records' bytes never
+// interleave.
 type Log struct {
 	mu sync.Mutex
 	f  *os.File
@@ -53,6 +62,9 @@ func Open(path string) (*Log, error) {
 }
 
 // Append writes one record.
+//
+// The write is serialized, so a concurrent append never interleaves two
+// records' bytes: a reader of the log never sees half a record.
 //
 // A context that is already done is refused before any write work,
 // without consuming a sequence number, so the log's numbering stays

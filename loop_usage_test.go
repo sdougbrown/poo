@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"testing"
 
@@ -45,8 +46,14 @@ type usageTransport struct {
 }
 
 // Stream hands out the reader.
-func (t *usageTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, error) {
-	return t.reader, nil
+func (t *usageTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	return t.reader, poo.Rendered{API: poo.APIChatCompletions}, nil
+}
+
+// Fork is not implemented by the fake: the compaction seam arrives with
+// the fork.
+func (t *usageTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return nil, fmt.Errorf("usageTransport: no fork")
 }
 
 // TestTheUsageFallbackFillsTheUsageRecord covers a transport whose stream

@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -101,14 +102,20 @@ type scriptedTransport struct {
 }
 
 // Stream serves the next turn's events.
-func (s *scriptedTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, error) {
+func (s *scriptedTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
 	i := s.n
 	if i >= len(s.turns) {
 		i = len(s.turns) - 1
 	} else {
 		s.n++
 	}
-	return &fakeReader{events: s.turns[i]}, nil
+	return &fakeReader{events: s.turns[i]}, poo.Rendered{API: poo.APIChatCompletions}, nil
+}
+
+// Fork is not implemented by the fake: the compaction seam arrives with
+// the fork.
+func (s *scriptedTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return nil, fmt.Errorf("scriptedTransport: no fork")
 }
 
 // TestTwoCallsAtOneIndexAreTwoCalls covers a provider that sends every

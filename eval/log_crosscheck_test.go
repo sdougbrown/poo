@@ -30,7 +30,7 @@ func TestEveryFieldTheMetricsUseSurvivesTheRealWriter(t *testing.T) {
 		},
 		&poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started"), RunID: "r"},
 		&poo.MessageRecord{
-			RecordMeta: poo.NewRecordMeta("message"), RunID: "r", Turn: 1, Origin: "model", Role: poo.RoleAssistant,
+			RecordMeta: poo.NewRecordMetaFrom("message", poo.OriginModel), RunID: "r", Turn: 1, Role: poo.RoleAssistant,
 			Content: []poo.ContentBlock{
 				{Kind: poo.ContentText, Text: "looking"},
 				{Kind: poo.ContentToolCall, ToolCallID: "c1", Name: "read", Arguments: readArgs},

@@ -275,3 +275,112 @@ func TestAZeroContextLimitSettlesBeforeAnyRequest(t *testing.T) {
 		t.Errorf("the transport was asked %d times, want none", len(tr.requests))
 	}
 }
+
+// TestARateLimitCarriesTheWaitItAskedFor covers a rate limit: the
+// endpoint asks the client to wait, and the settle record has to carry
+// the number, because the plan's provider_limit row settles on a
+// Retry-After over thirty seconds.
+func TestARateLimitCarriesTheWaitItAskedFor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"message":"slow down","code":"rate_limit_exceeded"}}`)
+	}))
+	defer srv.Close()
+
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	r := poo.NewRun(testOptions(t, tr, tool, sink))
+	res, err := r.Execute(context.Background(), "do the thing")
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if res.Reason != poo.ReasonProviderError {
+		t.Errorf("the run settled %q, want provider_error", res.Reason)
+	}
+
+	settle := settleOf(t, sink)
+	if settle.Detail.Provider == nil {
+		t.Fatalf("the settle record has no provider detail: %+v", settle.Detail)
+	}
+	if settle.Detail.Provider.Kind != "rate_limited" {
+		t.Errorf("the provider's kind is %q, want rate_limited", settle.Detail.Provider.Kind)
+	}
+	if settle.Detail.Provider.Status != http.StatusTooManyRequests {
+		t.Errorf("the provider's status is %d, want 429", settle.Detail.Provider.Status)
+	}
+	if settle.Detail.Provider.RetryAfterSec != 60 {
+		t.Errorf("the provider's retry-after is %d, want 60", settle.Detail.Provider.RetryAfterSec)
+	}
+}
+
+// TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty covers a
+// Retry-After sent as a date: the wait is fractional, and a wait just
+// over thirty seconds must not be recorded as thirty, which the plan's
+// rule reads as retryable.
+func TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", time.Now().Add(45*time.Second).UTC().Format(http.TimeFormat))
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"message":"slow down"}}`)
+	}))
+	defer srv.Close()
+
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	sink := &recordingSink{}
+	r := poo.NewRun(testOptions(t, tr, &echoTool{result: "echoed"}, sink))
+	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	settle := settleOf(t, sink)
+	if settle.Detail.Provider == nil || settle.Detail.Provider.RetryAfterSec <= 30 || settle.Detail.Provider.RetryAfterSec > 45 {
+		t.Errorf("the recorded retry-after is %+v, want more than 30 and at most 45 seconds", settle.Detail.Provider)
+	}
+}
+
+// TestATruncatedStreamKeepsItsOriginalKind covers a stream that breaks
+// after a delta: the plan reclassifies the failure as an interrupted
+// stream and keeps the kind the failure had in the code, so a reader can
+// tell a broken connection from a broken endpoint.
+func TestATruncatedStreamKeepsItsOriginalKind(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl := w.(http.Flusher)
+		_, _ = io.WriteString(w, "data: "+`{"choices":[{"index":0,"delta":{"content":"partial"}}]}`+"\n\n")
+		fl.Flush()
+		// The connection closes before the stream ends.
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, _, err := hj.Hijack()
+			if err == nil {
+				conn.Close()
+			}
+		}
+	}))
+	defer srv.Close()
+
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	r := poo.NewRun(testOptions(t, tr, tool, sink))
+	res, err := r.Execute(context.Background(), "do the thing")
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if res.Reason != poo.ReasonProviderError {
+		t.Errorf("the run settled %q, want provider_error", res.Reason)
+	}
+
+	settle := settleOf(t, sink)
+	if settle.Detail.Provider == nil {
+		t.Fatalf("the settle record has no provider detail: %+v", settle.Detail)
+	}
+	if settle.Detail.Provider.Kind != "interrupted_stream" {
+		t.Errorf("the provider's kind is %q, want interrupted_stream", settle.Detail.Provider.Kind)
+	}
+	if settle.Detail.Provider.Code != "network" {
+		t.Errorf("the provider's code is %q, want the original kind network", settle.Detail.Provider.Code)
+	}
+}
