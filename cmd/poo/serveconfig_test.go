@@ -164,6 +164,45 @@ func TestTheHandshakeReportsTheSettingsProfiles(t *testing.T) {
 	}
 }
 
+// TestTheServeOffersTheTypedResultTool covers the tool: the settings
+// name a schema for the result, and the session offers the model a way
+// to finish.
+func TestTheServeOffersTheTypedResultTool(t *testing.T) {
+	dir := t.TempDir()
+	schema := filepath.Join(dir, "result.schema.json")
+	if err := os.WriteFile(schema, []byte(`{"type":"object"}`), 0o600); err != nil {
+		t.Fatalf("writing the schema: %v", err)
+	}
+	settings := filepath.Join(dir, "settings.json")
+	body := `{"version":1,
+		"endpoints":{"test":{"base_url":"http://localhost:4000/v1"}},
+		"models":{"test-model":{"endpoint":"test","model_id":"test-model","api":"chat_completions","tools_mode":"native","ops":["chat"],"context_limit":32768}},
+		"roles":{"chat":"test-model"},
+		"finish":{"schema_file":"` + schema + `"}}`
+	if err := os.WriteFile(settings, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	client := startServe(t, "--settings", settings, "--session-dir", filepath.Join(dir, "sessions"))
+	client.call(t, "poo/initialize", map[string]any{
+		"protocol_versions": []int{1},
+		"client":            map[string]any{"name": "test", "version": "test"},
+	})
+	answer := client.call(t, "session/create", map[string]any{"working_dir": dir})
+	created := result(t, answer)
+	tools, _ := created["tools"].([]any)
+	found := false
+	for _, entry := range tools {
+		tool, _ := entry.(map[string]any)
+		if tool["name"] == "finish" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the session offers %v, want the finish tool", tools)
+	}
+}
+
 // TestThePromptOverridesReachTheSession covers the change a client
 // asks for: the prompt overrides are applied through the config
 // package, and the session's prompt shows them.

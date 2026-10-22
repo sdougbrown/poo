@@ -243,6 +243,26 @@ func (h *harness) call(method string, params any) (json.RawMessage, *protocol.Er
 	return nil, nil
 }
 
+// callAsync makes a request and returns a channel for its answer.
+//
+// A client that waits for a run and closes the session while it waits
+// needs both answers, and the second one comes first.
+func (h *harness) callAsync(method string, params any) <-chan *protocol.Response {
+	h.t.Helper()
+	h.mu.Lock()
+	h.ids++
+	id := strconv.Itoa(h.ids)
+	ch := make(chan *protocol.Response, 1)
+	h.pending[id] = ch
+	h.mu.Unlock()
+	req := map[string]any{"jsonrpc": "2.0", "id": id, "method": method}
+	if params != nil {
+		req["params"] = params
+	}
+	h.write(req)
+	return ch
+}
+
 // send makes a request without waiting for its answer.
 //
 // A client that stopped reading never gets the answer, so the test

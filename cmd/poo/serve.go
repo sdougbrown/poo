@@ -38,6 +38,7 @@ Serve flags:
   --api-key-env <var>          The environment variable holding the API key
   --tools-mode <mode>          native (default), text or auto
   --working-dir <dir>          The directory the tools work in (default: the current one)
+  --executor <name>            The executor the bash tool runs commands through: local or bwrap
 `
 
 // serveOptions are the flags of `poo serve`.
@@ -46,6 +47,8 @@ type serveOptions struct {
 	endpointFlags
 	// workingDir is the directory the tools work in.
 	workingDir string
+	// executor is the executor the bash tool runs commands through.
+	executor string
 }
 
 // register adds the serve flags to a flag set.
@@ -53,6 +56,7 @@ func (o *serveOptions) register(fs *flag.FlagSet) {
 	o.sharedFlags.register(fs)
 	o.endpointFlags.register(fs)
 	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
+	fs.StringVar(&o.executor, "executor", "", "The executor the bash tool runs commands through")
 }
 
 // runServe executes `poo serve`.
@@ -85,6 +89,10 @@ func runServe(args []string) int {
 		return 2
 	}
 	o.endpointFlags.apply(settings)
+	if o.executor != "" {
+		executor := o.executor
+		settings.Tools.Bash.Executor = &executor
+	}
 	workDir, err := workingDirectory(o.workingDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
@@ -122,6 +130,10 @@ func runServe(args []string) int {
 	}
 	if runtime.Warning != "" {
 		fmt.Fprintf(os.Stderr, "poo serve: warning: %s\n", runtime.Warning)
+	}
+	if err := addFinishTool(runtime); err != nil {
+		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
+		return 2
 	}
 
 	factory := &serveFactory{
@@ -198,6 +210,12 @@ func (f *serveFactory) runtimeFor(profile, model string) (*config.Runtime, error
 	if runtime, ok := f.runtimes[key]; ok {
 		return runtime, nil
 	}
+	if profile == "" && model == "" {
+		// The default runtime is the one the command built, and it
+		// carries the settings' own tools.
+		f.runtimes[key] = f.runtime
+		return f.runtime, nil
+	}
 	settings := *f.settings
 	settings.Roles = map[string]string{}
 	for name, entry := range f.settings.Roles {
@@ -213,6 +231,9 @@ func (f *serveFactory) runtimeFor(profile, model string) (*config.Runtime, error
 	}
 	runtime, err := config.Build(opts)
 	if err != nil {
+		return nil, err
+	}
+	if err := addFinishTool(runtime); err != nil {
 		return nil, err
 	}
 	f.runtimes[key] = runtime

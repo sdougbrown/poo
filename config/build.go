@@ -903,6 +903,11 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 		return nil, err
 	}
 	opts := r.Options
+	// The session works in the directory its header names: the tools
+	// work there, and the prompt names it.
+	if created.WorkingDir != "" {
+		opts.WorkingDir = created.WorkingDir
+	}
 	opts.Sink = store
 	opts.SessionID = created.SessionID
 	return poo.New(opts, append(fns, poo.WithPolicy(r.Policy))...)
@@ -925,7 +930,12 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 			Message: "the session has no store: the settings are in the ephemeral mode",
 		}
 	}
-	return session.Resume(ctx, store, id, r.Options, append(fns, poo.WithPolicy(r.Policy))...)
+	opts := r.Options
+	// A restored session continues in the directory it was recorded
+	// in: the core takes the recorded directory when the options name
+	// none.
+	opts.WorkingDir = ""
+	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy))...)
 }
 
 // PromptOverrides are the prompt changes a client asks for.

@@ -18,7 +18,6 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/prompt/agentsmd"
 	"github.com/sdougbrown/poo/session"
-	"github.com/sdougbrown/poo/tool/finish"
 )
 
 // runOptions are the flags of `poo run`.
@@ -261,28 +260,6 @@ func runRun(args []string) int {
 	// The exit code comes from the settle-reason table, combined
 	// across the runs: the first non-zero code wins.
 	return combinedExitCode(sess.SettleCodes())
-}
-
-// addFinishTool gives the session the typed-result tool.
-//
-// The settings name the schema the result is validated against, and the
-// tool is the one the binary links. A session with a schema and no tool
-// would never offer the model a way to finish.
-func addFinishTool(runtime *config.Runtime) error {
-	if runtime.FinishSchema == nil {
-		return nil
-	}
-	tool, err := finish.New(runtime.FinishSchema)
-	if err != nil {
-		return err
-	}
-	if runtime.Options.Tools == nil {
-		runtime.Options.Tools = map[string]poo.Tool{}
-	}
-	runtime.Options.Tools[poo.FinishToolName] = tool
-	runtime.Options.ToolOrder = append(runtime.Options.ToolOrder, poo.FinishToolName)
-	runtime.Options.FinishSchema = runtime.FinishSchema
-	return nil
 }
 
 // modelWithFlags returns the model the run talks to.

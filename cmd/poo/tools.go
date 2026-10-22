@@ -9,9 +9,39 @@ import (
 	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/edit"
+	"github.com/sdougbrown/poo/tool/finish"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
 )
+
+// addFinishTool gives the session the typed-result tool.
+//
+// The settings name the schema the result is validated against, and
+// the tool is the one the binary links. A session with a schema and no
+// tool would never offer the model a way to finish.
+//
+// The tool joins the profile's tools, so the client is told about it
+// like every other tool the session offers.
+func addFinishTool(runtime *config.Runtime) error {
+	if runtime.FinishSchema == nil {
+		return nil
+	}
+	tool, err := finish.New(runtime.FinishSchema)
+	if err != nil {
+		return err
+	}
+	if runtime.Options.Tools == nil {
+		runtime.Options.Tools = map[string]poo.Tool{}
+	}
+	runtime.Options.Tools[poo.FinishToolName] = tool
+	runtime.Options.ToolOrder = append(runtime.Options.ToolOrder, poo.FinishToolName)
+	runtime.Options.FinishSchema = runtime.FinishSchema
+	runtime.Profile.Tools = append(runtime.Profile.Tools, poo.ToolInfo{
+		Name:  poo.FinishToolName,
+		Class: poo.ClassReadOnly,
+	})
+	return nil
+}
 
 // defaultProfile is the profile a session runs under when neither the
 // command line nor the settings name one.

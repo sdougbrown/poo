@@ -357,6 +357,42 @@ func TestTheCatalogFailsWithoutAChatModel(t *testing.T) {
 	}
 }
 
+// TestTheSessionWorksInTheDirectoryItsHeaderNames covers the working
+// directory: a session works in the directory its header names, not in
+// the directory the build was made in.
+func TestTheSessionWorksInTheDirectoryItsHeaderNames(t *testing.T) {
+	dir := t.TempDir()
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  dir: "+dir+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+
+	workDir := t.TempDir()
+	created := &poo.SessionCreated{
+		RecordMeta:   poo.NewRecordMeta("session.created"),
+		Format:       poo.FormatVersion,
+		SessionID:    "s1",
+		Mode:         "logged",
+		CreatedAt:    "2026-10-22T12:00:00Z",
+		WorkingDir:   workDir,
+		Model:        poo.SessionModel{ID: "test-model"},
+		ContextLimit: 32768,
+		Profile:      "code",
+		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
+	}
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+
+	if !strings.Contains(sess.PromptState().Text, workDir) {
+		t.Errorf("the prompt does not name the working directory %q", workDir)
+	}
+}
+
 // The permission policy is the core's, and the chain is the askers'.
 var _ perm.Asker = (*perm.WireAsker)(nil)
 

@@ -23,6 +23,15 @@ const (
 	sourceCancelClient = "cancel:client"
 )
 
+// settleWait is how long a close waits for the settle record of the
+// run it ended.
+//
+// The record reaches the session's log through the observer, which
+// delivers the events on its own goroutine. The wait is short: the
+// record is written before the close returns, and the wait is only
+// there to let the observer deliver it.
+const settleWait = 5 * time.Second
+
 // session is one session the server serves.
 //
 // It holds the core session, what the factory said about it, and the
@@ -202,6 +211,9 @@ func (o *observer) Observe(ev poo.Event) error {
 	}
 	entry := o.entry
 	o.mu.Unlock()
+	// The notification names the session the event belongs to, so the
+	// client reads one event from several sessions apart.
+	evt.SessionID = entry.id
 	entry.record(evt)
 	return o.srv.notifyEvent(entry, evt)
 }
@@ -215,6 +227,7 @@ func (o *observer) attach(entry *session) {
 	o.pending = nil
 	o.mu.Unlock()
 	for _, evt := range pending {
+		evt.SessionID = entry.id
 		entry.record(evt)
 		_ = o.srv.notifyEvent(entry, evt)
 	}
@@ -328,6 +341,8 @@ func (s *server) closeSession(entry *session, source string) {
 	// Step 1: the session is closing, so new requests fail with
 	// session_closed and no job starts or wakes.
 	entry.markClosing()
+	// The run the session was in: the waiters for it get its outcome.
+	runID := entry.sess.ActiveRunID()
 	// Step 2: the run is finalized and waited for. A transport that
 	// broke says so in the settle record, so a reader of the log can
 	// tell a close from a failure.
@@ -335,6 +350,15 @@ func (s *server) closeSession(entry *session, source string) {
 		entry.sess.Cancel(source)
 	}
 	entry.sess.Close()
+	// The settle record reaches the session's log through the
+	// observer, which delivers the events on its own goroutine. The
+	// waiters are released after it arrives, so they get the run's
+	// outcome and not a refusal.
+	if runID != "" {
+		entry.waitForSettle(runID, settleWait)
+	}
+	// The extension build says goodbye in a way of its own.
+	s.sessionClosed(entry)
 	// Steps 3 and 4: the waiters are released. The waiter of the run
 	// that settled reads its outcome; the others are told the session
 	// is closed.
