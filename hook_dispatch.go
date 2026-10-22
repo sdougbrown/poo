@@ -204,7 +204,8 @@ func (s *Session) runBeforeRun(run *runState, trigger RunTrigger) (startDecision
 		})
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
-			// hook error.
+			// hook error. A decision that arrives late is logged.
+			s.logLateHookPoint(run.id, "before_run", hookName(h), 0)
 			return decisions, nil
 		}
 		if err != nil {
@@ -258,7 +259,8 @@ func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appen
 		})
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
-			// hook error.
+			// hook error. A decision that arrives late is logged.
+			s.logLateHookPoint(run.id, "after_turn", hookName(h), turn)
 			return appended, nil
 		}
 		if err != nil {
@@ -318,7 +320,8 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 		})
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
-			// hook error.
+			// hook error. A decision that arrives late is logged.
+			s.logLateHookPoint(run.id, "before_settle", hookName(h), turn)
 			return SettleDecision{}, false, nil
 		}
 		if err != nil {

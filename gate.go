@@ -400,8 +400,12 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 		}
 		msg := Message{Role: RoleAssistant, Content: resp.content, Origin: OriginModel}
 		if resp.usage != nil {
+			// A fork that finishes after the run settled does not add
+			// to the settled run's token counter.
 			s.mu.Lock()
-			run.tokens += resp.usage.InputTokens + resp.usage.OutputTokens
+			if !run.committed && !run.sealed {
+				run.tokens += resp.usage.InputTokens + resp.usage.OutputTokens
+			}
 			s.mu.Unlock()
 			return msg, *resp.usage, nil
 		}

@@ -402,8 +402,11 @@ func (s *Session) loop(run *runState) []candidate {
 		resp, rendered, err := s.request(run, turn)
 		// The run may have settled while the request was in flight.
 		// What the request produced then is a late completion: it
-		// never mutates the history, the records or the events.
+		// never mutates the history, the records or the events. The
+		// response is dropped and logged once; its deltas are not
+		// logged one by one.
 		if s.runWindingDown(run) {
+			s.logLateProviderResponse(run.id, turn)
 			return nil
 		}
 		if rendered.Body != nil || rendered.Messages > 0 {
