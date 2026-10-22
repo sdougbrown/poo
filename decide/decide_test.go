@@ -312,7 +312,7 @@ func TestTheRecordedOutcomeSplitsInvalidFromDeferred(t *testing.T) {
 
 // TestTheQuestionIDsComeBackSorted covers the id order: IDs sorts, so a
 // record built from it reads the same twice whatever order the questions
-// arrived in.
+// arrived in, and it does not reorder the caller's slice.
 func TestTheQuestionIDsComeBackSorted(t *testing.T) {
 	qs := []decide.Question{
 		{ID: "q3", Instructions: "is it?", Kind: decide.Bool{True: "yes"}},
@@ -329,6 +329,12 @@ func TestTheQuestionIDsComeBackSorted(t *testing.T) {
 			t.Errorf("IDs returned %v, want %v", got, want)
 		}
 	}
+	inputOrder := []string{"q3", "q1", "q2"}
+	for i, q := range qs {
+		if q.ID != inputOrder[i] {
+			t.Errorf("the caller's question %d has id %q, want %q: IDs reordered its input", i, q.ID, inputOrder[i])
+		}
+	}
 }
 
 // TestTheSplitFallsBackToTheLimitWhenTheSizeIsNotPositive covers the
@@ -343,6 +349,9 @@ func TestTheSplitFallsBackToTheLimitWhenTheSizeIsNotPositive(t *testing.T) {
 		batches := decide.SplitQuestions(qs, size)
 		if len(batches) != 3 {
 			t.Errorf("SplitQuestions(qs, %d) split %d questions into %d batches, want 3", size, len(qs), len(batches))
+		}
+		if len(batches[0]) != decide.MaxQuestionsPerRequest {
+			t.Errorf("the first batch holds %d questions, want the request limit %d", len(batches[0]), decide.MaxQuestionsPerRequest)
 		}
 		for i, b := range batches {
 			if len(b) > decide.MaxQuestionsPerRequest {

@@ -17,10 +17,6 @@ func TestTheOrderIsReturnedAsACopy(t *testing.T) {
 
 	mutated := prompt.Order()
 	mutated[0] = "changed"
-	mutated = append(mutated, "extra")
-	if len(mutated) != len(after)+1 {
-		t.Fatalf("the mutated slice holds %d entries, want %d", len(mutated), len(after)+1)
-	}
 
 	if got := prompt.Order(); !reflect.DeepEqual(got, after) {
 		t.Errorf("the order after a caller edit is %v, want %v", got, after)
