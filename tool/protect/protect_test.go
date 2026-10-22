@@ -9,6 +9,15 @@ import (
 	"github.com/sdougbrown/poo/tool/protect"
 )
 
+// masker is the shape a sandboxing executor declares for the paths it
+// masks.
+type masker interface {
+	Expand(root string) ([]string, error)
+}
+
+// The set is what an executor masks with.
+var _ masker = (*protect.Set)(nil)
+
 // tempDir returns a temporary directory with its symlinks resolved.
 //
 // The tests match resolved paths, and a temporary directory may sit
