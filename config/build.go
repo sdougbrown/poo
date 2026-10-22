@@ -265,55 +265,61 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 				Message: fmt.Sprintf("the profile %q offers the tool %q, and this binary does not link it", chosen.Name, tool),
 			}
 		}
-		spec := factory(ToolOptions{}).Spec()
-		r.Profile.Tools = append(r.Profile.Tools, poo.ToolInfo{
-			Name:       spec.Name,
-			Class:      spec.Class,
-			Background: spec.Background,
-		})
+		r.Profile.Tools = append(r.Profile.Tools, toolInfo(factory))
 		r.toolNames = append(r.toolNames, tool)
 	}
 	// The core adds the job tools on its own whenever a linked tool may
 	// run in the background, and the profile offers them with it.
-	if r.hasBackground() {
-		r.Profile.Tools = append(r.Profile.Tools,
-			poo.ToolInfo{Name: profile.JobsToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever},
-			poo.ToolInfo{Name: profile.CancelJobToolName, Class: poo.ClassSideEffecting, Background: poo.BackgroundNever})
-	}
+	r.Profile.Tools = withJobTools(r.Profile.Tools)
 	r.Profiles = resolveProfiles(opts)
 	return nil
 }
 
-// hasBackground reports whether one of the profile's tools may run in
-// the background.
-func (r *Runtime) hasBackground() bool {
-	for _, tool := range r.Profile.Tools {
+// toolInfo describes a tool the way the profile and the wire name it.
+func toolInfo(factory ToolFactory) poo.ToolInfo {
+	spec := factory(ToolOptions{}).Spec()
+	return poo.ToolInfo{
+		Name:       spec.Name,
+		Class:      spec.Class,
+		Background: spec.Background,
+	}
+}
+
+// withJobTools adds the core's job tools to a profile's tools.
+//
+// The core adds the job tools whenever a linked tool may run in the
+// background, so the profile offers them with it.
+func withJobTools(tools []poo.ToolInfo) []poo.ToolInfo {
+	for _, tool := range tools {
 		if tool.Background != poo.BackgroundNever {
-			return true
+			return append(tools,
+				poo.ToolInfo{Name: profile.JobsToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever},
+				poo.ToolInfo{Name: profile.CancelJobToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
 		}
 	}
-	return false
+	return tools
 }
 
 // resolveProfiles resolves every profile the binary links.
 //
-// A profile that names a tool the binary does not link is left out:
-// the profile cannot be run, and a profile that cannot be run is not
-// one the binary offers.
+// A profile that names a tool the binary does not link offers the
+// tools it has: the profile cannot be run with the others, and a
+// profile that cannot be run is not one the binary offers.
 func resolveProfiles(opts BuildOptions) []poo.Profile {
 	var out []poo.Profile
 	for _, definition := range opts.Profiles {
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
-		linked := false
 		for _, tool := range definition.Tools {
-			if _, ok := opts.Tools[tool]; !ok {
+			factory, ok := opts.Tools[tool]
+			if !ok || factory == nil {
 				continue
 			}
-			linked = true
+			resolved.Tools = append(resolved.Tools, toolInfo(factory))
 		}
-		if len(definition.Tools) > 0 && !linked {
+		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
 			continue
 		}
+		resolved.Tools = withJobTools(resolved.Tools)
 		out = append(out, resolved)
 	}
 	return out

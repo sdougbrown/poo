@@ -105,6 +105,22 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 			t.Errorf("the tool %d is %q, want %q", i, runtime.Options.ToolOrder[i], name)
 		}
 	}
+	// The profile offers the core's job tools as well: the bash tool
+	// may run in the background, so the model needs a way to see the
+	// jobs and a way to stop one.
+	names := map[string]bool{}
+	for _, tool := range runtime.Profile.Tools {
+		names[tool.Name] = true
+	}
+	for _, name := range []string{"bash", "read", "grep", "edit", "jobs", "cancel_job"} {
+		if !names[name] {
+			t.Errorf("the profile does not offer the %q tool", name)
+		}
+	}
+	// The profiles the binary offers are the ones it links.
+	if len(runtime.Profiles) != 2 {
+		t.Errorf("the build offers %d profiles, want 2", len(runtime.Profiles))
+	}
 }
 
 // TestTheBuildTakesTheUnmatchedActionFromTheProfile covers the
