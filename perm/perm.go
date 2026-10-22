@@ -303,8 +303,8 @@ func (p *Policy) doomLoopCounts(info poo.ToolCallInfo) (*poo.RepeatCounts, bool)
 
 // doomLoopCount returns the number of repeats that triggered the loop.
 //
-// The count is the one that reached its threshold: the exact count for
-// an exact loop, and the near count for a near one.
+// The count is the larger of the two: the call itself, or the shape it
+// repeats, was made that many times.
 func doomLoopCount(counts *poo.RepeatCounts) int {
 	if counts == nil {
 		return 0

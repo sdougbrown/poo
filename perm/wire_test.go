@@ -174,6 +174,39 @@ func TestTheWireAskCarriesTheDoomLoopReasonAndTheRepeatCount(t *testing.T) {
 	}
 }
 
+// TestTheAskFallsBackWithoutACapableClient covers the plan's rule: a
+// client that did not declare the capability is never asked, and the
+// fallback applies at once.
+func TestTheAskFallsBackWithoutACapableClient(t *testing.T) {
+	client := &fakeClient{connected: true, answers: false, decision: perm.DecisionAllow}
+	asker := perm.NewWireAsker(client, 0)
+	policy, err := perm.New(perm.Options{Askers: []perm.Asker{asker}})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	tool := &bashTool{}
+	s := newSession(t, []pootest.Turn{
+		{Calls: []pootest.Call{bashCall("c1", "rm -rf build")}},
+		{Text: "done"},
+	}, map[string]poo.Tool{"bash": tool}, []string{"bash"}, policy)
+
+	s.run(t)
+
+	if asks := client.Asks(); len(asks) != 0 {
+		t.Errorf("the client was asked %d time(s), want 0: it may not answer", len(asks))
+	}
+	if tool.Calls() != 0 {
+		t.Errorf("the tool ran %d time(s), want 0: the fallback refused the call", tool.Calls())
+	}
+	answered := s.events(t, poo.EventPermissionAnswered)
+	if len(answered) != 1 {
+		t.Fatalf("the session emitted %d answer event(s), want 1", len(answered))
+	}
+	if answered[0].Payload["provenance"] != poo.ProvenanceDefault {
+		t.Errorf("the answer's provenance is %q, want %q", answered[0].Payload["provenance"], poo.ProvenanceDefault)
+	}
+}
+
 // TestTheWireAskerDefersOnAClientError covers the plan's rule: a
 // client error is a deferral, and the chain moves on.
 func TestTheWireAskerDefersOnAClientError(t *testing.T) {
