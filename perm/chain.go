@@ -2,300 +2,186 @@ package perm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/sdougbrown/poo"
 )
 
-// Decision is an asker's answer to a permission ask.
+// Decision is an Asker's answer; defer advances the chain.
 type Decision string
 
 const (
-	// DecisionAllow lets the call run.
 	DecisionAllow Decision = "allow"
-	// DecisionDeny refuses the call.
-	DecisionDeny Decision = "deny"
-	// DecisionDefer passes the ask on: the chain moves to the next
-	// asker, and the fallback decides when the chain is exhausted.
+	DecisionDeny  Decision = "deny"
 	DecisionDefer Decision = "defer"
 )
 
-// Asker answers a permission ask.
-//
-// An asker that cannot answer defers. The chain moves on to the next
-// asker, and the fallback decides when the chain is exhausted.
+// Asker answers a permission request within its budget. Zero Budget
+// uses the chain deadline. Errors, panics and unknown answers defer.
 type Asker interface {
-	// Available reports whether the asker can answer an ask now.
-	//
-	// An unavailable asker is skipped without waiting, so an asker that
-	// is not there never holds a run up.
 	Available() bool
-	// Budget is how long the asker may take to answer.
-	//
-	// A budget of zero means the asker has no budget of its own, and
-	// the chain's deadline is the only limit.
 	Budget() time.Duration
-	// Ask answers the ask.
-	//
-	// An error is a deferral: the chain moves on to the next asker.
-	Ask(ctx context.Context, ask Ask) (Decision, error)
+	Ask(context.Context, Ask) (Decision, error)
 }
 
-// Availability is implemented by an asker that knows whether it can
-// ever answer an ask.
-//
-// An asker that is unavailable now may become available later: a wire
-// client that has not connected yet will. An asker that can never
-// answer — a wire asker in a build with no wire — says so, and the
-// load-time warning names it.
-type Availability interface {
-	// CanEverAnswer reports whether the asker may answer an ask at
-	// some point in this build.
-	CanEverAnswer() bool
-}
+// Availability reports whether an Asker can ever answer in this mode.
+type Availability interface{ CanEverAnswer() bool }
 
-// The name the fallback's answers carry.
 const fallbackName = "fallback"
 
-// errBudget is the failure a missed budget reports.
-//
-// The asker may still be answering; its answer is dropped.
-var errBudget = errors.New("perm: the asker missed its budget")
-
-// errCancelled is the failure a cancelled run reports.
-//
-// The run ended while the ask was pending, and the ask resolves as
-// cancelled.
-var errCancelled = errors.New("perm: the run ended while the ask was pending")
-
-// chain is the asker chain.
-//
-// The chain asks the askers in order. An asker that is unavailable is
-// skipped without waiting, and an asker that defers, fails or misses
-// its budget passes the ask on. When the chain is exhausted the
-// fallback decides.
 type chain struct {
-	// askers are the chain's askers, in order.
-	askers []Asker
-	// timeout is how long the whole chain may take.
-	timeout time.Duration
-	// fallback is the decision when the chain is exhausted.
+	askers   []Asker
+	timeout  time.Duration
 	fallback Action
-	// clock reads the time the chain measures with.
-	clock clock
+	clock    clock
 }
 
-// clock is the time the chain reads.
-//
-// The chain waits on a context and on the clock's timers, and it never
-// sleeps on its own. A test may replace the clock with one that fires
-// on demand, so a deadline is reached without waiting for it.
 type clock interface {
-	// Now returns the current time.
 	Now() time.Time
-	// After returns a channel that fires after the given duration.
-	After(d time.Duration) <-chan time.Time
+	After(time.Duration) <-chan time.Time
 }
 
-// systemClock is the real clock.
 type systemClock struct{}
 
-// Now returns the current time.
-func (systemClock) Now() time.Time { return time.Now() }
-
-// After returns a channel that fires after the given duration.
+func (systemClock) Now() time.Time                         { return time.Now() }
 func (systemClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
-// resolution is how an ask was resolved.
 type resolution struct {
-	// decision is what was decided: allow or deny.
-	decision Decision
-	// answeredBy names who decided: the asker that answered, or
-	// "fallback".
+	decision   Decision
 	answeredBy string
-	// provenance is how the ask was resolved: "answered", "timeout",
-	// "default", "cancelled" or "interrupted".
 	provenance string
 }
 
-// ask asks the chain about a call.
-//
-// Every way an ask can end goes through the same checks: an answer, a
-// missed deadline, a cancelled run and a panicking asker all resolve
-// here, and only a valid explicit allow survives. An ask resolved
-// because the run ended is never allowed.
+// guard is the single recovery boundary for extension calls, including
+// metadata. A panic has the same meaning as an error: this link defers.
+func guard[T any](call func() (T, error)) (out T, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("perm: extension panicked: %v", r)
+		}
+	}()
+	return call()
+}
+
 func (c *chain) ask(ctx context.Context, ask Ask) resolution {
+	return c.askReported(ctx, ask, nil)
+}
+
+// askReported sends all chain inputs to the run's request. The chain
+// owns no terminal state; late worker outputs use the same attempt token
+// and resolution boundary as timers, cancellation and the seal.
+func (c *chain) askReported(ctx context.Context, ask Ask, reporter poo.PermissionReporter) resolution {
 	deadline := c.clock.Now().Add(c.timeout)
+	public := poo.PermissionAsk{AskID: ask.AskID, Tool: ask.Tool, Summary: ask.Summary, Class: ask.Class, Reason: ask.Reason, RepeatCount: ask.RepeatCount}
+	opts := poo.PermissionRequestOptions{Context: ctx, Deadline: deadline, Now: c.clock.Now, Fallback: string(c.fallback)}
+	var request *poo.PermissionRequest
+	if owner, ok := reporter.(poo.PermissionRequests); ok {
+		request = owner.BeginPermission(public, opts)
+	} else {
+		request = poo.NewPermissionRequest(public, opts)
+		if reporter != nil {
+			reporter.Asked(public)
+		}
+	}
+	chainCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
 	for _, asker := range c.askers {
 		if asker == nil {
 			continue
 		}
-		if res, done := c.stopped(ctx, ask, deadline); done {
-			return res
+		select {
+		case <-request.Done():
+			return resolutionOf(request)
+		default:
 		}
-		if !askerAvailable(asker) {
-			// An asker that is not there is skipped without waiting.
-			continue
-		}
-		if res, done := c.stopped(ctx, ask, deadline); done {
-			return res
-		}
-		remaining := deadline.Sub(c.clock.Now())
-		if remaining <= 0 {
-			return c.fallbackResolution(poo.ProvenanceTimeout)
-		}
-		decision, err := c.call(ctx, asker, ask, remaining)
-		if err != nil {
-			if errors.Is(err, errCancelled) {
-				return cancelledResolution(poo.Interrupted(ctx) || ask.Interrupted)
-			}
-			// A failure, a missed budget and a disconnect are all
-			// deferrals: the chain moves on.
-			continue
-		}
-		switch decision {
-		case DecisionAllow, DecisionDeny:
-			// The answer is rechecked against the run's end and the
-			// chain's deadline, so which channel a select chose cannot
-			// let an expired or cancelled approval through.
-			if res, done := c.stopped(ctx, ask, deadline); done {
-				return res
-			}
-			return resolution{
-				decision:   decision,
-				answeredBy: askerName(asker),
-				provenance: poo.ProvenanceAnswered,
-			}
-		}
-		// Anything that is not an explicit allow or deny — including a
-		// decision the asker made up — is a deferral.
+		c.attempt(chainCtx, ctx, ask, asker, request, deadline)
 	}
-	// The chain is exhausted. A deadline that ran out is a timeout, and
-	// anything else is the default.
-	if res, done := c.stopped(ctx, ask, deadline); done {
-		return res
-	}
-	return c.fallbackResolution(poo.ProvenanceDefault)
+	request.Send(poo.PermissionInput{Kind: poo.PermissionExhausted})
+	return resolutionOf(request)
 }
 
-// stopped returns the resolution a run that ended or a chain that
-// missed its deadline has, before any answer is used.
-//
-// Cancellation wins over the deadline: a run that ended never allows a
-// call, whatever the clock says.
-func (c *chain) stopped(ctx context.Context, ask Ask, deadline time.Time) (resolution, bool) {
-	if ctx.Err() != nil {
-		return cancelledResolution(poo.Interrupted(ctx) || ask.Interrupted), true
-	}
-	if !c.clock.Now().Before(deadline) {
-		return c.fallbackResolution(poo.ProvenanceTimeout), true
-	}
-	return resolution{}, false
+func resolutionOf(p *poo.PermissionRequest) resolution {
+	answer := p.Result()
+	return resolution{decision: Decision(answer.Decision), answeredBy: answer.AnsweredBy, provenance: answer.Provenance}
 }
 
-// cancelledResolution returns the resolution of an ask the run ended
-// before it was answered.
-//
-// The ask is refused: a run that is ending never allows a call. An
-// interrupt is its own provenance, so a client can tell it from a
-// cancelled run.
-func cancelledResolution(interrupted bool) resolution {
-	provenance := poo.ProvenanceCancelled
-	if interrupted {
-		provenance = poo.ProvenanceInterrupted
-	}
-	return resolution{
-		decision:   DecisionDeny,
-		answeredBy: "cancelled",
-		provenance: provenance,
-	}
-}
-
-// askerAvailable reports whether an asker can answer now.
-//
-// A panicking asker is unavailable: the chain skips it rather than
-// taking the process down.
-func askerAvailable(asker Asker) (available bool) {
-	defer func() {
-		if recover() != nil {
-			available = false
-		}
-	}()
-	return asker.Available()
-}
-
-// askerBudget returns an asker's budget.
-//
-// A panicking asker has no budget of its own, and the chain's deadline
-// is the only limit.
-func askerBudget(asker Asker) (budget time.Duration) {
-	defer func() {
-		if recover() != nil {
-			budget = 0
-		}
-	}()
-	return asker.Budget()
-}
-
-// call asks one asker, under its own budget.
-//
-// The asker runs in its own goroutine, so an asker that ignores its
-// context never holds the chain up: the budget ends the wait, and the
-// answer that arrives after it is dropped. A panic is a deferral, not a
-// crash: the asker could not answer, so the chain moves on.
-func (c *chain) call(ctx context.Context, asker Asker, ask Ask, remaining time.Duration) (Decision, error) {
-	budget := askerBudget(asker)
-	if budget <= 0 || budget > remaining {
-		budget = remaining
-	}
-	askerCtx, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
-	timer := c.clock.After(budget)
-	result := make(chan askerResult, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				result <- askerResult{decision: DecisionDefer, err: fmt.Errorf("perm: the asker panicked: %v", r)}
-			}
-		}()
-		decision, err := asker.Ask(askerCtx, ask)
-		result <- askerResult{decision: decision, err: err}
-	}()
+// attempt bounds metadata by the remaining chain budget and Ask by its
+// own absolute budget. The worker never mutates a terminal decision.
+func (c *chain) attempt(chainCtx, runCtx context.Context, ask Ask, asker Asker, p *poo.PermissionRequest, chainDeadline time.Time) {
+	start := c.clock.Now()
+	token := p.Send(poo.PermissionInput{Kind: poo.PermissionAttempt, Deadline: chainDeadline})
 	select {
-	case out := <-result:
-		if out.err != nil {
-			return DecisionDefer, out.err
+	case <-p.Done():
+		return
+	default:
+	}
+	ctx, cancel := context.WithCancel(chainCtx)
+	defer cancel()
+	budgetReady := make(chan time.Time)
+	proceed := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		_, err := guard(func() (struct{}, error) {
+			if !asker.Available() {
+				return struct{}{}, nil
+			}
+			budget := asker.Budget()
+			deadline := chainDeadline
+			if budget > 0 && start.Add(budget).Before(deadline) {
+				deadline = start.Add(budget)
+			}
+			name := askerName(asker)
+			select {
+			case budgetReady <- deadline:
+			case <-ctx.Done():
+				return struct{}{}, ctx.Err()
+			}
+			select {
+			case <-proceed:
+			case <-ctx.Done():
+				return struct{}{}, ctx.Err()
+			}
+			remaining := deadline.Sub(c.clock.Now())
+			askCtx, stop := context.WithTimeout(ctx, remaining)
+			defer stop()
+			decision, err := asker.Ask(askCtx, ask)
+			if err != nil {
+				return struct{}{}, err
+			}
+			p.Send(poo.PermissionInput{Kind: poo.PermissionExplicitAnswer, Attempt: token, Deadline: deadline, Answer: poo.PermissionAnswer{Decision: string(decision), AnsweredBy: name}})
+			return struct{}{}, nil
+		})
+		if err != nil {
+			p.Send(poo.PermissionInput{Kind: poo.PermissionDeferred, Attempt: token})
 		}
-		return out.decision, nil
-	case <-timer:
-		// The asker missed its budget. The answer it may still send is
-		// dropped.
-		return DecisionDefer, errBudget
-	case <-ctx.Done():
-		// The run ended while the ask was pending.
-		return DecisionDefer, errCancelled
-	}
-}
-
-// askerResult is what an asker returned.
-type askerResult struct {
-	// decision is what the asker decided.
-	decision Decision
-	// err is the failure the asker reported.
-	err error
-}
-
-// fallbackResolution returns the fallback's decision.
-func (c *chain) fallbackResolution(provenance string) resolution {
-	decision := DecisionDeny
-	if c.fallback == ActionAllow {
-		decision = DecisionAllow
-	}
-	return resolution{
-		decision:   decision,
-		answeredBy: fallbackName,
-		provenance: provenance,
+	}()
+	var timer <-chan time.Time
+	for {
+		select {
+		case deadline := <-budgetReady:
+			p.Send(poo.PermissionInput{Kind: poo.PermissionBudget, Attempt: token, Deadline: deadline})
+			timer = c.clock.After(deadline.Sub(c.clock.Now()))
+			close(proceed)
+		case <-finished:
+			p.Send(poo.PermissionInput{Kind: poo.PermissionDeferred, Attempt: token})
+			return
+		case <-timer:
+			p.Send(poo.PermissionInput{Kind: poo.PermissionAttemptExpired, Attempt: token})
+			return
+		case <-p.Done():
+			return
+		case <-chainCtx.Done():
+			kind := poo.PermissionChainExpired
+			if runCtx.Err() != nil {
+				kind = poo.PermissionCancel
+				if poo.Interrupted(runCtx) || ask.Interrupted {
+					kind = poo.PermissionInterrupt
+				}
+			}
+			p.Send(poo.PermissionInput{Kind: kind})
+			return
+		}
 	}
 }

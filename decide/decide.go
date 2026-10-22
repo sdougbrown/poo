@@ -511,16 +511,10 @@ func (d *recordedDecider) Decide(ctx context.Context, state any, instructions st
 		StateHash: StateHash(state),
 		At:        time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	answers, err := d.inner.Decide(ctx, state, instructions, qs)
+	answers, requests, err := callDecider(ctx, d.inner, state, instructions, qs)
 	rec.LatencyMS = float64(time.Since(started).Microseconds()) / 1000
 	rec.Answers = answers
-	// A decider that knows how many wire requests it made reports it;
-	// one that does not leaves the count unreported, which the record
-	// says so.
-	if reporter, ok := d.inner.(RequestReporter); ok {
-		n := reporter.Requests()
-		rec.Requests = &n
-	}
+	rec.Requests = requests
 	switch {
 	case err == nil:
 		rec.Outcome = OutcomeOK
@@ -537,6 +531,23 @@ func (d *recordedDecider) Decide(ctx context.Context, state any, instructions st
 		_ = d.sink.Record(ctx, rec)
 	}
 	return answers, err
+}
+
+// callDecider contains every call into a Decider, including metadata.
+// A panic discards the answer and is recorded as a deferral.
+func callDecider(ctx context.Context, d Decider, state any, instructions string, qs []Question) (answers []Answer, requests *int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			answers, requests = nil, nil
+			err = fmt.Errorf("%w: decider panicked: %v", ErrDeferred, r)
+		}
+	}()
+	answers, err = d.Decide(ctx, state, instructions, qs)
+	if reporter, ok := d.(RequestReporter); ok {
+		n := reporter.Requests()
+		requests = &n
+	}
+	return answers, requests, err
 }
 
 // StateHash returns the hex SHA-256 of a state payload.

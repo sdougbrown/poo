@@ -464,17 +464,7 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason string, 
 		WorkingDir:  p.workingDir,
 		Interrupted: ctx.Interrupted,
 	}
-	if ctx.Permissions != nil {
-		ctx.Permissions.Asked(poo.PermissionAsk{
-			AskID:       ask.AskID,
-			Tool:        ask.Tool,
-			Summary:     ask.Summary,
-			Class:       ask.Class,
-			Reason:      ask.Reason,
-			RepeatCount: ask.RepeatCount,
-		})
-	}
-	resolution := p.chain.ask(ctx, ask)
+	resolution := p.chain.askReported(ctx, ask, ctx.Permissions)
 	if ctx.Permissions != nil {
 		ctx.Permissions.Answered(poo.PermissionAnswer{
 			AskID:      ask.AskID,
@@ -597,10 +587,13 @@ func canEverAnswer(asker Asker) bool {
 	if asker == nil {
 		return false
 	}
-	if a, ok := asker.(Availability); ok {
-		return a.CanEverAnswer()
-	}
-	return true
+	available, err := guard(func() (bool, error) {
+		if a, ok := asker.(Availability); ok {
+			return a.CanEverAnswer(), nil
+		}
+		return true, nil
+	})
+	return err == nil && available
 }
 
 // askerName returns the name an asker's answers carry.

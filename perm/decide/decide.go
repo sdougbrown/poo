@@ -94,7 +94,7 @@ func New(decider decide.Decider, opts Options) *Asker {
 		turns = poo.DefaultEvidenceTurns
 	}
 	return &Asker{
-		decider: decider,
+		decider: decide.Recorded(decider, nil, "permission"),
 		approve: approve,
 		deny:    deny,
 		timeout: timeout,
