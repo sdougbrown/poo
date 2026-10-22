@@ -415,6 +415,123 @@ func TestAFollowUpIsDeliveredAtANaturalStop(t *testing.T) {
 	}
 }
 
+// TestAFollowUpAcceptedAsTheRunStopsIsDelivered covers the window
+// between Send accepting a follow-up and the input.queued record it
+// writes: the run's finalization takes its input decision while the
+// acceptance is still in flight. The input was accepted before the run
+// was settling, so the natural stop has to deliver it.
+func TestAFollowUpAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &holdingInputSink{entered: make(chan struct{}), release: make(chan struct{})}
+	tool := &echoTool{result: "echoed"}
+	// The settle hook holds the run at the natural stop, so the
+	// follow-up is accepted while the run is still open.
+	hook := &blockingBeforeSettle{started: make(chan struct{}), release: make(chan struct{})}
+	atSettling := make(chan struct{})
+	observer := &settlingObserver{seen: atSettling}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+	opts.Observers = []poo.Observer{observer}
+
+	s := newTestSession(t, opts)
+	// The seam a natural finalization announces once it waits for an
+	// acceptance that is still being written.
+	atAcceptanceWait := make(chan struct{})
+	var waitOnce sync.Once
+	restore := s.SetSealRaceHooks(&poo.SealRaceHooks{BeforeAcceptanceWait: func() {
+		waitOnce.Do(func() { close(atAcceptanceWait) })
+	}})
+	defer restore()
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-hook.started
+	sendErr := make(chan error, 1)
+	go func() {
+		_, err := s.Send("and then this", poo.FollowUp)
+		sendErr <- err
+	}()
+	<-sink.entered
+	// The acceptance is in flight, so the run reaches its input
+	// decision now. Either it moves on to settling, or it says that it
+	// waits for the acceptance first; both mean the decision was taken
+	// while the input was neither deliverable nor refused.
+	close(hook.release)
+	select {
+	case <-atAcceptanceWait:
+	case <-atSettling:
+	}
+	close(sink.release)
+	if err := <-sendErr; err != nil {
+		t.Fatalf("sending the follow-up: %v", err)
+	}
+
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn", res.Reason)
+	}
+	// Send accepted the follow-up, so it is delivered.
+	if got := sink.count("input.delivered"); got != 1 {
+		t.Errorf("the log holds %d input.delivered records, want 1", got)
+	}
+	if got := sink.count("input.dropped"); got != 0 {
+		t.Errorf("the log holds %d input.dropped records, want 0", got)
+	}
+}
+
+// holdingInputSink holds one follow-up's input.queued record until the
+// test releases it, so the acceptance stays in flight while the run's
+// finalization takes its input decision.
+type holdingInputSink struct {
+	recordingSink
+	// once guards the hold, so only one record is held.
+	once sync.Once
+	// entered is closed once a record is being held.
+	entered chan struct{}
+	// release lets the held record through.
+	release chan struct{}
+}
+
+// Append holds the follow-up's acceptance record until the test releases
+// it.
+func (s *holdingInputSink) Append(ctx context.Context, rec poo.Record) error {
+	if queued, ok := rec.(*poo.InputQueued); ok && queued.Mode == poo.FollowUp {
+		s.once.Do(func() {
+			close(s.entered)
+			select {
+			case <-s.release:
+			case <-ctx.Done():
+			}
+		})
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.recordingSink.Append(ctx, rec)
+}
+
+// settlingObserver closes its channel when the run enters finalization.
+type settlingObserver struct {
+	// seen is the channel the observer closes.
+	seen chan struct{}
+	// once guards the channel, so a second run does not close it
+	// twice.
+	once sync.Once
+}
+
+// Observe closes the channel on the first settling event.
+func (o *settlingObserver) Observe(ev poo.Event) error {
+	if ev.Name == poo.EventRunSettling {
+		o.once.Do(func() { close(o.seen) })
+	}
+	return nil
+}
+
 // TestAFollowUpQueuedWhenTheRunIsCancelledIsDropped covers the plan's
 // rule: a follow-up that never reaches the model is dropped and
 // reported.

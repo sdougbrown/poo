@@ -14,6 +14,10 @@ type SealRaceHooks struct {
 	// BeforeSkipCalls is called at the skip path, before it claims any
 	// call of the batch.
 	BeforeSkipCalls func()
+	// BeforeAcceptanceWait is called by a natural finalization once it
+	// finds an input whose acceptance record is still being written,
+	// before it waits for that record.
+	BeforeAcceptanceWait func()
 }
 
 // SetSealRaceHooks installs the seal hooks and returns a function that
@@ -51,6 +55,10 @@ func (s *Session) sealRaceHook(name string) {
 	case "skip":
 		if hooks.BeforeSkipCalls != nil {
 			hooks.BeforeSkipCalls()
+		}
+	case "acceptance":
+		if hooks.BeforeAcceptanceWait != nil {
+			hooks.BeforeAcceptanceWait()
 		}
 	}
 }
