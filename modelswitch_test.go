@@ -124,7 +124,7 @@ func TestTheSessionRefusesAModelSwitchWithARequiredForeignBlock(t *testing.T) {
 	}
 	sink := &recordingSink{}
 	opts := testOptions(t, pootest.NewTransport(), &echoTool{}, sink)
-	opts.ModelAPI = poo.APIAnthropicMessages
+	opts.Model.API = poo.APIAnthropicMessages
 	s := newTestSession(t, opts, poo.WithSessionStart(&providerBlockHook{block: block}))
 
 	_, err := s.SetModel(chatModel("other", 32768))
@@ -140,6 +140,31 @@ func TestTheSessionRefusesAModelSwitchWithARequiredForeignBlock(t *testing.T) {
 	}
 }
 
+// TestTheSessionChecksTheForeignBlocksWithoutBeingToldTheAPI covers
+// the default: the session speaks the Chat Completions API, so a
+// required block from another API stops the switch even when the
+// consumer named no API at all.
+func TestTheSessionChecksTheForeignBlocksWithoutBeingToldTheAPI(t *testing.T) {
+	block := poo.ProviderBlock{
+		API:      poo.APIAnthropicMessages,
+		Type:     "thinking_signature",
+		Data:     json.RawMessage(`"payload"`),
+		Required: true,
+	}
+	sink := &recordingSink{}
+	opts := testOptions(t, pootest.NewTransport(), &echoTool{}, sink)
+	s := newTestSession(t, opts, poo.WithSessionStart(&providerBlockHook{block: block}))
+
+	_, err := s.SetModel(chatModel("other", 32768))
+	var perr *poo.ProviderError
+	if !errors.As(err, &perr) {
+		t.Fatalf("the switch failed with %v, want a provider failure", err)
+	}
+	if perr.Kind != poo.ProviderKindSessionIncompatible {
+		t.Errorf("the failure is a %q, want %q", perr.Kind, poo.ProviderKindSessionIncompatible)
+	}
+}
+
 // TestTheSessionOmitsForeignBlocksAndRecordsTheOmission covers the
 // second check's other half: a block that is not required is left out
 // of the requests, and the omission is recorded.
@@ -151,7 +176,7 @@ func TestTheSessionOmitsForeignBlocksAndRecordsTheOmission(t *testing.T) {
 	}
 	sink := &recordingSink{}
 	opts := testOptions(t, pootest.NewTransport(), &echoTool{}, sink)
-	opts.ModelAPI = poo.APIAnthropicMessages
+	opts.Model.API = poo.APIAnthropicMessages
 	tr := pootest.NewTransport(pootest.Turn{Text: "hello"})
 	opts.Transport = tr
 	s := newTestSession(t, opts, poo.WithSessionStart(&providerBlockHook{block: block}))
@@ -197,7 +222,7 @@ func TestTheSessionOmitsForeignBlocksAndRecordsTheOmission(t *testing.T) {
 func TestTheSessionWarnsWhenTheViewDoesNotFitTheNewWindow(t *testing.T) {
 	sink := &recordingSink{}
 	opts := testOptions(t, pootest.NewTransport(), &echoTool{}, sink)
-	opts.ContextLimit = 8000
+	opts.Model.ContextLimit = 8000
 	opts.SystemPrompt = ""
 	s := newTestSession(t, opts, poo.WithSessionStart(&bigHistoryHook{}))
 

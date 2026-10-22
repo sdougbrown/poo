@@ -606,11 +606,10 @@ func TestACancelWithASynchronousCallAndAJobSettlesTheRun(t *testing.T) {
 			"job":  jobTool,
 			"echo": slow,
 		},
-		ToolOrder:    []string{"job", "echo"},
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
+		ToolOrder: []string{"job", "echo"},
+		Sink:      sink,
+		SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
 	}
 	s := newTestSession(t, opts)
 	firstRunID, err := s.Prompt(context.Background(), "do the thing")
@@ -677,11 +676,10 @@ func TestAFinishWithAJobRunningSettlesFinished(t *testing.T) {
 			"job":    jobTool,
 			"finish": finisher,
 		},
-		ToolOrder:    []string{"job", "finish"},
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
+		ToolOrder: []string{"job", "finish"},
+		Sink:      sink,
+		SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
 	}
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")

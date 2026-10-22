@@ -30,8 +30,7 @@ func settleOf(t *testing.T, tr poo.ChatTransport) poo.Result {
 	s, err := poo.New(poo.Options{
 		Transport:    tr,
 		SessionID:    "s1",
-		ModelID:      "m",
-		ContextLimit: 32768,
+		Model:        poo.ModelInfo{ModelID: "m", ContextLimit: 32768},
 		SystemPrompt: "the system prompt",
 		WorkingDir:   t.TempDir(),
 	})

@@ -89,14 +89,13 @@ func (t *fixTool) Calls() int {
 func fixOpts(t *testing.T, tr poo.ChatTransport, tool poo.Tool, sink poo.RecordSink) poo.Options {
 	t.Helper()
 	return poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{tool.Spec().Name: tool},
-		ToolOrder:    []string{tool.Spec().Name},
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{tool.Spec().Name: tool},
+		ToolOrder:  []string{tool.Spec().Name},
+		Sink:       sink,
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
 	}
 }
 
@@ -864,13 +863,12 @@ func TestTheSecondRunsRequestUsesOnlyItsOwnPrompt(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "one"}, {text: "two"}})
 	sink := &recordingSink{}
 	opts := poo.Options{
-		Transport:    tr,
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
-		BeforeRun:    []poo.BeforeRunHook{&fixSecondRunPrompt{text: second}},
+		Transport:  tr,
+		Sink:       sink,
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
+		BeforeRun:  []poo.BeforeRunHook{&fixSecondRunPrompt{text: second}},
 	}
 	s := newTestSession(t, opts)
 	runSession(t, s, "one")
@@ -966,7 +964,7 @@ func TestReplayUsesTheRecordedPrompt(t *testing.T) {
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{}, sink)
 	opts.SystemPrompt = "x"
-	opts.ContextLimit = 530
+	opts.Model.ContextLimit = 530
 	opts.MaxTurns = 1
 	s := newTestSession(t, opts)
 	runSession(t, s, "start")

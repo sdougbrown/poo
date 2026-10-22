@@ -122,11 +122,10 @@ func promptSession(t *testing.T, tr *promptTransport) *Session {
 func promptSessionWithTool(t *testing.T, tr *promptTransport, tool Tool) *Session {
 	t.Helper()
 	opts := Options{
-		Transport:    tr,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
+		Transport:  tr,
+		SessionID:  "s1",
+		Model:      ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
 	}
 	if tool != nil {
 		opts.Tools = map[string]Tool{tool.Spec().Name: tool}

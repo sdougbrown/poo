@@ -79,7 +79,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	// names another one.
 	api := info.API
 	if api == "" {
-		api = s.opts.ModelAPI
+		api = s.opts.Model.API
 	}
 	// The history must hold no required block from another API: the
 	// request cannot be made without it.
@@ -94,7 +94,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	limit := info.ContextLimit
 	var warnings []string
 	if limit <= 0 {
-		limit = s.opts.ContextLimit
+		limit = s.opts.Model.ContextLimit
 		warnings = append(warnings, fmt.Sprintf(
 			"the model %q declares no context limit, so the session keeps the %d-token window",
 			name, limit))
@@ -105,7 +105,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 			limit, name, reason))
 	}
 
-	from := modelLabel(s.model)
+	from := modelLabel(s.opts.Model)
 	outcome := ModelSwitch{From: from, To: name, Warnings: warnings}
 
 	// The switch itself: the transport, the model's identity, the
@@ -118,16 +118,13 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	// speaks, so the descriptor and the session agree.
 	info.ModelID = modelIdentifier(info)
 	info.API = api
-	s.opts.ModelID = info.ModelID
-	s.opts.ModelAPI = api
-	s.opts.ContextLimit = limit
-	s.opts.MaxOutput = info.MaxOutput
-	s.model = info
+	info.ContextLimit = limit
+	s.opts.Model = info
 	// The environment section names the model, so the prompt the next
 	// run renders names it too.
 	if s.promptBuilder != nil {
 		env := s.promptBuilder.Env()
-		env.Model = s.opts.ModelID
+		env.Model = s.opts.Model.ModelID
 		s.promptBuilder = s.promptBuilder.WithEnv(env)
 	}
 	s.mu.Unlock()

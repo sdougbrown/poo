@@ -96,7 +96,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		RunID:      runID,
 		PromptHash: hashText(text),
 		StartedAt:  nowRFC3339(),
-		ModelID:    s.opts.ModelID,
+		ModelID:    s.opts.Model.ModelID,
 		MaxTurns:   s.opts.MaxTurns,
 		ToolsMode:  s.opts.ToolsMode,
 
@@ -979,7 +979,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	defer s.endActivity(run)
 
 	reader, rendered, err := s.opts.Transport.Stream(actCtx, ChatRequest{
-		Model:     s.opts.ModelID,
+		Model:     s.opts.Model.ModelID,
 		Messages:  messages,
 		Tools:     tools,
 		MaxTokens: s.maxTokens(),

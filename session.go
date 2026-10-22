@@ -164,12 +164,6 @@ type Session struct {
 	// noticeArmed reports that the context notice may fire. The notice
 	// re-arms when the estimate drops back below the notice ratio.
 	noticeArmed bool
-	// model is the model the session talks to.
-	//
-	// It is the descriptor the session was built with, and a switch
-	// replaces it. The name and the wire API live here, so a switch
-	// knows what it switched from.
-	model ModelInfo
 	// decider is the session's decision model, or nil when it has none.
 	//
 	// The handle is the recording wrapper: every call writes a record
@@ -393,17 +387,19 @@ type Options struct {
 	Sink RecordSink
 	// SessionID identifies the session.
 	SessionID string
-	// ModelID is the provider's model identifier.
-	ModelID string
-	// ModelAPI is the wire API the model is reached through.
+	// Model is the session's chat model.
 	//
-	// It is the API the session's transport speaks, and the switch
-	// checks the history against it: a required provider block from
-	// another API cannot be carried.
+	// The descriptor names the model the session talks to: the
+	// identifier the endpoint knows it by, the API it is reached
+	// through, the window the session measures against and the output
+	// ceiling the requests carry.
 	//
-	// The empty name means the API is unknown, and the check does not
-	// run: a block is only foreign when the API is known.
-	ModelAPI API
+	// The API is the Chat Completions API when the descriptor names
+	// none, because it is the only API v1 speaks. The window is
+	// required: a value of 0 or less is a construction error
+	// (ErrSessionInit), so no run starts without a window to measure
+	// against.
+	Model ModelInfo
 	// Decider is the session's decision model, or nil when it has none.
 	//
 	// The session wraps it, so every call is recorded.
@@ -414,13 +410,6 @@ type Options struct {
 	// one or the decisions one. A model that serves neither is a
 	// construction error.
 	DeciderModel ModelInfo
-	// ContextLimit is the model's context window in tokens. It is
-	// required: a value of 0 or less is a construction error
-	// (ErrSessionInit), so no run starts without a window to measure
-	// against.
-	ContextLimit int
-	// MaxOutput is the model's output-token ceiling, 0 when unknown.
-	MaxOutput int
 	// SystemPrompt is the system message prepended to the model's view.
 	//
 	// The text is the whole prompt: the sections the core assembles are
@@ -558,7 +547,14 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	if opts.Transport == nil {
 		return nil, &ErrSessionInit{Cause: errors.New("poo: the session has no chat transport")}
 	}
-	if opts.ContextLimit <= 0 {
+	// The session speaks the Chat Completions API unless the descriptor
+	// names another one: it is the only API v1 speaks, and an unknown
+	// API would skip the check that keeps a foreign block out of the
+	// requests.
+	if opts.Model.API == "" {
+		opts.Model.API = APIChatCompletions
+	}
+	if opts.Model.ContextLimit <= 0 {
 		return nil, &ErrSessionInit{Cause: errors.New("poo: the session has no context limit")}
 	}
 	if err := checkFinishTool(&opts); err != nil {
@@ -599,13 +595,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		noticeArmed:       true,
 		jobs:              map[string]*jobState{},
 		jobQueued:         make(chan struct{}, 1),
-		model: ModelInfo{
-			ModelID:      opts.ModelID,
-			API:          opts.ModelAPI,
-			ContextLimit: opts.ContextLimit,
-			MaxOutput:    opts.MaxOutput,
-		},
-		deciderModel: opts.DeciderModel,
+		deciderModel:      opts.DeciderModel,
 	}
 	// A construction that fails rolls back everything it started. The
 	// event bus's reporter is a goroutine, and no session is returned
@@ -895,7 +885,7 @@ func (s *Session) modelMessagesLocked() []Message {
 	// The provider blocks the current model cannot read are left out of
 	// the request: the history keeps them, and the switch that brought
 	// the model recorded the omission.
-	messages = stripForeignBlocks(messages, s.opts.ModelAPI)
+	messages = stripForeignBlocks(messages, s.opts.Model.API)
 	return CloneMessages(messages)
 }
 
@@ -915,7 +905,7 @@ func (s *Session) budgetLocked() Budget {
 		turns = s.run.turn
 	}
 	return Budget{
-		ContextLimit:   s.opts.ContextLimit,
+		ContextLimit:   s.opts.Model.ContextLimit,
 		EstimatedInput: s.estimatedInputLocked(),
 		NoticeRatio:    s.opts.NoticeRatio,
 		HardRatio:      s.opts.HardRatio,

@@ -142,7 +142,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			want:   poo.ReasonContextExhausted,
 			source: "no_output_room",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
-				opts.ContextLimit = 300
+				opts.Model.ContextLimit = 300
 				return newTestSession(t, *opts)
 			},
 			act: func(t *testing.T, s *poo.Session) {},
@@ -387,8 +387,8 @@ func TestTheUsageEventIsEmitted(t *testing.T) {
 func TestTheMessageDeltasReachTheClient(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "visible", thinking: "reasoning"}})
 	s := newTestSession(t, poo.Options{
-		Transport:    tr,
-		ContextLimit: 32768,
+		Transport: tr,
+		Model:     poo.ModelInfo{ContextLimit: 32768},
 	})
 	if _, err := s.Prompt(context.Background(), "start"); err != nil {
 		t.Fatalf("starting the run: %v", err)

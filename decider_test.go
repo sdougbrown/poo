@@ -149,14 +149,13 @@ func TestTheSessionGivesTheDeciderToTheHooksAndTheTools(t *testing.T) {
 	tool := &deciderTool{}
 	inner := pootest.NewDecider(0.7)
 	opts := poo.Options{
-		Transport:    pootest.NewTransport(pootest.Turn{Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`"x"`), ID: "c1"}}}),
-		Tools:        map[string]poo.Tool{"echo": tool},
-		ToolOrder:    []string{"echo"},
-		Sink:         &recordingSink{},
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
+		Transport:  pootest.NewTransport(pootest.Turn{Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`"x"`), ID: "c1"}}}),
+		Tools:      map[string]poo.Tool{"echo": tool},
+		ToolOrder:  []string{"echo"},
+		Sink:       &recordingSink{},
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
 	}
 	s := newTestSession(t, opts,
 		poo.WithDecider(deciderModel(), inner),

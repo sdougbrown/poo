@@ -124,7 +124,7 @@ func TestTheGateRunsOnTheBeforeSettleContinuePath(t *testing.T) {
 	opts.Compactor = compactor
 	// A window the run cannot answer in, so the gate's budget check
 	// stops it.
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")
@@ -147,7 +147,7 @@ func TestTheGateRunsOnTheInterruptedTurnPath(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Compactor = compactor
-	opts.ContextLimit = 1200
+	opts.Model.ContextLimit = 1200
 
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
@@ -189,7 +189,7 @@ func TestTheGateRunsOnTheStepSixPath(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Compactor = compactor
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")
@@ -215,7 +215,7 @@ func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Compactor = compactor
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 	// A window the run cannot answer in, so the gate's budget check
 	// stops it on the resumed path.
 	opts.MaxTurns = 5
@@ -253,7 +253,7 @@ func TestTheCompactingStateIsCancelledByAnInterrupt(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Compactor = compactor
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {

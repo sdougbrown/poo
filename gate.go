@@ -111,7 +111,7 @@ gateLoop:
 		return gateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
 			Source: "hard_limit",
 			Text: fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token window",
-				s.estimatedInput(), int(s.opts.HardRatio*100), s.opts.ContextLimit),
+				s.estimatedInput(), int(s.opts.HardRatio*100), s.opts.Model.ContextLimit),
 		})}}
 	}
 
@@ -125,7 +125,7 @@ gateLoop:
 // overHardLimit reports that the estimated input is at or above the hard
 // ratio of the context window.
 func (s *Session) overHardLimit() bool {
-	limit := s.opts.ContextLimit
+	limit := s.opts.Model.ContextLimit
 	if limit <= 0 {
 		return false
 	}
@@ -138,7 +138,7 @@ func (s *Session) overHardLimit() bool {
 // The notice fires at most once per run, and it fires again in a later
 // run only if the estimate has dropped back below the notice ratio.
 func (s *Session) maybeNotice(run *runState) {
-	limit := s.opts.ContextLimit
+	limit := s.opts.Model.ContextLimit
 	if limit <= 0 {
 		return
 	}
@@ -418,8 +418,7 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 // estimated input − 256). The value is always computed, never left to
 // the endpoint's default.
 func (s *Session) maxTokens() int {
-	info := ModelInfo{MaxOutput: s.opts.MaxOutput, ContextLimit: s.opts.ContextLimit}
-	return MaxTokens(info, s.estimatedInput())
+	return s.opts.Model.MaxTokens(s.estimatedInput())
 }
 
 // estimatedInput estimates the prompt tokens of the next request.

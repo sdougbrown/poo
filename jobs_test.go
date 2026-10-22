@@ -21,14 +21,13 @@ import (
 func jobOptions(t *testing.T, tr poo.ChatTransport, tool poo.Tool, sink poo.RecordSink) poo.Options {
 	t.Helper()
 	return poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"job": tool},
-		ToolOrder:    []string{"job"},
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{"job": tool},
+		ToolOrder:  []string{"job"},
+		Sink:       sink,
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
 	}
 }
 
@@ -385,12 +384,11 @@ func TestNewDoesNotMutateTheCallersTools(t *testing.T) {
 	tools := map[string]poo.Tool{"job": tool}
 	order := []string{"job"}
 	opts := poo.Options{
-		Transport:    scripted([]fakeResponse{{text: "hi"}}),
-		Tools:        tools,
-		ToolOrder:    order,
-		SessionID:    "s1",
-		ModelID:      "m",
-		ContextLimit: 32768,
+		Transport: scripted([]fakeResponse{{text: "hi"}}),
+		Tools:     tools,
+		ToolOrder: order,
+		SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "m", ContextLimit: 32768},
 	}
 	s1, err := poo.New(opts)
 	if err != nil {
@@ -454,14 +452,13 @@ func TestANeverToolKeepsItsOwnBackgroundArgument(t *testing.T) {
 	})
 	tool := &ownBackgroundTool{}
 	opts := poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"own": tool},
-		ToolOrder:    []string{"own"},
-		Sink:         &recordingSink{},
-		SessionID:    "s1",
-		ModelID:      "m",
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{"own": tool},
+		ToolOrder:  []string{"own"},
+		Sink:       &recordingSink{},
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "m", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
 	}
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "go"); err != nil {

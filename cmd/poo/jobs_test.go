@@ -151,13 +151,12 @@ func TestTheOneShotPrintsTheLastRunsAnswer(t *testing.T) {
 		pootest.Turn{Text: "woken answer"},
 	)
 	s, err := poo.New(poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"job": tool},
-		ToolOrder:    []string{"job"},
-		ContextLimit: 32768,
-		SessionID:    "s1",
-		ModelID:      "m",
-		MaxTurns:     1,
+		Transport: tr,
+		Tools:     map[string]poo.Tool{"job": tool},
+		ToolOrder: []string{"job"},
+		Model:     poo.ModelInfo{ContextLimit: 32768, ModelID: "m"},
+		SessionID: "s1",
+		MaxTurns:  1,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -30,15 +30,14 @@ func TestSessionCloseLeavesNoDescendant(t *testing.T) {
 			)
 			sink := pootest.NewSink()
 			s, err := poo.New(poo.Options{
-				Transport:    tr,
-				Tools:        map[string]poo.Tool{"bash": tool},
-				ToolOrder:    []string{"bash"},
-				Sink:         sink,
-				SessionID:    "s1",
-				ModelID:      "test-model",
-				ContextLimit: 32768,
-				WorkingDir:   dir,
-				Env:          os.Environ(),
+				Transport:  tr,
+				Tools:      map[string]poo.Tool{"bash": tool},
+				ToolOrder:  []string{"bash"},
+				Sink:       sink,
+				SessionID:  "s1",
+				Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+				WorkingDir: dir,
+				Env:        os.Environ(),
 			})
 			if err != nil {
 				t.Fatalf("building the session: %v", err)

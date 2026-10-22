@@ -309,8 +309,7 @@ func testOptions(t *testing.T, tr poo.ChatTransport, tool *echoTool, sink poo.Re
 		ToolOrder:    []string{"echo"},
 		Sink:         sink,
 		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
 		SystemPrompt: "the system prompt",
 		WorkingDir:   t.TempDir(),
 	}

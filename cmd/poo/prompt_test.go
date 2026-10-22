@@ -38,15 +38,14 @@ func sessionPromptWith(t *testing.T, modelID string, toolSpecs []poo.ToolSpec, t
 	t.Helper()
 	tr := pootest.NewTransport(pootest.Turn{Text: "done"})
 	s, err := poo.New(poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"bash": bash.New(), "read": read.New()},
-		ToolOrder:    []string{"bash", "read"},
-		SessionID:    "s1",
-		ModelID:      modelID,
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
-		Env:          os.Environ(),
-		ToolsMode:    toolsMode,
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{"bash": bash.New(), "read": read.New()},
+		ToolOrder:  []string{"bash", "read"},
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: modelID, ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
+		Env:        os.Environ(),
+		ToolsMode:  toolsMode,
 	}, poo.WithPrompt(systemPrompt(modelID, toolSpecs, toolsMode, project)))
 	if err != nil {
 		t.Fatalf("building the session: %v", err)
@@ -143,14 +142,13 @@ func TestTheTextModePromptIsTheContract(t *testing.T) {
 func TestThePromptIsTheSameEveryTime(t *testing.T) {
 	tr := pootest.NewTransport(pootest.Turn{Text: "one"}, pootest.Turn{Text: "two"})
 	s, err := poo.New(poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"bash": bash.New(), "read": read.New()},
-		ToolOrder:    []string{"bash", "read"},
-		SessionID:    "s1",
-		ModelID:      "gemma4",
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
-		Env:          os.Environ(),
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{"bash": bash.New(), "read": read.New()},
+		ToolOrder:  []string{"bash", "read"},
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "gemma4", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
+		Env:        os.Environ(),
 	}, poo.WithPrompt(systemPrompt("gemma4", testTools(), "native", "")))
 	if err != nil {
 		t.Fatalf("building the session: %v", err)

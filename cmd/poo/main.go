@@ -202,12 +202,17 @@ func runRun(args []string) int {
 		defer cancel()
 	}
 
+	// The descriptor of the model the run talks to. The transport and
+	// the session read it, so the flags name the model in one place.
+	model := o.modelInfo()
+
 	transport := openai.New(openai.Config{
 		BaseURL:         o.baseURL,
 		Model:           o.modelID,
 		APIKey:          apiKey,
 		ToolsMode:       o.toolsMode,
 		ReasoningEffort: o.reasoningEffort,
+		Info:            model,
 	})
 
 	// The executor is chosen before the session starts: a session that
@@ -274,20 +279,17 @@ func runRun(args []string) int {
 	}
 
 	sess, err := poo.New(poo.Options{
-		Transport: transport,
-		Tools:     tools,
-		ToolOrder: toolOrder,
-		Sink:      log,
-		SessionID: sessionID,
-		ModelID:   o.modelID,
-
-		ContextLimit: o.contextLimit,
-		MaxOutput:    o.maxOutput,
-		MaxTurns:     o.maxTurns,
-		WorkingDir:   absWorkDir,
-		Env:          childEnv,
-		Settings:     settings,
-		ToolsMode:    o.toolsMode,
+		Transport:  transport,
+		Tools:      tools,
+		ToolOrder:  toolOrder,
+		Sink:       log,
+		SessionID:  sessionID,
+		Model:      model,
+		MaxTurns:   o.maxTurns,
+		WorkingDir: absWorkDir,
+		Env:        childEnv,
+		Settings:   settings,
+		ToolsMode:  o.toolsMode,
 
 		ReasoningEffort: o.reasoningEffort,
 		// The plan makes handoff the command's default strategy: a
@@ -397,6 +399,31 @@ func loggedBaseURL(raw string) string {
 	}
 	u.User = nil
 	return u.String()
+}
+
+// modelInfo builds the descriptor of the model the run talks to.
+//
+// The flags name the model the endpoint serves: the identifier it knows
+// it by, the window it has, the ceiling it writes, how the run asks it
+// for tool calls and how its reasoning is controlled.
+//
+// The API is the Chat Completions API, because it is the only one the
+// transport speaks.
+func (o runOptions) modelInfo() poo.ModelInfo {
+	info := poo.ModelInfo{
+		ModelID:      o.modelID,
+		API:          poo.APIChatCompletions,
+		Ops:          []poo.Op{poo.OpChat},
+		ContextLimit: o.contextLimit,
+		MaxOutput:    o.maxOutput,
+		Tools:        poo.ToolCalling{Mode: poo.ToolsMode(o.toolsMode)},
+	}
+	if o.reasoningEffort != "" {
+		// The flag names an effort level, and the effort level is what
+		// the model takes.
+		info.Reasoning = poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort}
+	}
+	return info
 }
 
 // validate checks the flags and the prompt.
