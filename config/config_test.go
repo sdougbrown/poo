@@ -100,7 +100,6 @@ session:
     max_sessions: 500
 `
 
-
 // theTOML is the same settings in TOML.
 const theTOML = `
 version = 1

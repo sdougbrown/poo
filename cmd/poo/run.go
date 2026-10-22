@@ -115,9 +115,14 @@ func runRun(args []string) int {
 		return 2
 	}
 
+	overrides, err := o.overrides()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 2
+	}
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
-		Overrides:      o.overrides(),
+		Overrides:      overrides,
 		WorkingDir:     workDir,
 		DefaultProfile: defaultProfile,
 		Tools:          linkedTools(),

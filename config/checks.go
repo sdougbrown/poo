@@ -91,17 +91,17 @@ func (s *Settings) checkAvailability() error {
 		case !status.Enabled:
 			challenge := Challenge(name, fields, conditions, SettingsFields{})
 			return &Error{
-				Code:     CodeUnavailable,
-				Field:    path,
-				Message:  "the settings do not allow this field here",
+				Code:      CodeUnavailable,
+				Field:     path,
+				Message:   "the settings do not allow this field here",
 				Challenge: challenge.Explanations,
 			}
 		case !status.Fair:
 			challenge := Challenge(name, fields, conditions, SettingsFields{})
 			return &Error{
-				Code:     CodeInvalid,
-				Field:    path,
-				Message:  "the settings do not allow this value",
+				Code:      CodeInvalid,
+				Field:     path,
+				Message:   "the settings do not allow this value",
 				Challenge: challenge.Explanations,
 			}
 		}

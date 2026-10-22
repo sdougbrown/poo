@@ -48,9 +48,14 @@ func runPrompt(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
 		return 1
 	}
+	overrides, err := o.overrides()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
+		return 2
+	}
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
-		Overrides:      o.overrides(),
+		Overrides:      overrides,
 		WorkingDir:     workDir,
 		DefaultProfile: defaultProfile,
 		Tools:          linkedTools(),

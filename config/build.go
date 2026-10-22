@@ -317,6 +317,7 @@ func resolveProfiles(opts BuildOptions) []poo.Profile {
 	}
 	return out
 }
+
 // CatalogSettings returns the catalog's view of the settings.
 //
 // The catalog reads the endpoints, the models, the roles and the
@@ -611,19 +612,26 @@ func (r *Runtime) resolveAskers(opts BuildOptions, named []string) ([]perm.Asker
 	if len(names) == 0 {
 		names = opts.Askers
 	}
-	decider, err := r.DeciderModel()
-	if err != nil {
-		// A chain that names the decide asker without a decider is a
-		// failure the settings check already caught.
-		if len(named) == 0 {
-			return nil, nil
-		}
-		return nil, err
-	}
+	decider, deciderErr := r.DeciderModel()
 	var askers []perm.Asker
 	for _, name := range names {
 		switch name {
 		case "decide":
+			if deciderErr != nil {
+				if len(named) > 0 {
+					// The settings name the decide asker and no
+					// decider model is configured: the ask would
+					// wait for an answer that cannot come.
+					return nil, &Error{
+						Code:    CodeUnavailable,
+						Field:   "permission.askers",
+						Message: "the decide asker needs a decider model: roles.decider names one",
+					}
+				}
+				// The binary's own chain asks the decider, and there
+				// is no decider: the chain is the one the binary has.
+				continue
+			}
 			asker, err := r.newDeciderAsker(decider)
 			if err != nil {
 				return nil, err
@@ -878,7 +886,6 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 // httpClient is the client the transports use. It is nil unless the
 // build named one.
 var _ = http.DefaultClient
-
 
 // Decider returns the decision model and the decider that asks it.
 //

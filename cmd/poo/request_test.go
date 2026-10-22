@@ -73,8 +73,8 @@ roles:
 	flagsRequest := fromFlags.requests[0]
 	settingsRequest := fromSettings.requests[0]
 	for _, key := range []string{"model", "messages", "tools", "max_tokens", "stream"} {
-		flagsValue, _ := flagsRequest[key]
-		settingsValue, _ := settingsRequest[key]
+		flagsValue := flagsRequest[key]
+		settingsValue := settingsRequest[key]
 		if fmt.Sprint(flagsValue) != fmt.Sprint(settingsValue) {
 			t.Errorf("the %q of the request differs:\nflags:    %v\nsettings: %v",
 				key, flagsValue, settingsValue)

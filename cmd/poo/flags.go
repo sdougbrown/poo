@@ -62,18 +62,25 @@ func (f *sharedFlags) settings() (*config.Settings, error) {
 }
 
 // overrides returns the overrides the flags make.
-func (f *sharedFlags) overrides() config.Overrides {
+//
+// The appended prompt may name a file, so the overrides are read and
+// the failure is the caller's.
+func (f *sharedFlags) overrides() (config.Overrides, error) {
+	appended, err := f.appendedPrompt()
+	if err != nil {
+		return config.Overrides{}, err
+	}
 	overrides := config.Overrides{
 		Profile:             f.profile,
 		PermissionUnmatched: f.permissionUnmatched,
 		SessionDir:          f.sessionDir,
 		SystemPrompt:        f.systemPrompt,
-		AppendSystemPrompt:  f.appendSystemPrompt,
+		AppendSystemPrompt:  appended,
 	}
 	if f.ephemeral {
 		overrides.SessionMode = "ephemeral"
 	}
-	return overrides
+	return overrides, nil
 }
 
 // appendedPrompt returns the text the --append-system-prompt flag

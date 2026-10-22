@@ -179,7 +179,11 @@ func (o *sessionsOptions) openStore() (*session.FileStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir, err := config.SessionDirectory(settings, o.overrides())
+	overrides, err := o.overrides()
+	if err != nil {
+		return nil, err
+	}
+	dir, err := config.SessionDirectory(settings, overrides)
 	if err != nil {
 		return nil, err
 	}
