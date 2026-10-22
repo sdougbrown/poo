@@ -25,7 +25,11 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 	ctx := s.activityContext(run)
 	counts := s.repeatCountFor(handle)
 	info := ToolCallInfo{
-		Spec:            s.toolSpec(tool),
+		// The spec is the one the model was offered: a background-capable
+		// tool's schema carries the background argument in it, so a hook
+		// that validates arguments against the advertised schema sees
+		// the same shape the call has.
+		Spec:            s.toolSpecFor(tool),
 		Prepared:        prepared,
 		Handle:          handle,
 		RepeatCount:     counts.exact,
@@ -54,15 +58,6 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 		}
 	}
 	return ToolDecision{Allowed: true}, nil
-}
-
-// toolSpec returns a tool's description.
-func (s *Session) toolSpec(name string) ToolSpec {
-	tool, ok := s.opts.Tools[name]
-	if !ok {
-		return ToolSpec{Name: name}
-	}
-	return tool.Spec()
 }
 
 // repeatCountFor returns the repeat counts of one call.

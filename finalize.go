@@ -170,6 +170,12 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// The dropped inputs are reported after the settle event, so the
 	// client learns the run's outcome first.
 	s.dropUndelivered(run, undelivered, reason)
+	// The run's own result carries the same outcome the waiters got:
+	// the delivery notes and the running jobs were added after the
+	// commit point, and the store error may have remapped the reason.
+	s.mu.Lock()
+	run.result = Result{Reason: reason, Detail: detail, Turns: turns}
+	s.mu.Unlock()
 	s.wakeWaiters(run, Result{Reason: reason, Detail: detail, Turns: turns})
 	// A result that was queued while the run was settling is handled
 	// here: the session wakes with it, or holds it.

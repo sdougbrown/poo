@@ -322,9 +322,5 @@ func (s *Session) observeUsage(report *UsageReport, requestChars int) {
 //
 // The caller holds the session's lock.
 func (s *Session) historyCharsLocked() int {
-	chars := 0
-	for _, m := range s.history {
-		chars += estimateMessageChars(m)
-	}
-	return chars
+	return historyChars(s.history)
 }

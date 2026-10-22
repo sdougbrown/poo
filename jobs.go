@@ -314,8 +314,8 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	if err != nil {
 		s.mu.Lock()
 		run.jobStarts--
-		s.mu.Unlock()
 		s.signalWorkLocked(run)
+		s.mu.Unlock()
 		s.removeJobLocked(jobID)
 		cancel(errFinalizing)
 		if errors.Is(err, errDeliveryAbandoned) || winding {

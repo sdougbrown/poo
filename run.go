@@ -130,8 +130,10 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	})
 
 	// The system prompt is the first thing the model sees, and it is
-	// frozen for the length of the run.
-	if s.opts.SystemPrompt != "" {
+	// frozen for the length of the run. The history persists across a
+	// session's runs, so the prompt is appended once: a woken run
+	// reuses the copy the first run put there.
+	if s.opts.SystemPrompt != "" && !s.hasSystemMessage() {
 		msg := NewTextMessage(RoleSystem, s.opts.SystemPrompt)
 		msg.Origin = OriginSystem
 		s.appendMessages(msg)
@@ -241,6 +243,21 @@ func (s *Session) settleCandidates(run *runState, cands []candidate) []candidate
 		return nil
 	}
 	return []candidate{newCandidate(ReasonEndTurn, SettleDetail{Source: "end_turn"})}
+}
+
+// hasSystemMessage reports that the history already carries the
+// session's system prompt.
+//
+// The caller must not hold the session's lock.
+func (s *Session) hasSystemMessage() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.history {
+		if m.Role == RoleSystem {
+			return true
+		}
+	}
+	return false
 }
 
 // startDurationTimer starts the run's wall-clock budget.
@@ -764,39 +781,33 @@ var errDeliveryAbandoned = errors.New("poo: the delivery was abandoned")
 
 // writeDelivery writes a record for an input's delivery.
 //
-// Unlike write, a cancellation from the run's finalization abandons the
-// write instead of breaking the session: the delivery is in-flight work
-// that finalization step 3 may abandon.
+// The write policy is the appendRecord one; what is different is the
+// abandonment rule: a delivery is in-flight work that finalization step
+// 3 may abandon, so a write the run settled around is reported as
+// abandoned instead of breaking the session.
 func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) error {
 	if s.opts.Sink == nil {
 		return nil
 	}
 	s.mu.Lock()
-	if s.sunk {
-		s.mu.Unlock()
+	broken := s.sunk
+	s.mu.Unlock()
+	if broken {
 		return errors.New("poo: the session store is broken")
 	}
-	abandoned := run.committed || run.finalizing || ctx.Err() != nil
-	s.mu.Unlock()
-	if abandoned {
+	if run.committed || run.finalizing || ctx.Err() != nil {
 		return errDeliveryAbandoned
 	}
 	wctx, cancel := context.WithTimeout(ctx, recordWriteBudget)
 	defer cancel()
-	if err := s.opts.Sink.Append(wctx, rec); err != nil {
+	return s.appendRecord(wctx, rec, nil, func() (bool, error) {
 		s.mu.Lock()
-		abandoned := run.committed || run.finalizing || ctx.Err() != nil
-		if !abandoned {
-			s.sunk = true
-			s.broken = true
+		defer s.mu.Unlock()
+		if run.committed || run.finalizing || ctx.Err() != nil {
+			return true, errDeliveryAbandoned
 		}
-		s.mu.Unlock()
-		if abandoned {
-			return errDeliveryAbandoned
-		}
-		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
-	}
-	return nil
+		return false, nil
+	})
 }
 
 // finishDelivery releases a delivered input's in-flight claim.

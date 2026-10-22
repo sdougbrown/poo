@@ -442,7 +442,6 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		jobQueued:   make(chan struct{}, 1),
 	}
 	s.est.charsPerToken = CharsPerToken
-	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
 
 	// The job tools are the core's own, and they are registered
 	// whenever a tool may run in the background.
@@ -469,6 +468,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 			return nil, &ErrSessionInit{Cause: err}
 		}
 	}
+	// The jobs' context is created after every fallible step, so a
+	// construction that fails has no cancellation to leak.
+	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
 	return s, nil
 }
 
@@ -739,7 +741,7 @@ func (s *Session) markBroken() {
 func (s *Session) write(ctx context.Context, rec Record) error {
 	wctx, cancel := recordContext(ctx)
 	defer cancel()
-	return s.appendRecord(wctx, rec, nil)
+	return s.appendRecord(wctx, rec, nil, nil)
 }
 
 // appendRecord appends one record under the context given.
@@ -748,7 +750,7 @@ func (s *Session) write(ctx context.Context, rec Record) error {
 // belongs to is sealed: a record the finalization ended at the seal, or
 // stopped waiting for, is abandoned, and its sink's refusal says nothing
 // about the store. A record that belongs to no run is never abandoned.
-func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runState) error {
+func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runState, abandoned func() (bool, error)) error {
 	if s.opts.Sink == nil {
 		return nil
 	}
@@ -760,6 +762,14 @@ func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runSt
 	s.mu.Unlock()
 
 	if err := s.opts.Sink.Append(ctx, rec); err != nil {
+		// A caller that owns the abandonment rule decides first: a write
+		// the run settled around is the caller's to report, and it does
+		// not break the session.
+		if abandoned != nil {
+			if isAbandoned, err := abandoned(); isAbandoned {
+				return err
+			}
+		}
 		if errors.Is(context.Cause(ctx), errCallRecordSealed) || s.sealedRun(sealedRun) {
 			return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
 		}
@@ -800,7 +810,7 @@ var errCallRecordSealed = errors.New("poo: the finalization sealed the call reco
 // a store failure: the run's outcome is already fixed.
 func (s *Session) writeCallRecord(run *runState, call *issuedCall, rec Record) error {
 	if call.recordCtx != nil {
-		return s.appendRecord(call.recordCtx, rec, run)
+		return s.appendRecord(call.recordCtx, rec, run, nil)
 	}
 	base := run.ctx
 	if base == nil {
@@ -808,7 +818,7 @@ func (s *Session) writeCallRecord(run *runState, call *issuedCall, rec Record) e
 	}
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(base), recordWriteBudget)
 	defer cancel()
-	return s.appendRecord(wctx, rec, run)
+	return s.appendRecord(wctx, rec, run, nil)
 }
 
 // recordWriteBudget bounds one record write or flush.

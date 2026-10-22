@@ -22,10 +22,7 @@ type estimator struct {
 
 // estimate returns the estimated number of prompt tokens of the view.
 func (e *estimator) estimate(history []Message) int {
-	chars := 0
-	for _, m := range history {
-		chars += estimateMessageChars(m)
-	}
+	chars := historyChars(history)
 	if !e.calibrated {
 		// Before the first usage report the estimate is the whole view
 		// at the starting ratio.
@@ -63,12 +60,20 @@ func (e *estimator) observe(inputTokens int, chars int) {
 // A compaction changes the view, and the estimate is recomputed over the
 // whole view. The next usage report replaces it.
 func (e *estimator) rebase(history []Message) {
+	chars := historyChars(history)
+	e.baselineChars = chars
+	e.baseline = int(float64(chars) / e.ratio())
+}
+
+// historyChars returns the serialized size of a view: the estimate
+// every view-size measurement in the session goes through, so a change
+// to the per-message accounting lands everywhere at once.
+func historyChars(history []Message) int {
 	chars := 0
 	for _, m := range history {
 		chars += estimateMessageChars(m)
 	}
-	e.baselineChars = chars
-	e.baseline = int(float64(chars) / e.ratio())
+	return chars
 }
 
 // ratio returns the characters-per-token ratio, never zero.

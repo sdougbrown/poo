@@ -1316,3 +1316,55 @@ func TestHasToolCallIgnoresASkippedCall(t *testing.T) {
 		t.Errorf("the run settled %q, want output_truncated: a skipped call is an error result", res.Reason)
 	}
 }
+
+// TestASecondRunDoesNotRepeatTheSystemPrompt covers the plan's rule
+// that the system prompt is the first thing the model sees, once: the
+// history persists across a session's runs, and the prompt is appended
+// a single time, so no run's request carries it twice.
+func TestASecondRunDoesNotRepeatTheSystemPrompt(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the first answer"},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.SystemPrompt = "the contract"
+
+	s := newTestSession(t, opts)
+	for _, prompt := range []string{"the first thing", "the second thing"} {
+		if _, err := s.Prompt(context.Background(), prompt); err != nil {
+			t.Fatalf("starting the run: %v", err)
+		}
+		if _, err := s.Wait(context.Background()); err != nil {
+			t.Fatalf("waiting for the run: %v", err)
+		}
+	}
+
+	requests := tr.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("the session made %d requests, want 2", len(requests))
+	}
+	for i, req := range requests {
+		systems := 0
+		for _, m := range req.Messages {
+			if m.Role == poo.RoleSystem {
+				systems++
+			}
+		}
+		if systems != 1 {
+			t.Errorf("request %d carries %d system messages, want 1", i+1, systems)
+		}
+	}
+	// The log holds the system prompt once, with the run that first
+	// sent it.
+	systems := 0
+	for _, rec := range sink.allRecords() {
+		if m, ok := rec.(*poo.MessageRecord); ok && m.Role == poo.RoleSystem {
+			systems++
+		}
+	}
+	if systems != 1 {
+		t.Errorf("the log holds %d system message records, want 1", systems)
+	}
+}
