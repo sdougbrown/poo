@@ -57,8 +57,16 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// Step 1: the input check. A run that would settle naturally can
 	// still take a queued input; a run that is settling because of a
 	// failure or a limit cannot.
-	if resumable && s.abandonFinalize(run) {
-		return Result{}, true
+	//
+	// The check waits for the acceptances that are still being written,
+	// so an input Send accepted while the run was open is seen here, and
+	// the run is reopened for it, instead of being sealed and reported
+	// dropped.
+	if resumable {
+		s.awaitInputAcceptances(run)
+		if s.abandonFinalize(run) {
+			return Result{}, true
+		}
 	}
 
 	// The queued client messages that will never be delivered are
@@ -184,6 +192,46 @@ func (s *Session) actOnQueuedJobResults() {
 	s.handleIdleJobResults()
 }
 
+// awaitInputAcceptances waits, bounded by the record-write budget, for
+// the input acceptances that are still being written.
+//
+// Send registers an input and its acceptance claim under one lock, and
+// releases the claim only once the input.queued record is written, so a
+// finalization that finds no claim left finds every input Send accepted
+// before it. Waiting here is what keeps a natural stop from sealing an
+// input Send is about to accept: the check sees the accepted input and
+// abandons, and the resumed run delivers it.
+//
+// No claim can be added while the wait runs: Send refuses every input
+// once the run is finalizing, and the refusal is taken under the same
+// lock that registers a claim.
+func (s *Session) awaitInputAcceptances(run *runState) {
+	s.mu.Lock()
+	waiting := len(run.accepting) > 0
+	s.mu.Unlock()
+	if !waiting {
+		return
+	}
+	// The seam the wait is tested at: the finalization has an acceptance
+	// to wait for, and the queues have not been looked at yet.
+	s.sealRaceHook("acceptance")
+	deadline := time.After(recordWriteBudget)
+	for {
+		s.mu.Lock()
+		if len(run.accepting) == 0 {
+			s.mu.Unlock()
+			return
+		}
+		done := run.workDone
+		s.mu.Unlock()
+		select {
+		case <-done:
+		case <-deadline:
+			return
+		}
+	}
+}
+
 // abandonFinalize reports whether the finalization is abandoned because
 // a queued input can still be delivered.
 //
@@ -246,14 +294,18 @@ func (s *Session) resume(run *runState) ([]candidate, bool) {
 	return s.loop(run), true
 }
 
-// collectUndelivered takes the queued client messages that will never
-// be delivered.
+// collectUndelivered makes the run's input decision and takes the queued
+// client messages that will never be delivered.
+//
+// The decision and the collection are one step under the lock, so an
+// acceptance that lands afterwards is handed to the seal by its own Send.
 //
 // The inputs are dropped and reported with the reason the run settled
 // for. A queued job result stays on the session's job queue and is
 // never dropped here: settling never drops a job result.
 func (s *Session) collectUndelivered(run *runState) []UndeliveredInput {
 	s.mu.Lock()
+	run.inputsClosed = true
 	var pending []queuedInput
 	keptSteer := s.steerQueue[:0]
 	for _, input := range s.steerQueue {
@@ -262,7 +314,8 @@ func (s *Session) collectUndelivered(run *runState) []UndeliveredInput {
 			continue
 		}
 		// An entry whose acceptance is still in flight is not accepted
-		// yet: its own Send either accepts it too late or takes it back.
+		// yet: its own Send finds the decision made and hands it to the
+		// seal, which reports it.
 		keptSteer = append(keptSteer, input)
 	}
 	s.steerQueue = keptSteer
@@ -696,10 +749,14 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	// and the input's fate is then the finalization's to write.
 	owned := s.finishInputAcceptanceLocked(run, input)
 	committed := run.committed
-	late := committed || run.finalizing || run.sealed
+	// The run's input decision is the fact that closes the queues, and
+	// the seal and the commit point follow it. Until it is made, the
+	// entry stays drainable: a natural stop that is still waiting for the
+	// acceptance sees it and abandons, and the resumed run delivers it.
+	late := run.inputsClosed || run.sealed || committed
 	if late && accepted && owned {
-		// The run settled while the record was in flight: the input is
-		// accepted, and its fate is dropped.
+		// The decision was made while the record was in flight: the
+		// input is accepted, and its fate is dropped.
 		if s.removeQueuedInputLockedBool(input) {
 			run.abandonedInputs = append(run.abandonedInputs, input)
 		}

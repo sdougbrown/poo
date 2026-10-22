@@ -217,6 +217,11 @@ type runState struct {
 	// written. The finalization waits for them, and reports the ones it
 	// seals as undelivered.
 	accepting []queuedInput
+	// inputsClosed reports that the finalization has made the run's input
+	// decision: the queues have been looked at, so an input whose
+	// acceptance lands from now on can no longer be delivered. Send hands
+	// such an input to the finalization, which reports it dropped.
+	inputsClosed bool
 	// delivering are the inputs taken from the queues whose delivery
 	// records are still being written, in delivery order. The
 	// finalization waits for them, and reports the ones it seals as
