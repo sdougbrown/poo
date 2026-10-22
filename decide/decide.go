@@ -78,8 +78,8 @@ type Kind interface {
 
 // Bool asks a yes-or-no question.
 //
-// The two descriptions say what each answer means, so the model is not
-// left to guess.
+// The descriptions say what each answer means, so the model is not left
+// to guess. One is enough: validation asks for at least one of the two.
 type Bool struct {
 	// True describes what "yes" means.
 	True string `json:"true"`
@@ -298,7 +298,7 @@ func (q Question) Validate() error {
 
 // Keys returns the answer keys the question's probabilities are keyed by.
 func (q Question) Keys() []string {
-	if q.Kind == nil {
+	if q.Kind == nil || isNilKind(q.Kind) {
 		return nil
 	}
 	return q.Kind.keys()

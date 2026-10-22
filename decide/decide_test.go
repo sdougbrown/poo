@@ -53,6 +53,16 @@ func TestAQuestionIsValidatedBeforeAnythingIsSent(t *testing.T) {
 			}}},
 		},
 		{
+			name: "a bool with no descriptions",
+			qs:   []decide.Question{{ID: "q1", Instructions: "is it?", Kind: decide.Bool{}}},
+		},
+		{
+			name: "a score with an empty level name",
+			qs: []decide.Question{{ID: "q1", Instructions: "how much?", Kind: decide.Score{
+				Levels: []string{"", "b"},
+			}}},
+		},
+		{
 			name: "too few levels",
 			qs: []decide.Question{{ID: "q1", Instructions: "how much?", Kind: decide.Score{
 				Levels: manyLevels(1),
@@ -156,6 +166,16 @@ func TestABadDistributionIsADeferral(t *testing.T) {
 			name: "a missing key",
 			answers: []decide.Answer{
 				{ID: "q1", Probabilities: map[string]float64{"yes": 1}},
+			},
+		},
+		{
+			// The length check passes (two entries, two keys), so this
+			// case is the only one that reaches the per-key check: one
+			// required key absent, one key the question never asked
+			// about.
+			name: "a missing key beside an extra key",
+			answers: []decide.Answer{
+				{ID: "q1", Probabilities: map[string]float64{"yes": 1, "bogus": 0}},
 			},
 		},
 		{
@@ -277,6 +297,37 @@ func TestTheNilStateHashesLikeANullJSONValue(t *testing.T) {
 	}
 }
 
+// TestAnUnencodableStateStillHashes covers the fallback: a state the
+// encoder cannot render still gets an id. The rendering is the value's
+// fmt.Sprintf output, so a stable value (a complex number) hashes
+// stably, and an address-carrying value (a channel) at least hashes to
+// something non-empty.
+func TestAnUnencodableStateStillHashes(t *testing.T) {
+	if got := decide.StateHash(make(chan int)); got == "" {
+		t.Fatal("an unencodable state hashed to the empty string")
+	}
+	first := decide.StateHash(complex(1, 2))
+	second := decide.StateHash(complex(1, 2))
+	if first == "" {
+		t.Fatal("an unencodable state hashed to the empty string")
+	}
+	if first != second {
+		t.Errorf("two renders of the same unencodable state hashed to %q and %q", first, second)
+	}
+}
+
+// TestAQuestionWithoutAKindHasNoKeys covers the nil-kind guards: a
+// question with no kind has no keys, and a typed nil kind is guarded the
+// way Validate and MarshalJSON guard it, not a panic.
+func TestAQuestionWithoutAKindHasNoKeys(t *testing.T) {
+	if got := (decide.Question{ID: "q1"}).Keys(); got != nil {
+		t.Errorf("a kind-less question returned keys %v, want none", got)
+	}
+	if got := (decide.Question{ID: "q2", Kind: (*decide.Bool)(nil)}).Keys(); got != nil {
+		t.Errorf("a typed-nil kind returned keys %v, want none", got)
+	}
+}
+
 // TestTheRecordedOutcomeSplitsInvalidFromDeferred covers the recorded
 // outcome: a caller bug is recorded as invalid with no error text, and
 // any other failure is recorded as a deferral that carries the error.
@@ -307,6 +358,58 @@ func TestTheRecordedOutcomeSplitsInvalidFromDeferred(t *testing.T) {
 	}
 	if sink2.records[0].Error != "the endpoint was unreachable" {
 		t.Errorf("the failed call recorded the error %q, want the decider's error", sink2.records[0].Error)
+	}
+}
+
+// TestASuccessIsRecordedAsOKWithItsAnswers covers the success branch: a
+// call that answers is recorded as ok, and the record carries the
+// answers the decider returned.
+func TestASuccessIsRecordedAsOKWithItsAnswers(t *testing.T) {
+	sink := &recordingSink{}
+	want := []decide.Answer{{ID: "q1", Probabilities: map[string]float64{"yes": 1, "no": 0}}}
+	recorder := decide.Recorded(decide.DeciderFunc(func(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+		return want, nil
+	}), sink, "the caller")
+	answers, err := recorder.Decide(context.Background(), nil, "", nil)
+	if err != nil {
+		t.Fatalf("deciding: %v", err)
+	}
+	if got := sink.records[0].Outcome; got != decide.OutcomeOK {
+		t.Errorf("the successful call was recorded as %q, want %q", got, decide.OutcomeOK)
+	}
+	if sink.records[0].Error != "" {
+		t.Errorf("the successful call recorded the error %q, want none", sink.records[0].Error)
+	}
+	if len(answers) != len(want) || answers[0].ID != want[0].ID {
+		t.Errorf("the successful call returned %v, want the decider's answers", answers)
+	}
+	if len(sink.records[0].Answers) != len(want) || sink.records[0].Answers[0].ID != want[0].ID {
+		t.Errorf("the record holds answers %v, want the decider's answers", sink.records[0].Answers)
+	}
+}
+
+// TestASinkThatRefusesARecordDoesNotFailTheDecision covers the recording
+// contract: a sink that refuses the record does not change the answer
+// the caller gets or the error the caller sees.
+func TestASinkThatRefusesARecordDoesNotFailTheDecision(t *testing.T) {
+	writes := 0
+	broken := decide.SinkFunc(func(ctx context.Context, rec decide.Record) error {
+		writes++
+		return errors.New("the log is full")
+	})
+	want := []decide.Answer{{ID: "q1"}}
+	recorder := decide.Recorded(decide.DeciderFunc(func(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+		return want, nil
+	}), broken, "the caller")
+	answers, err := recorder.Decide(context.Background(), nil, "", nil)
+	if err != nil {
+		t.Fatalf("deciding: %v", err)
+	}
+	if writes != 1 {
+		t.Errorf("the sink was called %d times, want 1", writes)
+	}
+	if len(answers) != 1 || answers[0].ID != "q1" {
+		t.Errorf("the call returned %v, want the decider's answers", answers)
 	}
 }
 
