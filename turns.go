@@ -92,22 +92,3 @@ func (s *Session) spanForTurnLocked(turn int) (turnSpan, bool) {
 	}
 	return s.spans[turn-1], true
 }
-
-// turnSummaries returns the session's turn summaries.
-func (s *Session) turnSummaries() []TurnSummary {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.turnsLocked()
-}
-
-// turnsLocked returns the session's turn summaries.
-//
-// The caller holds the session's lock.
-func (s *Session) turnsLocked() []TurnSummary {
-	out := make([]TurnSummary, len(s.turns))
-	for i, t := range s.turns {
-		out[i] = t
-		out[i].Calls = append([]ToolCallSummary(nil), t.Calls...)
-	}
-	return out
-}

@@ -136,18 +136,21 @@ func TestTheReplacementIsAppliedAndTheOriginalsAreKept(t *testing.T) {
 			t.Errorf("the second request still holds the replaced turn: %q", m.Text())
 		}
 	}
-	// The store kept the original records.
-	if sink.count("message") < 3 {
-		t.Errorf("the log holds %d message records, want the originals", sink.count("message"))
-	}
+	// The store kept the original records: the result the compaction
+	// replaced is still in the log.
 	kept := false
-	for _, m := range sink.messages() {
-		if m.Origin == poo.OriginModel {
-			kept = true
+	for _, rec := range sink.allRecords() {
+		r, ok := rec.(*poo.ToolResultRecord)
+		if !ok {
+			continue
+		}
+		kept = true
+		if !strings.Contains(r.Text, "echoed") {
+			t.Errorf("the log's result holds %q, want the tool's own output", r.Text)
 		}
 	}
 	if !kept {
-		t.Error("the log holds no model message record")
+		t.Error("the log holds no tool result record: the compaction took the original")
 	}
 }
 
@@ -914,5 +917,75 @@ func TestAJobFinishingDuringTheCompactingIsNotInTheSnapshot(t *testing.T) {
 		if strings.Contains(m.Text(), "the job's output") {
 			t.Errorf("the compactor's snapshot holds the job's result: %q", m.Text())
 		}
+	}
+}
+
+// TestAJobHandleSurvivesTheCompaction covers the plan's rule: a job's
+// handle survives a compaction, and the job's result still reaches the
+// model.
+func TestAJobHandleSurvivesTheCompaction(t *testing.T) {
+	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
+	tool.SetResult("the job's output")
+	started := tool.Started()
+	compactor := &compactionCompactor{
+		should: afterTurns(1),
+		compaction: func(view poo.View) (poo.Compaction, error) {
+			// The compaction replaces the turn that started the job.
+			return poo.Compaction{
+				Strategy: "summarize",
+				Replace: &poo.RangeReplacement{
+					Cut:      poo.TurnRange{First: 1, Last: 1},
+					Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "the summary")},
+				},
+			}, nil
+		},
+	}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	opts := jobOptions(t, tr, tool, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-started
+	// The job finishes while the run is on its way.
+	tool.ReleaseAll()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	// The compaction really happened, and it replaced the turn that
+	// started the job.
+	if sink.count("compaction") != 1 {
+		t.Errorf("the log holds %d compaction records, want 1", sink.count("compaction"))
+	}
+	// The job's result reached the model, and the job's handle is
+	// still the one the job started with.
+	found := false
+	for _, m := range sink.messages() {
+		if m.Origin != poo.OriginJob {
+			continue
+		}
+		found = true
+		if !strings.Contains(m.Content[0].Text, "the job's output") {
+			t.Errorf("the job's message holds %q, want the job's output", m.Content[0].Text)
+		}
+	}
+	if !found {
+		t.Error("the log holds no job message: the job's result did not reach the model")
+	}
+	handles := 0
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolResultRecord); ok && r.Handle == "r1" {
+			handles++
+		}
+	}
+	if handles != 1 {
+		t.Errorf("the log holds %d results for r1, want 1", handles)
 	}
 }
