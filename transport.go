@@ -20,8 +20,11 @@ type ChatRequest struct {
 	// MaxTokens is the output-token ceiling for this request. It is always
 	// computed by the caller, never left to the endpoint default.
 	MaxTokens int
-	// OnAttempt is called for every attempt that failed and was tried
-	// again, so the caller can write the attempt to its record.
+	// OnAttempt is called for every attempt that failed, so the caller
+	// can write the attempt to its record.
+	//
+	// The attempt that ended the request is reported too, and the
+	// attempt says whether another one followed it.
 	//
 	// The call happens on the goroutine that reads the response, and
 	// the attempt is reported before the wait that follows it.

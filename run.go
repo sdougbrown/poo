@@ -1037,7 +1037,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 //
 // The attempts are written for the audit: a reader of the log sees what
 // the request tried and what every attempt failed with. The failure
-// that ended the request is in the run's settle record.
+// that ended the request is in the run's settle record as well.
 func (s *Session) reportAttempt(run *runState, turn int, attempt Attempt) {
 	rec := &ProviderAttempt{
 		RecordMeta: NewRecordMeta("provider.attempt"),
