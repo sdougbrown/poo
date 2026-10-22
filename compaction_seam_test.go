@@ -946,6 +946,13 @@ func TestAJobHandleSurvivesTheCompaction(t *testing.T) {
 	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
 	tool.SetResult("the job's output")
 	started := tool.Started()
+	// The second turn's tool holds the run until the job's result is
+	// queued, so the delivery is not a race.
+	release := make(chan struct{})
+	echo := &echoTool{result: "echoed", call: func(ctx context.Context) (poo.ToolResult, error) {
+		<-release
+		return poo.ToolResult{Text: "echoed"}, nil
+	}}
 	compactor := &compactionCompactor{
 		should: afterTurns(1),
 		compaction: func(view poo.View) (poo.Compaction, error) {
@@ -961,10 +968,13 @@ func TestAJobHandleSurvivesTheCompaction(t *testing.T) {
 	}
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
-	opts := jobOptions(t, tr, tool, sink)
+	opts := testOptions(t, tr, echo, sink)
+	opts.Tools["job"] = tool
+	opts.ToolOrder = []string{"echo", "job"}
 	opts.Compactor = compactor
 	s := newTestSession(t, opts)
 
@@ -972,8 +982,13 @@ func TestAJobHandleSurvivesTheCompaction(t *testing.T) {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-started
-	// The job finishes while the run is on its way.
+	// The compaction happens at the gate after the first turn, and the
+	// job is still running then.
+	waitFor(t, "the compaction to happen", func() bool { return sink.count("compaction") == 1 })
+	// The job finishes, and its result waits for the turn end.
 	tool.ReleaseAll()
+	waitFor(t, "the job's result to be queued", func() bool { return s.QueuedJobResults() > 0 })
+	close(release)
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
