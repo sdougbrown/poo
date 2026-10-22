@@ -24,19 +24,10 @@ import (
 // runOptions are the flags of `poo run`.
 type runOptions struct {
 	sharedFlags
+	endpointFlags
 	// permissionFallback is the decision when the asker chain is
 	// exhausted.
 	permissionFallback string
-	// baseURL is the endpoint's base URL.
-	baseURL string
-	// modelID is the model identifier.
-	modelID string
-	// contextLimit is the model's context window in tokens.
-	contextLimit int
-	// apiKeyEnv is the environment variable holding the API key.
-	apiKeyEnv string
-	// toolsMode is how the run asks for tool calls.
-	toolsMode string
 	// reasoningEffort is the reasoning_effort the run sends.
 	reasoningEffort string
 	// maxTurns is the turn ceiling.
@@ -63,12 +54,8 @@ type runOptions struct {
 // register adds the run flags to a flag set.
 func (o *runOptions) register(fs *flag.FlagSet) {
 	o.sharedFlags.register(fs)
+	o.endpointFlags.register(fs)
 	fs.StringVar(&o.permissionFallback, "permission-fallback", "", "The decision when the asker chain is exhausted: allow or deny")
-	fs.StringVar(&o.baseURL, "base-url", "", "The endpoint's base URL")
-	fs.StringVar(&o.modelID, "model-id", "", "The model identifier")
-	fs.IntVar(&o.contextLimit, "context-limit", 0, "The model's context window in tokens")
-	fs.StringVar(&o.apiKeyEnv, "api-key-env", "", "The environment variable holding the API key")
-	fs.StringVar(&o.toolsMode, "tools-mode", "", "native, text or auto")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "The reasoning_effort to send, for models that think only when asked")
 	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn ceiling")
 	fs.IntVar(&o.maxOutput, "max-output", 0, "The model's output-token ceiling")
@@ -324,29 +311,14 @@ func (o *runOptions) validate(rest []string) error {
 	default:
 		return errors.New("--permission-fallback must be allow or deny")
 	}
-	switch o.toolsMode {
-	case "", "native", "text", "auto":
-	default:
-		return fmt.Errorf("--tools-mode must be native, text or auto, not %q", o.toolsMode)
+	if err := o.endpointFlags.validate(); err != nil {
+		return err
 	}
 	if o.maxTurns < 0 {
 		return errors.New("--max-turns must not be negative")
 	}
 	if o.maxOutput < 0 {
 		return errors.New("--max-output must not be negative")
-	}
-	// The flags that name a model describe one model, so they are all
-	// or none of them.
-	named := o.baseURL != "" || o.modelID != "" || o.contextLimit > 0 || o.apiKeyEnv != "" || o.toolsMode != ""
-	if named {
-		switch {
-		case o.baseURL == "":
-			return errors.New("--base-url is required with --model-id")
-		case o.modelID == "":
-			return errors.New("--model-id is required with --base-url")
-		case o.contextLimit <= 0:
-			return errors.New("--context-limit is required and must be positive")
-		}
 	}
 	if len(rest) == 0 {
 		return errors.New("a prompt is required")
@@ -359,35 +331,7 @@ func (o *runOptions) validate(rest []string) error {
 // The flags come last: they change what the settings file says. A flag
 // that was not given changes nothing.
 func (o *runOptions) apply(settings *config.Settings) error {
-	if o.baseURL != "" {
-		name := o.modelID
-		if settings.Endpoints == nil {
-			settings.Endpoints = map[string]config.Endpoint{}
-		}
-		if settings.Models == nil {
-			settings.Models = map[string]config.Model{}
-		}
-		if settings.Roles == nil {
-			settings.Roles = map[string]string{}
-		}
-		settings.Endpoints[name] = config.Endpoint{
-			BaseURL:   o.baseURL,
-			APIKeyEnv: o.apiKeyEnv,
-		}
-		toolsMode := o.toolsMode
-		if toolsMode == "" {
-			toolsMode = string(poo.ToolsNative)
-		}
-		settings.Models[name] = config.Model{
-			Endpoint:     name,
-			ModelID:      o.modelID,
-			API:          string(poo.APIChatCompletions),
-			ToolsMode:    toolsMode,
-			Ops:          []string{string(poo.OpChat)},
-			ContextLimit: o.contextLimit,
-		}
-		settings.Roles[config.RoleChat] = name
-	}
+	o.endpointFlags.apply(settings)
 	if o.maxTurns > 0 {
 		settings.Limits.MaxTurns = o.maxTurns
 	}
@@ -406,26 +350,7 @@ func (o *runOptions) apply(settings *config.Settings) error {
 // The directory has to exist: a typo would otherwise create an empty
 // directory and run the task in it.
 func (o *runOptions) workingDirectory() (string, error) {
-	dir := o.workingDir
-	if dir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		dir = wd
-	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", fmt.Errorf("--working-dir %s: %w", abs, err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("--working-dir %s is not a directory", abs)
-	}
-	return abs, nil
+	return workingDirectory(o.workingDir)
 }
 
 // promptMutation returns the prompt the command adds.

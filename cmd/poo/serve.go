@@ -2,22 +2,18 @@ package main
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/compact/handoff"
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/perm"
-	"github.com/sdougbrown/poo/provider/openai"
+	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/session"
-	"github.com/sdougbrown/poo/tool/bash"
-	"github.com/sdougbrown/poo/tool/edit"
-	"github.com/sdougbrown/poo/tool/grep"
-	"github.com/sdougbrown/poo/tool/read"
 	"github.com/sdougbrown/poo/wire"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -29,26 +25,34 @@ Usage:
   poo serve [flags]
 
 Serve flags:
-  --base-url <url>       The endpoint's base URL, e.g. http://localhost:4000/v1
-  --model-id <id>        The model identifier
-  --context-limit <n>    The model's context window in tokens (required)
-  --api-key-env <var>    The environment variable holding the API key
-  --tools-mode <mode>    native (default), text or auto
-  --working-dir <dir>    The directory the tools work in (default: the current one)
-  --session-dir <dir>    The directory the session logs live in
-  --ephemeral            Keep the sessions in memory and write no files
+  --settings <file>            The settings file: JSON, TOML or YAML
+  --system-prompt <file>       The file holding the system prompt's base section
+  --append-system-prompt <t>   Text appended to the system prompt, or @file
+  --permission-unmatched <a>   What to do with a side-effecting call no rule covers
+  --session-dir <dir>          The directory the session files live in
+  --ephemeral                  Keep the sessions in memory and write no files
+  --profile <name>             The profile to run under: base, code or search
+  --base-url <url>             The endpoint's base URL, e.g. http://localhost:4000/v1
+  --model-id <id>              The model identifier
+  --context-limit <n>          The model's context window in tokens
+  --api-key-env <var>          The environment variable holding the API key
+  --tools-mode <mode>          native (default), text or auto
+  --working-dir <dir>          The directory the tools work in (default: the current one)
 `
 
 // serveOptions are the flags of `poo serve`.
 type serveOptions struct {
-	baseURL      string
-	modelID      string
-	contextLimit int
-	apiKeyEnv    string
-	toolsMode    string
-	workingDir   string
-	sessionDir   string
-	ephemeral    bool
+	sharedFlags
+	endpointFlags
+	// workingDir is the directory the tools work in.
+	workingDir string
+}
+
+// register adds the serve flags to a flag set.
+func (o *serveOptions) register(fs *flag.FlagSet) {
+	o.sharedFlags.register(fs)
+	o.endpointFlags.register(fs)
+	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
 }
 
 // runServe executes `poo serve`.
@@ -62,56 +66,72 @@ func runServe(args []string) int {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, serveUsage) }
 
 	var o serveOptions
-	fs.StringVar(&o.baseURL, "base-url", "", "The endpoint's base URL")
-	fs.StringVar(&o.modelID, "model-id", "", "The model identifier")
-	fs.IntVar(&o.contextLimit, "context-limit", 0, "The model's context window in tokens")
-	fs.StringVar(&o.apiKeyEnv, "api-key-env", "", "The environment variable holding the API key")
-	fs.StringVar(&o.toolsMode, "tools-mode", "native", "native, text or auto")
-	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
-	fs.StringVar(&o.sessionDir, "session-dir", "", "The directory the session logs live in")
-	fs.BoolVar(&o.ephemeral, "ephemeral", false, "Keep the sessions in memory and write no files")
-
+	o.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if o.baseURL == "" || o.modelID == "" || o.contextLimit <= 0 {
-		fmt.Fprint(os.Stderr, "poo serve: --base-url, --model-id and --context-limit are required\n")
+	if err := o.checkUnmatched(); err != nil {
+		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
+		return 2
+	}
+	if err := o.endpointFlags.validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
 		return 2
 	}
 
-	workDir := o.workingDir
-	if workDir == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-			return 1
-		}
-		workDir = wd
-	}
-	absWorkDir, err := filepath.Abs(workDir)
+	settings, err := o.settings()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-		return 1
+		return 2
 	}
-
-	sessionDir := o.sessionDir
-	if sessionDir == "" && !o.ephemeral {
-		sessionDir = defaultSessionDir()
+	o.endpointFlags.apply(settings)
+	workDir, err := workingDirectory(o.workingDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
+		return 2
 	}
-	if sessionDir != "" {
-		sessionDir, err = filepath.Abs(sessionDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-			return 1
-		}
-	}
-
-	factory, err := newServeFactory(o, absWorkDir, sessionDir)
+	overrides, err := o.overrides()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
 		return 2
 	}
 
+	// The client is the wire's own, and the server creates it when it
+	// starts. The asker chain is built with a client that learns it
+	// later.
+	client := &lateClient{}
+	build := config.BuildOptions{
+		Settings:       settings,
+		Overrides:      overrides,
+		WorkingDir:     workDir,
+		DefaultProfile: defaultProfile,
+		Tools:          linkedTools(),
+		Profiles:       linkedProfiles(),
+		Executors:      executorRegistry(),
+		// The command has a wire, so the chain asks the client. The
+		// decide asker is there only when the settings name a decider
+		// model.
+		Askers: []string{"wire"},
+		Wire:   client,
+		Build:  poo.BuildInfo{Name: "poo", Version: version},
+	}
+	runtime, err := config.Build(build)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
+		return 2
+	}
+	if runtime.Warning != "" {
+		fmt.Fprintf(os.Stderr, "poo serve: warning: %s\n", runtime.Warning)
+	}
+
+	factory := &serveFactory{
+		runtime:  runtime,
+		build:    build,
+		settings: settings,
+		workDir:  workDir,
+		client:   client,
+		runtimes: map[string]*config.Runtime{},
+	}
 	err = wire.Serve(wire.Options{
 		In:      os.Stdin,
 		Out:     os.Stdout,
@@ -129,410 +149,482 @@ func runServe(args []string) int {
 	return 0
 }
 
-// defaultSessionDir returns the directory the session logs live in.
-//
-// It is the state directory of the user, which is where a session that
-// outlives its run belongs.
-func defaultSessionDir() string {
-	dir, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(os.TempDir(), "poo-sessions")
-	}
-	return filepath.Join(dir, ".local", "state", "poo", "sessions")
-}
-
 // serveFactory builds the sessions `poo serve` serves.
 //
-// The settings arrive with the config package; until then the factory
-// takes the flags of `poo run` and builds the same session. The whole
-// wiring is in this file, so the swap is one function.
+// The settings arrive with the config package, and the runtime is what
+// they build: the profiles, the models, the policy and the options. The
+// factory turns a session's parameters into a session, and it is the
+// only place the wire's parameters meet the settings.
 type serveFactory struct {
-	// opts are the flags the server was started with.
-	opts serveOptions
+	// runtime is what the settings built. It is the runtime the
+	// handshake reports and the runtime a session runs under when it
+	// names no profile and no model.
+	runtime *config.Runtime
+	// build is what the settings are built with. A runtime for another
+	// profile or another model is built from it.
+	build config.BuildOptions
+	// settings are the settings the build was made from.
+	settings *config.Settings
 	// workDir is the directory the tools work in.
 	workDir string
-	// sessionDir is where the session logs live.
-	sessionDir string
-	// childEnv is the scrubbed environment the tools run in.
-	childEnv []string
-	// tools are the tools the binary links.
-	tools map[string]poo.Tool
-	// toolOrder is the order the tools are offered in.
-	toolOrder []string
-	// model is the descriptor of the chat model.
-	model poo.ModelInfo
+	// client is the wire client the asker chain asks.
+	client *lateClient
+
+	// mu guards the runtimes below.
+	mu sync.Mutex
+	// runtimes are the runtimes the sessions run under, by profile and
+	// model.
+	runtimes map[string]*config.Runtime
 }
 
-// newServeFactory builds the factory the server runs with.
-func newServeFactory(o serveOptions, workDir, sessionDir string) (*serveFactory, error) {
-	scrub := []string{}
-	if o.apiKeyEnv != "" {
-		scrub = append(scrub, o.apiKeyEnv)
+// runtimeFor returns the runtime a session runs under.
+//
+// A session names the profile it is built from and the model it talks
+// to, and the two decide the tools it offers and the policy it runs
+// with. The runtimes are built once and kept: a second session with
+// the same profile and model gets the same runtime.
+func (f *serveFactory) runtimeFor(profile, model string) (*config.Runtime, error) {
+	if profile != "" && !hasProfile(linkedProfiles(), profile) {
+		return nil, poo.ErrUnknownProfile
 	}
-	executor, err := executorRegistry().New("local", bash.Options{})
+	if model != "" {
+		if _, ok := f.settings.Models[model]; !ok {
+			return nil, poo.ErrUnknownModel
+		}
+	}
+	key := profile + "\x00" + model
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if runtime, ok := f.runtimes[key]; ok {
+		return runtime, nil
+	}
+	settings := *f.settings
+	settings.Roles = map[string]string{}
+	for name, entry := range f.settings.Roles {
+		settings.Roles[name] = entry
+	}
+	if model != "" {
+		settings.Roles[config.RoleChat] = model
+	}
+	opts := f.build
+	opts.Settings = &settings
+	if profile != "" {
+		opts.Overrides.Profile = profile
+	}
+	runtime, err := config.Build(opts)
 	if err != nil {
 		return nil, err
 	}
-	tools := map[string]poo.Tool{
-		"bash": bash.New(bash.WithExecutor(executor)),
-		"read": read.New(),
-		"grep": grep.New(),
-		"edit": edit.New(),
+	f.runtimes[key] = runtime
+	return runtime, nil
+}
+
+// hasProfile reports whether the binary links the named profile.
+func hasProfile(profiles []profile.Profile, name string) bool {
+	for _, p := range profiles {
+		if p.Name == name {
+			return true
+		}
 	}
-	info := poo.ModelInfo{
-		ModelID:      o.modelID,
-		API:          poo.APIChatCompletions,
-		Ops:          []poo.Op{poo.OpChat},
-		ContextLimit: o.contextLimit,
-		Tools:        poo.ToolCalling{Mode: poo.ToolsMode(o.toolsMode)},
-	}
-	return &serveFactory{
-		opts:       o,
-		workDir:    workDir,
-		sessionDir: sessionDir,
-		childEnv:   bash.ChildEnv(os.Environ(), scrub),
-		tools:      tools,
-		toolOrder:  []string{"bash", "read"},
-		model:      info,
-	}, nil
+	return false
 }
 
 // Profiles returns the profiles the binary offers.
-//
-// The command links the tools the code profile names.
 func (f *serveFactory) Profiles() []protocol.ProfileInfo {
-	tools := make([]protocol.ToolInfo, 0, len(f.toolOrder))
-	for _, name := range f.toolOrder {
-		spec := f.tools[name].Spec()
-		tools = append(tools, protocol.ToolInfo{
-			Name:       spec.Name,
-			Class:      string(spec.Class),
-			Background: string(spec.Background),
-		})
+	runtime, err := f.runtimeFor("", "")
+	if err != nil {
+		return []protocol.ProfileInfo{}
 	}
-	return []protocol.ProfileInfo{{
-		Name:      cmdProfile,
-		Tools:     tools,
-		Unmatched: string(perm.ActionAllow),
-	}}
+	out := make([]protocol.ProfileInfo, 0, len(runtime.Profiles))
+	for _, p := range runtime.Profiles {
+		info := protocol.ProfileInfo{Name: p.Name, Unmatched: p.Unmatched}
+		for _, tool := range p.Tools {
+			info.Tools = append(info.Tools, protocol.ToolInfo{
+				Name:       tool.Name,
+				Class:      string(tool.Class),
+				Background: string(tool.Background),
+			})
+		}
+		out = append(out, info)
+	}
+	return out
 }
 
 // Capabilities returns what this binary can do.
 func (f *serveFactory) Capabilities() protocol.Capabilities {
+	runtime, err := f.runtimeFor("", "")
+	if err != nil {
+		return protocol.Capabilities{}
+	}
 	modes := []string{"ephemeral"}
-	if f.sessionDir != "" {
+	if runtime.SessionMode == string(session.ModeLogged) {
 		modes = []string{"ephemeral", "logged"}
 	}
-	return protocol.Capabilities{
-		Decider:     false,
-		Compaction:  true,
-		Persistence: modes,
-		Jobs:        true,
+	decider := false
+	if _, err := runtime.DeciderModel(); err == nil {
+		decider = true
 	}
+	return protocol.Capabilities{
+		Decider:     decider,
+		Compaction:  runtime.Options.Compactor != nil,
+		Persistence: modes,
+		Jobs:        runtime.Options.Compactor != nil && f.jobs(runtime),
+	}
+}
+
+// jobs reports whether a tool of the runtime may run in the background.
+func (f *serveFactory) jobs(runtime *config.Runtime) bool {
+	for _, name := range runtime.Options.ToolOrder {
+		tool, ok := runtime.Options.Tools[name]
+		if ok && tool != nil && tool.Spec().Background != poo.BackgroundNever {
+			return true
+		}
+	}
+	return false
 }
 
 // Roles returns the models this binary talks to.
 func (f *serveFactory) Roles() protocol.ModelRoles {
-	return protocol.ModelRoles{Chat: f.opts.modelID}
+	runtime, err := f.runtimeFor("", "")
+	if err != nil {
+		return protocol.ModelRoles{}
+	}
+	roles := protocol.ModelRoles{}
+	if model, err := runtime.ChatModel(); err == nil {
+		roles.Chat = model.Name
+	}
+	if model, err := runtime.DeciderModel(); err == nil {
+		roles.Decider = model.Name
+	}
+	return roles
 }
 
 // Create builds a session.
 func (f *serveFactory) Create(ctx context.Context, params protocol.CreateParams, env wire.Env) (*poo.Session, *wire.Info, error) {
-	if params.Models != nil && params.Models.Chat != "" && params.Models.Chat != f.opts.modelID {
-		return nil, nil, fmt.Errorf("poo serve: the settings name no model %q", params.Models.Chat)
+	f.client.set(env.Client)
+	model := ""
+	if params.Models != nil {
+		model = params.Models.Chat
 	}
+	runtime, err := f.runtimeFor(params.Profile, model)
+	if err != nil {
+		return nil, nil, err
+	}
+	mode := params.Mode
+	if mode == "" {
+		mode = runtime.SessionMode
+	}
+	store, err := runtime.OpenStore(mode, params.SessionDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The recorder keeps the records the session writes, so the server
+	// can project them into the session's scrollback.
+	recorder := &session.Recording{Store: store}
 	workDir := params.WorkingDir
 	if workDir == "" {
 		workDir = f.workDir
 	}
-	mode := params.Mode
-	if mode == "" {
-		if f.sessionDir == "" {
-			mode = string(session.ModeEphemeral)
-		} else {
-			mode = string(session.ModeLogged)
-		}
-	}
-	store, err := f.openStore(mode, params.SessionDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	recorder := &session.Recording{Store: store}
-	sessionID, err := f.createSession(ctx, recorder, mode, workDir, params.Profile)
+	created, err := f.created(runtime, mode, workDir)
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, err
 	}
-	policy, err := f.policy(workDir, env)
-	if err != nil {
-		_ = store.Close()
-		return nil, nil, err
-	}
-	sess, err := poo.New(poo.Options{
-		Transport:  f.transport(),
-		Tools:      f.tools,
-		ToolOrder:  f.toolOrder,
-		Sink:       recorder,
-		SessionID:  sessionID,
-		Model:      f.model,
-		Profile:    profileOf(params.Profile),
-		Profiles:   f.pooProfiles(),
-		Build:      poo.BuildInfo{Name: "poo", Version: version},
-		WorkingDir: workDir,
-		Env:        f.childEnv,
-		Settings:   f.settings(),
-		ToolsMode:  f.opts.toolsMode,
-		Compactor:  handoff.New(handoff.Options{}),
-	}, poo.WithObserver(env.Observer), poo.WithPolicy(policy))
+	sess, err := runtime.CreateSession(ctx, recorder, created, poo.WithObserver(env.Observer))
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, err
 	}
 	info := &wire.Info{
-		Mode:    mode,
-		Tools:   f.toolInfos(),
-		Models:  f.Roles(),
+		Mode:   mode,
+		Tools:  toolInfos(runtime.Profile.Tools),
+		Models: f.Roles(),
+		// The records are the session's, and the store is what holds
+		// the session's lock.
 		Records: recorder.Records,
 		Release: store.Close,
 	}
 	if mode == string(session.ModeLogged) {
-		info.SessionDir = f.storeDir()
+		info.SessionDir = storeDir(store)
 	}
 	return sess, info, nil
 }
 
 // Load opens a recorded session.
 func (f *serveFactory) Load(ctx context.Context, params protocol.LoadParams, env wire.Env) (*poo.Session, *wire.Info, error) {
-	if f.sessionDir == "" {
-		return nil, nil, session.ErrSessionNotFound
-	}
+	f.client.set(env.Client)
 	dir := params.SessionDir
 	if dir == "" {
-		dir = f.storeDir()
+		dir = f.runtime.SessionDir
 	}
-	store, err := session.NewStore(dir, session.WithBuild(poo.BuildInfo{Name: "poo", Version: version}))
+	// The session's own profile decides the tools it runs with, and its
+	// own model decides the endpoint it talks to. The header says both,
+	// and it is read before the session is loaded.
+	meta, err := session.MetadataOf(dir, params.SessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	runtime, err := f.runtimeForLoad(meta)
+	if err != nil {
+		return nil, nil, err
+	}
+	store, err := runtime.OpenStore(string(session.ModeLogged), dir)
 	if err != nil {
 		return nil, nil, err
 	}
 	recorder := &session.Recording{Store: store}
-	policy, err := f.policy(f.workDir, env)
-	if err != nil {
-		_ = store.Close()
-		return nil, nil, err
-	}
-	resumed, err := session.Resume(ctx, recorder, params.SessionID, poo.Options{
-		Transport:  f.transport(),
-		Tools:      f.tools,
-		ToolOrder:  f.toolOrder,
-		Model:      f.model,
-		Profiles:   f.pooProfiles(),
-		Build:      poo.BuildInfo{Name: "poo", Version: version},
-		WorkingDir: f.workDir,
-		Env:        f.childEnv,
-		Settings:   f.settings(),
-		ToolsMode:  f.opts.toolsMode,
-		Compactor:  handoff.New(handoff.Options{}),
-	}, poo.WithObserver(env.Observer), poo.WithPolicy(policy))
+	resumed, err := runtime.ResumeSession(ctx, recorder, params.SessionID, poo.WithObserver(env.Observer))
 	if err != nil {
 		_ = store.Close()
 		return nil, nil, err
 	}
 	loaded := resumed.Loaded
-	records := recorder.RecordsWith(loaded.Records)
 	info := &wire.Info{
 		Mode:            string(loaded.Metadata.Mode),
-		SessionDir:      dir,
-		Tools:           f.toolInfos(),
+		SessionDir:      storeDir(store),
+		Tools:           toolInfos(runtime.Profile.Tools),
 		Models:          f.Roles(),
 		RecoveredTail:   loaded.RecoveredTail,
 		InterruptedRuns: resumed.Restored.Interrupted,
 		Warnings:        resumed.Restored.Warnings,
-		Records:         func() []poo.Record { return records },
+		Records:         func() []poo.Record { return recorder.RecordsWith(loaded.Records) },
 		Release:         store.Close,
 	}
 	return resumed.Session, info, nil
 }
 
+// runtimeForLoad returns the runtime a recorded session is restored
+// with.
+//
+// The session's own profile decides the tools it runs with, and its own
+// model decides the endpoint it talks to. A model the settings do not
+// name is left to the restore's own check: the session does not fit
+// this build.
+func (f *serveFactory) runtimeForLoad(meta session.Metadata) (*config.Runtime, error) {
+	model := ""
+	if meta.Roles.Chat != nil {
+		model = meta.Roles.Chat.Name
+	}
+	if model != "" {
+		if _, ok := f.settings.Models[model]; !ok {
+			model = ""
+		}
+	}
+	return f.runtimeFor(meta.Profile, model)
+}
+
 // Configure applies a configuration change to a session.
 //
-// The command's settings own the prompt and the models, so a change
-// that names another model is refused and a change that names none is
-// answered with the session's own roles.
+// The prompt overrides are the settings' own prompt changes, and the
+// models are the ones the settings offer. A model the settings do not
+// name is refused.
 func (f *serveFactory) Configure(ctx context.Context, sess *poo.Session, params protocol.ConfigureParams) (protocol.ModelRoles, error) {
-	if params.Models != nil && params.Models.Chat != "" && params.Models.Chat != f.opts.modelID {
-		return protocol.ModelRoles{}, poo.ErrUnknownModel
+	runtime, err := f.runtimeFor("", "")
+	if err != nil {
+		return protocol.ModelRoles{}, err
 	}
+	roles := f.Roles()
 	if params.PromptOverrides != nil {
-		return protocol.ModelRoles{}, errors.New("poo serve: the settings own the prompt in this build")
+		edits, err := runtime.ApplyPromptOverrides(promptOverrides(params.PromptOverrides))
+		if err != nil {
+			return protocol.ModelRoles{}, err
+		}
+		sess.SetPrompt(edits...)
 	}
-	return f.Roles(), nil
+	if params.Models != nil && params.Models.Chat != "" {
+		model, ok := runtime.Models[params.Models.Chat]
+		if !ok {
+			return protocol.ModelRoles{}, poo.ErrUnknownModel
+		}
+		transport, err := runtime.Transport(model)
+		if err != nil {
+			return protocol.ModelRoles{}, err
+		}
+		changed, err := sess.SetModel(model, transport)
+		if err != nil {
+			return protocol.ModelRoles{}, err
+		}
+		roles.Chat = changed.To
+	}
+	if params.Models != nil && params.Models.Decider != "" {
+		model, decider, err := runtime.DeciderFor(params.Models.Decider)
+		if err != nil {
+			return protocol.ModelRoles{}, err
+		}
+		if err := sess.SetDecider(model, decider); err != nil {
+			return protocol.ModelRoles{}, err
+		}
+		roles.Decider = model.Name
+	}
+	return roles, nil
 }
 
 // Models returns the effective model catalog.
 func (f *serveFactory) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo, error) {
-	return []protocol.ModelInfo{{
-		Name:         f.opts.modelID,
-		ModelID:      f.opts.modelID,
-		API:          string(poo.APIChatCompletions),
-		Ops:          []string{string(poo.OpChat)},
-		ContextLimit: f.opts.contextLimit,
-		ToolsMode:    f.opts.toolsMode,
-	}}, nil
+	runtime, err := f.runtimeFor("", "")
+	if err != nil {
+		return nil, err
+	}
+	if refresh {
+		if err := runtime.Catalog.Reprobe(ctx); err != nil {
+			return nil, err
+		}
+	}
+	models := runtime.Catalog.List()
+	out := make([]protocol.ModelInfo, 0, len(models))
+	for _, model := range models {
+		out = append(out, protocol.ModelInfo{
+			Name:         model.Name,
+			ModelID:      model.ModelID,
+			API:          string(model.API),
+			Ops:          opNames(model.Ops),
+			Inputs:       modalityNames(model.Inputs),
+			ContextLimit: model.ContextLimit,
+			MaxOutput:    model.MaxOutput,
+			ToolsMode:    string(model.Tools.Mode),
+		})
+	}
+	return out, nil
 }
 
 // Config returns the effective settings, with the credentials
 // redacted.
+//
+// The settings name the environment variables the keys come from and
+// never the keys themselves, so the document is the settings as they
+// are.
 func (f *serveFactory) Config(ctx context.Context) (map[string]any, error) {
-	return map[string]any{
-		"version": 1,
-		"endpoints": map[string]any{
-			"default": map[string]any{"base_url": f.opts.baseURL},
-		},
-		"models": map[string]any{
-			f.opts.modelID: map[string]any{
-				"model_id":      f.opts.modelID,
-				"context_limit": f.opts.contextLimit,
-				"api":           string(poo.APIChatCompletions),
-				"ops":           []string{string(poo.OpChat)},
-				"tools_mode":    f.opts.toolsMode,
-			},
-		},
-		"roles":   map[string]any{"chat": f.opts.modelID},
-		"profile": cmdProfile,
-		"session": map[string]any{
-			"mode": f.sessionMode(),
-			"dir":  f.storeDir(),
-		},
-	}, nil
-}
-
-// transport returns the transport the sessions talk to the endpoint
-// with.
-func (f *serveFactory) transport() *openai.Transport {
-	apiKey := ""
-	if f.opts.apiKeyEnv != "" {
-		apiKey = os.Getenv(f.opts.apiKeyEnv)
+	encoded, err := json.Marshal(f.settings)
+	if err != nil {
+		return nil, err
 	}
-	return openai.New(openai.Config{
-		BaseURL:   f.opts.baseURL,
-		Model:     f.opts.modelID,
-		APIKey:    apiKey,
-		ToolsMode: f.opts.toolsMode,
-		Info:      f.model,
-	})
-}
-
-// policy builds the permission policy of a session.
-//
-// The wire asker is in the chain: a client that declared the
-// permission_answers capability is asked about the calls the policy
-// wants to ask about.
-func (f *serveFactory) policy(workDir string, env wire.Env) (*perm.Policy, error) {
-	opts := perm.Options{Unmatched: perm.ActionAllow, WorkingDir: workDir}
-	if env.Client != nil {
-		opts.Askers = []perm.Asker{perm.NewWireAsker(env.Client, 0)}
+	var out map[string]any
+	if err := json.Unmarshal(encoded, &out); err != nil {
+		return nil, err
 	}
-	return perm.New(opts)
+	return out, nil
 }
 
-// settings returns the tools' tunable knobs.
-func (f *serveFactory) settings() poo.ToolSettings {
-	return poo.ToolSettings{
-		BashTimeoutSeconds:  int(bash.DefaultTimeout / time.Second),
-		ObservationCapChars: bash.ObservationCap(f.opts.contextLimit),
-		ReadOutputCapChars:  read.OutputCap(f.opts.contextLimit),
-	}
-}
-
-// toolInfos returns the tools the sessions offer.
-func (f *serveFactory) toolInfos() []protocol.ToolInfo {
-	tools := make([]protocol.ToolInfo, 0, len(f.toolOrder))
-	for _, name := range f.toolOrder {
-		spec := f.tools[name].Spec()
-		tools = append(tools, protocol.ToolInfo{
-			Name:       spec.Name,
-			Class:      string(spec.Class),
-			Background: string(spec.Background),
-		})
-	}
-	return tools
-}
-
-// pooProfiles returns the profiles the sessions may name.
-func (f *serveFactory) pooProfiles() []poo.Profile {
-	return []poo.Profile{{
-		Name:      cmdProfile,
-		Tools:     f.pooTools(),
-		Unmatched: string(perm.ActionAllow),
-	}}
-}
-
-// pooTools returns the tools the profiles link.
-func (f *serveFactory) pooTools() []poo.ToolInfo {
-	tools := make([]poo.ToolInfo, 0, len(f.toolOrder))
-	for _, name := range f.toolOrder {
-		spec := f.tools[name].Spec()
-		tools = append(tools, poo.ToolInfo{
-			Name:       spec.Name,
-			Class:      spec.Class,
-			Background: spec.Background,
-		})
-	}
-	return tools
-}
-
-// openStore opens the store a session's records live in.
-func (f *serveFactory) openStore(mode, dir string) (session.Store, error) {
-	if mode == string(session.ModeEphemeral) {
-		return session.NewMemory(), nil
-	}
-	if dir == "" {
-		dir = f.storeDir()
-	}
-	return session.NewStore(dir, session.WithBuild(poo.BuildInfo{Name: "poo", Version: version}))
-}
-
-// storeDir returns the directory the session logs live in.
-//
-// It is empty when the command keeps its sessions in memory, and the
-// handshake then announces the ephemeral mode alone.
-func (f *serveFactory) storeDir() string {
-	return f.sessionDir
-}
-
-// sessionMode returns the mode a session gets when the client names
-// none.
-func (f *serveFactory) sessionMode() string {
-	if f.sessionDir == "" {
-		return string(session.ModeEphemeral)
-	}
-	return string(session.ModeLogged)
-}
-
-// createSession writes the session's header and returns its id.
-func (f *serveFactory) createSession(ctx context.Context, store session.Store, mode, workDir, profile string) (string, error) {
-	tools := f.pooTools()
-	return store.Create(ctx, &poo.SessionCreated{
+// created returns the header record a session starts with.
+func (f *serveFactory) created(runtime *config.Runtime, mode, workDir string) (*poo.SessionCreated, error) {
+	model := runtime.Options.Model
+	chat := loggedModel(model)
+	return &poo.SessionCreated{
 		RecordMeta:   poo.NewRecordMeta("session.created"),
 		Format:       poo.FormatVersion,
 		SessionID:    newSessionID(),
 		Mode:         mode,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
 		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ID: f.opts.modelID, MaxOutput: f.model.MaxOutput},
-		Tools:        tools,
-		ContextLimit: f.opts.contextLimit,
-		ToolsMode:    f.opts.toolsMode,
-		Profile:      profileOf(profile),
-		Roles:        poo.ModelRoles{Chat: &f.model},
+		Model:        poo.SessionModel{ID: model.ModelID, BaseURL: loggedBaseURL(model.Endpoint), MaxOutput: model.MaxOutput},
+		Tools:        sessionTools(runtime),
+		ContextLimit: model.ContextLimit,
+		ToolsMode:    string(model.Tools.Mode),
+		Profile:      runtime.Profile.Name,
+		Roles:        poo.ModelRoles{Chat: &chat},
 		Build:        poo.BuildInfo{Name: "poo", Version: version},
-	})
+	}, nil
 }
 
-// profileOf returns the profile a session is built from.
-func profileOf(name string) string {
-	if name == "" {
-		return cmdProfile
+// promptOverrides converts the wire's prompt overrides into the
+// settings' own.
+func promptOverrides(overrides *protocol.PromptOverrides) config.PromptOverrides {
+	return config.PromptOverrides{
+		BaseFile: overrides.BaseFile,
+		Replace:  overrides.Replace,
+		Append:   overrides.Append,
+		Sections: overrides.Sections,
+		Remove:   overrides.Remove,
 	}
-	return name
+}
+
+// toolInfos converts the core's tool descriptions into the wire's.
+func toolInfos(tools []poo.ToolInfo) []protocol.ToolInfo {
+	out := make([]protocol.ToolInfo, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, protocol.ToolInfo{
+			Name:       tool.Name,
+			Class:      string(tool.Class),
+			Background: string(tool.Background),
+		})
+	}
+	return out
+}
+
+// storeDir returns the directory a store keeps its sessions in.
+func storeDir(store session.Store) string {
+	if file, ok := store.(*session.FileStore); ok {
+		return file.Dir()
+	}
+	return ""
+}
+
+// opNames returns the names of a model's operations.
+func opNames(ops []poo.Op) []string {
+	if len(ops) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ops))
+	for _, op := range ops {
+		out = append(out, string(op))
+	}
+	return out
+}
+
+// modalityNames returns the names of a model's modalities.
+func modalityNames(inputs []poo.Modality) []string {
+	if len(inputs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(inputs))
+	for _, input := range inputs {
+		out = append(out, string(input))
+	}
+	return out
+}
+
+// lateClient is the wire client the asker chain asks.
+//
+// The server creates its client when it starts, and the factory learns
+// it when the first session is built. The runtime is built before
+// either, so the client is filled in later and an ask made before that
+// is deferred.
+type lateClient struct {
+	// mu guards the client below.
+	mu sync.Mutex
+	// client is the connected client, once the factory has seen it.
+	client perm.Client
+}
+
+// set points the client at the connected one.
+func (c *lateClient) set(client perm.Client) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.client = client
+}
+
+// current returns the connected client.
+func (c *lateClient) current() perm.Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.client
+}
+
+// Connected reports that a client is connected.
+func (c *lateClient) Connected() bool { return c.current() != nil }
+
+// PermissionAnswers reports that the connected client declared the
+// permission_answers capability.
+func (c *lateClient) PermissionAnswers() bool {
+	client := c.current()
+	return client != nil && client.PermissionAnswers()
+}
+
+// Ask sends the ask to the client and waits for its answer.
+func (c *lateClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
+	client := c.current()
+	if client == nil {
+		return perm.DecisionDefer, nil
+	}
+	return client.Ask(ctx, ask)
 }

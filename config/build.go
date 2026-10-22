@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -155,6 +156,8 @@ type Runtime struct {
 	SessionDir string
 	// SessionMode is the persistence mode the session runs in.
 	SessionMode string
+	// Build names the binary that owns the sessions.
+	Build poo.BuildInfo
 	// Env is the environment the tools' commands get.
 	Env []string
 	// ProtectedPaths are the paths the tools must not touch.
@@ -709,6 +712,7 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	}
 	r.SessionDir = expanded
 	r.SessionMode = mode
+	r.Build = opts.Build
 
 	if mode == "logged" {
 		store, err := session.NewStore(expanded, session.WithBuild(opts.Build))
@@ -846,28 +850,62 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 		}
 		r.FinishSchema = json.RawMessage(data)
 	}
+	// The prompt the settings ask for is the session's prompt: the
+	// changes are the session's own, and a command's own changes come
+	// after them.
+	r.Options.Prompt = append(r.Options.Prompt, r.Prompt...)
 	return nil
+}
+
+// OpenStore opens the store a session's records go to.
+//
+// The store holds one session open at a time, so a caller that serves
+// several sessions at once opens one store for each of them. The mode
+// is the session's persistence mode: the logged mode writes a file and
+// the ephemeral mode keeps the records in memory.
+//
+// A process in the ephemeral mode serves no logged session: the mode it
+// announced is the only one it has.
+func (r *Runtime) OpenStore(mode, dir string) (session.Store, error) {
+	if mode == string(session.ModeLogged) {
+		if r.SessionMode != string(session.ModeLogged) {
+			return nil, &Error{
+				Code:    CodeUnsupported,
+				Field:   "session.mode",
+				Message: "this process is in the ephemeral mode: it serves no logged session",
+			}
+		}
+		if dir == "" {
+			dir = r.SessionDir
+		}
+		return session.NewStore(dir, session.WithBuild(r.Build))
+	}
+	return session.NewMemory(), nil
 }
 
 // CreateSession creates a session in the store and returns it.
 //
 // The session's records go to the store, and the store holds the
-// session's authority until it is closed. A runtime without a store is
-// in the ephemeral mode, and it creates no session.
-func (r *Runtime) CreateSession(ctx context.Context, created *poo.SessionCreated) (*poo.Session, error) {
-	if r.Store == nil {
+// session's authority until it is closed. A caller that serves several
+// sessions at once opens a store for each of them.
+//
+// The options are the session's own: a consumer that changes them —
+// the observer that sends the events to a client, say — passes them
+// along.
+func (r *Runtime) CreateSession(ctx context.Context, store session.Store, created *poo.SessionCreated, fns ...poo.Option) (*poo.Session, error) {
+	if store == nil {
 		return nil, &Error{
 			Code:    CodeUnsupported,
 			Message: "the session has no store: the settings are in the ephemeral mode",
 		}
 	}
-	if _, err := r.Store.Create(ctx, created); err != nil {
+	if _, err := store.Create(ctx, created); err != nil {
 		return nil, err
 	}
 	opts := r.Options
-	opts.Sink = r.Store
+	opts.Sink = store
 	opts.SessionID = created.SessionID
-	return poo.New(opts, poo.WithPolicy(r.Policy))
+	return poo.New(opts, append(fns, poo.WithPolicy(r.Policy))...)
 }
 
 // ResumeSession loads a session from the store and restores it.
@@ -877,14 +915,84 @@ func (r *Runtime) CreateSession(ctx context.Context, created *poo.SessionCreated
 // recovers the session: a torn tail is truncated, an unsettled run is
 // marked interrupted, and the job results that were never delivered are
 // queued again.
-func (r *Runtime) ResumeSession(ctx context.Context, id string) (*session.Resumed, error) {
-	if r.Store == nil {
+//
+// The options are the ones the session is built with: the hooks and the
+// observers a new session would carry.
+func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id string, fns ...poo.Option) (*session.Resumed, error) {
+	if store == nil {
 		return nil, &Error{
 			Code:    CodeUnsupported,
 			Message: "the session has no store: the settings are in the ephemeral mode",
 		}
 	}
-	return session.Resume(ctx, r.Store, id, r.Options)
+	return session.Resume(ctx, store, id, r.Options, append(fns, poo.WithPolicy(r.Policy))...)
+}
+
+// PromptOverrides are the prompt changes a client asks for.
+//
+// The shape is the settings' system_prompt block: the same keys and the
+// same meaning. A client that changes the prompt of a session names the
+// changes it wants, and the binary applies them.
+type PromptOverrides struct {
+	// BaseFile is the path of a file holding the base prompt. The
+	// binary reads it, so a client names a file the binary may read.
+	BaseFile string
+	// Replace is the text that takes over the whole prompt.
+	Replace string
+	// Append is the text appended to the prompt's base section.
+	Append string
+	// Sections are the sections the client sets, by name.
+	Sections map[string]string
+	// Remove are the sections the client drops, by name.
+	Remove []string
+}
+
+// ApplyPromptOverrides returns the prompt changes the overrides ask for.
+//
+// The changes are the settings' own prompt changes: the replacement
+// takes over the whole prompt, the file's text is the base section,
+// the appended text is added to the base section, the sections are set
+// and the removed ones are dropped.
+//
+// The file is read here, so the binary reads it and the caller never
+// does.
+func (r *Runtime) ApplyPromptOverrides(o PromptOverrides) ([]func(*prompt.Builder), error) {
+	var edits []func(*prompt.Builder)
+	if o.Replace != "" {
+		text := o.Replace
+		edits = append(edits, func(b *prompt.Builder) { b.Replace(text) })
+	}
+	if o.BaseFile != "" {
+		data, err := os.ReadFile(o.BaseFile)
+		if err != nil {
+			return nil, &Error{
+				Code:    CodeInvalid,
+				Field:   "prompt_overrides.base_file",
+				Message: "the file is not there",
+				Err:     err,
+			}
+		}
+		text := string(data)
+		edits = append(edits, func(b *prompt.Builder) { b.Set(BaseSection, text) })
+	}
+	if o.Append != "" {
+		text := o.Append
+		edits = append(edits, func(b *prompt.Builder) { b.Append(BaseSection, text) })
+	}
+	names := make([]string, 0, len(o.Sections))
+	for name := range o.Sections {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		name, text := name, o.Sections[name]
+		edits = append(edits, func(b *prompt.Builder) { b.Set(name, text) })
+	}
+	for _, name := range o.Remove {
+		name := name
+		edits = append(edits, func(b *prompt.Builder) { b.Remove(name) })
+	}
+	return edits, nil
 }
 
 // ChatModel returns the model the session talks to.
@@ -948,6 +1056,26 @@ func (r *Runtime) Decider() (poo.ModelInfo, decide.Decider, error) {
 	model, err := r.DeciderModel()
 	if err != nil {
 		return poo.ModelInfo{}, nil, err
+	}
+	decider, err := r.newDecider(model)
+	if err != nil {
+		return poo.ModelInfo{}, nil, err
+	}
+	return model, decider, nil
+}
+
+// DeciderFor returns the decision model and the decider that asks it.
+//
+// The model is the one the name picks, and the decider is the one that
+// asks it. A session without a decider model has no decider: the
+// caller asks for one only when the settings name a decider role.
+func (r *Runtime) DeciderFor(name string) (poo.ModelInfo, decide.Decider, error) {
+	if r.Catalog == nil {
+		return poo.ModelInfo{}, nil, &Error{Code: CodeInvalid, Message: "the build has no catalog"}
+	}
+	model, err := r.Catalog.Resolve(name)
+	if err != nil {
+		return poo.ModelInfo{}, nil, fmt.Errorf("config: %w", err)
 	}
 	decider, err := r.newDecider(model)
 	if err != nil {

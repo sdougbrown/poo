@@ -271,6 +271,24 @@ func TestTheBuildMakesThePrompt(t *testing.T) {
 	}
 }
 
+// TestTheSettingsPromptIsTheSessionPrompt covers the prompt the
+// session carries: the settings' sections are in it, and not only in
+// the build's own account of them.
+func TestTheSettingsPromptIsTheSessionPrompt(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`system_prompt:
+  sections:
+    house: the house style
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "the house style") {
+		t.Errorf("the prompt is %q, want the settings' section", text)
+	}
+}
+
 // TestTheBuildMakesTheStore covers the session's home: the store is
 // the settings' directory, and the ephemeral mode has none.
 func TestTheBuildMakesTheStore(t *testing.T) {
@@ -369,7 +387,7 @@ func TestTheRuntimeCreatesAndResumesASession(t *testing.T) {
 		Profile:      "code",
 		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
 	}
-	sess, err := runtime.CreateSession(context.Background(), created)
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
 	if err != nil {
 		t.Fatalf("creating the session: %v", err)
 	}
@@ -380,7 +398,7 @@ func TestTheRuntimeCreatesAndResumesASession(t *testing.T) {
 		t.Fatalf("closing the session: %v", err)
 	}
 
-	resumed, err := runtime.ResumeSession(context.Background(), "s1")
+	resumed, err := runtime.ResumeSession(context.Background(), runtime.Store, "s1")
 	if err != nil {
 		t.Fatalf("resuming the session: %v", err)
 	}

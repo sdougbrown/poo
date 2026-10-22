@@ -224,6 +224,27 @@ func (s *Session) SetPromptVariant(name string) {
 	s.promptVariant = name
 }
 
+// SetPrompt applies prompt changes to the session.
+//
+// The changes take effect between the runs: the prompt a run carries is
+// rendered once, at the start of the run, so a change made while a run
+// is going is not seen by that run.
+//
+// The changes are applied in the order they are given, and a later one
+// wins over an earlier one.
+func (s *Session) SetPrompt(edits ...func(*prompt.Builder)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.promptBuilder == nil {
+		return
+	}
+	for _, edit := range edits {
+		if edit != nil {
+			edit(s.promptBuilder)
+		}
+	}
+}
+
 // promptCopy returns a copy of the session's prompt builder, in the
 // variant the session renders in, and that variant's name.
 //
