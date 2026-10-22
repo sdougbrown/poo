@@ -34,6 +34,7 @@ const usage = `poo runs a session against an OpenAI-compatible endpoint.
 
 Usage:
   poo run --base-url <url> --model-id <id> --context-limit <n> [flags] "prompt"
+  poo serve [flags]
 
 Run flags:
   --base-url <url>       The endpoint's base URL, e.g. http://localhost:4000/v1
@@ -50,6 +51,10 @@ Run flags:
   --project-prompt       Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt
   --timeout <dur>        The wall-clock ceiling for the run, e.g. 5m
   --no-wait-jobs         Exit at the first settle; the running jobs stop through the session's close
+
+Serve:
+  poo serve runs the wire protocol on stdin and stdout. It takes the
+  same endpoint flags as poo run, plus --session-dir and --ephemeral.
 `
 
 func main() {
@@ -65,6 +70,8 @@ func run(args []string) int {
 	switch args[0] {
 	case "run":
 		return runRun(args[1:])
+	case "serve":
+		return runServe(args[1:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return 0
