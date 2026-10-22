@@ -24,11 +24,12 @@ temporary file is left behind, and a prune removes it once it is old.
 A log that was cut short in the middle of a record is truncated when the
 session is loaded: the bytes after the last newline are not a record. The
 load then recovers the session, appending the records that resolve what
-the session left open: an `interrupted` result for every tool call without
-one, a denied `permission.answered` for every ask without an answer, a
-`run.settled` with the reason `interrupted` for every run that never
-settled, a `job.ended` with the outcome `interrupted` for every job that
-never ended, and an `input.dropped` with the reason `interrupted` for every
+the session left open: an `interrupted` result, and the message that
+carries it, for every tool call without one, a denied
+`permission.answered` for every ask without an answer, a `run.settled`
+with the reason `interrupted` for every run that never settled, a
+`job.ended` with the outcome `interrupted` for every job that never
+ended, and an `input.dropped` with the reason `interrupted` for every
 input that never reached the model. The recovery appends only what is
 missing, so loading a session twice writes nothing twice.
 
@@ -299,6 +300,12 @@ once and its result arrives later as a message. The `denied`, `skipped`,
 `cancelled` and `interrupted` outcomes arrive with the later stages that
 produce them.
 
+An `interrupted` outcome is written by a load, never by a live run: the
+call was cut short, its outcome is unknown, and the model is told so. The
+result is the model-facing text of the call, and the message that carries
+it answers the call the model made, so a session that is loaded again asks
+the model nothing it cannot answer.
+
 ## `input.queued`
 
 An input the session accepted. The record is written before the call
@@ -565,6 +572,7 @@ commit point.
 | 9b | `stop_requested` | 0 | A hook or a stop condition asked the run to stop. |
 | 10 | `output_truncated` | 10 | The provider stopped on the output-token limit. |
 | 11 | `end_turn` | 0 | The model stopped on its own. |
+| — | `interrupted` | — | The run's outcome is unknown: the process stopped while the run was going. It is never produced live; a load writes it for a run that never settled. |
 
 `provider_limit` and `provider_error` share a precedence level, because
 a single failed request produces only one of them.
