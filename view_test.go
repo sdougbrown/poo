@@ -176,3 +176,26 @@ func TestTheViewCarriesTheToolResult(t *testing.T) {
 		t.Errorf("the view's result text is %q, want %q", hook.text, "echoed")
 	}
 }
+
+// TestTheViewReturnsTurnSummariesAsCopies covers the turn summaries: a
+// caller that mutates the returned slice, its entries or the calls does
+// not change the history's turns.
+func TestTheViewReturnsTurnSummariesAsCopies(t *testing.T) {
+	history := poo.NewHistory(nil, nil, []poo.TurnSummary{{
+		Index: 1,
+		Calls: []poo.ToolCallSummary{{Handle: "r1", Tool: "bash"}},
+	}})
+
+	got := history.Turns()
+	got[0].Index = 99
+	got[0].Calls[0].Handle = "mutated"
+	got[0].Calls = append(got[0].Calls, poo.ToolCallSummary{Handle: "extra"})
+
+	again := history.Turns()
+	if again[0].Index != 1 {
+		t.Errorf("the turn's index is %d, want 1", again[0].Index)
+	}
+	if len(again[0].Calls) != 1 || again[0].Calls[0].Handle != "r1" {
+		t.Errorf("the turn's calls are %+v, want one call r1", again[0].Calls)
+	}
+}

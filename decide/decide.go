@@ -78,8 +78,8 @@ type Kind interface {
 
 // Bool asks a yes-or-no question.
 //
-// The two descriptions say what each answer means, so the model is not
-// left to guess.
+// The descriptions say what each answer means, so the model is not left
+// to guess. One is enough: validation asks for at least one of the two.
 type Bool struct {
 	// True describes what "yes" means.
 	True string `json:"true"`
@@ -298,7 +298,7 @@ func (q Question) Validate() error {
 
 // Keys returns the answer keys the question's probabilities are keyed by.
 func (q Question) Keys() []string {
-	if q.Kind == nil {
+	if q.Kind == nil || isNilKind(q.Kind) {
 		return nil
 	}
 	return q.Kind.keys()
@@ -516,6 +516,16 @@ func (d *recordedDecider) Decide(ctx context.Context, state any, instructions st
 //
 // The hash identifies the state a decision was made about, without
 // carrying the state itself.
+//
+// The hash is an id, not a canonical encoding: distinct states can
+// collide. String, []byte and json.RawMessage states hash their bytes
+// raw, so a string and a non-string state can encode to the same bytes
+// ("123" and 123), a nil state hashes the bytes "null" like the string
+// "null" does, and two values that json.Marshal renders the same way
+// (1 and 1.0, or two structs whose difference is unexported fields)
+// collide within one type. A state that cannot be encoded hashes its
+// fmt.Sprintf rendering. A caller that needs collision-free identity
+// should hash a canonical encoding of its own.
 func StateHash(state any) string {
 	var raw []byte
 	switch v := state.(type) {
