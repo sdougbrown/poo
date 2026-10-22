@@ -94,7 +94,6 @@ gateLoop:
 				return gateResult{candidates: []candidate{*outcome.candidate}}
 			}
 			s.transition(StateRequesting)
-			break
 		}
 		break gateLoop
 	}
@@ -442,16 +441,6 @@ func (s *Session) estimatedInput() int {
 // The caller holds the session's lock.
 func (s *Session) estimatedInputLocked() int {
 	return s.est.estimate(s.modelMessagesLocked())
-}
-
-// rebaseEstimate makes the current view the accounting baseline.
-//
-// The estimate is recomputed over the whole view, and the next provider
-// usage report replaces it.
-func (s *Session) rebaseEstimate() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.est.rebase(s.modelMessagesLocked())
 }
 
 // observeUsage calibrates the estimator with a provider's report.

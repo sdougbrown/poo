@@ -85,7 +85,7 @@ func TestInterruptDuringACompactionRechecksTheGate(t *testing.T) {
 // fix2CompactionSink holds the compaction record until the test releases
 // it.
 type fix2CompactionSink struct {
-	recordingSink
+	*recordingSink
 	entered, release, written chan struct{}
 }
 
@@ -108,7 +108,7 @@ func (s *fix2CompactionSink) Append(ctx context.Context, r poo.Record) error {
 // is claimed against the seal like a call record.
 func TestCompactionWriteRespectsTheSeal(t *testing.T) {
 	inner := &recordingSink{}
-	sink := &fix2CompactionSink{recordingSink: *inner, entered: make(chan struct{}), release: make(chan struct{}), written: make(chan struct{})}
+	sink := &fix2CompactionSink{recordingSink: inner, entered: make(chan struct{}), release: make(chan struct{}), written: make(chan struct{})}
 	tr := scripted([]fakeResponse{fix2Turn(), {text: "done"}})
 	opts := testOptions(t, tr, &echoTool{result: "output"}, inner)
 	opts.Sink = sink

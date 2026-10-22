@@ -32,3 +32,12 @@ func SetObserverBuffer(n int) func() {
 	observerBuffer = n
 	return func() { observerBuffer = prev }
 }
+
+// LogDropped returns how many diagnostics the session's non-blocking
+// logger dropped because its queue was full.
+func LogDropped(s *Session) int64 {
+	if s.logs == nil {
+		return 0
+	}
+	return s.logs.droppedCount()
+}
