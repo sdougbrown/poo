@@ -260,3 +260,46 @@ func TestTheFinishResultStaysOnStdout(t *testing.T) {
 		t.Errorf("stdout is %q, want it to hold the result", stdout)
 	}
 }
+
+// TestTheFinishResultStaysOnStdoutAfterAWokenReply covers the stdout
+// rule: the client asked for a run, and the finish result of that run
+// is what it reads. A run that a job woke later does not replace it.
+func TestTheFinishResultStaysOnStdoutAfterAWokenReply(t *testing.T) {
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "result.schema.json")
+	schema := `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`
+	if err := os.WriteFile(schemaPath, []byte(schema), 0o644); err != nil {
+		t.Fatalf("writing the schema: %v", err)
+	}
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	settings := "version: 1\nfinish:\n  schema_file: " + schemaPath + "\n"
+	if err := os.WriteFile(settingsPath, []byte(settings), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	job := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"echo done\",\"background\":true}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	finish := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"finish","arguments":"{\"result\":{\"answer\":\"the result\"}}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpointSequence(t, []string{job, finish, answer("the woken answer")})
+
+	code, stderr, stdout := runCLIWithStdout(t,
+		"run",
+		"--settings", settingsPath,
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--log", filepath.Join(dir, "run.jsonl"),
+		"start a job and finish",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "the result") {
+		t.Errorf("stdout is %q, want it to hold the result", stdout)
+	}
+	if strings.Contains(stdout, "the woken answer") {
+		t.Errorf("stdout is %q, want the woken run's answer left out", stdout)
+	}
+}

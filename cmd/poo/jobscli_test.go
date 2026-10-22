@@ -272,6 +272,9 @@ jobs:
 	if !strings.Contains(stderr, "held") {
 		t.Errorf("stderr is %q, want it to name the held results", stderr)
 	}
+	if !strings.Contains(stderr, "j1") {
+		t.Errorf("stderr is %q, want it to name the job it holds", stderr)
+	}
 }
 
 // readPID reads the process id a job wrote.
