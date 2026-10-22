@@ -355,7 +355,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 		if errors.Is(err, errDeliveryAbandoned) || winding {
 			return "", false, true
 		}
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 		return "", false, false
 	}
 	if winding {
@@ -706,6 +706,24 @@ func jobOutcomeOf(outcome Outcome) JobOutcome {
 	}
 }
 
+// QueueJobResult delivers a finished job's result to the session, as if
+// the job had just ended.
+//
+// The result takes the session's idle policy: an idle session wakes a
+// run with it, and a session that holds its idle results keeps it for
+// the next run.
+func (s *Session) QueueJobResult(result JobResult) {
+	s.queueJobResult(jobResult{
+		id:      result.Job,
+		job:     result.Job,
+		handle:  result.Handle,
+		tool:    result.Tool,
+		outcome: jobOutcomeOf(result.Outcome),
+		text:    result.Text,
+		fatal:   result.Fatal,
+	})
+}
+
 // queueJobResult puts a finished result on the session's job queue and
 // acts on it.
 //
@@ -996,7 +1014,7 @@ func (s *Session) failJobDelivery(run *runState, item jobQueueItem, err error) {
 	s.abandonJobDeliveryLocked(run, item)
 	s.mu.Unlock()
 	if !errors.Is(err, errDeliveryAbandoned) {
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 	}
 }
 

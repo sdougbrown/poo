@@ -155,6 +155,8 @@ type ReplayResult struct {
 	Match bool `json:"match"`
 	// Differences describe where the two sequences part.
 	Differences []string `json:"differences,omitempty"`
+	// Jobs are the job results the replay delivered, in order.
+	Jobs []string `json:"jobs,omitempty"`
 }
 
 // Replay re-runs a recorded session through the current harness.
@@ -228,6 +230,19 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// A recording may hold a job result that reached the model in a
+	// woken run. The replay queues it again, so the run the recording
+	// woke is the run the replay wakes.
+	if jobs := replayJobResults(log); len(jobs) > 0 {
+		for _, job := range jobs {
+			session.QueueJobResult(job)
+		}
+		// The woken run consumes the recorded responses it used, so the
+		// prompt below continues the conversation after it.
+		if _, err := session.Wait(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("eval: replaying %s: waiting for the woken run: %w", path, err)
+		}
+	}
 	if _, err := session.Prompt(ctx, "replay"); err != nil {
 		// A script that runs out is not a failure: the recording held
 		// what it held, and the replay compared what it could.
@@ -244,6 +259,7 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 		Recorded:    recordedCalls(log),
 		Replayed:    recorder.calls,
 		Compactions: recorder.compactions,
+		Jobs:        recorder.jobs,
 	}
 	// A recorded compaction that the replay could not apply is a
 	// failure: a replay that silently skipped it measured a conversation
@@ -282,6 +298,33 @@ func (t *replayNativeTransport) Compact(ctx context.Context, prev poo.Rendered) 
 		return poo.ProviderWindow{}, fmt.Errorf("eval: the recording holds no window to apply")
 	}
 	return *t.window, nil
+}
+
+// replayJobResults returns the job results a recording holds that never
+// reached the model.
+//
+// The results are the core's own: the log is read into the records the
+// core pairs them from, so the replay and a restore agree on what was
+// delivered.
+func replayJobResults(log *Log) []poo.JobResult {
+	records := make([]poo.Record, 0, len(log.Records))
+	for _, r := range log.Records {
+		switch r.Record {
+		case "input.delivered":
+			records = append(records, &poo.InputDelivered{InputID: r.InputID})
+		case "job.ended":
+			records = append(records, &poo.JobEnded{
+				Job:     r.Job,
+				Handle:  r.Handle,
+				Tool:    r.Tool,
+				Outcome: poo.JobOutcome(r.Outcome),
+				InputID: r.InputID,
+				Text:    r.Text,
+				Fatal:   r.Fatal,
+			})
+		}
+	}
+	return poo.PendingJobResults(records)
 }
 
 // recordedSystemPrompts returns the session's rendered prompts, in run
@@ -448,6 +491,8 @@ type callRecorder struct {
 	calls []CallStep
 	// compactions counts the compactions the replay applied.
 	compactions int
+	// jobs are the job results the replay delivered, in order.
+	jobs []string
 }
 
 // Append records one session record.
@@ -463,6 +508,15 @@ func (c *callRecorder) Append(ctx context.Context, rec poo.Record) error {
 	case *poo.CompactionRecord:
 		// The compaction reached the store, so the replay applied it.
 		c.compactions++
+	case *poo.MessageRecord:
+		if r.Origin != poo.OriginJob {
+			return nil
+		}
+		for _, block := range r.Content {
+			if block.Kind == poo.ContentText {
+				c.jobs = append(c.jobs, block.Text)
+			}
+		}
 	}
 	return nil
 }

@@ -260,7 +260,7 @@ func runRun(args []string) int {
 	for _, name := range toolOrder {
 		spec := tools[name].Spec()
 		toolSpecs = append(toolSpecs, spec)
-		sessionTools = append(sessionTools, poo.SessionTool{Name: spec.Name, Class: spec.Class})
+		sessionTools = append(sessionTools, poo.SessionTool{Name: spec.Name, Class: spec.Class, Background: spec.Background})
 	}
 
 	settings := poo.ToolSettings{
