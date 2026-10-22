@@ -299,13 +299,11 @@ func (r *Run) loop(ctx context.Context) (Reason, SettleDetail, error) {
 		}
 
 		if resp.finish == FinishLength {
-			// The provider stopped on the output-token limit. The
-			// skeleton's enum has no output_truncated, so this settles
-			// as provider_error.
+			// The provider stopped on the output-token limit.
 			return ReasonProviderError, SettleDetail{
 				Source:   "finish:length",
 				Text:     "the provider stopped on the output-token limit",
-				Provider: &ProviderDetail{Kind: "output_truncated"},
+				Provider: &ProviderDetail{Kind: string(ProviderKindOutputTruncated)},
 			}, nil
 		}
 

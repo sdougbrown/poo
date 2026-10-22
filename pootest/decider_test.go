@@ -209,3 +209,26 @@ func TestTheScriptedCompactorForksTheCallItIsGiven(t *testing.T) {
 		t.Error("a fork with no func returned no error, want one")
 	}
 }
+
+// TestTheStubDeciderAnswersASingleOptionChoice covers the one-key case: a
+// choice with one option gets a probability of one, so the answer
+// validates.
+func TestTheStubDeciderAnswersASingleOptionChoice(t *testing.T) {
+	d := pootest.NewDecider(0.5)
+	questions := []decide.Question{
+		{ID: "q1", Instructions: "which?", Kind: decide.Choice{Options: []decide.Option{
+			{Name: "only"},
+		}}},
+	}
+
+	answers, err := d.Decide(context.Background(), nil, "", questions)
+	if err != nil {
+		t.Fatalf("deciding: %v", err)
+	}
+	if answers[0].Probabilities["only"] != 1 {
+		t.Errorf("the single option's probability is %v, want 1", answers[0].Probabilities["only"])
+	}
+	if err := decide.ValidateAnswers(questions, answers); err != nil {
+		t.Errorf("the answers do not validate: %v", err)
+	}
+}
