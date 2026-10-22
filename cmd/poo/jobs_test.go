@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,47 +12,6 @@ import (
 
 // The one-shot's job behaviour: it waits for the jobs, it prints the
 // run's answer, and its exit code comes from the settle-reason table.
-
-// runCLIWithStdout runs the command and returns its exit code, its
-// stderr and its stdout.
-func runCLIWithStdout(t *testing.T, args ...string) (int, string, string) {
-	t.Helper()
-	oldStderr := os.Stderr
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("creating the pipe: %v", err)
-	}
-	os.Stderr = w
-	outR, outW, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("creating the pipe: %v", err)
-	}
-	os.Stdout = outW
-
-	stderrDone := make(chan []byte, 1)
-	go func() {
-		out, _ := io.ReadAll(r)
-		stderrDone <- out
-	}()
-	stdoutDone := make(chan []byte, 1)
-	go func() {
-		out, _ := io.ReadAll(outR)
-		stdoutDone <- out
-	}()
-
-	code := run(args)
-
-	os.Stderr = oldStderr
-	os.Stdout = oldStdout
-	w.Close()
-	outW.Close()
-	stderr := <-stderrDone
-	stdout := <-stdoutDone
-	r.Close()
-	outR.Close()
-	return code, string(stderr), string(stdout)
-}
 
 // TestARunPrintsItsAnswerOnStdout covers the one-shot's output: the
 // final assistant message of the run goes to stdout.

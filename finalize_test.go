@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -845,7 +846,12 @@ type lateAnswerTransport struct {
 	release chan struct{}
 	// once guards the entered channel.
 	once sync.Once
+	// closed counts the Close calls on the transport's readers.
+	closed atomic.Int32
 }
+
+// ClosedStreams reports how many of the transport's readers were closed.
+func (t *lateAnswerTransport) ClosedStreams() int { return int(t.closed.Load()) }
 
 // Stream waits for the release.
 func (t *lateAnswerTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
@@ -856,7 +862,20 @@ func (t *lateAnswerTransport) Stream(ctx context.Context, req poo.ChatRequest) (
 		Name:      "echo",
 		Arguments: []byte(`{"text":"late"}`),
 	}}}
-	return &fakeReader{events: r.events()}, poo.Rendered{API: poo.APIChatCompletions}, nil
+	return &closedReader{StreamReader: &fakeReader{events: r.events()}, t: t}, poo.Rendered{API: poo.APIChatCompletions}, nil
+}
+
+// closedReader counts its closes on the transport, so the test can wait
+// for the late response's stream to be done.
+type closedReader struct {
+	poo.StreamReader
+	t *lateAnswerTransport
+}
+
+// Close passes through and counts the close.
+func (r *closedReader) Close() error {
+	r.t.closed.Add(1)
+	return r.StreamReader.Close()
 }
 
 // Fork is not implemented by the fake.
@@ -891,7 +910,12 @@ func TestALateResponseAfterTheSettleDoesNotRecord(t *testing.T) {
 	eventsBefore := len(s.Events())
 
 	close(tr.release)
-	time.Sleep(200 * time.Millisecond)
+	// The stream's close is the quiescence signal: once the run's read
+	// of the late response is done, nothing it would have written can
+	// follow, so the negative assertions do not rest on a fixed sleep.
+	waitFor(t, "the late response's stream to close", func() bool {
+		return tr.ClosedStreams() == 1
+	})
 
 	if got := len(sink.allRecords()); got != recordsBefore {
 		t.Errorf("the late response wrote %d records, want none", got-recordsBefore)

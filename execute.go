@@ -410,7 +410,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// An incomplete call in a truncated response is skipped: the model
 	// was cut off before it could finish the call.
 	if !plan.complete {
-		if !record(CallModeSync) {
+		// The incomplete call never started, so its record carries no
+		// mode, like every other call that did not run.
+		if !record("") {
 			return
 		}
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{

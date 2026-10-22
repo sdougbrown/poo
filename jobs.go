@@ -316,7 +316,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 		run.jobStarts--
 		s.signalWorkLocked(run)
 		s.mu.Unlock()
-		s.removeJobLocked(jobID)
+		s.removeJob(jobID)
 		cancel(errFinalizing)
 		if errors.Is(err, errDeliveryAbandoned) || winding {
 			return "", false, true
@@ -352,10 +352,8 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	return jobID, true, false
 }
 
-// removeJobLocked forgets a job that never ran.
-//
-// The caller holds the session's lock.
-func (s *Session) removeJobLocked(jobID string) {
+// removeJob forgets a job that never ran.
+func (s *Session) removeJob(jobID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.jobs, jobID)
@@ -717,8 +715,18 @@ func (s *Session) handleIdleJobResults() {
 	s.mu.Unlock()
 
 	// The woken run is a normal run: it starts with the results, and
-	// the first request goes through the gate.
-	_, _ = s.start(context.Background(), "", TriggerJob, nil, results...)
+	// the first request goes through the gate. A Close or a break that
+	// lands between the check above and start's own keeps the results
+	// on the queue, where the close's held-record pass covers them.
+	if _, err := s.start(context.Background(), "", TriggerJob, nil, results...); err != nil {
+		s.mu.Lock()
+		for _, result := range results {
+			s.jobQueue = append(s.jobQueue, jobQueueItem{result: result, held: true})
+		}
+		s.reserved = false
+		s.mu.Unlock()
+		return
+	}
 
 	s.mu.Lock()
 	s.reserved = false
