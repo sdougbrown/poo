@@ -414,19 +414,12 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 
 // maxTokens computes the output room for the next request.
 //
-// The plan's rule: min(model MaxOutput or 8192, context_limit −
+// The rule is the core's: min(model MaxOutput or 8192, context_limit −
 // estimated input − 256). The value is always computed, never left to
 // the endpoint's default.
 func (s *Session) maxTokens() int {
-	limit := s.opts.MaxOutput
-	if limit <= 0 {
-		limit = DefaultMaxOutput
-	}
-	room := s.opts.ContextLimit - s.estimatedInput() - OutputReserve
-	if room < limit {
-		limit = room
-	}
-	return limit
+	info := ModelInfo{MaxOutput: s.opts.MaxOutput, ContextLimit: s.opts.ContextLimit}
+	return MaxTokens(info, s.estimatedInput())
 }
 
 // estimatedInput estimates the prompt tokens of the next request.
