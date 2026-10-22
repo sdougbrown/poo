@@ -339,3 +339,49 @@ func TestAStoppedSyncCallStillRunsItsAfterToolChain(t *testing.T) {
 		})
 	}
 }
+
+// fixAfterFunc adapts a function to an after-tool hook.
+type fixAfterFunc func(poo.HookContext, poo.ToolCallInfo, poo.ToolResult) (poo.ResultDecision, error)
+
+// AfterTool calls the function.
+func (f fixAfterFunc) AfterTool(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+	return f(ctx, info, result)
+}
+
+// TestARedactionSurvivesALaterHookFailure covers the plan's rule: any
+// Redact makes the whole chain redacted, so a hook that fails afterwards
+// must not expose text an earlier decision carried.
+func TestARedactionSurvivesALaterHookFailure(t *testing.T) {
+	const secret = "REVIEW_SECRET_4AB"
+	for _, mode := range []string{"error", "timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			tr := scripted([]fakeResponse{
+				{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{}`)}}},
+				{text: "done"},
+			})
+			sink := &recordingSink{}
+			opts := testOptions(t, tr, &echoTool{result: secret}, sink)
+			opts.HookTimeout = 10 * time.Millisecond
+			opts.AfterTool = []poo.AfterToolHook{
+				fixAfterFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+					return poo.Replace(result), nil
+				}),
+				fixAfterFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+					return poo.Redact(poo.ToolResult{Text: "safe"}), nil
+				}),
+				fixAfterFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+					if mode == "timeout" {
+						<-ctx.Done()
+						return poo.Keep(), ctx.Err()
+					}
+					return poo.Keep(), context.Canceled
+				}),
+			}
+			s := newTestSession(t, opts)
+			runSession(t, s, "start")
+			if store := fixSinkJSON(sink, secret); strings.Contains(store, secret) {
+				t.Errorf("the redacted secret persisted after %s: %s", mode, store)
+			}
+		})
+	}
+}

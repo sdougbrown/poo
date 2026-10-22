@@ -69,8 +69,12 @@ type afterToolOutcome struct {
 // The hooks run in registration order, and each one sees the previous
 // hook's output. A hook that fails settles the run with hook_error, and
 // a job's completion turns the failure into the job's own error.
-func (s *Session) runAfterTool(ctx context.Context, runID, job string, turn int, info ToolCallInfo, result ToolResult) (afterToolOutcome, error) {
-	out := afterToolOutcome{result: result}
+func (s *Session) runAfterTool(ctx context.Context, runID, job string, turn int, info ToolCallInfo, result ToolResult) (out afterToolOutcome, err error) {
+	out = afterToolOutcome{result: result}
+	// Any accepted redaction makes the whole chain redacted, including
+	// every outcome that leaves the chain early because a later hook
+	// failed or was interrupted.
+	defer out.scrub()
 	if len(s.opts.AfterTool) == 0 {
 		return out, nil
 	}
@@ -119,14 +123,22 @@ func (s *Session) runAfterTool(ctx context.Context, runID, job string, turn int,
 		}
 		out.result = current
 	}
-	if out.redacted {
-		// A redacted chain's decisions carry no contents: the record
-		// must not hold what the redaction removed.
-		for i := range out.decisions {
-			out.decisions[i].Text = ""
-		}
-	}
 	return out, nil
+}
+
+// scrub removes every content a redacted chain must not carry.
+//
+// A redaction wins over the whole chain, so the decisions omit their
+// intermediate contents even when a later hook failed, missed its
+// deadline or was interrupted.
+func (o *afterToolOutcome) scrub() {
+	if !o.redacted {
+		return
+	}
+	o.original = nil
+	for i := range o.decisions {
+		o.decisions[i].Text = ""
+	}
 }
 
 // decisionRecord describes what a hook decided about a result.
