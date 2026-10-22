@@ -42,6 +42,7 @@ Run flags:
   --log <path>           The session log path
   --working-dir <dir>    The directory the tools work in (default: the current one)
   --timeout <dur>        The wall-clock ceiling for the run, e.g. 5m
+  --no-wait-jobs         Exit at the first settle; the running jobs stop through the session's close
 `
 
 func main() {
@@ -80,6 +81,9 @@ type runOptions struct {
 	logPath         string
 	workingDir      string
 	timeout         time.Duration
+	// noWaitJobs exits at the first settle, and the running jobs stop
+	// through the session's close.
+	noWaitJobs bool
 }
 
 // runRun executes `poo run`.
@@ -100,6 +104,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.logPath, "log", "", "The session log path")
 	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
 	fs.DurationVar(&o.timeout, "timeout", 0, "The wall-clock ceiling for the run")
+	fs.BoolVar(&o.noWaitJobs, "no-wait-jobs", false, "Exit at the first settle; the running jobs stop through the session's close")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -204,7 +209,6 @@ func runRun(args []string) int {
 	}
 
 	sessionID := newSessionID()
-	runID := newSessionID()
 
 	if err := log.Append(ctx, &poo.SessionCreated{
 		RecordMeta:   poo.NewRecordMeta("session.created"),
@@ -225,13 +229,12 @@ func runRun(args []string) int {
 		return 1
 	}
 
-	r := poo.NewRun(poo.Options{
+	sess, err := poo.New(poo.Options{
 		Transport: transport,
 		Tools:     tools,
 		ToolOrder: toolOrder,
 		Sink:      log,
 		SessionID: sessionID,
-		RunID:     runID,
 		ModelID:   o.modelID,
 
 		ContextLimit: o.contextLimit,
@@ -245,17 +248,92 @@ func runRun(args []string) int {
 
 		ReasoningEffort: o.reasoningEffort,
 	})
-
-	res, err := r.Execute(ctx, strings.Join(fs.Args(), " "))
 	if err != nil {
-		// The core owns the settle record, so an error here means the
-		// run never settled and the log has no run.settled.
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
+	defer sess.Close()
+
+	runID, err := sess.Prompt(ctx, strings.Join(fs.Args(), " "))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
+
+	// The answer and the exit code belong to the run the client asked
+	// for, not to a later run that a job result woke.
+	res, err := sess.WaitRun(ctx, runID)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1
 	}
 
 	fmt.Fprintf(os.Stderr, "poo: settled %s after %d turn(s); log: %s\n", res.Reason, res.Turns, logPath)
-	return poo.ExitCode(res.Reason)
+
+	// The one-shot waits for the jobs, so the work the model put in the
+	// background is done before the process goes. The answer is selected
+	// after the wait, because a wake may produce the last run. The flag
+	// turns the wait off, and the jobs stop through the session's close.
+	answer, waitErr := runOutput(ctx, sess, res, o.noWaitJobs)
+	if waitErr != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", waitErr)
+	}
+
+	// The run's answer goes to stdout: the finish result when the
+	// client's run produced one, and the last assistant message
+	// otherwise.
+	if answer != "" {
+		fmt.Println(answer)
+	}
+
+	// The held results do not keep the process alive: they wait for the
+	// next load, and the client is told which ones they are.
+	if held := sess.HeldJobs(); len(held) > 0 {
+		fmt.Fprintf(os.Stderr, "poo: %d job result(s) held for the next run: %s\n", len(held), strings.Join(held, ", "))
+	}
+
+	// The exit code comes from the settle-reason table, combined
+	// across the runs: the first non-zero code wins.
+	return combinedExitCode(sess.SettleCodes())
+}
+
+// finalAnswer returns the run's answer, as the client asked for it.
+//
+// The finish result is the typed answer when the run produced one, and
+// the last assistant message is the answer otherwise.
+func finalAnswer(sess *poo.Session, res poo.Result) string {
+	if res.Detail.Result != nil {
+		return string(res.Detail.Result)
+	}
+	return sess.LastAssistantMessage()
+}
+
+// runOutput waits for the jobs and then selects the answer to print.
+//
+// The client run's finish result is fixed by its settle, so it is kept
+// across the wait. Without one, the answer is the last run's final
+// assistant message, which is only known once the jobs and their wakes
+// are done.
+func runOutput(ctx context.Context, sess *poo.Session, res poo.Result, noWaitJobs bool) (string, error) {
+	if !noWaitJobs {
+		if err := sess.WaitJobs(ctx); err != nil {
+			return "", err
+		}
+	}
+	return finalAnswer(sess, res), nil
+}
+
+// combinedExitCode combines the exit codes of the runs that settled.
+//
+// The first non-zero code wins, and a session whose every run succeeded
+// has the code zero.
+func combinedExitCode(codes []int) int {
+	for _, code := range codes {
+		if code != 0 {
+			return code
+		}
+	}
+	return 0
 }
 
 // loggedBaseURL returns the base URL the log records.

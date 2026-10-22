@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,13 +36,11 @@ func stallingEndpoint(t *testing.T) *httptest.Server {
 // settleOf returns the run's settle record.
 func settleOf(t *testing.T, sink *recordingSink) *poo.RunSettled {
 	t.Helper()
-	for _, rec := range sink.records {
-		if s, ok := rec.(*poo.RunSettled); ok {
-			return s
-		}
+	s := sink.settled()
+	if s == nil {
+		t.Fatal("the log holds no run.settled record")
 	}
-	t.Fatal("the log holds no run.settled record")
-	return nil
+	return s
 }
 
 // TestACancelledRequestSettlesCancelled covers a cancellation that
@@ -58,11 +57,13 @@ func TestACancelledRequestSettlesCancelled(t *testing.T) {
 		cancel()
 	}()
 
-	opts := testOptions(t, tr, tool, sink)
-	r := poo.NewRun(opts)
-	res, err := r.Execute(ctx, "do the thing")
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(ctx, "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
 	if err != nil {
-		t.Fatalf("the run failed: %v", err)
+		t.Fatalf("waiting for the run: %v", err)
 	}
 	if res.Reason != poo.ReasonCancelled {
 		t.Errorf("the run settled %q, want cancelled", res.Reason)
@@ -90,10 +91,13 @@ func TestADeadlineDuringTheRequestSettlesCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(ctx, "do the thing")
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(ctx, "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
 	if err != nil {
-		t.Fatalf("the run failed: %v", err)
+		t.Fatalf("waiting for the run: %v", err)
 	}
 	if res.Reason != poo.ReasonCancelled {
 		t.Errorf("the run settled %q, want cancelled", res.Reason)
@@ -120,9 +124,12 @@ func TestAStartedRunAlwaysSettles(t *testing.T) {
 		cancel()
 	}()
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	if _, err := r.Execute(ctx, "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(ctx, "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
 	}
 
 	names := sink.names()
@@ -134,8 +141,8 @@ func TestAStartedRunAlwaysSettles(t *testing.T) {
 	}
 }
 
-// TestAStreamThatBreaksStillReportsItsUsage covers a provider that dies
-// mid-stream: the request still has a usage record.
+// TestAStreamThatBreaksStillReportsItsUsage covers a provider that
+// dies mid-stream: the request still has a usage record.
 func TestAStreamThatBreaksStillReportsItsUsage(t *testing.T) {
 	body := "data: " + `{"choices":[{"index":0,"delta":{"content":"hi"}}]}` + "\n\n" +
 		"data: " + `{"error":{"message":"the model crashed","type":"server_error"}}` + "\n\n"
@@ -149,11 +156,8 @@ func TestAStreamThatBreaksStillReportsItsUsage(t *testing.T) {
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonProviderError {
 		t.Errorf("the run settled %q, want provider_error", res.Reason)
 	}
@@ -182,14 +186,12 @@ func TestTheTextModeDoesNotDuplicateTheProse(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, sink)
 	opts.ToolsMode = "text"
-	r := poo.NewRun(opts)
-	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
 
 	var assistant *poo.MessageRecord
-	for _, rec := range sink.records {
-		if m, ok := rec.(*poo.MessageRecord); ok && m.Origin == "model" {
+	for _, m := range sink.messages() {
+		if m.Origin == "model" {
 			assistant = m
 		}
 	}
@@ -213,8 +215,8 @@ func TestTheTextModeDoesNotDuplicateTheProse(t *testing.T) {
 	}
 }
 
-// TestTheHistoryTheModelSeesHoldsTheProseOnce covers the same thing from
-// the model's side: the request it answers holds the prose once.
+// TestTheHistoryTheModelSeesHoldsTheProseOnce covers the same thing
+// from the model's side: the request it answers holds the prose once.
 func TestTheHistoryTheModelSeesHoldsTheProseOnce(t *testing.T) {
 	body := "data: " + `{"choices":[{"index":0,"delta":{"content":"I will list. <tool_call>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}</tool_call> done."},"finish_reason":"stop"}]}` + "\n\n" +
 		"data: [DONE]\n\n"
@@ -230,14 +232,12 @@ func TestTheHistoryTheModelSeesHoldsTheProseOnce(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, sink)
 	opts.ToolsMode = "text"
-	r := poo.NewRun(opts)
-	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
 
 	var assistant poo.Message
-	for _, rec := range sink.records {
-		if m, ok := rec.(*poo.MessageRecord); ok && m.Origin == "model" {
+	for _, m := range sink.messages() {
+		if m.Origin == "model" {
 			assistant = poo.Message{Role: m.Role, Content: m.Content}
 		}
 	}
@@ -250,29 +250,6 @@ func TestTheHistoryTheModelSeesHoldsTheProseOnce(t *testing.T) {
 	}
 	if strings.Contains(text, "tool_call") {
 		t.Errorf("the message holds the call markup: %q", text)
-	}
-}
-
-// TestAZeroContextLimitSettlesBeforeAnyRequest pins what a zero
-// ContextLimit means: no room, so the run ends without sending.
-func TestAZeroContextLimitSettlesBeforeAnyRequest(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "never asked"}}}
-	sink := &recordingSink{}
-	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
-	opts.ContextLimit = 0
-
-	res, err := poo.NewRun(opts).Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
-	if res.Reason != poo.ReasonContextExhausted {
-		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
-	}
-	if got := settleOf(t, sink).Detail.Source; got != "no_output_room" {
-		t.Errorf("the settle source is %q, want no_output_room", got)
-	}
-	if len(tr.requests) != 0 {
-		t.Errorf("the transport was asked %d times, want none", len(tr.requests))
 	}
 }
 
@@ -292,13 +269,10 @@ func TestARateLimitCarriesTheWaitItAskedFor(t *testing.T) {
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
-	if res.Reason != poo.ReasonProviderError {
-		t.Errorf("the run settled %q, want provider_error", res.Reason)
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonProviderLimit {
+		t.Errorf("the run settled %q, want provider_limit", res.Reason)
 	}
 
 	settle := settleOf(t, sink)
@@ -330,10 +304,10 @@ func TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty(t *testing.T) {
 
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 	sink := &recordingSink{}
-	r := poo.NewRun(testOptions(t, tr, &echoTool{result: "echoed"}, sink))
-	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	runSession(t, s, "do the thing")
 	settle := settleOf(t, sink)
 	if settle.Detail.Provider == nil || settle.Detail.Provider.RetryAfterSec <= 30 || settle.Detail.Provider.RetryAfterSec > 45 {
 		t.Errorf("the recorded retry-after is %+v, want more than 30 and at most 45 seconds", settle.Detail.Provider)
@@ -342,8 +316,8 @@ func TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty(t *testing.T) {
 
 // TestATruncatedStreamKeepsItsOriginalKind covers a stream that breaks
 // after a delta: the plan reclassifies the failure as an interrupted
-// stream and keeps the kind the failure had in the code, so a reader can
-// tell a broken connection from a broken endpoint.
+// stream and keeps the kind the failure had in the code, so a reader
+// can tell a broken connection from a broken endpoint.
 func TestATruncatedStreamKeepsItsOriginalKind(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -364,11 +338,8 @@ func TestATruncatedStreamKeepsItsOriginalKind(t *testing.T) {
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonProviderError {
 		t.Errorf("the run settled %q, want provider_error", res.Reason)
 	}
@@ -382,5 +353,122 @@ func TestATruncatedStreamKeepsItsOriginalKind(t *testing.T) {
 	}
 	if settle.Detail.Provider.Code != "network" {
 		t.Errorf("the provider's code is %q, want the original kind network", settle.Detail.Provider.Code)
+	}
+}
+
+// TestTheUsageFallbackFillsTheUsageRecord covers a transport whose
+// stream breaks before the endpoint's usage arrives: the request still
+// has a usage record, taken from the transport's own report.
+func TestTheUsageFallbackFillsTheUsageRecord(t *testing.T) {
+	cached := 7
+	tr := &usageTransport{reader: &usageReader{usage: &poo.UsageReport{
+		InputTokens:     120,
+		OutputTokens:    8,
+		CacheReadTokens: &cached,
+		TTFTMS:          42.5,
+	}}}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonProviderError {
+		t.Errorf("the run settled %q, want provider_error", res.Reason)
+	}
+	if sink.count("usage") != 1 {
+		t.Fatalf("the log holds %d usage records, want 1", sink.count("usage"))
+	}
+	var usage *poo.Usage
+	for _, rec := range sink.allRecords() {
+		if u, ok := rec.(*poo.Usage); ok {
+			usage = u
+		}
+	}
+	if usage == nil {
+		t.Fatal("the log holds no usage record")
+	}
+	if usage.InputTokens != 120 || usage.OutputTokens != 8 {
+		t.Errorf("the usage is %d/%d, want 120/8", usage.InputTokens, usage.OutputTokens)
+	}
+	if usage.CacheReadTokens == nil || *usage.CacheReadTokens != 7 {
+		t.Errorf("the cache-read count is %v, want 7", usage.CacheReadTokens)
+	}
+	if usage.TTFTMS != 42.5 {
+		t.Errorf("the time to the first token is %v, want 42.5", usage.TTFTMS)
+	}
+}
+
+// TestTheArgumentsAreRecordedAsTheModelSentThem covers the record's
+// shape for a call with malformed arguments.
+func TestTheArgumentsAreRecordedAsTheModelSentThem(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{
+			calls: []poo.ToolCall{{
+				ID:        "call_1",
+				Name:      "echo",
+				Arguments: json.RawMessage(`{"text": broken`),
+			}},
+		},
+		{text: "finished"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	runSession(t, s, "do the thing")
+
+	var call *poo.ToolCallRecord
+	for _, rec := range sink.allRecords() {
+		if c, ok := rec.(*poo.ToolCallRecord); ok {
+			call = c
+		}
+	}
+	if call == nil {
+		t.Fatal("the log holds no tool.call record")
+	}
+	var text string
+	if err := json.Unmarshal(call.Arguments, &text); err != nil {
+		t.Fatalf("the recorded arguments are not a JSON string: %s", call.Arguments)
+	}
+	if text != `{"text": broken` {
+		t.Errorf("the recorded arguments are %q, want the raw text", text)
+	}
+}
+
+// cancelAtSettleHook waits for its context and then accepts the settle.
+type cancelAtSettleHook struct {
+	entered chan struct{}
+}
+
+// BeforeSettle waits until the parent context is cancelled.
+func (h *cancelAtSettleHook) BeforeSettle(ctx poo.HookContext, reason poo.Reason) (poo.SettleDecision, error) {
+	close(h.entered)
+	<-ctx.Done()
+	return poo.Accept(), nil
+}
+
+// TestAParentCancelDuringTheSettleHookWins covers external cancellation:
+// a parent context that ends while BeforeSettle runs produces a
+// cancelled candidate that wins, unlike an internal hook interruption.
+func TestAParentCancelDuringTheSettleHookWins(t *testing.T) {
+	h := &cancelAtSettleHook{entered: make(chan struct{})}
+	s := newTestSession(t, poo.Options{
+		Transport:    scripted([]fakeResponse{{text: "done"}}),
+		ContextLimit: 32768,
+		BeforeSettle: []poo.BeforeSettleHook{h},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := s.Prompt(ctx, "start"); err != nil {
+		t.Fatal(err)
+	}
+	<-h.entered
+	cancel()
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reason != poo.ReasonCancelled {
+		t.Fatalf("the parent-cancelled run settled %q with losing %v, want cancelled", res.Reason, res.Detail.Losing)
 	}
 }

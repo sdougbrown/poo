@@ -3,230 +3,19 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
 )
 
-// fakeTransport answers requests from a script.
-type fakeTransport struct {
-	// responses holds one response per request. The last one repeats.
-	responses []fakeResponse
-	// requests holds the requests the transport received.
-	requests []poo.ChatRequest
-	// index is the next response to serve.
-	index int
-}
-
-// fakeResponse is one scripted response.
-type fakeResponse struct {
-	// text is the assistant's text.
-	text string
-	// calls are the tool calls the model asked for.
-	calls []poo.ToolCall
-	// finish is why the model stopped.
-	finish poo.FinishReason
-	// err is the failure the request returns, if any.
-	err error
-	// usage is the accounting the stream reports, if any.
-	usage *poo.UsageReport
-}
-
-// Stream answers the next scripted response.
-func (f *fakeTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
-	f.requests = append(f.requests, req)
-	rendered := poo.Rendered{
-		API:      poo.APIChatCompletions,
-		Messages: len(req.Messages),
-	}
-	i := f.index
-	if i >= len(f.responses) {
-		i = len(f.responses) - 1
-	} else {
-		f.index++
-	}
-	if i < 0 {
-		return nil, rendered, fmt.Errorf("fakeTransport: no scripted response")
-	}
-	resp := f.responses[i]
-	if resp.err != nil {
-		return nil, rendered, resp.err
-	}
-	return &fakeReader{events: resp.events()}, rendered, nil
-}
-
-// Fork is not implemented by the fake: the compaction seam arrives with
-// the fork.
-func (f *fakeTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
-	return nil, fmt.Errorf("fakeTransport: no fork")
-}
-
-// events turns a response into the events a stream yields.
-func (r fakeResponse) events() []poo.StreamEvent {
-	var events []poo.StreamEvent
-	if r.text != "" {
-		events = append(events, poo.StreamEvent{
-			Kind:  "delta",
-			Delta: &poo.Delta{Kind: "text", Text: r.text},
-		})
-	}
-	for _, c := range r.calls {
-		events = append(events, poo.StreamEvent{
-			Kind: "tool_call",
-			ToolCall: &poo.ToolCallDelta{
-				Index:     0,
-				ID:        c.ID,
-				Name:      c.Name,
-				Arguments: c.Arguments,
-				Complete:  true,
-			},
-		})
-	}
-	finish := r.finish
-	if finish == "" {
-		finish = poo.FinishStop
-	}
-	events = append(events, poo.StreamEvent{Kind: "finish", FinishReason: finish})
-	if r.usage != nil {
-		events = append(events, poo.StreamEvent{Kind: "usage", Usage: r.usage})
-	}
-	return events
-}
-
-// fakeReader yields a fixed set of events.
-type fakeReader struct {
-	events []poo.StreamEvent
-	index  int
-}
-
-// Next returns the next event.
-func (r *fakeReader) Next() (poo.StreamEvent, error) {
-	if r.index >= len(r.events) {
-		return poo.StreamEvent{}, io.EOF
-	}
-	ev := r.events[r.index]
-	r.index++
-	return ev, nil
-}
-
-// Close releases the reader.
-func (r *fakeReader) Close() error { return nil }
-
-// recordingSink collects the records a run writes.
-type recordingSink struct {
-	records []poo.Record
-}
-
-// Append collects one record.
-func (s *recordingSink) Append(ctx context.Context, rec poo.Record) error {
-	s.records = append(s.records, rec)
-	return nil
-}
-
-// Flush does nothing.
-func (s *recordingSink) Flush(ctx context.Context) error { return nil }
-
-// names returns the record names, in order.
-func (s *recordingSink) names() []string {
-	out := make([]string, 0, len(s.records))
-	for _, rec := range s.records {
-		out = append(out, rec.Meta().Record)
-	}
-	return out
-}
-
-// count returns how many records carry a name.
-func (s *recordingSink) count(name string) int {
-	n := 0
-	for _, rec := range s.records {
-		if rec.Meta().Record == name {
-			n++
-		}
-	}
-	return n
-}
-
-// messages returns the message records, in order.
-func (s *recordingSink) messages() []*poo.MessageRecord {
-	var out []*poo.MessageRecord
-	for _, rec := range s.records {
-		if m, ok := rec.(*poo.MessageRecord); ok {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-// echoTool is a tool that records what it was asked to do.
-type echoTool struct {
-	// calls holds the arguments the tool received.
-	calls []string
-	// result is the text the tool returns.
-	result string
-}
-
-// Spec describes the tool.
-func (t *echoTool) Spec() poo.ToolSpec {
-	return poo.ToolSpec{
-		Name:        "echo",
-		Description: "echo the argument back",
-		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`),
-		Class:       poo.ClassReadOnly,
-	}
-}
-
-// Prepare accepts anything.
-func (t *echoTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
-	return echoPrepared{text: string(raw)}, nil
-}
-
-// Call records the call and returns the result.
-func (t *echoTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
-	p := in.(echoPrepared)
-	t.calls = append(t.calls, p.text)
-	return poo.ToolResult{Text: t.result}, nil
-}
-
-// echoPrepared is a prepared echo call.
-type echoPrepared struct {
-	text string
-}
-
-// Summary describes the call.
-func (p echoPrepared) Summary() string { return p.text }
-
-// testOptions builds the options for a test run.
-func testOptions(t *testing.T, tr poo.ChatTransport, tool *echoTool, sink poo.RecordSink) poo.Options {
-	t.Helper()
-	return poo.Options{
-		Transport: tr,
-		Tools: map[string]poo.Tool{
-			"echo": tool,
-		},
-		ToolOrder:    []string{"echo"},
-		Sink:         sink,
-		SessionID:    "s1",
-		RunID:        "r1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
-		SystemPrompt: "the system prompt",
-		WorkingDir:   t.TempDir(),
-	}
-}
-
 func TestARunThatEndsOnItsOwnSettlesEndTurn(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "all done"}}}
+	tr := scripted([]fakeResponse{{text: "all done"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the run settled %q, want end_turn", res.Reason)
 	}
@@ -244,7 +33,7 @@ func TestARunThatEndsOnItsOwnSettlesEndTurn(t *testing.T) {
 }
 
 func TestARunThatCallsAToolExecutesIt(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -253,26 +42,23 @@ func TestARunThatCallsAToolExecutesIt(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the run settled %q, want end_turn", res.Reason)
 	}
 	if res.Turns != 2 {
 		t.Errorf("the run made %d turns, want 2", res.Turns)
 	}
-	if len(tool.calls) != 1 {
-		t.Fatalf("the tool ran %d times, want 1", len(tool.calls))
+	if len(tool.Calls()) != 1 {
+		t.Fatalf("the tool ran %d times, want 1", len(tool.Calls()))
 	}
-	if !strings.Contains(tool.calls[0], "hello") {
-		t.Errorf("the tool received %q, want the call's arguments", tool.calls[0])
+	if !strings.Contains(tool.Calls()[0], "hello") {
+		t.Errorf("the tool received %q, want the call's arguments", tool.Calls()[0])
 	}
 
 	// The tool call and its result are both recorded.
@@ -285,7 +71,7 @@ func TestARunThatCallsAToolExecutesIt(t *testing.T) {
 }
 
 func TestTheSecondRequestCarriesTheToolResult(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -294,18 +80,17 @@ func TestTheSecondRequestCarriesTheToolResult(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	tool := &echoTool{result: "the echoed text"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, &recordingSink{}))
-	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
+	runSession(t, s, "do the thing")
 
-	if len(tr.requests) != 2 {
-		t.Fatalf("the transport got %d requests, want 2", len(tr.requests))
+	reqs := tr.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("the transport got %d requests, want 2", len(reqs))
 	}
-	second := tr.requests[1].Messages
+	second := reqs[1].Messages
 	// system, user, assistant (with its tool call), tool result
 	if len(second) != 4 {
 		t.Fatalf("the second request carried %d messages, want 4", len(second))
@@ -334,49 +119,53 @@ func TestTheSecondRequestCarriesTheToolResult(t *testing.T) {
 }
 
 func TestTheMaxTurnsCeilingSettlesMaxTurns(t *testing.T) {
-	// Every response asks for another tool call, so the run only stops at
-	// its ceiling.
-	tr := &fakeTransport{responses: []fakeResponse{{
+	// Every response asks for another tool call, so the run only stops
+	// at its ceiling.
+	tr := scripted([]fakeResponse{{
 		calls: []poo.ToolCall{{
 			ID:        "call_1",
 			Name:      "echo",
 			Arguments: json.RawMessage(`{"text":"again"}`),
 		}},
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, sink)
 	opts.MaxTurns = 3
 
-	r := poo.NewRun(opts)
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonMaxTurns {
 		t.Errorf("the run settled %q, want max_turns", res.Reason)
 	}
 	if res.Turns != 3 {
 		t.Errorf("the run made %d turns, want 3", res.Turns)
 	}
-	if len(tool.calls) != 3 {
-		t.Errorf("the tool ran %d times, want 3", len(tool.calls))
+	if len(tool.Calls()) != 3 {
+		t.Errorf("the tool ran %d times, want 3", len(tool.Calls()))
+	}
+	// The turn ceiling is a candidate of its own.
+	if res.Detail.Source != "max_turns" {
+		t.Errorf("the settle source is %q, want max_turns", res.Detail.Source)
 	}
 }
 
 func TestACancelledContextSettlesCancelled(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(ctx, "do the thing")
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(ctx, "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
 	if err != nil {
-		t.Fatalf("the run failed: %v", err)
+		t.Fatalf("waiting for the run: %v", err)
 	}
 	if res.Reason != poo.ReasonCancelled {
 		t.Errorf("the run settled %q, want cancelled", res.Reason)
@@ -384,21 +173,18 @@ func TestACancelledContextSettlesCancelled(t *testing.T) {
 }
 
 func TestAProviderErrorSettlesProviderError(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		err: &poo.ProviderError{
 			Kind:    poo.ProviderKindServer,
 			Message: "the endpoint is down",
 			Status:  500,
 		},
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonProviderError {
 		t.Errorf("the run settled %q, want provider_error", res.Reason)
 	}
@@ -411,88 +197,78 @@ func TestAProviderErrorSettlesProviderError(t *testing.T) {
 }
 
 func TestAContextLengthErrorSettlesContextExhausted(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		err: &poo.ProviderError{
 			Kind:    poo.ProviderKindContextLength,
 			Message: "the prompt is too long",
 			Status:  400,
 		},
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonContextExhausted {
 		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
 	}
 }
 
-func TestAFinishReasonOfLengthSettlesProviderError(t *testing.T) {
-	// The skeleton's reason enum has no output_truncated, so a provider
-	// that stopped on the output limit is a provider error.
-	tr := &fakeTransport{responses: []fakeResponse{{
+func TestAFinishReasonOfLengthReachesBeforeSettle(t *testing.T) {
+	// A truncated response is a natural stop, and the plan's
+	// `output_truncated` reason is what it settles as.
+	tr := scripted([]fakeResponse{{
 		text:   "a truncated ans",
 		finish: poo.FinishLength,
-	}}}
+	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
-	if res.Reason != poo.ReasonProviderError {
-		t.Errorf("the run settled %q, want provider_error", res.Reason)
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonOutputTruncated {
+		t.Errorf("the run settled %q, want output_truncated", res.Reason)
 	}
 }
 
 func TestNoOutputRoomSettlesContextExhaustedWithoutSending(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, sink)
-	// A context limit this small leaves less than 256 tokens of room once
-	// the prompt is counted.
+	// A context limit this small leaves less than 256 tokens of room
+	// once the prompt is counted.
 	opts.ContextLimit = 300
 
-	r := poo.NewRun(opts)
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonContextExhausted {
 		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
 	}
 	if res.Detail.Source != "no_output_room" {
 		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
 	}
-	if len(tr.requests) != 0 {
-		t.Errorf("the transport got %d requests, want none", len(tr.requests))
+	if len(tr.Requests()) != 0 {
+		t.Errorf("the transport got %d requests, want none", len(tr.Requests()))
 	}
 }
 
 func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.ContextLimit = 4096
 	opts.MaxOutput = 0
 
-	r := poo.NewRun(opts)
-	if _, err := r.Execute(context.Background(), "a short prompt"); err != nil {
-		t.Fatalf("the run failed: %v", err)
+	s := newTestSession(t, opts)
+	runSession(t, s, "a short prompt")
+	reqs := tr.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the transport got %d requests, want 1", len(reqs))
 	}
-	if len(tr.requests) != 1 {
-		t.Fatalf("the transport got %d requests, want 1", len(tr.requests))
-	}
-	mt := tr.requests[0].MaxTokens
+	mt := reqs[0].MaxTokens
 	// The room is the limit minus the estimated input minus 256, and the
 	// model's own ceiling is 8192 by default. The estimate covers the
 	// history at request time: the system message ("the system prompt")
@@ -506,41 +282,37 @@ func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
 }
 
 func TestTheMaxOutputCapsTheMaxTokens(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.ContextLimit = 262144
 	opts.MaxOutput = 512
 
-	r := poo.NewRun(opts)
-	if _, err := r.Execute(context.Background(), "a short prompt"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
-	if got := tr.requests[0].MaxTokens; got != 512 {
+	s := newTestSession(t, opts)
+	runSession(t, s, "a short prompt")
+	if got := tr.Requests()[0].MaxTokens; got != 512 {
 		t.Errorf("max_tokens is %d, want 512", got)
 	}
 }
 
 func TestTheDefaultMaxTokensIsEightThousandAndNinetyTwo(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.ContextLimit = 262144
 	opts.MaxOutput = 0
 
-	r := poo.NewRun(opts)
-	if _, err := r.Execute(context.Background(), "a short prompt"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
-	if got := tr.requests[0].MaxTokens; got != 8192 {
+	s := newTestSession(t, opts)
+	runSession(t, s, "a short prompt")
+	if got := tr.Requests()[0].MaxTokens; got != 8192 {
 		t.Errorf("max_tokens is %d, want 8192", got)
 	}
 }
 
 func TestAnUnknownToolIsARecoverableError(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -549,15 +321,12 @@ func TestAnUnknownToolIsARecoverableError(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the run settled %q, want end_turn", res.Reason)
 	}
@@ -566,8 +335,8 @@ func TestAnUnknownToolIsARecoverableError(t *testing.T) {
 	}
 }
 
-func TestTheRunMovesThroughTheLoopStates(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{
+func TestTheSessionMovesThroughTheLoopStates(t *testing.T) {
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -576,42 +345,37 @@ func TestTheRunMovesThroughTheLoopStates(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, &recordingSink{}))
-	if r.State() != poo.StateRequesting {
-		t.Errorf("a new run is in %q, want requesting", r.State())
+	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
+	if s.State() != poo.StateIdle {
+		t.Errorf("a new session is in %q, want idle", s.State())
 	}
-	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
-	if r.State() != poo.StateSettled {
-		t.Errorf("a finished run is in %q, want settled", r.State())
+	runSession(t, s, "do the thing")
+	if s.State() != poo.StateSettled {
+		t.Errorf("a finished session is in %q, want settled", s.State())
 	}
 }
 
 func TestTheContextRunningOutMidRunSettlesContextExhausted(t *testing.T) {
 	// The model asks for a call whose result is large, so the next
 	// request has no room left.
-	tr := &fakeTransport{responses: []fakeResponse{{
+	tr := scripted([]fakeResponse{{
 		calls: []poo.ToolCall{{
 			ID:        "call_1",
 			Name:      "echo",
 			Arguments: json.RawMessage(`{"text":"hello"}`),
 		}},
-	}}}
+	}})
 	tool := &echoTool{result: string(make([]byte, 20000))}
 	sink := &recordingSink{}
 
 	opts := testOptions(t, tr, tool, sink)
 	opts.ContextLimit = 2000
 
-	r := poo.NewRun(opts)
-	res, err := r.Execute(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonContextExhausted {
 		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
 	}
@@ -619,21 +383,20 @@ func TestTheContextRunningOutMidRunSettlesContextExhausted(t *testing.T) {
 		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
 	}
 	// The first request went out, and the second did not.
-	if len(tr.requests) != 1 {
-		t.Errorf("the transport got %d requests, want 1", len(tr.requests))
+	if len(tr.Requests()) != 1 {
+		t.Errorf("the transport got %d requests, want 1", len(tr.Requests()))
 	}
 }
 
 func TestTheSettleRecordCarriesTheReason(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "hello"}}}
+	tr := scripted([]fakeResponse{{text: "hello"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
-	last := sink.records[len(sink.records)-1]
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	runSession(t, s, "do the thing")
+	records := sink.allRecords()
+	last := records[len(records)-1]
 	settled, ok := last.(*poo.RunSettled)
 	if !ok {
 		t.Fatalf("the last record is %T, want a run.settled", last)
@@ -641,8 +404,8 @@ func TestTheSettleRecordCarriesTheReason(t *testing.T) {
 	if settled.Reason != poo.ReasonEndTurn {
 		t.Errorf("the settle reason is %q, want end_turn", settled.Reason)
 	}
-	if settled.RunID != "r1" {
-		t.Errorf("the settle record's run id is %q, want r1", settled.RunID)
+	if settled.RunID == "" {
+		t.Error("the settle record has no run id")
 	}
 	if settled.Seq == 0 {
 		t.Error("the settle record has no sequence number")
@@ -653,10 +416,10 @@ func TestTheSettleRecordCarriesTheReason(t *testing.T) {
 }
 
 func TestMalformedArgumentsAreRecordedAsText(t *testing.T) {
-	// The model sent arguments that are not valid JSON. The record still
-	// holds valid JSON, so a consumer can decode it without a special
-	// case, and the raw text is preserved.
-	tr := &fakeTransport{responses: []fakeResponse{
+	// The model sent arguments that are not valid JSON. The record
+	// still holds valid JSON, so a consumer can decode it without a
+	// special case, and the raw text is preserved.
+	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
 				ID:        "call_1",
@@ -665,17 +428,15 @@ func TestMalformedArgumentsAreRecordedAsText(t *testing.T) {
 			}},
 		},
 		{text: "finished"},
-	}}
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	r := poo.NewRun(testOptions(t, tr, tool, sink))
-	if _, err := r.Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
-	}
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	runSession(t, s, "do the thing")
 
 	var call *poo.ToolCallRecord
-	for _, rec := range sink.records {
+	for _, rec := range sink.allRecords() {
 		if c, ok := rec.(*poo.ToolCallRecord); ok {
 			call = c
 		}
@@ -692,5 +453,48 @@ func TestMalformedArgumentsAreRecordedAsText(t *testing.T) {
 	}
 	if text != `{"text": broken` {
 		t.Errorf("the recorded arguments are %q, want the raw text", text)
+	}
+}
+
+func TestASessionWithoutATransportIsAConstructionError(t *testing.T) {
+	_, err := poo.New(poo.Options{ContextLimit: 1024})
+	if err == nil {
+		t.Fatal("a session with no transport was built")
+	}
+	var init *poo.ErrSessionInit
+	if !asSessionInit(err, &init) {
+		t.Fatalf("the error is %T, want an ErrSessionInit", err)
+	}
+}
+
+// asSessionInit reports that the error is an ErrSessionInit.
+func asSessionInit(err error, target **poo.ErrSessionInit) bool {
+	for err != nil {
+		if e, ok := err.(*poo.ErrSessionInit); ok {
+			*target = e
+			return true
+		}
+		u, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		err = u.Unwrap()
+	}
+	return false
+}
+
+func TestTheSessionRefusesASecondPromptWhileARunIsActive(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "hello"}})
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
+	if _, err := s.Prompt(context.Background(), "first"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Prompt(context.Background(), "second"); err == nil {
+		t.Fatal("the session accepted a second prompt")
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
 	}
 }

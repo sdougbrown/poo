@@ -42,7 +42,10 @@ type ToolCallDelta struct {
 	// arrives whole, and may be a fragment when the provider streams
 	// arguments in pieces.
 	Arguments json.RawMessage
-	// Complete reports whether Arguments is a complete JSON object.
+	// Complete reports whether this fragment's Arguments is a complete JSON
+	// object. It is informational: a call's arguments can arrive over several
+	// fragments, so the core decides whether a call is complete by parsing
+	// the assembled arguments, not from this field.
 	Complete bool
 }
 

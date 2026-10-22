@@ -56,6 +56,10 @@ func TestADeadlineDuringTheRunSettlesCancelled(t *testing.T) {
 	if settled["reason"] != "cancelled" {
 		t.Errorf("the settle reason is %v, want cancelled", settled["reason"])
 	}
+	detail, _ := settled["detail"].(map[string]any)
+	if detail["source"] != poo.SourceCancelDeadline {
+		t.Errorf("the settle source is %v, want %s", detail["source"], poo.SourceCancelDeadline)
+	}
 	// The run started, so the run settled: the log never holds a
 	// run.started without a run.settled after it.
 	started := false

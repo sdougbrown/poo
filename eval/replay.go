@@ -185,24 +185,35 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	transport := newScriptedTransport(script.Turns)
 	recorder := &callRecorder{}
 
-	run := poo.NewRun(poo.Options{
+	session, err := poo.New(poo.Options{
 		Transport:    transport,
 		Tools:        map[string]poo.Tool{},
 		ToolOrder:    nil,
 		Sink:         recorder,
 		SessionID:    "replay",
-		RunID:        "replay",
 		ModelID:      "replay",
 		ContextLimit: contextLimit,
 		MaxTurns:     maxTurns,
 		WorkingDir:   opts.WorkingDir,
 	})
-	if _, err := run.Execute(opts.Context, "replay"); err != nil {
+	if err != nil {
+		return nil, fmt.Errorf("eval: replaying %s: %w", path, err)
+	}
+	defer session.Close()
+
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, err := session.Prompt(ctx, "replay"); err != nil {
 		// A script that runs out is not a failure: the recording held
 		// what it held, and the replay compared what it could.
 		if !errors.Is(err, ErrScriptExhausted) {
 			return nil, fmt.Errorf("eval: replaying %s: %w", path, err)
 		}
+	}
+	if _, err := session.Wait(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		return nil, fmt.Errorf("eval: replaying %s: %w", path, err)
 	}
 
 	result := &ReplayResult{

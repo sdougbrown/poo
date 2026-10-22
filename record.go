@@ -150,10 +150,25 @@ type MessageRecord struct {
 	// MessageID is the message's session-monotonic id, e.g. "m7". It is
 	// set on the messages the model produced.
 	MessageID string `json:"message_id,omitempty"`
+	// Partial reports that the message was cut short.
+	Partial bool `json:"partial,omitempty"`
+	// Cause says why the message was cut short: "interrupt" or
+	// "provider_error". It is set only on a partial message.
+	Cause Cause `json:"cause,omitempty"`
 	// DeliveryNote says how much of the previous reply the user had
 	// seen, when the message carries one.
 	DeliveryNote *DeliveryNote `json:"delivery_note,omitempty"`
 }
+
+// CallMode says how a tool call ran.
+type CallMode string
+
+const (
+	// CallModeSync means the call ran in the turn.
+	CallModeSync CallMode = "sync"
+	// CallModeJob means the call became a background job.
+	CallModeJob CallMode = "job"
+)
 
 // ToolCallRecord records a tool call the model made, with its full arguments.
 type ToolCallRecord struct {
@@ -170,6 +185,9 @@ type ToolCallRecord struct {
 	// object when the model sent valid JSON, and a JSON string holding the
 	// raw text when it did not.
 	Arguments json.RawMessage `json:"arguments"`
+	// Mode says how the call ran: "sync" in the turn, or "job" in the
+	// background.
+	Mode CallMode `json:"mode,omitempty"`
 }
 
 // ToolResultRecord records the outcome of a tool call.
@@ -300,4 +318,25 @@ func Stamp(rec Record, seq int64, at time.Time) {
 	m := rec.Meta()
 	m.Seq = seq
 	m.TS = at.UTC().Format(time.RFC3339Nano)
+}
+
+// CompactionRecord records what a compactor did.
+//
+// The store keeps every original record, and the compaction record says
+// what the model's view was replaced with. The compaction's own fields
+// carry the form it took.
+type CompactionRecord struct {
+	RecordMeta
+	// RunID identifies the run the compaction belongs to.
+	RunID string `json:"run_id"`
+	// Strategy names the strategy that produced the compaction.
+	Strategy string `json:"strategy"`
+	// Form is the compaction's form: replace, rewrite, window or end.
+	Form string `json:"form"`
+	// TokensBefore is the estimated input before the compaction.
+	TokensBefore int `json:"tokens_before"`
+	// TokensAfter is the estimated input after the compaction.
+	TokensAfter int `json:"tokens_after"`
+	// Compaction is the compaction itself.
+	Compaction Compaction `json:"compaction"`
 }
