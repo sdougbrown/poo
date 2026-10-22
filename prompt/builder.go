@@ -86,9 +86,11 @@ func (b *Builder) WithVariant(name string) *Builder {
 //
 // The alternatives the section offers are kept: the default text and
 // the alternatives are texts of their own, and setting one of them
-// does not take the others away. The text appended to the section goes
-// away with the default text, because the default text is the whole
-// text the section carries when no variant is named.
+// does not take the others away.
+//
+// The text appended to the section goes away with it, because the
+// appended text belongs to the section and not to one of its
+// alternatives.
 func (b *Builder) Set(name, text string) {
 	b.dropReplacement()
 	b.setDefault(name, Content{Text: text})
