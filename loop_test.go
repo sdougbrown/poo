@@ -26,7 +26,7 @@ func TestARunThatEndsOnItsOwnSettlesEndTurn(t *testing.T) {
 	names := sink.names()
 	// The system message, the user's prompt, the model's answer and the
 	// settle record.
-	want := []string{"run.started", "message", "message", "message", "run.settled"}
+	want := []string{"run.started", "system_prompt", "message", "message", "message", "run.settled"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("the records are %v, want %v", names, want)
 	}
