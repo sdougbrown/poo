@@ -23,6 +23,8 @@ import (
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/tool/edit"
+	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
 )
 
@@ -187,10 +189,19 @@ func runRun(args []string) int {
 
 	bashTool := bash.New()
 	readTool := read.New()
+	grepTool := grep.New()
+	editTool := edit.New()
 
+	// The tools the binary links, and the tools a run offers.
+	//
+	// The order is the offer order, and it is what a run enables: the
+	// grep and the edit tools are linked into the binary, but a run
+	// does not offer them until a profile names them.
 	tools := map[string]poo.Tool{
 		"bash": bashTool,
 		"read": readTool,
+		"grep": grepTool,
+		"edit": editTool,
 	}
 	toolOrder := []string{"bash", "read"}
 	toolSpecs := make([]poo.ToolSpec, 0, len(toolOrder))
