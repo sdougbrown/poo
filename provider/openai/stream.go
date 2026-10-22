@@ -374,6 +374,8 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 					Name:      tc.Function.Name,
 					Arguments: []byte(tc.Function.Arguments),
 					Complete:  complete,
+					// The endpoint sent the call in its own field.
+					Origin: poo.CallOriginWire,
 				},
 			})
 		}

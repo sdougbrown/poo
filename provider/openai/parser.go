@@ -522,6 +522,9 @@ func (p *parser) toolEvent(name, args string) (poo.StreamEvent, bool) {
 			Name:      name,
 			Arguments: []byte(args),
 			Complete:  true,
+			// The call was read out of the model's own text, and the
+			// record says so.
+			Origin: poo.CallOriginParsedText,
 		},
 	}, true
 }

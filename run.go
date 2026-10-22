@@ -452,6 +452,7 @@ func (s *Session) loop(run *runState) []candidate {
 				ToolCallID: call.ID,
 				Name:       call.Name,
 				Arguments:  recordArgs(call.Arguments),
+				Origin:     call.Origin,
 			})
 		}
 		if len(assistant.Content) > 0 {
@@ -1375,6 +1376,9 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 			}
 			if ev.ToolCall.Name != "" {
 				existing.Name = ev.ToolCall.Name
+			}
+			if ev.ToolCall.Origin != "" {
+				existing.Origin = ev.ToolCall.Origin
 			}
 			if len(ev.ToolCall.Arguments) > 0 {
 				existing.Arguments = append(existing.Arguments, ev.ToolCall.Arguments...)
