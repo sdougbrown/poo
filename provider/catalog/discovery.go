@@ -147,12 +147,20 @@ func (c *Catalog) applyDiscovery(found *discovery) {
 			model := models[id]
 			e := c.entryForModel(endpoint, id)
 			if e == nil {
+				if _, taken := c.entries[id]; taken {
+					// An earlier endpoint already serves this id
+					// under its name: the catalog lists the model
+					// once, as its note says, and the first endpoint
+					// by name keeps it.
+					continue
+				}
 				e = &entry{
 					name:     id,
 					endpoint: endpoint,
 					modelID:  id,
 				}
 				c.entries[id] = e
+				c.modelIndex[modelRef{endpoint: endpoint, modelID: id}] = e
 			}
 			e.discovery = discoveredLayer(model, c.endpoints[endpoint].BaseURL)
 		}

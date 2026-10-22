@@ -69,8 +69,9 @@ type Options struct {
 	Settings Settings
 	// Logger receives the catalog's warnings. A nil logger drops them.
 	Logger *slog.Logger
-	// StateDir is the directory the discovery cache lives in. Empty
-	// means the user's state directory.
+	// StateDir is the state root the poo directory lives under. The
+	// discovery cache is <StateDir>/poo/discovery.json. Empty means the
+	// user's state directory.
 	StateDir string
 	// DiscoveryTTL is how long a cached discovery result stays fresh.
 	// Zero means DefaultDiscoveryTTL.
@@ -85,11 +86,19 @@ type Options struct {
 // Catalog is the effective catalog: the merged models, the endpoints
 // that serve them and the role assignments.
 type Catalog struct {
-	opts      Options
-	curated   *curated
-	entries   map[string]*entry
-	endpoints map[string]Endpoint
-	roles     map[Role]string
+	opts       Options
+	curated    *curated
+	entries    map[string]*entry
+	modelIndex map[modelRef]*entry
+	endpoints  map[string]Endpoint
+	roles      map[Role]string
+}
+
+// modelRef names the model a descriptor serves: an endpoint and the id
+// the endpoint calls it.
+type modelRef struct {
+	endpoint string
+	modelID  string
 }
 
 // entry is one model in the catalog, with the layers that built it.
@@ -116,11 +125,12 @@ type entry struct {
 // endpoints, or Build to do both and to check the roles.
 func New(opts Options) *Catalog {
 	c := &Catalog{
-		opts:      opts,
-		curated:   newCurated(),
-		entries:   map[string]*entry{},
-		endpoints: map[string]Endpoint{},
-		roles:     map[Role]string{},
+		opts:       opts,
+		curated:    newCurated(),
+		entries:    map[string]*entry{},
+		modelIndex: map[modelRef]*entry{},
+		endpoints:  map[string]Endpoint{},
+		roles:      map[Role]string{},
 	}
 	for name, endpoint := range c.curated.endpoints {
 		c.endpoints[name] = endpoint
@@ -182,6 +192,7 @@ func (c *Catalog) addSettingsModels() {
 		e.curated = curated
 		e.notes = notes
 		c.entries[name] = e
+		c.modelIndex[modelRef{endpoint: model.Endpoint, modelID: model.ModelID}] = e
 	}
 }
 
@@ -198,13 +209,15 @@ func (c *Catalog) addCuratedModels() {
 		if served, ok := c.endpoints[endpoint]; ok {
 			curated.Endpoint = served.BaseURL
 		}
-		c.entries[id] = &entry{
+		e := &entry{
 			name:     id,
 			endpoint: endpoint,
 			modelID:  id,
 			curated:  curated,
 			notes:    notes,
 		}
+		c.entries[id] = e
+		c.modelIndex[modelRef{endpoint: endpoint, modelID: id}] = e
 	}
 }
 
@@ -218,12 +231,7 @@ func (c *Catalog) addRoles() {
 // entryForModel returns the entry that serves a model id at an
 // endpoint, or nil when there is none.
 func (c *Catalog) entryForModel(endpoint, modelID string) *entry {
-	for _, e := range c.entries {
-		if e.endpoint == endpoint && e.modelID == modelID {
-			return e
-		}
-	}
-	return nil
+	return c.modelIndex[modelRef{endpoint: endpoint, modelID: modelID}]
 }
 
 // hasModelID reports whether an entry already serves a model id.

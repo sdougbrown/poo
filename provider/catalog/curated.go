@@ -126,24 +126,24 @@ func hostedLayer(hosted hostedEntry) (poo.ModelInfo, Endpoint) {
 }
 
 // reasoningControl returns the reasoning control a provider's models
-// take.
+// take through Chat Completions.
+//
+// Anthropic's thinking budget belongs to its own transport, which is
+// Phase B: the Chat Completions transport cannot spell it.
 func reasoningControl(provider string) poo.ReasoningControl {
-	switch provider {
-	case "openai":
+	if provider == "openai" {
 		return poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort}
-	case "anthropic":
-		return poo.ReasoningControl{Mode: poo.ReasoningBudget, Param: poo.ReasoningPathBudget}
 	}
 	return poo.ReasoningControl{Mode: poo.ReasoningNone}
 }
 
 // promptCacheMode returns how a provider's prompt cache is used.
+//
+// An explicit cache belongs to the Anthropic transport, which is Phase
+// B: Chat Completions has no breakpoint to place.
 func promptCacheMode(provider string) poo.CacheMode {
-	switch provider {
-	case "openai":
+	if provider == "openai" {
 		return poo.CacheAuto
-	case "anthropic":
-		return poo.CacheExplicit
 	}
 	return ""
 }
