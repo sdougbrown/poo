@@ -164,3 +164,59 @@ func TestTheMessageDeltaNamesTheAttempt(t *testing.T) {
 		t.Fatal("the run emitted no delta")
 	}
 }
+
+// lateAttemptTransport reports an attempt after the run has settled.
+type lateAttemptTransport struct {
+	// reported closes once the late attempt has been reported.
+	reported chan struct{}
+}
+
+// Stream serves an answer and reports an attempt after the run ends.
+func (t *lateAttemptTransport) Stream(_ context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		if req.OnAttempt != nil {
+			req.OnAttempt(poo.Attempt{
+				Number: 1,
+				Err:    &poo.ProviderError{Kind: poo.ProviderKindServer, Message: "too late"},
+			})
+		}
+		close(t.reported)
+	}()
+	return &fakeReader{events: []poo.StreamEvent{
+		{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "done"}},
+		{Kind: "finish", FinishReason: poo.FinishStop},
+	}}, poo.Rendered{API: poo.APIChatCompletions}, nil
+}
+
+// Fork is not used by the test.
+func (t *lateAttemptTransport) Fork(context.Context, poo.Rendered, []poo.Message, int) (poo.StreamReader, error) {
+	return nil, errNoFork
+}
+
+// TestAnAttemptAfterTheSealIsDropped covers the seal for the attempt
+// record: a report that lands after run.settled writes nothing.
+func TestAnAttemptAfterTheSealIsDropped(t *testing.T) {
+	tr := &lateAttemptTransport{reported: make(chan struct{})}
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+	runSession(t, s, "hi")
+	<-tr.reported
+
+	settled := -1
+	late := -1
+	for i, rec := range sink.allRecords() {
+		switch rec.Meta().Record {
+		case "run.settled":
+			settled = i
+		case "provider.attempt":
+			late = i
+		}
+	}
+	if settled < 0 {
+		t.Fatal("the run wrote no settle record")
+	}
+	if late > settled {
+		t.Error("a provider.attempt record followed run.settled")
+	}
+}
