@@ -48,5 +48,24 @@ func Resume(ctx context.Context, store Store, id string, opts poo.Options) (*Res
 	if err != nil {
 		return nil, err
 	}
+	// The store and the restore both report what changed. A caller prints
+	// one list, not two.
+	restored.Warnings = uniqueWarnings(append(restored.Warnings, loaded.Warnings...))
+	loaded.Warnings = nil
 	return &Resumed{Session: sess, Loaded: loaded, Restored: restored}, nil
+}
+
+// uniqueWarnings returns the warnings once, in the order they first
+// appear.
+func uniqueWarnings(warnings []string) []string {
+	out := make([]string, 0, len(warnings))
+	seen := map[string]bool{}
+	for _, warning := range warnings {
+		if warning == "" || seen[warning] {
+			continue
+		}
+		seen[warning] = true
+		out = append(out, warning)
+	}
+	return out
 }

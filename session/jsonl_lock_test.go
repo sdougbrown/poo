@@ -123,6 +123,31 @@ func runHelper(mode string) int {
 		}
 		fmt.Println(helperLoaded)
 		return 0
+	case "load-loop":
+		// The helper loads and releases the session again and again,
+		// so a prune that runs at the same time either skips the
+		// session or deletes it between two loads.
+		for i := 0; i < 2000; i++ {
+			loaded, err := store.Load(ctx, id)
+			if err != nil {
+				if errors.Is(err, ErrSessionNotFound) {
+					fmt.Println(helperGone)
+					return 0
+				}
+				fmt.Fprintln(os.Stderr, "poo session helper: loading:", err)
+				return 1
+			}
+			if len(loaded.Records) == 0 {
+				fmt.Fprintln(os.Stderr, "poo session helper: the load holds no records")
+				return 1
+			}
+			if err := store.Close(); err != nil {
+				fmt.Fprintln(os.Stderr, "poo session helper: closing:", err)
+				return 1
+			}
+		}
+		fmt.Println(helperLoaded)
+		return 0
 	case "run":
 		// The helper creates a session, runs a turn and stops in the
 		// middle of a tool call. The call never finishes, so the log
@@ -397,6 +422,63 @@ func TestARepeatedRecoveryAddsNothing(t *testing.T) {
 	if len(second.Records) != len(first.Records) {
 		t.Errorf("the second load holds %d records, want %d", len(second.Records), len(first.Records))
 	}
+}
+
+// TestALoadLoopRacingAPrune covers the race the serial test cannot: a
+// helper loads and releases the same session while the parent prunes it,
+// so a load either sees the whole session or gets no such session.
+func TestALoadLoopRacingAPrune(t *testing.T) {
+	dir, store := newTestStore(t)
+	ctx := context.Background()
+
+	sessionAt(t, dir, "s1", pruneNow.Add(-48*time.Hour))
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+	cmd.Env = append(os.Environ(),
+		helperMode+"=load-loop",
+		helperDir+"="+dir,
+		helperID+"=s1",
+	)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("opening the helper's output: %v", err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting the helper: %v", err)
+	}
+
+	stop := make(chan struct{})
+	pruned := make(chan struct{})
+	go func() {
+		defer close(pruned)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := store.Prune(ctx, Policy{MaxAge: 24 * time.Hour, Now: pruneNow}); err != nil {
+				t.Errorf("pruning: %v", err)
+				return
+			}
+		}
+	}()
+	scanner := bufio.NewScanner(out)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != helperLoaded && line != helperGone {
+			t.Errorf("the helper said %q, want %q or %q", line, helperLoaded, helperGone)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("reading the helper's output: %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("waiting for the helper: %v", err)
+	}
+	close(stop)
+	<-pruned
 }
 
 // TestALoadRacingAPrune covers the two outcomes of a load that races a

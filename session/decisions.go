@@ -33,7 +33,7 @@ type JSONLDecisionSink struct {
 // is created with it.
 func NewJSONLDecisionSink(path string) (*JSONLDecisionSink, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, &Error{Code: CodeStoreError, Message: "creating " + dir, Err: err}
 		}
 	}

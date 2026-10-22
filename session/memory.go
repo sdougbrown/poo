@@ -61,6 +61,9 @@ func (m *Memory) Records() []poo.Record {
 // The session's records are kept in memory, like every other record: the
 // memory is a store without a file.
 func (m *Memory) Create(ctx context.Context, created *poo.SessionCreated) (string, error) {
+	if created == nil {
+		return "", &Error{Code: CodeStoreError, Message: "the session has no header"}
+	}
 	if err := CheckMode(Mode(created.Mode)); err != nil {
 		return "", err
 	}

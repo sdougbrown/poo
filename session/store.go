@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -275,7 +276,7 @@ func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreated) (st
 		lock.Release()
 		return "", err
 	}
-	log, err := openLog(path, 1)
+	log, err := openLog(path, 1, s.now)
 	if err != nil {
 		os.Remove(path)
 		lock.Release()
@@ -307,6 +308,7 @@ func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *
 	if err != nil {
 		return &Error{Code: CodeStoreError, Message: "creating " + tmp, Err: err}
 	}
+	log.now = s.now
 	// The steps of the construction, in order. A test can fail any of
 	// them, and the construction must leave nothing behind either way.
 	cleanup := func() {
@@ -393,7 +395,7 @@ func (s *FileStore) Load(ctx context.Context, id string) (*Loaded, error) {
 // The authority is the caller's: a failure gives it up.
 func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) (*Loaded, error) {
 	path := s.path(id)
-	lines, torn, err := s.readLog(path)
+	lines, torn, err := s.readLog(path, true)
 	if err != nil {
 		return nil, err
 	}
@@ -429,7 +431,7 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) 
 		return nil, err
 	}
 
-	log, err := openLog(path, int64(len(recs)))
+	log, err := openLog(path, int64(len(recs)), s.now)
 	if err != nil {
 		return nil, &Error{Code: CodeStoreError, Message: "opening " + path, Err: err}
 	}
@@ -442,7 +444,7 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) 
 	}
 	// The records the session holds are the ones on disk, recovery
 	// included.
-	final, _, err := s.readLog(path)
+	final, _, err := s.readLog(path, true)
 	if err != nil {
 		log.Close()
 		return nil, err
@@ -495,20 +497,22 @@ func (s *FileStore) recover(ctx context.Context, log *Log, pending *Pending) err
 func (s *FileStore) warnings(meta Metadata) []string {
 	var out []string
 	if s.build.Name != "" && meta.Build.Name != "" && s.build != meta.Build {
-		out = append(out, "the session was written by "+meta.Build.Name+" "+meta.Build.Version)
+		out = append(out, "the session was made by "+meta.Build.Name+" "+meta.Build.Version+
+			", and this build is "+s.build.Name+" "+s.build.Version)
 	}
 	if s.settingsHash != "" && meta.SettingsHash != "" && s.settingsHash != meta.SettingsHash {
-		out = append(out, "the session was written with other settings")
+		out = append(out, "the settings changed since the session was created")
 	}
 	return out
 }
 
 // readLog reads a session's records.
 //
-// A tail that was cut short is truncated from the file: the bytes after
-// the last newline are not a record, and a reader must not see them.
-// The read reports that it truncated the file.
-func (s *FileStore) readLog(path string) ([][]byte, bool, error) {
+// A tail that was cut short is not a record, and a reader does not see
+// it. A read that holds the session's authority truncates the tail from
+// the file; a read that holds no authority leaves the file alone, so a
+// question about a live session never shortens it.
+func (s *FileStore) readLog(path string, truncate bool) ([][]byte, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -525,8 +529,10 @@ func (s *FileStore) readLog(path string) ([][]byte, bool, error) {
 	// The log was cut in the middle of a record. The bytes after the
 	// last newline are not a record.
 	whole := lastNewline(data) + 1
-	if err := os.Truncate(path, int64(whole)); err != nil {
-		return nil, false, &Error{Code: CodeStoreError, Message: "truncating " + path, Err: err}
+	if truncate {
+		if err := os.Truncate(path, int64(whole)); err != nil {
+			return nil, false, &Error{Code: CodeStoreError, Message: "truncating " + path, Err: err}
+		}
 	}
 	return bytesLines(data[:whole]), true, nil
 }
@@ -641,7 +647,7 @@ func (s *FileStore) Pending(ctx context.Context, id string) (*Pending, error) {
 	if s.open != nil && s.open.id == id {
 		return pendingOf(id, s.recordsOf(s.open)), nil
 	}
-	lines, _, err := s.readLog(s.path(id))
+	lines, _, err := s.readLog(s.path(id), false)
 	if err != nil {
 		return nil, err
 	}
@@ -657,7 +663,7 @@ func (s *FileStore) Pending(ctx context.Context, id string) (*Pending, error) {
 // The records are the ones the store wrote, so they are the ones on
 // disk.
 func (s *FileStore) recordsOf(open *openSession) []poo.Record {
-	lines, _, err := s.readLog(open.path)
+	lines, _, err := s.readLog(open.path, false)
 	if err != nil {
 		return nil
 	}
@@ -673,7 +679,7 @@ func (s *FileStore) recordsOf(open *openSession) []poo.Record {
 // A summary is what a reader of the session directory wants: the
 // session's id, when it was created, its profile and build, how many
 // runs it had, why its last run settled, how big its file is, and
-// whether another process holds it.
+// whether a process holds its lock.
 func (s *FileStore) List(ctx context.Context) ([]Summary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -770,7 +776,12 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 	byActivity := make([]Summary, len(summaries))
 	copy(byActivity, summaries)
 	sort.Slice(byActivity, func(i, j int) bool {
-		return byActivity[i].LastActivity.After(byActivity[j].LastActivity)
+		if !byActivity[i].LastActivity.Equal(byActivity[j].LastActivity) {
+			return byActivity[i].LastActivity.After(byActivity[j].LastActivity)
+		}
+		// Ties are broken by id, so the same sessions are kept on every
+		// run.
+		return byActivity[i].ID < byActivity[j].ID
 	})
 	kept := map[string]bool{}
 	var boundary time.Time
@@ -787,6 +798,7 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 	}
 
 	result := &PruneResult{}
+	deleted := false
 	for _, sum := range byActivity {
 		if !s.markedBy(sum, policy, now, kept, boundary) {
 			continue
@@ -822,6 +834,7 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 				lock.Release()
 				return nil, &Error{Code: CodeStoreError, Message: "removing " + s.path(sum.ID), Err: err}
 			}
+			deleted = true
 		}
 		lock.Release()
 		result.Deleted = append(result.Deleted, fresh)
@@ -833,6 +846,13 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 		return nil, err
 	}
 	result.Removed = removed
+	if deleted || len(removed) > 0 {
+		// A removal is only durable when the directory that held the
+		// entry is synced.
+		if err := syncDir(s.dir); err != nil {
+			return nil, &Error{Code: CodeStoreError, Message: "syncing " + s.dir, Err: err}
+		}
+	}
 	return result, nil
 }
 
@@ -876,7 +896,7 @@ func (s *FileStore) removeStaleTmp(now time.Time) ([]string, error) {
 		if now.Sub(info.ModTime()) < StaleTmpAge {
 			continue
 		}
-		id := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".jsonl.tmp"), ".tmp")
+		id := strings.TrimSuffix(entry.Name(), ".jsonl.tmp")
 		lock, err := Acquire(LockPath(s.dir, id))
 		if err != nil {
 			if errors.Is(err, ErrSessionLocked) {
@@ -905,12 +925,12 @@ func toolClasses(tools []poo.SessionTool) map[string]poo.ToolClass {
 
 // openLog opens a session's file for appending, continuing its
 // numbering at the given sequence number.
-func openLog(path string, seq int64) (*Log, error) {
+func openLog(path string, seq int64, now func() time.Time) (*Log, error) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	return &Log{f: f, path: path, seq: seq}, nil
+	return &Log{f: f, path: path, seq: seq, now: now}, nil
 }
 
 // syncDir puts a directory's entries on disk.
@@ -959,15 +979,27 @@ func scanSummary(path string) (*scanned, error) {
 	}
 	defer f.Close()
 	out := &scanned{}
-	dec := json.NewDecoder(bufio.NewReader(f))
+	reader := bufio.NewReader(f)
 	for {
-		var line summaryLine
-		if err := dec.Decode(&line); err != nil {
-			// A log that was cut short ends the scan: the rest of the
-			// log is not a summary.
+		line, err := reader.ReadBytes('\n')
+		if len(line) == 0 && err != nil {
 			break
 		}
-		out.add(line)
+		// A line that does not decode is skipped, so one corrupt record
+		// does not hide the activity that followed it. A tail with no
+		// newline was cut short, and is not a record.
+		if err == nil {
+			var summary summaryLine
+			if json.Unmarshal(line, &summary) == nil {
+				out.add(summary)
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				return nil, &Error{Code: CodeStoreError, Message: "reading " + path, Err: err}
+			}
+			break
+		}
 	}
 	return out, nil
 }

@@ -46,6 +46,8 @@ type Log struct {
 	path string
 	// seq numbers the records written.
 	seq int64
+	// now is the log's clock. Nil means time.Now.
+	now func() time.Time
 	// syncs counts the syncs the log made. It is a test hook.
 	syncs int
 	// appends counts the appends the log made.
@@ -64,7 +66,7 @@ type Log struct {
 // The directory the log lives in is created when it is missing.
 func Open(path string) (*Log, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("session: creating %s: %w", dir, err)
 		}
 	}
@@ -155,7 +157,11 @@ func (l *Log) Append(ctx context.Context, rec poo.Record) error {
 		return fmt.Errorf("session: appending %s: %w", rec.Meta().Record, errInjected)
 	}
 	l.seq++
-	poo.Stamp(rec, l.seq, time.Now())
+	at := time.Now()
+	if l.now != nil {
+		at = l.now()
+	}
+	poo.Stamp(rec, l.seq, at)
 
 	b, err := json.Marshal(rec)
 	if err != nil {

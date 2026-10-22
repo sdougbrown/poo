@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 )
 
 // The mode the lock file is created with.
@@ -13,6 +14,16 @@ import (
 // The lock file holds no secret, but it belongs to the session, so it is
 // created with the session's own mode.
 const lockFileMode = 0o600
+
+// The bounded wait an acquire gives a lock probe.
+//
+// A probe takes the lock shared for a moment. The wait lets an acquire
+// pass a probe without waiting on a real holder, which holds the lock
+// exclusively for the session's life.
+const (
+	acquireProbeWait  = 20 * time.Millisecond
+	acquireProbeRetry = 200 * time.Microsecond
+)
 
 // Authority is the exclusive right to write a session.
 //
@@ -49,12 +60,21 @@ func Acquire(path string) (*Authority, error) {
 	if err != nil {
 		return nil, &Error{Code: CodeStoreError, Message: "opening " + path, Err: err}
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if isLockedErr(err) {
+	deadline := time.Now().Add(acquireProbeWait)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if !isLockedErr(err) {
+			f.Close()
+			return nil, &Error{Code: CodeStoreError, Message: "locking " + path, Err: err}
+		}
+		if time.Now().After(deadline) {
+			f.Close()
 			return nil, ErrSessionLocked
 		}
-		return nil, &Error{Code: CodeStoreError, Message: "locking " + path, Err: err}
+		time.Sleep(acquireProbeRetry)
 	}
 	return &Authority{f: f, path: path}, nil
 }
@@ -85,6 +105,8 @@ func (a *Authority) Release() error {
 
 // Locked reports whether a session's lock is held by another process.
 //
+// The probe takes a shared lock, so two probes never exclude each other
+// and only a real holder, which took the lock exclusively, is reported.
 // The check does not create the lock file: a session that was never
 // opened has no lock and is not locked.
 func Locked(path string) (bool, error) {
@@ -96,7 +118,7 @@ func Locked(path string) (bool, error) {
 		return false, &Error{Code: CodeStoreError, Message: "opening " + path, Err: err}
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
 		if isLockedErr(err) {
 			return true, nil
 		}

@@ -97,7 +97,8 @@ type Summary struct {
 	LastReason string
 	// Size is the size of the session's file, in bytes.
 	Size int64
-	// Locked reports that another process holds the session's lock.
+	// Locked reports that a process holds the session's lock, whether it
+	// is another process or the store that is listing.
 	Locked bool
 	// LastActivity is when the session's last record was written.
 	LastActivity time.Time
