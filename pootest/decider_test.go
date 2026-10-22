@@ -153,3 +153,59 @@ func TestTheScriptedCompactorFails(t *testing.T) {
 		t.Errorf("the compaction returned %v, want %v", err, want)
 	}
 }
+
+// TestTheStubDeciderNamesItsChoice covers SetChoice: the choice the test
+// sets is the answer's choice, and the answers still validate.
+func TestTheStubDeciderNamesItsChoice(t *testing.T) {
+	d := pootest.NewDecider(0.5)
+	d.SetChoice("b")
+	questions := []decide.Question{
+		{ID: "q1", Instructions: "which?", Kind: decide.Choice{Options: []decide.Option{
+			{Name: "a"}, {Name: "b"},
+		}}},
+	}
+
+	answers, err := d.Decide(context.Background(), nil, "", questions)
+	if err != nil {
+		t.Fatalf("deciding: %v", err)
+	}
+	if answers[0].Choice != "b" {
+		t.Errorf("the answer names %q, want b", answers[0].Choice)
+	}
+	if err := decide.ValidateAnswers(questions, answers); err != nil {
+		t.Errorf("the answers do not validate: %v", err)
+	}
+}
+
+// TestTheScriptedCompactorForksTheCallItIsGiven covers Fork: the call's
+// appended messages and output ceiling are recorded, the fork func runs,
+// and a nil fork is an error rather than a panic.
+func TestTheScriptedCompactorForksTheCallItIsGiven(t *testing.T) {
+	c := pootest.NewCompactor(true, poo.Compaction{Strategy: "the scripted one"})
+	appended := []poo.Message{poo.NewTextMessage(poo.RoleUser, "again")}
+
+	msg, usage, err := c.Fork(context.Background(),
+		func(ctx context.Context, appended []poo.Message, maxTokens int) (poo.Message, poo.UsageReport, error) {
+			return poo.NewTextMessage(poo.RoleAssistant, "the fork"), poo.UsageReport{TTFTMS: 3}, nil
+		}, appended, 32)
+	if err != nil {
+		t.Fatalf("forking: %v", err)
+	}
+	if msg.Text() != "the fork" || usage.TTFTMS != 3 {
+		t.Errorf("the fork returned (%q, %+v), want the fork func's answer", msg.Text(), usage)
+	}
+	forks := c.Forks()
+	if len(forks) != 1 {
+		t.Fatalf("the compactor recorded %d forks, want 1", len(forks))
+	}
+	if forks[0].MaxTokens != 32 {
+		t.Errorf("the fork asked for %d tokens, want 32", forks[0].MaxTokens)
+	}
+	if len(forks[0].Appended) != 1 || forks[0].Appended[0].Text() != "again" {
+		t.Errorf("the fork's appended messages are %+v, want the one message", forks[0].Appended)
+	}
+
+	if _, _, err := c.Fork(context.Background(), nil, nil, 0); err == nil {
+		t.Error("a fork with no func returned no error, want one")
+	}
+}
