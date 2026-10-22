@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -163,6 +164,13 @@ type Session struct {
 	// noticeArmed reports that the context notice may fire. The notice
 	// re-arms when the estimate drops back below the notice ratio.
 	noticeArmed bool
+	// decider is the session's decision model, or nil when it has none.
+	//
+	// The handle is the recording wrapper: every call writes a record
+	// to the session's store and emits the decision event.
+	decider decide.Decider
+	// deciderModel is the descriptor of the decision model.
+	deciderModel ModelInfo
 	// log is the session's logger, when the consumer supplied one.
 	log *slog.Logger
 	// logs is the non-blocking dispatcher behind log.
@@ -381,6 +389,16 @@ type Options struct {
 	SessionID string
 	// ModelID is the provider's model identifier.
 	ModelID string
+	// Decider is the session's decision model, or nil when it has none.
+	//
+	// The session wraps it, so every call is recorded.
+	Decider decide.Decider
+	// DeciderModel describes the decision model.
+	//
+	// The model must serve the operation its role needs: the systemone
+	// one or the decisions one. A model that serves neither is a
+	// construction error.
+	DeciderModel ModelInfo
 	// ContextLimit is the model's context window in tokens. It is
 	// required: a value of 0 or less is a construction error
 	// (ErrSessionInit), so no run starts without a window to measure
@@ -531,6 +549,11 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	if err := checkFinishTool(&opts); err != nil {
 		return nil, &ErrSessionInit{Cause: err}
 	}
+	if opts.Decider != nil {
+		if err := checkDeciderModel(opts.DeciderModel); err != nil {
+			return nil, &ErrSessionInit{Cause: err}
+		}
+	}
 	if opts.MaxContinuations <= 0 {
 		opts.MaxContinuations = DefaultMaxContinuations
 	}
@@ -561,6 +584,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		noticeArmed:       true,
 		jobs:              map[string]*jobState{},
 		jobQueued:         make(chan struct{}, 1),
+		deciderModel:      opts.DeciderModel,
 	}
 	// A construction that fails rolls back everything it started. The
 	// event bus's reporter is a goroutine, and no session is returned
@@ -599,6 +623,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	// The observers start before anything can emit an event, and the
 	// bus's reporter starts with them.
 	s.events = newEventBus(s.logger().With(slog.String("session_id", opts.SessionID)))
+	// The decision model is wrapped before the session-start hooks run,
+	// so a hook may ask it a question.
+	s.decider = s.wrapDecider(opts.Decider)
 	for _, o := range opts.Observers {
 		s.events.addObserver(o)
 	}
@@ -813,6 +840,7 @@ func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn in
 		Interrupted: interrupted,
 		History:     s.view(),
 		Budget:      s.budget(),
+		Decider:     s.Decider(),
 	}
 }
 

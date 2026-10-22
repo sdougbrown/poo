@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/sdougbrown/poo/decide"
 )
 
 // FormatVersion is the version tag written into the first record of a
@@ -435,4 +437,32 @@ type HandoffRecord struct {
 	Handoff string `json:"handoff"`
 	// CreatedAt is the RFC 3339 time the handoff was written.
 	CreatedAt string `json:"created_at"`
+}
+
+// DecisionRecord records one decision call.
+//
+// One record is written per logical call, whatever the number of wire
+// requests it took. A call that did not answer is recorded too, with
+// the outcome that says why.
+type DecisionRecord struct {
+	RecordMeta
+	// Origin says who asked the questions.
+	Origin string `json:"origin"`
+	// Questions are the questions that were asked.
+	Questions []decide.Question `json:"questions"`
+	// StateHash is the hex SHA-256 of the state payload.
+	StateHash string `json:"state_hash"`
+	// Answers are the answers, when the call succeeded.
+	Answers []decide.Answer `json:"answers,omitempty"`
+	// Outcome is "ok", "deferred" or "invalid".
+	Outcome string `json:"outcome"`
+	// Error is the failure, when the call did not succeed.
+	Error string `json:"error,omitempty"`
+	// LatencyMS is how long the call took, in milliseconds.
+	LatencyMS float64 `json:"latency_ms"`
+	// Requests is the number of wire requests the call made. It is
+	// absent when the decider did not report one.
+	Requests *int `json:"requests,omitempty"`
+	// At is the RFC 3339 time of the call, in UTC.
+	At string `json:"at"`
 }

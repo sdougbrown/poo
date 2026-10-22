@@ -694,6 +694,7 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 		Handle:     handle,
 		Env:        s.opts.Env,
 		Settings:   s.opts.Settings,
+		Decider:    s.Decider(),
 	}
 }
 
