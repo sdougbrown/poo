@@ -2,6 +2,7 @@ package poo
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -30,6 +31,9 @@ type eventBus struct {
 	reporterDone chan struct{}
 	// interval is how often the overflow records are written.
 	interval time.Duration
+	// diag receives the observer errors and the coalesced overflow
+	// lines. It is nil when the bus is built by hand in a test.
+	diag *slog.Logger
 }
 
 // observerSlot is one observer's slot on the bus.
@@ -51,6 +55,8 @@ type observerSlot struct {
 	done chan struct{}
 	// stop asks the observer's goroutine to end.
 	stop chan struct{}
+	// logger receives the observer's errors.
+	logger *slog.Logger
 }
 
 // DefaultObserverBuffer is how many events an observer may fall behind
@@ -69,11 +75,15 @@ var observerBuffer = DefaultObserverBuffer
 var observerDropInterval = time.Second
 
 // newEventBus returns an empty bus.
-func newEventBus() *eventBus {
+//
+// The logger is the bus's diagnostics, with the session's id already
+// attached. A nil logger drops them.
+func newEventBus(logger *slog.Logger) *eventBus {
 	b := &eventBus{
 		reportDone:   make(chan struct{}),
 		reporterDone: make(chan struct{}),
 		interval:     observerDropInterval,
+		diag:         logger,
 	}
 	go b.reportDrops()
 	return b
@@ -92,6 +102,7 @@ func (b *eventBus) addObserver(o Observer) {
 		ch:       make(chan Event, observerBuffer),
 		done:     make(chan struct{}),
 		stop:     make(chan struct{}),
+		logger:   b.logger().With(slog.String("observer", hookName(o))),
 	}
 	b.observers = append(b.observers, slot)
 	go slot.run()
@@ -108,20 +119,38 @@ func (s *observerSlot) run() {
 		case ev := <-s.ch:
 			// An observer's error is the observer's problem: it is
 			// logged and the stream carries on.
-			_ = s.observer.Observe(ev)
+			s.observe(ev)
 		case <-s.stop:
 			// One last drain, so the observer sees what it already
 			// had.
 			for {
 				select {
 				case ev := <-s.ch:
-					_ = s.observer.Observe(ev)
+					s.observe(ev)
 				default:
 					return
 				}
 			}
 		}
 	}
+}
+
+// observe delivers one event and logs the observer's error.
+func (s *observerSlot) observe(ev Event) {
+	if err := s.observer.Observe(ev); err != nil {
+		s.logger.Error("observer error",
+			slog.String("event", string(ev.Name)),
+			slog.Int64("seq", ev.Seq),
+			slog.Any("error", err))
+	}
+}
+
+// logger returns the bus's logger, or the no-op logger.
+func (b *eventBus) logger() *slog.Logger {
+	if b.diag != nil {
+		return b.diag
+	}
+	return discardLogger
 }
 
 // emit publishes one event.
@@ -223,6 +252,12 @@ func (b *eventBus) flushDrops(observers []*observerSlot) {
 		// neither an observer nor a client reading the event log sees
 		// it.
 		report(o.name, count)
+		// The failure table calls overflow "logged / coalesced
+		// observer.dropped": the record is the coalesced record, and
+		// the logger gets the matching line.
+		b.logger().Warn("observer overflow",
+			slog.String("observer", o.name),
+			slog.Int("count", count))
 	}
 }
 

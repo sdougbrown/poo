@@ -50,7 +50,7 @@ func TestAnInputAcceptedWhileTheFinalizationWaitsHasAFate(t *testing.T) {
 	sink := &sealingInputSink{entered: make(chan struct{}), release: make(chan struct{})}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	r := &runState{id: "run", ctx: ctx, cancel: cancel, pendingCalls: map[string]*issuedCall{}, workDone: make(chan struct{}, 1)}
-	s := &Session{opts: Options{Sink: sink, ContextLimit: 32768}, state: StateExecuting, run: r, events: newEventBus(), messageIDs: &MessageIDs{}}
+	s := &Session{opts: Options{Sink: sink, ContextLimit: 32768}, state: StateExecuting, run: r, events: newEventBus(nil), messageIDs: &MessageIDs{}}
 	SetRecordWriteBudget(s, 100*time.Millisecond)
 	commit := make(chan struct{})
 	releaseCommit := make(chan struct{})

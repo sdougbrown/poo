@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"sync"
 	"time"
@@ -464,6 +465,15 @@ type Options struct {
 	AfterTool []AfterToolHook
 	// Jobs configures the session's background jobs.
 	Jobs JobOptions
+	// Logger receives the core's diagnostic messages: observer errors
+	// and overflow, candidates that arrive after the commit point, and
+	// completions that arrive after it.
+	//
+	// Nil means a no-op. The core logs outside the session lock, so a
+	// log call never changes a record or an event, and never fails a
+	// run. A consumer's handler should not block: a slog call is
+	// synchronous.
+	Logger *slog.Logger
 }
 
 // New builds a session.
@@ -561,7 +571,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 
 	// The observers start before anything can emit an event, and the
 	// bus's reporter starts with them.
-	s.events = newEventBus()
+	s.events = newEventBus(s.logger().With(slog.String("session_id", opts.SessionID)))
 	for _, o := range opts.Observers {
 		s.events.addObserver(o)
 	}

@@ -462,6 +462,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// The hook may have outlived the run: a decision that arrives after
 	// the finalization began is discarded, and the call starts nothing.
 	if s.runWindingDown(run) {
+		s.logLateHookDecision(run.id, handle, call.Name, turn)
 		return
 	}
 	if err != nil {
@@ -708,6 +709,7 @@ func (s *Session) recordResult(run *runState, turn int, handle, tool, callID str
 	won, tracked := s.claimResult(run, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
+		s.logLateToolResult(run.id, handle, tool, turn)
 		return
 	}
 	s.writeResult(run, turn, handle, tool, callID, result, outcome, afterToolOutcome{result: result})
@@ -733,6 +735,7 @@ func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID
 	won, tracked := s.claimResult(run, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
+		s.logLateToolResult(run.id, handle, tool, turn)
 		return out
 	}
 	s.writeResult(run, turn, handle, tool, callID, out.result, outcome, out)
@@ -1050,11 +1053,14 @@ func (s *Session) claimResult(run *runState, handle string) (won, tracked bool) 
 // never mutates a settled run.
 func (s *Session) addCandidate(run *runState, c candidate) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if run.committed {
+		runID := run.id
+		s.mu.Unlock()
+		s.logLateCandidate(runID, c)
 		return
 	}
 	run.candidates = append(run.candidates, c)
+	s.mu.Unlock()
 }
 
 // FinishToolName is the name the typed-result tool is called by.

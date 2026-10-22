@@ -29,9 +29,14 @@ func (s *Session) finalizeCandidates(run *runState, resumable bool, cands []cand
 	s.mu.Lock()
 	if run.committed {
 		// A candidate arriving after the commit point is logged and
-		// ignored: it never mutates a settled run.
+		// ignored: it never mutates a settled run. The log runs after
+		// the lock is released, so it cannot hold the loop up.
 		result := run.result
+		runID := run.id
 		s.mu.Unlock()
+		for _, c := range cands {
+			s.logLateCandidate(runID, c)
+		}
 		return result, false
 	}
 	if run.finalizing {
