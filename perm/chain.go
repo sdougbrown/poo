@@ -127,6 +127,9 @@ type resolution struct {
 func (c *chain) ask(ctx context.Context, ask Ask) resolution {
 	deadline := c.clock.Now().Add(c.timeout)
 	for _, asker := range c.askers {
+		if asker == nil {
+			continue
+		}
 		if !asker.Available() {
 			// An asker that is not there is skipped without waiting.
 			continue

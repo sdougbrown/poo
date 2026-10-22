@@ -69,6 +69,9 @@ type Asker struct {
 	turns int
 }
 
+// The asker is one link of the permission chain.
+var _ perm.Asker = (*Asker)(nil)
+
 // New returns an asker that asks the given decision model.
 //
 // A nil decider makes the asker unavailable: the chain skips it, and

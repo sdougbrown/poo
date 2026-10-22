@@ -15,13 +15,13 @@ import (
 // policy that can ask, in a build whose chain can never answer, is
 // warned about at load.
 func TestTheWarningFiresWhenNoAskerCanEverAnswer(t *testing.T) {
-	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAsk})
+	askers := []perm.Asker{perm.NewWireAsker(nil, 0)}
+	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAsk, Askers: askers})
 	if err != nil {
 		t.Fatalf("building the policy: %v", err)
 	}
-	askers := []perm.Asker{perm.NewWireAsker(nil, 0)}
 
-	warning := perm.Warning(policy, askers)
+	warning := perm.Warning(policy, policy.Askers())
 
 	if warning == "" {
 		t.Fatal("the load printed no warning, want one: no asker can ever answer")

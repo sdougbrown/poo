@@ -131,8 +131,7 @@ type Options struct {
 // about first, then the rules, and a side-effecting call no rule
 // matches takes the unmatched action. A read-only call no rule matches
 // is allowed.
-type Policy struct {
-	// rules are the policy's rules, in order.
+type Policy struct { // rules are the policy's rules, in order.
 	rules []Rule
 	// unmatched is the action for a side-effecting call no rule
 	// matches.
@@ -149,6 +148,10 @@ type Policy struct {
 	// id.
 	asks int
 }
+
+// The policy is the core's policy slot: the core installs it with
+// poo.WithPolicy, and it only ever allows or denies.
+var _ poo.PolicyHook = (*Policy)(nil)
 
 // New builds a policy.
 //
@@ -456,6 +459,13 @@ func summaryOf(info poo.ToolCallInfo) string {
 		return ""
 	}
 	return info.Prepared.Summary()
+}
+
+// Askers returns the policy's asker chain.
+//
+// The chain is the one the policy asks, in the order it asks it.
+func (p *Policy) Askers() []Asker {
+	return append([]Asker(nil), p.chain.askers...)
 }
 
 // canAsk reports whether the policy can produce an ask.
