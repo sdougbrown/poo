@@ -418,3 +418,162 @@ func TestAFatalErrorsTextIsTheHookProcessedResult(t *testing.T) {
 		t.Errorf("the settle detail holds the secret: %q", got)
 	}
 }
+
+// TestAJobTimeoutKeepsItsPartialOutputAndItsFlag covers the plan's rule:
+// timeout is an error with timed_out true and the partial output as its
+// result. The chain runs at completion on a context of its own, so a
+// hook cannot turn the timeout into a missed hook deadline.
+func TestAJobTimeoutKeepsItsPartialOutputAndItsFlag(t *testing.T) {
+	const partial = "the job's partial output"
+	for _, withHook := range []bool{false, true} {
+		name := "no hook"
+		if withHook {
+			name = "with an after-tool hook"
+		}
+		t.Run(name, func(t *testing.T) {
+			tr := scripted([]fakeResponse{
+				{calls: []poo.ToolCall{fixCall("slow", "one")}},
+				{text: "done"},
+			})
+			sink := &recordingSink{}
+			tool := newFixTool("slow", partial)
+			tool.block = true
+			tool.background = poo.BackgroundAlways
+			opts := fixOpts(t, tr, tool, sink)
+			opts.Jobs = poo.JobOptions{Timeout: 40 * time.Millisecond}
+			hook := &recordingAfterTool{decision: poo.Keep()}
+			if withHook {
+				opts.AfterTool = []poo.AfterToolHook{hook}
+			}
+			s := newTestSession(t, opts)
+
+			if _, err := s.Prompt(context.Background(), "go"); err != nil {
+				t.Fatalf("starting the run: %v", err)
+			}
+			waitFor(t, "the job to end", func() bool { return sink.count("job.ended") == 1 })
+			ended := fixJobEnded(t, sink)
+			if !ended.TimedOut {
+				t.Errorf("job.ended.TimedOut is false, want true (outcome %q, text %q)", ended.Outcome, ended.Text)
+			}
+			if !strings.Contains(ended.Text, partial) {
+				t.Errorf("job.ended.Text is %q, want the partial output %q", ended.Text, partial)
+			}
+			if withHook && hook.Calls() != 1 {
+				t.Errorf("the chain ran %d time(s), want 1", hook.Calls())
+			}
+		})
+	}
+}
+
+// TestACancelledJobRunsItsAfterToolChain covers the plan's rule: a
+// cancelled job's partial output is delivered as its result, and the
+// chain's redaction is what gets recorded.
+func TestACancelledJobRunsItsAfterToolChain(t *testing.T) {
+	const secret = "s3cr3t-in-a-job"
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{fixCall("slow", "one")}}})
+	sink := &recordingSink{}
+	tool := newFixTool("slow", "the output with "+secret)
+	tool.block = true
+	tool.background = poo.BackgroundAlways
+	opts := fixOpts(t, tr, tool, sink)
+	hook := &recordingAfterTool{decision: poo.Redact(poo.ToolResult{Text: "[the output was redacted]"})}
+	opts.AfterTool = []poo.AfterToolHook{hook}
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "go"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.started
+	if err := s.CancelJob("j1"); err != nil {
+		t.Fatalf("cancelling the job: %v", err)
+	}
+	waitFor(t, "the job to end", func() bool { return sink.count("job.ended") == 1 })
+
+	ended := fixJobEnded(t, sink)
+	if strings.Contains(ended.Text, secret) {
+		t.Errorf("job.ended.Text holds the secret: %q", ended.Text)
+	}
+	if got := hook.Calls(); got != 1 {
+		t.Errorf("the job's chain ran %d time(s), want 1 at its completion", got)
+	}
+	if store := fixSinkJSON(sink, secret); strings.Contains(store, secret) {
+		t.Errorf("the secret reached the store:\n%s", store)
+	}
+}
+
+// TestASessionCloseRunsTheJobsAfterToolChain covers the plan's rule: a
+// close is a job completion. The chain runs once, and the held result
+// never leaks what a hook would redact.
+func TestASessionCloseRunsTheJobsAfterToolChain(t *testing.T) {
+	const secret = "s3cr3t-in-a-job"
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{fixCall("slow", "one")}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	tool := newFixTool("slow", "the output with "+secret)
+	tool.block = true
+	tool.background = poo.BackgroundAlways
+	opts := fixOpts(t, tr, tool, sink)
+	hook := &recordingAfterTool{decision: poo.Redact(poo.ToolResult{Text: "[the output was redacted]"})}
+	opts.AfterTool = []poo.AfterToolHook{hook}
+	s, err := poo.New(opts)
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	if _, err := s.Prompt(context.Background(), "go"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.started
+	if err := s.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+
+	ended := fixJobEnded(t, sink)
+	if strings.Contains(ended.Text, secret) {
+		t.Errorf("job.ended.Text holds the secret: %q", ended.Text)
+	}
+	if got := hook.Calls(); got != 1 {
+		t.Errorf("the job's chain ran %d time(s), want 1: the close is the job's completion", got)
+	}
+	if store := fixSinkJSON(sink, secret); strings.Contains(store, secret) {
+		t.Errorf("the secret reached the store:\n%s", store)
+	}
+	if ended.Cause != poo.CauseSessionClosed {
+		t.Errorf("the job's cause is %q, want session_closed", ended.Cause)
+	}
+}
+
+// TestAReplacedJobKeepsTheOriginalInItsRecord covers the plan's rule for
+// a job completion: the same provenance a synchronous tool.result keeps
+// is recorded on job.ended, including the original a hook replaced.
+func TestAReplacedJobKeepsTheOriginalInItsRecord(t *testing.T) {
+	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
+	tool.SetResult("original job result")
+	sink := &recordingSink{}
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{jobCall("one", true)}}, {text: "done"}})
+	opts := jobOptions(t, tr, tool, sink)
+	opts.Jobs.OnIdle = poo.OnIdleHold
+	opts.AfterTool = []poo.AfterToolHook{fixAfterFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+		return poo.Replace(poo.ToolResult{Text: "replacement"}), nil
+	})}
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	s.Cancel("cancel:review")
+	tool.ReleaseAll()
+	waitFor(t, "job.ended", func() bool { return sink.count("job.ended") == 1 })
+
+	ended := fixJobEnded(t, sink)
+	if ended.Text != "replacement" {
+		t.Errorf("job.ended.Text is %q, want the replacement", ended.Text)
+	}
+	if ended.Original == nil || ended.Original.Text != "original job result" {
+		t.Errorf("job.ended.Original is %+v, want the original job result", ended.Original)
+	}
+	if len(ended.Hooks) != 1 || ended.Hooks[0].Action != poo.ResultActionReplace {
+		t.Errorf("job.ended.Hooks is %+v, want the replacement decision", ended.Hooks)
+	}
+}
