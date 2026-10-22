@@ -136,18 +136,21 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 	}
 }
 
-// touchCacheInputs opens the two inputs the Go test cache does not key
-// on: the inherited GOFLAGS, which changes which files the build sees,
-// and the module's go.sum, which changes what the toolchain resolves.
-// Opening them adds them to the test's own cache key, so a run after a
-// change to either recomputes instead of serving a stale result.
+// touchCacheInputs opens the inputs the Go test cache does not track on
+// its own: the inherited GOFLAGS, which changes which files the build
+// sees, and the module's go.mod and go.sum, which change what the
+// toolchain resolves. Opening them adds them to the test's own cache
+// key, so a run after a change to any of them recomputes instead of
+// serving a stale result.
 func touchCacheInputs(t *testing.T, root string) {
 	t.Helper()
 
 	_ = os.Getenv("GOFLAGS")
-	sum, err := os.Open(filepath.Join(root, "go.sum"))
-	if err == nil {
-		sum.Close()
+	for _, name := range []string{"go.mod", "go.sum"} {
+		f, err := os.Open(filepath.Join(root, name))
+		if err == nil {
+			f.Close()
+		}
 	}
 }
 
