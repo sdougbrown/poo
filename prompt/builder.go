@@ -9,6 +9,12 @@ import "strings"
 // edits: a Go consumer edits it directly, a hook edits it through the
 // Sections interface, and the core renders it once per run.
 //
+// A section holds a default text and, beside it, the named
+// alternatives it offers. The builder renders the prompt in one
+// variant: the variant the environment names. A section that offers an
+// alternative for that name renders the alternative, and a section that
+// does not renders its default text.
+//
 // The builder is not safe for concurrent use. A session keeps one
 // builder and renders a copy of it per run, and the copy is what a
 // run's own changes touch.
@@ -20,7 +26,9 @@ type Builder struct {
 	// extra holds the text appended to a section, by name.
 	//
 	// The appended text is kept apart from the section's own value, so
-	// a section that renders from the environment stays dynamic.
+	// a section that renders from the environment stays dynamic. It
+	// belongs to the section and not to one of its alternatives: it is
+	// added to whatever the section renders.
 	extra map[string]string
 	// order holds the names of the sections, in render order.
 	order []string
@@ -43,6 +51,9 @@ const toolPrefix = "tools."
 //
 // The builder starts with the default order and no sections: a section
 // that was never set renders nothing.
+//
+// The environment names the variant the prompt renders in. A builder
+// for another variant is a copy: WithVariant returns one.
 func New(env Env) *Builder {
 	return &Builder{
 		env:      env,
@@ -55,14 +66,32 @@ func New(env Env) *Builder {
 // Env returns the environment the builder's dynamic sections read.
 func (b *Builder) Env() Env { return b.env }
 
-// Set replaces a section's text.
+// WithVariant returns a copy of the builder that renders in the given
+// variant.
+//
+// The copy is what a run renders: a run's variant never changes the
+// builder the session holds. The empty name and "default" mean the
+// default text of every section.
+func (b *Builder) WithVariant(name string) *Builder {
+	out := b.Copy()
+	out.env.Variant = name
+	return out
+}
+
+// Set replaces a section's default text.
 //
 // A section that is not there yet is added. A section the default order
 // knows goes at its place in that order, and a section of the
 // consumer's own goes last, after the sections already there.
+//
+// The alternatives the section offers are kept: the default text and
+// the alternatives are texts of their own, and setting one of them
+// does not take the others away. The text appended to the section goes
+// away with the default text, because the default text is the whole
+// text the section carries when no variant is named.
 func (b *Builder) Set(name, text string) {
 	b.dropReplacement()
-	b.sections[name] = Section{Name: name, Text: text}
+	b.setDefault(name, Content{Text: text})
 	delete(b.extra, name)
 	b.place(name)
 }
@@ -72,6 +101,10 @@ func (b *Builder) Set(name, text string) {
 // A section that is not there yet is added, with the text as its value.
 // The text is kept apart from the section's own value, so appending to
 // a section that renders from the environment leaves it dynamic.
+//
+// The appended text belongs to the section and not to one of its
+// alternatives: it is added to whatever the section renders, the
+// default text or an alternative.
 func (b *Builder) Append(name, text string) {
 	b.dropReplacement()
 	if _, ok := b.sections[name]; !ok {
@@ -83,18 +116,57 @@ func (b *Builder) Append(name, text string) {
 	b.extra[name] += text
 }
 
-// SetRender sets a section's value to a function of the environment.
+// SetRender sets a section's default text to a function of the
+// environment.
 //
 // The function is called every time the prompt is rendered, so the
 // section follows the environment the prompt is rendered in.
+//
+// The alternatives the section offers are kept, as they are when the
+// default text is set.
 func (b *Builder) SetRender(name string, render func(Env) string) {
 	b.dropReplacement()
-	b.sections[name] = Section{Name: name, Render: render}
+	b.setDefault(name, Content{Render: render})
 	delete(b.extra, name)
 	b.place(name)
 }
 
+// SetVariant replaces one named alternative of a section's text.
+//
+// The alternative is a text of its own: the section's default text is
+// not part of it, and the text appended to the section is added to it
+// as it is to any other text the section renders.
+//
+// A section that is not there yet is added, with the alternative as
+// its only text, so the section renders nothing until the variant is
+// named.
+//
+// The empty name and "default" name the section's default text, so
+// setting one of them sets the default.
+func (b *Builder) SetVariant(name, variant, text string) {
+	b.dropReplacement()
+	b.setVariant(name, variant, Content{Text: text})
+	b.place(name)
+}
+
+// SetRenderVariant sets one named alternative of a section to a
+// function of the environment.
+//
+// The function is called every time the prompt is rendered, so the
+// alternative follows the environment the prompt is rendered in.
+//
+// The empty name and "default" name the section's default text, so
+// setting one of them sets the default.
+func (b *Builder) SetRenderVariant(name, variant string, render func(Env) string) {
+	b.dropReplacement()
+	b.setVariant(name, variant, Content{Render: render})
+	b.place(name)
+}
+
 // Remove drops a section.
+//
+// The section goes with its alternatives: a section that is not there
+// renders nothing, whatever the variant.
 //
 // Removing a section that is not there is not an error. A tool's
 // section goes away with the tool: a section named after a tool the
@@ -107,36 +179,62 @@ func (b *Builder) Remove(name string) {
 	}
 }
 
+// RemoveVariant drops one named alternative of a section.
+//
+// The section stays, with the alternatives it still offers. Removing
+// the default text leaves the section with its alternatives alone.
+//
+// Removing an alternative that is not there is not an error.
+func (b *Builder) RemoveVariant(name, variant string) {
+	section, ok := b.sections[name]
+	if !ok {
+		return
+	}
+	if isDefaultVariant(variant) {
+		section.Text = ""
+		section.Render = nil
+		b.sections[name] = section
+		return
+	}
+	delete(section.Variants, variant)
+	b.sections[name] = section
+}
+
 // Insert puts a section right after another one.
 //
 // A section that is already there moves to the new place. An anchor
 // that is not there puts the section first. A tool's section is
 // anchored at the tools' place, so a section inserted after
 // "tools.bash" follows every tool's section.
+//
+// The section's default text is set, as Set sets it, and the
+// alternatives the section offers are kept.
 func (b *Builder) Insert(after, name, text string) {
 	b.dropReplacement()
-	b.sections[name] = Section{Name: name, Text: text}
+	b.setDefault(name, Content{Text: text})
 	delete(b.extra, name)
-	if isToolSection(name) {
-		// The tool sections render together, in the order the
-		// environment offers the tools, so the order does not hold
-		// them.
-		return
-	}
-	order := removeName(b.order, name)
-	idx := indexOf(order, anchorName(after))
-	if idx < 0 {
-		b.order = append([]string{name}, order...)
-		return
-	}
-	b.order = insertAt(order, idx+1, name)
+	b.move(name, after)
+}
+
+// InsertVariant puts a section right after another one, with one named
+// alternative set.
+//
+// The section's default text is left alone, and so are the
+// alternatives it already offers.
+func (b *Builder) InsertVariant(after, name, variant, text string) {
+	b.dropReplacement()
+	b.setVariant(name, variant, Content{Text: text})
+	b.move(name, after)
 }
 
 // Replace takes over the whole prompt.
 //
-// The sections are dropped, and the text is the prompt. A section set
-// afterwards puts the builder back in the sections' hands: the
-// replacement is dropped, and the prompt is the sections again.
+// The sections go, with their alternatives, and the text is the prompt.
+// The prompt is the same whatever the variant is.
+//
+// A section set afterwards puts the builder back in the sections'
+// hands: the replacement is dropped, and the prompt is the sections
+// again.
 func (b *Builder) Replace(text string) {
 	b.sections = map[string]Section{}
 	b.extra = map[string]string{}
@@ -174,6 +272,10 @@ func (b *Builder) Names() []string {
 // The sections render in the order the builder holds, and their texts
 // are joined with a blank line. A section with no text renders nothing.
 // A prompt with no sections is empty.
+//
+// Every section renders in the variant the environment names: the
+// alternative the section offers for that name, or the section's
+// default text.
 func (b *Builder) Render() string {
 	if b.replaced {
 		return b.text
@@ -203,7 +305,8 @@ func (b *Builder) Render() string {
 // Copy returns a copy of the builder.
 //
 // A copy is what a run renders: the run's prompt may change without
-// the session's prompt changing.
+// the session's prompt changing. The alternatives come with it: a copy
+// may change one without the builder it came from changing.
 func (b *Builder) Copy() *Builder {
 	out := &Builder{
 		env:      b.env,
@@ -214,12 +317,47 @@ func (b *Builder) Copy() *Builder {
 		text:     b.text,
 	}
 	for name, section := range b.sections {
+		if section.Variants != nil {
+			variants := make(map[string]Content, len(section.Variants))
+			for variant, content := range section.Variants {
+				variants[variant] = content
+			}
+			section.Variants = variants
+		}
 		out.sections[name] = section
 	}
 	for name, text := range b.extra {
 		out.extra[name] = text
 	}
 	return out
+}
+
+// setDefault replaces a section's default text.
+//
+// The alternatives the section offers are kept.
+func (b *Builder) setDefault(name string, content Content) {
+	section := b.sections[name]
+	section.Name = name
+	section.Text = content.Text
+	section.Render = content.Render
+	b.sections[name] = section
+}
+
+// setVariant replaces one named alternative of a section's text.
+//
+// The empty name and "default" name the section's default text.
+func (b *Builder) setVariant(name, variant string, content Content) {
+	if isDefaultVariant(variant) {
+		b.setDefault(name, content)
+		return
+	}
+	section := b.sections[name]
+	section.Name = name
+	if section.Variants == nil {
+		section.Variants = map[string]Content{}
+	}
+	section.Variants[variant] = content
+	b.sections[name] = section
 }
 
 // dropReplacement puts the builder back in the sections' hands.
@@ -251,6 +389,27 @@ func (b *Builder) place(name string) {
 	b.order = append(b.order, name)
 }
 
+// move puts a section at another section's place.
+//
+// A tool's section has no place of its own in the order: it is
+// anchored at the tools' place, so a section inserted after it follows
+// every tool's section.
+func (b *Builder) move(name, after string) {
+	if isToolSection(name) {
+		// The tool sections render together, in the order the
+		// environment offers the tools, so the order does not hold
+		// them.
+		return
+	}
+	order := removeName(b.order, name)
+	idx := indexOf(order, anchorName(after))
+	if idx < 0 {
+		b.order = append([]string{name}, order...)
+		return
+	}
+	b.order = insertAt(order, idx+1, name)
+}
+
 // slotPosition returns where a section the default order knows goes.
 //
 // The sections the default order knows keep that order among
@@ -275,16 +434,16 @@ func (b *Builder) slotPosition(name string) int {
 //
 // The text is used as it is: the builder does not trim it, so a section
 // that ends in a newline ends in a newline.
+//
+// The section renders in the variant the environment names: the
+// alternative the section offers for that name, or the section's
+// default text.
 func (b *Builder) sectionText(name string) string {
 	section, ok := b.sections[name]
 	if !ok {
 		return ""
 	}
-	text := section.Text
-	if section.Render != nil {
-		text = section.Render(b.env)
-	}
-	return text + b.extra[name]
+	return section.content(b.env.Variant).String(b.env) + b.extra[name]
 }
 
 // toolTexts returns the texts of the tool sections, in the order the
@@ -320,6 +479,28 @@ func (b *Builder) toolNames() []string {
 // The section is named after the tool, so a tool that is not linked
 // takes its guidance with it.
 func ToolSection(tool string) string { return toolPrefix + tool }
+
+// content returns the text a section renders in the given variant.
+//
+// A section that offers an alternative for the variant renders it, and
+// a section that does not renders its default text.
+func (s Section) content(variant string) Content {
+	if !isDefaultVariant(variant) {
+		if content, ok := s.Variants[variant]; ok {
+			return content
+		}
+	}
+	return Content{Text: s.Text, Render: s.Render}
+}
+
+// isDefaultVariant reports whether a variant name names the default
+// text of a section.
+//
+// The empty name and "default" do: they are the text a section carries
+// when no other variant is named.
+func isDefaultVariant(variant string) bool {
+	return variant == "" || variant == DefaultVariant
+}
 
 // isToolSection reports whether a name is a tool section's name.
 func isToolSection(name string) bool {
