@@ -172,10 +172,6 @@ type streamWithRetry struct {
 	// usage holds the usage of the last attempt that failed, so a
 	// request that ends with a failure still reports what it cost.
 	usage *poo.UsageReport
-	// done reports that the stream is finished.
-	done bool
-	// err holds the failure that ended the stream.
-	err error
 }
 
 // Next returns the next event of the response.
