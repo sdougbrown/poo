@@ -146,7 +146,7 @@ func TestTheRawSystemPromptIsTheWholePrompt(t *testing.T) {
 	if len(reqs) != 1 {
 		t.Fatalf("the transport got %d requests, want 1", len(reqs))
 	}
-	if got := systemPromptOf(t, reqs[0]); got != "the whole prompt\n" {
+	if got := systemPromptOf(t, reqs[0]); got != "the whole prompt" {
 		t.Errorf("the prompt is %q, want the whole prompt", got)
 	}
 }
@@ -224,7 +224,7 @@ func TestThePromptIsSentWithTheFirstRequestOnly(t *testing.T) {
 	if len(reqs) != 1 {
 		t.Fatalf("the transport got %d requests, want 1", len(reqs))
 	}
-	if got := systemPromptOf(t, reqs[0]); got != "the whole prompt\n" {
+	if got := systemPromptOf(t, reqs[0]); got != "the whole prompt" {
 		t.Errorf("the prompt is %q, want the whole prompt", got)
 	}
 }

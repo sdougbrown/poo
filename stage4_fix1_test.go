@@ -996,3 +996,25 @@ func TestReplayUsesTheRecordedPrompt(t *testing.T) {
 		t.Errorf("the replay of a one-request recorded prompt diverged: %v", result.Differences)
 	}
 }
+
+// TestARawSystemPromptIsSentVerbatim covers the field's contract: a raw
+// Options.SystemPrompt is the whole prompt, byte for byte. The builder's
+// trailing newline belongs to a rendered prompt, not to a raw one.
+func TestARawSystemPromptIsSentVerbatim(t *testing.T) {
+	for _, raw := range []string{"the raw prompt", "the raw prompt\n"} {
+		t.Run("raw", func(t *testing.T) {
+			tr := scripted([]fakeResponse{{text: "done"}})
+			opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+			opts.SystemPrompt = raw
+			s := newTestSession(t, opts)
+			runSession(t, s, "start")
+			reqs := tr.Requests()
+			if len(reqs) != 1 {
+				t.Fatalf("the transport got %d request(s), want 1", len(reqs))
+			}
+			if got := systemText(reqs[0].Messages); got != raw {
+				t.Errorf("the system prompt is %q, want %q", got, raw)
+			}
+		})
+	}
+}

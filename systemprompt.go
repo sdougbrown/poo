@@ -102,7 +102,15 @@ func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) string {
 			edit(b)
 		}
 	}
-	return b.Render()
+	rendered := b.Render()
+	// A raw prompt is the whole prompt, byte for byte. The builder adds
+	// a trailing newline to the sections it renders; that newline
+	// belongs to the rendered form, not to a raw prompt the consumer
+	// supplied.
+	if raw := s.opts.SystemPrompt; raw != "" && (rendered == raw || rendered == raw+"\n") {
+		return raw
+	}
+	return rendered
 }
 
 // promptCopy returns a copy of the session's prompt builder.
