@@ -166,6 +166,8 @@ type runState struct {
 	tokens int
 	// startedAt is when the run began.
 	startedAt time.Time
+	// stopTimer stops the run's wall-clock budget timer.
+	stopTimer func()
 	// trigger says what started the run.
 	trigger TriggerKind
 	// continuations counts the BeforeSettle continuations the run took.

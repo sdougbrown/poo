@@ -54,6 +54,15 @@ func (s *Session) finalizeCandidates(run *runState, resumable bool, cands []cand
 // run's context, the wait for in-flight work, the synthetic results,
 // the commit point, the outcome records, and the settled event.
 func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
+	// A committed run has no wall-clock budget left to spend.
+	defer func() {
+		s.mu.Lock()
+		committed := run.committed
+		s.mu.Unlock()
+		if committed {
+			s.stopRunTimer(run)
+		}
+	}()
 	// Step 1: the input check. A run that would settle naturally can
 	// still take a queued input; a run that is settling because of a
 	// failure or a limit cannot.

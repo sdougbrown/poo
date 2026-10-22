@@ -118,6 +118,14 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		"jobs":        jobPayload(jobs),
 	})
 
+	// The wall-clock budget starts when the run is admitted, before the
+	// startup hooks and the prompt render, so a blocked hook cannot
+	// outlive MaxDuration.
+	stopTimer := s.startDurationTimer(run)
+	s.mu.Lock()
+	run.stopTimer = stopTimer
+	s.mu.Unlock()
+
 	// The held results are delivered before the prompt's text, so the
 	// model sees them first. A woken run's job results are appended
 	// before its first request too, and they are recorded with the
@@ -241,9 +249,9 @@ func (s *Session) drive(run *runState) {
 	}()
 
 	// The duration budget is a timer: it fires even while a tool is
-	// running, and it settles the run through the normal protocol.
-	stopTimer := s.startDurationTimer(run)
-	defer stopTimer()
+	// running, and it settles the run through the normal protocol. It
+	// started when the run was admitted, before the startup hooks.
+	defer s.stopRunTimer(run)
 
 	cands := s.loop(run)
 	for {
@@ -299,6 +307,17 @@ func (s *Session) startDurationTimer(run *runState) func() {
 		}
 	}()
 	return func() { close(stop) }
+}
+
+// stopRunTimer stops the run's wall-clock timer, if it is still running.
+func (s *Session) stopRunTimer(run *runState) {
+	s.mu.Lock()
+	stop := run.stopTimer
+	run.stopTimer = nil
+	s.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 // loop drives the requesting/executing cycle and returns the candidates

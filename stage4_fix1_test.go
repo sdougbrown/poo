@@ -794,3 +794,36 @@ func TestAFailedNewLeavesNoReporterGoroutine(t *testing.T) {
 		t.Errorf("a failed New leaked %d reporter goroutine(s)", after-before)
 	}
 }
+
+// TestMaxDurationCoversTheBeforeRunHook covers the plan's run budget: the
+// wall-clock timer starts when the run is admitted, so a blocked
+// BeforeRun cannot outlive MaxDuration.
+func TestMaxDurationCoversTheBeforeRunHook(t *testing.T) {
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	tr := scripted([]fakeResponse{{text: "done"}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.MaxDuration = 10 * time.Millisecond
+	opts.BeforeRun = []poo.BeforeRunHook{fixStartFunc(func(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
+		close(entered)
+		select {
+		case <-ctx.Done():
+		case <-release:
+		}
+		return poo.StartDecision{}, nil
+	})}
+	s := newTestSession(t, opts)
+	go func() {
+		defer close(done)
+		_, _ = s.Prompt(context.Background(), "start")
+	}()
+	<-entered
+	time.Sleep(60 * time.Millisecond)
+	settled := sink.settled() != nil
+	close(release)
+	<-done
+	_, _ = s.Wait(context.Background())
+	if !settled {
+		t.Error("MaxDuration=10ms did not settle a blocked BeforeRun within 60ms")
+	}
+}
