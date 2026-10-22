@@ -314,13 +314,12 @@ func TestAConcurrentCancelAndStoreFailureArbitrateByPrecedence(t *testing.T) {
 // TestAStuckSinkStillLetsTheWaitersWake covers the plan's bound: a sink
 // that blocks until its context ends does not hang the run.
 func TestAStuckSinkStillLetsTheWaitersWake(t *testing.T) {
-	defer poo.SetRecordWriteBudget(50 * time.Millisecond)()
-
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	sink := &failingSink{blockUntilContextEnd: true}
 
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	poo.SetRecordWriteBudget(s, 50*time.Millisecond)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}

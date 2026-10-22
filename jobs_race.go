@@ -102,7 +102,7 @@ func (s *Session) waitForJobResult() bool {
 	select {
 	case <-ch:
 		return true
-	case <-time.After(recordWriteBudget):
+	case <-time.After(s.recordBudget()):
 		return false
 	}
 }

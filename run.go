@@ -851,7 +851,7 @@ func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) 
 	if abandoned {
 		return errDeliveryAbandoned
 	}
-	wctx, cancel := context.WithTimeout(ctx, recordWriteBudget)
+	wctx, cancel := context.WithTimeout(ctx, s.recordBudget())
 	defer cancel()
 	if err := s.opts.Sink.Append(wctx, rec); err != nil {
 		s.mu.Lock()

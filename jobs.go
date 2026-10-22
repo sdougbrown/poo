@@ -1322,7 +1322,7 @@ func (s *Session) closeJobs() {
 	// The teardown is bounded once for the whole wait, so a job that
 	// ignores its context never holds the close up, however many jobs
 	// are still running.
-	teardown, stopTeardown := context.WithTimeout(context.Background(), recordWriteBudget)
+	teardown, stopTeardown := context.WithTimeout(context.Background(), s.recordBudget())
 	defer stopTeardown()
 	for _, job := range jobs {
 		select {

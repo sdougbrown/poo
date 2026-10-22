@@ -625,8 +625,6 @@ func (s *fixSealSink) Append(ctx context.Context, rec poo.Record) error {
 // so it never lands after run.settled. The history mutation follows only
 // a successful record write.
 func TestAClaimedHookWriteIsEndedAtTheSeal(t *testing.T) {
-	restore := poo.SetRecordWriteBudget(80 * time.Millisecond)
-	defer restore()
 	sink := &fixSealSink{first: make(chan struct{}), releaseFirst: make(chan struct{}), settled: make(chan struct{})}
 	tr := scripted([]fakeResponse{{text: "done"}})
 	opts := testOptions(t, tr, &echoTool{}, sink)
@@ -637,6 +635,7 @@ func TestAClaimedHookWriteIsEndedAtTheSeal(t *testing.T) {
 		}}, nil
 	})}
 	s := newTestSession(t, opts)
+	poo.SetRecordWriteBudget(s, 80*time.Millisecond)
 	promptDone := make(chan struct{})
 	cancelDone := make(chan struct{})
 	go func() { defer close(promptDone); _, _ = s.Prompt(context.Background(), "start") }()

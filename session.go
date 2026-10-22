@@ -25,6 +25,13 @@ type Session struct {
 
 	// opts are the session's configuration.
 	opts Options
+	// recordWriteBudget bounds one record write or flush on this
+	// session.
+	//
+	// It is per session, copied from the default when the session is
+	// built, so a test that shrinks it never races another session's
+	// run goroutine.
+	recordWriteBudget time.Duration
 
 	// state is where the session is in the FSM.
 	state State
@@ -511,16 +518,17 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	opts.MessageIDs = ids
 
 	s := &Session{
-		opts:        opts,
-		state:       StateIdle,
-		results:     map[string]ToolResult{},
-		resultMeta:  map[string]resultMeta{},
-		recorded:    map[string]Message{},
-		messageIDs:  ids,
-		repeats:     newRepeatCounter(),
-		noticeArmed: true,
-		jobs:        map[string]*jobState{},
-		jobQueued:   make(chan struct{}, 1),
+		opts:              opts,
+		recordWriteBudget: defaultRecordWriteBudget,
+		state:             StateIdle,
+		results:           map[string]ToolResult{},
+		resultMeta:        map[string]resultMeta{},
+		recorded:          map[string]Message{},
+		messageIDs:        ids,
+		repeats:           newRepeatCounter(),
+		noticeArmed:       true,
+		jobs:              map[string]*jobState{},
+		jobQueued:         make(chan struct{}, 1),
 	}
 	// A construction that fails rolls back everything it started. The
 	// event bus's reporter is a goroutine, and no session is returned
@@ -863,7 +871,7 @@ func (s *Session) markBroken() {
 // A refused write marks the session broken: the store is the session's
 // memory, and a session that cannot write cannot be trusted.
 func (s *Session) write(ctx context.Context, rec Record) error {
-	wctx, cancel := recordContext(ctx)
+	wctx, cancel := s.recordContext(ctx)
 	defer cancel()
 	return s.appendRecord(wctx, rec, nil)
 }
@@ -914,7 +922,7 @@ func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
 	if base == nil {
 		base = context.Background()
 	}
-	timed, timeout := context.WithTimeout(context.WithoutCancel(base), recordWriteBudget)
+	timed, timeout := context.WithTimeout(context.WithoutCancel(base), s.recordBudget())
 	ctx, cancel := context.WithCancelCause(timed)
 	claim := &runWriteClaim{cancel: cancel, timeout: timeout}
 	run.writeClaims = append(run.writeClaims, claim)
@@ -1002,21 +1010,32 @@ func (s *Session) writeCallRecord(run *runState, call *issuedCall, rec Record) e
 	if base == nil {
 		base = context.Background()
 	}
-	wctx, cancel := context.WithTimeout(context.WithoutCancel(base), recordWriteBudget)
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(base), s.recordBudget())
 	defer cancel()
 	return s.appendRecord(wctx, rec, run)
 }
 
-// recordWriteBudget bounds one record write or flush.
-var recordWriteBudget = 5 * time.Second
+// defaultRecordWriteBudget bounds one record write or flush.
+const defaultRecordWriteBudget = 5 * time.Second
+
+// recordBudget returns the session's record-write budget.
+//
+// A session built by hand in a test may not have one; the default
+// covers it.
+func (s *Session) recordBudget() time.Duration {
+	if s.recordWriteBudget > 0 {
+		return s.recordWriteBudget
+	}
+	return defaultRecordWriteBudget
+}
 
 // recordContext returns the context a record write runs under.
 //
 // A record is written even when the run's context has ended, because the
 // log has to say what the run did and how it ended. The write is still
 // bounded, so a store that never answers cannot hang the process.
-func recordContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), recordWriteBudget)
+func (s *Session) recordContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), s.recordBudget())
 }
 
 // hashText returns the hex SHA-256 of a text.

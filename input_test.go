@@ -1523,7 +1523,6 @@ func (s *cancellingDeliverySink) Append(ctx context.Context, rec poo.Record) err
 // input.dropped: a cancel that commits while the drain is writing must
 // not leave the input delivered, and the input is never silently lost.
 func TestADeliveryDuringASecondFinalizeIsDropped(t *testing.T) {
-	defer poo.SetRecordWriteBudget(100 * time.Millisecond)()
 	hookStarted := make(chan struct{})
 	release := make(chan struct{})
 	hook := &blockingBeforeSettle{started: hookStarted, release: release}
@@ -1534,6 +1533,7 @@ func TestADeliveryDuringASecondFinalizeIsDropped(t *testing.T) {
 	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
 
 	s := newTestSession(t, opts)
+	poo.SetRecordWriteBudget(s, 100*time.Millisecond)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}

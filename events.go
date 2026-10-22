@@ -280,7 +280,7 @@ func (s *Session) writeObserverDropped(observer string, count int) {
 	if s.opts.Sink == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), recordWriteBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), s.recordBudget())
 	defer cancel()
 	_ = s.opts.Sink.Append(ctx, &ObserverDropped{
 		RecordMeta: NewRecordMeta("observer.dropped"),

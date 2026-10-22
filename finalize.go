@@ -144,7 +144,7 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 		Turns:     turns,
 		SettledAt: nowRFC3339(),
 	}
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), recordWriteBudget)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), s.recordBudget())
 	defer cleanupCancel()
 	storeErr := s.write(cleanupCtx, settle)
 	if s.opts.Sink != nil {
@@ -224,7 +224,7 @@ func (s *Session) awaitInputAcceptances(run *runState) {
 	// The seam the wait is tested at: the finalization has an acceptance
 	// to wait for, and the queues have not been looked at yet.
 	s.sealRaceHook("acceptance")
-	deadline := time.After(recordWriteBudget)
+	deadline := time.After(s.recordBudget())
 	for {
 		s.mu.Lock()
 		if len(run.accepting) == 0 {
@@ -438,7 +438,7 @@ func (s *Session) commitLocked(run *runState) (Reason, SettleDetail) {
 // still in flight; they never reached the model, so the finalization
 // reports them with the run's reason.
 func (s *Session) sealRun(run *runState) ([]*issuedCall, []UndeliveredInput) {
-	deadline := time.After(recordWriteBudget)
+	deadline := time.After(s.recordBudget())
 	for {
 		s.mu.Lock()
 		if s.inFlightLocked(run) == 0 {
@@ -640,7 +640,7 @@ func (s *Session) Wait(ctx context.Context) (Result, error) {
 	select {
 	case res := <-ch:
 		return res, nil
-	case <-time.After(recordWriteBudget):
+	case <-time.After(s.recordBudget()):
 		return Result{}, ctx.Err()
 	}
 }
@@ -671,7 +671,7 @@ func (s *Session) WaitRun(ctx context.Context, runID string) (Result, error) {
 	select {
 	case res := <-ch:
 		return res, nil
-	case <-time.After(recordWriteBudget):
+	case <-time.After(s.recordBudget()):
 		return Result{}, ctx.Err()
 	}
 }
@@ -1007,7 +1007,7 @@ func (s *Session) Close() error {
 	s.closeJobs()
 	s.events.stop()
 	if s.opts.Sink != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), recordWriteBudget)
+		ctx, cancel := context.WithTimeout(context.Background(), s.recordBudget())
 		defer cancel()
 		return s.opts.Sink.Flush(ctx)
 	}

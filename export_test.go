@@ -2,12 +2,13 @@ package poo
 
 import "time"
 
-// SetRecordWriteBudget changes how long one record write may take, and
-// returns a function that restores the previous budget.
-func SetRecordWriteBudget(d time.Duration) func() {
-	prev := recordWriteBudget
-	recordWriteBudget = d
-	return func() { recordWriteBudget = prev }
+// SetRecordWriteBudget changes how long one record write may take on
+// one session.
+//
+// The budget is per session, so a test never races another session's
+// run goroutine.
+func SetRecordWriteBudget(s *Session, d time.Duration) {
+	s.recordWriteBudget = d
 }
 
 // SetObserverDropInterval changes how often the overflow records are
