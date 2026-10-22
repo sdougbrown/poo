@@ -148,6 +148,7 @@ func TestSkippedPackages(t *testing.T) {
 		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
 		m + "/session (does not exist yet)",
+		m + "/wire (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
@@ -170,6 +171,7 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
 		m + "/session (does not exist yet)",
+		m + "/wire (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
@@ -197,6 +199,7 @@ func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
 		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
 		m + "/session (does not exist yet)",
+		m + "/wire (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {

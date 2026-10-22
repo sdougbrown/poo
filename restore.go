@@ -174,7 +174,16 @@ type Restored struct {
 // follow the session's idle policy like any other result.
 //
 // The session takes new runs when the restore returns.
-func Restore(opts Options, records []Record) (*Session, Restored, error) {
+func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored, error) {
+	// The options are applied before the session is built, so a
+	// restored session carries the same hooks and observers a new one
+	// does. The session-start hooks are still dropped below: the
+	// records hold the messages they appended.
+	for _, fn := range fns {
+		if fn != nil {
+			fn(&opts)
+		}
+	}
 	created := sessionHeader(records)
 	if created == nil {
 		return nil, Restored{}, ErrNoSessionHeader
