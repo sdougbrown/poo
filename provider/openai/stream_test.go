@@ -438,3 +438,46 @@ func TestAStreamThatBreaksAfterItsDeltaKeepsItsKind(t *testing.T) {
 		t.Errorf("the failure's code is %q, want the original kind network", pe.Code)
 	}
 }
+
+// TestAStreamThatBreaksBeforeItsDeltaIsNetwork covers the other branch:
+// a failure before any delta is still a network failure, which the
+// retryable rule can retry, not a terminal interrupted stream.
+func TestAStreamThatBreaksBeforeItsDeltaIsNetwork(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		// The response starts, then a line arrives that the reader
+		// cannot hold: the body fails before any data line.
+		w.WriteHeader(http.StatusOK)
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+		_, _ = io.WriteString(w, strings.Repeat("x", 17*1024*1024))
+	}))
+	defer srv.Close()
+
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	var last error
+	for {
+		_, err := reader.Next()
+		if err != nil {
+			last = err
+			break
+		}
+	}
+	if last == nil {
+		t.Fatal("the stream did not fail")
+	}
+	pe, ok := last.(*poo.ProviderError)
+	if !ok {
+		t.Fatalf("the failure is %T, want a provider error", last)
+	}
+	if pe.Kind != poo.ProviderKindNetwork {
+		t.Errorf("the failure's kind is %q, want network", pe.Kind)
+	}
+}
