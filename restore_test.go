@@ -385,3 +385,50 @@ func TestTheRestoreHoldsTheSteeringAndTheCompactions(t *testing.T) {
 		t.Errorf("the restored history holds the replaced turn: %s", joined)
 	}
 }
+
+// TestTheRestoredSessionHoldsTheUndeliveredJobResults covers the job
+// results a restore queues: they follow the session's idle policy, so
+// a session that holds them delivers them at the next run.
+func TestTheRestoredSessionHoldsTheUndeliveredJobResults(t *testing.T) {
+	records := []poo.Record{
+		header("s1"),
+		&poo.JobStarted{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", Job: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
+		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", Job: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.JobOutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
+	}
+	tr := scripted([]fakeResponse{{text: "ok"}})
+	sink := &recordingSink{}
+	opts := restoreOptions(t, tr, sink)
+	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
+	session, restored, err := poo.Restore(opts, records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	if len(restored.Jobs) != 1 {
+		t.Fatalf("the restore queued %d job results, want 1", len(restored.Jobs))
+	}
+	if sink.count("input.held") != 1 {
+		t.Errorf("the log holds %d input.held records, want 1", sink.count("input.held"))
+	}
+
+	// The held result is delivered at the next run.
+	if _, err := session.Prompt(context.Background(), "more"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := session.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	requests := tr.Requests()
+	if len(requests) == 0 {
+		t.Fatal("the restored session made no request")
+	}
+	found := false
+	for _, m := range requests[0].Messages {
+		if strings.Contains(m.Text(), "the job said something") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the model did not read the job's result")
+	}
+}
