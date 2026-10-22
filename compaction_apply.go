@@ -156,22 +156,63 @@ func (s *Session) nativeWindow(ctx context.Context, run *runState) (ProviderWind
 	return compactor.Compact(ctx, rendered)
 }
 
-// applyCompaction applies a compaction to the model's view.
+// compactionView is the state a compaction would install.
 //
-// The caller has validated the compaction. The application changes only
-// the view: the store keeps every original record.
-func (s *Session) applyCompaction(c Compaction) error {
+// The core builds it without touching the session: the record is
+// written first, and the view is committed only after the record and
+// the seal both allow it.
+type compactionView struct {
+	// history is the model view after the compaction.
+	history []Message
+	// spans are the turn spans after the compaction.
+	spans []turnSpan
+	// results are the tool results the compaction changed, by handle.
+	results map[string]ToolResult
+	// clearSystemPrompt reports that the window replaces the frozen
+	// run prompt too.
+	clearSystemPrompt bool
+}
+
+// buildCompactionView computes the view a compaction installs.
+//
+// The caller has validated the compaction. Nothing is mutated here: a
+// failure leaves the view as it was.
+func (s *Session) buildCompactionView(c Compaction) (compactionView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
 	case c.Replace != nil:
-		return s.applyReplaceLocked(*c.Replace)
+		return s.replaceViewLocked(*c.Replace)
 	case len(c.Rewrite) > 0:
-		return s.applyRewriteLocked(c.Rewrite)
+		return s.rewriteViewLocked(c.Rewrite)
 	case c.Window != nil:
-		return s.applyWindowLocked(*c.Window)
+		return s.windowViewLocked(*c.Window)
 	}
-	return nil
+	return compactionView{history: append([]Message(nil), s.history...), spans: append([]turnSpan(nil), s.spans...)}, nil
+}
+
+// commitCompactionView installs a compaction's view.
+//
+// The caller has written the compaction record and still holds its
+// claim, so the finalization cannot seal the run between the record and
+// this commit. A run the seal took in the meantime keeps the view it
+// had: a refused or abandoned compaction applies nothing.
+func (s *Session) commitCompactionView(run *runState, view compactionView) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run.sealed {
+		return false
+	}
+	s.history = view.history
+	s.spans = view.spans
+	for handle, result := range view.results {
+		s.results[handle] = result
+	}
+	if view.clearSystemPrompt && s.run != nil {
+		s.run.systemMessage = nil
+	}
+	s.est.rebase(view.history)
+	return true
 }
 
 // cutSpansLocked returns the spans a cut covers.
@@ -196,13 +237,13 @@ func (s *Session) cutSpansLocked(cut TurnRange) ([]turnSpan, error) {
 	return out, nil
 }
 
-// applyReplaceLocked replaces a range of turns with visible messages.
+// replaceViewLocked computes a replacement's view.
 //
 // The caller holds the session's lock.
-func (s *Session) applyReplaceLocked(r RangeReplacement) error {
+func (s *Session) replaceViewLocked(r RangeReplacement) (compactionView, error) {
 	spans, err := s.cutSpansLocked(r.Cut)
 	if err != nil {
-		return err
+		return compactionView{}, err
 	}
 	// The replacement is visible: the model reads it as a user message
 	// that says its history was replaced.
@@ -229,49 +270,52 @@ func (s *Session) applyReplaceLocked(r RangeReplacement) error {
 		pos = span.end
 	}
 	out = append(out, s.history[pos:]...)
-	s.history = out
 
 	// The spans after the cut move with the view, and the cut's own
 	// turns are gone.
+	newSpans := append([]turnSpan(nil), s.spans...)
 	shift := len(replacement) - removed
-	for i := range s.spans {
+	for i := range newSpans {
 		switch {
-		case s.spans[i].turn < r.Cut.First:
+		case newSpans[i].turn < r.Cut.First:
 			continue
-		case s.spans[i].turn <= r.Cut.Last:
-			s.spans[i].removed = true
-			s.spans[i].start = 0
-			s.spans[i].end = 0
+		case newSpans[i].turn <= r.Cut.Last:
+			newSpans[i].removed = true
+			newSpans[i].start = 0
+			newSpans[i].end = 0
 		default:
-			s.spans[i].start += shift
-			s.spans[i].end += shift
+			newSpans[i].start += shift
+			newSpans[i].end += shift
 		}
 	}
-	return nil
+	return compactionView{history: out, spans: newSpans}, nil
 }
 
-// applyRewriteLocked rewrites the content of tool results.
+// rewriteViewLocked computes a rewrite's view.
 //
 // The call and the result stay paired: the result's message keeps its
-// place and its call id, and only its content changes.
+// place and its call id, and only its content changes. Every target is
+// resolved before anything is built, so a rewrite whose later handle is
+// missing produces no view at all.
 //
 // The caller holds the session's lock.
-func (s *Session) applyRewriteLocked(rewrites []ToolResultRewrite) error {
+func (s *Session) rewriteViewLocked(rewrites []ToolResultRewrite) (compactionView, error) {
 	// Every target is resolved before anything changes: a rewrite whose
 	// later handle is missing leaves the view as it was.
 	type target struct {
 		idx     int
 		content []ContentBlock
 	}
+	history := append([]Message(nil), s.history...)
 	targets := make([]target, 0, len(rewrites))
 	for _, rw := range rewrites {
 		idx := s.resultMessageIndexLocked(rw.Handle)
 		if idx < 0 {
-			return fmt.Errorf("%w: the result %q is not in the view", ErrInvalidCompaction, rw.Handle)
+			return compactionView{}, fmt.Errorf("%w: the result %q is not in the view", ErrInvalidCompaction, rw.Handle)
 		}
 		// The message's blocks are a copy: the recorded message keeps
 		// the slice it was recorded with.
-		content := append([]ContentBlock(nil), s.history[idx].Content...)
+		content := append([]ContentBlock(nil), history[idx].Content...)
 		replaced := false
 		for i := range content {
 			if content[i].Kind != ContentToolResult {
@@ -281,19 +325,23 @@ func (s *Session) applyRewriteLocked(rewrites []ToolResultRewrite) error {
 			replaced = true
 		}
 		if !replaced {
-			return fmt.Errorf("%w: the result %q is not in the view", ErrInvalidCompaction, rw.Handle)
+			return compactionView{}, fmt.Errorf("%w: the result %q is not in the view", ErrInvalidCompaction, rw.Handle)
 		}
 		targets = append(targets, target{idx: idx, content: content})
 	}
-	// The targets all exist, so the batch commits together.
+	results := make(map[string]ToolResult, len(rewrites))
 	for i, t := range targets {
-		s.history[t.idx].Content = t.content
+		history[t.idx].Content = t.content
 		rw := rewrites[i]
 		result := s.results[rw.Handle]
 		result.Text = rw.Content
-		s.results[rw.Handle] = result
+		results[rw.Handle] = result
 	}
-	return nil
+	return compactionView{
+		history: history,
+		spans:   append([]turnSpan(nil), s.spans...),
+		results: results,
+	}, nil
 }
 
 // resultMessageIndexLocked returns the index of the message that
@@ -315,28 +363,26 @@ func (s *Session) resultMessageIndexLocked(handle string) int {
 	return -1
 }
 
-// applyWindowLocked makes the view the provider's window.
+// windowViewLocked computes a provider window's view.
 //
 // The window is the model's own compacted state, so the view becomes
 // it, and the marker message tells the model that its history was
 // compacted.
 //
 // The caller holds the session's lock.
-func (s *Session) applyWindowLocked(w ProviderWindow) error {
+func (s *Session) windowViewLocked(w ProviderWindow) (compactionView, error) {
 	window := Message{Role: RoleUser, Content: w.Items, Origin: OriginCompaction}
 	marker := NewTextMessage(RoleUser, CompactionMarkerText)
 	marker.Origin = OriginCompaction
-	s.history = []Message{window, marker}
-	// The window is the whole model view, so the run's frozen prompt
-	// goes with it: the provider's own compacted state is what the
-	// model reads from here on.
-	if s.run != nil {
-		s.run.systemMessage = nil
+	spans := append([]turnSpan(nil), s.spans...)
+	for i := range spans {
+		spans[i].removed = true
+		spans[i].start = 0
+		spans[i].end = 0
 	}
-	for i := range s.spans {
-		s.spans[i].removed = true
-		s.spans[i].start = 0
-		s.spans[i].end = 0
-	}
-	return nil
+	return compactionView{
+		history:           []Message{window, marker},
+		spans:             spans,
+		clearSystemPrompt: true,
+	}, nil
 }

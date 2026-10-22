@@ -26,44 +26,62 @@ type gateResult struct {
 //
 // The gate never opens a request while a candidate is pending.
 func (s *Session) gate(run *runState) gateResult {
-	// Step 0: a pending candidate settles the run.
-	s.mu.Lock()
-	held := len(run.candidates) > 0
-	s.mu.Unlock()
-	if held {
-		return gateResult{held: true}
-	}
+	// The compactor gets one chance in a gate pass. An interrupt that
+	// ends the compaction restarts the gate for the candidates, the
+	// budget and the notice, but not for a second compaction the
+	// interrupt already ended.
+	compactionTried := false
+gateLoop:
+	for {
+		// Step 0: a pending candidate settles the run.
+		s.mu.Lock()
+		held := len(run.candidates) > 0
+		s.mu.Unlock()
+		if held {
+			return gateResult{held: true}
+		}
 
-	// Step 1: the compactor.
-	//
-	// The compaction is applied here: the view changes, the budget is
-	// rebased onto the new view, and a compaction that refuses to
-	// compact ends the run with its handoff.
-	if s.opts.Compactor != nil {
-		should := s.opts.Compactor.ShouldCompact(s.view(), s.budget())
-		if should {
+		// Step 1: the compactor.
+		//
+		// The compaction is applied here: the view changes, the budget is
+		// rebased onto the new view, and a compaction that refuses to
+		// compact ends the run with its handoff.
+		//
+		// An interrupt that ends the compaction is not a compaction
+		// failure: the gate restarts from its first step, so the pending
+		// candidates, the compactor, the budget and the notice are all
+		// checked again instead of the interrupt opening a request by
+		// itself.
+		for s.opts.Compactor != nil && !compactionTried {
+			compactionTried = true
+			should := s.opts.Compactor.ShouldCompact(s.view(), s.budget())
+			if !should {
+				break
+			}
 			s.transition(StateCompacting)
 			outcome, err := s.compact(run)
-			// The run may have settled while the compactor was
-			// running. Nothing the gate does after that may move the
-			// state, open a request, or record anything.
+			// The run may have settled while the compactor was running.
+			// Nothing the gate does after that may move the state, open a
+			// request, or record anything.
 			if errors.Is(err, errRunWindingDown) || s.runWindingDown(run) {
 				return gateResult{held: true}
 			}
+			if errors.Is(err, errCompactionInterrupted) {
+				s.clearInterrupt(run)
+				s.drainInputs(run, false)
+				s.transition(StateRequesting)
+				continue gateLoop
+			}
+			if errors.Is(err, errCompactionStore) {
+				// The compaction record was refused, and the run holds
+				// the store_error candidate. The gate never opens a
+				// request while a candidate is pending.
+				return gateResult{held: true}
+			}
 			if err != nil {
-				// An interrupt that cancelled the compaction is not
-				// a compaction failure: the run carries on, and no
-				// compaction is applied. The compaction is not a
-				// turn, so the interrupt emits no turn events.
-				if s.interruptPending(run) {
-					s.clearInterrupt(run)
-					s.drainInputs(run, false)
-					s.transition(StateRequesting)
-					return gateResult{}
-				}
 				// The compactor failed. Below the hard limit the run
-				// continues uncompacted; at or above it the run
-				// settles context_exhausted.
+				// continues uncompacted; at or above it the run settles
+				// context_exhausted.
 				if s.overHardLimit() {
 					return gateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
 						Source: "compaction_failed",
@@ -71,16 +89,14 @@ func (s *Session) gate(run *runState) gateResult {
 					})}}
 				}
 			} else if outcome.candidate != nil {
-				// The compactor refused to compact: the run ends
-				// with the handoff it wrote.
+				// The compactor refused to compact: the run ends with
+				// the handoff it wrote.
 				return gateResult{candidates: []candidate{*outcome.candidate}}
-			} else if outcome.applied {
-				// The compaction was applied, and the budget was
-				// rebased onto the new view.
-				s.rebaseEstimate()
 			}
 			s.transition(StateRequesting)
+			break
 		}
+		break gateLoop
 	}
 
 	// Step 2: the budget check.
@@ -172,16 +188,41 @@ type compactionOutcome struct {
 	candidate *candidate
 }
 
+// errCompactionInterrupted reports that an interrupt ended a compaction
+// before its result was applied.
+var errCompactionInterrupted = errors.New("poo: the compaction was interrupted")
+
+// errCompactionStore reports that the store refused a compaction record.
+// The candidate is already on the run, and the gate re-enters its
+// candidate check.
+var errCompactionStore = errors.New("poo: the compaction record was refused")
+
 // compact asks the compactor to compact the view and applies what it
 // produced.
+//
+// The whole compaction is claimed against the run's seal, like a call
+// record: the finalization waits for it, a claim that arrives after the
+// seal is refused, and the seal ends an abandoned record write. The view
+// is committed only after the record landed, and never for a run the
+// seal owns.
 //
 // The compaction is validated before it is applied: a compaction the
 // core cannot apply is a compactor failure, and the run carries on
 // uncompacted below the hard limit.
 //
-// The compaction's record is written after the view changed, so the
-// record's tokens_after is the estimate of the new view.
+// The compaction's record is written after the new view is known, so the
+// record's tokens_after is the estimate of the new view at the plan's
+// rebased ratio.
 func (s *Session) compact(run *runState) (compactionOutcome, error) {
+	claimCtx, release, ok := s.beginCompactionClaim(run)
+	if !ok {
+		return compactionOutcome{}, errRunWindingDown
+	}
+	defer release()
+	if s.runWindingDown(run) {
+		return compactionOutcome{}, errRunWindingDown
+	}
+
 	s.events.emit(EventCompactionStarted, map[string]any{"run_id": run.id})
 
 	tokensBefore := s.estimatedInput()
@@ -190,10 +231,18 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 
 	// The compaction runs under the run's activity context, so an
 	// interrupt cancels it and no compaction is applied.
-	ctx, _ := s.startActivity(run)
+	actCtx, _ := s.startActivity(run)
 	defer s.endActivity(run)
 
-	compaction, err := s.opts.Compactor.Compact(ctx, view, fork)
+	compaction, err := s.opts.Compactor.Compact(actCtx, view, fork)
+	if s.wasInterrupted(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
+		// A cooperative compactor may return a value while it unwinds.
+		// The activity was interrupted, so the value is discarded.
+		if !s.runWindingDown(run) {
+			s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": errCompactionInterrupted.Error()})
+		}
+		return compactionOutcome{}, errCompactionInterrupted
+	}
 	// The run may have settled while the compactor was running. The
 	// compaction's own record is not written, and the ended event is
 	// not emitted, for a run that has already settled.
@@ -208,7 +257,13 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	// core asks the transport for it. A strategy's items are never
 	// applied: it can only ask for the native compaction.
 	if compaction.Window != nil && compaction.Replace == nil && len(compaction.Rewrite) == 0 && compaction.End == nil {
-		window, werr := s.nativeWindow(ctx, run)
+		window, werr := s.nativeWindow(actCtx, run)
+		if s.wasInterrupted(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
+			if !s.runWindingDown(run) {
+				s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": errCompactionInterrupted.Error()})
+			}
+			return compactionOutcome{}, errCompactionInterrupted
+		}
 		if werr != nil {
 			s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": werr.Error()})
 			return compactionOutcome{}, werr
@@ -221,17 +276,23 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	}
 
 	outcome := compactionOutcome{}
+	tokensAfter := tokensBefore
+	var change *compactionView
 	// A compaction that refuses to compact leaves the view alone: the
 	// run ends with the handoff instead.
 	if compaction.End == nil {
-		if err := s.applyCompaction(compaction); err != nil {
-			s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
-			return compactionOutcome{}, err
+		built, verr := s.buildCompactionView(compaction)
+		if verr != nil {
+			s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": verr.Error()})
+			return compactionOutcome{}, verr
 		}
+		change = &built
+		// The rebase uses the plan's whole-view ratio, and the record
+		// carries the estimate the next request will use.
+		tokensAfter = int(float64(estimateHistoryChars(built.history)) / CharsPerToken)
 		outcome.applied = true
 	}
 
-	tokensAfter := s.estimatedInput()
 	rec := &CompactionRecord{
 		RecordMeta:   NewRecordMeta("compaction"),
 		RunID:        run.id,
@@ -246,21 +307,32 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		rec.Cut = &cut
 		rec.Replacement = compaction.Replace.Messages
 	}
-	if err := s.write(run.ctx, rec); err != nil {
+	if err := s.appendRecord(claimCtx, rec, run); err != nil {
+		if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
+			return compactionOutcome{}, errRunWindingDown
+		}
 		s.addCandidate(run, storeErrorCandidate(err))
+		return compactionOutcome{}, errCompactionStore
+	}
+	if change != nil && !s.commitCompactionView(run, *change) {
+		return compactionOutcome{}, errRunWindingDown
 	}
 
 	// The handoff is recorded on its own, so a consumer that carries
 	// the work on can read the note without reading the compaction.
 	if compaction.End != nil {
-		if err := s.write(run.ctx, &HandoffRecord{
+		if err := s.appendRecord(claimCtx, &HandoffRecord{
 			RecordMeta: NewRecordMeta("handoff"),
 			RunID:      run.id,
 			Strategy:   compaction.Strategy,
 			Handoff:    compaction.End.Handoff,
 			CreatedAt:  nowRFC3339(),
-		}); err != nil {
+		}, run); err != nil {
+			if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
+				return compactionOutcome{}, errRunWindingDown
+			}
 			s.addCandidate(run, storeErrorCandidate(err))
+			return compactionOutcome{}, errCompactionStore
 		}
 		outcome.candidate = &candidate{
 			reason: ReasonContextExhausted,
@@ -272,6 +344,12 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		}
 	}
 
+	// The run may have started finalizing while the record was written.
+	// The record is its own now, and its ended event is not emitted for
+	// a run that is going down.
+	if s.runWindingDown(run) {
+		return compactionOutcome{}, errRunWindingDown
+	}
 	s.events.emit(EventCompactionEnded, map[string]any{
 		"run_id":   run.id,
 		"strategy": compaction.Strategy,

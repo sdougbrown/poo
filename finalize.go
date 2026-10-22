@@ -604,14 +604,24 @@ func (s *Session) Cancel(reason string) {
 	}
 	s.mu.Lock()
 	run := s.run
+	compacting := run != nil && run.compactionClaims > 0
 	s.mu.Unlock()
 	if run == nil {
 		return
 	}
-	s.finalize(run, newCandidate(ReasonCancelled, SettleDetail{
+	cand := newCandidate(ReasonCancelled, SettleDetail{
 		Source: reason,
 		Text:   "the run was cancelled",
-	}))
+	})
+	if compacting {
+		// The compaction holds a store write that the finalization
+		// waits for. The caller's cancel does not wait for it: the
+		// finalization runs on its own and the caller can release the
+		// store.
+		go s.finalize(run, cand)
+		return
+	}
+	s.finalize(run, cand)
 }
 
 // Wait waits for the active run to settle.

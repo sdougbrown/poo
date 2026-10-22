@@ -270,6 +270,11 @@ type runState struct {
 	// writeClaims are the claimed hook writes, so the seal can end a
 	// write the finalization stopped waiting for.
 	writeClaims []*runWriteClaim
+	// compactionClaims counts the compaction claims that are still in
+	// flight. A cancel while one is in flight returns without waiting:
+	// the finalization waits for the compaction, and the caller releases
+	// the store it is holding.
+	compactionClaims int
 	// callWrites counts the tool.call records whose writes are still in
 	// flight. The finalization waits for them, so no record of the run
 	// follows run.settled.
@@ -976,6 +981,29 @@ func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
 		run.runWrites--
 		s.signalWorkLocked(run)
 		s.mu.Unlock()
+	}
+	return ctx, release, true
+}
+
+// beginCompactionClaim claims a whole compaction against the run's seal.
+//
+// The claim is a run write, so the finalization waits for it and the
+// seal ends it if it outlives the wait. It is marked as a compaction
+// claim too, so a cancel can return without waiting for the store that
+// the compaction is holding.
+func (s *Session) beginCompactionClaim(run *runState) (context.Context, func(), bool) {
+	ctx, releaseWrite, ok := s.beginRunWrite(run)
+	if !ok {
+		return nil, nil, false
+	}
+	s.mu.Lock()
+	run.compactionClaims++
+	s.mu.Unlock()
+	release := func() {
+		s.mu.Lock()
+		run.compactionClaims--
+		s.mu.Unlock()
+		releaseWrite()
 	}
 	return ctx, release, true
 }
