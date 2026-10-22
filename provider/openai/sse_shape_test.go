@@ -26,7 +26,7 @@ func TestEventsSeparatedByOneNewlineAreRead(t *testing.T) {
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestAnEventSplitOverTwoDataLinesIsStillJoined(t *testing.T) {
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestEventsSeparatedByABlankLineAreRead(t *testing.T) {
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestTheEventsArriveInOrder(t *testing.T) {
 			srv := newSSEServer(t, body)
 			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-			reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			if err != nil {
 				t.Fatalf("starting the request: %v", err)
 			}
@@ -155,7 +155,7 @@ func TestAnEventBeforeABrokenConnectionIsKept(t *testing.T) {
 	defer srv.Close()
 	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
 
-	reader, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
 	}

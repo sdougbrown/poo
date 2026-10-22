@@ -1,8 +1,16 @@
 package poo
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // ProviderKind classifies a provider failure.
+//
+// A settle reason is derived from the kind, and every kind means one
+// thing. Not every kind appears in the plan's settle table:
+// session_incompatible currently settles as provider_error, and its
+// settle placement is pending an owner decision.
 type ProviderKind string
 
 const (
@@ -25,13 +33,23 @@ const (
 	// ProviderKindPlanInactive means the account's plan does not allow the
 	// request.
 	ProviderKindPlanInactive ProviderKind = "plan_inactive"
+	// ProviderKindInterruptedStream means the stream broke after it had
+	// already sent a delta. The request cannot be retried, because the
+	// model has already seen part of the answer.
+	ProviderKindInterruptedStream ProviderKind = "interrupted_stream"
+	// ProviderKindOutputTruncated means the provider stopped on the
+	// output-token limit.
+	ProviderKindOutputTruncated ProviderKind = "output_truncated"
+	// ProviderKindSessionIncompatible means the history holds a required
+	// provider block that belongs to another wire API, so this transport
+	// cannot make the request.
+	ProviderKindSessionIncompatible ProviderKind = "session_incompatible"
 )
 
 // ProviderError is a failure a provider reported.
 //
-// The skeleton has no retry budget, so every provider failure ends the run.
-// The kind still travels with the error, so the settle record says what
-// happened.
+// The kind travels with the error, so the settle record says what
+// happened and the loop can tell a retryable failure from a terminal one.
 type ProviderError struct {
 	// Kind classifies the failure.
 	Kind ProviderKind
@@ -39,8 +57,13 @@ type ProviderError struct {
 	Message string
 	// Status is the HTTP status, 0 when the failure was not a response.
 	Status int
-	// Code is the provider's own error code, when it sent one.
+	// Code is the provider's own error code, when it sent one. It also
+	// holds the kind a failure had before it was reclassified: an
+	// interrupted stream keeps the kind it broke in here.
 	Code string
+	// RetryAfter is how long the endpoint asked the client to wait, when
+	// it said so.
+	RetryAfter time.Duration
 }
 
 func (e *ProviderError) Error() string {
@@ -49,3 +72,32 @@ func (e *ProviderError) Error() string {
 	}
 	return e.Message
 }
+
+// Retryable reports whether the failure is worth retrying.
+//
+// The plan's rule: a rate limit is worth another attempt only when the
+// endpoint asked for a wait of thirty seconds or less, and a wait of
+// none means it asked for no wait at all. A server failure and a network
+// failure always are. A rejection is not: the same request would be
+// refused again.
+//
+// Stage 6's retry budget consumes this and MaxRetryAfter; nothing calls
+// them yet.
+func (e *ProviderError) Retryable() bool {
+	switch e.Kind {
+	case ProviderKindRateLimited:
+		return e.RetryAfter <= MaxRetryAfter
+	case ProviderKindServer, ProviderKindNetwork:
+		return true
+	default:
+		return false
+	}
+}
+
+// MaxRetryAfter is the longest wait a rate limit may ask for and still
+// be worth retrying.
+//
+// A limit that asks for longer is a provider limit, not a transient
+// failure: the run settles and a later run may succeed. Stage 6's retry
+// budget consumes it; nothing reads it yet.
+const MaxRetryAfter = 30 * time.Second

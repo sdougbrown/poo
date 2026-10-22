@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -128,24 +129,80 @@ type errorBody struct {
 }
 
 // Stream starts a chat completion request and returns the response stream.
-func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, error) {
+//
+// The snapshot is the serialized request body, exactly as it went out. A
+// fork is built from it, so the fork sends the same prefix.
+func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
 	body, err := t.buildBody(req)
+	if err != nil {
+		return nil, poo.Rendered{}, err
+	}
+	rendered := poo.Rendered{
+		API:      poo.APIChatCompletions,
+		Body:     body,
+		Messages: len(req.Messages),
+	}
+
+	reader, err := t.open(ctx, body)
+	if err != nil {
+		return nil, rendered, err
+	}
+	return reader, rendered, nil
+}
+
+// Fork sends a body that is byte-identical to the snapshot, apart from
+// the appended messages and the output ceiling.
+//
+// The snapshot holds the serialized body, so the fork re-sends it with
+// the appended messages added after the last one. The key order and
+// every other field are unchanged, because the body was serialized once
+// and only the two changed fields are rewritten.
+func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	if prev.API != poo.APIChatCompletions {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: fmt.Sprintf("the request snapshot belongs to the %q API, not Chat Completions", prev.API),
+		}
+	}
+	if len(prev.Body) == 0 {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot holds no body to fork",
+		}
+	}
+	body, err := forkBody(prev.Body, appended, maxTokens)
 	if err != nil {
 		return nil, err
 	}
 
+	reader, err := t.open(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	return reader, nil
+}
+
+// open sends a serialized body and returns the response stream.
+//
+// Stream and Fork both go through it, so the timeout, the headers, the
+// error classification and the time to the first token mean the same
+// thing for both.
+func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error) {
 	// The timeout bounds the whole request, streaming included, so the
 	// context is created before the request goes out.
 	var cancel context.CancelFunc
 	if t.cfg.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
 	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.BaseURL), bytes.NewReader(body))
-	if err != nil {
+	release := func() {
 		if cancel != nil {
 			cancel()
 		}
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.BaseURL), bytes.NewReader(body))
+	if err != nil {
+		release()
 		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -164,20 +221,15 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		// released, because releasing it would replace the failure with
 		// the context's own error.
 		perr := classifyTransportError(ctx, err)
-		if cancel != nil {
-			cancel()
-		}
+		release()
 		return nil, perr
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		// The body is read before the context is released: releasing
-		// it aborts the read and leaves an error with no message.
-		perr := classifyStatus(resp)
-		if cancel != nil {
-			cancel()
-		}
-		return nil, perr
+		// The body is read under the request's timeout, so the context is
+		// released after it.
+		defer release()
+		return nil, classifyStatus(resp)
 	}
 
 	// Some servers answer a failed request with a 200 and a JSON error
@@ -188,18 +240,17 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	first, err := peekFirstByte(br)
 	if err != nil {
 		resp.Body.Close()
-		if cancel != nil {
-			cancel()
-		}
+		release()
 		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 	if first == '{' {
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(br, 1<<20))
-		if cancel != nil {
-			cancel()
+		defer release()
+		errBody, err := io.ReadAll(io.LimitReader(br, 1<<20))
+		if err != nil {
+			return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 		}
-		if kind, msg, code, ok := errorInBody(body); ok {
+		if kind, msg, code, ok := errorInBody(errBody); ok {
 			return nil, &poo.ProviderError{
 				Kind:    kind,
 				Message: msg,
@@ -222,6 +273,153 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		cancel:  cancel,
 		started: started,
 	}, nil
+}
+
+// forkBody appends messages to a serialized request body.
+//
+// The body is decoded, the messages are appended after the last one and
+// the output ceiling is replaced, and the result is serialized again. The
+// key order is the one the body already had, because the keys are
+// written in the transport's own order and any key it does not know
+// keeps its position.
+func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot does not hold a JSON body",
+		}
+	}
+
+	if len(appended) > 0 {
+		var messages []json.RawMessage
+		if raw, ok := payload["messages"]; ok {
+			if err := json.Unmarshal(raw, &messages); err != nil {
+				return nil, &poo.ProviderError{
+					Kind:    poo.ProviderKindInvalidRequest,
+					Message: "the request snapshot's messages do not decode",
+				}
+			}
+		}
+		for _, m := range appended {
+			cm, err := convertMessage(m)
+			if err != nil {
+				return nil, err
+			}
+			raw, err := json.Marshal(cm)
+			if err != nil {
+				return nil, &poo.ProviderError{
+					Kind:    poo.ProviderKindInvalidRequest,
+					Message: "the appended message does not encode",
+				}
+			}
+			messages = append(messages, raw)
+		}
+		raw, err := json.Marshal(messages)
+		if err != nil {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the messages do not encode",
+			}
+		}
+		payload["messages"] = raw
+	}
+
+	if maxTokens > 0 {
+		raw, err := json.Marshal(maxTokens)
+		if err != nil {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the output ceiling does not encode",
+			}
+		}
+		payload["max_tokens"] = raw
+	}
+
+	// The keys are written in the order the body had them, so the fork's
+	// prefix is byte-identical to the original. Every key the payload
+	// holds came from the body, except the two the fork may add; those
+	// go last, in the order they are named.
+	order, err := jsonKeyOrder(body)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, k := range order {
+		seen[k] = true
+	}
+	for _, k := range []string{"messages", "max_tokens"} {
+		if !seen[k] {
+			if _, ok := payload[k]; ok {
+				order = append(order, k)
+				seen[k] = true
+			}
+		}
+	}
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, k := range order {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		// A string always encodes.
+		key, _ := json.Marshal(k)
+		b.Write(key)
+		b.WriteByte(':')
+		b.Write(payload[k])
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
+// jsonKeyOrder returns the top-level keys of a JSON object, in the order
+// the object holds them.
+//
+// The order matters for a fork: the forked body has to be byte-identical
+// to the body it came from, apart from the fields that changed, and a
+// JSON object decoded into a map loses its order.
+func jsonKeyOrder(body []byte) ([]string, error) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot does not hold a JSON body",
+		}
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return nil, &poo.ProviderError{
+			Kind:    poo.ProviderKindInvalidRequest,
+			Message: "the request snapshot does not hold a JSON object",
+		}
+	}
+	var order []string
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the request snapshot's keys do not decode",
+			}
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the request snapshot's keys do not decode",
+			}
+		}
+		order = append(order, key)
+		// The value is skipped: the payload map already holds it.
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, &poo.ProviderError{
+				Kind:    poo.ProviderKindInvalidRequest,
+				Message: "the request snapshot's values do not decode",
+			}
+		}
+	}
+	return order, nil
 }
 
 // peekFirstByte returns the first non-space byte of the body, without
@@ -326,7 +524,11 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	}
 
 	for _, m := range req.Messages {
-		out.Messages = append(out.Messages, convertMessage(m))
+		cm, err := convertMessage(m)
+		if err != nil {
+			return nil, err
+		}
+		out.Messages = append(out.Messages, cm)
 	}
 
 	// In native mode the tools go in the request, and the model answers
@@ -351,13 +553,28 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 }
 
 // convertMessage turns a core message into the wire shape.
-func convertMessage(m poo.Message) chatMessage {
+func convertMessage(m poo.Message) (chatMessage, error) {
 	cm := chatMessage{Role: string(m.Role)}
 
 	var text strings.Builder
 	var calls []chatToolCall
+	// The provider blocks are checked in a pass of their own, so a block
+	// after a tool result is checked too.
+	for _, c := range m.Content {
+		if c.Provider != nil {
+			if err := checkProviderBlock(c.Provider); err != nil {
+				return chatMessage{}, err
+			}
+		}
+	}
 	for _, c := range m.Content {
 		switch c.Kind {
+		case poo.ContentProvider:
+			// The block's payload is opaque and has no wire field here.
+			// checkProviderBlock has already refused a required block, so
+			// what is left is optional and omitted. The plan's "the
+			// omission is recorded" is the loop's job (Stage 3/6): the
+			// transport cannot write records.
 		case poo.ContentText:
 			text.WriteString(c.Text)
 		case poo.ContentThinking:
@@ -375,13 +592,29 @@ func convertMessage(m poo.Message) chatMessage {
 			cm.Role = "tool"
 			cm.ToolCallID = c.ToolCallID
 			cm.Content = c.Text
-			return cm
+			return cm, nil
 		}
 	}
 
 	cm.Content = text.String()
 	cm.ToolCalls = calls
-	return cm
+	return cm, nil
+}
+
+// checkProviderBlock applies the opaque-block rule to one block.
+//
+// Chat Completions has no field that carries opaque data, so no block can
+// be sent. An optional block is omitted, and a required one fails the
+// request, whichever API produced it.
+func checkProviderBlock(p *poo.ProviderBlock) error {
+	if p.Required {
+		return &poo.ProviderError{
+			Kind: poo.ProviderKindSessionIncompatible,
+			Message: fmt.Sprintf("the history holds a required %q block (%s) that Chat Completions cannot carry",
+				p.Type, p.API),
+		}
+	}
+	return nil
 }
 
 // classifyStatus turns a non-200 response into a provider error.
@@ -416,11 +649,39 @@ func classifyStatus(resp *http.Response) error {
 	kind = classifyError(code, message, kind)
 
 	return &poo.ProviderError{
-		Kind:    kind,
-		Message: message,
-		Status:  resp.StatusCode,
-		Code:    code,
+		Kind:       kind,
+		Message:    message,
+		Status:     resp.StatusCode,
+		Code:       code,
+		RetryAfter: retryAfter(resp),
 	}
+}
+
+// retryAfter returns how long the endpoint asked the client to wait.
+//
+// The header is either a number of seconds or an HTTP date, and the plan
+// reads a Retry-After over thirty seconds as a provider limit rather than
+// a failure to retry.
+func retryAfter(resp *http.Response) time.Duration {
+	raw := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if raw == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(raw); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil {
+		return 0
+	}
+	d := time.Until(when)
+	if d <= 0 {
+		return 0
+	}
+	return d
 }
 
 // isContextLength reports whether an error means the request was too long.

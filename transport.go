@@ -111,11 +111,40 @@ type UsageReport struct {
 	TTFTMS float64
 }
 
+// Rendered is the immutable snapshot of a request as it was sent.
+//
+// It holds the serialized request body exactly as it went out. A fork
+// sends a body that is byte-identical to this one, apart from the
+// messages appended after the last one and the output ceiling.
+//
+// The snapshot is what makes the payload, rather than a cache hit,
+// reproducible: a compaction strategy that forks the last request sends
+// the same prefix, so a server's prefix cache can hit.
+type Rendered struct {
+	// API is the wire API the body belongs to.
+	API API
+	// Body is the serialized request body, exactly as sent.
+	Body []byte
+	// Messages is the number of messages the body carried, so a fork
+	// knows where the appended messages go.
+	Messages int
+}
+
 // ChatTransport sends a chat request to a provider.
 //
-// The interface is the seam the plan's Stage 2 formalises; the skeleton's
-// version is the small one the OpenAI transport needs.
+// The transport owns the wire shape. Core never sees a provider's own
+// JSON, and a transport never decides what the model sees: it converts
+// the model's view into the API's shape and the API's answers back into
+// the model's shapes.
 type ChatTransport interface {
-	// Stream starts a request and returns the response stream.
-	Stream(ctx context.Context, req ChatRequest) (StreamReader, error)
+	// Stream starts a request and returns the response stream along
+	// with the snapshot of the request that was sent.
+	Stream(ctx context.Context, req ChatRequest) (StreamReader, Rendered, error)
+	// Fork sends a body that is byte-identical to the snapshot, apart
+	// from the appended messages and the output ceiling.
+	//
+	// A transport that cannot fork returns a typed error: the
+	// compaction seam needs a fork, and a transport that cannot do one
+	// cannot take part in a compaction.
+	Fork(ctx context.Context, prev Rendered, appended []Message, maxTokens int) (StreamReader, error)
 }

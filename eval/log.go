@@ -35,14 +35,21 @@ type LogRecord struct {
 	Turn    int    `json:"turn"`
 	Reason  string `json:"reason"`
 	Turns   int    `json:"turns"`
+	Trigger string `json:"trigger"`
 	Details struct {
 		Source string `json:"source"`
 		Text   string `json:"text"`
 	} `json:"detail"`
 
 	// The message's fields.
-	Origin  string `json:"origin"`
-	Role    string `json:"role"`
+	Origin       string `json:"origin"`
+	Role         string `json:"role"`
+	MessageID    string `json:"message_id"`
+	DeliveryNote *struct {
+		MessageID string `json:"message_id"`
+		UpToChars int    `json:"upto_chars"`
+		Text      string `json:"text"`
+	} `json:"delivery_note"`
 	Content []struct {
 		Kind       string          `json:"kind"`
 		Text       string          `json:"text"`
@@ -50,6 +57,14 @@ type LogRecord struct {
 		Name       string          `json:"name"`
 		Arguments  json.RawMessage `json:"arguments"`
 		IsError    bool            `json:"is_error"`
+		// Provider is the block's opaque provider companion, when it
+		// has one. The harness does not interpret it.
+		Provider *struct {
+			API      string          `json:"api"`
+			Type     string          `json:"type"`
+			Data     json.RawMessage `json:"data"`
+			Required bool            `json:"required"`
+		} `json:"provider"`
 	} `json:"content"`
 
 	// The tool call's and tool result's fields.

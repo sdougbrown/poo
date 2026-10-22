@@ -21,6 +21,12 @@ type RecordMeta struct {
 	Seq int64 `json:"seq"`
 	// TS is the RFC 3339 timestamp with nanosecond precision, in UTC.
 	TS string `json:"ts"`
+	// Origin says who produced the record: "model", "tool", "user",
+	// "steer", "hook:<name>" and the rest of the closed set.
+	//
+	// It is empty on the records that no one produced: the session's own
+	// header, a run's boundaries, the usage accounting.
+	Origin Origin `json:"origin,omitempty"`
 }
 
 // Meta returns the record's header, so a sink can stamp it.
@@ -33,6 +39,14 @@ type Record interface {
 }
 
 // RecordSink receives the records a run produces, in order.
+//
+// Append may be called concurrently: the loop, a job's completion and the
+// finalization's cleanup path all write, and an observer may write too. An
+// implementation serializes internally and never interleaves two records'
+// bytes, so a reader of the log never sees half a record.
+//
+// Core never depends on the order of records written concurrently, except
+// that a run's settle record follows that run's own outcome records.
 type RecordSink interface {
 	// Append writes one record. It returns an error when the record could
 	// not be stored.
@@ -57,6 +71,10 @@ type SessionTool struct {
 	Name string `json:"name"`
 	// Class is the tool's side-effect class.
 	Class ToolClass `json:"class"`
+	// Background is the tool's background mode. A session loaded from
+	// the record is incompatible with the current build when a tool's
+	// mode changed.
+	Background Background `json:"background,omitempty"`
 }
 
 // BuildInfo names the binary that produced a session.
@@ -112,6 +130,10 @@ type RunStarted struct {
 	// ReasoningEffort is the reasoning_effort the run sends, empty when
 	// it sends none.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Trigger says what started the run: "prompt" or "job".
+	Trigger TriggerKind `json:"trigger,omitempty"`
+	// Jobs are the job results that started a job run.
+	Jobs []JobResult `json:"jobs,omitempty"`
 }
 
 // MessageRecord records one message in the model's history.
@@ -121,13 +143,16 @@ type MessageRecord struct {
 	RunID string `json:"run_id"`
 	// Turn is the turn the message belongs to, 0 for the run's input.
 	Turn int `json:"turn"`
-	// Origin says who produced the message: "user", "model", "tool" or
-	// "system".
-	Origin string `json:"origin"`
 	// Role is the message's role.
 	Role Role `json:"role"`
 	// Content is the message's content blocks.
 	Content []ContentBlock `json:"content"`
+	// MessageID is the message's session-monotonic id, e.g. "m7". It is
+	// set on the messages the model produced.
+	MessageID string `json:"message_id,omitempty"`
+	// DeliveryNote says how much of the previous reply the user had
+	// seen, when the message carries one.
+	DeliveryNote *DeliveryNote `json:"delivery_note,omitempty"`
 }
 
 // ToolCallRecord records a tool call the model made, with its full arguments.
@@ -147,16 +172,6 @@ type ToolCallRecord struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
-// Outcome is the result of a tool call.
-type Outcome string
-
-const (
-	// OutcomeOK means the call succeeded.
-	OutcomeOK Outcome = "ok"
-	// OutcomeError means the call failed recoverably.
-	OutcomeError Outcome = "error"
-)
-
 // ToolResultRecord records the outcome of a tool call.
 type ToolResultRecord struct {
 	RecordMeta
@@ -168,7 +183,7 @@ type ToolResultRecord struct {
 	Handle string `json:"handle"`
 	// Tool is the name of the tool that ran.
 	Tool string `json:"tool"`
-	// Outcome is "ok" or "error".
+	// Outcome is the call's outcome.
 	Outcome Outcome `json:"outcome"`
 	// Text is the model-facing text of the result.
 	Text string `json:"text"`
@@ -203,8 +218,13 @@ type ProviderDetail struct {
 	Kind string `json:"kind"`
 	// Status is the HTTP status, 0 when the failure was not a response.
 	Status int `json:"status,omitempty"`
-	// Code is the provider's own error code, when it sent one.
+	// Code is the provider's own error code, when it sent one. It also
+	// holds the kind a failure had before it was reclassified: an
+	// interrupted stream keeps the kind it broke in here.
 	Code string `json:"code,omitempty"`
+	// RetryAfterSec is how long the endpoint asked the client to wait, in
+	// seconds, when it said so.
+	RetryAfterSec int `json:"retry_after_s,omitempty"`
 }
 
 // SettleDetail explains why a run settled.
@@ -217,6 +237,31 @@ type SettleDetail struct {
 	Losing []string `json:"losing,omitempty"`
 	// Provider is set when a provider request failed.
 	Provider *ProviderDetail `json:"provider,omitempty"`
+	// Handoff is the note a compactor wrote when it refused to
+	// compact. It is set when the run settled as context_exhausted
+	// because a Compactor ended it.
+	Handoff string `json:"handoff,omitempty"`
+	// UndeliveredInput lists the accepted inputs that never reached the
+	// model, with the mode they were accepted in.
+	UndeliveredInput []UndeliveredInput `json:"undelivered_input,omitempty"`
+	// JobsRunning lists the jobs that were still running when the run
+	// settled.
+	JobsRunning []string `json:"jobs_running,omitempty"`
+	// Result is the payload of a valid finish call, when the run
+	// settled as finished.
+	Result json.RawMessage `json:"result,omitempty"`
+}
+
+// UndeliveredInput is an accepted input that never reached the model.
+//
+// The input was accepted and recorded, so it is never lost: it is
+// reported here with the reason the run settled.
+type UndeliveredInput struct {
+	// InputID is the input's identifier.
+	InputID string `json:"input_id"`
+	// Mode is how the input was accepted: "steer", "interrupt" or
+	// "follow_up".
+	Mode string `json:"mode"`
 }
 
 // RunSettled records the end of a run.
@@ -237,6 +282,17 @@ type RunSettled struct {
 // NewRecordMeta returns a header for a record of the given type.
 func NewRecordMeta(name string) RecordMeta {
 	return RecordMeta{Record: name}
+}
+
+// NewRecordMetaFrom returns a header for a record of the given type and
+// origin.
+//
+// The origin says who produced the record, and every record carries one:
+// "model", "tool", "user", "steer", "hook:<name>" and the rest of the
+// closed set. A record that no one produced — the session's own header, a
+// run's boundaries — has no origin.
+func NewRecordMetaFrom(name string, origin Origin) RecordMeta {
+	return RecordMeta{Record: name, Origin: origin}
 }
 
 // Stamp fills in the sequence number and timestamp of a record.
