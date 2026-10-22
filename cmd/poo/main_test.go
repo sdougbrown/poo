@@ -104,7 +104,7 @@ func TestTheDefaultLogPathIsInTheWorkingDirectory(t *testing.T) {
 func TestTheSystemPromptStatesTheOperatingContract(t *testing.T) {
 	// The bash tool's section is the tool's guidance, and it renders
 	// only when the tool is linked.
-	prompt := renderPrompt("gemma4", testTools(), "native", "")
+	prompt := sessionPrompt(t, "gemma4", "native", "")
 	for _, needle := range []string{
 		"fresh shell",
 		"narrow reads",
@@ -124,7 +124,7 @@ func TestTheTextModePromptNamesTheToolsAndTheCallFormat(t *testing.T) {
 		{Name: "bash", Description: "Run a shell command."},
 		{Name: "read", Description: "Read a range of lines from a file."},
 	}
-	prompt := renderPrompt("gemma4", tools, "text", "")
+	prompt := sessionPromptWith(t, "gemma4", tools, "text", "")
 	for _, needle := range []string{
 		"bash: Run a shell command.",
 		"read: Read a range of lines from a file.",

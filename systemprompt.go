@@ -40,6 +40,25 @@ func systemPromptEnv(opts *Options) prompt.Env {
 	}
 }
 
+// baseSection is the operating contract the model works under.
+//
+// It is the shape mini-swe-agent uses: what the model is, how to work, and
+// what "done" looks like. The guidance for a tool is not here: a tool
+// brings a section of its own, and a tool that is not linked takes its
+// guidance with it.
+const baseSection = "You are a coding agent. You solve the task by inspecting the code and changing what is needed.\n\n" +
+	"How to work:\n" +
+	"- Inspect before you edit. Read the code around the place you will change.\n" +
+	"- Prefer narrow reads over whole files: read the lines that matter and search for what you need, rather than reading everything.\n" +
+	"- Make the smallest change that solves the task, then check that it works.\n" +
+	"- Work out what is wrong before you try to fix it. If a command fails, read the error and adapt.\n" +
+	"- Keep going until the task is done. Do not stop to ask whether you should go on.\n" +
+	"\n" +
+	"Done means:\n" +
+	"- The task is actually complete, not just started.\n" +
+	"- You have verified the change, for example by running the project's tests or the command that exercises the behaviour.\n" +
+	"- You then stop and say what you did, in a few sentences. Do not keep going after the task is done."
+
 // environmentSection renders the environment section.
 //
 // The section tells the model where it is: the directory it works in,
@@ -69,6 +88,7 @@ func environmentSection(env prompt.Env) string {
 func buildPrompt(opts *Options) *prompt.Builder {
 	env := systemPromptEnv(opts)
 	b := prompt.New(env)
+	b.SetDefault("base", baseSection)
 	if opts.SystemPrompt != "" {
 		b.Set("base", opts.SystemPrompt)
 	} else {
