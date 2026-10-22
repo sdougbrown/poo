@@ -167,6 +167,76 @@ func runBlockedTurn(ctx context.Context, store *FileStore, id string) error {
 	return nil
 }
 
+// TestARecoveredJobIsQueuedAgain covers the job a crash cut short: the
+// recovery ends it, and the restore queues its result again, so the
+// model hears how the job ended.
+func TestARecoveredJobIsQueuedAgain(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	tool := newBlockingTool()
+	writeSession(t, dir, "s1",
+		testHeader("s1", tool),
+		runStarted("r1"),
+		jobStarted("j1", "r1", tool.Spec().Name, "r1"),
+	)
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	transport := pootest.NewTransport(pootest.Turn{Text: "ok", Finish: "stop"})
+	resumed, err := Resume(ctx, store, "s1", testOptions("s1", tool, transport))
+	if err != nil {
+		t.Fatalf("resuming the session: %v", err)
+	}
+	t.Cleanup(func() { resumed.Session.Close() })
+
+	// The restore queued the result the recovery ended.
+	if len(resumed.Restored.Jobs) != 1 {
+		t.Fatalf("the restore queued %d job results, want 1", len(resumed.Restored.Jobs))
+	}
+	queued := resumed.Restored.Jobs[0]
+	if queued.Job != "j1" {
+		t.Errorf("the queued result is for %q, want j1", queued.Job)
+	}
+	if queued.Outcome != poo.OutcomeInterrupted {
+		t.Errorf("the queued result's outcome is %q, want %q", queued.Outcome, poo.OutcomeInterrupted)
+	}
+	if !strings.Contains(queued.Text, "outcome unknown") {
+		t.Errorf("the queued result's text is %q, want it to say the outcome is unknown", queued.Text)
+	}
+
+	// The result reached the model: the idle session woke a run, and
+	// the run's request carried the result.
+	waitForRequest(t, transport)
+	requests := transport.Requests()
+	if len(requests) == 0 {
+		t.Fatal("the restored session made no request, want the job result delivered")
+	}
+	carried := false
+	for _, msg := range requests[0].Messages {
+		if strings.Contains(msg.Text(), "outcome unknown") {
+			carried = true
+		}
+	}
+	if !carried {
+		t.Error("the request does not carry the job result, want the model to hear how the job ended")
+	}
+}
+
+// waitForRequest waits until the transport has served a request.
+func waitForRequest(t *testing.T, transport *pootest.Transport) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(transport.Requests()) > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // TestAKilledSessionIsRestored covers the whole seam: a process that
 // was killed in the middle of a tool call, a load that recovers the
 // session, a restore that rebuilds it, and a new prompt the model can
