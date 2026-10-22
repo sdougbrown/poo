@@ -16,6 +16,49 @@ import (
 // always computed, the tools are always in a stable order, and the
 // reasoning parameter follows the model's reasoning control.
 
+// requestSettings is the descriptor one request is shaped by, with the
+// quirks it names.
+//
+// The request carries its own descriptor when the core supplies one; a
+// direct consumer that passes none keeps the transport's configured
+// one.
+type requestSettings struct {
+	// info is the model descriptor.
+	info poo.ModelInfo
+	// quirks are the profiles the descriptor named, in its order.
+	quirks []quirkProfile
+}
+
+// requestSettings returns the settings a request is shaped by.
+func (t *Transport) requestSettings(req poo.ChatRequest) requestSettings {
+	info := req.Info
+	if zeroModelInfo(info) {
+		info = t.cfg.Info
+	}
+	return requestSettings{info: info, quirks: quirksFor(info.Quirks, t.logger)}
+}
+
+// zeroModelInfo reports that a request carried no descriptor.
+func zeroModelInfo(info poo.ModelInfo) bool {
+	return info.Name == "" &&
+		info.Endpoint == "" &&
+		info.ModelID == "" &&
+		info.API == "" &&
+		len(info.Ops) == 0 &&
+		len(info.Inputs) == 0 &&
+		info.ContextLimit == 0 &&
+		info.MaxOutput == 0 &&
+		info.Sampling == poo.Sampling{} &&
+		info.PrefixCache == nil &&
+		info.Tools == poo.ToolCalling{} &&
+		info.Reasoning == poo.ReasoningControl{} &&
+		info.Temperature == "" &&
+		info.PromptCache == "" &&
+		info.PromptVariant == "" &&
+		len(info.Quirks) == 0 &&
+		len(info.Source) == 0
+}
+
 // reasoningSetting returns the reasoning setting the request uses.
 //
 // The configured setting wins, and the descriptor's reasoning control
@@ -35,8 +78,8 @@ func (t *Transport) reasoningSetting() string {
 //
 // A setting the model cannot honour is a configuration error, and the
 // request never goes out.
-func (t *Transport) shapeReasoning(shape *requestShape) error {
-	fields, err := t.cfg.Info.ReasoningFields(t.reasoningSetting())
+func (t *Transport) shapeReasoning(info poo.ModelInfo, shape *requestShape) error {
+	fields, err := info.ReasoningFields(t.reasoningSetting())
 	if err != nil {
 		return configErrorf("%s", reasonError(err))
 	}
@@ -63,8 +106,8 @@ func reasonError(err error) string {
 // The descriptor holds the rule: the model's own defaults are the
 // base, the configured overrides win over them, and a model that takes
 // no temperature never gets one.
-func (t *Transport) shapeSampling(shape *requestShape) {
-	sampling := t.cfg.Info.EffectiveSampling(t.cfg.Sampling)
+func (t *Transport) shapeSampling(info poo.ModelInfo, shape *requestShape) {
+	sampling := info.EffectiveSampling(t.cfg.Sampling)
 	if v := sampling.Temperature; v != nil {
 		shape.setParam("temperature", *v)
 	}
@@ -95,10 +138,14 @@ func configErrorf(format string, args ...any) error {
 // The payload is shaped in three passes: the request's own fields, the
 // descriptor's controls (the reasoning parameter, the sampling
 // parameters), and the quirks the descriptor named, in its order.
-func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
+func (t *Transport) buildBody(req poo.ChatRequest, settings requestSettings) ([]byte, error) {
+	model := req.Model
+	if model == "" {
+		model = t.cfg.Model
+	}
 	out := chatRequest{
-		Model:     req.Model,
-		MaxTokens: t.maxTokens(req),
+		Model:     model,
+		MaxTokens: t.maxTokens(req, settings.info),
 		Stream:    true,
 		// The usage chunk is asked for in every mode, because the log's
 		// usage record needs the token accounting and a server that
@@ -119,7 +166,7 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	// with tool_calls. In text mode the tools are described in the
 	// prompt instead, and the model answers with text that the parser
 	// reads. In auto mode both happen.
-	if mode := t.toolsMode(); mode == "native" || mode == "auto" {
+	if mode := t.toolsMode(settings.info); mode == "native" || mode == "auto" {
 		for _, spec := range sortedTools(req.Tools) {
 			var ct chatTool
 			ct.Type = "function"
@@ -137,11 +184,11 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 		request: &out,
 		params:  out.Params,
 	}
-	if err := t.shapeReasoning(shape); err != nil {
+	if err := t.shapeReasoning(settings.info, shape); err != nil {
 		return nil, err
 	}
-	t.shapeSampling(shape)
-	for _, quirk := range t.quirks {
+	t.shapeSampling(settings.info, shape)
+	for _, quirk := range settings.quirks {
 		if quirk.shapeRequest != nil {
 			quirk.shapeRequest(shape)
 		}
@@ -161,11 +208,11 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 //
 // The ceiling is at least one token: a request asks for room, and a
 // room of zero is no room at all.
-func (t *Transport) maxTokens(req poo.ChatRequest) int {
+func (t *Transport) maxTokens(req poo.ChatRequest, info poo.ModelInfo) int {
 	if req.MaxTokens > 0 {
 		return req.MaxTokens
 	}
-	limit := t.cfg.Info.MaxTokens(0)
+	limit := info.MaxTokens(0)
 	if limit < 1 {
 		limit = 1
 	}

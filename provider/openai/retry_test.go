@@ -249,17 +249,28 @@ func TestACancellationDuringTheBackoffEndsTheRun(t *testing.T) {
 // TestTheRetryAfterOverridesTheBackoff covers the rule: the wait the
 // endpoint asked for is the wait the transport makes.
 func TestTheRetryAfterOverridesTheBackoff(t *testing.T) {
+	var requests int
+	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
-		w.Header().Set("Retry-After", "2")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = io.WriteString(w, `{"error":{"message":"slow down","code":"rate_limit_exceeded"}}`)
+		mu.Lock()
+		requests++
+		n := requests
+		mu.Unlock()
+		if n == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"error":{"message":"slow down","code":"rate_limit_exceeded"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, chunk(`{"choices":[{"index":0,"delta":{"content":"the answer"},"finish_reason":"stop"}]}`)+done)
 	}))
 	defer srv.Close()
 
-	var mu sync.Mutex
 	var delays []time.Duration
+	var retried []bool
 	tr := openai.New(openai.Config{
 		BaseURL: srv.URL,
 		Model:   "m",
@@ -268,25 +279,30 @@ func TestTheRetryAfterOverridesTheBackoff(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			delays = append(delays, a.Delay)
+			retried = append(retried, a.Retried)
 		},
 	})
 
-	// The wait is the endpoint's, so the test does not wait for it: the
-	// context ends the request while the transport waits.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	_, _, err := tr.Stream(ctx, poo.ChatRequest{Model: "m", MaxTokens: 16})
-	if err == nil {
-		t.Fatal("the request succeeded, want a failure")
+	reader, _, err := tr.Stream(ctx, poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	if got := textOf(read(t, reader)); got != "the answer" {
+		t.Errorf("the answer is %q, want the retry's answer", got)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if len(delays) == 0 {
 		t.Fatal("no attempt was reported")
 	}
-	if delays[0] != 2*time.Second {
-		t.Errorf("the wait was %v, want the endpoint's two seconds", delays[0])
+	if delays[0] != time.Second {
+		t.Errorf("the wait was %v, want the endpoint's one second", delays[0])
+	}
+	if !retried[0] {
+		t.Error("the attempt does not say the retry followed it")
 	}
 }
 

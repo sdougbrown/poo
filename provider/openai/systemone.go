@@ -95,10 +95,10 @@ func NewSystemOneDeciderFor(model poo.ModelInfo, cfg SystemOneConfig) (*SystemOn
 // timeout, a failure, a missing answer and a distribution that does not
 // add up are all deferrals.
 func (d *SystemOneDecider) Decide(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+	d.setRequests(0)
 	if err := decide.ValidateQuestions(qs); err != nil {
 		return nil, err
 	}
-	d.setRequests(0)
 	budget := d.cfg.Timeout
 	if budget <= 0 {
 		budget = DefaultDeciderTimeout

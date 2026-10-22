@@ -60,6 +60,10 @@ type requestShape struct {
 	request *chatRequest
 	// params holds the named parameters the request carries.
 	params map[string]json.RawMessage
+	// claimed holds the parameter paths the descriptor's controls
+	// already named. A quirk may add what the descriptor did not, never
+	// override it.
+	claimed map[string]bool
 }
 
 // setParam sets a named parameter.
@@ -68,6 +72,13 @@ type requestShape struct {
 // and the value is then nested under the parts before it. A parameter
 // that is already there keeps the parts another call set.
 func (s *requestShape) setParam(name string, value any) {
+	if s.claimed[name] {
+		return
+	}
+	if s.claimed == nil {
+		s.claimed = map[string]bool{}
+	}
+	s.claimed[name] = true
 	parts := strings.Split(name, ".")
 	if len(parts) == 1 {
 		s.setRaw(name, value)
@@ -233,22 +244,22 @@ func simplifySchema(raw json.RawMessage) json.RawMessage {
 //
 // The quirks add theirs in the order the descriptor named them, and the
 // parser is last: it reads the text the others passed on.
-func (t *Transport) textFilters() []textFilter {
-	repair := &responseRepair{logger: t.logger, model: t.cfg.Info.Name}
-	for _, quirk := range t.quirks {
+func (t *Transport) textFilters(settings requestSettings) []textFilter {
+	repair := &responseRepair{logger: t.logger, model: settings.info.Name}
+	for _, quirk := range settings.quirks {
 		if quirk.repairResponse != nil {
 			quirk.repairResponse(repair)
 		}
 	}
 	filters := repair.filters
-	mode := t.toolsMode()
+	mode := t.toolsMode(settings.info)
 	if repair.textCalls && mode != "text" && mode != "auto" {
 		// The model writes its tool calls as text, whatever its mode
 		// says.
 		mode = "text"
 	}
 	if mode == "text" || mode == "auto" {
-		filters = append(filters, newParser(mode, t.cfg.Info.Tools.TextFormat))
+		filters = append(filters, newParser(mode, settings.info.Tools.TextFormat))
 	}
 	return filters
 }
@@ -257,7 +268,7 @@ func (t *Transport) textFilters() []textFilter {
 //
 // A request that carries them may also carry native tool calls, and a
 // native call wins over one the model wrote as text.
-func (t *Transport) sendsTools() bool {
-	mode := t.toolsMode()
+func (t *Transport) sendsTools(settings requestSettings) bool {
+	mode := t.toolsMode(settings.info)
 	return mode == "native" || mode == "auto"
 }

@@ -40,6 +40,7 @@ A record that someone produced also carries an `origin`:
 | `tool.call` | Once per tool call the model makes, before it runs. |
 | `tool.result` | Once per tool call, after it runs. |
 | `usage` | Once per provider request. |
+| `provider.attempt` | Once per attempt of a request that failed. |
 | `input.queued` | Once per input the session accepts. |
 | `input.delivered` | Once per input that reaches the model. |
 | `input.dropped` | Once per input that never reaches the model. |
@@ -395,6 +396,22 @@ including a request whose stream failed part way through: the request
 still cost tokens, and the record is what a consumer reads to account for
 it. A request that failed before the endpoint's stream started has no
 usage record: no token was spent on it.
+
+## `provider.attempt`
+
+One attempt of a provider request that failed. Every attempt is written,
+the last one included, so a reader of the log sees what the request tried
+and what each attempt failed with.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | string | The run the request belongs to. |
+| `turn` | integer | The turn the request belongs to. |
+| `request` | integer | The request's number within the run, starting at 1. |
+| `attempt` | integer | The attempt's number, counting from 1. |
+| `error` | string | The failure's message. |
+| `kind` | string | The provider error kind, when the failure is one. **Absent** when it is not. |
+| `delay_ms` | integer | How long the transport waited before the next attempt. **Absent** when no retry followed. |
 
 ## `session.models_changed`
 

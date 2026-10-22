@@ -13,6 +13,14 @@ import (
 type ChatRequest struct {
 	// Model is the provider's model identifier.
 	Model string
+	// Info is the descriptor the request is shaped from.
+	//
+	// A transport uses it for everything the model decides: the tools
+	// mode, the reasoning and temperature controls, the sampling
+	// defaults, the quirks and the output ceiling. A zero descriptor
+	// leaves the transport's own configuration in charge, so a consumer
+	// that calls Stream directly can keep using Config.Info.
+	Info ModelInfo
 	// Messages is the model's history, oldest first.
 	Messages []Message
 	// Tools are the tools the model may call.
@@ -145,6 +153,10 @@ type StreamEvent struct {
 	// Kind names the payload: "delta", "tool_call", "usage", "finish" or
 	// "error".
 	Kind string
+	// Attempt is the request attempt that produced the event, counting
+	// from one. A transport that retries sets it; zero means the
+	// transport did not say.
+	Attempt int
 }
 
 // StreamError is a failure in a response that did not stop the stream.

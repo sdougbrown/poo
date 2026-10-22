@@ -136,11 +136,11 @@ func (t *Transport) reportAttempt(report func(poo.Attempt), attempt int, err err
 //
 // The report is the request's own reporter: it hears every attempt
 // that failed.
-func (t *Transport) openWithRetry(ctx context.Context, body []byte, report func(poo.Attempt)) (*streamReader, int, error) {
+func (t *Transport) openWithRetry(ctx context.Context, body []byte, report func(poo.Attempt), settings requestSettings) (*streamReader, int, error) {
 	attempt := 0
 	for {
 		attempt++
-		reader, err := t.open(ctx, body)
+		reader, err := t.open(ctx, body, settings)
 		if err == nil {
 			return reader, attempt, nil
 		}
@@ -151,10 +151,14 @@ func (t *Transport) openWithRetry(ctx context.Context, body []byte, report func(
 			t.reportAttempt(report, attempt, err, 0, false)
 			return nil, attempt, err
 		}
-		t.reportAttempt(report, attempt, err, wait, true)
+		// The attempt is reported once the wait is over, so a wait
+		// that a cancellation ends leaves an attempt that says no
+		// retry followed it.
 		if werr := waitFor(ctx, wait); werr != nil {
+			t.reportAttempt(report, attempt, err, 0, false)
 			return nil, attempt, werr
 		}
+		t.reportAttempt(report, attempt, err, wait, true)
 	}
 }
 
@@ -175,6 +179,10 @@ type streamWithRetry struct {
 	// report is the request's own reporter: it hears every attempt that
 	// failed.
 	report func(poo.Attempt)
+	// settings are the descriptor and the quirks the request is shaped
+	// by, so an attempt reopened after a failure reads the response the
+	// same way the first one did.
+	settings requestSettings
 	// current is the reader of the attempt in flight.
 	current *streamReader
 	// seen reports that the attempt in flight has carried something the
@@ -182,9 +190,11 @@ type streamWithRetry struct {
 	// repeated, because the core assembles the calls by their index and
 	// a repeated call would join the discarded one.
 	seen bool
-	// usage holds the usage of the last attempt that failed, so a
-	// request that ends with a failure still reports what it cost.
+	// usage is the total the attempts spent, so a request that is
+	// retried reports every attempt's cost and not only the answer's.
 	usage *poo.UsageReport
+	// counted is the attempt's usage report that is already in usage.
+	counted *poo.UsageReport
 }
 
 // Next returns the next event of the response.
@@ -194,28 +204,34 @@ type streamWithRetry struct {
 func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 	for {
 		if s.current == nil {
-			reader, err := s.transport.open(s.ctx, s.body)
+			reader, err := s.transport.open(s.ctx, s.body, s.settings)
 			if err != nil {
 				wait, ok := s.transport.policy.delay(s.attempt, err)
 				if !ok {
 					s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
 					return poo.StreamEvent{}, err
 				}
-				s.transport.reportAttempt(s.report, s.attempt, err, wait, true)
 				if werr := waitFor(s.ctx, wait); werr != nil {
+					s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
 					return poo.StreamEvent{}, werr
 				}
+				s.transport.reportAttempt(s.report, s.attempt, err, wait, true)
 				s.attempt++
 				continue
 			}
 			s.current = reader
+			s.counted = nil
 		}
 
 		ev, err := s.current.Next()
 		if err == nil {
+			if ev.Kind == "usage" && ev.Usage != nil {
+				ev.Usage = s.addUsage(ev.Usage)
+			}
 			if ev.Kind == "delta" || ev.Kind == "tool_call" {
 				s.seen = true
 			}
+			ev.Attempt = s.attempt
 			return ev, nil
 		}
 		if errors.Is(err, io.EOF) {
@@ -226,17 +242,23 @@ func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 		if s.ctx.Err() != nil {
 			return poo.StreamEvent{}, err
 		}
+		if s.seen {
+			// The attempt carried part of the answer, so the request
+			// cannot be repeated. A failure that would be retryable
+			// before the first delta is an interrupted stream now, so
+			// the record and the settle reason name the real
+			// condition.
+			err = interruptedStreamError(err)
+		}
 		if !s.seen {
 			if wait, ok := s.transport.policy.delay(s.attempt, err); ok {
-				s.transport.reportAttempt(s.report, s.attempt, err, wait, true)
-				// The attempt failed before it carried anything, but it
-				// may have spent tokens: the usage is kept.
-				s.usage = s.current.ReportUsage()
 				s.current.Close()
 				s.current = nil
 				if werr := waitFor(s.ctx, wait); werr != nil {
+					s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
 					return poo.StreamEvent{}, werr
 				}
+				s.transport.reportAttempt(s.report, s.attempt, err, wait, true)
 				s.attempt++
 				continue
 			}
@@ -246,6 +268,56 @@ func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 		s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
 		return poo.StreamEvent{}, err
 	}
+}
+
+// interruptedStreamError reclassifies a retryable failure that arrived
+// after the stream carried part of the answer.
+//
+// The original kind stays in the error's code, where the plan keeps it.
+func interruptedStreamError(err error) error {
+	var pe *poo.ProviderError
+	if !errors.As(err, &pe) || !pe.Retryable() {
+		return err
+	}
+	out := *pe
+	out.Code = string(pe.Kind)
+	out.Kind = poo.ProviderKindInterruptedStream
+	return &out
+}
+
+// addUsage adds one attempt's usage to the request's total and returns
+// a snapshot of the total.
+func (s *streamWithRetry) addUsage(report *poo.UsageReport) *poo.UsageReport {
+	if s.usage == nil {
+		s.usage = &poo.UsageReport{}
+	}
+	s.usage.InputTokens += report.InputTokens
+	s.usage.OutputTokens += report.OutputTokens
+	if report.CacheReadTokens != nil {
+		total := *report.CacheReadTokens
+		if s.usage.CacheReadTokens != nil {
+			total += *s.usage.CacheReadTokens
+		}
+		s.usage.CacheReadTokens = &total
+	}
+	if s.usage.TTFTMS == 0 {
+		s.usage.TTFTMS = report.TTFTMS
+	}
+	s.counted = report
+	return cloneUsage(s.usage)
+}
+
+// cloneUsage returns a copy of a usage report.
+func cloneUsage(report *poo.UsageReport) *poo.UsageReport {
+	if report == nil {
+		return nil
+	}
+	out := *report
+	if report.CacheReadTokens != nil {
+		cached := *report.CacheReadTokens
+		out.CacheReadTokens = &cached
+	}
+	return &out
 }
 
 // Close releases the response.
@@ -261,8 +333,10 @@ func (s *streamWithRetry) Close() error {
 // A request that failed before its usage arrived still produced tokens,
 // so the transport reports what it knows.
 func (s *streamWithRetry) ReportUsage() *poo.UsageReport {
-	if s.current == nil {
-		return s.usage
+	if s.current != nil {
+		if usage := s.current.ReportUsage(); usage != nil && usage != s.counted {
+			return s.addUsage(usage)
+		}
 	}
-	return s.current.ReportUsage()
+	return cloneUsage(s.usage)
 }

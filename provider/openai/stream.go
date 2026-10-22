@@ -76,6 +76,10 @@ type streamReader struct {
 	// ctx is the request's context. A stream that ends because the
 	// context ended reports the context's error, not a network failure.
 	ctx context.Context
+	// parent is the context the transport's own timeout was applied to.
+	// A stream that the run's context ended reports the parent's error;
+	// a stream that the transport's timeout ended is a network failure.
+	parent context.Context
 	// cancel releases the request's context, when the transport made one.
 	cancel context.CancelFunc
 	// pending holds events the reader has decoded but not yet returned.
@@ -341,18 +345,21 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 // names it, and the kind the failure had before the reclassification
 // stays in the error's code, where the plan keeps it.
 func (r *streamReader) contextError(err error) error {
+	if r.parent != nil && r.parent.Err() != nil {
+		return r.parent.Err()
+	}
 	if r.ctx != nil && r.ctx.Err() != nil {
-		return r.ctx.Err()
-	}
-	kind := poo.ProviderKindNetwork
-	if r.ttftSet {
-		return &poo.ProviderError{
-			Kind:    poo.ProviderKindInterruptedStream,
-			Code:    string(kind),
-			Message: err.Error(),
+		kind := poo.ProviderKindNetwork
+		if r.ttftSet {
+			return &poo.ProviderError{
+				Kind:    poo.ProviderKindInterruptedStream,
+				Code:    string(kind),
+				Message: r.ctx.Err().Error(),
+			}
 		}
+		return &poo.ProviderError{Kind: kind, Message: r.ctx.Err().Error()}
 	}
-	return &poo.ProviderError{Kind: kind, Message: err.Error()}
+	return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 }
 
 // providerError turns an error chunk into a provider error.

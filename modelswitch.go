@@ -120,11 +120,14 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	info.API = api
 	info.ContextLimit = limit
 	s.opts.Model = info
-	// The environment section names the model, so the prompt the next
-	// run renders names it too.
+	// The descriptor selects the prompt's variant, and the environment
+	// section names the model, so the prompt the next run renders
+	// follows both.
+	s.promptVariant = info.PromptVariant
 	if s.promptBuilder != nil {
 		env := s.promptBuilder.Env()
 		env.Model = s.opts.Model.ModelID
+		env.Variant = info.PromptVariant
 		s.promptBuilder = s.promptBuilder.WithEnv(env)
 	}
 	s.mu.Unlock()

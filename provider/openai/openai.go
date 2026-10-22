@@ -75,8 +75,6 @@ type Transport struct {
 	http *http.Client
 	// policy is the retry policy.
 	policy retryPolicy
-	// quirks are the profiles the descriptor named, in its order.
-	quirks []quirkProfile
 	// logger receives the transport's notes.
 	logger *slog.Logger
 }
@@ -102,16 +100,14 @@ func New(cfg Config) *Transport {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	tr := &Transport{cfg: cfg, http: client, policy: policy, logger: logger}
-	tr.quirks = quirksFor(cfg.Info.Quirks, logger)
-	return tr
+	return &Transport{cfg: cfg, http: client, policy: policy, logger: logger}
 }
 
 // toolsMode returns how the run asks for tool calls.
 //
 // A descriptor that names a mode wins over the configured one.
-func (t *Transport) toolsMode() string {
-	if mode := t.cfg.Info.Tools.Mode; mode != "" {
+func (t *Transport) toolsMode(info poo.ModelInfo) string {
+	if mode := info.Tools.Mode; mode != "" {
 		return string(mode)
 	}
 	return t.cfg.ToolsMode
@@ -234,7 +230,8 @@ type errorBody struct {
 // the plan's budget, and a stream that breaks before it carried a delta
 // is retried too.
 func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
-	body, err := t.buildBody(req)
+	settings := t.requestSettings(req)
+	body, err := t.buildBody(req, settings)
 	if err != nil {
 		return nil, poo.Rendered{}, err
 	}
@@ -244,7 +241,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		Messages: len(req.Messages),
 	}
 
-	reader, attempt, err := t.openWithRetry(ctx, body, req.OnAttempt)
+	reader, attempt, err := t.openWithRetry(ctx, body, req.OnAttempt, settings)
 	if err != nil {
 		return nil, rendered, err
 	}
@@ -255,6 +252,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		attempt:   attempt,
 		current:   reader,
 		report:    req.OnAttempt,
+		settings:  settings,
 	}, rendered, nil
 }
 
@@ -285,7 +283,8 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		return nil, err
 	}
 
-	reader, attempt, err := t.openWithRetry(ctx, body, nil)
+	settings := t.requestSettings(poo.ChatRequest{})
+	reader, attempt, err := t.openWithRetry(ctx, body, nil, settings)
 	if err != nil {
 		return nil, err
 	}
@@ -295,6 +294,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		body:      body,
 		attempt:   attempt,
 		current:   reader,
+		settings:  settings,
 	}, nil
 }
 
@@ -303,9 +303,12 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 // Stream and Fork both go through it, so the timeout, the headers, the
 // error classification and the time to the first token mean the same
 // thing for both.
-func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error) {
+func (t *Transport) open(ctx context.Context, body []byte, settings requestSettings) (*streamReader, error) {
 	// The timeout bounds the whole request, streaming included, so the
-	// context is created before the request goes out.
+	// context is created before the request goes out. The parent stays
+	// apart, so a timeout the transport imposed is told from the run's
+	// own cancellation.
+	parent := ctx
 	var cancel context.CancelFunc
 	if t.cfg.Timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
@@ -336,7 +339,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 		// The failure is classified before the request's context is
 		// released, because releasing it would replace the failure with
 		// the context's own error.
-		perr := classifyTransportError(ctx, err)
+		perr := classifyTransportError(parent, ctx, err)
 		release()
 		return nil, perr
 	}
@@ -379,9 +382,10 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 	return &streamReader{
 		body:        resp.Body,
 		scanner:     newSSEScanner(br),
-		filters:     t.textFilters(),
-		deferParsed: t.sendsTools(),
+		filters:     t.textFilters(settings),
+		deferParsed: t.sendsTools(settings),
 		ctx:         ctx,
+		parent:      parent,
 		cancel:      cancel,
 		started:     started,
 	}, nil
@@ -673,9 +677,12 @@ func checkProviderBlock(p *poo.ProviderBlock) error {
 }
 
 // classifyTransportError turns a request failure into a provider error.
-func classifyTransportError(ctx context.Context, err error) error {
-	if ctx.Err() != nil {
-		return ctx.Err()
+func classifyTransportError(parent, request context.Context, err error) error {
+	if parent != nil && parent.Err() != nil {
+		return parent.Err()
+	}
+	if request != nil && request.Err() != nil {
+		return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: request.Err().Error()}
 	}
 	return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 }

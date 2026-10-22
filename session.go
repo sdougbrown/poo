@@ -240,6 +240,9 @@ type runState struct {
 	trigger TriggerKind
 	// continuations counts the BeforeSettle continuations the run took.
 	continuations int
+	// recoverableNotes counts the consecutive turns a recoverable
+	// response failure opened.
+	recoverableNotes int
 	// noticeFired reports that the context notice already fired in
 	// this run.
 	noticeFired bool

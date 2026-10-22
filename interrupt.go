@@ -96,6 +96,15 @@ func (s *Session) emitInterrupted(run *runState, turn int) {
 //
 // The message is partial, and its cause is the interrupt.
 func (s *Session) recordPartial(run *runState, turn int, resp *response) {
+	s.recordPartialCause(run, turn, resp, CauseInterrupt)
+}
+
+// recordPartialCause records the text a cut-short response carried.
+//
+// The message is partial, and its cause names why the response was cut
+// short. Its calls are part of the message, so a reader sees what the
+// model was asking for when the stream broke.
+func (s *Session) recordPartialCause(run *runState, turn int, resp *response, cause Cause) {
 	if resp == nil {
 		return
 	}
@@ -122,11 +131,11 @@ func (s *Session) recordPartial(run *runState, turn int, resp *response) {
 		msg.ID = s.messageIDs.Next()
 	}
 	msg.Partial = true
-	msg.Cause = CauseInterrupt
+	msg.Cause = cause
 	s.appendMessages(msg)
 	s.recordMessage(msg)
 	s.growSpan(run.globalTurn)
-	_ = s.write(run.ctx, &MessageRecord{
+	_ = s.writeRun(run, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
 		Turn:       turn,
@@ -134,7 +143,7 @@ func (s *Session) recordPartial(run *runState, turn int, resp *response) {
 		Content:    msg.Content,
 		MessageID:  msg.ID,
 		Partial:    true,
-		Cause:      CauseInterrupt,
+		Cause:      cause,
 	})
 }
 

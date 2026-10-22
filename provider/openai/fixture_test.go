@@ -183,17 +183,17 @@ func TestTheEmptyToolCallsAreAFailure(t *testing.T) {
 	if len(srv.requests) != 3 {
 		t.Errorf("the endpoint got %d requests, want 3: the failure is retried", len(srv.requests))
 	}
-	// The attempt cost tokens, and the record says so.
+	// Every attempt cost tokens, and the report says so.
 	reporter, ok := reader.(poo.UsageReporter)
 	if !ok {
 		t.Fatal("the reader reports no usage")
 	}
 	usage := reporter.ReportUsage()
 	if usage == nil {
-		t.Fatal("the failed attempt reported no usage")
+		t.Fatal("the failed request reported no usage")
 	}
-	if usage.OutputTokens != 18 {
-		t.Errorf("the attempt's output tokens are %d, want 18", usage.OutputTokens)
+	if usage.OutputTokens != 54 {
+		t.Errorf("the request's output tokens are %d, want the three attempts' 54", usage.OutputTokens)
 	}
 }
 
