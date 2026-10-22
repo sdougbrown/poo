@@ -243,20 +243,34 @@ func TestANonContiguousCutIsRejected(t *testing.T) {
 func TestACutOverARemovedTurnIsRejected(t *testing.T) {
 	// The first compaction replaces turn one, and the second one asks
 	// for a range that reaches over it.
+	calls := 0
 	compactor := &compactionCompactor{
 		should: afterTurns(1),
 		compaction: func(view poo.View) (poo.Compaction, error) {
+			calls++
+			if calls == 1 {
+				return poo.Compaction{
+					Strategy: "summarize",
+					Replace: &poo.RangeReplacement{
+						Cut:      poo.TurnRange{First: 1, Last: 1},
+						Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "the summary")},
+					},
+				}, nil
+			}
+			// The range reaches over the turn the first compaction
+			// removed.
 			return poo.Compaction{
 				Strategy: "summarize",
 				Replace: &poo.RangeReplacement{
-					Cut:      poo.TurnRange{First: 1, Last: 1},
-					Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "the summary")},
+					Cut:      poo.TurnRange{First: 1, Last: 2},
+					Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "the second summary")},
 				},
 			}, nil
 		},
 	}
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -266,6 +280,11 @@ func TestACutOverARemovedTurnIsRejected(t *testing.T) {
 
 	runSession(t, s, "do the thing")
 
+	if calls < 2 {
+		t.Fatalf("the compactor ran %d time(s), want 2", calls)
+	}
+	// Only the first compaction was applied: the second one reached
+	// over a turn that is gone.
 	if sink.count("compaction") != 1 {
 		t.Errorf("the log holds %d compaction records, want 1", sink.count("compaction"))
 	}
@@ -987,5 +1006,65 @@ func TestAJobHandleSurvivesTheCompaction(t *testing.T) {
 	}
 	if handles != 1 {
 		t.Errorf("the log holds %d results for r1, want 1", handles)
+	}
+}
+
+// plainTransport is a chat transport that cannot compact natively.
+//
+// It carries the scripted transport's behaviour and none of its native
+// compaction, so a window cannot have come from it.
+type plainTransport struct {
+	// inner is the scripted transport.
+	inner *pootest.Transport
+}
+
+// Stream serves the next scripted response.
+func (t *plainTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	return t.inner.Stream(ctx, req)
+}
+
+// Fork serves the next forked response.
+func (t *plainTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	return t.inner.Fork(ctx, prev, appended, maxTokens)
+}
+
+// TestAWindowFromATransportThatCannotCompactIsRejected covers the
+// plan's rule: a window is accepted only when it came from the
+// session's own transport, through its native compaction.
+func TestAWindowFromATransportThatCannotCompactIsRejected(t *testing.T) {
+	inner := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer"},
+	})
+	tr := &plainTransport{inner: inner}
+	compactor := &compactionCompactor{
+		should: afterTurns(1),
+		compaction: func(view poo.View) (poo.Compaction, error) {
+			return poo.Compaction{
+				Strategy: "window",
+				Window: &poo.ProviderWindow{Items: []poo.ContentBlock{{
+					Kind: poo.ContentProvider,
+					Provider: &poo.ProviderBlock{
+						API:      poo.APIChatCompletions,
+						Type:     "compaction",
+						Data:     []byte(`{"encrypted_content":"abc"}`),
+						Required: true,
+					},
+				}}},
+			}, nil
+		},
+	}
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "do the thing")
+
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn", res.Reason)
+	}
+	if sink.count("compaction") != 0 {
+		t.Errorf("the log holds %d compaction records, want none", sink.count("compaction"))
 	}
 }
