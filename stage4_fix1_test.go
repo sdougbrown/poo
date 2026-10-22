@@ -643,7 +643,6 @@ func TestAClaimedHookWriteIsEndedAtTheSeal(t *testing.T) {
 	<-sink.first
 	go func() { defer close(cancelDone); s.Cancel("cancel:review") }()
 	waitFor(t, "settling", func() bool { return s.State() == poo.StateSettling })
-	time.Sleep(25 * time.Millisecond)
 	close(sink.releaseFirst)
 	<-promptDone
 	<-cancelDone
