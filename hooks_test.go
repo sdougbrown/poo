@@ -270,10 +270,10 @@ func TestTheEventNamesAreThePlanNames(t *testing.T) {
 	}
 }
 
-// TestTheJobResultRecordsRoundTrip covers the job result as a record
-// field: it reaches the log.
-func TestTheJobResultRecordsRoundTrip(t *testing.T) {
-	started := &poo.RunStarted{
+// jobResultRunStarted builds the RunStarted record both job-result
+// tests pin, so the record shape is written in one place.
+func jobResultRunStarted() *poo.RunStarted {
+	return &poo.RunStarted{
 		RecordMeta: poo.NewRecordMeta("run.started"),
 		RunID:      "r1",
 		Trigger:    poo.TriggerJob,
@@ -285,6 +285,12 @@ func TestTheJobResultRecordsRoundTrip(t *testing.T) {
 			Outcome: poo.OutcomeOK,
 		}},
 	}
+}
+
+// TestTheJobResultRecordsRoundTrip covers the job result as a record
+// field: it reaches the log.
+func TestTheJobResultRecordsRoundTrip(t *testing.T) {
+	started := jobResultRunStarted()
 	raw, err := json.Marshal(started)
 	if err != nil {
 		t.Fatalf("encoding: %v", err)
@@ -306,18 +312,7 @@ func TestTheJobResultRecordsRoundTrip(t *testing.T) {
 // log with Go's field names would not be readable by a consumer that
 // follows the documented vocabulary.
 func TestTheJobResultUsesTheRecordVocabulary(t *testing.T) {
-	started := &poo.RunStarted{
-		RecordMeta: poo.NewRecordMeta("run.started"),
-		RunID:      "r1",
-		Trigger:    poo.TriggerJob,
-		Jobs: []poo.JobResult{{
-			Job:     "j3",
-			Handle:  "r1",
-			Tool:    "bash",
-			Text:    "the result",
-			Outcome: poo.OutcomeOK,
-		}},
-	}
+	started := jobResultRunStarted()
 	raw, err := json.Marshal(started)
 	if err != nil {
 		t.Fatalf("encoding: %v", err)
