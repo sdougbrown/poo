@@ -1,6 +1,8 @@
 package main
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -9,14 +11,15 @@ import (
 
 // The prompt the command sends is the operating contract the model
 // works under, and the sections it is assembled from render it byte
-// for byte.
+// for byte. The base was redrafted in Stage 5, and the notes of that
+// stage hold the prompt before and after the change.
 
 // renderPrompt renders the prompt the command builds.
 //
 // The session renders the prompt in the environment it works in, and
 // the environment holds the tools the model may call. A tool's section
 // renders only when the tool is linked, so the environment names it.
-func renderPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string {
+func renderPrompt(modelID string, tools []poo.ToolSpec, toolsMode, project string) string {
 	env := prompt.Env{
 		Cwd:   "/work",
 		OS:    "linux",
@@ -27,8 +30,25 @@ func renderPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string
 		env.Tools = append(env.Tools, t.Name)
 	}
 	b := prompt.New(env)
-	systemPrompt(modelID, tools, toolsMode)(b)
+	systemPrompt(modelID, tools, toolsMode, project)(b)
 	return b.Render()
+}
+
+// promptNames returns the names of the sections the command's prompt
+// renders, in render order.
+func promptNames(modelID string, tools []poo.ToolSpec, toolsMode, project string) []string {
+	env := prompt.Env{
+		Cwd:   "/work",
+		OS:    "linux",
+		Date:  "2026-02-03",
+		Model: modelID,
+	}
+	for _, t := range tools {
+		env.Tools = append(env.Tools, t.Name)
+	}
+	b := prompt.New(env)
+	systemPrompt(modelID, tools, toolsMode, project)(b)
+	return b.Names()
 }
 
 // testTools returns the tool specs the command links.
@@ -63,7 +83,7 @@ func TestTheNativeModePromptIsTheContract(t *testing.T) {
 		"\n" +
 		"You are running as the model gemma4.\n"
 
-	got := renderPrompt("gemma4", testTools(), "native")
+	got := renderPrompt("gemma4", testTools(), "native", "")
 	if got != want {
 		t.Errorf("the prompt is\n%q\nwant\n%q", got, want)
 	}
@@ -101,7 +121,7 @@ func TestTheTextModePromptIsTheContract(t *testing.T) {
 		"<tool_call>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls -la\"}}</tool_call>\n" +
 		"Call one tool at a time, and wait for its result before the next call.\n"
 
-	got := renderPrompt("gemma4", testTools(), "text")
+	got := renderPrompt("gemma4", testTools(), "text", "")
 	if got != want {
 		t.Errorf("the prompt is\n%q\nwant\n%q", got, want)
 	}
@@ -110,11 +130,41 @@ func TestTheTextModePromptIsTheContract(t *testing.T) {
 // TestThePromptIsTheSameEveryTime covers the rule that the prompt is
 // deterministic: the same sections render the same text.
 func TestThePromptIsTheSameEveryTime(t *testing.T) {
-	first := renderPrompt("gemma4", testTools(), "text")
+	first := renderPrompt("gemma4", testTools(), "text", "")
 	for i := 0; i < 4; i++ {
-		if got := renderPrompt("gemma4", testTools(), "text"); got != first {
+		if got := renderPrompt("gemma4", testTools(), "text", ""); got != first {
 			t.Fatalf("the prompt changed on the %d render", i)
 		}
+	}
+}
+
+// TestTheProjectSectionRendersAfterTheEnvironment covers the order of
+// the sections: the project's instructions come after the
+// environment, and the base comes first.
+func TestTheProjectSectionRendersAfterTheEnvironment(t *testing.T) {
+	want := []string{"base", "tools.bash", "environment", "project"}
+	got := promptNames("gemma4", testTools(), "native", "the project's instructions")
+	if !slices.Equal(got, want) {
+		t.Errorf("the sections are %q, want %q", got, want)
+	}
+}
+
+// TestTheProjectSectionIsNotThereWithoutAFile covers the rule that a
+// directory with no project file holds no project section.
+func TestTheProjectSectionIsNotThereWithoutAFile(t *testing.T) {
+	want := []string{"base", "tools.bash", "environment"}
+	got := promptNames("gemma4", testTools(), "native", "")
+	if !slices.Equal(got, want) {
+		t.Errorf("the sections are %q, want %q", got, want)
+	}
+}
+
+// TestTheProjectSectionHoldsTheInstructions covers the rule that the
+// project's instructions are the section's text.
+func TestTheProjectSectionHoldsTheInstructions(t *testing.T) {
+	got := renderPrompt("gemma4", testTools(), "native", "the project's instructions")
+	if !strings.Contains(got, "the project's instructions") {
+		t.Errorf("the prompt holds no project instructions: %q", got)
 	}
 }
 
@@ -122,7 +172,7 @@ func TestThePromptIsTheSameEveryTime(t *testing.T) {
 // section that offers no alternative for the variant renders its
 // default text.
 func TestTheBaseSectionIsTheSameInEveryVariant(t *testing.T) {
-	base := renderPrompt("gemma4", testTools(), "native")
+	base := renderPrompt("gemma4", testTools(), "native", "")
 
 	for _, variant := range []string{"", "default", "small-local"} {
 		env := prompt.Env{
@@ -134,7 +184,7 @@ func TestTheBaseSectionIsTheSameInEveryVariant(t *testing.T) {
 			Variant: variant,
 		}
 		b := prompt.New(env)
-		systemPrompt("gemma4", testTools(), "native")(b)
+		systemPrompt("gemma4", testTools(), "native", "")(b)
 		if got := b.WithVariant(variant).Render(); got != base {
 			t.Errorf("the prompt in the %q variant is\n%q\nwant\n%q", variant, got, base)
 		}

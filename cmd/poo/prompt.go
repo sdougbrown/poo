@@ -60,12 +60,17 @@ const bashSection = "Bash:\n" +
 // transport sends the tools in the request, so the prompt says nothing
 // about them.
 //
-func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) func(*prompt.Builder) {
+// The project's instructions are a section of their own, and the
+// section is there only when the caller loaded them.
+func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode, project string) func(*prompt.Builder) {
 	return func(b *prompt.Builder) {
 		b.Set("base", baseSection)
 		b.Set(prompt.ToolSection("bash"), bashSection)
 		if len(tools) > 0 && toolsMode != "native" {
 			b.Set("tool-calls", toolCallsSection(tools))
+		}
+		if project != "" {
+			b.Set("project", project)
 		}
 		b.Set("environment", environmentSection(modelID))
 	}
