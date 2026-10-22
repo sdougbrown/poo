@@ -162,12 +162,14 @@ func (s *Session) maybeNotice(run *runState) {
 	msg := NewTextMessage(RoleUser, ContextNoticeText)
 	msg.Origin = OriginUser
 	s.appendMessages(msg)
-	_ = s.write(run.ctx, &MessageRecord{
+	if err := s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
 		Role:       msg.Role,
 		Content:    msg.Content,
-	})
+	}); err != nil {
+		s.addCandidate(run, storeErrorCandidate(err))
+	}
 	s.events.emit(EventContextNotice, map[string]any{
 		"run_id": run.id,
 		"ratio":  s.opts.NoticeRatio,

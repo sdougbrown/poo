@@ -159,6 +159,9 @@ type JobEnded struct {
 	InputID string `json:"input_id"`
 	// Text is the result the model reads.
 	Text string `json:"text"`
+	// Fatal reports that the job failed with an error that wraps
+	// ErrFatal. A run that receives the result settles tool_fatal.
+	Fatal bool `json:"fatal,omitempty"`
 	// Original is the result the tool produced, when a hook replaced
 	// it. It is absent for a redacted result.
 	Original *ToolResultData `json:"original,omitempty"`
@@ -622,6 +625,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 		Outcome:    jobOutcome,
 		Cause:      cause,
 		TimedOut:   timedOut,
+		Fatal:      fatal,
 		InputID:    inputID,
 		Text:       text,
 		Redacted:   out.redacted,

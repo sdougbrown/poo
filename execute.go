@@ -896,13 +896,15 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 	result.Text = text
 	s.rememberResult(handle, tool, outcome, result)
 
-	_ = s.write(run.ctx, &MessageRecord{
+	if err := s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
 		Turn:       turn,
 		Role:       msg.Role,
 		Content:    msg.Content,
-	})
+	}); err != nil {
+		s.addCandidate(run, storeErrorCandidate(err))
+	}
 
 	s.events.emit(EventToolResult, map[string]any{
 		"run_id":  run.id,
