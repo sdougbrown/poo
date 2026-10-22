@@ -196,6 +196,9 @@ func Serve(opts Options) error {
 type server struct {
 	// opts are the server's configuration.
 	opts Options
+	// bounds are the limits the transport enforces, with the defaults
+	// filled in.
+	bounds Bounds
 	// factory builds the sessions.
 	factory Factory
 	// out is the output queue.
@@ -229,6 +232,7 @@ func newServer(opts Options) *server {
 	bounds := opts.Bounds.withDefaults()
 	s := &server{
 		opts:       opts,
+		bounds:     bounds,
 		factory:    opts.Factory,
 		out:        newOutput(bounds.QueueMessages, bounds.QueueBytes),
 		sessions:   map[string]*session{},
@@ -276,7 +280,7 @@ func (s *server) run() error {
 	s.out.close()
 	select {
 	case <-s.writerDone:
-	case <-time.After(s.opts.Bounds.withDefaults().Drain):
+	case <-time.After(s.bounds.Drain):
 	}
 	return nil
 }
@@ -339,7 +343,7 @@ func (s *server) writeLoop() {
 // when the queue is not full: the client is not reading, and the server
 // would wait for it forever.
 func (s *server) writeLine(line []byte) error {
-	stall := s.opts.Bounds.withDefaults().WriteStall
+	stall := s.bounds.WriteStall
 	done := make(chan error, 1)
 	go func() {
 		_, err := s.opts.Out.Write(line)

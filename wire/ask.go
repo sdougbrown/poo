@@ -84,7 +84,7 @@ func (c *wireClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, erro
 	}); err != nil {
 		return perm.DecisionDefer, err
 	}
-	budget := c.srv.opts.Bounds.withDefaults().AskBudget
+	budget := c.srv.bounds.AskBudget
 	timer := time.NewTimer(budget)
 	defer timer.Stop()
 	select {
