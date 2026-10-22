@@ -15,21 +15,28 @@ import (
 // catalog, the environment and the project, and then the sections of
 // the consumer's own.
 //
-// The sections below are the ones this command has always sent. The
-// prompt they render is the prompt the command sent before the
-// sections existed, byte for byte, and the eval baseline was measured
-// with it.
+// The sections below are the ones this command sends. The base is the
+// operating contract, in the shape mini-swe-agent uses, and the tools
+// bring their own guidance.
 
 // baseSection is the operating contract the model works under.
 //
-// It is the shape mini-swe-agent uses: how to work, read narrowly, and
-// what "done" looks like.
-const baseSection = "You are a coding agent working in a shell. You solve the task by inspecting the repository and changing what is needed.\n\n" +
+// It is the shape mini-swe-agent uses: what the model is, how to
+// work, and what "done" looks like. The guidance for a tool is not
+// here: a tool brings a section of its own, and a tool that is not
+// linked takes its guidance with it.
+const baseSection = "You are a coding agent. You solve the task by inspecting the code and changing what is needed.\n\n" +
 	"How to work:\n" +
-	"- Inspect before you edit. Read the files that matter and the code around the place you will change.\n" +
-	"- Prefer narrow reads over whole files. Use the read tool for a specific line range, and use bash with grep, sed, head or tail when you need to search or slice.\n" +
+	"- Inspect before you edit. Read the code around the place you will change.\n" +
+	"- Prefer narrow reads over whole files: read the lines that matter and search for what you need, rather than reading everything.\n" +
 	"- Make the smallest change that solves the task, then check that it works.\n" +
-	"- Work out what is wrong before you try to fix it. If a command fails, read the error and adapt."
+	"- Work out what is wrong before you try to fix it. If a command fails, read the error and adapt.\n" +
+	"- Keep going until the task is done. Do not stop to ask whether you should go on.\n" +
+	"\n" +
+	"Done means:\n" +
+	"- The task is actually complete, not just started.\n" +
+	"- You have verified the change, for example by running the project's tests or the command that exercises the behaviour.\n" +
+	"- You then stop and say what you did, in a few sentences. Do not keep going after the task is done."
 
 // bashSection is the guidance the bash tool brings.
 //
@@ -40,16 +47,6 @@ const bashSection = "Bash:\n" +
 	"- Every bash call runs in a fresh shell. A cd, an exported variable or a background job from one call is gone by the next one, so use absolute paths or start each command where you want it.\n" +
 	"- Background processes are killed when the command returns.\n" +
 	"- Long output is truncated with the middle elided. Use grep/sed/head/tail to inspect narrower ranges."
-
-// doneSection is what "done" looks like.
-//
-// The base section holds the operating contract, and this part of it
-// comes after the tools' sections, where the model reads what ending
-// the run means.
-const doneSection = "Done means:\n" +
-	"- The task is actually complete, not just started.\n" +
-	"- You have verified the change, for example by running the project's tests or the command that exercises the behaviour.\n" +
-	"- You then stop and say what you did, in a few sentences. Do not keep going after the task is done."
 
 // systemPrompt returns the operating contract the model works under.
 //
@@ -62,6 +59,7 @@ const doneSection = "Done means:\n" +
 // transport's parser reads. The native mode needs neither: the
 // transport sends the tools in the request, so the prompt says nothing
 // about them.
+//
 func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) func(*prompt.Builder) {
 	return func(b *prompt.Builder) {
 		b.Set("base", baseSection)
@@ -69,13 +67,7 @@ func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) func(*
 		if len(tools) > 0 && toolsMode != "native" {
 			b.Set("tool-calls", toolCallsSection(tools))
 		}
-		b.Set("done", doneSection)
-		// The environment section says which model the model is. The
-		// default order puts it before the sections of the consumer's
-		// own, and this command's prompt has always ended with the
-		// model line, so the section is moved to the end.
 		b.Set("environment", environmentSection(modelID))
-		b.Insert("done", "environment", environmentSection(modelID))
 	}
 }
 
