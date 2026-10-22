@@ -1,8 +1,10 @@
 # Session log v0
 
 A poo session log is an append-only JSONL file: one JSON object per line,
-in the order the records were produced. The log is written with no lock and
-no recovery. This document is the contract a consumer parses.
+in the order the records were produced. One writer serializes its writes, so
+the file never holds two half-written records; there is no recovery across
+processes and no recovery of a torn tail. This document is the contract a
+consumer parses.
 
 A session log holds one session. The file is created exclusively, so a run
 pointed at a log that already exists fails before it sends a request rather
