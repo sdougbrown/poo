@@ -38,9 +38,13 @@ unless a bind names them.
 ### Protected paths
 
 A protected path inside a bound directory is masked: a directory behind
-an empty tmpfs, a file behind an empty device. The command reads
-nothing where the configuration protects something. A protected path
-outside every bound directory is not in the sandbox at all.
+an empty tmpfs, a file behind an empty device. The executor asks the
+matcher about every bind, so this covers the working directory, the
+read-only system directories and the extra read-write binds alike. The
+command reads nothing where the configuration protects something. A
+protected path outside every bound directory is not in the sandbox at
+all. The expansion of a bind is reused by the commands that follow, so a
+large read-only bind is walked once, not once per command.
 
 The `local` executor cannot do this. Protected paths stop the file
 tools from wandering; with the `local` executor, `bash` reaches

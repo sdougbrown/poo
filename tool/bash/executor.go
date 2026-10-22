@@ -53,11 +53,12 @@ type Process interface {
 
 // Masker expands the protected paths to mask.
 //
-// The paths it returns are absolute and under the root it is given. A
-// sandbox masks them, so a command cannot read what the session
-// protects.
+// A sandbox asks it about every directory the sandbox mounts, not only the
+// working directory, so a path the operator protects inside a read-only or
+// read-write bind is hidden as well. The paths it returns are absolute; the
+// executor masks the ones a bind reaches.
 type Masker interface {
-	// Expand returns the protected paths under root.
+	// Expand returns the protected paths at or under root.
 	Expand(root string) ([]string, error)
 }
 

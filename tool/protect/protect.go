@@ -42,6 +42,9 @@ type Set struct {
 // matched against an absolute path and would protect nothing, which is
 // worse than a refusal.
 //
+// A trailing separator is normalized away, so "/etc/" and "/etc" protect
+// the same paths. The root itself is kept.
+//
 // A malformed glob is an error too, and so is a glob whose home directory
 // cannot be found.
 //
@@ -57,17 +60,28 @@ func Compile(globs []string) (*Set, error) {
 		if err != nil {
 			return nil, err
 		}
+		expanded = filepath.Clean(expanded)
 		if !filepath.IsAbs(expanded) {
 			return nil, fmt.Errorf("protect: the glob %q must be absolute or start with ~", glob)
 		}
 		segments := splitPath(expanded)
+		hasWildcard := false
 		for _, segment := range segments {
 			if segment == "**" {
+				hasWildcard = true
 				continue
 			}
 			if _, err := path.Match(segment, ""); err != nil {
 				return nil, fmt.Errorf("protect: the glob %q is malformed: %w", glob, err)
 			}
+			if strings.ContainsAny(segment, "*?[") {
+				hasWildcard = true
+			}
+		}
+		// A literal path protects what it names and everything under it,
+		// so "/etc" is the same setting as "/etc/**".
+		if !hasWildcard {
+			segments = append(segments, "**")
 		}
 		s.globs = append(s.globs, expanded)
 		s.patterns = append(s.patterns, segments)
@@ -112,11 +126,16 @@ func (s *Set) Match(target string) bool {
 	return false
 }
 
-// Expand returns the paths under root that are protected.
+// Expand returns the paths at or under root that are protected.
+//
+// A root that matches a glob is returned as the topmost match, without a
+// walk: masking the root hides everything below it. Otherwise the walk
+// starts at the glob's fixed prefix when that prefix is under the root, so
+// expanding one bind directory does not walk another. A glob whose prefix
+// is outside the root cannot match inside it, and is skipped.
 //
 // The walk does not follow symlinks: a symlinked directory is not entered,
-// and a path is matched as it stands. The root itself is not among the
-// results, because the caller binds it.
+// and a path is matched as it stands.
 //
 // The paths come back sorted, so a caller that masks them does the same
 // thing every time.
@@ -135,29 +154,127 @@ func (s *Set) Expand(root string) ([]string, error) {
 			abs = resolved
 		}
 	}
+	// A root that is itself protected is the topmost match: hiding it
+	// hides every path below it, and the walk has nothing to add.
+	if s.matchOwn(abs) {
+		return []string{abs}, nil
+	}
+
+	roots := s.walkRoots(abs)
 	var found []string
-	err = filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// An entry that cannot be read is skipped: the walk is a
-			// search, and one unreadable directory does not end it.
-			if d != nil && d.IsDir() {
-				return fs.SkipDir
+	for _, walkRoot := range roots {
+		err = filepath.WalkDir(walkRoot, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				// An entry that cannot be read is skipped: the walk is a
+				// search, and one unreadable directory does not end it.
+				if d != nil && d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if p == abs && walkRoot == abs {
+				return nil
+			}
+			if s.matchOwn(p) {
+				found = append(found, p)
 			}
 			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("protect: walking %s: %w", walkRoot, err)
 		}
-		if p == abs {
-			return nil
-		}
-		if s.matchOwn(p) {
-			found = append(found, p)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("protect: walking %s: %w", abs, err)
 	}
 	slices.Sort(found)
-	return found, nil
+	return slices.Compact(found), nil
+}
+
+// walkRoots returns the directories the walk of root has to cover.
+//
+// A glob can only match inside root when its fixed prefix and root contain
+// one another. The walk starts at the deeper of the two, so a glob for a
+// small directory does not walk the whole bind it happens to be under, and
+// a glob whose prefix is outside root costs nothing.
+func (s *Set) walkRoots(root string) []string {
+	var out []string
+	for _, pattern := range s.patterns {
+		prefix := fixedPrefix(pattern)
+		var walkRoot string
+		switch {
+		case within(root, prefix):
+			// The prefix is at or under the root, so the walk can
+			// start there.
+			walkRoot = prefix
+		case within(prefix, root):
+			// The root is under the prefix, so the matches can be
+			// anywhere under the root.
+			walkRoot = root
+		default:
+			continue
+		}
+		if info, err := os.Stat(walkRoot); err != nil || !info.IsDir() {
+			continue
+		}
+		if !slices.Contains(out, walkRoot) {
+			out = append(out, walkRoot)
+		}
+	}
+	return out
+}
+
+// fixedPrefix returns the part of a pattern before its first wildcard.
+//
+// The prefix is a real path: every segment in it is a literal. The prefix
+// of an absolute pattern is itself absolute.
+func fixedPrefix(pattern []string) string {
+	literal := make([]string, 0, len(pattern))
+	for _, segment := range pattern {
+		if segment == "**" {
+			break
+		}
+		if _, err := path.Match(segment, ""); err != nil {
+			break
+		}
+		if strings.ContainsAny(segment, "*?[") {
+			break
+		}
+		literal = append(literal, segment)
+	}
+	if len(literal) == 0 {
+		return "/"
+	}
+	prefix := strings.Join(literal, "/")
+	if prefix == "" {
+		return "/"
+	}
+	return prefix
+}
+
+// within reports whether a path is at or under a directory.
+func within(dir, path string) bool {
+	if dir == "" || path == "" {
+		return false
+	}
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// Resolve returns the absolute form of a path with its symlinks resolved.
+//
+// A path that does not exist is resolved as far as it goes, so a tool can
+// decide what a path means before it creates the last element.
+func Resolve(path string) string {
+	return resolvePath(absPath(path))
+}
+
+// Within reports whether a path is at or under a directory.
+//
+// Both paths are compared as they are. A caller that needs symlinks
+// resolved resolves them first, with Resolve.
+func Within(dir, path string) bool {
+	return within(absPath(dir), absPath(path))
 }
 
 // Guarded reports whether a path is protected by the given globs.

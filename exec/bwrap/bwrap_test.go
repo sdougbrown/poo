@@ -90,7 +90,8 @@ func TestAFileOutsideTheWorkingDirectoryIsInvisible(t *testing.T) {
 }
 
 // TestTheHomeDirectoryIsNotMounted covers the plan's filesystem: $HOME
-// is not mounted, so the operator's files are not the command's.
+// is absent, or holds only the directories a bind needed, so the
+// operator's files are not the command's.
 func TestTheHomeDirectoryIsNotMounted(t *testing.T) {
 	exec := newExecutor(t, bwrap.Options{})
 	workdir := t.TempDir()
@@ -99,10 +100,6 @@ func TestTheHomeDirectoryIsNotMounted(t *testing.T) {
 	if err != nil {
 		t.Skipf("skip: the home directory is unknown: %v", err)
 	}
-	// A file of the home directory is what the command must not read.
-	// The home itself may exist inside the sandbox, because the
-	// sandbox creates the directories a bind needs, and the working
-	// directory may be under it.
 	entries, err := os.ReadDir(home)
 	if err != nil {
 		t.Skipf("skip: the home directory cannot be read: %v", err)
@@ -114,12 +111,35 @@ func TestTheHomeDirectoryIsNotMounted(t *testing.T) {
 			break
 		}
 	}
-	if marker == "" {
-		t.Skip("skip: the home directory holds no regular file to look for")
-	}
 
-	got := call(t, exec, fmt.Sprintf("cat %q 2>&1", filepath.Join(home, marker)), workdir)
-	if !strings.Contains(got, "No such file") {
+	// The sandbox creates the directories a bind needs. When the working
+	// directory is under the home, that is the one entry the home may
+	// hold; every other entry of the real home must be absent.
+	allowed := ""
+	if rel, err := filepath.Rel(home, workdir); err == nil && !strings.HasPrefix(rel, "..") {
+		allowed = strings.Split(rel, string(filepath.Separator))[0]
+	}
+	command := fmt.Sprintf("if [ -e %q ]; then echo present; ls -A %q; else echo absent; fi", home, home)
+	if marker != "" {
+		command += fmt.Sprintf("; cat %q 2>&1", filepath.Join(home, marker))
+	}
+	got := call(t, exec, command, workdir)
+	lines := strings.Split(strings.TrimSpace(got), "\n")
+	if lines[0] == "present" {
+		if allowed == "" {
+			t.Errorf("the home directory is mounted: %q", got)
+		} else {
+			for _, line := range lines[1:] {
+				if strings.HasPrefix(line, "cat:") {
+					continue
+				}
+				if strings.TrimSpace(line) != allowed {
+					t.Errorf("the home directory holds %q, want only %q: %q", line, allowed, got)
+				}
+			}
+		}
+	}
+	if marker != "" && !strings.Contains(got, "No such file") {
 		t.Errorf("a file of the home directory is readable: %q", got)
 	}
 }
@@ -280,6 +300,24 @@ func TestTheExecutorIsUnavailableWhenTheNamespacesFail(t *testing.T) {
 	_, err := bwrap.New(bwrap.Options{Binary: fake})
 	if err == nil {
 		t.Fatal("the executor was built with a binary that cannot create the namespaces")
+	}
+	var unavailable *bwrap.UnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("the failure is %v, want an unavailable executor", err)
+	}
+	if unavailable.Code() != bwrap.CodeUnavailable {
+		t.Errorf("the code is %q, want %q", unavailable.Code(), bwrap.CodeUnavailable)
+	}
+}
+
+// TestABadReadWriteBindIsUnavailableAtConstruction covers the probe: a
+// read-write bind that the sandbox cannot make is an executor that cannot
+// run, not a failure a command discovers later.
+func TestABadReadWriteBindIsUnavailableAtConstruction(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-directory")
+	_, err := bwrap.New(bwrap.Options{RWBinds: []string{missing}})
+	if err == nil {
+		t.Fatal("the executor was built with a read-write bind that does not exist")
 	}
 	var unavailable *bwrap.UnavailableError
 	if !errors.As(err, &unavailable) {
