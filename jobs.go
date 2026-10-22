@@ -225,6 +225,16 @@ type jobState struct {
 	// completing reports that the job's completion owns the chain, so
 	// only one caller runs it.
 	completing bool
+	// completionCtx is the context the completion chain runs under. It
+	// is the session's, not the job's, so a cancelled job still completes
+	// its chain; the close ends it when the chain outlives the teardown.
+	completionCtx context.Context
+	// completionCancel ends the completion chain, so the close can take
+	// ownership of a chain that outlived its teardown deadline.
+	completionCancel context.CancelFunc
+	// completionDone is closed when the completion chain has written the
+	// job's terminal records.
+	completionDone chan struct{}
 }
 
 // jobResult is a job's finished result, waiting for its delivery.
@@ -496,9 +506,18 @@ func (s *Session) completeJob(job *jobState, result ToolResult, outcome Outcome,
 		return
 	}
 	job.completing = true
+	if job.completionCtx == nil {
+		job.completionCtx, job.completionCancel = context.WithCancel(context.Background())
+		job.completionDone = make(chan struct{})
+	}
+	completionCtx := job.completionCtx
+	completionDone := job.completionDone
 	prepared := job.prepared
 	closing := cause != "" || s.jobCtx.Err() != nil
 	s.mu.Unlock()
+	// The chain's terminal record is written before this closes: the
+	// close waits for it before its final flush.
+	defer close(completionDone)
 
 	if closing && cause == "" {
 		cause = CauseSessionClosed
@@ -511,7 +530,7 @@ func (s *Session) completeJob(job *jobState, result ToolResult, outcome Outcome,
 
 	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{})
 	info.Job = job.id
-	chain, hookErr := s.runAfterTool(hookCompletionContext(job.ctx), job.runID, job.id, 0, info, result)
+	chain, hookErr := s.runAfterTool(completionCtx, job.runID, job.id, 0, info, result)
 
 	s.mu.Lock()
 	job.completing = false
@@ -1331,6 +1350,29 @@ func (s *Session) closeJobs() {
 		}
 	}
 
+	// A completion chain that outlived the teardown deadline is the
+	// close's: it ends the chain, waits for the terminal records it
+	// writes, and writes them itself if the chain still does not finish.
+	completionDeadline := time.After(s.recordBudget())
+	for _, job := range jobs {
+		s.mu.Lock()
+		completing := job.completing
+		ended := job.ended
+		done := job.completionDone
+		cancel := job.completionCancel
+		s.mu.Unlock()
+		if ended || !completing {
+			continue
+		}
+		if cancel != nil {
+			cancel()
+		}
+		select {
+		case <-done:
+		case <-completionDeadline:
+		}
+	}
+
 	// Every job with no job.ended gets one, carrying its partial
 	// output.
 	for _, job := range jobs {
@@ -1354,8 +1396,17 @@ func (s *Session) closeJobs() {
 // the record keeps the partial output with the close's cause.
 func (s *Session) writeJobEndedOnClose(job *jobState) {
 	s.mu.Lock()
-	if job.ended || job.completing {
+	if job.ended {
 		s.mu.Unlock()
+		return
+	}
+	if job.completing {
+		// The chain outlived the close's bound. The close takes the job
+		// and writes a terminal record with no unredacted payload: the
+		// chain's own record, if it ever finishes, finds the job ended
+		// and writes nothing.
+		s.mu.Unlock()
+		s.finishJob(job, OutcomeCancelled, afterToolOutcome{result: ToolResult{Text: closedJobText(""), IsError: true}}, false, false, CauseSessionClosed)
 		return
 	}
 	partial := job.partialText
