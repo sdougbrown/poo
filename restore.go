@@ -24,6 +24,12 @@ const (
 	// CodeSessionIncompatible names a session whose tools do not fit
 	// this build.
 	CodeSessionIncompatible = "session_incompatible"
+	// CodeUnsupportedMode names a persistence mode this build does not
+	// support.
+	CodeUnsupportedMode = "unsupported_mode"
+	// CodeUnansweredCall names a session whose history holds a tool call
+	// the model would see without an answer.
+	CodeUnansweredCall = "unanswered_call"
 )
 
 // The errors a restore returns.
@@ -42,6 +48,13 @@ var (
 	ErrNoSessionHeader = errors.New("poo: the records hold no session header")
 	// ErrCodecVersion means the records are in another format version.
 	ErrCodecVersion = errors.New("poo: the records are in another format version")
+	// ErrUnsupportedMode means the session's persistence mode is not
+	// supported by this build.
+	ErrUnsupportedMode = errors.New("poo: the session's persistence mode is not supported")
+	// ErrUnansweredCall means the records hold a tool call the model saw
+	// with no result, so the next request would be one the provider
+	// rejects.
+	ErrUnansweredCall = errors.New("poo: the session holds a tool call with no result")
 )
 
 // IncompatibleError is the error a failed compatibility check returns.
@@ -99,6 +112,36 @@ func (e *CodecError) Error() string {
 // Is reports that the error is a codec mismatch.
 func (e *CodecError) Is(target error) bool { return target == ErrCodecVersion }
 
+// UnsupportedModeError is the error a session in a mode this build does
+// not support returns.
+type UnsupportedModeError struct {
+	// Mode is the unsupported mode.
+	Mode string `json:"mode"`
+}
+
+// Error returns the message.
+func (e *UnsupportedModeError) Error() string {
+	return fmt.Sprintf("poo: the session's persistence mode %q is not supported", e.Mode)
+}
+
+// Is reports that the error is the unsupported-mode sentinel.
+func (e *UnsupportedModeError) Is(target error) bool { return target == ErrUnsupportedMode }
+
+// UnansweredCallError is the error a session with a tool call the model
+// would see unanswered returns.
+type UnansweredCallError struct {
+	// CallID is the provider's id of the unanswered call.
+	CallID string `json:"call_id"`
+}
+
+// Error returns the message.
+func (e *UnansweredCallError) Error() string {
+	return fmt.Sprintf("poo: the session holds the tool call %q with no result", e.CallID)
+}
+
+// Is reports that the error is the unanswered-call sentinel.
+func (e *UnansweredCallError) Is(target error) bool { return target == ErrUnansweredCall }
+
 // Restored is what a restore produced.
 type Restored struct {
 	// Metadata is the session's metadata, as the records hold it.
@@ -139,6 +182,9 @@ func Restore(opts Options, records []Record) (*Session, Restored, error) {
 	if created.Format != "" && created.Format != FormatVersion {
 		return nil, Restored{}, &CodecError{Format: created.Format, Expected: FormatVersion}
 	}
+	if created.Mode == "durable" {
+		return nil, Restored{}, &UnsupportedModeError{Mode: created.Mode}
+	}
 	restored := Restored{Metadata: created.Metadata()}
 
 	// The prompt is the recorded one. It is never rendered from the
@@ -158,6 +204,11 @@ func Restore(opts Options, records []Record) (*Session, Restored, error) {
 	if restored.Metadata.Profile != "" {
 		opts.Profile = restored.Metadata.Profile
 	}
+	// The run's shape is the recorded one: the tools mode and the
+	// reasoning effort are part of what the session sent, so the
+	// restored session sends them again.
+	opts.ToolsMode = created.ToolsMode
+	opts.ReasoningEffort = created.ReasoningEffort
 	// The chat role is the recorded one: the effective role comes from
 	// the metadata, not from the current defaults.
 	if role := restored.Metadata.Roles.Chat; role != nil {
@@ -169,6 +220,14 @@ func Restore(opts Options, records []Record) (*Session, Restored, error) {
 			model.ContextLimit = created.ContextLimit
 		}
 		opts.Model = model
+	}
+	// The request's shape is the recorded one too: the role's model may
+	// carry it, and the header's own fields fill it when it does not.
+	if created.ToolsMode != "" {
+		opts.Model.Tools.Mode = ToolsMode(created.ToolsMode)
+	}
+	if created.ReasoningEffort != "" {
+		opts.Model.Reasoning = ReasoningControl{Mode: ReasoningEffort, Param: ReasoningPathEffort}
 	}
 	// The session-start hooks do not run: the records hold the messages
 	// they appended, and running them again would say it twice.
@@ -189,6 +248,10 @@ func Restore(opts Options, records []Record) (*Session, Restored, error) {
 	if err := s.rebuild(records, &restored); err != nil {
 		s.Close()
 		return nil, Restored{}, err
+	}
+	if callID := s.unansweredCall(); callID != "" {
+		s.Close()
+		return nil, Restored{}, &UnansweredCallError{CallID: callID}
 	}
 	// The results that were never delivered are queued again, in
 	// completion order, and the idle policy acts on them.
@@ -300,7 +363,9 @@ func toolDifferences(recorded []ToolInfo, current map[string]Tool) []string {
 		if spec.Class != info.Class {
 			diffs = append(diffs, fmt.Sprintf("the tool %q changed from %q to %q", info.Name, info.Class, spec.Class))
 		}
-		if spec.Background != info.Background {
+		// A record written before the header carried a background mode
+		// says nothing about it, so it is not a difference.
+		if info.Background != "" && spec.Background != info.Background {
 			diffs = append(diffs, fmt.Sprintf("the tool %q changed its background mode from %q to %q",
 				info.Name, info.Background, spec.Background))
 		}
@@ -459,6 +524,7 @@ func (s *Session) seedCounters(records []Record) {
 	handles := 0
 	messages := 0
 	inputs := 0
+	jobs := 0
 	for _, rec := range records {
 		switch r := rec.(type) {
 		case *ToolCallRecord:
@@ -467,12 +533,16 @@ func (s *Session) seedCounters(records []Record) {
 			handles = max(handles, handleSeq(r.Handle))
 		case *MessageRecord:
 			messages = max(messages, messageSeq(r.MessageID))
+		case *JobStarted:
+			jobs = max(jobs, seqOf(r.Job, 'j'))
 		case *JobEnded:
+			jobs = max(jobs, seqOf(r.Job, 'j'))
 			inputs = max(inputs, jobInputSeq(s.opts.SessionID, r.InputID))
 		}
 	}
 	s.handleSeq = handles
 	s.inputSeq = inputs
+	s.jobSeq = jobs
 	s.messageIDs.Set(messages)
 }
 
@@ -652,6 +722,35 @@ func handleInText(text string) string {
 		return ""
 	}
 	return line[:sep]
+}
+
+// unansweredCall returns the first tool call in the rebuilt view that
+// has no result, or the empty string when every call is paired.
+//
+// A request carries the view, so an unanswered call is a request the
+// provider rejects. The restore refuses it rather than handing back a
+// session whose first request fails.
+func (s *Session) unansweredCall() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var calls []string
+	results := map[string]bool{}
+	for _, msg := range s.history {
+		for _, block := range msg.Content {
+			switch block.Kind {
+			case ContentToolCall:
+				calls = append(calls, block.ToolCallID)
+			case ContentToolResult:
+				results[block.ToolCallID] = true
+			}
+		}
+	}
+	for _, id := range calls {
+		if !results[id] {
+			return id
+		}
+	}
+	return ""
 }
 
 // applyRecordedCompaction applies a compaction the records hold.

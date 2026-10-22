@@ -25,7 +25,7 @@ func header(sessionID string) *poo.SessionCreated {
 		WorkingDir:   "/tmp",
 		Profile:      "code",
 		Roles:        poo.ModelRoles{Chat: &poo.ModelInfo{Name: "fast", ModelID: "test-model", ContextLimit: 32768}},
-		Tools:        []poo.ToolInfo{{Name: "echo", Class: poo.ClassReadOnly}},
+		Tools:        []poo.ToolInfo{{Name: "echo", Class: poo.ClassReadOnly, Background: poo.BackgroundNever}},
 		SettingsHash: "settings-1",
 		Build:        poo.BuildInfo{Name: "poo", Version: "test"},
 	}
@@ -484,9 +484,13 @@ func TestTheRestoreRejectsAToolThatChangedItsClass(t *testing.T) {
 // compatibility check: a tool that changed its background mode does
 // not fit.
 func TestTheRestoreRejectsAToolThatChangedItsBackgroundMode(t *testing.T) {
-	records := []poo.Record{header("s1")}
+	created := header("s1")
+	// The recorded mode is non-empty: a record written before the header
+	// carried a mode says nothing about it, and is not a difference.
+	created.Tools[0].Background = poo.BackgroundAllowed
+	records := []poo.Record{created}
 	opts := restoreOptions(t, scripted(nil), &recordingSink{})
-	opts.Tools["echo"] = &backgroundTool{background: poo.BackgroundAllowed}
+	opts.Tools["echo"] = &backgroundTool{background: poo.BackgroundAlways}
 	_, _, err := poo.Restore(opts, records)
 	if err == nil {
 		t.Fatal("the restore accepted a tool that changed its background mode")
@@ -521,5 +525,78 @@ func TestTheRestoreKeepsTheRecordedProfileAndRole(t *testing.T) {
 	}
 	if got := poo.SessionChatModel(session); got.Name != "fast" {
 		t.Errorf("the restored session's model is %q, want the recorded one", got.Name)
+	}
+}
+
+// TestTheRestoreKeepsARecordedBackgroundModeItDoesNotKnow covers a log
+// written before the header carried a tool's background mode: the empty
+// record says nothing about the mode, so it is not a difference.
+func TestTheRestoreKeepsARecordedBackgroundModeItDoesNotKnow(t *testing.T) {
+	records := []poo.Record{header("s1")}
+	opts := restoreOptions(t, scripted(nil), &recordingSink{})
+	opts.Tools["echo"] = &backgroundTool{background: poo.BackgroundAllowed}
+	if _, _, err := poo.Restore(opts, records); err != nil {
+		t.Fatalf("the restore refused a tool whose recorded mode is unknown: %v", err)
+	}
+}
+
+// TestTheRestoreRejectsAToolThatIsNoLongerLinked covers the
+// compatibility check: a tool the records name and this build does not
+// link is a difference.
+func TestTheRestoreRejectsAToolThatIsNoLongerLinked(t *testing.T) {
+	records := []poo.Record{header("s1")}
+	opts := restoreOptions(t, scripted(nil), &recordingSink{})
+	delete(opts.Tools, "echo")
+	opts.ToolOrder = nil
+	_, _, err := poo.Restore(opts, records)
+	if err == nil {
+		t.Fatal("the restore accepted a tool that is no longer linked")
+	}
+	var incompatible *poo.IncompatibleError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("the restore returned %T, want an incompatible error", err)
+	}
+	if len(incompatible.Differences) != 1 || !strings.Contains(incompatible.Differences[0], "no longer linked") {
+		t.Errorf("the differences are %v, want the missing tool", incompatible.Differences)
+	}
+}
+
+// TestTheRestoreSendsTheRecordedToolsModeAndReasoning covers the
+// request's shape: the recorded tools mode and reasoning effort are what
+// the restored session sends, not the caller's defaults.
+func TestTheRestoreSendsTheRecordedToolsModeAndReasoning(t *testing.T) {
+	created := header("s1")
+	created.ToolsMode = string(poo.ToolsText)
+	created.ReasoningEffort = "low"
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := restoreOptions(t, tr, &recordingSink{})
+	opts.ToolsMode = string(poo.ToolsNative)
+	opts.ReasoningEffort = ""
+	sess, _, err := poo.Restore(opts, []poo.Record{created})
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { sess.Close() })
+	runSession(t, sess, "again")
+	requests := tr.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("the restored session made %d requests, want 1", len(requests))
+	}
+	if got := requests[0].Info.Tools.Mode; got != poo.ToolsText {
+		t.Errorf("the restored request's tools mode is %q, want %q", got, poo.ToolsText)
+	}
+	if got := requests[0].Info.Reasoning.Mode; got != poo.ReasoningEffort {
+		t.Errorf("the restored request's reasoning mode is %q, want %q", got, poo.ReasoningEffort)
+	}
+}
+
+// TestTheRestoreRefusesADurableSession covers the mode check on the core
+// path: a durable session is not one this build continues.
+func TestTheRestoreRefusesADurableSession(t *testing.T) {
+	created := header("s1")
+	created.Mode = "durable"
+	_, _, err := poo.Restore(restoreOptions(t, scripted(nil), &recordingSink{}), []poo.Record{created})
+	if !errors.Is(err, poo.ErrUnsupportedMode) {
+		t.Fatalf("the restore returned %v, want an unsupported mode", err)
 	}
 }
