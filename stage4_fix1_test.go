@@ -205,8 +205,8 @@ func TestAnInterruptDuringTheBeforeToolChainKeepsTheFirstResult(t *testing.T) {
 		t.Errorf("the tool was called %d time(s) after an interrupt, want 0", got)
 	}
 	rec := fixResultRecord(t, sink)
-	if rec.Text != synthetic {
-		t.Errorf("the call's result is %q, want the first hook's %q", rec.Text, synthetic)
+	if want := poo.HandleLine("r1", "quick") + "\n" + synthetic; rec.Text != want {
+		t.Errorf("the call's result is %q, want the first hook's %q", rec.Text, want)
 	}
 }
 

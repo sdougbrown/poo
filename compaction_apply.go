@@ -299,6 +299,12 @@ func (s *Session) applyWindowLocked(w ProviderWindow) error {
 	marker := NewTextMessage(RoleUser, CompactionMarkerText)
 	marker.Origin = OriginCompaction
 	s.history = []Message{window, marker}
+	// The window is the whole model view, so the run's frozen prompt
+	// goes with it: the provider's own compacted state is what the
+	// model reads from here on.
+	if s.run != nil {
+		s.run.systemMessage = nil
+	}
 	for i := range s.spans {
 		s.spans[i].removed = true
 		s.spans[i].start = 0
