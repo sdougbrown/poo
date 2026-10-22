@@ -154,6 +154,10 @@ type Compactor struct {
 	mu sync.Mutex
 	// should is what ShouldCompact answers.
 	should bool
+	// shouldAfter is the number of turns the view must hold before the
+	// compactor answers "yes". It is zero when the compactor answers
+	// from the first call.
+	shouldAfter int
 	// compaction is what Compact answers.
 	compaction poo.Compaction
 	// err is the failure Compact returns, when it is set.
@@ -186,6 +190,18 @@ func (c *Compactor) SetError(err error) {
 	c.err = err
 }
 
+// SetShouldAfter makes the compactor answer "no" until the view holds
+// the given number of turns.
+//
+// A compaction that replaces a range of turns needs the turns to
+// exist, so a compactor that answers "yes" from the first gate would
+// have nothing to replace.
+func (c *Compactor) SetShouldAfter(turns int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.shouldAfter = turns
+}
+
 // Calls returns how many times the compactor compacted.
 func (c *Compactor) Calls() int {
 	c.mu.Lock()
@@ -211,6 +227,9 @@ func (c *Compactor) Forks() []ForkCall {
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.shouldAfter > 0 && len(view.Turns()) < c.shouldAfter {
+		return false
+	}
 	return c.should
 }
 
