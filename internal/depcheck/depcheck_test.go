@@ -90,6 +90,9 @@ func TestFixtures(t *testing.T) {
 		{
 			name: "ignored",
 		},
+		{
+			name: "ignoreonly",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,6 +136,29 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 	}
 	if len(res.Findings) != 0 {
 		t.Errorf("findings:\n%s\nwant none", strings.Join(res.Findings, "\n"))
+	}
+}
+
+// TestAFileWithTheIgnoreBuildTagIsNotSeen covers the doc's promise: a
+// normal-named file carrying //go:build ignore does not fail the check,
+// the way a dot- or underscore-prefixed file does not.
+func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
+	const m = "example.com/poo/depcheck/ignoreonly"
+	res := checkModule(t, filepath.Join("testdata", "ignoreonly"), m)
+	if len(res.Findings) != 0 {
+		t.Errorf("findings:\n%s\nwant none", strings.Join(res.Findings, "\n"))
+	}
+}
+
+// TestABrokenModuleIsAnError covers the child failure: a module whose
+// go.mod does not parse makes Check fail rather than pass silently.
+func TestABrokenModuleIsAnError(t *testing.T) {
+	_, err := (depcheck.Checker{
+		ModuleRoot: filepath.Join("testdata", "brokenmod"),
+		ModulePath: "example.com/poo/depcheck/brokenmod",
+	}.Check())
+	if err == nil {
+		t.Error("the broken module returned no error, want one")
 	}
 }
 
