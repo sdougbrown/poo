@@ -385,3 +385,36 @@ func TestARedactionSurvivesALaterHookFailure(t *testing.T) {
 		})
 	}
 }
+
+// TestAFatalErrorsTextIsTheHookProcessedResult covers the plan's rule:
+// only the hook-processed result is recorded or emitted. A fatal tool
+// error keeps its tool_fatal classification, but its published text is
+// the result the chain returned.
+func TestAFatalErrorsTextIsTheHookProcessedResult(t *testing.T) {
+	const secret = "REVIEW_FATAL_SECRET"
+	tool := &echoTool{call: func(context.Context) (poo.ToolResult, error) {
+		return poo.ToolResult{}, poo.Fatalf("failed with token %s", secret)
+	}}
+	sink := &recordingSink{}
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{}`)}}}})
+	opts := testOptions(t, tr, tool, sink)
+	opts.AfterTool = []poo.AfterToolHook{fixAfterFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+		return poo.Redact(poo.ToolResult{Text: "safe failure", IsError: true}), nil
+	})}
+	s := newTestSession(t, opts)
+	runSession(t, s, "start")
+
+	if store := fixSinkJSON(sink, secret); strings.Contains(store, secret) {
+		t.Errorf("the fatal error's secret reached the store: %s", store)
+	}
+	events, _ := json.Marshal(s.Events())
+	if strings.Contains(string(events), secret) {
+		t.Error("the fatal error's secret reached the events")
+	}
+	if got := sink.settled(); got == nil || got.Reason != poo.ReasonToolFatal {
+		t.Fatalf("the run settled %v, want tool_fatal", got)
+	}
+	if got := sink.settled().Detail.Text; strings.Contains(got, secret) {
+		t.Errorf("the settle detail holds the secret: %q", got)
+	}
+}

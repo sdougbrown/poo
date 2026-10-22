@@ -547,6 +547,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
 	// The outcome is decided by the core, not by the tool.
 	outcome := OutcomeOK
+	var fatalCandidate *candidate
 	switch {
 	case err == nil && callCtx.Err() != nil:
 		// The call's context ended while the call ran: the tool saw
@@ -589,13 +590,15 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			outcome = OutcomeCancelled
 		case errors.Is(err, ErrFatal):
 			// A tool error that wraps ErrFatal is the environment being
-			// unusable: the run settles tool_fatal.
+			// unusable: the run settles tool_fatal. The published text
+			// is the hook-processed result, so a redaction covers it
+			// too; the fatal classification is kept separately.
 			result = ToolResult{Text: err.Error(), IsError: true}
 			outcome = OutcomeError
-			s.addCandidate(run, newCandidate(ReasonToolFatal, SettleDetail{
+			fatalCandidate = &candidate{reason: ReasonToolFatal, detail: SettleDetail{
 				Source: "tool:" + call.Name,
 				Text:   err.Error(),
-			}))
+			}}
 		default:
 			// Any other error is recoverable: it goes back to the model
 			// and the run continues.
@@ -618,7 +621,11 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// The after-tool chain runs before the result is recorded or
 	// emitted, so the record, the event and the model see the same
 	// sanitized result.
-	s.recordToolResult(run, turn, handle, call.Name, call.ID, s.toolCallInfo(turn, handle, call.Name, prepared, plan), result, outcome)
+	out := s.recordToolResult(run, turn, handle, call.Name, call.ID, s.toolCallInfo(turn, handle, call.Name, prepared, plan), result, outcome)
+	if fatalCandidate != nil {
+		fatalCandidate.detail.Text = out.result.Text
+		s.addCandidate(run, *fatalCandidate)
+	}
 }
 
 // startJobCall turns a call into a background job.
@@ -710,7 +717,7 @@ func (s *Session) recordResult(run *runState, turn int, handle, tool, callID str
 // record, the event and the model all see the same sanitized result. A
 // hook that fails settles the run with hook_error, and the call keeps
 // the result the tool gave.
-func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID string, info ToolCallInfo, result ToolResult, outcome Outcome) {
+func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID string, info ToolCallInfo, result ToolResult, outcome Outcome) afterToolOutcome {
 	out, err := s.runAfterTool(hookCompletionContext(run.ctx), run.id, "", turn, info, result)
 	if err != nil {
 		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
@@ -721,12 +728,13 @@ func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID
 	won, tracked := s.claimResult(run, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
-		return
+		return out
 	}
 	s.writeResult(run, turn, handle, tool, callID, out.result, outcome, out)
 	if tracked {
 		s.finishResultWrite(run)
 	}
+	return out
 }
 
 // finishResultWrite marks the end of a claimed result's write, so the
