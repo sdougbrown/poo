@@ -189,7 +189,7 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 		maxTurns = log.SettleTurns()
 	}
 
-	transport := newScriptedTransport(script.Turns)
+	transport := &replayNativeTransport{scriptedTransport: newScriptedTransport(script.Turns)}
 	recorder := &callRecorder{}
 
 	// The replay sends the prompt the recording holds. It never renders
@@ -215,7 +215,7 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 		MaxTurns:     maxTurns,
 		WorkingDir:   opts.WorkingDir,
 		BeforeRun:    beforeRun,
-		Compactor:    newRecordedCompactor(compactions),
+		Compactor:    newRecordedCompactor(compactions, transport),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("eval: replaying %s: %w", path, err)
@@ -243,8 +243,43 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 		Replayed:    recorder.calls,
 		Compactions: recorder.compactions,
 	}
+	// A recorded compaction that the replay could not apply is a
+	// failure: a replay that silently skipped it measured a conversation
+	// the recording never had.
+	if result.Compactions != len(compactions) {
+		return nil, fmt.Errorf("eval: replaying %s: %d of %d recorded compactions were not applied",
+			path, result.Compactions, len(compactions))
+	}
 	result.Match, result.Differences = diffCalls(result.Recorded, result.Replayed)
 	return result, nil
+}
+
+// replayNativeTransport is the scripted transport with the native
+// compaction capability.
+//
+// A recording's window was produced by the transport that recorded it,
+// and the replay hands that window back through the same capability.
+type replayNativeTransport struct {
+	*scriptedTransport
+	mu     sync.Mutex
+	window *poo.ProviderWindow
+}
+
+// setWindow names the window the next native compaction returns.
+func (t *replayNativeTransport) setWindow(w *poo.ProviderWindow) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.window = w
+}
+
+// Compact returns the recorded window.
+func (t *replayNativeTransport) Compact(ctx context.Context, prev poo.Rendered) (poo.ProviderWindow, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.window == nil {
+		return poo.ProviderWindow{}, fmt.Errorf("eval: the recording holds no window to apply")
+	}
+	return *t.window, nil
 }
 
 // recordedSystemPrompts returns the session's rendered prompts, in run
@@ -330,6 +365,8 @@ type recordedCompactor struct {
 	compactions []recordedCompaction
 	// applied counts the compactions the compactor handed out.
 	applied int
+	// transport receives the recorded window of a window compaction.
+	transport *replayNativeTransport
 }
 
 // newRecordedCompactor returns a compactor that applies the recorded
@@ -337,11 +374,11 @@ type recordedCompactor struct {
 //
 // A recording with no compaction gets no compactor, so the replay never
 // enters the compacting state.
-func newRecordedCompactor(compactions []recordedCompaction) poo.Compactor {
+func newRecordedCompactor(compactions []recordedCompaction, transport *replayNativeTransport) poo.Compactor {
 	if len(compactions) == 0 {
 		return nil
 	}
-	return &recordedCompactor{compactions: compactions}
+	return &recordedCompactor{compactions: compactions, transport: transport}
 }
 
 // ShouldCompact says yes once the run has made the requests the
@@ -364,6 +401,9 @@ func (c *recordedCompactor) Compact(ctx context.Context, view poo.View, fork poo
 	}
 	compaction := c.compactions[c.applied].compaction
 	c.applied++
+	if compaction.Window != nil && c.transport != nil {
+		c.transport.setWindow(compaction.Window)
+	}
 	return compaction, nil
 }
 
