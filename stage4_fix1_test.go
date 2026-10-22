@@ -10,6 +10,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // The stage-4 fix pass's tool: it can block until its context ends and
@@ -662,4 +663,45 @@ type fixStartFunc func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, erro
 // BeforeRun calls the function.
 func (f fixStartFunc) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
 	return f(ctx, trigger)
+}
+
+// TestStartupWritesNothingAfterTheSeal covers the plan's seal: a
+// cancellation during the prompt render settles the run, and the
+// startup writes nothing else for it.
+func TestStartupWritesNothingAfterTheSeal(t *testing.T) {
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	sink := &recordingSink{}
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Prompt = []func(*prompt.Builder){func(b *prompt.Builder) {
+		b.SetRender("base", func(prompt.Env) string {
+			close(entered)
+			<-release
+			return ""
+		})
+	}}
+	s := newTestSession(t, opts)
+	go func() {
+		defer close(done)
+		_, _ = s.Prompt(context.Background(), "late user prompt")
+	}()
+	<-entered
+	s.Cancel("cancel:review")
+	close(release)
+	<-done
+
+	settled := false
+	for _, name := range sink.names() {
+		if settled {
+			t.Errorf("record %s appended after run.settled; order=%v", name, sink.names())
+		}
+		if name == "run.settled" {
+			settled = true
+		}
+	}
+	for _, m := range sink.messages() {
+		if m.Role == poo.RoleUser && len(m.Content) > 0 && m.Content[0].Text == "late user prompt" {
+			t.Error("the late user prompt was recorded after the seal")
+		}
+	}
 }

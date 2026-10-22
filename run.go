@@ -87,8 +87,10 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	held := s.takeHeldResultsLocked()
 	s.mu.Unlock()
 
-	// The run's own record of its beginning.
-	if err := s.write(ctx, &RunStarted{
+	// The run's own record of its beginning. The write is claimed
+	// against the seal, so a run that settles while it is in flight
+	// cannot get run.settled first.
+	if err := s.writeRun(run, &RunStarted{
 		RecordMeta: NewRecordMeta("run.started"),
 		RunID:      runID,
 		PromptHash: hashText(text),
@@ -129,6 +131,9 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	for _, result := range jobs {
 		s.deliverJobResult(run, result)
 	}
+	if s.runWindingDown(run) {
+		return runID, nil
+	}
 
 	// The before-run hooks run at the start of every run, before the
 	// first request. The trigger says what started the run.
@@ -145,36 +150,49 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		}))
 		return runID, nil
 	}
+	// The finalization owns the run: the startup writes nothing more
+	// for it.
+	if s.runWindingDown(run) {
+		return runID, nil
+	}
 
 	// The system prompt is rendered once per run, after the before-run
 	// hooks, and it is frozen for the length of the run.
 	if promptText := s.renderSystemPrompt(decisions.edits); promptText != "" {
+		if s.runWindingDown(run) {
+			return runID, nil
+		}
 		msg := NewTextMessage(RoleSystem, promptText)
 		msg.Origin = OriginSystem
-		s.appendMessages(msg)
 		if err := s.writeRun(run, &MessageRecord{
 			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 			RunID:      runID,
 			Role:       msg.Role,
 			Content:    msg.Content,
 		}); err != nil {
+			if s.runWindingDown(run) {
+				return runID, nil
+			}
 			s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
 				Source: "store",
 				Text:   err.Error(),
 			}))
 			return runID, nil
 		}
+		s.appendMessages(msg)
 	}
 
 	// The messages the before-run hooks appended follow the system
 	// prompt.
 	s.appendStartMessages(run, decisions)
+	if s.runWindingDown(run) {
+		return runID, nil
+	}
 
 	user := NewTextMessage(RoleUser, withDeliveryNote(text, note))
 	user.Origin = OriginUser
 	user.DeliveryNote = note
-	s.appendMessages(user)
-	if err := s.write(ctx, &MessageRecord{
+	if err := s.writeRun(run, &MessageRecord{
 		RecordMeta:   NewRecordMetaFrom("message", user.Origin),
 		RunID:        runID,
 		Turn:         0,
@@ -182,12 +200,19 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		Content:      user.Content,
 		DeliveryNote: note,
 	}); err != nil {
+		if s.runWindingDown(run) {
+			return runID, nil
+		}
 		// The store refused a record. The run settles store_error, and
 		// the session is broken.
 		s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
 			Source: "store",
 			Text:   err.Error(),
 		}))
+		return runID, nil
+	}
+	s.appendMessages(user)
+	if s.runWindingDown(run) {
 		return runID, nil
 	}
 

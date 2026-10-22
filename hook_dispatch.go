@@ -190,6 +190,9 @@ func (s *Session) runBeforeRun(run *runState, trigger RunTrigger) (startDecision
 // hook that put them there, and the record says the same.
 func (s *Session) appendStartMessages(run *runState, decisions startDecisions) {
 	for _, added := range decisions.messages {
+		if s.runWindingDown(run) {
+			return
+		}
 		msg := hookMessage(added.message, added.name)
 		if err := s.writeRun(run, &MessageRecord{
 			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
