@@ -58,8 +58,6 @@ type quirkProfile struct {
 type requestShape struct {
 	// request is the wire shape of the request.
 	request *chatRequest
-	// reasoning is the reasoning setting, as the settings spell it.
-	reasoning string
 	// params holds the named parameters the request carries.
 	params map[string]json.RawMessage
 }

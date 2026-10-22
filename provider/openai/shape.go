@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/sdougbrown/poo"
 )
@@ -28,74 +26,32 @@ func (t *Transport) reasoningSetting() string {
 	return t.cfg.ReasoningEffort
 }
 
-// shapeReasoning sets the parameter that turns the reasoning on.
+// shapeReasoning sets the parameters that turn the reasoning on.
 //
-// The plan's mapping: an effort is an effort level, a budget is a
-// number of thinking tokens, and a toggle is on or off. The parameter's
-// name is the one the endpoint knows, which the descriptor names.
+// The descriptor holds the rule: the setting is mapped through the
+// model's reasoning control, and the fields the mapping names are the
+// ones the request carries.
 //
-// A model whose reasoning cannot be controlled takes no parameter, and a
-// setting that asks it to think is a configuration error.
+// A setting the model cannot honour is a configuration error, and the
+// request never goes out.
 func (t *Transport) shapeReasoning(shape *requestShape) error {
-	mode := t.cfg.Info.Reasoning.Mode
-	setting := strings.TrimSpace(shape.reasoning)
-	if mode == "" {
-		if setting == "" {
-			return nil
-		}
-		// No descriptor: the configured value is an effort level.
-		mode = poo.ReasoningEffort
+	fields, err := t.cfg.Info.ReasoningFields(t.reasoningSetting())
+	if err != nil {
+		return configErrorf("%s", err.Error())
 	}
-	if strings.EqualFold(setting, "off") {
-		return nil
-	}
-	if mode == poo.ReasoningNone {
-		return configErrorf("the model's reasoning cannot be controlled, but the reasoning setting is %q", setting)
-	}
-	switch mode {
-	case poo.ReasoningEffort:
-		level := strings.ToLower(setting)
-		switch level {
-		case "low", "medium", "high":
-		default:
-			return configErrorf("the reasoning setting %q is not an effort level", setting)
-		}
-		shape.setParam(t.reasoningParam("reasoning_effort"), level)
-	case poo.ReasoningBudget:
-		budget, err := strconv.Atoi(setting)
-		if err != nil || budget <= 0 {
-			return configErrorf("the reasoning setting %q is not a number of thinking tokens", setting)
-		}
-		shape.setParam(t.reasoningParam("reasoning_budget"), budget)
-	case poo.ReasoningToggle:
-		shape.setParam(t.reasoningParam("chat_template_kwargs.enable_thinking"), true)
-	default:
-		return configErrorf("the model's reasoning mode %q is not one the transport knows", mode)
+	for _, field := range fields {
+		shape.setParam(field.Path, field.Value)
 	}
 	return nil
 }
 
-// reasoningParam returns the name the endpoint knows the reasoning
-// parameter by.
-//
-// The descriptor names it. A quirk may name another one, and the
-// quirk's name wins: it is the model-specific knowledge.
-func (t *Transport) reasoningParam(fallback string) string {
-	if p := t.cfg.Info.Reasoning.Param; p != "" {
-		return p
-	}
-	return fallback
-}
-
 // shapeSampling sets the sampling parameters the request carries.
 //
-// The descriptor's defaults are the base, and the configured overrides
-// win over them. A model that takes no temperature never gets one.
+// The descriptor holds the rule: the model's own defaults are the
+// base, the configured overrides win over them, and a model that takes
+// no temperature never gets one.
 func (t *Transport) shapeSampling(shape *requestShape) {
-	sampling := t.effectiveSampling()
-	if t.cfg.Info.Temperature == poo.TempFixed || t.cfg.Info.Temperature == poo.TempUnsupported {
-		sampling.Temperature = nil
-	}
+	sampling := t.cfg.Info.EffectiveSampling(t.cfg.Sampling)
 	if v := sampling.Temperature; v != nil {
 		shape.setParam("temperature", *v)
 	}
@@ -108,27 +64,6 @@ func (t *Transport) shapeSampling(shape *requestShape) {
 	if v := sampling.MinP; v != nil {
 		shape.setParam("min_p", *v)
 	}
-}
-
-// effectiveSampling returns the sampling parameters the request uses.
-//
-// The descriptor's defaults are the base, and the configured overrides
-// win over them, field by field.
-func (t *Transport) effectiveSampling() poo.Sampling {
-	out := t.cfg.Info.Sampling
-	if v := t.cfg.Sampling.Temperature; v != nil {
-		out.Temperature = v
-	}
-	if v := t.cfg.Sampling.TopP; v != nil {
-		out.TopP = v
-	}
-	if v := t.cfg.Sampling.TopK; v != nil {
-		out.TopK = v
-	}
-	if v := t.cfg.Sampling.MinP; v != nil {
-		out.MinP = v
-	}
-	return out
 }
 
 // configErrorf is a failure in the transport's own configuration.
@@ -186,9 +121,8 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	}
 
 	shape := &requestShape{
-		request:   &out,
-		reasoning: t.reasoningSetting(),
-		params:    out.Params,
+		request: &out,
+		params:  out.Params,
 	}
 	if err := t.shapeReasoning(shape); err != nil {
 		return nil, err
@@ -211,30 +145,19 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 // The caller computes the ceiling, because only it knows the size of
 // the history. A request that arrives without one gets the model's own
 // ceiling, or the default, and never the endpoint's.
+//
+// The ceiling is at least one token: a request asks for room, and a
+// room of zero is no room at all.
 func (t *Transport) maxTokens(req poo.ChatRequest) int {
 	if req.MaxTokens > 0 {
 		return req.MaxTokens
 	}
-	limit := t.cfg.Info.MaxOutput
-	if limit <= 0 {
-		limit = poo.DefaultMaxOutput
-	}
-	// A model with a known context window cannot be asked for more than
-	// its window holds.
-	if ctxLimit := t.cfg.Info.ContextLimit; ctxLimit > 0 {
-		if room := ctxLimit - outputReserve; room < limit {
-			limit = room
-		}
-	}
+	limit := t.cfg.Info.MaxTokens(0)
 	if limit < 1 {
 		limit = 1
 	}
 	return limit
 }
-
-// outputReserve is the room a request leaves for the answer's own
-// closing tokens.
-const outputReserve = 256
 
 // sortedTools returns the tools in the order the request sends them.
 //

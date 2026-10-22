@@ -1019,7 +1019,14 @@ func TestTheReasoningEffortIsSentOnlyWhenSet(t *testing.T) {
 	for _, effort := range []string{"", "low"} {
 		body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 		srv := newSSEServer(t, body)
-		tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ReasoningEffort: effort})
+		tr := openai.New(openai.Config{
+			BaseURL: srv.URL,
+			Model:   "m",
+			Info: poo.ModelInfo{Reasoning: poo.ReasoningControl{
+				Mode: poo.ReasoningEffort,
+			}},
+			ReasoningEffort: effort,
+		})
 
 		reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 		if err != nil {

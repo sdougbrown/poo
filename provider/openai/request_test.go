@@ -150,11 +150,12 @@ func TestTheReasoningParameterFollowsTheMode(t *testing.T) {
 			wantVal: "high",
 		},
 		{
-			name:    "a budget is a number of thinking tokens",
-			mode:    poo.ReasoningBudget,
-			setting: "2048",
-			wantKey: "reasoning_budget",
-			wantVal: float64(2048),
+			name:     "a budget is a number of thinking tokens",
+			mode:     poo.ReasoningBudget,
+			setting:  "2048",
+			wantKey:  "thinking",
+			wantPath: []string{"budget_tokens"},
+			wantVal:  float64(2048),
 		},
 		{
 			name:     "a toggle is a chat template argument",
@@ -231,7 +232,7 @@ func TestAModelThatCannotThinkIsAskedNotTo(t *testing.T) {
 	if err == nil {
 		t.Fatal("the request succeeded, want the configuration to be refused")
 	}
-	if !strings.Contains(err.Error(), "cannot be controlled") {
+	if !strings.Contains(err.Error(), "does not control its reasoning") {
 		t.Errorf("the error is %q, want it to name the reason", err)
 	}
 }
@@ -259,6 +260,58 @@ func TestAModelThatCannotThinkIsAskedNotToSendAnything(t *testing.T) {
 		if _, sent := srv.requests[0][key]; sent {
 			t.Errorf("the request sent a %s: %v", key, srv.requests[0])
 		}
+	}
+}
+
+// TestAToggleModelIsSwitchedOff covers the plan's rule: a toggle
+// model that is asked not to think is switched off explicitly, because
+// its template thinks by default.
+func TestAToggleModelIsSwitchedOff(t *testing.T) {
+	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
+	tr := openai.New(openai.Config{
+		BaseURL: srv.URL,
+		Model:   "m",
+		Info: poo.ModelInfo{Reasoning: poo.ReasoningControl{
+			Mode: poo.ReasoningToggle,
+		}},
+		Reasoning: "off",
+	})
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	kwargs, ok := srv.requests[0]["chat_template_kwargs"].(map[string]any)
+	if !ok {
+		t.Fatalf("the request has no chat_template_kwargs: %v", srv.requests[0])
+	}
+	if kwargs["enable_thinking"] != false {
+		t.Errorf("the request's enable_thinking is %v, want false", kwargs["enable_thinking"])
+	}
+}
+
+// TestAModelWithoutAReasoningControlRefusesTheSetting covers the
+// plan's rule: the descriptor holds the rule, and a model that names no
+// reasoning control is asked for none. A setting that asks it to think
+// is a configuration error, and the request never goes out.
+func TestAModelWithoutAReasoningControlRefusesTheSetting(t *testing.T) {
+	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
+	tr := openai.New(openai.Config{
+		BaseURL:   srv.URL,
+		Model:     "m",
+		Info:      poo.ModelInfo{},
+		Reasoning: "low",
+	})
+
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err == nil {
+		t.Fatal("the request succeeded, want the configuration to be refused")
+	}
+	if len(srv.requests) != 0 {
+		t.Errorf("the endpoint got %d requests, want none", len(srv.requests))
 	}
 }
 
