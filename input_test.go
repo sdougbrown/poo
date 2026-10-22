@@ -385,14 +385,22 @@ func TestAFollowUpIsDeliveredAtANaturalStop(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
+	// The settle hook holds the run open, so the follow-up is accepted
+	// while the run can still take it.
+	hook := &blockingBeforeSettle{started: make(chan struct{}), release: make(chan struct{})}
 
-	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	opts := testOptions(t, tr, tool, sink)
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+
+	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	<-hook.started
 	if _, err := s.Send("and then this", poo.FollowUp); err != nil {
 		t.Fatalf("sending the follow-up: %v", err)
 	}
+	close(hook.release)
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
