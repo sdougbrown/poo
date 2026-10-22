@@ -1,12 +1,36 @@
 # Session log v0
 
 A poo session log is an append-only JSONL file: one JSON object per line,
-in the order the records were produced. The log is written with no lock and
-no recovery. This document is the contract a consumer parses.
+in the order the records were produced. This document is the contract a
+consumer parses.
 
 A session log holds one session. The file is created exclusively, so a run
 pointed at a log that already exists fails before it sends a request rather
 than appending a second session to the log.
+
+## Where a session's log lives
+
+A logged session's log is `<dir>/<session_id>.jsonl`, and its lock is
+`<dir>/<session_id>.lock`. The lock is an exclusive `flock`, taken when the
+session is created or loaded and held until the session is closed: a second
+process is refused while the session is live, and the kernel releases the
+lock when the holding process dies. The lock file is never deleted, and a
+lock file with no log beside it is a harmless leftover.
+
+The log is built in a temporary file and renamed into place, so a session
+that was cut short during its construction is never a session: the
+temporary file is left behind, and a prune removes it once it is old.
+
+A log that was cut short in the middle of a record is truncated when the
+session is loaded: the bytes after the last newline are not a record. The
+load then recovers the session, appending the records that resolve what
+the session left open: an `interrupted` result for every tool call without
+one, a denied `permission.answered` for every ask without an answer, a
+`run.settled` with the reason `interrupted` for every run that never
+settled, a `job.ended` with the outcome `interrupted` for every job that
+never ended, and an `input.dropped` with the reason `interrupted` for every
+input that never reached the model. The recovery appends only what is
+missing, so loading a session twice writes nothing twice.
 
 The first record is always `session.created`, and it carries
 `"format": "poo-session-v0"`. A consumer that does not recognise the format
