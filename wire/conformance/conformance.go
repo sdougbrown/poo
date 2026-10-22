@@ -153,6 +153,10 @@ type suite struct {
 	handshakeResult protocol.InitializeResult
 	// settingsCount is how many settings files the suite wrote.
 	settingsCount int
+	// commands is how many commands the suite scripted.
+	commands int
+	// commandSeconds is how long a scripted command runs.
+	commandSeconds int
 }
 
 // Run runs the suite against the target.
@@ -166,13 +170,14 @@ func Run(t *testing.T, target Target) {
 		t.Fatal("conformance: the target has no binary")
 	}
 	s := &suite{
-		t:            t,
-		target:       target,
-		dir:          t.TempDir(),
-		profile:      target.Profile,
-		model:        defaultModel,
-		contextLimit: defaultContextLimit,
-		turns:        defaultTurns,
+		t:              t,
+		target:         target,
+		dir:            t.TempDir(),
+		profile:        target.Profile,
+		model:          defaultModel,
+		contextLimit:   defaultContextLimit,
+		turns:          defaultTurns,
+		commandSeconds: 2,
 	}
 	if s.profile == "" {
 		s.profile = defaultProfile
@@ -219,6 +224,17 @@ func (s *suite) flow(name string, run func()) {
 	s.t.Logf("flow: %s", name)
 	run()
 	s.t.Logf("flow: %s took %s", name, time.Since(start).Round(time.Millisecond))
+}
+
+// boundedCommand returns a command that ends by itself.
+//
+// A command that waits for the suite to end it is the one a killed
+// binary leaves behind: the binary dies, and the command goes on
+// without it. A command that ends by itself leaves nothing behind.
+func (s *suite) boundedCommand() string {
+	s.t.Helper()
+	s.commands++
+	return fmt.Sprintf("sleep %d", s.commandSeconds)
 }
 
 // settings writes a settings file for a flow and returns its path.

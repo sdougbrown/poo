@@ -191,9 +191,10 @@ func (s *suite) jobCancelWakesTheSession() {
 // the run carries on.
 func (s *suite) jobCancelStopsTheJob() {
 	s.t.Helper()
+	command := s.boundedCommand()
 	turns := []Turn{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{
-			"command":    "sleep 30",
+			"command":    command,
 			"background": true,
 		}}}},
 		{Text: "the answer"},
@@ -314,8 +315,11 @@ func (s *suite) lastChange(path string) time.Time {
 // the interrupted run is marked.
 func (s *suite) attachAndScrollback() {
 	s.t.Helper()
+	// The command ends by itself: the binary dies, and the command goes
+	// on without it.
+	command := s.boundedCommand()
 	turns := []Turn{
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "sleep 30"}}}},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 	}
 	endpoint := newProvider(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
@@ -394,8 +398,11 @@ func historyHas(items []protocol.HistoryItem, want protocol.HistoryItem) bool {
 // prompt.
 func (s *suite) resume() {
 	s.t.Helper()
+	// The command ends by itself: the binary dies, and the command goes
+	// on without it.
+	command := s.boundedCommand()
 	turns := []Turn{
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "sleep 30"}}}},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 		{Text: "the answer after the resume"},
 	}
 	endpoint := newProvider(s.t, turns)
@@ -724,8 +731,10 @@ func (s *suite) teardownCloseRacingARun() {
 // in flight: the binary closes the session and ends cleanly.
 func (s *suite) teardownHangUp() {
 	s.t.Helper()
+	// The command is a short one: the run waits for the ask, not for
+	// the command, and the binary hangs up while the ask is pending.
 	turns := []Turn{
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "sleep 30"}}}},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "true"}}}},
 	}
 	c, sessionID := s.open(turns, nil)
 	// The client does not answer the ask, and the run waits for it.

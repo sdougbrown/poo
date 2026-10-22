@@ -430,8 +430,9 @@ func (s *suite) interrupt() {
 		s.t.Logf("skipping the interrupt: the profile %q offers no side-effecting tool", s.profile)
 		return
 	}
+	command := s.boundedCommand()
 	turns := []Turn{
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "sleep 30"}}}},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 		{Text: "the answer after the interrupt"},
 	}
 	c, sessionID := s.open(turns, nil)
@@ -593,8 +594,9 @@ func (s *suite) kill() {
 		s.t.Logf("skipping the kill: the profile %q offers no side-effecting tool", s.profile)
 		return
 	}
+	command := s.boundedCommand()
 	turns := []Turn{
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "sleep 30"}}}},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 	}
 	c, sessionID := s.open(turns, nil)
 
