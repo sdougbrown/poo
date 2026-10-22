@@ -668,3 +668,19 @@ func TestAQueuedFollowUpDoesNotKeepARunFromWaiting(t *testing.T) {
 	}
 	s.Cancel("cleanup")
 }
+
+// TestTheCancelJobToolRejectsTrailingData covers the strict decode: a
+// call's arguments are one JSON value, and bytes after it are refused,
+// not silently ignored.
+func TestTheCancelJobToolRejectsTrailingData(t *testing.T) {
+	tool := pootest.NewJobTool(poo.CancelJobToolName, poo.BackgroundAllowed)
+	if _, err := tool.Prepare(json.RawMessage(`{"job":"j1"} trailing`), poo.PrepareEnv{}); err == nil {
+		t.Error("the call with trailing data was accepted")
+	}
+	if _, err := tool.Prepare(json.RawMessage(`{"job":"j1"}`), poo.PrepareEnv{}); err != nil {
+		t.Errorf("the clean call was refused: %v", err)
+	}
+	if _, err := tool.Prepare(json.RawMessage(`  {"job":"j1"}  `), poo.PrepareEnv{}); err != nil {
+		t.Errorf("the clean call with surrounding space was refused: %v", err)
+	}
+}

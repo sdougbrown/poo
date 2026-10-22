@@ -62,6 +62,19 @@ func (s *Session) Prompt(ctx context.Context, text string, opts ...InputOption) 
 // first request.
 func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, note *DeliveryNote, jobs ...jobResult) (string, error) {
 	s.mu.Lock()
+	// The state was checked under a previous lock hold (Prompt, the
+	// wake paths), but a Close may have landed between that check and
+	// this one. A closed session takes no new run: the records it
+	// writes would land after the final flush, and its drive would run
+	// with no one to cancel it.
+	if s.closed {
+		s.mu.Unlock()
+		return "", ErrSessionClosed
+	}
+	if s.broken {
+		s.mu.Unlock()
+		return "", ErrSessionBroken
+	}
 	runID := NewULID()
 	runCtx, cancel := context.WithCancelCause(ctx)
 	run := &runState{
@@ -976,14 +989,19 @@ func (s *Session) accountInterruptedRequest(run *runState, turn int, resp *respo
 	if resp.usage != nil {
 		return s.writeUsage(run, turn, resp.usage, resp.requestChars)
 	}
-	chars := resp.requestChars
-	for _, block := range resp.content {
-		chars += len(block.Text) + len(block.Name) + len(block.ToolCallID) + len(block.Arguments)
-	}
+	// The estimate is the one a completed turn would have received:
+	// the request plus the assistant message the response would have
+	// produced, calls included, through the same accounting helper.
+	assistant := Message{Role: RoleAssistant, Content: resp.content}
 	for _, call := range resp.calls {
-		chars += len(call.ID) + len(call.Name) + len(call.Arguments)
+		assistant.Content = append(assistant.Content, ContentBlock{
+			Kind:       ContentToolCall,
+			ToolCallID: call.ID,
+			Name:       call.Name,
+			Arguments:  recordArgs(call.Arguments),
+		})
 	}
-	s.addEstimatedChars(run, chars)
+	s.addEstimatedChars(run, resp.requestChars+estimateMessageChars(assistant))
 	return true
 }
 

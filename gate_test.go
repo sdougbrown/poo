@@ -475,3 +475,92 @@ func TestTheCompactionRecordNamesItsFormAndTokens(t *testing.T) {
 			rec.TokensAfter, rec.TokensBefore)
 	}
 }
+
+// forkCaptureCompactor runs the fork once and records what came back.
+type forkCaptureCompactor struct {
+	// gates counts the run's gate passes: the first one opens the
+	// run's first request, and a compactor cannot fork before one.
+	gates       int
+	compactions int
+	msg         poo.Message
+	usage       poo.UsageReport
+}
+
+// ShouldCompact compacts on the run's second gate: the first one opens
+// the run's first request, and a compactor cannot fork before one.
+func (c *forkCaptureCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+	c.gates++
+	return c.gates == 2
+}
+
+// Compact forks one request and records the reply and its usage.
+func (c *forkCaptureCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+	c.compactions++
+	msg, usage, err := fork(ctx, []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "write the handoff"}}}}, 0)
+	if err != nil {
+		return poo.Compaction{}, err
+	}
+	c.msg, c.usage = msg, usage
+	return poo.Compaction{Strategy: "forky"}, nil
+}
+
+// TestACompactorsForkCountsTowardTheRunBudget covers the plan's rule
+// that a fork's usage counts toward MaxRunTokens, not MaxTurns: the
+// fork's usage report lands in the run's token count, and the ceiling
+// fires on accounting that includes it. The ceiling sits just under a
+// million tokens, which only the fork's usage can reach.
+func TestACompactorsForkCountsTowardTheRunBudget(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer", usage: &poo.UsageReport{InputTokens: 10}},
+		{text: "the second answer"},
+	})
+	tr.SetForkTurns(pootest.Turn{Text: "the handoff", InputTokens: 999990, OutputTokens: 10})
+	compactor := &forkCaptureCompactor{}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.Compactor = compactor
+	opts.MaxRunTokens = 1000000
+	// The gate runs on a continue path: the first turn continues, and
+	// the compaction happens before the second request.
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if res.Reason != poo.ReasonBudgetExhausted {
+		t.Errorf("the run settled %q, want budget_exhausted: the fork's usage is what crosses the ceiling", res.Reason)
+	}
+	if res.Detail.Source != "max_run_tokens" {
+		t.Errorf("the settle source is %q, want max_run_tokens", res.Detail.Source)
+	}
+	if res.Turns != 2 {
+		t.Errorf("the run made %d requests, want 2", res.Turns)
+	}
+	// The fork returned the scripted reply and its usage.
+	if compactor.msg.Content[0].Text != "the handoff" {
+		t.Errorf("the fork returned %q, want the handoff", compactor.msg.Content[0].Text)
+	}
+	if compactor.usage.InputTokens != 999990 || compactor.usage.OutputTokens != 10 {
+		t.Errorf("the fork's usage was %d/%d, want 999990/10", compactor.usage.InputTokens, compactor.usage.OutputTokens)
+	}
+	// The compaction itself is recorded.
+	if sink.count("compaction") != 1 {
+		t.Errorf("the log holds %d compaction records, want 1", sink.count("compaction"))
+	}
+	// The fork carried the appended message against the rendered prefix.
+	forks := tr.Forks()
+	if len(forks) != 1 {
+		t.Fatalf("the transport served %d forks, want 1", len(forks))
+	}
+	if len(forks[0].Appended) != 1 || forks[0].Appended[0].Content[0].Text != "write the handoff" {
+		t.Errorf("the fork's appended message is %+v, want the handoff request", forks[0].Appended)
+	}
+}

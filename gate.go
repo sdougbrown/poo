@@ -72,8 +72,10 @@ func (s *Session) gate(run *runState) gateResult {
 					})}}
 				}
 			} else if compacted {
-				// The compaction was applied, and the budget was
-				// rebased onto the new view.
+				// The compaction is recorded, and the budget is
+				// rebased on the estimate. The view change itself is
+				// applied by the stage that validates compactions
+				// (Stage 4); the store keeps the original history.
 				s.rebaseEstimate()
 			}
 			s.transition(StateRequesting)

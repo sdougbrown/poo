@@ -1580,6 +1580,11 @@ func decodeStrictJSON(raw json.RawMessage, into any) error {
 	if err := dec.Decode(into); err != nil {
 		return err
 	}
+	// One value means one value: bytes after it, even valid JSON, are
+	// not arguments the caller wrote.
+	if dec.More() {
+		return errors.New("poo: trailing data after the JSON value")
+	}
 	return nil
 }
 

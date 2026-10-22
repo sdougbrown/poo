@@ -317,7 +317,10 @@ func finalAnswer(sess *poo.Session, res poo.Result) string {
 func runOutput(ctx context.Context, sess *poo.Session, res poo.Result, noWaitJobs bool) (string, error) {
 	if !noWaitJobs {
 		if err := sess.WaitJobs(ctx); err != nil {
-			return "", err
+			// The wait failed, but the run itself may have finished:
+			// its answer is already fixed at settle, so it survives
+			// the failed wait.
+			return finalAnswer(sess, res), err
 		}
 	}
 	return finalAnswer(sess, res), nil

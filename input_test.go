@@ -1804,3 +1804,88 @@ func TestARefusedInputIsNotDrainedBeforeItsQueuedRecord(t *testing.T) {
 		}
 	}
 }
+
+// blockingQueuedSink blocks the input.queued record write, so a test
+// can hold an acceptance in flight while the finalization waits for it.
+type blockingQueuedSink struct {
+	*recordingSink
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+// Append holds the queued record until the test releases it.
+func (s *blockingQueuedSink) Append(ctx context.Context, rec poo.Record) error {
+	if _, ok := rec.(*poo.InputQueued); ok {
+		s.once.Do(func() { close(s.entered) })
+		<-s.release
+	}
+	return s.recordingSink.Append(ctx, rec)
+}
+
+// TestASteerAcceptedDuringAFinalizeIsReportedAsUndelivered covers the
+// plan's rule that an accepted input is never silently lost: a steer
+// whose acceptance record is in flight when the run seals is taken out
+// of the queue, and the settle detail lists it as undelivered.
+func TestASteerAcceptedDuringAFinalizeIsReportedAsUndelivered(t *testing.T) {
+	defer poo.SetRecordWriteBudget(100 * time.Millisecond)()
+	hookStarted := make(chan struct{})
+	release := make(chan struct{})
+	hook := &blockingBeforeSettle{started: hookStarted, release: release}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &blockingQueuedSink{recordingSink: &recordingSink{}, entered: make(chan struct{}), release: make(chan struct{})}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+	// The settle gate is the ordering seam: the run.settling event is
+	// emitted after the queues are closed, so releasing the acceptance
+	// record's write from there lands it in the window where the run
+	// is closed but not yet sealed.
+	settling := make(chan struct{})
+	obs := &settlingObserver{seen: settling}
+	opts.Observers = []poo.Observer{obs}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-hookStarted
+	sent := make(chan struct{})
+	go func() {
+		defer close(sent)
+		if _, err := s.Send("and then this", poo.Steer); err != nil {
+			t.Errorf("sending the steer: %v", err)
+		}
+	}()
+	<-sink.entered
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.Cancel("probe")
+	}()
+	<-settling
+	close(sink.release)
+	<-sent
+	close(release)
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	<-done
+
+	if res.Reason != poo.ReasonCancelled {
+		t.Fatalf("the run settled %q, want cancelled", res.Reason)
+	}
+	if len(res.Detail.UndeliveredInput) != 1 {
+		t.Errorf("the settle detail lists %d undelivered inputs, want 1", len(res.Detail.UndeliveredInput))
+	}
+	if n := sink.count("input.queued"); n != 1 {
+		t.Errorf("the log holds %d input.queued records, want 1", n)
+	}
+	if n := sink.count("input.delivered"); n != 0 {
+		t.Errorf("the log holds %d input.delivered records, want none", n)
+	}
+	if n := len(tr.Requests()); n != 1 {
+		t.Errorf("the run made %d requests, want 1: the steer never reaches the model", n)
+	}
+}

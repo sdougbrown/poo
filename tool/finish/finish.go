@@ -119,12 +119,6 @@ type prepared struct {
 // Summary describes the call.
 func (p prepared) Summary() string { return "finish" }
 
-// Result returns the validated result.
-//
-// The core reads it when the batch completes, so a valid call settles
-// the run as finished.
-func (p prepared) Result() json.RawMessage { return p.result }
-
 // FinishResult returns the validated result.
 //
 // The method is what the core recognizes: a prepared call that carries
