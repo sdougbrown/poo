@@ -167,9 +167,30 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 
 	// The system prompt is rendered once per run, after the before-run
 	// hooks, and it is frozen for the length of the run.
-	if promptText := s.renderSystemPrompt(decisions.edits); promptText != "" {
+	if promptText, promptVariant := s.renderSystemPrompt(decisions.edits); promptText != "" {
 		if s.runWindingDown(run) {
 			return runID, nil
+		}
+		// A prompt that differs from the last one is recorded whole,
+		// with its hash and variant, so a replay never re-renders it.
+		if s.promptChanged(promptText) {
+			if err := s.writeRun(run, &SystemPromptRecord{
+				RecordMeta: NewRecordMeta("system_prompt"),
+				RunID:      runID,
+				Variant:    promptVariant,
+				Text:       promptText,
+				Hash:       hashText(promptText),
+			}); err != nil {
+				if s.runWindingDown(run) {
+					return runID, nil
+				}
+				s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
+					Source: "store",
+					Text:   err.Error(),
+				}))
+				return runID, nil
+			}
+			s.rememberPrompt(promptText)
 		}
 		msg := NewTextMessage(RoleSystem, promptText)
 		msg.Origin = OriginSystem

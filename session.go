@@ -177,6 +177,9 @@ type Session struct {
 	// rendered once, at the start of the run, so a change never
 	// reaches a run that is going.
 	promptVariant string
+	// lastPromptText is the last rendered prompt that was recorded, so
+	// an unchanged prompt is not written again.
+	lastPromptText string
 
 	// waiters are the goroutines waiting for the run to settle.
 	waiters []chan Result

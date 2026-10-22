@@ -285,7 +285,18 @@ func (t *replayNativeTransport) Compact(ctx context.Context, prev poo.Rendered) 
 // recordedSystemPrompts returns the session's rendered prompts, in run
 // order.
 func recordedSystemPrompts(log *Log) []string {
-	var out []string
+	// The system_prompt record carries the whole prompt, so a log that
+	// has one is read from it. An older log that predates the record
+	// keeps the prompt on its system message, which is the fallback.
+	var prompts []string
+	for _, r := range log.Records {
+		if r.Record == "system_prompt" {
+			prompts = append(prompts, r.Text)
+		}
+	}
+	if len(prompts) > 0 {
+		return prompts
+	}
 	for _, r := range log.Records {
 		if r.Record != "message" || r.Origin != "system" {
 			continue
@@ -296,9 +307,9 @@ func recordedSystemPrompts(log *Log) []string {
 				b.WriteString(c.Text)
 			}
 		}
-		out = append(out, b.String())
+		prompts = append(prompts, b.String())
 	}
-	return out
+	return prompts
 }
 
 // recordedCompaction is one compaction a recording holds.

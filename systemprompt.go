@@ -116,10 +116,11 @@ func setPromptVariants(b *prompt.Builder, section string, variants map[string]st
 // The run renders a copy of the session's builder, so the before-run
 // hooks' edits reach the run that is starting and not the next one. The
 // prompt is rendered once, here, and frozen for the length of the run.
-func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) string {
-	b := s.promptCopy()
+// It returns the variant it rendered in too, for the prompt's record.
+func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) (string, string) {
+	b, variant := s.promptCopy()
 	if b == nil {
-		return ""
+		return "", variant
 	}
 	for _, edit := range beforeRun {
 		if edit != nil {
@@ -132,9 +133,9 @@ func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) string {
 	// belongs to the rendered form, not to a raw prompt the consumer
 	// supplied.
 	if raw := s.opts.SystemPrompt; raw != "" && (rendered == raw || rendered == raw+"\n") {
-		return raw
+		return raw, variant
 	}
-	return rendered
+	return rendered, variant
 }
 
 // SetPromptVariant sets the variant the prompt renders in.
@@ -152,17 +153,33 @@ func (s *Session) SetPromptVariant(name string) {
 }
 
 // promptCopy returns a copy of the session's prompt builder, in the
-// variant the session renders in.
+// variant the session renders in, and that variant's name.
 //
 // The copy is what a run renders. A nil builder means the session has
 // no prompt at all.
-func (s *Session) promptCopy() *prompt.Builder {
+func (s *Session) promptCopy() (*prompt.Builder, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.promptBuilder == nil {
-		return nil
+		return nil, s.promptVariant
 	}
-	return s.promptBuilder.WithVariant(s.promptVariant)
+	return s.promptBuilder.WithVariant(s.promptVariant), s.promptVariant
+}
+
+// promptChanged reports whether a rendered prompt differs from the last
+// one written to the record.
+func (s *Session) promptChanged(text string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return text != s.lastPromptText
+}
+
+// rememberPrompt records the prompt that was written, so an unchanged
+// prompt is not written again.
+func (s *Session) rememberPrompt(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastPromptText = text
 }
 
 // applyPromptEdit applies a system-prompt edit to the session's prompt.

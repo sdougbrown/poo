@@ -136,6 +136,23 @@ type RunStarted struct {
 	Jobs []JobResult `json:"jobs,omitempty"`
 }
 
+// SystemPromptRecord records a rendered system prompt.
+//
+// Every rendered prompt that differs from the previous one is written
+// whole, with its hash and the variant it rendered in. Replay uses the
+// recorded text and never re-renders.
+type SystemPromptRecord struct {
+	RecordMeta
+	// RunID identifies the run the prompt belongs to.
+	RunID string `json:"run_id"`
+	// Variant is the variant the prompt rendered in.
+	Variant string `json:"variant,omitempty"`
+	// Text is the full rendered prompt.
+	Text string `json:"text"`
+	// Hash is the hex SHA-256 of the text.
+	Hash string `json:"hash"`
+}
+
 // MessageRecord records one message in the model's history.
 type MessageRecord struct {
 	RecordMeta
