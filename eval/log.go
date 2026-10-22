@@ -7,6 +7,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/sdougbrown/poo"
 )
 
 // LogRecord is one record of a session log, decoded into the fields the
@@ -80,6 +82,15 @@ type LogRecord struct {
 	OutputTokens    int     `json:"output_tokens"`
 	CacheReadTokens *int    `json:"cache_read_tokens"`
 	TTFTMS          float64 `json:"ttft_ms"`
+
+	// The compaction record's fields.
+	//
+	// The compaction itself is kept whole, so a replay applies the
+	// compaction the recording holds and never runs the strategy that
+	// made it.
+	Compaction *poo.Compaction `json:"compaction,omitempty"`
+	Strategy   string          `json:"strategy,omitempty"`
+	Form       string          `json:"form,omitempty"`
 }
 
 // Log is a decoded session log.
