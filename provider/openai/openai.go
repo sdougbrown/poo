@@ -13,7 +13,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,11 +31,24 @@ type Config struct {
 	// APIKey is the bearer token, empty when the endpoint needs none.
 	APIKey string
 	// ToolsMode is how the run asks for tool calls: "native", "text" or
-	// "auto".
+	// "auto". A descriptor that names a mode wins over this one.
 	ToolsMode string
 	// ReasoningEffort is sent as the request's reasoning_effort when it
-	// is set, for endpoints whose models think only when asked to.
+	// is set, for endpoints whose models think only when asked to. A
+	// descriptor that names a reasoning control wins over this one.
 	ReasoningEffort string
+	// Info is the model's descriptor. It names the reasoning control,
+	// the temperature control, the tools mode and the quirks.
+	Info poo.ModelInfo
+	// Reasoning is the reasoning setting: "off", "low", "medium",
+	// "high", or a number of thinking tokens.
+	Reasoning string
+	// Sampling holds the sampling overrides. They win over the
+	// descriptor's own defaults, field by field.
+	Sampling poo.Sampling
+	// Logger receives the transport's notes, such as a degenerate
+	// stream. A nil logger drops them.
+	Logger *slog.Logger
 	// OnAttempt is called for every attempt that failed, so a consumer
 	// can write the attempt to the log.
 	OnAttempt func(Attempt)
@@ -56,6 +71,10 @@ type Transport struct {
 	http *http.Client
 	// policy is the retry policy.
 	policy retryPolicy
+	// quirks are the profiles the descriptor named, in its order.
+	quirks []quirkProfile
+	// logger receives the transport's notes.
+	logger *slog.Logger
 }
 
 // New returns a transport.
@@ -75,7 +94,23 @@ func New(cfg Config) *Transport {
 	if len(cfg.Backoff) > 0 {
 		policy.backoff = cfg.Backoff
 	}
-	return &Transport{cfg: cfg, http: client, policy: policy}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	tr := &Transport{cfg: cfg, http: client, policy: policy, logger: logger}
+	tr.quirks = quirksFor(cfg.Info.Quirks, logger)
+	return tr
+}
+
+// toolsMode returns how the run asks for tool calls.
+//
+// A descriptor that names a mode wins over the configured one.
+func (t *Transport) toolsMode() string {
+	if mode := t.cfg.Info.Tools.Mode; mode != "" {
+		return string(mode)
+	}
+	return t.cfg.ToolsMode
 }
 
 // chatRequest is the wire shape of a chat completion request.
@@ -86,12 +121,50 @@ type chatRequest struct {
 	// MaxTokens is always sent, because some local servers default to 512.
 	MaxTokens int  `json:"max_tokens"`
 	Stream    bool `json:"stream"`
-	// ReasoningEffort asks a thinking model to think. It is omitted when
-	// unset, so an endpoint that does not know the field never sees it.
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// StreamOptions asks for the usage chunk, which some servers honour
 	// and others ignore.
 	StreamOptions *streamOptions `json:"stream_options,omitempty"`
+	// Params holds the parameters whose names the endpoint chooses: the
+	// reasoning parameter, the sampling parameters and whatever a
+	// quirk adds. They are written after the fields above, in name
+	// order, so the same request always has the same body.
+	Params map[string]json.RawMessage `json:"-"`
+}
+
+// MarshalJSON writes the request, with the named parameters merged into
+// the top level.
+//
+// The parameters are written last and in name order, so the body of two
+// requests that ask for the same thing is the same bytes.
+func (r chatRequest) MarshalJSON() ([]byte, error) {
+	type plain chatRequest
+	body, err := json.Marshal(plain(r))
+	if err != nil {
+		return nil, err
+	}
+	if len(r.Params) == 0 {
+		return body, nil
+	}
+	names := make([]string, 0, len(r.Params))
+	for name := range r.Params {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var b bytes.Buffer
+	b.Write(body[:len(body)-1])
+	for _, name := range names {
+		b.WriteByte(',')
+		key, err := json.Marshal(name)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(key)
+		b.WriteByte(':')
+		b.Write(r.Params[name])
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
 }
 
 // streamOptions asks for a final usage chunk.
@@ -299,12 +372,13 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 	}
 
 	return &streamReader{
-		body:    resp.Body,
-		scanner: newSSEScanner(br),
-		parser:  newParser(t.cfg.ToolsMode, ""),
-		ctx:     ctx,
-		cancel:  cancel,
-		started: started,
+		body:        resp.Body,
+		scanner:     newSSEScanner(br),
+		filters:     t.textFilters(),
+		deferParsed: t.sendsTools(),
+		ctx:         ctx,
+		cancel:      cancel,
+		started:     started,
 	}, nil
 }
 
@@ -526,48 +600,6 @@ func ChatURL(baseURL string) string {
 		return base
 	}
 	return base + "/chat/completions"
-}
-
-// buildBody turns a core request into the wire payload.
-func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
-	out := chatRequest{
-		Model:           req.Model,
-		MaxTokens:       req.MaxTokens,
-		Stream:          true,
-		ReasoningEffort: t.cfg.ReasoningEffort,
-		// The usage chunk is asked for in every mode, because the log's
-		// usage record needs the token accounting and a server that
-		// reports it on its own still ignores the field.
-		StreamOptions: &streamOptions{IncludeUsage: true},
-	}
-
-	for _, m := range req.Messages {
-		cm, err := convertMessage(m)
-		if err != nil {
-			return nil, err
-		}
-		out.Messages = append(out.Messages, cm)
-	}
-
-	// In native mode the tools go in the request, and the model answers
-	// with tool_calls. In text mode the tools are described in the
-	// prompt instead, and the model answers with text that the parser
-	// reads. In auto mode both happen.
-	if t.cfg.ToolsMode == "native" || t.cfg.ToolsMode == "auto" {
-		for _, spec := range req.Tools {
-			var ct chatTool
-			ct.Type = "function"
-			ct.Function.Name = spec.Name
-			ct.Function.Description = spec.Description
-			ct.Function.Parameters = spec.Schema
-			if len(ct.Function.Parameters) == 0 {
-				ct.Function.Parameters = json.RawMessage(`{"type":"object","properties":{}}`)
-			}
-			out.Tools = append(out.Tools, ct)
-		}
-	}
-
-	return json.Marshal(out)
 }
 
 // convertMessage turns a core message into the wire shape.

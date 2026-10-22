@@ -69,7 +69,10 @@ type streamChunk struct {
 type streamReader struct {
 	body    io.ReadCloser
 	scanner *bufio.Scanner
-	parser  *parser
+	// filters are the text filters the quirks added, in order. The
+	// parser is the last of them, so it reads the text the others
+	// passed on.
+	filters []textFilter
 	// ctx is the request's context. A stream that ends because the
 	// context ended reports the context's error, not a network failure.
 	ctx context.Context
@@ -99,6 +102,16 @@ type streamReader struct {
 	// usage holds the usage report, so a stream that fails before its
 	// usage chunk arrives can still report what it knows.
 	usage *poo.UsageReport
+	// sawText reports that the response carried text.
+	sawText bool
+	// sawToolCall reports that the response carried a tool call.
+	sawToolCall bool
+	// deferParsed reports that the calls the model writes as text wait
+	// for a native call that would win over them.
+	deferParsed bool
+	// deferred holds the calls the model wrote as text, waiting to see
+	// whether the response carries a native call.
+	deferred []poo.StreamEvent
 }
 
 // newSSEScanner returns a scanner for SSE lines. A single event line can
@@ -242,7 +255,17 @@ func (r *streamReader) close() (poo.StreamEvent, error) {
 		// The event ended the stream. The usage is still reported.
 		return r.fail(err)
 	}
-	r.pending = append(r.pending, r.parser.flush()...)
+	// The calls the model wrote as text wait for a native call that
+	// would win over them. The endpoint sent one, so the calls the
+	// model wrote are not the ones it made.
+	flushed := flushFilters(r.filters)
+	if r.sawToolCall {
+		flushed = withoutToolCalls(flushed)
+	} else {
+		r.pending = append(r.pending, r.deferred...)
+	}
+	r.deferred = nil
+	r.pending = append(r.pending, flushed...)
 	r.pending = r.appendUsage(r.pending)
 	if ev, ok := r.take(); ok {
 		return ev, nil
@@ -251,6 +274,21 @@ func (r *streamReader) close() (poo.StreamEvent, error) {
 		return poo.StreamEvent{}, r.err
 	}
 	return poo.StreamEvent{}, io.EOF
+}
+
+// withoutToolCalls drops the tool call events from a list of events.
+//
+// The endpoint sent a call of its own, so a call the model wrote as
+// text is not one the model made.
+func withoutToolCalls(events []poo.StreamEvent) []poo.StreamEvent {
+	out := make([]poo.StreamEvent, 0, len(events))
+	for _, ev := range events {
+		if ev.Kind == "tool_call" {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 // fail ends the stream with a failure.
@@ -350,17 +388,19 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 
 		if delta.Content != "" {
 			r.markFirstToken()
-			if r.parser.on() {
-				// The parser owns the text: it strips the call markup
-				// and emits the prose itself. Emitting the raw delta as
-				// well would double the prose and leave the markup in
-				// the model's history.
-				out = append(out, r.parser.feed(delta.Content)...)
-			} else {
-				out = append(out, poo.StreamEvent{
-					Kind:  "delta",
-					Delta: &poo.Delta{Kind: "text", Text: delta.Content},
-				})
+			r.sawText = true
+			// The filters own the text: they strip the call markup and
+			// the thinking tags, and they emit the prose themselves.
+			// Emitting the raw delta as well would double the prose and
+			// leave the markup in the model's history.
+			for _, ev := range applyFilters(r.filters, delta.Content) {
+				if ev.Kind == "tool_call" && r.deferParsed {
+					// The call the model wrote as text waits: a native
+					// call wins over it.
+					r.deferred = append(r.deferred, ev)
+					continue
+				}
+				out = append(out, ev)
 			}
 		}
 
@@ -368,6 +408,10 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 			// A tool call is the first token too: a turn that only asks
 			// for a tool call still has a time to its first token.
 			r.markFirstToken()
+			r.sawToolCall = true
+			// The native call wins over the calls the model wrote as
+			// text, so the parsed ones are dropped.
+			r.deferred = nil
 			complete := isCompleteJSON(tc.Function.Arguments)
 			out = append(out, poo.StreamEvent{
 				Kind: "tool_call",

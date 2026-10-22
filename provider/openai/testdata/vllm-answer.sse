@@ -1,0 +1,12 @@
+data: {"id":"chatcmpl-3f1c9b0a7d2e4c58a1b6c0d9e2f3a4b5","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3f1c9b0a7d2e4c58a1b6c0d9e2f3a4b5","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{"content":"The answer "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3f1c9b0a7d2e4c58a1b6c0d9e2f3a4b5","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{"content":"is 42."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3f1c9b0a7d2e4c58a1b6c0d9e2f3a4b5","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-3f1c9b0a7d2e4c58a1b6c0d9e2f3a4b5","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":8,"prompt_tokens":120,"total_tokens":128,"completion_tokens_details":{"accepted_prediction_tokens":0,"reasoning_tokens":0,"rejected_prediction_tokens":0,"text_tokens":8},"prompt_tokens_details":{"cached_tokens":96}}}
+
+data: [DONE]
+
