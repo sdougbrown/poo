@@ -472,11 +472,25 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		results:     map[string]ToolResult{},
 		messageIDs:  ids,
 		repeats:     newRepeatCounter(),
-		events:      newEventBus(),
 		noticeArmed: true,
 		jobs:        map[string]*jobState{},
 		jobQueued:   make(chan struct{}, 1),
 	}
+	// A construction that fails rolls back everything it started. The
+	// event bus's reporter is a goroutine, and no session is returned
+	// for the caller to close.
+	complete := false
+	defer func() {
+		if complete {
+			return
+		}
+		if s.events != nil {
+			s.events.stop()
+		}
+		if s.jobCancel != nil {
+			s.jobCancel(nil)
+		}
+	}()
 	s.est.charsPerToken = CharsPerToken
 	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
 
@@ -491,8 +505,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	// now, so their own sections are in it too.
 	s.promptBuilder = buildPrompt(&s.opts)
 
-	// The observers start before anything can emit an event, and they
-	// are stopped if the construction fails.
+	// The observers start before anything can emit an event, and the
+	// bus's reporter starts with them.
+	s.events = newEventBus()
 	for _, o := range opts.Observers {
 		s.events.addObserver(o)
 	}
@@ -504,15 +519,14 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	// fails leaves nothing written.
 	buffered, err := s.runSessionStart()
 	if err != nil {
-		s.events.stop()
 		return nil, err
 	}
 	for _, rec := range buffered {
 		if err := s.write(context.Background(), rec); err != nil {
-			s.events.stop()
 			return nil, &ErrSessionInit{Cause: err}
 		}
 	}
+	complete = true
 	return s, nil
 }
 

@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -754,4 +755,42 @@ func TestTheObserverDropDiagnosticIsRecordOnly(t *testing.T) {
 		}
 	}
 	close(observer.release)
+}
+
+// fixBadBackgroundTool defines the reserved background argument, so its
+// registration fails.
+type fixBadBackgroundTool struct{ echoTool }
+
+// Spec describes the bad tool.
+func (t *fixBadBackgroundTool) Spec() poo.ToolSpec {
+	spec := t.echoTool.Spec()
+	spec.Background = poo.BackgroundAllowed
+	spec.Schema = json.RawMessage(`{"properties":{"background":{"type":"boolean"}}}`)
+	return spec
+}
+
+// fixReporterGoroutines counts the event bus's reporter goroutines.
+func fixReporterGoroutines() int {
+	b := make([]byte, 1<<20)
+	n := runtime.Stack(b, true)
+	return strings.Count(string(b[:n]), "(*eventBus).reportDrops(")
+}
+
+// TestAFailedNewLeavesNoReporterGoroutine covers the plan's construction
+// rollback: a New that fails stops everything it started, including the
+// event bus's reporter.
+func TestAFailedNewLeavesNoReporterGoroutine(t *testing.T) {
+	before := fixReporterGoroutines()
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Tools["echo"] = &fixBadBackgroundTool{}
+	for i := 0; i < 5; i++ {
+		if _, err := poo.New(opts); err == nil {
+			t.Fatal("the bad tool was accepted")
+		}
+	}
+	runtime.Gosched()
+	if after := fixReporterGoroutines(); after != before {
+		t.Errorf("a failed New leaked %d reporter goroutine(s)", after-before)
+	}
 }
