@@ -242,9 +242,9 @@ func (s *Session) nextHandle() string {
 // parse as a complete JSON object and pass Prepare. An incomplete call
 // is skipped with a visible result and does not count as processed.
 //
-// The plan validates every call, so the repeat counters are asked about
-// the calls in the model order and a call that failed its validation is
-// counted toward the near key before the batch runs.
+// The plan validates every call, so a call that failed its validation
+// is known before its repeat counts are taken, and is counted toward
+// the near key.
 func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated bool) []callPlan {
 	var plans []callPlan
 	for i, call := range calls {
@@ -255,8 +255,8 @@ func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated
 			plans = append(plans, plan)
 			continue
 		}
-		// The call is validated now, so the repeat counters know
-		// which calls failed before the batch runs.
+		// The call is validated now, so the batch knows which calls
+		// failed before it counts them.
 		tool, ok := s.opts.Tools[call.Name]
 		if !ok {
 			plans = append(plans, plan)
@@ -573,10 +573,6 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		s.recordResult(run, turn, handle, call.Name, call.ID, *decision.Result, OutcomeOK)
 		return
 	}
-
-	// The repeat counters were asked about the call before the batch
-	// ran, so the counts the policy slot sees are the ones the plan
-	// names.
 
 	// A call that becomes a job returns at once, and its result
 	// arrives later as an input. An interrupt that arrived after the

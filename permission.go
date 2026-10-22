@@ -8,42 +8,83 @@ import (
 
 // PermissionAsk identifies a call waiting for authorization.
 type PermissionAsk struct {
-	AskID       string
-	Tool        string
-	Summary     string
-	Class       ToolClass
-	Reason      string
+	// AskID names the ask. A client answers by it.
+	AskID string
+	// Tool is the name of the tool the model called.
+	Tool string
+	// Summary describes the call.
+	Summary string
+	// Class is the tool's class.
+	Class ToolClass
+	// Reason is why the call is being asked about: "policy" or
+	// "doom_loop".
+	Reason string
+	// RepeatCount holds the doom loop's counts, and is nil for a policy
+	// ask.
 	RepeatCount *RepeatCounts
 }
 
 // PermissionAnswer is the terminal outcome of a permission request.
 type PermissionAnswer struct {
-	AskID      string
-	Decision   string
+	// AskID names the ask the answer resolves.
+	AskID string
+	// Decision is "allow" or "deny".
+	Decision string
+	// AnsweredBy names who answered: an Asker, "fallback" for the
+	// chain's fallback, or "cancelled" for a run that ended.
 	AnsweredBy string
+	// Provenance is how the ask was resolved: "answered", "timeout",
+	// "default", "cancelled" or "interrupted".
 	Provenance string
-	Reason     string
+	// Reason is why the call was being asked about.
+	Reason string
 }
 
+// The provenances a permission answer can carry.
 const (
-	ProvenanceAnswered    = "answered"
-	ProvenanceTimeout     = "timeout"
-	ProvenanceDefault     = "default"
-	ProvenanceCancelled   = "cancelled"
+	// ProvenanceAnswered means an Asker answered the ask.
+	ProvenanceAnswered = "answered"
+	// ProvenanceTimeout means the chain's deadline ran out.
+	ProvenanceTimeout = "timeout"
+	// ProvenanceDefault means the chain had no answer to give, and the
+	// fallback decided.
+	ProvenanceDefault = "default"
+	// ProvenanceCancelled means the run ended while the ask was pending.
+	ProvenanceCancelled = "cancelled"
+	// ProvenanceInterrupted means an interrupt ended the activity while
+	// the ask was pending.
 	ProvenanceInterrupted = "interrupted"
-	ReasonPolicy          = "policy"
-	ReasonDoomLoop        = "doom_loop"
 )
 
-// PermissionReporter records policy outcomes and resets allowed loops.
-// Core also implements PermissionRequests so the chain and seal share
-// the same pending request.
+// The reasons a call is being asked about.
+const (
+	// ReasonPolicy means a policy rule asked about the call.
+	ReasonPolicy = "policy"
+	// ReasonDoomLoop means the doom loop asked about the call.
+	ReasonDoomLoop = "doom_loop"
+)
+
+// PermissionReporter is the policy slot's seam to the core.
+//
+// The core hands the slot a reporter when it calls the slot. The
+// reporter writes the ask and answer records and publishes their events,
+// so a policy engine never publishes an event itself. It also clears a
+// call's repeat counters, which is how a doom loop the policy allowed
+// starts over.
+//
+// The core's reporter also implements PermissionRequests, so the chain
+// and the finalization share the run's pending request.
 type PermissionReporter interface {
+	// Asked reports that the run is waiting for an answer.
 	Asked(PermissionAsk)
+	// Answered reports the answer that resolved the ask.
 	Answered(PermissionAnswer)
+	// ResetRepeats clears the repeat counters of the call with the
+	// given handle.
 	ResetRepeats(handle string)
 }
 
+// permissionReporter is the core's side of the policy slot's seam.
 type permissionReporter struct {
 	session *Session
 	run     *runState
@@ -65,6 +106,10 @@ func (r *permissionReporter) BeginPermission(ask PermissionAsk, opts PermissionR
 	return r.session.beginPermission(r.run, ask, opts)
 }
 
+// beginPermission registers a request with the run and writes its ask
+// record. The request is registered under the session's lock, so the
+// seal either sees it or refuses it, and a request that arrives after
+// the seal resolves as cancelled without writing anything.
 func (s *Session) beginPermission(run *runState, ask PermissionAsk, opts PermissionRequestOptions) *PermissionRequest {
 	p := NewPermissionRequest(ask, opts)
 	p.logDrop = func(in PermissionInput) {
@@ -89,12 +134,16 @@ func (s *Session) beginPermission(run *runState, ask PermissionAsk, opts Permiss
 	return p
 }
 
+// reportPermissionAsked registers an ask with the run and records it.
 func (s *Session) reportPermissionAsked(run *runState, ask PermissionAsk) {
 	if run != nil {
 		s.beginPermission(run, ask, PermissionRequestOptions{Context: run.ctx})
 	}
 }
 
+// reportPermissionAnswered resolves the ask's request and records its
+// answer. An answer for an ask that already resolved is dropped, and one
+// that arrives after the seal is inert.
 func (s *Session) reportPermissionAnswered(run *runState, answer PermissionAnswer) {
 	if run == nil {
 		return
@@ -121,7 +170,13 @@ func (s *Session) reportPermissionAnswered(run *runState, answer PermissionAnswe
 		}
 	}
 	if p != nil {
-		p.Send(PermissionInput{Kind: PermissionPolicyAnswer, Answer: answer})
+		select {
+		case <-p.Done():
+			// The request resolved already. The echo needs its record,
+			// not a second resolution.
+		default:
+			p.Send(PermissionInput{Kind: PermissionPolicyAnswer, Answer: answer})
+		}
 	}
 	s.mu.Unlock()
 	if p != nil {

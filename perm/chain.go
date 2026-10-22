@@ -97,8 +97,19 @@ func (c *chain) askReported(ctx context.Context, ask Ask, reporter poo.Permissio
 		}
 		c.attempt(chainCtx, ctx, ask, asker, request, deadline)
 	}
-	request.Send(poo.PermissionInput{Kind: poo.PermissionExhausted})
+	offer(request, poo.PermissionInput{Kind: poo.PermissionExhausted})
 	return resolutionOf(request)
+}
+
+// offer sends an input the chain owns, unless the request has already
+// resolved. The chain hands its terminal answer back through the
+// reporter, and that echo is not a stale input.
+func offer(p *poo.PermissionRequest, in poo.PermissionInput) {
+	select {
+	case <-p.Done():
+	default:
+		p.Send(in)
+	}
 }
 
 func resolutionOf(p *poo.PermissionRequest) resolution {
@@ -161,14 +172,15 @@ func (c *chain) attempt(chainCtx, runCtx context.Context, ask Ask, asker Asker, 
 	for {
 		select {
 		case deadline := <-budgetReady:
-			p.Send(poo.PermissionInput{Kind: poo.PermissionBudget, Attempt: token, Deadline: deadline})
+			offer(p, poo.PermissionInput{Kind: poo.PermissionBudget, Attempt: token, Deadline: deadline})
 			timer = c.clock.After(deadline.Sub(c.clock.Now()))
 			close(proceed)
 		case <-finished:
-			p.Send(poo.PermissionInput{Kind: poo.PermissionDeferred, Attempt: token})
+			// The worker delivered its answer or its deferral before it
+			// ended, so the chain has nothing to add.
 			return
 		case <-timer:
-			p.Send(poo.PermissionInput{Kind: poo.PermissionAttemptExpired, Attempt: token})
+			offer(p, poo.PermissionInput{Kind: poo.PermissionAttemptExpired, Attempt: token})
 			return
 		case <-p.Done():
 			return
@@ -180,7 +192,7 @@ func (c *chain) attempt(chainCtx, runCtx context.Context, ask Ask, asker Asker, 
 					kind = poo.PermissionInterrupt
 				}
 			}
-			p.Send(poo.PermissionInput{Kind: kind})
+			offer(p, poo.PermissionInput{Kind: kind})
 			return
 		}
 	}

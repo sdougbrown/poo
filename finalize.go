@@ -495,8 +495,14 @@ func (s *Session) inFlightLocked(run *runState) int {
 // The caller holds the session's lock, and the caller releases it.
 func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) {
 	run.sealed = true
+	// A request that already resolved keeps its answer: the seal only
+	// ends the ones still pending.
 	for _, ask := range run.asks {
-		ask.Send(PermissionInput{Kind: PermissionSeal})
+		select {
+		case <-ask.Done():
+		default:
+			ask.Send(PermissionInput{Kind: PermissionSeal})
+		}
 	}
 	// A call record whose write the finalization stopped waiting for is
 	// ended here, so the record cannot land after run.settled. The claim

@@ -8,41 +8,70 @@ import (
 )
 
 // PermissionInput is a message to a pending permission request.
-// Answers and deadlines name the attempt that produced them.
+//
+// Answers and deadlines name the attempt that produced them, so an
+// input for an attempt that already ended is dropped instead of applied.
 type PermissionInput struct {
-	Kind     PermissionInputKind
-	Attempt  uint64
+	// Kind is the transition the input asks for.
+	Kind PermissionInputKind
+	// Attempt is the token of the attempt the input belongs to.
+	Attempt uint64
+	// Deadline is the attempt's deadline, as the input was produced
+	// under.
 	Deadline time.Time
-	Answer   PermissionAnswer
+	// Answer is the answer an explicit or policy input carries.
+	Answer PermissionAnswer
 }
 
 // PermissionInputKind identifies a permission state transition.
 type PermissionInputKind uint8
 
 const (
+	// PermissionAttempt starts an Asker's attempt. Deadline is the
+	// attempt's deadline.
 	PermissionAttempt PermissionInputKind = iota
+	// PermissionBudget narrows the attempt to the Asker's own budget.
 	PermissionBudget
+	// PermissionExplicitAnswer is an Asker's answer to an attempt.
 	PermissionExplicitAnswer
+	// PermissionAttemptExpired reports that the attempt's budget ran out.
 	PermissionAttemptExpired
+	// PermissionDeferred reports that the Asker could not answer, so the
+	// chain moves on.
 	PermissionDeferred
+	// PermissionChainExpired reports that the chain's deadline ran out.
 	PermissionChainExpired
+	// PermissionExhausted reports that the chain had no answer to give.
 	PermissionExhausted
+	// PermissionCancel reports that the run ended.
 	PermissionCancel
+	// PermissionInterrupt reports that an interrupt ended the activity.
 	PermissionInterrupt
+	// PermissionSeal reports that the finalization sealed the run.
 	PermissionSeal
+	// PermissionPolicyAnswer is the policy's deterministic outcome.
 	PermissionPolicyAnswer
 )
 
 // PermissionRequestOptions supplies the chain's clock, deadline and fallback.
 type PermissionRequestOptions struct {
-	Context  context.Context
-	Now      func() time.Time
+	// Context is the run's context. A cancelled context interrupts the
+	// request.
+	Context context.Context
+	// Now reads the time the request measures its deadlines with.
+	Now func() time.Time
+	// Deadline is the chain's deadline.
 	Deadline time.Time
+	// Fallback is the decision when the chain is exhausted. Only
+	// "allow" allows; anything else denies.
 	Fallback string
 }
 
-// PermissionRequest owns one pending-to-resolved transition. The run and
-// the policy share this value; neither keeps a second resolution state.
+// PermissionRequest owns one ask from pending to resolved.
+//
+// The run and the policy share this value; neither keeps a second
+// resolution state. The finalization seals it, and its records have one
+// writer.
 type PermissionRequest struct {
 	mu              sync.Mutex
 	options         PermissionRequestOptions
@@ -52,7 +81,8 @@ type PermissionRequest struct {
 	active          bool
 	answer          *PermissionAnswer
 	done            chan struct{}
-	logDrop         func(PermissionInput)
+	// logDrop reports an input that was dropped as stale.
+	logDrop func(PermissionInput)
 
 	// io serializes the request's records, including seal cleanup. A
 	// submitted append is never abandoned or retried by another writer.
