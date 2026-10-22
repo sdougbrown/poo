@@ -1011,10 +1011,16 @@ func (s *Session) Close() error {
 	// is written while the store is still open.
 	s.closeJobs()
 	s.events.stop()
+	var err error
 	if s.opts.Sink != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), s.recordBudget())
 		defer cancel()
-		return s.opts.Sink.Flush(ctx)
+		err = s.opts.Sink.Flush(ctx)
 	}
-	return nil
+	// The dispatcher ends without a wait: a handler that blocks is the
+	// consumer's, and it never holds the close up.
+	if s.logs != nil {
+		s.logs.stop()
+	}
+	return err
 }

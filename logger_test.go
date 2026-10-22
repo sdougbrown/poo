@@ -182,6 +182,9 @@ func TestACandidateAfterTheCommitIsLogged(t *testing.T) {
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the late candidate changed the run to %q, want end_turn", res.Reason)
 	}
+	waitFor(t, "the late candidate", func() bool {
+		return len(capture.find("finalize candidate after commit point")) == 1
+	})
 	got := capture.find("finalize candidate after commit point")
 	if len(got) != 1 {
 		t.Fatalf("the logger holds %d late candidates, want 1", len(got))

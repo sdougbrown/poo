@@ -163,6 +163,10 @@ type Session struct {
 	// noticeArmed reports that the context notice may fire. The notice
 	// re-arms when the estimate drops back below the notice ratio.
 	noticeArmed bool
+	// log is the session's logger, when the consumer supplied one.
+	log *slog.Logger
+	// logs is the non-blocking dispatcher behind log.
+	logs *logDispatcher
 	// promptBuilder holds the sections the system prompt is assembled
 	// from. A run renders a copy of it, so a run's prompt may change
 	// without the session's prompt changing.
@@ -571,6 +575,10 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		}
 	}()
 	s.est.charsPerToken = CharsPerToken
+	if opts.Logger != nil {
+		s.logs = newLogDispatcher(opts.Logger.Handler())
+		s.log = slog.New(s.logs.handler())
+	}
 	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
 
 	// The job tools are the core's own, and they are registered
