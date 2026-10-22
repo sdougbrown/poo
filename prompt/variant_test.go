@@ -76,20 +76,49 @@ func TestAVariantOnlySectionRendersNothingByDefault(t *testing.T) {
 	}
 }
 
-// TestSetKeepsTheAlternatives covers the rule that the default text and
-// the alternatives are texts of their own: setting the default text
-// does not take the alternatives away.
-func TestSetKeepsTheAlternatives(t *testing.T) {
+// TestSetDefaultKeepsTheAlternatives covers the rule that an earlier
+// layer contributes a default and its alternatives together.
+func TestSetDefaultKeepsTheAlternatives(t *testing.T) {
 	b := prompt.New(variantEnv("small-local"))
-	b.Set("base", "the first base")
+	b.SetDefault("base", "the first base")
 	b.SetVariant("base", "small-local", "the small local base")
-	b.Set("base", "the second base")
+	b.SetDefault("base", "the second base")
 
 	if got := b.WithVariant("").Render(); got != "the second base\n" {
 		t.Errorf("the prompt is %q, want the second base", got)
 	}
 	if got := b.Render(); got != "the small local base\n" {
 		t.Errorf("the prompt in the variant is %q, want the small local base", got)
+	}
+}
+
+// TestSetOverridesTheAlternatives covers the plan's merge order: a
+// later layer's Set wins over the section's alternative.
+func TestSetOverridesTheAlternatives(t *testing.T) {
+	b := prompt.New(variantEnv("small-local"))
+	b.SetDefault("base", "the default base")
+	b.SetVariant("base", "small-local", "the small local base")
+	b.Set("base", "the later base")
+
+	if got := b.Render(); got != "the later base\n" {
+		t.Errorf("the prompt in the variant is %q, want the later base", got)
+	}
+	if got := b.WithVariant("").Render(); got != "the later base\n" {
+		t.Errorf("the prompt is %q, want the later base", got)
+	}
+}
+
+// TestInsertOverridesTheAlternatives covers the plan's merge order for
+// a later layer's Insert.
+func TestInsertOverridesTheAlternatives(t *testing.T) {
+	b := prompt.New(variantEnv("small-local"))
+	b.SetDefault("base", "the default base")
+	b.SetVariant("base", "small-local", "the small local base")
+	b.Set("catalog", "the catalog")
+	b.Insert("base", "base", "the other base")
+
+	if got := b.Render(); got != "the other base\n\nthe catalog\n" {
+		t.Errorf("the prompt in the variant is %q, want the other base and the catalog", got)
 	}
 }
 
@@ -187,23 +216,6 @@ func TestRemoveVariantInTheDefaultNameTakesTheDefaultText(t *testing.T) {
 	want := "the small local base\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
-	}
-}
-
-// TestInsertKeepsTheAlternatives covers the rule that inserting a
-// section sets its default text and keeps the alternatives it offers.
-func TestInsertKeepsTheAlternatives(t *testing.T) {
-	b := prompt.New(variantEnv("small-local"))
-	b.Set("base", "the default base")
-	b.SetVariant("base", "small-local", "the small local base")
-	b.Set("catalog", "the catalog")
-	b.Insert("base", "base", "the other base")
-
-	if got := b.WithVariant("").Render(); got != "the other base\n\nthe catalog\n" {
-		t.Errorf("the prompt is %q, want the other base and the catalog", got)
-	}
-	if got := b.Render(); got != "the small local base\n\nthe catalog\n" {
-		t.Errorf("the prompt in the variant is %q, want the small local base and the catalog", got)
 	}
 }
 

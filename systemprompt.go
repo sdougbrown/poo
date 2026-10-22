@@ -82,7 +82,7 @@ func buildPrompt(opts *Options) *prompt.Builder {
 			if !ok {
 				continue
 			}
-			b.Set(prompt.ToolSection(name), contributor.PromptSection(env))
+			b.SetDefault(prompt.ToolSection(name), contributor.PromptSection(env))
 			if variantContributor, ok := tool.(PromptVariantContributor); ok {
 				setPromptVariants(b, prompt.ToolSection(name), variantContributor.PromptVariants(env))
 			}

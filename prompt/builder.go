@@ -78,20 +78,35 @@ func (b *Builder) WithVariant(name string) *Builder {
 	return out
 }
 
-// Set replaces a section's default text.
+// Set replaces a section's text, whatever variant the prompt renders
+// in.
+//
+// A later layer wins over an earlier one: setting a section takes its
+// alternatives away, so the text is the section's text in every
+// variant. A tool that contributes a default and its alternatives uses
+// SetDefault instead.
 //
 // A section that is not there yet is added. A section the default order
 // knows goes at its place in that order, and a section of the
 // consumer's own goes last, after the sections already there.
 //
-// The alternatives the section offers are kept: the default text and
-// the alternatives are texts of their own, and setting one of them
-// does not take the others away.
-//
 // The text appended to the section goes away with it, because the
-// appended text belongs to the section and not to one of its
-// alternatives.
+// appended text belongs to the section.
 func (b *Builder) Set(name, text string) {
+	b.dropReplacement()
+	b.setDefault(name, Content{Text: text})
+	b.clearVariants(name)
+	delete(b.extra, name)
+	b.place(name)
+}
+
+// SetDefault contributes a section's default text and keeps the
+// alternatives it offers.
+//
+// It is the mutation an earlier layer uses when it brings a section
+// together with its variants. A later layer's Set replaces the whole
+// section.
+func (b *Builder) SetDefault(name, text string) {
 	b.dropReplacement()
 	b.setDefault(name, Content{Text: text})
 	delete(b.extra, name)
@@ -118,15 +133,26 @@ func (b *Builder) Append(name, text string) {
 	b.extra[name] += text
 }
 
-// SetRender sets a section's default text to a function of the
-// environment.
+// SetRender sets a section's text to a function of the environment,
+// whatever variant the prompt renders in.
 //
 // The function is called every time the prompt is rendered, so the
 // section follows the environment the prompt is rendered in.
 //
-// The alternatives the section offers are kept, as they are when the
-// default text is set.
+// As Set does, it replaces the whole section: the alternatives the
+// section offered go away. SetRenderDefault contributes a default and
+// keeps them.
 func (b *Builder) SetRender(name string, render func(Env) string) {
+	b.dropReplacement()
+	b.setDefault(name, Content{Render: render})
+	b.clearVariants(name)
+	delete(b.extra, name)
+	b.place(name)
+}
+
+// SetRenderDefault contributes a section's default render and keeps the
+// alternatives it offers.
+func (b *Builder) SetRenderDefault(name string, render func(Env) string) {
 	b.dropReplacement()
 	b.setDefault(name, Content{Render: render})
 	delete(b.extra, name)
@@ -209,11 +235,12 @@ func (b *Builder) RemoveVariant(name, variant string) {
 // anchored at the tools' place, so a section inserted after
 // "tools.bash" follows every tool's section.
 //
-// The section's default text is set, as Set sets it, and the
-// alternatives the section offers are kept.
+// The section's text is set, as Set sets it: a later layer's Insert
+// wins over an earlier layer's alternatives.
 func (b *Builder) Insert(after, name, text string) {
 	b.dropReplacement()
 	b.setDefault(name, Content{Text: text})
+	b.clearVariants(name)
 	delete(b.extra, name)
 	b.move(name, after)
 }
@@ -332,6 +359,16 @@ func (b *Builder) Copy() *Builder {
 		out.extra[name] = text
 	}
 	return out
+}
+
+// clearVariants takes a section's alternatives away.
+func (b *Builder) clearVariants(name string) {
+	section, ok := b.sections[name]
+	if !ok {
+		return
+	}
+	section.Variants = nil
+	b.sections[name] = section
 }
 
 // setDefault replaces a section's default text.
