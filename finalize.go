@@ -750,16 +750,27 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	// The entry becomes drainable only now, after its acceptance
 	// record succeeded.
 	accepted := s.markInputAcceptedLocked(id)
-	// The acceptance claim is released here, and it reports whether the
-	// claim was still ours. A finalization that sealed the run took it,
-	// and the input's fate is then the finalization's to write.
-	owned := s.finishInputAcceptanceLocked(run, input)
 	committed := run.committed
 	// The run's input decision is the fact that closes the queues, and
 	// the seal and the commit point follow it. Until it is made, the
 	// entry stays drainable: a natural stop that is still waiting for the
 	// acceptance sees it and abandons, and the resumed run delivers it.
 	late := run.inputsClosed || run.sealed || committed
+	waiting := !late && s.run == run && s.state == StateWaiting
+	reason := run.result.Reason
+	// An interrupt aborts the activity that is running. The abort is
+	// raised before the acceptance claim is released, so a finalization
+	// that waits for this acceptance and then takes the run back clears
+	// it: the turn it would have noted has already ended, and its message
+	// is delivered at the gate. An interrupt has therefore exactly one
+	// effect, whichever side of the acceptance the run is on.
+	if mode == Interrupt && !late && !waiting {
+		s.raiseInterruptLocked(run, id)
+	}
+	// The acceptance claim is released here, and it reports whether the
+	// claim was still ours. A finalization that sealed the run took it,
+	// and the input's fate is then the finalization's to write.
+	owned := s.finishInputAcceptanceLocked(run, input)
 	if late && accepted && owned {
 		// The decision was made while the record was in flight: the
 		// input is accepted, and its fate is dropped.
@@ -767,8 +778,6 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 			run.abandonedInputs = append(run.abandonedInputs, input)
 		}
 	}
-	waiting := !late && s.run == run && s.state == StateWaiting
-	reason := run.result.Reason
 	s.mu.Unlock()
 
 	if late {
@@ -786,10 +795,10 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		return id, nil
 	}
 
-	// An interrupt aborts the activity that is running.
-	if mode == Interrupt {
-		s.addInterrupt(run, id)
-	}
+	// The seam the delivery/abort order is tested at: the input is
+	// accepted and its claim released, and the run may already have
+	// taken it for delivery.
+	s.sealRaceHook("accepted")
 	return id, nil
 }
 

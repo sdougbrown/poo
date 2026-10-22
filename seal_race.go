@@ -18,6 +18,11 @@ type SealRaceHooks struct {
 	// finds an input whose acceptance record is still being written,
 	// before it waits for that record.
 	BeforeAcceptanceWait func()
+	// AfterAcceptance is called by Send once an input's acceptance record
+	// is written and its claim released, before Send returns. A test can
+	// hold Send here and watch what the run does with the input in the
+	// meantime.
+	AfterAcceptance func()
 }
 
 // SetSealRaceHooks installs the seal hooks and returns a function that
@@ -59,6 +64,10 @@ func (s *Session) sealRaceHook(name string) {
 	case "acceptance":
 		if hooks.BeforeAcceptanceWait != nil {
 			hooks.BeforeAcceptanceWait()
+		}
+	case "accepted":
+		if hooks.AfterAcceptance != nil {
+			hooks.AfterAcceptance()
 		}
 	}
 }

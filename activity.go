@@ -56,17 +56,24 @@ func (s *Session) activityContextFor(run *runState) context.Context {
 	return s.activityContext(run)
 }
 
-// addInterrupt records that an interrupt arrived.
+// raiseInterruptLocked records that an interrupt arrived and ends the
+// activity that is running.
 //
 // Several interrupts that arrive during one abort coalesce into one
 // abort, and all their messages are delivered.
-func (s *Session) addInterrupt(run *runState, inputID string) {
-	s.mu.Lock()
+//
+// The caller holds the session's lock, so the abort is ordered with the
+// input's acceptance and with the queues: an input the run has already
+// taken for delivery has nothing left to abort, and a finalization that
+// waits for this acceptance and then takes the run back clears the abort
+// because the turn it would have noted has already ended.
+//
+// The activity is cancelled under the same lock, so no other goroutine
+// can replace it with an activity the abort does not mean.
+func (s *Session) raiseInterruptLocked(run *runState, inputID string) {
 	run.interruptPending = true
 	run.pendingInterruptIDs = append(run.pendingInterruptIDs, inputID)
-	cancel := run.activityCancel
-	s.mu.Unlock()
-	if cancel != nil {
+	if cancel := run.activityCancel; cancel != nil {
 		cancel(errInterrupted)
 	}
 }

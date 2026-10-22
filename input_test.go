@@ -419,10 +419,19 @@ func TestAFollowUpIsDeliveredAtANaturalStop(t *testing.T) {
 // its settle hooks, holds the input.queued write, and lets the run reach
 // its input decision before releasing the write. The input was accepted
 // before the run was settling, so the natural stop has to deliver it.
-func inputAcceptedAtTheNaturalStop(t *testing.T, mode poo.InputMode) (*holdingInputSink, poo.Result) {
+//
+// afterAcceptance, when set, is installed at the seam Send reaches once
+// the input's acceptance is done, so a test can hold Send there and pin
+// what the run does with the input in the meantime.
+func inputAcceptedAtTheNaturalStop(t *testing.T, mode poo.InputMode, afterAcceptance func(*holdingInputSink)) (*holdingInputSink, poo.Result) {
 	t.Helper()
 	tr := scripted([]fakeResponse{{text: "the answer"}})
-	sink := &holdingInputSink{mode: mode, entered: make(chan struct{}), release: make(chan struct{})}
+	sink := &holdingInputSink{
+		mode:      mode,
+		entered:   make(chan struct{}),
+		release:   make(chan struct{}),
+		delivered: make(chan struct{}),
+	}
 	tool := &echoTool{result: "echoed"}
 	// The settle hook holds the run at the natural stop, so the input is
 	// accepted while the run is still open.
@@ -438,9 +447,13 @@ func inputAcceptedAtTheNaturalStop(t *testing.T, mode poo.InputMode) (*holdingIn
 	// acceptance that is still being written.
 	atAcceptanceWait := make(chan struct{})
 	var waitOnce sync.Once
-	restore := s.SetSealRaceHooks(&poo.SealRaceHooks{BeforeAcceptanceWait: func() {
+	hooks := &poo.SealRaceHooks{BeforeAcceptanceWait: func() {
 		waitOnce.Do(func() { close(atAcceptanceWait) })
-	}})
+	}}
+	if afterAcceptance != nil {
+		hooks.AfterAcceptance = func() { afterAcceptance(sink) }
+	}
+	restore := s.SetSealRaceHooks(hooks)
 	t.Cleanup(restore)
 
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
@@ -478,7 +491,7 @@ func inputAcceptedAtTheNaturalStop(t *testing.T, mode poo.InputMode) (*holdingIn
 // writes: the run's finalization takes its input decision while the
 // acceptance is still in flight, and the follow-up is delivered.
 func TestAFollowUpAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
-	sink, res := inputAcceptedAtTheNaturalStop(t, poo.FollowUp)
+	sink, res := inputAcceptedAtTheNaturalStop(t, poo.FollowUp, nil)
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the run settled %q, want end_turn", res.Reason)
 	}
@@ -495,8 +508,14 @@ func TestAFollowUpAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
 // the same window: the turn it would have cut short has already ended, so
 // its message is delivered at the gate, and the turn that follows is not
 // reported as interrupted.
+//
+// The pin holds Send until the gate's delivery has landed, which is the
+// order that makes the double effect visible every time: the message is
+// delivered, and an abort raised after it cuts the following turn.
 func TestAnInterruptAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
-	sink, res := inputAcceptedAtTheNaturalStop(t, poo.Interrupt)
+	sink, res := inputAcceptedAtTheNaturalStop(t, poo.Interrupt, func(sink *holdingInputSink) {
+		<-sink.delivered
+	})
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the run settled %q, want end_turn", res.Reason)
 	}
@@ -520,22 +539,32 @@ type holdingInputSink struct {
 	mode poo.InputMode
 	// once guards the hold, so only one record is held.
 	once sync.Once
+	// heldID is the identifier of the input the sink holds.
+	heldID string
 	// entered is closed once a record is being held.
 	entered chan struct{}
 	// release lets the held record through.
 	release chan struct{}
+	// delivered is closed once the held input's delivery record lands.
+	delivered chan struct{}
+	// deliveredOnce guards delivered.
+	deliveredOnce sync.Once
 }
 
 // Append holds the input's acceptance record until the test releases it.
 func (s *holdingInputSink) Append(ctx context.Context, rec poo.Record) error {
 	if queued, ok := rec.(*poo.InputQueued); ok && queued.Mode == s.mode {
 		s.once.Do(func() {
+			s.heldID = queued.InputID
 			close(s.entered)
 			select {
 			case <-s.release:
 			case <-ctx.Done():
 			}
 		})
+	}
+	if delivered, ok := rec.(*poo.InputDelivered); ok && delivered.InputID == s.heldID {
+		s.deliveredOnce.Do(func() { close(s.delivered) })
 	}
 	if err := ctx.Err(); err != nil {
 		return err
