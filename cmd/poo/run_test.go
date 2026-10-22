@@ -109,7 +109,7 @@ func TestARunWritesItsLogAndSettles(t *testing.T) {
 
 	recs := readLog(t, logPath)
 	got := names(recs)
-	want := []string{"session.created", "run.started", "message", "message", "message", "usage", "run.settled"}
+	want := []string{"session.created", "run.started", "system_prompt", "message", "message", "message", "usage", "run.settled"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("the records are %v, want %v", got, want)
 	}

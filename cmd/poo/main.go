@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/tool/bash"
@@ -246,6 +247,10 @@ func runRun(args []string) int {
 		ToolsMode:    o.toolsMode,
 
 		ReasoningEffort: o.reasoningEffort,
+		// The plan makes handoff the command's default strategy: a
+		// session that reaches the window writes a handoff and settles
+		// context_exhausted with the note.
+		Compactor: handoff.New(handoff.Options{}),
 	}, poo.WithPrompt(systemPrompt(o.modelID, toolSpecs, o.toolsMode)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
