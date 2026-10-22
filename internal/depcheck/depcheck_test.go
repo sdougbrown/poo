@@ -83,6 +83,9 @@ func TestFixtures(t *testing.T) {
 		{
 			name: "onlytests",
 		},
+		{
+			name: "ignored",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -106,6 +109,26 @@ func TestSkippedPackages(t *testing.T) {
 	}
 	if !slices.Equal(res.Skipped, want) {
 		t.Errorf("skipped %q, want %q", res.Skipped, want)
+	}
+}
+
+// TestABuildIgnoredFileIsSkipped covers the dot/underscore exemption: a
+// package whose only Go file is build-ignored by an underscore prefix is
+// skipped, not reported and not treated as an error.
+func TestABuildIgnoredFileIsSkipped(t *testing.T) {
+	const m = "example.com/poo/depcheck/ignored"
+	res := checkModule(t, filepath.Join("testdata", "ignored"), m)
+	want := []string{
+		m + " (no non-test Go files)",
+		m + "/decide (does not exist yet)",
+		m + "/prompt (does not exist yet)",
+		m + "/wire/protocol (does not exist yet)",
+	}
+	if !slices.Equal(res.Skipped, want) {
+		t.Errorf("skipped %q, want %q", res.Skipped, want)
+	}
+	if len(res.Findings) != 0 {
+		t.Errorf("findings:\n%s\nwant none", strings.Join(res.Findings, "\n"))
 	}
 }
 
