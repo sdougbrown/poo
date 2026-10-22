@@ -118,10 +118,35 @@ func (c *cache) save(found discovery) error {
 	return nil
 }
 
-// freshEndpoint reports whether an endpoint's cached result is still
-// within the TTL.
-func (c *cache) freshEndpoint(entry cacheEndpoint) bool {
-	return c.now().Sub(entry.FetchedAt) < c.ttl
+// fresh returns an endpoint's cached models, when the cache is still
+// fresh.
+//
+// A cache that holds no result for the endpoint is not fresh, and an
+// endpoint that was probed a long time ago is not fresh either.
+func (c *cache) fresh(cached *cacheFile, endpoint string) (map[string]Discovered, string, time.Time, bool) {
+	if cached == nil {
+		return nil, "", time.Time{}, false
+	}
+	entry, ok := cached.Endpoints[endpoint]
+	if !ok || c.now().Sub(entry.FetchedAt) >= c.ttl {
+		return nil, "", time.Time{}, false
+	}
+	return entry.Models, entry.Shape, entry.FetchedAt, true
+}
+
+// stale returns an endpoint's cached models, however old they are.
+//
+// The cache is the fallback of a probe that failed, and a stale answer
+// beats no answer at all.
+func (c *cache) stale(cached *cacheFile, endpoint string) (map[string]Discovered, string, time.Time, bool) {
+	if cached == nil {
+		return nil, "", time.Time{}, false
+	}
+	entry, ok := cached.Endpoints[endpoint]
+	if !ok || len(entry.Models) == 0 {
+		return nil, "", time.Time{}, false
+	}
+	return entry.Models, entry.Shape, entry.FetchedAt, true
 }
 
 // cachePath returns the path of the discovery cache.

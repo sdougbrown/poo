@@ -102,10 +102,10 @@ func (c *Catalog) refresh(ctx context.Context, force bool) error {
 	for _, name := range c.endpointNames() {
 		endpoint := c.endpoints[name]
 		if !force {
-			if models, shape, ok := c.freshCache(cached, name); ok {
+			if models, shape, fetchedAt, ok := cache.fresh(cached, name); ok {
 				found.models[name] = models
 				found.shapes[name] = shape
-				found.fetched[name] = cached.Endpoints[name].FetchedAt
+				found.fetched[name] = fetchedAt
 				continue
 			}
 		}
@@ -114,13 +114,14 @@ func (c *Catalog) refresh(ctx context.Context, force bool) error {
 			c.warn("the endpoint could not be probed",
 				slog.String("endpoint", name),
 				slog.Any("error", err))
-			models, shape = c.fromCache(cached, name)
-			if len(models) == 0 {
+			cachedModels, cachedShape, fetchedAt, ok := cache.stale(cached, name)
+			if !ok {
 				continue
 			}
 			c.warn("the endpoint falls back to the cached result",
 				slog.String("endpoint", name))
-			found.fetched[name] = cached.Endpoints[name].FetchedAt
+			models, shape = cachedModels, cachedShape
+			found.fetched[name] = fetchedAt
 		} else {
 			found.fetched[name] = now
 		}
@@ -136,19 +137,6 @@ func (c *Catalog) refresh(ctx context.Context, force bool) error {
 			slog.Any("error", err))
 	}
 	return nil
-}
-
-// freshCache returns an endpoint's cached models, when the cache is
-// still fresh.
-func (c *Catalog) freshCache(cached *cacheFile, endpoint string) (map[string]Discovered, string, bool) {
-	if cached == nil {
-		return nil, "", false
-	}
-	entry, ok := cached.Endpoints[endpoint]
-	if !ok || !c.cache().freshEndpoint(entry) {
-		return nil, "", false
-	}
-	return entry.Models, entry.Shape, true
 }
 
 // applyDiscovery merges the discovery layer into the catalog.
@@ -169,18 +157,6 @@ func (c *Catalog) applyDiscovery(found *discovery) {
 			e.discovery = discoveredLayer(model, c.endpoints[endpoint].BaseURL)
 		}
 	}
-}
-
-// fromCache returns an endpoint's cached models.
-func (c *Catalog) fromCache(cached *cacheFile, endpoint string) (map[string]Discovered, string) {
-	if cached == nil {
-		return nil, ""
-	}
-	entry, ok := cached.Endpoints[endpoint]
-	if !ok {
-		return nil, ""
-	}
-	return entry.Models, entry.Shape
 }
 
 // endpointNames returns the names of the endpoints the catalog probes,
@@ -234,6 +210,10 @@ func (c *Catalog) probeEndpoint(ctx context.Context, endpoint Endpoint, modelIDs
 	if client == nil {
 		client = &http.Client{Timeout: c.probeTimeout()}
 	}
+	// The three shapes share one budget, so an endpoint that does not
+	// answer costs one timeout and not three.
+	ctx, cancel := context.WithTimeout(ctx, c.probeTimeout())
+	defer cancel()
 	list, err := c.probeOpenAI(ctx, client, endpoint.BaseURL)
 	if err != nil {
 		return nil, "", err
