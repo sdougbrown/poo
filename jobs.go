@@ -262,7 +262,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	// about. A run that is winding down admits nothing: no new effect
 	// starts after the finalization has begun.
 	s.mu.Lock()
-	if run.committed || run.finalizing {
+	if run.committed || run.finalizing || run.interruptPending {
 		s.mu.Unlock()
 		return "", false, true
 	}

@@ -18,7 +18,11 @@ import (
 // A hook that fails settles the run with hook_error. A hook that misses
 // its deadline settles the run with hook_error too: the decision never
 // arrives, and the call's fate is unknown.
-func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, prepared Prepared, plan callPlan) (ToolDecision, error) {
+//
+// The second result reports that an interrupt ended the chain. The call
+// must not start then, and the first result collected before the
+// interrupt still becomes the call's result.
+func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, prepared Prepared, plan callPlan) (ToolDecision, bool, error) {
 	ctx := s.activityContext(run)
 	info := s.toolCallInfo(turn, handle, tool, prepared, plan)
 
@@ -28,10 +32,10 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 	if policy := s.opts.Policy; policy != nil {
 		decision, err := s.callPolicy(ctx, policy, turn, info)
 		if err != nil {
-			return ToolDecision{}, err
+			return ToolDecision{}, false, err
 		}
 		if decision.Denied {
-			return decision, nil
+			return decision, false, nil
 		}
 	}
 
@@ -45,16 +49,18 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 		})
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
-			// hook error.
-			return ToolDecision{Allowed: true}, nil
+			// hook error. The chain stops, the call does not start,
+			// and the first result collected before the interrupt
+			// still becomes the call's result.
+			return ToolDecision{Allowed: result == nil, Result: result}, true, nil
 		}
 		if err != nil {
-			return ToolDecision{}, fmt.Errorf("poo: the %s hook: %w", hookName(h), err)
+			return ToolDecision{}, false, fmt.Errorf("poo: the %s hook: %w", hookName(h), err)
 		}
 		decision, _ := out.value.(ToolDecision)
 		// A refusal wins over everything else.
 		if decision.Denied {
-			return decision, nil
+			return decision, false, nil
 		}
 		if decision.Result != nil && result == nil {
 			// The first result in registration order becomes the
@@ -64,9 +70,9 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 		}
 	}
 	if result != nil {
-		return ToolDecision{Allowed: true, Result: result}, nil
+		return ToolDecision{Allowed: true, Result: result}, false, nil
 	}
-	return ToolDecision{Allowed: true}, nil
+	return ToolDecision{Allowed: true}, false, nil
 }
 
 // callPolicy runs the policy slot.

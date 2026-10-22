@@ -453,7 +453,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 
 	// The before-tool hooks run after the validation and before the
 	// call, and they may refuse it or answer it themselves.
-	decision, err := s.runBeforeTool(run, turn, handle, call.Name, prepared, plan)
+	decision, interrupted, err := s.runBeforeTool(run, turn, handle, call.Name, prepared, plan)
 	// The hook may have outlived the run: a decision that arrives after
 	// the finalization began is discarded, and the call starts nothing.
 	if s.runWindingDown(run) {
@@ -471,6 +471,18 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			Source: "before_tool",
 			Text:   err.Error(),
 		}))
+		return
+	}
+	// An interrupted authorization starts no call and admits no job. A
+	// result an earlier hook gave before the interrupt is still the
+	// call's result.
+	if interrupted || s.interruptPending(run) {
+		if decision.Result != nil {
+			if !record(CallModeSync) {
+				return
+			}
+			s.recordResult(run, turn, handle, call.Name, call.ID, *decision.Result, OutcomeOK)
+		}
 		return
 	}
 	if decision.Denied {
@@ -504,7 +516,8 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// names.
 
 	// A call that becomes a job returns at once, and its result
-	// arrives later as an input.
+	// arrives later as an input. An interrupt that arrived after the
+	// authorization refuses the admission.
 	if s.callBecomesJob(call.Name, plan.background) {
 		if !record(CallModeJob) {
 			return
@@ -942,7 +955,7 @@ func (s *Session) reserveCallRecord(run *runState, handle string) (*issuedCall, 
 func (s *Session) startCall(run *runState, handle string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed {
+	if run.sealed || run.interruptPending {
 		return false
 	}
 	call, ok := run.pendingCalls[handle]
