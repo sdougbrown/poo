@@ -158,6 +158,47 @@ func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) (string, stri
 	return rendered, variant
 }
 
+// PromptState describes the session's system prompt.
+//
+// The text is the prompt the next run would render, and the preview
+// says whether a run has rendered one yet.
+type PromptState struct {
+	// Text is the rendered prompt.
+	Text string
+	// Hash is the hash of the text.
+	Hash string
+	// Sections are the names of the prompt's sections, in order.
+	Sections []string
+	// Preview reports that no run has rendered the prompt yet: the
+	// text is a preview of what the first run would use.
+	Preview bool
+}
+
+// PromptState returns the session's system prompt.
+//
+// The prompt is rendered from a copy of the session's own builder, so
+// the state never changes the prompt a run carries.
+func (s *Session) PromptState() PromptState {
+	s.mu.Lock()
+	rendered := s.promptRendered
+	s.mu.Unlock()
+	b, _ := s.promptCopy()
+	if b == nil {
+		return PromptState{Preview: !rendered}
+	}
+	text := b.Render()
+	// A raw prompt is the whole prompt, byte for byte.
+	if raw := s.opts.SystemPrompt; raw != "" && (text == raw || text == raw+"\n") {
+		text = raw
+	}
+	return PromptState{
+		Text:     text,
+		Hash:     hashText(text),
+		Sections: b.Names(),
+		Preview:  !rendered,
+	}
+}
+
 // SetPromptVariant sets the variant the prompt renders in.
 //
 // The prompt a run carries is rendered once, at the start of the run,

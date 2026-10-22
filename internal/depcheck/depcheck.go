@@ -4,6 +4,8 @@
 //     decide packages
 //   - the prompt, prompt/agentsmd, decide and wire/protocol packages may
 //     import the standard library only
+//   - the wire package may import the core package, the permission
+//     package, the session package and the wire/protocol package
 //   - the provider/catalog package may import the standard library and the
 //     core package, and no transport
 //   - the perm package may import the standard library and the core package
@@ -73,6 +75,7 @@ func (c Checker) rules() []rule {
 		{path: m + "/prompt/agentsmd"},
 		{path: m + "/decide"},
 		{path: m + "/wire/protocol"},
+		{path: m + "/wire", allowed: []string{m, m + "/perm", m + "/session", m + "/wire/protocol"}},
 		{path: m + "/provider/catalog", allowed: []string{m}},
 		{path: m + "/perm", allowed: []string{m}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},

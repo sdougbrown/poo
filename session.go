@@ -185,6 +185,11 @@ type Session struct {
 	// lastPromptText is the last rendered prompt that was recorded, so
 	// an unchanged prompt is not written again.
 	lastPromptText string
+	// promptRendered reports that a run has rendered the prompt.
+	//
+	// The state tells a client that the prompt it reads is a preview:
+	// before the first run, nothing has rendered it yet.
+	promptRendered bool
 
 	// waiters are the goroutines waiting for the run to settle.
 	waiters []chan Result
@@ -758,6 +763,29 @@ func (s *Session) Running() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.run != nil
+}
+
+// ActiveRunID returns the id of the run that is active.
+//
+// It is empty when the session has no run.
+func (s *Session) ActiveRunID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.run == nil {
+		return ""
+	}
+	return s.run.id
+}
+
+// RunResult returns the outcome of a run that has settled.
+//
+// It reports false for a run the session does not know: a run that is
+// still going and a run that never was are both unknown to it.
+func (s *Session) RunResult(runID string) (Result, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, ok := s.runResults[runID]
+	return result, ok
 }
 
 // Transitions returns the states the session moved through, in order.
