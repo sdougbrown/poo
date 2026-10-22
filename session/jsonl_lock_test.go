@@ -123,6 +123,18 @@ func runHelper(mode string) int {
 		}
 		fmt.Println(helperLoaded)
 		return 0
+	case "run":
+		// The helper creates a session, runs a turn and stops in the
+		// middle of a tool call. The call never finishes, so the log
+		// holds the call and no result.
+		if err := runBlockedTurn(ctx, store, id); err != nil {
+			fmt.Fprintln(os.Stderr, "poo session helper:", err)
+			return 1
+		}
+		fmt.Println(helperReady)
+		for {
+			time.Sleep(time.Hour)
+		}
 	default:
 		fmt.Fprintln(os.Stderr, "poo session helper: unknown mode", mode)
 		return 1
