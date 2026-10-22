@@ -145,3 +145,73 @@ func TestTheTextToolCallFormatsAreParsed(t *testing.T) {
 		})
 	}
 }
+
+// TestTheEmptyToolCallsAreAFailure covers the plan's rule: a response
+// whose finish reason is tool_calls but which carries no tool call and
+// no text is the server's own failure, and it is retried like one.
+//
+// The fixture is the recorded one: the homelab vLLM's gemma4 parser
+// answers a tool call with no tool call.
+func TestTheEmptyToolCallsAreAFailure(t *testing.T) {
+	srv := newSSEServer(t, fixture(t, "vllm-empty-tool-calls.sse"))
+	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	var last error
+	for {
+		_, err := reader.Next()
+		if err != nil {
+			last = err
+			break
+		}
+	}
+	if last == nil {
+		t.Fatal("the stream did not fail")
+	}
+	pe, ok := last.(*poo.ProviderError)
+	if !ok {
+		t.Fatalf("the error is %T, want a provider error", last)
+	}
+	if pe.Kind != poo.ProviderKindServer {
+		t.Errorf("the failure's kind is %q, want server", pe.Kind)
+	}
+	if len(srv.requests) != 3 {
+		t.Errorf("the endpoint got %d requests, want 3: the failure is retried", len(srv.requests))
+	}
+	// The attempt cost tokens, and the record says so.
+	reporter, ok := reader.(poo.UsageReporter)
+	if !ok {
+		t.Fatal("the reader reports no usage")
+	}
+	usage := reporter.ReportUsage()
+	if usage == nil {
+		t.Fatal("the failed attempt reported no usage")
+	}
+	if usage.OutputTokens != 18 {
+		t.Errorf("the attempt's output tokens are %d, want 18", usage.OutputTokens)
+	}
+}
+
+// TestTheEmptyToolCallsSettleTheRunAsAProviderError covers the same
+// failure from the run's side: the run settles as a provider error
+// when the budget runs out.
+func TestTheEmptyToolCallsSettleTheRunAsAProviderError(t *testing.T) {
+	srv := newSSEServer(t, fixture(t, "vllm-empty-tool-calls.sse"))
+	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+
+	res := settleOf(t, tr)
+	if res.Reason != poo.ReasonProviderError {
+		t.Errorf("the run settled %q, want provider_error", res.Reason)
+	}
+	if res.Detail.Provider == nil {
+		t.Fatalf("the settle record has no provider detail: %+v", res.Detail)
+	}
+	if res.Detail.Provider.Kind != "server" {
+		t.Errorf("the failure's kind is %q, want server", res.Detail.Provider.Kind)
+	}
+}
