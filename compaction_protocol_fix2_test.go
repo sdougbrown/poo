@@ -86,7 +86,7 @@ func TestInterruptDuringACompactionRechecksTheGate(t *testing.T) {
 // it.
 type fix2CompactionSink struct {
 	*recordingSink
-	entered, release, written chan struct{}
+	entered, release chan struct{}
 }
 
 func (s *fix2CompactionSink) Append(ctx context.Context, r poo.Record) error {
@@ -97,9 +97,7 @@ func (s *fix2CompactionSink) Append(ctx context.Context, r poo.Record) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		err := s.recordingSink.Append(ctx, r)
-		close(s.written)
-		return err
+		return s.recordingSink.Append(ctx, r)
 	}
 	return s.recordingSink.Append(ctx, r)
 }
@@ -108,7 +106,7 @@ func (s *fix2CompactionSink) Append(ctx context.Context, r poo.Record) error {
 // is claimed against the seal like a call record.
 func TestCompactionWriteRespectsTheSeal(t *testing.T) {
 	inner := &recordingSink{}
-	sink := &fix2CompactionSink{recordingSink: inner, entered: make(chan struct{}), release: make(chan struct{}), written: make(chan struct{})}
+	sink := &fix2CompactionSink{recordingSink: inner, entered: make(chan struct{}), release: make(chan struct{})}
 	tr := scripted([]fakeResponse{fix2Turn(), {text: "done"}})
 	opts := testOptions(t, tr, &echoTool{result: "output"}, inner)
 	opts.Sink = sink
@@ -121,9 +119,15 @@ func TestCompactionWriteRespectsTheSeal(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-sink.entered
-	s.Cancel("fix2")
+	// The cancel waits for the compaction's claim, so the test releases
+	// the store while the cancel is under way.
+	cancelled := make(chan struct{})
+	go func() {
+		s.Cancel("fix2")
+		close(cancelled)
+	}()
 	close(sink.release)
-	<-sink.written
+	<-cancelled
 	seenSettle := false
 	for _, r := range sink.allRecords() {
 		if r.Meta().Record == "run.settled" {

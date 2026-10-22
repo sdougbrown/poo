@@ -213,7 +213,7 @@ var errCompactionStore = errors.New("poo: the compaction record was refused")
 // record's tokens_after is the estimate of the new view at the plan's
 // rebased ratio.
 func (s *Session) compact(run *runState) (compactionOutcome, error) {
-	claimCtx, release, ok := s.beginCompactionClaim(run)
+	claimCtx, release, ok := s.beginRunWrite(run)
 	if !ok {
 		return compactionOutcome{}, errRunWindingDown
 	}
