@@ -154,7 +154,7 @@ func (s *Session) skipInterruptedCalls(run *runState, turn int, calls []ToolCall
 // that claim.
 func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text string) {
 	s.sealRaceHook("skip")
-	handles := s.handlesOf(turn, len(calls))
+	handles := s.handlesOf(run.globalTurn, len(calls))
 	for i, call := range calls {
 		handle := handles[i]
 		callRecord, ok := s.claimSkippedCall(run, turn, handle, call)
@@ -201,7 +201,7 @@ func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call 
 		s.beginCallRecordLocked(run, entry)
 		return entry, true
 	}
-	if run.settledCalls[handle] || s.turnSummaryLocked(turn, handle).Outcome != "" {
+	if run.settledCalls[handle] || s.turnSummaryLocked(run.globalTurn, handle).Outcome != "" {
 		// The call already has an outcome.
 		return nil, false
 	}
@@ -219,13 +219,17 @@ func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call 
 
 // handlesOf returns the handles of a turn's calls.
 //
+// The turn is the session's number for the turn: a run's own turn
+// numbers start again at one, and a lookup by them would find the
+// previous run's handles.
+//
 // A turn whose calls were planned already has its handles in the turn's
 // summary. A turn that an interrupt cut short before the plan has none
 // yet, and its calls get fresh ones.
 func (s *Session) handlesOf(turn, n int) []string {
 	s.mu.Lock()
 	for _, t := range s.turns {
-		if t.Index == turn && len(t.Calls) == n {
+		if t.Session == turn && len(t.Calls) == n {
 			handles := make([]string, n)
 			for i, c := range t.Calls {
 				handles[i] = c.Handle
@@ -244,10 +248,13 @@ func (s *Session) handlesOf(turn, n int) []string {
 
 // turnSummaryLocked returns the summary of one call of a turn.
 //
+// The turn is the session's number for the turn, so a summary of an
+// earlier run is not mixed in.
+//
 // The caller holds the session's lock.
 func (s *Session) turnSummaryLocked(turn int, handle string) ToolCallSummary {
 	for _, t := range s.turns {
-		if t.Index != turn {
+		if t.Session != turn {
 			continue
 		}
 		for _, c := range t.Calls {
