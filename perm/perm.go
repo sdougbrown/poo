@@ -496,11 +496,29 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason string, 
 // other tool exposes the raw arguments the model wrote.
 func argumentsOf(info poo.ToolCallInfo) json.RawMessage {
 	if evidence, ok := info.Prepared.(poo.EvidenceArgumenter); ok {
-		if args := evidence.EvidenceArguments(); len(args) > 0 {
+		if args := evidence.EvidenceArguments(); json.Valid(args) {
 			return args
 		}
 	}
-	return append(json.RawMessage(nil), info.Arguments...)
+	return validJSON(info.Arguments)
+}
+
+// validJSON returns the arguments as valid JSON.
+//
+// A model that sent malformed arguments is still shown faithfully: the
+// raw text becomes a JSON string rather than breaking the evidence.
+func validJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return json.RawMessage("{}")
+	}
+	if json.Valid(raw) {
+		return append(json.RawMessage(nil), raw...)
+	}
+	quoted, err := json.Marshal(string(raw))
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return quoted
 }
 
 // nextAskID returns the id of the next ask.
