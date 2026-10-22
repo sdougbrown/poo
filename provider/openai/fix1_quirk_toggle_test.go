@@ -25,8 +25,7 @@ func TestTheDescriptorReasoningBeatsTheQuirk(t *testing.T) {
 		},
 		Reasoning: "off",
 	})
-	req := poo.ChatRequest{Model: "gemma4", MaxTokens: 16}
-	body, err := tr.buildBody(req, tr.requestSettings(req))
+	body, err := tr.buildBody(poo.ChatRequest{Model: "gemma4", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("building the body: %v", err)
 	}

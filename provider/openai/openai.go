@@ -231,7 +231,7 @@ type errorBody struct {
 // is retried too.
 func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
 	settings := t.requestSettings(req)
-	body, err := t.buildBody(req, settings)
+	body, err := t.buildBodyWith(req, settings)
 	if err != nil {
 		return nil, poo.Rendered{}, err
 	}

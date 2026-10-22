@@ -138,7 +138,13 @@ func configErrorf(format string, args ...any) error {
 // The payload is shaped in three passes: the request's own fields, the
 // descriptor's controls (the reasoning parameter, the sampling
 // parameters), and the quirks the descriptor named, in its order.
-func (t *Transport) buildBody(req poo.ChatRequest, settings requestSettings) ([]byte, error) {
+func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
+	return t.buildBodyWith(req, t.requestSettings(req))
+}
+
+// buildBodyWith turns a request into the wire payload under the settings
+// the caller already resolved.
+func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings) ([]byte, error) {
 	model := req.Model
 	if model == "" {
 		model = t.cfg.Model
