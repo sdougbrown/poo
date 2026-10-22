@@ -168,7 +168,7 @@ func (s *Session) maybeNotice(run *runState) {
 		Role:       msg.Role,
 		Content:    msg.Content,
 	}); err != nil {
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 	}
 	s.events.emit(EventContextNotice, map[string]any{
 		"run_id": run.id,
@@ -312,7 +312,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
 			return compactionOutcome{}, errRunWindingDown
 		}
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 		return compactionOutcome{}, errCompactionStore
 	}
 	if change != nil && !s.commitCompactionView(run, *change) {
@@ -332,7 +332,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 			if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
 				return compactionOutcome{}, errRunWindingDown
 			}
-			s.addCandidate(run, storeErrorCandidate(err))
+			s.noteStoreError(run, err)
 			return compactionOutcome{}, errCompactionStore
 		}
 		outcome.candidate = &candidate{
