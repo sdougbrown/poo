@@ -48,7 +48,7 @@ that already exists, rather than appending a second session to it.
 | `poo/cmd/poo` | The headless CLI |
 
 The core depends on the standard library only (plus `poo/prompt` and
-`poo/decide`). `scripts/check-imports.sh` enforces this in CI.
+`poo/decide`). `internal/depcheck` enforces this in `go test`.
 
 ## Development
 
@@ -57,7 +57,6 @@ Requires [mise](https://mise.jdx.dev/) and Go 1.25 (see `mise.toml`).
 ```
 mise exec -- go vet ./...
 mise exec -- go test -race ./...
-mise exec -- ./scripts/check-imports.sh
 ```
 
 ## License
