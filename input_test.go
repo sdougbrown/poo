@@ -415,20 +415,19 @@ func TestAFollowUpIsDeliveredAtANaturalStop(t *testing.T) {
 	}
 }
 
-// TestAFollowUpAcceptedAsTheRunStopsIsDelivered covers the window
-// between Send accepting a follow-up and the input.queued record it
-// writes: the run's finalization takes its input decision while the
-// acceptance is still in flight. The input was accepted before the run
-// was settling, so the natural stop has to deliver it.
-func TestAFollowUpAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
+// inputAcceptedAtTheNaturalStop sends one input while the run is held at
+// its settle hooks, holds the input.queued write, and lets the run reach
+// its input decision before releasing the write. The input was accepted
+// before the run was settling, so the natural stop has to deliver it.
+func inputAcceptedAtTheNaturalStop(t *testing.T, mode poo.InputMode) (*holdingInputSink, poo.Result) {
+	t.Helper()
 	tr := scripted([]fakeResponse{{text: "the answer"}})
-	sink := &holdingInputSink{entered: make(chan struct{}), release: make(chan struct{})}
+	sink := &holdingInputSink{mode: mode, entered: make(chan struct{}), release: make(chan struct{})}
 	tool := &echoTool{result: "echoed"}
-	// The settle hook holds the run at the natural stop, so the
-	// follow-up is accepted while the run is still open.
+	// The settle hook holds the run at the natural stop, so the input is
+	// accepted while the run is still open.
 	hook := &blockingBeforeSettle{started: make(chan struct{}), release: make(chan struct{})}
-	atSettling := make(chan struct{})
-	observer := &settlingObserver{seen: atSettling}
+	observer := &settlingObserver{seen: make(chan struct{})}
 
 	opts := testOptions(t, tr, tool, sink)
 	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
@@ -442,7 +441,7 @@ func TestAFollowUpAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
 	restore := s.SetSealRaceHooks(&poo.SealRaceHooks{BeforeAcceptanceWait: func() {
 		waitOnce.Do(func() { close(atAcceptanceWait) })
 	}})
-	defer restore()
+	t.Cleanup(restore)
 
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
@@ -450,28 +449,36 @@ func TestAFollowUpAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
 	<-hook.started
 	sendErr := make(chan error, 1)
 	go func() {
-		_, err := s.Send("and then this", poo.FollowUp)
+		_, err := s.Send("and then this", mode)
 		sendErr <- err
 	}()
 	<-sink.entered
-	// The acceptance is in flight, so the run reaches its input
-	// decision now. Either it moves on to settling, or it says that it
-	// waits for the acceptance first; both mean the decision was taken
-	// while the input was neither deliverable nor refused.
+	// The acceptance is in flight, so the run reaches its input decision
+	// now. Either it moves on to settling, or it says that it waits for
+	// the acceptance first; both mean the decision was taken while the
+	// input was neither deliverable nor refused.
 	close(hook.release)
 	select {
 	case <-atAcceptanceWait:
-	case <-atSettling:
+	case <-observer.seen:
 	}
 	close(sink.release)
 	if err := <-sendErr; err != nil {
-		t.Fatalf("sending the follow-up: %v", err)
+		t.Fatalf("sending the input: %v", err)
 	}
-
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
+	return sink, res
+}
+
+// TestAFollowUpAcceptedAsTheRunStopsIsDelivered covers the window
+// between Send accepting a follow-up and the input.queued record it
+// writes: the run's finalization takes its input decision while the
+// acceptance is still in flight, and the follow-up is delivered.
+func TestAFollowUpAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
+	sink, res := inputAcceptedAtTheNaturalStop(t, poo.FollowUp)
 	if res.Reason != poo.ReasonEndTurn {
 		t.Errorf("the run settled %q, want end_turn", res.Reason)
 	}
@@ -484,11 +491,33 @@ func TestAFollowUpAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
 	}
 }
 
-// holdingInputSink holds one follow-up's input.queued record until the
-// test releases it, so the acceptance stays in flight while the run's
+// TestAnInterruptAcceptedAsTheRunStopsIsDelivered covers the interrupt in
+// the same window: the turn it would have cut short has already ended, so
+// its message is delivered at the gate, and the turn that follows is not
+// reported as interrupted.
+func TestAnInterruptAcceptedAsTheRunStopsIsDelivered(t *testing.T) {
+	sink, res := inputAcceptedAtTheNaturalStop(t, poo.Interrupt)
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn", res.Reason)
+	}
+	if got := sink.count("input.delivered"); got != 1 {
+		t.Errorf("the log holds %d input.delivered records, want 1", got)
+	}
+	if got := sink.count("input.dropped"); got != 0 {
+		t.Errorf("the log holds %d input.dropped records, want 0", got)
+	}
+	if got := sink.count("turn.interrupted"); got != 0 {
+		t.Errorf("the log holds %d turn.interrupted records, want 0: no turn was cut short", got)
+	}
+}
+
+// holdingInputSink holds one input's input.queued record until the test
+// releases it, so the acceptance stays in flight while the run's
 // finalization takes its input decision.
 type holdingInputSink struct {
 	recordingSink
+	// mode is the mode of the input the sink holds.
+	mode poo.InputMode
 	// once guards the hold, so only one record is held.
 	once sync.Once
 	// entered is closed once a record is being held.
@@ -497,10 +526,9 @@ type holdingInputSink struct {
 	release chan struct{}
 }
 
-// Append holds the follow-up's acceptance record until the test releases
-// it.
+// Append holds the input's acceptance record until the test releases it.
 func (s *holdingInputSink) Append(ctx context.Context, rec poo.Record) error {
-	if queued, ok := rec.(*poo.InputQueued); ok && queued.Mode == poo.FollowUp {
+	if queued, ok := rec.(*poo.InputQueued); ok && queued.Mode == s.mode {
 		s.once.Do(func() {
 			close(s.entered)
 			select {

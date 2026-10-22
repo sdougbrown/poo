@@ -288,6 +288,12 @@ func (s *Session) resume(run *runState) ([]candidate, bool) {
 		}
 	}
 	s.transitionLocked(StateRequesting)
+	// An interrupt that arrived after the turn's last check has no turn to
+	// note: the turn it would have cut short has already ended, and its
+	// message is drained at the gate. It must not surface as an
+	// interruption of the next turn.
+	run.interruptPending = false
+	run.pendingInterruptIDs = nil
 	s.mu.Unlock()
 
 	s.drainInputs(run, true)
