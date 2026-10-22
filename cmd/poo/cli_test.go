@@ -270,8 +270,22 @@ func TestTheNativeModeRunSendsTheToolsNatively(t *testing.T) {
 	}
 
 	tools, _ := endpoint.requests[0]["tools"].([]any)
-	if len(tools) != 2 {
-		t.Errorf("the request held %d tools, want 2", len(tools))
+	// The bash tool may run in the background, so the core registers
+	// the jobs tools beside it.
+	if len(tools) != 4 {
+		t.Errorf("the request held %d tools, want 4", len(tools))
+	}
+	names := map[string]bool{}
+	for _, tool := range tools {
+		m, _ := tool.(map[string]any)
+		fn, _ := m["function"].(map[string]any)
+		name, _ := fn["name"].(string)
+		names[name] = true
+	}
+	for _, want := range []string{"bash", "read", "jobs", "cancel_job"} {
+		if !names[want] {
+			t.Errorf("the request does not offer the %q tool", want)
+		}
 	}
 
 	// The system prompt never asks for a text call.

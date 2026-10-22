@@ -80,6 +80,11 @@ type RunOptions struct {
 	// Sandbox is how a run is isolated from the rest of the machine:
 	// SandboxNone or SandboxBwrap.
 	Sandbox string
+	// Executor is the executor the model's commands run through:
+	// ExecutorLocal or ExecutorBwrap. It is a layer under the sandbox:
+	// the sandbox wraps the whole poo process, and the executor wraps
+	// the commands the model runs.
+	Executor string
 	// Force clears the out directory's runs directory before the run.
 	// A run into a directory that already holds a run's output is
 	// refused without it.
@@ -133,6 +138,8 @@ type Report struct {
 	GitSHA string `json:"git_sha"`
 	// Sandbox is how the runs were isolated.
 	Sandbox string `json:"sandbox,omitempty"`
+	// Executor is the executor the runs' commands went through.
+	Executor string `json:"executor,omitempty"`
 	// Dir is where the report was written.
 	Dir string `json:"dir"`
 	// Results are the runs, in a stable order.
@@ -227,6 +234,9 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 	if err := checkSandbox(r.opts.Sandbox); err != nil {
 		return nil, err
 	}
+	if err := checkExecutor(r.opts.Executor); err != nil {
+		return nil, err
+	}
 	if err := r.checkWorkRoot(); err != nil {
 		return nil, err
 	}
@@ -238,6 +248,7 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 		Dir:       r.opts.Out,
 		GitSHA:    gitSHA(),
 		Sandbox:   r.opts.Sandbox,
+		Executor:  r.opts.Executor,
 	}
 	if err := os.MkdirAll(r.opts.Out, 0o755); err != nil {
 		return nil, fmt.Errorf("eval: creating %s: %w", r.opts.Out, err)
@@ -715,6 +726,12 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 	}
 	if j.model.ReasoningEffort != "" {
 		args = append(args, "--reasoning-effort", j.model.ReasoningEffort)
+	}
+	if r.opts.Executor != "" {
+		// The executor is the layer under the sandbox: the commands
+		// the model runs go through it, in a sandbox of their own
+		// when the run asks for one.
+		args = append(args, "--executor", r.opts.Executor)
 	}
 	args = append(args, j.task.Prompt)
 
