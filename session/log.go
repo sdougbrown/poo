@@ -5,7 +5,9 @@
 // store: it creates sessions, loads them, lists them and prunes them,
 // and it holds the authority over a session while it is open. The Memory
 // is the ephemeral store: it keeps a session's records for the length of
-// the process and writes no file.
+// the process and writes no file. The Resume is the way back into a
+// session: it loads a session, recovers it and restores it, so a
+// session carries on in the file it was recorded in.
 //
 // A session's records are the log's vocabulary, documented in
 // docs/session-log-v0.md. The log takes a lock around each write, so a
