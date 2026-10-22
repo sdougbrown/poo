@@ -47,7 +47,8 @@ var filenames = []string{"AGENTS.md", "CLAUDE.md"}
 //
 // A file that cannot be read is an error. The caller asked for the
 // project's instructions, and an empty section would say the project
-// has none.
+// has none. A path that is not a regular file is an error too: the
+// loader does not read a pipe and wait for it.
 func Load(dir string) (string, error) {
 	for _, name := range filenames {
 		path := filepath.Join(dir, name)
@@ -58,8 +59,8 @@ func Load(dir string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("agentsmd: %s: %w", path, err)
 		}
-		if info.IsDir() {
-			return "", fmt.Errorf("agentsmd: %s is a directory, not a file", path)
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("agentsmd: %s is not a regular file", path)
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
