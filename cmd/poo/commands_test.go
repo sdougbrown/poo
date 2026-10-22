@@ -303,3 +303,35 @@ func TestTheFinishResultStaysOnStdoutAfterAWokenReply(t *testing.T) {
 		t.Errorf("stdout is %q, want the woken run's answer left out", stdout)
 	}
 }
+
+// TestTheEphemeralModeWritesNothing covers the mode: an ephemeral
+// session leaves no file behind.
+func TestTheEphemeralModeWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	endpoint := newFakeEndpoint(t, "data: "+`{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}`+"\n\n")
+
+	code, stderr := runCLI(t,
+		"run",
+		"--ephemeral",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--session-dir", dir,
+		"say hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading the directory: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		t.Errorf("the directory holds %v, want nothing", names)
+	}
+}
