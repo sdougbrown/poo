@@ -79,6 +79,9 @@ type PendingCall struct {
 	MissingResult bool
 	// MissingMessage reports that the call has no result message.
 	MissingMessage bool
+	// Recorded reports that the log holds a tool.call record for the
+	// call, not only the message that carried it.
+	Recorded bool
 	// ResultText is the text of the call's existing result record, when
 	// it has one. The message the recovery writes carries it.
 	ResultText string
@@ -287,8 +290,6 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		messages: map[string]bool{},
 		asks:     map[string]*PendingAsk{},
 		answered: map[string]bool{},
-		jobs:     map[string]poo.JobStarted{},
-		jobEnded: map[string]bool{},
 		inputs:   map[string]poo.InputQueued{},
 		fate:     map[string]bool{},
 		callIDs:  poo.CallIDs(recs),
@@ -302,23 +303,24 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			state.settled[r.RunID] = true
 		case *poo.ToolCallRecord:
 			state.run(r.RunID)
-			call := state.call(callIdentity(r.CallID, r.RunID, r.Handle))
+			id := r.CallID
+			if id == "" {
+				id = state.callIDs[r.Handle]
+			}
+			call := state.call(callIdentity(id, r.RunID, r.Handle))
 			call.RunID = r.RunID
 			call.Turn = r.Turn
 			call.Handle = r.Handle
 			call.Tool = r.Tool
-			call.CallID = r.CallID
+			call.CallID = id
+			call.Recorded = true
 		case *poo.ToolResultRecord:
 			state.run(r.RunID)
-			key := callIdentity(r.CallID, r.RunID, r.Handle)
-			state.results[key] = r
-			// A result written before the record carried the call's id
-			// belongs to the call with the same handle.
-			if r.CallID == "" {
-				if id := state.callIDs[r.Handle]; id != "" {
-					state.results[callIdentity(id, r.RunID, r.Handle)] = r
-				}
+			id := r.CallID
+			if id == "" {
+				id = state.callIDs[r.Handle]
 			}
+			state.results[callIdentity(id, r.RunID, r.Handle)] = r
 		case *poo.MessageRecord:
 			if r.RunID != "" {
 				state.run(r.RunID)
@@ -352,12 +354,10 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		case *poo.PermissionAnsweredRecord:
 			state.answered[askIdentity(r.RunID, r.AskID)] = true
 		case *poo.JobStarted:
-			if _, ok := state.jobs[r.Job]; !ok {
-				state.jobs[r.Job] = *r
-				state.jobOrder = append(state.jobOrder, r.Job)
-			}
+			state.jobs = append(state.jobs, *r)
+			state.jobEnded = append(state.jobEnded, false)
 		case *poo.JobEnded:
-			state.jobEnded[r.Job] = true
+			state.endJob(r.Job)
 		case *poo.InputQueued:
 			if _, ok := state.inputs[r.InputID]; !ok {
 				state.inputs[r.InputID] = *r
@@ -418,6 +418,12 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			pending.Calls = append(pending.Calls, called)
 		}
 		sort.SliceStable(pending.Calls, func(i, j int) bool {
+			// The calls the session recorded are written after the
+			// calls only the model's message held: the session's own
+			// work is the last thing before the settle.
+			if pending.Calls[i].Recorded != pending.Calls[j].Recorded {
+				return !pending.Calls[i].Recorded
+			}
 			return handleNumber(pending.Calls[i].Handle) < handleNumber(pending.Calls[j].Handle)
 		})
 		for _, key := range state.askOrder {
@@ -429,11 +435,10 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		}
 		pend.Runs = append(pend.Runs, pending)
 	}
-	for _, jobID := range state.jobOrder {
-		if state.jobEnded[jobID] {
+	for i, job := range state.jobs {
+		if state.jobEnded[i] {
 			continue
 		}
-		job := state.jobs[jobID]
 		pend.Jobs = append(pend.Jobs, PendingJob{
 			Job:    job.Job,
 			Handle: job.Handle,
@@ -478,12 +483,12 @@ type pendingState struct {
 	askOrder []string
 	// answered are the asks that have an answer.
 	answered map[string]bool
-	// jobs are the jobs that started, by id.
-	jobs map[string]poo.JobStarted
-	// jobOrder is the order the jobs started in.
-	jobOrder []string
-	// jobEnded are the jobs that ended.
-	jobEnded map[string]bool
+	// jobs are the jobs that started, in order. A job id may repeat in
+	// a log written before the counter continued, so the order is what
+	// pairs each end with a start.
+	jobs []poo.JobStarted
+	// jobEnded reports which of the started jobs have ended.
+	jobEnded []bool
 	// inputs are the inputs that were queued, by id.
 	inputs map[string]poo.InputQueued
 	// inputOrder is the order the inputs were queued in.
@@ -514,6 +519,16 @@ func (s *pendingState) call(key string) *PendingCall {
 		s.callOrder = append(s.callOrder, key)
 	}
 	return call
+}
+
+// endJob marks the first start of a job id as ended.
+func (s *pendingState) endJob(id string) {
+	for i := range s.jobs {
+		if s.jobs[i].Job == id && !s.jobEnded[i] {
+			s.jobEnded[i] = true
+			return
+		}
+	}
 }
 
 // callIdentity names a call. A call with a provider id is named by it;

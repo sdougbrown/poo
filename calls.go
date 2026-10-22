@@ -14,15 +14,61 @@ package poo
 // A call's record carries the id the model's message gave it, so the
 // pairing is by id and never by the order the records landed in: a batch
 // of read-only calls runs at the same time, and its records land in any
-// order. A call the model never saw has no id, and nothing refers to it.
+// order. A record written before the field existed falls back to the
+// handle's place in the model's order, which the message blocks give. A
+// call the model never saw has no id, and nothing refers to it.
 func CallIDs(records []Record) map[string]string {
 	out := make(map[string]string)
 	for _, rec := range records {
 		call, ok := rec.(*ToolCallRecord)
-		if !ok || call.CallID == "" {
+		if ok && call.CallID != "" {
+			out[call.Handle] = call.CallID
+		}
+	}
+	// A record written before the field existed carries no id. Its
+	// handle is the call's place in the model's order, so the id is the
+	// message block at that place.
+	type turnKey struct {
+		run  string
+		turn int
+	}
+	blocks := map[turnKey][]string{}
+	seen := map[turnKey]bool{}
+	var order []turnKey
+	for _, rec := range records {
+		msg, ok := rec.(*MessageRecord)
+		if !ok || msg.Role != RoleAssistant {
 			continue
 		}
-		out[call.Handle] = call.CallID
+		key := turnKey{run: msg.RunID, turn: msg.Turn}
+		for _, block := range msg.Content {
+			if block.Kind != ContentToolCall || block.ToolCallID == "" {
+				continue
+			}
+			blocks[key] = append(blocks[key], block.ToolCallID)
+			if !seen[key] {
+				seen[key] = true
+				order = append(order, key)
+			}
+		}
+	}
+	first := map[turnKey]int{}
+	ordinal := 1
+	for _, key := range order {
+		first[key] = ordinal
+		ordinal += len(blocks[key])
+	}
+	for _, rec := range records {
+		call, ok := rec.(*ToolCallRecord)
+		if !ok || call.CallID != "" {
+			continue
+		}
+		key := turnKey{run: call.RunID, turn: call.Turn}
+		ids := blocks[key]
+		index := handleSeq(call.Handle) - first[key]
+		if index >= 0 && index < len(ids) {
+			out[call.Handle] = ids[index]
+		}
 	}
 	return out
 }
