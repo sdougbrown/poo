@@ -70,13 +70,7 @@ func (s *server) initialize(raw json.RawMessage) (any, *protocol.Error) {
 	s.initialized = true
 	s.clientInfo = params.Client
 	s.mu.Unlock()
-	return protocol.InitializeResult{
-		ProtocolVersion: version,
-		Build:           s.opts.Build,
-		Profiles:        s.factory.Profiles(),
-		Models:          s.factory.Roles(),
-		Capabilities:    s.factory.Capabilities(),
-	}, nil
+	return s.initializeResult(version), nil
 }
 
 // negotiate picks the highest version the client and the server share.
@@ -121,6 +115,7 @@ func (s *server) sessionCreate(raw json.RawMessage) (any, *protocol.Error) {
 	entry := newSession(sess, info)
 	obs.attach(entry)
 	s.register(entry)
+	s.sessionCreated(entry)
 	return sessionInfoOf(entry), nil
 }
 
@@ -190,7 +185,7 @@ func (s *server) sessionGet(raw json.RawMessage) (any, *protocol.Error) {
 	if runID := entry.sess.ActiveRunID(); runID != "" {
 		result.RunID = runID
 	}
-	return result, nil
+	return s.getResult(result), nil
 }
 
 // sessionConfigure changes a session between its runs.

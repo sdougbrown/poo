@@ -40,6 +40,9 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      - name: Conformance
+        run: go test -race -v -run TestTheBinary ./cmd/poo/
+
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
@@ -72,3 +75,8 @@ jobs:
 
       - name: Executors
         run: go test -race -v ./exec/bwrap/ ./internal/bashverify/ ./tool/bash/
+
+      - name: Conformance in the sandbox
+        env:
+          POO_CONFORMANCE_EXECUTOR: bwrap
+        run: go test -race -v -run TestTheBinarySpeaksTheProtocol ./cmd/poo/
