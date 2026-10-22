@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/prompt"
@@ -168,10 +169,19 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	if err != nil {
 		return nil, poo.InvalidArgsf("grep: %v", err)
 	}
+	// The root is resolved once, so a symlinked root is the directory
+	// it points at and the git and walk paths see the same files.
+	resolved := protect.Resolve(abs)
+	if env.WorkingDir != "" {
+		workingDir := protect.Resolve(env.WorkingDir)
+		if !protect.Within(workingDir, resolved) {
+			return nil, poo.InvalidArgsf("grep: path is outside the working directory: %s", a.Path)
+		}
+	}
 	return &prepared{
 		pattern: re,
 		source:  a.Pattern,
-		root:    abs,
+		root:    resolved,
 		glob:    a.Glob,
 		mode:    mode,
 	}, nil
@@ -323,23 +333,21 @@ func (s *search) scan(ctx context.Context, abs, rel string, re *regexp.Regexp) (
 		if err := ctx.Err(); err != nil {
 			return matches > 0, err
 		}
-		text, err := br.ReadString('\n')
-		if len(text) > 0 {
+		line, eof, err := readLine(br, MaxLineChars)
+		if err != nil {
+			return matches > 0, err
+		}
+		if line != "" || !eof {
 			number++
-			line := strings.TrimSuffix(text, "\n")
-			line = strings.TrimSuffix(line, "\r")
 			if re.MatchString(line) {
 				matches++
 				if s.mode == ModeContent {
-					s.add(fmt.Sprintf("%s:%d:%s", rel, number, truncateLine(line)))
+					s.add(fmt.Sprintf("%s:%d:%s", rel, number, line))
 				}
 			}
 		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return matches > 0, err
+		if eof {
+			break
 		}
 	}
 	switch s.mode {
@@ -363,7 +371,7 @@ func (s *search) render(cap int) string {
 	for {
 		lines := s.lines()
 		text := strings.Join(lines, "\n")
-		if len(text) <= cap || len(s.entries) == 0 {
+		if utf8.RuneCountInString(text) <= cap || len(s.entries) == 0 {
 			return text
 		}
 		// The output does not fit under the cap: the last result goes,
@@ -444,8 +452,7 @@ func selectFiles(root string) ([]string, error) {
 
 // inWorkTree reports whether a directory is inside a git work tree.
 func inWorkTree(root string) bool {
-	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
-	cmd.Dir = root
+	cmd := gitCommand(root, "rev-parse", "--is-inside-work-tree")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -458,8 +465,7 @@ func inWorkTree(root string) bool {
 // The paths are the ones git knows: the tracked files and the untracked
 // ones the ignore rules do not hide.
 func gitFiles(root string) ([]string, error) {
-	cmd := exec.Command("git", "ls-files", "--cached", "--others", "--exclude-standard", "-z")
-	cmd.Dir = root
+	cmd := gitCommand(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
@@ -473,6 +479,34 @@ func gitFiles(root string) ([]string, error) {
 		files = append(files, filepath.ToSlash(name))
 	}
 	return files, nil
+}
+
+// gitCommand returns a git command that runs no repository-configured
+// code.
+//
+// The tree is the model's: it can write the repository's config, and a
+// config key such as core.fsmonitor names a program git runs. The command
+// pins the executable knobs, isolates the global and system config, and
+// drops the variables that redirect the repository, so the git that runs
+// in poo's own process reads the file list and nothing else. The
+// environment is git's own: poo's credentials never reach it.
+func gitCommand(dir string, args ...string) *exec.Cmd {
+	pinned := []string{
+		"-c", "core.fsmonitor=false",
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "core.untrackedCache=false",
+		"--no-optional-locks",
+	}
+	cmd := exec.Command("git", append(pinned, args...)...)
+	cmd.Dir = dir
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_TERMINAL_PROMPT=0",
+		"LC_ALL=C",
+	}
+	return cmd
 }
 
 // walkFiles returns the files of a tree.
@@ -534,6 +568,42 @@ func isBinary(path string) (bool, error) {
 		return false, err
 	}
 	return bytes.IndexByte(buf[:n], 0) >= 0, nil
+}
+
+// readLine reads one line, keeping at most limit characters.
+//
+// The rest of a long line is read and discarded rather than held in
+// memory, so a minified file costs a bounded buffer even when its line is
+// far larger than the context could show. The match is made against the
+// kept prefix. It reports whether the file ended with the line.
+func readLine(br *bufio.Reader, limit int) (string, bool, error) {
+	// A rune is at most four bytes, so this budget holds more than limit
+	// characters. The cut to limit characters therefore always lands
+	// before the budget's own cut, which may split a rune.
+	budget := limit*4 + 4
+	var b strings.Builder
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if b.Len() < budget {
+			room := budget - b.Len()
+			if room > len(chunk) {
+				room = len(chunk)
+			}
+			b.Write(chunk[:room])
+		}
+		switch {
+		case err == nil:
+			text := strings.TrimSuffix(b.String(), "\n")
+			return truncateLine(strings.TrimSuffix(text, "\r")), false, nil
+		case errors.Is(err, bufio.ErrBufferFull):
+			// The line is longer than the buffer. Keep reading.
+			continue
+		case errors.Is(err, io.EOF):
+			return truncateLine(strings.TrimSuffix(b.String(), "\r")), true, nil
+		default:
+			return "", false, err
+		}
+	}
 }
 
 // truncateLine cuts a line to the line cap.
