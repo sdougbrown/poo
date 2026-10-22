@@ -88,6 +88,10 @@ func TestFixtures(t *testing.T) {
 			want: []string{m + "wireproto/wire/protocol imports " + m + "wireproto/extra"},
 		},
 		{
+			name: "wireconf",
+			want: []string{m + "wireconf/wire/conformance imports " + m + "wireconf/extra"},
+		},
+		{
 			name: "unresolvable",
 			want: []string{"cannot resolve " + m + "unresolvable/missing (imported by " + m + "unresolvable)"},
 		},
@@ -149,6 +153,7 @@ func TestSkippedPackages(t *testing.T) {
 		m + "/provider/catalog (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/wire (does not exist yet)",
+		m + "/wire/conformance (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
@@ -172,6 +177,7 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 		m + "/provider/catalog (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/wire (does not exist yet)",
+		m + "/wire/conformance (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
@@ -200,6 +206,7 @@ func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
 		m + "/provider/catalog (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/wire (does not exist yet)",
+		m + "/wire/conformance (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {

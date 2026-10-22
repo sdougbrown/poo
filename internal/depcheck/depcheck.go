@@ -6,6 +6,8 @@
 //     import the standard library only
 //   - the wire package may import the core package, the permission
 //     package, the session package and the wire/protocol package
+//   - the wire/conformance package may import the standard library and
+//     the wire/protocol package, for it is a client of the contract
 //   - the provider/catalog package may import the standard library and the
 //     core package, and no transport
 //   - the perm package may import the standard library and the core package
@@ -76,6 +78,7 @@ func (c Checker) rules() []rule {
 		{path: m + "/decide"},
 		{path: m + "/wire/protocol"},
 		{path: m + "/wire", allowed: []string{m, m + "/perm", m + "/session", m + "/wire/protocol"}},
+		{path: m + "/wire/conformance", allowed: []string{m + "/wire/protocol"}},
 		{path: m + "/provider/catalog", allowed: []string{m}},
 		{path: m + "/perm", allowed: []string{m}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
