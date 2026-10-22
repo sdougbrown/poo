@@ -1,6 +1,7 @@
 package poo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -116,22 +117,13 @@ func (s *Session) validateRewrite(rewrites []ToolResultRewrite) error {
 
 // validateWindow checks a provider window.
 //
-// The window is the provider's own compacted state, so it can only come
-// from the session's own transport, and every one of its items is
-// required provider data.
+// The window is the provider's own compacted state, so the core asks the
+// session's own transport for it: the items a strategy hands back are
+// never trusted. Every item is required provider data.
 func (s *Session) validateWindow(w ProviderWindow) error {
 	if len(w.Items) == 0 {
 		return fmt.Errorf("%w: the window carries no items", ErrInvalidCompaction)
 	}
-	if _, ok := s.opts.Transport.(NativeCompactor); !ok {
-		return fmt.Errorf("%w: the session's transport cannot compact", ErrInvalidCompaction)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.run == nil || !s.run.hasRendered {
-		return fmt.Errorf("%w: the session's transport has no request to compact", ErrInvalidCompaction)
-	}
-	api := s.run.lastRendered.API
 	for _, item := range w.Items {
 		if item.Provider == nil {
 			return fmt.Errorf("%w: the window holds an item that is not provider data", ErrInvalidCompaction)
@@ -139,12 +131,29 @@ func (s *Session) validateWindow(w ProviderWindow) error {
 		if !item.Provider.Required {
 			return fmt.Errorf("%w: the window holds an item that is not required", ErrInvalidCompaction)
 		}
-		if item.Provider.API != api {
-			return fmt.Errorf("%w: the window holds %s data, and the transport speaks %s",
-				ErrInvalidCompaction, item.Provider.API, api)
-		}
 	}
 	return nil
+}
+
+// nativeWindow asks the session's own transport to compact its state.
+//
+// The window is the provider's own compacted state, and only the
+// core-bound call to the transport's NativeCompactor capability can
+// produce one. A strategy's Window is a request for this call, not the
+// data that is applied.
+func (s *Session) nativeWindow(ctx context.Context, run *runState) (ProviderWindow, error) {
+	compactor, ok := s.opts.Transport.(NativeCompactor)
+	if !ok {
+		return ProviderWindow{}, fmt.Errorf("%w: the session's transport cannot compact", ErrInvalidCompaction)
+	}
+	s.mu.Lock()
+	rendered := run.lastRendered
+	has := run.hasRendered
+	s.mu.Unlock()
+	if !has {
+		return ProviderWindow{}, fmt.Errorf("%w: the session's transport has no request to compact", ErrInvalidCompaction)
+	}
+	return compactor.Compact(ctx, rendered)
 }
 
 // applyCompaction applies a compaction to the model's view.

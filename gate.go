@@ -204,6 +204,17 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
 		return compactionOutcome{}, err
 	}
+	// A provider window is the transport's own compacted state, so the
+	// core asks the transport for it. A strategy's items are never
+	// applied: it can only ask for the native compaction.
+	if compaction.Window != nil && compaction.Replace == nil && len(compaction.Rewrite) == 0 && compaction.End == nil {
+		window, werr := s.nativeWindow(ctx, run)
+		if werr != nil {
+			s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": werr.Error()})
+			return compactionOutcome{}, werr
+		}
+		compaction.Window = &window
+	}
 	if err := s.validateCompaction(compaction); err != nil {
 		s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
 		return compactionOutcome{}, err
