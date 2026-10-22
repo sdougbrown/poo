@@ -58,8 +58,9 @@ type ToolCallDelta struct {
 	// fragments, so the core decides whether a call is complete by parsing
 	// the assembled arguments, not from this field.
 	Complete bool
-	// Origin says where the call came from. An empty origin means the
-	// wire.
+	// Origin says where the call came from: "wire" for a call the
+	// endpoint sent, "parsed_text" for a call the model wrote as text.
+	// It is empty when the transport did not say.
 	Origin CallOrigin
 }
 
