@@ -705,3 +705,28 @@ func TestStartupWritesNothingAfterTheSeal(t *testing.T) {
 		}
 	}
 }
+
+// TestCloseIsBoundedWithTwoStalledObservers covers the plan's shutdown
+// bound: the 2s deadline is one deadline for the whole wait, so a second
+// stalled observer does not wait for another timeout.
+func TestCloseIsBoundedWithTwoStalledObservers(t *testing.T) {
+	first := &stallingObserver{name: "first", entered: make(chan struct{}), release: make(chan struct{})}
+	second := &stallingObserver{name: "second", entered: make(chan struct{}), release: make(chan struct{})}
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Observers = []poo.Observer{first, second}
+	s := newTestSession(t, opts)
+	runSession(t, s, "start")
+	<-first.entered
+	<-second.entered
+	done := make(chan struct{})
+	go func() { defer close(done); _ = s.Close() }()
+	select {
+	case <-done:
+	case <-time.After(2300 * time.Millisecond):
+		t.Error("Close still blocked after 2.3s with two stalled observers")
+	}
+	close(first.release)
+	close(second.release)
+	<-done
+}

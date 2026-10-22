@@ -279,11 +279,14 @@ func (b *eventBus) stop() {
 	for _, o := range observers {
 		close(o.stop)
 	}
-	deadline := time.After(2 * time.Second)
+	// One deadline for the whole wait: a context's Done channel is
+	// closed once and stays closed for every observer.
+	deadline, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	for _, o := range observers {
 		select {
 		case <-o.done:
-		case <-deadline:
+		case <-deadline.Done():
 		}
 	}
 	// The reporter ends with the bus, and the last report is written
