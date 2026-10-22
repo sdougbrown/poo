@@ -222,6 +222,9 @@ type jobState struct {
 	// prepared is the validated call the job runs, so a completion the
 	// close owns can still name the call to its hooks.
 	prepared Prepared
+	// arguments are the call's raw arguments, so a completion still
+	// shows the call to its hooks.
+	arguments json.RawMessage
 	// completing reports that the job's completion owns the chain, so
 	// only one caller runs it.
 	completing bool
@@ -282,7 +285,7 @@ func WithJobs(o JobOptions) Option {
 // so two calls that race for the last slot admit exactly one of them.
 // The job.started record is written before the goroutine starts, so a
 // log shows the job was accepted even when it never ran.
-func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared, summary string) (string, bool, bool) {
+func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared, summary string, arguments json.RawMessage) (string, bool, bool) {
 	// The slot is reserved under the lock, and the job is registered
 	// there too, so a job that is admitted is a job the session knows
 	// about. A run that is winding down admits nothing: no new effect
@@ -314,6 +317,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 		cancel:    cancel,
 		done:      make(chan struct{}),
 		prepared:  prepared,
+		arguments: cloneArguments(arguments),
 	}
 	s.jobs[jobID] = job
 	s.jobOrder = append(s.jobOrder, jobID)
@@ -528,7 +532,7 @@ func (s *Session) completeJob(job *jobState, result ToolResult, outcome Outcome,
 		result.Text = closedJobText(result.Text)
 	}
 
-	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{})
+	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{call: ToolCall{Name: job.tool, Arguments: job.arguments}})
 	info.Job = job.id
 	chain, hookErr := s.runAfterTool(completionCtx, job.runID, job.id, 0, info, result)
 

@@ -80,6 +80,15 @@ func (p readPrepared) Summary() string {
 	return p.path
 }
 
+// CanonicalKey returns the call's prepared input.
+func (p readPrepared) CanonicalKey() json.RawMessage {
+	key, _ := json.Marshal(struct {
+		Path   string `json:"path"`
+		Offset int    `json:"offset"`
+	}{p.path, p.offset})
+	return key
+}
+
 // bashTool is a side-effecting tool with a command argument.
 type bashTool struct {
 	mu sync.Mutex
@@ -133,6 +142,14 @@ type bashPrepared struct {
 // Summary describes the call.
 func (p bashPrepared) Summary() string {
 	return p.command
+}
+
+// CanonicalKey returns the call's prepared input.
+func (p bashPrepared) CanonicalKey() json.RawMessage {
+	key, _ := json.Marshal(struct {
+		Command string `json:"command"`
+	}{p.command})
+	return key
 }
 
 // session is a session under test.

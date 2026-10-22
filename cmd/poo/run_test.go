@@ -569,3 +569,34 @@ func TestTheCommandDefaultsToHandoff(t *testing.T) {
 		t.Errorf("the handoff is %v, want the fork's text", handoff["handoff"])
 	}
 }
+
+// TestARunWarnsWhenNoAskerCanAnswer covers the Stage 7 verify item: a
+// run whose policy can ask, with no asker that can ever answer, prints
+// the load-time warning naming the fallback.
+func TestARunWarnsWhenNoAskerCanAnswer(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+
+	code, stderr := runCLI(t,
+		"run",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--log", logPath,
+		"say hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "permission policy can ask") {
+		t.Errorf("the run printed no permission warning; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, "falls back to") {
+		t.Errorf("the warning does not name the fallback; stderr: %s", stderr)
+	}
+}

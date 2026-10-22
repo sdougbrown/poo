@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -105,7 +106,15 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 	s.countRepeats(plans)
 
 	if s.batchIsParallel(plans) {
-		s.executeParallel(run, turn, plans)
+		order := newResultOrder(plans)
+		s.mu.Lock()
+		run.resultOrder = order
+		s.mu.Unlock()
+		s.executeParallel(run, turn, plans, order)
+		s.mu.Lock()
+		run.resultOrder = nil
+		s.mu.Unlock()
+		order.close()
 		// The calls that never started because of an interrupt get a
 		// visible result.
 		if s.interruptPending(run) {
@@ -154,7 +163,9 @@ func (s *Session) batchStopped(run *runState) bool {
 //
 // The counts are the doom loop's, and they depend on the order the
 // model asked for the calls: a batch that runs in parallel still has
-// the model's order.
+// the model's order. The counters are consecutive per tool: a call to
+// another tool does not break a tool's streak, and a call with a
+// different key starts the streak over.
 //
 // A call that failed its validation counts toward the invalid near key,
 // because the same malformed call repeated is the same loop.
@@ -170,19 +181,43 @@ func (s *Session) countRepeats(plans []callPlan) {
 	if s.repeatKeys == nil {
 		s.repeatKeys = map[string]repeatKey{}
 	}
+	s.repeatBase = s.repeats.clone()
+	s.repeatBatch = s.repeatBatch[:0]
+	s.repeatResets = map[int]bool{}
 	for _, p := range plans {
 		primary := s.primaryArgOf(p.call.Name)
-		exact := exactKeyOf(p.call.Name, p.call.Arguments)
+		exact := exactKeyOf(p.call.Name, p.prepared, p.call.Arguments)
 		near := nearKeyOf(p.call.Name, primary, p.call.Arguments, false)
 		if p.invalid {
 			exact = "invalid:" + p.call.Name
 			near = nearKeyOf(p.call.Name, primary, p.call.Arguments, true)
 		}
-		counts := s.repeats.count(exact, near)
-		s.repeatCounts[p.handle] = counts
-		s.repeatKeys[p.handle] = repeatKey{exact: exact, near: near}
+		s.repeatBatch = append(s.repeatBatch, repeatPlan{
+			handle: p.handle,
+			tool:   p.call.Name,
+			exact:  exact,
+			near:   near,
+		})
 		s.repeatOrder = append(s.repeatOrder, p.handle)
 	}
+	s.recountRepeatsLocked()
+}
+
+// recountRepeatsLocked recounts the current batch from its starting
+// state and the resets committed so far.
+//
+// The caller holds the session's lock.
+func (s *Session) recountRepeatsLocked() {
+	counter := s.repeatBase.clone()
+	for i, plan := range s.repeatBatch {
+		counts := counter.count(plan.tool, plan.exact, plan.near)
+		s.repeatCounts[plan.handle] = counts
+		s.repeatKeys[plan.handle] = repeatKey{tool: plan.tool, exact: plan.exact, near: plan.near}
+		if s.repeatResets[i] {
+			counter.reset(plan.tool)
+		}
+	}
+	s.repeats = counter
 }
 
 // callsFromPlans returns the calls a plan holds.
@@ -330,12 +365,17 @@ func (s *Session) batchIsParallel(plans []callPlan) bool {
 }
 
 // executeParallel runs a read-only batch at the same time.
-func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
+//
+// The tools run concurrently, and their results are recorded in model
+// order, so the next request sees the results of the calls in the order
+// the model made them.
+func (s *Session) executeParallel(run *runState, turn int, plans []callPlan, order *resultOrder) {
 	var wg sync.WaitGroup
 	for _, p := range plans {
 		wg.Add(1)
 		go func(p callPlan) {
 			defer wg.Done()
+			defer order.advance(p.handle)
 			// An interrupt that arrived before the call started skips
 			// it.
 			if s.interruptPending(run) || s.batchStopped(run) {
@@ -345,6 +385,76 @@ func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
 		}(p)
 	}
 	wg.Wait()
+}
+
+// resultOrder orders a parallel batch's results in model order.
+type resultOrder struct {
+	// mu guards the order.
+	mu sync.Mutex
+	// cond wakes a call whose turn has come.
+	cond *sync.Cond
+	// indices are the calls' model positions, by handle.
+	indices map[string]int
+	// done marks the calls whose result is recorded.
+	done map[int]bool
+	// next is the lowest model index whose result is not recorded.
+	next int
+	// closed reports that the batch is over, so no one waits any more.
+	closed bool
+}
+
+// newResultOrder returns the gate for a batch.
+func newResultOrder(plans []callPlan) *resultOrder {
+	order := &resultOrder{
+		indices: make(map[string]int, len(plans)),
+		done:    make(map[int]bool, len(plans)),
+	}
+	order.cond = sync.NewCond(&order.mu)
+	for _, plan := range plans {
+		order.indices[plan.handle] = plan.index
+	}
+	return order
+}
+
+// wait waits until every earlier call of the batch has recorded its
+// result.
+func (o *resultOrder) wait(handle string) {
+	index, ok := o.indices[handle]
+	if !ok {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for !o.closed && o.next < index {
+		o.cond.Wait()
+	}
+}
+
+// advance marks a call's result as recorded and wakes the calls behind
+// it.
+func (o *resultOrder) advance(handle string) {
+	index, ok := o.indices[handle]
+	if !ok {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed || o.done[index] {
+		return
+	}
+	o.done[index] = true
+	for o.done[o.next] {
+		o.next++
+	}
+	o.cond.Broadcast()
+}
+
+// close ends the gate and wakes every waiter.
+func (o *resultOrder) close() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.closed = true
+	o.cond.Broadcast()
 }
 
 // executeOne runs one call and records its result.
@@ -447,14 +557,55 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// The call's outcome is decided by the core, not by the tool.
 	prepared := plan.prepared
 	if prepared == nil {
-		// The call failed its validation. The failure is a recoverable
-		// error: the model sees the message and may correct the call.
+		// The call is recorded before the policy sees it, so a log shows
+		// the malformed call the model made even when the policy asks
+		// about it.
+		if !record(CallModeSync) {
+			return
+		}
+		// The call failed its validation. The doom loop still judges it:
+		// the same malformed call repeated is the same loop. The other
+		// rules do not apply, because the call is not a valid call.
+		if policy := s.opts.Policy; policy != nil {
+			ctx := s.activityContext(run)
+			info := s.toolCallInfo(turn, handle, call.Name, nil, plan)
+			info.PrepareFailed = true
+			decision, err := s.callPolicy(ctx, run, policy, turn, info)
+			if s.runWindingDown(run) {
+				s.logLateHookDecision(run.id, handle, call.Name, turn)
+				return
+			}
+			if err != nil {
+				s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+					Text:    err.Error(),
+					IsError: true,
+				}, OutcomeError)
+				s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
+					Source: hookFailureSource(err, "before_tool"),
+					Text:   err.Error(),
+				}))
+				return
+			}
+			if s.interruptPending(run) {
+				return
+			}
+			if decision.Denied {
+				text := decision.Detail
+				if text == "" {
+					text = "The call was refused."
+				}
+				s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+					Text:    text,
+					IsError: true,
+				}, OutcomeDenied)
+				return
+			}
+		}
+		// The failure is a recoverable error: the model sees the message
+		// and may correct the call.
 		text := "the call was not prepared"
 		if plan.prepareErr != nil {
 			text = plan.prepareErr.Error()
-		}
-		if !record(CallModeSync) {
-			return
 		}
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
 			Text:    text,
@@ -648,7 +799,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 // starts. The call's own result is the "started" one, and the batch
 // carries on.
 func (s *Session) startJobCall(run *runState, turn int, handle string, call ToolCall, plan callPlan) {
-	jobID, ok, winding := s.startJob(run, handle, call.Name, plan.prepared, plan.summary)
+	jobID, ok, winding := s.startJob(run, handle, call.Name, plan.prepared, plan.summary, call.Arguments)
 	if winding {
 		// The run settled while the job was being accepted; nothing
 		// else starts, and the finalization owns the run.
@@ -705,6 +856,17 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 	}
 }
 
+// waitForResultOrder waits until the earlier calls of a parallel batch
+// have recorded their results.
+func (s *Session) waitForResultOrder(run *runState, handle string) {
+	s.mu.Lock()
+	order := run.resultOrder
+	s.mu.Unlock()
+	if order != nil {
+		order.wait(handle)
+	}
+}
+
 // recordResult records a tool result and appends it to the history.
 //
 // The result goes back to the model under the call's provider-side id,
@@ -714,6 +876,7 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 // record is written, so a call that the finalization already gave a
 // synthetic result to is not given a second one.
 func (s *Session) recordResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome) {
+	s.waitForResultOrder(run, handle)
 	won, tracked := s.claimResult(run, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
@@ -740,6 +903,7 @@ func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID
 			Text:   err.Error(),
 		}))
 	}
+	s.waitForResultOrder(run, handle)
 	won, tracked := s.claimResult(run, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
@@ -1113,19 +1277,30 @@ func Fatalf(format string, args ...any) error {
 // repeatCounter counts the consecutive repeats of a call in a run.
 //
 // The counters are the doom loop's: an exact key is the tool plus its
-// canonical input, and a near key is the tool plus its primary
+// canonical prepared input, and a near key is the tool plus its primary
 // argument. A Prepare failure counts toward the near key, because the
 // same malformed call repeated is the same loop.
 //
-// The counters are kept per key, and a call to another tool does not
+// The counters are kept per tool, and a call to another tool does not
 // break the streak: a run that reads the same file five times with
-// another tool in between is still a loop. The keys name the tool, so
-// calls to different tools never share a count.
+// another tool in between is still a loop. A call with a different key
+// for the same tool starts the streak over, which is what makes the
+// repeats consecutive.
 type repeatCounter struct {
-	// exact counts the repeats of each exact key.
-	exact map[string]int
-	// near counts the repeats of each near key.
-	near map[string]int
+	// streaks are the per-tool streaks.
+	streaks map[string]*toolStreak
+}
+
+// toolStreak is one tool's consecutive repeats.
+type toolStreak struct {
+	// exactKey is the last exact key the tool was called with.
+	exactKey string
+	// exact is how many times that key repeated consecutively.
+	exact int
+	// nearKey is the last near key the tool was called with.
+	nearKey string
+	// near is how many times that key repeated consecutively.
+	near int
 }
 
 // repeatCounts is what a call's repeat counters hold.
@@ -1137,11 +1312,28 @@ type repeatCounts struct {
 	near int
 }
 
+// repeatPlan is one call of the counted batch.
+//
+// The plans are kept in model order, so a reset can recount the calls
+// after it.
+type repeatPlan struct {
+	// handle is the call's handle.
+	handle string
+	// tool is the name of the tool the call names.
+	tool string
+	// exact is the call's exact key.
+	exact string
+	// near is the call's near key.
+	near string
+}
+
 // repeatKey is the pair of keys a call was counted under.
 //
 // The keys are kept so a policy that allowed a loop can clear the
 // counters: the loop starts over.
 type repeatKey struct {
+	// tool is the name of the tool the call names.
+	tool string
 	// exact is the call's exact key.
 	exact string
 	// near is the call's near key.
@@ -1150,27 +1342,51 @@ type repeatKey struct {
 
 // newRepeatCounter returns an empty counter.
 func newRepeatCounter() *repeatCounter {
-	return &repeatCounter{exact: map[string]int{}, near: map[string]int{}}
+	return &repeatCounter{streaks: map[string]*toolStreak{}}
+}
+
+// clone returns a copy of the counter.
+func (c *repeatCounter) clone() *repeatCounter {
+	out := newRepeatCounter()
+	for tool, streak := range c.streaks {
+		copied := *streak
+		out.streaks[tool] = &copied
+	}
+	return out
 }
 
 // count records a call and returns the counts it had.
 //
-// The counts are the number of times the model has made this call, and
-// the number of times it has made a call with the same primary
-// argument, in the run.
-func (c *repeatCounter) count(exactKey, nearKey string) repeatCounts {
-	c.exact[exactKey]++
-	c.near[nearKey]++
-	return repeatCounts{exact: c.exact[exactKey], near: c.near[nearKey]}
+// The counts are the number of times the model has made this call
+// consecutively, and the number of times it has made a call with the
+// same primary argument consecutively, in the run.
+func (c *repeatCounter) count(tool, exactKey, nearKey string) repeatCounts {
+	streak, ok := c.streaks[tool]
+	if !ok {
+		streak = &toolStreak{}
+		c.streaks[tool] = streak
+	}
+	if streak.exactKey == exactKey {
+		streak.exact++
+	} else {
+		streak.exactKey = exactKey
+		streak.exact = 1
+	}
+	if streak.nearKey == nearKey {
+		streak.near++
+	} else {
+		streak.nearKey = nearKey
+		streak.near = 1
+	}
+	return repeatCounts{exact: streak.exact, near: streak.near}
 }
 
-// reset clears the counters of a key pair.
+// reset clears a tool's streak.
 //
 // The counters are the doom loop's, and a policy that allowed a loop
 // clears them: the next call of the same shape starts the count over.
-func (c *repeatCounter) reset(exactKey, nearKey string) {
-	delete(c.exact, exactKey)
-	delete(c.near, nearKey)
+func (c *repeatCounter) reset(tool string) {
+	delete(c.streaks, tool)
 }
 
 // primaryArgOf returns the name of a tool's primary argument.
@@ -1184,9 +1400,34 @@ func (s *Session) primaryArgOf(name string) string {
 
 // exactKeyOf returns the exact repeat key of a call.
 //
-// The key is the tool plus its canonical arguments.
-func exactKeyOf(name string, args json.RawMessage) string {
+// The key is the tool plus its canonical prepared input, re-encoded as
+// JSON with sorted keys. A tool whose prepared value cannot be
+// re-encoded names its own canonical key, and a tool that does neither
+// falls back to its canonicalized raw arguments.
+func exactKeyOf(name string, prepared Prepared, args json.RawMessage) string {
+	if key, ok := canonicalPrepared(prepared); ok {
+		return name + ":" + key
+	}
 	return name + ":" + canonicalJSON(args)
+}
+
+// canonicalPrepared returns a prepared call's canonical JSON, when it
+// has one the core can use.
+func canonicalPrepared(prepared Prepared) (string, bool) {
+	if prepared == nil {
+		return "", false
+	}
+	if raw, err := json.Marshal(prepared); err == nil {
+		if canonical := canonicalJSON(raw); canonical != "{}" && canonical != "null" {
+			return canonical, true
+		}
+	}
+	if keyer, ok := prepared.(CanonicalKeyer); ok {
+		if key := keyer.CanonicalKey(); len(key) > 0 {
+			return canonicalJSON(key), true
+		}
+	}
+	return "", false
 }
 
 // nearKeyOf returns the near repeat key of a call.
@@ -1195,11 +1436,11 @@ func exactKeyOf(name string, args json.RawMessage) string {
 // validation has no valid primary argument, and the key says so.
 func nearKeyOf(name, primary string, args json.RawMessage, invalid bool) string {
 	if invalid {
-		value := ""
-		if primary != "" {
-			value = primaryArgValue(args, primary)
+		if primary == "" {
+			return name + ":invalid"
 		}
-		if value == "" {
+		value, ok := primaryArgValue(args, primary)
+		if !ok {
 			return name + ":invalid"
 		}
 		return name + ":invalid:" + value
@@ -1207,39 +1448,46 @@ func nearKeyOf(name, primary string, args json.RawMessage, invalid bool) string 
 	if primary == "" {
 		return name
 	}
-	return name + ":" + primaryArgValue(args, primary)
+	value, ok := primaryArgValue(args, primary)
+	if !ok {
+		return name
+	}
+	return name + ":" + value
 }
 
 // primaryArgValue returns the raw value of a top-level string argument.
 //
-// The value is the raw text, so two calls that spell the same argument
-// the same way share a key.
-func primaryArgValue(args json.RawMessage, name string) string {
+// The second result reports that the field was present as a string, so
+// an empty string is not confused with a missing field.
+func primaryArgValue(args json.RawMessage, name string) (string, bool) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(args, &obj); err != nil {
-		return ""
+		return "", false
 	}
 	raw, ok := obj[name]
 	if !ok {
-		return ""
+		return "", false
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return ""
+		return "", false
 	}
-	return s
+	return s, true
 }
 
-// canonicalJSON returns the arguments in a canonical form.
+// canonicalJSON returns a JSON value in a canonical form.
 //
 // The keys are sorted, so two calls that spell the same arguments in a
-// different order share an exact key.
+// different order share an exact key. Numbers keep their original
+// precision, so two distinct large integers never compare equal.
 func canonicalJSON(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return "{}"
 	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
 	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
+	if err := dec.Decode(&value); err != nil {
 		return string(raw)
 	}
 	out, err := json.Marshal(value)

@@ -99,3 +99,23 @@ func TestThePolicySeesTheCountsAndTheArguments(t *testing.T) {
 		t.Errorf("the policy saw the exact count %d, want 1", got)
 	}
 }
+
+// TestTheStreakContinuesAcrossTurns covers "consecutive within a run":
+// the same call in the next turn continues the streak, because the
+// counters belong to the run and not to one batch.
+func TestTheStreakContinuesAcrossTurns(t *testing.T) {
+	tool := &echoTool{result: "the effect", primaryArg: "text"}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"a"}`)}}},
+		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: []byte(`{"text":"a"}`)}}},
+		{text: "done"},
+	})
+	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
+
+	runSession(t, s, "start")
+
+	second := s.RepeatCountsFor("r2")
+	if second.Exact != 2 || second.Near != 2 {
+		t.Errorf("the second turn's call has counts %+v, want exact 2 and near 2", second)
+	}
+}

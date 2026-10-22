@@ -82,6 +82,28 @@ func (p *prepared) Summary() string {
 	return fmt.Sprintf("%s (replace %q)", p.path, p.old)
 }
 
+// CanonicalKey returns the call's prepared input.
+func (p *prepared) CanonicalKey() json.RawMessage {
+	key, _ := json.Marshal(struct {
+		Path       string `json:"path"`
+		Old        string `json:"old"`
+		New        string `json:"new"`
+		ReplaceAll bool   `json:"replace_all"`
+	}{p.abs, p.old, p.new, p.replaceAll})
+	return key
+}
+
+// EvidenceArguments returns the arguments a decision model may see.
+func (p *prepared) EvidenceArguments() json.RawMessage {
+	args, _ := json.Marshal(struct {
+		Path       string `json:"path"`
+		Old        string `json:"old"`
+		New        string `json:"new"`
+		ReplaceAll bool   `json:"replace_all"`
+	}{p.path, p.old, p.new, p.replaceAll})
+	return args
+}
+
 // Prepare validates the arguments.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args
