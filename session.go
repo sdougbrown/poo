@@ -831,8 +831,11 @@ func (s *Session) writeRun(run *runState, rec Record) error {
 
 // runWriteClaim is one claimed hook write for a run.
 type runWriteClaim struct {
-	// cancel ends the write at the seal.
+	// cancel ends the write, with the seal's cause when the
+	// finalization stops waiting for it.
 	cancel context.CancelCauseFunc
+	// timeout ends the claim's own record-write budget.
+	timeout context.CancelFunc
 }
 
 // beginRunWrite claims a record's write against the run's seal.
@@ -852,14 +855,16 @@ func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
 	if base == nil {
 		base = context.Background()
 	}
-	ctx, cancel := context.WithCancelCause(context.WithoutCancel(base))
-	claim := &runWriteClaim{cancel: cancel}
+	timed, timeout := context.WithTimeout(context.WithoutCancel(base), recordWriteBudget)
+	ctx, cancel := context.WithCancelCause(timed)
+	claim := &runWriteClaim{cancel: cancel, timeout: timeout}
 	run.writeClaims = append(run.writeClaims, claim)
 	run.runWrites++
 	s.mu.Unlock()
 
 	release := func() {
 		cancel(nil)
+		timeout()
 		s.mu.Lock()
 		for i, held := range run.writeClaims {
 			if held == claim {
