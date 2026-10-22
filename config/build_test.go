@@ -328,3 +328,51 @@ var _ perm.Asker = (*perm.WireAsker)(nil)
 
 // The context is what the store's prune runs under.
 var _ = context.Background
+
+// TestTheRuntimeCreatesAndResumesASession covers the factory: the
+// runtime creates a session in the store, and the session is loaded
+// again from the records it wrote.
+func TestTheRuntimeCreatesAndResumesASession(t *testing.T) {
+	dir := t.TempDir()
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  dir: "+dir+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+
+	created := &poo.SessionCreated{
+		RecordMeta:   poo.NewRecordMeta("session.created"),
+		Format:       poo.FormatVersion,
+		SessionID:    "s1",
+		Mode:         "logged",
+		CreatedAt:    "2026-10-22T12:00:00Z",
+		WorkingDir:   t.TempDir(),
+		Model:        poo.SessionModel{ID: "test-model"},
+		ContextLimit: 32768,
+		Profile:      "code",
+		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
+	}
+	sess, err := runtime.CreateSession(context.Background(), created)
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if _, err := sess.Prompt(context.Background(), "say hello"); err != nil {
+		t.Fatalf("prompting: %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+
+	resumed, err := runtime.ResumeSession(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("resuming the session: %v", err)
+	}
+	defer resumed.Session.Close()
+	if resumed.Loaded.ID != "s1" {
+		t.Errorf("the loaded session is %q, want s1", resumed.Loaded.ID)
+	}
+	if len(resumed.Loaded.Records) == 0 {
+		t.Error("the loaded session holds no records")
+	}
+}

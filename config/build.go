@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -718,6 +719,14 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 		}
 	} else {
 		r.Options.Model = model
+		// The session talks to the chat model, so the transport is
+		// part of the runtime's options. A consumer that changes the
+		// model builds its own transport for it.
+		transport, err := r.Transport(model)
+		if err != nil {
+			return err
+		}
+		r.Options.Transport = transport
 	}
 	r.Options.Profile = r.Profile.Name
 	r.Options.Profiles = r.Profiles
@@ -832,6 +841,44 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 		r.FinishSchema = json.RawMessage(data)
 	}
 	return nil
+}
+
+// CreateSession creates a session in the store and returns it.
+//
+// The session's records go to the store, and the store holds the
+// session's authority until it is closed. A runtime without a store is
+// in the ephemeral mode, and it creates no session.
+func (r *Runtime) CreateSession(ctx context.Context, created *poo.SessionCreated) (*poo.Session, error) {
+	if r.Store == nil {
+		return nil, &Error{
+			Code:    CodeUnsupported,
+			Message: "the session has no store: the settings are in the ephemeral mode",
+		}
+	}
+	if _, err := r.Store.Create(ctx, created); err != nil {
+		return nil, err
+	}
+	opts := r.Options
+	opts.Sink = r.Store
+	opts.SessionID = created.SessionID
+	return poo.New(opts, poo.WithPolicy(r.Policy))
+}
+
+// ResumeSession loads a session from the store and restores it.
+//
+// The restored session writes to the store it was loaded from, and the
+// store holds the session's authority until it is closed. The load
+// recovers the session: a torn tail is truncated, an unsettled run is
+// marked interrupted, and the job results that were never delivered are
+// queued again.
+func (r *Runtime) ResumeSession(ctx context.Context, id string) (*session.Resumed, error) {
+	if r.Store == nil {
+		return nil, &Error{
+			Code:    CodeUnsupported,
+			Message: "the session has no store: the settings are in the ephemeral mode",
+		}
+	}
+	return session.Resume(ctx, r.Store, id, r.Options)
 }
 
 // ChatModel returns the model the session talks to.
