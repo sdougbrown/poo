@@ -161,29 +161,6 @@ func (b *eventBus) emit(name EventName, payload map[string]any) Event {
 	return ev
 }
 
-// emitLogOnly publishes one event to the log without delivering it to
-// the observers.
-//
-// The overflow diagnostics are the core's own: an observer that fell
-// behind must not be handed the report of its own overflow, or the
-// report would cause more overflow.
-//
-// The log is written even when the bus has stopped, so the last report
-// is in the log.
-func (b *eventBus) emitLogOnly(name EventName, payload map[string]any) Event {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.seq++
-	ev := Event{
-		Seq:     b.seq,
-		Name:    name,
-		At:      time.Now().UTC().Format(time.RFC3339Nano),
-		Payload: payload,
-	}
-	b.log = append(b.log, ev)
-	return ev
-}
-
 // setDropReporter sets the writer of the overflow records.
 //
 // The writer is called from the reporter's goroutine, so a store that
@@ -242,12 +219,9 @@ func (b *eventBus) flushDrops(observers []*observerSlot) {
 		if count == 0 {
 			continue
 		}
-		// The diagnostic is in the log, and it is never delivered to
-		// an observer.
-		b.emitLogOnly(EventObserverDropped, map[string]any{
-			"observer": o.name,
-			"count":    count,
-		})
+		// The diagnostic is the record's own: it is not an event, so
+		// neither an observer nor a client reading the event log sees
+		// it.
 		report(o.name, count)
 	}
 }

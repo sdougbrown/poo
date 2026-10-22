@@ -730,3 +730,28 @@ func TestCloseIsBoundedWithTwoStalledObservers(t *testing.T) {
 	close(second.release)
 	<-done
 }
+
+// TestTheObserverDropDiagnosticIsRecordOnly covers the plan's rule: the
+// coalesced overflow diagnostic is written to the record only. It is not
+// an event, so a client never receives it.
+func TestTheObserverDropDiagnosticIsRecordOnly(t *testing.T) {
+	restoreBuffer := poo.SetObserverBuffer(1)
+	defer restoreBuffer()
+	restoreInterval := poo.SetObserverDropInterval(20 * time.Millisecond)
+	defer restoreInterval()
+	observer := &stallingObserver{name: "stalled", entered: make(chan struct{}), release: make(chan struct{})}
+	tr := scripted([]fakeResponse{{text: "done"}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Observers = []poo.Observer{observer}
+	s := newTestSession(t, opts)
+	runSession(t, s, "start")
+	<-observer.entered
+	waitFor(t, "the overflow record", func() bool { return sink.count("observer.dropped") > 0 })
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventObserverDropped {
+			t.Errorf("the overflow diagnostic was emitted as an event: %+v", ev)
+		}
+	}
+	close(observer.release)
+}
