@@ -3,6 +3,7 @@ package poo
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // ChatRequest is one provider request: the full model view plus the
@@ -19,6 +20,30 @@ type ChatRequest struct {
 	// MaxTokens is the output-token ceiling for this request. It is always
 	// computed by the caller, never left to the endpoint default.
 	MaxTokens int
+	// OnAttempt is called for every attempt that failed and was tried
+	// again, so the caller can write the attempt to its record.
+	//
+	// The call happens on the goroutine that reads the response, and
+	// the attempt is reported before the wait that follows it.
+	//
+	// A nil reporter drops the attempts.
+	OnAttempt func(Attempt)
+}
+
+// Attempt is one attempt of a request that failed.
+//
+// A request that fails before the endpoint answered is tried again, and
+// every attempt that failed is reported, so the record can hold them.
+type Attempt struct {
+	// Number is the attempt's number, counting from one.
+	Number int
+	// Err is the failure the attempt ended with.
+	Err error
+	// Delay is how long the transport waited before the next attempt.
+	// It is zero when no other attempt followed.
+	Delay time.Duration
+	// Retried reports that another attempt followed this one.
+	Retried bool
 }
 
 // Delta is one piece of a streamed response.

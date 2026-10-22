@@ -983,6 +983,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 		Messages:  messages,
 		Tools:     tools,
 		MaxTokens: s.maxTokens(),
+		OnAttempt: func(a Attempt) { s.reportAttempt(run, turn, a) },
 	})
 	if err != nil {
 		return nil, rendered, err
@@ -1014,6 +1015,44 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 		}
 	}
 	return resp, rendered, err
+}
+
+// reportAttempt writes the record of an attempt that failed.
+//
+// The attempts are written for the audit: a reader of the log sees what
+// the request tried and what every attempt failed with. The failure
+// that ended the request is in the run's settle record.
+func (s *Session) reportAttempt(run *runState, turn int, attempt Attempt) {
+	rec := &ProviderAttempt{
+		RecordMeta: NewRecordMeta("provider.attempt"),
+		RunID:      run.id,
+		Turn:       turn,
+		Request:    run.requests,
+		Attempt:    attempt.Number,
+		Error:      attempt.Err.Error(),
+		DelayMS:    int(attempt.Delay.Milliseconds()),
+	}
+	var perr *ProviderError
+	if errors.As(attempt.Err, &perr) {
+		rec.Kind = string(perr.Kind)
+	}
+	if err := s.writeRun(run, rec); err != nil {
+		s.logger().Warn("the attempt record could not be written", "error", err)
+	}
+	if !attempt.Retried {
+		// No other attempt followed: the failure ended the request, and
+		// the run's settle record says so.
+		return
+	}
+	s.events.emit(EventProviderRetry, map[string]any{
+		"run_id":   run.id,
+		"turn":     turn,
+		"request":  run.requests,
+		"attempt":  attempt.Number,
+		"error":    rec.Error,
+		"kind":     rec.Kind,
+		"delay_ms": rec.DelayMS,
+	})
 }
 
 // toolSpecs returns the tools the model may call, in offer order.

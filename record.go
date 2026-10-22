@@ -304,6 +304,29 @@ type Usage struct {
 	TTFTMS float64 `json:"ttft_ms"`
 }
 
+// ProviderAttempt is the record of one attempt of a request that
+// failed.
+//
+// The attempts are written for the audit: a reader of the log sees
+// what a request tried and what every attempt failed with.
+type ProviderAttempt struct {
+	RecordMeta
+	// RunID identifies the run the request belongs to.
+	RunID string `json:"run_id"`
+	// Turn is the turn the request belongs to.
+	Turn int `json:"turn"`
+	// Request is the 1-based number of the request within the run.
+	Request int `json:"request"`
+	// Attempt is the attempt's number, counting from one.
+	Attempt int `json:"attempt"`
+	// Error is the failure's message.
+	Error string `json:"error"`
+	// Kind is the provider's error kind, when the failure is one.
+	Kind string `json:"kind,omitempty"`
+	// DelayMS is how long the transport waited before the next attempt.
+	DelayMS int `json:"delay_ms,omitempty"`
+}
+
 // ProviderDetail describes why a provider request failed.
 type ProviderDetail struct {
 	// Kind is the failure class, e.g. "context_length" or "server".

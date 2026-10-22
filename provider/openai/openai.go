@@ -51,6 +51,10 @@ type Config struct {
 	Logger *slog.Logger
 	// OnAttempt is called for every attempt that failed, so a consumer
 	// can write the attempt to the log.
+	//
+	// The request's own reporter is the core's channel: it hears the
+	// attempts of one request, and the core writes them to the
+	// session's record.
 	OnAttempt func(Attempt)
 	// MaxAttempts is the number of attempts one request gets. Zero
 	// means the plan's three.
@@ -240,7 +244,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		Messages: len(req.Messages),
 	}
 
-	reader, attempt, err := t.openWithRetry(ctx, body)
+	reader, attempt, err := t.openWithRetry(ctx, body, req.OnAttempt)
 	if err != nil {
 		return nil, rendered, err
 	}
@@ -250,6 +254,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		body:      body,
 		attempt:   attempt,
 		current:   reader,
+		report:    req.OnAttempt,
 	}, rendered, nil
 }
 
@@ -280,7 +285,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		return nil, err
 	}
 
-	reader, attempt, err := t.openWithRetry(ctx, body)
+	reader, attempt, err := t.openWithRetry(ctx, body, nil)
 	if err != nil {
 		return nil, err
 	}

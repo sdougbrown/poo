@@ -314,15 +314,67 @@ func TestTheAttemptsAreReported(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(attempts) != 2 {
-		t.Fatalf("the transport reported %d attempts, want 2: the third one is the failure", len(attempts))
+	if len(attempts) != 3 {
+		t.Fatalf("the transport reported %d attempts, want 3: every attempt that failed is reported", len(attempts))
 	}
-	if attempts[0].Number != 1 || attempts[1].Number != 2 {
-		t.Errorf("the attempts are numbered %d and %d, want 1 and 2", attempts[0].Number, attempts[1].Number)
-	}
-	for _, a := range attempts {
+	for i, a := range attempts {
+		if a.Number != i+1 {
+			t.Errorf("the attempt is %d, want %d", a.Number, i+1)
+		}
 		if a.Err == nil {
 			t.Errorf("attempt %d has no failure", a.Number)
+		}
+	}
+	// The last attempt is the one that ended the request, and no other
+	// attempt followed it.
+	if !attempts[0].Retried || !attempts[1].Retried {
+		t.Errorf("the first two attempts were not retried: %+v", attempts)
+	}
+	if attempts[2].Retried {
+		t.Errorf("the last attempt says it was retried: %+v", attempts[2])
+	}
+	if attempts[2].Delay != 0 {
+		t.Errorf("the last attempt waited %v, want no wait", attempts[2].Delay)
+	}
+}
+
+// TestTheRequestHearsTheAttempts covers the request's own reporter: it
+// hears every attempt that failed, so the core can write the attempts
+// to the session's record.
+func TestTheRequestHearsTheAttempts(t *testing.T) {
+	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`)
+
+	var mu sync.Mutex
+	var attempts []poo.Attempt
+	tr := openai.New(openai.Config{
+		BaseURL: srv.URL,
+		Model:   "m",
+		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
+	})
+
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "m",
+		MaxTokens: 16,
+		OnAttempt: func(a poo.Attempt) {
+			mu.Lock()
+			defer mu.Unlock()
+			attempts = append(attempts, a)
+		},
+	})
+	if err == nil {
+		t.Fatal("the request succeeded, want a failure")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(attempts) != 3 {
+		t.Fatalf("the request heard %d attempts, want 3", len(attempts))
+	}
+	for i, a := range attempts {
+		if a.Number != i+1 {
+			t.Errorf("the attempt is %d, want %d", a.Number, i+1)
+		}
+		if a.Err == nil {
+			t.Errorf("the attempt %d has no failure", a.Number)
 		}
 	}
 }

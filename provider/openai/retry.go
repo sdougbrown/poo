@@ -106,22 +106,26 @@ func waitFor(ctx context.Context, d time.Duration) error {
 // Attempt is one attempt of a request that failed.
 //
 // The transport reports every attempt, so a consumer can write the
-// attempt to the log and tell how a request ended.
-type Attempt struct {
-	// Number is the attempt's number, counting from one.
-	Number int
-	// Err is the failure the attempt ended with.
-	Err error
-	// Delay is how long the transport waited before the next attempt.
-	Delay time.Duration
-}
+// attempt to the log and tell how a request ended. It is the core's
+// type: the core writes the attempts to the session's record.
+type Attempt = poo.Attempt
 
 // reportAttempt tells the consumer about an attempt that failed.
-func (t *Transport) reportAttempt(attempt int, err error, delay time.Duration) {
-	if t.cfg.OnAttempt == nil {
-		return
+//
+// The request's own reporter comes first: it is the core's channel,
+// and the core writes the attempt to the session's record. The
+// transport's reporter is the consumer's own.
+//
+// The retried flag says whether another attempt followed: the last
+// attempt of a request is reported too, and nothing follows it.
+func (t *Transport) reportAttempt(report func(poo.Attempt), attempt int, err error, delay time.Duration, retried bool) {
+	a := poo.Attempt{Number: attempt, Err: err, Delay: delay, Retried: retried}
+	if t.cfg.OnAttempt != nil {
+		t.cfg.OnAttempt(a)
 	}
-	t.cfg.OnAttempt(Attempt{Number: attempt, Err: err, Delay: delay})
+	if report != nil {
+		report(a)
+	}
 }
 
 // openWithRetry opens the request and returns the reader of the attempt
@@ -129,7 +133,10 @@ func (t *Transport) reportAttempt(attempt int, err error, delay time.Duration) {
 //
 // A failure that is worth another attempt is retried within the
 // budget. The wait between the attempts is cancellable.
-func (t *Transport) openWithRetry(ctx context.Context, body []byte) (*streamReader, int, error) {
+//
+// The report is the request's own reporter: it hears every attempt
+// that failed.
+func (t *Transport) openWithRetry(ctx context.Context, body []byte, report func(poo.Attempt)) (*streamReader, int, error) {
 	attempt := 0
 	for {
 		attempt++
@@ -139,9 +146,12 @@ func (t *Transport) openWithRetry(ctx context.Context, body []byte) (*streamRead
 		}
 		wait, ok := t.policy.delay(attempt, err)
 		if !ok {
+			// The last attempt of the request is reported too: the
+			// record holds every attempt the request made.
+			t.reportAttempt(report, attempt, err, 0, false)
 			return nil, attempt, err
 		}
-		t.reportAttempt(attempt, err, wait)
+		t.reportAttempt(report, attempt, err, wait, true)
 		if werr := waitFor(ctx, wait); werr != nil {
 			return nil, attempt, werr
 		}
@@ -162,6 +172,9 @@ type streamWithRetry struct {
 	body []byte
 	// attempt is the number of the attempt in flight.
 	attempt int
+	// report is the request's own reporter: it hears every attempt that
+	// failed.
+	report func(poo.Attempt)
 	// current is the reader of the attempt in flight.
 	current *streamReader
 	// seen reports that the attempt in flight has carried something the
@@ -185,9 +198,10 @@ func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 			if err != nil {
 				wait, ok := s.transport.policy.delay(s.attempt, err)
 				if !ok {
+					s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
 					return poo.StreamEvent{}, err
 				}
-				s.transport.reportAttempt(s.attempt, err, wait)
+				s.transport.reportAttempt(s.report, s.attempt, err, wait, true)
 				if werr := waitFor(s.ctx, wait); werr != nil {
 					return poo.StreamEvent{}, werr
 				}
@@ -214,7 +228,7 @@ func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 		}
 		if !s.seen {
 			if wait, ok := s.transport.policy.delay(s.attempt, err); ok {
-				s.transport.reportAttempt(s.attempt, err, wait)
+				s.transport.reportAttempt(s.report, s.attempt, err, wait, true)
 				// The attempt failed before it carried anything, but it
 				// may have spent tokens: the usage is kept.
 				s.usage = s.current.ReportUsage()
@@ -227,6 +241,9 @@ func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 				continue
 			}
 		}
+		// The attempt that failed and was not tried again: it is the
+		// last one, and the record holds it too.
+		s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
 		return poo.StreamEvent{}, err
 	}
 }
