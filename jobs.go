@@ -414,6 +414,15 @@ func (s *Session) onIdle() OnIdle {
 // it is cancelled, or when the session closes.
 func (s *Session) runJob(job *jobState, prepared Prepared) {
 	defer close(job.done)
+	// A panic in a tool must not bring the process down: the foreground
+	// path settles a panicking tool as tool_fatal, and a job gets the
+	// same treatment — exactly one job.ended, with the panic as the
+	// result and the fatal flag set.
+	defer func() {
+		if r := recover(); r != nil {
+			s.finishJob(job, OutcomeError, fmt.Sprintf("panic: %v", r), false, true)
+		}
+	}()
 
 	tool, ok := s.opts.Tools[job.tool]
 	if !ok {
@@ -836,33 +845,13 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 
 	msg := NewTextMessage(RoleUser, jobResultText(result))
 	msg.Origin = OriginJob
-	if err := s.writeDelivery(run.ctx, run, &MessageRecord{
-		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
-		RunID:      run.id,
-		Role:       msg.Role,
-		Content:    msg.Content,
-	}); err != nil {
+	if !s.deliverMessageRecords(run, msg, result.id, InputModeJob, nil, func(err error) {
 		s.failJobDelivery(run, item, err)
+	}, func() {
+		s.finishJobDelivery(run, item)
+	}) {
 		return false
 	}
-	if err := s.writeDelivery(run.ctx, run, &InputDelivered{
-		RecordMeta:  NewRecordMeta("input.delivered"),
-		SessionID:   s.opts.SessionID,
-		RunID:       run.id,
-		InputID:     result.id,
-		Mode:        InputModeJob,
-		DeliveredAt: nowRFC3339(),
-	}); err != nil {
-		s.failJobDelivery(run, item, err)
-		return false
-	}
-	s.appendMessages(msg)
-	s.finishJobDelivery(run, item)
-	s.events.emit(EventInputDelivered, map[string]any{
-		"run_id":   run.id,
-		"input_id": result.id,
-		"mode":     string(InputModeJob),
-	})
 	if result.fatal {
 		s.addCandidate(run, newCandidate(ReasonToolFatal, SettleDetail{
 			Source: "tool:" + result.tool,
@@ -1554,6 +1543,12 @@ type jobPrepared struct {
 
 // Summary describes the call.
 func (p *jobPrepared) Summary() string { return p.job }
+
+// JobsPromptSection is the model's guidance about background jobs, as
+// the core's own jobs tool renders it.
+func JobsPromptSection() string {
+	return (&JobTool{name: JobsToolName}).PromptSection(prompt.Env{})
+}
 
 // PromptSection renders the section that tells the model about the
 // background jobs.

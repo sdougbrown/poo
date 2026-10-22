@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/prompt"
 )
 
 // systemPrompt is the operating contract the model works under.
@@ -74,10 +73,9 @@ func jobsSection(tools []poo.ToolSpec) string {
 	if !allowed {
 		return ""
 	}
-	// The core's own jobs tool contributes the section, so the model
-	// reads the same guidance whatever built the prompt.
-	tool := &poo.JobTool{}
-	return tool.PromptSection(prompt.Env{})
+	// The core owns the section, so the model reads the same guidance
+	// whatever built the prompt.
+	return poo.JobsPromptSection()
 }
 
 // newSessionID returns a fresh identifier for a session.

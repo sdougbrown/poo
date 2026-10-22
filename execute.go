@@ -530,7 +530,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		return
 	}
 
-	callCtx := s.activityContextFor(run)
+	callCtx := s.activityContext(run)
 	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
 	if err == nil && callCtx.Err() != nil {
 		// The call's context ended while the call ran: the tool saw
@@ -538,7 +538,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		// the call was cancelled, and the result carries the partial
 		// output with the note.
 		text := result.Text
-		if s.wasInterrupted(run) {
+		if s.interruptPending(run) {
 			text = interruptNote(text)
 		} else {
 			text = text + "\n" + CancelledInterruptedText
@@ -549,7 +549,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		}, OutcomeCancelled)
 		return
 	}
-	if err == nil && s.wasInterrupted(run) {
+	if err == nil && s.interruptPending(run) {
 		// The call was cut short by an interrupt, even though the tool
 		// returned a result: the tool saw the cancellation and gave
 		// back what it had. The outcome says the call was cancelled,
@@ -566,7 +566,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			// that never started is skipped, and one that was running
 			// is cancelled. The partial output the tool returned stays
 			// in the result, with the note.
-			if s.wasInterrupted(run) {
+			if s.interruptPending(run) {
 				s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
 					Text:    interruptNote(result.Text),
 					IsError: true,

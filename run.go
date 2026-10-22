@@ -260,6 +260,51 @@ func (s *Session) hasSystemMessage() bool {
 	return false
 }
 
+// recordAssistantResponse records the model's response as a message: the
+// blocks, the calls the response carried, and the id the stream assigned
+// at its first delta. A response an interrupt cut short is recorded with
+// its partial flag and cause; the shared builder is what keeps the two
+// paths' messages identical apart from those fields.
+//
+// The store error comes back to the caller: the run path turns it into
+// the settle candidate, and the interrupt path ignores it, as it did
+// before the paths shared this builder.
+func (s *Session) recordAssistantResponse(run *runState, turn int, resp *response, partial bool, cause Cause) (Message, error) {
+	content := append([]ContentBlock(nil), resp.content...)
+	// The calls the model had asked for belong to the message, so the
+	// results that follow have a call to answer.
+	for _, call := range resp.calls {
+		content = append(content, ContentBlock{
+			Kind:       ContentToolCall,
+			ToolCallID: call.ID,
+			Name:       call.Name,
+			Arguments:  recordArgs(call.Arguments),
+		})
+	}
+	msg := Message{Role: RoleAssistant, Content: content, Origin: OriginModel}
+	if len(content) == 0 {
+		return msg, nil
+	}
+	if resp.messageID != "" {
+		msg.ID = resp.messageID
+	} else {
+		msg.ID = s.messageIDs.Next()
+	}
+	msg.Partial = partial
+	msg.Cause = cause
+	s.appendMessages(msg)
+	return msg, s.write(run.ctx, &MessageRecord{
+		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
+		RunID:      run.id,
+		Turn:       turn,
+		Role:       msg.Role,
+		Content:    msg.Content,
+		MessageID:  msg.ID,
+		Partial:    partial,
+		Cause:      cause,
+	})
+}
+
 // startDurationTimer starts the run's wall-clock budget.
 //
 // The timer returns a function that stops it.
@@ -376,36 +421,12 @@ func (s *Session) loop(run *runState) []candidate {
 
 		// The model's response is part of the history whether or not
 		// it asked for tool calls.
-		assistant := Message{Role: RoleAssistant, Content: resp.content, Origin: OriginModel}
-		for _, call := range resp.calls {
-			assistant.Content = append(assistant.Content, ContentBlock{
-				Kind:       ContentToolCall,
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Arguments:  recordArgs(call.Arguments),
-			})
-		}
-		if len(assistant.Content) > 0 {
-			// The id is taken only for a message that is recorded.
-			if resp.messageID != "" {
-				assistant.ID = resp.messageID
-			} else {
-				assistant.ID = s.messageIDs.Next()
-			}
-			s.appendMessages(assistant)
-			if err := s.write(run.ctx, &MessageRecord{
-				RecordMeta: NewRecordMetaFrom("message", assistant.Origin),
-				RunID:      run.id,
-				Turn:       turn,
-				Role:       assistant.Role,
-				Content:    assistant.Content,
-				MessageID:  assistant.ID,
-			}); err != nil {
-				return []candidate{newCandidate(ReasonStoreError, SettleDetail{
-					Source: "store",
-					Text:   err.Error(),
-				})}
-			}
+		assistant, err := s.recordAssistantResponse(run, turn, resp, false, "")
+		if err != nil {
+			return []candidate{newCandidate(ReasonStoreError, SettleDetail{
+				Source: "store",
+				Text:   err.Error(),
+			})}
 		}
 
 		if resp.usage != nil {
@@ -712,6 +733,48 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 	return delivered
 }
 
+// deliverMessageRecords carries out the delivery protocol one accepted
+// input follows: the message record, then the input.delivered record,
+// then the history append, the delivery's finish, and the delivery
+// event. The records come before the history append, so a delivery the
+// finalization abandons must not mutate the view.
+//
+// The two delivery families differ in what a failed write does to the
+// input: the caller's fail hook handles the record writes' errors (the
+// client input is dropped and reported; a job result goes back on the
+// queue), and done releases the family's own claim.
+func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID string, mode InputMode, note *DeliveryNote, fail func(error), done func()) bool {
+	if err := s.writeDelivery(run.ctx, run, &MessageRecord{
+		RecordMeta:   NewRecordMetaFrom("message", msg.Origin),
+		RunID:        run.id,
+		Role:         msg.Role,
+		Content:      msg.Content,
+		DeliveryNote: note,
+	}); err != nil {
+		fail(err)
+		return false
+	}
+	if err := s.writeDelivery(run.ctx, run, &InputDelivered{
+		RecordMeta:  NewRecordMeta("input.delivered"),
+		SessionID:   s.opts.SessionID,
+		RunID:       run.id,
+		InputID:     inputID,
+		Mode:        mode,
+		DeliveredAt: nowRFC3339(),
+	}); err != nil {
+		fail(err)
+		return false
+	}
+	s.appendMessages(msg)
+	done()
+	s.events.emit(EventInputDelivered, map[string]any{
+		"run_id":   run.id,
+		"input_id": inputID,
+		"mode":     string(mode),
+	})
+	return true
+}
+
 // deliverInput appends one input's message to the model's view and
 // records the delivery.
 //
@@ -731,48 +794,17 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 	msg := NewTextMessage(RoleUser, withDeliveryNote(input.text, note))
 	msg.Origin = originForMode(input.mode)
 	msg.DeliveryNote = note
-
-	// The records come before the history append: a delivery that the
-	// finalization abandons must not mutate the view. A record the
-	// store refuses is a store_error candidate, and the drain stops
-	// there.
-	if err := s.writeDelivery(run.ctx, run, &MessageRecord{
-		RecordMeta:   NewRecordMetaFrom("message", msg.Origin),
-		RunID:        run.id,
-		Role:         msg.Role,
-		Content:      msg.Content,
-		DeliveryNote: note,
-	}); err != nil {
-		// The message never reached the model, so the input is
-		// dropped and reported, even though the store is what failed.
+	// The message never reached the model, so the input is dropped and
+	// reported, even though the store is what failed.
+	fail := func(err error) {
 		s.abandonDelivery(run, input)
 		if !errors.Is(err, errDeliveryAbandoned) {
 			s.addCandidate(run, storeErrorCandidate(err))
 		}
-		return false
 	}
-	if err := s.writeDelivery(run.ctx, run, &InputDelivered{
-		RecordMeta:  NewRecordMeta("input.delivered"),
-		SessionID:   s.opts.SessionID,
-		RunID:       run.id,
-		InputID:     input.id,
-		Mode:        input.mode,
-		DeliveredAt: nowRFC3339(),
-	}); err != nil {
-		s.abandonDelivery(run, input)
-		if !errors.Is(err, errDeliveryAbandoned) {
-			s.addCandidate(run, storeErrorCandidate(err))
-		}
-		return false
-	}
-	s.appendMessages(msg)
-	s.finishDelivery(run, input)
-	s.events.emit(EventInputDelivered, map[string]any{
-		"run_id":   run.id,
-		"input_id": input.id,
-		"mode":     string(input.mode),
+	return s.deliverMessageRecords(run, msg, input.id, input.mode, note, fail, func() {
+		s.finishDelivery(run, input)
 	})
-	return true
 }
 
 // errDeliveryAbandoned reports that a delivery write was abandoned
