@@ -73,6 +73,11 @@ func (s *Session) validateReplace(r RangeReplacement) error {
 	if len(r.Messages) == 0 {
 		return fmt.Errorf("%w: the replacement carries no messages", ErrInvalidCompaction)
 	}
+	for _, m := range r.Messages {
+		if strings.TrimSpace(m.Text()) == "" {
+			return fmt.Errorf("%w: the replacement carries a message with no visible text", ErrInvalidCompaction)
+		}
+	}
 	if r.Cut.First < 1 {
 		return fmt.Errorf("%w: the cut starts at the turn %d", ErrInvalidCompaction, r.Cut.First)
 	}
