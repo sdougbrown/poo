@@ -49,6 +49,8 @@ A record that someone produced also carries an `origin`:
 | `observer.dropped` | Once a second at most, per observer that fell behind. |
 | `turn.interrupted` | Once per turn an interrupt cut short. |
 | `compaction` | Once per compaction a compactor produced. |
+| `session.models_changed` | Once per model switch, between the runs. |
+| `decision` | Once per decision call, failures included. |
 | `run.settled` | Once per run, when the run ends. |
 
 The fields of the records grow over time. A consumer must tolerate a field
@@ -393,6 +395,38 @@ including a request whose stream failed part way through: the request
 still cost tokens, and the record is what a consumer reads to account for
 it. A request that failed before the endpoint's stream started has no
 usage record: no token was spent on it.
+
+## `session.models_changed`
+
+The session switched models. The switch happens between the runs, so a
+reader of the log knows which model answered which turn.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `from` | string | The name of the model the session talked to. |
+| `to` | string | The name of the model the session talks to now. |
+| `warnings` | array of strings | What the caller should know about the switch. **Absent** when there was nothing to say. |
+| `omitted` | array of objects | The provider blocks that are left out of the requests from now on, because they belong to another API. Each object holds `api`, `type` and `count`. **Absent** when nothing was left out. |
+
+The history is never truncated by a switch. A view that does not fit the
+new window is a warning, and the next run settles `context_exhausted`.
+
+## `decision`
+
+One decision call. The record is written whatever the outcome was, so a
+reader of the log sees the calls that could not be answered too.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `origin` | string | Who asked the questions. |
+| `questions` | array of objects | The questions that were asked. Each holds `id`, `instructions` and its kind's own fields. |
+| `state_hash` | string | The hex SHA-256 of the state payload the questions were asked about. |
+| `answers` | array of objects | The answers, when the call succeeded. **Absent** when it did not. |
+| `outcome` | string | `"ok"`, `"deferred"` or `"invalid"`. |
+| `error` | string | The failure, when the call did not succeed. **Absent** when it did. |
+| `latency_ms` | number | How long the call took, in milliseconds. |
+| `requests` | integer | The number of wire requests the call made. **Absent** when the decider did not report one. |
+| `at` | string | RFC 3339, UTC. |
 
 ## `run.settled`
 

@@ -164,6 +164,12 @@ type Session struct {
 	// noticeArmed reports that the context notice may fire. The notice
 	// re-arms when the estimate drops back below the notice ratio.
 	noticeArmed bool
+	// model is the model the session talks to.
+	//
+	// It is the descriptor the session was built with, and a switch
+	// replaces it. The name and the wire API live here, so a switch
+	// knows what it switched from.
+	model ModelInfo
 	// decider is the session's decision model, or nil when it has none.
 	//
 	// The handle is the recording wrapper: every call writes a record
@@ -389,6 +395,15 @@ type Options struct {
 	SessionID string
 	// ModelID is the provider's model identifier.
 	ModelID string
+	// ModelAPI is the wire API the model is reached through.
+	//
+	// It is the API the session's transport speaks, and the switch
+	// checks the history against it: a required provider block from
+	// another API cannot be carried.
+	//
+	// The empty name means the API is unknown, and the check does not
+	// run: a block is only foreign when the API is known.
+	ModelAPI API
 	// Decider is the session's decision model, or nil when it has none.
 	//
 	// The session wraps it, so every call is recorded.
@@ -584,7 +599,13 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		noticeArmed:       true,
 		jobs:              map[string]*jobState{},
 		jobQueued:         make(chan struct{}, 1),
-		deciderModel:      opts.DeciderModel,
+		model: ModelInfo{
+			ModelID:      opts.ModelID,
+			API:          opts.ModelAPI,
+			ContextLimit: opts.ContextLimit,
+			MaxOutput:    opts.MaxOutput,
+		},
+		deciderModel: opts.DeciderModel,
 	}
 	// A construction that fails rolls back everything it started. The
 	// event bus's reporter is a goroutine, and no session is returned
@@ -871,6 +892,10 @@ func (s *Session) modelMessagesLocked() []Message {
 		}
 		messages = append(messages, msg)
 	}
+	// The provider blocks the current model cannot read are left out of
+	// the request: the history keeps them, and the switch that brought
+	// the model recorded the omission.
+	messages = stripForeignBlocks(messages, s.opts.ModelAPI)
 	return CloneMessages(messages)
 }
 

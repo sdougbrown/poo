@@ -439,6 +439,36 @@ type HandoffRecord struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// ModelsChanged records that the session switched models.
+//
+// The switch is recorded between the runs, so a reader of the log knows
+// which model answered which turn.
+type ModelsChanged struct {
+	RecordMeta
+	// From is the name of the model the session talked to.
+	From string `json:"from"`
+	// To is the name of the model the session talks to now.
+	To string `json:"to"`
+	// Warnings are the things the caller should know about the switch.
+	Warnings []string `json:"warnings,omitempty"`
+	// Omitted are the provider blocks that are left out of the requests
+	// from now on, because they belong to another API.
+	Omitted []OmittedBlock `json:"omitted,omitempty"`
+}
+
+// OmittedBlock is one kind of provider block left out of the requests.
+//
+// The block stays in the history, and the requests leave it out: the
+// model that made it is not the model the session talks to now.
+type OmittedBlock struct {
+	// API is the API the block belonged to.
+	API API `json:"api"`
+	// Type is the provider's own name for the payload.
+	Type string `json:"type"`
+	// Count is how many blocks of this kind are left out.
+	Count int `json:"count"`
+}
+
 // DecisionRecord records one decision call.
 //
 // One record is written per logical call, whatever the number of wire
