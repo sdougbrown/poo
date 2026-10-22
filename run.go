@@ -80,7 +80,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	// The turn summaries and the results belong to the session, not to
 	// the run: a turn keeps its number across the runs, and a handle
 	// names a call for the life of the session.
-	s.repeats = newRepeatCounter()
+	run.repeats = newRepeatCounter()
 	s.transitionLocked(StateRequesting)
 	// The results that were held are delivered at the start of the run,
 	// before the prompt text. They are the session's own work coming

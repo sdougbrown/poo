@@ -478,7 +478,15 @@ func (s *Session) inFlightLocked(run *runState) int {
 			started++
 		}
 	}
-	return started + run.resultWrites + run.callWrites + run.jobStarts + run.runWrites + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
+	asks := 0
+	for _, ask := range run.asks {
+		ask.mu.Lock()
+		if ask.answer == nil || ask.writing {
+			asks++
+		}
+		ask.mu.Unlock()
+	}
+	return asks + started + run.resultWrites + run.callWrites + run.jobStarts + run.runWrites + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
 }
 
 // sealLocked seals the run and takes ownership of every claim that was
@@ -487,6 +495,9 @@ func (s *Session) inFlightLocked(run *runState) int {
 // The caller holds the session's lock, and the caller releases it.
 func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) {
 	run.sealed = true
+	for _, ask := range run.asks {
+		ask.Send(PermissionInput{Kind: PermissionSeal})
+	}
 	// A call record whose write the finalization stopped waiting for is
 	// ended here, so the record cannot land after run.settled. The claim
 	// keeps the call, so the record is not written twice.

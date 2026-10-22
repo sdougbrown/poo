@@ -54,6 +54,9 @@ type callPlan struct {
 	background bool
 	// summary describes the call, for the job's own bookkeeping.
 	summary string
+	// policy is the model-ordered permission decision for this call.
+	policy    *ToolDecision
+	policyErr error
 }
 
 // executeBatch runs a turn's tool calls.
@@ -99,22 +102,17 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 	s.startActivity(run)
 	defer s.endActivity(run)
 
-	// The repeat counters are asked about the calls in model order,
-	// before the batch runs: the counts depend on the order the model
-	// asked for the calls, and a batch that runs in parallel still has
-	// that order.
-	s.countRepeats(plans)
-
 	if s.batchIsParallel(plans) {
-		order := newResultOrder(plans)
-		s.mu.Lock()
-		run.resultOrder = order
-		s.mu.Unlock()
-		s.executeParallel(run, turn, plans, order)
-		s.mu.Lock()
-		run.resultOrder = nil
-		s.mu.Unlock()
-		order.close()
+		for i := range plans {
+			if s.runWindingDown(run) || s.interruptPending(run) {
+				break
+			}
+			s.decideCall(run, turn, &plans[i])
+			if plans[i].policyErr != nil {
+				break
+			}
+		}
+		s.executeParallel(run, turn, plans)
 		// The calls that never started because of an interrupt get a
 		// visible result.
 		if s.interruptPending(run) {
@@ -137,6 +135,7 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 			s.skipCalls(run, turn, callsFromPlans(plans), SkippedSettlingText)
 			return processed
 		}
+		s.decideCall(run, turn, &p)
 		s.executeOne(run, turn, p)
 	}
 	return processed
@@ -159,65 +158,41 @@ func (s *Session) batchStopped(run *runState) bool {
 	return false
 }
 
-// countRepeats records every call of a batch in the model order.
-//
-// The counts are the doom loop's, and they depend on the order the
-// model asked for the calls: a batch that runs in parallel still has
-// the model's order. The counters are consecutive per tool: a call to
-// another tool does not break a tool's streak, and a call with a
-// different key starts the streak over.
-//
-// A call that failed its validation counts toward the invalid near key,
-// because the same malformed call repeated is the same loop.
-func (s *Session) countRepeats(plans []callPlan) {
+// decideCall counts and authorizes one call before the next call is
+// counted. A reset therefore applies to every following call, including
+// calls whose tools will execute concurrently.
+func (s *Session) decideCall(run *runState, turn int, p *callPlan) {
+	primary := s.primaryArgOf(p.call.Name)
+	exact := exactKeyOf(p.call.Name, p.prepared, p.call.Arguments)
+	near := nearKeyOf(p.call.Name, primary, p.call.Arguments, p.invalid)
+	if p.invalid {
+		exact = "invalid:" + p.call.Name
+	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.repeats == nil {
-		s.repeats = newRepeatCounter()
+	if run.sealed || run.committed {
+		s.mu.Unlock()
+		return
+	}
+	if run.repeats == nil {
+		run.repeats = newRepeatCounter()
 	}
 	if s.repeatCounts == nil {
 		s.repeatCounts = map[string]repeatCounts{}
 	}
-	if s.repeatKeys == nil {
-		s.repeatKeys = map[string]repeatKey{}
+	s.repeatCounts[p.handle] = run.repeats.count(p.call.Name, exact, near)
+	s.repeatOrder = append(s.repeatOrder, p.handle)
+	run.permissionHandle, run.permissionTool = p.handle, p.call.Name
+	s.mu.Unlock()
+	decision := Allow()
+	if policy := s.opts.Policy; policy != nil && p.complete && (p.prepared != nil || p.invalid) {
+		info := s.toolCallInfo(turn, p.handle, p.call.Name, p.prepared, *p)
+		info.PrepareFailed = p.invalid
+		decision, p.policyErr = s.callPolicy(s.activityContext(run), run, policy, turn, info)
 	}
-	s.repeatBase = s.repeats.clone()
-	s.repeatBatch = s.repeatBatch[:0]
-	s.repeatResets = map[int]bool{}
-	for _, p := range plans {
-		primary := s.primaryArgOf(p.call.Name)
-		exact := exactKeyOf(p.call.Name, p.prepared, p.call.Arguments)
-		near := nearKeyOf(p.call.Name, primary, p.call.Arguments, false)
-		if p.invalid {
-			exact = "invalid:" + p.call.Name
-			near = nearKeyOf(p.call.Name, primary, p.call.Arguments, true)
-		}
-		s.repeatBatch = append(s.repeatBatch, repeatPlan{
-			handle: p.handle,
-			tool:   p.call.Name,
-			exact:  exact,
-			near:   near,
-		})
-		s.repeatOrder = append(s.repeatOrder, p.handle)
-	}
-	s.recountRepeatsLocked()
-}
-
-// recountRepeatsLocked recounts the current batch from its starting
-// state and the resets committed so far.
-//
-// The caller holds the session's lock.
-func (s *Session) recountRepeatsLocked() {
-	counter := s.repeatBase.clone()
-	for i, plan := range s.repeatBatch {
-		counts := counter.count(plan.tool, plan.exact, plan.near)
-		s.repeatCounts[plan.handle] = counts
-		s.repeatKeys[plan.handle] = repeatKey{tool: plan.tool, exact: plan.exact, near: plan.near}
-		if s.repeatResets[i] {
-			counter.reset(plan.tool)
-		}
-	}
-	s.repeats = counter
+	p.policy = &decision
+	s.mu.Lock()
+	run.permissionHandle, run.permissionTool = "", ""
+	s.mu.Unlock()
 }
 
 // callsFromPlans returns the calls a plan holds.
@@ -366,95 +341,22 @@ func (s *Session) batchIsParallel(plans []callPlan) bool {
 
 // executeParallel runs a read-only batch at the same time.
 //
-// The tools run concurrently, and their results are recorded in model
-// order, so the next request sees the results of the calls in the order
-// the model made them.
-func (s *Session) executeParallel(run *runState, turn int, plans []callPlan, order *resultOrder) {
+// Permission decisions are complete before the tools run concurrently.
+func (s *Session) executeParallel(run *runState, turn int, plans []callPlan) {
 	var wg sync.WaitGroup
 	for _, p := range plans {
 		wg.Add(1)
 		go func(p callPlan) {
 			defer wg.Done()
-			defer order.advance(p.handle)
 			// An interrupt that arrived before the call started skips
 			// it.
-			if s.interruptPending(run) || s.batchStopped(run) {
+			if p.policy == nil || s.interruptPending(run) || s.batchStopped(run) {
 				return
 			}
 			s.executeOne(run, turn, p)
 		}(p)
 	}
 	wg.Wait()
-}
-
-// resultOrder orders a parallel batch's results in model order.
-type resultOrder struct {
-	// mu guards the order.
-	mu sync.Mutex
-	// cond wakes a call whose turn has come.
-	cond *sync.Cond
-	// indices are the calls' model positions, by handle.
-	indices map[string]int
-	// done marks the calls whose result is recorded.
-	done map[int]bool
-	// next is the lowest model index whose result is not recorded.
-	next int
-	// closed reports that the batch is over, so no one waits any more.
-	closed bool
-}
-
-// newResultOrder returns the gate for a batch.
-func newResultOrder(plans []callPlan) *resultOrder {
-	order := &resultOrder{
-		indices: make(map[string]int, len(plans)),
-		done:    make(map[int]bool, len(plans)),
-	}
-	order.cond = sync.NewCond(&order.mu)
-	for _, plan := range plans {
-		order.indices[plan.handle] = plan.index
-	}
-	return order
-}
-
-// wait waits until every earlier call of the batch has recorded its
-// result.
-func (o *resultOrder) wait(handle string) {
-	index, ok := o.indices[handle]
-	if !ok {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	for !o.closed && o.next < index {
-		o.cond.Wait()
-	}
-}
-
-// advance marks a call's result as recorded and wakes the calls behind
-// it.
-func (o *resultOrder) advance(handle string) {
-	index, ok := o.indices[handle]
-	if !ok {
-		return
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.closed || o.done[index] {
-		return
-	}
-	o.done[index] = true
-	for o.done[o.next] {
-		o.next++
-	}
-	o.cond.Broadcast()
-}
-
-// close ends the gate and wakes every waiter.
-func (o *resultOrder) close() {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.closed = true
-	o.cond.Broadcast()
 }
 
 // executeOne runs one call and records its result.
@@ -566,11 +468,8 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		// The call failed its validation. The doom loop still judges it:
 		// the same malformed call repeated is the same loop. The other
 		// rules do not apply, because the call is not a valid call.
-		if policy := s.opts.Policy; policy != nil {
-			ctx := s.activityContext(run)
-			info := s.toolCallInfo(turn, handle, call.Name, nil, plan)
-			info.PrepareFailed = true
-			decision, err := s.callPolicy(ctx, run, policy, turn, info)
+		if plan.policy != nil {
+			decision, err := *plan.policy, plan.policyErr
 			if s.runWindingDown(run) {
 				s.logLateHookDecision(run.id, handle, call.Name, turn)
 				return
@@ -856,17 +755,6 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 	}
 }
 
-// waitForResultOrder waits until the earlier calls of a parallel batch
-// have recorded their results.
-func (s *Session) waitForResultOrder(run *runState, handle string) {
-	s.mu.Lock()
-	order := run.resultOrder
-	s.mu.Unlock()
-	if order != nil {
-		order.wait(handle)
-	}
-}
-
 // recordResult records a tool result and appends it to the history.
 //
 // The result goes back to the model under the call's provider-side id,
@@ -876,7 +764,6 @@ func (s *Session) waitForResultOrder(run *runState, handle string) {
 // record is written, so a call that the finalization already gave a
 // synthetic result to is not given a second one.
 func (s *Session) recordResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome) {
-	s.waitForResultOrder(run, handle)
 	won, tracked := s.claimResult(run, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
@@ -903,7 +790,6 @@ func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID
 			Text:   err.Error(),
 		}))
 	}
-	s.waitForResultOrder(run, handle)
 	won, tracked := s.claimResult(run, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
@@ -1312,47 +1198,9 @@ type repeatCounts struct {
 	near int
 }
 
-// repeatPlan is one call of the counted batch.
-//
-// The plans are kept in model order, so a reset can recount the calls
-// after it.
-type repeatPlan struct {
-	// handle is the call's handle.
-	handle string
-	// tool is the name of the tool the call names.
-	tool string
-	// exact is the call's exact key.
-	exact string
-	// near is the call's near key.
-	near string
-}
-
-// repeatKey is the pair of keys a call was counted under.
-//
-// The keys are kept so a policy that allowed a loop can clear the
-// counters: the loop starts over.
-type repeatKey struct {
-	// tool is the name of the tool the call names.
-	tool string
-	// exact is the call's exact key.
-	exact string
-	// near is the call's near key.
-	near string
-}
-
 // newRepeatCounter returns an empty counter.
 func newRepeatCounter() *repeatCounter {
 	return &repeatCounter{streaks: map[string]*toolStreak{}}
-}
-
-// clone returns a copy of the counter.
-func (c *repeatCounter) clone() *repeatCounter {
-	out := newRepeatCounter()
-	for tool, streak := range c.streaks {
-		copied := *streak
-		out.streaks[tool] = &copied
-	}
-	return out
 }
 
 // count records a call and returns the counts it had.
@@ -1401,9 +1249,9 @@ func (s *Session) primaryArgOf(name string) string {
 // exactKeyOf returns the exact repeat key of a call.
 //
 // The key is the tool plus its canonical prepared input, re-encoded as
-// JSON with sorted keys. A tool whose prepared value cannot be
-// re-encoded names its own canonical key, and a tool that does neither
-// falls back to its canonicalized raw arguments.
+// JSON with sorted keys. An explicit CanonicalKeyer takes precedence
+// over encoding. A tool that provides neither falls back to its
+// canonicalized raw arguments.
 func exactKeyOf(name string, prepared Prepared, args json.RawMessage) string {
 	if key, ok := canonicalPrepared(prepared); ok {
 		return name + ":" + key
@@ -1417,14 +1265,12 @@ func canonicalPrepared(prepared Prepared) (string, bool) {
 	if prepared == nil {
 		return "", false
 	}
+	if keyer, ok := prepared.(CanonicalKeyer); ok {
+		return canonicalJSON(keyer.CanonicalKey()), true
+	}
 	if raw, err := json.Marshal(prepared); err == nil {
 		if canonical := canonicalJSON(raw); canonical != "{}" && canonical != "null" {
 			return canonical, true
-		}
-	}
-	if keyer, ok := prepared.(CanonicalKeyer); ok {
-		if key := keyer.CanonicalKey(); len(key) > 0 {
-			return canonicalJSON(key), true
 		}
 	}
 	return "", false

@@ -40,7 +40,16 @@ func TestReviewExactKeyUsesThePreparedValue(t *testing.T) {
 	if tool.Calls() != 2 {
 		t.Errorf("the tool ran %d time(s), want 2: the third call is the same prepared call", tool.Calls())
 	}
-	if got := s.lastResult(t); got != "Blocked: this exact call was repeated 3 times. Try a different approach." {
-		t.Errorf("the model saw %q, want the doom-loop refusal on the third call", got)
+	requests := s.transport.Requests()
+	for _, message := range requests[len(requests)-1].Messages {
+		for _, block := range message.Content {
+			if block.Kind == poo.ContentToolResult && block.ToolCallID == "c3" {
+				if got := resultText(block.Text); got != "Blocked: this exact call was repeated 3 times. Try a different approach." {
+					t.Errorf("the model saw %q, want the doom-loop refusal on the third call", got)
+				}
+				return
+			}
+		}
 	}
+	t.Fatal("third call has no model-visible result")
 }

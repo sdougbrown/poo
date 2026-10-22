@@ -78,29 +78,15 @@ type Session struct {
 	// from the view, and a delivery note still renders from the
 	// original recorded message.
 	recorded map[string]Message
-	// repeats counts the consecutive repeats of a call, for the doom
-	// loop.
-	repeats *repeatCounter
 	// repeatCounts are the repeat counts of each call, by handle.
 	//
 	// The counts are per call, so a batch that runs in parallel does
 	// not race over them: the counts of the call the core is asking
 	// about are the ones it wrote.
 	repeatCounts map[string]repeatCounts
-	// repeatKeys are the keys each call was counted under, so a policy
-	// that allowed a loop can clear its counters.
-	repeatKeys map[string]repeatKey
 	// repeatOrder is the handles the calls were counted in, so the
 	// last call's counts can be named without a map's random order.
 	repeatOrder []string
-	// repeatBatch is the current batch's calls, in model order, so a
-	// reset can rebase the counts the batch already recorded.
-	repeatBatch []repeatPlan
-	// repeatResets marks the calls after which the counter was reset.
-	repeatResets map[int]bool
-	// repeatBase is the counter state before the current batch was
-	// counted, so a reset can recount the batch from where it started.
-	repeatBase *repeatCounter
 
 	// run is the active run, nil when the session is idle.
 	run *runState
@@ -307,16 +293,17 @@ type runState struct {
 	// asks are the permission asks the run has published and not yet
 	// answered, by ask id. The finalization resolves the ones still
 	// pending before it settles.
-	asks map[string]*pendingAsk
+	asks map[string]*PermissionRequest
 	// jobStarts counts the job acceptance records whose writes are still
 	// in flight. The finalization waits for them as it does for the
 	// pending calls.
 	jobStarts int
 	// workDone is signalled when a pending call gets its result.
 	workDone chan struct{}
-	// resultOrder orders a parallel batch's results in model order, so
-	// the model sees the results of its calls in the order it made them.
-	resultOrder *resultOrder
+	// repeats and the current permission call belong to this run.
+	repeats          *repeatCounter
+	permissionHandle string
+	permissionTool   string
 
 	// accepting are the inputs whose acceptance record is still being
 	// written. The finalization waits for them, and reports the ones it
@@ -612,7 +599,6 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		resultMeta:        map[string]resultMeta{},
 		recorded:          map[string]Message{},
 		messageIDs:        ids,
-		repeats:           newRepeatCounter(),
 		noticeArmed:       true,
 		jobs:              map[string]*jobState{},
 		jobQueued:         make(chan struct{}, 1),

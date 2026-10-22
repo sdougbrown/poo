@@ -28,19 +28,11 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 	ctx := s.activityContext(run)
 	info := s.toolCallInfo(turn, handle, tool, prepared, plan)
 
-	// The policy slot runs first. It is exempt from the hook deadline:
-	// the permission engine keeps its own chain deadline and always
-	// returns a decision.
-	if policy := s.opts.Policy; policy != nil {
-		policyInfo := info
-		policyInfo.Arguments = cloneArguments(info.Arguments)
-		decision, err := s.callPolicy(ctx, run, policy, turn, policyInfo)
-		if err != nil {
-			return ToolDecision{}, false, err
-		}
-		if decision.Denied {
-			return decision, false, nil
-		}
+	if plan.policyErr != nil {
+		return ToolDecision{}, false, plan.policyErr
+	}
+	if plan.policy != nil && plan.policy.Denied {
+		return *plan.policy, false, nil
 	}
 
 	// The consumer hooks run in registration order. A refusal stops the
@@ -151,31 +143,15 @@ func (s *Session) repeatCountFor(handle string) repeatCounts {
 // resetRepeats clears the repeat counters of one call.
 //
 // The policy slot calls this when it allows a doom loop: the loop starts
-// over, and the next call of the same shape is counted from one. A call
-// later in the same batch is rebased, so it is counted from the reset
-// rather than from the batch's frozen counts.
-func (s *Session) resetRepeats(handle string) {
+// over. Model-ordered policy dispatch ensures that the next call is
+// counted from the reset rather than a precomputed snapshot.
+func (s *Session) resetRepeats(run *runState, handle string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.repeats == nil {
+	if run == nil || s.run != run || run.sealed || run.committed || run.permissionHandle != handle || run.repeats == nil {
 		return
 	}
-	for i, plan := range s.repeatBatch {
-		if plan.handle != handle {
-			continue
-		}
-		if s.repeatResets == nil {
-			s.repeatResets = map[int]bool{}
-		}
-		s.repeatResets[i] = true
-		s.recountRepeatsLocked()
-		return
-	}
-	key, ok := s.repeatKeys[handle]
-	if !ok {
-		return
-	}
-	s.repeats.reset(key.tool)
+	run.repeats.reset(run.permissionTool)
 }
 
 // cloneArguments returns a copy of a call's arguments.
