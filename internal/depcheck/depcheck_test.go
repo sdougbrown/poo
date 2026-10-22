@@ -93,6 +93,14 @@ func TestFixtures(t *testing.T) {
 		{
 			name: "onlytests",
 		},
+		{
+			// The permission package may import the core package and
+			// no more.
+			name: "perm",
+			want: []string{
+				m + "perm/perm imports " + m + "perm/extra",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -111,6 +119,8 @@ func TestSkippedPackages(t *testing.T) {
 	res := checkModule(t, filepath.Join("testdata", "onlytests"), m)
 	want := []string{
 		m + "/decide (no non-test Go files)",
+		m + "/perm (does not exist yet)",
+		m + "/perm/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",
 		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
