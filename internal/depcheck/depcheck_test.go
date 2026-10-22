@@ -93,6 +93,10 @@ func TestFixtures(t *testing.T) {
 		{
 			name: "ignoreonly",
 		},
+		{
+			name: "ignoreddep",
+			want: []string{"cannot resolve " + m + "ignoreddep/gen (imported by " + m + "ignoreddep)"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,6 +151,14 @@ func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
 	res := checkModule(t, filepath.Join("testdata", "ignoreonly"), m)
 	if len(res.Findings) != 0 {
 		t.Errorf("findings:\n%s\nwant none", strings.Join(res.Findings, "\n"))
+	}
+	want := []string{
+		m + "/decide (does not exist yet)",
+		m + "/prompt (does not exist yet)",
+		m + "/wire/protocol (does not exist yet)",
+	}
+	if !slices.Equal(res.Skipped, want) {
+		t.Errorf("skipped %q, want %q", res.Skipped, want)
 	}
 }
 

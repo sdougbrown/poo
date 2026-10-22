@@ -119,11 +119,11 @@ func (c Checker) check(r rule, checked []string, pkgs []listPackage) []string {
 			continue
 		}
 		if p.Error != nil {
-			// A package whose every file is build-ignored is not seen: the
-			// doc promises that a //go:build ignore file does not reach
-			// the check. The imports are empty, so there is nothing to
-			// scan.
-			if len(p.Imports) == 0 && strings.Contains(c.localize(p.Error.Err), "build constraints exclude all Go files") {
+			// A package whose every file is build-ignored is not seen when
+			// it is the rule's own package: the doc promises that a
+			// //go:build ignore file does not reach the check. The imports
+			// are empty, so there is nothing to scan.
+			if p.ImportPath == r.path && len(p.Imports) == 0 && strings.Contains(c.localize(p.Error.Err), "build constraints exclude all Go files") {
 				continue
 			}
 			// A package that does not exist has no directory; it is
