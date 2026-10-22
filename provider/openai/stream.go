@@ -69,7 +69,10 @@ type streamChunk struct {
 type streamReader struct {
 	body    io.ReadCloser
 	scanner *bufio.Scanner
-	parser  *parser
+	// filters are the text filters the quirks added, in order. The
+	// parser is the last of them, so it reads the text the others
+	// passed on.
+	filters []textFilter
 	// ctx is the request's context. A stream that ends because the
 	// context ended reports the context's error, not a network failure.
 	ctx context.Context
@@ -99,6 +102,20 @@ type streamReader struct {
 	// usage holds the usage report, so a stream that fails before its
 	// usage chunk arrives can still report what it knows.
 	usage *poo.UsageReport
+	// sawText reports that the response carried text.
+	sawText bool
+	// sawToolCall reports that the response carried a tool call.
+	sawToolCall bool
+	// deferParsed reports that the calls the model writes as text wait
+	// for a native call that would win over them.
+	deferParsed bool
+	// deferred holds the calls the model wrote as text, waiting to see
+	// whether the response carries a native call.
+	deferred []poo.StreamEvent
+	// emptyToolCalls reports that the model asked for tool calls and
+	// sent none. The failure is reported when the response ends, so the
+	// usage the endpoint sends after the finish reason is not lost.
+	emptyToolCalls bool
 }
 
 // newSSEScanner returns a scanner for SSE lines. A single event line can
@@ -242,8 +259,28 @@ func (r *streamReader) close() (poo.StreamEvent, error) {
 		// The event ended the stream. The usage is still reported.
 		return r.fail(err)
 	}
-	r.pending = append(r.pending, r.parser.flush()...)
+	// The calls the model wrote as text wait for a native call that
+	// would win over them. The endpoint sent one, so the calls the
+	// model wrote are not the ones it made.
+	flushed := flushFilters(r.filters)
+	if r.sawToolCall {
+		flushed = withoutToolCalls(flushed)
+	} else {
+		r.pending = append(r.pending, r.deferred...)
+	}
+	r.deferred = nil
+	r.pending = append(r.pending, flushed...)
 	r.pending = r.appendUsage(r.pending)
+	// The model asked for tool calls and sent none: the response is the
+	// server's own failure, and it is retried like one. The failure is
+	// reported after the usage, so the tokens the attempt cost are
+	// counted.
+	if r.emptyToolCalls && !r.sawText && !r.sawToolCall {
+		r.err = &poo.ProviderError{
+			Kind:    poo.ProviderKindServer,
+			Message: "the model asked for tool calls but sent none",
+		}
+	}
 	if ev, ok := r.take(); ok {
 		return ev, nil
 	}
@@ -251,6 +288,21 @@ func (r *streamReader) close() (poo.StreamEvent, error) {
 		return poo.StreamEvent{}, r.err
 	}
 	return poo.StreamEvent{}, io.EOF
+}
+
+// withoutToolCalls drops the tool call events from a list of events.
+//
+// The endpoint sent a call of its own, so a call the model wrote as
+// text is not one the model made.
+func withoutToolCalls(events []poo.StreamEvent) []poo.StreamEvent {
+	out := make([]poo.StreamEvent, 0, len(events))
+	for _, ev := range events {
+		if ev.Kind == "tool_call" {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 // fail ends the stream with a failure.
@@ -304,6 +356,9 @@ func (r *streamReader) contextError(err error) error {
 }
 
 // providerError turns an error chunk into a provider error.
+//
+// The chunk carries no status, so its class comes from the code and the
+// message, and the server's own failure is the default.
 func (r *streamReader) providerError(body *errorBody) error {
 	code := codeString(body.Code)
 	message := body.Message
@@ -311,7 +366,7 @@ func (r *streamReader) providerError(body *errorBody) error {
 		message = "the endpoint returned an error"
 	}
 	return &poo.ProviderError{
-		Kind:    classifyError(code, message, poo.ProviderKindServer),
+		Kind:    failureKind(0, code, body.Type, message, poo.ProviderKindServer),
 		Message: message,
 		Code:    code,
 	}
@@ -347,17 +402,19 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 
 		if delta.Content != "" {
 			r.markFirstToken()
-			if r.parser.on() {
-				// The parser owns the text: it strips the call markup
-				// and emits the prose itself. Emitting the raw delta as
-				// well would double the prose and leave the markup in
-				// the model's history.
-				out = append(out, r.parser.feed(delta.Content)...)
-			} else {
-				out = append(out, poo.StreamEvent{
-					Kind:  "delta",
-					Delta: &poo.Delta{Kind: "text", Text: delta.Content},
-				})
+			r.sawText = true
+			// The filters own the text: they strip the call markup and
+			// the thinking tags, and they emit the prose themselves.
+			// Emitting the raw delta as well would double the prose and
+			// leave the markup in the model's history.
+			for _, ev := range applyFilters(r.filters, delta.Content) {
+				if ev.Kind == "tool_call" && r.deferParsed {
+					// The call the model wrote as text waits: a native
+					// call wins over it.
+					r.deferred = append(r.deferred, ev)
+					continue
+				}
+				out = append(out, ev)
 			}
 		}
 
@@ -365,6 +422,10 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 			// A tool call is the first token too: a turn that only asks
 			// for a tool call still has a time to its first token.
 			r.markFirstToken()
+			r.sawToolCall = true
+			// The native call wins over the calls the model wrote as
+			// text, so the parsed ones are dropped.
+			r.deferred = nil
 			complete := isCompleteJSON(tc.Function.Arguments)
 			out = append(out, poo.StreamEvent{
 				Kind: "tool_call",
@@ -374,11 +435,21 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 					Name:      tc.Function.Name,
 					Arguments: []byte(tc.Function.Arguments),
 					Complete:  complete,
+					// The endpoint sent the call in its own field.
+					Origin: poo.CallOriginWire,
 				},
 			})
 		}
 
 		if choice.FinishReason != "" {
+			if choice.FinishReason == "tool_calls" && !r.sawText && !r.sawToolCall {
+				// The model asked for tool calls and sent none. The
+				// response is the server's own failure, and it is
+				// retried like one. The failure is reported when the
+				// response ends, so the usage chunk that follows the
+				// finish reason is not lost.
+				r.emptyToolCalls = true
+			}
 			out = append(out, poo.StreamEvent{
 				Kind:         "finish",
 				FinishReason: poo.FinishReason(choice.FinishReason),

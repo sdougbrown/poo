@@ -89,6 +89,15 @@ func textOf(events []poo.StreamEvent) string {
 	return b.String()
 }
 
+// fastRetry shortens the wait between the attempts.
+//
+// A test that fails on purpose does not wait the plan's backoff, and
+// the test that covers the backoff waits for it on purpose.
+func fastRetry(cfg openai.Config) openai.Config {
+	cfg.Backoff = []time.Duration{time.Millisecond, time.Millisecond}
+	return cfg
+}
+
 // toolCallsOf returns the tool call events.
 func toolCallsOf(events []poo.StreamEvent) []poo.ToolCallDelta {
 	var calls []poo.ToolCallDelta
@@ -397,7 +406,7 @@ func TestAnAuthFailureIsMapped(t *testing.T) {
 func TestAServerFailureIsMapped(t *testing.T) {
 	srv := newSSEServer(t, `{"error":{"message":"boom"}}`)
 	srv.status = http.StatusInternalServerError
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -568,7 +577,7 @@ func TestAnErrorChunkEndsTheStream(t *testing.T) {
 	body := chunk(`{"error":{"message":"the model died","type":"server_error"}}`)
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -765,7 +774,7 @@ func TestTheRequestIsSentToTheChatCompletionsPath(t *testing.T) {
 func TestTheErrorBodyIsReadWhenTheStatusIsNotOK(t *testing.T) {
 	srv := newSSEServer(t, "not json at all")
 	srv.status = http.StatusBadGateway
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -864,9 +873,12 @@ func TestTheChunkedArgumentsAreJoined(t *testing.T) {
 	}
 }
 
-func TestTheAutoModeKeepsTheNativeAndParsedCallsApart(t *testing.T) {
+// TestTheNativeToolCallWinsOverTheParsedOne covers the plan's rule: the
+// text tool-call parser is a fallback, and a native tool call wins over
+// a call the model wrote as text.
+func TestTheNativeToolCallWinsOverTheParsedOne(t *testing.T) {
 	// The endpoint sends a native tool call and a text call in the same
-	// response. Both are read, and neither overwrites the other.
+	// response. The native one is the one the model made.
 	body := chunk(`{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"ls\"}"}}]}}]}`) +
 		chunk(`{"choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\": \"read\", \"arguments\": {\"path\": \"a.txt\"}}</tool_call>"}}]}`) +
 		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`) + done
@@ -881,15 +893,38 @@ func TestTheAutoModeKeepsTheNativeAndParsedCallsApart(t *testing.T) {
 	defer reader.Close()
 
 	calls := toolCallsOf(read(t, reader))
-	if len(calls) != 2 {
-		t.Fatalf("the stream held %d calls, want 2", len(calls))
+	if len(calls) != 1 {
+		t.Fatalf("the stream held %d calls, want 1: the native call wins", len(calls))
 	}
-	names := []string{calls[0].Name, calls[1].Name}
-	if !((names[0] == "bash" && names[1] == "read") || (names[0] == "read" && names[1] == "bash")) {
-		t.Errorf("the calls are %v, want one bash and one read", names)
+	if calls[0].Name != "bash" {
+		t.Errorf("the call is %q, want the native one", calls[0].Name)
 	}
-	if calls[0].Index == calls[1].Index {
-		t.Errorf("the calls share the index %d, want them apart", calls[0].Index)
+}
+
+// TestTheNativeToolCallWinsOverAnUnclosedParsedOne covers the same
+// rule for a call the model wrote and never closed: the parser holds it
+// until the stream ends, and the native call is still the one the model
+// made.
+func TestTheNativeToolCallWinsOverAnUnclosedParsedOne(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"ls\"}"}}]}}]}`) +
+		chunk(`{"choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\": \"read\", \"arguments\": {\"path\": \"a.txt\"}}"}}]}`) +
+		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`) + done
+
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "auto"})
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 1024})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	calls := toolCallsOf(read(t, reader))
+	if len(calls) != 1 {
+		t.Fatalf("the stream held %d calls, want 1: the native call wins", len(calls))
+	}
+	if calls[0].Name != "bash" {
+		t.Errorf("the call is %q, want the native one", calls[0].Name)
 	}
 }
 

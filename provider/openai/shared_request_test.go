@@ -76,7 +76,7 @@ func brokenBodyServer(t *testing.T) *httptest.Server {
 // the connection cuts short.
 func TestABodyThatBreaksMidReadIsANetworkFailure(t *testing.T) {
 	srv := brokenBodyServer(t)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 
 	check := func(t *testing.T, err error) {
 		t.Helper()

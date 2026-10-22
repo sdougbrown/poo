@@ -452,6 +452,7 @@ func (s *Session) loop(run *runState) []candidate {
 				ToolCallID: call.ID,
 				Name:       call.Name,
 				Arguments:  recordArgs(call.Arguments),
+				Origin:     call.Origin,
 			})
 		}
 		if len(assistant.Content) > 0 {
@@ -1175,6 +1176,12 @@ func (s *Session) settleForError(err error) (Reason, SettleDetail, error) {
 		// retryable.
 		retryAfter := int((pe.RetryAfter + time.Second - 1) / time.Second)
 		provider := &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code, RetryAfterSec: retryAfter}
+		// The time the endpoint says its limit resets travels with the
+		// failure too, so a consumer can tell when another attempt
+		// could succeed.
+		if !pe.ResetsAt.IsZero() {
+			provider.ResetsAt = pe.ResetsAt.UTC().Format(time.RFC3339)
+		}
 		switch pe.Kind {
 		case ProviderKindContextLength:
 			return ReasonContextExhausted, SettleDetail{
@@ -1375,6 +1382,9 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 			}
 			if ev.ToolCall.Name != "" {
 				existing.Name = ev.ToolCall.Name
+			}
+			if ev.ToolCall.Origin != "" {
+				existing.Origin = ev.ToolCall.Origin
 			}
 			if len(ev.ToolCall.Arguments) > 0 {
 				existing.Arguments = append(existing.Arguments, ev.ToolCall.Arguments...)

@@ -29,6 +29,17 @@ type Delta struct {
 	Text string
 }
 
+// CallOrigin says where a tool call came from.
+type CallOrigin string
+
+const (
+	// CallOriginWire is a call the endpoint sent in its own field.
+	CallOriginWire CallOrigin = "wire"
+	// CallOriginParsedText is a call the model wrote as text and the
+	// transport read out of it.
+	CallOriginParsedText CallOrigin = "parsed_text"
+)
+
 // ToolCallDelta is a tool call the model requested.
 type ToolCallDelta struct {
 	// Index groups the fragments of one call. A provider that sends one
@@ -47,6 +58,10 @@ type ToolCallDelta struct {
 	// fragments, so the core decides whether a call is complete by parsing
 	// the assembled arguments, not from this field.
 	Complete bool
+	// Origin says where the call came from: "wire" for a call the
+	// endpoint sent, "parsed_text" for a call the model wrote as text.
+	// It is empty when the transport did not say.
+	Origin CallOrigin
 }
 
 // FinishReason is why the model stopped.
@@ -96,8 +111,27 @@ type StreamEvent struct {
 	Usage *UsageReport
 	// FinishReason is set when Kind is "finish".
 	FinishReason FinishReason
-	// Kind names the payload: "delta", "tool_call", "usage" or "finish".
+	// Error is a failure the transport reports about the response. It is
+	// set when Kind is "error".
+	Error *StreamError
+	// Kind names the payload: "delta", "tool_call", "usage", "finish" or
+	// "error".
 	Kind string
+}
+
+// StreamError is a failure in a response that did not stop the stream.
+//
+// A tool call the model wrote as text and that could not be parsed is
+// one: the text is not lost, and the run carries on.
+type StreamError struct {
+	// Message explains the failure.
+	Message string
+	// Text is the text the failure is about, when the failure is about
+	// text.
+	Text string
+	// Recoverable reports that the run can carry on: the failure is
+	// visible and the model gets another turn.
+	Recoverable bool
 }
 
 // UsageReport is the token accounting a provider reports.

@@ -108,6 +108,7 @@ func (s *Session) recordPartial(run *runState, turn int, resp *response) {
 			ToolCallID: call.ID,
 			Name:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
+			Origin:     call.Origin,
 		})
 	}
 	if len(content) == 0 {

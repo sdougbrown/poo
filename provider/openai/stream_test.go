@@ -274,7 +274,7 @@ func TestAnErrorChunkWithoutAMessageIsStillAnError(t *testing.T) {
 	for _, errBody := range []string{`{"error":{}}`, `{"error":{"code":1}}`} {
 		t.Run(errBody, func(t *testing.T) {
 			srv := newSSEServer(t, chunk(errBody))
-			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+			tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			if err != nil {
 				t.Fatalf("starting the request: %v", err)
