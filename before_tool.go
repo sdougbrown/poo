@@ -84,14 +84,15 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 // discarded: the call is refused rather than allowed.
 func (s *Session) callPolicy(ctx context.Context, h PolicyHook, turn int, info ToolCallInfo) (ToolDecision, error) {
 	decision, err := h.BeforeTool(s.hookContext(ctx, turn, false), info)
-	if err != nil {
-		return ToolDecision{}, fmt.Errorf("poo: the %s policy hook: %w", hookName(h), err)
-	}
 	if ctx.Err() != nil {
 		// The run ended while the slot was thinking. Its decision is
 		// discarded, and the call is refused: a run that is ending
-		// must not start a call.
+		// must not start a call. The cancellation is not a hook
+		// failure, even when the slot returns its context's error.
 		return Deny("The run ended before the policy answered."), nil
+	}
+	if err != nil {
+		return ToolDecision{}, fmt.Errorf("poo: the %s policy hook: %w", hookName(h), err)
 	}
 	// The policy slot only ever allows or denies. A result it returns
 	// is ignored: the slot decides whether the call runs at all, not

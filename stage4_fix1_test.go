@@ -242,3 +242,43 @@ func (h *fixInterruptingBeforeTool) BeforeTool(ctx poo.HookContext, info poo.Too
 	<-ctx.Done()
 	return poo.Allow(), nil
 }
+
+// fixPolicyOnInterrupt waits for the policy's context to end and then
+// returns its cancellation as the policy's error.
+type fixPolicyOnInterrupt struct{ entered chan struct{} }
+
+// BeforeTool waits for the interrupt.
+func (h *fixPolicyOnInterrupt) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	close(h.entered)
+	<-ctx.Done()
+	return poo.ToolDecision{}, ctx.Err()
+}
+
+// TestAPolicyThatFailsOnInterruptDoesNotSettleHookError covers the
+// plan's rule: an interrupted policy decision is discarded and the call
+// is refused. Its cancellation is not a hook failure.
+func TestAPolicyThatFailsOnInterruptDoesNotSettleHookError(t *testing.T) {
+	entered := make(chan struct{})
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "done"},
+	})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Policy = &fixPolicyOnInterrupt{entered: entered}
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-entered
+	if _, err := s.Send("instead", poo.Interrupt); err != nil {
+		t.Fatalf("interrupting the run: %v", err)
+	}
+	got, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if got.Reason != poo.ReasonEndTurn {
+		t.Errorf("the interrupt settled %s (%s), want end_turn", got.Reason, got.Detail.Text)
+	}
+}
