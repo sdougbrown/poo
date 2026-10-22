@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo/decide"
@@ -56,6 +58,22 @@ func TestAQuestionIsValidatedBeforeAnythingIsSent(t *testing.T) {
 				Levels: manyLevels(1),
 			}}},
 		},
+		{
+			name: "a choice with no options",
+			qs:   []decide.Question{{ID: "q1", Instructions: "which?", Kind: decide.Choice{}}},
+		},
+		{
+			name: "a choice with an option with no name",
+			qs: []decide.Question{{ID: "q1", Instructions: "which?", Kind: decide.Choice{
+				Options: []decide.Option{{Name: ""}},
+			}}},
+		},
+		{
+			name: "a choice with two options of one name",
+			qs: []decide.Question{{ID: "q1", Instructions: "which?", Kind: decide.Choice{
+				Options: []decide.Option{{Name: "a"}, {Name: "a"}},
+			}}},
+		},
 	}
 
 	for _, c := range cases {
@@ -88,8 +106,8 @@ func TestTheLimitsAreThePlanLimits(t *testing.T) {
 // yes and no, a choice by the option names and a score by the level
 // index.
 func TestTheAnswerKeysFollowTheKind(t *testing.T) {
-	bool := decide.Question{ID: "q1", Kind: decide.Bool{True: "yes", False: "no"}}
-	if got := bool.Keys(); len(got) != 2 || got[0] != "yes" || got[1] != "no" {
+	bq := decide.Question{ID: "q1", Kind: decide.Bool{True: "yes", False: "no"}}
+	if got := bq.Keys(); len(got) != 2 || got[0] != "yes" || got[1] != "no" {
 		t.Errorf("the bool's keys are %v, want yes and no", got)
 	}
 
@@ -247,6 +265,104 @@ func TestTheStateHashIsStable(t *testing.T) {
 	c := decide.StateHash(map[string]any{"turn": 2})
 	if a == c {
 		t.Errorf("a different state hashed to the same value %q", a)
+	}
+}
+
+// TestTheNilStateHashesLikeANullJSONValue covers the nil state: it hashes
+// the way a JSON null does, so a caller that hashes a missing state and
+// one that hashes an explicit null get the same value.
+func TestTheNilStateHashesLikeANullJSONValue(t *testing.T) {
+	if decide.StateHash(nil) != decide.StateHash([]byte("null")) {
+		t.Errorf("a nil state hashed to %q, want the JSON null hash", decide.StateHash(nil))
+	}
+}
+
+// TestTheRecordedOutcomeSplitsInvalidFromDeferred covers the recorded
+// outcome: a caller bug is recorded as invalid with no error text, and
+// any other failure is recorded as a deferral that carries the error.
+func TestTheRecordedOutcomeSplitsInvalidFromDeferred(t *testing.T) {
+	sink := &recordingSink{}
+	invalid := decide.Recorded(decide.DeciderFunc(func(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+		return nil, fmt.Errorf("wrapped: %w", decide.ErrInvalidQuestion)
+	}), sink, "the caller")
+	if _, err := invalid.Decide(context.Background(), nil, "", nil); !errors.Is(err, decide.ErrInvalidQuestion) {
+		t.Fatalf("the invalid call returned %v, want ErrInvalidQuestion", err)
+	}
+	if got := sink.records[0].Outcome; got != decide.OutcomeInvalid {
+		t.Errorf("the invalid call was recorded as %q, want %q", got, decide.OutcomeInvalid)
+	}
+	if sink.records[0].Error != "" {
+		t.Errorf("the invalid call recorded the error %q, want none", sink.records[0].Error)
+	}
+
+	sink2 := &recordingSink{}
+	failed := decide.Recorded(decide.DeciderFunc(func(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+		return nil, errors.New("the endpoint was unreachable")
+	}), sink2, "the caller")
+	if _, err := failed.Decide(context.Background(), nil, "", nil); err == nil || errors.Is(err, decide.ErrInvalidQuestion) {
+		t.Fatalf("the failed call returned %v, want an unrelated error", err)
+	}
+	if got := sink2.records[0].Outcome; got != decide.OutcomeDeferred {
+		t.Errorf("the failed call was recorded as %q, want %q", got, decide.OutcomeDeferred)
+	}
+	if sink2.records[0].Error != "the endpoint was unreachable" {
+		t.Errorf("the failed call recorded the error %q, want the decider's error", sink2.records[0].Error)
+	}
+}
+
+// TestTheQuestionIDsComeBackSorted covers the id order: IDs sorts, so a
+// record built from it reads the same twice whatever order the questions
+// arrived in.
+func TestTheQuestionIDsComeBackSorted(t *testing.T) {
+	qs := []decide.Question{
+		{ID: "q3", Instructions: "is it?", Kind: decide.Bool{True: "yes"}},
+		{ID: "q1", Instructions: "is it?", Kind: decide.Bool{True: "yes"}},
+		{ID: "q2", Instructions: "is it?", Kind: decide.Bool{True: "yes"}},
+	}
+	got := decide.IDs(qs)
+	want := []string{"q1", "q2", "q3"}
+	if len(got) != len(want) {
+		t.Fatalf("IDs returned %v, want %v", got, want)
+	}
+	for i, id := range want {
+		if got[i] != id {
+			t.Errorf("IDs returned %v, want %v", got, want)
+		}
+	}
+}
+
+// TestTheSplitFallsBackToTheLimitWhenTheSizeIsNotPositive covers the
+// batch size fallback: a size the caller cannot mean (zero or negative)
+// means the request limit, not a panic and not one batch.
+func TestTheSplitFallsBackToTheLimitWhenTheSizeIsNotPositive(t *testing.T) {
+	qs := make([]decide.Question, 150)
+	for i := range qs {
+		qs[i] = decide.Question{ID: "q" + itoa(i), Instructions: "is it?", Kind: decide.Bool{True: "yes"}}
+	}
+	for _, size := range []int{0, -1} {
+		batches := decide.SplitQuestions(qs, size)
+		if len(batches) != 3 {
+			t.Errorf("SplitQuestions(qs, %d) split %d questions into %d batches, want 3", size, len(qs), len(batches))
+		}
+		for i, b := range batches {
+			if len(b) > decide.MaxQuestionsPerRequest {
+				t.Errorf("batch %d holds %d questions, the most is %d", i, len(b), decide.MaxQuestionsPerRequest)
+			}
+		}
+	}
+}
+
+// TestAnUnknownQuestionKindIsAnError covers the wire shape: a recorded
+// question whose kind the reader does not know is an error, not a
+// silently empty kind.
+func TestAnUnknownQuestionKindIsAnError(t *testing.T) {
+	var q decide.Question
+	err := json.Unmarshal([]byte(`{"id":"q1","instructions":"x","kind":"boolx"}`), &q)
+	if err == nil {
+		t.Fatal("unmarshaling an unknown kind returned no error")
+	}
+	if !strings.Contains(err.Error(), "unknown kind") {
+		t.Errorf("the error for an unknown kind is %q, want it to name the kind", err)
 	}
 }
 

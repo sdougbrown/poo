@@ -516,6 +516,12 @@ func (d *recordedDecider) Decide(ctx context.Context, state any, instructions st
 //
 // The hash identifies the state a decision was made about, without
 // carrying the state itself.
+//
+// The hash is only unique for states of one type: string, []byte and
+// json.RawMessage states hash their bytes raw, and other types go through
+// json.Marshal, so a string state and a non-string state can encode to
+// the same bytes ("123" and 123). A caller that compares hashes across
+// types should encode its states one way first.
 func StateHash(state any) string {
 	var raw []byte
 	switch v := state.(type) {
