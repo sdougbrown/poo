@@ -40,9 +40,8 @@ func TestRepoImports(t *testing.T) {
 func TestFixtures(t *testing.T) {
 	const m = "example.com/poo/depcheck/"
 	tests := []struct {
-		name    string
-		want    []string
-		skipped []string
+		name string
+		want []string
 	}{
 		{
 			name: "direct",
@@ -72,6 +71,10 @@ func TestFixtures(t *testing.T) {
 		},
 		{
 			name: "allowed",
+		},
+		{
+			name: "wireproto",
+			want: []string{m + "wireproto/wire/protocol imports " + m + "wireproto/extra"},
 		},
 		{
 			name: "unresolvable",
