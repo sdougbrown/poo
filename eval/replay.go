@@ -353,14 +353,21 @@ type recordedPrompt struct {
 }
 
 // BeforeRun replaces the run's prompt with the recorded one.
+//
+// A replay never renders the current default: a run that has more runs
+// than the recording has prompt changes uses the last recorded prompt,
+// which is the prompt the recording's later runs carried.
 func (h *recordedPrompt) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.index >= len(h.prompts) {
+	if len(h.prompts) == 0 {
 		return poo.StartDecision{}, nil
 	}
-	text := h.prompts[h.index]
-	h.index++
+	text := h.prompts[len(h.prompts)-1]
+	if h.index < len(h.prompts) {
+		text = h.prompts[h.index]
+		h.index++
+	}
 	return poo.StartDecision{SystemPrompt: func(s prompt.Sections) {
 		s.Replace(text)
 	}}, nil
