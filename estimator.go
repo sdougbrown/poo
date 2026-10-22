@@ -61,14 +61,18 @@ func (e *estimator) observe(inputTokens int, chars int) {
 // rebase makes the current view the accounting baseline.
 //
 // A compaction changes the view, and the estimate is recomputed over the
-// whole view. The next usage report replaces it.
+// whole view at the plan's starting ratio: 3.5 characters per token.
+// The next usage report replaces the ratio and the baseline it
+// calibrates.
 func (e *estimator) rebase(history []Message) {
 	chars := 0
 	for _, m := range history {
 		chars += estimateMessageChars(m)
 	}
+	e.charsPerToken = CharsPerToken
 	e.baselineChars = chars
-	e.baseline = int(float64(chars) / e.ratio())
+	e.baseline = int(float64(chars) / CharsPerToken)
+	e.calibrated = true
 }
 
 // ratio returns the characters-per-token ratio, never zero.
