@@ -42,3 +42,33 @@ jobs:
 
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+
+  executors:
+    name: Executors (bubblewrap)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          # The sandbox needs unprivileged user namespaces. Ubuntu 24.04
+          # restricts them for unprivileged binaries, and the knob is
+          # absent on the kernels that do not.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Check the sandbox
+        run: |
+          if ! bwrap --unshare-all --ro-bind / / -- /bin/true; then
+            echo "::warning::bubblewrap cannot create a sandbox here; the executor tests will skip and say so"
+          fi
+
+      - name: Executors
+        run: go test -race -v ./exec/bwrap/ ./internal/bashverify/ ./tool/bash/
