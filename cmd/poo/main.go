@@ -42,6 +42,7 @@ Run flags:
   --max-output <n>       The model's output-token ceiling
   --log <path>           The session log path
   --working-dir <dir>    The directory the tools work in (default: the current one)
+  --executor <name>      The executor the bash tool runs commands through: local (default) or bwrap
   --timeout <dur>        The wall-clock ceiling for the run, e.g. 5m
   --no-wait-jobs         Exit at the first settle; the running jobs stop through the session's close
 `
@@ -81,7 +82,10 @@ type runOptions struct {
 	reasoningEffort string
 	logPath         string
 	workingDir      string
-	timeout         time.Duration
+	// executor is the executor the bash tool runs its commands
+	// through.
+	executor string
+	timeout  time.Duration
 	// noWaitJobs exits at the first settle, and the running jobs stop
 	// through the session's close.
 	noWaitJobs bool
@@ -104,6 +108,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "The reasoning_effort to send, for models that think only when asked")
 	fs.StringVar(&o.logPath, "log", "", "The session log path")
 	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
+	fs.StringVar(&o.executor, "executor", "local", "The executor the bash tool runs commands through")
 	fs.DurationVar(&o.timeout, "timeout", 0, "The wall-clock ceiling for the run")
 	fs.BoolVar(&o.noWaitJobs, "no-wait-jobs", false, "Exit at the first settle; the running jobs stop through the session's close")
 
@@ -185,7 +190,16 @@ func runRun(args []string) int {
 		ReasoningEffort: o.reasoningEffort,
 	})
 
-	bashTool := bash.New()
+	// The executor is chosen before the session starts: a session that
+	// asked for an executor that cannot run fails here, and never runs
+	// its commands through another one.
+	executor, err := executorRegistry().New(o.executor, bash.Options{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 2
+	}
+
+	bashTool := bash.New(bash.WithExecutor(executor))
 	readTool := read.New()
 
 	tools := map[string]poo.Tool{
