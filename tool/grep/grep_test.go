@@ -408,3 +408,37 @@ func TestTheSearchRootIsHonoured(t *testing.T) {
 		t.Errorf("the output holds the file outside the root: %q", res.Text)
 	}
 }
+
+// TestAMissingRootIsAnError covers the root that is not there.
+func TestAMissingRootIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	res := call(t, grep.New(), map[string]any{"pattern": "needle", "path": "missing"}, dir)
+	if !res.IsError {
+		t.Fatalf("the search succeeded: %s", res.Text)
+	}
+}
+
+// TestARootThatIsAFileIsAnError covers the root that is not a
+// directory.
+func TestARootThatIsAFileIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.txt", "a needle here\n")
+	res := call(t, grep.New(), map[string]any{"pattern": "needle", "path": "a.txt"}, dir)
+	if !res.IsError {
+		t.Fatalf("the search succeeded: %s", res.Text)
+	}
+}
+
+// TestNoMatchesIsAnEmptyResult covers the search that finds nothing.
+func TestNoMatchesIsAnEmptyResult(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.txt", "nothing here\n")
+
+	res := call(t, grep.New(), map[string]any{"pattern": "needle"}, dir)
+	if res.IsError {
+		t.Fatalf("the search failed: %s", res.Text)
+	}
+	if !strings.Contains(res.Text, "0 matches in 0 files") {
+		t.Errorf("the output is %q, want the empty result", res.Text)
+	}
+}

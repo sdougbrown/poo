@@ -7,6 +7,10 @@
 //
 // The package imports the standard library only, so the tools and a
 // sandboxing executor can share it.
+//
+// The bash tool is not covered by it: with the local executor a command
+// reaches anything the process can. A contained executor masks the
+// protected paths instead, and the file tools keep their own check.
 package protect
 
 import (

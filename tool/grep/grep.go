@@ -292,8 +292,6 @@ type search struct {
 	elided int
 	// protected is the number of protected files that were skipped.
 	protected int
-	// chars is the number of characters of the shown results.
-	chars int
 }
 
 // add records a result.
@@ -307,7 +305,6 @@ func (s *search) add(line string) {
 		return
 	}
 	s.entries = append(s.entries, line)
-	s.chars += len(line) + 1
 }
 
 // scan reads a file and records what the mode shows.
@@ -483,12 +480,24 @@ func gitFiles(root string) ([]string, error) {
 // The dot-directories are skipped, and no ignore file is applied: the
 // tree is searched as it stands.
 func walkFiles(root string) ([]string, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory", root)
+	}
 	var files []string
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
+			// The root itself could not be read: the search has
+			// nothing to cover.
+			if d == nil {
+				return err
+			}
 			// An entry that cannot be read is skipped: the walk is a
 			// search, and one unreadable directory does not end it.
-			if d != nil && d.IsDir() {
+			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
