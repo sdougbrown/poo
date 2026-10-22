@@ -827,3 +827,132 @@ func TestMaxDurationCoversTheBeforeRunHook(t *testing.T) {
 		t.Error("MaxDuration=10ms did not settle a blocked BeforeRun within 60ms")
 	}
 }
+
+// fixTurnFunc adapts a function to an after-turn hook.
+type fixTurnFunc func(poo.HookContext) (poo.TurnDecision, error)
+
+// AfterTurn calls the function.
+func (f fixTurnFunc) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) {
+	return f(ctx)
+}
+
+// fixSecondRunPrompt rewrites the prompt of the session's second run.
+type fixSecondRunPrompt struct {
+	mu   sync.Mutex
+	runs int
+	text string
+}
+
+// BeforeRun changes the second run's prompt.
+func (h *fixSecondRunPrompt) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
+	h.mu.Lock()
+	h.runs++
+	second := h.runs == 2
+	h.mu.Unlock()
+	if !second {
+		return poo.StartDecision{}, nil
+	}
+	return poo.StartDecision{SystemPrompt: func(s prompt.Sections) { s.Set("base", h.text) }}, nil
+}
+
+// TestTheSecondRunsRequestUsesOnlyItsOwnPrompt covers the plan's rule:
+// the prompt is rendered once per run and frozen for that run. An earlier
+// run's system message stays in the record but is not sent again.
+func TestTheSecondRunsRequestUsesOnlyItsOwnPrompt(t *testing.T) {
+	const second = "THE SECOND RUN'S PROMPT"
+	tr := scripted([]fakeResponse{{text: "one"}, {text: "two"}})
+	sink := &recordingSink{}
+	opts := poo.Options{
+		Transport:    tr,
+		Sink:         sink,
+		SessionID:    "s1",
+		ModelID:      "test-model",
+		ContextLimit: 32768,
+		WorkingDir:   t.TempDir(),
+		BeforeRun:    []poo.BeforeRunHook{&fixSecondRunPrompt{text: second}},
+	}
+	s := newTestSession(t, opts)
+	runSession(t, s, "one")
+	runSession(t, s, "two")
+
+	requests := tr.Requests()
+	if len(requests) < 2 {
+		t.Fatalf("the transport saw %d request(s), want at least 2", len(requests))
+	}
+	systems := 0
+	for _, m := range requests[1].Messages {
+		if m.Role == poo.RoleSystem {
+			systems++
+		}
+	}
+	if systems != 1 {
+		t.Errorf("the second run's request carries %d system message(s), want 1", systems)
+	}
+	if got := requests[1].Messages[0]; got.Role != poo.RoleSystem {
+		t.Errorf("the second run's first message is %q, want a system message", got.Role)
+	} else if !strings.Contains(got.Text(), second) {
+		t.Errorf("the second run's first message is %q, want the run's own prompt %q", got.Text(), second)
+	}
+}
+
+// TestTheViewOrderMatchesTheRequestOrder covers the plan's rule: the view
+// a hook reads is the model's history in the order the request sends it.
+func TestTheViewOrderMatchesTheRequestOrder(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "done"}, {text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	var mu sync.Mutex
+	var histories [][]poo.Message
+	opts.AfterTurn = []poo.AfterTurnHook{fixTurnFunc(func(ctx poo.HookContext) (poo.TurnDecision, error) {
+		mu.Lock()
+		histories = append(histories, ctx.History.Messages())
+		mu.Unlock()
+		return poo.TurnDecision{}, nil
+	})}
+	s := newTestSession(t, opts)
+	runSession(t, s, "one")
+	runSession(t, s, "two")
+
+	mu.Lock()
+	view := histories[1]
+	mu.Unlock()
+	req := tr.Requests()[1].Messages
+	if len(view) < len(req) {
+		t.Fatalf("the view holds %d messages, the request %d", len(view), len(req))
+	}
+	view = view[:len(req)]
+	for i := range req {
+		if req[i].Role != view[i].Role || req[i].Text() != view[i].Text() {
+			t.Fatalf("the view and request differ at %d: view=%s:%q request=%s:%q", i, view[i].Role, view[i].Text(), req[i].Role, req[i].Text())
+		}
+	}
+}
+
+// TestAPromptReplacementDoesNotReachTheNextRequest covers the plan's rule
+// for a run-local prompt: a replacement stays in its own run's request,
+// while the earlier run's system message stays in the record.
+func TestAPromptReplacementDoesNotReachTheNextRequest(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "done"}, {text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	var n int
+	opts.BeforeRun = []poo.BeforeRunHook{fixStartFunc(func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error) {
+		n++
+		text := "only instructions for run 1"
+		if n == 2 {
+			text = "only instructions for run 2"
+		}
+		return poo.StartDecision{SystemPrompt: func(s prompt.Sections) { s.Replace(text) }}, nil
+	})}
+	s := newTestSession(t, opts)
+	runSession(t, s, "one")
+	runSession(t, s, "two")
+
+	var systems []string
+	for _, m := range tr.Requests()[1].Messages {
+		if m.Role == poo.RoleSystem {
+			systems = append(systems, m.Text())
+		}
+	}
+	if len(systems) != 1 || systems[0] != "only instructions for run 2" {
+		t.Errorf("the second request's system instructions are %q, want only run 2", systems)
+	}
+}

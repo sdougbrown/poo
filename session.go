@@ -168,6 +168,10 @@ type runState struct {
 	startedAt time.Time
 	// stopTimer stops the run's wall-clock budget timer.
 	stopTimer func()
+	// systemMessage is the prompt this run rendered, frozen for the
+	// run. Earlier runs' system messages stay in the record but are
+	// not sent again.
+	systemMessage *Message
 	// trigger says what started the run.
 	trigger TriggerKind
 	// continuations counts the BeforeSettle continuations the run took.
@@ -731,7 +735,30 @@ func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn in
 func (s *Session) view() View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return NewHistory(s.history, s.results, s.turns)
+	return NewHistory(s.modelMessagesLocked(), s.results, s.turns)
+}
+
+// modelMessagesLocked returns the messages in the order the model reads
+// them.
+//
+// The current run's own system prompt comes first, and the rest of the
+// history follows in the order it was recorded. Earlier runs' system
+// messages stay in the records, but they are not sent again: a run's
+// prompt is frozen for that run.
+//
+// The caller holds the session's lock.
+func (s *Session) modelMessagesLocked() []Message {
+	messages := make([]Message, 0, len(s.history)+1)
+	if s.run != nil && s.run.systemMessage != nil {
+		messages = append(messages, *s.run.systemMessage)
+	}
+	for _, msg := range s.history {
+		if msg.Role == RoleSystem {
+			continue
+		}
+		messages = append(messages, msg)
+	}
+	return CloneMessages(messages)
 }
 
 // budget returns the run's context budget.

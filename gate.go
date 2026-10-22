@@ -287,7 +287,7 @@ func (s *Session) estimatedInput() int {
 //
 // The caller holds the session's lock.
 func (s *Session) estimatedInputLocked() int {
-	return s.est.estimate(s.history)
+	return s.est.estimate(s.modelMessagesLocked())
 }
 
 // rebaseEstimate makes the current view the accounting baseline.
@@ -297,7 +297,7 @@ func (s *Session) estimatedInputLocked() int {
 func (s *Session) rebaseEstimate() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.est.rebase(s.history)
+	s.est.rebase(s.modelMessagesLocked())
 }
 
 // observeUsage calibrates the estimator with a provider's report.
@@ -321,7 +321,7 @@ func (s *Session) observeUsage(report *UsageReport, requestChars int) {
 // The caller holds the session's lock.
 func (s *Session) historyCharsLocked() int {
 	chars := 0
-	for _, m := range s.history {
+	for _, m := range s.modelMessagesLocked() {
 		chars += estimateMessageChars(m)
 	}
 	return chars

@@ -188,6 +188,9 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 			return runID, nil
 		}
 		s.appendMessages(msg)
+		s.mu.Lock()
+		run.systemMessage = &msg
+		s.mu.Unlock()
 	}
 
 	// The messages the before-run hooks appended follow the system
@@ -927,7 +930,7 @@ func originForMode(mode InputMode) Origin {
 // error, so the caller can still write the usage it produced.
 func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
 	s.mu.Lock()
-	messages := systemFirst(CloneMessages(s.history))
+	messages := s.modelMessagesLocked()
 	tools := s.toolSpecs()
 	requestChars := s.historyCharsLocked()
 	s.mu.Unlock()
@@ -973,28 +976,6 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 		}
 	}
 	return resp, rendered, err
-}
-
-// systemFirst returns the messages with the system ones first.
-//
-// A woken run's job results enter the history before the run's system
-// message, because the prompt is rendered after the before-run hooks
-// have seen them. The model still reads the system prompt first: the
-// request carries it at the front, and the log keeps the order the
-// records were written in.
-func systemFirst(messages []Message) []Message {
-	out := make([]Message, 0, len(messages))
-	for _, msg := range messages {
-		if msg.Role == RoleSystem {
-			out = append(out, msg)
-		}
-	}
-	for _, msg := range messages {
-		if msg.Role != RoleSystem {
-			out = append(out, msg)
-		}
-	}
-	return out
 }
 
 // toolSpecs returns the tools the model may call, in offer order.
