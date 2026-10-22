@@ -73,6 +73,38 @@ type hookOutcome struct {
 	interrupted bool
 }
 
+// hookFailure is an executable hook's failure, with the point and the
+// hook that produced it.
+//
+// The settle detail's source names both, so a record says which hook to
+// fix rather than only which hook point fired.
+type hookFailure struct {
+	// point is the hook point: "before_tool", "after_tool" and so on.
+	point string
+	// hook is the hook's name.
+	hook string
+	// err is the hook's own failure.
+	err error
+}
+
+// Error returns the hook's message.
+func (e *hookFailure) Error() string { return e.err.Error() }
+
+// Unwrap returns the hook's own failure.
+func (e *hookFailure) Unwrap() error { return e.err }
+
+// hookFailureSource returns the settle source an error names.
+//
+// A hook's failure names its point and its hook; anything else keeps the
+// fallback the point uses.
+func hookFailureSource(err error, fallback string) string {
+	var failure *hookFailure
+	if errors.As(err, &failure) {
+		return failure.point + ":" + failure.hook
+	}
+	return fallback
+}
+
 // hookAppend is a message a hook appended.
 type hookAppend struct {
 	// name is the hook that appended the message.
@@ -176,7 +208,7 @@ func (s *Session) runBeforeRun(run *runState, trigger RunTrigger) (startDecision
 			return decisions, nil
 		}
 		if err != nil {
-			return decisions, fmt.Errorf("poo: the %s hook: %w", hookName(h), err)
+			return decisions, &hookFailure{point: "before_run", hook: hookName(h), err: fmt.Errorf("poo: the %s hook: %w", hookName(h), err)}
 		}
 		decision, _ := out.value.(StartDecision)
 		decisions.appendStartDecision(hookName(h), decision)
@@ -290,7 +322,7 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 			return SettleDecision{}, false, nil
 		}
 		if err != nil {
-			return SettleDecision{}, false, fmt.Errorf("poo: the %s hook: %w", hookName(h), err)
+			return SettleDecision{}, false, &hookFailure{point: "before_settle", hook: hookName(h), err: fmt.Errorf("poo: the %s hook: %w", hookName(h), err)}
 		}
 		decision, _ := out.value.(SettleDecision)
 		if decision.Stop {

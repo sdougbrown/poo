@@ -89,7 +89,7 @@ func (s *Session) runAfterTool(ctx context.Context, runID, job string, turn int,
 			return out, nil
 		}
 		if err != nil {
-			return out, fmt.Errorf("poo: the %s hook: %w", hookName(h), err)
+			return out, &hookFailure{point: "after_tool", hook: hookName(h), err: fmt.Errorf("poo: the %s hook: %w", hookName(h), err)}
 		}
 		decision, _ := hookOut.value.(ResultDecision)
 		out.decisions = append(out.decisions, decisionRecord(hookName(h), decision))

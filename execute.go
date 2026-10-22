@@ -468,7 +468,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			IsError: true,
 		}, OutcomeError)
 		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
-			Source: "before_tool",
+			Source: hookFailureSource(err, "before_tool"),
 			Text:   err.Error(),
 		}))
 		return
@@ -721,7 +721,7 @@ func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID
 	out, err := s.runAfterTool(hookCompletionContext(run.ctx), run.id, "", turn, info, result)
 	if err != nil {
 		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
-			Source: "after_tool",
+			Source: hookFailureSource(err, "after_tool"),
 			Text:   err.Error(),
 		}))
 	}

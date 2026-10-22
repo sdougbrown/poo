@@ -1018,3 +1018,91 @@ func TestARawSystemPromptIsSentVerbatim(t *testing.T) {
 		})
 	}
 }
+
+// fixSettleFunc adapts a function to a before-settle hook.
+type fixSettleFunc func(poo.HookContext, poo.Reason) (poo.SettleDecision, error)
+
+// BeforeSettle calls the function.
+func (f fixSettleFunc) BeforeSettle(ctx poo.HookContext, candidate poo.Reason) (poo.SettleDecision, error) {
+	return f(ctx, candidate)
+}
+
+// fixStallingBeforeTool never answers, so its deadline names it.
+type fixStallingBeforeTool struct{}
+
+// BeforeTool waits for its deadline.
+func (h *fixStallingBeforeTool) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	<-ctx.Done()
+	return poo.Allow(), nil
+}
+
+// TestAHookErrorsSourceNamesTheHook covers the plan's rule: an executable
+// hook's error or deadline settles hook_error and detail.source names the
+// hook.
+func TestAHookErrorsSourceNamesTheHook(t *testing.T) {
+	t.Run("before_tool", func(t *testing.T) {
+		tr := scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+			{text: "done"},
+		})
+		opts := testOptions(t, tr, &echoTool{result: "the effect"}, &recordingSink{})
+		opts.HookTimeout = 20 * time.Millisecond
+		opts.BeforeTool = []poo.BeforeToolHook{&fixStallingBeforeTool{}}
+		s := newTestSession(t, opts)
+		res := runSession(t, s, "start")
+		if res.Reason != poo.ReasonHookError {
+			t.Fatalf("the run settled %q, want hook_error", res.Reason)
+		}
+		if res.Detail.Source != "before_tool:fixStallingBeforeTool" {
+			t.Errorf("the settle source is %q, want the hook's name", res.Detail.Source)
+		}
+	})
+	t.Run("after_tool", func(t *testing.T) {
+		tr := scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+			{text: "done"},
+		})
+		opts := testOptions(t, tr, &echoTool{result: "the effect"}, &recordingSink{})
+		opts.AfterTool = []poo.AfterToolHook{fixAfterFunc(func(poo.HookContext, poo.ToolCallInfo, poo.ToolResult) (poo.ResultDecision, error) {
+			return poo.Keep(), context.Canceled
+		})}
+		s := newTestSession(t, opts)
+		res := runSession(t, s, "start")
+		if res.Reason != poo.ReasonHookError {
+			t.Fatalf("the run settled %q, want hook_error", res.Reason)
+		}
+		if res.Detail.Source != "after_tool:fixAfterFunc" {
+			t.Errorf("the settle source is %q, want the hook's name", res.Detail.Source)
+		}
+	})
+	t.Run("before_settle", func(t *testing.T) {
+		tr := scripted([]fakeResponse{{text: "done"}})
+		opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+		opts.BeforeSettle = []poo.BeforeSettleHook{fixSettleFunc(func(poo.HookContext, poo.Reason) (poo.SettleDecision, error) {
+			return poo.SettleDecision{}, context.Canceled
+		})}
+		s := newTestSession(t, opts)
+		res := runSession(t, s, "start")
+		if res.Reason != poo.ReasonHookError {
+			t.Fatalf("the run settled %q, want hook_error", res.Reason)
+		}
+		if res.Detail.Source != "before_settle:fixSettleFunc" {
+			t.Errorf("the settle source is %q, want the hook's name", res.Detail.Source)
+		}
+	})
+	t.Run("before_run", func(t *testing.T) {
+		tr := scripted([]fakeResponse{{text: "done"}})
+		opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+		opts.BeforeRun = []poo.BeforeRunHook{fixStartFunc(func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error) {
+			return poo.StartDecision{}, context.Canceled
+		})}
+		s := newTestSession(t, opts)
+		res := runSession(t, s, "start")
+		if res.Reason != poo.ReasonHookError {
+			t.Fatalf("the run settled %q, want hook_error", res.Reason)
+		}
+		if res.Detail.Source != "before_run:fixStartFunc" {
+			t.Errorf("the settle source is %q, want the hook's name", res.Detail.Source)
+		}
+	})
+}

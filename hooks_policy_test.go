@@ -228,8 +228,8 @@ func TestAHookThatMissesItsDeadlineSettlesTheRun(t *testing.T) {
 	if res.Reason != poo.ReasonHookError {
 		t.Fatalf("the run settled %q, want hook_error", res.Reason)
 	}
-	if res.Detail.Source != "before_tool" {
-		t.Errorf("the settle detail's source is %q, want before_tool", res.Detail.Source)
+	if res.Detail.Source != "before_tool:stallingBeforeTool" {
+		t.Errorf("the settle detail's source is %q, want the hook's name", res.Detail.Source)
 	}
 }
 

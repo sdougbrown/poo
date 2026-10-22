@@ -153,7 +153,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	if err != nil {
 		// A hook that failed settles the run with hook_error.
 		s.finalize(run, newCandidate(ReasonHookError, SettleDetail{
-			Source: "before_run",
+			Source: hookFailureSource(err, "before_run"),
 			Text:   err.Error(),
 		}))
 		return runID, nil
@@ -595,7 +595,7 @@ func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool) tu
 			})}}
 		}
 		return turnOutcome{candidates: []candidate{newCandidate(ReasonHookError, SettleDetail{
-			Source: "before_settle",
+			Source: hookFailureSource(err, "before_settle"),
 			Text:   err.Error(),
 		})}}
 	}

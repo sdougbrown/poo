@@ -55,7 +55,7 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 			return ToolDecision{Allowed: result == nil, Result: result}, true, nil
 		}
 		if err != nil {
-			return ToolDecision{}, false, fmt.Errorf("poo: the %s hook: %w", hookName(h), err)
+			return ToolDecision{}, false, &hookFailure{point: "before_tool", hook: hookName(h), err: fmt.Errorf("poo: the %s hook: %w", hookName(h), err)}
 		}
 		decision, _ := out.value.(ToolDecision)
 		// A refusal wins over everything else.
@@ -92,7 +92,7 @@ func (s *Session) callPolicy(ctx context.Context, h PolicyHook, turn int, info T
 		return Deny("The run ended before the policy answered."), nil
 	}
 	if err != nil {
-		return ToolDecision{}, fmt.Errorf("poo: the %s policy hook: %w", hookName(h), err)
+		return ToolDecision{}, &hookFailure{point: "before_tool", hook: hookName(h), err: fmt.Errorf("poo: the %s policy hook: %w", hookName(h), err)}
 	}
 	// The policy slot only ever allows or denies. A result it returns
 	// is ignored: the slot decides whether the call runs at all, not

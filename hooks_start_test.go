@@ -299,8 +299,8 @@ func TestTheBeforeRunHookThatFailsSettlesTheRun(t *testing.T) {
 	if res.Reason != poo.ReasonHookError {
 		t.Fatalf("the run settled %q, want hook_error", res.Reason)
 	}
-	if res.Detail.Source != "before_run" {
-		t.Errorf("the settle detail's source is %q, want before_run", res.Detail.Source)
+	if res.Detail.Source != "before_run:recordingStartHook" {
+		t.Errorf("the settle detail's source is %q, want the hook's name", res.Detail.Source)
 	}
 }
 
