@@ -24,8 +24,15 @@ type View interface {
 
 // TurnSummary describes one turn of the model's history.
 type TurnSummary struct {
-	// Index is the turn's number, counting from one.
+	// Index is the turn's number in its run, counting from one.
 	Index int
+	// Session is the turn's number in the session, counting from one
+	// and never restarting.
+	//
+	// The compaction seam names a range of turns by this number, so a
+	// range may cross a run boundary, and a turn keeps its number when
+	// a compaction removes it.
+	Session int
 	// Calls are the tool calls the turn made, in order.
 	Calls []ToolCallSummary
 	// Interrupted reports that the turn was cut short by an interrupt.
@@ -58,6 +65,13 @@ type Budget struct {
 	HardRatio float64
 	// CharsPerToken is the calibrated characters-per-token ratio.
 	CharsPerToken float64
+	// Turns is the number of provider requests the run has made.
+	//
+	// A compaction strategy needs it: the handoff strategy asks for a
+	// handoff only after the run has asked the model something, and a
+	// replay applies a recorded compaction after the same number of
+	// requests.
+	Turns int
 }
 
 // HookContext is what a hook is given.

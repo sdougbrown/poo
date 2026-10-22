@@ -99,8 +99,8 @@ func TestTheSecondRequestCarriesTheToolResult(t *testing.T) {
 	if last.Role != poo.RoleTool {
 		t.Errorf("the last message's role is %q, want tool", last.Role)
 	}
-	if last.Content[0].Text != "the echoed text" {
-		t.Errorf("the last message holds %q, want the tool's output", last.Content[0].Text)
+	if want := poo.HandleLine("r1", "echo") + "\n" + "the echoed text"; last.Content[0].Text != want {
+		t.Errorf("the last message holds %q, want %q", last.Content[0].Text, want)
 	}
 	// The result carries the provider's call id, because that is the id
 	// the provider matches it against.

@@ -142,12 +142,12 @@ func TestAReplacementKeepsTheOriginalInTheRecord(t *testing.T) {
 	s := newTestSession(t, opts)
 
 	runSession(t, s, "start")
-	if result := lastToolResult(t, tr); result != "the replacement" {
-		t.Errorf("the model saw %q, want the replacement", result)
+	if want := poo.HandleLine("r1", "echo") + "\n" + "the replacement"; lastToolResult(t, tr) != want {
+		t.Errorf("the model saw %q, want %q", lastToolResult(t, tr), want)
 	}
 	rec := toolResultRecord(t, sink)
-	if rec.Text != "the replacement" {
-		t.Errorf("the record's text is %q, want the replacement", rec.Text)
+	if want := poo.HandleLine("r1", "echo") + "\n" + "the replacement"; rec.Text != want {
+		t.Errorf("the record's text is %q, want %q", rec.Text, want)
 	}
 	if rec.Original == nil {
 		t.Fatal("the record holds no original, want the tool's own result")
@@ -230,8 +230,8 @@ func TestTheChainRunsInRegistrationOrder(t *testing.T) {
 	if seen[0].Text != "the first replacement" {
 		t.Errorf("the second hook saw %q, want the first hook's output", seen[0].Text)
 	}
-	if result := lastToolResult(t, tr); result != "the first replacement\nthe second note" {
-		t.Errorf("the model saw %q, want the replacement and the note", result)
+	if want := poo.HandleLine("r1", "echo") + "\n" + "the first replacement\nthe second note"; lastToolResult(t, tr) != want {
+		t.Errorf("the model saw %q, want %q", lastToolResult(t, tr), want)
 	}
 }
 

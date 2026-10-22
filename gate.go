@@ -36,15 +36,14 @@ func (s *Session) gate(run *runState) gateResult {
 
 	// Step 1: the compactor.
 	//
-	// The compaction itself belongs to the stage that applies it: this
-	// stage calls the compactor and moves the run through the
-	// compacting state, and the compaction's effect on the view is
-	// applied there.
+	// The compaction is applied here: the view changes, the budget is
+	// rebased onto the new view, and a compaction that refuses to
+	// compact ends the run with its handoff.
 	if s.opts.Compactor != nil {
 		should := s.opts.Compactor.ShouldCompact(s.view(), s.budget())
 		if should {
 			s.transition(StateCompacting)
-			compacted, err := s.compact(run)
+			outcome, err := s.compact(run)
 			// The run may have settled while the compactor was
 			// running. Nothing the gate does after that may move the
 			// state, open a request, or record anything.
@@ -71,7 +70,11 @@ func (s *Session) gate(run *runState) gateResult {
 						Text:   err.Error(),
 					})}}
 				}
-			} else if compacted {
+			} else if outcome.candidate != nil {
+				// The compactor refused to compact: the run ends
+				// with the handoff it wrote.
+				return gateResult{candidates: []candidate{*outcome.candidate}}
+			} else if outcome.applied {
 				// The compaction was applied, and the budget was
 				// rebased onto the new view.
 				s.rebaseEstimate()
@@ -158,13 +161,27 @@ func (s *Session) maybeNotice(run *runState) {
 	})
 }
 
-// compact asks the compactor to compact the view.
+// compactionOutcome is what a compaction did.
+type compactionOutcome struct {
+	// applied reports that the compaction changed the view.
+	applied bool
+	// candidate is the settle candidate the compaction produced.
+	//
+	// A compaction that refuses to compact ends the run, and the
+	// candidate carries the handoff it wrote.
+	candidate *candidate
+}
+
+// compact asks the compactor to compact the view and applies what it
+// produced.
 //
-// The compaction's validation and its effect on the view belong to the
-// stage that applies them. This stage calls the compactor from the
-// compacting state and records what it did, so a compactor that is
-// wired up cannot be called from anywhere else.
-func (s *Session) compact(run *runState) (bool, error) {
+// The compaction is validated before it is applied: a compaction the
+// core cannot apply is a compactor failure, and the run carries on
+// uncompacted below the hard limit.
+//
+// The compaction's record is written after the view changed, so the
+// record's tokens_after is the estimate of the new view.
+func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	s.events.emit(EventCompactionStarted, map[string]any{"run_id": run.id})
 
 	tokensBefore := s.estimatedInput()
@@ -181,30 +198,74 @@ func (s *Session) compact(run *runState) (bool, error) {
 	// compaction's own record is not written, and the ended event is
 	// not emitted, for a run that has already settled.
 	if s.runWindingDown(run) {
-		return false, errRunWindingDown
+		return compactionOutcome{}, errRunWindingDown
 	}
 	if err != nil {
 		s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
-		return false, err
+		return compactionOutcome{}, err
+	}
+	if err := s.validateCompaction(compaction); err != nil {
+		s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
+		return compactionOutcome{}, err
 	}
 
-	// The record of what the compactor did is written even though the
-	// view change is applied by the next stage: the store keeps the
-	// original history either way.
-	_ = s.write(run.ctx, &CompactionRecord{
+	outcome := compactionOutcome{}
+	// A compaction that refuses to compact leaves the view alone: the
+	// run ends with the handoff instead.
+	if compaction.End == nil {
+		if err := s.applyCompaction(compaction); err != nil {
+			s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
+			return compactionOutcome{}, err
+		}
+		outcome.applied = true
+	}
+
+	tokensAfter := s.estimatedInput()
+	rec := &CompactionRecord{
 		RecordMeta:   NewRecordMeta("compaction"),
 		RunID:        run.id,
 		Strategy:     compaction.Strategy,
 		Form:         compactionForm(compaction),
 		TokensBefore: tokensBefore,
-		TokensAfter:  s.estimatedInput(),
+		TokensAfter:  tokensAfter,
 		Compaction:   compaction,
-	})
+	}
+	if compaction.Replace != nil {
+		cut := compaction.Replace.Cut
+		rec.Cut = &cut
+		rec.Replacement = compaction.Replace.Messages
+	}
+	if err := s.write(run.ctx, rec); err != nil {
+		s.addCandidate(run, storeErrorCandidate(err))
+	}
+
+	// The handoff is recorded on its own, so a consumer that carries
+	// the work on can read the note without reading the compaction.
+	if compaction.End != nil {
+		if err := s.write(run.ctx, &HandoffRecord{
+			RecordMeta: NewRecordMeta("handoff"),
+			RunID:      run.id,
+			Strategy:   compaction.Strategy,
+			Handoff:    compaction.End.Handoff,
+			CreatedAt:  nowRFC3339(),
+		}); err != nil {
+			s.addCandidate(run, storeErrorCandidate(err))
+		}
+		outcome.candidate = &candidate{
+			reason: ReasonContextExhausted,
+			detail: SettleDetail{
+				Source:  "compactor:" + compaction.Strategy,
+				Text:    "the compactor refused to compact",
+				Handoff: compaction.End.Handoff,
+			},
+		}
+	}
+
 	s.events.emit(EventCompactionEnded, map[string]any{
 		"run_id":   run.id,
 		"strategy": compaction.Strategy,
 	})
-	return true, nil
+	return outcome, nil
 }
 
 // compactionForm names the compaction's form.

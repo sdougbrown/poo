@@ -123,6 +123,7 @@ func (s *Session) recordPartial(run *runState, turn int, resp *response) {
 	msg.Partial = true
 	msg.Cause = CauseInterrupt
 	s.appendMessages(msg)
+	s.recordMessage(msg)
 	_ = s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,

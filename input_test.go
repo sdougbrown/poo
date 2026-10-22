@@ -292,8 +292,8 @@ func TestAnInterruptSkipsTheUnstartedCalls(t *testing.T) {
 	if skipped.Outcome != poo.OutcomeSkipped {
 		t.Errorf("the outcome is %q, want skipped", skipped.Outcome)
 	}
-	if skipped.Text != poo.SkippedInterruptedText {
-		t.Errorf("the result's text is %q, want the visible note", skipped.Text)
+	if want := poo.HandleLine("r2", "echo") + "\n" + poo.SkippedInterruptedText; skipped.Text != want {
+		t.Errorf("the result's text is %q, want %q", skipped.Text, want)
 	}
 }
 
@@ -1146,8 +1146,8 @@ func TestThePartialMessageKeepsTheToolCallsVisible(t *testing.T) {
 	if skipped.Outcome != poo.OutcomeSkipped {
 		t.Errorf("the outcome is %q, want skipped", skipped.Outcome)
 	}
-	if skipped.Text != poo.SkippedInterruptedText {
-		t.Errorf("the result's text is %q, want the visible note", skipped.Text)
+	if want := poo.HandleLine("r1", "echo") + "\n" + poo.SkippedInterruptedText; skipped.Text != want {
+		t.Errorf("the result's text is %q, want %q", skipped.Text, want)
 	}
 	// The partial assistant message declares the call, so the skipped
 	// result has a call to answer.

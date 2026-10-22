@@ -189,18 +189,23 @@ func callsFromPlans(plans []callPlan) []ToolCall {
 
 // beginTurn records the turn's calls in the turn's summary.
 //
-// The caller holds the session's lock.
+// The turn's summary was made when the turn started, so the calls join
+// the summary the run is in.
 func (s *Session) beginTurn(run *runState, turn int, plans []callPlan) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	summary := TurnSummary{Index: turn}
-	for _, p := range plans {
-		summary.Calls = append(summary.Calls, ToolCallSummary{
-			Handle: p.handle,
-			Tool:   p.call.Name,
-		})
+	for i := range s.turns {
+		if s.turns[i].Session != run.globalTurn {
+			continue
+		}
+		for _, p := range plans {
+			s.turns[i].Calls = append(s.turns[i].Calls, ToolCallSummary{
+				Handle: p.handle,
+				Tool:   p.call.Name,
+			})
+		}
+		return
 	}
-	s.turns = append(s.turns, summary)
 }
 
 // nextHandle returns the next tool-result handle, r<n>.
@@ -795,7 +800,11 @@ func (s *Session) beginCallRecordLocked(run *runState, call *issuedCall) {
 // The caller has claimed the call's result. The chain's outcome
 // carries the original the hooks replaced and the decisions they made:
 // a redacted result's record holds no original at all.
+//
+// The result's model-facing text starts with the handle line, so the
+// model can name the result later and a strategy can find it.
 func (s *Session) writeResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome, out afterToolOutcome) {
+	text := modelFacingText(handle, tool, result.Text)
 	rec := &ToolResultRecord{
 		RecordMeta: NewRecordMetaFrom("tool.result", OriginTool),
 		RunID:      run.id,
@@ -803,7 +812,7 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		Handle:     handle,
 		Tool:       tool,
 		Outcome:    outcome,
-		Text:       result.Text,
+		Text:       text,
 		Structured: result.Structured,
 		Redacted:   out.redacted,
 		RedactedBy: out.redactedBy,
@@ -824,9 +833,10 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 	}
 
 	// The result goes into the model's view and the turn's summary.
-	msg := ToolResultMessage(callID, tool, result.Text, result.IsError)
+	msg := ToolResultMessage(callID, tool, text, result.IsError)
 	msg.Origin = OriginTool
 	s.appendMessages(msg)
+	result.Text = text
 	s.rememberResult(run, turn, handle, tool, outcome, result)
 
 	_ = s.write(run.ctx, &MessageRecord{
@@ -842,7 +852,7 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		"handle":  handle,
 		"tool":    tool,
 		"outcome": string(outcome),
-		"text":    result.Text,
+		"text":    text,
 	})
 }
 
@@ -852,8 +862,14 @@ func (s *Session) rememberResult(run *runState, turn int, handle, tool string, o
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.results[handle] = copyResult(result)
+	// The turn the call was made in is the turn the summary belongs
+	// to, and the handle knows it.
+	global := turn
+	if meta, ok := s.resultMeta[handle]; ok {
+		global = meta.turn
+	}
 	for i := range s.turns {
-		if s.turns[i].Index != turn {
+		if s.turns[i].Session != global {
 			continue
 		}
 		for j := range s.turns[i].Calls {
@@ -891,11 +907,17 @@ func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 			continue
 		}
 		run.pendingCalls[p.handle] = &issuedCall{
-			handle:    p.handle,
-			tool:      p.call.Name,
-			id:        p.call.ID,
-			turn:      turn,
-			arguments: p.call.Arguments,
+			handle:     p.handle,
+			tool:       p.call.Name,
+			id:         p.call.ID,
+			turn:       turn,
+			globalTurn: run.globalTurn,
+			arguments:  p.call.Arguments,
+		}
+		s.resultMeta[p.handle] = resultMeta{
+			tool:   p.call.Name,
+			callID: p.call.ID,
+			turn:   run.globalTurn,
 		}
 	}
 }
@@ -922,11 +944,17 @@ func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCal
 		return false
 	}
 	run.pendingCalls[handle] = &issuedCall{
-		handle:    handle,
-		tool:      call.Name,
-		id:        call.ID,
-		turn:      turn,
-		arguments: call.Arguments,
+		handle:     handle,
+		tool:       call.Name,
+		id:         call.ID,
+		turn:       turn,
+		globalTurn: run.globalTurn,
+		arguments:  call.Arguments,
+	}
+	s.resultMeta[handle] = resultMeta{
+		tool:   call.Name,
+		callID: call.ID,
+		turn:   run.globalTurn,
 	}
 	if run.workDone == nil {
 		run.workDone = make(chan struct{}, 1)

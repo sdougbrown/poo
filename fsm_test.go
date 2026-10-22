@@ -182,8 +182,8 @@ func TestATruncatedResponseRunsTheCompleteCalls(t *testing.T) {
 	if skipped.Outcome != poo.OutcomeSkipped {
 		t.Errorf("the outcome is %q, want skipped", skipped.Outcome)
 	}
-	if skipped.Text != poo.SkippedTruncatedText {
-		t.Errorf("the result's text is %q, want the visible note", skipped.Text)
+	if want := poo.HandleLine("r2", "echo") + "\n" + poo.SkippedTruncatedText; skipped.Text != want {
+		t.Errorf("the result's text is %q, want %q", skipped.Text, want)
 	}
 }
 

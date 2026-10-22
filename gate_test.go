@@ -301,7 +301,10 @@ func TestTheCompactingStateIsCancelledByAnInterrupt(t *testing.T) {
 // TestTheCompactionIsRecorded covers the plan's rule: the compaction is
 // recorded, so a replay knows what the compactor did.
 func TestTheCompactionIsRecorded(t *testing.T) {
-	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "handoff"})
+	compactor := pootest.NewCompactor(true, poo.Compaction{
+		Strategy: "handoff",
+		End:      &poo.EndRun{Handoff: "the handoff"},
+	})
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
 	sink := &recordingSink{}
@@ -436,6 +439,9 @@ func TestARunWindingDownAfterTheSettleDoesNotMoveTheStateOrRecord(t *testing.T) 
 // TestTheCompactionRecordNamesItsFormAndTokens covers the plan's
 // compaction record: it carries the form of the compaction and the
 // token estimate before and after it.
+//
+// The view is applied, so the estimate after the compaction is the
+// estimate of the new view, and it is smaller than the one before.
 func TestTheCompactionRecordNamesItsFormAndTokens(t *testing.T) {
 	compaction := poo.Compaction{
 		Strategy: "summarize",
@@ -445,7 +451,12 @@ func TestTheCompactionRecordNamesItsFormAndTokens(t *testing.T) {
 		},
 	}
 	compactor := pootest.NewCompactor(true, compaction)
-	tr := scripted([]fakeResponse{{text: "the answer"}})
+	// The replacement covers a turn, so the compaction waits for one.
+	compactor.SetShouldAfter(1)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer"},
+	})
 	tool := &echoTool{result: "echoed"}
 	sink := &recordingSink{}
 
@@ -470,8 +481,8 @@ func TestTheCompactionRecordNamesItsFormAndTokens(t *testing.T) {
 	if rec.TokensBefore <= 0 {
 		t.Errorf("the compaction's tokens_before is %d, want a positive estimate", rec.TokensBefore)
 	}
-	if rec.TokensAfter != rec.TokensBefore {
-		t.Errorf("the compaction's tokens_after is %d, want %d while the view is not applied",
+	if rec.TokensAfter >= rec.TokensBefore {
+		t.Errorf("the compaction's tokens_after is %d, want less than the %d before it",
 			rec.TokensAfter, rec.TokensBefore)
 	}
 }

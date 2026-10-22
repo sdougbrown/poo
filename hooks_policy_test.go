@@ -102,8 +102,8 @@ func TestThePolicySlotRunsFirst(t *testing.T) {
 		t.Errorf("the tool ran %d time(s) after the policy refused, want 0", got)
 	}
 	result := lastToolResult(t, tr)
-	if result != "the policy says no" {
-		t.Errorf("the model saw %q, want the policy's detail", result)
+	if want := poo.HandleLine("r1", "echo") + "\n" + "the policy says no"; result != want {
+		t.Errorf("the model saw %q, want %q", result, want)
 	}
 }
 
@@ -131,8 +131,8 @@ func TestTheFirstResultBecomesTheCallsResult(t *testing.T) {
 	if got := len(tool.Calls()); got != 0 {
 		t.Errorf("the tool ran %d time(s) after a hook answered the call, want 0", got)
 	}
-	if result := lastToolResult(t, tr); result != "the first answer" {
-		t.Errorf("the model saw %q, want the first hook's answer", result)
+	if want := poo.HandleLine("r1", "echo") + "\n" + "the first answer"; lastToolResult(t, tr) != want {
+		t.Errorf("the model saw %q, want %q", lastToolResult(t, tr), want)
 	}
 }
 
@@ -155,8 +155,8 @@ func TestARefusalWinsOverAResult(t *testing.T) {
 	if got := len(tool.Calls()); got != 0 {
 		t.Errorf("the tool ran %d time(s) after a hook refused the call, want 0", got)
 	}
-	if result := lastToolResult(t, tr); result != "not this one" {
-		t.Errorf("the model saw %q, want the refusal's detail", result)
+	if want := poo.HandleLine("r1", "echo") + "\n" + "not this one"; lastToolResult(t, tr) != want {
+		t.Errorf("the model saw %q, want %q", lastToolResult(t, tr), want)
 	}
 }
 
@@ -204,8 +204,8 @@ func TestThePolicySlotsResultIsIgnored(t *testing.T) {
 	if got := len(tool.Calls()); got != 1 {
 		t.Errorf("the tool ran %d time(s), want 1: the policy slot's result is not the call's result", got)
 	}
-	if result := lastToolResult(t, tr); result != "the effect" {
-		t.Errorf("the model saw %q, want the tool's own result", result)
+	if want := poo.HandleLine("r1", "echo") + "\n" + "the effect"; lastToolResult(t, tr) != want {
+		t.Errorf("the model saw %q, want %q", lastToolResult(t, tr), want)
 	}
 }
 

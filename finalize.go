@@ -972,14 +972,14 @@ func (s *Session) renderForDelivery(note *DeliveryNote) *DeliveryNote {
 
 // messagesByIDLocked returns the message an id names.
 //
+// The message comes from the session's record, not from the view: a
+// compaction may have removed the message from the view, and a
+// delivery note still renders from the original recorded message.
+//
 // The caller holds the session's lock.
 func (s *Session) messagesByIDLocked(id string) (Message, bool) {
-	for _, m := range s.history {
-		if m.ID == id {
-			return m, true
-		}
-	}
-	return Message{}, false
+	msg, ok := s.recorded[id]
+	return msg, ok
 }
 
 // Close ends the session.

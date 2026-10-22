@@ -34,12 +34,41 @@ type Session struct {
 
 	// history is the model's view: what has been said so far.
 	history []Message
-	// turns summarises each turn of the current run.
+	// turns summarises each turn of the session.
+	//
+	// The summaries cover every turn of the session, not only the
+	// current run's: the compaction seam names a range of turns, and a
+	// range may cross a run boundary.
 	turns []TurnSummary
-	// results holds the tool results of the current run, by handle.
+	// results holds the tool results of the session, by handle.
+	//
+	// A handle names a call for the life of the session, so its result
+	// stays known after the run that made it has settled.
 	results map[string]ToolResult
+	// resultMeta holds what the session knows about each result: the
+	// tool it called and the provider's id for the call.
+	//
+	// The core needs both to validate a compaction's rewrites and to
+	// find the result in the view.
+	resultMeta map[string]resultMeta
+	// spans holds the session's turns, in order, with the range of the
+	// view each one occupies.
+	//
+	// The spans are the seam's map from a turn to the messages it
+	// occupies, so a compaction can cut a range of turns out of the
+	// view.
+	spans []turnSpan
+	// turnSeq numbers the session's turns. The number never restarts,
+	// so a turn keeps its number when a compaction removes it.
+	turnSeq int
 	// messageIDs hands out the session-monotonic message ids.
 	messageIDs *MessageIDs
+	// recorded holds the recorded messages, by id.
+	//
+	// The record outlives the view: a compaction may remove a message
+	// from the view, and a delivery note still renders from the
+	// original recorded message.
+	recorded map[string]Message
 	// repeats counts the consecutive repeats of a call, for the doom
 	// loop.
 	repeats *repeatCounter
@@ -160,6 +189,12 @@ type runState struct {
 	cancel context.CancelCauseFunc
 	// turn counts the provider requests made so far.
 	turn int
+	// globalTurn is the session's number for the turn the run is in.
+	//
+	// The run's turn number counts from one in every run, and the
+	// session's number counts from one for the life of the session. The
+	// compaction seam names a turn by the session's number.
+	globalTurn int
 	// requests counts the provider requests made so far.
 	requests int
 	// tokens counts the run's cumulative input and output tokens.
@@ -284,6 +319,9 @@ type issuedCall struct {
 	id string
 	// turn is the turn the call belongs to.
 	turn int
+	// globalTurn is the session's number for the turn the call belongs
+	// to.
+	globalTurn int
 	// arguments are the model's arguments, kept so the finalization can
 	// write the call's record when the call was claimed before its
 	// record was written.
@@ -476,6 +514,8 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		opts:        opts,
 		state:       StateIdle,
 		results:     map[string]ToolResult{},
+		resultMeta:  map[string]resultMeta{},
+		recorded:    map[string]Message{},
 		messageIDs:  ids,
 		repeats:     newRepeatCounter(),
 		noticeArmed: true,
@@ -772,12 +812,17 @@ func (s *Session) budget() Budget {
 //
 // The caller holds the session's lock.
 func (s *Session) budgetLocked() Budget {
+	turns := 0
+	if s.run != nil {
+		turns = s.run.turn
+	}
 	return Budget{
 		ContextLimit:   s.opts.ContextLimit,
 		EstimatedInput: s.estimatedInputLocked(),
 		NoticeRatio:    s.opts.NoticeRatio,
 		HardRatio:      s.opts.HardRatio,
 		CharsPerToken:  s.est.charsPerToken,
+		Turns:          turns,
 	}
 }
 
@@ -786,6 +831,20 @@ func (s *Session) appendMessages(msgs ...Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.history = append(s.history, msgs...)
+}
+
+// recordMessage keeps a message under its id.
+//
+// The record outlives the view: a compaction may remove a message from
+// the view, and a delivery note still renders from the original
+// recorded message.
+func (s *Session) recordMessage(msg Message) {
+	if msg.ID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recorded[msg.ID] = msg
 }
 
 // markBroken marks the session broken.

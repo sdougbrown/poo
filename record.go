@@ -378,8 +378,10 @@ func Stamp(rec Record, seq int64, at time.Time) {
 // CompactionRecord records what a compactor did.
 //
 // The store keeps every original record, and the compaction record says
-// what the model's view was replaced with. The compaction's own fields
-// carry the form it took.
+// what the model's view was replaced with. The record's own fields
+// carry the plan's vocabulary, and the compaction itself is kept beside
+// them, so a replay applies the compaction again without running the
+// strategy that made it.
 type CompactionRecord struct {
 	RecordMeta
 	// RunID identifies the run the compaction belongs to.
@@ -388,10 +390,32 @@ type CompactionRecord struct {
 	Strategy string `json:"strategy"`
 	// Form is the compaction's form: replace, rewrite, window or end.
 	Form string `json:"form"`
+	// Cut is the range of turns a replacement covers. It is set for a
+	// replacement only.
+	Cut *TurnRange `json:"cut,omitempty"`
+	// Replacement are the messages that replace the cut's turns. It is
+	// set for a replacement only.
+	Replacement []Message `json:"replacement,omitempty"`
 	// TokensBefore is the estimated input before the compaction.
 	TokensBefore int `json:"tokens_before"`
 	// TokensAfter is the estimated input after the compaction.
 	TokensAfter int `json:"tokens_after"`
 	// Compaction is the compaction itself.
 	Compaction Compaction `json:"compaction"`
+}
+
+// HandoffRecord records the note a compactor wrote when it refused to
+// compact.
+//
+// The note is what a consumer carries on: it seeds the next session.
+type HandoffRecord struct {
+	RecordMeta
+	// RunID identifies the run the handoff ends.
+	RunID string `json:"run_id"`
+	// Strategy names the strategy that wrote the handoff.
+	Strategy string `json:"strategy"`
+	// Handoff is the note the next agent picks up.
+	Handoff string `json:"handoff"`
+	// CreatedAt is the RFC 3339 time the handoff was written.
+	CreatedAt string `json:"created_at"`
 }

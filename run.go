@@ -77,8 +77,9 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		wake:            make(chan struct{}, 1),
 	}
 	s.run = run
-	s.turns = nil
-	s.results = map[string]ToolResult{}
+	// The turn summaries and the results belong to the session, not to
+	// the run: a turn keeps its number across the runs, and a handle
+	// names a call for the life of the session.
 	s.repeats = newRepeatCounter()
 	s.transitionLocked(StateRequesting)
 	// The results that were held are delivered at the start of the run,
@@ -371,6 +372,10 @@ func (s *Session) loop(run *runState) []candidate {
 		s.transitionLocked(StateRequesting)
 		s.mu.Unlock()
 
+		// The turn starts here: the session numbers it, and the
+		// span it occupies in the view begins.
+		run.globalTurn = s.openTurn(turn)
+
 		s.events.emit(EventTurnStarted, map[string]any{"run_id": run.id, "turn": turn})
 
 		resp, rendered, err := s.request(run, turn)
@@ -433,6 +438,8 @@ func (s *Session) loop(run *runState) []candidate {
 				assistant.ID = s.messageIDs.Next()
 			}
 			s.appendMessages(assistant)
+			s.recordMessage(assistant)
+			s.growSpan(run.globalTurn)
 			if err := s.write(run.ctx, &MessageRecord{
 				RecordMeta: NewRecordMetaFrom("message", assistant.Origin),
 				RunID:      run.id,
@@ -468,6 +475,9 @@ func (s *Session) loop(run *runState) []candidate {
 		processed := false
 		if len(resp.calls) > 0 {
 			processed = s.executeBatch(run, turn, resp.calls, truncated)
+			// The turn's messages are all in the view now, so the
+			// turn's span is complete.
+			s.growSpan(run.globalTurn)
 			// An interrupt during the batch cut the turn short. The
 			// unstarted calls are skipped, and the run continues.
 			if s.interruptPending(run) {
@@ -620,7 +630,7 @@ func (s *Session) evaluateStopConditions(run *runState, turn int) []candidate {
 	s.mu.Unlock()
 	state := StopState{
 		Turn:      turn,
-		Calls:     s.callStates(turn),
+		Calls:     s.callStates(run.globalTurn),
 		RunTokens: tokens,
 	}
 	var cands []candidate
@@ -673,12 +683,15 @@ func (s *Session) evaluateBudgets(run *runState, turn int) []candidate {
 }
 
 // callStates returns the calls of a turn and their outcomes.
+//
+// The turn is the session's number for the turn, so the summaries of
+// the earlier runs are not mixed in.
 func (s *Session) callStates(turn int) []CallState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []CallState
 	for _, t := range s.turns {
-		if t.Index != turn {
+		if t.Session != turn {
 			continue
 		}
 		for _, c := range t.Calls {
