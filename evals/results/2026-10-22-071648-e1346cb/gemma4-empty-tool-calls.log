@@ -1,0 +1,20 @@
+=== REQ
+rameters":{"type":"object","properties":{}}}},{"type":"function","function":{"name":"cancel_job","description":"Stop one background job. Its partial output is delivered as its result.","parameters":{"type":"object","properties":{"job":{"type":"string","description":"The job's identifier, e.g. \"j3\"."}},"required":["job"]}}}],"max_tokens":8192,"stream":true,"stream_options":{"include_usage":true}}
+=== RESP
+data: {"id":"chatcmpl-a526b890d4764fb5829b9ad79afa85a5","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"chatcmpl-a526b890d4764fb5829b9ad79afa85a5","created":1792655142,"model":"gemma4","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":18,"prompt_tokens":1082,"total_tokens":1100,"completion_tokens_details":{"accepted_prediction_tokens":0,"reasoning_tokens":0,"rejected_prediction_tokens":0,"text_tokens":18},"prompt_tokens_details":{"cached_tokens":0}}}
+
+data: [DONE]
+
+
+=== REQ
+rameters":{"type":"object","properties":{}}}},{"type":"function","function":{"name":"cancel_job","description":"Stop one background job. Its partial output is delivered as its result.","parameters":{"type":"object","properties":{"job":{"type":"string","description":"The job's identifier, e.g. \"j3\"."}},"required":["job"]}}}],"max_tokens":8192,"stream":true,"stream_options":{"include_usage":true}}
+=== RESP
+data: {"id":"chatcmpl-3a3113ade7b24bc88905f6518d9864e0","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"chatcmpl-3a3113ade7b24bc88905f6518d9864e0","created":1792655142,"model":"gemma4","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":18,"prompt_tokens":1082,"total_tokens":1100,"completion_tokens_details":{"accepted_prediction_tokens":0,"reasoning_tokens":0,"rejected_prediction_tokens":0,"text_tokens":18},"prompt_tokens_details":{"cached_tokens":1024}}}
+
+data: [DONE]
+
+
