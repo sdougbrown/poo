@@ -48,6 +48,7 @@ A record that someone produced also carries an `origin`:
 | `input.held` | Once per round of job results that were held instead of delivered. |
 | `job.started` | Once per background job, when it is accepted. |
 | `job.ended` | Once per background job, when it finishes. |
+| `observer.dropped` | Once a second at most, per observer that fell behind. |
 | `turn.interrupted` | Once per turn an interrupt cut short. |
 | `compaction` | Once per compaction a compactor produced. |
 | `run.settled` | Once per run, when the run ends. |
@@ -211,6 +212,26 @@ The outcome of a tool call.
 | `outcome` | string | `"ok"`, `"error"`, `"denied"`, `"skipped"`, `"cancelled"`, `"interrupted"` or `"started"`. |
 | `text` | string | The model-facing text of the result. |
 | `structured` | any | The tool's side-channel payload. Absent when the tool has none. |
+| `original` | object | The result the tool produced, when a hook replaced it. Absent when no hook replaced it, and absent for a redacted result: the original of a redacted result never reaches the log. |
+| `redacted` | boolean | `true` when a hook redacted the result. Absent when it did not. |
+| `redacted_by` | string | The name of the hook that redacted the result. Absent unless the result was redacted. |
+| `hooks` | array of objects | The after-tool hooks' decisions, in the order the hooks ran. Absent when no hook acted. A redacted chain's decisions carry no `text`. |
+
+`original` holds:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `text` | string | The model-facing text of the result the tool produced. |
+| `structured` | any | The tool's side-channel payload. Absent when the tool had none. |
+| `is_error` | boolean | `true` when the result reported a failure. Absent when it did not. |
+
+A `hooks` entry holds:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `hook` | string | The name of the hook that decided. |
+| `action` | string | What the hook did: `"keep"`, `"annotate"`, `"replace"` or `"redact"`. |
+| `text` | string | The text the hook added or substituted. Absent when the chain was redacted, and absent when the hook kept the result. |
 
 An `error` outcome is recoverable: the model saw the text and the run
 continued. A bash call that hit its timeout is an `error` outcome, because
@@ -310,6 +331,20 @@ reads, so a held result survives a crash and a load can deliver it.
 | `input_id` | string | The id the queued result is delivered under. |
 | `text` | string | The result the model reads. |
 | `ended_at` | string | RFC 3339, UTC. |
+
+## `observer.dropped`
+
+The events an observer missed. The record is written at most once a
+second per observer, so an observer that fell behind does not flood the
+log, and it is never delivered to an observer: the diagnostics must not
+cause more overflow.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `session_id` | string | The session's identifier. |
+| `observer` | string | The observer that fell behind. |
+| `count` | integer | How many events the observer missed. |
+| `dropped_at` | string | RFC 3339, UTC. |
 
 ## `turn.interrupted`
 

@@ -339,6 +339,9 @@ func runReplay(args []string) int {
 
 	fmt.Printf("recorded calls: %d\n", len(result.Recorded))
 	fmt.Printf("replayed calls:  %d\n", len(result.Replayed))
+	if result.Compactions > 0 {
+		fmt.Printf("compactions:     %d applied from the recording\n", result.Compactions)
+	}
 	if result.Match {
 		fmt.Printf("match: the tool-call sequence is the same\n")
 		return 0

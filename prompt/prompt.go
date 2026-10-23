@@ -2,13 +2,16 @@
 //
 // The system prompt is assembled from named sections, and a consumer can
 // change it at every layer: a Go consumer, a profile, a settings file, a
-// CLI flag or a hook. This package holds the two things every layer
-// shares: the environment a section may read, and the surface a section
-// list is edited through.
+// CLI flag or a hook. This package holds the three things every layer
+// shares: the environment a section may read, the surface a section
+// list is edited through, and the builder that renders the prompt.
 //
-// The package imports the standard library only. The builder that renders
-// a prompt arrives with the prompt stage; what is here is the vocabulary
-// the rest of poo already depends on.
+// A section holds a default text and, beside it, the named alternatives
+// it offers. The builder renders the prompt in one variant, named by the
+// environment: a section that offers an alternative for that name
+// renders it, and a section that does not renders its default text.
+//
+// The package imports the standard library only.
 package prompt
 
 // Env is what a dynamic section may read.
@@ -30,7 +33,19 @@ type Env struct {
 	// Tools are the names of the tools linked into the session, in
 	// offer order.
 	Tools []string
+	// Variant is the name of the prompt variant the prompt renders in.
+	//
+	// A section that offers an alternative for that name renders the
+	// alternative, and a section that does not renders its default
+	// text. The empty name and "default" mean the default text.
+	Variant string
 }
+
+// DefaultVariant is the name of a section's default text.
+//
+// The empty name means the same thing: a section's default text is
+// what the prompt renders when no other variant is named.
+const DefaultVariant = "default"
 
 // Sections is the surface a named section list is edited through.
 //
@@ -65,13 +80,44 @@ type Sections interface {
 //
 // A section's value is either a string or a function of the environment,
 // so a section can be dynamic without a template engine.
+//
+// A section holds a default value and, beside it, the named
+// alternatives it offers. The alternatives are texts of their own: a
+// prompt that renders in a variant renders the alternative the section
+// offers for that name, and the section's default value otherwise.
 type Section struct {
 	// Name is the section's name.
 	Name string
-	// Text is the section's text, when it is static.
+	// Text is the section's default text, when it is static.
 	Text string
-	// Render renders the section, when it is dynamic.
+	// Render renders the section's default text, when it is dynamic.
 	Render func(Env) string
+	// Variants holds the section's named alternatives, keyed by name.
+	//
+	// The default text is not among them: the empty name and
+	// "default" name the section's own text.
+	Variants map[string]Content
+}
+
+// Content is one text of a section.
+//
+// It is either a string or a function of the environment, so a section
+// can be dynamic without a template engine.
+type Content struct {
+	// Text is the text, when it is static.
+	Text string
+	// Render renders the text, when it is dynamic.
+	Render func(Env) string
+}
+
+// String returns the content's text in the given environment.
+//
+// A dynamic content renders; a static one is its own text.
+func (c Content) String(env Env) string {
+	if c.Render != nil {
+		return c.Render(env)
+	}
+	return c.Text
 }
 
 // DefaultOrder is the order the sections render in.

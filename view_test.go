@@ -172,8 +172,8 @@ func TestTheViewCarriesTheToolResult(t *testing.T) {
 	if !hook.ok {
 		t.Fatal("the view has no result for r1")
 	}
-	if hook.text != "echoed" {
-		t.Errorf("the view's result text is %q, want %q", hook.text, "echoed")
+	if want := poo.HandleLine("r1", "echo") + "\n" + "echoed"; hook.text != want {
+		t.Errorf("the view's result text is %q, want %q", hook.text, want)
 	}
 }
 

@@ -29,9 +29,14 @@ func (s *Session) finalizeCandidates(run *runState, resumable bool, cands []cand
 	s.mu.Lock()
 	if run.committed {
 		// A candidate arriving after the commit point is logged and
-		// ignored: it never mutates a settled run.
+		// ignored: it never mutates a settled run. The log runs after
+		// the lock is released, so it cannot hold the loop up.
 		result := run.result
+		runID := run.id
 		s.mu.Unlock()
+		for _, c := range cands {
+			s.logLateCandidate(runID, c)
+		}
 		return result, false
 	}
 	if run.finalizing {
@@ -54,6 +59,15 @@ func (s *Session) finalizeCandidates(run *runState, resumable bool, cands []cand
 // run's context, the wait for in-flight work, the synthetic results,
 // the commit point, the outcome records, and the settled event.
 func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
+	// A committed run has no wall-clock budget left to spend.
+	defer func() {
+		s.mu.Lock()
+		committed := run.committed
+		s.mu.Unlock()
+		if committed {
+			s.stopRunTimer(run)
+		}
+	}()
 	// Step 1: the input check. A run that would settle naturally can
 	// still take a queued input; a run that is settling because of a
 	// failure or a limit cannot.
@@ -135,7 +149,7 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 		Turns:     turns,
 		SettledAt: nowRFC3339(),
 	}
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), recordWriteBudget)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), s.recordBudget())
 	defer cleanupCancel()
 	storeErr := s.write(cleanupCtx, settle)
 	if s.opts.Sink != nil {
@@ -221,7 +235,7 @@ func (s *Session) awaitInputAcceptances(run *runState) {
 	// The seam the wait is tested at: the finalization has an acceptance
 	// to wait for, and the queues have not been looked at yet.
 	s.sealRaceHook("acceptance")
-	deadline := time.After(recordWriteBudget)
+	deadline := time.After(s.recordBudget())
 	for {
 		s.mu.Lock()
 		if len(run.accepting) == 0 {
@@ -435,7 +449,7 @@ func (s *Session) commitLocked(run *runState) (Reason, SettleDetail) {
 // still in flight; they never reached the model, so the finalization
 // reports them with the run's reason.
 func (s *Session) sealRun(run *runState) ([]*issuedCall, []UndeliveredInput) {
-	deadline := time.After(recordWriteBudget)
+	deadline := time.After(s.recordBudget())
 	for {
 		s.mu.Lock()
 		if s.inFlightLocked(run) == 0 {
@@ -469,7 +483,7 @@ func (s *Session) inFlightLocked(run *runState) int {
 			started++
 		}
 	}
-	return started + run.resultWrites + run.callWrites + run.jobStarts + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
+	return started + run.resultWrites + run.callWrites + run.jobStarts + run.runWrites + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
 }
 
 // sealLocked seals the run and takes ownership of every claim that was
@@ -485,6 +499,9 @@ func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) 
 		if call.writing && call.recordCancel != nil {
 			call.recordCancel(errCallRecordSealed)
 		}
+	}
+	for _, claim := range run.writeClaims {
+		claim.cancel(errCallRecordSealed)
 	}
 	issued := make([]*issuedCall, 0, len(run.pendingCalls))
 	for _, call := range run.pendingCalls {
@@ -554,7 +571,10 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 		s.writeResult(run, call.turn, call.handle, call.tool, call.id, ToolResult{
 			Text:    text,
 			IsError: true,
-		}, outcome)
+		}, outcome, afterToolOutcome{result: ToolResult{
+			Text:    text,
+			IsError: true,
+		}})
 	}
 }
 
@@ -658,7 +678,7 @@ func (s *Session) awaitResult(ctx context.Context, ch chan Result) (Result, erro
 	select {
 	case res := <-ch:
 		return res, nil
-	case <-time.After(recordWriteBudget):
+	case <-time.After(s.recordBudget()):
 		return Result{}, ctx.Err()
 	}
 }
@@ -948,14 +968,14 @@ func (s *Session) renderForDelivery(note *DeliveryNote) *DeliveryNote {
 
 // messagesByIDLocked returns the message an id names.
 //
+// The message comes from the session's record, not from the view: a
+// compaction may have removed the message from the view, and a
+// delivery note still renders from the original recorded message.
+//
 // The caller holds the session's lock.
 func (s *Session) messagesByIDLocked(id string) (Message, bool) {
-	for _, m := range s.history {
-		if m.ID == id {
-			return m, true
-		}
-	}
-	return Message{}, false
+	msg, ok := s.recorded[id]
+	return msg, ok
 }
 
 // Close ends the session.
@@ -982,10 +1002,16 @@ func (s *Session) Close() error {
 	// is written while the store is still open.
 	s.closeJobs()
 	s.events.stop()
+	var err error
 	if s.opts.Sink != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), recordWriteBudget)
+		ctx, cancel := context.WithTimeout(context.Background(), s.recordBudget())
 		defer cancel()
-		return s.opts.Sink.Flush(ctx)
+		err = s.opts.Sink.Flush(ctx)
 	}
-	return nil
+	// The dispatcher ends without a wait: a handler that blocks is the
+	// consumer's, and it never holds the close up.
+	if s.logs != nil {
+		s.logs.stop()
+	}
+	return err
 }

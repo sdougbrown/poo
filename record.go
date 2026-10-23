@@ -136,6 +136,23 @@ type RunStarted struct {
 	Jobs []JobResult `json:"jobs,omitempty"`
 }
 
+// SystemPromptRecord records a rendered system prompt.
+//
+// Every rendered prompt that differs from the previous one is written
+// whole, with its hash and the variant it rendered in. Replay uses the
+// recorded text and never re-renders.
+type SystemPromptRecord struct {
+	RecordMeta
+	// RunID identifies the run the prompt belongs to.
+	RunID string `json:"run_id"`
+	// Variant is the variant the prompt rendered in.
+	Variant string `json:"variant,omitempty"`
+	// Text is the full rendered prompt.
+	Text string `json:"text"`
+	// Hash is the hex SHA-256 of the text.
+	Hash string `json:"hash"`
+}
+
 // MessageRecord records one message in the model's history.
 type MessageRecord struct {
 	RecordMeta
@@ -209,6 +226,61 @@ type ToolResultRecord struct {
 	Text string `json:"text"`
 	// Structured is the optional side-channel payload.
 	Structured json.RawMessage `json:"structured,omitempty"`
+	// Original is the result the tool produced, when a hook replaced
+	// it. The model has not seen that result yet, so the log keeps it.
+	//
+	// It is absent for a redacted result: the original never reaches
+	// the record.
+	Original *ToolResultData `json:"original,omitempty"`
+	// Redacted reports that a hook redacted the result.
+	Redacted bool `json:"redacted,omitempty"`
+	// RedactedBy names the hook that redacted the result.
+	RedactedBy string `json:"redacted_by,omitempty"`
+	// Hooks are the after-tool hooks' decisions, in the order the
+	// hooks ran. A redacted chain's decisions carry no contents.
+	Hooks []HookDecision `json:"hooks,omitempty"`
+}
+
+// ToolResultData is a tool result's own data.
+//
+// It is the payload of the original result a hook replaced.
+type ToolResultData struct {
+	// Text is the model-facing text of the result.
+	Text string `json:"text"`
+	// Structured is the optional side-channel payload.
+	Structured json.RawMessage `json:"structured,omitempty"`
+	// IsError marks a recoverable failure.
+	IsError bool `json:"is_error,omitempty"`
+}
+
+// HookDecision is what an after-tool hook decided about a result.
+type HookDecision struct {
+	// Hook names the hook that decided.
+	Hook string `json:"hook"`
+	// Action is what the hook did: "keep", "annotate", "replace" or
+	// "redact".
+	Action string `json:"action"`
+	// Text is the text the hook added or substituted. It is absent
+	// when the chain was redacted: the record must not carry what a
+	// redaction removed.
+	Text string `json:"text,omitempty"`
+}
+
+// ObserverDropped records the events an observer missed.
+//
+// The record is written at most once a second per observer, and it is
+// never delivered to an observer: overflow diagnostics must not cause
+// more overflow.
+type ObserverDropped struct {
+	RecordMeta
+	// SessionID identifies the session.
+	SessionID string `json:"session_id"`
+	// Observer names the observer that fell behind.
+	Observer string `json:"observer"`
+	// Count is how many events the observer missed.
+	Count int `json:"count"`
+	// DroppedAt is the RFC 3339 time of the report, in UTC.
+	DroppedAt string `json:"dropped_at"`
 }
 
 // Usage records the token accounting of one provider request.
@@ -325,8 +397,10 @@ func Stamp(rec Record, seq int64, at time.Time) {
 // CompactionRecord records what a compactor did.
 //
 // The store keeps every original record, and the compaction record says
-// what the model's view was replaced with. The compaction's own fields
-// carry the form it took.
+// what the model's view was replaced with. The record's own fields
+// carry the plan's vocabulary, and the compaction itself is kept beside
+// them, so a replay applies the compaction again without running the
+// strategy that made it.
 type CompactionRecord struct {
 	RecordMeta
 	// RunID identifies the run the compaction belongs to.
@@ -335,10 +409,32 @@ type CompactionRecord struct {
 	Strategy string `json:"strategy"`
 	// Form is the compaction's form: replace, rewrite, window or end.
 	Form string `json:"form"`
+	// Cut is the range of turns a replacement covers. It is set for a
+	// replacement only.
+	Cut *TurnRange `json:"cut,omitempty"`
+	// Replacement are the messages that replace the cut's turns. It is
+	// set for a replacement only.
+	Replacement []Message `json:"replacement,omitempty"`
 	// TokensBefore is the estimated input before the compaction.
 	TokensBefore int `json:"tokens_before"`
 	// TokensAfter is the estimated input after the compaction.
 	TokensAfter int `json:"tokens_after"`
 	// Compaction is the compaction itself.
 	Compaction Compaction `json:"compaction"`
+}
+
+// HandoffRecord records the note a compactor wrote when it refused to
+// compact.
+//
+// The note is what a consumer carries on: it seeds the next session.
+type HandoffRecord struct {
+	RecordMeta
+	// RunID identifies the run the handoff ends.
+	RunID string `json:"run_id"`
+	// Strategy names the strategy that wrote the handoff.
+	Strategy string `json:"strategy"`
+	// Handoff is the note the next agent picks up.
+	Handoff string `json:"handoff"`
+	// CreatedAt is the RFC 3339 time the handoff was written.
+	CreatedAt string `json:"created_at"`
 }

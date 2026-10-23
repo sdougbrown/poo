@@ -292,8 +292,8 @@ func TestAnInterruptSkipsTheUnstartedCalls(t *testing.T) {
 	if skipped.Outcome != poo.OutcomeSkipped {
 		t.Errorf("the outcome is %q, want skipped", skipped.Outcome)
 	}
-	if skipped.Text != poo.SkippedInterruptedText {
-		t.Errorf("the result's text is %q, want the visible note", skipped.Text)
+	if want := poo.HandleLine("r2", "echo") + "\n" + poo.SkippedInterruptedText; skipped.Text != want {
+		t.Errorf("the result's text is %q, want %q", skipped.Text, want)
 	}
 }
 
@@ -314,6 +314,7 @@ func TestAnInterruptDuringTheHooksDiscardsTheirDecision(t *testing.T) {
 	opts.AfterTurn = []poo.AfterTurnHook{hook}
 
 	s := newTestSession(t, opts)
+	poo.SetRecordWriteBudget(s, 100*time.Millisecond)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
@@ -708,6 +709,7 @@ func TestAMessageWhileIdleIsRefused(t *testing.T) {
 // their messages are delivered.
 func TestTwoInterruptsCoalesceIntoOneAbort(t *testing.T) {
 	tr := newStallingTransport()
+	tr.hold = make(chan struct{})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -722,6 +724,9 @@ func TestTwoInterruptsCoalesceIntoOneAbort(t *testing.T) {
 	if _, err := s.Send("really stop", poo.Interrupt); err != nil {
 		t.Fatalf("sending the second interrupt: %v", err)
 	}
+	// Both interrupts are accepted before the stream returns, so they
+	// belong to one abort.
+	close(tr.hold)
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
@@ -949,6 +954,10 @@ type stallingTransport struct {
 	responses []fakeResponse
 	// index is the next response to serve.
 	index int
+	// hold keeps the stalled stream from returning after its context
+	// ends, so a test can line up more than one interrupt before the
+	// abort is handled.
+	hold chan struct{}
 }
 
 // newStallingTransport returns a transport that stalls on its first
@@ -965,7 +974,7 @@ func (t *stallingTransport) Stream(ctx context.Context, req poo.ChatRequest) (po
 		t.index++
 		streaming := t.streaming
 		t.mu.Unlock()
-		return &stallingReader{ctx: ctx, started: streaming}, poo.Rendered{API: poo.APIChatCompletions}, nil
+		return &stallingReader{ctx: ctx, started: streaming, hold: t.hold}, poo.Rendered{API: poo.APIChatCompletions}, nil
 	}
 	i := t.index - 1
 	t.index++
@@ -993,6 +1002,9 @@ type stallingReader struct {
 	started chan struct{}
 	// sent reports whether the delta was handed out.
 	sent bool
+	// hold delays the reader's return after its context ends, when it is
+	// set.
+	hold chan struct{}
 }
 
 // Next hands out one delta and then waits for the context.
@@ -1003,6 +1015,9 @@ func (r *stallingReader) Next() (poo.StreamEvent, error) {
 		return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "partial text"}}, nil
 	}
 	<-r.ctx.Done()
+	if r.hold != nil {
+		<-r.hold
+	}
 	return poo.StreamEvent{}, r.ctx.Err()
 }
 
@@ -1146,8 +1161,8 @@ func TestThePartialMessageKeepsTheToolCallsVisible(t *testing.T) {
 	if skipped.Outcome != poo.OutcomeSkipped {
 		t.Errorf("the outcome is %q, want skipped", skipped.Outcome)
 	}
-	if skipped.Text != poo.SkippedInterruptedText {
-		t.Errorf("the result's text is %q, want the visible note", skipped.Text)
+	if want := poo.HandleLine("r1", "echo") + "\n" + poo.SkippedInterruptedText; skipped.Text != want {
+		t.Errorf("the result's text is %q, want %q", skipped.Text, want)
 	}
 	// The partial assistant message declares the call, so the skipped
 	// result has a call to answer.
@@ -1523,7 +1538,6 @@ func (s *cancellingDeliverySink) Append(ctx context.Context, rec poo.Record) err
 // input.dropped: a cancel that commits while the drain is writing must
 // not leave the input delivered, and the input is never silently lost.
 func TestADeliveryDuringASecondFinalizeIsDropped(t *testing.T) {
-	defer poo.SetRecordWriteBudget(100 * time.Millisecond)()
 	hookStarted := make(chan struct{})
 	release := make(chan struct{})
 	hook := &blockingBeforeSettle{started: hookStarted, release: release}
@@ -1534,6 +1548,7 @@ func TestADeliveryDuringASecondFinalizeIsDropped(t *testing.T) {
 	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
 
 	s := newTestSession(t, opts)
+	poo.SetRecordWriteBudget(s, 100*time.Millisecond)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
@@ -1828,7 +1843,6 @@ func (s *blockingQueuedSink) Append(ctx context.Context, rec poo.Record) error {
 // whose acceptance record is in flight when the run seals is taken out
 // of the queue, and the settle detail lists it as undelivered.
 func TestASteerAcceptedDuringAFinalizeIsReportedAsUndelivered(t *testing.T) {
-	defer poo.SetRecordWriteBudget(100 * time.Millisecond)()
 	hookStarted := make(chan struct{})
 	release := make(chan struct{})
 	hook := &blockingBeforeSettle{started: hookStarted, release: release}

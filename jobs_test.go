@@ -691,8 +691,12 @@ type panicPrepared struct{}
 // Summary describes the call.
 func (panicPrepared) Summary() string { return "explode" }
 
-// panicTool always panics in Call.
-type panicTool struct{}
+// panicTool always panics in Call, once the test releases it.
+type panicTool struct {
+	// release holds the panic until the test closes it. A nil channel
+	// panics at once.
+	release chan struct{}
+}
 
 // Spec describes the tool: every call is a background job.
 func (t *panicTool) Spec() poo.ToolSpec {
@@ -711,7 +715,17 @@ func (t *panicTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepar
 }
 
 // Call panics, the way a broken tool does.
+//
+// The panic waits for the test's release, so a test can put it at a
+// point of its own choosing instead of racing the run's turns.
 func (t *panicTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	if t.release != nil {
+		select {
+		case <-t.release:
+		case <-ctx.Done():
+			return poo.ToolResult{}, ctx.Err()
+		}
+	}
 	panic("the tool exploded")
 }
 
@@ -725,12 +739,18 @@ func TestAPanickingJobEndsWithAFatalError(t *testing.T) {
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
-	tool := &panicTool{}
+	release := make(chan struct{})
+	tool := &panicTool{release: release}
 
 	s := newTestSession(t, jobOptions(t, tr, tool, sink))
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	// The job panics when the test releases it, and not before: the run
+	// has finished its own turns and is waiting for the job, so the
+	// settle the panic's fatal result produces is this run's settle.
+	waitFor(t, "the run to wait for the job", func() bool { return s.State() == poo.StateWaiting })
+	close(release)
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)

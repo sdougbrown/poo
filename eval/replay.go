@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // ScriptedTurn is one recorded provider response.
@@ -145,6 +147,11 @@ type ReplayResult struct {
 	Recorded []CallStep `json:"recorded"`
 	// Replayed is the tool-call sequence the replay produced.
 	Replayed []CallStep `json:"replayed"`
+	// Compactions is the number of compactions the replay applied.
+	//
+	// A replay applies the compactions the recording holds, and never
+	// runs the strategy that made them.
+	Compactions int `json:"compactions"`
 	// Match reports whether the two sequences are the same.
 	Match bool `json:"match"`
 	// Differences describe where the two sequences part.
@@ -182,8 +189,20 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 		maxTurns = log.SettleTurns()
 	}
 
-	transport := newScriptedTransport(script.Turns)
+	transport := &replayNativeTransport{scriptedTransport: newScriptedTransport(script.Turns)}
 	recorder := &callRecorder{}
+
+	// The replay sends the prompt the recording holds. It never renders
+	// the current default again: a prompt change since the recording
+	// would otherwise change the replay's budget and its requests.
+	var beforeRun []poo.BeforeRunHook
+	if prompts := recordedSystemPrompts(log); len(prompts) > 0 {
+		beforeRun = []poo.BeforeRunHook{&recordedPrompt{prompts: prompts}}
+	}
+
+	// The recording's compactions are applied as they were recorded,
+	// and the strategy that made them is never run.
+	compactions := recordedCompactions(log)
 
 	session, err := poo.New(poo.Options{
 		Transport:    transport,
@@ -195,6 +214,8 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 		ContextLimit: contextLimit,
 		MaxTurns:     maxTurns,
 		WorkingDir:   opts.WorkingDir,
+		BeforeRun:    beforeRun,
+		Compactor:    newRecordedCompactor(compactions, transport),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("eval: replaying %s: %w", path, err)
@@ -217,12 +238,191 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	}
 
 	result := &ReplayResult{
-		Path:     path,
-		Recorded: recordedCalls(log),
-		Replayed: recorder.calls,
+		Path:        path,
+		Recorded:    recordedCalls(log),
+		Replayed:    recorder.calls,
+		Compactions: recorder.compactions,
+	}
+	// A recorded compaction that the replay could not apply is a
+	// failure: a replay that silently skipped it measured a conversation
+	// the recording never had.
+	if result.Compactions != len(compactions) {
+		return nil, fmt.Errorf("eval: replaying %s: %d of %d recorded compactions were not applied",
+			path, result.Compactions, len(compactions))
 	}
 	result.Match, result.Differences = diffCalls(result.Recorded, result.Replayed)
 	return result, nil
+}
+
+// replayNativeTransport is the scripted transport with the native
+// compaction capability.
+//
+// A recording's window was produced by the transport that recorded it,
+// and the replay hands that window back through the same capability.
+type replayNativeTransport struct {
+	*scriptedTransport
+	mu     sync.Mutex
+	window *poo.ProviderWindow
+}
+
+// setWindow names the window the next native compaction returns.
+func (t *replayNativeTransport) setWindow(w *poo.ProviderWindow) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.window = w
+}
+
+// Compact returns the recorded window.
+func (t *replayNativeTransport) Compact(ctx context.Context, prev poo.Rendered) (poo.ProviderWindow, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.window == nil {
+		return poo.ProviderWindow{}, fmt.Errorf("eval: the recording holds no window to apply")
+	}
+	return *t.window, nil
+}
+
+// recordedSystemPrompts returns the session's rendered prompts, in run
+// order.
+func recordedSystemPrompts(log *Log) []string {
+	// The system_prompt record carries the whole prompt, so a log that
+	// has one is read from it. An older log that predates the record
+	// keeps the prompt on its system message, which is the fallback.
+	var prompts []string
+	for _, r := range log.Records {
+		if r.Record == "system_prompt" {
+			prompts = append(prompts, r.Text)
+		}
+	}
+	if len(prompts) > 0 {
+		return prompts
+	}
+	for _, r := range log.Records {
+		if r.Record != "message" || r.Origin != "system" {
+			continue
+		}
+		var b strings.Builder
+		for _, c := range r.Content {
+			if c.Kind == "text" {
+				b.WriteString(c.Text)
+			}
+		}
+		prompts = append(prompts, b.String())
+	}
+	return prompts
+}
+
+// recordedCompaction is one compaction a recording holds.
+type recordedCompaction struct {
+	// turns is the number of requests the recording had made when the
+	// compaction happened.
+	turns int
+	// compaction is the compaction itself.
+	compaction poo.Compaction
+}
+
+// recordedCompactions returns the compactions a log holds, in order.
+//
+// The number of requests a compaction followed is the number of the
+// model's messages before it, so the replay applies it at the same
+// point the recording did.
+func recordedCompactions(log *Log) []recordedCompaction {
+	var out []recordedCompaction
+	turns := 0
+	for _, r := range log.Records {
+		switch r.Record {
+		case "message":
+			if r.Origin == "model" {
+				turns++
+			}
+		case "compaction":
+			if r.Compaction == nil {
+				continue
+			}
+			out = append(out, recordedCompaction{turns: turns, compaction: *r.Compaction})
+		}
+	}
+	return out
+}
+
+// recordedPrompt installs each run's recorded prompt in order.
+type recordedPrompt struct {
+	mu      sync.Mutex
+	prompts []string
+	index   int
+}
+
+// BeforeRun replaces the run's prompt with the recorded one.
+//
+// A replay never renders the current default: a run that has more runs
+// than the recording has prompt changes uses the last recorded prompt,
+// which is the prompt the recording's later runs carried.
+func (h *recordedPrompt) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.prompts) == 0 {
+		return poo.StartDecision{}, nil
+	}
+	text := h.prompts[len(h.prompts)-1]
+	if h.index < len(h.prompts) {
+		text = h.prompts[h.index]
+		h.index++
+	}
+	return poo.StartDecision{SystemPrompt: func(s prompt.Sections) {
+		s.Replace(text)
+	}}, nil
+}
+
+// recordedCompactor applies the compactions a recording holds.
+//
+// The strategy that made them is never run: the recorded compaction is
+// applied as it was recorded.
+type recordedCompactor struct {
+	mu sync.Mutex
+	// compactions are the recorded compactions, in order.
+	compactions []recordedCompaction
+	// applied counts the compactions the compactor handed out.
+	applied int
+	// transport receives the recorded window of a window compaction.
+	transport *replayNativeTransport
+}
+
+// newRecordedCompactor returns a compactor that applies the recorded
+// compactions.
+//
+// A recording with no compaction gets no compactor, so the replay never
+// enters the compacting state.
+func newRecordedCompactor(compactions []recordedCompaction, transport *replayNativeTransport) poo.Compactor {
+	if len(compactions) == 0 {
+		return nil
+	}
+	return &recordedCompactor{compactions: compactions, transport: transport}
+}
+
+// ShouldCompact says yes once the run has made the requests the
+// recording had made when it compacted.
+func (c *recordedCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.applied >= len(c.compactions) {
+		return false
+	}
+	return budget.Turns >= c.compactions[c.applied].turns
+}
+
+// Compact hands out the next recorded compaction.
+func (c *recordedCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.applied >= len(c.compactions) {
+		return poo.Compaction{}, fmt.Errorf("eval: the recording holds no more compactions")
+	}
+	compaction := c.compactions[c.applied].compaction
+	c.applied++
+	if compaction.Window != nil && c.transport != nil {
+		c.transport.setWindow(compaction.Window)
+	}
+	return compaction, nil
 }
 
 // DefaultReplayContextLimit is the context window a replay uses when the
@@ -272,20 +472,24 @@ func recordedCalls(log *Log) []CallStep {
 type callRecorder struct {
 	// calls are the calls, in order.
 	calls []CallStep
+	// compactions counts the compactions the replay applied.
+	compactions int
 }
 
 // Append records one session record.
 func (c *callRecorder) Append(ctx context.Context, rec poo.Record) error {
-	call, ok := rec.(*poo.ToolCallRecord)
-	if !ok {
-		return nil
+	switch r := rec.(type) {
+	case *poo.ToolCallRecord:
+		c.calls = append(c.calls, CallStep{
+			Index:     len(c.calls) + 1,
+			Turn:      r.Turn,
+			Tool:      r.Tool,
+			Arguments: r.Arguments,
+		})
+	case *poo.CompactionRecord:
+		// The compaction reached the store, so the replay applied it.
+		c.compactions++
 	}
-	c.calls = append(c.calls, CallStep{
-		Index:     len(c.calls) + 1,
-		Turn:      call.Turn,
-		Tool:      call.Tool,
-		Arguments: call.Arguments,
-	})
 	return nil
 }
 

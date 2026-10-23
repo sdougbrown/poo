@@ -4,43 +4,64 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // callHook runs one hook and reports what came back.
 //
 // A hook's deadline is the session's hook timeout, and a decision that
-// arrives after it is discarded: the run settles hook_error.
+// arrives after it is discarded: the run settles hook_error. A hook
+// whose context was cancelled — by an interrupt, by the run's end — is
+// discarded as well, and that is not a hook error.
 func (s *Session) callHook(ctx context.Context, h any, call func(context.Context) (any, error)) (hookOutcome, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.opts.HookTimeout)
 	defer cancel()
+	deadline, hasDeadline := ctx.Deadline()
 
 	type result struct {
 		value any
 		err   error
+		at    time.Time
 	}
 	// The hook runs in its own goroutine, so a hook that ignores its
-	// context cannot hold the loop up. The goroutine may leak, which is
-	// the consumer's bug.
+	// context cannot hold the loop up. The goroutine may leak, which
+	// is the consumer's bug.
 	done := make(chan result, 1)
 	go func() {
 		v, err := call(ctx)
-		done <- result{v, err}
+		done <- result{v, err, time.Now()}
 	}()
 
 	select {
 	case r := <-done:
+		if hasDeadline && !r.at.Before(deadline) {
+			// The decision arrived after the deadline. It is
+			// discarded, and the run settles hook_error.
+			return hookOutcome{}, s.hookDeadlineError(h)
+		}
+		if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, context.DeadlineExceeded) {
+			// The hook's context ended before the decision was
+			// taken: the decision is discarded, and that is not a
+			// hook error.
+			return hookOutcome{interrupted: true}, nil
+		}
 		if r.err != nil {
 			return hookOutcome{}, r.err
 		}
 		return hookOutcome{value: r.value}, nil
 	case <-ctx.Done():
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return hookOutcome{}, fmt.Errorf("poo: the %s hook missed its %s deadline", hookName(h), s.opts.HookTimeout)
+			return hookOutcome{}, s.hookDeadlineError(h)
 		}
 		// The hook was interrupted: its decision is discarded, and
 		// that is not a hook error.
 		return hookOutcome{interrupted: true}, nil
 	}
+}
+
+// hookDeadlineError reports that a hook missed its deadline.
+func (s *Session) hookDeadlineError(h any) error {
+	return fmt.Errorf("poo: the %s hook missed its %s deadline", hookName(h), s.opts.HookTimeout)
 }
 
 // hookOutcome is what one hook call produced.
@@ -50,6 +71,172 @@ type hookOutcome struct {
 	// interrupted reports that the hook's context ended before it
 	// answered.
 	interrupted bool
+}
+
+// hookFailure is an executable hook's failure, with the point and the
+// hook that produced it.
+//
+// The settle detail's source names both, so a record says which hook to
+// fix rather than only which hook point fired.
+type hookFailure struct {
+	// point is the hook point: "before_tool", "after_tool" and so on.
+	point string
+	// hook is the hook's name.
+	hook string
+	// err is the hook's own failure.
+	err error
+}
+
+// Error returns the hook's message.
+func (e *hookFailure) Error() string { return e.err.Error() }
+
+// Unwrap returns the hook's own failure.
+func (e *hookFailure) Unwrap() error { return e.err }
+
+// hookFailureSource returns the settle source an error names.
+//
+// A hook's failure names its point and its hook; anything else keeps the
+// fallback the point uses.
+func hookFailureSource(err error, fallback string) string {
+	var failure *hookFailure
+	if errors.As(err, &failure) {
+		return failure.point + ":" + failure.hook
+	}
+	return fallback
+}
+
+// hookAppend is a message a hook appended.
+type hookAppend struct {
+	// name is the hook that appended the message.
+	name string
+	// message is the message itself.
+	message Message
+}
+
+// startDecisions is what the start hooks decided.
+//
+// The session-start hooks and the before-run hooks share the shape: a
+// list of messages to append and a list of prompt edits to apply.
+type startDecisions struct {
+	// messages are the messages the hooks appended, in registration
+	// order.
+	messages []hookAppend
+	// edits are the prompt edits, in registration order. A later edit
+	// wins over an earlier one.
+	edits []SystemPromptEdit
+}
+
+// appendStartDecision adds one hook's decision to the decisions.
+//
+// The messages keep the hook that appended them, so the record says
+// which hook put a message in the history.
+func (d *startDecisions) appendStartDecision(name string, decision StartDecision) {
+	for _, msg := range decision.Append {
+		d.messages = append(d.messages, hookAppend{name: name, message: msg})
+	}
+	if decision.SystemPrompt != nil {
+		d.edits = append(d.edits, decision.SystemPrompt)
+	}
+}
+
+// runSessionStart runs the session-start hooks.
+//
+// The hooks' output is buffered in memory: a construction that fails
+// leaves nothing written. The prompt edit the hooks made is kept, so
+// every run's prompt carries it.
+func (s *Session) runSessionStart() ([]Record, error) {
+	if len(s.opts.SessionStart) == 0 {
+		return nil, nil
+	}
+	var decisions startDecisions
+	var buffered []Record
+	for _, h := range s.opts.SessionStart {
+		out, err := s.callHook(context.Background(), h, func(hctx context.Context) (any, error) {
+			return h.SessionStart(s.hookContext(hctx, 0, false))
+		})
+		if out.interrupted {
+			// A construction has no run to interrupt, so the only
+			// thing that ends the hook's context is its deadline.
+			return nil, &ErrSessionInit{Cause: s.hookDeadlineError(h)}
+		}
+		if err != nil {
+			return nil, &ErrSessionInit{Cause: fmt.Errorf("poo: the session_start hook: %w", err)}
+		}
+		decision, _ := out.value.(StartDecision)
+		decisions.appendStartDecision(hookName(h), decision)
+	}
+	// The prompt edits the session start made are applied to the
+	// session's builder, so every run's prompt carries them.
+	for _, edit := range decisions.edits {
+		s.applyPromptEdit(edit)
+	}
+	for _, added := range decisions.messages {
+		msg := hookMessage(added.message, added.name)
+		s.appendMessages(msg)
+		buffered = append(buffered, &MessageRecord{
+			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
+			Role:       msg.Role,
+			Content:    msg.Content,
+		})
+	}
+	return buffered, nil
+}
+
+// runBeforeRun runs the before-run hooks.
+//
+// The hooks run at the start of every run, before the first request.
+// The trigger says what started the run, and a woken run's job results
+// are already in the history when the hooks run.
+func (s *Session) runBeforeRun(run *runState, trigger RunTrigger) (startDecisions, error) {
+	var decisions startDecisions
+	if len(s.opts.BeforeRun) == 0 {
+		return decisions, nil
+	}
+	// The hooks run under their own activity, so an interrupt that
+	// arrives while they run cancels them and their decisions are
+	// discarded.
+	s.startActivity(run)
+	defer s.endActivity(run)
+	ctx := s.activityContext(run)
+	for _, h := range s.opts.BeforeRun {
+		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
+			return h.BeforeRun(s.hookContext(hctx, 0, false), trigger)
+		})
+		if out.interrupted {
+			// The hook's decision is discarded, and that is not a
+			// hook error. A decision that arrives late is logged.
+			s.logLateHookPoint(run.id, "before_run", hookName(h), 0)
+			return decisions, nil
+		}
+		if err != nil {
+			return decisions, &hookFailure{point: "before_run", hook: hookName(h), err: fmt.Errorf("poo: the %s hook: %w", hookName(h), err)}
+		}
+		decision, _ := out.value.(StartDecision)
+		decisions.appendStartDecision(hookName(h), decision)
+	}
+	return decisions, nil
+}
+
+// appendStartMessages appends the messages the start hooks appended.
+//
+// The messages enter the history as user-role messages tagged with the
+// hook that put them there, and the record says the same.
+func (s *Session) appendStartMessages(run *runState, decisions startDecisions) {
+	for _, added := range decisions.messages {
+		if s.runWindingDown(run) {
+			return
+		}
+		msg := hookMessage(added.message, added.name)
+		if err := s.writeRun(run, &MessageRecord{
+			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
+			RunID:      run.id,
+			Role:       msg.Role,
+			Content:    msg.Content,
+		}); err != nil {
+			continue
+		}
+		s.appendMessages(msg)
+	}
 }
 
 // runAfterTurn runs the AfterTurn hooks in registration order.
@@ -72,7 +259,8 @@ func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appen
 		})
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
-			// hook error.
+			// hook error. A decision that arrives late is logged.
+			s.logLateHookPoint(run.id, "after_turn", hookName(h), turn)
 			return appended, nil
 		}
 		if err != nil {
@@ -85,14 +273,16 @@ func (s *Session) runAfterTurn(run *runState, turn int, interrupted bool) (appen
 		if len(decision.Append) > 0 {
 			for _, msg := range decision.Append {
 				msg = hookMessage(msg, hookName(h))
-				s.appendMessages(msg)
-				_ = s.write(run.ctx, &MessageRecord{
+				if err := s.writeRun(run, &MessageRecord{
 					RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 					RunID:      run.id,
 					Turn:       turn,
 					Role:       msg.Role,
 					Content:    msg.Content,
-				})
+				}); err != nil {
+					continue
+				}
+				s.appendMessages(msg)
 			}
 			appended = true
 		}
@@ -123,25 +313,26 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 	s.startActivity(run)
 	defer s.endActivity(run)
 	ctx := s.activityContext(run)
-	var continues []Message
+	var continues []hookAppend
 	for _, h := range s.opts.BeforeSettle {
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
 			return h.BeforeSettle(s.hookContext(hctx, turn, false), natural)
 		})
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
-			// hook error.
+			// hook error. A decision that arrives late is logged.
+			s.logLateHookPoint(run.id, "before_settle", hookName(h), turn)
 			return SettleDecision{}, false, nil
 		}
 		if err != nil {
-			return SettleDecision{}, false, fmt.Errorf("poo: the %s hook: %w", hookName(h), err)
+			return SettleDecision{}, false, &hookFailure{point: "before_settle", hook: hookName(h), err: fmt.Errorf("poo: the %s hook: %w", hookName(h), err)}
 		}
 		decision, _ := out.value.(SettleDecision)
 		if decision.Stop {
 			return decision, false, nil
 		}
 		if decision.Continue != nil {
-			continues = append(continues, *decision.Continue)
+			continues = append(continues, hookAppend{name: hookName(h), message: *decision.Continue})
 		}
 	}
 	if len(continues) == 0 {
@@ -159,16 +350,18 @@ func (s *Session) runBeforeSettle(run *runState, turn int, natural Reason) (Sett
 
 	// Every Continue message is appended, and the run goes back to the
 	// model.
-	for _, msg := range continues {
-		msg = hookMessage(msg, "before_settle")
-		s.appendMessages(msg)
-		_ = s.write(run.ctx, &MessageRecord{
+	for _, added := range continues {
+		msg := hookMessage(added.message, added.name)
+		if err := s.writeRun(run, &MessageRecord{
 			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 			RunID:      run.id,
 			Turn:       turn,
 			Role:       msg.Role,
 			Content:    msg.Content,
-		})
+		}); err != nil {
+			continue
+		}
+		s.appendMessages(msg)
 	}
 	return SettleDecision{Accepted: true}, true, nil
 }
