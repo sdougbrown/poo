@@ -53,11 +53,12 @@ func TestTheNoticeFiresOncePerRun(t *testing.T) {
 	if notices != 1 {
 		t.Errorf("the run emitted %d context notices, want 1", notices)
 	}
-	// The notice is a user message the model reads.
+	// The notice is a user message the model reads, and it names the
+	// ratio it fired at.
 	found := false
 	for _, m := range sink.messages() {
 		for _, c := range m.Content {
-			if c.Text == poo.ContextNoticeText {
+			if strings.Contains(c.Text, "Context notice") && strings.Contains(c.Text, "~50%") {
 				found = true
 			}
 		}

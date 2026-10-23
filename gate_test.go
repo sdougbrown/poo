@@ -2,8 +2,8 @@ package poo_test
 
 import (
 	"context"
-	"strings"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
