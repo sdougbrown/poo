@@ -106,6 +106,7 @@ func runRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 2
 	}
+	overrides.PermissionFallback = o.permissionFallback
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
 		Overrides:      overrides,
