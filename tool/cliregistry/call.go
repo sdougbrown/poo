@@ -183,11 +183,16 @@ func failed(err error, cap int) (poo.ToolResult, error) {
 	}
 	var exited *cli.ExecError
 	if errors.As(err, &exited) {
-		code := exited.ExitCode
+		// A process that died by a signal has no exit status, so the
+		// field is null, as it is in bash's envelope.
+		var code *int
+		if exited.ExitCode >= 0 {
+			code = &exited.ExitCode
+		}
 		// cli-registry reports the stderr of a failed call and not its
 		// stdout, so the envelope carries what is left.
 		text, structured := bash.Envelope(bash.Observation{
-			Returncode: &code,
+			Returncode: code,
 			Stderr:     string(exited.Stderr),
 			Cap:        cap,
 		})
