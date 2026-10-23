@@ -17,6 +17,7 @@ import (
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/perm"
 	permissive "github.com/sdougbrown/poo/perm/decide"
@@ -26,7 +27,6 @@ import (
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
-	"github.com/sdougbrown/poo/tool/bash"
 )
 
 // The names the settings and the profiles use.
@@ -100,7 +100,7 @@ type BuildOptions struct {
 	// Profiles are the profiles the binary links.
 	Profiles []profile.Profile
 	// Executors are the executors the binary links.
-	Executors *bash.Registry
+	Executors *exec.Registry
 	// Askers are the names of the askers the binary can ask, in the
 	// order the chain asks them when the settings do not say.
 	Askers []string
@@ -232,9 +232,9 @@ type ToolFactory func(ToolOptions) poo.Tool
 type ToolOptions struct {
 	// Executor is the executor the bash tool runs its commands
 	// through.
-	Executor bash.Executor
+	Executor exec.Executor
 	// Scrub is the rules for the child environment.
-	Scrub bash.Scrub
+	Scrub exec.Scrub
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths *protect.Set
 	// Registry is the cli registry the registry's tools call. It is nil
@@ -449,6 +449,16 @@ func registryToolNames(find bool) []string {
 	return []string{cli.CallToolName}
 }
 
+// offersTool reports whether a profile offers a tool.
+func offersTool(tools []string, name string) bool {
+	for _, tool := range tools {
+		if tool == name {
+			return true
+		}
+	}
+	return false
+}
+
 // offersSideEffects reports whether a tool set can change anything.
 func offersSideEffects(tools []poo.ToolInfo) bool {
 	for _, tool := range tools {
@@ -655,31 +665,45 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	}
 	r.ProtectedPaths = append([]string(nil), settings.Tools.ProtectedPaths...)
 
-	scrub := bash.Scrub{
+	scrub := exec.Scrub{
 		Names:       append([]string(nil), settings.Tools.Env.Scrub...),
 		Passthrough: append([]string(nil), settings.Tools.Env.Passthrough...),
 	}
 	if r.Catalog != nil {
 		scrub.Names = append(scrub.Names, r.Catalog.CredentialEnvNames()...)
 	}
-	r.Env = bash.ScrubEnv(os.Environ(), scrub)
+	r.Env = exec.ScrubEnv(os.Environ(), scrub)
 
 	executorName := DefaultExecutor
 	if settings.Tools.Bash.Executor != nil {
 		executorName = *settings.Tools.Bash.Executor
-	}
-	if opts.Executors == nil {
-		return &Error{
-			Code:    CodeUnsupported,
-			Field:   "tools.bash.executor",
-			Message: "this binary links no executor",
+		// A settings file cannot set up a tool the binary lacks: the
+		// executor is the bash tool's, and a profile that offers the
+		// tool is the one that runs commands.
+		if _, linked := opts.Tools["bash"]; !linked {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.executor",
+				Message: fmt.Sprintf("the settings name an executor for the %q tool, and this binary does not link it", "bash"),
+			}
 		}
 	}
-	if !opts.Executors.Has(executorName) {
-		return &Error{
-			Code:    CodeUnsupported,
-			Field:   "tools.bash.executor",
-			Message: fmt.Sprintf("this binary links no executor named %q", executorName),
+	// The executor is the bash tool's: a profile that offers no bash
+	// runs no command, so the build resolves none.
+	if offersTool(r.toolNames, "bash") {
+		if opts.Executors == nil {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.executor",
+				Message: "this binary links no executor",
+			}
+		}
+		if !opts.Executors.Has(executorName) {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.executor",
+				Message: fmt.Sprintf("this binary links no executor named %q", executorName),
+			}
 		}
 	}
 
@@ -692,9 +716,9 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 			continue
 		}
 		if tool == "bash" {
-			executor, err := opts.Executors.New(executorName, bash.Options{
+			executor, err := opts.Executors.New(executorName, exec.Options{
 				Masker: protected,
-				Sandbox: bash.Sandbox{
+				Sandbox: exec.Sandbox{
 					DisableNetwork: settings.Tools.Bwrap.Network != nil && !*settings.Tools.Bwrap.Network,
 					ROBinds:        settings.Tools.Bwrap.ROBinds,
 					RWBinds:        settings.Tools.Bwrap.RWBinds,
