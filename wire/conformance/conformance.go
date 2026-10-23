@@ -178,28 +178,32 @@ type suite struct {
 
 // Report is what the suite ran.
 type Report struct {
-	// Run names the flows that ran, in order.
+	// Run names the flows that ran whole, in order. A flow that ran in
+	// part is not here.
 	Run []string
 	// Partial names the flows that ran in part and skipped the rest, in
-	// order. The flows' reasons are in Skipped as well.
+	// order. The flow has one entry in Skipped for each part it skipped.
 	//
 	// A flow that has two halves reports itself here when the first
 	// half ran and the second needed something the target does not
-	// offer. The suite counts the flow as neither wholly run nor wholly
-	// skipped.
+	// offer.
 	Partial []string
-	// Skipped names the flows that did not run, in order, and says why.
+	// Skipped is the reasons the flows did not run, in order.
 	//
-	// A flow skips when the target does not offer what the flow
-	// scripts, so a binary with fewer tools reports more skips.
+	// A flow is here when the target does not offer what the flow
+	// scripts, so a binary with fewer tools reports more skips. A flow
+	// that ran in part is here for the part it skipped and is named in
+	// Partial as well, so the flow names here are the skipped flows and
+	// the partly run ones: a caller that counts the flows that did not run
+	// at all subtracts Partial from them.
 	Skipped []Skip
 }
 
-// Skip is one flow the target did not run.
+// Skip is one reason a flow did not run.
 type Skip struct {
 	// Flow names the flow.
 	Flow string
-	// Reason says why it did not run.
+	// Reason says why the flow skipped.
 	Reason string
 }
 
@@ -257,8 +261,21 @@ func Run(t *testing.T, target Target) Report {
 	s.flow("teardown", s.teardown)
 	s.flow("slow client", s.slowClient)
 	s.flow("ephemeral", s.ephemeral)
-	s.t.Logf("flows: %d ran, %d skipped", len(s.report.Run), len(s.report.Skipped))
+	s.t.Logf("flows: %d ran, %d ran in part, %d skipped, %d skip reasons",
+		len(s.report.Run), len(s.report.Partial), skippedFlows(s.report.Skipped), len(s.report.Skipped))
 	return s.report
+}
+
+// skippedFlows returns how many flows the skip reasons name.
+//
+// A flow can have several reasons, and a flow that ran in part is among
+// them.
+func skippedFlows(skips []Skip) int {
+	seen := make(map[string]struct{}, len(skips))
+	for _, skip := range skips {
+		seen[skip.Flow] = struct{}{}
+	}
+	return len(seen)
 }
 
 // flow runs one flow and says which one it was.
