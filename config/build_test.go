@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/code"
+	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
@@ -451,5 +453,77 @@ func TestTheRuntimeCreatesAndResumesASession(t *testing.T) {
 	}
 	if len(resumed.Loaded.Records) == 0 {
 		t.Error("the loaded session holds no records")
+	}
+}
+
+// readOnlyTools are the tools a binary that can change nothing links.
+func readOnlyTools() map[string]config.ToolFactory {
+	return map[string]config.ToolFactory{
+		"read": func(config.ToolOptions) poo.Tool { return read.New() },
+		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
+	}
+}
+
+// readOnlyBuild builds a runtime for a binary with the read-only tools.
+func readOnlyBuild(t *testing.T, settings *config.Settings, executors *bash.Registry) (*config.Runtime, error) {
+	t.Helper()
+	return config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: search.Name,
+		Tools:          readOnlyTools(),
+		Profiles:       []profile.Profile{search.Profile()},
+		Executors:      executors,
+	})
+}
+
+// TestAnExecutorWithoutTheBashToolIsRefused covers the seam's settings
+// side: tools.bash.executor belongs to the bash tool, so a binary that
+// does not link the tool refuses the setting by name.
+func TestAnExecutorWithoutTheBashToolIsRefused(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+tools:
+  bash:
+    executor: bwrap
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = readOnlyBuild(t, settings, nil)
+	if err == nil {
+		t.Fatal("a binary without bash built a settings file that names an executor")
+	}
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the failure is %v, want a settings failure", err)
+	}
+	if failure.Field != "tools.bash.executor" {
+		t.Errorf("the failure names the field %q, want tools.bash.executor", failure.Field)
+	}
+	if !strings.Contains(failure.Message, "bash") {
+		t.Errorf("the message %q does not name the tool", failure.Message)
+	}
+}
+
+// TestAReadOnlyBuildNeedsNoExecutor covers the other half: a profile that
+// offers no bash builds without an executor, so a read-only binary passes
+// no registry.
+func TestAReadOnlyBuildNeedsNoExecutor(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := readOnlyBuild(t, settings, nil)
+	if err != nil {
+		t.Fatalf("building a read-only runtime: %v", err)
+	}
+	want := []string{"read", "grep"}
+	if len(runtime.Options.ToolOrder) != len(want) {
+		t.Fatalf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
+	}
+	for i, name := range want {
+		if runtime.Options.ToolOrder[i] != name {
+			t.Errorf("the tool %d is %q, want %q", i, runtime.Options.ToolOrder[i], name)
+		}
 	}
 }

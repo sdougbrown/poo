@@ -37,6 +37,8 @@ const (
 	RoleDecider = "decider"
 	// BaseSection is the name of the prompt's base section.
 	BaseSection = "base"
+	// ToolBash is the name of the bash tool.
+	ToolBash = "bash"
 )
 
 // The defaults the settings take when they do not say otherwise.
@@ -678,19 +680,19 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	if settings.Tools.Bash.Executor != nil {
 		executorName = *settings.Tools.Bash.Executor
 		// A settings file cannot set up a tool the binary lacks: the
-		// executor is the bash tool's, and a profile that offers the
-		// tool is the one that runs commands.
-		if _, linked := opts.Tools["bash"]; !linked {
+		// executor is the bash tool's, so a binary without the tool
+		// refuses the setting by name.
+		if _, linked := opts.Tools[ToolBash]; !linked {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "tools.bash.executor",
-				Message: fmt.Sprintf("the settings name an executor for the %q tool, and this binary does not link it", "bash"),
+				Message: fmt.Sprintf("the settings name an executor for the %q tool, and this binary does not link it", ToolBash),
 			}
 		}
 	}
 	// The executor is the bash tool's: a profile that offers no bash
 	// runs no command, so the build resolves none.
-	if offersTool(r.toolNames, "bash") {
+	if offersTool(r.toolNames, ToolBash) {
 		if opts.Executors == nil {
 			return &Error{
 				Code:    CodeUnsupported,

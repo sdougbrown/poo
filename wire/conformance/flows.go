@@ -603,7 +603,7 @@ func (s *suite) typedResult() {
 		}
 	}
 	if !offers {
-		s.skip("the session offers no \"finish\" tool")
+		s.skip(`the session offers no "finish" tool`)
 		return
 	}
 
