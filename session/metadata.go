@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // MetadataOf returns the metadata of a recorded session.
@@ -17,6 +18,9 @@ import (
 // failure, and a log in a format this build does not know is the
 // codec's mismatch.
 func MetadataOf(dir, id string) (Metadata, error) {
+	if err := ValidateID(id); err != nil {
+		return Metadata{}, err
+	}
 	path := filepath.Join(dir, id+".jsonl")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -44,4 +48,19 @@ func MetadataOf(dir, id string) (Metadata, error) {
 		lines = migrated
 	}
 	return metadataOf(lines[0])
+}
+
+// ValidateID checks a session id before it is joined to a path.
+//
+// An id is a plain file name: it may not carry a path separator or
+// name a parent directory, so a client cannot make the store read or
+// write outside its directory.
+func ValidateID(id string) error {
+	if id == "" || id == "." || id == ".." {
+		return ErrInvalidSessionID
+	}
+	if strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
+		return ErrInvalidSessionID
+	}
+	return nil
 }

@@ -372,6 +372,9 @@ func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *
 // so a load that failed partway is finished by the next one, without
 // writing a record twice.
 func (s *FileStore) Load(ctx context.Context, id string) (*Loaded, error) {
+	if err := ValidateID(id); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -641,6 +644,9 @@ func (s *FileStore) closeOpen() error {
 // The read takes no authority: it is a question about the records, and
 // the store's own session is answered from memory.
 func (s *FileStore) Pending(ctx context.Context, id string) (*Pending, error) {
+	if err := ValidateID(id); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

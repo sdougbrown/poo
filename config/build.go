@@ -258,7 +258,7 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
 		return nil, err
 	}
-	if err := runtime.resolvePolicy(opts); err != nil {
+	if err := runtime.resolvePolicy(opts, workingDir); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveSession(opts, workingDir); err != nil {
@@ -577,7 +577,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 // then the profile. The asker chain is the one the settings name, or
 // the one the binary asks by default. The decide asker needs a decider
 // model, so a chain that names it without one is a failure.
-func (r *Runtime) resolvePolicy(opts BuildOptions) error {
+func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 	settings := r.Settings
 	var rules []perm.Rule
 	for _, rule := range settings.Permission.Rules {
@@ -639,7 +639,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions) error {
 		DoomLoop:     doomLoop,
 		Askers:       askers,
 		ChainTimeout: chainTimeout,
-		WorkingDir:   opts.WorkingDir,
+		WorkingDir:   workingDir,
 	})
 	if err != nil {
 		return fmt.Errorf("config: %w", err)

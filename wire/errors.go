@@ -38,6 +38,8 @@ func codeOf(err error) string {
 		return protocol.DataUnsupportedMode
 	case errors.Is(err, poo.ErrNoSessionHeader), errors.Is(err, poo.ErrCodecVersion):
 		return protocol.DataCodecMismatch
+	case errors.Is(err, storesession.ErrInvalidSessionID):
+		return protocol.DataInvalidParams
 	}
 	// The store's failures carry their own code: session_locked,
 	// session_not_found, session_exists, unsupported_mode, no_policy,

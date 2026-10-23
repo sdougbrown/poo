@@ -128,11 +128,16 @@ func share(value *float64) *float64 {
 }
 
 // count returns a pointer to a value, or nil when the value is absent.
+//
+// A set zero is a value the settings hold: the keys that use this
+// helper are pointers, so zero is not the same as an omitted key, and
+// the generated minimum rules see it.
 func count(value *int) *float64 {
 	if value == nil {
 		return nil
 	}
-	return number(float64(*value))
+	number := float64(*value)
+	return &number
 }
 
 // flag returns a pointer to a value, or nil when the value is absent.

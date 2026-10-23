@@ -130,3 +130,23 @@ func fix1DataCode(rerr *protocol.Error) string {
 	}
 	return rerr.Data.Code
 }
+
+// TestLoadWithAnInvalidSessionIDIsInvalidParams covers the id rule at
+// the wire: a client cannot make the server read outside the session
+// directory.
+func TestLoadWithAnInvalidSessionIDIsInvalidParams(t *testing.T) {
+	factory := newTestFactory(t, func() poo.ChatTransport { return pootest.NewTransport() })
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	for _, id := range []string{"../x", "a/b", "..", `a\b`} {
+		_, rerr := h.call(protocol.MethodSessionLoad, protocol.LoadParams{SessionID: id})
+		if rerr == nil {
+			t.Errorf("the load of %q was answered", id)
+			continue
+		}
+		if rerr.Data == nil || rerr.Data.Code != protocol.DataInvalidParams {
+			t.Errorf("the load of %q failed with %q, want %q", id, fix1DataCode(rerr), protocol.DataInvalidParams)
+		}
+	}
+}
