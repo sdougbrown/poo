@@ -40,6 +40,40 @@ func checkSandbox(mode string) error {
 	}
 }
 
+// The executors a run's bash tool may use.
+//
+// The executor is a layer under the sandbox: the sandbox wraps the
+// whole poo process, and the executor wraps the commands the model
+// runs. A run may use both, and a run may use the executor alone.
+const (
+	// ExecutorLocal runs the model's commands in poo's own process
+	// space.
+	ExecutorLocal = "local"
+	// ExecutorBwrap runs the model's commands in a bubblewrap
+	// sandbox, bound to the task's workdir.
+	ExecutorBwrap = "bwrap"
+)
+
+// checkExecutor reports whether an executor can be used.
+//
+// The executor is chosen by the binary that runs, not by the harness:
+// the harness only says which one the run wants. The check here is for
+// the one thing the harness knows: a sandboxed executor needs
+// bubblewrap on the host.
+func checkExecutor(name string) error {
+	switch name {
+	case "", ExecutorLocal:
+		return nil
+	case ExecutorBwrap:
+		if _, err := exec.LookPath("bwrap"); err != nil {
+			return fmt.Errorf("eval: the bwrap executor needs bubblewrap installed: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("eval: unknown executor %q, want %s or %s", name, ExecutorLocal, ExecutorBwrap)
+	}
+}
+
 // bwrapArgs returns the bubblewrap arguments that run poo with the given
 // arguments inside the sandbox.
 //

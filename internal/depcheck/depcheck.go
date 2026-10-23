@@ -2,8 +2,8 @@
 //
 //   - the core package may import the standard library, plus the prompt and
 //     decide packages
-//   - the prompt, decide and wire/protocol packages may import the standard
-//     library only
+//   - the prompt, prompt/agentsmd, decide and wire/protocol packages may
+//     import the standard library only
 //
 // The import graph comes from "go list -e -deps -json", and the toolchain
 // decides what counts as the standard library. The rules cover each checked
@@ -63,6 +63,7 @@ func (c Checker) rules() []rule {
 	return []rule{
 		{path: m, allowed: []string{m + "/prompt", m + "/decide"}},
 		{path: m + "/prompt"},
+		{path: m + "/prompt/agentsmd"},
 		{path: m + "/decide"},
 		{path: m + "/wire/protocol"},
 	}

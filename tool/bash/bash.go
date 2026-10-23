@@ -96,10 +96,37 @@ type Tool struct {
 	// ObservationCap is the cap on the observation. Zero means the cap is
 	// taken from the run's settings.
 	ObservationCap int
+	// Executor runs the command. Nil means the local executor.
+	Executor Executor
+	// Scrub describes the environment the child gets.
+	Scrub Scrub
+}
+
+// Option configures a bash tool.
+type Option func(*Tool)
+
+// WithExecutor gives the tool the executor its commands run through.
+//
+// The local executor runs the command in poo's own process space. A
+// sandboxed executor runs it somewhere else, where the credentials the
+// host tools use are not.
+func WithExecutor(e Executor) Option {
+	return func(t *Tool) { t.Executor = e }
+}
+
+// WithScrub gives the tool the rules for the child environment.
+func WithScrub(scrub Scrub) Option {
+	return func(t *Tool) { t.Scrub = scrub }
 }
 
 // New returns a bash tool.
-func New() *Tool { return &Tool{} }
+func New(opts ...Option) *Tool {
+	t := &Tool{}
+	for _, opt := range opts {
+		opt(t)
+	}
+	return t
+}
 
 // Spec describes the tool.
 func (t *Tool) Spec() poo.ToolSpec {
@@ -115,6 +142,9 @@ func (t *Tool) Spec() poo.ToolSpec {
 }`),
 		Class:      poo.ClassSideEffecting,
 		PrimaryArg: "command",
+		// A command may be long, and the model may know it is long
+		// before it starts it.
+		Background: poo.BackgroundAllowed,
 	}
 }
 
@@ -187,7 +217,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		cap = ObservationCapMax
 	}
 
-	res, err := run(ctx, p.command, env.WorkingDir, env.Env, timeout)
+	res, err := t.run(ctx, p.command, env, timeout)
 	if err != nil {
 		return poo.ToolResult{}, err
 	}
