@@ -132,7 +132,8 @@ func (c *Catalog) Len() int {
 
 // Entries returns the registered CLIs, in name order.
 //
-// The entries are copies: a caller that changes one changes its own.
+// The list is a copy, so a caller may reorder it. The argument schemas
+// are the catalog's own and are not to be changed.
 func (c *Catalog) Entries() []Entry {
 	if c == nil {
 		return nil

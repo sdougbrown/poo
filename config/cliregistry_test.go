@@ -1,0 +1,229 @@
+package config_test
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/profile"
+	"github.com/sdougbrown/poo/profile/base"
+	"github.com/sdougbrown/poo/profile/code"
+	"github.com/sdougbrown/poo/profile/search"
+)
+
+// theRegistrySettings is the settings the registry tests build from: a
+// model, a chat role, and a registry the case names.
+func registrySettings(paths ...string) string {
+	quoted := make([]string, 0, len(paths))
+	for _, path := range paths {
+		quoted = append(quoted, fmt.Sprintf("%q", path))
+	}
+	return theModelSettings + "cliregistry:\n  paths: [" + strings.Join(quoted, ", ") + "]\n"
+}
+
+// withDecider is a settings document with a chat model that also serves
+// the decider role.
+const withDecider = `
+version: 1
+endpoints:
+  test:
+    base_url: http://localhost:4000/v1
+models:
+  test-model:
+    endpoint: test
+    model_id: test-model
+    ops: [chat, systemone, decisions]
+    context_limit: 32768
+roles:
+  chat: test-model
+  decider: test-model
+`
+
+// registry writes a registry with the named entries and returns its
+// directory. The commands are the registry's own business: no case calls
+// one.
+func registry(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	tools := map[string]any{}
+	for _, name := range names {
+		tools[name] = map[string]any{
+			"description": "The " + name + " command",
+			"command":     []string{"true"},
+			"inputSchema": map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
+				"additionalProperties": false,
+			},
+		}
+	}
+	body, err := json.Marshal(map[string]any{"version": 1, "tools": tools})
+	if err != nil {
+		t.Fatalf("encoding the registry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "registry.json"), body, 0o600); err != nil {
+		t.Fatalf("writing the registry: %v", err)
+	}
+	return dir
+}
+
+// hasTool reports whether a tool order holds a name.
+func hasTool(order []string, name string) bool {
+	for _, tool := range order {
+		if tool == name {
+			return true
+		}
+	}
+	return false
+}
+
+// TestARegistryReachesTheSessionAndItsPrompt covers the settings block: a
+// registry the settings name is loaded when the session is built, the
+// profile offers the tool that calls it, and the prompt carries the
+// catalog.
+func TestARegistryReachesTheSessionAndItsPrompt(t *testing.T) {
+	dir := registry(t, "deploy", "logs")
+	settings, err := config.Parse([]byte(registrySettings(dir)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	if runtime.Registry == nil {
+		t.Fatal("the build loaded no registry")
+	}
+	if runtime.Registry.Len() != 2 {
+		t.Errorf("the registry holds %d entries, want 2", runtime.Registry.Len())
+	}
+	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	// Two entries are short enough to list, so nothing searches them and
+	// no decision model is configured.
+	if hasTool(runtime.Options.ToolOrder, "find_tool") {
+		t.Errorf("the session offers find_tool over a catalog of two entries")
+	}
+
+	text := poo.PromptBuilder(runtime.Options).Render()
+	for _, want := range []string{"deploy: The deploy command", "logs: The logs command"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the prompt %q does not carry %q", text, want)
+		}
+	}
+}
+
+// TestALargeRegistryIsSearchedInsteadOfListed covers the search: with a
+// decision model and more entries than the prompt should hold, the
+// session offers find_tool and the catalog section says so instead of
+// listing the entries.
+func TestALargeRegistryIsSearchedInsteadOfListed(t *testing.T) {
+	names := make([]string, 0, 200)
+	for i := 0; i < 200; i++ {
+		names = append(names, fmt.Sprintf("entry-%03d", i))
+	}
+	dir := registry(t, names...)
+	// The decider role needs a model that answers systemone questions.
+	settings, err := config.Parse([]byte(withDecider+"cliregistry:\n  paths: [\""+dir+"\"]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	if !hasTool(runtime.Options.ToolOrder, "find_tool") {
+		t.Errorf("the session offers %v, and not find_tool", runtime.Options.ToolOrder)
+	}
+	// The search asks the session's decision model, so the session has
+	// one.
+	if runtime.Options.Decider == nil {
+		t.Error("the session has no decision model to search with")
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "find_tool") {
+		t.Errorf("the prompt does not name the search: %q", text)
+	}
+	if strings.Contains(text, "entry-000:") {
+		t.Errorf("the prompt lists the catalog it should search: %q", text)
+	}
+}
+
+// TestAReadOnlyProfileStaysReadOnly covers which profiles the registry
+// joins: the tools come with the profiles that already offer a
+// side-effecting one, so a session that run under the read-only profile
+// offers nothing that can change anything.
+func TestAReadOnlyProfileStaysReadOnly(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: search\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile()},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the search session offers %v", runtime.Options.ToolOrder)
+	}
+	offered := map[string][]string{}
+	for _, p := range runtime.Profiles {
+		for _, tool := range p.Tools {
+			offered[p.Name] = append(offered[p.Name], tool.Name)
+		}
+	}
+	if !hasTool(offered["code"], "call_cli") {
+		t.Errorf("the code profile offers %v, and not call_cli", offered["code"])
+	}
+	if hasTool(offered["search"], "call_cli") {
+		t.Errorf("the search profile offers %v", offered["search"])
+	}
+	// A session that cannot call a registered CLI says nothing about the
+	// catalog.
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "deploy: The deploy command") {
+		t.Errorf("the prompt lists a catalog the session cannot call: %q", text)
+	}
+}
+
+// TestARegistryThatDoesNotLoadIsAnError covers the settings check: a
+// registry the settings name and the binary cannot load fails the build,
+// and the failure names the field the operator wrote.
+func TestARegistryThatDoesNotLoadIsAnError(t *testing.T) {
+	one := registry(t, "deploy")
+	two := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(one, two)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build accepted a registry it cannot load")
+	}
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Errorf("the failure is %T, want a config error", err)
+	}
+	if failure.Field != "cliregistry.paths" {
+		t.Errorf("the failure names %q, want cliregistry.paths", failure.Field)
+	}
+}

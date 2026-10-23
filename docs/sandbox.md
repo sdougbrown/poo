@@ -65,6 +65,31 @@ the call, which is the escape the `local` executor cannot close.
 A background job runs in a sandbox of its own, and `cancel_job` or
 `session/close` stops it the same way.
 
+## Registered CLIs run outside the executor
+
+A `call_cli` call is not a bash command. It is one of the operator's
+registered CLIs, and cli-registry runs it with its own process engine, so
+neither the executor nor poo's environment reaches it.
+
+- **The command is the one its manifest names**, and it runs wherever
+  that command runs. A `bwrap` executor does not wrap it, and a protected
+  path does not mask it.
+- **Its environment** is the benign default set (`PATH`, `HOME`, `LANG`,
+  `LC_ALL`, `TMPDIR`) plus the variables its manifest declares. The
+  session's scrub does not reach it: an endpoint's key is in the
+  environment only when the manifest names the variable, and a manifest
+  that names one hands it over.
+- **Its arguments** were checked against the manifest's schema before the
+  process started, so a malformed call never runs.
+- **Its lifetime** is the command's own timeout, and a command that
+  reaches it is killed with its process group. A descendant that leaves
+  the group is not reaped when the command exits in time; only a timeout
+  tears the group down.
+
+The way to contain a registered CLI is the way to contain bash: run the
+whole process inside a container or a bubblewrap sandbox, which covers
+every process the run starts.
+
 ## What the `bwrap` executor does not contain
 
 **It is not a security boundary against hostile code.**

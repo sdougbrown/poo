@@ -15,6 +15,7 @@ import (
 	"github.com/sdougbrown/poo/profile/code"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/tool/cliregistry"
 	"github.com/sdougbrown/poo/tool/edit"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
@@ -29,6 +30,12 @@ func theTools() map[string]config.ToolFactory {
 		"read": func(config.ToolOptions) poo.Tool { return read.New() },
 		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+		"call_cli": func(opts config.ToolOptions) poo.Tool {
+			return cliregistry.NewCall(opts.Registry)
+		},
+		"find_tool": func(opts config.ToolOptions) poo.Tool {
+			return cliregistry.NewFind(opts.Registry)
+		},
 	}
 }
 

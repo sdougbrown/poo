@@ -123,6 +123,20 @@ tools:
   #       - "/etc/shadow"
   protected_paths: []
 
+# The registered command-line tools. A path is a manifest file, a
+# directory of manifests, or several of them, resolved against the
+# working directory. Every manifest is loaded when the session is built,
+# and a name two manifests define fails the load.
+#
+# Naming a registry offers the registry's tools to a profile that already
+# offers a side-effecting tool: call_cli runs one registered CLI, and a
+# catalog over thirty entries with a decider model is searched with
+# find_tool instead of listed. A registered CLI runs outside the bash
+# executor, so a sandbox does not contain it; docs/sandbox.md says what
+# that means.
+cliregistry:
+  paths: []
+
 # The run's limits. A limit of zero is off.
 limits:
   max_tokens_per_run: 0
