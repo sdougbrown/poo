@@ -33,8 +33,9 @@ const (
 	MaxLineChars = 2000
 	// OutputCapMax is the largest read output the model ever sees.
 	OutputCapMax = 70000
-	// CharsPerToken is the plan's estimate of characters per token.
-	CharsPerToken = 3.5
+	// CharsPerToken is the core's estimate of characters per token, so
+	// the tool's caps and the session's estimator measure on one scale.
+	CharsPerToken = poo.CharsPerToken
 	// BinarySniffBytes is how much of a file is read to decide whether it
 	// is binary.
 	BinarySniffBytes = 8 << 10

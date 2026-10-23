@@ -1,7 +1,6 @@
 package poo_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -59,17 +58,16 @@ func TestTheMessageIdsCarryOnAfterAReload(t *testing.T) {
 // run's ids do not repeat the first run's.
 func TestTheRunsIdsContinueAcrossRuns(t *testing.T) {
 	ids := &poo.MessageIDs{}
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, sink)
 	opts.MessageIDs = ids
 
+	s := newTestSession(t, opts)
 	for run := 1; run <= 2; run++ {
-		if _, err := poo.NewRun(opts).Execute(context.Background(), "do the thing"); err != nil {
-			t.Fatalf("run %d failed: %v", run, err)
-		}
+		runSession(t, s, "do the thing")
 	}
 
 	var ids_ []string
@@ -87,16 +85,38 @@ func TestTheRunsIdsContinueAcrossRuns(t *testing.T) {
 	}
 }
 
-// TestTheMessageRecordCarriesTheId covers the record: the model's
-// message carries the id, and the user's does not.
-func TestTheMessageRecordCarriesTheId(t *testing.T) {
-	tr := &fakeTransport{responses: []fakeResponse{{text: "the answer"}}}
+// TestAnEmptyResponseBurnsNoId covers the ids of recorded messages: a
+// response with no content is not recorded, so the next message that is
+// recorded takes the id it would have taken anyway.
+func TestAnEmptyResponseBurnsNoId(t *testing.T) {
+	tr := scripted([]fakeResponse{{}, {text: "the answer"}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	if _, err := poo.NewRun(testOptions(t, tr, tool, sink)).Execute(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("the run failed: %v", err)
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	runSession(t, s, "first")
+	runSession(t, s, "second")
+
+	var got []string
+	for _, m := range sink.messages() {
+		if m.Origin == poo.OriginModel {
+			got = append(got, m.MessageID)
+		}
 	}
+	if len(got) != 1 || got[0] != "m1" {
+		t.Errorf("the recorded model messages carry the ids %v, want [m1]", got)
+	}
+}
+
+// TestTheMessageRecordCarriesTheId covers the record: the model's
+// message carries the id, and the user's does not.
+func TestTheMessageRecordCarriesTheId(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	runSession(t, s, "do the thing")
 
 	messages := sink.messages()
 	if len(messages) != 3 {
@@ -161,6 +181,24 @@ func TestTheMessageIdsAreSafeForConcurrentUse(t *testing.T) {
 		if _, ok := seen[fmt.Sprintf("m%d", i)]; !ok {
 			t.Errorf("the id m%d was never handed out", i)
 			break
+		}
+	}
+}
+
+// TestOnlyAnAssignedIDInItsCanonicalFormIsKnown covers the registry: an
+// id is the letter m and a decimal number without a sign or a leading
+// zero, so a malformed id is not accepted for a number it starts with.
+func TestOnlyAnAssignedIDInItsCanonicalFormIsKnown(t *testing.T) {
+	var ids poo.MessageIDs
+	ids.Next()
+	ids.Next()
+	for id, want := range map[string]bool{
+		"m1": true, "m2": true, "m3": false, "m0": false, "m": false, "": false,
+		"m1x": false, "m1;junk": false, "m01": false, "m+1": false, "m-1": false,
+		"m 1": false, "M1": false, "m1 ": false, "m١": false,
+	} {
+		if got := ids.Knows(id); got != want {
+			t.Errorf("Knows(%q) is %v, want %v", id, got, want)
 		}
 	}
 }

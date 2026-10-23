@@ -348,7 +348,10 @@ const (
 	EventCompactionStarted EventName = "compaction.started"
 	// EventCompactionEnded is emitted when a compaction ends.
 	EventCompactionEnded EventName = "compaction.ended"
-	// EventObserverDropped is emitted when an observer's buffer overflows.
+	// EventObserverDropped names the observer-overflow diagnostic. The
+	// plan makes it a record-only diagnostic — it is never delivered to
+	// observers — and the coalesced record is written by the stage that
+	// owns observers (Stage 4).
 	EventObserverDropped EventName = "observer.dropped"
 )
 
@@ -407,4 +410,7 @@ type JobResult struct {
 	Text string `json:"text"`
 	// Outcome is the job's outcome.
 	Outcome Outcome `json:"outcome"`
+	// Fatal reports that the job failed with an error that wraps
+	// ErrFatal. The run that receives the result settles tool_fatal.
+	Fatal bool `json:"fatal,omitempty"`
 }

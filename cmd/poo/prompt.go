@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -25,7 +23,6 @@ func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string
 	var b strings.Builder
 
 	b.WriteString("You are a coding agent working in a shell. You solve the task by inspecting the repository and changing what is needed.\n\n")
-
 	b.WriteString("How to work:\n")
 	b.WriteString("- Inspect before you edit. Read the files that matter and the code around the place you will change.\n")
 	b.WriteString("- Prefer narrow reads over whole files. Use the read tool for a specific line range, and use bash with grep, sed, head or tail when you need to search or slice.\n")
@@ -47,6 +44,8 @@ func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string
 		b.WriteString("Call one tool at a time, and wait for its result before the next call.\n\n")
 	}
 
+	b.WriteString(jobsSection(tools))
+
 	b.WriteString("Done means:\n")
 	b.WriteString("- The task is actually complete, not just started.\n")
 	b.WriteString("- You have verified the change, for example by running the project's tests or the command that exercises the behaviour.\n")
@@ -58,14 +57,28 @@ func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) string
 	return b.String()
 }
 
-// newSessionID returns a fresh identifier for a session or a run.
+// jobsSection renders the section that tells the model about the
+// background jobs.
 //
-// The identifier is random rather than a ULID: the plan's ULID arrives with
-// the session seam in Stage 8, and nothing in the skeleton depends on the
-// ordering.
+// A session with no job-capable tool has no jobs, so the section is
+// empty and the prompt does not mention them.
+func jobsSection(tools []poo.ToolSpec) string {
+	allowed := false
+	for _, t := range tools {
+		if t.Background == poo.BackgroundAllowed || t.Background == poo.BackgroundAlways {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return ""
+	}
+	// The core owns the section, so the model reads the same guidance
+	// whatever built the prompt.
+	return poo.JobsPromptSection()
+}
+
+// newSessionID returns a fresh identifier for a session.
 func newSessionID() string {
-	var b [16]byte
-	// crypto/rand.Read never returns an error (it ends the program if the system's source fails).
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
+	return poo.NewULID()
 }
