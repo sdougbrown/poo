@@ -21,6 +21,9 @@
 //     registry
 //   - the cli package may import the standard library and the packages
 //     outside the module that hold a cli registry
+//   - the server package may import the packages it composes: the core,
+//     the settings, the profiles, the executors, the permission policy,
+//     the sessions, the catalogs and the wire
 //   - the exec package may import the standard library only, and the
 //     exec/bwrap package may import the exec package
 //   - the protect package may import the standard library only
@@ -102,6 +105,29 @@ func (c Checker) rules() []rule {
 		{path: m + "/protect"},
 		{path: m + "/internal/caps"},
 		{path: m + "/cli", external: true},
+		{
+			path: m + "/server",
+			allowed: []string{
+				m,
+				m + "/cli",
+				m + "/compact/handoff",
+				m + "/config",
+				m + "/decide",
+				m + "/exec",
+				m + "/internal/caps",
+				m + "/perm",
+				m + "/perm/decide",
+				m + "/profile",
+				m + "/prompt",
+				m + "/protect",
+				m + "/provider/catalog",
+				m + "/provider/openai",
+				m + "/session",
+				m + "/wire",
+				m + "/wire/protocol",
+			},
+			external: true,
+		},
 		{
 			path:     m + "/tool/cliregistry",
 			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/prompt", m + "/tool/bash"},

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -171,9 +170,9 @@ func runRun(args []string) int {
 
 	// The log records the models without their credentials: a URL may
 	// carry a key, and the log is a file a consumer reads.
-	chatModel := loggedModel(model)
+	chatModel := session.LoggedModel(model)
 
-	sessionID := newSessionID()
+	sessionID := session.NewID()
 	created := &poo.SessionCreated{
 		RecordMeta:   poo.NewRecordMeta("session.created"),
 		Format:       poo.FormatVersion,
@@ -181,8 +180,8 @@ func runRun(args []string) int {
 		Mode:         runtime.SessionMode,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
 		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ID: model.ModelID, BaseURL: loggedBaseURL(model.Endpoint), MaxOutput: model.MaxOutput},
-		Tools:        sessionTools(runtime),
+		Model:        poo.SessionModel{ID: model.ModelID, BaseURL: session.LoggedBaseURL(model.Endpoint), MaxOutput: model.MaxOutput},
+		Tools:        runtime.SessionTools(),
 		ContextLimit: model.ContextLimit,
 		ToolsMode:    string(model.Tools.Mode),
 		// The metadata says what the session ran with: the profile it
@@ -194,7 +193,7 @@ func runRun(args []string) int {
 		Build:           poo.BuildInfo{Name: "poo", Version: version},
 	}
 	if deciderModel, _, err := runtime.Decider(); err == nil {
-		deciderModel = loggedModel(deciderModel)
+		deciderModel = session.LoggedModel(deciderModel)
 		created.Roles.Decider = &deciderModel
 	}
 
@@ -389,7 +388,7 @@ func (o *runOptions) workingDirectory() (string, error) {
 // The command's own sections come after the settings': the flags come
 // last, so they change what the settings file said.
 func promptMutation(runtime *config.Runtime, model poo.ModelInfo, project string) func(*prompt.Builder) {
-	tools := toolSpecs(runtime)
+	tools := runtime.ToolSpecs()
 	toolsMode := string(model.Tools.Mode)
 	return systemPrompt(model.ModelID, tools, toolsMode, project)
 }
@@ -472,36 +471,6 @@ func (s *sink) Close() error {
 	}
 }
 
-// sessionTools returns the tools the session's metadata holds.
-//
-// The session's tool list derives from the same specs: one source for
-// the name and the class, so the log cannot drift from the wire.
-func sessionTools(runtime *config.Runtime) []poo.SessionTool {
-	specs := toolSpecs(runtime)
-	tools := make([]poo.SessionTool, 0, len(specs))
-	for _, spec := range specs {
-		tools = append(tools, poo.SessionTool{
-			Name:       spec.Name,
-			Class:      spec.Class,
-			Background: spec.Background,
-		})
-	}
-	return tools
-}
-
-// toolSpecs returns the specs of the tools the session offers.
-func toolSpecs(runtime *config.Runtime) []poo.ToolSpec {
-	specs := make([]poo.ToolSpec, 0, len(runtime.Options.ToolOrder))
-	for _, name := range runtime.Options.ToolOrder {
-		tool, ok := runtime.Options.Tools[name]
-		if !ok || tool == nil {
-			continue
-		}
-		specs = append(specs, tool.Spec())
-	}
-	return specs
-}
-
 // finalAnswer returns the run's answer, as the client asked for it.
 //
 // The finish result is the typed answer when the run produced one, and
@@ -539,31 +508,6 @@ func combinedExitCode(codes []int) int {
 		}
 	}
 	return 0
-}
-
-// loggedModel returns the model the log records.
-//
-// A URL may carry credentials, and the log is a file a consumer reads,
-// so the userinfo is stripped before the model is written.
-func loggedModel(model poo.ModelInfo) poo.ModelInfo {
-	model.Endpoint = loggedBaseURL(model.Endpoint)
-	return model
-}
-
-// loggedBaseURL returns the base URL the log records.
-//
-// A URL may carry credentials, and the log is a file a consumer reads, so
-// the userinfo is stripped before it is written.
-func loggedBaseURL(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
-		return raw
-	}
-	u.User = nil
-	return u.String()
 }
 
 // version is the build's version.

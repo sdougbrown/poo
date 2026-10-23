@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -72,16 +70,4 @@ func toolCallsSection(tools []poo.ToolSpec) string {
 	b.WriteString("<tool_call>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls -la\"}}</tool_call>\n")
 	b.WriteString("Call one tool at a time, and wait for its result before the next call.")
 	return b.String()
-}
-
-// newSessionID returns a fresh identifier for a session or a run.
-//
-// The identifier is random rather than a ULID: the plan's ULID arrives with
-// the session seam in Stage 8, and nothing in the skeleton depends on
-// the ordering.
-func newSessionID() string {
-	var b [16]byte
-	// crypto/rand.Read never returns an error (it ends the program if the system's source fails).
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
 }
