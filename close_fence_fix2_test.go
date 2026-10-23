@@ -96,7 +96,7 @@ func (s *fenceSlowSink) afterTheLastFlush() []string {
 	defer s.mu.Unlock()
 	last := -1
 	for i, entry := range s.order {
-		if len(entry) >= 5 && entry[:5] == "flush" {
+		if strings.HasPrefix(entry, "flush@") {
 			last = i
 		}
 	}
@@ -112,7 +112,7 @@ func (s *fenceSlowSink) count(name string) int {
 	defer s.mu.Unlock()
 	n := 0
 	for _, entry := range s.order {
-		if entry == "append:"+name || len(entry) > len("append:"+name) && entry[:len("append:"+name)+1] == "append:"+name+"@" {
+		if strings.HasPrefix(entry, "append:"+name+"@") {
 			n++
 		}
 	}
@@ -125,7 +125,7 @@ func (s *fenceSlowSink) flushes() int {
 	defer s.mu.Unlock()
 	n := 0
 	for _, entry := range s.order {
-		if len(entry) >= 5 && entry[:5] == "flush" {
+		if strings.HasPrefix(entry, "flush@") {
 			n++
 		}
 	}
