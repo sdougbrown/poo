@@ -11,6 +11,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"sync"
 	"time"
 
@@ -55,6 +56,12 @@ type Options struct {
 	// (a typed result, say) adds it here, so the tool joins the profile
 	// and the client is told about it like every other tool.
 	SessionTools func(*config.Runtime) error
+	// PromptFS is the prompt directory the binary embeds.
+	//
+	// The files replace the sections they name after the binary's
+	// embedded defaults and before the settings. A nil FS keeps the
+	// embedded defaults alone.
+	PromptFS fs.FS
 }
 
 // New builds the server: the runtime the handshake reports, and the
@@ -73,8 +80,9 @@ func New(opts Options) (*Server, error) {
 		// decide asker is there only when the settings name a decider
 		// model.
 		Askers: []string{"wire"},
-		Wire:   client,
-		Build:  opts.Build,
+		Wire:     client,
+		Build:    opts.Build,
+		PromptFS: opts.PromptFS,
 	}
 	runtime, err := config.Build(build)
 	if err != nil {

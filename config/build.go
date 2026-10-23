@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -120,6 +121,13 @@ type BuildOptions struct {
 	// A command that only shows the prompt does not need a model: the
 	// prompt names the model, and a name may be empty.
 	NoChatModel bool
+	// PromptFS is the prompt directory the binary embeds.
+	//
+	// The files replace the sections they name after the binary's
+	// embedded defaults and before the settings, so an operator's
+	// `system_prompt` settings keep the last word. A nil FS keeps the
+	// embedded defaults alone.
+	PromptFS fs.FS
 }
 
 // Runtime is what a build produced.
@@ -1058,6 +1066,31 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	if settings.SystemPrompt.Replace != "" {
 		r.Options.SystemPrompt = settings.SystemPrompt.Replace
 	}
+	// The catalog is the default for its section: the binary's own
+	// prompt directory and the settings' own sections come after it, so
+	// an operator who writes one keeps it.
+	if r.Registry != nil && r.offersRegistry() {
+		tmpl := r.Registry.Template(r.findTool())
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			b.SetTemplate(cli.SectionName, tmpl)
+		})
+	}
+	// The binary's own prompt directory replaces the defaults that are
+	// already in the builder. The settings come after it.
+	if opts.PromptFS != nil {
+		dir, err := prompt.Load(opts.PromptFS, promptSources(opts, r))
+		if err != nil {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "prompts",
+				Message: err.Error(),
+				Err:     err,
+			}
+		}
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			dir.Apply(b)
+		})
+	}
 	if baseFile != "" {
 		text, err := os.ReadFile(baseFile)
 		if err != nil {
@@ -1075,14 +1108,6 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	if appendText != "" {
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			b.Append(BaseSection, appendText)
-		})
-	}
-	// The catalog is the default for its section: the settings' own
-	// sections come after it, so an operator who writes one keeps it.
-	if r.Registry != nil && r.offersRegistry() {
-		section := r.Registry.Section(r.findTool())
-		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
-			b.Set(cli.SectionName, section)
 		})
 	}
 	for name, text := range settings.SystemPrompt.Sections {
@@ -1114,6 +1139,35 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	// after them.
 	r.Options.Prompt = append(r.Options.Prompt, r.Prompt...)
 	return nil
+}
+
+// promptSources returns the sections the binary's prompt directory may
+// replace, with the data their templates render with.
+//
+// The sections are the ones the build can put in a prompt: the core's
+// own, every tool the binary links, the core's job tools and the cli
+// registry's. The catalog renders with the registry's own data, so a
+// replacement file renders the entries the way the default does.
+func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
+	sources := prompt.Sources{
+		"base":        nil,
+		"environment": nil,
+		"project":     nil,
+	}
+	for name, factory := range opts.Tools {
+		if factory == nil {
+			continue
+		}
+		sources[prompt.ToolSection(name)] = nil
+	}
+	sources[prompt.ToolSection(profile.JobsToolName)] = nil
+	sources[prompt.ToolSection(profile.CancelJobToolName)] = nil
+	if r.Registry != nil {
+		sources[prompt.ToolSection(cli.CallToolName)] = nil
+		sources[prompt.ToolSection(cli.FindToolName)] = nil
+		sources[cli.SectionName] = r.Registry.Template(r.findTool()).Data()
+	}
+	return sources
 }
 
 // OpenStore opens the store a session's records go to.
