@@ -76,7 +76,52 @@ func (s *suite) create(c *client) string {
 	if info.SessionDir == "" {
 		s.t.Error("the session names no directory")
 	}
+	// The session runs under the profile the client asked for: it
+	// offers that profile's tools, and none of another profile's. A
+	// tool the flow added (the typed result's finish, say) is not a
+	// profile tool and is allowed.
+	s.checkSessionTools(info.Tools, s.profileTools(), s.handshakeResult.Profiles)
 	return info.SessionID
+}
+
+// checkSessionTools checks the tools a created session offers against
+// the profile the client asked for.
+func (s *suite) checkSessionTools(got, want []protocol.ToolInfo, profiles []protocol.ProfileInfo) {
+	s.t.Helper()
+	byName := make(map[string]protocol.ToolInfo, len(got))
+	for _, tool := range got {
+		byName[tool.Name] = tool
+	}
+	foreign := map[string]bool{}
+	for _, profile := range profiles {
+		for _, tool := range profile.Tools {
+			found := false
+			for _, own := range want {
+				if own.Name == tool.Name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				foreign[tool.Name] = true
+			}
+		}
+	}
+	for _, tool := range want {
+		gotTool, ok := byName[tool.Name]
+		if !ok {
+			s.t.Errorf("the session does not offer the profile's %q tool", tool.Name)
+			continue
+		}
+		if gotTool != tool {
+			s.t.Errorf("the session's %q tool is %+v, want %+v", tool.Name, gotTool, tool)
+		}
+	}
+	for _, tool := range got {
+		if foreign[tool.Name] {
+			s.t.Errorf("the session offers %q, a tool of another profile", tool.Name)
+		}
+	}
 }
 
 // prompt starts a run and returns its id.

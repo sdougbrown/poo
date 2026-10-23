@@ -233,7 +233,11 @@ func (s *suite) jobStopsWithTheSession() {
 			"background": true,
 		}}}},
 	}
-	c, sessionID := s.open(turns, nil)
+	endpoint := newProvider(s.t, turns)
+	settings := s.settings(endpoint, s.contextLimit, nil)
+	c := s.start(settings, endpoint)
+	s.handshake(c)
+	sessionID := s.create(c)
 
 	runID := s.prompt(c, sessionID, "start a job")
 	c.waitEvent("job started", func(e event) bool {
@@ -256,6 +260,39 @@ func (s *suite) jobStopsWithTheSession() {
 
 	// The process is gone: the file it wrote stops changing.
 	s.waitForTheFileToSettle(beat)
+
+	// The closing process appended nothing after its flush: the log
+	// stops growing once the close returned.
+	path := filepath.Join(s.sessions, sessionID+".jsonl")
+	before, err := os.Stat(path)
+	if err != nil {
+		s.t.Fatalf("stating the session log: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	still, err := os.Stat(path)
+	if err != nil {
+		s.t.Fatalf("stating the session log after the close: %v", err)
+	}
+	if still.Size() != before.Size() {
+		s.t.Errorf("the session log grew from %d to %d bytes after the close returned", before.Size(), still.Size())
+	}
+
+	// Another process loads the session at once: the close released the
+	// Authority lock.
+	other := s.start(settings, endpoint)
+	s.handshake(other)
+	answer := other.send(protocol.MethodSessionLoad, map[string]any{
+		"session_id": sessionID,
+	}).wait(s.t)
+	if answer.failure != nil {
+		if dataCode(answer.failure) == protocol.DataSessionLocked {
+			s.t.Error("the load after the close is refused with session_locked: the Authority lock was not released")
+		} else {
+			s.t.Errorf("the load after the close was refused: %s (%s)", answer.failure.Message, dataCode(answer.failure))
+		}
+		return
+	}
+	other.call(protocol.MethodSessionClose, map[string]any{"session_id": sessionID}, &struct{}{})
 }
 
 // waitForTheFile waits for a file to appear.
@@ -315,6 +352,10 @@ func (s *suite) lastChange(path string) time.Time {
 // the interrupted run is marked.
 func (s *suite) attachAndScrollback() {
 	s.t.Helper()
+	if !s.hasSideEffecting() {
+		s.t.Logf("skipping attach and scrollback: the profile %q offers no side-effecting tool", s.profile)
+		return
+	}
 	// The command ends by itself: the binary dies, and the command goes
 	// on without it.
 	command := s.boundedCommand()
@@ -358,18 +399,41 @@ func (s *suite) attachAndScrollback() {
 		}
 	}
 
-	after := s.history(other, sessionID, 0, 500)
-	if len(after.Items) < len(before.Items) {
-		s.t.Errorf("the scrollback holds %d items, want at least %d", len(after.Items), len(before.Items))
+	// The scrollback pages backwards: each page is older than the one
+	// before it, and the union is the transcript the session recorded
+	// before the crash.
+	var after []protocol.HistoryItem
+	beforeSeq := int64(0)
+	for page := 0; ; page++ {
+		if page > 10000 {
+			s.t.Fatal("the scrollback never reached its oldest page")
+		}
+		result := s.history(other, sessionID, beforeSeq, 3)
+		if len(result.Items) == 0 {
+			break
+		}
+		for i := 1; i < len(result.Items); i++ {
+			if result.Items[i].Seq <= result.Items[i-1].Seq {
+				s.t.Errorf("the page is not in oldest-first order: %d after %d", result.Items[i].Seq, result.Items[i-1].Seq)
+			}
+		}
+		after = append(result.Items, after...)
+		if !result.HasMore {
+			break
+		}
+		beforeSeq = result.Items[0].Seq
+	}
+	if len(after) < len(before.Items) {
+		s.t.Errorf("the scrollback holds %d items, want at least %d", len(after), len(before.Items))
 	}
 	// The scrollback holds what the session did before the crash.
 	for _, item := range before.Items {
-		if !historyHas(after.Items, item) {
+		if !historyHas(after, item) {
 			s.t.Errorf("the scrollback lost the %q item %q", item.Type, item.Text)
 		}
 	}
 	marked := false
-	for _, item := range after.Items {
+	for _, item := range after {
 		if item.Reason == "interrupted" {
 			marked = true
 		}
@@ -398,6 +462,10 @@ func historyHas(items []protocol.HistoryItem, want protocol.HistoryItem) bool {
 // prompt.
 func (s *suite) resume() {
 	s.t.Helper()
+	if !s.hasSideEffecting() {
+		s.t.Logf("skipping the resume: the profile %q offers no side-effecting tool", s.profile)
+		return
+	}
 	// The command ends by itself: the binary dies, and the command goes
 	// on without it.
 	command := s.boundedCommand()
@@ -731,6 +799,10 @@ func (s *suite) teardownCloseRacingARun() {
 // in flight: the binary closes the session and ends cleanly.
 func (s *suite) teardownHangUp() {
 	s.t.Helper()
+	if !s.hasSideEffecting() {
+		s.t.Logf("skipping the hang-up: the profile %q offers no side-effecting tool", s.profile)
+		return
+	}
 	// The command is a short one: the run waits for the ask, not for
 	// the command, and the binary hangs up while the ask is pending.
 	turns := []Turn{
@@ -795,6 +867,7 @@ func (s *suite) slowClientQueueOverflow() {
 	if !strings.Contains(c.stderrText(), "the output queue overflowed") {
 		s.t.Errorf("the binary wrote %q, want it to say the queue overflowed", c.stderrText())
 	}
+	s.reloadAfterAFailure(settings, endpoint, sessionID)
 }
 
 // slowClientWriteStall covers the client that stops reading with less
@@ -820,6 +893,31 @@ func (s *suite) slowClientWriteStall() {
 	if !strings.Contains(c.stderrText(), "the write to the client took more than") {
 		s.t.Errorf("the binary wrote %q, want it to say the write stalled", c.stderrText())
 	}
+	s.reloadAfterAFailure(settings, endpoint, sessionID)
+}
+
+// reloadAfterAFailure proves the transport failure released the
+// sessions: another process loads the session that the failed process
+// served.
+func (s *suite) reloadAfterAFailure(settings string, endpoint *provider, sessionID string) {
+	s.t.Helper()
+	second := s.start(settings, endpoint)
+	s.handshake(second)
+	pending := second.send(protocol.MethodSessionLoad, map[string]any{
+		"session_id": sessionID,
+	})
+	answer := pending.wait(s.t)
+	if answer.failure != nil {
+		if dataCode(answer.failure) == protocol.DataSessionLocked {
+			s.t.Error("the load after the transport failure is refused with session_locked: the Authority lock was not released")
+			return
+		}
+		s.t.Errorf("the load after the transport failure was refused: %s (%s)", answer.failure.Message, dataCode(answer.failure))
+		return
+	}
+	// The load took the session: closing it releases the second
+	// process's authority too.
+	second.call(protocol.MethodSessionClose, map[string]any{"session_id": sessionID}, &struct{}{})
 }
 
 // chunks returns the pieces an answer arrives in.

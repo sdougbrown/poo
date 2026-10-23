@@ -75,3 +75,15 @@ func buildTheBinary(t *testing.T, tags []string) string {
 	}
 	return binary
 }
+
+// TestTheBinarySpeaksTheProtocolWithTheSearchProfile runs the suite
+// against a profile with other tools: the flows that need a
+// side-effecting tool skip, and the rest prove the protocol.
+func TestTheBinarySpeaksTheProtocolWithTheSearchProfile(t *testing.T) {
+	binary := buildTheBinary(t, nil)
+	conformance.Run(t, conformance.Target{
+		Binary:  binary,
+		Args:    []string{"serve"},
+		Profile: "search",
+	})
+}
