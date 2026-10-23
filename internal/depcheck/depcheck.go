@@ -15,6 +15,9 @@
 //     package, the perm package and the decide package
 //   - the session package may import the standard library, the core
 //     package and the decide package
+//   - the tool/cliregistry package may import the standard library, the core
+//     package, the prompt package, the decide package, the bash package and
+//     the packages outside the module that hold a cli registry
 //
 // The import graph comes from "go list -e -deps -json", and the toolchain
 // decides what counts as the standard library. The rules cover each checked
@@ -67,6 +70,10 @@ type Result struct {
 type rule struct {
 	path    string
 	allowed []string // module-internal imports permitted besides the standard library
+	// external permits the packages outside the module, so a package may
+	// have third-party dependencies of its own. A rule without it keeps
+	// its closure inside the module and the standard library.
+	external bool
 }
 
 func (c Checker) rules() []rule {
@@ -83,7 +90,17 @@ func (c Checker) rules() []rule {
 		{path: m + "/perm", allowed: []string{m}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
+		{
+			path:     m + "/tool/cliregistry",
+			allowed:  []string{m, m + "/decide", m + "/prompt", m + "/tool/bash"},
+			external: true,
+		},
 	}
+}
+
+// inModule reports whether an import path belongs to the checked module.
+func (c Checker) inModule(path string) bool {
+	return path == c.ModulePath || strings.HasPrefix(path, c.ModulePath+"/")
 }
 
 // Check applies the rules and reports what it finds.
@@ -165,7 +182,9 @@ func (c Checker) check(r rule, checked []string, pkgs []listPackage) []string {
 				if target.Dir == "" {
 					findings = append(findings, fmt.Sprintf("cannot resolve %s (imported by %s)", imp, p.ImportPath))
 				}
-			case !slices.Contains(r.allowed, imp):
+			case slices.Contains(r.allowed, imp):
+			case r.external && !c.inModule(imp):
+			default:
 				finding := fmt.Sprintf("%s imports %s", p.ImportPath, imp)
 				if p.ImportPath != r.path {
 					finding += fmt.Sprintf(" (in the closure of %s)", r.path)

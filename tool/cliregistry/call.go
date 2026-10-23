@@ -1,0 +1,237 @@
+package cliregistry
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
+	cli "github.com/sdougbrown/cli-registry"
+	"github.com/sdougbrown/cli-registry/schema"
+
+	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/tool/bash"
+)
+
+// CallTool runs one registered CLI.
+//
+// The call is side-effecting: an arbitrary command can change anything,
+// so the permission policy decides about it the way it decides about
+// bash.
+type CallTool struct {
+	// catalog is the set of CLIs the tool may call.
+	catalog *Catalog
+}
+
+// NewCall returns the tool that runs a registered CLI.
+func NewCall(catalog *Catalog) *CallTool {
+	return &CallTool{catalog: catalog}
+}
+
+// Spec describes the tool.
+func (t *CallTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        CallToolName,
+		Description: "Run one of the registered command-line tools and return its output.",
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "name": {"type": "string", "description": "The registered tool's name."},
+    "args": {"type": "object", "description": "The tool's arguments, as its schema describes them."}
+  },
+  "required": ["name"]
+}`),
+		Class:      poo.ClassSideEffecting,
+		PrimaryArg: "name",
+	}
+}
+
+// The prompt section the tool brings.
+//
+// The catalog has a section of its own, which the session renders; the
+// tool adds what the catalog cannot say: what a call does when it fails,
+// and where its output goes.
+const callSection = "Calling a registered CLI:\n" +
+	"- \"name\" is one line of the catalog, and \"args\" is an object of that CLI's arguments.\n" +
+	"- Arguments that do not fit the CLI's schema are refused before anything runs, with the reason.\n" +
+	"- The result is the command's output and its exit status, elided in the middle when it is long."
+
+// PromptSection renders the tool's guidance.
+func (t *CallTool) PromptSection(prompt.Env) string { return callSection }
+
+// callArgs are the tool's arguments.
+type callArgs struct {
+	// Name is the registered CLI to run.
+	Name string `json:"name"`
+	// Args are the CLI's arguments, as a JSON object.
+	Args json.RawMessage `json:"args,omitempty"`
+}
+
+// preparedCall is a validated call_cli call.
+type preparedCall struct {
+	// name is the registered CLI.
+	name string
+	// args are the CLI's arguments.
+	args map[string]any
+	// key is the call's canonical input.
+	key json.RawMessage
+}
+
+// Summary describes the call for a human reader.
+func (p *preparedCall) Summary() string {
+	return strings.TrimSpace(p.name + " " + string(marshal(p.args)))
+}
+
+// CanonicalKey returns the call's prepared input.
+func (p *preparedCall) CanonicalKey() json.RawMessage { return p.key }
+
+// EvidenceArguments returns the arguments a decision model may see.
+func (p *preparedCall) EvidenceArguments() json.RawMessage { return p.key }
+
+// Prepare validates the arguments.
+//
+// The name has to be in the catalog, and the arguments have to fit the
+// CLI's schema. Both are refused here, before a process exists, so a
+// malformed call never reaches a command and the model sees the reason
+// instead of the command's failure.
+func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	if t.catalog == nil {
+		return nil, poo.InvalidArgsf("%s: no CLI registry is configured", CallToolName)
+	}
+	var a callArgs
+	if err := decodeStrict(raw, &a); err != nil {
+		return nil, poo.InvalidArgsf("%s: %v", CallToolName, err)
+	}
+	entry, ok := t.catalog.Lookup(a.Name)
+	if !ok {
+		if t.catalog.Len() == 0 {
+			return nil, poo.InvalidArgsf("%s: no CLI is registered", CallToolName)
+		}
+		return nil, poo.InvalidArgsf("%s: no CLI named %q; %s",
+			CallToolName, a.Name, t.catalog.namesHint())
+	}
+	args := map[string]any{}
+	if len(a.Args) > 0 && string(a.Args) != "null" {
+		if err := json.Unmarshal(a.Args, &args); err != nil {
+			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, entry.Name, err)
+		}
+	}
+	if issues := t.catalog.validators[entry.Name].Validate(args); len(issues) > 0 {
+		return nil, poo.InvalidArgsf("%s: %s: %s", CallToolName, entry.Name, issuesText(issues))
+	}
+	key := marshal(struct {
+		Name string         `json:"name"`
+		Args map[string]any `json:"args"`
+	}{entry.Name, args})
+	return &preparedCall{name: entry.Name, args: args, key: key}, nil
+}
+
+// Call runs the CLI.
+//
+// The output is the CLI's stdout and stderr with its exit status, in the
+// envelope bash's observation uses. An exit outside the CLI's success
+// codes is a recoverable failure: the model sees what the command said
+// and may try something else.
+func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	p, ok := in.(*preparedCall)
+	if !ok {
+		return poo.ToolResult{}, fmt.Errorf("%s: prepared value is not a %s call", CallToolName, CallToolName)
+	}
+	tool, ok := t.catalog.tools[p.name]
+	if !ok {
+		return poo.ToolResult{}, fmt.Errorf("%s: no CLI named %q", CallToolName, p.name)
+	}
+
+	cap := env.Settings.ObservationCapChars
+	if cap <= 0 {
+		cap = bash.ObservationCapMax
+	}
+
+	res, err := t.catalog.registry.Call(ctx, tool, p.args)
+	if err != nil {
+		return failed(err, cap)
+	}
+	code := res.ExitCode
+	text, structured := bash.Envelope(bash.Observation{
+		Returncode: &code,
+		Output:     string(res.Stdout),
+		Stderr:     string(res.Stderr),
+		Cap:        cap,
+	})
+	return poo.ToolResult{Text: text, Structured: structured}, nil
+}
+
+// failed renders a call that did not produce a result as an observation.
+//
+// A timeout and an exit outside the success codes are recoverable: the
+// model sees what the command said and may try something else. Anything
+// else is the environment being unusable, and it goes back as an error.
+func failed(err error, cap int) (poo.ToolResult, error) {
+	var timedOut *cli.TimeoutError
+	if errors.As(err, &timedOut) {
+		text, structured := bash.Envelope(bash.Observation{TimedOut: true, Cap: cap})
+		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
+	}
+	var exited *cli.ExecError
+	if errors.As(err, &exited) {
+		code := exited.ExitCode
+		// cli-registry reports the stderr of a failed call and not its
+		// stdout, so the envelope carries what is left.
+		text, structured := bash.Envelope(bash.Observation{
+			Returncode: &code,
+			Stderr:     string(exited.Stderr),
+			Cap:        cap,
+		})
+		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
+	}
+	return poo.ToolResult{}, fmt.Errorf("%s: %w", CallToolName, err)
+}
+
+// decodeStrict decodes one JSON value and nothing else.
+//
+// A second value, or anything after the first, is a malformed call: the
+// model sent more than it meant to, and taking the first object would
+// silently run something else.
+func decodeStrict(raw json.RawMessage, into any) error {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		return err
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("the arguments hold more than one JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+// issuesText renders schema issues for the model.
+//
+// A path is an RFC 6901 pointer into the arguments, so the model can see
+// which argument it got wrong.
+func issuesText(issues []schema.StructuralIssue) string {
+	parts := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		path := issue.Path
+		if path == "" {
+			path = "arguments"
+		}
+		parts = append(parts, path+": "+issue.Message)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// marshal encodes a value, falling back to an empty object.
+func marshal(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return b
+}
