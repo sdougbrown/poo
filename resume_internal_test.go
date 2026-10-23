@@ -15,7 +15,6 @@ func TestResumeSettlesANonNaturalCandidate(t *testing.T) {
 		state:      StateRequesting,
 		events:     newEventBus(nil),
 		messageIDs: &MessageIDs{},
-		repeats:    newRepeatCounter(),
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	run := &runState{

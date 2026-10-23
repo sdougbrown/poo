@@ -109,9 +109,10 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	undelivered = append(undelivered, sealed...)
 	s.sealRaceHook("seal")
 
-	// Steps 4 and 5: every call that was issued but has no result
-	// gets a synthetic one, and every pending ask resolves as
-	// cancelled.
+	// Step 4 and 5: every ask the run left unanswered is resolved as
+	// cancelled, before any result or settle record, and every call that
+	// was issued but has no result gets a synthetic one.
+	s.settlePendingAsks(run)
 	s.settleIssuedCalls(run, issued)
 
 	// The seam the race is tested at: the input check has passed, and
@@ -483,7 +484,15 @@ func (s *Session) inFlightLocked(run *runState) int {
 			started++
 		}
 	}
-	return started + run.resultWrites + run.callWrites + run.jobStarts + run.runWrites + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
+	asks := 0
+	for _, ask := range run.asks {
+		ask.mu.Lock()
+		if ask.answer == nil || ask.writing {
+			asks++
+		}
+		ask.mu.Unlock()
+	}
+	return asks + started + run.resultWrites + run.callWrites + run.jobStarts + run.runWrites + len(run.accepting) + len(run.delivering) + len(run.deliveringJobs)
 }
 
 // sealLocked seals the run and takes ownership of every claim that was
@@ -492,6 +501,15 @@ func (s *Session) inFlightLocked(run *runState) int {
 // The caller holds the session's lock, and the caller releases it.
 func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) {
 	run.sealed = true
+	// A request that already resolved keeps its answer: the seal only
+	// ends the ones still pending.
+	for _, ask := range run.asks {
+		select {
+		case <-ask.Done():
+		default:
+			ask.Send(PermissionInput{Kind: PermissionSeal})
+		}
+	}
 	// A call record whose write the finalization stopped waiting for is
 	// ended here, so the record cannot land after run.settled. The claim
 	// keeps the call, so the record is not written twice.

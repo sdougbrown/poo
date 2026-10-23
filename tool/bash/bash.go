@@ -161,6 +161,19 @@ type prepared struct {
 // Summary describes the call for a human reader.
 func (p *prepared) Summary() string { return p.command }
 
+// CanonicalKey returns the call's prepared input.
+func (p *prepared) CanonicalKey() json.RawMessage {
+	key, _ := json.Marshal(struct {
+		Command string `json:"command"`
+	}{p.command})
+	return key
+}
+
+// EvidenceArguments returns the arguments a decision model may see.
+func (p *prepared) EvidenceArguments() json.RawMessage {
+	return p.CanonicalKey()
+}
+
 // Prepare validates the arguments.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args

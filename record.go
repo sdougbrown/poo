@@ -243,6 +243,47 @@ type ToolResultRecord struct {
 	Hooks []HookDecision `json:"hooks,omitempty"`
 }
 
+// PermissionAskedRecord records a permission ask.
+//
+// The ask names the call the run is waiting on, so a reader of the log
+// can see what the run asked and why.
+type PermissionAskedRecord struct {
+	RecordMeta
+	// RunID identifies the run that is waiting.
+	RunID string `json:"run_id"`
+	// AskID names the ask.
+	AskID string `json:"ask_id"`
+	// Tool is the name of the tool the model called.
+	Tool string `json:"tool"`
+	// Summary describes the call.
+	Summary string `json:"summary,omitempty"`
+	// Class is the tool's class.
+	Class ToolClass `json:"class,omitempty"`
+	// Reason is why the call is being asked about.
+	Reason string `json:"reason,omitempty"`
+	// RepeatCount holds the doom loop's counts, when the ask is one.
+	RepeatCount *RepeatCounts `json:"repeat_count,omitempty"`
+}
+
+// PermissionAnsweredRecord records the answer that resolved an ask, or a
+// doom loop's deterministic outcome.
+type PermissionAnsweredRecord struct {
+	RecordMeta
+	// RunID identifies the run the answer belongs to.
+	RunID string `json:"run_id"`
+	// AskID names the ask the answer resolves. It is empty for a doom
+	// loop's deterministic action, which answers no ask.
+	AskID string `json:"ask_id,omitempty"`
+	// Decision is "allow" or "deny".
+	Decision string `json:"decision"`
+	// AnsweredBy names who answered.
+	AnsweredBy string `json:"answered_by"`
+	// Provenance is how the ask was resolved.
+	Provenance string `json:"provenance"`
+	// Reason is why the call was being asked about.
+	Reason string `json:"reason,omitempty"`
+}
+
 // ToolResultData is a tool result's own data.
 //
 // It is the payload of the original result a hook replaced.
