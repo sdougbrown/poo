@@ -39,9 +39,9 @@ type Observation struct {
 //	 "output_tail": "...", "elided_chars": 1234, "hint": "..."}
 //
 // A command whose stderr is captured apart from its stdout carries it in
-// a field of its own, and the two streams share the cap: each one is
-// whole when both fit, and each one is elided to its head and its tail
-// when they do not.
+// a field of its own, and the two streams share the cap: both stay whole
+// when they fit together, and when they do not, the shorter one keeps
+// what it needs and the longer one is elided to its head and tail.
 //
 // The cap and elided_chars are counted in characters, not bytes, and a
 // cut never splits a rune.
@@ -62,10 +62,7 @@ func Envelope(o Observation) (string, json.RawMessage) {
 
 	// The two streams share the cap, so one command's observation keeps
 	// its size whatever the command wrote.
-	outCap, errCap := cap, cap
-	if o.Output != "" && o.Stderr != "" {
-		outCap, errCap = cap/2, cap-cap/2
-	}
+	outCap, errCap := streamCaps(o.Output, o.Stderr, cap)
 
 	elided := 0
 	outChars := utf8.RuneCountInString(o.Output)
@@ -104,6 +101,30 @@ func Envelope(o Observation) (string, json.RawMessage) {
 		structured[f.key] = f.value
 	}
 	return render(fields), mustJSON(structured)
+}
+
+// streamCaps divides the cap between the two streams.
+//
+// A single stream may use the whole cap. Two streams stay whole when
+// they fit together; when they do not, the short one keeps what it
+// needs, up to half the cap, and the long one takes the rest.
+func streamCaps(output, stderr string, cap int) (int, int) {
+	outChars := utf8.RuneCountInString(output)
+	errChars := utf8.RuneCountInString(stderr)
+	if output == "" || stderr == "" || outChars+errChars <= cap {
+		return cap, cap
+	}
+	shortCap := outChars
+	if errChars < outChars {
+		shortCap = errChars
+	}
+	if half := cap / 2; shortCap > half {
+		shortCap = half
+	}
+	if outChars <= errChars {
+		return shortCap, cap - shortCap
+	}
+	return cap - shortCap, shortCap
 }
 
 // field is one entry of the observation envelope.
