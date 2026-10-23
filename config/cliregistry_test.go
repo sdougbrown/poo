@@ -342,6 +342,101 @@ func TestTheOperatorsCatalogSectionWins(t *testing.T) {
 	}
 }
 
+// TestTheFindThresholdIsThirtyEntries covers the boundary: a catalog the
+// prompt can show whole is listed, and one entry more is searched.
+func TestTheFindThresholdIsThirtyEntries(t *testing.T) {
+	tests := []struct {
+		entries int
+		search  bool
+	}{
+		{entries: cliregistry.FindThreshold, search: false},
+		{entries: cliregistry.FindThreshold + 1, search: true},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d entries", tt.entries), func(t *testing.T) {
+			names := make([]string, 0, tt.entries)
+			for i := 0; i < tt.entries; i++ {
+				names = append(names, fmt.Sprintf("entry-%03d", i))
+			}
+			settings, err := config.Parse([]byte(withDecider+"cliregistry:\n  paths: [\""+registry(t, names...)+"\"]\n"), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			runtime := build(t, settings, config.Overrides{})
+
+			if got := hasTool(runtime.Options.ToolOrder, "find_tool"); got != tt.search {
+				t.Errorf("the session offers find_tool: %v, want %v", got, tt.search)
+			}
+			text := poo.PromptBuilder(runtime.Options).Render()
+			if listed := strings.Contains(text, "entry-000:"); listed == tt.search {
+				t.Errorf("the prompt lists the catalog: %v, and the session searches it: %v", listed, tt.search)
+			}
+			if got := strings.Count(text, "Registered CLIs:"); got != 1 {
+				t.Errorf("the prompt carries the catalog %d times, want once", got)
+			}
+		})
+	}
+}
+
+// TestARegistryPathIsRelativeToTheWorkingDirectory covers the path: a
+// relative `cliregistry.paths` entry is resolved against the directory
+// the session works in, not the directory the process was started in.
+func TestARegistryPathIsRelativeToTheWorkingDirectory(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings("registry.json")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     dir,
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if runtime.Registry == nil || runtime.Registry.Len() != 1 {
+		t.Fatalf("the build loaded %v, want the one entry beside the working directory", runtime.Registry)
+	}
+	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+}
+
+// TestARegistryPathThatIsNotThereNamesTheField covers a path the load
+// cannot read: the failure is the settings field the operator wrote.
+func TestARegistryPathThatIsNotThereNamesTheField(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "registry.json")
+	settings, err := config.Parse([]byte(registrySettings(missing)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build accepted a registry path that is not there")
+	}
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the failure is %T, want a config error", err)
+	}
+	if failure.Field != "cliregistry.paths" {
+		t.Errorf("the failure names %q, want cliregistry.paths", failure.Field)
+	}
+	if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file") {
+		t.Errorf("the failure %q does not keep the cause", err)
+	}
+}
+
 // TestARegistryThatDoesNotLoadIsAnError covers the settings check: a
 // registry the settings name and the binary cannot load fails the build,
 // and the failure names the field the operator wrote.
