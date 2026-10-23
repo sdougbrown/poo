@@ -225,6 +225,91 @@ func TestExpandDoesNotFollowSymlinks(t *testing.T) {
 	}
 }
 
+// TestExpandNamesAMatchUnderTheRootsOwnSpelling covers a glob written
+// through a symlinked root: the root is walked through the link, and the
+// match comes back under the name the caller mounts it by.
+func TestExpandNamesAMatchUnderTheRootsOwnSpelling(t *testing.T) {
+	dir := tempDir(t)
+	real := filepath.Join(dir, "real")
+	private := writeFile(t, real, "private.txt", "the private text")
+	writeFile(t, real, "keep.txt", "keep")
+	link := filepath.Join(dir, "linked-root")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	spelled := filepath.Join(link, "private.txt")
+	set, err := protect.Compile([]string{spelled})
+	if err != nil {
+		t.Fatalf("compiling: %v", err)
+	}
+	found, err := set.Expand(link)
+	if err != nil {
+		t.Fatalf("expanding: %v", err)
+	}
+	want := []string{spelled}
+	if !slices.Equal(found, want) {
+		t.Errorf("the expansion is %v, want %v", found, want)
+	}
+	found, err = set.Expand(dir)
+	if err != nil {
+		t.Fatalf("expanding %s: %v", dir, err)
+	}
+	want = []string{private}
+	if !slices.Equal(found, want) {
+		t.Errorf("the expansion under %s is %v, want %v", dir, found, want)
+	}
+}
+
+// TestExpandWalksThroughASymlinkedPrefix covers a glob whose fixed prefix
+// is a symlink: the directory it reaches is walked, so a wildcard under a
+// link finds what the link holds.
+func TestExpandWalksThroughASymlinkedPrefix(t *testing.T) {
+	dir := tempDir(t)
+	real := filepath.Join(dir, "real")
+	private := writeFile(t, real, "private.txt", "the private text")
+	writeFile(t, real, "keep.txt", "keep")
+	link := filepath.Join(dir, "linked-root")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	set, err := protect.Compile([]string{filepath.Join(link, "private.*")})
+	if err != nil {
+		t.Fatalf("compiling: %v", err)
+	}
+	found, err := set.Expand(dir)
+	if err != nil {
+		t.Fatalf("expanding: %v", err)
+	}
+	want := []string{private}
+	if !slices.Equal(found, want) {
+		t.Errorf("the expansion is %v, want %v", found, want)
+	}
+}
+
+// TestExpandResolvesAnIntermediateSymlink covers a glob with a symlinked
+// directory in the middle of its prefix: the path behind the link is the
+// one a sandbox can mask.
+func TestExpandResolvesAnIntermediateSymlink(t *testing.T) {
+	dir := tempDir(t)
+	private := writeFile(t, dir, "nested/deeper/private.txt", "the private text")
+	link := filepath.Join(dir, "linked-dir")
+	if err := os.Symlink(filepath.Join(dir, "nested", "deeper"), link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	set, err := protect.Compile([]string{filepath.Join(link, "private.txt")})
+	if err != nil {
+		t.Fatalf("compiling: %v", err)
+	}
+	found, err := set.Expand(dir)
+	if err != nil {
+		t.Fatalf("expanding: %v", err)
+	}
+	want := []string{private}
+	if !slices.Equal(found, want) {
+		t.Errorf("the expansion is %v, want %v", found, want)
+	}
+}
+
 // TestARelativeGlobIsRefused covers the glob that would protect nothing.
 func TestARelativeGlobIsRefused(t *testing.T) {
 	if _, err := protect.Compile([]string{"secrets/**"}); err == nil {
