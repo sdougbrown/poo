@@ -11,6 +11,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/session"
@@ -103,6 +104,7 @@ func runServe(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
 		return 2
 	}
+	effective := config.WithOverrides(settings, overrides)
 
 	// The client is the wire's own, and the server creates it when it
 	// starts. The asker chain is built with a client that learns it
@@ -137,12 +139,13 @@ func runServe(args []string) int {
 	}
 
 	factory := &serveFactory{
-		runtime:  runtime,
-		build:    build,
-		settings: settings,
-		workDir:  workDir,
-		client:   client,
-		runtimes: map[string]*config.Runtime{},
+		runtime:   runtime,
+		build:     build,
+		settings:  settings,
+		effective: effective,
+		workDir:   workDir,
+		client:    client,
+		runtimes:  map[string]*config.Runtime{},
 	}
 	err = wire.Serve(wire.Options{
 		In:      os.Stdin,
@@ -177,6 +180,9 @@ type serveFactory struct {
 	build config.BuildOptions
 	// settings are the settings the build was made from.
 	settings *config.Settings
+	// effective are the settings the command line leaves after its
+	// overrides: the document config/get reports.
+	effective *config.Settings
 	// workDir is the directory the tools work in.
 	workDir string
 	// client is the wire client the asker chain asks.
@@ -289,7 +295,7 @@ func (f *serveFactory) Capabilities() protocol.Capabilities {
 		Decider:     decider,
 		Compaction:  runtime.Options.Compactor != nil,
 		Persistence: modes,
-		Jobs:        runtime.Options.Compactor != nil && f.jobs(runtime),
+		Jobs:        f.jobs(runtime),
 	}
 }
 
@@ -310,12 +316,30 @@ func (f *serveFactory) Roles() protocol.ModelRoles {
 	if err != nil {
 		return protocol.ModelRoles{}
 	}
+	return rolesOf(nil, runtime)
+}
+
+// rolesOf returns the models a session talks to.
+//
+// The session's own chat and decision models come first. A session that
+// has no decision model reports the runtime's, which is the role the
+// settings name.
+func rolesOf(sess *poo.Session, runtime *config.Runtime) protocol.ModelRoles {
 	roles := protocol.ModelRoles{}
-	if model, err := runtime.ChatModel(); err == nil {
+	if sess != nil {
+		if model := sess.ChatModel(); model.Name != "" {
+			roles.Chat = model.Name
+		}
+		if model, ok := sess.DeciderModel(); ok {
+			roles.Decider = model.Name
+		}
+	} else if model, err := runtime.ChatModel(); err == nil {
 		roles.Chat = model.Name
 	}
-	if model, err := runtime.DeciderModel(); err == nil {
-		roles.Decider = model.Name
+	if roles.Decider == "" {
+		if model, err := runtime.DeciderModel(); err == nil {
+			roles.Decider = model.Name
+		}
 	}
 	return roles
 }
@@ -324,12 +348,27 @@ func (f *serveFactory) Roles() protocol.ModelRoles {
 func (f *serveFactory) Create(ctx context.Context, params protocol.CreateParams, env wire.Env) (*poo.Session, *wire.Info, error) {
 	f.client.set(env.Client)
 	model := ""
+	deciderName := ""
 	if params.Models != nil {
 		model = params.Models.Chat
+		deciderName = params.Models.Decider
 	}
 	runtime, err := f.runtimeFor(params.Profile, model)
 	if err != nil {
 		return nil, nil, err
+	}
+	// The decision model must be one the settings name, and it is built
+	// before the session is so a bad name leaves nothing behind.
+	var deciderModel poo.ModelInfo
+	var decider decide.Decider
+	if deciderName != "" {
+		if _, ok := f.settings.Models[deciderName]; !ok {
+			return nil, nil, poo.ErrUnknownModel
+		}
+		deciderModel, decider, err = runtime.DeciderFor(deciderName)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	mode := params.Mode
 	if mode == "" {
@@ -356,10 +395,26 @@ func (f *serveFactory) Create(ctx context.Context, params protocol.CreateParams,
 		_ = store.Close()
 		return nil, nil, err
 	}
+	if params.PromptOverrides != nil {
+		edits, err := runtime.ApplyPromptOverrides(promptOverrides(params.PromptOverrides))
+		if err != nil {
+			_ = sess.Close()
+			_ = store.Close()
+			return nil, nil, err
+		}
+		sess.SetPrompt(edits...)
+	}
+	if deciderName != "" {
+		if err := sess.SetDecider(deciderModel, decider); err != nil {
+			_ = sess.Close()
+			_ = store.Close()
+			return nil, nil, err
+		}
+	}
 	info := &wire.Info{
 		Mode:   mode,
 		Tools:  toolInfos(runtime.Profile.Tools),
-		Models: f.Roles(),
+		Models: rolesOf(sess, runtime),
 		// The records are the session's, and the store is what holds
 		// the session's lock.
 		Records: recorder.Records,
@@ -404,7 +459,7 @@ func (f *serveFactory) Load(ctx context.Context, params protocol.LoadParams, env
 		Mode:            string(loaded.Metadata.Mode),
 		SessionDir:      storeDir(store),
 		Tools:           toolInfos(runtime.Profile.Tools),
-		Models:          f.Roles(),
+		Models:          rolesOf(resumed.Session, runtime),
 		RecoveredTail:   loaded.RecoveredTail,
 		InterruptedRuns: resumed.Restored.Interrupted,
 		Warnings:        resumed.Restored.Warnings,
@@ -444,7 +499,7 @@ func (f *serveFactory) Configure(ctx context.Context, sess *poo.Session, params 
 	if err != nil {
 		return protocol.ModelRoles{}, err
 	}
-	roles := f.Roles()
+	roles := rolesOf(sess, runtime)
 	if params.PromptOverrides != nil {
 		edits, err := runtime.ApplyPromptOverrides(promptOverrides(params.PromptOverrides))
 		if err != nil {
@@ -515,7 +570,20 @@ func (f *serveFactory) Models(ctx context.Context, refresh bool) ([]protocol.Mod
 // never the keys themselves, so the document is the settings as they
 // are.
 func (f *serveFactory) Config(ctx context.Context) (map[string]any, error) {
-	encoded, err := json.Marshal(f.settings)
+	settings := f.effective
+	if settings == nil {
+		settings = f.settings
+	}
+	// The settings name environment variables, never keys. A base URL
+	// may carry credentials all the same, and the document is what the
+	// client reads.
+	redacted := *settings
+	redacted.Endpoints = make(map[string]config.Endpoint, len(settings.Endpoints))
+	for name, endpoint := range settings.Endpoints {
+		endpoint.BaseURL = loggedBaseURL(endpoint.BaseURL)
+		redacted.Endpoints[name] = endpoint
+	}
+	encoded, err := json.Marshal(&redacted)
 	if err != nil {
 		return nil, err
 	}

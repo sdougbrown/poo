@@ -798,6 +798,24 @@ func (s *Session) Transitions() []State {
 // ID returns the session's identifier.
 func (s *Session) ID() string { return s.opts.SessionID }
 
+// ChatModel returns the model the session talks to.
+func (s *Session) ChatModel() ModelInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opts.Model
+}
+
+// DeciderModel returns the decision model and reports whether the
+// session has one.
+func (s *Session) DeciderModel() (ModelInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deciderModel.Name == "" && s.deciderModel.ModelID == "" {
+		return ModelInfo{}, false
+	}
+	return s.deciderModel, true
+}
+
 // Broken reports that the store failed and the session cannot be used.
 func (s *Session) Broken() bool {
 	s.mu.Lock()

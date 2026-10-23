@@ -169,6 +169,46 @@ type Runtime struct {
 	httpClient *http.Client
 }
 
+// WithOverrides returns a copy of the settings with the command line's
+// changes applied.
+//
+// The copy is the effective configuration a command runs with: the
+// profile, the permission actions, the session directory and mode, and
+// the prompt changes the flags name. The maps and lists are shared, and
+// only the fields an override names are replaced.
+func WithOverrides(settings *Settings, overrides Overrides) *Settings {
+	if settings == nil {
+		return nil
+	}
+	effective := *settings
+	if overrides.Profile != "" {
+		effective.Profile = overrides.Profile
+	}
+	if overrides.PermissionUnmatched != "" {
+		value := overrides.PermissionUnmatched
+		effective.Permission.Unmatched = &value
+	}
+	if overrides.PermissionFallback != "" {
+		value := overrides.PermissionFallback
+		effective.Permission.Fallback = &value
+	}
+	if overrides.SessionDir != "" {
+		value := overrides.SessionDir
+		effective.Session.Dir = &value
+	}
+	if overrides.SessionMode != "" {
+		value := overrides.SessionMode
+		effective.Session.Mode = &value
+	}
+	if overrides.SystemPrompt != "" {
+		effective.SystemPrompt.BaseFile = overrides.SystemPrompt
+	}
+	if overrides.AppendSystemPrompt != "" {
+		effective.SystemPrompt.Append = overrides.AppendSystemPrompt
+	}
+	return &effective
+}
+
 // ToolFactory builds a tool from the settings.
 //
 // The factory is the binary's: the binary knows what a tool is, and
