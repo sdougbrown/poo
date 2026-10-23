@@ -152,6 +152,7 @@ func TestTheOneShotPrintsTheFinishResult(t *testing.T) {
 	}
 	tr := pootest.NewTransport(
 		pootest.Turn{
+			Text:  "the prose answer",
 			Calls: []pootest.Call{{ID: "c", Name: "finish", Arguments: []byte(`{"result":{"answer":"the typed answer"}}`)}},
 		},
 	)
@@ -178,7 +179,6 @@ func TestTheOneShotPrintsTheFinishResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("reason=%s result=%s", res.Reason, res.Detail.Result)
 	stdout, err := runOutput(context.Background(), s, res, false)
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +186,7 @@ func TestTheOneShotPrintsTheFinishResult(t *testing.T) {
 	if !strings.Contains(stdout, "the typed answer") {
 		t.Errorf("stdout is %q, want it to hold the finish result", stdout)
 	}
-	if strings.Contains(stdout, "woken answer") || strings.Contains(stdout, "initial answer") {
+	if strings.Contains(stdout, "the prose answer") {
 		t.Errorf("stdout is %q, want the finish result ahead of the last assistant message", stdout)
 	}
 }

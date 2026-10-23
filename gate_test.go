@@ -601,3 +601,95 @@ func TestTheGateRechecksTheOutputRoomAfterTheNotice(t *testing.T) {
 		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
 	}
 }
+
+// failingGateCompactor fails the compaction once, on the run's second
+// gate: the first one opens the run's first request.
+type failingGateCompactor struct {
+	gates int
+	err   error
+}
+
+// ShouldCompact compacts on the run's second gate only.
+func (c *failingGateCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+	c.gates++
+	return c.gates == 2
+}
+
+// Compact fails.
+func (c *failingGateCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+	return poo.Compaction{}, c.err
+}
+
+// TestAFailingCompactorOverTheHardLimitSettlesContextExhausted covers
+// the compactor-failure row of the failure table: a compaction that
+// fails at or above the hard ratio settles context_exhausted with the
+// compaction_failed source.
+func TestAFailingCompactorOverTheHardLimitSettlesContextExhausted(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer", usage: &poo.UsageReport{InputTokens: 2950}},
+		{text: "the second answer"},
+	})
+	compactor := &failingGateCompactor{err: errors.New("the compactor failed")}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.Compactor = compactor
+	opts.ContextLimit = 3000
+	// The gate runs on a continue path: the first turn continues, and
+	// the compaction fails before the second request.
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if res.Reason != poo.ReasonContextExhausted {
+		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
+	}
+	if res.Detail.Source != "compaction_failed" {
+		t.Errorf("the settle source is %q, want compaction_failed", res.Detail.Source)
+	}
+}
+
+// TestAFailingCompactorBelowTheHardLimitContinuesUncompacted covers the
+// same row's soft half: below the hard ratio the run carries on
+// uncompacted, and the strategy retries at the next gate.
+func TestAFailingCompactorBelowTheHardLimitContinuesUncompacted(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer"},
+		{text: "the second answer"},
+	})
+	compactor := &failingGateCompactor{err: errors.New("the compactor failed")}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.Compactor = compactor
+	opts.ContextLimit = 32768
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn: below the hard ratio the failure is not fatal", res.Reason)
+	}
+	if res.Turns != 2 {
+		t.Errorf("the run made %d requests, want 2: the run continued uncompacted", res.Turns)
+	}
+	// A failed compaction is not recorded: the record is what the
+	// compactor did, and it did nothing.
+	if n := sink.count("compaction"); n != 0 {
+		t.Errorf("the log holds %d compaction records, want none", n)
+	}
+}
