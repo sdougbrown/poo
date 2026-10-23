@@ -456,16 +456,6 @@ func registryToolNames(find bool) []string {
 	return []string{cli.CallToolName}
 }
 
-// offersTool reports whether a profile offers a tool.
-func offersTool(tools []string, name string) bool {
-	for _, tool := range tools {
-		if tool == name {
-			return true
-		}
-	}
-	return false
-}
-
 // offersSideEffects reports whether a tool set can change anything.
 func offersSideEffects(tools []poo.ToolInfo) bool {
 	for _, tool := range tools {
