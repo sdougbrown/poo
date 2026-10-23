@@ -653,7 +653,6 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		s.logs = newLogDispatcher(opts.Logger.Handler())
 		s.log = slog.New(s.logs.handler())
 	}
-	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
 
 	// The job tools are the core's own, and they are registered
 	// whenever a tool may run in the background.
@@ -691,6 +690,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 			return nil, &ErrSessionInit{Cause: err}
 		}
 	}
+	// The jobs' context is created after every fallible step, so a
+	// construction that fails has no cancellation to leak.
+	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
 	complete = true
 	return s, nil
 }
@@ -989,7 +991,7 @@ func (s *Session) markBroken() {
 func (s *Session) write(ctx context.Context, rec Record) error {
 	wctx, cancel := s.recordContext(ctx)
 	defer cancel()
-	return s.appendRecord(wctx, rec, nil)
+	return s.appendRecord(wctx, rec, nil, nil)
 }
 
 // writeRun appends one record that belongs to a run.
@@ -1009,7 +1011,7 @@ func (s *Session) writeRun(run *runState, rec Record) error {
 		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
 	}
 	defer release()
-	return s.appendRecord(ctx, rec, run)
+	return s.appendRecord(ctx, rec, run, nil)
 }
 
 // runWriteClaim is one claimed hook write for a run.
@@ -1076,7 +1078,11 @@ func (s *Session) beginRunWriteLocked(run *runState) (context.Context, func(), b
 // belongs to is sealed: a record the finalization ended at the seal, or
 // stopped waiting for, is abandoned, and its sink's refusal says nothing
 // about the store. A record that belongs to no run is never abandoned.
-func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runState) error {
+//
+// A caller may pass an abandonment predicate; it is consulted before
+// the write and again on a failure, so the refusal happens without a
+// write when the rule says so.
+func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runState, abandoned func() (bool, error)) error {
 	if s.opts.Sink == nil {
 		return nil
 	}
@@ -1087,7 +1093,21 @@ func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runSt
 	}
 	s.mu.Unlock()
 
+	// A caller that owns the abandonment rule decides first, before the
+	// write and again on a failure: a write the run settled around is
+	// the caller's to report, and it does not break the session.
+	if abandoned != nil {
+		if isAbandoned, err := abandoned(); isAbandoned {
+			return err
+		}
+	}
+
 	if err := s.opts.Sink.Append(ctx, rec); err != nil {
+		if abandoned != nil {
+			if isAbandoned, err := abandoned(); isAbandoned {
+				return err
+			}
+		}
 		if errors.Is(context.Cause(ctx), errCallRecordSealed) || s.sealedRun(sealedRun) {
 			return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
 		}
@@ -1128,7 +1148,7 @@ var errCallRecordSealed = errors.New("poo: the finalization sealed the call reco
 // a store failure: the run's outcome is already fixed.
 func (s *Session) writeCallRecord(run *runState, call *issuedCall, rec Record) error {
 	if call.recordCtx != nil {
-		return s.appendRecord(call.recordCtx, rec, run)
+		return s.appendRecord(call.recordCtx, rec, run, nil)
 	}
 	base := run.ctx
 	if base == nil {
@@ -1136,7 +1156,7 @@ func (s *Session) writeCallRecord(run *runState, call *issuedCall, rec Record) e
 	}
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(base), s.recordBudget())
 	defer cancel()
-	return s.appendRecord(wctx, rec, run)
+	return s.appendRecord(wctx, rec, run, nil)
 }
 
 // defaultRecordWriteBudget bounds one record write or flush.

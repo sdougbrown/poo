@@ -23,7 +23,7 @@ func TestARunThatEndsOnItsOwnSettlesEndTurn(t *testing.T) {
 		t.Errorf("the run made %d turns, want 1", res.Turns)
 	}
 
-	names := sink.names()
+	names := sink.Names()
 	// The system message, the user's prompt, the model's answer and the
 	// settle record.
 	want := []string{"run.started", "system_prompt", "message", "message", "message", "run.settled"}
