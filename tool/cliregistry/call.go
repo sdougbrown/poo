@@ -114,7 +114,13 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 			CallToolName, a.Name, t.catalog.namesHint())
 	}
 	args := map[string]any{}
-	if len(a.Args) > 0 && string(a.Args) != "null" {
+	if len(a.Args) > 0 {
+		// An omitted args is an empty object, because a CLI that takes
+		// no arguments is called with the name alone. An explicit null
+		// is not the same thing: the property's type is an object.
+		if string(a.Args) == "null" {
+			return nil, poo.InvalidArgsf("%s: %s: args must be an object, not null", CallToolName, entry.Name)
+		}
 		if err := json.Unmarshal(a.Args, &args); err != nil {
 			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, entry.Name, err)
 		}

@@ -85,6 +85,49 @@ func TestCallRunsTheCLI(t *testing.T) {
 	if output != "one\ntwo\n" {
 		t.Errorf("the output is %q, want the two words", output)
 	}
+
+	// A CLI that takes no arguments is called without the args
+	// property: an omitted args is an empty object.
+	res = call(t, tool, `{"name":"list"}`, poo.ToolEnv{})
+	if res.IsError {
+		t.Errorf("a call with no args is an error: %q", res.Text)
+	}
+}
+
+// TestAKilledCLIReportsNoReturncode covers the envelope's null: a
+// process that died by a signal has no exit status, and bash reports
+// null for it.
+func TestAKilledCLIReportsNoReturncode(t *testing.T) {
+	tool := cliregistry.NewCall(load(t, suicideManifest(t)))
+
+	res := call(t, tool, `{"name":"suicide","args":{}}`, poo.ToolEnv{})
+	if !res.IsError {
+		t.Errorf("a CLI that died by a signal is not an error: %q", res.Text)
+	}
+	obs := observation(t, res)
+	code, ok := obs[bash.EnvelopeReturncode]
+	if !ok {
+		t.Fatalf("the observation has no return code: %v", obs)
+	}
+	if code != nil {
+		t.Errorf("the return code is %v, want null: a killed process has no exit status", code)
+	}
+}
+
+// suicideManifest writes a registry with one CLI that dies by a signal.
+func suicideManifest(t *testing.T) string {
+	t.Helper()
+	return writeManifest(t, t.TempDir(), "suicide.json", map[string]any{
+		"suicide": map[string]any{
+			"description": "Print, then die by a signal",
+			"command":     []string{script(t, "suicide")},
+			"inputSchema": map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
+				"additionalProperties": false,
+			},
+		},
+	})
 }
 
 // TestCallReportsAFailedExit covers a command that fails: the model sees
@@ -133,6 +176,7 @@ func TestPrepareRefusesBadArgumentsBeforeAnyProcess(t *testing.T) {
 		{"an argument of the wrong type", `{"name":"say","args":{"name":5}}`},
 		{"an argument the schema does not have", `{"name":"say","args":{"colour":"red"}}`},
 		{"args that are not an object", `{"name":"say","args":["ada"]}`},
+		{"an explicit null", `{"name":"say","args":null}`},
 		{"a malformed call", `{"name":"say"} {}`},
 	}
 	for _, c := range bad {
