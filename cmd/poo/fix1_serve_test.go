@@ -174,3 +174,30 @@ func TestConfigGetReportsTheEffectiveSettings(t *testing.T) {
 		t.Errorf("config/get reports the session dir %v, want the effective one", session["dir"])
 	}
 }
+
+// TestConfigureRejectsAnUnknownDeciderModel covers the models rule on
+// session/configure: a decider the settings do not name is refused the
+// same way a chat model is.
+func TestConfigureRejectsAnUnknownDeciderModel(t *testing.T) {
+	dir := t.TempDir()
+	endpoint := newFakeEndpoint(t, fix1DoneAnswer())
+	settings := theSettings(t, dir, endpoint.URL+"/v1")
+
+	client := startServe(t, "--settings", settings, "--session-dir", filepath.Join(dir, "sessions"))
+	client.call(t, "poo/initialize", map[string]any{
+		"protocol_versions": []int{1},
+		"client":            map[string]any{"name": "test", "version": "test"},
+	})
+	answer := client.call(t, "session/create", map[string]any{"working_dir": dir})
+	created := result(t, answer)
+	sessionID, _ := created["session_id"].(string)
+	answer = client.call(t, "session/configure", map[string]any{
+		"session_id": sessionID,
+		"models":     map[string]any{"decider": "no-such-model"},
+	})
+	failure, _ := answer["error"].(map[string]any)
+	data, _ := failure["data"].(map[string]any)
+	if data["code"] != "unknown_model" {
+		t.Errorf("the failure is %v, want unknown_model", failure)
+	}
+}

@@ -529,6 +529,9 @@ func (f *serveFactory) Configure(ctx context.Context, sess *poo.Session, params 
 		roles.Chat = changed.To
 	}
 	if params.Models != nil && params.Models.Decider != "" {
+		if _, ok := f.settings.Models[params.Models.Decider]; !ok {
+			return protocol.ModelRoles{}, poo.ErrUnknownModel
+		}
 		model, decider, err := runtime.DeciderFor(params.Models.Decider)
 		if err != nil {
 			return protocol.ModelRoles{}, err
