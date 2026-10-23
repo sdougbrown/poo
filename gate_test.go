@@ -564,3 +564,40 @@ func TestACompactorsForkCountsTowardTheRunBudget(t *testing.T) {
 		t.Errorf("the fork's appended message is %+v, want the handoff request", forks[0].Appended)
 	}
 }
+
+// TestTheGateRechecksTheOutputRoomAfterTheNotice covers the gate's own
+// promise: no request leaves with a max_tokens under the minimum. The
+// usage report lands the run just under the notice's ratio, so the
+// notice's own tokens are what push the view past the room to answer —
+// and the gate settles context_exhausted instead of opening the
+// request.
+func TestTheGateRechecksTheOutputRoomAfterTheNotice(t *testing.T) {
+	// The first turn runs a tool and reports the usage that puts the
+	// estimate just inside the notice's ratio, so the notice's own
+	// tokens are what take the room to answer away.
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 2475}},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.ContextLimit = 3000
+	opts.NoticeRatio = 0.80
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if res.Reason != poo.ReasonContextExhausted {
+		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
+	}
+	if res.Detail.Source != "no_output_room" {
+		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
+	}
+}

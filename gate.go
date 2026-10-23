@@ -102,6 +102,17 @@ func (s *Session) gate(run *runState) gateResult {
 	// Step 3: the context notice, when it is due.
 	s.maybeNotice(run)
 
+	// The notice grew the view, so the room to answer is checked again:
+	// the request would otherwise go out with a max_tokens the minimum
+	// already forbids.
+	maxTokens = s.maxTokens()
+	if maxTokens < MinOutputTokens {
+		return gateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
+			Source: "no_output_room",
+			Text:   fmt.Sprintf("the computed max_tokens %d is under the %d-token minimum", maxTokens, MinOutputTokens),
+		})}}
+	}
+
 	// Step 4: the run requests.
 	return gateResult{}
 }
