@@ -43,8 +43,10 @@ matcher about every bind, so this covers the working directory, the
 read-only system directories and the extra read-write binds alike. The
 command reads nothing where the configuration protects something. A
 protected path outside every bound directory is not in the sandbox at
-all. The expansion of a bind is reused by the commands that follow, so a
-large read-only bind is walked once, not once per command.
+all. A protected path that is a link is masked where the link points,
+because a mount cannot land on a link. The expansion of a bind is reused
+by the commands that follow, so a large read-only bind is walked once,
+not once per command.
 
 The `local` executor cannot do this. Protected paths stop the file
 tools from wandering; with the `local` executor, `bash` reaches

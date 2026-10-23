@@ -77,6 +77,44 @@ func callCLI(t *testing.T, runtime *config.Runtime) poo.ToolResult {
 	return res
 }
 
+// TestTheSandboxProtectsALiteralFile covers the protection the settings
+// name as one file: the session's own matcher expands to it, and the
+// sandboxed CLI cannot read it. Protecting the directory it sits in is
+// not enough to cover the file.
+func TestTheSandboxProtectsALiteralFile(t *testing.T) {
+	dir := t.TempDir()
+	protected := filepath.Join(dir, "protected-file")
+	if err := os.WriteFile(protected, []byte("synthetic-protected-file-content"), 0o600); err != nil {
+		t.Fatalf("writing the protected file: %v", err)
+	}
+	registry := registryFile(t, map[string]any{
+		"description": "Read the protected file",
+		"command":     []string{"/bin/cat", protected},
+		"inputSchema": map[string]any{
+			"type":                 "object",
+			"properties":           map[string]any{},
+			"additionalProperties": false,
+		},
+	})
+	document := theModelSettings + fmt.Sprintf(`tools:
+  bash:
+    executor: bwrap
+  protected_paths: [%q]
+cliregistry:
+  paths: [%q]
+`, protected, registry)
+	settings, err := config.Parse([]byte(document), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, dir, sandboxExecutors())
+
+	res := callCLI(t, runtime)
+	if strings.Contains(res.Text, "synthetic-protected-file-content") {
+		t.Errorf("the sandboxed CLI read the protected file: %s", res.Text)
+	}
+}
+
 // TestTheSettingsExecutorRunsTheCLI covers the wiring: the executor the
 // settings name is the one call_cli runs through, with the sandbox's
 // options and the protected paths the settings name.
