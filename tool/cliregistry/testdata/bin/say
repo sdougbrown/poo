@@ -1,0 +1,20 @@
+#!/bin/sh
+# A fixture CLI: it greets a name, and it records that it ran.
+if [ -n "$FIXTURE_MARKER" ]; then
+	echo ran >>"$FIXTURE_MARKER"
+fi
+name=world
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--name)
+		name=$2
+		shift 2
+		;;
+	*) shift ;;
+	esac
+done
+if [ "$name" = "nobody" ]; then
+	echo "say: there is no one called nobody" >&2
+	exit 3
+fi
+echo "hello $name"

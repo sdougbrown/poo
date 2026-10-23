@@ -3,6 +3,7 @@ package bwrap
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -12,10 +13,10 @@ import (
 	"time"
 )
 
-// The helper is the sandbox's init's child: it starts the command, waits
-// for it, and reports the wait status to the executor. A shell cannot tell
-// a signal death from an exit of 128 plus the signal, so the wait status is
-// the only reliable report.
+// The helper is the sandbox's init: it starts the command, waits for it,
+// and reports the wait status to the executor. A shell cannot tell a signal
+// death from an exit of 128 plus the signal, so the wait status is the only
+// reliable report.
 //
 // It re-execs the running binary, because a separate helper binary would
 // have to be installed beside every poo build.
@@ -49,6 +50,10 @@ func runHelper() int {
 		writeStatus(status, statusReport{Exit: intPtr(127)})
 		return 127
 	}
+
+	// The helper watches the executor, so a poo that dies without a
+	// teardown still ends the command it left behind.
+	parentGone := watchParent()
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin = os.Stdin
@@ -95,8 +100,42 @@ func runHelper() int {
 		case <-escalation:
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			escalation = nil
+		case <-parentGone:
+			// Nothing is left to report to and nothing is left to keep
+			// the command alive for: the namespace ends with this
+			// process.
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			writeStatus(status, statusReport{Signal: intPtr(int(syscall.SIGKILL))})
+			return 128 + int(syscall.SIGKILL)
 		}
 	}
+}
+
+// watchParent reports the executor's death.
+//
+// The executor holds the write end of a pipe whose read end this process
+// has, so the kernel closes it when the executor ends, however it ends.
+// A descriptor that is missing or unreadable reports nothing, and the
+// watch then never fires.
+func watchParent() <-chan struct{} {
+	gone := make(chan struct{})
+	fd, err := strconv.Atoi(os.Getenv(parentFDEnv))
+	if err != nil || fd < 3 {
+		return gone
+	}
+	file := os.NewFile(uintptr(fd), "bwrap-parent")
+	if file == nil {
+		return gone
+	}
+	// The command has no business with the descriptor.
+	syscall.CloseOnExec(fd)
+	go func() {
+		defer file.Close()
+		if _, err := io.Copy(io.Discard, file); err == nil {
+			close(gone)
+		}
+	}()
+	return gone
 }
 
 // waitReport turns a finished process's wait status into the report the

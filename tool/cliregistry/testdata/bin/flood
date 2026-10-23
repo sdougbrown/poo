@@ -1,0 +1,8 @@
+#!/bin/sh
+# A fixture CLI: it prints a long output, so an observation has to elide it.
+i=0
+while [ $i -lt 400 ]; do
+	printf 'x'
+	i=$((i + 1))
+done
+echo

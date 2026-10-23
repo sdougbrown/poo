@@ -301,7 +301,7 @@ const section = "Edit:\n" +
 	"- The edit replaces an exact string, so the old text must be in the file exactly as you wrote it, spacing included.\n" +
 	"- The old text must appear once, unless replace_all is set: the edit fails loudly when it appears nowhere or more than once.\n" +
 	"- An edit with an empty old text on a path that does not exist creates the file.\n" +
-	"- The edit writes the whole file, so read the file again when you need to see what it holds now."
+	"- After an edit, run the tests once. When they pass, end your turn with a short summary."
 
 // PromptSection renders the tool's own section of the system prompt.
 func (t *Tool) PromptSection(env prompt.Env) string {

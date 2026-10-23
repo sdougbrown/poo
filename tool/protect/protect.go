@@ -134,8 +134,12 @@ func (s *Set) Match(target string) bool {
 // expanding one bind directory does not walk another. A glob whose prefix
 // is outside the root cannot match inside it, and is skipped.
 //
-// The walk does not follow symlinks: a symlinked directory is not entered,
-// and a path is matched as it stands.
+// The root is walked through its symlinks and its matches come back under
+// the spelling it was given: that is the name a caller mounts it by, so a
+// mask named with the resolving spelling would miss it. Below the root the
+// walk does not follow symlinks, and a match that is a symlink is returned
+// at the path it reaches, because that is the path a command reads through
+// it.
 //
 // The paths come back sorted, so a caller that masks them does the same
 // thing every time.
@@ -147,23 +151,22 @@ func (s *Set) Expand(root string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("protect: resolving %s: %w", root, err)
 	}
-	// A root that is a symlink is walked through, so the directory
-	// behind it is seen.
-	if info, err := os.Lstat(abs); err == nil && info.Mode()&fs.ModeSymlink != 0 {
-		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-			abs = resolved
-		}
+	resolved := resolvePath(abs)
+	// The patterns are resolved once, so the root, the walk roots and
+	// the matches all read the same spelling.
+	patterns := make([][]string, len(s.patterns))
+	for i, pattern := range s.patterns {
+		patterns[i] = resolvePattern(pattern)
 	}
 	// A root that is itself protected is the topmost match: hiding it
 	// hides every path below it, and the walk has nothing to add.
-	if s.matchOwn(abs) {
+	if s.matchOwn(abs) || matchesAny(patterns, resolved) {
 		return []string{abs}, nil
 	}
 
-	roots := s.walkRoots(abs)
 	var found []string
-	for _, walkRoot := range roots {
-		err = filepath.WalkDir(walkRoot, func(p string, d fs.DirEntry, err error) error {
+	for _, w := range walks(resolved, patterns) {
+		err = filepath.WalkDir(w.root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				// An entry that cannot be read is skipped: the walk is a
 				// search, and one unreadable directory does not end it.
@@ -172,32 +175,58 @@ func (s *Set) Expand(root string) ([]string, error) {
 				}
 				return nil
 			}
-			if p == abs && walkRoot == abs {
+			if !matchesAny(w.patterns, p) {
 				return nil
 			}
-			if s.matchOwn(p) {
-				found = append(found, p)
+			if mask, ok := maskPath(abs, resolved, p); ok {
+				found = append(found, mask)
 			}
 			return nil
 		})
 		if err != nil {
-			return nil, fmt.Errorf("protect: walking %s: %w", walkRoot, err)
+			return nil, fmt.Errorf("protect: walking %s: %w", w.root, err)
 		}
 	}
 	slices.Sort(found)
 	return slices.Compact(found), nil
 }
 
-// walkRoots returns the directories the walk of root has to cover.
+// walk is one directory an expansion covers, and the patterns that can
+// match inside it.
+type walk struct {
+	// root is the directory to walk.
+	root string
+	// patterns are the patterns with their fixed prefixes resolved,
+	// so they match the paths the walk sees.
+	patterns [][]string
+}
+
+// matchesAny reports whether a path matches one of the patterns.
+func matchesAny(patterns [][]string, target string) bool {
+	segments := splitPath(target)
+	for _, pattern := range patterns {
+		if matchSegments(pattern, segments) {
+			return true
+		}
+	}
+	return false
+}
+
+// walks returns the directories the walk of a resolved root has to cover.
 //
 // A glob can only match inside root when its fixed prefix and root contain
 // one another. The walk starts at the deeper of the two, so a glob for a
 // small directory does not walk the whole bind it happens to be under, and
-// a glob whose prefix is outside root costs nothing.
-func (s *Set) walkRoots(root string) []string {
-	var out []string
-	for _, pattern := range s.patterns {
-		prefix := fixedPrefix(pattern)
+// a glob whose prefix is outside root costs nothing. The prefix is resolved
+// the same way the root is, so a glob written through a symlink is walked
+// where its paths really are.
+//
+// A fixed prefix that is a matching file is covered as well: the walk
+// visits it once, and the expansion names it.
+func walks(root string, patterns [][]string) []walk {
+	var out []walk
+	for _, resolved := range patterns {
+		prefix := fixedPrefix(resolved)
 		var walkRoot string
 		switch {
 		case within(root, prefix):
@@ -211,14 +240,73 @@ func (s *Set) walkRoots(root string) []string {
 		default:
 			continue
 		}
-		if info, err := os.Stat(walkRoot); err != nil || !info.IsDir() {
+		if info, err := os.Stat(walkRoot); err != nil || (!info.IsDir() && !matchSegments(resolved, splitPath(walkRoot))) {
 			continue
 		}
-		if !slices.Contains(out, walkRoot) {
-			out = append(out, walkRoot)
+		i := slices.IndexFunc(out, func(w walk) bool { return w.root == walkRoot })
+		if i < 0 {
+			out = append(out, walk{root: walkRoot, patterns: [][]string{resolved}})
+			continue
 		}
+		out[i].patterns = append(out[i].patterns, resolved)
 	}
 	return out
+}
+
+// maskPath returns the path a match is masked at, and whether the sandbox
+// can mask the match at all.
+//
+// The match is named with the root's spelling and the resolved path below
+// it: a caller mounts the directory under the name it was given, so that
+// spelling is the one a mask lands on. A match that is a symlink is masked
+// at the path it reaches: a mount cannot land on a link, and the link's
+// target is what a command reads. A target outside the root is not in the
+// sandbox under this root, so there is nothing to mask.
+func maskPath(base, resolvedRoot, match string) (string, bool) {
+	if info, err := os.Lstat(match); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(match)
+		if err != nil || !within(resolvedRoot, target) {
+			return "", false
+		}
+		match = target
+	}
+	rel, err := filepath.Rel(resolvedRoot, match)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	if rel == "." {
+		return base, true
+	}
+	return filepath.Join(base, rel), true
+}
+
+// resolvePattern returns a pattern with its fixed prefix resolved.
+//
+// A pattern is matched against the paths a walk sees, and those are
+// resolved: a glob written through a symlink names the path it reaches.
+func resolvePattern(pattern []string) []string {
+	prefix := fixedPrefix(pattern)
+	if prefix == "/" {
+		// Nothing before the first wildcard, so there is no spelling
+		// to resolve.
+		return pattern
+	}
+	literal := fixedSegments(pattern)
+	out := splitPath(resolvePath(prefix))
+	return append(out, pattern[len(literal):]...)
+}
+
+// fixedSegments returns the leading segments of a pattern that are
+// literal.
+func fixedSegments(pattern []string) []string {
+	literal := make([]string, 0, len(pattern))
+	for _, segment := range pattern {
+		if segment == "**" || strings.ContainsAny(segment, "*?[") {
+			break
+		}
+		literal = append(literal, segment)
+	}
+	return literal
 }
 
 // fixedPrefix returns the part of a pattern before its first wildcard.
@@ -226,19 +314,7 @@ func (s *Set) walkRoots(root string) []string {
 // The prefix is a real path: every segment in it is a literal. The prefix
 // of an absolute pattern is itself absolute.
 func fixedPrefix(pattern []string) string {
-	literal := make([]string, 0, len(pattern))
-	for _, segment := range pattern {
-		if segment == "**" {
-			break
-		}
-		if _, err := path.Match(segment, ""); err != nil {
-			break
-		}
-		if strings.ContainsAny(segment, "*?[") {
-			break
-		}
-		literal = append(literal, segment)
-	}
+	literal := fixedSegments(pattern)
 	if len(literal) == 0 {
 		return "/"
 	}

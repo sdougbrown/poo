@@ -1,0 +1,5 @@
+#!/bin/sh
+# A fixture CLI: it prints, then dies by a signal, so it has no exit
+# status at all.
+echo before
+kill -9 $$

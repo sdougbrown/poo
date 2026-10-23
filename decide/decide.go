@@ -485,8 +485,11 @@ func (f SinkFunc) Record(ctx context.Context, rec Record) error { return f(ctx, 
 
 // Recorded wraps a decider and writes one record per logical call.
 //
-// The wrapper never changes the call's outcome: a sink that refuses a
-// record does not fail the decision.
+// A call that answers with a question set the answers do not match is
+// recorded as a deferral that carries the reason, though the caller still
+// gets the decider's answers and error. The wrapper never changes the
+// call's outcome: a sink that refuses a record does not fail the
+// decision.
 func Recorded(inner Decider, sink Sink, origin string) Decider {
 	if inner == nil {
 		return nil
@@ -523,6 +526,16 @@ func (d *recordedDecider) Decide(ctx context.Context, state any, instructions st
 	default:
 		rec.Outcome = OutcomeDeferred
 		rec.Error = err.Error()
+	}
+	// An answer set that does not match the questions is no answer, so
+	// the record says the call was deferred and carries the reason. The
+	// caller still gets the answers and the decider's nil error: the
+	// caller validates too, and its result says what the model reads.
+	if err == nil {
+		if verr := ValidateAnswers(qs, answers); verr != nil {
+			rec.Outcome = OutcomeDeferred
+			rec.Error = verr.Error()
+		}
 	}
 	if d.sink != nil {
 		// A sink that refuses the record does not fail the decision:

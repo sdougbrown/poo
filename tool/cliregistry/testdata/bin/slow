@@ -1,0 +1,5 @@
+#!/bin/sh
+# A fixture CLI: it records its pid and then sleeps, so a test can see
+# whether the process outlives the call.
+echo $$ >"$FIXTURE_PID"
+sleep 60

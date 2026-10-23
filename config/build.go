@@ -24,6 +24,7 @@ import (
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/tool/cliregistry"
 	"github.com/sdougbrown/poo/tool/protect"
 	"github.com/sdougbrown/poo/tool/read"
 )
@@ -132,6 +133,17 @@ type Runtime struct {
 	Store *session.FileStore
 	// Catalog is the model catalog the roles are resolved in.
 	Catalog *catalog.Catalog
+	// Registry is the cli registry the session offers, or nil when the
+	// settings name none.
+	Registry *cliregistry.Catalog
+	// deciderModel is the model the session's decider asks, when there
+	// is one.
+	deciderModel poo.ModelInfo
+	// decider is the decider the session and the tools over the
+	// registry share. It is nil when the settings name no decider.
+	decider decide.Decider
+	// deciderErr is why the session has no decider.
+	deciderErr error
 	// Policy is the permission policy.
 	Policy *perm.Policy
 	// Askers are the asker chain, in order.
@@ -218,13 +230,19 @@ type ToolFactory func(ToolOptions) poo.Tool
 
 // ToolOptions are the settings' options for the tools.
 type ToolOptions struct {
-	// Executor is the executor the bash tool runs its commands
-	// through.
+	// Executor is the executor the tools that run a command use:
+	// bash, and the registered CLIs.
 	Executor bash.Executor
 	// Scrub is the rules for the child environment.
 	Scrub bash.Scrub
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths *protect.Set
+	// Registry is the cli registry the registry's tools call. It is nil
+	// when the settings name no registry.
+	Registry *cliregistry.Catalog
+	// Search reports that the session searches the catalog instead of
+	// listing it, so call_cli points an unknown name at the search.
+	Search bool
 }
 
 // Build turns the settings into the runtime a session is built from.
@@ -249,10 +267,14 @@ func Build(opts BuildOptions) (*Runtime, error) {
 
 	runtime := &Runtime{Settings: settings, httpClient: opts.HTTPClient}
 
-	if err := runtime.resolveProfile(opts); err != nil {
+	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveModels(opts); err != nil {
+		return nil, err
+	}
+	runtime.resolveDecider()
+	if err := runtime.resolveProfile(opts); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
@@ -311,11 +333,145 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 		r.Profile.Tools = append(r.Profile.Tools, toolInfo(factory))
 		r.toolNames = append(r.toolNames, tool)
 	}
+	// The registry is the settings' opt-in: a session whose settings name
+	// a registry offers its CLIs as well.
+	if err := r.addRegistryTools(opts); err != nil {
+		return err
+	}
 	// The core adds the job tools on its own whenever a linked tool may
 	// run in the background, and the profile offers them with it.
 	r.Profile.Tools = withJobTools(r.Profile.Tools)
-	r.Profiles = resolveProfiles(opts)
+	r.Profiles = resolveProfiles(opts, r.Registry != nil, r.findTool())
 	return nil
+}
+
+// resolveRegistry loads the cli registries the settings name.
+//
+// A path is resolved against the working directory, and every manifest
+// reachable from the paths is one catalog. The catalog is loaded here,
+// once: the commands a session may call are the ones its registry holds
+// when the session is built, and a session does not reload one.
+func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
+	paths := r.Settings.CLIRegistry.Paths
+	if len(paths) == 0 {
+		return nil
+	}
+	resolved := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		resolved = append(resolved, path)
+	}
+	catalog, err := cliregistry.Load(resolved...)
+	if err != nil {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "cliregistry.paths",
+			Message: "the cli registry does not load",
+			Err:     err,
+		}
+	}
+	r.Registry = catalog
+	return nil
+}
+
+// resolveDecider resolves the session's decider once.
+//
+// The tools over the registry, the catalog's section and the session's
+// own options all have to agree about whether there is a decider, so
+// they read one answer rather than resolving the role again.
+func (r *Runtime) resolveDecider() {
+	r.deciderModel, r.decider, r.deciderErr = r.Decider()
+}
+
+// findTool reports whether the session searches the catalog instead of
+// listing it.
+//
+// A search needs a decision model to ask, and it pays for itself only
+// when the catalog is too long to show: below the threshold the whole
+// catalog is in the prompt, and a search would cost a round trip to say
+// what the model could already read. The decider is the session's own: a
+// decider role the settings name and the catalog cannot resolve gives
+// the session none.
+func (r *Runtime) findTool() bool {
+	return r.Registry != nil && r.Registry.Len() > cliregistry.FindThreshold &&
+		r.deciderErr == nil && r.decider != nil
+}
+
+// offersRegistry reports whether the session offers the registry's tools.
+//
+// The catalog is a section of the prompt only when the model can call
+// what it lists: a tool left out of the build takes its guidance with it.
+func (r *Runtime) offersRegistry() bool {
+	for _, name := range r.toolNames {
+		if name == cliregistry.CallToolName {
+			return true
+		}
+	}
+	return false
+}
+
+// addRegistryTools offers the registry's tools to the session.
+//
+// The tools join a profile that already offers a side-effecting tool: a
+// registered CLI can change anything, so a read-only profile stays
+// read-only. A binary that links no such tool cannot honour the settings,
+// and the operator is told which tool is missing.
+func (r *Runtime) addRegistryTools(opts BuildOptions) error {
+	if r.Registry == nil || !offersSideEffects(r.Profile.Tools) {
+		return nil
+	}
+	for _, name := range registryToolNames(r.findTool()) {
+		factory, ok := opts.Tools[name]
+		if !ok || factory == nil {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "cliregistry.paths",
+				Message: fmt.Sprintf("the settings name a cli registry, and this binary does not link the %q tool", name),
+			}
+		}
+		r.Profile.Tools = append(r.Profile.Tools, toolInfo(factory))
+		r.toolNames = append(r.toolNames, name)
+	}
+	return nil
+}
+
+// registryToolNames names the tools over a registry.
+//
+// The catalog is searched when there is a decision model and enough
+// entries to need one; otherwise the whole catalog is listed, and
+// call_cli is all the model needs.
+func registryToolNames(find bool) []string {
+	if find {
+		return []string{cliregistry.CallToolName, cliregistry.FindToolName}
+	}
+	return []string{cliregistry.CallToolName}
+}
+
+// offersSideEffects reports whether a tool set can change anything.
+func offersSideEffects(tools []poo.ToolInfo) bool {
+	for _, tool := range tools {
+		if tool.Class == poo.ClassSideEffecting {
+			return true
+		}
+	}
+	return false
+}
+
+// needsExecutor reports whether an offered tool runs a command.
+//
+// bash and call_cli run a command through the executor, so a session that
+// offers either one builds it; a read-only profile builds none, and a
+// settings file naming an executor this binary lacks is only an error when
+// something would run in it.
+func (r *Runtime) needsExecutor() bool {
+	for _, name := range r.toolNames {
+		if name == "bash" || name == cliregistry.CallToolName {
+			return true
+		}
+	}
+	return false
 }
 
 // toolInfo describes a tool the way the profile and the wire name it.
@@ -348,7 +504,7 @@ func withJobTools(tools []poo.ToolInfo) []poo.ToolInfo {
 // A profile that names a tool the binary does not link offers the
 // tools it has: the profile cannot be run with the others, and a
 // profile that cannot be run is not one the binary offers.
-func resolveProfiles(opts BuildOptions) []poo.Profile {
+func resolveProfiles(opts BuildOptions, registry, find bool) []poo.Profile {
 	var out []poo.Profile
 	for _, definition := range opts.Profiles {
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
@@ -361,6 +517,13 @@ func resolveProfiles(opts BuildOptions) []poo.Profile {
 		}
 		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
 			continue
+		}
+		if registry && offersSideEffects(resolved.Tools) {
+			for _, name := range registryToolNames(find) {
+				if factory, ok := opts.Tools[name]; ok && factory != nil {
+					resolved.Tools = append(resolved.Tools, toolInfo(factory))
+				}
+			}
 		}
 		resolved.Tools = withJobTools(resolved.Tools)
 		out = append(out, resolved)
@@ -489,11 +652,12 @@ func modalities(names []string) []poo.Modality {
 
 // resolveTools builds the tools the session offers.
 //
-// The tools are the ones the profile names. The bash tool runs its
-// commands through the executor the settings name, with the sandbox's
-// options and the protected paths the settings name. The child
-// environment is the session's own, less the names the settings scrub
-// and the names the endpoints' credentials are read from.
+// The tools are the ones the profile names. The tools that run a command
+// — bash and the registered CLIs — run it through the executor the
+// settings name, with the sandbox's options and the protected paths the
+// settings name. The child environment is the session's own, less the
+// names the settings scrub and the names the endpoints' credentials are
+// read from.
 func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	settings := r.Settings
 	protected, err := protect.Compile(settings.Tools.ProtectedPaths)
@@ -535,32 +699,32 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		}
 	}
 
-	toolOptions := ToolOptions{Scrub: scrub, ProtectedPaths: protected}
+	toolOptions := ToolOptions{Scrub: scrub, ProtectedPaths: protected, Registry: r.Registry, Search: r.findTool()}
+	if r.needsExecutor() {
+		executor, err := opts.Executors.New(executorName, bash.Options{
+			Masker: protected,
+			Sandbox: bash.Sandbox{
+				DisableNetwork: settings.Tools.Bwrap.Network != nil && !*settings.Tools.Bwrap.Network,
+				ROBinds:        settings.Tools.Bwrap.ROBinds,
+				RWBinds:        settings.Tools.Bwrap.RWBinds,
+			},
+		})
+		if err != nil {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.executor",
+				Message: err.Error(),
+				Err:     err,
+			}
+		}
+		toolOptions.Executor = executor
+	}
 	tools := map[string]poo.Tool{}
 	var order []string
 	for _, tool := range r.toolNames {
 		factory, ok := opts.Tools[tool]
 		if !ok || factory == nil {
 			continue
-		}
-		if tool == "bash" {
-			executor, err := opts.Executors.New(executorName, bash.Options{
-				Masker: protected,
-				Sandbox: bash.Sandbox{
-					DisableNetwork: settings.Tools.Bwrap.Network != nil && !*settings.Tools.Bwrap.Network,
-					ROBinds:        settings.Tools.Bwrap.ROBinds,
-					RWBinds:        settings.Tools.Bwrap.RWBinds,
-				},
-			})
-			if err != nil {
-				return &Error{
-					Code:    CodeUnsupported,
-					Field:   "tools.bash.executor",
-					Message: err.Error(),
-					Err:     err,
-				}
-			}
-			toolOptions.Executor = executor
 		}
 		tools[tool] = factory(toolOptions)
 		order = append(order, tool)
@@ -778,6 +942,11 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 		}
 		r.Options.Transport = transport
 	}
+	// The decider is the session's as well as the policy's: the tools over
+	// a cli registry ask it which entries fit, and a session without one
+	// lists the whole catalog instead.
+	r.Options.DeciderModel = r.deciderModel
+	r.Options.Decider = r.decider
 	r.Options.Profile = r.Profile.Name
 	r.Options.Profiles = r.Profiles
 	r.Options.Models = r.Models
@@ -864,6 +1033,14 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	if appendText != "" {
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			b.Append(BaseSection, appendText)
+		})
+	}
+	// The catalog is the default for its section: the settings' own
+	// sections come after it, so an operator who writes one keeps it.
+	if r.Registry != nil && r.offersRegistry() {
+		section := r.Registry.Section(r.findTool())
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			b.Set(cliregistry.SectionName, section)
 		})
 	}
 	for name, text := range settings.SystemPrompt.Sections {

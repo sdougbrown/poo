@@ -1,0 +1,4 @@
+#!/bin/sh
+# A fixture CLI: it prints, then runs past its timeout.
+echo partial-output
+sleep 30
