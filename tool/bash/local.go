@@ -35,9 +35,10 @@ func (l *Local) Name() string { return "local" }
 
 // Start runs the command in its own process group.
 //
-// The output of stdout and stderr goes to out as one stream. The
-// context ends the command: when it is done, the command's process
-// group is torn down.
+// The output of stdout and stderr goes to out as one stream, unless the
+// command names a writer for stderr: then the two streams are captured
+// apart. The context ends the command: when it is done, the command's
+// process group is torn down.
 func (l *Local) Start(ctx context.Context, c Command, out io.Writer) (Process, error) {
 	if len(c.Argv) == 0 {
 		return nil, errors.New("bash: the command has no arguments")
@@ -57,23 +58,50 @@ func (l *Local) Start(ctx context.Context, c Command, out io.Writer) (Process, e
 	}
 	cmd.Stdout = pw
 	cmd.Stderr = pw
+	var errPr, errW *os.File
+	if c.Stderr != nil {
+		errPr, errW, err = os.Pipe()
+		if err != nil {
+			pr.Close()
+			pw.Close()
+			return nil, err
+		}
+		cmd.Stderr = errW
+	}
 
 	if err := cmd.Start(); err != nil {
 		pr.Close()
 		pw.Close()
+		if errW != nil {
+			errPr.Close()
+			errW.Close()
+		}
 		return nil, err
 	}
-	// The parent's copy of the write end is closed, so the pipe reaches
-	// EOF once every writer is gone.
+	// The parent's copies of the write ends are closed, so a pipe
+	// reaches EOF once every writer is gone.
 	pw.Close()
+	if errW != nil {
+		errW.Close()
+	}
 
 	pgid := cmd.Process.Pid
 
-	drained := make(chan struct{})
-	go func() {
-		defer close(drained)
-		_, _ = io.Copy(out, pr)
-	}()
+	pipes := []*os.File{pr}
+	writers := []io.Writer{out}
+	if errPr != nil {
+		pipes = append(pipes, errPr)
+		writers = append(writers, c.Stderr)
+	}
+	drains := make([]chan struct{}, 0, len(pipes))
+	for i, pipe := range pipes {
+		drained := make(chan struct{})
+		drains = append(drains, drained)
+		go func(pipe *os.File, w io.Writer) {
+			defer close(drained)
+			_, _ = io.Copy(w, pipe)
+		}(pipe, writers[i])
+	}
 
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
@@ -81,9 +109,9 @@ func (l *Local) Start(ctx context.Context, c Command, out io.Writer) (Process, e
 	p := &localProcess{
 		cmd:      cmd,
 		pgid:     pgid,
-		pr:       pr,
+		pipes:    pipes,
 		waited:   waited,
-		drained:  drained,
+		drains:   drains,
 		finished: make(chan struct{}),
 	}
 	go func() {
@@ -100,11 +128,13 @@ func (l *Local) Start(ctx context.Context, c Command, out io.Writer) (Process, e
 
 // localProcess is a command running in its own process group.
 type localProcess struct {
-	cmd     *exec.Cmd
-	pgid    int
-	pr      *os.File
-	waited  chan error
-	drained chan struct{}
+	cmd  *exec.Cmd
+	pgid int
+	// pipes are the read ends of the capture, one per stream.
+	pipes  []*os.File
+	waited chan error
+	// drains report that a stream has been read to its end.
+	drains []chan struct{}
 
 	// finished is closed when the wait is over, so the context watcher
 	// stops.
@@ -140,22 +170,32 @@ func (p *localProcess) Wait() (int, error) {
 		// SIGKILL it once the grace period is up.
 		p.terminateGroup()
 
-		// A descendant may still hold the pipe open. Wait for the
-		// drain, then close the pipe so the goroutine cannot hang.
-		select {
-		case <-p.drained:
-		case <-time.After(KillGrace):
-			p.killGroup(syscall.SIGKILL)
-			p.pr.Close()
-			<-p.drained
+		// A descendant may still hold a pipe open. Wait for the
+		// drains, then close the pipes so the goroutines cannot hang.
+		deadline := time.After(KillGrace)
+		for _, drained := range p.drains {
+			select {
+			case <-drained:
+			case <-deadline:
+				p.killGroup(syscall.SIGKILL)
+				p.closePipes()
+				<-drained
+			}
 		}
-		p.pr.Close()
+		p.closePipes()
 		close(p.finished)
 	})
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.code, p.err
+}
+
+// closePipes closes the read ends the wait has finished with.
+func (p *localProcess) closePipes() {
+	for _, pipe := range p.pipes {
+		pipe.Close()
+	}
 }
 
 // Kill stops the command and everything in its process group.

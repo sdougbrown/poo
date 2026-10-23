@@ -148,7 +148,9 @@ func (e *Executor) Name() string { return Name }
 // the filesystem is there, and $HOME is not mounted unless a bind names
 // it.
 //
-// The output of stdout and stderr goes to out as one stream.
+// The output of stdout and stderr goes to out as one stream, unless the
+// command names a writer for stderr: then the two streams are captured
+// apart.
 func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (bash.Process, error) {
 	if len(c.Argv) == 0 {
 		return nil, errors.New("bwrap: the command has no arguments")
@@ -202,11 +204,29 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 	}
 	cmd.Stdout = pw
 	cmd.Stderr = pw
+	var errPr, errW *os.File
+	if c.Stderr != nil {
+		errPr, errW, err = os.Pipe()
+		if err != nil {
+			pr.Close()
+			pw.Close()
+			statusR.Close()
+			statusW.Close()
+			jsonR.Close()
+			jsonW.Close()
+			return nil, err
+		}
+		cmd.Stderr = errW
+	}
 	cmd.ExtraFiles = []*os.File{statusW, jsonW}
 
 	if err := cmd.Start(); err != nil {
 		pr.Close()
 		pw.Close()
+		if errW != nil {
+			errPr.Close()
+			errW.Close()
+		}
 		statusR.Close()
 		statusW.Close()
 		jsonR.Close()
@@ -216,14 +236,27 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 	// The parent's copies of the write ends are closed, so the pipes
 	// reach EOF once every writer is gone.
 	pw.Close()
+	if errW != nil {
+		errW.Close()
+	}
 	statusW.Close()
 	jsonW.Close()
 
-	drained := make(chan struct{})
-	go func() {
-		defer close(drained)
-		_, _ = io.Copy(out, pr)
-	}()
+	pipes := []*os.File{pr}
+	writers := []io.Writer{out}
+	if errPr != nil {
+		pipes = append(pipes, errPr)
+		writers = append(writers, c.Stderr)
+	}
+	drains := make([]chan struct{}, 0, len(pipes))
+	for i, pipe := range pipes {
+		drained := make(chan struct{})
+		drains = append(drains, drained)
+		go func(pipe *os.File, w io.Writer) {
+			defer close(drained)
+			_, _ = io.Copy(w, pipe)
+		}(pipe, writers[i])
+	}
 
 	done := make(chan struct{})
 	waited := make(chan error, 1)
@@ -235,11 +268,11 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 
 	p := &process{
 		cmd:        cmd,
-		pr:         pr,
+		pipes:      pipes,
 		statusR:    statusR,
 		jsonR:      jsonR,
 		waited:     waited,
-		drained:    drained,
+		drains:     drains,
 		done:       done,
 		finished:   make(chan struct{}),
 		statusDone: make(chan struct{}),
@@ -500,12 +533,14 @@ func probe(binary string, opts Options) error {
 
 // process is a sandbox that is running.
 type process struct {
-	cmd     *exec.Cmd
-	pr      *os.File
+	cmd *exec.Cmd
+	// pipes are the read ends of the capture, one per stream.
+	pipes   []*os.File
 	statusR *os.File
 	jsonR   *os.File
 	waited  chan error
-	drained chan struct{}
+	// drains report that a stream has been read to its end.
+	drains []chan struct{}
 	// done is closed when the sandbox's own process has been reaped.
 	done chan struct{}
 	// finished is closed when the wait is over, so the context watcher
@@ -610,15 +645,18 @@ func (p *process) Wait() (int, error) {
 		p.exited = true
 		p.mu.Unlock()
 
-		// A descendant may still hold the pipe open. The wait is
+		// A descendant may still hold a pipe open. The wait is
 		// bounded, so the call cannot hang on it.
-		select {
-		case <-p.drained:
-		case <-time.After(KillGrace):
-			p.pr.Close()
-			<-p.drained
+		deadline := time.After(KillGrace)
+		for _, drained := range p.drains {
+			select {
+			case <-drained:
+			case <-deadline:
+				p.closePipes()
+				<-drained
+			}
 		}
-		p.pr.Close()
+		p.closePipes()
 		close(p.finished)
 	})
 
@@ -684,6 +722,13 @@ func (p *process) Kill() {
 	}
 	_ = syscall.Kill(child, syscall.SIGKILL)
 	_ = p.cmd.Process.Signal(syscall.SIGKILL)
+}
+
+// closePipes closes the read ends the wait has finished with.
+func (p *process) closePipes() {
+	for _, pipe := range p.pipes {
+		pipe.Close()
+	}
 }
 
 // alive reports whether the sandbox's own process is still there.
