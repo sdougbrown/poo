@@ -688,30 +688,29 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	executorName := DefaultExecutor
 	if settings.Tools.Bash.Executor != nil {
 		executorName = *settings.Tools.Bash.Executor
-		// A settings file cannot set up a tool the binary lacks: the
-		// executor is the bash tool's, so a binary without the tool
-		// refuses the setting by name.
-		if _, linked := opts.Tools[ToolBash]; !linked {
+	}
+	// A settings file cannot set up a tool the binary lacks: every bash
+	// leaf belongs to the bash tool, so a binary without the tool
+	// refuses the leaf by name.
+	if !linksTool(opts, ToolBash) {
+		if settings.Tools.Bash.Executor != nil {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "tools.bash.executor",
 				Message: fmt.Sprintf("the settings name an executor for the %q tool, and this binary does not link it", ToolBash),
 			}
 		}
-	}
-	// A settings file cannot set up a tool the binary lacks: the timeout
-	// is the bash tool's, so a binary without the tool refuses the
-	// setting by name.
-	if !linksTool(opts, ToolBash) && settings.Tools.Bash.TimeoutS != nil {
-		return &Error{
-			Code:    CodeUnsupported,
-			Field:   "tools.bash.timeout_s",
-			Message: fmt.Sprintf("the settings name a timeout for the %q tool, and this binary does not link it", ToolBash),
+		if settings.Tools.Bash.TimeoutS != nil {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.timeout_s",
+				Message: fmt.Sprintf("the settings name a timeout for the %q tool, and this binary does not link it", ToolBash),
+			}
 		}
-	}
-	// The executor is the bash tool's: a profile that offers no bash
-	// runs no command, so the build resolves none.
-	if offersTool(r.toolNames, ToolBash) {
+	} else {
+		// The executor is the bash tool's, and a binary that links the
+		// tool must be able to resolve the name whatever profile runs:
+		// a typo is a settings failure, not a failure to discover later.
 		if opts.Executors == nil {
 			return &Error{
 				Code:    CodeUnsupported,
@@ -732,10 +731,10 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	tools := map[string]poo.Tool{}
 	var order []string
 	for _, tool := range r.toolNames {
-		factory, ok := opts.Tools[tool]
-		if !ok || factory == nil {
+		if !linksTool(opts, tool) {
 			continue
 		}
+		factory := opts.Tools[tool]
 		if tool == "bash" {
 			executor, err := opts.Executors.New(executorName, exec.Options{
 				Masker: protected,
