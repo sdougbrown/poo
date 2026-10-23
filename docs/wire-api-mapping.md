@@ -162,8 +162,8 @@ Two placement rules belong to the API, and a transport has to honour them:
    *Closed:* `Message.Origin`, with the plan's values.
 
 5. **A user message had nowhere to put a delivery note.** The note is
-   rendered when the input is accepted and must survive to the record, so
-   replay is exact.
+   rendered when the input is delivered, prefixed to the message's text,
+   and must survive to the record, so replay is exact.
    *Closed:* `Message.DeliveryNote{message_id, upto_chars, text}`.
 
 6. **A tool result's tool name and error flag have no home on one of the
