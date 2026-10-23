@@ -240,7 +240,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			}
 			// The settle record says the same thing, unless the
 			// store refused it.
-			if settle := sink.settled(); settle != nil {
+			if settle := sink.Settled(); settle != nil {
 				if settle.Reason != c.want && c.want != poo.ReasonStoreError {
 					t.Errorf("the settle record says %q, want %q", settle.Reason, c.want)
 				}

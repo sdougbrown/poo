@@ -359,8 +359,8 @@ func TestTheConstructionRollsBack(t *testing.T) {
 		t.Fatalf("the error is %T, want an ErrSessionInit", err)
 	}
 	// Nothing was written.
-	if len(sink.records) != 0 {
-		t.Errorf("the log holds %d records, want none", len(sink.records))
+	if len(sink.Records()) != 0 {
+		t.Errorf("the log holds %d records, want none", len(sink.Records()))
 	}
 	// No run was settled: the construction failed before there was a
 	// run to settle.
@@ -479,7 +479,7 @@ func TestALateCompletionDoesNotMutateTheSettledRun(t *testing.T) {
 	// change it.
 	close(release)
 	time.Sleep(50 * time.Millisecond)
-	settle := sink.settled()
+	settle := sink.Settled()
 	if settle == nil {
 		t.Fatal("the log holds no settle record")
 	}
@@ -523,7 +523,7 @@ func TestClosingTheSessionCancelsTheRun(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("closing the session: %v", err)
 	}
-	settle := sink.settled()
+	settle := sink.Settled()
 	if settle == nil {
 		t.Fatal("the log holds no settle record")
 	}

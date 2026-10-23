@@ -239,7 +239,7 @@ func TestAJobFinishingAfterTheCommitWakesAfterTheSettle(t *testing.T) {
 	}
 	// The session woke with the result.
 	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.settled()
+		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
 }
@@ -275,7 +275,7 @@ func TestAJobResultNeverReopensASettlingRun(t *testing.T) {
 	// first one.
 	tool.Release()
 	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.settled()
+		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
 	settles := 0
@@ -343,7 +343,7 @@ func TestAWakeRacingAPromptStartsOneRun(t *testing.T) {
 
 	// Exactly one run started after the first one: the wake's.
 	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.settled()
+		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
 	starts := 0
@@ -653,7 +653,7 @@ func TestNoJobLaunchesAfterTheSettle(t *testing.T) {
 	close(sink.release)
 	select {
 	case <-tool.Started():
-		t.Fatalf("the job began executing after the run settled; records: %v", sink.inner.names())
+		t.Fatalf("the job began executing after the run settled; records: %v", sink.inner.Names())
 	case <-time.After(100 * time.Millisecond):
 	}
 }
@@ -750,10 +750,10 @@ func TestAnAcceptedJobGetsTerminalOutcomes(t *testing.T) {
 		t.Fatalf("the log holds %d job.started record(s), want 1", got)
 	}
 	if got := sink.count("job.ended"); got != 1 {
-		t.Fatalf("the accepted job has %d job.ended record(s), want 1; records: %v", got, sink.names())
+		t.Fatalf("the accepted job has %d job.ended record(s), want 1; records: %v", got, sink.Names())
 	}
 	if got := sink.count("tool.result"); got != 1 {
-		t.Fatalf("the accepted job's call has %d result(s), want 1; records: %v", got, sink.names())
+		t.Fatalf("the accepted job's call has %d result(s), want 1; records: %v", got, sink.Names())
 	}
 	if got := tool.Calls(); got != 0 {
 		t.Errorf("the job ran %d time(s) after the run settled, want 0", got)

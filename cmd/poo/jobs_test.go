@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/tool/finish"
 )
 
 // The one-shot's job behaviour: it waits for the jobs, it prints the
@@ -114,7 +116,9 @@ func TestTheOneShotPrintsTheLastRunsAnswer(t *testing.T) {
 		ContextLimit: 32768,
 		SessionID:    "s1",
 		ModelID:      "m",
-		MaxTurns:     1,
+		// The finish call's own turn is the last one: the candidate
+		// it adds outranks nothing at the turn ceiling.
+		MaxTurns: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -135,5 +139,54 @@ func TestTheOneShotPrintsTheLastRunsAnswer(t *testing.T) {
 	}
 	if stdout != s.LastAssistantMessage() {
 		t.Fatalf("stdout is %q, but the last run's answer is %q", stdout, s.LastAssistantMessage())
+	}
+}
+
+// TestTheOneShotPrintsTheFinishResult covers the one-shot's stdout rule
+// with a typed result: the finish result the run settled with is what
+// stdout gets, ahead of the last assistant message.
+func TestTheOneShotPrintsTheFinishResult(t *testing.T) {
+	tool, err := finish.New(json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := pootest.NewTransport(
+		pootest.Turn{
+			Calls: []pootest.Call{{ID: "c", Name: "finish", Arguments: []byte(`{"result":{"answer":"the typed answer"}}`)}},
+		},
+	)
+	s, err := poo.New(poo.Options{
+		Transport:    tr,
+		Tools:        map[string]poo.Tool{"finish": tool},
+		ToolOrder:    []string{"finish"},
+		ContextLimit: 32768,
+		SessionID:    "s1",
+		ModelID:      "m",
+		// The finish call's own turn is the last one: the candidate
+		// it adds outranks nothing at the turn ceiling.
+		MaxTurns: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	id, err := s.Prompt(context.Background(), "start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.WaitRun(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("reason=%s result=%s", res.Reason, res.Detail.Result)
+	stdout, err := runOutput(context.Background(), s, res, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "the typed answer") {
+		t.Errorf("stdout is %q, want it to hold the finish result", stdout)
+	}
+	if strings.Contains(stdout, "woken answer") || strings.Contains(stdout, "initial answer") {
+		t.Errorf("stdout is %q, want the finish result ahead of the last assistant message", stdout)
 	}
 }

@@ -596,7 +596,7 @@ func TestAnUnlaunchedJobCompletesThroughTheQueue(t *testing.T) {
 	}
 	<-cancelDone
 
-	names := sink.names()
+	names := sink.Names()
 	started, ended := -1, -1
 	var end *poo.JobEnded
 	for i, name := range names {
