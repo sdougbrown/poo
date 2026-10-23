@@ -21,6 +21,17 @@ type result struct {
 	output string
 }
 
+// stopped is the result of a command the context ended before it ran.
+//
+// There is no output and no return code: the command never wrote
+// anything, and the model has to see that the call did not happen.
+func stopped(err error) result {
+	return result{
+		timedOut:  errors.Is(err, context.DeadlineExceeded),
+		cancelled: errors.Is(err, context.Canceled),
+	}
+}
+
 // run executes the command through the tool's executor and collects its
 // output.
 //
@@ -45,6 +56,11 @@ func (t *Tool) run(ctx context.Context, command string, env poo.ToolEnv, timeout
 	}
 
 	buf := NewCappedBuffer(CaptureCap)
+	// A context that has already ended runs nothing: a cancelled call
+	// must not let the command write its side effects first.
+	if err := runCtx.Err(); err != nil {
+		return stopped(err), nil
+	}
 	proc, err := executor.Start(runCtx, Command{
 		Argv: []string{"/bin/bash", "-c", command},
 		Dir:  env.WorkingDir,

@@ -38,10 +38,17 @@ func (l *Local) Name() string { return "local" }
 // The output of stdout and stderr goes to out as one stream, unless the
 // command names a writer for stderr: then the two streams are captured
 // apart. The context ends the command: when it is done, the command's
-// process group is torn down.
+// process group is torn down. A context that has already ended starts
+// nothing.
 func (l *Local) Start(ctx context.Context, c Command, out io.Writer) (Process, error) {
 	if len(c.Argv) == 0 {
 		return nil, errors.New("bash: the command has no arguments")
+	}
+	// A command whose context is already over gets no start: the caller
+	// asked for no process, and a fast command would be a side effect
+	// before the kill.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	cmd := exec.Command(c.Argv[0], c.Argv[1:]...)
 	cmd.Dir = c.Dir

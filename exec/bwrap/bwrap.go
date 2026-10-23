@@ -151,10 +151,16 @@ func (e *Executor) Name() string { return Name }
 //
 // The output of stdout and stderr goes to out as one stream, unless the
 // command names a writer for stderr: then the two streams are captured
-// apart.
+// apart. A context that has already ended starts nothing: Start returns
+// its error and no sandbox.
 func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (bash.Process, error) {
 	if len(c.Argv) == 0 {
 		return nil, errors.New("bwrap: the command has no arguments")
+	}
+	// The sandbox is a process of its own, so a context that is over
+	// before it starts would still let a fast command run first.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	// An empty directory means the caller's own, and the sandbox binds
 	// it under its own name.

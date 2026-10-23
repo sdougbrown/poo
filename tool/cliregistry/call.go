@@ -216,6 +216,19 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		dir = env.WorkingDir
 	}
 
+	cap := env.Settings.ObservationCapChars
+	if cap <= 0 {
+		cap = bash.ObservationCapMax
+	}
+
+	// A context that has already ended runs nothing: starting the
+	// command only for the executor to stop it gives a fast command
+	// time for its side effects. The call is classified the way a
+	// stopped one is.
+	if res, ok := stoppedResult(ctx.Err(), cli.Output{}, cap); ok {
+		return res, nil
+	}
+
 	executor := t.executor
 	if executor == nil {
 		executor = bash.NewLocal()
@@ -251,30 +264,11 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		Duration:  time.Since(start),
 	}
 
-	cap := env.Settings.ObservationCapChars
-	if cap <= 0 {
-		cap = bash.ObservationCapMax
-	}
-
 	// The executor stops a command whose context ended, so what the
 	// command wrote before it was stopped is all there is: it is the
 	// output the model needs to see why the call did not finish.
-	switch {
-	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
-		text, structured := bash.Envelope(bash.Observation{
-			TimedOut: true,
-			Output:   string(out.Stdout),
-			Stderr:   string(out.Stderr),
-			Cap:      cap,
-		})
-		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
-	case errors.Is(runCtx.Err(), context.Canceled):
-		text, structured := bash.Envelope(bash.Observation{
-			Output: string(out.Stdout),
-			Stderr: string(out.Stderr),
-			Cap:    cap,
-		})
-		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
+	if res, ok := stoppedResult(runCtx.Err(), out, cap); ok {
+		return res, nil
 	}
 
 	res, err := p.plan.Finish(out)
@@ -289,6 +283,33 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		Cap:        cap,
 	})
 	return poo.ToolResult{Text: text, Structured: structured}, nil
+}
+
+// stoppedResult renders a call the run's context ended, and reports
+// whether it did.
+//
+// Whatever the command wrote before it was stopped is kept: it is the
+// output the model needs to see why the call did not finish. A deadline
+// is a timeout; a cancellation is a failure without one.
+func stoppedResult(err error, out cli.Output, cap int) (poo.ToolResult, bool) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		text, structured := bash.Envelope(bash.Observation{
+			TimedOut: true,
+			Output:   string(out.Stdout),
+			Stderr:   string(out.Stderr),
+			Cap:      cap,
+		})
+		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, true
+	case errors.Is(err, context.Canceled):
+		text, structured := bash.Envelope(bash.Observation{
+			Output: string(out.Stdout),
+			Stderr: string(out.Stderr),
+			Cap:    cap,
+		})
+		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, true
+	}
+	return poo.ToolResult{}, false
 }
 
 // checkArgv refuses a value the command may read as a flag.

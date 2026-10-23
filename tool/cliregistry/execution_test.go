@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -531,5 +533,91 @@ func TestASameGroupChildDoesNotOutliveTheCall(t *testing.T) {
 	}
 	if !gone(pid) {
 		t.Fatalf("the CLI's same-group child (pid %d) outlived the call", pid)
+	}
+}
+
+// startedExecutor counts the commands an executor was asked to start.
+type startedExecutor struct {
+	bash.Executor
+	starts atomic.Int64
+}
+
+// Start counts the command and hands it to the executor it wraps.
+func (s *startedExecutor) Start(ctx context.Context, c bash.Command, out io.Writer) (bash.Process, error) {
+	s.starts.Add(1)
+	return s.Executor.Start(ctx, c, out)
+}
+
+// TestAnAlreadyCancelledCallStartsNothing covers the local executor: a
+// call whose context has already ended reaches no process, so a fast CLI
+// cannot write its side effects first.
+func TestAnAlreadyCancelledCallStartsNothing(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "marker")
+	exec := &startedExecutor{Executor: bash.NewLocal()}
+	tool := execTool(t, []string{"/bin/sh", "-c", `printf executed > "$1"`, "probe", marker}, nil).WithExecutor(exec)
+	prepared, err := prepare(t, tool, `{"name":"probe","args":{}}`)
+	if err != nil {
+		t.Fatalf("preparing the call: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	res, err := tool.Call(ctx, prepared, poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: dir}})
+	if err != nil {
+		t.Fatalf("running the CLI: %v", err)
+	}
+	if got := exec.starts.Load(); got != 0 {
+		t.Errorf("the executor was asked to start %d commands for a cancelled call", got)
+	}
+	if !res.IsError {
+		t.Errorf("a cancelled call is not an error: %q", res.Text)
+	}
+	obs := observation(t, res)
+	if timedOut, _ := obs[bash.EnvelopeTimedOut].(bool); timedOut {
+		t.Errorf("a cancelled call reported a timeout: %q", res.Text)
+	}
+	if rc, ok := obs[bash.EnvelopeReturncode]; ok && rc != nil {
+		t.Errorf("returncode is %v, want null for a cancelled call", rc)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Errorf("the cancelled call ran the CLI")
+	}
+}
+
+// TestAnAlreadyCancelledSandboxDoesNotExecute covers the sandbox: the
+// call is the cancel observation and the CLI never ran, so the marker
+// file it writes is not there.
+func TestAnAlreadyCancelledSandboxDoesNotExecute(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "marker")
+	tool := execTool(t, []string{"/bin/sh", "-c", `printf executed >> "$1"`, "probe", marker}, nil).
+		WithExecutor(sandbox(t))
+	prepared, err := prepare(t, tool, `{"name":"probe","args":{}}`)
+	if err != nil {
+		t.Fatalf("preparing the call: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < 3; i++ {
+		res, err := tool.Call(ctx, prepared, poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: dir}})
+		if err != nil {
+			t.Fatalf("running the CLI: %v", err)
+		}
+		if !res.IsError {
+			t.Errorf("a cancelled call is not an error: %q", res.Text)
+		}
+		obs := observation(t, res)
+		if timedOut, _ := obs[bash.EnvelopeTimedOut].(bool); timedOut {
+			t.Errorf("a cancelled call reported a timeout: %q", res.Text)
+		}
+		if rc, ok := obs[bash.EnvelopeReturncode]; ok && rc != nil {
+			t.Errorf("returncode is %v, want null for a cancelled call", rc)
+		}
+	}
+	raw, err := os.ReadFile(marker)
+	if err == nil {
+		t.Errorf("the already-cancelled sandbox calls ran the CLI: %q", raw)
 	}
 }

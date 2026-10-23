@@ -26,7 +26,8 @@ type Executor interface {
 	// the writer will not take.
 	//
 	// The context ends the command: when it is done, the executor
-	// stops the command the way Kill does.
+	// stops the command the way Kill does. A context that has already
+	// ended starts nothing: Start returns its error and no process.
 	Start(ctx context.Context, c Command, out io.Writer) (Process, error)
 }
 
