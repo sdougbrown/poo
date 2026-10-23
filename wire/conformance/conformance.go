@@ -259,8 +259,7 @@ func (s *suite) settings(endpoint *provider, contextLimit int, extra map[string]
 				"context_limit": contextLimit,
 			},
 		},
-		"roles":   map[string]any{"chat": s.model},
-		"profile": s.profile,
+		"roles": map[string]any{"chat": s.model},
 		"session": map[string]any{
 			"mode": "logged",
 			"dir":  s.sessions,

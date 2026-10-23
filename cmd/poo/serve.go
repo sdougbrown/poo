@@ -295,16 +295,22 @@ func (f *serveFactory) Capabilities() protocol.Capabilities {
 		Decider:     decider,
 		Compaction:  runtime.Options.Compactor != nil,
 		Persistence: modes,
-		Jobs:        f.jobs(runtime),
+		Jobs:        f.jobs(),
 	}
 }
 
-// jobs reports whether a tool of the runtime may run in the background.
-func (f *serveFactory) jobs(runtime *config.Runtime) bool {
-	for _, name := range runtime.Options.ToolOrder {
-		tool, ok := runtime.Options.Tools[name]
-		if ok && tool != nil && tool.Spec().Background != poo.BackgroundNever {
-			return true
+// jobs reports whether a tool the binary offers may run in the
+// background.
+//
+// The capability is about the binary, not about the profile the
+// settings name: a session may be created under any profile the
+// handshake offers.
+func (f *serveFactory) jobs() bool {
+	for _, profile := range f.Profiles() {
+		for _, tool := range profile.Tools {
+			if tool.Background != string(poo.BackgroundNever) {
+				return true
+			}
 		}
 	}
 	return false
