@@ -54,6 +54,17 @@ func (r *Registry) Names() []string {
 	return names
 }
 
+// Has reports whether the registry holds an executor under a name.
+//
+// A name the registry does not hold is a configuration error, never a
+// fallback to another executor.
+func (r *Registry) Has(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.ctors[name]
+	return ok
+}
+
 // New builds the executor the name selects.
 //
 // A name the registry does not hold is an ErrUnknownExecutor.

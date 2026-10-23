@@ -38,6 +38,10 @@ var (
 	ErrSessionBroken = errors.New("poo: the session is broken")
 	// ErrSessionClosed means the session is closing or closed.
 	ErrSessionClosed = errors.New("poo: the session is closed")
+	// ErrCloseStalled means the close's wait for the record writes that
+	// were in flight ran out. The close says which records it was still
+	// waiting for, and continues its teardown without them.
+	ErrCloseStalled = errors.New("poo: the close stalled on a record write")
 )
 
 // ErrInvalidInput means the input itself is wrong: an unknown message

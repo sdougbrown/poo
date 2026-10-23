@@ -1,0 +1,162 @@
+# The settings a coding session runs under.
+#
+# Every key is optional unless the plan marks it required, and an
+# unknown key is an error. The file may be JSON, TOML or YAML; the
+# extension says which.
+#
+# The command reads it with:
+#
+#     poo run --settings examples/code.settings.yaml "..."
+#
+# The precedence is the profile, then this file, then the command
+# line: the last one that says something wins.
+
+version: 1
+
+# The profile the session is built from: base, code or search.
+#
+# The code profile offers bash, read, grep and edit, and it allows
+# every side-effecting call no rule covers. That is the mini-swe-agent
+# stance: the isolation is the operator's job, and it is done with a
+# sandbox or a container.
+profile: code
+
+# The endpoints the models are served by, and the models themselves.
+endpoints:
+  grace:
+    base_url: "http://localhost:4000/v1"
+    # The key is read from the environment, and from nowhere else. The
+    # name is scrubbed from the child environment, so a command the
+    # model runs cannot read the credential.
+    api_key_env: "GRACE_KEY"
+
+models:
+  gemma4:
+    endpoint: grace
+    model_id: "gemma4"
+    api: chat_completions
+    tools_mode: native
+    ops: [chat, systemone]
+    inputs: [text]
+    context_limit: 131072
+
+# The roles the models fill. The chat model is the one a session
+# cannot run without; the decider model is the one the permission
+# chain asks.
+roles:
+  chat: gemma4
+  decider: gemma4
+
+# The permission policy.
+permission:
+  # What to do with a side-effecting call no rule covers. The profile's
+  # own action applies when this is absent.
+  unmatched: ask
+  # The decision when the asker chain is exhausted. The default is deny.
+  fallback: deny
+  # A call the model keeps making is a permission case.
+  doom_loop:
+    threshold: 3
+    near_threshold: 5
+    action: ask
+  # The rules, in order. The first match wins. A rule matches on the
+  # tool's name or on the tool's class, never on both.
+  rules:
+    - tool: bash
+      command_prefix: "git status"
+      action: allow
+    - class: read_only
+      action: allow
+  # The asker chain, in order. The decide asker needs a decider model.
+  askers: [decide]
+  chain_timeout_s: 120
+  # The decision asker's thresholds.
+  decide:
+    approve: 0.85
+    deny: 0.99
+    timeout_ms: 1500
+
+# The context window's ratios. The notice ratio is when the model is
+# told that the context is filling up; the hard ratio is when the run
+# stops.
+context:
+  notice_ratio: 0.8
+  hard_ratio: 0.97
+  strategy: handoff
+  handoff:
+    ratio: 0.90
+    max_tokens: 2048
+
+# The tools.
+tools:
+  bash:
+    timeout_s: 120
+    # The executor the commands run through: local, or bwrap when the
+    # binary links the sandbox. A name the binary does not link is an
+    # error, and the command never falls back to another executor.
+    executor: bwrap
+  bwrap:
+    # The sandbox has the host's network unless this is false.
+    network: true
+    ro_binds: ["/usr", "/bin", "/lib", "/lib64", "/etc"]
+    rw_binds: []
+  # The child environment: the names to remove, and the names to keep
+  # and nothing else. A passthrough list limits the environment to
+  # exactly the names on it.
+  env:
+    scrub: []
+    passthrough: []
+  # The paths the tools must not touch, as globs on the resolved
+  # paths. A glob is absolute, or starts with "~".
+  #
+  # The file tools (read, grep and edit) refuse a protected path. The
+  # bash tool cannot: with the local executor a command reaches
+  # anything the process can, and with the bwrap executor the sandbox
+  # masks the protected paths inside the directories it binds.
+  #
+  # The example protects the operator's own secrets from a model that
+  # goes looking:
+  #
+  #     protected_paths:
+  #       - "~/.ssh"
+  #       - "~/.aws"
+  #       - "/etc/shadow"
+  protected_paths: []
+
+# The run's limits. A limit of zero is off.
+limits:
+  max_tokens_per_run: 0
+  max_duration_s: 0
+  max_turns: 0
+  max_continuations: 3
+
+# The background jobs.
+jobs:
+  max_running: 4
+  timeout_s: 1800
+  # What happens to a result that arrives while the session is idle:
+  # wake starts a new run with it, hold waits for the next one.
+  on_idle: wake
+  max_unattended_wakes: 0
+
+# The reasoning level the chat model runs at: off, low, medium, high
+# or a budget in tokens.
+reasoning:
+  chat: off
+
+# The per-model sampling overrides. A field left out is not sent.
+sampling:
+  gemma4:
+    temperature: 1.0
+    top_p: 0.95
+
+# The session.
+session:
+  # logged writes the session's records; ephemeral writes nothing.
+  mode: logged
+  dir: "~/.local/state/poo/sessions"
+  # Retention is opt-in: a prune with neither an age nor a count
+  # deletes nothing.
+  retention:
+    max_age_days: 30
+    max_sessions: 500

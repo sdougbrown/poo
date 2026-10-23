@@ -67,4 +67,24 @@ type Options struct {
 	// Masker expands the protected paths to mask. It is nil when the
 	// session protects nothing.
 	Masker Masker
+	// Sandbox holds the options a sandboxing executor needs.
+	//
+	// The settings name the sandbox's own options: the network, the
+	// binds and the paths to mask. The executor that is a sandbox
+	// reads them, and the executor that is not ignores them.
+	Sandbox Sandbox
+}
+
+// Sandbox holds a sandbox's options.
+//
+// The options are plain data, so the executor that is a sandbox reads
+// them without the tool package knowing what a sandbox is.
+type Sandbox struct {
+	// DisableNetwork gives the sandbox its own empty network
+	// namespace instead of the host's.
+	DisableNetwork bool
+	// ROBinds are the host paths the sandbox mounts read-only.
+	ROBinds []string
+	// RWBinds are the host paths the sandbox mounts read-write.
+	RWBinds []string
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/config"
 )
 
 // runCLI runs the command with the given arguments and returns its exit
@@ -102,23 +103,17 @@ func TestTheHelpIsPrinted(t *testing.T) {
 	}
 }
 
-func TestTheDefaultLogPathIsInTheWorkingDirectory(t *testing.T) {
-	dir := t.TempDir()
-	old, err := os.Getwd()
+func TestTheDefaultSessionDirectoryIsUnderTheStateDirectory(t *testing.T) {
+	settings := &config.Settings{Version: 1}
+	dir, err := config.SessionDirectory(settings, config.Overrides{})
 	if err != nil {
-		t.Fatalf("reading the working directory: %v", err)
+		t.Fatalf("resolving the session directory: %v", err)
 	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("changing the working directory: %v", err)
+	if filepath.Base(dir) != "sessions" {
+		t.Errorf("the default session directory is %q, want it to end in sessions", dir)
 	}
-	t.Cleanup(func() { _ = os.Chdir(old) })
-
-	path := defaultLogPath(dir)
-	if filepath.Dir(path) != dir {
-		t.Errorf("the default log path is %q, want it under %q", path, dir)
-	}
-	if !strings.HasPrefix(filepath.Base(path), "poo-session-") {
-		t.Errorf("the default name is %q, want it to start with poo-session-", filepath.Base(path))
+	if !filepath.IsAbs(dir) {
+		t.Errorf("the default session directory is %q, want it to be absolute", dir)
 	}
 }
 

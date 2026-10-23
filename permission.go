@@ -203,10 +203,19 @@ func (s *Session) persistPermission(run *runState, p *PermissionRequest) {
 		s.mu.Unlock()
 	}()
 	if !p.askedWritten {
+		// The registration is taken before the flag is set, so a close
+		// either refuses the record or waits for it. The session's lock is
+		// taken before the request's own, because the seal takes the
+		// request's while it holds the session's.
+		gate, ok := s.beginWrite("permission.asked")
+		if !ok {
+			// The close has fenced the session: the record is abandoned.
+			return
+		}
 		p.askedWritten = true
 		ask := p.ask
 		rec := &PermissionAskedRecord{RecordMeta: NewRecordMeta("permission.asked"), RunID: run.id, AskID: ask.AskID, Tool: ask.Tool, Summary: ask.Summary, Class: ask.Class, Reason: ask.Reason, RepeatCount: ask.RepeatCount}
-		if err := s.write(context.Background(), rec); err != nil {
+		if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
 			s.noteStoreError(run, err)
 		}
 		payload := map[string]any{"run_id": run.id, "ask_id": ask.AskID, "tool": ask.Tool, "summary": ask.Summary, "class": string(ask.Class), "reason": ask.Reason}
@@ -219,9 +228,14 @@ func (s *Session) persistPermission(run *runState, p *PermissionRequest) {
 	if answer.Decision == "" || p.answerWritten {
 		return
 	}
+	gate, ok := s.beginWrite("permission.answered")
+	if !ok {
+		// The close has fenced the session: the record is abandoned.
+		return
+	}
 	p.answerWritten = true
 	rec := &PermissionAnsweredRecord{RecordMeta: NewRecordMeta("permission.answered"), RunID: run.id, AskID: answer.AskID, Decision: answer.Decision, AnsweredBy: answer.AnsweredBy, Provenance: answer.Provenance, Reason: answer.Reason}
-	if err := s.write(context.Background(), rec); err != nil {
+	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
 		s.noteStoreError(run, err)
 	}
 	s.events.emit(EventPermissionAnswered, map[string]any{"run_id": run.id, "ask_id": answer.AskID, "decision": answer.Decision, "answered_by": answer.AnsweredBy, "provenance": answer.Provenance, "reason": answer.Reason})

@@ -116,6 +116,17 @@ func buildPrompt(opts *Options) *prompt.Builder {
 	return b
 }
 
+// PromptBuilder returns the prompt builder a session with these options
+// would assemble.
+//
+// The builder is the session's own: the core's own section, the
+// sections the linked tools bring and the consumer's changes, in the
+// order they happen. A consumer that shows the prompt to a person uses
+// this, so the text the person reads is the text the model gets.
+func PromptBuilder(opts Options) *prompt.Builder {
+	return buildPrompt(&opts)
+}
+
 // setPromptVariants puts a tool's alternative texts in the builder.
 //
 // The names are sorted, so the builder holds the alternatives in the
@@ -158,6 +169,47 @@ func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) (string, stri
 	return rendered, variant
 }
 
+// PromptState describes the session's system prompt.
+//
+// The text is the prompt the next run would render, and the preview
+// says whether a run has rendered one yet.
+type PromptState struct {
+	// Text is the rendered prompt.
+	Text string
+	// Hash is the hash of the text.
+	Hash string
+	// Sections are the names of the prompt's sections, in order.
+	Sections []string
+	// Preview reports that no run has rendered the prompt yet: the
+	// text is a preview of what the first run would use.
+	Preview bool
+}
+
+// PromptState returns the session's system prompt.
+//
+// The prompt is rendered from a copy of the session's own builder, so
+// the state never changes the prompt a run carries.
+func (s *Session) PromptState() PromptState {
+	s.mu.Lock()
+	rendered := s.promptRendered
+	s.mu.Unlock()
+	b, _ := s.promptCopy()
+	if b == nil {
+		return PromptState{Preview: !rendered}
+	}
+	text := b.Render()
+	// A raw prompt is the whole prompt, byte for byte.
+	if raw := s.opts.SystemPrompt; raw != "" && (text == raw || text == raw+"\n") {
+		text = raw
+	}
+	return PromptState{
+		Text:     text,
+		Hash:     hashText(text),
+		Sections: b.Names(),
+		Preview:  !rendered,
+	}
+}
+
 // SetPromptVariant sets the variant the prompt renders in.
 //
 // The prompt a run carries is rendered once, at the start of the run,
@@ -170,6 +222,27 @@ func (s *Session) SetPromptVariant(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.promptVariant = name
+}
+
+// SetPrompt applies prompt changes to the session.
+//
+// The changes take effect between the runs: the prompt a run carries is
+// rendered once, at the start of the run, so a change made while a run
+// is going is not seen by that run.
+//
+// The changes are applied in the order they are given, and a later one
+// wins over an earlier one.
+func (s *Session) SetPrompt(edits ...func(*prompt.Builder)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.promptBuilder == nil {
+		return
+	}
+	for _, edit := range edits {
+		if edit != nil {
+			edit(s.promptBuilder)
+		}
+	}
 }
 
 // promptCopy returns a copy of the session's prompt builder, in the

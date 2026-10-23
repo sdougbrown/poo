@@ -50,6 +50,11 @@ The `local` executor cannot do this. Protected paths stop the file
 tools from wandering; with the `local` executor, `bash` reaches
 everything the process can.
 
+The paths are the settings' `tools.protected_paths`, and
+`examples/code.settings.yaml` shows the setting with a commented
+example: the operator's own secrets, protected from a model that goes
+looking.
+
 ### What ends the sandbox
 
 The sandbox ends when the command ends, and the kernel ends a
