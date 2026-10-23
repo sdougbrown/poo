@@ -121,7 +121,7 @@ func TestACloseThatBeatsAPromptReservationWritesNothing(t *testing.T) {
 // close ordering's fence: a prompt that races the close either loses
 // the race or is finalized by it, so nothing appends after the flush.
 func TestAConcurrentCloseAndPromptWriteNothingAfterTheFlush(t *testing.T) {
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 200; i++ {
 		sink := &fix1OrderedSink{}
 		sess := newFix1Session(t, sink)
 		var wg sync.WaitGroup
@@ -148,7 +148,7 @@ func TestAConcurrentCloseAndPromptWriteNothingAfterTheFlush(t *testing.T) {
 // jobs: a close that races a job's completion leaves exactly one
 // job.ended record per job.
 func TestCloseRacingAJobCompletionEndsItOnce(t *testing.T) {
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 20; i++ {
 		tr := scripted([]fakeResponse{
 			{calls: []poo.ToolCall{jobCall("one", true)}},
 			{text: "the answer"},

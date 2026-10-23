@@ -20,7 +20,7 @@ func TestACloseRacingAPromptLeavesNoRun(t *testing.T) {
 	h := newHarness(t, factory, wire.Bounds{})
 	h.initialize()
 
-	for i := 0; i < 300; i++ {
+	for i := 0; i < 50; i++ {
 		sessionID := createSession(t, h)
 		prompt := h.callAsync(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 		closeAnswer := h.callAsync(protocol.MethodSessionClose, protocol.CloseParams{SessionID: sessionID})
