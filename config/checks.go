@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/sdougbrown/poo/tool/protect"
+	"github.com/sdougbrown/poo/protect"
 )
 
 // The checks the settings must pass.

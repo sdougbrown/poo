@@ -18,7 +18,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/prompt"
-	"github.com/sdougbrown/poo/tool/protect"
+	"github.com/sdougbrown/poo/protect"
 )
 
 // Defaults for the read tool.

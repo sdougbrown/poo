@@ -11,7 +11,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/exec/bwrap"
 	"github.com/sdougbrown/poo/tool/bash"
-	"github.com/sdougbrown/poo/tool/protect"
+	"github.com/sdougbrown/poo/protect"
 )
 
 // reviewMasker expands to a fixed list of paths.

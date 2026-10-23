@@ -25,7 +25,7 @@ import (
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
-	"github.com/sdougbrown/poo/tool/protect"
+	"github.com/sdougbrown/poo/protect"
 	"github.com/sdougbrown/poo/tool/read"
 )
 
