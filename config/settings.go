@@ -110,12 +110,27 @@ type Permission struct {
 	DoomLoop DoomLoop `json:"doom_loop,omitempty"`
 	// Rules are the policy's rules, in order. The first match wins.
 	Rules []Rule `json:"rules,omitempty"`
-	// Askers are the names of the askers in the chain, in order.
+	// Askers are the names of the askers in the chain, in order. An
+	// empty list is a chain with no askers; an absent list takes the
+	// binary's default chain.
 	Askers []string `json:"askers,omitempty"`
+	// askersNamed reports that the settings name the asker chain, even
+	// an empty one.
+	askersNamed bool
 	// ChainTimeoutS bounds the whole chain, in seconds.
 	ChainTimeoutS *int `json:"chain_timeout_s,omitempty"`
 	// Decide are the decision asker's settings.
 	Decide Decide `json:"decide,omitempty"`
+}
+
+// AskersNamed reports whether the settings name the asker chain.
+//
+// An empty list names a chain with no askers, so an ask goes straight
+// to the fallback. An absent list names no chain, and the binary's own
+// askers apply. A chain with names in it was named, whether or not the
+// decode recorded the key.
+func (p Permission) AskersNamed() bool {
+	return p.askersNamed || len(p.Askers) > 0
 }
 
 // DoomLoop are the doom loop's settings.

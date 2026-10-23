@@ -34,7 +34,7 @@ type PermissionAnswer struct {
 	// chain's fallback, or "cancelled" for a run that ended.
 	AnsweredBy string
 	// Provenance is how the ask was resolved: "answered", "timeout",
-	// "default", "cancelled" or "interrupted".
+	// "default", "no_asker", "cancelled" or "interrupted".
 	Provenance string
 	// Reason is why the call was being asked about.
 	Reason string
@@ -49,6 +49,9 @@ const (
 	// ProvenanceDefault means the chain had no answer to give, and the
 	// fallback decided.
 	ProvenanceDefault = "default"
+	// ProvenanceNoAsker means the chain had no asker to ask, so the
+	// fallback decided without one.
+	ProvenanceNoAsker = "no_asker"
 	// ProvenanceCancelled means the run ended while the ask was pending.
 	ProvenanceCancelled = "cancelled"
 	// ProvenanceInterrupted means an interrupt ended the activity while

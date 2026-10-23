@@ -46,6 +46,15 @@ type Target struct {
 	// the settings name. A target that leaves them empty gets the
 	// suite's own.
 	Fixtures Fixtures
+	// Env is the environment the binary is started with, appended to
+	// the suite's own.
+	//
+	// A binary that reads a variable before it serves (an identity, the
+	// path of the socket it reports to) cannot run without one, and the
+	// suite sets it here rather than in the test process's environment:
+	// the value is the target's business, and the suite's own
+	// environment stays as it is.
+	Env []string
 }
 
 // Fixtures are the scripted provider turns and the environment.
@@ -157,14 +166,53 @@ type suite struct {
 	commands int
 	// commandSeconds is how long a scripted command runs.
 	commandSeconds int
+	// flowName is the name of the flow that is running.
+	flowName string
+	// skips are the reasons the running flow did not run.
+	skips []string
+	// partial reports whether a flow ran before it skipped.
+	partial bool
+	// report is what the suite ran.
+	report Report
 }
 
-// Run runs the suite against the target.
+// Report is what the suite ran.
+type Report struct {
+	// Run names the flows that ran whole, in order. A flow that ran in
+	// part is not here.
+	Run []string
+	// Partial names the flows that ran in part and skipped the rest, in
+	// order. The flow has one entry in Skipped for each part it skipped.
+	//
+	// A flow that has two halves reports itself here when the first
+	// half ran and the second needed something the target does not
+	// offer.
+	Partial []string
+	// Skipped is the reasons the flows did not run, in order.
+	//
+	// A flow is here when the target does not offer what the flow
+	// scripts, so a binary with fewer tools reports more skips. A flow
+	// that ran in part is here for the part it skipped and is named in
+	// Partial as well, so the flow names here are the skipped flows and
+	// the partly run ones: a caller that counts the flows that did not run
+	// at all subtracts Partial from them.
+	Skipped []Skip
+}
+
+// Skip is one reason a flow did not run.
+type Skip struct {
+	// Flow names the flow.
+	Flow string
+	// Reason says why the flow skipped.
+	Reason string
+}
+
+// Run runs the suite against the target and returns what it ran.
 //
 // The suite runs every flow the target can run. A flow that needs
 // something the target does not have is skipped, and the reason is
-// logged.
-func Run(t *testing.T, target Target) {
+// logged and reported.
+func Run(t *testing.T, target Target) Report {
 	t.Helper()
 	if target.Binary == "" {
 		t.Fatal("conformance: the target has no binary")
@@ -213,6 +261,21 @@ func Run(t *testing.T, target Target) {
 	s.flow("teardown", s.teardown)
 	s.flow("slow client", s.slowClient)
 	s.flow("ephemeral", s.ephemeral)
+	s.t.Logf("flows: %d ran, %d ran in part, %d skipped, %d skip reasons",
+		len(s.report.Run), len(s.report.Partial), skippedFlows(s.report.Skipped), len(s.report.Skipped))
+	return s.report
+}
+
+// skippedFlows returns how many flows the skip reasons name.
+//
+// A flow can have several reasons, and a flow that ran in part is among
+// them.
+func skippedFlows(skips []Skip) int {
+	seen := make(map[string]struct{}, len(skips))
+	for _, skip := range skips {
+		seen[skip.Flow] = struct{}{}
+	}
+	return len(seen)
 }
 
 // flow runs one flow and says which one it was.
@@ -220,9 +283,20 @@ func Run(t *testing.T, target Target) {
 // The log names the flow, so a failure says which one it was.
 func (s *suite) flow(name string, run func()) {
 	s.t.Helper()
+	s.flowName = name
+	s.skips = nil
+	s.partial = false
 	start := time.Now()
 	s.t.Logf("flow: %s", name)
 	run()
+	if len(s.skips) == 0 {
+		s.report.Run = append(s.report.Run, name)
+	} else if s.partial {
+		s.report.Partial = append(s.report.Partial, name)
+	}
+	for _, reason := range s.skips {
+		s.report.Skipped = append(s.report.Skipped, Skip{Flow: name, Reason: reason})
+	}
 	s.t.Logf("flow: %s took %s", name, time.Since(start).Round(time.Millisecond))
 }
 

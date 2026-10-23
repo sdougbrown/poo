@@ -145,12 +145,18 @@ func TestSkippedPackages(t *testing.T) {
 	const m = "example.com/poo/depcheck/onlytests"
 	res := checkModule(t, filepath.Join("testdata", "onlytests"), m)
 	want := []string{
+		m + "/cli (does not exist yet)",
 		m + "/decide (no non-test Go files)",
+		m + "/exec (does not exist yet)",
+		m + "/exec/bwrap (does not exist yet)",
+		m + "/internal/caps (does not exist yet)",
 		m + "/perm (does not exist yet)",
 		m + "/perm/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",
 		m + "/prompt/agentsmd (does not exist yet)",
+		m + "/protect (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
+		m + "/server (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/tool/cliregistry (does not exist yet)",
 		m + "/wire (does not exist yet)",
@@ -170,12 +176,18 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 	res := checkModule(t, filepath.Join("testdata", "ignored"), m)
 	want := []string{
 		m + " (no non-test Go files)",
+		m + "/cli (does not exist yet)",
 		m + "/decide (does not exist yet)",
+		m + "/exec (does not exist yet)",
+		m + "/exec/bwrap (does not exist yet)",
+		m + "/internal/caps (does not exist yet)",
 		m + "/perm (does not exist yet)",
 		m + "/perm/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",
 		m + "/prompt/agentsmd (does not exist yet)",
+		m + "/protect (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
+		m + "/server (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/tool/cliregistry (does not exist yet)",
 		m + "/wire (does not exist yet)",
@@ -200,12 +212,18 @@ func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
 		t.Errorf("findings:\n%s\nwant none", strings.Join(res.Findings, "\n"))
 	}
 	want := []string{
+		m + "/cli (does not exist yet)",
 		m + "/decide (does not exist yet)",
+		m + "/exec (does not exist yet)",
+		m + "/exec/bwrap (does not exist yet)",
+		m + "/internal/caps (does not exist yet)",
 		m + "/perm (does not exist yet)",
 		m + "/perm/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",
 		m + "/prompt/agentsmd (does not exist yet)",
+		m + "/protect (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
+		m + "/server (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/tool/cliregistry (does not exist yet)",
 		m + "/wire (does not exist yet)",

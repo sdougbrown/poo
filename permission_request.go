@@ -43,6 +43,8 @@ const (
 	PermissionChainExpired
 	// PermissionExhausted reports that the chain had no answer to give.
 	PermissionExhausted
+	// PermissionNoAsker reports that the chain has no askers at all.
+	PermissionNoAsker
 	// PermissionCancel reports that the run ended.
 	PermissionCancel
 	// PermissionInterrupt reports that an interrupt ended the activity.
@@ -210,6 +212,8 @@ func (p *PermissionRequest) Send(in PermissionInput) uint64 {
 		fallback(ProvenanceTimeout)
 	case PermissionExhausted:
 		fallback(ProvenanceDefault)
+	case PermissionNoAsker:
+		fallback(ProvenanceNoAsker)
 	case PermissionPolicyAnswer:
 		if in.Answer.AnsweredBy == "policy" || in.Answer.Decision != "allow" {
 			resolve(in.Answer)

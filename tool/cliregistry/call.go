@@ -14,6 +14,7 @@ import (
 	"github.com/sdougbrown/cli-registry/schema"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
 )
@@ -136,13 +137,12 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	if err := decodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("%s: %v", CallToolName, err)
 	}
-	tool, ok := t.catalog.tools[a.Name]
-	if !ok {
+	if _, ok := t.catalog.Lookup(a.Name); !ok {
 		if t.catalog.Len() == 0 {
 			return nil, poo.InvalidArgsf("%s: no CLI is registered", CallToolName)
 		}
 		return nil, poo.InvalidArgsf("%s: no CLI named %q; %s",
-			CallToolName, a.Name, t.catalog.namesHint(t.search))
+			CallToolName, a.Name, t.catalog.NamesHint(t.search))
 	}
 	args := map[string]any{}
 	if len(a.Args) > 0 {
@@ -156,7 +156,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, a.Name, err)
 		}
 	}
-	plan, err := t.catalog.registry.Plan(tool, args)
+	plan, err := t.catalog.Plan(a.Name, args)
 	if err != nil {
 		return nil, planError(a.Name, err)
 	}
@@ -219,7 +219,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 
 	cap := env.Settings.ObservationCapChars
 	if cap <= 0 {
-		cap = bash.ObservationCapMax
+		cap = caps.ObservationMax
 	}
 
 	// A context that has already ended runs nothing: starting the

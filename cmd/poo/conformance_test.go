@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -18,7 +20,8 @@ import (
 // this package builds.
 //
 // The suite drives the binary over stdin and stdout, and every flow of
-// the plan's table runs against it.
+// the plan's table runs against it: the command links every tool the
+// flows script, so nothing skips.
 func TestTheBinarySpeaksTheProtocol(t *testing.T) {
 	executor := os.Getenv("POO_CONFORMANCE_EXECUTOR")
 	if executor == "" {
@@ -30,11 +33,17 @@ func TestTheBinarySpeaksTheProtocol(t *testing.T) {
 		}
 	}
 	binary := buildTheBinary(t, nil)
-	conformance.Run(t, conformance.Target{
+	report := conformance.Run(t, conformance.Target{
 		Binary:  binary,
 		Args:    []string{"serve", "--executor", executor},
 		Profile: "code",
 	})
+	if len(report.Skipped) > 0 {
+		t.Errorf("the suite skipped %d flows, want every flow: %v", len(report.Skipped), report.Skipped)
+	}
+	if len(report.Partial) > 0 {
+		t.Errorf("the suite reports partly run flows: %v", report.Partial)
+	}
 }
 
 // TestTheBinaryWithTheExtensionSpeaksTheProtocol runs the suite
@@ -60,18 +69,28 @@ func TestTheBinaryWithTheExtensionSpeaksTheProtocol(t *testing.T) {
 // a client runs, so it is the thing the suite proves.
 func buildTheBinary(t *testing.T, tags []string) string {
 	t.Helper()
+	return build(t, ".", tags)
+}
+
+// build builds a command and returns the path of the binary.
+func build(t *testing.T, pkg string, tags []string) string {
+	t.Helper()
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "poo")
+	name := filepath.Base(pkg)
+	if pkg == "." {
+		name = "poo"
+	}
+	binary := filepath.Join(dir, name)
 	args := []string{"build", "-o", binary}
 	if len(tags) > 0 {
 		args = append(args, "-tags", strings.Join(tags, ","))
 	}
-	args = append(args, ".")
+	args = append(args, pkg)
 	cmd := exec.Command("go", args...)
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("building the binary: %v\n%s", err, out)
+		t.Fatalf("building %s: %v\n%s", pkg, err, out)
 	}
 	return binary
 }
@@ -86,4 +105,53 @@ func TestTheBinarySpeaksTheProtocolWithTheSearchProfile(t *testing.T) {
 		Args:    []string{"serve"},
 		Profile: "search",
 	})
+}
+
+// TestAReadOnlyBinarySpeaksTheProtocol runs the suite against a binary
+// that composes poo the way a custom binary does: the exported factory,
+// the search profile, and read and grep alone, with no shell.
+//
+// The flows that script a tool the binary does not offer skip and say
+// so; the others prove the protocol against the read-only build. The
+// binary reads its identity from the environment, so the target sets it.
+func TestAReadOnlyBinarySpeaksTheProtocol(t *testing.T) {
+	binary := build(t, filepath.Join("..", "..", "wire", "conformance", "testdata", "readonly"), nil)
+	report := conformance.Run(t, conformance.Target{
+		Binary:  binary,
+		Args:    []string{"serve"},
+		Profile: "search",
+		Env:     []string{"POO_READONLY_ID=conformance"},
+	})
+
+	want := []string{
+		"permission gate",
+		"steer",
+		"interrupt",
+		"follow-up message",
+		"typed result",
+		"handoff",
+		"kill",
+		"jobs",
+		"attach and scrollback",
+		"resume",
+		"teardown",
+	}
+	var skipped []string
+	for _, skip := range report.Skipped {
+		skipped = append(skipped, skip.Flow)
+		if skip.Reason == "" {
+			t.Errorf("the skipped flow %q says no reason", skip.Flow)
+		}
+	}
+	slices.Sort(skipped)
+	sort.Strings(want)
+	if !slices.Equal(skipped, want) {
+		t.Errorf("the suite skipped %v, want %v", skipped, want)
+	}
+	if !slices.Contains(report.Partial, "teardown") {
+		t.Errorf("the suite did not report teardown as partly run: %v", report.Partial)
+	}
+	if len(report.Run) == 0 {
+		t.Error("the suite ran no flow against the read-only binary")
+	}
 }
