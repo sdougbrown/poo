@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,9 @@ import (
 // compactor asks for a handoff, and the run ends with it.
 func (s *suite) handoff() {
 	s.t.Helper()
+	if s.skipWithoutTool("bash") {
+		return
+	}
 	// The model calls a tool, so the run carries on and the gate asks
 	// the compactor whether the window is full.
 	turns := []Turn{
@@ -86,8 +90,11 @@ func (s *suite) promptText(c *client, sessionID string) string {
 // process behind.
 func (s *suite) jobs() {
 	s.t.Helper()
+	if s.skipWithoutTool("bash") {
+		return
+	}
 	if !s.hasBackground() {
-		s.t.Logf("skipping the jobs: the profile %q offers no tool that may run in the background", s.profile)
+		s.skip(fmt.Sprintf("the profile %q offers no tool that may run in the background", s.profile))
 		return
 	}
 	s.jobRunsAndSettles()
@@ -352,8 +359,7 @@ func (s *suite) lastChange(path string) time.Time {
 // the interrupted run is marked.
 func (s *suite) attachAndScrollback() {
 	s.t.Helper()
-	if !s.hasSideEffecting() {
-		s.t.Logf("skipping attach and scrollback: the profile %q offers no side-effecting tool", s.profile)
+	if s.skipWithoutTool("bash") {
 		return
 	}
 	// The command ends by itself: the binary dies, and the command goes
@@ -462,8 +468,7 @@ func historyHas(items []protocol.HistoryItem, want protocol.HistoryItem) bool {
 // prompt.
 func (s *suite) resume() {
 	s.t.Helper()
-	if !s.hasSideEffecting() {
-		s.t.Logf("skipping the resume: the profile %q offers no side-effecting tool", s.profile)
+	if s.skipWithoutTool("bash") {
 		return
 	}
 	// The command ends by itself: the binary dies, and the command goes
@@ -799,8 +804,7 @@ func (s *suite) teardownCloseRacingARun() {
 // in flight: the binary closes the session and ends cleanly.
 func (s *suite) teardownHangUp() {
 	s.t.Helper()
-	if !s.hasSideEffecting() {
-		s.t.Logf("skipping the hang-up: the profile %q offers no side-effecting tool", s.profile)
+	if s.skipWithoutTool("bash") {
 		return
 	}
 	// The command is a short one: the run waits for the ask, not for

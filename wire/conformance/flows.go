@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,12 @@ func (s *suite) handshake(c *client) protocol.InitializeResult {
 // create opens a session and returns its id.
 func (s *suite) create(c *client) string {
 	s.t.Helper()
+	return s.createInfo(c).SessionID
+}
+
+// createInfo opens a session and returns what the binary said about it.
+func (s *suite) createInfo(c *client) protocol.SessionInfo {
+	s.t.Helper()
 	raw := c.call(protocol.MethodSessionCreate, map[string]any{
 		"working_dir": s.dir,
 		"profile":     s.profile,
@@ -81,7 +88,7 @@ func (s *suite) create(c *client) string {
 	// tool the flow added (the typed result's finish, say) is not a
 	// profile tool and is allowed.
 	s.checkSessionTools(info.Tools, s.profileTools(), s.handshakeResult.Profiles)
-	return info.SessionID
+	return info
 }
 
 // checkSessionTools checks the tools a created session offers against
@@ -184,15 +191,33 @@ func (s *suite) profileTools() []protocol.ToolInfo {
 	return nil
 }
 
-// hasSideEffecting reports whether the profile offers a tool that
-// changes something.
-func (s *suite) hasSideEffecting() bool {
+// hasTool reports whether the profile offers a tool by name.
+func (s *suite) hasTool(name string) bool {
 	for _, tool := range s.profileTools() {
-		if tool.Class == "side_effecting" {
+		if tool.Name == name {
 			return true
 		}
 	}
 	return false
+}
+
+// skip records that the current flow does not run, and says why.
+func (s *suite) skip(reason string) {
+	s.t.Logf("skipping %s: %s", s.flowName, reason)
+	s.skips = append(s.skips, reason)
+}
+
+// skipWithoutTool reports whether the current flow must skip.
+//
+// A flow scripts a tool's call, so it needs the tool the binary offers
+// under that name: a profile that offers no bash cannot run a flow that
+// scripts one.
+func (s *suite) skipWithoutTool(name string) bool {
+	if s.hasTool(name) {
+		return false
+	}
+	s.skip(fmt.Sprintf("the profile %q offers no %q tool", s.profile, name))
+	return true
 }
 
 // hasBackground reports whether the profile offers a tool that may run
@@ -321,8 +346,7 @@ func (s *suite) statusAndWait() {
 // the ask runs out of time.
 func (s *suite) permissionGate() {
 	s.t.Helper()
-	if !s.hasSideEffecting() {
-		s.t.Logf("skipping the permission gate: the profile %q offers no side-effecting tool", s.profile)
+	if s.skipWithoutTool("bash") {
 		return
 	}
 	turns := []Turn{
@@ -422,8 +446,7 @@ func (s *suite) history(c *client, sessionID string, beforeSeq int64, limit int)
 // arrives at the next turn.
 func (s *suite) steer() {
 	s.t.Helper()
-	if !s.hasSideEffecting() {
-		s.t.Logf("skipping the steer: the profile %q offers no side-effecting tool", s.profile)
+	if s.skipWithoutTool("bash") {
 		return
 	}
 	turns := []Turn{
@@ -471,8 +494,7 @@ func (s *suite) waitToolCall(c *client, runID string) {
 // cancelled, the turn is interrupted, and the run carries on.
 func (s *suite) interrupt() {
 	s.t.Helper()
-	if !s.hasSideEffecting() {
-		s.t.Logf("skipping the interrupt: the profile %q offers no side-effecting tool", s.profile)
+	if s.skipWithoutTool("bash") {
 		return
 	}
 	command := s.boundedCommand()
@@ -514,8 +536,7 @@ func (s *suite) interrupt() {
 // stopped, and the run carries on.
 func (s *suite) followUpMessage() {
 	s.t.Helper()
-	if !s.hasSideEffecting() {
-		s.t.Logf("skipping the follow-up message: the profile %q offers no side-effecting tool", s.profile)
+	if s.skipWithoutTool("bash") {
 		return
 	}
 	turns := []Turn{
@@ -566,7 +587,25 @@ func (s *suite) typedResult() {
 			"result": map[string]any{"answer": "the result"},
 		}}}},
 	}
-	c, sessionID := s.open(turns, extra)
+	endpoint := newProvider(s.t, turns)
+	settings := s.settings(endpoint, s.contextLimit, extra)
+	c := s.start(settings, endpoint)
+	s.handshake(c)
+	// The finish tool is the settings' opt-in, so the binary announces
+	// it with the session and not with the profile.
+	info := s.createInfo(c)
+	sessionID := info.SessionID
+	offers := false
+	for _, tool := range info.Tools {
+		if tool.Name == "finish" {
+			offers = true
+			break
+		}
+	}
+	if !offers {
+		s.skip("the session offers no \"finish\" tool")
+		return
+	}
 
 	runID := s.prompt(c, sessionID, "finish it")
 	settled := s.settled(c, sessionID, runID)
@@ -635,8 +674,7 @@ func (s *suite) heardAndSaid() {
 // cancelled, the run settles as cancelled, and the waiter wakes.
 func (s *suite) kill() {
 	s.t.Helper()
-	if !s.hasSideEffecting() {
-		s.t.Logf("skipping the kill: the profile %q offers no side-effecting tool", s.profile)
+	if s.skipWithoutTool("bash") {
 		return
 	}
 	command := s.boundedCommand()
