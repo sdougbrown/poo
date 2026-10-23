@@ -202,10 +202,10 @@ func TestASearchNeedsTheSessionsDecider(t *testing.T) {
 	}
 	text := poo.PromptBuilder(runtime.Options).Render()
 	if !strings.Contains(text, "entry-000:") {
-		t.Errorf("the prompt does not list the catalog the session can call: %q", text)
+		t.Error("the prompt does not list the catalog the session can call")
 	}
 	if strings.Contains(text, "find_tool") {
-		t.Errorf("the prompt names a search the session does not offer: %q", text)
+		t.Error("the prompt names a search the session does not offer")
 	}
 
 	// An unknown name points at the search only when there is one.
@@ -265,6 +265,29 @@ func TestAReadOnlyProfileStaysReadOnly(t *testing.T) {
 	// catalog.
 	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "deploy: The deploy command") {
 		t.Errorf("the prompt lists a catalog the session cannot call: %q", text)
+	}
+}
+
+// TestTheOperatorsCatalogSectionWins covers the order: the automatic
+// catalog is the default, and an explicit `sections.catalog` is the
+// operator's text, so it is the one the prompt carries.
+func TestTheOperatorsCatalogSectionWins(t *testing.T) {
+	dir := registry(t, "deploy", "logs")
+	settings, err := config.Parse([]byte(registrySettings(dir)+`system_prompt:
+  sections:
+    catalog: the operator's own catalog
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "the operator's own catalog") {
+		t.Error("the prompt does not carry the operator's catalog section")
+	}
+	if strings.Contains(text, "Registered CLIs:") {
+		t.Error("the prompt carries the automatic catalog too")
 	}
 }
 

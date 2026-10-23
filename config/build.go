@@ -1019,16 +1019,18 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 			b.Append(BaseSection, appendText)
 		})
 	}
-	for name, text := range settings.SystemPrompt.Sections {
-		name, text := name, text
-		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
-			b.Set(name, text)
-		})
-	}
+	// The catalog is the default for its section: the settings' own
+	// sections come after it, so an operator who writes one keeps it.
 	if r.Registry != nil && r.offersRegistry() {
 		section := r.Registry.Section(r.findTool())
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			b.Set(cliregistry.SectionName, section)
+		})
+	}
+	for name, text := range settings.SystemPrompt.Sections {
+		name, text := name, text
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			b.Set(name, text)
 		})
 	}
 	for _, name := range settings.SystemPrompt.Remove {
