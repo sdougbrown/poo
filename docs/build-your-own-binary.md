@@ -74,9 +74,9 @@ type ToolOptions struct {
 ```
 
 The map's key is the name the profile, the permission rules and the wire
-use. It must be the name the tool's `Spec` reports. A profile, a
-permission rule or a cli registry that names a tool the binary does not
-register is a typed error.
+use. It must be the name the tool's `Spec` reports. A profile or a
+permission rule that names a tool the binary does not register is a typed
+error. So is a cli registry whose `call_cli` the binary does not link.
 
 The settings still decode and validate in `config`. `tools.bash.*`, the
 executor name and `cliregistry.paths` are settings, not tools. Nothing in
