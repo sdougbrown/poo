@@ -78,11 +78,16 @@ func (t *Tool) run(ctx context.Context, command string, env poo.ToolEnv, timeout
 	if code >= 0 {
 		res.returncode = &code
 	}
-	switch {
-	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
-		res.timedOut = true
-	case errors.Is(runCtx.Err(), context.Canceled):
-		res.cancelled = true
+	// Only a command the executor stopped was stopped by the run's
+	// context: one that exited on its own keeps that outcome, however
+	// long the teardown of what it left behind takes.
+	if proc.Stopped() {
+		switch {
+		case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+			res.timedOut = true
+		case errors.Is(runCtx.Err(), context.Canceled):
+			res.cancelled = true
+		}
 	}
 	return res, nil
 }

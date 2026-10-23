@@ -606,8 +606,14 @@ type process struct {
 	// exited reports that the sandbox has ended. A kill after that
 	// would signal a process that may belong to another one by now.
 	exited bool
-	code   int
-	err    error
+	// stopping reports that a kill is taking the sandbox, rather than
+	// the command exiting on its own.
+	stopping bool
+	// stopped reports that a kill took the command. It is decided when
+	// the sandbox's own process is reaped.
+	stopped bool
+	code    int
+	err     error
 	// status is what the helper reported about the command's wait.
 	status statusReport
 	// childPID is bubblewrap's child in the host's pid space: the
@@ -673,6 +679,12 @@ func (p *process) Wait() (int, error) {
 	p.waitOnce.Do(func() {
 		err := <-p.waited
 
+		// The command's own process has ended: whatever the teardown
+		// of what it left behind does, this is its outcome.
+		p.mu.Lock()
+		p.stopped = p.stopping
+		p.mu.Unlock()
+
 		// The helper's report arrives before bubblewrap exits, so the
 		// wait is bounded and does not hold a finished call for long.
 		select {
@@ -714,6 +726,14 @@ func (p *process) Wait() (int, error) {
 	return p.code, p.err
 }
 
+// Stopped reports whether the command was killed instead of exiting on
+// its own.
+func (p *process) Stopped() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stopped
+}
+
 // Kill stops the sandbox.
 //
 // The helper gets SIGTERM, and it gives the command the same graceful
@@ -724,12 +744,13 @@ func (p *process) Wait() (int, error) {
 // executor cannot close.
 func (p *process) Kill() {
 	p.mu.Lock()
-	exited := p.exited
-	child := p.childPID
-	p.mu.Unlock()
-	if exited {
+	if p.exited {
+		p.mu.Unlock()
 		return
 	}
+	p.stopping = true
+	child := p.childPID
+	p.mu.Unlock()
 	if child <= 0 {
 		// The child may not have been read yet: a cancellation can
 		// arrive as soon as the sandbox starts. Give the status stream

@@ -528,3 +528,33 @@ func TestTheObservationCapChain(t *testing.T) {
 		})
 	}
 }
+
+// TestACallThatExitsBeforeTheDeadlineIsNotATimeout covers the outcome
+// against the teardown: the command exits 0 and leaves a child that
+// ignores SIGTERM, so stop it takes past the timeout. The command exited
+// on its own, and the call is its exit, not a timeout.
+func TestACallThatExitsBeforeTheDeadlineIsNotATimeout(t *testing.T) {
+	dir := t.TempDir()
+	tool := &bash.Tool{Timeout: 500 * time.Millisecond}
+
+	start := time.Now()
+	res := call(t, tool, `trap '' TERM; sleep 30 & printf completed`, poo.ToolEnv{
+		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+		Env:        os.Environ(),
+	})
+	took := time.Since(start)
+
+	if res.IsError {
+		t.Errorf("a command that exited successfully is an error: %s", res.Text)
+	}
+	obs := structured(t, res)
+	if timedOut, _ := obs["timed_out"].(bool); timedOut {
+		t.Errorf("the call reported a timeout after %v, though the command exited: %s", took, res.Text)
+	}
+	if code, ok := obs["returncode"].(float64); !ok || code != 0 {
+		t.Errorf("returncode is %v, want 0", obs["returncode"])
+	}
+	if output, _ := obs["output"].(string); !strings.Contains(output, "completed") {
+		t.Errorf("the observation lost the command's output: %q", output)
+	}
+}

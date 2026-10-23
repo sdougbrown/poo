@@ -154,8 +154,14 @@ type localProcess struct {
 	// been torn down. A kill after that would signal a group that may
 	// belong to another process by now.
 	exited bool
-	code   int
-	err    error
+	// stopping reports that a kill is taking the command, rather than
+	// the command exiting on its own.
+	stopping bool
+	// stopped reports that a kill took the command. It is decided when
+	// the command's own process is reaped.
+	stopped bool
+	code    int
+	err     error
 }
 
 // Wait waits for the command to finish and for everything it left
@@ -167,7 +173,10 @@ func (p *localProcess) Wait() (int, error) {
 	p.waitOnce.Do(func() {
 		err := <-p.waited
 
+		// The command's own process has ended: whatever the teardown
+		// of what it left behind does, this is its outcome.
 		p.mu.Lock()
+		p.stopped = p.stopping
 		p.code = exitCode(p.cmd)
 		p.err = err
 		p.exited = true
@@ -198,6 +207,14 @@ func (p *localProcess) Wait() (int, error) {
 	return p.code, p.err
 }
 
+// Stopped reports whether the command was killed instead of exiting on
+// its own.
+func (p *localProcess) Stopped() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stopped
+}
+
 // closePipes closes the read ends the wait has finished with.
 func (p *localProcess) closePipes() {
 	for _, pipe := range p.pipes {
@@ -211,11 +228,12 @@ func (p *localProcess) closePipes() {
 // process that ignores SIGTERM does not survive the call.
 func (p *localProcess) Kill() {
 	p.mu.Lock()
-	exited := p.exited
-	p.mu.Unlock()
-	if exited {
+	if p.exited {
+		p.mu.Unlock()
 		return
 	}
+	p.stopping = true
+	p.mu.Unlock()
 	p.terminateGroup()
 }
 

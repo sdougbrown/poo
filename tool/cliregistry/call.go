@@ -264,11 +264,14 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		Duration:  time.Since(start),
 	}
 
-	// The executor stops a command whose context ended, so what the
-	// command wrote before it was stopped is all there is: it is the
-	// output the model needs to see why the call did not finish.
-	if res, ok := stoppedResult(runCtx.Err(), out, cap); ok {
-		return res, nil
+	// A command the executor stopped was stopped by the run's context,
+	// so what it wrote before is all there is. A command that exited on
+	// its own keeps its own outcome, however long the teardown of what
+	// it left behind takes.
+	if proc.Stopped() {
+		if res, ok := stoppedResult(runCtx.Err(), out, cap); ok {
+			return res, nil
+		}
 	}
 
 	res, err := p.plan.Finish(out)

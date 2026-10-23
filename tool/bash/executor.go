@@ -56,6 +56,11 @@ type Process interface {
 	Wait() (exitCode int, err error)
 	// Kill stops the command and everything it started.
 	Kill()
+	// Stopped reports that the command did not exit on its own: the
+	// executor killed it, which it does when the context ends. Wait has
+	// to have returned. A command that exited on its own keeps that
+	// outcome, however long the teardown of what it left behind takes.
+	Stopped() bool
 }
 
 // Masker expands the protected paths to mask.

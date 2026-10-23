@@ -621,3 +621,37 @@ func TestAnAlreadyCancelledSandboxDoesNotExecute(t *testing.T) {
 		t.Errorf("the already-cancelled sandbox calls ran the CLI: %q", raw)
 	}
 }
+
+// TestACLIThatExitsBeforeTheDeadlineIsNotATimeout covers the outcome
+// against the teardown: the CLI exits 0 and leaves a child that ignores
+// SIGTERM, so stopping it takes past the manifest's timeout. The CLI
+// exited on its own, and the call is its exit, not a timeout.
+func TestACLIThatExitsBeforeTheDeadlineIsNotATimeout(t *testing.T) {
+	dir := t.TempDir()
+	ready := filepath.Join(dir, "ready")
+	tool := execTool(t, []string{"/bin/sh", "-c",
+		`/bin/sh -c 'trap "" TERM; echo ready > "$1"; exec sleep 30' child "$1" & ` +
+			`while [ ! -f "$1" ]; do :; done; printf completed; exit 0`,
+		"probe", ready}, map[string]any{"timeout": "500ms"})
+
+	start := time.Now()
+	res, err := runCall(t, tool, poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: dir}})
+	if err != nil {
+		t.Fatalf("running the CLI: %v", err)
+	}
+	took := time.Since(start)
+
+	if res.IsError {
+		t.Errorf("a CLI that exited successfully is an error: %q", res.Text)
+	}
+	obs := observation(t, res)
+	if timedOut, _ := obs[bash.EnvelopeTimedOut].(bool); timedOut {
+		t.Errorf("the call reported a timeout after %v, though the CLI exited: %q", took, res.Text)
+	}
+	if code, ok := obs[bash.EnvelopeReturncode].(float64); !ok || code != 0 {
+		t.Errorf("returncode is %v, want 0", obs[bash.EnvelopeReturncode])
+	}
+	if output, _ := obs[bash.EnvelopeOutput].(string); output != "completed" {
+		t.Errorf("the observation lost the CLI's output: %q", output)
+	}
+}
