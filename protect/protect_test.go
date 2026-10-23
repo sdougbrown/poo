@@ -310,6 +310,73 @@ func TestExpandResolvesAnIntermediateSymlink(t *testing.T) {
 	}
 }
 
+// TestExpandNamesTheTargetOfAProtectedFileSymlink covers a glob that names
+// a link: the link is not a mount destination, so the path it reaches is
+// the one to mask, and a target outside the root is not in the sandbox to
+// mask at all.
+func TestExpandNamesTheTargetOfAProtectedFileSymlink(t *testing.T) {
+	dir := tempDir(t)
+	private := writeFile(t, dir, "private.txt", "the private text")
+	inside := filepath.Join(dir, "inside.txt")
+	if err := os.Symlink(private, inside); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	outside := writeFile(t, tempDir(t), "secret.txt", "the secret")
+	beyond := filepath.Join(dir, "beyond.txt")
+	if err := os.Symlink(outside, beyond); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+
+	set, err := protect.Compile([]string{inside})
+	if err != nil {
+		t.Fatalf("compiling: %v", err)
+	}
+	found, err := set.Expand(dir)
+	if err != nil {
+		t.Fatalf("expanding: %v", err)
+	}
+	want := []string{private}
+	if !slices.Equal(found, want) {
+		t.Errorf("the expansion is %v, want %v", found, want)
+	}
+
+	set, err = protect.Compile([]string{beyond})
+	if err != nil {
+		t.Fatalf("compiling: %v", err)
+	}
+	found, err = set.Expand(dir)
+	if err != nil {
+		t.Fatalf("expanding: %v", err)
+	}
+	if len(found) != 0 {
+		t.Errorf("the expansion names the link or its target outside the root: %v", found)
+	}
+}
+
+// TestExpandMasksTheTargetOfAProtectedFileSymlink covers a wildcard that
+// matches a link: the match is masked at the path it reaches, because a
+// mount cannot land on a link.
+func TestExpandMasksTheTargetOfAProtectedFileSymlink(t *testing.T) {
+	dir := tempDir(t)
+	private := writeFile(t, dir, "private.txt", "the private text")
+	writeFile(t, dir, "keep.md", "keep")
+	if err := os.Symlink(private, filepath.Join(dir, "alias.txt")); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	set, err := protect.Compile([]string{filepath.Join(dir, "*.txt")})
+	if err != nil {
+		t.Fatalf("compiling: %v", err)
+	}
+	found, err := set.Expand(dir)
+	if err != nil {
+		t.Fatalf("expanding: %v", err)
+	}
+	want := []string{private}
+	if !slices.Equal(found, want) {
+		t.Errorf("the expansion is %v, want %v", found, want)
+	}
+}
+
 // TestARelativeGlobIsRefused covers the glob that would protect nothing.
 func TestARelativeGlobIsRefused(t *testing.T) {
 	if _, err := protect.Compile([]string{"secrets/**"}); err == nil {

@@ -256,9 +256,18 @@ func (s *Set) walks(root string) []walk {
 //
 // The match is named with the root's spelling and the resolved path below
 // it: a caller mounts the directory under the name it was given, so that
-// spelling is the one a mask lands on. A match outside the root is not in
-// the sandbox under this root, so there is nothing to mask.
+// spelling is the one a mask lands on. A match that is a symlink is masked
+// at the path it reaches: a mount cannot land on a link, and the link's
+// target is what a command reads. A target outside the root is not in the
+// sandbox under this root, so there is nothing to mask.
 func maskPath(base, resolvedRoot, match string) (string, bool) {
+	if info, err := os.Lstat(match); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(match)
+		if err != nil || !within(resolvedRoot, target) {
+			return "", false
+		}
+		match = target
+	}
 	rel, err := filepath.Rel(resolvedRoot, match)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", false

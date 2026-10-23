@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -344,8 +345,10 @@ func (e *Executor) roBinds() []string {
 // masks returns the arguments that hide the protected paths.
 //
 // A path inside a bound directory is hidden: a directory behind an empty
-// tmpfs, a file behind an empty device. A path outside every bound
-// directory is not in the sandbox at all, so there is nothing to hide.
+// tmpfs, a file behind an empty device. A path that is a symlink is hidden
+// at the path it reaches, because a mount cannot land on a link. A path
+// outside every bound directory is not in the sandbox at all, so there is
+// nothing to hide.
 // The masker is asked about every bind, not only the working directory,
 // so a protected path inside a read-only or read-write bind is hidden too.
 func (e *Executor) masks(root string) ([][]string, error) {
@@ -365,10 +368,8 @@ func (e *Executor) masks(root string) ([][]string, error) {
 	var out [][]string
 	var hidden []string
 	for _, path := range paths {
-		if path == "" || !e.bound(path, root) {
-			continue
-		}
-		if underAny(hidden, path) {
+		path, ok := e.destination(path, root)
+		if !ok || underAny(hidden, path) {
 			continue
 		}
 		info, err := os.Stat(path)
@@ -384,6 +385,48 @@ func (e *Executor) masks(root string) ([][]string, error) {
 		out = append(out, []string{"--dev-bind", "/dev/null", path})
 	}
 	return out, nil
+}
+
+// destination returns the path to mask for one masker path, and whether
+// the sandbox holds that path.
+//
+// A mount cannot land on a symlink, so a link is masked at the path it
+// reaches: that is the path a command reads through it. A target outside
+// every bind is not in the sandbox at all, and needs no mount; a link that
+// cannot be resolved is not masked either. A bind's own path is the
+// exception: the sandbox creates a directory of that name for the mount,
+// so a bind whose host path is a symlink is still masked by name.
+func (e *Executor) destination(path, root string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	if !e.isBind(path, root) {
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			target, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return "", false
+			}
+			path = target
+		}
+	}
+	if !e.bound(path, root) {
+		return "", false
+	}
+	return path, true
+}
+
+// isBind reports whether a path is one of the directories the sandbox
+// mounts.
+func (e *Executor) isBind(path, root string) bool {
+	if path == root || path == resolveBind {
+		return true
+	}
+	for _, dir := range e.roBinds() {
+		if dir == path {
+			return true
+		}
+	}
+	return slices.Contains(e.opts.RWBinds, path)
 }
 
 // expandBinds returns the protected paths the sandbox's binds reach.
