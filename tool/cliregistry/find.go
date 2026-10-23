@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/decide"
@@ -128,10 +127,11 @@ type ranked struct {
 
 // Call searches the catalog.
 //
-// One question per entry goes to the decision model, in batches of at
-// most sixty-four questions with at most four requests in flight. The
-// entries the model is most sure about come back first, the default eight
-// of them, with their descriptions and the schema of their arguments.
+// One question per entry goes to the decision model, in one call: the
+// decider splits a long question set into requests of its own, so one
+// search is one decision and one record. The entries the model is most
+// sure about come back first, the default eight of them, with their
+// descriptions and the schema of their arguments.
 func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
 	p, ok := in.(*preparedFind)
 	if !ok {
@@ -145,7 +145,12 @@ func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	for _, entry := range entries {
 		questions = append(questions, findQuestion(entry, p.intent))
 	}
-	answers, err := ask(ctx, env.Decider, p.intent, questions)
+	answers, err := env.Decider.Decide(ctx, map[string]string{"intent": p.intent}, FindInstructions, questions)
+	if err == nil {
+		// A model that answered badly has not answered, so the failure
+		// is the search's own and not the answers'.
+		err = decide.ValidateAnswers(questions, answers)
+	}
 	if err != nil {
 		return poo.ToolResult{}, fmt.Errorf("%s: %w", UnavailableText, err)
 	}
@@ -191,47 +196,6 @@ func findQuestion(entry Entry, intent string) decide.Question {
 			False: "the tool does something else",
 		},
 	}
-}
-
-// ask sends the questions to the decision model.
-//
-// The questions are split into batches, and the batches go out with at
-// most four requests in flight. The answers are merged in the order the
-// questions were asked and checked before they are used: a model that
-// answered badly has not answered.
-func ask(ctx context.Context, decider decide.Decider, intent string, qs []decide.Question) ([]decide.Answer, error) {
-	batches := decide.SplitQuestions(qs, decide.MaxQuestionsPerRequest)
-	if len(batches) == 0 {
-		return nil, nil
-	}
-	state := map[string]string{"intent": intent}
-	answers := make([][]decide.Answer, len(batches))
-	errs := make([]error, len(batches))
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, decide.MaxRequestsInFlight)
-	for i, batch := range batches {
-		wg.Add(1)
-		go func(i int, batch []decide.Question) {
-			defer wg.Done()
-			slots <- struct{}{}
-			defer func() { <-slots }()
-			answers[i], errs[i] = decider.Decide(ctx, state, FindInstructions, batch)
-		}(i, batch)
-	}
-	wg.Wait()
-	for _, err := range errs {
-		if err != nil {
-			return nil, err
-		}
-	}
-	var merged []decide.Answer
-	for _, batch := range answers {
-		merged = append(merged, batch...)
-	}
-	if err := decide.ValidateAnswers(qs, merged); err != nil {
-		return nil, err
-	}
-	return merged, nil
 }
 
 // answerFor returns the probability that an entry fits.

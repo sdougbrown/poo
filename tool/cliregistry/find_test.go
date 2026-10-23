@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,32 +16,24 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
 // searcher is a decision model that answers by entry name.
 //
-// It records the batches it is asked, so a test can see how a search is
-// split, and it can fail on demand.
+// It answers every question it is asked, and it can fail on demand.
 type searcher struct {
-	mu sync.Mutex
-	// calls holds the questions of every request, in the order they
-	// arrived.
-	calls [][]decide.Question
 	// err is the failure the searcher returns, when it is set.
 	err error
 	// probability is the probability the searcher answers for a name.
 	probability func(name string) float64
 }
 
-// Decide answers every question of a batch.
+// Decide answers every question.
 func (s *searcher) Decide(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
-	s.mu.Lock()
-	s.calls = append(s.calls, qs)
-	err := s.err
-	s.mu.Unlock()
-	if err != nil {
-		return nil, err
+	if s.err != nil {
+		return nil, s.err
 	}
 	answers := make([]decide.Answer, 0, len(qs))
 	for _, q := range qs {
@@ -53,11 +49,79 @@ func (s *searcher) Decide(ctx context.Context, state any, instructions string, q
 	return answers, nil
 }
 
-// batches returns the questions of every request.
-func (s *searcher) batches() [][]decide.Question {
+// systemOneServer is a decision endpoint that answers every question it
+// is asked.
+//
+// It records how many questions each request carried, so a test can see
+// how the decider split the search.
+type systemOneServer struct {
+	*httptest.Server
+	mu sync.Mutex
+	// sizes holds the number of questions of every request, in order.
+	sizes []int
+}
+
+// newSystemOneServer starts the endpoint.
+func newSystemOneServer(t *testing.T) *systemOneServer {
+	t.Helper()
+	s := &systemOneServer{}
+	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var req struct {
+			Questions map[string]json.RawMessage `json:"questions"`
+		}
+		_ = json.Unmarshal(raw, &req)
+		s.mu.Lock()
+		s.sizes = append(s.sizes, len(req.Questions))
+		s.mu.Unlock()
+
+		answers := map[string]any{}
+		for id := range req.Questions {
+			p := indexProbability(id)
+			answers[id] = map[string]any{
+				"probabilities": map[string]float64{"yes": p, "no": 1 - p},
+			}
+		}
+		body, _ := json.Marshal(map[string]any{
+			"object":  "structured_decision",
+			"id":      "decision-1",
+			"created": 1730000000,
+			"answers": answers,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(s.Close)
+	return s
+}
+
+// requestSizes returns the number of questions of every request.
+func (s *systemOneServer) requestSizes() []int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([][]decide.Question(nil), s.calls...)
+	return append([]int(nil), s.sizes...)
+}
+
+// recordingSink keeps the decision records a search wrote.
+type recordingSink struct {
+	mu sync.Mutex
+	// recs holds the records, in the order they arrived.
+	recs []decide.Record
+}
+
+// Record keeps one record.
+func (s *recordingSink) Record(ctx context.Context, rec decide.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recs = append(s.recs, rec)
+	return nil
+}
+
+// records returns the records written.
+func (s *recordingSink) records() []decide.Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]decide.Record(nil), s.recs...)
 }
 
 // found is the search's structured result.
@@ -71,33 +135,43 @@ type found struct {
 	} `json:"results"`
 }
 
-// TestFindToolAsksFourRequests covers the search over a large catalog:
-// one question per entry, in batches of at most sixty-four, with the
+// TestFindToolAsksFourRequests covers the split a large catalog needs:
+// one question per entry, in requests of at most sixty-four, and the
 // best entries first.
+//
+// The split belongs to the decision model, so the test asks a real
+// systemone decider and counts the requests its endpoint receives.
 func TestFindToolAsksFourRequests(t *testing.T) {
 	catalog := wideCatalog(t)
-	tool := cliregistry.NewFind(catalog)
-	model := &searcher{probability: indexProbability}
+	server := newSystemOneServer(t)
+	model := openai.NewSystemOneDecider(openai.SystemOneConfig{
+		BaseURL: server.URL,
+		Model:   "test-model",
+	})
 
-	res, err := preparedCall(t, tool, `{"intent":"print the words I give it"}`, poo.ToolEnv{Decider: model})
+	res, err := preparedCall(t, cliregistry.NewFind(catalog), `{"intent":"print the words I give it"}`, poo.ToolEnv{Decider: model})
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
 
-	// Two hundred entries in batches of sixty-four: four requests.
-	calls := model.batches()
-	if len(calls) != 4 {
-		t.Fatalf("the search made %d requests, want 4", len(calls))
+	// Two hundred entries in requests of sixty-four: four requests.
+	sizes := server.requestSizes()
+	if len(sizes) != 4 {
+		t.Fatalf("the search made %d requests, want 4", len(sizes))
 	}
 	total := 0
-	for i, batch := range calls {
-		if len(batch) > decide.MaxQuestionsPerRequest {
-			t.Errorf("the request %d holds %d questions, the most is %d", i, len(batch), decide.MaxQuestionsPerRequest)
+	for i, size := range sizes {
+		if size > decide.MaxQuestionsPerRequest {
+			t.Errorf("the request %d holds %d questions, the most is %d", i, size, decide.MaxQuestionsPerRequest)
 		}
-		total += len(batch)
+		total += size
 	}
 	if total != catalog.Len() {
 		t.Errorf("the search asked %d questions for %d entries", total, catalog.Len())
+	}
+	// The decider's own count agrees: one call, four requests.
+	if got := model.Requests(); got != len(sizes) {
+		t.Errorf("the decider reports %d requests, and the endpoint saw %d", got, len(sizes))
 	}
 
 	// The best eight, best first.
@@ -132,6 +206,70 @@ func TestFindToolAsksFourRequests(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "args: ") {
 		t.Errorf("the text %q does not carry the argument schemas", res.Text)
+	}
+}
+
+// TestOneSearchWritesOneDecisionRecord covers the record: a search is one
+// logical decision, so it leaves one record behind, and the record names
+// every question the search asked.
+func TestOneSearchWritesOneDecisionRecord(t *testing.T) {
+	sink := &recordingSink{}
+	model := decide.Recorded(&searcher{probability: indexProbability}, sink, "session")
+
+	if _, err := preparedCall(t, cliregistry.NewFind(wideCatalog(t)), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model}); err != nil {
+		t.Fatalf("searching: %v", err)
+	}
+
+	records := sink.records()
+	if len(records) != 1 {
+		t.Fatalf("one search wrote %d decision records, want 1", len(records))
+	}
+	if got := len(records[0].Questions); got != 200 {
+		t.Errorf("the record holds %d questions, want the catalog's 200", got)
+	}
+}
+
+// TestTheSearchRanksByProbability covers the ranking: the entries come
+// back by the probability the model gave them, not by their names.
+func TestTheSearchRanksByProbability(t *testing.T) {
+	catalog := wideCatalog(t)
+	scores := map[string]float64{wideName(3): 0.95, wideName(117): 0.85, wideName(42): 0.75}
+	model := &searcher{probability: func(name string) float64 {
+		if p, ok := scores[name]; ok {
+			return p
+		}
+		return 0.1
+	}}
+
+	res, err := preparedCall(t, cliregistry.NewFind(catalog).WithTopK(3), `{"intent":"print the words"}`, poo.ToolEnv{Decider: model})
+	if err != nil {
+		t.Fatalf("searching: %v", err)
+	}
+	var body found
+	if err := json.Unmarshal(res.Structured, &body); err != nil {
+		t.Fatalf("decoding the result %q: %v", res.Structured, err)
+	}
+	want := []string{wideName(3), wideName(117), wideName(42)}
+	if len(body.Results) != len(want) {
+		t.Fatalf("the search returned %d entries, want %d", len(body.Results), len(want))
+	}
+	for i, name := range want {
+		if body.Results[i].Name != name || body.Results[i].Probability != scores[name] {
+			t.Errorf("the entry %d is %q at %v, want %q at %v",
+				i, body.Results[i].Name, body.Results[i].Probability, name, scores[name])
+		}
+		entry, ok := catalog.Lookup(name)
+		if !ok {
+			t.Fatalf("the catalog has no entry named %q", name)
+		}
+		if body.Results[i].Description != entry.Description {
+			t.Errorf("the entry %q carries the description %q, want %q",
+				name, body.Results[i].Description, entry.Description)
+		}
+		if !reflect.DeepEqual(body.Results[i].Schema, entry.Schema) {
+			t.Errorf("the entry %q carries the schema %v, want %v",
+				name, body.Results[i].Schema, entry.Schema)
+		}
 	}
 }
 
