@@ -122,10 +122,12 @@ func (p *preparedCall) EvidenceArguments() json.RawMessage { return p.key }
 // Prepare validates the arguments and plans the command.
 //
 // The name has to be in the catalog, and the arguments have to fit the
-// CLI's schema. Both are refused here, before a process exists, so a
-// malformed call never reaches a command and the model sees the reason
-// instead of the command's failure. The plan is the command and nothing
-// else: no environment is read and no process is started until Call.
+// CLI's schema, including the library's rule about a value a
+// separate-value binding would put where the command parses options.
+// Both are refused here, before a process exists, so a malformed call
+// never reaches a command and the model sees the reason instead of the
+// command's failure. The plan is the command and nothing else: no
+// environment is read and no process is started until Call.
 func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	if t.catalog == nil {
 		return nil, poo.InvalidArgsf("%s: no CLI registry is configured", CallToolName)
@@ -158,9 +160,6 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	if err != nil {
 		return nil, planError(a.Name, err)
 	}
-	if err := checkArgv(a.Name, args, plan.Argv); err != nil {
-		return nil, err
-	}
 	key := marshal(struct {
 		Name string         `json:"name"`
 		Args map[string]any `json:"args"`
@@ -171,9 +170,11 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 // planError reports a call the CLI's own definition refused.
 //
 // A validation failure is the model's to correct, so it comes back as
-// an invalid call. Anything else is the manifest being unusable — a
-// binding that cannot be built, or a working directory that does not
-// resolve — and it is reported as it is.
+// an invalid call: the schema, and a value a separate-value binding
+// would put where the command reads an option, are both the library's
+// checks and both land here. Anything else is the manifest being
+// unusable — a binding that cannot be built, or a working directory that
+// does not resolve — and it is reported as it is.
 func planError(name string, err error) error {
 	var invalid *cli.ValidationError
 	if errors.As(err, &invalid) {
@@ -313,73 +314,6 @@ func stoppedResult(err error, out cli.Output, cap int) (poo.ToolResult, bool) {
 		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, true
 	}
 	return poo.ToolResult{}, false
-}
-
-// checkArgv refuses a value the command may read as a flag.
-//
-// cli-registry escapes a positional value that begins with a dash by
-// putting "--" before it, and a value bound with the equals or short
-// style is part of one argv element. A value bound with the space style
-// is an element of its own after its flag, where a command whose flag
-// takes no value reads it as another flag. poo cannot tell one such
-// command from another, so it refuses the call rather than run a command
-// with an option the model supplied but the manifest does not declare.
-func checkArgv(name string, args map[string]any, argv []string) error {
-	values := dashLeadingValues(args)
-	if len(values) == 0 {
-		return nil
-	}
-	// Everything after the first "--" is an operand, whatever it looks
-	// like; before it, an element equal to a value the model supplied
-	// is a value the command parses as an option.
-	operands := len(argv)
-	for i, element := range argv {
-		if element == "--" {
-			operands = i
-			break
-		}
-	}
-	for _, value := range values {
-		// The command itself is argv[0], never a value the model
-		// supplied.
-		for i := 1; i < len(argv); i++ {
-			if argv[i] != value || i >= operands {
-				continue
-			}
-			return poo.InvalidArgsf("%s: %s: %q begins with a dash, and the command may read it as a flag; "+
-				"pass a value it cannot mistake for one", CallToolName, name, value)
-		}
-	}
-	return nil
-}
-
-// dashLeadingValues returns the string arguments that could be a flag.
-//
-// The values are the ones the model wrote, anywhere in the argument
-// object: a binding reads a top-level property, and a positional array
-// passes its elements as they are. Only a string can name another flag;
-// a number encodes to digits and a sign.
-func dashLeadingValues(v any) []string {
-	var out []string
-	var walk func(any)
-	walk = func(v any) {
-		switch value := v.(type) {
-		case string:
-			if strings.HasPrefix(value, "-") && value != "-" {
-				out = append(out, value)
-			}
-		case []any:
-			for _, element := range value {
-				walk(element)
-			}
-		case map[string]any:
-			for _, element := range value {
-				walk(element)
-			}
-		}
-	}
-	walk(v)
-	return out
 }
 
 // envLookup returns the lookup a plan resolves its env references with.
