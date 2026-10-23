@@ -64,7 +64,6 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 //
 // A call that was never counted has no counts.
 func (s *Session) repeatCountFor(handle string) repeatCounts {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.repeatCounts[handle]
+	counts := s.RepeatCountsFor(handle)
+	return repeatCounts{exact: counts.Exact, near: counts.Near}
 }

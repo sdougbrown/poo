@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"context"
+	"strings"
 	"errors"
 	"sync"
 	"testing"
@@ -691,5 +692,46 @@ func TestAFailingCompactorBelowTheHardLimitContinuesUncompacted(t *testing.T) {
 	// compactor did, and it did nothing.
 	if n := sink.count("compaction"); n != 0 {
 		t.Errorf("the log holds %d compaction records, want none", n)
+	}
+}
+
+// TestTheNoticeNamesTheConfiguredRatio covers the notice's contract
+// with a configured ratio: the notice the model reads names the ratio
+// it fired at, not the default's.
+func TestTheNoticeNamesTheConfiguredRatio(t *testing.T) {
+	// The first turn runs a tool, so the run reaches the gate with the
+	// estimate past the configured ratio; a natural stop would settle
+	// without a gate pass.
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 1800}},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.ContextLimit = 3000
+	opts.NoticeRatio = 0.60
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	noticed := false
+	for _, m := range sink.messages() {
+		if m.Role != poo.RoleUser {
+			continue
+		}
+		if text := m.Content[0].Text; strings.Contains(text, "~60%") {
+			noticed = true
+		} else if strings.Contains(text, "Context notice") {
+			t.Errorf("the notice is %q, want the configured ratio", text)
+		}
+	}
+	if !noticed {
+		t.Error("the log holds no notice with the configured ratio")
 	}
 }

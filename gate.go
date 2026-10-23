@@ -154,7 +154,10 @@ func (s *Session) maybeNotice(run *runState) {
 	s.noticeArmed = false
 	s.mu.Unlock()
 
-	msg := NewTextMessage(RoleUser, ContextNoticeText)
+	// The ratio in the model's notice is the configured one: a
+	// consumer that fires the notice at 60% does not tell the model
+	// the window is ~80% used.
+	msg := NewTextMessage(RoleUser, fmt.Sprintf("[Context notice: ~%d%% of the context window used. Prefer narrow reads; finish or report soon.]", int(s.opts.NoticeRatio*100)))
 	msg.Origin = OriginUser
 	s.appendMessages(msg)
 	_ = s.write(run.ctx, &MessageRecord{
