@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -118,6 +119,19 @@ func (s *fenceSlowSink) count(name string) int {
 	return n
 }
 
+// flushes returns how many times the sink was flushed.
+func (s *fenceSlowSink) flushes() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, entry := range s.order {
+		if len(entry) >= 5 && entry[:5] == "flush" {
+			n++
+		}
+	}
+	return n
+}
+
 // order returns the recorded order.
 func (s *fenceSlowSink) orderCopy() []string {
 	s.mu.Lock()
@@ -184,6 +198,53 @@ func TestAJobEndedRecordDoesNotFollowTheClose(t *testing.T) {
 	}
 	if got := sink.count("job.ended"); got != 1 {
 		t.Fatalf("the log holds %d job.ended record(s), want 1; order: %v", got, sink.orderCopy())
+	}
+}
+
+// TestAStalledWriteIsNamedAndTheCloseFinishes covers the fence's bound:
+// a record write that outlives the close's wait is named in the close's
+// error, and the close still stops the session and flushes.
+func TestAStalledWriteIsNamedAndTheCloseFinishes(t *testing.T) {
+	sink := newFenceSlowSink("input.queued", 4*fenceWriteBudget)
+	sess, err := poo.New(poo.Options{
+		Transport:    fix1StalledTransport{},
+		Sink:         sink,
+		SessionID:    "s1",
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir:   t.TempDir(),
+		SystemPrompt: "the system prompt",
+	})
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	poo.SetRecordWriteBudget(sess, fenceWriteBudget)
+
+	if _, err := sess.Prompt(context.Background(), "hi"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	waitFor(t, "the run to request", func() bool { return sess.State() == poo.StateRequesting })
+	go sess.Send("a message", poo.Steer)
+	select {
+	case <-sink.held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the message's write never reached the sink")
+	}
+
+	err = sess.Close()
+	if !errors.Is(err, poo.ErrCloseStalled) {
+		t.Fatalf("the close returned %v, want ErrCloseStalled", err)
+	}
+	if !strings.Contains(err.Error(), "input.queued") {
+		t.Errorf("the close's error is %q, want it to name the input.queued write", err)
+	}
+	if got := sink.flushes(); got < 1 {
+		t.Errorf("the sink was flushed %d time(s), want at least 1", got)
+	}
+	// The bound is the escape hatch: the close said which write held it
+	// up and flushed without it, and the write lands after the flush.
+	sink.waitForLanded(t)
+	if late := sink.afterTheLastFlush(); len(late) == 0 {
+		t.Errorf("the stalled write is expected after the close's flush; order: %v", sink.orderCopy())
 	}
 }
 
