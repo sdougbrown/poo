@@ -97,11 +97,12 @@ func (c *chain) askReported(ctx context.Context, ask Ask, reporter poo.Permissio
 		}
 		c.attempt(chainCtx, ctx, ask, asker, request, deadline)
 	}
+	kind := poo.PermissionExhausted
 	if len(c.askers) == 0 {
-		offer(request, poo.PermissionInput{Kind: poo.PermissionNoAsker})
-		return resolutionOf(request)
+		// Nobody was asked, and the answer says so.
+		kind = poo.PermissionNoAsker
 	}
-	offer(request, poo.PermissionInput{Kind: poo.PermissionExhausted})
+	offer(request, poo.PermissionInput{Kind: kind})
 	return resolutionOf(request)
 }
 

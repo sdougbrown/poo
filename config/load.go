@@ -80,14 +80,6 @@ func Parse(data []byte, format Format) (*Settings, error) {
 	return &settings, nil
 }
 
-// namedLists holds the lists whose emptiness a decoded value cannot
-// tell from their absence.
-type namedLists struct {
-	Permission struct {
-		Askers *[]string `json:"askers"`
-	} `json:"permission"`
-}
-
 // namesAskers reports whether the document names the asker chain, even
 // an empty one.
 //
@@ -95,7 +87,11 @@ type namedLists struct {
 // absent one: the document is read a second time for the key's
 // presence, and the first read is the values.
 func namesAskers(document []byte) bool {
-	var named namedLists
+	var named struct {
+		Permission struct {
+			Askers *[]string `json:"askers"`
+		} `json:"permission"`
+	}
 	if err := json.Unmarshal(document, &named); err != nil {
 		return false
 	}
