@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
@@ -68,31 +71,92 @@ func TestTheExitCodeComesFromTheSettleReason(t *testing.T) {
 	}
 }
 
-// TestTheNoWaitJobsFlagIsAccepted covers the flag: the one-shot exits at
-// the first settle when it is given.
-func TestTheNoWaitJobsFlagIsAccepted(t *testing.T) {
-	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"the answer"},"finish_reason":"stop"}]}` + "\n\n" +
+// TestTheOneShotWithAStuckJobExitsAtTheFirstSettle covers the flag's
+// actual behavior: the model's job never finishes, and the one-shot
+// exits at the first settle with the answer instead of waiting for it.
+// A regression that waits for jobs never returns, and the test's
+// deadline catches it.
+func TestTheOneShotWithAStuckJobExitsAtTheFirstSettle(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"the answer","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"job","arguments":"{\"text\":\"one\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
 		"data: [DONE]\n\n"
 	endpoint := newFakeEndpoint(t, body)
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "run.jsonl")
 
-	code, stderr, stdout := runCLIWithStdout(t,
+	args := []string{
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--base-url", endpoint.URL + "/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
+		"--max-turns", "1",
 		"--no-wait-jobs",
 		"--working-dir", dir,
 		"--log", logPath,
 		"say hello",
-	)
-	if code != 0 {
-		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+
+	// The same std-handle juggling as runCLIWithStdout, but the run is
+	// awaited under a deadline: waiting for a job that is never
+	// released does not return.
+	oldStderr := os.Stderr
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating the pipe: %v", err)
+	}
+	os.Stderr = w
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating the pipe: %v", err)
+	}
+	os.Stdout = outW
+
+	stderrDone := make(chan []byte, 1)
+	go func() {
+		out, _ := io.ReadAll(r)
+		stderrDone <- out
+	}()
+	stdoutDone := make(chan []byte, 1)
+	go func() {
+		out, _ := io.ReadAll(outR)
+		stdoutDone <- out
+	}()
+
+	type result struct {
+		code int
+	}
+	done := make(chan result, 1)
+	go func() {
+		done <- result{run(args)}
+	}()
+
+	var code int
+	select {
+	case res := <-done:
+		code = res.code
+	case <-time.After(10 * time.Second):
+		os.Stderr = oldStderr
+		os.Stdout = oldStdout
+		t.Fatal("the one-shot did not exit at the first settle: --no-wait-jobs was ignored, or the run is stuck waiting for the job")
+		return
+	}
+
+	os.Stderr = oldStderr
+	os.Stdout = oldStdout
+	w.Close()
+	outW.Close()
+	stderr := string(<-stderrDone)
+	stdout := string(<-stdoutDone)
+	r.Close()
+	outR.Close()
+
+	// The turn ceiling settles the run, and the code is the table's.
+	if code != poo.ExitCode(poo.ReasonMaxTurns) {
+		t.Errorf("the exit code is %d, want %d; stderr: %s", code, poo.ExitCode(poo.ReasonMaxTurns), stderr)
 	}
 	if !strings.Contains(stdout, "the answer") {
-		t.Errorf("stdout is %q, want it to hold the answer", stdout)
+		t.Errorf("stdout is %q, want it to hold the answer printed without waiting for the stuck job", stdout)
 	}
 }
 

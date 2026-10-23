@@ -467,7 +467,10 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	case errors.Is(err, context.Canceled):
 		s.finishJob(job, OutcomeCancelled, stoppedText(result.Text, err, "the job was cancelled"), false, fatal)
 	default:
-		s.finishJob(job, OutcomeError, err.Error(), false, fatal)
+		// The policy is the stopped branches': the partial output is
+		// the job's result, and the error explains a job that
+		// produced none.
+		s.finishJob(job, OutcomeError, stoppedText(result.Text, err, "the job failed"), false, fatal)
 	}
 }
 
