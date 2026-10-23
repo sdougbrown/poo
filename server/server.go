@@ -69,7 +69,7 @@ func New(opts Options) (*Server, error) {
 		Tools:          opts.Tools,
 		Profiles:       opts.Profiles,
 		Executors:      opts.Executors,
-		// The command has a wire, so the chain asks the client. The
+		// The server has a wire, so the chain asks the client. The
 		// decide asker is there only when the settings name a decider
 		// model.
 		Askers: []string{"wire"},
@@ -108,7 +108,8 @@ func (s *Server) decorateRuntime(runtime *config.Runtime) error {
 	return s.decorate(runtime)
 }
 
-// Server builds the sessions a serve command serves.
+// Server is the wire factory: it builds the sessions a serve command
+// serves.
 //
 // The settings arrive with the config package, and the runtime is what
 // they build: the profiles, the models, the policy and the options. The
@@ -124,7 +125,7 @@ type Server struct {
 	build config.BuildOptions
 	// settings are the settings the build was made from.
 	settings *config.Settings
-	// effective are the settings the command line leaves after its
+	// effective are the settings a command line leaves after its
 	// overrides: the document config/get reports.
 	effective *config.Settings
 	// workDir is the directory the tools work in.
@@ -164,8 +165,8 @@ func (f *Server) runtimeFor(profile, model string) (*config.Runtime, error) {
 		return runtime, nil
 	}
 	if profile == "" && model == "" {
-		// The default runtime is the one the command built, and it
-		// carries the settings' own tools.
+		// The default runtime is the one New built, and it carries
+		// the settings' own tools.
 		f.runtimes[key] = f.runtime
 		return f.runtime, nil
 	}
