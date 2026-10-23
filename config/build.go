@@ -421,19 +421,24 @@ func (r *Runtime) offersRegistry() bool {
 // read-only. A binary that links no such tool cannot honour the settings,
 // and the operator is told which tool is missing.
 func (r *Runtime) addRegistryTools(opts BuildOptions) error {
-	if r.Registry == nil || !offersSideEffects(r.Profile.Tools) {
+	if r.Registry == nil {
 		return nil
 	}
-	for _, name := range registryToolNames(r.findTool()) {
-		factory, ok := opts.Tools[name]
-		if !ok || factory == nil {
+	names := registryToolNames(r.findTool())
+	for _, name := range names {
+		if !linksTool(opts, name) {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "cliregistry.paths",
 				Message: fmt.Sprintf("the settings name a cli registry, and this binary does not link the %q tool", name),
 			}
 		}
-		r.Profile.Tools = append(r.Profile.Tools, toolInfo(factory))
+	}
+	if !offersSideEffects(r.Profile.Tools) {
+		return nil
+	}
+	for _, name := range names {
+		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[name]))
 		r.toolNames = append(r.toolNames, name)
 	}
 	return nil
