@@ -34,7 +34,10 @@ type observerSlot struct {
 	observer Observer
 	// ch is the observer's buffer.
 	ch chan Event
-	// dropped counts the events the observer missed.
+	// dropped counts the events the observer missed. The coalesced
+	// observer.dropped record is written by the observer stage (Stage
+	// 4) and is never delivered to observers, so the count itself is
+	// scaffolding until then.
 	dropped int
 	// done is closed when the observer's goroutine ends.
 	done chan struct{}

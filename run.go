@@ -1344,9 +1344,6 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 		}
 	}
 
-	for k, c := range calls {
-		println("DEBUG call", k, c.ID, len(c.Arguments), string(c.Arguments))
-	}
 	resp.collect(text.String(), thinking.String(), calls, order)
 	return resp, nil
 }

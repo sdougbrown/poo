@@ -493,6 +493,39 @@ func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 	return env
 }
 
+// jobEnded builds the job.ended record and its event payload: the one
+// construction the finish path and the close path share, so the
+// record's fields and the event's move together. The cause names the
+// close when the close wrote the record, and is empty on the finish
+// path.
+func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, cause JobCause, timedOut bool, text string) (*JobEnded, map[string]any) {
+	rec := &JobEnded{
+		RecordMeta: NewRecordMeta("job.ended"),
+		SessionID:  s.opts.SessionID,
+		Job:        job.id,
+		Handle:     job.handle,
+		Tool:       job.tool,
+		RunID:      job.runID,
+		Outcome:    outcome,
+		Cause:      cause,
+		TimedOut:   timedOut,
+		InputID:    inputID,
+		Text:       text,
+		EndedAt:    nowRFC3339(),
+	}
+	payload := map[string]any{
+		"job":      job.id,
+		"handle":   job.handle,
+		"tool":     job.tool,
+		"outcome":  string(outcome),
+		"input_id": inputID,
+	}
+	if cause != "" {
+		payload["cause"] = string(cause)
+	}
+	return rec, payload
+}
+
 // finishJob records a job's outcome and queues its result.
 //
 // The result is queued on the session's job queue, and the queue is
@@ -525,19 +558,8 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 	// held result never leaks what a hook would have redacted. The
 	// after-tool chain is Stage 4's; the core records the tool's own
 	// result for now.
-	if err := s.write(context.WithoutCancel(job.ctx), &JobEnded{
-		RecordMeta: NewRecordMeta("job.ended"),
-		SessionID:  s.opts.SessionID,
-		Job:        job.id,
-		Handle:     handle,
-		Tool:       tool,
-		RunID:      runID,
-		Outcome:    jobOutcome,
-		TimedOut:   timedOut,
-		InputID:    inputID,
-		Text:       text,
-		EndedAt:    nowRFC3339(),
-	}); err != nil {
+	rec, payload := s.jobEnded(job, inputID, jobOutcome, "", timedOut, text)
+	if err := s.write(context.WithoutCancel(job.ctx), rec); err != nil {
 		// The store refused the job's end. The session is broken at
 		// once: the wakes stop, and the run that is still open gets
 		// the store_error candidate.
@@ -545,13 +567,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 		s.addStoreError()
 		return
 	}
-	s.events.emit(EventJobEnded, map[string]any{
-		"job":      job.id,
-		"handle":   handle,
-		"tool":     tool,
-		"outcome":  string(jobOutcome),
-		"input_id": inputID,
-	})
+	s.events.emit(EventJobEnded, payload)
 
 	s.queueJobResult(jobResult{
 		id:      inputID,
@@ -1265,9 +1281,6 @@ func (s *Session) writeJobEndedOnClose(job *jobState) {
 	job.ended = true
 	s.inputSeq++
 	inputID := fmt.Sprintf("%s-ji%d", s.opts.SessionID, s.inputSeq)
-	handle := job.handle
-	tool := job.tool
-	runID := job.runID
 	partial := job.partialText
 	s.mu.Unlock()
 
@@ -1275,27 +1288,9 @@ func (s *Session) writeJobEndedOnClose(job *jobState) {
 	if partial != "" {
 		text = partial + "\n" + text
 	}
-	s.write(context.Background(), &JobEnded{
-		RecordMeta: NewRecordMeta("job.ended"),
-		SessionID:  s.opts.SessionID,
-		Job:        job.id,
-		Handle:     handle,
-		Tool:       tool,
-		RunID:      runID,
-		Outcome:    JobOutcomeCancelled,
-		Cause:      CauseSessionClosed,
-		InputID:    inputID,
-		Text:       text,
-		EndedAt:    nowRFC3339(),
-	})
-	s.events.emit(EventJobEnded, map[string]any{
-		"job":      job.id,
-		"handle":   handle,
-		"tool":     tool,
-		"outcome":  string(JobOutcomeCancelled),
-		"cause":    string(CauseSessionClosed),
-		"input_id": inputID,
-	})
+	rec, payload := s.jobEnded(job, inputID, JobOutcomeCancelled, CauseSessionClosed, false, text)
+	s.write(context.Background(), rec)
+	s.events.emit(EventJobEnded, payload)
 }
 
 // jobSummary describes one job, for the jobs tool.

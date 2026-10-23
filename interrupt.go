@@ -51,10 +51,11 @@ func (s *Session) interruptedActivityTurn(run *runState, turn int, resp *respons
 	// toward MaxTurns.
 	cands := s.evaluateStopConditions(run, turn)
 	cands = append(cands, s.evaluateBudgets(run, turn)...)
-	if len(cands) > 0 {
-		s.mu.Lock()
-		run.candidates = append(run.candidates, cands...)
-		s.mu.Unlock()
+	// The candidates go through the guarded writer: a candidate that
+	// arrives after the commit point is dropped, like every other
+	// writer's.
+	for _, c := range cands {
+		s.addCandidate(run, c)
 	}
 	s.clearInterrupt(run)
 }

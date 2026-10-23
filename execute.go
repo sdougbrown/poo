@@ -365,7 +365,6 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// because a refusal never starts a job. The record is therefore
 	// written once, at the point the mode is fixed.
 	recorded := false
-	println("EXECUTE call", call.ID, len(call.Arguments), string(call.Arguments))
 	record := func(m CallMode) bool {
 		if recorded {
 			return true
