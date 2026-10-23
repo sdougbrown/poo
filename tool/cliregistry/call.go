@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	cli "github.com/sdougbrown/cli-registry"
-	"github.com/sdougbrown/cli-registry/schema"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/internal/caps"
@@ -124,7 +123,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 			return nil, poo.InvalidArgsf("%s: no CLI is registered", CallToolName)
 		}
 		return nil, poo.InvalidArgsf("%s: no CLI named %q; %s",
-			CallToolName, a.Name, t.catalog.namesHint(t.search))
+			CallToolName, a.Name, t.catalog.NamesHint(t.search))
 	}
 	args := map[string]any{}
 	if len(a.Args) > 0 {
@@ -138,8 +137,8 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, entry.Name, err)
 		}
 	}
-	if issues := t.catalog.validators[entry.Name].Validate(args); len(issues) > 0 {
-		return nil, poo.InvalidArgsf("%s: %s: %s", CallToolName, entry.Name, issuesText(issues))
+	if issues := t.catalog.Validate(entry.Name, args); len(issues) > 0 {
+		return nil, poo.InvalidArgsf("%s: %s: %s", CallToolName, entry.Name, strings.Join(issues, "; "))
 	}
 	key := marshal(struct {
 		Name string         `json:"name"`
@@ -159,17 +158,12 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	if !ok {
 		return poo.ToolResult{}, fmt.Errorf("%s: prepared value is not a %s call", CallToolName, CallToolName)
 	}
-	tool, ok := t.catalog.tools[p.name]
-	if !ok {
-		return poo.ToolResult{}, fmt.Errorf("%s: no CLI named %q", CallToolName, p.name)
-	}
-
 	cap := env.Settings.ObservationCapChars
 	if cap <= 0 {
 		cap = caps.ObservationMax
 	}
 
-	res, err := t.catalog.registry.Call(ctx, tool, p.args)
+	res, err := t.catalog.Run(ctx, p.name, p.args)
 	if err != nil {
 		return failed(err, cap)
 	}
@@ -233,22 +227,6 @@ func decodeStrict(raw json.RawMessage, into any) error {
 		return err
 	}
 	return nil
-}
-
-// issuesText renders schema issues for the model.
-//
-// A path is an RFC 6901 pointer into the arguments, so the model can see
-// which argument it got wrong.
-func issuesText(issues []schema.StructuralIssue) string {
-	parts := make([]string, 0, len(issues))
-	for _, issue := range issues {
-		path := issue.Path
-		if path == "" {
-			path = "arguments"
-		}
-		parts = append(parts, path+": "+issue.Message)
-	}
-	return strings.Join(parts, "; ")
 }
 
 // marshal encodes a value, falling back to an empty object.

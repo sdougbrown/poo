@@ -16,8 +16,11 @@
 //   - the session package may import the standard library, the core
 //     package and the decide package
 //   - the tool/cliregistry package may import the standard library, the core
-//     package, the prompt package, the decide package, the bash package and
-//     the packages outside the module that hold a cli registry
+//     package, the cli package, the prompt package, the decide package, the
+//     bash package and the packages outside the module that hold a cli
+//     registry
+//   - the cli package may import the standard library and the packages
+//     outside the module that hold a cli registry
 //   - the exec package may import the standard library only, and the
 //     exec/bwrap package may import the exec package
 //   - the protect package may import the standard library only
@@ -98,9 +101,10 @@ func (c Checker) rules() []rule {
 		{path: m + "/exec/bwrap", allowed: []string{m + "/exec"}},
 		{path: m + "/protect"},
 		{path: m + "/internal/caps"},
+		{path: m + "/cli", external: true},
 		{
 			path:     m + "/tool/cliregistry",
-			allowed:  []string{m, m + "/decide", m + "/exec", m + "/internal/caps", m + "/prompt", m + "/tool/bash"},
+			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/prompt", m + "/tool/bash"},
 			external: true,
 		},
 	}

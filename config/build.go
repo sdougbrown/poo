@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/internal/caps"
@@ -26,7 +27,6 @@ import (
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/tool/bash"
-	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
 // The names the settings and the profiles use.
@@ -135,7 +135,7 @@ type Runtime struct {
 	Catalog *catalog.Catalog
 	// Registry is the cli registry the session offers, or nil when the
 	// settings name none.
-	Registry *cliregistry.Catalog
+	Registry *cli.Catalog
 	// deciderModel is the model the session's decider asks, when there
 	// is one.
 	deciderModel poo.ModelInfo
@@ -239,7 +239,7 @@ type ToolOptions struct {
 	ProtectedPaths *protect.Set
 	// Registry is the cli registry the registry's tools call. It is nil
 	// when the settings name no registry.
-	Registry *cliregistry.Catalog
+	Registry *cli.Catalog
 	// Search reports that the session searches the catalog instead of
 	// listing it, so call_cli points an unknown name at the search.
 	Search bool
@@ -363,7 +363,7 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 		}
 		resolved = append(resolved, path)
 	}
-	catalog, err := cliregistry.Load(resolved...)
+	catalog, err := cli.Load(resolved...)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
@@ -395,7 +395,7 @@ func (r *Runtime) resolveDecider() {
 // decider role the settings name and the catalog cannot resolve gives
 // the session none.
 func (r *Runtime) findTool() bool {
-	return r.Registry != nil && r.Registry.Len() > cliregistry.FindThreshold &&
+	return r.Registry != nil && r.Registry.Len() > cli.FindThreshold &&
 		r.deciderErr == nil && r.decider != nil
 }
 
@@ -405,7 +405,7 @@ func (r *Runtime) findTool() bool {
 // what it lists: a tool left out of the build takes its guidance with it.
 func (r *Runtime) offersRegistry() bool {
 	for _, name := range r.toolNames {
-		if name == cliregistry.CallToolName {
+		if name == cli.CallToolName {
 			return true
 		}
 	}
@@ -444,9 +444,9 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 // call_cli is all the model needs.
 func registryToolNames(find bool) []string {
 	if find {
-		return []string{cliregistry.CallToolName, cliregistry.FindToolName}
+		return []string{cli.CallToolName, cli.FindToolName}
 	}
-	return []string{cliregistry.CallToolName}
+	return []string{cli.CallToolName}
 }
 
 // offersSideEffects reports whether a tool set can change anything.
@@ -1024,7 +1024,7 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	if r.Registry != nil && r.offersRegistry() {
 		section := r.Registry.Section(r.findTool())
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
-			b.Set(cliregistry.SectionName, section)
+			b.Set(cli.SectionName, section)
 		})
 	}
 	for name, text := range settings.SystemPrompt.Sections {
