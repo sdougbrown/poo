@@ -764,6 +764,9 @@ func (s *suite) failureLockedSession() {
 func (s *suite) teardown() {
 	s.t.Helper()
 	s.teardownCloseRacingARun()
+	// The close race needs no tool, so a hang-up that skips leaves the
+	// flow half run rather than wholly skipped.
+	s.partial = true
 	s.teardownHangUp()
 }
 

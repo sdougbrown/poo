@@ -170,6 +170,8 @@ type suite struct {
 	flowName string
 	// skips are the reasons the running flow did not run.
 	skips []string
+	// partial reports whether a flow ran before it skipped.
+	partial bool
 	// report is what the suite ran.
 	report Report
 }
@@ -178,6 +180,14 @@ type suite struct {
 type Report struct {
 	// Run names the flows that ran, in order.
 	Run []string
+	// Partial names the flows that ran in part and skipped the rest, in
+	// order. The flows' reasons are in Skipped as well.
+	//
+	// A flow that has two halves reports itself here when the first
+	// half ran and the second needed something the target does not
+	// offer. The suite counts the flow as neither wholly run nor wholly
+	// skipped.
+	Partial []string
 	// Skipped names the flows that did not run, in order, and says why.
 	//
 	// A flow skips when the target does not offer what the flow
@@ -258,11 +268,14 @@ func (s *suite) flow(name string, run func()) {
 	s.t.Helper()
 	s.flowName = name
 	s.skips = nil
+	s.partial = false
 	start := time.Now()
 	s.t.Logf("flow: %s", name)
 	run()
 	if len(s.skips) == 0 {
 		s.report.Run = append(s.report.Run, name)
+	} else if s.partial {
+		s.report.Partial = append(s.report.Partial, name)
 	}
 	for _, reason := range s.skips {
 		s.report.Skipped = append(s.report.Skipped, Skip{Flow: name, Reason: reason})

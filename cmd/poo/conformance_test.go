@@ -41,6 +41,9 @@ func TestTheBinarySpeaksTheProtocol(t *testing.T) {
 	if len(report.Skipped) > 0 {
 		t.Errorf("the suite skipped %d flows, want every flow: %v", len(report.Skipped), report.Skipped)
 	}
+	if len(report.Partial) > 0 {
+		t.Errorf("the suite reports partly run flows: %v", report.Partial)
+	}
 }
 
 // TestTheBinaryWithTheExtensionSpeaksTheProtocol runs the suite
@@ -144,6 +147,9 @@ func TestAReadOnlyBinarySpeaksTheProtocol(t *testing.T) {
 	sort.Strings(want)
 	if !slices.Equal(skipped, want) {
 		t.Errorf("the suite skipped %v, want %v", skipped, want)
+	}
+	if !slices.Contains(report.Partial, "teardown") {
+		t.Errorf("the suite did not report teardown as partly run: %v", report.Partial)
 	}
 	if len(report.Run) == 0 {
 		t.Error("the suite ran no flow against the read-only binary")
