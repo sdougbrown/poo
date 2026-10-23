@@ -887,18 +887,7 @@ func (s *Session) hasDrainableSteerLocked() bool {
 //
 // The caller holds the session's lock.
 func (s *Session) removeQueuedInputLocked(input queuedInput) {
-	for i, queued := range s.steerQueue {
-		if queued.id == input.id {
-			s.steerQueue = append(s.steerQueue[:i], s.steerQueue[i+1:]...)
-			return
-		}
-	}
-	for i, queued := range s.followUpQueue {
-		if queued.id == input.id {
-			s.followUpQueue = append(s.followUpQueue[:i], s.followUpQueue[i+1:]...)
-			return
-		}
-	}
+	s.removeQueuedInputLockedBool(input)
 }
 
 // prepareDeliveryNoteLocked validates a delivery note against the

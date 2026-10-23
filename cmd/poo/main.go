@@ -293,7 +293,10 @@ func runRun(args []string) int {
 	}
 
 	// The exit code comes from the settle-reason table, combined
-	// across the runs: the first non-zero code wins.
+	// across the runs: the first non-zero code wins. A failed jobs
+	// wait is the client's own context - the jobs stop through the
+	// close, and the wait error is on stderr - so it does not add a
+	// code of its own.
 	return combinedExitCode(sess.SettleCodes())
 }
 
