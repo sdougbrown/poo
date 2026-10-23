@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/code"
@@ -265,6 +267,55 @@ func TestAReadOnlyProfileStaysReadOnly(t *testing.T) {
 	// catalog.
 	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "deploy: The deploy command") {
 		t.Errorf("the prompt lists a catalog the session cannot call: %q", text)
+	}
+}
+
+// TestAResumedSessionKeepsOneCatalog covers the resume: a session that
+// recorded its prompt keeps that prompt whole, so the sections the build
+// installs are not applied a second time on top of it.
+func TestAResumedSessionKeepsOneCatalog(t *testing.T) {
+	dir := registry(t, "deploy", "logs")
+	settings, err := config.Parse([]byte(registrySettings(dir)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+	runtime.Options.Transport = pootest.NewTransport(pootest.Turn{Text: "done"})
+
+	created := &poo.SessionCreated{
+		RecordMeta:   poo.NewRecordMeta("session.created"),
+		Format:       poo.FormatVersion,
+		SessionID:    "s1",
+		Mode:         "logged",
+		CreatedAt:    "2026-10-22T12:00:00Z",
+		WorkingDir:   runtime.Options.WorkingDir,
+		Model:        poo.SessionModel{ID: "test-model"},
+		ContextLimit: 32768,
+		Profile:      "code",
+		Tools:        runtime.Profile.Tools,
+	}
+	session, err := runtime.CreateSession(context.Background(), runtime.Store, created)
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if _, err := session.Prompt(context.Background(), "say hello"); err != nil {
+		t.Fatalf("prompting: %v", err)
+	}
+	if _, err := session.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+
+	resumed, err := runtime.ResumeSession(context.Background(), runtime.Store, "s1")
+	if err != nil {
+		t.Fatalf("resuming the session: %v", err)
+	}
+	defer resumed.Session.Close()
+	if got := strings.Count(resumed.Session.PromptState().Text, "Registered CLIs:"); got != 1 {
+		t.Errorf("the resumed prompt carries the catalog %d times, want once", got)
 	}
 }
 

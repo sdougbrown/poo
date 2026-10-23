@@ -175,15 +175,6 @@ type Restored struct {
 //
 // The session takes new runs when the restore returns.
 func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored, error) {
-	// The options are applied before the session is built, so a
-	// restored session carries the same hooks and observers a new one
-	// does. The session-start hooks are still dropped below: the
-	// records hold the messages they appended.
-	for _, fn := range fns {
-		if fn != nil {
-			fn(&opts)
-		}
-	}
 	created := sessionHeader(records)
 	if created == nil {
 		return nil, Restored{}, ErrNoSessionHeader
@@ -198,9 +189,22 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 
 	// The prompt is the recorded one. It is never rendered from the
 	// sections again, so a change in the prompt's sections cannot reach
-	// a session that was recorded under another one.
+	// a session that was recorded under another one. The sections the
+	// options were built with are not applied to it either: the recorded
+	// text is the whole prompt, and an edit on top of it would add a
+	// section the record already carries.
 	if text, ok := recordedPrompt(records); ok {
 		opts.SystemPrompt = text
+		opts.Prompt = nil
+	}
+	// The options are applied before the session is built, so a
+	// restored session carries the same hooks and observers a new one
+	// does. The session-start hooks are still dropped below: the
+	// records hold the messages they appended.
+	for _, fn := range fns {
+		if fn != nil {
+			fn(&opts)
+		}
 	}
 	if opts.SessionID == "" {
 		opts.SessionID = restored.Metadata.SessionID
