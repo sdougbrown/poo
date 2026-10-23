@@ -26,13 +26,15 @@ type Executor interface {
 	Name() string
 	// Start runs the command and writes its output to out.
 	//
-	// The output of stdout and stderr is one stream, so it arrives in
-	// the order the command produced it. A writer that stops accepting
-	// the output does not stop the command: the executor keeps
-	// reading and discards what the writer will not take.
+	// The output of stdout and stderr is one stream unless the command
+	// asks for them apart, so it arrives in the order the command
+	// produced it. A writer that stops accepting the output does not
+	// stop the command: the executor keeps reading and discards what
+	// the writer will not take.
 	//
 	// The context ends the command: when it is done, the executor
-	// stops the command the way Kill does.
+	// stops the command the way Kill does. A context that has already
+	// ended starts nothing: Start returns its error and no process.
 	Start(ctx context.Context, c Command, out io.Writer) (Process, error)
 }
 
@@ -46,6 +48,11 @@ type Command struct {
 	// Env is the command's environment, already scrubbed. A nil
 	// environment means the command inherits the executor's own.
 	Env []string
+	// Stderr is where the command's error output goes, when the
+	// caller needs the two streams apart. A nil writer keeps them
+	// merged into out, interleaved in the order the command wrote
+	// them.
+	Stderr io.Writer
 }
 
 // Process is a command that is running.
@@ -56,6 +63,11 @@ type Process interface {
 	Wait() (exitCode int, err error)
 	// Kill stops the command and everything it started.
 	Kill()
+	// Stopped reports that the command did not exit on its own: the
+	// executor killed it, which it does when the context ends. Wait has
+	// to have returned. A command that exited on its own keeps that
+	// outcome, however long the teardown of what it left behind takes.
+	Stopped() bool
 }
 
 // Masker expands the protected paths to mask.

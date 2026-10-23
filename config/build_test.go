@@ -10,6 +10,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
@@ -33,7 +34,7 @@ func theTools() map[string]config.ToolFactory {
 		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
-			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search)
+			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},
 		"find_tool": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewFind(opts.Registry)
@@ -58,14 +59,21 @@ func theExecutors() *bash.Registry {
 // build builds a runtime for the settings.
 func build(t *testing.T, settings *config.Settings, overrides config.Overrides) *config.Runtime {
 	t.Helper()
+	return buildIn(t, settings, overrides, t.TempDir(), theExecutors())
+}
+
+// buildIn builds a runtime for the settings in a working directory, with
+// the executors the binary links.
+func buildIn(t *testing.T, settings *config.Settings, overrides config.Overrides, workingDir string, executors *bash.Registry) *config.Runtime {
+	t.Helper()
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
 		Overrides:      overrides,
-		WorkingDir:     t.TempDir(),
+		WorkingDir:     workingDir,
 		DefaultProfile: "code",
 		Tools:          theTools(),
 		Profiles:       theProfiles(),
-		Executors:      theExecutors(),
+		Executors:      executors,
 	})
 	if err != nil {
 		t.Fatalf("building the runtime: %v", err)
@@ -553,6 +561,59 @@ func TestABashSettingWithoutTheBashToolIsRefused(t *testing.T) {
 				t.Errorf("the message %q does not name the tool", failure.Message)
 			}
 		})
+	}
+}
+
+// TestACLIRegistryWithoutTheBashToolBuildsAnExecutor covers the executor's
+// other caller: call_cli runs a command too, so a binary that offers it
+// gets the session's executor, and a binary that carries no executor at
+// all is told so rather than left without one.
+func TestACLIRegistryWithoutTheBashToolBuildsAnExecutor(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(dir)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	files := profile.Profile{Name: "files", Tools: []string{"edit"}}
+	var got exec.Executor
+	build := func(executors *bash.Registry) (*config.Runtime, error) {
+		return config.Build(config.BuildOptions{
+			Settings:       settings,
+			WorkingDir:     t.TempDir(),
+			DefaultProfile: files.Name,
+			Tools: map[string]config.ToolFactory{
+				"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+				"call_cli": func(opts config.ToolOptions) poo.Tool {
+					got = opts.Executor
+					return cliregistry.NewCall(opts.Registry).WithExecutor(opts.Executor)
+				},
+			},
+			Profiles:  []profile.Profile{files},
+			Executors: executors,
+		})
+	}
+
+	runtime, err := build(theExecutors())
+	if err != nil {
+		t.Fatalf("building a runtime with call_cli and no bash: %v", err)
+	}
+	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	if got == nil {
+		t.Error("call_cli was built with no executor")
+	}
+
+	_, err = build(nil)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a binary with call_cli and no executor built anyway: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "tools.bash.executor" {
+		t.Errorf("the failure is %+v, want unsupported on tools.bash.executor", failure)
+	}
+	if !strings.Contains(failure.Message, "links no executor") {
+		t.Errorf("the message %q does not say the binary links no executor", failure.Message)
 	}
 }
 

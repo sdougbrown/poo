@@ -3,7 +3,7 @@
 //
 // A registered CLI is a small manifest describing a real command: its
 // argv, its flags and the JSON schema of its arguments. The package loads
-// the manifests the settings name, compiles each argument schema once,
+// the manifests the settings name, holds the library's compiled registry,
 // and renders the catalog's section of the prompt.
 //
 // The tools over the catalog live in poo/tool/cliregistry. A binary that
@@ -12,13 +12,11 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	cliregistry "github.com/sdougbrown/cli-registry"
-	"github.com/sdougbrown/cli-registry/schema"
 )
 
 // The names the catalog and its tools answer to.
@@ -59,8 +57,6 @@ type Catalog struct {
 	registry *cliregistry.Registry
 	// tools are the compiled descriptors, by name.
 	tools map[string]cliregistry.Tool
-	// validators check a call's arguments before any process exists.
-	validators map[string]*schema.ValueSchema
 	// entries are the CLIs, in name order.
 	entries []Entry
 }
@@ -72,25 +68,20 @@ type Catalog struct {
 // them. A tool name defined by two manifests fails the load, and the
 // failure names both files: a name a model calls has to mean one command.
 //
-// The arguments of every CLI are compiled here, once, so a call that does
-// not fit its schema is refused before any process is started.
+// The arguments of every CLI are compiled by the library when the catalog
+// loads, so a call that does not fit its schema is refused before any
+// process is started.
 func Load(paths ...string) (*Catalog, error) {
 	registry, err := cliregistry.Load(paths...)
 	if err != nil {
 		return nil, err
 	}
 	c := &Catalog{
-		registry:   registry,
-		tools:      map[string]cliregistry.Tool{},
-		validators: map[string]*schema.ValueSchema{},
+		registry: registry,
+		tools:    map[string]cliregistry.Tool{},
 	}
 	for _, tool := range registry.Tools() {
-		validator, err := schema.Compile(tool.InputSchema)
-		if err != nil {
-			return nil, fmt.Errorf("cliregistry: the tool %q: %w", tool.Name, err)
-		}
 		c.tools[tool.Name] = tool
-		c.validators[tool.Name] = validator
 		c.entries = append(c.entries, Entry{
 			Name:        tool.Name,
 			Description: tool.Description,
@@ -168,38 +159,18 @@ func (c *Catalog) NamesHint(search bool) string {
 	return fmt.Sprintf("the catalog holds %d entries: call one the prompt lists", c.Len())
 }
 
-// Validate checks an argument object against the CLI's schema.
+// Plan validates an argument object and builds the command a call runs.
 //
-// It returns what is wrong with the arguments in the form the model
-// reads, one issue per entry. A path is an RFC 6901 pointer into the
-// arguments, so the model can see which argument it got wrong.
-func (c *Catalog) Validate(name string, args map[string]any) []string {
-	validator, ok := c.validators[name]
-	if !ok {
-		return nil
-	}
-	issues := validator.Validate(args)
-	parts := make([]string, 0, len(issues))
-	for _, issue := range issues {
-		path := issue.Path
-		if path == "" {
-			path = "arguments"
-		}
-		parts = append(parts, path+": "+issue.Message)
-	}
-	return parts
-}
-
-// Run runs a registered CLI with an argument object it validated.
-//
-// The call is the cli-registry's: the catalog holds the compiled
-// descriptors, so a caller does not need the registry itself.
-func (c *Catalog) Run(ctx context.Context, name string, args map[string]any) (*cliregistry.Result, error) {
+// The plan is the command and nothing else: no environment is read and no
+// process is started until the caller runs it. A validation failure comes
+// back as the library's *ValidationError, whose issues are the model's to
+// correct.
+func (c *Catalog) Plan(name string, args map[string]any) (*cliregistry.Plan, error) {
 	tool, ok := c.tools[name]
 	if !ok {
 		return nil, fmt.Errorf("no CLI named %q", name)
 	}
-	return c.registry.Call(ctx, tool, args)
+	return c.registry.Plan(tool, args)
 }
 
 // Section renders the catalog's section of the system prompt.

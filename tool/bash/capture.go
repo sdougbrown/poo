@@ -5,28 +5,47 @@ import (
 	"unicode/utf8"
 )
 
-// cappedBuffer collects output up to a limit and discards the rest.
+// CappedBuffer collects output up to a limit and discards the rest.
 //
 // Write always reports the whole input as written, so the reader
 // draining the pipe never blocks on a full buffer.
-type cappedBuffer struct {
+type CappedBuffer struct {
 	mu    sync.Mutex
 	buf   []byte
 	limit int
+	// dropped reports that the buffer refused output, so a caller can
+	// say the capture is not the whole stream.
+	dropped bool
+}
+
+// NewCappedBuffer returns a buffer that keeps at most limit bytes.
+func NewCappedBuffer(limit int) *CappedBuffer {
+	return &CappedBuffer{limit: limit}
 }
 
 // Write appends to the buffer until it is full, then discards.
-func (b *cappedBuffer) Write(p []byte) (int, error) {
+func (b *CappedBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	n := 0
 	if len(b.buf) < b.limit {
-		n := b.limit - len(b.buf)
+		n = b.limit - len(b.buf)
 		if n > len(p) {
 			n = len(p)
 		}
 		b.buf = append(b.buf, p[:n]...)
 	}
+	if n < len(p) {
+		b.dropped = true
+	}
 	return len(p), nil
+}
+
+// Truncated reports whether the buffer discarded output.
+func (b *CappedBuffer) Truncated() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.dropped
 }
 
 // String returns the captured output.
@@ -34,7 +53,7 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 // A cut that lands in the middle of a character drops the partial one.
 // Bytes the command printed are otherwise kept as they are, valid UTF-8
 // or not.
-func (b *cappedBuffer) String() string {
+func (b *CappedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.buf) < b.limit {

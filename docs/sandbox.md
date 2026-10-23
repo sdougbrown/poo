@@ -43,8 +43,10 @@ matcher about every bind, so this covers the working directory, the
 read-only system directories and the extra read-write binds alike. The
 command reads nothing where the configuration protects something. A
 protected path outside every bound directory is not in the sandbox at
-all. The expansion of a bind is reused by the commands that follow, so a
-large read-only bind is walked once, not once per command.
+all. A protected path that is a link is masked where the link points,
+because a mount cannot land on a link. The expansion of a bind is reused
+by the commands that follow, so a large read-only bind is walked once,
+not once per command.
 
 The `local` executor cannot do this. Protected paths stop the file
 tools from wandering; with the `local` executor, `bash` reaches
@@ -65,30 +67,50 @@ the call, which is the escape the `local` executor cannot close.
 A background job runs in a sandbox of its own, and `cancel_job` or
 `session/close` stops it the same way.
 
-## Registered CLIs run outside the executor
+The sandbox ends with poo as well. The helper that runs the command is
+the sandbox's init, and it holds one end of a pipe whose other end poo
+holds: the kernel closes it when poo ends, and the helper takes the
+command down and exits, which ends the namespace. The executor also
+starts bubblewrap with `--die-with-parent` and the parent-death signal,
+so the bubblewrap process does not outlive poo either. A poo that is
+killed without a teardown therefore leaves no sandbox behind. The
+`local` executor has no such tie, so a command it runs outlives a killed
+poo.
 
-A `call_cli` call is not a bash command. It is one of the operator's
-registered CLIs, and cli-registry runs it with its own process engine, so
-neither the executor nor poo's environment reaches it.
+## Registered CLIs
 
-- **The command is the one its manifest names**, and it runs wherever
-  that command runs. A `bwrap` executor does not wrap it, and a protected
-  path does not mask it.
-- **Its environment** is the benign default set (`PATH`, `HOME`, `LANG`,
-  `LC_ALL`, `TMPDIR`) plus the variables its manifest declares. The
-  session's scrub does not reach it: an endpoint's key is in the
-  environment only when the manifest names the variable, and a manifest
-  that names one hands it over.
+A `call_cli` call is one of the operator's registered CLIs, and it runs
+where a bash command runs: through the session's executor, with the
+sandbox's binds and the protected paths it masks.
+
+- **The command is the one its manifest names**, and the executor wraps
+  it the way it wraps a shell command. A `bwrap` session runs it in the
+  sandbox, and a protected path is masked there.
+- **Its directory** is the manifest's when the manifest fixes one, and
+  the session's working directory otherwise.
+- **Its environment** is the session's environment, already scrubbed: the
+  benign names the CLI needs (`PATH`, `HOME`, `LANG`, `LC_ALL`, `TMPDIR`)
+  come from it, then the variables the manifest declares, with an
+  `env:NAME` reference resolved against the scrubbed environment. A name
+  the scrub removed, or a `tools.env.passthrough` list left out, is a
+  reference the call cannot honour, and it fails naming the variable.
 - **Its arguments** were checked against the manifest's schema before the
-  process started, so a malformed call never runs.
-- **Its lifetime** is the command's own timeout, and a command that
-  reaches it is killed with its process group. A descendant that leaves
-  the group is not reaped when the command exits in time; only a timeout
-  tears the group down.
+  process started, so a malformed call never runs. A value that begins
+  with a dash is refused when the manifest passes it as an argument of
+  its own, because a command whose flag takes no value would read it as
+  another flag; bind it `equals` to pass a value that looks like one.
+- **Its lifetime** is the plan's timeout, enforced by poo, and the run's
+  context: a timeout, an interrupt, a cancel, a close or
+  `--no-wait-jobs` stops the CLI and everything it started in its process
+  group.
+- **The output is bash's envelope**: both streams, the exit status, null
+  for a killed process, and the partial output of a timeout.
 
-The way to contain a registered CLI is the way to contain bash: run the
-whole process inside a container or a bubblewrap sandbox, which covers
-every process the run starts.
+The `local` executor still cannot hide what it does not own: a CLI it
+runs can read poo's own environment through `/proc/$PPID/environ`,
+because the process that started it is poo. The `bwrap` executor closes
+that, because the CLI's parent is inside the sandbox's pid namespace.
+Scrubbing stops a manifest reference; only isolation stops procfs.
 
 ## What the `bwrap` executor does not contain
 
