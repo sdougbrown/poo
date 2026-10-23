@@ -349,8 +349,8 @@ func TestTheFindThresholdIsThirtyEntries(t *testing.T) {
 		entries int
 		search  bool
 	}{
-		{entries: cliregistry.FindThreshold, search: false},
-		{entries: cliregistry.FindThreshold + 1, search: true},
+		{entries: 30, search: false},
+		{entries: 31, search: true},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%d entries", tt.entries), func(t *testing.T) {
