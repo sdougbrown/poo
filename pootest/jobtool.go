@@ -196,9 +196,9 @@ func (t *JobTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (p
 		case <-gate:
 		case <-closed:
 		case <-ctx.Done():
-			// The stop wraps the context's cause, so a caller can
-			// recognize the cancellation either way.
-			return poo.ToolResult{Text: "the call was stopped"}, fmt.Errorf("pootest: the job was stopped: %w", ctx.Err())
+			// The stop wraps the sentinel and the context's cause, so
+			// a caller can recognize the cancellation either way.
+			return poo.ToolResult{Text: "the call was stopped"}, fmt.Errorf("%w: %w", ErrJobStopped, ctx.Err())
 		}
 	}
 

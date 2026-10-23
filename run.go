@@ -816,19 +816,6 @@ var errDeliveryAbandoned = errors.New("poo: the delivery was abandoned")
 // 3 may abandon, so a write the run settled around is reported as
 // abandoned instead of breaking the session.
 func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) error {
-	if s.opts.Sink == nil {
-		return nil
-	}
-	s.mu.Lock()
-	broken := s.sunk
-	abandoned := run.committed || run.finalizing
-	s.mu.Unlock()
-	if broken {
-		return errors.New("poo: the session store is broken")
-	}
-	if abandoned || ctx.Err() != nil {
-		return errDeliveryAbandoned
-	}
 	wctx, cancel := context.WithTimeout(ctx, recordWriteBudget)
 	defer cancel()
 	return s.appendRecord(wctx, rec, nil, func() (bool, error) {

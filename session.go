@@ -750,6 +750,10 @@ func (s *Session) write(ctx context.Context, rec Record) error {
 // belongs to is sealed: a record the finalization ended at the seal, or
 // stopped waiting for, is abandoned, and its sink's refusal says nothing
 // about the store. A record that belongs to no run is never abandoned.
+//
+// A caller may pass an abandonment predicate; it is consulted before
+// the write and again on a failure, so the refusal happens without a
+// write when the rule says so.
 func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runState, abandoned func() (bool, error)) error {
 	if s.opts.Sink == nil {
 		return nil
@@ -761,10 +765,16 @@ func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runSt
 	}
 	s.mu.Unlock()
 
+	// A caller that owns the abandonment rule decides first, before the
+	// write and again on a failure: a write the run settled around is
+	// the caller's to report, and it does not break the session.
+	if abandoned != nil {
+		if isAbandoned, err := abandoned(); isAbandoned {
+			return err
+		}
+	}
+
 	if err := s.opts.Sink.Append(ctx, rec); err != nil {
-		// A caller that owns the abandonment rule decides first: a write
-		// the run settled around is the caller's to report, and it does
-		// not break the session.
 		if abandoned != nil {
 			if isAbandoned, err := abandoned(); isAbandoned {
 				return err
