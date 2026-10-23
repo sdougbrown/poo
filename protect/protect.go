@@ -188,12 +188,15 @@ func (s *Set) Expand(root string) ([]string, error) {
 	return slices.Compact(found), nil
 }
 
-// walkRoots returns the directories the walk of root has to cover.
+// walkRoots returns the paths the walk of root has to cover.
 //
 // A glob can only match inside root when its fixed prefix and root contain
 // one another. The walk starts at the deeper of the two, so a glob for a
 // small directory does not walk the whole bind it happens to be under, and
 // a glob whose prefix is outside root costs nothing.
+//
+// A fixed prefix that is a matching file is covered as well: the walk
+// visits it once, and the expansion names it.
 func (s *Set) walkRoots(root string) []string {
 	var out []string
 	for _, pattern := range s.patterns {
@@ -211,7 +214,7 @@ func (s *Set) walkRoots(root string) []string {
 		default:
 			continue
 		}
-		if info, err := os.Stat(walkRoot); err != nil || !info.IsDir() {
+		if info, err := os.Stat(walkRoot); err != nil || (!info.IsDir() && !s.matchOwn(walkRoot)) {
 			continue
 		}
 		if !slices.Contains(out, walkRoot) {

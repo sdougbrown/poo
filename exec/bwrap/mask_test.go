@@ -126,3 +126,27 @@ func TestAProtectedPathInsideAReadWriteBindIsMaskedWithTheRealMasker(t *testing.
 		t.Errorf("a protected path inside a read-write bind is not masked: %q", got)
 	}
 }
+
+// TestALiteralProtectedFileIsMaskedWithTheRealMasker covers the matcher
+// expansion a literal protected file needs: the file sits in the
+// sandbox's working directory, and its content is not readable there.
+func TestALiteralProtectedFileIsMaskedWithTheRealMasker(t *testing.T) {
+	workdir := t.TempDir()
+	private := filepath.Join(workdir, "private.txt")
+	if err := os.WriteFile(private, []byte("fixture-protected-content"), 0o600); err != nil {
+		t.Fatalf("writing the fixture: %v", err)
+	}
+	set, err := protect.Compile([]string{private})
+	if err != nil {
+		t.Fatalf("compiling the globs: %v", err)
+	}
+	exec, err := bwrap.New(bwrap.Options{Masker: set})
+	if err != nil {
+		t.Skipf("skip: %v", err)
+	}
+	obs := reviewCall(t, exec, "cat private.txt", workdir)
+	got, _ := obs["output"].(string)
+	if strings.Contains(got, "fixture-protected-content") {
+		t.Errorf("a literal protected file is readable in the sandbox: %q", got)
+	}
+}

@@ -249,3 +249,25 @@ func TestAnEmptyGlobIsSkipped(t *testing.T) {
 		t.Errorf("the set holds %d globs, want one", set.Len())
 	}
 }
+
+// TestExpandReturnsALiteralProtectedFile covers a glob that names one
+// file: the fixed prefix is the file itself, and the expansion still has
+// to name it so a sandbox can hide it.
+func TestExpandReturnsALiteralProtectedFile(t *testing.T) {
+	dir := tempDir(t)
+	private := writeFile(t, dir, "private.txt", "the private text")
+	writeFile(t, dir, "keep.txt", "keep")
+
+	set, err := protect.Compile([]string{private})
+	if err != nil {
+		t.Fatalf("compiling: %v", err)
+	}
+	found, err := set.Expand(dir)
+	if err != nil {
+		t.Fatalf("expanding: %v", err)
+	}
+	want := []string{private}
+	if !slices.Equal(found, want) {
+		t.Errorf("the expansion is %v, want %v", found, want)
+	}
+}
