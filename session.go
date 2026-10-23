@@ -670,7 +670,6 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		s.logs = newLogDispatcher(opts.Logger.Handler())
 		s.log = slog.New(s.logs.handler())
 	}
-	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
 
 	// The job tools are the core's own, and they are registered
 	// whenever a tool may run in the background.
@@ -708,6 +707,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 			return nil, &ErrSessionInit{Cause: err}
 		}
 	}
+	// The jobs' context is created after every fallible step, so a
+	// construction that fails has no cancellation to leak.
+	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
 	complete = true
 	return s, nil
 }

@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -484,5 +485,273 @@ func TestTheCompactionRecordNamesItsFormAndTokens(t *testing.T) {
 	if rec.TokensAfter >= rec.TokensBefore {
 		t.Errorf("the compaction's tokens_after is %d, want less than the %d before it",
 			rec.TokensAfter, rec.TokensBefore)
+	}
+}
+
+// forkCaptureCompactor runs the fork once and records what came back.
+type forkCaptureCompactor struct {
+	// gates counts the run's gate passes: the first one opens the
+	// run's first request, and a compactor cannot fork before one.
+	gates       int
+	compactions int
+	msg         poo.Message
+	usage       poo.UsageReport
+}
+
+// ShouldCompact compacts on the run's second gate: the first one opens
+// the run's first request, and a compactor cannot fork before one.
+func (c *forkCaptureCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+	c.gates++
+	return c.gates == 2
+}
+
+// Compact forks one request and records the reply and its usage.
+//
+// The compaction replaces the first turn with the handoff the fork
+// wrote, so it is a compaction the session accepts and records.
+func (c *forkCaptureCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+	c.compactions++
+	msg, usage, err := fork(ctx, []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "write the handoff"}}}}, 0)
+	if err != nil {
+		return poo.Compaction{}, err
+	}
+	c.msg, c.usage = msg, usage
+	return poo.Compaction{
+		Strategy: "forky",
+		Replace: &poo.RangeReplacement{
+			Cut:      poo.TurnRange{First: 1, Last: 1},
+			Messages: []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "the handoff"}}}},
+		},
+	}, nil
+}
+
+// TestACompactorsForkCountsTowardTheRunBudget covers the plan's rule
+// that a fork's usage counts toward MaxRunTokens, not MaxTurns: the
+// fork's usage report lands in the run's token count, and the ceiling
+// fires on accounting that includes it. The ceiling sits just under a
+// million tokens, which only the fork's usage can reach.
+func TestACompactorsForkCountsTowardTheRunBudget(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer", usage: &poo.UsageReport{InputTokens: 10}},
+		{text: "the second answer"},
+	})
+	tr.SetForkTurns(pootest.Turn{Text: "the handoff", InputTokens: 999990, OutputTokens: 10})
+	compactor := &forkCaptureCompactor{}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.Compactor = compactor
+	opts.MaxRunTokens = 1000000
+	// The gate runs on a continue path: the first turn continues, and
+	// the compaction happens before the second request.
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if res.Reason != poo.ReasonBudgetExhausted {
+		t.Errorf("the run settled %q, want budget_exhausted: the fork's usage is what crosses the ceiling", res.Reason)
+	}
+	if res.Detail.Source != "max_run_tokens" {
+		t.Errorf("the settle source is %q, want max_run_tokens", res.Detail.Source)
+	}
+	if res.Turns != 2 {
+		t.Errorf("the run made %d requests, want 2", res.Turns)
+	}
+	// The fork returned the scripted reply and its usage.
+	if compactor.msg.Content[0].Text != "the handoff" {
+		t.Errorf("the fork returned %q, want the handoff", compactor.msg.Content[0].Text)
+	}
+	if compactor.usage.InputTokens != 999990 || compactor.usage.OutputTokens != 10 {
+		t.Errorf("the fork's usage was %d/%d, want 999990/10", compactor.usage.InputTokens, compactor.usage.OutputTokens)
+	}
+	// The compaction itself is recorded.
+	if sink.count("compaction") != 1 {
+		t.Errorf("the log holds %d compaction records, want 1", sink.count("compaction"))
+	}
+	// The fork carried the appended message against the rendered prefix.
+	forks := tr.Forks()
+	if len(forks) != 1 {
+		t.Fatalf("the transport served %d forks, want 1", len(forks))
+	}
+	if len(forks[0].Appended) != 1 || forks[0].Appended[0].Content[0].Text != "write the handoff" {
+		t.Errorf("the fork's appended message is %+v, want the handoff request", forks[0].Appended)
+	}
+}
+
+// TestTheGateRechecksTheOutputRoomAfterTheNotice covers the gate's own
+// promise: no request leaves with a max_tokens under the minimum. The
+// usage report lands the run just under the notice's ratio, so the
+// notice's own tokens are what push the view past the room to answer —
+// and the gate settles context_exhausted instead of opening the
+// request.
+func TestTheGateRechecksTheOutputRoomAfterTheNotice(t *testing.T) {
+	// The first turn runs a tool and reports the usage that puts the
+	// estimate just inside the notice's ratio, so the notice's own
+	// tokens are what take the room to answer away.
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 2475}},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.Model.ContextLimit = 3000
+	opts.NoticeRatio = 0.80
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if res.Reason != poo.ReasonContextExhausted {
+		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
+	}
+	if res.Detail.Source != "no_output_room" {
+		t.Errorf("the settle source is %q, want no_output_room", res.Detail.Source)
+	}
+}
+
+// failingGateCompactor fails the compaction once, on the run's second
+// gate: the first one opens the run's first request.
+type failingGateCompactor struct {
+	gates int
+	err   error
+}
+
+// ShouldCompact compacts on the run's second gate only.
+func (c *failingGateCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+	c.gates++
+	return c.gates == 2
+}
+
+// Compact fails.
+func (c *failingGateCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+	return poo.Compaction{}, c.err
+}
+
+// TestAFailingCompactorOverTheHardLimitSettlesContextExhausted covers
+// the compactor-failure row of the failure table: a compaction that
+// fails at or above the hard ratio settles context_exhausted with the
+// compaction_failed source.
+func TestAFailingCompactorOverTheHardLimitSettlesContextExhausted(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer", usage: &poo.UsageReport{InputTokens: 2950}},
+		{text: "the second answer"},
+	})
+	compactor := &failingGateCompactor{err: errors.New("the compactor failed")}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.Compactor = compactor
+	opts.Model.ContextLimit = 3000
+	// The gate runs on a continue path: the first turn continues, and
+	// the compaction fails before the second request.
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if res.Reason != poo.ReasonContextExhausted {
+		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
+	}
+	if res.Detail.Source != "compaction_failed" {
+		t.Errorf("the settle source is %q, want compaction_failed", res.Detail.Source)
+	}
+}
+
+// TestAFailingCompactorBelowTheHardLimitContinuesUncompacted covers the
+// same row's soft half: below the hard ratio the run carries on
+// uncompacted, and the strategy retries at the next gate.
+func TestAFailingCompactorBelowTheHardLimitContinuesUncompacted(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the answer"},
+		{text: "the second answer"},
+	})
+	compactor := &failingGateCompactor{err: errors.New("the compactor failed")}
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.Compactor = compactor
+	opts.Model.ContextLimit = 32768
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn: below the hard ratio the failure is not fatal", res.Reason)
+	}
+	if res.Turns != 2 {
+		t.Errorf("the run made %d requests, want 2: the run continued uncompacted", res.Turns)
+	}
+	// A failed compaction is not recorded: the record is what the
+	// compactor did, and it did nothing.
+	if n := sink.count("compaction"); n != 0 {
+		t.Errorf("the log holds %d compaction records, want none", n)
+	}
+}
+
+// TestTheNoticeNamesTheConfiguredRatio covers the notice's contract
+// with a configured ratio: the notice the model reads names the ratio
+// it fired at, not the default's.
+func TestTheNoticeNamesTheConfiguredRatio(t *testing.T) {
+	// The first turn runs a tool, so the run reaches the gate with the
+	// estimate past the configured ratio; a natural stop would settle
+	// without a gate pass.
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 1800}},
+		{text: "the second answer"},
+	})
+	sink := &recordingSink{}
+	tool := &echoTool{result: "echoed"}
+	opts := testOptions(t, tr, tool, sink)
+	opts.Model.ContextLimit = 3000
+	opts.NoticeRatio = 0.60
+
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	noticed := false
+	for _, m := range sink.messages() {
+		if m.Role != poo.RoleUser {
+			continue
+		}
+		if text := m.Content[0].Text; strings.Contains(text, "~60%") {
+			noticed = true
+		} else if strings.Contains(text, "Context notice") {
+			t.Errorf("the notice is %q, want the configured ratio", text)
+		}
+	}
+	if !noticed {
+		t.Error("the log holds no notice with the configured ratio")
 	}
 }

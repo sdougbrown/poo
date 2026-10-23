@@ -104,7 +104,7 @@ func TestASwitchShapesEverythingTheNextRequestNeeds(t *testing.T) {
 	n := len(nextServer.bodies)
 	nextServer.mu.Unlock()
 	if n == 0 {
-		t.Fatalf("the new transport got no request; the records are %v", sink.names())
+		t.Fatalf("the new transport got no request; the records are %v", sink.Names())
 	}
 	body := nextServer.last(t)
 	if got := body["max_tokens"]; got != float64(512) {

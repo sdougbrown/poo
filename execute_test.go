@@ -101,7 +101,7 @@ func TestACancelDuringTheCallRecordStillGetsAResult(t *testing.T) {
 				return false
 			})
 			call, result, settled := -1, -1, -1
-			for i, name := range sink.names() {
+			for i, name := range sink.Names() {
 				switch name {
 				case "tool.call":
 					call = i
@@ -112,10 +112,10 @@ func TestACancelDuringTheCallRecordStillGetsAResult(t *testing.T) {
 				}
 			}
 			if call < 0 || !(call < result && result < settled) {
-				t.Fatalf("records are %v; want tool.call before tool.result before run.settled", sink.names())
+				t.Fatalf("records are %v; want tool.call before tool.result before run.settled", sink.Names())
 			}
 			if got := sink.count("tool.result"); got != 1 {
-				t.Fatalf("the recorded call has %d result(s) after cancellation, want 1; records: %v", got, sink.names())
+				t.Fatalf("the recorded call has %d result(s) after cancellation, want 1; records: %v", got, sink.Names())
 			}
 			if got := tool.Calls(); got != 0 {
 				t.Errorf("the tool ran %d time(s) after the run settled, want 0", got)
@@ -218,7 +218,7 @@ func TestALateDispatchWritesNoRecordAfterTheSettle(t *testing.T) {
 	})
 
 	call, result, settled := -1, -1, -1
-	names := sink.names()
+	names := sink.Names()
 	for i, name := range names {
 		switch name {
 		case "tool.call":
@@ -332,7 +332,7 @@ func TestSkippedCallRecordsPrecedeTheSettle(t *testing.T) {
 	<-cancelled
 	waitFor(t, "the skipped call's result", func() bool { return sink.count("tool.result") == 2 })
 
-	names := sink.names()
+	names := sink.Names()
 	lastResult, settledAt := -1, -1
 	for i, name := range names {
 		switch name {

@@ -31,7 +31,7 @@ func TestReviewArgumentsDoNotAliasModelHistory(t *testing.T) {
 			}
 		}
 	}
-	for _, rec := range sink.records {
+	for _, rec := range sink.Records() {
 		if call, ok := rec.(*poo.ToolCallRecord); ok && strings.Contains(string(call.Arguments), "two") {
 			t.Errorf("hook mutated tool.call record: %s", call.Arguments)
 		}

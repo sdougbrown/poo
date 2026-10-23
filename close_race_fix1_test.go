@@ -181,7 +181,7 @@ func TestCloseRacingAJobCompletionEndsItOnce(t *testing.T) {
 		wg.Wait()
 
 		if got := sink.count("job.ended"); got != 1 {
-			t.Fatalf("iteration %d: the log holds %d job.ended record(s), want 1; records: %v", i, got, sink.names())
+			t.Fatalf("iteration %d: the log holds %d job.ended record(s), want 1; records: %v", i, got, sink.Names())
 		}
 	}
 }
