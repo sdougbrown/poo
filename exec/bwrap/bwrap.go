@@ -55,8 +55,13 @@ const (
 	statusFD = 3
 	// jsonStatusFD is the descriptor bubblewrap writes its status to.
 	jsonStatusFD = 4
+	// parentFD is the descriptor the helper watches for the executor's
+	// death.
+	parentFD = 5
 	// statusFDEnv names the descriptor for the helper.
 	statusFDEnv = "POO_BWRAP_STATUS_FD"
+	// parentFDEnv names the parent-death descriptor for the helper.
+	parentFDEnv = "POO_BWRAP_PARENT_FD"
 	// helperArg is the first argument the helper is invoked with.
 	helperArg = "__poo_bwrap_helper__"
 	// helperPath is where the helper is bound inside the sandbox.
@@ -186,10 +191,15 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 	if env == nil {
 		env = os.Environ()
 	}
-	cmd.Env = append(append([]string(nil), env...), fmt.Sprintf("%s=%d", statusFDEnv, statusFD))
+	cmd.Env = append(append([]string(nil), env...),
+		fmt.Sprintf("%s=%d", statusFDEnv, statusFD),
+		fmt.Sprintf("%s=%d", parentFDEnv, parentFD))
 	// The sandbox runs in its own process group, so the whole group can
-	// be signalled at once.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// be signalled at once. The parent-death signal ties bubblewrap to
+	// poo: --die-with-parent ties the sandbox to bubblewrap, so a poo
+	// that dies without running a teardown takes the sandbox with it
+	// instead of leaving it to init.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 
 	pr, pw, err := os.Pipe()
 	if err != nil {
@@ -209,6 +219,19 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 		statusW.Close()
 		return nil, err
 	}
+	// The parent-death pipe is the sandbox's tie to poo. The helper holds
+	// the read end and poo the write end, so the kernel tells the helper
+	// when poo ends, whatever ends it.
+	parentR, parentW, err := os.Pipe()
+	if err != nil {
+		pr.Close()
+		pw.Close()
+		statusR.Close()
+		statusW.Close()
+		jsonR.Close()
+		jsonW.Close()
+		return nil, err
+	}
 	cmd.Stdout = pw
 	cmd.Stderr = pw
 	var errPr, errW *os.File
@@ -221,11 +244,13 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 			statusW.Close()
 			jsonR.Close()
 			jsonW.Close()
+			parentR.Close()
+			parentW.Close()
 			return nil, err
 		}
 		cmd.Stderr = errW
 	}
-	cmd.ExtraFiles = []*os.File{statusW, jsonW}
+	cmd.ExtraFiles = []*os.File{statusW, jsonW, parentR}
 
 	if err := cmd.Start(); err != nil {
 		pr.Close()
@@ -238,6 +263,8 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 		statusW.Close()
 		jsonR.Close()
 		jsonW.Close()
+		parentR.Close()
+		parentW.Close()
 		return nil, err
 	}
 	// The parent's copies of the write ends are closed, so the pipes
@@ -248,6 +275,7 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 	}
 	statusW.Close()
 	jsonW.Close()
+	parentR.Close()
 
 	pipes := []*os.File{pr}
 	writers := []io.Writer{out}
@@ -278,6 +306,7 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 		pipes:      pipes,
 		statusR:    statusR,
 		jsonR:      jsonR,
+		parentW:    parentW,
 		waited:     waited,
 		drains:     drains,
 		done:       done,
@@ -315,6 +344,11 @@ func (e *Executor) args(c bash.Command) ([]string, error) {
 		// A session of its own, so the command's processes are not in
 		// the caller's process group.
 		"--new-session",
+		// The helper is the sandbox's init, so the namespace lives
+		// exactly as long as the helper does. Bubblewrap's own init is
+		// a process between the sandbox and the command, and a parent
+		// that dies while it starts up leaves it behind.
+		"--as-pid-1",
 		// A fresh /proc, /dev and /tmp: the command sees its own
 		// processes and nobody else's.
 		"--proc", "/proc",
@@ -587,6 +621,9 @@ type process struct {
 	pipes   []*os.File
 	statusR *os.File
 	jsonR   *os.File
+	// parentW is the write end of the parent-death pipe. Closing it
+	// tells the helper that poo is ending.
+	parentW *os.File
 	waited  chan error
 	// drains report that a stream has been read to its end.
 	drains []chan struct{}
@@ -738,10 +775,10 @@ func (p *process) Stopped() bool {
 //
 // The helper gets SIGTERM, and it gives the command the same graceful
 // window the local executor gives: SIGTERM, then SIGKILL after the grace
-// period. The sandbox's processes are its init's children, so the kernel
-// ends the namespace when the helper exits; a descendant that left the
-// process group dies with the namespace, which is the escape the local
-// executor cannot close.
+// period. The helper is the sandbox's init, so the kernel ends the
+// namespace when the helper exits; a descendant that left the process
+// group dies with the namespace, which is the escape the local executor
+// cannot close.
 func (p *process) Kill() {
 	p.mu.Lock()
 	if p.exited {
@@ -794,11 +831,12 @@ func (p *process) Kill() {
 	_ = p.cmd.Process.Signal(syscall.SIGKILL)
 }
 
-// closePipes closes the read ends the wait has finished with.
+// closePipes closes the ends the wait has finished with.
 func (p *process) closePipes() {
 	for _, pipe := range p.pipes {
 		pipe.Close()
 	}
+	p.parentW.Close()
 }
 
 // alive reports whether the sandbox's own process is still there.

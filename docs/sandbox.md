@@ -67,6 +67,16 @@ the call, which is the escape the `local` executor cannot close.
 A background job runs in a sandbox of its own, and `cancel_job` or
 `session/close` stops it the same way.
 
+The sandbox ends with poo as well. The helper that runs the command is
+the sandbox's init, and it holds one end of a pipe whose other end poo
+holds: the kernel closes it when poo ends, and the helper takes the
+command down and exits, which ends the namespace. The executor also
+starts bubblewrap with `--die-with-parent` and the parent-death signal,
+so the bubblewrap process does not outlive poo either. A poo that is
+killed without a teardown therefore leaves no sandbox behind. The
+`local` executor has no such tie, so a command it runs outlives a killed
+poo.
+
 ## Registered CLIs
 
 A `call_cli` call is one of the operator's registered CLIs, and it runs
