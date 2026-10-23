@@ -400,6 +400,11 @@ func (s *server) handleLine(line []byte) {
 			"the line is not JSON: %v", err))
 		return
 	}
+	if msg.Method != "" && msg.JSONRPC != "2.0" {
+		s.respondError(msg.ID, protocol.Errorf(protocol.CodeInvalidRequest, protocol.DataInvalidRequest,
+			"the request's jsonrpc must be \"2.0\", not %q", msg.JSONRPC))
+		return
+	}
 	if msg.Method == "" {
 		if len(msg.ID) == 0 {
 			// The line is neither a request nor an answer.

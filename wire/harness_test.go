@@ -450,6 +450,8 @@ type testFactory struct {
 	released int
 	// ids numbers the sessions.
 	ids int
+	// flushErr is the failure a session's flush returns, when it is set.
+	flushErr error
 }
 
 // newTestFactory returns a factory over a temporary directory.
@@ -526,11 +528,15 @@ func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, 
 		_ = store.Close()
 		return nil, nil, err
 	}
+	var sink poo.RecordSink = recorder
+	if f.flushErr != nil {
+		sink = &flushErrorSink{RecordSink: recorder, err: f.flushErr}
+	}
 	sess, err := poo.New(poo.Options{
 		Transport:  f.transport(),
 		Tools:      map[string]poo.Tool{"test": testTool{}},
 		ToolOrder:  []string{"test"},
-		Sink:       recorder,
+		Sink:       sink,
 		SessionID:  id,
 		Model:      f.model(),
 		Profile:    "code",
@@ -702,6 +708,15 @@ func (f *testFactory) releasedSessions() int {
 	defer f.mu.Unlock()
 	return f.released
 }
+
+// flushErrorSink wraps a sink whose flush fails.
+type flushErrorSink struct {
+	poo.RecordSink
+	err error
+}
+
+// Flush returns the configured failure.
+func (s *flushErrorSink) Flush(ctx context.Context) error { return s.err }
 
 // testTool is a side-effecting tool the scripted model calls.
 type testTool struct{}

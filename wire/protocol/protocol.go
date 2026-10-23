@@ -11,8 +11,8 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -256,21 +256,107 @@ func DecodeParams(raw json.RawMessage, v any) error {
 	if isNull(raw) {
 		return &ParamsError{Code: DataInvalidParams, Message: "the params are null"}
 	}
+	if err := checkParams(raw, reflect.TypeOf(v), ""); err != nil {
+		return err
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		var typeErr *json.UnmarshalTypeError
-		switch {
-		case errors.As(err, &typeErr):
-			return &ParamsError{Code: DataInvalidParams, Message: err.Error()}
-		case strings.HasPrefix(err.Error(), "json: unknown field "):
-			field := strings.Trim(strings.TrimPrefix(err.Error(), "json: unknown field "), `"`)
-			return &ParamsError{Code: DataUnknownField, Message: err.Error(), Field: field}
-		default:
-			return &ParamsError{Code: DataInvalidParams, Message: err.Error()}
+		return &ParamsError{Code: DataInvalidParams, Message: err.Error()}
+	}
+	return nil
+}
+
+// checkParams walks a params object and the shape it decodes into.
+//
+// A field the shape does not have is an unknown field, and a field
+// whose value is null is invalid: the contract says an omitted field
+// takes its default and an explicit null is refused. The walk covers
+// the nested objects and arrays the shapes define, so the two rules
+// hold at every depth.
+func checkParams(raw json.RawMessage, shape reflect.Type, path string) *ParamsError {
+	if isNull(raw) {
+		name := path
+		if name == "" {
+			name = "params"
+		}
+		return &ParamsError{Code: DataInvalidParams, Message: fmt.Sprintf("the field %q is null", name)}
+	}
+	for shape != nil && shape.Kind() == reflect.Pointer {
+		shape = shape.Elem()
+	}
+	if shape == nil {
+		return nil
+	}
+	switch shape.Kind() {
+	case reflect.Struct:
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil
+		}
+		known := jsonFields(shape)
+		for name, value := range fields {
+			field, ok := known[name]
+			if !ok {
+				return &ParamsError{
+					Code:    DataUnknownField,
+					Message: fmt.Sprintf("json: unknown field %q", name),
+					Field:   name,
+				}
+			}
+			if err := checkParams(value, field, joinPath(path, name)); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		var items []json.RawMessage
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return nil
+		}
+		for i, item := range items {
+			if err := checkParams(item, shape.Elem(), fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		var entries map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil
+		}
+		for name, value := range entries {
+			if err := checkParams(value, shape.Elem(), joinPath(path, name)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// jsonFields returns the fields a shape decodes from a JSON object, by
+// their JSON names.
+func jsonFields(shape reflect.Type) map[string]reflect.Type {
+	fields := make(map[string]reflect.Type, shape.NumField())
+	for i := 0; i < shape.NumField(); i++ {
+		field := shape.Field(i)
+		tag := field.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		name := strings.Split(tag, ",")[0]
+		if name == "" {
+			name = field.Name
+		}
+		fields[name] = field.Type
+	}
+	return fields
+}
+
+// joinPath names a nested field the way the failure reports it.
+func joinPath(path, name string) string {
+	if path == "" {
+		return name
+	}
+	return path + "." + name
 }
 
 // isNull reports whether a raw message is the JSON null.

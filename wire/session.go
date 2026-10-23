@@ -337,7 +337,7 @@ func (s *server) closeAll(source string) {
 // own lock, the run is finalized and waited for, the waiters are
 // released, the observers and the jobs are stopped, and the lock is
 // released at the end.
-func (s *server) closeSession(entry *session, source string) {
+func (s *server) closeSession(entry *session, source string) error {
 	// Step 1: the session is closing, so new requests fail with
 	// session_closed and no job starts or wakes.
 	entry.markClosing()
@@ -349,7 +349,7 @@ func (s *server) closeSession(entry *session, source string) {
 	if source == sourceTransportFailed {
 		entry.sess.Cancel(source)
 	}
-	entry.sess.Close()
+	closeErr := entry.sess.Close()
 	// The settle record reaches the session's log through the
 	// observer, which delivers the events on its own goroutine. The
 	// waiters are released after it arrives, so they get the run's
@@ -368,4 +368,5 @@ func (s *server) closeSession(entry *session, source string) {
 		_ = entry.info.Release()
 	}
 	s.removeSession(entry.id)
+	return closeErr
 }
