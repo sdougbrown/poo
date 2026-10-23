@@ -36,7 +36,7 @@ func stallingEndpoint(t *testing.T) *httptest.Server {
 // settleOf returns the run's settle record.
 func settleOf(t *testing.T, sink *recordingSink) *poo.RunSettled {
 	t.Helper()
-	s := sink.settled()
+	s := sink.Settled()
 	if s == nil {
 		t.Fatal("the log holds no run.settled record")
 	}
@@ -132,7 +132,7 @@ func TestAStartedRunAlwaysSettles(t *testing.T) {
 		t.Fatalf("waiting for the run: %v", err)
 	}
 
-	names := sink.names()
+	names := sink.Names()
 	if len(names) == 0 || names[0] != "run.started" {
 		t.Fatalf("the records are %v, want a run.started first", names)
 	}

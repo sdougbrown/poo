@@ -108,7 +108,11 @@ func (s *Session) callPolicy(ctx context.Context, h PolicyHook, turn int, info T
 func (s *Session) toolCallInfo(turn int, handle, tool string, prepared Prepared, plan callPlan) ToolCallInfo {
 	counts := s.repeatCountFor(handle)
 	return ToolCallInfo{
-		Spec:            s.toolSpec(tool),
+		// The spec is the one the model was offered: a background-capable
+		// tool's schema carries the background argument in it, so a hook
+		// that validates arguments against the advertised schema sees
+		// the same shape the call has.
+		Spec:            s.toolSpecFor(tool),
 		Prepared:        prepared,
 		Handle:          handle,
 		RepeatCount:     counts.exact,
@@ -117,20 +121,10 @@ func (s *Session) toolCallInfo(turn int, handle, tool string, prepared Prepared,
 	}
 }
 
-// toolSpec returns a tool's description.
-func (s *Session) toolSpec(name string) ToolSpec {
-	tool, ok := s.opts.Tools[name]
-	if !ok {
-		return ToolSpec{Name: name}
-	}
-	return tool.Spec()
-}
-
 // repeatCountFor returns the repeat counts of one call.
 //
 // A call that was never counted has no counts.
 func (s *Session) repeatCountFor(handle string) repeatCounts {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.repeatCounts[handle]
+	counts := s.RepeatCountsFor(handle)
+	return repeatCounts{exact: counts.Exact, near: counts.Near}
 }

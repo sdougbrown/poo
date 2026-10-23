@@ -189,9 +189,6 @@ func WithContextRatios(notice, hard float64) Option {
 	}
 }
 
-// finishToolName is the name the finish tool is called by.
-const finishToolName = FinishToolName
-
 // checkFinishTool reports that the session has no tool for its finish
 // schema.
 //
@@ -202,8 +199,8 @@ func checkFinishTool(opts *Options) error {
 	if len(opts.FinishSchema) == 0 {
 		return nil
 	}
-	if _, ok := opts.Tools[finishToolName]; !ok {
-		return fmt.Errorf("poo: the session has a finish schema but no %q tool", finishToolName)
+	if _, ok := opts.Tools[FinishToolName]; !ok {
+		return fmt.Errorf("poo: the session has a finish schema but no %q tool", FinishToolName)
 	}
 	return nil
 }

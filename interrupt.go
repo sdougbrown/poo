@@ -51,10 +51,11 @@ func (s *Session) interruptedActivityTurn(run *runState, turn int, resp *respons
 	// toward MaxTurns.
 	cands := s.evaluateStopConditions(run, turn)
 	cands = append(cands, s.evaluateBudgets(run, turn)...)
-	if len(cands) > 0 {
-		s.mu.Lock()
-		run.candidates = append(run.candidates, cands...)
-		s.mu.Unlock()
+	// The candidates go through the guarded writer: a candidate that
+	// arrives after the commit point is dropped, like every other
+	// writer's.
+	for _, c := range cands {
+		s.addCandidate(run, c)
 	}
 	s.clearInterrupt(run)
 }
@@ -94,47 +95,14 @@ func (s *Session) emitInterrupted(run *runState, turn int) {
 
 // recordPartial records the text a cut-short response carried.
 //
-// The message is partial, and its cause is the interrupt.
+// The message is partial, and its cause is the interrupt. The builder is
+// the full-response path's, so the two messages differ only in the
+// partial flag and the cause.
 func (s *Session) recordPartial(run *runState, turn int, resp *response) {
 	if resp == nil {
 		return
 	}
-	content := append([]ContentBlock(nil), resp.content...)
-	// The calls the model had asked for belong to the message, so the
-	// skipped results that follow have a call to answer.
-	for _, call := range resp.calls {
-		content = append(content, ContentBlock{
-			Kind:       ContentToolCall,
-			ToolCallID: call.ID,
-			Name:       call.Name,
-			Arguments:  recordArgs(call.Arguments),
-		})
-	}
-	if len(content) == 0 {
-		return
-	}
-	msg := Message{Role: RoleAssistant, Content: content, Origin: OriginModel}
-	// The id the stream assigned at its first delta is the one this
-	// message carries, so a reference to the streaming reply names it.
-	msg.ID = resp.messageID
-	if msg.ID == "" {
-		msg.ID = s.messageIDs.Next()
-	}
-	msg.Partial = true
-	msg.Cause = CauseInterrupt
-	s.appendMessages(msg)
-	s.recordMessage(msg)
-	s.growSpan(run.globalTurn)
-	_ = s.write(run.ctx, &MessageRecord{
-		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
-		RunID:      run.id,
-		Turn:       turn,
-		Role:       msg.Role,
-		Content:    msg.Content,
-		MessageID:  msg.ID,
-		Partial:    true,
-		Cause:      CauseInterrupt,
-	})
+	_, _ = s.recordAssistantResponse(run, turn, resp, true, CauseInterrupt)
 }
 
 // skipInterruptedCalls records the calls that an interrupt stopped

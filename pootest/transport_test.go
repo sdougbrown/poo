@@ -491,3 +491,32 @@ func TestTheForkKeepsACopyOfWhatWasAppended(t *testing.T) {
 		t.Errorf("the recorded fork appended %q, want original", got)
 	}
 }
+
+// TestClosedStreamsCounts covers the helper's own contract: a Close
+// counts once, a second Close counts again, and an unopened transport
+// has none.
+func TestClosedStreamsCounts(t *testing.T) {
+	tr := pootest.NewTransport(pootest.Turn{Text: "the answer"})
+	if n := tr.ClosedStreams(); n != 0 {
+		t.Fatalf("the transport counts %d closed streams before any, want 0", n)
+	}
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{})
+	if err != nil {
+		t.Fatalf("streaming: %v", err)
+	}
+	if n := tr.ClosedStreams(); n != 0 {
+		t.Fatalf("the transport counts %d closed streams before the close, want 0", n)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("closing the reader: %v", err)
+	}
+	if n := tr.ClosedStreams(); n != 1 {
+		t.Errorf("the transport counts %d closed streams after one close, want 1", n)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("closing the reader again: %v", err)
+	}
+	if n := tr.ClosedStreams(); n != 2 {
+		t.Errorf("the transport counts %d closed streams after two closes, want 2", n)
+	}
+}

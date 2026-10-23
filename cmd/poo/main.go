@@ -340,7 +340,10 @@ func runRun(args []string) int {
 	}
 
 	// The exit code comes from the settle-reason table, combined
-	// across the runs: the first non-zero code wins.
+	// across the runs: the first non-zero code wins. A failed jobs
+	// wait is the client's own context - the jobs stop through the
+	// close, and the wait error is on stderr - so it does not add a
+	// code of its own.
 	return combinedExitCode(sess.SettleCodes())
 }
 
@@ -364,7 +367,10 @@ func finalAnswer(sess *poo.Session, res poo.Result) string {
 func runOutput(ctx context.Context, sess *poo.Session, res poo.Result, noWaitJobs bool) (string, error) {
 	if !noWaitJobs {
 		if err := sess.WaitJobs(ctx); err != nil {
-			return "", err
+			// The wait failed, but the run itself may have finished:
+			// its answer is already fixed at settle, so it survives
+			// the failed wait.
+			return finalAnswer(sess, res), err
 		}
 	}
 	return finalAnswer(sess, res), nil

@@ -76,6 +76,10 @@ func TestAnInputAcceptedWhileTheFinalizationWaitsHasAFate(t *testing.T) {
 		s.Cancel("probe")
 		close(cancelDone)
 	}()
+	// The poll is bounded, so a regression that never emits the event
+	// fails with a diagnostic instead of hanging to the package
+	// timeout.
+	deadline := time.After(5 * time.Second)
 	for {
 		found := false
 		for _, ev := range s.Events() {
@@ -86,7 +90,11 @@ func TestAnInputAcceptedWhileTheFinalizationWaitsHasAFate(t *testing.T) {
 		if found {
 			break
 		}
-		time.Sleep(time.Millisecond)
+		select {
+		case <-deadline:
+			t.Fatal("the run never emitted run.settling")
+		case <-time.After(time.Millisecond):
+		}
 	}
 	s.events.mu.Lock()
 	close(sink.release)

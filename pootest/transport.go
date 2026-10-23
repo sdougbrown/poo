@@ -80,6 +80,8 @@ type Transport struct {
 	rendered []poo.Rendered
 	// forks holds the forks the transport received.
 	forks []Fork
+	// closed counts the streams a reader has been closed for.
+	closed int
 	// forkTurns are the responses a fork serves, in order.
 	forkTurns []Turn
 	// forkIndex is the next forked response to hand out.
@@ -268,7 +270,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	if turn.Err != nil {
 		return nil, rendered, turn.Err
 	}
-	return newReader(turn, t.index-1), rendered, nil
+	return newReader(t, turn, t.index-1), rendered, nil
 }
 
 // Fork serves the next forked response.
@@ -295,7 +297,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 	}
 	turn := t.forkTurns[t.forkIndex]
 	t.forkIndex++
-	return newReader(turn, t.forkIndex-1), nil
+	return newReader(t, turn, t.forkIndex-1), nil
 }
 
 // renderBody renders a request into a body, so the snapshot holds
@@ -364,6 +366,9 @@ func renderBody(req poo.ChatRequest) []byte {
 
 // reader is the read side of one scripted response.
 type reader struct {
+	// t is the transport the reader belongs to, so a Close is visible
+	// to tests. It is nil for a zero reader.
+	t    *Transport
 	turn Turn
 	// index is the turn's number in the script.
 	index int
@@ -378,8 +383,16 @@ type reader struct {
 }
 
 // newReader returns a reader for a scripted turn.
-func newReader(turn Turn, index int) *reader {
-	return &reader{turn: turn, index: index, callCount: len(turn.Calls)}
+func newReader(t *Transport, turn Turn, index int) *reader {
+	return &reader{t: t, turn: turn, index: index, callCount: len(turn.Calls)}
+}
+
+// ClosedStreams reports how many of the transport's readers a caller
+// has closed, so a test can wait for a stream to be done.
+func (t *Transport) ClosedStreams() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.closed
 }
 
 // Next returns the next piece of the scripted response.
@@ -454,4 +467,11 @@ func (r *reader) Next() (poo.StreamEvent, error) {
 }
 
 // Close releases the response.
-func (r *reader) Close() error { return nil }
+func (r *reader) Close() error {
+	if r.t != nil {
+		r.t.mu.Lock()
+		r.t.closed++
+		r.t.mu.Unlock()
+	}
+	return nil
+}
