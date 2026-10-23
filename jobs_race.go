@@ -31,6 +31,9 @@ type JobRaceHooks struct {
 	// BeforeWake is called after a wake has taken the session's
 	// reservation and before it starts its run.
 	BeforeWake func()
+	// BeforeRunStart is called after a run has taken the session's
+	// reservation and before the run is installed.
+	BeforeRunStart func()
 }
 
 // WaitForResult blocks until a job result is queued, and reports that
@@ -84,6 +87,10 @@ func (s *Session) raceHook(name string) {
 	case "wake":
 		if hooks.BeforeWake != nil {
 			hooks.BeforeWake()
+		}
+	case "start":
+		if hooks.BeforeRunStart != nil {
+			hooks.BeforeRunStart()
 		}
 	}
 }

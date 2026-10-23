@@ -61,7 +61,16 @@ func (s *Session) Prompt(ctx context.Context, text string, opts ...InputOption) 
 // results carries them, and the results are appended before the run's
 // first request.
 func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, note *DeliveryNote, jobs ...jobResult) (string, error) {
+	// The admission is the last step of the reservation, and the
+	// session's lock decides it together with Close: a close that got
+	// the lock first refuses the run, and a run that got it first is
+	// the run the close finalizes.
+	s.raceHook("start")
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return "", ErrSessionClosed
+	}
 	runID := NewULID()
 	runCtx, cancel := context.WithCancelCause(ctx)
 	run := &runState{
