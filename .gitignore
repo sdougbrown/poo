@@ -41,3 +41,6 @@ go.work.sum
 
 # Raw eval transcripts hold local paths; the reports and verdicts are committed.
 evals/results/**/runs/
+
+# The poo binary, built at the repo root by `go build ./cmd/poo`
+/poo
