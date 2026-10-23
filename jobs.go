@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
 )
 
 // A job is a background tool call. It belongs to the session, not to the

@@ -79,7 +79,7 @@ func New(opts Options) (*Server, error) {
 		// The server has a wire, so the chain asks the client. The
 		// decide asker is there only when the settings name a decider
 		// model.
-		Askers: []string{"wire"},
+		Askers:   []string{"wire"},
 		Wire:     client,
 		Build:    opts.Build,
 		PromptFS: opts.PromptFS,
