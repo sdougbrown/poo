@@ -157,11 +157,15 @@ func runRun(args []string) int {
 		project = text
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	interrupts := make(chan os.Signal, 2)
+	signal.Notify(interrupts, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(interrupts)
+	baseCtx, stop := context.WithCancel(context.Background())
 	defer stop()
+	ctx := baseCtx
 	if o.timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, o.timeout)
+		ctx, cancel = context.WithTimeout(baseCtx, o.timeout)
 		defer cancel()
 	}
 
@@ -220,6 +224,14 @@ func runRun(args []string) int {
 	}
 	defer sess.Close()
 
+	// The first interrupt cancels the run, and the run settles through
+	// the normal path. A second interrupt is the operator saying the
+	// finalization is stuck: it stops what it can and ends the process
+	// at once.
+	finished := make(chan struct{})
+	defer close(finished)
+	go watchInterrupts(interrupts, stop, sess.Close, finished, exitProcess)
+
 	runID, err := sess.Prompt(ctx, strings.Join(fs.Args(), " "))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
@@ -261,6 +273,47 @@ func runRun(args []string) int {
 	// The exit code comes from the settle-reason table, combined
 	// across the runs: the first non-zero code wins.
 	return combinedExitCode(sess.SettleCodes())
+}
+
+// The exit code a second interrupt leaves: the one a cancelled run
+// leaves.
+const secondSignalExitCode = 130
+
+// secondSignalStopWait bounds the teardown a second interrupt gives the
+// session before it ends the process.
+const secondSignalStopWait = 250 * time.Millisecond
+
+// exitProcess ends the process. A test replaces it to observe the
+// second interrupt without ending the test binary.
+var exitProcess = os.Exit
+
+// watchInterrupts waits for the operator's interrupts.
+//
+// The first one cancels the run. A second one stops the session, which
+// takes the jobs down with it, and ends the process at once.
+func watchInterrupts(interrupts <-chan os.Signal, cancel context.CancelFunc, closeSession func() error, finished <-chan struct{}, exit func(int)) {
+	select {
+	case <-interrupts:
+		cancel()
+	case <-finished:
+		return
+	}
+	select {
+	case <-interrupts:
+		done := make(chan struct{})
+		go func() {
+			if closeSession != nil {
+				_ = closeSession()
+			}
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(secondSignalStopWait):
+		}
+		exit(secondSignalExitCode)
+	case <-finished:
+	}
 }
 
 // modelWithFlags returns the model the run talks to.
