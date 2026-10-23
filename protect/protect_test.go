@@ -258,6 +258,21 @@ func TestExpandNamesAMatchUnderTheRootsOwnSpelling(t *testing.T) {
 	if !slices.Equal(found, want) {
 		t.Errorf("the expansion under %s is %v, want %v", dir, found, want)
 	}
+
+	// A glob that names the root's link protects the root the link
+	// reaches, and the topmost match is the root itself.
+	set, err = protect.Compile([]string{link})
+	if err != nil {
+		t.Fatalf("compiling: %v", err)
+	}
+	found, err = set.Expand(real)
+	if err != nil {
+		t.Fatalf("expanding %s: %v", real, err)
+	}
+	want = []string{real}
+	if !slices.Equal(found, want) {
+		t.Errorf("the expansion under %s is %v, want %v", real, found, want)
+	}
 }
 
 // TestExpandWalksThroughASymlinkedPrefix covers a glob whose fixed prefix

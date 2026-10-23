@@ -152,14 +152,20 @@ func (s *Set) Expand(root string) ([]string, error) {
 		return nil, fmt.Errorf("protect: resolving %s: %w", root, err)
 	}
 	resolved := resolvePath(abs)
+	// The patterns are resolved once, so the root, the walk roots and
+	// the matches all read the same spelling.
+	patterns := make([][]string, len(s.patterns))
+	for i, pattern := range s.patterns {
+		patterns[i] = resolvePattern(pattern)
+	}
 	// A root that is itself protected is the topmost match: hiding it
 	// hides every path below it, and the walk has nothing to add.
-	if s.matchOwn(abs) || s.matchOwn(resolved) {
+	if s.matchOwn(abs) || matchesAny(patterns, resolved) {
 		return []string{abs}, nil
 	}
 
 	var found []string
-	for _, w := range s.walks(resolved) {
+	for _, w := range walks(resolved, patterns) {
 		err = filepath.WalkDir(w.root, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				// An entry that cannot be read is skipped: the walk is a
@@ -169,10 +175,7 @@ func (s *Set) Expand(root string) ([]string, error) {
 				}
 				return nil
 			}
-			if p == resolved && w.root == resolved {
-				return nil
-			}
-			if !w.matches(p) {
+			if !matchesAny(w.patterns, p) {
 				return nil
 			}
 			if mask, ok := maskPath(abs, resolved, p); ok {
@@ -193,15 +196,15 @@ func (s *Set) Expand(root string) ([]string, error) {
 type walk struct {
 	// root is the directory to walk.
 	root string
-	// patterns are the patterns with their fixed prefixes resolved, so
-	// they match the paths the walk sees.
+	// patterns are the patterns with their fixed prefixes resolved,
+	// so they match the paths the walk sees.
 	patterns [][]string
 }
 
-// matches reports whether a walked path matches one of the patterns.
-func (w walk) matches(p string) bool {
-	segments := splitPath(p)
-	for _, pattern := range w.patterns {
+// matchesAny reports whether a path matches one of the patterns.
+func matchesAny(patterns [][]string, target string) bool {
+	segments := splitPath(target)
+	for _, pattern := range patterns {
 		if matchSegments(pattern, segments) {
 			return true
 		}
@@ -220,10 +223,9 @@ func (w walk) matches(p string) bool {
 //
 // A fixed prefix that is a matching file is covered as well: the walk
 // visits it once, and the expansion names it.
-func (s *Set) walks(root string) []walk {
+func walks(root string, patterns [][]string) []walk {
 	var out []walk
-	for _, pattern := range s.patterns {
-		resolved := resolvePattern(pattern)
+	for _, resolved := range patterns {
 		prefix := fixedPrefix(resolved)
 		var walkRoot string
 		switch {
