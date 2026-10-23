@@ -1,0 +1,156 @@
+# Build your own binary
+
+Poo is a library first. A consumer composes the packages it wants into a
+binary of its own. It picks the tools, the executors and the profiles it
+links, and the providers its settings name. What the binary leaves out is
+not reachable at runtime, because it is not in the binary.
+
+`cmd/poo` is one such binary.
+`wire/conformance/testdata/readonly` is the smallest. It serves the search
+profile, `read`, `grep` and the OpenAI transport, with no shell and no
+tool that can change anything.
+
+## The factory
+
+`server.New` takes the settings and the tool set, and returns the wire
+factory. Serve it with `wire.Serve`:
+
+```go
+settings, err := config.Load(*settingsPath)
+if err != nil {
+	return err
+}
+srv, err := server.New(server.Options{
+	Settings:       settings,
+	WorkingDir:     dir,
+	DefaultProfile: search.Name,
+	Tools: map[string]config.ToolFactory{
+		"read": func(config.ToolOptions) poo.Tool { return read.New() },
+		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
+	},
+	Profiles: []profile.Profile{search.Profile()},
+	Build:    poo.BuildInfo{Name: "poo-readonly", Version: version},
+})
+if err != nil {
+	return err
+}
+return wire.Serve(wire.Options{
+	In:      os.Stdin,
+	Out:     os.Stdout,
+	Factory: srv,
+	Build: protocol.Build{
+		Name:       "poo-readonly",
+		Version:    version,
+		PooVersion: version,
+	},
+})
+```
+
+The factory maps the protocol onto `config`: the handshake reports the
+profiles, the capabilities and the models. A session's profile and model
+pick a runtime, and the store, the prompt overrides and the permission
+asks are the session's own.
+
+`server.Options.Overrides` carries what a command line changed.
+`SessionTools` changes every runtime the factory builds, before a session
+is created from it. The typed result's `finish` tool is added that way,
+because the settings opt into it and no profile names it.
+
+## Inject tools
+
+A tool constructor takes the settings' resolved options and returns a
+`poo.Tool`:
+
+```go
+type ToolFactory func(ToolOptions) poo.Tool
+
+type ToolOptions struct {
+	Executor       exec.Executor
+	Scrub          exec.Scrub
+	ProtectedPaths *protect.Set
+	Registry       *cli.Catalog
+	Search         bool
+}
+```
+
+The map's key is the name the profile, the permission rules and the wire
+use. It must be the name the tool's `Spec` reports. A profile, a
+permission rule or a cli registry that names a tool the binary does not
+register is a typed error.
+
+The settings still decode and validate in `config`. `tools.bash.*`, the
+executor name and `cliregistry.paths` are settings, not tools. Nothing in
+`config` imports a tool package, so reading a settings file links none.
+
+The executors are the same seam. A binary registers the ones it links, and
+the session's settings name one:
+
+```go
+registry := exec.NewRegistry()
+registry.Register("local", func(exec.Options) (exec.Executor, error) {
+	return bash.NewLocal(), nil
+})
+```
+
+The executor is resolved only for a profile that offers `bash`. A
+read-only binary passes no registry, and it runs no command.
+
+To see what a binary actually links, ask the toolchain:
+
+```sh
+mise exec -- go list -deps ./cmd/my-poo | grep 'poo/tool'
+```
+
+## The conformance recipe
+
+The suite is black box. It starts the binary and drives it over stdin and
+stdout. A settings file it writes points the binary at a fake endpoint.
+
+```go
+func TestMyBinarySpeaksTheProtocol(t *testing.T) {
+	report := conformance.Run(t, conformance.Target{
+		Binary:  binary,
+		Args:    []string{"serve"},
+		Profile: "search",
+		Env:     []string{"MY_POO_ID=conformance"},
+	})
+	if len(report.Skipped) > 0 {
+		t.Logf("skipped: %v", report.Skipped)
+	}
+}
+```
+
+The target is a binary, not a function, so build the command first. The
+suite passes `--settings <file>` on every start, and `--ephemeral` for
+the ephemeral flow, so the binary takes both. It creates sessions in the
+logged mode, so the binary writes session files. The profile it names must
+be one the handshake offers.
+
+A flow that needs a tool the binary does not report is skipped, and the
+reason is logged. The bash-scripting flows need `bash`, and the typed
+result needs the session to offer `finish`. `Run` returns a `Report` of
+the flows that ran and the ones that skipped, so a full binary can assert
+that nothing skipped.
+
+`Target.Env` is appended to the suite's own environment for the child. A
+binary that reads an identity before it serves (a socket path, a run id)
+is the case it is for. The value is the target's business, and setting it
+does not change the suite's own environment.
+
+## The closure gate
+
+The point of composing a binary is what it does not link. Keep a test that
+says so:
+
+```go
+deps := listDeps(t, "./wire/conformance/testdata/readonly")
+for _, excluded := range []string{"tool/bash", "tool/edit", "tool/cliregistry", "exec/bwrap"} {
+	if slices.Contains(deps, modulePath+"/"+excluded) {
+		t.Errorf("the read-only binary links %s", excluded)
+	}
+}
+```
+
+`internal/depcheck/closure_test.go` is that test. It also checks that the
+packages the binary composes are present, because a subject that stopped
+importing them passes the exclusions by linking nothing.
