@@ -146,6 +146,8 @@ func TestSkippedPackages(t *testing.T) {
 	res := checkModule(t, filepath.Join("testdata", "onlytests"), m)
 	want := []string{
 		m + "/decide (no non-test Go files)",
+		m + "/exec (does not exist yet)",
+		m + "/exec/bwrap (does not exist yet)",
 		m + "/perm (does not exist yet)",
 		m + "/perm/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",
@@ -171,6 +173,8 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 	want := []string{
 		m + " (no non-test Go files)",
 		m + "/decide (does not exist yet)",
+		m + "/exec (does not exist yet)",
+		m + "/exec/bwrap (does not exist yet)",
 		m + "/perm (does not exist yet)",
 		m + "/perm/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",
@@ -201,6 +205,8 @@ func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
 	}
 	want := []string{
 		m + "/decide (does not exist yet)",
+		m + "/exec (does not exist yet)",
+		m + "/exec/bwrap (does not exist yet)",
 		m + "/perm (does not exist yet)",
 		m + "/perm/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",
