@@ -620,20 +620,7 @@ func (s *Session) Wait(ctx context.Context) (Result, error) {
 	}
 	s.waiters = append(s.waiters, ch)
 	s.mu.Unlock()
-	select {
-	case res := <-ch:
-		return res, nil
-	case <-ctx.Done():
-	}
-	// The context ended. A run started under the same context settles on
-	// its own, so a bounded grace period covers a run that is finishing
-	// its work.
-	select {
-	case res := <-ch:
-		return res, nil
-	case <-time.After(recordWriteBudget):
-		return Result{}, ctx.Err()
-	}
+	return s.awaitResult(ctx, ch)
 }
 
 // WaitRun waits for one run to settle and returns its result.
@@ -654,6 +641,15 @@ func (s *Session) WaitRun(ctx context.Context, runID string) (Result, error) {
 	}
 	s.waiters = append(s.waiters, ch)
 	s.mu.Unlock()
+	return s.awaitResult(ctx, ch)
+}
+
+// awaitResult waits for the run's result on the caller's waiter channel.
+//
+// The context ends the wait with a bounded grace period: a run started
+// under the same context settles on its own, so the grace covers a run
+// that is finishing its work.
+func (s *Session) awaitResult(ctx context.Context, ch chan Result) (Result, error) {
 	select {
 	case res := <-ch:
 		return res, nil

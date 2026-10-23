@@ -365,6 +365,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// because a refusal never starts a job. The record is therefore
 	// written once, at the point the mode is fixed.
 	recorded := false
+	println("EXECUTE call", call.ID, len(call.Arguments), string(call.Arguments))
 	record := func(m CallMode) bool {
 		if recorded {
 			return true
@@ -610,14 +611,15 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	}
 
 	// A valid finish call settles the run as finished, with the result.
-	if call.Name == FinishToolName {
-		if raw, ok := prepared.(FinishResult); ok {
-			s.addCandidate(run, newCandidate(ReasonFinished, SettleDetail{
-				Source: "finish",
-				Text:   "the model called finish with a valid result",
-				Result: raw.FinishResult(),
-			}))
-		}
+	// The recognition keys on the prepared value the call carries, not
+	// on the tool's name: FinishResult is the finish tool's own, and a
+	// consumer that renames the tool keeps the settle.
+	if raw, ok := prepared.(FinishResult); ok {
+		s.addCandidate(run, newCandidate(ReasonFinished, SettleDetail{
+			Source: "finish",
+			Text:   "the model called finish with a valid result",
+			Result: raw.FinishResult(),
+		}))
 	}
 
 	s.recordResult(run, turn, handle, call.Name, call.ID, result, OutcomeOK)

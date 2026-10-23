@@ -941,7 +941,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	// message is recorded: a delivery note may name a message that is
 	// still streaming.
 	ids := s.messageIDs
-	resp, err := readResponse(actCtx, reader, ids, run.id, turn, run.requests, s.opts.Sink, func(name EventName, payload map[string]any) {
+	resp, err := readResponse(actCtx, reader, ids, run.id, turn, run.requests, func(name EventName, payload map[string]any) {
 		// A stream that outlives the run is a late completion: what it
 		// carries never reaches the history, the records or the
 		// events.
@@ -1230,7 +1230,7 @@ type callSlot struct {
 //
 // A stream that fails part way through returns the response it managed to
 // read along with the failure, so the caller can still write the usage.
-func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, runID string, turn, request int, sink RecordSink, emit func(EventName, map[string]any)) (*response, error) {
+func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, runID string, turn, request int, emit func(EventName, map[string]any)) (*response, error) {
 	resp := &response{finish: FinishStop}
 	var text strings.Builder
 	var thinking strings.Builder
@@ -1344,6 +1344,9 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 		}
 	}
 
+	for k, c := range calls {
+		println("DEBUG call", k, c.ID, len(c.Arguments), string(c.Arguments))
+	}
 	resp.collect(text.String(), thinking.String(), calls, order)
 	return resp, nil
 }

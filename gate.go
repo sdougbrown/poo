@@ -246,7 +246,7 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 			return Message{}, UsageReport{}, err
 		}
 		defer reader.Close()
-		resp, err := readResponse(ctx, reader, nil, run.id, 0, run.requests, s.opts.Sink, nil)
+		resp, err := readResponse(ctx, reader, nil, run.id, 0, run.requests, nil)
 		if err != nil {
 			return Message{}, UsageReport{}, err
 		}
