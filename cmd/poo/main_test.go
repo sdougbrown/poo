@@ -15,28 +15,49 @@ import (
 // code and its standard error.
 func runCLI(t *testing.T, args ...string) (int, string) {
 	t.Helper()
+	code, stderr, _ := runCLIWithStdout(t, args...)
+	return code, stderr
+}
+
+// runCLIWithStdout runs the command and returns its exit code, its
+// stderr and its stdout.
+func runCLIWithStdout(t *testing.T, args ...string) (int, string, string) {
+	t.Helper()
 	oldStderr := os.Stderr
+	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("creating the pipe: %v", err)
 	}
 	os.Stderr = w
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating the pipe: %v", err)
+	}
+	os.Stdout = outW
 
-	// The pipe is drained while the command runs, so output larger than
-	// the pipe's buffer cannot block it.
-	done := make(chan []byte, 1)
+	stderrDone := make(chan []byte, 1)
 	go func() {
 		out, _ := io.ReadAll(r)
-		done <- out
+		stderrDone <- out
+	}()
+	stdoutDone := make(chan []byte, 1)
+	go func() {
+		out, _ := io.ReadAll(outR)
+		stdoutDone <- out
 	}()
 
 	code := run(args)
 
 	os.Stderr = oldStderr
+	os.Stdout = oldStdout
 	w.Close()
-	out := <-done
+	outW.Close()
+	stderr := <-stderrDone
+	stdout := <-stdoutDone
 	r.Close()
-	return code, string(out)
+	outR.Close()
+	return code, string(stderr), string(stdout)
 }
 
 func TestTheRequiredFlagsAreChecked(t *testing.T) {

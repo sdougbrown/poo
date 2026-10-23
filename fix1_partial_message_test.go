@@ -62,7 +62,7 @@ func TestThePartialAssistantMessageAfterADeltaIsRecorded(t *testing.T) {
 		}
 	}
 	if partial == nil {
-		t.Fatalf("the record holds no partial assistant message; the records are %v", sink.names())
+		t.Fatalf("the record holds no partial assistant message; the records are %v", sink.Names())
 	}
 	if partial.Cause != poo.CauseProviderError {
 		t.Errorf("the partial message's cause is %q, want %q", partial.Cause, poo.CauseProviderError)

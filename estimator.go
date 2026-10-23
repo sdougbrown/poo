@@ -77,7 +77,9 @@ func (e *estimator) ratio() float64 {
 	return e.charsPerToken
 }
 
-// estimateHistoryChars returns the serialized size of a view.
+// estimateHistoryChars returns the serialized size of a view: the
+// estimate every view-size measurement in the session goes through, so a
+// change to the per-message accounting lands everywhere at once.
 func estimateHistoryChars(history []Message) int {
 	chars := 0
 	for _, m := range history {

@@ -263,7 +263,9 @@ type ToolCallRecord struct {
 	// raw text when it did not.
 	Arguments json.RawMessage `json:"arguments"`
 	// Mode says how the call ran: "sync" in the turn, or "job" in the
-	// background.
+	// background. The mode is fixed when the call starts, after the
+	// before-tool hooks have answered; a call that never ran has no
+	// mode.
 	Mode CallMode `json:"mode,omitempty"`
 }
 
