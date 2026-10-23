@@ -99,8 +99,8 @@ prompts/
 ```
 
 A file is a `text/template`. The template renders with the data the default it
-replaces carries. The environment section reads `{{.Cwd}}`, `{{.OS}}`,
-`{{.Date}}` and `{{.Model}}`, and the catalog reads its entry list. A section
+replaces carries. The library's environment section reads `{{.Cwd}}`,
+`{{.OS}}`, `{{.Date}}` and `{{.Model}}`, and the catalog reads its entry list. A section
 whose prose names no field renders the same text whatever the data is.
 
 A file's final newline is not part of the section. Each file ends with one, and
