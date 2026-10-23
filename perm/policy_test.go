@@ -142,8 +142,8 @@ func TestTheUnmatchedActionAndTheFallbackAreIndependent(t *testing.T) {
 	if len(answered) != 1 {
 		t.Fatalf("the session emitted %d answer event(s), want 1", len(answered))
 	}
-	if answered[0].Payload["provenance"] != poo.ProvenanceDefault {
-		t.Errorf("the answer's provenance is %q, want %q", answered[0].Payload["provenance"], poo.ProvenanceDefault)
+	if answered[0].Payload["provenance"] != poo.ProvenanceNoAsker {
+		t.Errorf("the answer's provenance is %q, want %q", answered[0].Payload["provenance"], poo.ProvenanceNoAsker)
 	}
 	if answered[0].Payload["decision"] != string(perm.DecisionAllow) {
 		t.Errorf("the answer's decision is %q, want %q", answered[0].Payload["decision"], perm.DecisionAllow)
