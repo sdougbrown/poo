@@ -81,7 +81,7 @@ func TestTwoResultsFinishingWhileIdleStartOneWokenRun(t *testing.T) {
 	})
 	close(release)
 	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.settled()
+		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
 
@@ -277,10 +277,10 @@ func TestAJobThatFailsFatallyWhileIdleWakesARunThatSettles(t *testing.T) {
 	// run settles tool_fatal.
 	tool.Release()
 	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.settled()
+		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
-	settled := sink.settled()
+	settled := sink.Settled()
 	if settled.Reason != poo.ReasonToolFatal {
 		t.Errorf("the woken run settled %q, want tool_fatal", settled.Reason)
 	}

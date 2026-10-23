@@ -118,6 +118,17 @@ gateLoop:
 	// Step 3: the context notice, when it is due.
 	s.maybeNotice(run)
 
+	// The notice grew the view, so the room to answer is checked again:
+	// the request would otherwise go out with a max_tokens the minimum
+	// already forbids.
+	maxTokens = s.maxTokens()
+	if maxTokens < MinOutputTokens {
+		return gateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
+			Source: "no_output_room",
+			Text:   fmt.Sprintf("the computed max_tokens %d is under the %d-token minimum", maxTokens, MinOutputTokens),
+		})}}
+	}
+
 	// Step 4: the run requests.
 	return gateResult{}
 }
@@ -159,7 +170,10 @@ func (s *Session) maybeNotice(run *runState) {
 	s.noticeArmed = false
 	s.mu.Unlock()
 
-	msg := NewTextMessage(RoleUser, ContextNoticeText)
+	// The ratio in the model's notice is the configured one: a
+	// consumer that fires the notice at 60% does not tell the model
+	// the window is ~80% used.
+	msg := NewTextMessage(RoleUser, fmt.Sprintf("[Context notice: ~%d%% of the context window used. Prefer narrow reads; finish or report soon.]", int(s.opts.NoticeRatio*100)))
 	msg.Origin = OriginUser
 	s.appendMessages(msg)
 	if err := s.write(run.ctx, &MessageRecord{
@@ -236,7 +250,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	defer s.endActivity(run)
 
 	compaction, err := s.opts.Compactor.Compact(actCtx, view, fork)
-	if s.wasInterrupted(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
+	if s.interruptPending(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
 		// A cooperative compactor may return a value while it unwinds.
 		// The activity was interrupted, so the value is discarded.
 		if !s.runWindingDown(run) {
@@ -259,7 +273,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	// applied: it can only ask for the native compaction.
 	if compaction.Window != nil && compaction.Replace == nil && len(compaction.Rewrite) == 0 && compaction.End == nil {
 		window, werr := s.nativeWindow(actCtx, run)
-		if s.wasInterrupted(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
+		if s.interruptPending(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
 			if !s.runWindingDown(run) {
 				s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": errCompactionInterrupted.Error()})
 			}
@@ -395,7 +409,7 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 			return Message{}, UsageReport{}, err
 		}
 		defer reader.Close()
-		resp, err := readResponse(ctx, reader, nil, run.id, 0, run.requests, s.opts.Sink, nil)
+		resp, err := readResponse(ctx, reader, nil, run.id, 0, run.requests, nil)
 		if err != nil {
 			return Message{}, UsageReport{}, err
 		}
@@ -457,9 +471,5 @@ func (s *Session) observeUsage(report *UsageReport, requestChars int) {
 //
 // The caller holds the session's lock.
 func (s *Session) historyCharsLocked() int {
-	chars := 0
-	for _, m := range s.modelMessagesLocked() {
-		chars += estimateMessageChars(m)
-	}
-	return chars
+	return estimateHistoryChars(s.modelMessagesLocked())
 }

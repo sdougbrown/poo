@@ -95,10 +95,15 @@ sandbox's binds and the protected paths it masks.
   the scrub removed, or a `tools.env.passthrough` list left out, is a
   reference the call cannot honour, and it fails naming the variable.
 - **Its arguments** were checked against the manifest's schema before the
-  process started, so a malformed call never runs. A value that begins
-  with a dash is refused when the manifest passes it as an argument of
-  its own, because a command whose flag takes no value would read it as
-  another flag; bind it `equals` to pass a value that looks like one.
+  process started, so a malformed call never runs. The same check, in the
+  library, refuses a value that begins with a dash when the manifest
+  passes it as an argument of its own (`style: space`), because a command
+  whose flag takes no value would read it as another flag. The rule
+  belongs to `cli-registry` (`specs/argv.md` there): the call fails its
+  validation, naming the property, before argv exists. Bind the property
+  `equals` to pass a value that looks like one — a dash-leading value
+  inside one `--flag=value` element is not an option, even when it spells
+  one the manifest fixes itself.
 - **Its lifetime** is the plan's timeout, enforced by poo, and the run's
   context: a timeout, an interrupt, a cancel, a close or
   `--no-wait-jobs` stops the CLI and everything it started in its process

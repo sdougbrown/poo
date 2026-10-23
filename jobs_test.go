@@ -593,7 +593,7 @@ func TestAnUnlaunchedJobCompletesThroughTheQueue(t *testing.T) {
 	}
 	<-cancelDone
 
-	names := sink.names()
+	names := sink.Names()
 	started, ended := -1, -1
 	var end *poo.JobEnded
 	for i, name := range names {
@@ -664,4 +664,115 @@ func TestAQueuedFollowUpDoesNotKeepARunFromWaiting(t *testing.T) {
 			len(tr.Requests()), res.Reason, s.JobsRunning(), sink.count("input.queued"), sink.count("input.delivered"), sink.count("input.dropped"), sendErr)
 	}
 	s.Cancel("cleanup")
+}
+
+// TestTheCancelJobToolRejectsTrailingData covers the strict decode: a
+// call's arguments are one JSON value, and bytes after it are refused,
+// not silently ignored.
+func TestTheCancelJobToolRejectsTrailingData(t *testing.T) {
+	tool := pootest.NewJobTool(poo.CancelJobToolName, poo.BackgroundAllowed)
+	if _, err := tool.Prepare(json.RawMessage(`{"job":"j1"} trailing`), poo.PrepareEnv{}); err == nil {
+		t.Error("the call with trailing data was accepted")
+	}
+	if _, err := tool.Prepare(json.RawMessage(`{"job":"j1"}`), poo.PrepareEnv{}); err != nil {
+		t.Errorf("the clean call was refused: %v", err)
+	}
+	if _, err := tool.Prepare(json.RawMessage(`  {"job":"j1"}  `), poo.PrepareEnv{}); err != nil {
+		t.Errorf("the clean call with surrounding space was refused: %v", err)
+	}
+}
+
+// panicPrepared is a prepared panic call.
+type panicPrepared struct{}
+
+// Summary describes the call.
+func (panicPrepared) Summary() string { return "explode" }
+
+// panicTool always panics in Call, once the test releases it.
+type panicTool struct {
+	// release holds the panic until the test closes it. A nil channel
+	// panics at once.
+	release chan struct{}
+}
+
+// Spec describes the tool: every call is a background job.
+func (t *panicTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        "explode",
+		Description: "explode",
+		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Class:       poo.ClassSideEffecting,
+		Background:  poo.BackgroundAlways,
+	}
+}
+
+// Prepare accepts anything.
+func (t *panicTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	return panicPrepared{}, nil
+}
+
+// Call panics, the way a broken tool does.
+//
+// The panic waits for the test's release, so a test can put it at a
+// point of its own choosing instead of racing the run's turns.
+func (t *panicTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	if t.release != nil {
+		select {
+		case <-t.release:
+		case <-ctx.Done():
+			return poo.ToolResult{}, ctx.Err()
+		}
+	}
+	panic("the tool exploded")
+}
+
+// TestAPanickingJobEndsWithAFatalError covers the promise the log makes:
+// a tool that panics as a background job does not bring the process
+// down. The job ends exactly once, with the panic as its error result,
+// and the queued result reaches the model like any job's.
+func TestAPanickingJobEndsWithAFatalError(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	release := make(chan struct{})
+	tool := &panicTool{release: release}
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	// The job panics when the test releases it, and not before: the run
+	// has finished its own turns and is waiting for the job, so the
+	// settle the panic's fatal result produces is this run's settle.
+	waitFor(t, "the run to wait for the job", func() bool { return s.State() == poo.StateWaiting })
+	close(release)
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	// A fatal tool error settles the receiving run, the way a
+	// foreground panicking tool does.
+	if res.Reason != poo.ReasonToolFatal {
+		t.Errorf("the run settled %q, want tool_fatal", res.Reason)
+	}
+
+	ended := 0
+	for _, rec := range sink.allRecords() {
+		e, ok := rec.(*poo.JobEnded)
+		if !ok {
+			continue
+		}
+		ended++
+		if e.Outcome != poo.JobOutcomeError {
+			t.Errorf("the job ended %q, want error", e.Outcome)
+		}
+		if !strings.Contains(e.Text, "panic: the tool exploded") {
+			t.Errorf("the job's result is %q, want the panic", e.Text)
+		}
+	}
+	if ended != 1 {
+		t.Errorf("the log holds %d job.ended records, want 1", ended)
+	}
 }

@@ -119,12 +119,6 @@ type prepared struct {
 // Summary describes the call.
 func (p prepared) Summary() string { return "finish" }
 
-// Result returns the validated result.
-//
-// The core reads it when the batch completes, so a valid call settles
-// the run as finished.
-func (p prepared) Result() json.RawMessage { return p.result }
-
 // FinishResult returns the validated result.
 //
 // The method is what the core recognizes: a prepared call that carries
@@ -168,7 +162,9 @@ func validateValue(schema map[string]any, value any, path string) error {
 	if raw, ok := schema["enum"]; ok {
 		options, ok := raw.([]any)
 		if !ok {
-			return nil
+			// A malformed schema is a configuration error in the
+			// consumer's own tool spec, not a silent pass.
+			return fmt.Errorf("%s: the schema's enum is not an array", path)
 		}
 		found := false
 		for _, o := range options {
@@ -249,7 +245,7 @@ func validateObject(schema map[string]any, value map[string]any, path string) er
 func checkType(raw any, value any, path string) error {
 	want, ok := raw.(string)
 	if !ok {
-		return nil
+		return fmt.Errorf("%s: the schema's type is not a string", path)
 	}
 	switch want {
 	case "object":

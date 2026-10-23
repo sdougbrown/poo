@@ -24,6 +24,17 @@
 // The plan's own timeout is poo's to enforce, and the call shows the
 // model the same observation bash shows it: the two streams, the exit
 // status, the partial output of a timeout, and null for a killed process.
+//
+// # Validation
+//
+// What the arguments may be is the library's to decide, and poo adds no
+// rule of its own: Plan refuses a value that does not fit the CLI's
+// schema, and a dash-leading value a separate-value binding would put
+// where the command parses options. Both come back as a *ValidationError,
+// which poo reports as an invalid call before any process exists. A value
+// bound with the equals or short style stays inside one argv element and
+// is not refused, nor is a positional one, which the library escapes with
+// "--".
 package cliregistry
 
 import (

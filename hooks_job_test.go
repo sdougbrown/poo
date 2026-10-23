@@ -153,7 +153,7 @@ func TestTheDeliveryDoesNotRerunTheJobsChain(t *testing.T) {
 	// the waiting run.
 	tool.ReleaseAll()
 	waitFor(t, "the result to be delivered", func() bool { return sink.count("input.delivered") == 1 })
-	waitFor(t, "the run to settle", func() bool { return sink.settled() != nil })
+	waitFor(t, "the run to settle", func() bool { return sink.Settled() != nil })
 	if got := hook.Calls(); got != 1 {
 		t.Errorf("the chain ran %d time(s), want 1: the delivery does not run it again", got)
 	}

@@ -8,7 +8,6 @@ import (
 	"io"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
@@ -129,42 +128,17 @@ func (r *fakeReader) Next() (poo.StreamEvent, error) {
 func (r *fakeReader) Close() error { return nil }
 
 // recordingSink collects the records a run writes.
+// recordingSink is the root tests' sink. The stamping, the write
+// serialization and the record accessors are pootest.Sink's; the type
+// stays for the field literals and adds the name counter.
 type recordingSink struct {
-	mu      sync.Mutex
-	records []poo.Record
-	seq     int64
-}
-
-// Append stamps one record the way a real sink does, and collects it.
-func (s *recordingSink) Append(ctx context.Context, rec poo.Record) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.seq++
-	poo.Stamp(rec, s.seq, time.Now())
-	s.records = append(s.records, rec)
-	return nil
-}
-
-// Flush does nothing.
-func (s *recordingSink) Flush(ctx context.Context) error { return nil }
-
-// names returns the record names, in order.
-func (s *recordingSink) names() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.records))
-	for _, rec := range s.records {
-		out = append(out, rec.Meta().Record)
-	}
-	return out
+	pootest.Sink
 }
 
 // count returns how many records carry a name.
 func (s *recordingSink) count(name string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	n := 0
-	for _, rec := range s.records {
+	for _, rec := range s.Records() {
 		if rec.Meta().Record == name {
 			n++
 		}
@@ -173,41 +147,10 @@ func (s *recordingSink) count(name string) int {
 }
 
 // messages returns the message records, in order.
-func (s *recordingSink) messages() []*poo.MessageRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []*poo.MessageRecord
-	for _, rec := range s.records {
-		if m, ok := rec.(*poo.MessageRecord); ok {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-// settled returns the run's settle record, or nil.
-//
-// The last settle record is the one returned: a session may run more
-// than once, and a consumer wants the outcome of the run that just
-// finished.
-func (s *recordingSink) settled() *poo.RunSettled {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var last *poo.RunSettled
-	for _, rec := range s.records {
-		if r, ok := rec.(*poo.RunSettled); ok {
-			last = r
-		}
-	}
-	return last
-}
+func (s *recordingSink) messages() []*poo.MessageRecord { return s.Messages() }
 
 // allRecords returns every record the sink kept.
-func (s *recordingSink) allRecords() []poo.Record {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]poo.Record(nil), s.records...)
-}
+func (s *recordingSink) allRecords() []poo.Record { return s.Records() }
 
 // namedTool is an echo tool under a different name.
 //
