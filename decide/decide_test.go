@@ -388,6 +388,70 @@ func TestASuccessIsRecordedAsOKWithItsAnswers(t *testing.T) {
 	}
 }
 
+// TestAMalformedAnswerIsRecordedAsADeferral covers the wrapper's own
+// check: an inner decider that fails no call but answers against the
+// questions is recorded as a deferral that carries the reason, and the
+// caller still gets the answers and the nil error.
+func TestAMalformedAnswerIsRecordedAsADeferral(t *testing.T) {
+	qs := []decide.Question{
+		{ID: "q1", Kind: decide.Bool{True: "yes", False: "no"}},
+		{ID: "q2", Kind: decide.Bool{True: "yes", False: "no"}},
+	}
+	good := func(id string) decide.Answer {
+		return decide.Answer{ID: id, Probabilities: map[string]float64{"yes": 0.5, "no": 0.5}}
+	}
+	tests := []struct {
+		name    string
+		answers []decide.Answer
+		want    string
+	}{
+		{
+			name:    "missing",
+			answers: []decide.Answer{good("q1")},
+			want:    `the question "q2" has no answer`,
+		},
+		{
+			name:    "duplicate",
+			answers: []decide.Answer{good("q1"), good("q1")},
+			want:    `the question "q1" has two answers`,
+		},
+		{
+			name: "bad-distribution",
+			answers: []decide.Answer{
+				{ID: "q1", Probabilities: map[string]float64{"yes": 0.9, "no": 0.9}},
+				good("q2"),
+			},
+			want: `the question "q1" has probabilities summing to 1.8`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			recorder := decide.Recorded(decide.DeciderFunc(func(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+				return tt.answers, nil
+			}), sink, "the caller")
+
+			answers, err := recorder.Decide(context.Background(), nil, "", qs)
+			if err != nil {
+				t.Fatalf("the call returned %v, want the inner nil error", err)
+			}
+			if len(answers) != len(tt.answers) {
+				t.Errorf("the call returned %d answers, want the decider's %d", len(answers), len(tt.answers))
+			}
+			if len(sink.records) != 1 {
+				t.Fatalf("the sink holds %d records, want 1", len(sink.records))
+			}
+			rec := sink.records[0]
+			if rec.Outcome != decide.OutcomeDeferred {
+				t.Errorf("the malformed answer was recorded as %q, want %q", rec.Outcome, decide.OutcomeDeferred)
+			}
+			if !strings.Contains(rec.Error, tt.want) {
+				t.Errorf("the record holds the error %q, want %q", rec.Error, tt.want)
+			}
+		})
+	}
+}
+
 // TestASinkThatRefusesARecordDoesNotFailTheDecision covers the recording
 // contract: a sink that refuses the record does not change the answer
 // the caller gets or the error the caller sees.

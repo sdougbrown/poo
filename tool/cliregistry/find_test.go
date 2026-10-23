@@ -230,6 +230,88 @@ func TestOneSearchWritesOneDecisionRecord(t *testing.T) {
 	}
 }
 
+// malformedDecider answers every question, then breaks the answer set
+// the way the kind names.
+func malformedDecider(kind string) decide.Decider {
+	return decide.DeciderFunc(func(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+		answers := make([]decide.Answer, 0, len(qs))
+		for _, q := range qs {
+			answers = append(answers, decide.Answer{ID: q.ID, Probabilities: map[string]float64{"yes": 0.5, "no": 0.5}})
+		}
+		if len(answers) == 0 {
+			return answers, nil
+		}
+		switch kind {
+		case "missing":
+			return answers[:len(answers)-1], nil
+		case "duplicate":
+			answers[len(answers)-1] = answers[0]
+		case "bad-distribution":
+			answers[0].Probabilities = map[string]float64{"yes": 0.9, "no": 0.9}
+		}
+		return answers, nil
+	})
+}
+
+// TestMalformedAnswersAreRecoverable covers the search's own answer check:
+// answers that do not match the questions make the search fail the
+// recoverable way, not return a list built from an answer set that does
+// not add up.
+func TestMalformedAnswersAreRecoverable(t *testing.T) {
+	for _, kind := range []string{"missing", "duplicate", "bad-distribution"} {
+		t.Run(kind, func(t *testing.T) {
+			res, err := preparedCall(t, cliregistry.NewFind(fixtureCatalog(t)), `{"intent":"say hello"}`, poo.ToolEnv{Decider: malformedDecider(kind)})
+			if err != nil || !res.IsError || res.Text != cliregistry.UnavailableText || len(res.Structured) != 0 {
+				t.Fatalf("bad answers produced result=%+v err=%v", res, err)
+			}
+		})
+	}
+}
+
+// TestMalformedAnswersKeepDiagnostic covers the record: the session's
+// recording wrapper writes the reason the answers did not add up, so a
+// search a decider answered badly is not recorded as a successful
+// decision.
+func TestMalformedAnswersKeepDiagnostic(t *testing.T) {
+	sink := pootest.NewSink()
+	transport := pootest.NewTransport(
+		pootest.Turn{Calls: []pootest.Call{{Name: cliregistry.FindToolName, Arguments: json.RawMessage(`{"intent":"say hello"}`)}}},
+		pootest.Turn{Text: "recovered"},
+	)
+	session, err := poo.New(poo.Options{
+		Transport: transport, Sink: sink, SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(fixtureCatalog(t))},
+		ToolOrder: []string{cliregistry.FindToolName},
+		Decider:   malformedDecider("bad-distribution"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	if _, err := session.Prompt(context.Background(), "find a tool"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastToolResult(t, transport); got != poo.HandleLine("r1", cliregistry.FindToolName)+"\n"+cliregistry.UnavailableText {
+		t.Fatalf("wrong model result %q", got)
+	}
+	var records []*poo.DecisionRecord
+	for _, record := range sink.Records() {
+		if decision, ok := record.(*poo.DecisionRecord); ok {
+			records = append(records, decision)
+		}
+	}
+	if len(records) != 1 {
+		t.Fatalf("got %d decision records, want 1", len(records))
+	}
+	if records[0].Error == "" || records[0].Outcome == decide.OutcomeOK {
+		t.Fatalf("search failed but decision record says outcome=%q error=%q", records[0].Outcome, records[0].Error)
+	}
+}
+
 // TestTheSearchRanksByProbability covers the ranking: the entries come
 // back by the probability the model gave them, not by their names.
 func TestTheSearchRanksByProbability(t *testing.T) {
