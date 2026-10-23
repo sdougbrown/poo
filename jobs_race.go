@@ -2,6 +2,11 @@ package poo
 
 import "time"
 
+// raceWaitBudget bounds the job-race waiter's wait. It is its own
+// constant: the record-write budget is the finalization's, and a test
+// that tunes one should not move the other.
+const raceWaitBudget = 5 * time.Second
+
 // The seams the job races are tested at.
 //
 // A race is tested at a boundary, and a boundary is reached by a hook
@@ -102,7 +107,7 @@ func (s *Session) waitForJobResult() bool {
 	select {
 	case <-ch:
 		return true
-	case <-time.After(s.recordBudget()):
+	case <-time.After(raceWaitBudget):
 		return false
 	}
 }

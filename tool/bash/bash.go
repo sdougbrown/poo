@@ -30,8 +30,9 @@ const (
 	KillGrace = 2 * time.Second
 	// ObservationCapMax is the largest observation the model ever sees.
 	ObservationCapMax = 30000
-	// CharsPerToken is the plan's estimate of characters per token.
-	CharsPerToken = 3.5
+	// CharsPerToken is the core's estimate of characters per token, so
+	// the tool's caps and the session's estimator measure on one scale.
+	CharsPerToken = poo.CharsPerToken
 	// ElisionHint tells the model how to see the elided middle.
 	ElisionHint = "Output too long. Use grep/sed/head/tail to inspect narrower ranges."
 )

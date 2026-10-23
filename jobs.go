@@ -341,9 +341,9 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	if err != nil {
 		s.mu.Lock()
 		run.jobStarts--
-		s.mu.Unlock()
 		s.signalWorkLocked(run)
-		s.removeJobLocked(jobID)
+		s.mu.Unlock()
+		s.removeJob(jobID)
 		cancel(errFinalizing)
 		if errors.Is(err, errDeliveryAbandoned) || winding {
 			return "", false, true
@@ -379,10 +379,8 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	return jobID, true, false
 }
 
-// removeJobLocked forgets a job that never ran.
-//
-// The caller holds the session's lock.
-func (s *Session) removeJobLocked(jobID string) {
+// removeJob forgets a job that never ran.
+func (s *Session) removeJob(jobID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.jobs, jobID)
@@ -441,6 +439,15 @@ func (s *Session) onIdle() OnIdle {
 // it is cancelled, or when the session closes.
 func (s *Session) runJob(job *jobState, prepared Prepared) {
 	defer close(job.done)
+	// A panic in a tool must not bring the process down: the foreground
+	// path settles a panicking tool as tool_fatal, and a job gets the
+	// same treatment — exactly one job.ended, with the panic as the
+	// result and the fatal flag set.
+	defer func() {
+		if r := recover(); r != nil {
+			s.finishJob(job, OutcomeError, afterToolOutcome{result: ToolResult{Text: fmt.Sprintf("panic: %v", r), IsError: true}}, false, true, "")
+		}
+	}()
 
 	tool, ok := s.opts.Tools[job.tool]
 	if !ok {
@@ -484,8 +491,11 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 		outcome = OutcomeCancelled
 		text = stoppedText(result.Text, err, "the job was cancelled")
 	default:
+		// The policy is the stopped branches': the partial output is
+		// the job's result, and the error explains a job that
+		// produced none.
 		outcome = OutcomeError
-		text = err.Error()
+		text = stoppedText(result.Text, err, "the job failed")
 	}
 
 	// The chain runs once, at the completion, under a context of its
@@ -577,6 +587,52 @@ func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 	return env
 }
 
+// jobEnded builds the job.ended record and its event payload: the one
+// construction the finish path and the close path share, so the
+// record's fields and the event's move together. The cause names the
+// close when the close wrote the record, and is empty on the finish
+// path.
+//
+// The record carries the hook-processed result, so a held result never
+// leaks what a hook would have redacted.
+func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, cause JobCause, timedOut bool, text string, out afterToolOutcome) (*JobEnded, map[string]any) {
+	rec := &JobEnded{
+		RecordMeta: NewRecordMeta("job.ended"),
+		SessionID:  s.opts.SessionID,
+		Job:        job.id,
+		Handle:     job.handle,
+		Tool:       job.tool,
+		RunID:      job.runID,
+		Outcome:    outcome,
+		Cause:      cause,
+		TimedOut:   timedOut,
+		InputID:    inputID,
+		Text:       text,
+		Redacted:   out.redacted,
+		RedactedBy: out.redactedBy,
+		Hooks:      out.decisions,
+		EndedAt:    nowRFC3339(),
+	}
+	if out.original != nil {
+		rec.Original = &ToolResultData{
+			Text:       out.original.Text,
+			Structured: out.original.Structured,
+			IsError:    out.original.IsError,
+		}
+	}
+	payload := map[string]any{
+		"job":      job.id,
+		"handle":   job.handle,
+		"tool":     job.tool,
+		"outcome":  string(outcome),
+		"input_id": inputID,
+	}
+	if cause != "" {
+		payload["cause"] = string(cause)
+	}
+	return rec, payload
+}
+
 // finishJob records a job's outcome and queues its result.
 //
 // The result is queued on the session's job queue, and the queue is
@@ -608,47 +664,14 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 
 	// The hook-processed result is what gets recorded and emitted, so a
 	// held result never leaks what a hook would have redacted.
-	ended := &JobEnded{
-		RecordMeta: NewRecordMeta("job.ended"),
-		SessionID:  s.opts.SessionID,
-		Job:        job.id,
-		Handle:     handle,
-		Tool:       tool,
-		RunID:      runID,
-		Outcome:    jobOutcome,
-		Cause:      cause,
-		TimedOut:   timedOut,
-		InputID:    inputID,
-		Text:       text,
-		Redacted:   out.redacted,
-		RedactedBy: out.redactedBy,
-		Hooks:      out.decisions,
-		EndedAt:    nowRFC3339(),
-	}
-	if out.original != nil {
-		ended.Original = &ToolResultData{
-			Text:       out.original.Text,
-			Structured: out.original.Structured,
-			IsError:    out.original.IsError,
-		}
-	}
-	if err := s.write(hookCompletionContext(job.ctx), ended); err != nil {
+	rec, payload := s.jobEnded(job, inputID, jobOutcome, cause, timedOut, text, out)
+	if err := s.write(hookCompletionContext(job.ctx), rec); err != nil {
 		// The store refused the job's end. The session is broken at
 		// once: the wakes stop, and the run that is still open gets
 		// the store_error candidate.
 		s.markBroken()
 		s.addStoreError()
 		return
-	}
-	payload := map[string]any{
-		"job":      job.id,
-		"handle":   handle,
-		"tool":     tool,
-		"outcome":  string(jobOutcome),
-		"input_id": inputID,
-	}
-	if cause != "" {
-		payload["cause"] = string(cause)
 	}
 	s.events.emit(EventJobEnded, payload)
 
@@ -814,8 +837,18 @@ func (s *Session) handleIdleJobResults() {
 	s.mu.Unlock()
 
 	// The woken run is a normal run: it starts with the results, and
-	// the first request goes through the gate.
-	_, _ = s.start(context.Background(), "", TriggerJob, nil, results...)
+	// the first request goes through the gate. A Close or a break that
+	// lands between the check above and start's own keeps the results
+	// on the queue, where the close's held-record pass covers them.
+	if _, err := s.start(context.Background(), "", TriggerJob, nil, results...); err != nil {
+		s.mu.Lock()
+		for _, result := range results {
+			s.jobQueue = append(s.jobQueue, jobQueueItem{result: result, held: true})
+		}
+		s.reserved = false
+		s.mu.Unlock()
+		return
+	}
 
 	s.mu.Lock()
 	s.reserved = false
@@ -942,33 +975,13 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 
 	msg := NewTextMessage(RoleUser, jobResultText(result))
 	msg.Origin = OriginJob
-	if err := s.writeDelivery(run.ctx, run, &MessageRecord{
-		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
-		RunID:      run.id,
-		Role:       msg.Role,
-		Content:    msg.Content,
-	}); err != nil {
+	if !s.deliverMessageRecords(run, msg, result.id, InputModeJob, nil, func(err error) {
 		s.failJobDelivery(run, item, err)
+	}, func() {
+		s.finishJobDelivery(run, item)
+	}) {
 		return false
 	}
-	if err := s.writeDelivery(run.ctx, run, &InputDelivered{
-		RecordMeta:  NewRecordMeta("input.delivered"),
-		SessionID:   s.opts.SessionID,
-		RunID:       run.id,
-		InputID:     result.id,
-		Mode:        InputModeJob,
-		DeliveredAt: nowRFC3339(),
-	}); err != nil {
-		s.failJobDelivery(run, item, err)
-		return false
-	}
-	s.appendMessages(msg)
-	s.finishJobDelivery(run, item)
-	s.events.emit(EventInputDelivered, map[string]any{
-		"run_id":   run.id,
-		"input_id": result.id,
-		"mode":     string(InputModeJob),
-	})
 	if result.fatal {
 		s.addCandidate(run, newCandidate(ReasonToolFatal, SettleDetail{
 			Source: "tool:" + result.tool,
@@ -1199,15 +1212,14 @@ func (s *Session) enterWaiting(run *runState) (waiting, drained bool) {
 //
 // A waiting run has nothing to do: no request, no tool and no hook. It
 // wakes when a job result arrives, when the client sends a message, or
-// when the run is cancelled.
-//
-// The call reports that the run is still waiting, so the loop goes
-// round again.
-func (s *Session) waitWhileWaiting(run *runState) bool {
+// when the run is cancelled. The call blocks until one of those, and
+// leaves the run in the requesting state when it is still the session's
+// waiting run.
+func (s *Session) waitWhileWaiting(run *runState) {
 	s.mu.Lock()
 	if s.state != StateWaiting || s.run != run {
 		s.mu.Unlock()
-		return false
+		return
 	}
 	wake := run.wake
 	s.mu.Unlock()
@@ -1222,7 +1234,6 @@ func (s *Session) waitWhileWaiting(run *runState) bool {
 		s.transitionLocked(StateRequesting)
 	}
 	s.mu.Unlock()
-	return false
 }
 
 // signalWake wakes a waiting run.
@@ -1666,6 +1677,12 @@ type jobPrepared struct {
 // Summary describes the call.
 func (p *jobPrepared) Summary() string { return p.job }
 
+// JobsPromptSection is the model's guidance about background jobs, as
+// the core's own jobs tool renders it.
+func JobsPromptSection() string {
+	return (&JobTool{name: JobsToolName}).PromptSection(prompt.Env{})
+}
+
 // PromptSection renders the section that tells the model about the
 // background jobs.
 //
@@ -1690,6 +1707,11 @@ func decodeStrictJSON(raw json.RawMessage, into any) error {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(into); err != nil {
 		return err
+	}
+	// One value means one value: bytes after it, even valid JSON, are
+	// not arguments the caller wrote.
+	if dec.More() {
+		return errors.New("poo: trailing data after the JSON value")
 	}
 	return nil
 }

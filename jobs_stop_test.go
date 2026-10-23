@@ -645,7 +645,7 @@ func TestACancelWithASynchronousCallAndAJobSettlesTheRun(t *testing.T) {
 	// The job keeps running, and its result wakes the session.
 	jobTool.Release()
 	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.settled()
+		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
 }
