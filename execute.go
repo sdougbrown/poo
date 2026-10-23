@@ -407,6 +407,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			RunID:      run.id,
 			Turn:       turn,
 			Handle:     handle,
+			CallID:     call.ID,
 			Tool:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
 			Mode:       m,
@@ -872,8 +873,10 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		RunID:      run.id,
 		Turn:       turn,
 		Handle:     handle,
+		CallID:     callID,
 		Tool:       tool,
 		Outcome:    outcome,
+		IsError:    result.IsError,
 		Text:       text,
 		Structured: result.Structured,
 		Redacted:   out.redacted,
@@ -888,10 +891,7 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		}
 	}
 	if err := s.write(run.ctx, rec); err != nil {
-		s.addCandidate(run, newCandidate(ReasonStoreError, SettleDetail{
-			Source: "store",
-			Text:   err.Error(),
-		}))
+		s.noteStoreError(run, err)
 	}
 
 	// The result goes into the model's view and the turn's summary.
@@ -901,13 +901,15 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 	result.Text = text
 	s.rememberResult(handle, tool, outcome, result)
 
-	_ = s.write(run.ctx, &MessageRecord{
+	if err := s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
 		Turn:       turn,
 		Role:       msg.Role,
 		Content:    msg.Content,
-	})
+	}); err != nil {
+		s.noteStoreError(run, err)
+	}
 
 	s.events.emit(EventToolResult, map[string]any{
 		"run_id":  run.id,

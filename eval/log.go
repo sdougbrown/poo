@@ -76,6 +76,11 @@ type LogRecord struct {
 	Outcome   string          `json:"outcome"`
 	Text      string          `json:"text"`
 
+	// The job's fields.
+	Job     string `json:"job"`
+	InputID string `json:"input_id"`
+	Fatal   bool   `json:"fatal"`
+
 	// The usage record's fields.
 	Request         int     `json:"request"`
 	InputTokens     int     `json:"input_tokens"`

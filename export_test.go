@@ -41,3 +41,16 @@ func LogDropped(s *Session) int64 {
 	}
 	return s.logs.droppedCount()
 }
+
+// SessionView returns the model's history as a read-only view.
+func SessionView(s *Session) View { return s.view() }
+
+// Messages returns the model's history, in the order the model reads
+// it.
+func Messages(s *Session) []Message { return s.view().Messages() }
+
+// SessionProfile returns the profile the session was built with.
+func SessionProfile(s *Session) string { return s.opts.Profile }
+
+// SessionChatModel returns the model the session talks to.
+func SessionChatModel(s *Session) ModelInfo { return s.opts.Model }

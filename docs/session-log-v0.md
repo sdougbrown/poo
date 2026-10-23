@@ -1,14 +1,37 @@
 # Session log v0
 
 A poo session log is an append-only JSONL file: one JSON object per line,
-in the order the records were produced. One writer serializes its writes, so
-the file never holds two half-written records; there is no recovery across
-processes and no recovery of a torn tail. This document is the contract a
+in the order the records were produced. This document is the contract a
 consumer parses.
 
 A session log holds one session. The file is created exclusively, so a run
 pointed at a log that already exists fails before it sends a request rather
 than appending a second session to the log.
+
+## Where a session's log lives
+
+A logged session's log is `<dir>/<session_id>.jsonl`, and its lock is
+`<dir>/<session_id>.lock`. The lock is an exclusive `flock`, taken when the
+session is created or loaded and held until the session is closed: a second
+process is refused while the session is live, and the kernel releases the
+lock when the holding process dies. The lock file is never deleted, and a
+lock file with no log beside it is a harmless leftover.
+
+The log is built in a temporary file and renamed into place, so a session
+that was cut short during its construction is never a session: the
+temporary file is left behind, and a prune removes it once it is old.
+
+A log that was cut short in the middle of a record is truncated when the
+session is loaded: the bytes after the last newline are not a record. The
+load then recovers the session, appending the records that resolve what
+the session left open: an `interrupted` result, and the message that
+carries it, for every tool call without one, a denied
+`permission.answered` for every ask without an answer, a `run.settled`
+with the reason `interrupted` for every run that never settled, a
+`job.ended` with the outcome `interrupted` for every job that never
+ended, and an `input.dropped` with the reason `interrupted` for every
+input that never reached the model. The recovery appends only what is
+missing, so loading a session twice writes nothing twice.
 
 The first record is always `session.created`, and it carries
 `"format": "poo-session-v0"`. A consumer that does not recognise the format
@@ -38,6 +61,7 @@ A record that someone produced also carries an `origin`:
 |---|---|
 | `session.created` | Once, first, when the session starts. |
 | `run.started` | Once per run, when the run begins. |
+| `system_prompt` | Once per run whose prompt differs from the previous one, with the whole prompt. |
 | `message` | Once per message that enters the model's history. |
 | `tool.call` | Once per tool call the model makes, before it runs. |
 | `tool.result` | Once per tool call, after it runs. |
@@ -71,12 +95,27 @@ The first record of a log.
 | `mode` | string | The persistence mode. `"logged"` for a `poo run`. |
 | `created_at` | string | RFC 3339, UTC. |
 | `working_dir` | string | The absolute directory the run works in. |
+| `profile` | string | The profile the session was built from. Absent when the log was written before the field existed. |
+| `roles` | object | The models the session talked to. See below. |
 | `model` | object | The model the session talks to. See below. |
 | `tools` | array of objects | The tools linked into the session, in call order. |
+| `settings_hash` | string | The hash of the settings the session was built with. Absent when the log was written before the field existed. |
 | `context_limit` | integer | The model's context window, in tokens. |
 | `tools_mode` | string | How the run asks for tool calls: `"native"`, `"text"` or `"auto"`. |
 | `reasoning_effort` | string | The `reasoning_effort` the run sends. Absent when it sends none. |
 | `build` | object | The binary that produced the session. |
+
+`roles` holds the session's effective roles:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `chat` | object | The chat model. Absent when the session had none. |
+| `decider` | object | The decision model. Absent when the session had none. |
+
+A role holds a model descriptor: its `name`, its `model_id`, its `endpoint`,
+its `api`, its `ops` and its `context_limit`. The roles are the ones the
+session ran with, not the ones the current settings would pick: a session
+loaded by another binary keeps the roles it was made with.
 
 `model` holds:
 
@@ -96,6 +135,7 @@ Each entry of `tools` holds:
 |---|---|---|
 | `name` | string | The tool's identifier. |
 | `class` | string | The tool's side-effect class: `"read_only"` or `"side_effecting"`. |
+| `background` | string | The tool's background mode: `"allowed"` or `"always"`. Absent when the tool never runs in the background. |
 
 `build` holds:
 
@@ -188,6 +228,20 @@ A `provider` payload may also ride as the `provider` field of a `thinking`
 block: an Anthropic thinking block is one block on the wire, with a text
 part and a signature, and poo keeps the two together.
 
+## `system_prompt`
+
+The prompt a run rendered, whole. A prompt that differs from the previous
+one is written; an unchanged one is not. The record is what a restored
+session takes: the prompt is never rendered from the sections again, so a
+session that was recorded under another prompt keeps that prompt.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | string | The run the prompt belongs to. |
+| `variant` | string | The variant the prompt rendered in. Absent when it rendered in the default one. |
+| `text` | string | The whole rendered prompt. |
+| `hash` | string | The hex SHA-256 of the text. |
+
 ## `tool.call`
 
 A tool call the model made. The record is written before the tool runs, so
@@ -245,6 +299,12 @@ The `started` outcome belongs to a background job: the call returned at
 once and its result arrives later as a message. The `denied`, `skipped`,
 `cancelled` and `interrupted` outcomes arrive with the later stages that
 produce them.
+
+An `interrupted` outcome is written by a load, never by a live run: the
+call was cut short, its outcome is unknown, and the model is told so. The
+result is the model-facing text of the call, and the message that carries
+it answers the call the model made, so a session that is loaded again asks
+the model nothing it cannot answer.
 
 ## `input.queued`
 
@@ -331,6 +391,7 @@ reads, so a held result survives a crash and a load can deliver it.
 | `outcome` | string | How the job ended: `"ok"`, `"error"`, `"cancelled"` or `"interrupted"`. |
 | `cause` | string | Why the job ended, when something else ended it. Absent unless the cause is `"session_closed"`. |
 | `timed_out` | boolean | `true` when the job hit the jobs timeout. Absent when it did not. |
+| `fatal` | boolean | `true` when the job failed with a fatal error. A run that receives the result settles `tool_fatal`. Absent when the job did not. |
 | `input_id` | string | The id the queued result is delivered under. |
 | `text` | string | The result the model reads. |
 | `ended_at` | string | RFC 3339, UTC. |
@@ -511,6 +572,7 @@ commit point.
 | 9b | `stop_requested` | 0 | A hook or a stop condition asked the run to stop. |
 | 10 | `output_truncated` | 10 | The provider stopped on the output-token limit. |
 | 11 | `end_turn` | 0 | The model stopped on its own. |
+| — | `interrupted` | — | The run's outcome is unknown: the process stopped while the run was going. It is never produced live; a load writes it for a run that never settled. |
 
 `provider_limit` and `provider_error` share a precedence level, because
 a single failed request produces only one of them.

@@ -9,6 +9,21 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 )
 
+// ToolInfo describes one tool as a session's metadata records it.
+//
+// It is the tool's name, its side-effect class and its background mode:
+// what a restored session checks the tool against.
+type ToolInfo struct {
+	// Name is the tool's identifier.
+	Name string `json:"name"`
+	// Class is the tool's side-effect class.
+	Class ToolClass `json:"class"`
+	// Background is the tool's background mode. A session loaded from
+	// the record is incompatible with the current build when a tool's
+	// mode changed.
+	Background Background `json:"background,omitempty"`
+}
+
 // ToolSpec describes a tool to the model and to the core.
 type ToolSpec struct {
 	// Name is the tool's identifier, as the model calls it.

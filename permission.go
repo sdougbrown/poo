@@ -207,7 +207,7 @@ func (s *Session) persistPermission(run *runState, p *PermissionRequest) {
 		ask := p.ask
 		rec := &PermissionAskedRecord{RecordMeta: NewRecordMeta("permission.asked"), RunID: run.id, AskID: ask.AskID, Tool: ask.Tool, Summary: ask.Summary, Class: ask.Class, Reason: ask.Reason, RepeatCount: ask.RepeatCount}
 		if err := s.write(context.Background(), rec); err != nil {
-			s.addCandidate(run, storeErrorCandidate(err))
+			s.noteStoreError(run, err)
 		}
 		payload := map[string]any{"run_id": run.id, "ask_id": ask.AskID, "tool": ask.Tool, "summary": ask.Summary, "class": string(ask.Class), "reason": ask.Reason}
 		if ask.RepeatCount != nil {
@@ -222,7 +222,7 @@ func (s *Session) persistPermission(run *runState, p *PermissionRequest) {
 	p.answerWritten = true
 	rec := &PermissionAnsweredRecord{RecordMeta: NewRecordMeta("permission.answered"), RunID: run.id, AskID: answer.AskID, Decision: answer.Decision, AnsweredBy: answer.AnsweredBy, Provenance: answer.Provenance, Reason: answer.Reason}
 	if err := s.write(context.Background(), rec); err != nil {
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 	}
 	s.events.emit(EventPermissionAnswered, map[string]any{"run_id": run.id, "ask_id": answer.AskID, "decision": answer.Decision, "answered_by": answer.AnsweredBy, "provenance": answer.Provenance, "reason": answer.Reason})
 }

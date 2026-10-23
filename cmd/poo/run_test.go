@@ -600,3 +600,46 @@ func TestARunWarnsWhenNoAskerCanAnswer(t *testing.T) {
 		t.Errorf("the warning does not name the fallback; stderr: %s", stderr)
 	}
 }
+
+// TestTheRunHeaderRecordsTheToolsBackgroundMode covers the metadata the
+// run writes: the compatibility check compares a tool's background mode,
+// so the header must carry it.
+func TestTheRunHeaderRecordsTheToolsBackgroundMode(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: " + `{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+	code, stderr := runCLI(t,
+		"run",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--log", logPath,
+		"say hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	recs := readLog(t, logPath)
+	tools, ok := recs[0]["tools"].([]any)
+	if !ok {
+		t.Fatalf("the header's tools are %T, want a list", recs[0]["tools"])
+	}
+	found := false
+	for _, raw := range tools {
+		tool, ok := raw.(map[string]any)
+		if !ok || tool["name"] != "bash" {
+			continue
+		}
+		found = true
+		if tool["background"] != "allowed" {
+			t.Errorf("the bash tool's recorded background mode is %v, want allowed", tool["background"])
+		}
+	}
+	if !found {
+		t.Fatal("the header does not name the bash tool")
+	}
+}

@@ -176,12 +176,14 @@ func (s *Session) maybeNotice(run *runState) {
 	msg := NewTextMessage(RoleUser, fmt.Sprintf("[Context notice: ~%d%% of the context window used. Prefer narrow reads; finish or report soon.]", int(s.opts.NoticeRatio*100)))
 	msg.Origin = OriginUser
 	s.appendMessages(msg)
-	_ = s.write(run.ctx, &MessageRecord{
+	if err := s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
 		Role:       msg.Role,
 		Content:    msg.Content,
-	})
+	}); err != nil {
+		s.noteStoreError(run, err)
+	}
 	s.events.emit(EventContextNotice, map[string]any{
 		"run_id": run.id,
 		"ratio":  s.opts.NoticeRatio,
@@ -324,7 +326,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
 			return compactionOutcome{}, errRunWindingDown
 		}
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 		return compactionOutcome{}, errCompactionStore
 	}
 	if change != nil && !s.commitCompactionView(run, *change) {
@@ -344,7 +346,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 			if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
 				return compactionOutcome{}, errRunWindingDown
 			}
-			s.addCandidate(run, storeErrorCandidate(err))
+			s.noteStoreError(run, err)
 			return compactionOutcome{}, errCompactionStore
 		}
 		outcome.candidate = &candidate{

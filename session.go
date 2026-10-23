@@ -408,6 +408,35 @@ type Options struct {
 	// (ErrSessionInit), so no run starts without a window to measure
 	// against.
 	Model ModelInfo
+	// Profile is the name of the profile the session was built with.
+	//
+	// A profile is a named tool set with its own defaults. The name
+	// goes into the session's metadata, and a restored session keeps
+	// the recorded name rather than the current default.
+	Profile string
+	// Profiles are the profiles this binary offers.
+	//
+	// A restore checks the recorded profile against them: a profile
+	// this build does not offer is an unknown profile.
+	Profiles []Profile
+	// Models are the models the current settings offer, by name.
+	//
+	// A restore checks the recorded roles against them: a role that
+	// names a model the settings do not offer is an unknown model. A
+	// caller that names no models at all has no catalog to check
+	// against, and the roles are not checked.
+	Models map[string]ModelInfo
+	// SettingsHash is the hash of the settings the session was built
+	// with.
+	//
+	// A restore compares it with the recorded one, and reports a
+	// difference as a warning.
+	SettingsHash string
+	// Build names this binary.
+	//
+	// A restore compares it with the recorded one, and reports a
+	// difference as a warning.
+	Build BuildInfo
 	// Decider is the session's decision model, or nil when it has none.
 	//
 	// The session wraps it, so every call is recorded.
