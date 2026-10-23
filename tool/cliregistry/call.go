@@ -24,11 +24,23 @@ import (
 type CallTool struct {
 	// catalog is the set of CLIs the tool may call.
 	catalog *Catalog
+	// search reports that the session offers find_tool over the
+	// catalog, so an unknown name can point at the search.
+	search bool
 }
 
 // NewCall returns the tool that runs a registered CLI.
 func NewCall(catalog *Catalog) *CallTool {
 	return &CallTool{catalog: catalog}
+}
+
+// WithSearch says whether the session offers a search over the catalog.
+//
+// The hint an unknown name gets depends on it: a session that cannot
+// search is not pointed at a search.
+func (t *CallTool) WithSearch(search bool) *CallTool {
+	t.search = search
+	return t
 }
 
 // Spec describes the tool.
@@ -111,7 +123,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 			return nil, poo.InvalidArgsf("%s: no CLI is registered", CallToolName)
 		}
 		return nil, poo.InvalidArgsf("%s: no CLI named %q; %s",
-			CallToolName, a.Name, t.catalog.namesHint())
+			CallToolName, a.Name, t.catalog.namesHint(t.search))
 	}
 	args := map[string]any{}
 	if len(a.Args) > 0 {

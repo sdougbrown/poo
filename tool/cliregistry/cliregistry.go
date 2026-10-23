@@ -174,15 +174,19 @@ func (c *Catalog) Names() []string {
 //
 // A short catalog is worth listing in the failure, so the model can
 // correct the call at once. A long one is not: the failure would carry
-// what the prompt was careful not to.
-func (c *Catalog) namesHint() string {
+// what the prompt was careful not to. A session that offers no search is
+// pointed at the prompt's list instead.
+func (c *Catalog) namesHint(search bool) string {
 	if c.Len() == 0 {
 		return "no CLI is registered"
 	}
 	if c.Len() <= 8 {
 		return "the catalog holds " + strings.Join(c.Names(), ", ")
 	}
-	return fmt.Sprintf("the catalog holds %d entries: search it, or call one the prompt lists", c.Len())
+	if search {
+		return fmt.Sprintf("the catalog holds %d entries: search it, or call one the prompt lists", c.Len())
+	}
+	return fmt.Sprintf("the catalog holds %d entries: call one the prompt lists", c.Len())
 }
 
 // Section renders the catalog's section of the system prompt.

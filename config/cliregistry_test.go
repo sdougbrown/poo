@@ -15,6 +15,7 @@ import (
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/code"
 	"github.com/sdougbrown/poo/profile/search"
+	"github.com/sdougbrown/poo/tool/cliregistry"
 )
 
 // theRegistrySettings is the settings the registry tests build from: a
@@ -152,6 +153,75 @@ func TestALargeRegistryIsSearchedInsteadOfListed(t *testing.T) {
 	}
 	if strings.Contains(text, "entry-000:") {
 		t.Errorf("the prompt lists the catalog it should search: %q", text)
+	}
+}
+
+// withoutDeciderModel is withDecider's twin: the decider role names a
+// model the catalog does not hold, so the settings ask for a decider and
+// the session does not get one.
+const withoutDeciderModel = `
+version: 1
+endpoints:
+  test:
+    base_url: http://localhost:4000/v1
+models:
+  test-model:
+    endpoint: test
+    model_id: test-model
+    ops: [chat, systemone, decisions]
+    context_limit: 32768
+roles:
+  chat: test-model
+  decider: missing-model
+`
+
+// TestASearchNeedsTheSessionsDecider covers the gate: the search is
+// offered, and the catalog hidden behind it, only when the session has
+// the decider the search asks, not when the settings name a decider
+// role the catalog cannot resolve.
+func TestASearchNeedsTheSessionsDecider(t *testing.T) {
+	names := make([]string, 0, 200)
+	for i := 0; i < 200; i++ {
+		names = append(names, fmt.Sprintf("entry-%03d", i))
+	}
+	dir := registry(t, names...)
+	settings, err := config.Parse([]byte(withoutDeciderModel+"cliregistry:\n  paths: [\""+dir+"\"]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	if runtime.Options.Decider != nil {
+		t.Fatal("the session resolved a decider, so the case proves nothing")
+	}
+	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, "find_tool") {
+		t.Errorf("the session offers find_tool without a decider to ask: %v", runtime.Options.ToolOrder)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "entry-000:") {
+		t.Errorf("the prompt does not list the catalog the session can call: %q", text)
+	}
+	if strings.Contains(text, "find_tool") {
+		t.Errorf("the prompt names a search the session does not offer: %q", text)
+	}
+
+	// An unknown name points at the search only when there is one.
+	tool := runtime.Options.Tools[cliregistry.CallToolName]
+	if tool == nil {
+		t.Fatal("the session has no call_cli tool")
+	}
+	_, err = tool.Prepare(json.RawMessage(`{"name":"nope"}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("an unknown name prepared a call")
+	}
+	if strings.Contains(err.Error(), "search it") {
+		t.Errorf("the hint points at a search the session does not offer: %q", err)
+	}
+	if !strings.Contains(err.Error(), "200 entries") {
+		t.Errorf("the hint %q does not say how long the catalog is", err)
 	}
 }
 

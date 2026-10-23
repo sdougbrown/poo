@@ -31,7 +31,7 @@ func theTools() map[string]config.ToolFactory {
 		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
-			return cliregistry.NewCall(opts.Registry)
+			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search)
 		},
 		"find_tool": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewFind(opts.Registry)

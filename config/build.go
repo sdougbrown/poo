@@ -136,6 +136,14 @@ type Runtime struct {
 	// Registry is the cli registry the session offers, or nil when the
 	// settings name none.
 	Registry *cliregistry.Catalog
+	// deciderModel is the model the session's decider asks, when there
+	// is one.
+	deciderModel poo.ModelInfo
+	// decider is the decider the session and the tools over the
+	// registry share. It is nil when the settings name no decider.
+	decider decide.Decider
+	// deciderErr is why the session has no decider.
+	deciderErr error
 	// Policy is the permission policy.
 	Policy *perm.Policy
 	// Askers are the asker chain, in order.
@@ -232,6 +240,9 @@ type ToolOptions struct {
 	// Registry is the cli registry the registry's tools call. It is nil
 	// when the settings name no registry.
 	Registry *cliregistry.Catalog
+	// Search reports that the session searches the catalog instead of
+	// listing it, so call_cli points an unknown name at the search.
+	Search bool
 }
 
 // Build turns the settings into the runtime a session is built from.
@@ -259,10 +270,11 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
 	}
-	if err := runtime.resolveProfile(opts); err != nil {
+	if err := runtime.resolveModels(opts); err != nil {
 		return nil, err
 	}
-	if err := runtime.resolveModels(opts); err != nil {
+	runtime.resolveDecider()
+	if err := runtime.resolveProfile(opts); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
@@ -364,15 +376,27 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	return nil
 }
 
+// resolveDecider resolves the session's decider once.
+//
+// The tools over the registry, the catalog's section and the session's
+// own options all have to agree about whether there is a decider, so
+// they read one answer rather than resolving the role again.
+func (r *Runtime) resolveDecider() {
+	r.deciderModel, r.decider, r.deciderErr = r.Decider()
+}
+
 // findTool reports whether the session searches the catalog instead of
 // listing it.
 //
 // A search needs a decision model to ask, and it pays for itself only
 // when the catalog is too long to show: below the threshold the whole
 // catalog is in the prompt, and a search would cost a round trip to say
-// what the model could already read.
+// what the model could already read. The decider is the session's own: a
+// decider role the settings name and the catalog cannot resolve gives
+// the session none.
 func (r *Runtime) findTool() bool {
-	return r.Registry != nil && r.Registry.Len() > cliregistry.FindThreshold && r.Settings.Roles[RoleDecider] != ""
+	return r.Registry != nil && r.Registry.Len() > cliregistry.FindThreshold &&
+		r.deciderErr == nil && r.decider != nil
 }
 
 // offersRegistry reports whether the session offers the registry's tools.
@@ -659,7 +683,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		}
 	}
 
-	toolOptions := ToolOptions{Scrub: scrub, ProtectedPaths: protected, Registry: r.Registry}
+	toolOptions := ToolOptions{Scrub: scrub, ProtectedPaths: protected, Registry: r.Registry, Search: r.findTool()}
 	tools := map[string]poo.Tool{}
 	var order []string
 	for _, tool := range r.toolNames {
@@ -905,10 +929,8 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	// The decider is the session's as well as the policy's: the tools over
 	// a cli registry ask it which entries fit, and a session without one
 	// lists the whole catalog instead.
-	if deciderModel, decider, err := r.Decider(); err == nil {
-		r.Options.DeciderModel = deciderModel
-		r.Options.Decider = decider
-	}
+	r.Options.DeciderModel = r.deciderModel
+	r.Options.Decider = r.decider
 	r.Options.Profile = r.Profile.Name
 	r.Options.Profiles = r.Profiles
 	r.Options.Models = r.Models
