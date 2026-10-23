@@ -16,6 +16,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/tool/cliregistry"
 )
@@ -275,19 +276,22 @@ func TestTheSearchRanksByProbability(t *testing.T) {
 
 // TestFindToolFailsRecoverably covers a search the decision model could
 // not answer: the model is told the search is unavailable and how to go
-// on, and no list of entries takes its place.
+// on, in exactly those words, and no list of entries takes its place.
 func TestFindToolFailsRecoverably(t *testing.T) {
 	tool := cliregistry.NewFind(wideCatalog(t))
 	model := &searcher{err: errors.New("the decision model is down")}
 
 	res, err := preparedCall(t, tool, `{"intent":"print something"}`, poo.ToolEnv{Decider: model})
-	if err == nil {
-		t.Fatalf("the search returned %q, want a failure", res.Text)
+	if err != nil {
+		t.Fatalf("the failure came back as an error: %v", err)
 	}
-	if !strings.Contains(err.Error(), cliregistry.UnavailableText) {
-		t.Errorf("the failure is %q, want %q", err, cliregistry.UnavailableText)
+	if !res.IsError {
+		t.Error("the failure is not an error result")
 	}
-	if strings.Contains(res.Text, wideName(0)) {
+	if res.Text != cliregistry.UnavailableText {
+		t.Errorf("the model reads %q, want %q", res.Text, cliregistry.UnavailableText)
+	}
+	if strings.Contains(res.Text, wideName(0)) || strings.Contains(string(res.Structured), wideName(0)) {
 		t.Errorf("the failure carries a fallback list: %q", res.Text)
 	}
 }
@@ -297,12 +301,55 @@ func TestFindToolFailsRecoverably(t *testing.T) {
 // with a made-up ranking.
 func TestFindToolNeedsADecider(t *testing.T) {
 	tool := cliregistry.NewFind(fixtureCatalog(t))
-	_, err := preparedCall(t, tool, `{"intent":"say hello"}`, poo.ToolEnv{})
-	if err == nil {
-		t.Fatal("a search without a decision model answered")
+	res, err := preparedCall(t, tool, `{"intent":"say hello"}`, poo.ToolEnv{})
+	if err != nil {
+		t.Fatalf("the failure came back as an error: %v", err)
 	}
-	if !strings.Contains(err.Error(), cliregistry.UnavailableText) {
-		t.Errorf("the failure is %q, want %q", err, cliregistry.UnavailableText)
+	if !res.IsError || res.Text != cliregistry.UnavailableText {
+		t.Errorf("the model reads %q (an error: %v), want %q", res.Text, res.IsError, cliregistry.UnavailableText)
+	}
+}
+
+// TestAFailedSearchIsNotFatal covers the session: the failure a search
+// reports cannot settle a run, even when the decider's own error would
+// have. The model reads the search's text and the run goes on.
+func TestAFailedSearchIsNotFatal(t *testing.T) {
+	model := &searcher{err: fmt.Errorf("%w: %w", decide.ErrDeferred, poo.ErrFatal)}
+	transport := pootest.NewTransport(
+		pootest.Turn{Calls: []pootest.Call{{
+			Name:      cliregistry.FindToolName,
+			Arguments: json.RawMessage(`{"intent":"print the words"}`),
+		}}},
+		pootest.Turn{Text: "recovered"},
+	)
+	session, err := poo.New(poo.Options{
+		Transport: transport,
+		Tools:     map[string]poo.Tool{cliregistry.FindToolName: cliregistry.NewFind(wideCatalog(t))},
+		ToolOrder: []string{cliregistry.FindToolName},
+		Sink:      pootest.NewSink(),
+		SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		Decider:   model,
+	})
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	defer session.Close()
+
+	if _, err := session.Prompt(context.Background(), "find a tool"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	result, err := session.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if result.Reason == poo.ReasonToolFatal {
+		t.Errorf("a failed search settled %q", result.Reason)
+	}
+	// The model saw the search's own text and nothing of the cause.
+	got := lastToolResult(t, transport)
+	if want := poo.HandleLine("r1", cliregistry.FindToolName) + "\n" + cliregistry.UnavailableText; got != want {
+		t.Errorf("the model reads %q, want %q", got, want)
 	}
 }
 

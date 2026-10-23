@@ -138,7 +138,7 @@ func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		return poo.ToolResult{}, fmt.Errorf("%s: prepared value is not a %s call", FindToolName, FindToolName)
 	}
 	if env.Decider == nil {
-		return poo.ToolResult{}, fmt.Errorf("%s: no decision model is configured", UnavailableText)
+		return unavailable(), nil
 	}
 	entries := t.catalog.Entries()
 	questions := make([]decide.Question, 0, len(entries))
@@ -147,12 +147,12 @@ func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	}
 	answers, err := env.Decider.Decide(ctx, map[string]string{"intent": p.intent}, FindInstructions, questions)
 	if err == nil {
-		// A model that answered badly has not answered, so the failure
-		// is the search's own and not the answers'.
+		// A model that answered badly has not answered, and the search
+		// fails the same way as one the decider refused.
 		err = decide.ValidateAnswers(questions, answers)
 	}
 	if err != nil {
-		return poo.ToolResult{}, fmt.Errorf("%s: %w", UnavailableText, err)
+		return unavailable(), nil
 	}
 
 	best := make([]ranked, 0, len(entries))
@@ -183,6 +183,16 @@ func (t *FindTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		k = len(best)
 	}
 	return result(p.intent, len(entries), best[:k]), nil
+}
+
+// unavailable is the result of a search that cannot run.
+//
+// A failed search is recoverable: the model is told the search is
+// unavailable and how to go on without it, and the cause stays in the
+// decision record. The result is the same whatever went wrong, so a
+// search never settles a run.
+func unavailable() poo.ToolResult {
+	return poo.ToolResult{Text: UnavailableText, IsError: true}
 }
 
 // findQuestion asks whether one entry fits the intent.
