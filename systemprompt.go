@@ -1,10 +1,8 @@
 package poo
 
 import (
-	"fmt"
 	"runtime"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/sdougbrown/poo/prompt"
@@ -40,38 +38,20 @@ func systemPromptEnv(opts *Options) prompt.Env {
 	}
 }
 
-// baseSection is the operating contract the model works under.
+// baseSection is the operating contract the model works under, as the
+// prompt package embeds it.
 //
 // It is the shape mini-swe-agent uses: what the model is, how to work, and
 // what "done" looks like. The guidance for a tool is not here: a tool
 // brings a section of its own, and a tool that is not linked takes its
 // guidance with it.
-const baseSection = "You are a coding agent. You solve the task by inspecting the code and changing what is needed.\n\n" +
-	"How to work:\n" +
-	"- Inspect before you edit. Read the code around the place you will change.\n" +
-	"- Prefer narrow reads over whole files: read the lines that matter and search for what you need, rather than reading everything.\n" +
-	"- Make the smallest change that solves the task, then check that it works.\n" +
-	"- Work out what is wrong before you try to fix it. If a command fails, read the error and adapt.\n" +
-	"- Keep going until the task is done. Do not stop to ask whether you should go on.\n" +
-	"\n" +
-	"Done means:\n" +
-	"- The task is actually complete, not just started.\n" +
-	"- You have verified the change, for example by running the project's tests or the command that exercises the behaviour.\n" +
-	"- You then stop and say what you did, in a few sentences. Do not keep going after the task is done."
+var baseSection = prompt.Base()
 
 // environmentSection renders the environment section.
 //
 // The section tells the model where it is: the directory it works in,
 // the operating system, the date and the model it talks to.
-func environmentSection(env prompt.Env) string {
-	var b strings.Builder
-	b.WriteString("Environment:\n")
-	fmt.Fprintf(&b, "- Working directory: %s\n", env.Cwd)
-	fmt.Fprintf(&b, "- Operating system: %s\n", env.OS)
-	fmt.Fprintf(&b, "- Date: %s\n", env.Date)
-	fmt.Fprintf(&b, "- Model: %s\n", env.Model)
-	return strings.TrimRight(b.String(), "\n")
-}
+var environmentSection = prompt.Environment()
 
 // buildPrompt assembles the session's prompt builder.
 //
@@ -88,11 +68,11 @@ func environmentSection(env prompt.Env) string {
 func buildPrompt(opts *Options) *prompt.Builder {
 	env := systemPromptEnv(opts)
 	b := prompt.New(env)
-	b.SetDefault("base", baseSection)
+	b.SetTemplateDefault("base", baseSection)
 	if opts.SystemPrompt != "" {
 		b.Set("base", opts.SystemPrompt)
 	} else {
-		b.SetRender("environment", environmentSection)
+		b.SetTemplateDefault("environment", environmentSection)
 		for _, name := range opts.ToolOrder {
 			tool, ok := opts.Tools[name]
 			if !ok || tool == nil {

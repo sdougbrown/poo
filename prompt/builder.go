@@ -125,6 +125,33 @@ func (b *Builder) SetDefault(name, text string) {
 	b.place(name)
 }
 
+// SetTemplate replaces a section with a template, whatever variant the
+// prompt renders in.
+//
+// The template renders with the data it was compiled with, and the
+// alternatives the section offered go away: the template is the
+// section's text in every variant. A tool that contributes a default
+// and its alternatives uses SetTemplateDefault instead.
+func (b *Builder) SetTemplate(name string, t *Template) {
+	b.dropReplacement()
+	b.setDefault(name, Content{Render: t.Render})
+	b.clearVariants(name)
+	delete(b.extra, name)
+	b.place(name)
+}
+
+// SetTemplateDefault contributes a section's default prose and keeps
+// the alternatives it offers.
+//
+// It is the mutation an earlier layer uses when it brings a section
+// together with its variants.
+func (b *Builder) SetTemplateDefault(name string, t *Template) {
+	b.dropReplacement()
+	b.setDefault(name, Content{Render: t.Render})
+	delete(b.extra, name)
+	b.place(name)
+}
+
 // Append adds text after a section's value.
 //
 // A section that is not there yet is added, with the text as its value.
@@ -186,6 +213,19 @@ func (b *Builder) SetRenderDefault(name string, render func(Env) string) {
 func (b *Builder) SetVariant(name, variant, text string) {
 	b.dropReplacement()
 	b.setVariant(name, variant, Content{Text: text})
+	b.place(name)
+}
+
+// SetTemplateVariant replaces one named alternative of a section with a
+// template.
+//
+// The template renders with the data it was compiled with, and the
+// section's default text is left alone. The empty name and "default"
+// name the section's default text, so setting one of them sets the
+// default.
+func (b *Builder) SetTemplateVariant(name, variant string, t *Template) {
+	b.dropReplacement()
+	b.setVariant(name, variant, Content{Render: t.Render})
 	b.place(name)
 }
 

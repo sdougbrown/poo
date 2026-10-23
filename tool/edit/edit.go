@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/protect"
 )
 
@@ -291,19 +290,4 @@ func absolutePath(path, workingDir string) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Join(workingDir, path)
-}
-
-// section is the guidance the tool brings to the system prompt.
-//
-// The tool changes a file only when the text it was given is in the
-// file, so the model is told how to write that text.
-const section = "Edit:\n" +
-	"- The edit replaces an exact string, so the old text must be in the file exactly as you wrote it, spacing included.\n" +
-	"- The old text must appear once, unless replace_all is set: the edit fails loudly when it appears nowhere or more than once.\n" +
-	"- An edit with an empty old text on a path that does not exist creates the file.\n" +
-	"- After an edit, run the tests once. When they pass, end your turn with a short summary."
-
-// PromptSection renders the tool's own section of the system prompt.
-func (t *Tool) PromptSection(env prompt.Env) string {
-	return section
 }
