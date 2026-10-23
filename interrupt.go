@@ -99,10 +99,19 @@ func (s *Session) emitInterrupted(run *runState, turn int) {
 // the full-response path's, so the two messages differ only in the
 // partial flag and the cause.
 func (s *Session) recordPartial(run *runState, turn int, resp *response) {
+	s.recordPartialCause(run, turn, resp, CauseInterrupt)
+}
+
+// recordPartialCause records the text a cut-short response carried.
+//
+// The message is partial, and its cause names why the response was cut
+// short. Its calls are part of the message, so a reader sees what the
+// model was asking for when the stream broke.
+func (s *Session) recordPartialCause(run *runState, turn int, resp *response, cause Cause) {
 	if resp == nil {
 		return
 	}
-	_, _ = s.recordAssistantResponse(run, turn, resp, true, CauseInterrupt)
+	_, _ = s.recordAssistantResponse(run, turn, resp, true, cause)
 }
 
 // skipInterruptedCalls records the calls that an interrupt stopped

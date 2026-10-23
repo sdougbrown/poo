@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -163,6 +164,13 @@ type Session struct {
 	// noticeArmed reports that the context notice may fire. The notice
 	// re-arms when the estimate drops back below the notice ratio.
 	noticeArmed bool
+	// decider is the session's decision model, or nil when it has none.
+	//
+	// The handle is the recording wrapper: every call writes a record
+	// to the session's store and emits the decision event.
+	decider decide.Decider
+	// deciderModel is the descriptor of the decision model.
+	deciderModel ModelInfo
 	// log is the session's logger, when the consumer supplied one.
 	log *slog.Logger
 	// logs is the non-blocking dispatcher behind log.
@@ -232,6 +240,9 @@ type runState struct {
 	trigger TriggerKind
 	// continuations counts the BeforeSettle continuations the run took.
 	continuations int
+	// recoverableNotes counts the consecutive turns a recoverable
+	// response failure opened.
+	recoverableNotes int
 	// noticeFired reports that the context notice already fired in
 	// this run.
 	noticeFired bool
@@ -379,15 +390,29 @@ type Options struct {
 	Sink RecordSink
 	// SessionID identifies the session.
 	SessionID string
-	// ModelID is the provider's model identifier.
-	ModelID string
-	// ContextLimit is the model's context window in tokens. It is
+	// Model is the session's chat model.
+	//
+	// The descriptor names the model the session talks to: the
+	// identifier the endpoint knows it by, the API it is reached
+	// through, the window the session measures against and the output
+	// ceiling the requests carry.
+	//
+	// The API is the Chat Completions API when the descriptor names
+	// none, because it is the only API v1 speaks. The window is
 	// required: a value of 0 or less is a construction error
 	// (ErrSessionInit), so no run starts without a window to measure
 	// against.
-	ContextLimit int
-	// MaxOutput is the model's output-token ceiling, 0 when unknown.
-	MaxOutput int
+	Model ModelInfo
+	// Decider is the session's decision model, or nil when it has none.
+	//
+	// The session wraps it, so every call is recorded.
+	Decider decide.Decider
+	// DeciderModel describes the decision model.
+	//
+	// The model must serve the operation its role needs: the systemone
+	// one or the decisions one. A model that serves neither is a
+	// construction error.
+	DeciderModel ModelInfo
 	// SystemPrompt is the system message prepended to the model's view.
 	//
 	// The text is the whole prompt: the sections the core assembles are
@@ -525,11 +550,23 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	if opts.Transport == nil {
 		return nil, &ErrSessionInit{Cause: errors.New("poo: the session has no chat transport")}
 	}
-	if opts.ContextLimit <= 0 {
+	// The session speaks the Chat Completions API unless the descriptor
+	// names another one: it is the only API v1 speaks, and an unknown
+	// API would skip the check that keeps a foreign block out of the
+	// requests.
+	if opts.Model.API == "" {
+		opts.Model.API = APIChatCompletions
+	}
+	if opts.Model.ContextLimit <= 0 {
 		return nil, &ErrSessionInit{Cause: errors.New("poo: the session has no context limit")}
 	}
 	if err := checkFinishTool(&opts); err != nil {
 		return nil, &ErrSessionInit{Cause: err}
+	}
+	if opts.Decider != nil {
+		if err := checkDeciderModel(opts.DeciderModel); err != nil {
+			return nil, &ErrSessionInit{Cause: err}
+		}
 	}
 	if opts.MaxContinuations <= 0 {
 		opts.MaxContinuations = DefaultMaxContinuations
@@ -561,6 +598,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		noticeArmed:       true,
 		jobs:              map[string]*jobState{},
 		jobQueued:         make(chan struct{}, 1),
+		deciderModel:      opts.DeciderModel,
 	}
 	// A construction that fails rolls back everything it started. The
 	// event bus's reporter is a goroutine, and no session is returned
@@ -598,6 +636,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	// The observers start before anything can emit an event, and the
 	// bus's reporter starts with them.
 	s.events = newEventBus(s.logger().With(slog.String("session_id", opts.SessionID)))
+	// The decision model is wrapped before the session-start hooks run,
+	// so a hook may ask it a question.
+	s.decider = s.wrapDecider(opts.Decider)
 	for _, o := range opts.Observers {
 		s.events.addObserver(o)
 	}
@@ -815,6 +856,7 @@ func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn in
 		Interrupted: interrupted,
 		History:     s.view(),
 		Budget:      s.budget(),
+		Decider:     s.Decider(),
 	}
 }
 
@@ -845,6 +887,10 @@ func (s *Session) modelMessagesLocked() []Message {
 		}
 		messages = append(messages, msg)
 	}
+	// The provider blocks the current model cannot read are left out of
+	// the request: the history keeps them, and the switch that brought
+	// the model recorded the omission.
+	messages = stripForeignBlocks(messages, s.opts.Model.API)
 	return CloneMessages(messages)
 }
 
@@ -864,7 +910,7 @@ func (s *Session) budgetLocked() Budget {
 		turns = s.run.turn
 	}
 	return Budget{
-		ContextLimit:   s.opts.ContextLimit,
+		ContextLimit:   s.opts.Model.ContextLimit,
 		EstimatedInput: s.estimatedInputLocked(),
 		NoticeRatio:    s.opts.NoticeRatio,
 		HardRatio:      s.opts.HardRatio,

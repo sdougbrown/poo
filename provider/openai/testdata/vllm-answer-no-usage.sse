@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl-3f1c9b0a7d2e4c58a1b6c0d9e2f3a4b5","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3f1c9b0a7d2e4c58a1b6c0d9e2f3a4b5","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{"content":"The answer is 42."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3f1c9b0a7d2e4c58a1b6c0d9e2f3a4b5","object":"chat.completion.chunk","created":1792655142,"model":"gemma4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+

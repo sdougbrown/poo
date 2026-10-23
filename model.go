@@ -126,6 +126,10 @@ type ContentBlock struct {
 	Name       string `json:"name,omitempty"`
 	// Arguments holds the raw JSON arguments of a tool call.
 	Arguments json.RawMessage `json:"arguments,omitempty"`
+	// Origin says where a tool call came from: "wire" for a call the
+	// endpoint sent, "parsed_text" for a call the model wrote as text.
+	// It is set when Kind is ContentToolCall.
+	Origin CallOrigin `json:"origin,omitempty"`
 
 	// ToolCallID is reused for a tool result, so the field above carries it.
 	// IsError marks a tool result that the model must see as a failure.
@@ -227,6 +231,11 @@ type ToolCall struct {
 	Name string `json:"name"`
 	// Arguments are the raw JSON arguments.
 	Arguments json.RawMessage `json:"arguments"`
+	// Origin says where the call came from: "wire" for a call the
+	// endpoint sent, "parsed_text" for a call the model wrote as text
+	// and the transport read out of it. It is empty when the transport
+	// did not say.
+	Origin CallOrigin `json:"origin,omitempty"`
 }
 
 // Outcome is the result of a tool call.

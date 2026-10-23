@@ -20,6 +20,9 @@ const (
 	// SkippedSettlingText is the result of a call that did not start
 	// because the run was settling.
 	SkippedSettlingText = "Not run: the run settled before the call started."
+	// SkippedProviderErrorText is the result of a call in a response
+	// whose stream broke: the call was never complete enough to run.
+	SkippedProviderErrorText = "Not run: the provider's response broke before it finished."
 	// CancelledInterruptedText is the result of a call that an
 	// interrupt cut short while it ran.
 	CancelledInterruptedText = "Cancelled: interrupted by the user."
@@ -699,6 +702,7 @@ func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 		Handle:     handle,
 		Env:        s.opts.Env,
 		Settings:   s.opts.Settings,
+		Decider:    s.Decider(),
 	}
 }
 

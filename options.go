@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -137,6 +138,21 @@ func WithObserver(o Observer) Option {
 func WithPrompt(edit func(*prompt.Builder)) Option {
 	return func(opts *Options) {
 		opts.Prompt = append(opts.Prompt, edit)
+	}
+}
+
+// WithDecider gives the session a decision model.
+//
+// The model describes the decision model, and it must serve the
+// operation its role needs: the systemone one or the decisions one. A
+// model that serves neither is a construction error.
+//
+// The session wraps the decider, so every call writes a record to the
+// session's store and emits the decision event.
+func WithDecider(model ModelInfo, d decide.Decider) Option {
+	return func(opts *Options) {
+		opts.DeciderModel = model
+		opts.Decider = d
 	}
 }
 

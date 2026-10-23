@@ -37,14 +37,13 @@ func (t *variantTool) PromptVariants(env prompt.Env) map[string]string {
 func variantOptions(t *testing.T, tr poo.ChatTransport, tool poo.Tool) poo.Options {
 	t.Helper()
 	return poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"echo": tool},
-		ToolOrder:    []string{"echo"},
-		Sink:         &recordingSink{},
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{"echo": tool},
+		ToolOrder:  []string{"echo"},
+		Sink:       &recordingSink{},
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
 	}
 }
 

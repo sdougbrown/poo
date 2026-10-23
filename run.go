@@ -109,7 +109,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		RunID:      runID,
 		PromptHash: hashText(text),
 		StartedAt:  nowRFC3339(),
-		ModelID:    s.opts.ModelID,
+		ModelID:    s.opts.Model.ModelID,
 		MaxTurns:   s.opts.MaxTurns,
 		ToolsMode:  s.opts.ToolsMode,
 
@@ -364,6 +364,7 @@ func (s *Session) recordAssistantResponse(run *runState, turn int, resp *respons
 			ToolCallID: call.ID,
 			Name:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
+			Origin:     call.Origin,
 		})
 	}
 	msg := Message{Role: RoleAssistant, Content: content, Origin: OriginModel}
@@ -380,7 +381,10 @@ func (s *Session) recordAssistantResponse(run *runState, turn int, resp *respons
 	s.appendMessages(msg)
 	s.recordMessage(msg)
 	s.growSpan(run.globalTurn)
-	return msg, s.write(run.ctx, &MessageRecord{
+	// The write is claimed against the seal: a message whose record the
+	// finalization ends at the seal is abandoned rather than appended
+	// after the final flush.
+	return msg, s.writeRun(run, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
 		Turn:       turn,
@@ -510,6 +514,15 @@ func (s *Session) loop(run *runState) []candidate {
 			if cancelledByFinalize(run) {
 				return nil
 			}
+			// The stream carried part of an answer: what it said
+			// belongs to the history, even though the run ends with
+			// the failure. Its calls are recorded and never run, and each
+			// gets a visible result, so a later request pairs every call
+			// with its result.
+			if resp != nil && (len(resp.content) > 0 || len(resp.calls) > 0) {
+				s.recordPartialCause(run, turn, resp, CauseProviderError)
+				s.skipCalls(run, turn, resp.calls, SkippedProviderErrorText)
+			}
 			reason, detail, serr := s.settleForError(err)
 			if serr != nil {
 				return []candidate{newCandidate(ReasonCancelled, cancelDetail(serr))}
@@ -563,9 +576,31 @@ func (s *Session) loop(run *runState) []candidate {
 			}
 		}
 
+		// A failure the transport reported about the response is
+		// visible: the model is told, and the record holds it. A note
+		// that opened another turn is a continuation, like a steer.
+		noted := false
+		if len(resp.errors) > 0 {
+			var err error
+			noted, err = s.reportResponseErrors(run, turn, resp.errors)
+			if err != nil {
+				var perr *ProviderError
+				if errors.As(err, &perr) {
+					reason, detail, _ := s.settleForError(perr)
+					return []candidate{newCandidate(reason, detail)}
+				}
+				return []candidate{newCandidate(ReasonStoreError, SettleDetail{
+					Source: "store",
+					Text:   err.Error(),
+				})}
+			}
+		} else {
+			s.resetRecoverableNotes(run)
+		}
+
 		// The turn ended. The turn-end algorithm decides what happens
 		// next: it may settle the run, or it may go to the gate.
-		outcome := s.turnEnd(run, turn, processed, truncated)
+		outcome := s.turnEnd(run, turn, processed, truncated, noted)
 		if len(outcome.candidates) > 0 {
 			return outcome.candidates
 		}
@@ -586,15 +621,16 @@ type turnOutcome struct {
 // The steps are normative: emit turn.ended, drain the queues, run the
 // AfterTurn hooks, evaluate the stop conditions, and then either settle
 // or go to the next-request gate.
-func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool) turnOutcome {
+func (s *Session) turnEnd(run *runState, turn int, processed, truncated, noted bool) turnOutcome {
 	// Step 1: the turn is over.
 	s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
 
 	// Step 2: drain the steer queue, then the job queue.
 	//
 	// A follow-up is not drained here: it waits for a natural stop, and
-	// finalize step 1 delivers it.
-	appended := s.drainInputs(run, false)
+	// finalize step 1 delivers it. A response note that opened another
+	// turn counts like a steer: the model has something new to read.
+	appended := s.drainInputs(run, false) || noted
 
 	// Step 3: the AfterTurn hooks run on every turn, tool-free turns
 	// included.
@@ -1012,10 +1048,15 @@ func originForMode(mode InputMode) Origin {
 // A response that broke part way through is returned along with the
 // error, so the caller can still write the usage it produced.
 func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
+	// The model is read once, here: the request's body, its ceiling and
+	// every descriptor-derived decision come from this one value, so a
+	// switch between runs cannot reach a request half way.
 	s.mu.Lock()
+	model := s.opts.Model
 	messages := s.modelMessagesLocked()
 	tools := s.toolSpecs()
 	requestChars := s.historyCharsLocked()
+	maxTokens := model.MaxTokens(s.estimatedInputLocked())
 	s.mu.Unlock()
 
 	// The request runs under the run's activity context, so an
@@ -1024,10 +1065,12 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	defer s.endActivity(run)
 
 	reader, rendered, err := s.opts.Transport.Stream(actCtx, ChatRequest{
-		Model:     s.opts.ModelID,
+		Model:     model.ModelID,
+		Info:      model,
 		Messages:  messages,
 		Tools:     tools,
-		MaxTokens: s.maxTokens(),
+		MaxTokens: maxTokens,
+		OnAttempt: func(a Attempt) { s.reportAttempt(run, turn, a) },
 	})
 	if err != nil {
 		return nil, rendered, err
@@ -1059,6 +1102,105 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 		}
 	}
 	return resp, rendered, err
+}
+
+// reportAttempt writes the record of an attempt that failed.
+//
+// The attempts are written for the audit: a reader of the log sees what
+// the request tried and what every attempt failed with. The failure
+// that ended the request is in the run's settle record as well.
+func (s *Session) reportAttempt(run *runState, turn int, attempt Attempt) {
+	rec := &ProviderAttempt{
+		RecordMeta: NewRecordMeta("provider.attempt"),
+		RunID:      run.id,
+		Turn:       turn,
+		Request:    run.requests,
+		Attempt:    attempt.Number,
+		Error:      attempt.Err.Error(),
+		DelayMS:    int(attempt.Delay.Milliseconds()),
+	}
+	var perr *ProviderError
+	if errors.As(attempt.Err, &perr) {
+		rec.Kind = string(perr.Kind)
+	}
+	if err := s.writeRun(run, rec); err != nil {
+		s.logger().Warn("the attempt record could not be written", "error", err)
+	}
+	if !attempt.Retried {
+		// No other attempt followed: the failure ended the request, and
+		// the run's settle record says so.
+		return
+	}
+	s.events.emit(EventProviderRetry, map[string]any{
+		"run_id":   run.id,
+		"turn":     turn,
+		"request":  run.requests,
+		"attempt":  attempt.Number,
+		"error":    rec.Error,
+		"kind":     rec.Kind,
+		"delay_ms": rec.DelayMS,
+	})
+}
+
+// reportResponseErrors makes the failures the transport reported about
+// the response visible.
+//
+// A recoverable failure is a note for the model: the note goes into the
+// view, so the model reads it in its next turn, and the record holds
+// it. A failure that is not recoverable ends the run.
+//
+// The note comes after the turn's tool results, so the request that
+// follows it keeps the order the wire wants: a tool result follows the
+// assistant's message that asked for it.
+func (s *Session) reportResponseErrors(run *runState, turn int, errs []StreamError) (bool, error) {
+	notes := make([]string, 0, len(errs))
+	for _, e := range errs {
+		if !e.Recoverable {
+			return false, &ProviderError{Kind: ProviderKindInvalidRequest, Message: e.Message}
+		}
+		notes = append(notes, e.Message)
+	}
+	if len(notes) == 0 {
+		return false, nil
+	}
+	msg := NewTextMessage(RoleUser, strings.Join(notes, "\n"))
+	msg.Origin = OriginUser
+	s.appendMessages(msg)
+	if err := s.write(run.ctx, &MessageRecord{
+		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
+		RunID:      run.id,
+		Turn:       turn,
+		Role:       msg.Role,
+		Content:    msg.Content,
+	}); err != nil {
+		return false, err
+	}
+	return s.noteRecoverable(run), nil
+}
+
+// maxRecoverableNotes bounds the consecutive turns a recoverable
+// response failure may open.
+//
+// A model that keeps reporting the same failure would otherwise keep the
+// run asking forever: MaxTurns is unlimited by default, and the Stage 7
+// doom-loop counter only sees tool calls. After this many consecutive
+// notes, the note is still recorded, and the run settles naturally.
+const maxRecoverableNotes = 3
+
+// noteRecoverable counts a recoverable note and reports whether it opens
+// another turn.
+func (s *Session) noteRecoverable(run *runState) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.recoverableNotes++
+	return run.recoverableNotes < maxRecoverableNotes
+}
+
+// resetRecoverableNotes ends a run of recoverable notes.
+func (s *Session) resetRecoverableNotes(run *runState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.recoverableNotes = 0
 }
 
 // toolSpecs returns the tools the model may call, in offer order.
@@ -1226,6 +1368,12 @@ func (s *Session) settleForError(err error) (Reason, SettleDetail, error) {
 		// retryable.
 		retryAfter := int((pe.RetryAfter + time.Second - 1) / time.Second)
 		provider := &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code, RetryAfterSec: retryAfter}
+		// The time the endpoint says its limit resets travels with the
+		// failure too, so a consumer can tell when another attempt
+		// could succeed.
+		if !pe.ResetsAt.IsZero() {
+			provider.ResetsAt = pe.ResetsAt.UTC().Format(time.RFC3339)
+		}
 		switch pe.Kind {
 		case ProviderKindContextLength:
 			return ReasonContextExhausted, SettleDetail{
@@ -1285,6 +1433,9 @@ type response struct {
 	// requestChars is the serialized size of the view the request sent,
 	// which is what the endpoint's input token count measures.
 	requestChars int
+	// errors are the failures the transport reported about the
+	// response.
+	errors []StreamError
 }
 
 // collect fills the response with what the stream carried.
@@ -1369,10 +1520,14 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 				kind = "text"
 			}
 			if emit != nil && resp.messageID != "" {
+				attempt := ev.Attempt
+				if attempt == 0 {
+					attempt = 1
+				}
 				emit(EventMessageDelta, map[string]any{
 					"run_id":     runID,
 					"message_id": resp.messageID,
-					"attempt":    request,
+					"attempt":    attempt,
 					"kind":       kind,
 					"text":       ev.Delta.Text,
 				})
@@ -1427,6 +1582,9 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 			if ev.ToolCall.Name != "" {
 				existing.Name = ev.ToolCall.Name
 			}
+			if ev.ToolCall.Origin != "" {
+				existing.Origin = ev.ToolCall.Origin
+			}
 			if len(ev.ToolCall.Arguments) > 0 {
 				existing.Arguments = append(existing.Arguments, ev.ToolCall.Arguments...)
 			}
@@ -1435,6 +1593,14 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 				usage := *ev.Usage
 				resp.usage = &usage
 			}
+		case "error":
+			// A failure the transport reported about the response: a
+			// tool call the model wrote as text and that could not be
+			// parsed. The text is not lost, and the run carries on.
+			if ev.Error == nil {
+				continue
+			}
+			resp.errors = append(resp.errors, *ev.Error)
 		case "finish":
 			if ev.FinishReason != "" {
 				resp.finish = ev.FinishReason

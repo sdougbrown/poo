@@ -3,6 +3,7 @@ package poo
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // ChatRequest is one provider request: the full model view plus the
@@ -12,6 +13,14 @@ import (
 type ChatRequest struct {
 	// Model is the provider's model identifier.
 	Model string
+	// Info is the descriptor the request is shaped from.
+	//
+	// A transport uses it for everything the model decides: the tools
+	// mode, the reasoning and temperature controls, the sampling
+	// defaults, the quirks and the output ceiling. A zero descriptor
+	// leaves the transport's own configuration in charge, so a consumer
+	// that calls Stream directly can keep using Config.Info.
+	Info ModelInfo
 	// Messages is the model's history, oldest first.
 	Messages []Message
 	// Tools are the tools the model may call.
@@ -19,6 +28,33 @@ type ChatRequest struct {
 	// MaxTokens is the output-token ceiling for this request. It is always
 	// computed by the caller, never left to the endpoint default.
 	MaxTokens int
+	// OnAttempt is called for every attempt that failed, so the caller
+	// can write the attempt to its record.
+	//
+	// The attempt that ended the request is reported too, and the
+	// attempt says whether another one followed it.
+	//
+	// The call happens on the goroutine that reads the response, and
+	// the attempt is reported before the wait that follows it.
+	//
+	// A nil reporter drops the attempts.
+	OnAttempt func(Attempt)
+}
+
+// Attempt is one attempt of a request that failed.
+//
+// A request that fails before the endpoint answered is tried again, and
+// every attempt that failed is reported, so the record can hold them.
+type Attempt struct {
+	// Number is the attempt's number, counting from one.
+	Number int
+	// Err is the failure the attempt ended with.
+	Err error
+	// Delay is how long the transport waited before the next attempt.
+	// It is zero when no other attempt followed.
+	Delay time.Duration
+	// Retried reports that another attempt followed this one.
+	Retried bool
 }
 
 // Delta is one piece of a streamed response.
@@ -28,6 +64,17 @@ type Delta struct {
 	// Text is the delta's text.
 	Text string
 }
+
+// CallOrigin says where a tool call came from.
+type CallOrigin string
+
+const (
+	// CallOriginWire is a call the endpoint sent in its own field.
+	CallOriginWire CallOrigin = "wire"
+	// CallOriginParsedText is a call the model wrote as text and the
+	// transport read out of it.
+	CallOriginParsedText CallOrigin = "parsed_text"
+)
 
 // ToolCallDelta is a tool call the model requested.
 type ToolCallDelta struct {
@@ -47,6 +94,10 @@ type ToolCallDelta struct {
 	// fragments, so the core decides whether a call is complete by parsing
 	// the assembled arguments, not from this field.
 	Complete bool
+	// Origin says where the call came from: "wire" for a call the
+	// endpoint sent, "parsed_text" for a call the model wrote as text.
+	// It is empty when the transport did not say.
+	Origin CallOrigin
 }
 
 // FinishReason is why the model stopped.
@@ -96,8 +147,31 @@ type StreamEvent struct {
 	Usage *UsageReport
 	// FinishReason is set when Kind is "finish".
 	FinishReason FinishReason
-	// Kind names the payload: "delta", "tool_call", "usage" or "finish".
+	// Error is a failure the transport reports about the response. It is
+	// set when Kind is "error".
+	Error *StreamError
+	// Kind names the payload: "delta", "tool_call", "usage", "finish" or
+	// "error".
 	Kind string
+	// Attempt is the request attempt that produced the event, counting
+	// from one. A transport that retries sets it; zero means the
+	// transport did not say.
+	Attempt int
+}
+
+// StreamError is a failure in a response that did not stop the stream.
+//
+// A tool call the model wrote as text and that could not be parsed is
+// one: the text is not lost, and the run carries on.
+type StreamError struct {
+	// Message explains the failure.
+	Message string
+	// Text is the text the failure is about, when the failure is about
+	// text.
+	Text string
+	// Recoverable reports that the run can carry on: the failure is
+	// visible and the model gets another turn.
+	Recoverable bool
 }
 
 // UsageReport is the token accounting a provider reports.

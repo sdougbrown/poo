@@ -18,7 +18,7 @@ func TestRebaseUsesThePlanRatio(t *testing.T) {
 	})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: strings.Repeat("x", 8000)}, sink)
-	opts.ContextLimit = 2000
+	opts.Model.ContextLimit = 2000
 	opts.Compactor = &compactionCompactor{
 		should: afterTurns(1),
 		compaction: func(poo.View) (poo.Compaction, error) {

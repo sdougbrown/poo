@@ -64,6 +64,9 @@ type ProviderError struct {
 	// RetryAfter is how long the endpoint asked the client to wait, when
 	// it said so.
 	RetryAfter time.Duration
+	// ResetsAt is when the endpoint says its limit resets, when it said
+	// so. It is the zero time when the endpoint said nothing about it.
+	ResetsAt time.Time
 }
 
 func (e *ProviderError) Error() string {

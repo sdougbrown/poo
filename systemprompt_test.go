@@ -59,14 +59,13 @@ func TestThePromptCarriesTheToolSections(t *testing.T) {
 	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
 
 	opts := poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"job": tool},
-		ToolOrder:    []string{"job"},
-		Sink:         &recordingSink{},
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
-		WorkingDir:   t.TempDir(),
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{"job": tool},
+		ToolOrder:  []string{"job"},
+		Sink:       &recordingSink{},
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
 	}
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
