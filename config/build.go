@@ -324,15 +324,14 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	}
 	r.Profile = poo.Profile{Name: chosen.Name, Unmatched: chosen.Unmatched}
 	for _, tool := range chosen.Tools {
-		factory, ok := opts.Tools[tool]
-		if !ok || factory == nil {
+		if !linksTool(opts, tool) {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "profile",
 				Message: fmt.Sprintf("the profile %q offers the tool %q, and this binary does not link it", chosen.Name, tool),
 			}
 		}
-		r.Profile.Tools = append(r.Profile.Tools, toolInfo(factory))
+		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[tool]))
 		r.toolNames = append(r.toolNames, tool)
 	}
 	// The registry is the settings' opt-in: a session whose settings name
@@ -416,10 +415,11 @@ func (r *Runtime) offersRegistry() bool {
 
 // addRegistryTools offers the registry's tools to the session.
 //
-// The tools join a profile that already offers a side-effecting tool: a
-// registered CLI can change anything, so a read-only profile stays
-// read-only. A binary that links no such tool cannot honour the settings,
-// and the operator is told which tool is missing.
+// The catalog needs the tools that read it, and a binary that links none
+// of them cannot honour the settings: the operator is told which tool is
+// missing, whatever profile the session runs under. The tools themselves
+// join a profile that already offers a side-effecting tool: a registered
+// CLI can change anything, so a read-only profile stays read-only.
 func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if r.Registry == nil {
 		return nil
@@ -511,19 +511,18 @@ func resolveProfiles(opts BuildOptions, registry, find bool) []poo.Profile {
 	for _, definition := range opts.Profiles {
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
 		for _, tool := range definition.Tools {
-			factory, ok := opts.Tools[tool]
-			if !ok || factory == nil {
+			if !linksTool(opts, tool) {
 				continue
 			}
-			resolved.Tools = append(resolved.Tools, toolInfo(factory))
+			resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[tool]))
 		}
 		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
 			continue
 		}
 		if registry && offersSideEffects(resolved.Tools) {
 			for _, name := range registryToolNames(find) {
-				if factory, ok := opts.Tools[name]; ok && factory != nil {
-					resolved.Tools = append(resolved.Tools, toolInfo(factory))
+				if linksTool(opts, name) {
+					resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
 				}
 			}
 		}
@@ -612,7 +611,7 @@ func linksTool(opts BuildOptions, name string) bool {
 	return ok && factory != nil
 }
 
-// linkedTool reports whether the binary links a tool.
+// linkedTool reports whether a settings rule may name a tool.
 //
 // The core's own job tools are linked by the core, so a rule may name
 // them.
@@ -620,8 +619,7 @@ func linkedTool(opts BuildOptions, name string) bool {
 	if name == profile.JobsToolName || name == profile.CancelJobToolName {
 		return true
 	}
-	_, ok := opts.Tools[name]
-	return ok
+	return linksTool(opts, name)
 }
 
 // isChatRole reports whether a failure is about the chat role.

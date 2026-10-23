@@ -555,3 +555,30 @@ func TestABashSettingWithoutTheBashToolIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// TestANilBashFactoryIsNotLinked covers the linked predicate: a map
+// entry with no constructor is not a tool the binary offers, so the
+// executor setting it names is refused.
+func TestANilBashFactoryIsNotLinked(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"tools:\n  bash: {executor: local}\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	tools := readOnlyTools()
+	tools["bash"] = nil
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "base",
+		Tools:          tools,
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a nil bash factory accepted tools.bash.executor: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "tools.bash.executor" {
+		t.Errorf("the failure is %+v, want unsupported on tools.bash.executor", failure)
+	}
+}
