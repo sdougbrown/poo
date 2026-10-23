@@ -131,9 +131,9 @@ tools:
 # Naming a registry offers the registry's tools to a profile that already
 # offers a side-effecting tool: call_cli runs one registered CLI, and a
 # catalog over thirty entries with a decider model is searched with
-# find_tool instead of listed. A registered CLI runs outside the bash
-# executor, so a sandbox does not contain it; docs/sandbox.md says what
-# that means.
+# find_tool instead of listed. A registered CLI runs through the same
+# executor as bash, so a sandboxed session runs it in the sandbox;
+# docs/sandbox.md says what that means.
 cliregistry:
   paths: []
 
