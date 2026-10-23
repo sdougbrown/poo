@@ -76,7 +76,7 @@ func Load(fsys fs.FS, sources Sources) (*Dir, error) {
 		}
 		tmpl, err := Compile(section, string(text), data)
 		if err != nil {
-			return fmt.Errorf("prompt: %s: %w", p, err)
+			return fmt.Errorf("%s: %w", p, err)
 		}
 		files = append(files, dirFile{section: section, variant: variant, template: tmpl})
 		return nil
