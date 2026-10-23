@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"time"
 
 	cli "github.com/sdougbrown/cli-registry"
 	"github.com/sdougbrown/cli-registry/schema"
@@ -27,11 +29,23 @@ type CallTool struct {
 	// search reports that the session offers find_tool over the
 	// catalog, so an unknown name can point at the search.
 	search bool
+	// executor runs the CLI. Nil means the local executor, the way it
+	// does for bash.
+	executor bash.Executor
 }
 
 // NewCall returns the tool that runs a registered CLI.
 func NewCall(catalog *Catalog) *CallTool {
 	return &CallTool{catalog: catalog}
+}
+
+// WithExecutor gives the tool the executor its commands run through.
+//
+// It is the executor bash uses, so a registered CLI runs in the same
+// place and under the same process rules as a shell command.
+func (t *CallTool) WithExecutor(e bash.Executor) *CallTool {
+	t.executor = e
+	return t
 }
 
 // WithSearch says whether the session offers a search over the catalog.
@@ -88,6 +102,8 @@ type preparedCall struct {
 	name string
 	// args are the CLI's arguments.
 	args map[string]any
+	// plan is the command the call runs.
+	plan *cli.Plan
 	// key is the call's canonical input.
 	key json.RawMessage
 }
@@ -103,12 +119,13 @@ func (p *preparedCall) CanonicalKey() json.RawMessage { return p.key }
 // EvidenceArguments returns the arguments a decision model may see.
 func (p *preparedCall) EvidenceArguments() json.RawMessage { return p.key }
 
-// Prepare validates the arguments.
+// Prepare validates the arguments and plans the command.
 //
 // The name has to be in the catalog, and the arguments have to fit the
 // CLI's schema. Both are refused here, before a process exists, so a
 // malformed call never reaches a command and the model sees the reason
-// instead of the command's failure.
+// instead of the command's failure. The plan is the command and nothing
+// else: no environment is read and no process is started until Call.
 func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	if t.catalog == nil {
 		return nil, poo.InvalidArgsf("%s: no CLI registry is configured", CallToolName)
@@ -117,7 +134,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	if err := decodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("%s: %v", CallToolName, err)
 	}
-	entry, ok := t.catalog.Lookup(a.Name)
+	tool, ok := t.catalog.tools[a.Name]
 	if !ok {
 		if t.catalog.Len() == 0 {
 			return nil, poo.InvalidArgsf("%s: no CLI is registered", CallToolName)
@@ -131,36 +148,107 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 		// no arguments is called with the name alone. An explicit null
 		// is not the same thing: the property's type is an object.
 		if string(a.Args) == "null" {
-			return nil, poo.InvalidArgsf("%s: %s: args must be an object, not null", CallToolName, entry.Name)
+			return nil, poo.InvalidArgsf("%s: %s: args must be an object, not null", CallToolName, a.Name)
 		}
 		if err := json.Unmarshal(a.Args, &args); err != nil {
-			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, entry.Name, err)
+			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, a.Name, err)
 		}
 	}
-	if issues := t.catalog.validators[entry.Name].Validate(args); len(issues) > 0 {
-		return nil, poo.InvalidArgsf("%s: %s: %s", CallToolName, entry.Name, issuesText(issues))
+	plan, err := t.catalog.registry.Plan(tool, args)
+	if err != nil {
+		return nil, planError(a.Name, err)
+	}
+	if err := checkArgv(a.Name, args, plan.Argv); err != nil {
+		return nil, err
 	}
 	key := marshal(struct {
 		Name string         `json:"name"`
 		Args map[string]any `json:"args"`
-	}{entry.Name, args})
-	return &preparedCall{name: entry.Name, args: args, key: key}, nil
+	}{a.Name, args})
+	return &preparedCall{name: a.Name, args: args, plan: plan, key: key}, nil
 }
 
-// Call runs the CLI.
+// planError reports a call the CLI's own definition refused.
+//
+// A validation failure is the model's to correct, so it comes back as
+// an invalid call. Anything else is the manifest being unusable — a
+// binding that cannot be built, or a working directory that does not
+// resolve — and it is reported as it is.
+func planError(name string, err error) error {
+	var invalid *cli.ValidationError
+	if errors.As(err, &invalid) {
+		return poo.InvalidArgsf("%s: %s: %s", CallToolName, name, issuesText(invalid.Issues))
+	}
+	return fmt.Errorf("%s: %s: %w", CallToolName, name, err)
+}
+
+// Call runs the planned command through the session's executor.
+//
+// The command runs where bash runs and under the same rules: the
+// session's executor (the sandbox, when the settings name one), the
+// session's working directory unless the manifest fixes one, an
+// environment looked up in the session's scrubbed one, and the run's
+// context, so a cancelled run stops the CLI and everything it started.
 //
 // The output is the CLI's stdout and stderr with its exit status, in the
 // envelope bash's observation uses. An exit outside the CLI's success
-// codes is a recoverable failure: the model sees what the command said
-// and may try something else.
+// codes and a timeout are recoverable failures: the model sees what the
+// command said and may try something else.
 func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
 	p, ok := in.(*preparedCall)
 	if !ok {
 		return poo.ToolResult{}, fmt.Errorf("%s: prepared value is not a %s call", CallToolName, CallToolName)
 	}
-	tool, ok := t.catalog.tools[p.name]
-	if !ok {
-		return poo.ToolResult{}, fmt.Errorf("%s: no CLI named %q", CallToolName, p.name)
+	if p.plan == nil {
+		return poo.ToolResult{}, fmt.Errorf("%s: %s: the call has no plan", CallToolName, p.name)
+	}
+
+	// A manifest's env:NAME is resolved against the session's scrubbed
+	// environment, never the host's: a name the scrub removed or the
+	// passthrough list left out is a reference the CLI cannot have.
+	environ, err := p.plan.ResolveEnv(envLookup(env.Env))
+	if err != nil {
+		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, err)
+	}
+
+	dir := p.plan.Dir
+	if dir == "" {
+		dir = env.WorkingDir
+	}
+
+	executor := t.executor
+	if executor == nil {
+		executor = bash.NewLocal()
+	}
+
+	runCtx := ctx
+	if p.plan.Timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, p.plan.Timeout)
+		defer cancel()
+	}
+
+	stdout := bash.NewCappedBuffer(bash.CaptureCap)
+	stderr := bash.NewCappedBuffer(bash.CaptureCap)
+
+	start := time.Now()
+	proc, err := executor.Start(runCtx, bash.Command{
+		Argv:   p.plan.Argv,
+		Dir:    dir,
+		Env:    environ,
+		Stderr: stderr,
+	}, stdout)
+	if err != nil {
+		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, err)
+	}
+	code, _ := proc.Wait()
+
+	out := cli.Output{
+		Stdout:    []byte(stdout.String()),
+		Stderr:    []byte(stderr.String()),
+		Truncated: stdout.Truncated() || stderr.Truncated(),
+		ExitCode:  code,
+		Duration:  time.Since(start),
 	}
 
 	cap := env.Settings.ObservationCapChars
@@ -168,13 +256,34 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		cap = bash.ObservationCapMax
 	}
 
-	res, err := t.catalog.registry.Call(ctx, tool, p.args)
+	// The executor stops a command whose context ended, so what the
+	// command wrote before it was stopped is all there is: it is the
+	// output the model needs to see why the call did not finish.
+	switch {
+	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+		text, structured := bash.Envelope(bash.Observation{
+			TimedOut: true,
+			Output:   string(out.Stdout),
+			Stderr:   string(out.Stderr),
+			Cap:      cap,
+		})
+		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
+	case errors.Is(runCtx.Err(), context.Canceled):
+		text, structured := bash.Envelope(bash.Observation{
+			Output: string(out.Stdout),
+			Stderr: string(out.Stderr),
+			Cap:    cap,
+		})
+		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
+	}
+
+	res, err := p.plan.Finish(out)
 	if err != nil {
 		return failed(err, cap)
 	}
-	code := res.ExitCode
+	returncode := res.ExitCode
 	text, structured := bash.Envelope(bash.Observation{
-		Returncode: &code,
+		Returncode: &returncode,
 		Output:     string(res.Stdout),
 		Stderr:     string(res.Stderr),
 		Cap:        cap,
@@ -182,17 +291,103 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	return poo.ToolResult{Text: text, Structured: structured}, nil
 }
 
-// failed renders a call that did not produce a result as an observation.
+// checkArgv refuses a value the command may read as a flag.
 //
-// A timeout and an exit outside the success codes are recoverable: the
-// model sees what the command said and may try something else. Anything
-// else is the environment being unusable, and it goes back as an error.
-func failed(err error, cap int) (poo.ToolResult, error) {
-	var timedOut *cli.TimeoutError
-	if errors.As(err, &timedOut) {
-		text, structured := bash.Envelope(bash.Observation{TimedOut: true, Cap: cap})
-		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
+// cli-registry escapes a positional value that begins with a dash by
+// putting "--" before it, and a value bound with the equals or short
+// style is part of one argv element. A value bound with the space style
+// is an element of its own after its flag, where a command whose flag
+// takes no value reads it as another flag. poo cannot tell one such
+// command from another, so it refuses the call rather than run a command
+// with an option the model supplied but the manifest does not declare.
+func checkArgv(name string, args map[string]any, argv []string) error {
+	values := dashLeadingValues(args)
+	if len(values) == 0 {
+		return nil
 	}
+	// Everything after the first "--" is an operand, whatever it looks
+	// like; before it, an element equal to a value the model supplied
+	// is a value the command parses as an option.
+	operands := len(argv)
+	for i, element := range argv {
+		if element == "--" {
+			operands = i
+			break
+		}
+	}
+	for _, value := range values {
+		// The command itself is argv[0], never a value the model
+		// supplied.
+		for i := 1; i < len(argv); i++ {
+			if argv[i] != value || i >= operands {
+				continue
+			}
+			return poo.InvalidArgsf("%s: %s: %q begins with a dash, and the command may read it as a flag; "+
+				"pass a value it cannot mistake for one", CallToolName, name, value)
+		}
+	}
+	return nil
+}
+
+// dashLeadingValues returns the string arguments that could be a flag.
+//
+// The values are the ones the model wrote, anywhere in the argument
+// object: a binding reads a top-level property, and a positional array
+// passes its elements as they are. Only a string can name another flag;
+// a number encodes to digits and a sign.
+func dashLeadingValues(v any) []string {
+	var out []string
+	var walk func(any)
+	walk = func(v any) {
+		switch value := v.(type) {
+		case string:
+			if strings.HasPrefix(value, "-") && value != "-" {
+				out = append(out, value)
+			}
+		case []any:
+			for _, element := range value {
+				walk(element)
+			}
+		case map[string]any:
+			for _, element := range value {
+				walk(element)
+			}
+		}
+	}
+	walk(v)
+	return out
+}
+
+// envLookup returns the lookup a plan resolves its env references with.
+//
+// The environment is the session's, already scrubbed, so a name the
+// scrub removed or the passthrough list left out is not there to read.
+// A nil environment means the host's own, the way it does for bash.
+func envLookup(environ []string) func(string) (string, bool) {
+	if environ == nil {
+		environ = os.Environ()
+	}
+	values := make(map[string]string, len(environ))
+	for _, kv := range environ {
+		name, value, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		values[name] = value
+	}
+	return func(name string) (string, bool) {
+		value, ok := values[name]
+		return value, ok
+	}
+}
+
+// failed renders a completed run outside the CLI's success codes as an
+// observation.
+//
+// Such a run is recoverable: the model sees what the command said, on
+// both streams, and may try something else. Anything else is the
+// environment being unusable, and it goes back as an error.
+func failed(err error, cap int) (poo.ToolResult, error) {
 	var exited *cli.ExecError
 	if errors.As(err, &exited) {
 		// A process that died by a signal has no exit status, so the
@@ -201,10 +396,9 @@ func failed(err error, cap int) (poo.ToolResult, error) {
 		if exited.ExitCode >= 0 {
 			code = &exited.ExitCode
 		}
-		// cli-registry reports the stderr of a failed call and not its
-		// stdout, so the envelope carries what is left.
 		text, structured := bash.Envelope(bash.Observation{
 			Returncode: code,
+			Output:     string(exited.Stdout),
 			Stderr:     string(exited.Stderr),
 			Cap:        cap,
 		})

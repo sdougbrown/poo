@@ -1,0 +1,4 @@
+#!/bin/sh
+# A fixture CLI: it leaves a background child that holds the pipe.
+sleep 5 &
+echo started

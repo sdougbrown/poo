@@ -230,8 +230,8 @@ type ToolFactory func(ToolOptions) poo.Tool
 
 // ToolOptions are the settings' options for the tools.
 type ToolOptions struct {
-	// Executor is the executor the bash tool runs its commands
-	// through.
+	// Executor is the executor the tools that run a command use:
+	// bash, and the registered CLIs.
 	Executor bash.Executor
 	// Scrub is the rules for the child environment.
 	Scrub bash.Scrub
@@ -459,6 +459,21 @@ func offersSideEffects(tools []poo.ToolInfo) bool {
 	return false
 }
 
+// needsExecutor reports whether an offered tool runs a command.
+//
+// bash and call_cli run a command through the executor, so a session that
+// offers either one builds it; a read-only profile builds none, and a
+// settings file naming an executor this binary lacks is only an error when
+// something would run in it.
+func (r *Runtime) needsExecutor() bool {
+	for _, name := range r.toolNames {
+		if name == "bash" || name == cliregistry.CallToolName {
+			return true
+		}
+	}
+	return false
+}
+
 // toolInfo describes a tool the way the profile and the wire name it.
 func toolInfo(factory ToolFactory) poo.ToolInfo {
 	spec := factory(ToolOptions{}).Spec()
@@ -637,11 +652,12 @@ func modalities(names []string) []poo.Modality {
 
 // resolveTools builds the tools the session offers.
 //
-// The tools are the ones the profile names. The bash tool runs its
-// commands through the executor the settings name, with the sandbox's
-// options and the protected paths the settings name. The child
-// environment is the session's own, less the names the settings scrub
-// and the names the endpoints' credentials are read from.
+// The tools are the ones the profile names. The tools that run a command
+// — bash and the registered CLIs — run it through the executor the
+// settings name, with the sandbox's options and the protected paths the
+// settings name. The child environment is the session's own, less the
+// names the settings scrub and the names the endpoints' credentials are
+// read from.
 func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	settings := r.Settings
 	protected, err := protect.Compile(settings.Tools.ProtectedPaths)
@@ -684,31 +700,31 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	}
 
 	toolOptions := ToolOptions{Scrub: scrub, ProtectedPaths: protected, Registry: r.Registry, Search: r.findTool()}
+	if r.needsExecutor() {
+		executor, err := opts.Executors.New(executorName, bash.Options{
+			Masker: protected,
+			Sandbox: bash.Sandbox{
+				DisableNetwork: settings.Tools.Bwrap.Network != nil && !*settings.Tools.Bwrap.Network,
+				ROBinds:        settings.Tools.Bwrap.ROBinds,
+				RWBinds:        settings.Tools.Bwrap.RWBinds,
+			},
+		})
+		if err != nil {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.executor",
+				Message: err.Error(),
+				Err:     err,
+			}
+		}
+		toolOptions.Executor = executor
+	}
 	tools := map[string]poo.Tool{}
 	var order []string
 	for _, tool := range r.toolNames {
 		factory, ok := opts.Tools[tool]
 		if !ok || factory == nil {
 			continue
-		}
-		if tool == "bash" {
-			executor, err := opts.Executors.New(executorName, bash.Options{
-				Masker: protected,
-				Sandbox: bash.Sandbox{
-					DisableNetwork: settings.Tools.Bwrap.Network != nil && !*settings.Tools.Bwrap.Network,
-					ROBinds:        settings.Tools.Bwrap.ROBinds,
-					RWBinds:        settings.Tools.Bwrap.RWBinds,
-				},
-			})
-			if err != nil {
-				return &Error{
-					Code:    CodeUnsupported,
-					Field:   "tools.bash.executor",
-					Message: err.Error(),
-					Err:     err,
-				}
-			}
-			toolOptions.Executor = executor
 		}
 		tools[tool] = factory(toolOptions)
 		order = append(order, tool)

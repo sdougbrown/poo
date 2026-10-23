@@ -16,19 +16,17 @@
 //
 // # Execution
 //
-// The package turns the manifests into tools; it does not run them.
-// cli-registry v0.1.0 validates, builds argv and spawns in one call
-// (Registry.Call), and it exports neither the validator nor the argv
-// builder. Poo validates an argument object in Prepare with cli-registry's
-// public schema compiler, so a bad call never reaches a process, and then
-// hands the call to Registry.Call.
+// A registered CLI runs where bash runs. cli-registry's Plan validates an
+// argument object and builds the command without touching a process, and
+// poo runs the plan through the session's executor: the sandbox the
+// settings name, with the protected paths it masks, in the session's
+// working directory, with an environment resolved against the session's
+// scrubbed one, and under the run's context, so an interrupt, a cancel or
+// a close stops the CLI and everything it started.
 //
-// A call_cli process therefore runs outside poo's executor chain: no
-// bubblewrap, no masked paths, and not the session's scrubbed environment.
-// It gets the benign default set (PATH, HOME, LANG, LC_ALL, TMPDIR) plus
-// the variables its manifest declares. Running the argv through the
-// executor needs two exports from cli-registry: Tool.Validate(args) and
-// Tool.Argv(args).
+// The plan's own timeout is poo's to enforce, and the call shows the
+// model the same observation bash shows it: the two streams, the exit
+// status, the partial output of a timeout, and null for a killed process.
 package cliregistry
 
 import (
@@ -37,7 +35,6 @@ import (
 	"strings"
 
 	cli "github.com/sdougbrown/cli-registry"
-	"github.com/sdougbrown/cli-registry/schema"
 
 	"github.com/sdougbrown/poo"
 )
@@ -80,8 +77,6 @@ type Catalog struct {
 	registry *cli.Registry
 	// tools are the compiled descriptors, by name.
 	tools map[string]cli.Tool
-	// validators check a call's arguments before any process exists.
-	validators map[string]*schema.ValueSchema
 	// entries are the CLIs, in name order.
 	entries []Entry
 }
@@ -93,25 +88,19 @@ type Catalog struct {
 // them. A tool name defined by two manifests fails the load, and the
 // failure names both files: a name a model calls has to mean one command.
 //
-// The arguments of every CLI are compiled here, once, so a call that does
-// not fit its schema is refused before any process is started.
+// The arguments of every CLI are compiled by the library, once, so a call
+// that does not fit its schema is refused before any process is started.
 func Load(paths ...string) (*Catalog, error) {
 	registry, err := cli.Load(paths...)
 	if err != nil {
 		return nil, err
 	}
 	c := &Catalog{
-		registry:   registry,
-		tools:      map[string]cli.Tool{},
-		validators: map[string]*schema.ValueSchema{},
+		registry: registry,
+		tools:    map[string]cli.Tool{},
 	}
 	for _, tool := range registry.Tools() {
-		validator, err := schema.Compile(tool.InputSchema)
-		if err != nil {
-			return nil, fmt.Errorf("cliregistry: the tool %q: %w", tool.Name, err)
-		}
 		c.tools[tool.Name] = tool
-		c.validators[tool.Name] = validator
 		c.entries = append(c.entries, Entry{
 			Name:        tool.Name,
 			Description: tool.Description,

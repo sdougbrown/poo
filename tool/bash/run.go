@@ -44,7 +44,7 @@ func (t *Tool) run(ctx context.Context, command string, env poo.ToolEnv, timeout
 		defer cancel()
 	}
 
-	buf := &cappedBuffer{limit: CaptureCap}
+	buf := NewCappedBuffer(CaptureCap)
 	proc, err := executor.Start(runCtx, Command{
 		Argv: []string{"/bin/bash", "-c", command},
 		Dir:  env.WorkingDir,
