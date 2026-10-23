@@ -737,6 +737,15 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	id := NewULID()
 	input := queuedInput{id: id, mode: mode, text: text, note: note}
 
+	// The acceptance's write is registered here, in the critical section
+	// that decides the input, so a close that sees the input takes its
+	// record with it.
+	gate, ok := s.beginWriteLocked("input.queued")
+	if !ok {
+		// The close has fenced the session: the input is refused.
+		s.mu.Unlock()
+		return "", ErrSessionClosed
+	}
 	switch mode {
 	case FollowUp:
 		// A follow-up waits for a real settle: it is delivered only
@@ -759,7 +768,7 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	// The input is recorded before the call returns, so an accepted
 	// input is never lost. The write runs outside the lock, so a drain
 	// never hangs on the store.
-	if err := s.write(context.Background(), &InputQueued{
+	if err := s.writeClaimed(context.Background(), &InputQueued{
 		RecordMeta:   NewRecordMeta("input.queued"),
 		SessionID:    s.opts.SessionID,
 		RunID:        run.id,
@@ -768,7 +777,7 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 		Text:         text,
 		DeliveryNote: note,
 		QueuedAt:     nowRFC3339(),
-	}); err != nil {
+	}, gate); err != nil {
 		// The message was never accepted, so it comes back off the
 		// queue. The refused record ends the run, as the failure table
 		// says, so a waiting run does not sleep on a lost message.
@@ -1008,8 +1017,9 @@ func (s *Session) messagesByIDLocked(id string) (Message, bool) {
 
 // Close ends the session.
 //
-// An active run is cancelled, the jobs are stopped, the observers are
-// stopped and drained, and the session's records are flushed.
+// An active run is cancelled, the jobs are stopped, the writes that are
+// still in flight are waited for, the observers are stopped and drained,
+// and the session's records are flushed.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -1020,26 +1030,36 @@ func (s *Session) Close() error {
 	run := s.run
 	s.mu.Unlock()
 
+	var errs []error
 	if run != nil {
 		s.finalize(run, newCandidate(ReasonCancelled, SettleDetail{
 			Source: "cancel:close",
 			Text:   "the session was closed",
 		}))
 	}
-	// The jobs are stopped before the observers, so a job's own record
-	// is written while the store is still open.
+	// The jobs are stopped before the fence, so a job's own record is
+	// written while the store still takes it.
 	s.closeJobs()
+	// The fence refuses every write that has not registered yet, and the
+	// wait covers the ones that have, so no record follows the flush.
+	s.mu.Lock()
+	s.fenced = true
+	s.mu.Unlock()
+	if err := s.awaitWrites(); err != nil {
+		errs = append(errs, err)
+	}
 	s.events.stop()
-	var err error
 	if s.opts.Sink != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), s.recordBudget())
-		defer cancel()
-		err = s.opts.Sink.Flush(ctx)
+		if err := s.opts.Sink.Flush(ctx); err != nil {
+			errs = append(errs, err)
+		}
+		cancel()
 	}
 	// The dispatcher ends without a wait: a handler that blocks is the
 	// consumer's, and it never holds the close up.
 	if s.logs != nil {
 		s.logs.stop()
 	}
-	return err
+	return errors.Join(errs...)
 }

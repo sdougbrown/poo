@@ -223,7 +223,7 @@ func (s *server) sessionClose(raw json.RawMessage) (any, *protocol.Error) {
 	}
 	if err := s.closeSession(entry, sourceCancelClose); err != nil {
 		return nil, protocol.Errorf(protocol.CodeServerError, protocol.DataStoreError,
-			"the close's flush failed: %v", err)
+			"the close failed: %v", err)
 	}
 	return map[string]any{}, nil
 }

@@ -905,7 +905,8 @@ var errDeliveryAbandoned = errors.New("poo: the delivery was abandoned")
 //
 // Unlike write, a cancellation from the run's finalization abandons the
 // write instead of breaking the session: the delivery is in-flight work
-// that finalization step 3 may abandon.
+// that finalization step 3 may abandon. A write the close has fenced is
+// abandoned for the same reason.
 func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) error {
 	if s.opts.Sink == nil {
 		return nil
@@ -915,14 +916,24 @@ func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) 
 		s.mu.Unlock()
 		return errors.New("poo: the session store is broken")
 	}
+	// The delivery's decision and its write's registration are one step
+	// under the lock, so a close that sees the run sees the write too.
 	abandoned := run.committed || run.finalizing || ctx.Err() != nil
+	gate, ok := s.beginWriteLocked(rec.Meta().Record)
 	s.mu.Unlock()
 	if abandoned {
+		s.endWrite(gate)
+		return errDeliveryAbandoned
+	}
+	if !ok {
 		return errDeliveryAbandoned
 	}
 	wctx, cancel := context.WithTimeout(ctx, s.recordBudget())
 	defer cancel()
-	if err := s.opts.Sink.Append(wctx, rec); err != nil {
+	if err := s.appendToSink(wctx, rec, gate); err != nil {
+		if errors.Is(err, errWriteFenced) {
+			return errDeliveryAbandoned
+		}
 		s.mu.Lock()
 		abandoned := run.committed || run.finalizing || ctx.Err() != nil
 		if !abandoned {

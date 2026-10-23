@@ -308,7 +308,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		rec.Cut = &cut
 		rec.Replacement = compaction.Replace.Messages
 	}
-	if err := s.appendRecord(claimCtx, rec, run); err != nil {
+	if err := s.appendRecord(claimCtx, rec, run, nil); err != nil {
 		if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
 			return compactionOutcome{}, errRunWindingDown
 		}
@@ -328,7 +328,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 			Strategy:   compaction.Strategy,
 			Handoff:    compaction.End.Handoff,
 			CreatedAt:  nowRFC3339(),
-		}, run); err != nil {
+		}, run, nil); err != nil {
 			if errors.Is(err, errCallRecordSealed) || s.runWindingDown(run) {
 				return compactionOutcome{}, errRunWindingDown
 			}

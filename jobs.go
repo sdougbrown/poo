@@ -659,6 +659,15 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 		s.mu.Unlock()
 		return
 	}
+	// The write's registration is taken with the decision, so a close
+	// that sees the job ended waits for its record.
+	gate, ok := s.beginWriteLocked("job.ended")
+	if !ok {
+		// The close has fenced the session and has already ended the
+		// jobs it saw: this record is abandoned.
+		s.mu.Unlock()
+		return
+	}
 	job.ended = true
 	s.jobCompletions++
 	jobOutcome := jobOutcomeOf(outcome)
@@ -704,7 +713,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 			IsError:    out.original.IsError,
 		}
 	}
-	if err := s.write(hookCompletionContext(job.ctx), ended); err != nil {
+	if err := s.writeClaimed(hookCompletionContext(job.ctx), ended, gate); err != nil {
 		// The store refused the job's end. The session is broken at
 		// once: the wakes stop, and the run that is still open gets
 		// the store_error candidate.
@@ -915,7 +924,9 @@ func (s *Session) handleIdleJobResults() {
 // holdJobResultsLocked marks the queued results as held.
 //
 // The caller holds the session's lock. The record is written after the
-// lock is released, because the write takes it too.
+// lock is released, because the write takes it too; the write's
+// registration is taken here, so the decision and the registration are
+// one step.
 func (s *Session) holdJobResultsLocked(reason string) {
 	if len(s.jobQueue) == 0 {
 		return
@@ -929,13 +940,27 @@ func (s *Session) holdJobResultsLocked(reason string) {
 	if s.run != nil {
 		runID = s.run.id
 	}
-	s.pendingHeld = &InputHeld{
-		RecordMeta: NewRecordMeta("input.held"),
-		SessionID:  s.opts.SessionID,
-		RunID:      runID,
-		Jobs:       jobs,
-		Reason:     reason,
-		HeldAt:     nowRFC3339(),
+	// The new record names every held job, so a held record that was
+	// decided but not written yet is superseded.
+	if s.pendingHeld != nil {
+		s.endWriteLocked(s.pendingHeld.gate)
+	}
+	gate, ok := s.beginWriteLocked("input.held")
+	if !ok {
+		// The close has fenced the session: the record is abandoned.
+		s.pendingHeld = nil
+		return
+	}
+	s.pendingHeld = &heldRecord{
+		rec: &InputHeld{
+			RecordMeta: NewRecordMeta("input.held"),
+			SessionID:  s.opts.SessionID,
+			RunID:      runID,
+			Jobs:       jobs,
+			Reason:     reason,
+			HeldAt:     nowRFC3339(),
+		},
+		gate: gate,
 	}
 }
 
@@ -951,10 +976,10 @@ func (s *Session) writePendingHeld() {
 	if held == nil {
 		return
 	}
-	_ = s.write(context.Background(), held)
+	_ = s.writeClaimed(context.Background(), held.rec, held.gate)
 	s.events.emit(EventInputHeld, map[string]any{
-		"jobs":   held.Jobs,
-		"reason": held.Reason,
+		"jobs":   held.rec.Jobs,
+		"reason": held.rec.Reason,
 	})
 }
 
