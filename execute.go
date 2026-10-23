@@ -434,7 +434,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// An incomplete call in a truncated response is skipped: the model
 	// was cut off before it could finish the call.
 	if !plan.complete {
-		if !record(CallModeSync) {
+		// The incomplete call never started, so its record carries no
+		// mode, like every other call that did not run.
+		if !record("") {
 			return
 		}
 		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
@@ -602,7 +604,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		return
 	}
 
-	callCtx := s.activityContextFor(run)
+	callCtx := s.activityContext(run)
 	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
 	// The outcome is decided by the core, not by the tool.
 	outcome := OutcomeOK
@@ -614,14 +616,14 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		// the call was cancelled, and the result carries the partial
 		// output with the note.
 		text := result.Text
-		if s.wasInterrupted(run) {
+		if s.interruptPending(run) {
 			text = interruptNote(text)
 		} else {
 			text = text + "\n" + CancelledInterruptedText
 		}
 		result = ToolResult{Text: text, IsError: true}
 		outcome = OutcomeCancelled
-	case err == nil && s.wasInterrupted(run):
+	case err == nil && s.interruptPending(run):
 		// The call was cut short by an interrupt, even though the tool
 		// returned a result: the tool saw the cancellation and gave
 		// back what it had. The outcome says the call was cancelled,
@@ -635,7 +637,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			// that never started is skipped, and one that was running
 			// is cancelled. The partial output the tool returned stays
 			// in the result, with the note.
-			if s.wasInterrupted(run) {
+			if s.interruptPending(run) {
 				result = ToolResult{Text: interruptNote(result.Text), IsError: true}
 			} else {
 				text := result.Text
@@ -667,7 +669,10 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	}
 
 	// A valid finish call settles the run as finished, with the result.
-	if outcome == OutcomeOK && call.Name == FinishToolName {
+	if outcome == OutcomeOK {
+		// The recognition keys on the prepared value the call carries, not
+		// on the tool's name: FinishResult is the finish tool's own, and a
+		// consumer that renames the tool keeps the settle.
 		if raw, ok := prepared.(FinishResult); ok {
 			s.addCandidate(run, newCandidate(ReasonFinished, SettleDetail{
 				Source: "finish",

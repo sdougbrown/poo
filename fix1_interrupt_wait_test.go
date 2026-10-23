@@ -71,7 +71,7 @@ func TestAnInterruptDuringTheRetryWait(t *testing.T) {
 		}
 	}
 	if !interrupted {
-		t.Errorf("the run recorded no interrupted turn; the records are %v", sink.names())
+		t.Errorf("the run recorded no interrupted turn; the records are %v", sink.Names())
 	}
 	t.Logf("the run settled %q after %d requests", res.Reason, requests.Load())
 }

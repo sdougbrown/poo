@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/sdougbrown/poo"
@@ -95,8 +96,9 @@ func (t *JobTool) ReleaseWaiting() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.rounds++
-	// The calls that are waiting now are released at once, and a call
-	// that arrives after this is not blocked.
+	// The calls that are waiting now are released at once; a call that
+	// starts after the release captures the new round and is blocked
+	// again.
 	for {
 		select {
 		case t.gate <- struct{}{}:
@@ -194,7 +196,9 @@ func (t *JobTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (p
 		case <-gate:
 		case <-closed:
 		case <-ctx.Done():
-			return poo.ToolResult{Text: "the call was stopped"}, ctx.Err()
+			// The stop wraps the sentinel and the context's cause, so
+			// a caller can recognize the cancellation either way.
+			return poo.ToolResult{Text: "the call was stopped"}, fmt.Errorf("%w: %w", ErrJobStopped, ctx.Err())
 		}
 	}
 

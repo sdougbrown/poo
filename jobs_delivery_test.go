@@ -309,7 +309,7 @@ func TestACancelledRunsJobResultWakesTheSession(t *testing.T) {
 	// The job finishes, and the session wakes with it.
 	tool.Release()
 	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.settled()
+		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
 	// The woken run carries the job results.
@@ -401,7 +401,7 @@ func TestTheUnattendedWakeLimitHoldsTheThirdWake(t *testing.T) {
 	// The first wake is unattended, and the limit is two.
 	tool.Release()
 	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.settled()
+		settled := sink.Settled()
 		return settled != nil && settled.RunID != firstRunID
 	})
 	// No result was held: the first wake is under the limit.
