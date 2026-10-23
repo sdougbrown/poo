@@ -191,7 +191,7 @@ func TestAHooksRecordNeverFollowsTheSettleRecord(t *testing.T) {
 		t.Fatalf("waiting for the run: %v", err)
 	}
 
-	names := sink.names()
+	names := sink.Names()
 	hookRecord, settled := -1, -1
 	for i, name := range names {
 		switch name {

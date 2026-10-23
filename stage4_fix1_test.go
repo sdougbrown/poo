@@ -199,7 +199,7 @@ func TestAnInterruptDuringTheBeforeToolChainKeepsTheFirstResult(t *testing.T) {
 		t.Fatalf("interrupting the run: %v", err)
 	}
 	close(blocker.release)
-	waitFor(t, "the run to settle", func() bool { return sink.settled() != nil })
+	waitFor(t, "the run to settle", func() bool { return sink.Settled() != nil })
 
 	if got := tool.Calls(); got != 0 {
 		t.Errorf("the tool was called %d time(s) after an interrupt, want 0", got)
@@ -320,7 +320,7 @@ func TestAStoppedSyncCallStillRunsItsAfterToolChain(t *testing.T) {
 			case "cancel":
 				s.Cancel("cancel:test")
 			}
-			waitFor(t, "the run to settle", func() bool { return sink.settled() != nil })
+			waitFor(t, "the run to settle", func() bool { return sink.Settled() != nil })
 
 			if got := hook.Calls(); got != 1 {
 				t.Errorf("the chain ran %d time(s), want 1 at the call's completion", got)
@@ -416,10 +416,10 @@ func TestAFatalErrorsTextIsTheHookProcessedResult(t *testing.T) {
 	if strings.Contains(string(events), secret) {
 		t.Error("the fatal error's secret reached the events")
 	}
-	if got := sink.settled(); got == nil || got.Reason != poo.ReasonToolFatal {
+	if got := sink.Settled(); got == nil || got.Reason != poo.ReasonToolFatal {
 		t.Fatalf("the run settled %v, want tool_fatal", got)
 	}
-	if got := sink.settled().Detail.Text; strings.Contains(got, secret) {
+	if got := sink.Settled().Detail.Text; strings.Contains(got, secret) {
 		t.Errorf("the settle detail holds the secret: %q", got)
 	}
 }
@@ -693,9 +693,9 @@ func TestStartupWritesNothingAfterTheSeal(t *testing.T) {
 	<-done
 
 	settled := false
-	for _, name := range sink.names() {
+	for _, name := range sink.Names() {
 		if settled {
-			t.Errorf("record %s appended after run.settled; order=%v", name, sink.names())
+			t.Errorf("record %s appended after run.settled; order=%v", name, sink.Names())
 		}
 		if name == "run.settled" {
 			settled = true
@@ -820,7 +820,7 @@ func TestMaxDurationCoversTheBeforeRunHook(t *testing.T) {
 	}()
 	<-entered
 	time.Sleep(60 * time.Millisecond)
-	settled := sink.settled() != nil
+	settled := sink.Settled() != nil
 	close(release)
 	<-done
 	_, _ = s.Wait(context.Background())

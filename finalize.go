@@ -184,6 +184,12 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// The dropped inputs are reported after the settle event, so the
 	// client learns the run's outcome first.
 	s.dropUndelivered(run, undelivered, reason)
+	// The run's own result carries the same outcome the waiters got:
+	// the delivery notes and the running jobs were added after the
+	// commit point, and the store error may have remapped the reason.
+	s.mu.Lock()
+	run.result = Result{Reason: reason, Detail: detail, Turns: turns}
+	s.mu.Unlock()
 	s.wakeWaiters(run, Result{Reason: reason, Detail: detail, Turns: turns})
 	// A result that was queued while the run was settling is handled
 	// here: the session wakes with it, or holds it.
@@ -634,20 +640,7 @@ func (s *Session) Wait(ctx context.Context) (Result, error) {
 	}
 	s.waiters = append(s.waiters, ch)
 	s.mu.Unlock()
-	select {
-	case res := <-ch:
-		return res, nil
-	case <-ctx.Done():
-	}
-	// The context ended. A run started under the same context settles on
-	// its own, so a bounded grace period covers a run that is finishing
-	// its work.
-	select {
-	case res := <-ch:
-		return res, nil
-	case <-time.After(s.recordBudget()):
-		return Result{}, ctx.Err()
-	}
+	return s.awaitResult(ctx, ch)
 }
 
 // WaitRun waits for one run to settle and returns its result.
@@ -668,6 +661,15 @@ func (s *Session) WaitRun(ctx context.Context, runID string) (Result, error) {
 	}
 	s.waiters = append(s.waiters, ch)
 	s.mu.Unlock()
+	return s.awaitResult(ctx, ch)
+}
+
+// awaitResult waits for the run's result on the caller's waiter channel.
+//
+// The context ends the wait with a bounded grace period: a run started
+// under the same context settles on its own, so the grace covers a run
+// that is finishing its work.
+func (s *Session) awaitResult(ctx context.Context, ch chan Result) (Result, error) {
 	select {
 	case res := <-ch:
 		return res, nil
@@ -905,18 +907,7 @@ func (s *Session) hasDrainableSteerLocked() bool {
 //
 // The caller holds the session's lock.
 func (s *Session) removeQueuedInputLocked(input queuedInput) {
-	for i, queued := range s.steerQueue {
-		if queued.id == input.id {
-			s.steerQueue = append(s.steerQueue[:i], s.steerQueue[i+1:]...)
-			return
-		}
-	}
-	for i, queued := range s.followUpQueue {
-		if queued.id == input.id {
-			s.followUpQueue = append(s.followUpQueue[:i], s.followUpQueue[i+1:]...)
-			return
-		}
-	}
+	s.removeQueuedInputLockedBool(input)
 }
 
 // prepareDeliveryNoteLocked validates a delivery note against the

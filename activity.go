@@ -50,12 +50,6 @@ func (s *Session) activityContext(run *runState) context.Context {
 	return run.ctx
 }
 
-// activityContextFor returns the context the run's current activity runs
-// under.
-func (s *Session) activityContextFor(run *runState) context.Context {
-	return s.activityContext(run)
-}
-
 // raiseInterruptLocked records that an interrupt arrived and ends the
 // activity that is running.
 //
@@ -92,14 +86,6 @@ func (s *Session) takeInterrupt(run *runState) []string {
 
 // interruptPending reports that an interrupt is waiting to be acted on.
 func (s *Session) interruptPending(run *runState) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return run.interruptPending
-}
-
-// wasInterrupted reports that the run's current activity was cut short
-// by an interrupt.
-func (s *Session) wasInterrupted(run *runState) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return run.interruptPending

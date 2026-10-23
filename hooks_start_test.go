@@ -212,7 +212,7 @@ func TestTheBeforeRunHookSeesTheJobsThatWokeTheRun(t *testing.T) {
 	}
 	tool.ReleaseAll()
 	waitFor(t, "the woken run to settle", func() bool {
-		settled := sink.settled()
+		settled := sink.Settled()
 		return settled != nil && settled.RunID != ""
 	})
 	waitFor(t, "the woken run's hook to run", func() bool { return hook.Calls() >= 2 })
