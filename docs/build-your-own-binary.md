@@ -51,6 +51,11 @@ profiles, the capabilities and the models. A session's profile and model
 pick a runtime, and the store, the prompt overrides and the permission
 asks are the session's own.
 
+`permission.askers` is the one list whose emptiness means something: an
+explicit empty list is a chain with no askers, so an `ask` goes straight to
+the fallback, and an absent list takes the binary's own chain (`[wire]` in
+`poo serve`).
+
 `server.Options.Overrides` carries what a command line changed.
 `SessionTools` changes every runtime the factory builds, before a session
 is created from it. The typed result's `finish` tool is added that way,

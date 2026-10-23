@@ -198,9 +198,10 @@ func (s *Settings) checkRules() error {
 
 // checkAskers checks the asker chain.
 //
-// The chain names the askers it holds, in order. The decide asker
-// needs a decider model: a chain that asks a model that is not there
-// would wait for an answer that cannot come.
+// The chain names the askers it holds, in order. A chain the settings
+// name with no askers is a chain with no askers: every ask goes to the
+// fallback. The decide asker needs a decider model: a chain that asks a
+// model that is not there would wait for an answer that cannot come.
 func (s *Settings) checkAskers() error {
 	for i, name := range s.Permission.Askers {
 		where := fmt.Sprintf("permission.askers[%d]", i)

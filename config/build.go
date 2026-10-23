@@ -830,7 +830,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		chainTimeout = time.Duration(*settings.Permission.ChainTimeoutS) * time.Second
 	}
 
-	askers, err := r.resolveAskers(opts, settings.Permission.Askers)
+	askers, err := r.resolveAskers(opts, settings.Permission)
 	if err != nil {
 		return err
 	}
@@ -856,13 +856,16 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 // resolveAskers builds the asker chain.
 //
 // The chain is the one the settings name, or the one the binary asks by
-// default. The decide asker is only in the chain when a decider model
-// is configured: a chain that asks a model that is not there would wait
-// for an answer that cannot come. The wire asker is only in the chain
-// when the binary has a wire client.
-func (r *Runtime) resolveAskers(opts BuildOptions, named []string) ([]perm.Asker, error) {
-	names := named
-	if len(names) == 0 {
+// default. An explicit empty chain is a chain with no askers: an ask
+// goes straight to the fallback. A chain the settings do not name is
+// absent, and the binary's own askers apply. The decide asker is only
+// in the chain when a decider model is configured: a chain that asks a
+// model that is not there would wait for an answer that cannot come.
+// The wire asker is only in the chain when the binary has a wire
+// client.
+func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]perm.Asker, error) {
+	names := permission.Askers
+	if !permission.AskersNamed() {
 		names = opts.Askers
 	}
 	decider, deciderErr := r.DeciderModel()
@@ -871,7 +874,7 @@ func (r *Runtime) resolveAskers(opts BuildOptions, named []string) ([]perm.Asker
 		switch name {
 		case "decide":
 			if deciderErr != nil {
-				if len(named) > 0 {
+				if permission.AskersNamed() {
 					// The settings name the decide asker and no
 					// decider model is configured: the ask would
 					// wait for an answer that cannot come.
