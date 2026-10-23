@@ -598,6 +598,15 @@ func (r *Runtime) resolveModels(opts BuildOptions) error {
 	return nil
 }
 
+// linksTool reports whether the binary links a tool.
+//
+// A map entry with no constructor links nothing: the binary has no way
+// to build the tool, so it does not offer it.
+func linksTool(opts BuildOptions, name string) bool {
+	factory, ok := opts.Tools[name]
+	return ok && factory != nil
+}
+
 // linkedTool reports whether the binary links a tool.
 //
 // The core's own job tools are linked by the core, so a rule may name
@@ -688,6 +697,16 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 				Field:   "tools.bash.executor",
 				Message: fmt.Sprintf("the settings name an executor for the %q tool, and this binary does not link it", ToolBash),
 			}
+		}
+	}
+	// A settings file cannot set up a tool the binary lacks: the timeout
+	// is the bash tool's, so a binary without the tool refuses the
+	// setting by name.
+	if !linksTool(opts, ToolBash) && settings.Tools.Bash.TimeoutS != nil {
+		return &Error{
+			Code:    CodeUnsupported,
+			Field:   "tools.bash.timeout_s",
+			Message: fmt.Sprintf("the settings name a timeout for the %q tool, and this binary does not link it", ToolBash),
 		}
 	}
 	// The executor is the bash tool's: a profile that offers no bash

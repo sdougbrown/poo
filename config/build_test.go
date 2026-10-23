@@ -527,3 +527,31 @@ func TestAReadOnlyBuildNeedsNoExecutor(t *testing.T) {
 		}
 	}
 }
+
+// TestABashSettingWithoutTheBashToolIsRefused covers every leaf the bash
+// tool owns: a binary that does not link the tool refuses the leaf by
+// name, and an explicit zero is still present.
+func TestABashSettingWithoutTheBashToolIsRefused(t *testing.T) {
+	for _, tc := range []struct{ name, leaf, document string }{
+		{"timeout", "tools.bash.timeout_s", "tools:\n  bash: {timeout_s: 17}\n"},
+		{"zero timeout", "tools.bash.timeout_s", "tools:\n  bash: {timeout_s: 0}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+tc.document), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			_, err = readOnlyBuild(t, settings, nil)
+			var failure *config.Error
+			if !errors.As(err, &failure) {
+				t.Fatalf("a binary without bash accepted %s: %v", tc.leaf, err)
+			}
+			if failure.Code != config.CodeUnsupported || failure.Field != tc.leaf {
+				t.Errorf("the failure is %+v, want unsupported on %s", failure, tc.leaf)
+			}
+			if !strings.Contains(failure.Message, "bash") {
+				t.Errorf("the message %q does not name the tool", failure.Message)
+			}
+		})
+	}
+}
