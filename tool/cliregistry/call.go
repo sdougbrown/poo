@@ -12,6 +12,7 @@ import (
 	"github.com/sdougbrown/cli-registry/schema"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
 )
@@ -165,7 +166,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 
 	cap := env.Settings.ObservationCapChars
 	if cap <= 0 {
-		cap = bash.ObservationCapMax
+		cap = caps.ObservationMax
 	}
 
 	res, err := t.catalog.registry.Call(ctx, tool, p.args)

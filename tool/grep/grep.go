@@ -25,8 +25,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/prompt"
-	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/protect"
 )
 
@@ -255,7 +255,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		cap = env.Settings.ObservationCapChars
 	}
 	if cap <= 0 {
-		cap = bash.ObservationCapMax
+		cap = caps.ObservationMax
 	}
 
 	s := &search{mode: p.mode, max: maxMatches}

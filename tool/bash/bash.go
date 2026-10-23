@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/caps"
 )
 
 // Defaults for the bash tool.
@@ -28,9 +29,9 @@ const (
 	// SIGKILL.
 	KillGrace = 2 * time.Second
 	// ObservationCapMax is the largest observation the model ever sees.
-	ObservationCapMax = 30000
+	ObservationCapMax = caps.ObservationMax
 	// CharsPerToken is the plan's estimate of characters per token.
-	CharsPerToken = 3.5
+	CharsPerToken = caps.CharsPerToken
 	// ElisionHint tells the model how to see the elided middle.
 	ElisionHint = "Output too long. Use grep/sed/head/tail to inspect narrower ranges."
 )
@@ -40,14 +41,7 @@ const (
 // The cap is context-relative: min(30000, floor(0.06 × context_limit ×
 // 3.5)) characters.
 func ObservationCap(contextLimit int) int {
-	cap := int(0.06 * float64(contextLimit) * CharsPerToken)
-	if cap > ObservationCapMax {
-		return ObservationCapMax
-	}
-	if cap < 0 {
-		return 0
-	}
-	return cap
+	return caps.Observation(contextLimit)
 }
 
 // The observation the model reads is an envelope.

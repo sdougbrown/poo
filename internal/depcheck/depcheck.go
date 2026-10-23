@@ -21,6 +21,7 @@
 //   - the exec package may import the standard library only, and the
 //     exec/bwrap package may import the exec package
 //   - the protect package may import the standard library only
+//   - the caps package may import the standard library only
 //
 // The import graph comes from "go list -e -deps -json", and the toolchain
 // decides what counts as the standard library. The rules cover each checked
@@ -96,9 +97,10 @@ func (c Checker) rules() []rule {
 		{path: m + "/exec"},
 		{path: m + "/exec/bwrap", allowed: []string{m + "/exec"}},
 		{path: m + "/protect"},
+		{path: m + "/internal/caps"},
 		{
 			path:     m + "/tool/cliregistry",
-			allowed:  []string{m, m + "/decide", m + "/exec", m + "/prompt", m + "/tool/bash"},
+			allowed:  []string{m, m + "/decide", m + "/exec", m + "/internal/caps", m + "/prompt", m + "/tool/bash"},
 			external: true,
 		},
 	}

@@ -16,17 +16,17 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/perm"
 	permissive "github.com/sdougbrown/poo/perm/decide"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/protect"
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
-	"github.com/sdougbrown/poo/protect"
-	"github.com/sdougbrown/poo/tool/read"
 )
 
 // The names the settings and the profiles use.
@@ -962,8 +962,8 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	if settings.Tools.Bash.TimeoutS != nil {
 		r.Options.Settings.BashTimeoutSeconds = *settings.Tools.Bash.TimeoutS
 	}
-	r.Options.Settings.ObservationCapChars = bash.ObservationCap(model.ContextLimit)
-	r.Options.Settings.ReadOutputCapChars = read.OutputCap(model.ContextLimit)
+	r.Options.Settings.ObservationCapChars = caps.Observation(model.ContextLimit)
+	r.Options.Settings.ReadOutputCapChars = caps.ReadOutput(model.ContextLimit)
 
 	strategy := DefaultContextStrategy
 	if settings.Context.Strategy != nil {
