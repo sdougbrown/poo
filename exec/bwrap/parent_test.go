@@ -105,6 +105,9 @@ started:
 		time.Sleep(50 * time.Millisecond)
 	}
 	left := sandboxPIDs(t, dir)
+	// Name the survivor before the sweep runs: the sweep's own kills
+	// would leave zombies behind and hide what was alive.
+	described := describe(left)
 	// A survivor is the test's own, because it names the test's
 	// directory. The sweep runs until the directory names nothing, so a
 	// bubblewrap that is still starting up cannot be left behind either.
@@ -118,7 +121,30 @@ started:
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("the sandbox outlived the process that started it: %v", left)
+	t.Fatalf("the sandbox outlived the process that started it: %s", described)
+}
+
+// describe names each surviving sandbox process: its state, its parent
+// and its command line, so a failure says what kind of leftover it
+// was.
+func describe(pids []int) string {
+	var b strings.Builder
+	for _, pid := range pids {
+		raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if err != nil {
+			fmt.Fprintf(&b, "pid %d (stat: %v)", pid, err)
+			continue
+		}
+		// The command name can hold a space inside its parentheses, so
+		// the fields after it are found from the end of it: the state
+		// and the parent process are the first two.
+		open := strings.LastIndex(string(raw), ")")
+		rest := strings.Fields(string(raw[open+2:]))
+		state, ppid := rest[0], rest[1]
+		cmd, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		fmt.Fprintf(&b, "pid %d state=%s ppid=%s argv=%q; ", pid, state, ppid, strings.ReplaceAll(strings.TrimRight(string(cmd), "\x00"), "\x00", " "))
+	}
+	return strings.TrimRight(b.String(), "; ")
 }
 
 // sandboxPIDs returns the pids of the sandbox processes that hold a

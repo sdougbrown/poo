@@ -311,6 +311,24 @@ func (s *suite) boundedCommand() string {
 	return fmt.Sprintf("sleep %d", s.commandSeconds)
 }
 
+// markerWaitSteps is how many 50ms steps a marker wait takes before it
+// ends by itself: about ten seconds.
+const markerWaitSteps = 200
+
+// markerCommand returns a command that waits, bounded, for a marker in
+// the working directory and then ends.
+//
+// The wait holds the run inside its tool call while a flow sends its
+// message: the marker is written once the message is accepted. Like
+// boundedCommand, the command ends by itself, so a binary that dies
+// leaves nothing behind.
+func (s *suite) markerCommand(marker string) string {
+	s.t.Helper()
+	s.commands++
+	return fmt.Sprintf("i=0; while [ \"$i\" -lt %d ] && [ ! -e %s ]; do sleep 0.05; i=$((i+1)); done",
+		markerWaitSteps, marker)
+}
+
 // settings writes a settings file for a flow and returns its path.
 //
 // The file points the binary at the fake endpoint, names the model and
