@@ -318,10 +318,10 @@ const markerWaitSteps = 200
 // markerCommand returns a command that waits, bounded, for a marker in
 // the working directory and then ends.
 //
-// The wait holds the run inside its tool call while a flow steers: the
-// marker is written once the steer is accepted. Like boundedCommand,
-// the command ends by itself, so a binary that dies leaves nothing
-// behind.
+// The wait holds the run inside its tool call while a flow sends its
+// message: the marker is written once the message is accepted. Like
+// boundedCommand, the command ends by itself, so a binary that dies
+// leaves nothing behind.
 func (s *suite) markerCommand(marker string) string {
 	s.t.Helper()
 	s.commands++
