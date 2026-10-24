@@ -62,6 +62,8 @@ const (
 	statusFDEnv = "POO_BWRAP_STATUS_FD"
 	// parentFDEnv names the parent-death descriptor for the helper.
 	parentFDEnv = "POO_BWRAP_PARENT_FD"
+	// ReadyTimeout bounds the wait for bubblewrap's startup gate.
+	ReadyTimeout = 10 * time.Second
 	// helperArg is the first argument the helper is invoked with.
 	helperArg = "__poo_bwrap_helper__"
 	// helperPath is where the helper is bound inside the sandbox.
@@ -295,11 +297,6 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 
 	done := make(chan struct{})
 	waited := make(chan error, 1)
-	go func() {
-		err := cmd.Wait()
-		close(done)
-		waited <- err
-	}()
 
 	p := &process{
 		cmd:        cmd,
@@ -313,9 +310,44 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 		finished:   make(chan struct{}),
 		statusDone: make(chan struct{}),
 		childDone:  make(chan struct{}),
+		gated:      make(chan struct{}),
 	}
+	// The status readers run from here on: the gate wait below needs
+	// the JSON status, and a command that ends early still has its
+	// reports read.
 	go p.readStatus()
 	go p.readJSONStatus()
+
+	// Start waits for bubblewrap's startup gate to pass. The launcher
+	// writes its child's pid to the JSON status pipe immediately
+	// before it releases the namespace child, so the line in the pipe
+	// is the gate passed: a launcher that dies during its own startup
+	// would otherwise strand the namespace child on the gate, which is
+	// an eventfd and never reports a death the way a pipe would. Past
+	// the gate, the helper ends the sandbox when the owner ends,
+	// however the owner ends. An end that arrives before the line (the
+	// sandbox died on the way up) is an EOF; the deadline covers a
+	// stalled launcher either way, and the context's cancellation
+	// kills the sandbox and ends the stream.
+	select {
+	case <-p.gated:
+	case <-p.childDone:
+	case <-ctx.Done():
+		// The cancellation's kill is on its way: the run below tears
+		// the rest down.
+		go p.Kill()
+		<-p.childDone
+	case <-time.After(ReadyTimeout):
+	}
+
+	go func() {
+		// The command's process is waited on here: the sandbox has
+		// either started or died, and its wait status is the same
+		// either way.
+		err := cmd.Wait()
+		close(done)
+		waited <- err
+	}()
 	go func() {
 		// The context ends the sandbox: a cancelled run must not
 		// leave one behind.
@@ -636,6 +668,10 @@ type process struct {
 	// bubblewrap's child pid have been read.
 	statusDone chan struct{}
 	childDone  chan struct{}
+	// gated is closed when bubblewrap's startup gate has passed: its
+	// launcher wrote the child pid to the JSON status, which it does
+	// right before it releases the namespace child.
+	gated chan struct{}
 	// waitOnce keeps the teardown to one run.
 	waitOnce sync.Once
 
@@ -702,6 +738,13 @@ func (p *process) readJSONStatus() {
 			p.mu.Lock()
 			p.childPID = status.ChildPID
 			p.mu.Unlock()
+			// The launcher writes this document right before it
+			// releases the namespace child from its startup gate.
+			select {
+			case <-p.gated:
+			default:
+				close(p.gated)
+			}
 		}
 	}
 }
