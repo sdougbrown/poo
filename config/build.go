@@ -410,11 +410,12 @@ func (r *Runtime) findTool() bool {
 
 // offersRegistry reports whether the session offers the registry's tools.
 //
-// The catalog is a section of the prompt only when the model can call
-// what it lists: a tool left out of the build takes its guidance with it.
+// The catalog is a section of the prompt only when the model can call or
+// search what it lists: a tool left out of the build takes its guidance
+// with it.
 func (r *Runtime) offersRegistry() bool {
 	for _, name := range r.toolNames {
-		if name == cli.CallToolName {
+		if name == cli.CallToolName || name == cli.FindToolName {
 			return true
 		}
 	}
@@ -1090,6 +1091,12 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 		}
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			dir.Apply(b)
+			// A catalog the session cannot reach is not guidance
+			// the model can use. The file still loads, so one
+			// directory serves a code profile and a read-only one.
+			if !r.offersRegistry() {
+				b.Remove(cli.SectionName)
+			}
 		})
 	}
 	// The replacement is a setting, so it applies after the directory's
