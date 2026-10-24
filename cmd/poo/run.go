@@ -216,10 +216,10 @@ func runRun(args []string) int {
 		runtime.Options.Decider = decider
 	}
 
-	sess, err := poo.New(runtime.Options, poo.WithPolicy(runtime.Policy))
+	sess, code, err := newSession(runtime)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 1
+		return code
 	}
 	defer sess.Close()
 
@@ -384,6 +384,16 @@ func (o *runOptions) apply(settings *config.Settings) error {
 // directory and run the task in it.
 func (o *runOptions) workingDirectory() (string, error) {
 	return workingDirectory(o.workingDir)
+}
+
+// newSession constructs the session from the runtime, and returns the
+// exit code a construction failure takes. The caller prints the error.
+func newSession(runtime *config.Runtime) (*poo.Session, int, error) {
+	sess, err := poo.New(runtime.Options, poo.WithPolicy(runtime.Policy))
+	if err == nil {
+		return sess, 0, nil
+	}
+	return nil, 1, err
 }
 
 // promptMutation returns the prompt the command adds.
