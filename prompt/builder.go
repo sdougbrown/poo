@@ -417,8 +417,9 @@ func (b *Builder) SectionsError() ([]SectionText, error) {
 // default text.
 //
 // Render is the must-style path: a section whose template fails panics.
-// A session renders through RenderError, because a loaded file's
-// template can fail on the data a run supplies.
+// A session renders through RenderError when it is built, so a loaded
+// file's template fails the session; a run renders a copy of the prompt a
+// hook edited, which holds only templates that already rendered.
 func (b *Builder) Render() string {
 	text, err := b.RenderError()
 	if err != nil {

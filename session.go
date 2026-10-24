@@ -184,23 +184,24 @@ type Session struct {
 	// logs is the non-blocking dispatcher behind log.
 	logs *logDispatcher
 	// promptBuilder holds the sections the system prompt is assembled
-	// from. A run renders a copy of it, so a run's prompt may change
-	// without the session's prompt changing.
+	// from. The session is built with one, and a change to the prompt is
+	// applied to a copy of it.
 	promptBuilder *prompt.Builder
 	// promptVariant is the variant the prompt renders in.
 	//
-	// It may change between the runs: the prompt a run carries is
-	// rendered once, at the start of the run, so a change never
-	// reaches a run that is going.
+	// It may change between the runs, and the prompt renders again when
+	// it does.
 	promptVariant string
+	// promptText is the prompt the session's runs carry. It is rendered
+	// when the session is built and when a later change edits the prompt,
+	// so a run never renders it.
+	promptText string
+	// promptSections are the names of the sections the prompt rendered,
+	// in render order.
+	promptSections []string
 	// lastPromptText is the last rendered prompt that was recorded, so
 	// an unchanged prompt is not written again.
 	lastPromptText string
-	// promptRendered reports that a run has rendered the prompt.
-	//
-	// The state tells a client that the prompt it reads is a preview:
-	// before the first run, nothing has rendered it yet.
-	promptRendered bool
 
 	// waiters are the goroutines waiting for the run to settle.
 	waiters []chan Result
@@ -679,9 +680,14 @@ func New(opts Options, fns ...Option) (*Session, error) {
 
 	// The prompt is assembled from the sections the core and the
 	// consumer put in the builder. The job tools are registered by
-	// now, so their own sections are in it too.
+	// now, so their own sections are in it too. It renders here, once:
+	// every value a template reads is known, so a loaded file that
+	// cannot render fails the session and not a run.
 	s.promptBuilder = buildPrompt(&s.opts)
 	s.promptVariant = s.opts.PromptVariant
+	if err := s.renderPromptLocked(); err != nil {
+		return nil, &ErrSessionInit{Cause: err}
+	}
 
 	// The observers start before anything can emit an event, and the
 	// bus's reporter starts with them.

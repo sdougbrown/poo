@@ -887,8 +887,8 @@ func TestSessionGetReportsTheState(t *testing.T) {
 	if got.Broken {
 		t.Error("the session is broken")
 	}
-	if got.Prompt.Preview != true {
-		t.Error("the prompt should be a preview before the first run")
+	if got.Prompt.Preview {
+		t.Error("the prompt is rendered when the session is built, so it is no preview")
 	}
 	if got.Prompt.Text == "" {
 		t.Error("the prompt holds no text")

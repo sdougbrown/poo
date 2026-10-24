@@ -181,20 +181,12 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		return runID, nil
 	}
 
-	// The system prompt is rendered once per run, after the before-run
-	// hooks, and it is frozen for the length of the run.
-	promptText, promptVariant, err := s.renderSystemPrompt(decisions.edits)
-	if err != nil {
-		s.finalize(run, newCandidate(ReasonHookError, SettleDetail{
-			Source: "system_prompt",
-			Text:   err.Error(),
-		}))
-		return runID, nil
-	}
+	// The prompt the run carries is the one rendered when the session
+	// was built, or the one a hook edited for this run. It is frozen for
+	// the length of the run, and a run that is woken reuses the copy the
+	// first run recorded.
+	promptText, promptVariant := s.runSystemPrompt(decisions.edits)
 	if promptText != "" {
-		s.mu.Lock()
-		s.promptRendered = true
-		s.mu.Unlock()
 		if s.runWindingDown(run) {
 			return runID, nil
 		}

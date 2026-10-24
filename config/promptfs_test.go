@@ -142,84 +142,93 @@ func TestTheSettingsAfterTheReplacementStillApply(t *testing.T) {
 	}
 }
 
-// TestARenderErrorSettlesTheRun covers a loaded template that
-// type-checks and still fails on the data a run supplies: the error
-// names the file and settles the run instead of panicking the session.
-func TestARenderErrorSettlesTheRun(t *testing.T) {
-	runtime, err := buildWithPrompt(t, theModelSettings, fstest.MapFS{
-		"base.md": {Data: []byte("{{index .Tools 99}}\n")},
-	})
-	if err != nil {
-		t.Fatalf("building the runtime: %v", err)
-	}
-	runtime.Options.Transport = pootest.NewTransport(pootest.Turn{Text: "done"})
-	sess, err := poo.New(runtime.Options)
-	if err != nil {
-		t.Fatalf("building the session: %v", err)
-	}
-	defer sess.Close()
-	runID, err := sess.Prompt(context.Background(), "do the thing")
-	if err != nil {
-		t.Fatalf("starting the run: %v", err)
-	}
-	result, err := sess.WaitRun(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("waiting for the run: %v", err)
-	}
-	if result.Reason != poo.ReasonHookError {
-		t.Errorf("the run settled as %s, want hook_error", result.Reason)
-	}
-	if result.Detail.Source != "system_prompt" {
-		t.Errorf("the run's source is %q, want system_prompt", result.Detail.Source)
-	}
-	for _, want := range []string{"base.md", "index out of range"} {
-		if !strings.Contains(result.Detail.Text, want) {
-			t.Errorf("the settle text %q does not name %q", result.Detail.Text, want)
-		}
-	}
-}
-
-// TestATemplateThatOnlyFailsAtRenderSettlesTheRun covers the templates
-// the load-time check leaves alone: they load, and the run settles as
-// hook_error with the file named.
-func TestATemplateThatOnlyFailsAtRenderSettlesTheRun(t *testing.T) {
+// TestAPromptFileThatDoesNotRenderFailsTheBuild covers the loaded
+// templates the load-time check leaves alone: they load, and a build that
+// carries them is refused with the file named, so no session is opened.
+func TestAPromptFileThatDoesNotRenderFailsTheBuild(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		text string
 	}{
+		{"index out of range", "{{index .Tools 99}}"},
 		{"nested call", `{{define "part"}}{{.Model}}{{end}}{{template "part" .Model}}`},
 		{"builtin result", `{{(index .Tools 0).Bad}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			runtime, err := buildWithPrompt(t, theModelSettings, fstest.MapFS{
+			transport := pootest.NewTransport(pootest.Turn{Text: "done"})
+			_, err := buildWithPrompt(t, theModelSettings, fstest.MapFS{
 				"base.md": {Data: []byte(tc.text)},
 			})
-			if err != nil {
-				t.Fatalf("building the runtime: %v", err)
+			if err == nil {
+				t.Fatal("the build accepted a prompt file that does not render")
 			}
-			runtime.Options.Transport = pootest.NewTransport(pootest.Turn{Text: "done"})
-			sess, err := poo.New(runtime.Options)
-			if err != nil {
-				t.Fatalf("building the session: %v", err)
+			code, ok := config.CodeOf(err)
+			if !ok || code != config.CodeInvalid {
+				t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
 			}
-			defer sess.Close()
-			runID, err := sess.Prompt(context.Background(), "do the thing")
-			if err != nil {
-				t.Fatalf("starting the run: %v", err)
+			if field, _ := config.FieldOf(err); field != "system_prompt" {
+				t.Errorf("the field is %q, want system_prompt", field)
 			}
-			result, err := sess.WaitRun(context.Background(), runID)
-			if err != nil {
-				t.Fatalf("waiting for the run: %v", err)
+			if !strings.Contains(err.Error(), "base.md") {
+				t.Errorf("the error %q does not name the file", err)
 			}
-			if result.Reason != poo.ReasonHookError {
-				t.Errorf("the run settled as %s, want hook_error", result.Reason)
-			}
-			if result.Detail.Source != "system_prompt" {
-				t.Errorf("the run's source is %q, want system_prompt", result.Detail.Source)
-			}
-			if !strings.Contains(result.Detail.Text, "base.md") {
-				t.Errorf("the settle text %q does not name the file", result.Detail.Text)
+			if got := len(transport.Requests()); got != 0 {
+				t.Errorf("the endpoint got %d requests, want none", got)
 			}
 		})
+	}
+}
+
+// TestAPromptThatFailsInTheSessionsVariantFailsTheSession covers a
+// template that renders as the build's default and not in the variant a
+// session asks for: the session is not built, and the failure names the
+// file.
+func TestAPromptThatFailsInTheSessionsVariantFailsTheSession(t *testing.T) {
+	runtime, err := buildWithPrompt(t, theModelSettings, fstest.MapFS{
+		"base.small-local.md": {Data: []byte("{{index .Tools 99}}\n")},
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	store, err := runtime.OpenStore("ephemeral", "")
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer store.Close()
+
+	transport := pootest.NewTransport(pootest.Turn{Text: "done"})
+	runtime.Options.Transport = transport
+	created := &poo.SessionCreated{
+		RecordMeta:   poo.NewRecordMeta("session.created"),
+		Format:       poo.FormatVersion,
+		SessionID:    "s1",
+		Mode:         "ephemeral",
+		CreatedAt:    "2026-10-22T12:00:00Z",
+		WorkingDir:   t.TempDir(),
+		Model:        poo.SessionModel{ID: "test-model"},
+		ContextLimit: 32768,
+		Profile:      "code",
+		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
+	}
+	sess, err := runtime.CreateSession(context.Background(), store, created, poo.WithPromptVariant("small-local"))
+	if err == nil {
+		_ = sess.Close()
+		t.Fatal("the session was built with a prompt that does not render")
+	}
+	if sess != nil {
+		t.Error("the failed creation returned a session")
+	}
+	code, ok := config.CodeOf(err)
+	if !ok || code != config.CodeInvalid {
+		t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
+	}
+	if field, _ := config.FieldOf(err); field != "system_prompt" {
+		t.Errorf("the field is %q, want system_prompt", field)
+	}
+	if !strings.Contains(err.Error(), "base.small-local.md") {
+		t.Errorf("the error %q does not name the file", err)
+	}
+	if got := len(transport.Requests()); got != 0 {
+		t.Errorf("the endpoint got %d requests, want none", got)
 	}
 }

@@ -135,7 +135,7 @@ func (t *Template) Data() func(Env) any { return t.data }
 // Render is the must-style path the packages that own their prose use:
 // their templates are compiled when the package loads, and a failure
 // here is a bug in the prose. A loaded file uses RenderError, because a
-// template can still fail on data a run supplies, and a consumer's
+// template can still fail on data the session supplies, and a consumer's
 // prose should not panic a session.
 func (t *Template) Render(env Env) string {
 	text, err := t.RenderError(env)

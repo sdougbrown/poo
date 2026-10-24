@@ -1,6 +1,8 @@
 package poo
 
 import (
+	"errors"
+	"fmt"
 	"runtime"
 	"slices"
 	"time"
@@ -8,11 +10,20 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 )
 
-// The system prompt is assembled from named sections and rendered once
-// per run. A session keeps a builder with the sections in it, and every
-// run renders a copy of that builder: the prompt a run carries never
-// changes while the run goes on, and the next run may render a
-// different one.
+// The system prompt is assembled from named sections and rendered once,
+// when the session is built: the model, the tools, the working directory,
+// the variant and the consumer's own changes are all known by then. The
+// session keeps the rendered text, so a run carries a prompt that already
+// rendered and a loaded file that cannot render fails the session instead
+// of a run.
+
+// ErrPromptRender reports that a prompt section did not render.
+//
+// A loaded prompt file's template can fail on the data the session
+// supplies, which the load-time check does not prove either way. The
+// prompt renders when the session is built, so the failure refuses the
+// session and the error names the file to fix.
+var ErrPromptRender = errors.New("a prompt section did not render")
 
 // systemPromptEnv returns the environment the session's prompt renders
 // in.
@@ -107,6 +118,16 @@ func PromptBuilder(opts Options) *prompt.Builder {
 	return buildPrompt(&opts)
 }
 
+// CheckPrompt reports whether a session with these options has a prompt
+// that renders.
+//
+// A build calls it, so a loaded file that cannot render on the build's own
+// data fails the build before a session is opened.
+func CheckPrompt(opts Options) error {
+	_, _, err := renderPrompt(buildPrompt(&opts), opts.SystemPrompt)
+	return err
+}
+
 // setPromptVariants puts a tool's alternative texts in the builder.
 //
 // The names are sorted, so the builder holds the alternatives in the
@@ -122,43 +143,76 @@ func setPromptVariants(b *prompt.Builder, section string, variants map[string]st
 	}
 }
 
-// renderSystemPrompt renders the prompt for a run.
+// renderPrompt renders a builder in the variant it holds and returns the
+// prompt's text and the names of its sections, in render order.
 //
-// The run renders a copy of the session's builder, so the before-run
-// hooks' edits reach the run that is starting and not the next one. The
-// prompt is rendered once, here, and frozen for the length of the run.
-// It returns the variant it rendered in too, for the prompt's record.
-//
-// A loaded template can fail on the data the run supplies; the error
-// goes to the run, which settles it as the failure it is.
-func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) (string, string, error) {
-	b, variant := s.promptCopy()
-	if b == nil {
-		return "", variant, nil
+// A raw prompt is the whole prompt, byte for byte. The builder adds a
+// trailing newline to the sections it renders; that newline belongs to the
+// rendered form, not to a raw prompt the consumer supplied.
+func renderPrompt(b *prompt.Builder, raw string) (string, []string, error) {
+	text, err := b.RenderError()
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %w", ErrPromptRender, err)
 	}
+	return rawPromptText(text, raw), b.Names(), nil
+}
+
+// rawPromptText returns the text a render produced, after the raw prompt's
+// rule: a prompt the consumer supplied whole stays that text.
+func rawPromptText(rendered, raw string) string {
+	if raw != "" && (rendered == raw || rendered == raw+"\n") {
+		return raw
+	}
+	return rendered
+}
+
+// renderPromptLocked renders the session's prompt and keeps it, for the
+// session's runs.
+//
+// The builder renders in the session's variant, so the text is the one the
+// next run carries.
+func (s *Session) renderPromptLocked() error {
+	text, sections, err := renderPrompt(s.promptBuilder.WithVariant(s.promptVariant), s.opts.SystemPrompt)
+	if err != nil {
+		return err
+	}
+	s.promptText = text
+	s.promptSections = sections
+	return nil
+}
+
+// runSystemPrompt returns the prompt the run carries and the variant it
+// renders in.
+//
+// The session's prompt is the one rendered when the session was built, and
+// a run reuses it as it is. A run whose hooks edited the prompt renders
+// their copy: the edit surface sets texts and appends to them, so the copy
+// holds only templates the session has already rendered in the same
+// environment, and the render cannot fail.
+func (s *Session) runSystemPrompt(beforeRun []SystemPromptEdit) (string, string) {
+	s.mu.Lock()
+	text, variant := s.promptText, s.promptVariant
+	builder, raw := s.promptBuilder, s.opts.SystemPrompt
+	s.mu.Unlock()
+	if len(beforeRun) == 0 {
+		return text, variant
+	}
+	// The session's builder is never changed in place, so the copy is
+	// made and rendered without the session's lock: an edit that blocks
+	// cannot hold up the cancel that ends the run.
+	b := builder.WithVariant(variant)
 	for _, edit := range beforeRun {
 		if edit != nil {
 			edit(b)
 		}
 	}
-	rendered, err := b.RenderError()
-	if err != nil {
-		return "", variant, err
-	}
-	// A raw prompt is the whole prompt, byte for byte. The builder adds
-	// a trailing newline to the sections it renders; that newline
-	// belongs to the rendered form, not to a raw prompt the consumer
-	// supplied.
-	if raw := s.opts.SystemPrompt; raw != "" && (rendered == raw || rendered == raw+"\n") {
-		return raw, variant, nil
-	}
-	return rendered, variant, nil
+	return rawPromptText(b.Render(), raw), variant
 }
 
 // PromptState describes the session's system prompt.
 //
-// The text is the prompt the next run would render, and the preview
-// says whether a run has rendered one yet.
+// The text is the prompt the next run carries: it was rendered when the
+// session was built, or when the last change to it was made.
 type PromptState struct {
 	// Text is the rendered prompt.
 	Text string
@@ -166,86 +220,70 @@ type PromptState struct {
 	Hash string
 	// Sections are the names of the prompt's sections, in order.
 	Sections []string
-	// Preview reports that no run has rendered the prompt yet: the
-	// text is a preview of what the first run would use.
+	// Preview reports that no run has rendered the prompt yet.
+	//
+	// A session renders its prompt when it is built, so a constructed
+	// session never reports one; the field stays for the clients that
+	// read it.
 	Preview bool
 }
 
 // PromptState returns the session's system prompt.
 //
-// The prompt is rendered from a copy of the session's own builder, so
-// the state never changes the prompt a run carries.
+// Reading the state renders nothing: the text is the one the last render
+// produced, and it is the prompt the next run carries.
 func (s *Session) PromptState() PromptState {
 	s.mu.Lock()
-	rendered := s.promptRendered
+	text, sections := s.promptText, s.promptSections
 	s.mu.Unlock()
-	b, _ := s.promptCopy()
-	if b == nil {
-		return PromptState{Preview: !rendered}
-	}
-	text, err := b.RenderError()
-	if err != nil {
-		return PromptState{Preview: !rendered}
-	}
-	// A raw prompt is the whole prompt, byte for byte.
-	if raw := s.opts.SystemPrompt; raw != "" && (text == raw || text == raw+"\n") {
-		text = raw
-	}
 	return PromptState{
 		Text:     text,
 		Hash:     hashText(text),
-		Sections: b.Names(),
-		Preview:  !rendered,
+		Sections: slices.Clone(sections),
 	}
 }
 
 // SetPromptVariant sets the variant the prompt renders in.
 //
-// The prompt a run carries is rendered once, at the start of the run,
-// so the change takes effect between the runs and never inside one.
-//
-// A variant picks the alternative text of the sections that offer one:
-// the base section and the tools' sections. A section that offers no
-// alternative for the variant renders its default text.
-func (s *Session) SetPromptVariant(name string) {
+// The prompt renders again in the new variant, so a section that offers an
+// alternative for it renders that one and a section that does not renders
+// its default text. A prompt that cannot render in the variant refuses the
+// change, and the session keeps the variant and the prompt it had.
+func (s *Session) SetPromptVariant(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	variant := s.promptVariant
 	s.promptVariant = name
+	if err := s.renderPromptLocked(); err != nil {
+		s.promptVariant = variant
+		return err
+	}
+	return nil
 }
 
 // SetPrompt applies prompt changes to the session.
 //
-// The changes take effect between the runs: the prompt a run carries is
-// rendered once, at the start of the run, so a change made while a run
-// is going is not seen by that run.
-//
 // The changes are applied in the order they are given, and a later one
-// wins over an earlier one.
-func (s *Session) SetPrompt(edits ...func(*prompt.Builder)) {
+// wins over an earlier one. The prompt renders again with them, so the
+// change is in the next run's prompt. A change that leaves the prompt
+// unable to render is refused, and the session keeps the prompt it had.
+func (s *Session) SetPrompt(edits ...func(*prompt.Builder)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.promptBuilder == nil {
-		return
-	}
+	b := s.promptBuilder.Copy()
 	for _, edit := range edits {
 		if edit != nil {
-			edit(s.promptBuilder)
+			edit(b)
 		}
 	}
-}
-
-// promptCopy returns a copy of the session's prompt builder, in the
-// variant the session renders in, and that variant's name.
-//
-// The copy is what a run renders. A nil builder means the session has
-// no prompt at all.
-func (s *Session) promptCopy() (*prompt.Builder, string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.promptBuilder == nil {
-		return nil, s.promptVariant
+	text, sections, err := renderPrompt(b.WithVariant(s.promptVariant), s.opts.SystemPrompt)
+	if err != nil {
+		return err
 	}
-	return s.promptBuilder.WithVariant(s.promptVariant), s.promptVariant
+	s.promptBuilder = b
+	s.promptText = text
+	s.promptSections = sections
+	return nil
 }
 
 // promptChanged reports whether a rendered prompt differs from the last
@@ -266,17 +304,12 @@ func (s *Session) rememberPrompt(text string) {
 
 // applyPromptEdit applies a system-prompt edit to the session's prompt.
 //
-// The edit is the one a session-start hook's decision carries. The
-// session's builder is the session's own, so the edit changes every run
-// that follows.
-func (s *Session) applyPromptEdit(edit SystemPromptEdit) {
+// The edit is the one a session-start hook's decision carries. It is kept
+// only when the prompt still renders, so an edit that breaks the prompt
+// leaves the session with the prompt it had.
+func (s *Session) applyPromptEdit(edit SystemPromptEdit) error {
 	if edit == nil {
-		return
+		return nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.promptBuilder == nil {
-		return
-	}
-	edit(s.promptBuilder)
+	return s.SetPrompt(func(b *prompt.Builder) { edit(b) })
 }

@@ -364,7 +364,11 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 			_ = store.Close()
 			return nil, nil, err
 		}
-		sess.SetPrompt(edits...)
+		if err := sess.SetPrompt(edits...); err != nil {
+			_ = sess.Close()
+			_ = store.Close()
+			return nil, nil, err
+		}
 	}
 	if deciderName != "" {
 		if err := sess.SetDecider(deciderModel, decider); err != nil {
@@ -467,7 +471,9 @@ func (f *Server) Configure(ctx context.Context, sess *poo.Session, params protoc
 		if err != nil {
 			return protocol.ModelRoles{}, err
 		}
-		sess.SetPrompt(edits...)
+		if err := sess.SetPrompt(edits...); err != nil {
+			return protocol.ModelRoles{}, err
+		}
 	}
 	if params.Models != nil && params.Models.Chat != "" {
 		model, ok := runtime.Models[params.Models.Chat]

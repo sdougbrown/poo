@@ -38,8 +38,9 @@ type ModelSwitch struct {
 //     a warning, not a refusal: the history is never truncated, and the
 //     next run's gate settles context_exhausted.
 //
-// The system prompt re-renders at the next run, because the environment
-// section names the model.
+// The system prompt is rendered in the switch, because the environment
+// section names the model and the descriptor selects the variant. A prompt
+// that cannot render in the new environment refuses the switch.
 //
 // The transport is the session's chat transport when the call names none,
 // and the one given when it does. A model on another endpoint needs its
@@ -108,6 +109,20 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	from := modelLabel(s.opts.Model)
 	outcome := ModelSwitch{From: from, To: name, Warnings: warnings}
 
+	// The descriptor selects the prompt's variant, and the environment
+	// section names the model, so the prompt renders again in the new
+	// environment. A prompt that cannot render there refuses the switch,
+	// and the session keeps the model and the prompt it had.
+	modelID := modelIdentifier(info)
+	env := s.promptBuilder.Env()
+	env.Model = modelID
+	env.Variant = info.PromptVariant
+	promptText, promptSections, err := renderPrompt(s.promptBuilder.WithEnv(env), s.opts.SystemPrompt)
+	if err != nil {
+		s.mu.Unlock()
+		return ModelSwitch{}, err
+	}
+
 	// The switch itself: the transport, the model's identity, the
 	// window and the output ceiling.
 	if len(transport) == 1 && transport[0] != nil {
@@ -116,20 +131,14 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	// The model keeps the identifier the endpoint calls it by, and the
 	// name is the fallback. The wire API stays the one the session
 	// speaks, so the descriptor and the session agree.
-	info.ModelID = modelIdentifier(info)
+	info.ModelID = modelID
 	info.API = api
 	info.ContextLimit = limit
 	s.opts.Model = info
-	// The descriptor selects the prompt's variant, and the environment
-	// section names the model, so the prompt the next run renders
-	// follows both.
 	s.promptVariant = info.PromptVariant
-	if s.promptBuilder != nil {
-		env := s.promptBuilder.Env()
-		env.Model = s.opts.Model.ModelID
-		env.Variant = info.PromptVariant
-		s.promptBuilder = s.promptBuilder.WithEnv(env)
-	}
+	s.promptBuilder = s.promptBuilder.WithEnv(env)
+	s.promptText = promptText
+	s.promptSections = promptSections
 	s.mu.Unlock()
 
 	rec := &ModelsChanged{

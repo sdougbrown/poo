@@ -299,7 +299,26 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolvePrompt(opts, workingDir); err != nil {
 		return nil, err
 	}
+	// The prompt renders once here, so a loaded file that cannot render on
+	// this build's own model, tools, directory and settings fails the
+	// build rather than a session.
+	if err := poo.CheckPrompt(runtime.Options); err != nil {
+		return nil, promptRenderError(err)
+	}
 	return runtime, nil
+}
+
+// promptRenderError returns the build failure for a prompt that did not
+// render.
+//
+// The prompt's prose is what is wrong, so the failure names the setting
+// the prose came through, and the error underneath names the file.
+func promptRenderError(err error) *Error {
+	return &Error{
+		Code:  CodeInvalid,
+		Field: "system_prompt",
+		Err:   err,
+	}
 }
 
 // resolveProfile picks the profile the session is built from.
@@ -1246,7 +1265,14 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 	}
 	opts.Sink = store
 	opts.SessionID = created.SessionID
-	return poo.New(opts, append(fns, poo.WithPolicy(r.Policy))...)
+	sess, err := poo.New(opts, append(fns, poo.WithPolicy(r.Policy))...)
+	if err != nil {
+		if errors.Is(err, poo.ErrPromptRender) {
+			return nil, promptRenderError(err)
+		}
+		return nil, err
+	}
+	return sess, nil
 }
 
 // ResumeSession loads a session from the store and restores it.
