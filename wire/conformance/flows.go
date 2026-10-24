@@ -444,13 +444,18 @@ func (s *suite) history(c *client, sessionID string, beforeSeq int64, limit int)
 
 // steer covers the flow of a client that redirects a run: the message
 // arrives at the next turn.
+//
+// The command waits for the marker the flow writes once the message is
+// accepted, so the run is still inside its tool call when the steer
+// arrives.
 func (s *suite) steer() {
 	s.t.Helper()
 	if s.skipWithoutTool("bash") {
 		return
 	}
+	const marker = "steer.marker"
 	turns := []Turn{
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo first"}}}},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": s.markerCommand(marker)}}}},
 		{Text: "the answer"},
 	}
 	c, sessionID := s.open(turns, nil)
@@ -468,6 +473,10 @@ func (s *suite) steer() {
 	}
 	if message.InputID == "" {
 		s.t.Errorf("the message returned no input id: %s", string(raw))
+	}
+	// The message is accepted, so the tool may end.
+	if err := os.WriteFile(filepath.Join(s.dir, marker), nil, 0o600); err != nil {
+		s.t.Fatalf("writing the marker: %v", err)
 	}
 
 	s.settled(c, sessionID, runID)
