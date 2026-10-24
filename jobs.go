@@ -1741,7 +1741,7 @@ func (t *JobTool) Spec() ToolSpec {
 			Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
-    "job": {"type": "string", "description": "The job's identifier, e.g. \"j3\"."}
+    "job": {"type": "string", "description": "The job's identifier, for example \"j3\"."}
   },
   "required": ["job"]
 }`),
