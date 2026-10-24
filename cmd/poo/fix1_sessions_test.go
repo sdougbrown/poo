@@ -30,7 +30,7 @@ func TestThePruneOlderThanFlagDeletesTheOldSessions(t *testing.T) {
 		SessionID:  "old-session",
 		Mode:       "logged",
 		CreatedAt:  old.UTC().Format(time.RFC3339Nano),
-		Model:      poo.SessionModel{ID: "test-model"},
+		Model:      poo.SessionModel{ModelID: "test-model"},
 		Profile:    "code",
 	}
 	if _, err := store.Create(context.Background(), created); err != nil {

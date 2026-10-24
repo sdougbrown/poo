@@ -45,7 +45,7 @@ func TestTheSwitchReachesTheTransport(t *testing.T) {
 		Tools:        poo.ToolCalling{Mode: poo.ToolsNative},
 		Temperature:  poo.TempFree,
 	}
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: first.ModelID, Info: first})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: first.ModelID, ModelInfo: first})
 	s := newTestSession(t, poo.Options{
 		Transport:    tr,
 		Tools:        map[string]poo.Tool{"echo": &echoTool{}},

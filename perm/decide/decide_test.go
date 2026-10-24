@@ -117,11 +117,11 @@ func TestTheThresholdsAreConfigurable(t *testing.T) {
 func TestTheEvidenceComesFromTheHistory(t *testing.T) {
 	decider := pootest.NewDecider(0.9)
 	asker := permissive.New(decider, permissive.Options{})
-	history := poo.NewHistory([]poo.Message{
+	history := poo.NewHistoryView([]poo.Message{
 		poo.NewTextMessage(poo.RoleUser, "clean the build directory"),
 	}, nil, nil)
 
-	if _, err := asker.Ask(context.Background(), perm.Ask{Tool: "bash", History: history}); err != nil {
+	if _, err := asker.Ask(context.Background(), perm.Ask{Tool: "bash", HistoryView: history}); err != nil {
 		t.Fatalf("asking: %v", err)
 	}
 

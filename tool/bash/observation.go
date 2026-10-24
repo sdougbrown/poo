@@ -11,9 +11,9 @@ import (
 // A tool that captures stdout and stderr together puts everything in
 // Output. A tool that captures them apart fills Stderr as well.
 type Observation struct {
-	// Returncode is the command's exit status, nil when the process was
+	// ExitCode is the command's exit status, nil when the process was
 	// killed and has none.
-	Returncode *int
+	ExitCode *int
 	// TimedOut reports that the command hit its timeout.
 	TimedOut bool
 	// Output is what the command wrote to stdout.
@@ -52,8 +52,8 @@ func Envelope(o Observation) (string, json.RawMessage) {
 	}
 	// A killed process has no exit code, so the field is null.
 	var code any
-	if o.Returncode != nil {
-		code = *o.Returncode
+	if o.ExitCode != nil {
+		code = *o.ExitCode
 	}
 	fields := []field{
 		{EnvelopeReturncode, code},

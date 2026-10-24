@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/exec/bwrap"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/tool/bash"
@@ -34,7 +35,7 @@ type executorCase struct {
 	// name is the executor's name.
 	name string
 	// build returns the executor for one test.
-	build func(t *testing.T) bash.Executor
+	build func(t *testing.T) exec.Executor
 	// survivors returns what a command left behind, given the files it
 	// wrote in the working directory.
 	survivors func(t *testing.T, dir string) []string
@@ -51,7 +52,7 @@ func executorCases(t *testing.T) []executorCase {
 	t.Helper()
 	cases := []executorCase{{
 		name:      "local",
-		build:     func(t *testing.T) bash.Executor { return bash.NewLocal() },
+		build:     func(t *testing.T) exec.Executor { return bash.NewLocal() },
 		survivors: localSurvivors,
 		alive:     localAlive,
 	}}
@@ -62,7 +63,7 @@ func executorCases(t *testing.T) []executorCase {
 	}
 	cases = append(cases, executorCase{
 		name:      "bwrap",
-		build:     func(t *testing.T) bash.Executor { return sandbox },
+		build:     func(t *testing.T) exec.Executor { return sandbox },
 		survivors: sandboxSurvivors,
 		alive:     sandboxAlive,
 	})

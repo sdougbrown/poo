@@ -27,13 +27,13 @@ type View interface {
 type TurnSummary struct {
 	// Index is the turn's number in its run, counting from one.
 	Index int
-	// Session is the turn's number in the session, counting from one
+	// TurnIndex is the turn's number in the session, counting from one
 	// and never restarting.
 	//
 	// The compaction seam names a range of turns by this number, so a
 	// range may cross a run boundary, and a turn keeps its number when
 	// a compaction removes it.
-	Session int
+	TurnIndex int
 	// Calls are the tool calls the turn made, in order.
 	Calls []ToolCallSummary
 	// Interrupted reports that the turn was cut short by an interrupt.
@@ -52,8 +52,8 @@ type ToolCallSummary struct {
 	Summary string
 }
 
-// Budget is the context budget of a run.
-type Budget struct {
+// ContextBudget is the context budget of a run.
+type ContextBudget struct {
 	// ContextLimit is the model's context window, in tokens.
 	ContextLimit int
 	// EstimatedInput is the estimated number of prompt tokens of the
@@ -90,17 +90,17 @@ type HookContext struct {
 	RunID string
 	// Job is the identifier of the job the hook runs for, e.g. "j3". It is
 	// empty when the hook runs for the run itself.
-	Job string
+	JobID string
 	// Turn is the turn the hook is called in, counting from one.
 	Turn int
 	// Interrupted reports that the activity was interrupted. It is set
 	// for AfterTurn and for the policy slot, so a pending ask resolves as
 	// interrupted rather than cancelled.
 	Interrupted bool
-	// History is the model's view of the history, as a read-only view.
-	History View
+	// HistoryView is the model's view of the history, as a read-only view.
+	HistoryView View
 	// Budget is the run's context budget.
-	Budget Budget
+	Budget ContextBudget
 	// Decider is the decision model, or nil when there is none.
 	Decider decide.Decider
 	// Permissions is the policy slot's seam to the core.
@@ -148,7 +148,7 @@ type ToolCallInfo struct {
 	Handle string
 	// Job is the identifier of the job the call runs as, e.g. "j3". It is
 	// empty when the call runs in the turn.
-	Job string
+	JobID string
 	// RepeatCount is how many times the model has made this exact call
 	// in the run.
 	RepeatCount int
@@ -435,8 +435,8 @@ const (
 // outcome, and the job carries that call's handle, so a reader can tie
 // the job back to the call that started it.
 type JobResult struct {
-	// Job is the job's identifier, e.g. "j3".
-	Job string `json:"job"`
+	// JobID is the job's identifier, e.g. "j3".
+	JobID string `json:"job"`
 	// Handle is the handle of the tool call the job came from (that
 	// call's ToolEnv.Handle), e.g.
 	// "r1".

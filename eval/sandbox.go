@@ -12,7 +12,7 @@ const (
 	// runner's user can, including the task set and its checks.
 	SandboxNone = "none"
 	// SandboxBwrap runs poo under bubblewrap. The run sees the system's
-	// read-only /usr and /etc, its own workdir at /work and its log
+	// read-only /usr and /etc, its own working dir at /work and its log
 	// directory at /log, and nothing else of the filesystem. The network
 	// is shared, so the model's endpoint stays reachable.
 	SandboxBwrap = "bwrap"
@@ -50,7 +50,7 @@ const (
 	// space.
 	ExecutorLocal = "local"
 	// ExecutorBwrap runs the model's commands in a bubblewrap
-	// sandbox, bound to the task's workdir.
+	// sandbox, bound to the task's working dir.
 	ExecutorBwrap = "bwrap"
 )
 
@@ -77,7 +77,7 @@ func checkExecutor(name string) error {
 // bwrapArgs returns the bubblewrap arguments that run poo with the given
 // arguments inside the sandbox.
 //
-// The workdir and the log's directory are the only writable paths, and
+// The working dir and the log's directory are the only writable paths, and
 // poo's --working-dir and --log are rewritten to name them as the
 // sandbox sees them.
 func bwrapArgs(poo, workdir, logPath string, args []string) []string {

@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/exec"
 )
 
 // TestAnAlreadyCancelledSandboxStartRunsNothing covers the executor's
 // promise: a command whose context is over does not get a sandbox, so
 // nothing of it runs, not even for the moment it takes to stop it.
 func TestAnAlreadyCancelledSandboxStartRunsNothing(t *testing.T) {
-	exec, err := newReviewExecutor(t)
+	executor, err := newReviewExecutor(t)
 	if err != nil {
 		t.Skipf("skip: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestAnAlreadyCancelledSandboxStartRunsNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	proc, err := exec.Start(ctx, bash.Command{
+	proc, err := executor.Start(ctx, exec.Command{
 		Argv: []string{"/bin/sh", "-c", `printf executed > "$1"`, "probe", marker},
 		Dir:  dir,
 	}, io.Discard)

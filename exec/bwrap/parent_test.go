@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	osexec "os/exec"
+
+	"github.com/sdougbrown/poo/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,7 +17,6 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo/exec/bwrap"
-	"github.com/sdougbrown/poo/tool/bash"
 )
 
 // The variables the test binary reads to act as the process that owns a
@@ -37,12 +38,12 @@ func TestTheSandboxOwner(t *testing.T) {
 		t.Skip("a helper for TestASandboxDoesNotOutliveTheProcessThatStartedIt")
 	}
 	dir := os.Getenv(parentDirEnv)
-	exec, err := bwrap.New(bwrap.Options{})
+	executor, err := bwrap.New(bwrap.Options{})
 	if err != nil {
 		fmt.Println("unavailable:", err)
 		os.Exit(1)
 	}
-	if _, err := exec.Start(context.Background(), bash.Command{
+	if _, err := executor.Start(context.Background(), exec.Command{
 		Argv: []string{"/bin/bash", "-c", "sleep 300"},
 		Dir:  dir,
 	}, io.Discard); err != nil {
@@ -64,7 +65,7 @@ func TestASandboxDoesNotOutliveTheProcessThatStartedIt(t *testing.T) {
 		t.Skipf("skip: %v", err)
 	}
 	dir := t.TempDir()
-	owner := exec.Command(os.Args[0], "-test.run=^TestTheSandboxOwner$", "-test.v")
+	owner := osexec.Command(os.Args[0], "-test.run=^TestTheSandboxOwner$", "-test.v")
 	owner.Env = append(os.Environ(), parentHelperEnv+"=1", parentDirEnv+"="+dir)
 	output, err := owner.StdoutPipe()
 	if err != nil {

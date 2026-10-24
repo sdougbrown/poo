@@ -20,7 +20,7 @@ func TestTheChatTransportTalksToALiveEndpoint(t *testing.T) {
 	if url == "" || model == "" {
 		t.Skip("POO_CHAT_URL and POO_CHAT_MODEL are not set")
 	}
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: url,
 		Model:   model,
 		APIKey:  os.Getenv("POO_CHAT_API_KEY"),

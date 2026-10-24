@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// The harness's own rules about the workdir and the check.
+// The harness's own rules about the working dir and the check.
 
 func TestTheGeneratedBytecodeIsNotInTheDiff(t *testing.T) {
 	// A run that runs python leaves __pycache__ behind. Those are

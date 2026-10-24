@@ -314,7 +314,7 @@ func replayJobResults(log *Log) []poo.JobResult {
 			records = append(records, &poo.InputDelivered{InputID: r.InputID})
 		case "job.ended":
 			records = append(records, &poo.JobEnded{
-				Job:     r.Job,
+				JobID:   r.JobID,
 				Handle:  r.Handle,
 				Tool:    r.Tool,
 				Outcome: poo.JobOutcome(r.Outcome),
@@ -418,7 +418,7 @@ func newRecordedCompactor(compactions []recordedCompaction, transport *replayNat
 
 // ShouldCompact says yes once the run has made the requests the
 // recording had made when it compacted.
-func (c *recordedCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+func (c *recordedCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.applied >= len(c.compactions) {

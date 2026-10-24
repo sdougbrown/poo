@@ -19,14 +19,14 @@ func TestTheNoticeFiresOncePerRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
 		},
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_2",
+				CallID:    "call_2",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -149,7 +149,7 @@ func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {
 		{
 			usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 10},
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -217,7 +217,7 @@ func TestCrossingTheHardRatioSettlesContextExhausted(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -252,7 +252,7 @@ func TestTheHardLimitSettlesWithItsOwnSource(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -346,9 +346,9 @@ func TestTheRepeatCountsCoverTheExactAndNearKeys(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one","offset":1}`)},
-				{ID: "call_2", Name: "echo", Arguments: []byte(`{"text":"one","offset":2}`)},
-				{ID: "call_3", Name: "echo", Arguments: []byte(`{"text":"one","offset":1}`)},
+				{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one","offset":1}`)},
+				{CallID: "call_2", Name: "echo", Arguments: []byte(`{"text":"one","offset":2}`)},
+				{CallID: "call_3", Name: "echo", Arguments: []byte(`{"text":"one","offset":1}`)},
 			},
 		},
 		{text: "the answer"},
@@ -396,8 +396,8 @@ func TestAPrepareFailureCountsTowardTheNearKey(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
-				{ID: "call_2", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
+				{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
+				{CallID: "call_2", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
 			},
 		},
 		{text: "the answer"},
@@ -432,7 +432,7 @@ func TestTheCalibrationChangesTheOutputRoom(t *testing.T) {
 		{
 			usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 1},
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -469,7 +469,7 @@ func TestTheCalibrationIsClamped(t *testing.T) {
 		{
 			usage: &poo.UsageReport{InputTokens: 1, OutputTokens: 1},
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -516,7 +516,7 @@ func TestTheEstimateCountsTheReplyTheUsageReportLeftOut(t *testing.T) {
 		{
 			usage: &poo.UsageReport{InputTokens: 1000, OutputTokens: 2000},
 			text:  strings.Repeat("a", 7000),
-			calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
+			calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
 		},
 		{text: "the second answer"},
 	})
@@ -547,9 +547,9 @@ func TestACallToAnotherToolDoesNotBreakTheStreak(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
-				{ID: "call_2", Name: "other", Arguments: []byte(`{"text":"two"}`)},
-				{ID: "call_3", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
+				{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
+				{CallID: "call_2", Name: "other", Arguments: []byte(`{"text":"two"}`)},
+				{CallID: "call_3", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
 			},
 		},
 		{text: "the answer"},

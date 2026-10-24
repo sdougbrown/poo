@@ -15,6 +15,7 @@ import (
 	"github.com/sdougbrown/cli-registry/schema"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
@@ -33,7 +34,7 @@ type CallTool struct {
 	search bool
 	// executor runs the CLI. Nil means the local executor, the way it
 	// does for bash.
-	executor bash.Executor
+	executor exec.Executor
 }
 
 // NewCall returns the tool that runs a registered CLI.
@@ -45,7 +46,7 @@ func NewCall(catalog *Catalog) *CallTool {
 //
 // It is the executor bash uses, so a registered CLI runs in the same
 // place and under the same process rules as a shell command.
-func (t *CallTool) WithExecutor(e bash.Executor) *CallTool {
+func (t *CallTool) WithExecutor(e exec.Executor) *CallTool {
 	t.executor = e
 	return t
 }
@@ -248,7 +249,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	stderr := bash.NewCappedBuffer(bash.CaptureCap)
 
 	start := time.Now()
-	proc, err := executor.Start(runCtx, bash.Command{
+	proc, err := executor.Start(runCtx, exec.Command{
 		Argv:   p.plan.Argv,
 		Dir:    dir,
 		Env:    environ,
@@ -283,10 +284,10 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	}
 	returncode := res.ExitCode
 	text, structured := bash.Envelope(bash.Observation{
-		Returncode: &returncode,
-		Output:     string(res.Stdout),
-		Stderr:     string(res.Stderr),
-		Cap:        cap,
+		ExitCode: &returncode,
+		Output:   string(res.Stdout),
+		Stderr:   string(res.Stderr),
+		Cap:      cap,
 	})
 	return poo.ToolResult{Text: text, Structured: structured}, nil
 }
@@ -357,10 +358,10 @@ func failed(err error, cap int) (poo.ToolResult, error) {
 			code = &exited.ExitCode
 		}
 		text, structured := bash.Envelope(bash.Observation{
-			Returncode: code,
-			Output:     string(exited.Stdout),
-			Stderr:     string(exited.Stderr),
-			Cap:        cap,
+			ExitCode: code,
+			Output:   string(exited.Stdout),
+			Stderr:   string(exited.Stderr),
+			Cap:      cap,
 		})
 		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
 	}

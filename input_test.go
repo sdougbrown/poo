@@ -24,7 +24,7 @@ func TestASteerIsDeliveredAtTheNextTurnEnd(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -83,7 +83,7 @@ func TestTheSteerWaitsForTheBatchToFinish(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -194,7 +194,7 @@ func TestAnInterruptDuringALongCallCancelsIt(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -257,8 +257,8 @@ func TestAnInterruptSkipsTheUnstartedCalls(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
-				{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
+				{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
+				{CallID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
 			},
 		},
 		{text: "the second answer"},
@@ -980,7 +980,7 @@ func (t *stallingTransport) Stream(ctx context.Context, req poo.ChatRequest) (po
 	t.index++
 	t.mu.Unlock()
 	if i >= len(t.responses) {
-		return &fakeReader{events: []poo.StreamEvent{
+		return &fakeReader{events: []poo.StreamItem{
 			{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "the second answer"}},
 			{Kind: "finish", FinishReason: poo.FinishStop},
 		}}, poo.Rendered{API: poo.APIChatCompletions}, nil
@@ -1008,17 +1008,17 @@ type stallingReader struct {
 }
 
 // Next hands out one delta and then waits for the context.
-func (r *stallingReader) Next() (poo.StreamEvent, error) {
+func (r *stallingReader) Next() (poo.StreamItem, error) {
 	if !r.sent {
 		r.sent = true
 		close(r.started)
-		return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "partial text"}}, nil
+		return poo.StreamItem{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "partial text"}}, nil
 	}
 	<-r.ctx.Done()
 	if r.hold != nil {
 		<-r.hold
 	}
-	return poo.StreamEvent{}, r.ctx.Err()
+	return poo.StreamItem{}, r.ctx.Err()
 }
 
 // Close releases the reader.
@@ -1220,15 +1220,15 @@ type partialCallReader struct {
 }
 
 // Next hands out the delta and the call, and then waits.
-func (r *partialCallReader) Next() (poo.StreamEvent, error) {
+func (r *partialCallReader) Next() (poo.StreamItem, error) {
 	switch r.stage {
 	case 0:
 		r.stage++
 		close(r.started)
-		return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "partial text"}}, nil
+		return poo.StreamItem{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "partial text"}}, nil
 	case 1:
 		r.stage++
-		return poo.StreamEvent{Kind: "tool_call", ToolCall: &poo.ToolCallDelta{
+		return poo.StreamItem{Kind: "tool_call", ToolCall: &poo.ToolCallDelta{
 			Index:     0,
 			ID:        "call_1",
 			Name:      "echo",
@@ -1237,7 +1237,7 @@ func (r *partialCallReader) Next() (poo.StreamEvent, error) {
 		}}, nil
 	default:
 		<-r.ctx.Done()
-		return poo.StreamEvent{}, r.ctx.Err()
+		return poo.StreamItem{}, r.ctx.Err()
 	}
 }
 
@@ -1249,7 +1249,7 @@ func (r *partialCallReader) Close() error { return nil }
 // naturally, so a turn end that continues the run leaves it queued.
 func TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
 		{text: "the second answer"},
 		{text: "the third answer"},
 	})
@@ -1300,7 +1300,7 @@ func resumedRun(t *testing.T, tool *echoTool, maxDuration time.Duration) (*poo.S
 	hook := &blockingBeforeSettle{started: hookStarted, release: release}
 	tr := scripted([]fakeResponse{
 		{text: "the first answer"},
-		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
 	})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, tool, sink)
@@ -1381,7 +1381,7 @@ func TestAnInterruptDuringTheBatchRecordsTheReplyOnce(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			text:  "let me look",
-			calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)}},
+			calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)}},
 		},
 		{text: "the second answer"},
 	})
@@ -1484,7 +1484,7 @@ func TestThePartialMessageKeepsTheIDTheStreamAssigned(t *testing.T) {
 // failure left to the next write.
 func TestARefusedDeliveryRecordEndsTheRunWithoutAnotherRequest(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}}},
 		{text: "the second answer"},
 	})
 	sink := &failingSink{failRecord: "input.delivered"}
@@ -1615,7 +1615,7 @@ func (s *refusingSteerSink) Append(ctx context.Context, rec poo.Record) error {
 // detail.
 func TestADrainStopsWhenADeliveryWriteFails(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{text: "the first answer", calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the first answer", calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the second answer"},
 	})
 	sink := &refusingSteerSink{recordingSink: &recordingSink{}}
@@ -1785,7 +1785,7 @@ func TestARefusedInputIsNotDrainedBeforeItsQueuedRecord(t *testing.T) {
 	tool := &echoTool{result: "ok"}
 	hold := newNoteHold(tool)
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	s := newTestSession(t, testOptions(t, tr, tool, sink))

@@ -76,7 +76,7 @@ type Rule struct {
 	// Tool is the name of the tool the rule matches, exactly.
 	Tool string
 	// Class is the class of the tools the rule matches.
-	Class poo.ToolClass
+	Class poo.ToolKind
 	// CommandPrefix matches the raw command of a bash call.
 	//
 	// The prefix is a lexical heuristic and not a safety boundary: it
@@ -460,7 +460,7 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason string, 
 		Reason:      reason,
 		RepeatCount: counts,
 		Arguments:   argumentsOf(info),
-		History:     ctx.History,
+		HistoryView: ctx.HistoryView,
 		WorkingDir:  p.workingDir,
 		Interrupted: ctx.Interrupted,
 	}

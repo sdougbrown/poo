@@ -147,12 +147,12 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 			RunID:      run.id,
 			Turn:       turn,
 			Handle:     handle,
-			CallID:     call.ID,
+			CallID:     call.CallID,
 			Tool:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
 		})
 		s.finishCallWrite(run, callRecord)
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, OutcomeSkipped)
@@ -190,7 +190,7 @@ func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call 
 	entry := &issuedCall{
 		handle:    handle,
 		tool:      call.Name,
-		id:        call.ID,
+		id:        call.CallID,
 		turn:      turn,
 		arguments: call.Arguments,
 	}
@@ -211,7 +211,7 @@ func (s *Session) claimSkippedCall(run *runState, turn int, handle string, call 
 func (s *Session) handlesOf(turn, n int) []string {
 	s.mu.Lock()
 	for _, t := range s.turns {
-		if t.Session == turn && len(t.Calls) == n {
+		if t.TurnIndex == turn && len(t.Calls) == n {
 			handles := make([]string, n)
 			for i, c := range t.Calls {
 				handles[i] = c.Handle
@@ -236,7 +236,7 @@ func (s *Session) handlesOf(turn, n int) []string {
 // The caller holds the session's lock.
 func (s *Session) turnSummaryLocked(turn int, handle string) ToolCallSummary {
 	for _, t := range s.turns {
-		if t.Session != turn {
+		if t.TurnIndex != turn {
 			continue
 		}
 		for _, c := range t.Calls {

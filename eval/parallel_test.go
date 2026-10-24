@@ -155,7 +155,7 @@ func TestTheGlobalLimitHolds(t *testing.T) {
 
 func TestConcurrentSeedsKeepTheirOwnWorkdir(t *testing.T) {
 	// Two seeds of the same model run at the same time, and one seed's
-	// cleanup must not pull the workdir out from under the other.
+	// cleanup must not pull the working dir out from under the other.
 	const seeds = 3
 	if MaxParallelPerEndpoint < 2 {
 		t.Skip("the runner never runs two seeds of one endpoint at once")
@@ -165,7 +165,7 @@ func TestConcurrentSeedsKeepTheirOwnWorkdir(t *testing.T) {
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 
-	// The fake poo records the workdir it ran in, and checks that the
+	// The fake poo records the working dir it ran in, and checks that the
 	// directory is still there when it runs. Each run records its start
 	// and then waits until as many runs as the runner allows at once have started, so
 	// the runs overlap whatever the machine's load. A run that waits

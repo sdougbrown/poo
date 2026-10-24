@@ -65,7 +65,7 @@ func fix1CrashSession(t *testing.T) (poo.Tool, poo.Tool, *poo.SessionCreated) {
 		Roles:        poo.ModelRoles{Chat: &model},
 		Tools:        []poo.ToolInfo{testToolInfo(echo), testToolInfo(job)},
 		SettingsHash: testSettingsHash,
-		Model:        poo.SessionModel{ID: model.ModelID, BaseURL: model.Endpoint},
+		Model:        poo.SessionModel{ModelID: model.ModelID, BaseURL: model.Endpoint},
 		ContextLimit: model.ContextLimit,
 		ToolsMode:    "native",
 		Build:        poo.BuildInfo{Name: "poo", Version: "test"},

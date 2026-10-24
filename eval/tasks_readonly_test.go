@@ -47,7 +47,7 @@ func fixtureField(t *testing.T, content, name string) string {
 //
 // The question has to be answerable: the answer must not be in the
 // prompt, the check must verify every fact the prompt asks for, and
-// the check must not be reachable from the workdir.
+// the check must not be reachable from the working dir.
 
 // The read-only prompts must not hand the answer to the model.
 //

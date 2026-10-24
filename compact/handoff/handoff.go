@@ -72,7 +72,7 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 // The strategy acts when the window is nearly full, and only after the
 // run has asked the model something: a handoff is a note about work
 // that happened.
-func (c *Compactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	if budget.Turns < 1 {
 		// The run has not asked the model anything yet, so there is
 		// nothing to hand over.

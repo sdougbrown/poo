@@ -226,7 +226,7 @@ func TestTheEvidenceTurnsHoldTheRecentConversation(t *testing.T) {
 		poo.ToolResultMessage("c1", "read", "the file's contents", false),
 		poo.NewTextMessage(poo.RoleUser, "thanks"),
 	}
-	view := poo.NewHistory(messages, nil, nil)
+	view := poo.NewHistoryView(messages, nil, nil)
 
 	turns := poo.EvidenceTurns(view, 0)
 	if len(turns) != 4 {

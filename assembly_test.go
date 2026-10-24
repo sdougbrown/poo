@@ -21,7 +21,7 @@ import (
 type eventsTransport struct {
 	mu     sync.Mutex
 	served int
-	events []poo.StreamEvent
+	events []poo.StreamItem
 }
 
 func (t *eventsTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
@@ -29,7 +29,7 @@ func (t *eventsTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.
 	t.served++
 	events := t.events
 	if t.served > 1 {
-		events = []poo.StreamEvent{
+		events = []poo.StreamItem{
 			{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "the answer"}},
 			{Kind: "finish", FinishReason: poo.FinishStop},
 		}
@@ -43,27 +43,27 @@ func (t *eventsTransport) Fork(ctx context.Context, prev poo.Rendered, appended 
 }
 
 // callEvents builds the events for one streamed call fragment.
-func callEvents(index int, id, name string, arguments string, complete bool) []poo.StreamEvent {
-	ev := poo.StreamEvent{Kind: "tool_call", ToolCall: &poo.ToolCallDelta{
+func callEvents(index int, id, name string, arguments string, complete bool) []poo.StreamItem {
+	ev := poo.StreamItem{Kind: "tool_call", ToolCall: &poo.ToolCallDelta{
 		Index:     index,
 		ID:        id,
 		Name:      name,
 		Arguments: json.RawMessage(arguments),
 		Complete:  complete,
 	}}
-	return []poo.StreamEvent{ev}
+	return []poo.StreamItem{ev}
 }
 
 // finishEvents closes a response the way a provider does.
-func finishEvents() []poo.StreamEvent {
-	return []poo.StreamEvent{
+func finishEvents() []poo.StreamItem {
+	return []poo.StreamItem{
 		{Kind: "finish", FinishReason: poo.FinishToolCalls},
 		{Kind: "usage", Usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 10}},
 	}
 }
 
 // runOnce drives one run whose single response is the given events.
-func runOnce(t *testing.T, events []poo.StreamEvent) []poo.ToolCallRecord {
+func runOnce(t *testing.T, events []poo.StreamItem) []poo.ToolCallRecord {
 	t.Helper()
 	tr := &eventsTransport{events: events}
 	sink := &recordingSink{}
@@ -86,8 +86,8 @@ func runOnce(t *testing.T, events []poo.StreamEvent) []poo.ToolCallRecord {
 	return calls
 }
 
-func toolCallEvents(fragments ...[]poo.StreamEvent) []poo.StreamEvent {
-	var out []poo.StreamEvent
+func toolCallEvents(fragments ...[]poo.StreamItem) []poo.StreamItem {
+	var out []poo.StreamItem
 	for _, f := range fragments {
 		out = append(out, f...)
 	}

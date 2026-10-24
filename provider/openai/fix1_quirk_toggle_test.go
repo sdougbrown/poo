@@ -15,10 +15,10 @@ import (
 // the quirk then writes true over it, because the quirks are applied
 // after the descriptor's controls and setRaw merges the leaf.
 func TestTheDescriptorReasoningBeatsTheQuirk(t *testing.T) {
-	tr := New(Config{
+	tr := New(Options{
 		BaseURL: "http://127.0.0.1:1/v1",
 		Model:   "gemma4",
-		Info: poo.ModelInfo{
+		ModelInfo: poo.ModelInfo{
 			Name:      "gemma4",
 			Reasoning: poo.ReasoningControl{Mode: poo.ReasoningToggle, Param: poo.ReasoningPathToggle},
 			Quirks:    []string{QuirkChatTemplateThinking},

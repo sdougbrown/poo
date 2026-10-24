@@ -38,7 +38,7 @@ func jobCall(text string, background bool) poo.ToolCall {
 		args["background"] = true
 	}
 	raw, _ := json.Marshal(args)
-	return poo.ToolCall{ID: "call_" + text, Name: "job", Arguments: raw}
+	return poo.ToolCall{CallID: "call_" + text, Name: "job", Arguments: raw}
 }
 
 // waitFor polls a condition until it holds.
@@ -153,7 +153,7 @@ func TestTheBackgroundArgumentIsStrippedBeforePrepare(t *testing.T) {
 func TestANonBooleanBackgroundArgumentIsRecoverable(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{{
-			ID:        "call_1",
+			CallID:    "call_1",
 			Name:      "job",
 			Arguments: json.RawMessage(`{"text":"one","background":"yes"}`),
 		}}},
@@ -216,7 +216,7 @@ func TestASchemaThatDefinesBackgroundFailsRegistration(t *testing.T) {
 func TestBackgroundAlwaysMakesEveryCallAJob(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{{
-			ID:        "call_1",
+			CallID:    "call_1",
 			Name:      "job",
 			Arguments: json.RawMessage(`{"text":"one"}`),
 		}}},
@@ -447,7 +447,7 @@ func (t *ownBackgroundTool) Call(ctx context.Context, in poo.Prepared, env poo.T
 // job. A never-background tool may define its own background property.
 func TestANeverToolKeepsItsOwnBackgroundArgument(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "own", Arguments: []byte(`{"background":true}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "own", Arguments: []byte(`{"background":true}`)}}},
 		{text: "done"},
 	})
 	tool := &ownBackgroundTool{}
@@ -478,7 +478,7 @@ func TestANeverToolKeepsItsOwnBackgroundArgument(t *testing.T) {
 func TestANullBackgroundArgumentIsRefused(t *testing.T) {
 	tr := scripted([]fakeResponse{{
 		calls: []poo.ToolCall{{
-			ID:        "null",
+			CallID:    "null",
 			Name:      "job",
 			Arguments: json.RawMessage(`{"text":"one","background":null}`),
 		}},

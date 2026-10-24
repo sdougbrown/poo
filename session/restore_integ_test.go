@@ -83,7 +83,7 @@ func testHeader(id string, tool poo.Tool) *poo.SessionCreated {
 		Roles:        poo.ModelRoles{Chat: &model},
 		Tools:        []poo.ToolInfo{testToolInfo(tool)},
 		SettingsHash: testSettingsHash,
-		Model:        poo.SessionModel{ID: model.ModelID, BaseURL: model.Endpoint},
+		Model:        poo.SessionModel{ModelID: model.ModelID, BaseURL: model.Endpoint},
 		ContextLimit: model.ContextLimit,
 		ToolsMode:    "native",
 		Build:        poo.BuildInfo{Name: "poo", Version: "test"},
@@ -138,7 +138,7 @@ func (t *blockingTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEn
 // blockingArgs is a prepared call of the blocking tool.
 type blockingArgs struct{}
 
-// Summary describes the call.
+// Listing describes the call.
 func (blockingArgs) Summary() string { return "the blocking call" }
 
 // runBlockedTurn creates a session and runs a turn that stops in the
@@ -197,8 +197,8 @@ func TestARecoveredJobIsQueuedAgain(t *testing.T) {
 		t.Fatalf("the restore queued %d job results, want 1", len(resumed.Restored.Jobs))
 	}
 	queued := resumed.Restored.Jobs[0]
-	if queued.Job != "j1" {
-		t.Errorf("the queued result is for %q, want j1", queued.Job)
+	if queued.JobID != "j1" {
+		t.Errorf("the queued result is for %q, want j1", queued.JobID)
 	}
 	if queued.Outcome != poo.OutcomeInterrupted {
 		t.Errorf("the queued result's outcome is %q, want %q", queued.Outcome, poo.OutcomeInterrupted)

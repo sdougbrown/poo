@@ -67,7 +67,7 @@ func TestARestoredSessionContinuesTheJobIDs(t *testing.T) {
 		for _, rec := range recs {
 			if started, ok := rec.(*poo.JobStarted); ok {
 				sawStart = true
-				if started.Job != "j1" {
+				if started.JobID != "j1" {
 					// A job id past the recorded one: the counter continued.
 					return
 				}
@@ -105,11 +105,11 @@ func TestAJobOfARestoredSessionIsRecoveredOnTheNextLoad(t *testing.T) {
 	// its result again.
 	ends := 0
 	for _, rec := range loaded.Records {
-		if e, ok := rec.(*poo.JobEnded); ok && e.Job == "j1" {
+		if e, ok := rec.(*poo.JobEnded); ok && e.JobID == "j1" {
 			ends++
 		}
 	}
-	if len(loaded.Requeue) != 1 {
-		t.Errorf("the load queues %d job results, want the recovered job's result (job.ended records for j1: %d)", len(loaded.Requeue), ends)
+	if len(loaded.Jobs) != 1 {
+		t.Errorf("the load queues %d job results, want the recovered job's result (job.ended records for j1: %d)", len(loaded.Jobs), ends)
 	}
 }

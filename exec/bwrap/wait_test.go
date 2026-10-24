@@ -13,15 +13,16 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/exec/bwrap"
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
 // reviewTimeoutCall runs a command through the tool with a timeout and
 // returns the observation.
-func reviewTimeoutCall(t *testing.T, exec *bwrap.Executor, command, dir string, timeout time.Duration) (map[string]any, time.Duration) {
+func reviewTimeoutCall(t *testing.T, executor *bwrap.Executor, command, dir string, timeout time.Duration) (map[string]any, time.Duration) {
 	t.Helper()
-	tool := &bash.Tool{Timeout: timeout, Executor: exec}
+	tool := &bash.Tool{Timeout: timeout, Executor: executor}
 	raw, err := json.Marshal(map[string]string{"command": command})
 	if err != nil {
 		t.Fatalf("marshalling: %v", err)
@@ -50,12 +51,12 @@ func reviewTimeoutCall(t *testing.T, exec *bwrap.Executor, command, dir string, 
 // returns: the plan says Wait returns after everything the command
 // started has exited.
 func TestTheSandboxIsGoneWhenWaitReturns(t *testing.T) {
-	exec, err := bwrap.New(bwrap.Options{})
+	executor, err := bwrap.New(bwrap.Options{})
 	if err != nil {
 		t.Skipf("skip: %v", err)
 	}
 	dir := t.TempDir()
-	obs, elapsed := reviewTimeoutCall(t, exec,
+	obs, elapsed := reviewTimeoutCall(t, executor,
 		"readlink /proc/self/ns/pid > ns.txt; sleep 300 & echo $! > pid.txt; echo started; wait",
 		dir, 300*time.Millisecond)
 	t.Logf("elapsed %v, observation %v", elapsed, obs)
@@ -103,10 +104,10 @@ func reviewPIDsInNamespace(ns string) []int {
 // comes, so Start returns on the status stream's end rather than its
 // deadline, and the failed start is the wait's error.
 func TestAStartThatLosesTheLauncherReportsThroughTheWait(t *testing.T) {
-	exec := newExecutor(t, bwrap.Options{Binary: "/bin/false"})
+	executor := newExecutor(t, bwrap.Options{Binary: "/bin/false"})
 	dir := t.TempDir()
 	started := time.Now()
-	p, err := exec.Start(context.Background(), bash.Command{
+	p, err := executor.Start(context.Background(), exec.Command{
 		Argv: []string{"/bin/true"},
 		Dir:  dir,
 	}, io.Discard)

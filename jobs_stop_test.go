@@ -80,11 +80,11 @@ func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
 		{calls: []poo.ToolCall{jobCall("one", true)}},
 		{calls: []poo.ToolCall{
 			{
-				ID:        "call_2",
+				CallID:    "call_2",
 				Name:      "cancel_job",
 				Arguments: json.RawMessage(`{"job":"j1"}`),
 			},
-			{ID: "call_3", Name: "echo", Arguments: json.RawMessage(`{"text":"hold"}`)},
+			{CallID: "call_3", Name: "echo", Arguments: json.RawMessage(`{"text":"hold"}`)},
 		}},
 		{text: "the answer"},
 	})
@@ -336,7 +336,7 @@ func TestTheJobsToolListsTheRunningJobs(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
 		{calls: []poo.ToolCall{{
-			ID:        "call_2",
+			CallID:    "call_2",
 			Name:      "jobs",
 			Arguments: json.RawMessage(`{}`),
 		}}},
@@ -481,8 +481,8 @@ func TestTheJobHandleSurvivesTheTurnEnd(t *testing.T) {
 	if started == nil {
 		t.Fatal("the log holds no job.started record")
 	}
-	if started.Job != "j1" {
-		t.Errorf("the job is %q, want j1", started.Job)
+	if started.JobID != "j1" {
+		t.Errorf("the job is %q, want j1", started.JobID)
 	}
 	if started.Handle != "r1" {
 		t.Errorf("the job's handle is %q, want r1", started.Handle)
@@ -592,7 +592,7 @@ func TestACancelWithASynchronousCallAndAJobSettlesTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{
 			jobCall("one", true),
-			{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)},
+			{CallID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)},
 		}},
 		{text: "the woken answer"},
 	})
@@ -658,7 +658,7 @@ func TestAFinishWithAJobRunningSettlesFinished(t *testing.T) {
 		{calls: []poo.ToolCall{
 			jobCall("one", true),
 			{
-				ID:        "call_2",
+				CallID:    "call_2",
 				Name:      "finish",
 				Arguments: json.RawMessage(`{"result":{"answer":"42"}}`),
 			},

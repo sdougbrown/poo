@@ -32,10 +32,6 @@ import (
 
 // The names the settings and the profiles use.
 const (
-	// RoleChat is the name of the chat role.
-	RoleChat = "chat"
-	// RoleDecider is the name of the decider role.
-	RoleDecider = "decider"
 	// BaseSection is the name of the prompt's base section.
 	BaseSection = "base"
 	// ToolBash is the name of the bash tool.
@@ -588,7 +584,7 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			Endpoint:     model.Endpoint,
 			ModelID:      model.ModelID,
 			API:          poo.API(model.API),
-			ToolsMode:    poo.ToolsMode(model.ToolsMode),
+			ToolsMode:    model.ToolsMode,
 			Ops:          ops(model.Ops),
 			Inputs:       modalities(model.Inputs),
 			ContextLimit: model.ContextLimit,
@@ -770,7 +766,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	if r.needsExecutor() {
 		executor, err := opts.Executors.New(executorName, exec.Options{
 			Masker: protected,
-			Sandbox: exec.Sandbox{
+			Sandbox: exec.SandboxOptions{
 				DisableNetwork: settings.Tools.Bwrap.Network != nil && !*settings.Tools.Bwrap.Network,
 				ROBinds:        settings.Tools.Bwrap.ROBinds,
 				RWBinds:        settings.Tools.Bwrap.RWBinds,
@@ -824,7 +820,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		}
 		rules = append(rules, perm.Rule{
 			Tool:          rule.Tool,
-			Class:         poo.ToolClass(rule.Class),
+			Class:         poo.ToolKind(rule.Class),
 			CommandPrefix: rule.CommandPrefix,
 			Action:        perm.Action(rule.Action),
 		})
@@ -954,7 +950,7 @@ func (r *Runtime) newDeciderAsker(model poo.ModelInfo) (perm.Asker, error) {
 	if value := r.Settings.Permission.Decide.Deny; value != nil {
 		askerOptions.Deny = *value
 	}
-	if value := r.Settings.Permission.Decide.TimeoutMs; value != nil {
+	if value := r.Settings.Permission.Decide.TimeoutMS; value != nil {
 		askerOptions.Timeout = time.Duration(*value) * time.Millisecond
 	}
 	return permissive.New(decider, askerOptions), nil
@@ -1046,7 +1042,7 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 		r.Options.Jobs.OnIdle = poo.OnIdle(*settings.Jobs.OnIdle)
 	}
 	if settings.Tools.Bash.TimeoutS != nil {
-		r.Options.Settings.BashTimeoutSeconds = *settings.Tools.Bash.TimeoutS
+		r.Options.Settings.BashTimeoutS = *settings.Tools.Bash.TimeoutS
 	}
 	r.Options.Settings.ObservationCapChars = caps.Observation(model.ContextLimit)
 	r.Options.Settings.ReadOutputCapChars = caps.ReadOutput(model.ContextLimit)
@@ -1404,12 +1400,12 @@ func (r *Runtime) DeciderModel() (poo.ModelInfo, error) {
 // environment and from nowhere else.
 func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	apiKey := r.apiKey(model.Name)
-	transport := openai.New(openai.Config{
+	transport := openai.New(openai.Options{
 		BaseURL:    model.Endpoint,
 		Model:      model.ModelID,
 		APIKey:     apiKey,
 		ToolsMode:  string(model.Tools.Mode),
-		Info:       model,
+		ModelInfo:  model,
 		Sampling:   model.Sampling,
 		HTTPClient: r.httpClient,
 	})
@@ -1463,8 +1459,8 @@ func (r *Runtime) DeciderFor(name string) (poo.ModelInfo, decide.Decider, error)
 // question is not a decider.
 func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 	timeout := time.Duration(0)
-	if r.Settings.Decider.TimeoutMs != nil {
-		timeout = time.Duration(*r.Settings.Decider.TimeoutMs) * time.Millisecond
+	if r.Settings.Decider.TimeoutMS != nil {
+		timeout = time.Duration(*r.Settings.Decider.TimeoutMS) * time.Millisecond
 	}
 	decider, err := openai.NewSystemOneDeciderFor(model, openai.SystemOneConfig{
 		APIKey:     r.apiKey(model.Name),

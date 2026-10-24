@@ -31,7 +31,7 @@ func (h *fix2JobCompletionHook) AfterTool(ctx poo.HookContext, info poo.ToolCall
 func TestCloseFinishesJobHookBeforeReturning(t *testing.T) {
 	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
 	tool.SetResult("output")
-	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{ID: "jcall", Name: "job", Arguments: []byte(`{}`)}}}})
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{CallID: "jcall", Name: "job", Arguments: []byte(`{}`)}}}})
 	sink := &recordingSink{}
 	h := &fix2JobCompletionHook{entered: make(chan struct{}), release: make(chan struct{})}
 	opts := testOptions(t, tr, nil, sink)

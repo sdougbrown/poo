@@ -22,7 +22,7 @@ func TestASteerWithADeliveryNoteCarriesIt(t *testing.T) {
 		{
 			text: "the first answer",
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -96,7 +96,7 @@ func TestADeliveryNoteAtTheEndAddsNothing(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -137,7 +137,7 @@ func TestADeliveryNoteOfZeroSaysNothingWasSeen(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -234,7 +234,7 @@ func TestTheNoteCountsCodePointsOverTheTextBlocks(t *testing.T) {
 			text:     "héllo wörld",
 			thinking: "a long thought that is not counted",
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -281,7 +281,7 @@ func TestTheQuoteEscapesTheQuotesAndNewlines(t *testing.T) {
 		{
 			text: "he said \"hi\"\nthen left",
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -465,7 +465,7 @@ func TestTheDeliveryNoteReachesTheModel(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			text:  "the first answer",
-			calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
+			calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
 		},
 		{text: "the second answer"},
 	})

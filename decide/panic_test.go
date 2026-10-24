@@ -19,8 +19,8 @@ func (panickingDecider) Requests() int { panic("requests failure") }
 func TestRecordedDeciderPanicsDefer(t *testing.T) {
 	for _, metadata := range []bool{false, true} {
 		t.Run(map[bool]string{false: "answer", true: "metadata"}[metadata], func(t *testing.T) {
-			var records []Record
-			d := Recorded(panickingDecider{metadata: metadata}, SinkFunc(func(_ context.Context, r Record) error { records = append(records, r); return nil }), "test")
+			var records []Decision
+			d := Recorded(panickingDecider{metadata: metadata}, SinkFunc(func(_ context.Context, r Decision) error { records = append(records, r); return nil }), "test")
 			answers, err := d.Decide(context.Background(), nil, "", nil)
 			if !errors.Is(err, ErrDeferred) || len(answers) != 0 {
 				t.Fatalf("answers=%v err=%v", answers, err)

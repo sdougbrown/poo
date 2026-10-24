@@ -396,18 +396,18 @@ func (t *Transport) ClosedStreams() int {
 }
 
 // Next returns the next piece of the scripted response.
-func (r *reader) Next() (poo.StreamEvent, error) {
+func (r *reader) Next() (poo.StreamItem, error) {
 	for {
 		switch r.stage {
 		case 0:
 			r.stage++
 			if r.turn.Thinking != "" {
-				return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "thinking", Text: r.turn.Thinking}}, nil
+				return poo.StreamItem{Kind: "delta", Delta: &poo.Delta{Kind: "thinking", Text: r.turn.Thinking}}, nil
 			}
 		case 1:
 			r.stage++
 			if r.turn.Text != "" {
-				return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: r.turn.Text}}, nil
+				return poo.StreamItem{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: r.turn.Text}}, nil
 			}
 		case 2:
 			if len(r.turn.Calls) == 0 {
@@ -421,7 +421,7 @@ func (r *reader) Next() (poo.StreamEvent, error) {
 			if id == "" {
 				id = fmt.Sprintf("pootest_%d_%d", r.index, r.callIndex)
 			}
-			return poo.StreamEvent{
+			return poo.StreamItem{
 				Kind: "tool_call",
 				ToolCall: &poo.ToolCallDelta{
 					Index:     r.callIndex - 1,
@@ -445,7 +445,7 @@ func (r *reader) Next() (poo.StreamEvent, error) {
 					finish = "stop"
 				}
 			}
-			return poo.StreamEvent{Kind: "finish", FinishReason: poo.FinishReason(finish)}, nil
+			return poo.StreamItem{Kind: "finish", FinishReason: poo.FinishReason(finish)}, nil
 		case 4:
 			r.stage++
 			if r.turn.InputTokens == 0 && r.turn.OutputTokens == 0 {
@@ -453,7 +453,7 @@ func (r *reader) Next() (poo.StreamEvent, error) {
 				// replay writes no zero-token usage record.
 				continue
 			}
-			return poo.StreamEvent{
+			return poo.StreamItem{
 				Kind: "usage",
 				Usage: &poo.UsageReport{
 					InputTokens:  r.turn.InputTokens,
@@ -461,7 +461,7 @@ func (r *reader) Next() (poo.StreamEvent, error) {
 				},
 			}, nil
 		default:
-			return poo.StreamEvent{}, io.EOF
+			return poo.StreamItem{}, io.EOF
 		}
 	}
 }

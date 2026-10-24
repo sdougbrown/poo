@@ -205,7 +205,7 @@ func TestAPromptThatFailsInTheSessionsVariantFailsTheSession(t *testing.T) {
 		Mode:         "ephemeral",
 		CreatedAt:    "2026-10-22T12:00:00Z",
 		WorkingDir:   t.TempDir(),
-		Model:        poo.SessionModel{ID: "test-model"},
+		Model:        poo.SessionModel{ModelID: "test-model"},
 		ContextLimit: 32768,
 		Profile:      "code",
 		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},

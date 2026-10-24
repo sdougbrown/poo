@@ -99,15 +99,15 @@ func TestTheLiveEvaluationOfThePermissionAsker(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			history := poo.NewHistory([]poo.Message{
+			history := poo.NewHistoryView([]poo.Message{
 				poo.NewTextMessage(poo.RoleUser, tt.request),
 			}, nil, nil)
 			decision, err := asker.Ask(context.Background(), perm.Ask{
-				Tool:    tt.tool,
-				Summary: tt.summary,
-				Class:   poo.ClassSideEffecting,
-				Reason:  poo.ReasonPolicy,
-				History: history,
+				Tool:        tt.tool,
+				Summary:     tt.summary,
+				Class:       poo.ClassSideEffecting,
+				Reason:      poo.ReasonPolicy,
+				HistoryView: history,
 			})
 			if err != nil {
 				// An endpoint that is unavailable is a failure of the

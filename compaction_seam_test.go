@@ -22,7 +22,7 @@ import (
 type compactionCompactor struct {
 	mu sync.Mutex
 	// should answers ShouldCompact.
-	should func(view poo.View, budget poo.Budget) bool
+	should func(view poo.View, budget poo.ContextBudget) bool
 	// compaction answers Compact.
 	compaction func(view poo.View) (poo.Compaction, error)
 	// views holds the views the compactor saw, in order.
@@ -32,7 +32,7 @@ type compactionCompactor struct {
 }
 
 // ShouldCompact answers the scripted decision.
-func (c *compactionCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+func (c *compactionCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.should == nil {
@@ -76,8 +76,8 @@ func (c *compactionCompactor) View() poo.View {
 //
 // A compaction that replaces a range of turns needs the turns to
 // exist, and the gate is only reached after a turn that did something.
-func afterTurns(n int) func(poo.View, poo.Budget) bool {
-	return func(view poo.View, budget poo.Budget) bool {
+func afterTurns(n int) func(poo.View, poo.ContextBudget) bool {
+	return func(view poo.View, budget poo.ContextBudget) bool {
 		return len(view.Turns()) >= n
 	}
 }
@@ -98,7 +98,7 @@ func TestTheReplacementIsAppliedAndTheOriginalsAreKept(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -165,7 +165,7 @@ func TestAnEmptyCompactionIsRejected(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -219,7 +219,7 @@ func TestANonContiguousCutIsRejected(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -269,8 +269,8 @@ func TestACutOverARemovedTurnIsRejected(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
-		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -308,7 +308,7 @@ func TestTheRewriteReplacesTheResultAndKeepsThePairing(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -371,7 +371,7 @@ func TestARewriteWithoutTheMarkerIsRejected(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -429,7 +429,7 @@ func TestAWindowFromAnotherTransportIsRejected(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -451,7 +451,7 @@ func TestAWindowFromAnotherTransportIsRejected(t *testing.T) {
 // provider window becomes the view, and the marker message says so.
 func TestTheWindowBecomesTheViewPlusTheMarker(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	tr.SetWindow(poo.ProviderWindow{Items: []poo.ContentBlock{{
@@ -513,7 +513,7 @@ func TestTheEndSettlesWithTheHandoff(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -571,7 +571,7 @@ func TestTheBudgetIsRebasedOntoTheNewView(t *testing.T) {
 	// The first answer is long enough to fill the window.
 	long := strings.Repeat("x", 8000)
 	tr := scripted([]fakeResponse{
-		{text: long, calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: long, calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -597,7 +597,7 @@ func TestTheBudgetIsRebasedOntoTheNewView(t *testing.T) {
 func TestTheHardLimitSettlesWithoutACompaction(t *testing.T) {
 	long := strings.Repeat("x", 8000)
 	tr := scripted([]fakeResponse{
-		{text: long, calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: long, calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -626,7 +626,7 @@ func TestTheCompactorsFailureBelowTheHardLimitContinues(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -656,7 +656,7 @@ func TestTheCompactorsFailureAtTheHardLimitSettles(t *testing.T) {
 	}
 	long := strings.Repeat("x", 8000)
 	tr := scripted([]fakeResponse{
-		{text: long, calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: long, calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -693,7 +693,7 @@ func TestTheCompactionRecordCarriesTheCutAndTheReplacement(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -732,9 +732,9 @@ func TestTheCompactionRecordCarriesTheCutAndTheReplacement(t *testing.T) {
 // grows across the runs of a session.
 func TestTheHandlesNumberTheResultsAndGrowAcrossRuns(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
-		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
 		{text: "the second answer"},
 	})
 	sink := &recordingSink{}
@@ -770,7 +770,7 @@ func TestAHandleSurvivesTheCompaction(t *testing.T) {
 	var second poo.View
 	calls := 0
 	compactor := &compactionCompactor{
-		should: func(view poo.View, budget poo.Budget) bool {
+		should: func(view poo.View, budget poo.ContextBudget) bool {
 			return len(view.Turns()) >= 1
 		},
 		compaction: func(view poo.View) (poo.Compaction, error) {
@@ -799,8 +799,8 @@ func TestAHandleSurvivesTheCompaction(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
-		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -839,7 +839,7 @@ func TestTheDeliveryNoteRendersAfterTheCompaction(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{text: "the first answer", calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the first answer", calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -889,7 +889,7 @@ func TestAJobFinishingDuringTheCompactingIsNotInTheSnapshot(t *testing.T) {
 	compacting := make(chan struct{})
 	var snapshot poo.View
 	compactor := &compactionCompactor{
-		should: func(view poo.View, budget poo.Budget) bool {
+		should: func(view poo.View, budget poo.ContextBudget) bool {
 			return len(view.Turns()) >= 1
 		},
 		compaction: func(view poo.View) (poo.Compaction, error) {
@@ -907,7 +907,7 @@ func TestAJobFinishingDuringTheCompactingIsNotInTheSnapshot(t *testing.T) {
 		},
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "job", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "job", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -968,7 +968,7 @@ func TestAJobHandleSurvivesTheCompaction(t *testing.T) {
 	}
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
-		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
 		{text: "the answer"},
 	})
 	sink := &recordingSink{}
@@ -1048,7 +1048,7 @@ func (t *plainTransport) Fork(ctx context.Context, prev poo.Rendered, appended [
 // session's own transport, through its native compaction.
 func TestAWindowFromATransportThatCannotCompactIsRejected(t *testing.T) {
 	inner := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	tr := &plainTransport{inner: inner}

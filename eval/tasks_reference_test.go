@@ -66,7 +66,7 @@ func TestTheCodingChecksFailBeforeTheFixAndPassAfterIt(t *testing.T) {
 	}
 }
 
-// packageInit returns the package's __init__.py in a workdir.
+// packageInit returns the package's __init__.py in a working dir.
 //
 // The package is the directory beside the tests directory.
 func packageInit(t *testing.T, workdir string) string {

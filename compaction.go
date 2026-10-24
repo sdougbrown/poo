@@ -11,7 +11,7 @@ import "context"
 type Compactor interface {
 	// ShouldCompact reports whether the view should be compacted before
 	// the next request.
-	ShouldCompact(view View, budget Budget) bool
+	ShouldCompact(view View, budget ContextBudget) bool
 	// Compact compacts the view. The fork is the only way to reach the
 	// provider: a strategy that needs the model to write something
 	// forks the last request.

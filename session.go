@@ -797,11 +797,11 @@ func (s *Session) ActiveRunID() string {
 	return s.run.id
 }
 
-// RunResult returns the outcome of a run that has settled.
+// Result returns the outcome of a run that has settled.
 //
 // It reports false for a run the session does not know: a run that is
 // still going and a run that never was are both unknown to it.
-func (s *Session) RunResult(runID string) (Result, bool) {
+func (s *Session) Result(runID string) (Result, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result, ok := s.runResults[runID]
@@ -948,10 +948,10 @@ func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn in
 		Context:     ctx,
 		SessionID:   s.opts.SessionID,
 		RunID:       runID,
-		Job:         job,
+		JobID:       job,
 		Turn:        turn,
 		Interrupted: interrupted,
-		History:     s.view(),
+		HistoryView: s.view(),
 		Budget:      s.budget(),
 		Decider:     s.Decider(),
 	}
@@ -961,7 +961,7 @@ func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn in
 func (s *Session) view() View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return NewHistory(s.modelMessagesLocked(), s.results, s.turns)
+	return NewHistoryView(s.modelMessagesLocked(), s.results, s.turns)
 }
 
 // modelMessagesLocked returns the messages in the order the model reads
@@ -992,7 +992,7 @@ func (s *Session) modelMessagesLocked() []Message {
 }
 
 // budget returns the run's context budget.
-func (s *Session) budget() Budget {
+func (s *Session) budget() ContextBudget {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.budgetLocked()
@@ -1001,12 +1001,12 @@ func (s *Session) budget() Budget {
 // budgetLocked returns the run's context budget.
 //
 // The caller holds the session's lock.
-func (s *Session) budgetLocked() Budget {
+func (s *Session) budgetLocked() ContextBudget {
 	turns := 0
 	if s.run != nil {
 		turns = s.run.turn
 	}
-	return Budget{
+	return ContextBudget{
 		ContextLimit:   s.opts.Model.ContextLimit,
 		EstimatedInput: s.estimatedInputLocked(),
 		NoticeRatio:    s.opts.NoticeRatio,

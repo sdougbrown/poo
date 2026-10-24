@@ -46,7 +46,7 @@ func TestTheRunMovesThroughTheStatesItUses(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -147,8 +147,8 @@ func TestATruncatedResponseRunsTheCompleteCalls(t *testing.T) {
 		{
 			finish: poo.FinishLength,
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"whole"}`)},
-				{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"half`)},
+				{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"whole"}`)},
+				{CallID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"half`)},
 			},
 		},
 		{text: "finished"},
@@ -221,8 +221,8 @@ func TestABatchCompletesBeforeHasToolCallStopsTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
-				{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
+				{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
+				{CallID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
 			},
 		},
 		{text: "finished"},
@@ -252,7 +252,7 @@ func TestHasToolCallIgnoresErroredResults(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
+				{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
 			},
 		},
 		{text: "finished"},
@@ -357,9 +357,9 @@ func TestTheContinuationPredicateCoversTheResultKinds(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "denied", Arguments: json.RawMessage(`{}`)},
-				{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
-				{ID: "call_3", Name: "short", Arguments: json.RawMessage(`{}`)},
+				{CallID: "call_1", Name: "denied", Arguments: json.RawMessage(`{}`)},
+				{CallID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
+				{CallID: "call_3", Name: "short", Arguments: json.RawMessage(`{}`)},
 			},
 		},
 		{text: "the answer"},
@@ -518,7 +518,7 @@ func TestMaxTurnsBeatsAnAfterTurnStop(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -573,7 +573,7 @@ func TestTheFinishToolSettlesTheRunWithItsResult(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "finish",
 				Arguments: json.RawMessage(`{"result":{"answer":"42"}}`),
 			}},
@@ -611,7 +611,7 @@ func TestAnInvalidFinishResultIsARecoverableError(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "finish",
 				Arguments: json.RawMessage(`{"result":{"wrong":"yes"}}`),
 			}},
@@ -658,8 +658,8 @@ func TestTheOtherCallsInTheBatchCompleteFirst(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
-				{ID: "call_2", Name: "finish", Arguments: json.RawMessage(`{"result":{"answer":"42"}}`)},
+				{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
+				{CallID: "call_2", Name: "finish", Arguments: json.RawMessage(`{"result":{"answer":"42"}}`)},
 			},
 		},
 		{text: "finished"},
@@ -689,7 +689,7 @@ func TestTheMaxRunTokensBudgetSettlesTheRun(t *testing.T) {
 		{
 			usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 20},
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -745,7 +745,7 @@ func TestTheMaxDurationBudgetFiringMidToolSettlesTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -854,8 +854,8 @@ func TestAReadOnlyBatchRunsInParallel(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
-				{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
+				{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
+				{CallID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
 			},
 		},
 		{text: "finished"},
@@ -907,8 +907,8 @@ func TestAMixedBatchRunsSequentially(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{
-				{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
-				{ID: "call_2", Name: "read", Arguments: json.RawMessage(`{"text":"two"}`)},
+				{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
+				{CallID: "call_2", Name: "read", Arguments: json.RawMessage(`{"text":"two"}`)},
 			},
 		},
 		{text: "finished"},
@@ -1135,7 +1135,7 @@ func TestATruncatedTurnWhoseCallsAreAllIncompleteReachesBeforeSettle(t *testing.
 	tr := scripted([]fakeResponse{{
 		text:   "writing",
 		finish: poo.FinishLength,
-		calls:  []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hel`)}},
+		calls:  []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hel`)}},
 	}})
 	tool := &echoTool{result: "echoed"}
 	hook := &recordingBeforeSettle{}
@@ -1165,7 +1165,7 @@ func TestATruncatedCallThatFailsPrepareIsIncomplete(t *testing.T) {
 	tr := scripted([]fakeResponse{{
 		text:   "writing",
 		finish: poo.FinishLength,
-		calls:  []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"half"}`)}},
+		calls:  []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"half"}`)}},
 	}, {text: "the second answer"}})
 	tool := &echoTool{result: "echoed", prepareErr: errors.New("the arguments are wrong")}
 	hook := &recordingBeforeSettle{}
@@ -1192,7 +1192,7 @@ func TestATruncatedCallThatFailsPrepareIsIncomplete(t *testing.T) {
 // settled -> requesting, and every move it makes is listed.
 func TestEveryTransitionOfAMultiRunSessionIsInTheTable(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{}))
@@ -1265,7 +1265,7 @@ type signalReader struct {
 }
 
 // Next signals the first read.
-func (r *signalReader) Next() (poo.StreamEvent, error) {
+func (r *signalReader) Next() (poo.StreamItem, error) {
 	r.once.Do(func() { close(r.reading) })
 	return r.fakeReader.Next()
 }
@@ -1297,7 +1297,7 @@ func TestARunThatWindsDownAfterTheSettleDoesNotMoveTheState(t *testing.T) {
 func TestHasToolCallIgnoresASkippedCall(t *testing.T) {
 	tr := scripted([]fakeResponse{{
 		finish: poo.FinishLength,
-		calls:  []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":`)}},
+		calls:  []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":`)}},
 	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}

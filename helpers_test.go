@@ -61,7 +61,7 @@ func (r fakeResponse) turn() pootest.Turn {
 		Err:      r.err,
 	}
 	for _, c := range r.calls {
-		t.Calls = append(t.Calls, pootest.Call{Name: c.Name, Arguments: c.Arguments, ID: c.ID})
+		t.Calls = append(t.Calls, pootest.Call{Name: c.Name, Arguments: c.Arguments, ID: c.CallID})
 	}
 	if r.usage != nil {
 		t.InputTokens = r.usage.InputTokens
@@ -71,26 +71,26 @@ func (r fakeResponse) turn() pootest.Turn {
 }
 
 // events turns a response into the events a stream yields.
-func (r fakeResponse) events() []poo.StreamEvent {
-	var events []poo.StreamEvent
+func (r fakeResponse) events() []poo.StreamItem {
+	var events []poo.StreamItem
 	if r.thinking != "" {
-		events = append(events, poo.StreamEvent{
+		events = append(events, poo.StreamItem{
 			Kind:  "delta",
 			Delta: &poo.Delta{Kind: "thinking", Text: r.thinking},
 		})
 	}
 	if r.text != "" {
-		events = append(events, poo.StreamEvent{
+		events = append(events, poo.StreamItem{
 			Kind:  "delta",
 			Delta: &poo.Delta{Kind: "text", Text: r.text},
 		})
 	}
 	for _, c := range r.calls {
-		events = append(events, poo.StreamEvent{
+		events = append(events, poo.StreamItem{
 			Kind: "tool_call",
 			ToolCall: &poo.ToolCallDelta{
 				Index:     0,
-				ID:        c.ID,
+				ID:        c.CallID,
 				Name:      c.Name,
 				Arguments: c.Arguments,
 				Complete:  true,
@@ -101,23 +101,23 @@ func (r fakeResponse) events() []poo.StreamEvent {
 	if finish == "" {
 		finish = poo.FinishStop
 	}
-	events = append(events, poo.StreamEvent{Kind: "finish", FinishReason: finish})
+	events = append(events, poo.StreamItem{Kind: "finish", FinishReason: finish})
 	if r.usage != nil {
-		events = append(events, poo.StreamEvent{Kind: "usage", Usage: r.usage})
+		events = append(events, poo.StreamItem{Kind: "usage", Usage: r.usage})
 	}
 	return events
 }
 
 // fakeReader yields a fixed set of events.
 type fakeReader struct {
-	events []poo.StreamEvent
+	events []poo.StreamItem
 	index  int
 }
 
 // Next returns the next event.
-func (r *fakeReader) Next() (poo.StreamEvent, error) {
+func (r *fakeReader) Next() (poo.StreamItem, error) {
 	if r.index >= len(r.events) {
-		return poo.StreamEvent{}, io.EOF
+		return poo.StreamItem{}, io.EOF
 	}
 	ev := r.events[r.index]
 	r.index++
@@ -181,7 +181,7 @@ type echoTool struct {
 	// result is the text the tool returns.
 	result string
 	// class is the tool's side-effect class.
-	class poo.ToolClass
+	class poo.ToolKind
 	// primaryArg names the tool's primary argument.
 	primaryArg string
 	// prepareErr is the failure Prepare returns, when it is set.
@@ -311,12 +311,12 @@ type usageReader struct {
 }
 
 // Next fails the stream without yielding an event.
-func (r *usageReader) Next() (poo.StreamEvent, error) {
+func (r *usageReader) Next() (poo.StreamItem, error) {
 	if r.sent {
-		return poo.StreamEvent{}, io.EOF
+		return poo.StreamItem{}, io.EOF
 	}
 	r.sent = true
-	return poo.StreamEvent{}, &poo.ProviderError{
+	return poo.StreamItem{}, &poo.ProviderError{
 		Kind:    poo.ProviderKindNetwork,
 		Message: "the stream broke",
 	}

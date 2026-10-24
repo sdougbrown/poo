@@ -220,7 +220,7 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 	// The run's shape is the recorded one: the tools mode and the
 	// reasoning effort are part of what the session sent, so the
 	// restored session sends them again.
-	opts.ToolsMode = created.ToolsMode
+	opts.ToolsMode = string(created.ToolsMode)
 	opts.ReasoningEffort = created.ReasoningEffort
 	// The chat role is the recorded one: the effective role comes from
 	// the metadata, not from the current defaults.
@@ -237,7 +237,7 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 	// The request's shape is the recorded one too: the role's model may
 	// carry it, and the header's own fields fill it when it does not.
 	if created.ToolsMode != "" {
-		opts.Model.Tools.Mode = ToolsMode(created.ToolsMode)
+		opts.Model.Tools.Mode = created.ToolsMode
 	}
 	if created.ReasoningEffort != "" {
 		opts.Model.Reasoning = ReasoningControl{Mode: ReasoningEffort, Param: ReasoningPathEffort}
@@ -420,7 +420,7 @@ func pendingJobResults(records []Record) []jobResult {
 		}
 		out = append(out, jobResult{
 			id:      ended.InputID,
-			job:     ended.Job,
+			job:     ended.JobID,
 			handle:  ended.Handle,
 			tool:    ended.Tool,
 			runID:   ended.RunID,
@@ -435,7 +435,7 @@ func pendingJobResults(records []Record) []jobResult {
 // publicJobResult turns an internal result into the public one.
 func publicJobResult(job jobResult) JobResult {
 	return JobResult{
-		Job:     job.job,
+		JobID:   job.job,
 		Handle:  job.handle,
 		Tool:    job.tool,
 		Text:    job.text,
@@ -476,7 +476,7 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 	s.spans = make([]turnSpan, 0, offset)
 	for _, id := range runs {
 		for t := 1; t <= runTurns[id]; t++ {
-			s.turns = append(s.turns, TurnSummary{Index: t, Session: offset - runTurns[id] + t})
+			s.turns = append(s.turns, TurnSummary{Index: t, TurnIndex: offset - runTurns[id] + t})
 			s.spans = append(s.spans, turnSpan{turn: offset - runTurns[id] + t, run: t})
 		}
 	}
@@ -547,9 +547,9 @@ func (s *Session) seedCounters(records []Record) {
 		case *MessageRecord:
 			messages = max(messages, messageSeq(r.MessageID))
 		case *JobStarted:
-			jobs = max(jobs, seqOf(r.Job, 'j'))
+			jobs = max(jobs, seqOf(r.JobID, 'j'))
 		case *JobEnded:
-			jobs = max(jobs, seqOf(r.Job, 'j'))
+			jobs = max(jobs, seqOf(r.JobID, 'j'))
 			inputs = max(inputs, jobInputSeq(s.opts.SessionID, r.InputID))
 		}
 	}

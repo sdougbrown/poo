@@ -32,8 +32,8 @@ func createdRecord(id string) *poo.SessionCreated {
 		Mode:         string(ModeLogged),
 		CreatedAt:    "2026-10-20T00:00:00Z",
 		WorkingDir:   "/tmp",
-		Model:        poo.SessionModel{ID: "m"},
-		Tools:        []poo.SessionTool{{Name: "bash", Class: poo.ClassSideEffecting}, {Name: "read", Class: poo.ClassReadOnly}},
+		Model:        poo.SessionModel{ModelID: "m"},
+		Tools:        []poo.ToolInfo{{Name: "bash", Class: poo.ClassSideEffecting}, {Name: "read", Class: poo.ClassReadOnly}},
 		ContextLimit: 32768,
 		ToolsMode:    "native",
 		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
@@ -161,7 +161,7 @@ func jobStarted(job, handle, tool, runID string) *poo.JobStarted {
 	return &poo.JobStarted{
 		RecordMeta: poo.NewRecordMeta("job.started"),
 		SessionID:  "s1",
-		Job:        job,
+		JobID:      job,
 		Handle:     handle,
 		Tool:       tool,
 		RunID:      runID,
@@ -174,7 +174,7 @@ func jobEnded(job, handle, tool, runID, inputID, text string) *poo.JobEnded {
 	return &poo.JobEnded{
 		RecordMeta: poo.NewRecordMeta("job.ended"),
 		SessionID:  "s1",
-		Job:        job,
+		JobID:      job,
 		Handle:     handle,
 		Tool:       tool,
 		RunID:      runID,

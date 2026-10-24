@@ -10,7 +10,7 @@ import (
 
 // editingPoo is a fake poo that records the content it starts from, then
 // edits the file at the absolute path it was built with, then does the
-// task's work in its own workdir.
+// task's work in its own working dir.
 func editingPoo(t *testing.T, record, target string) string {
 	t.Helper()
 	return fakePoo(t, `while [ "$#" -gt 0 ]; do case "$1" in --working-dir) d="$2"; shift 2 ;; *) shift ;; esac; done
@@ -87,7 +87,7 @@ func TestARunThatEditsTheSnapshotIsInvalid(t *testing.T) {
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 	out := t.TempDir()
-	// The snapshot sits beside the workdirs, under the invocation's work root.
+	// The snapshot sits beside the working dirs, under the invocation's work root.
 	poisoner := fakePoo(t, `while [ "$#" -gt 0 ]; do case "$1" in --working-dir) d="$2"; shift 2 ;; *) shift ;; esac; done
 s="$d"
 while [ ! -d "$s/fixtures/fix-a" ]; do s=$(dirname "$s"); done

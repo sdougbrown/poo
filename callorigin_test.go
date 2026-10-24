@@ -33,9 +33,9 @@ func (t *originTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.
 	first := t.requests == 1
 	t.mu.Unlock()
 
-	var events []poo.StreamEvent
+	var events []poo.StreamItem
 	if first {
-		events = append(events, poo.StreamEvent{
+		events = append(events, poo.StreamItem{
 			Kind: "tool_call",
 			ToolCall: &poo.ToolCallDelta{
 				Index:     0,
@@ -46,10 +46,10 @@ func (t *originTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.
 				Origin:    t.origin,
 			},
 		})
-		events = append(events, poo.StreamEvent{Kind: "finish", FinishReason: poo.FinishToolCalls})
+		events = append(events, poo.StreamItem{Kind: "finish", FinishReason: poo.FinishToolCalls})
 	} else {
-		events = append(events, poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "the answer"}})
-		events = append(events, poo.StreamEvent{Kind: "finish", FinishReason: poo.FinishStop})
+		events = append(events, poo.StreamItem{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "the answer"}})
+		events = append(events, poo.StreamItem{Kind: "finish", FinishReason: poo.FinishStop})
 	}
 	return &fakeReader{events: events}, poo.Rendered{API: poo.APIChatCompletions}, nil
 }

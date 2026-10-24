@@ -63,9 +63,9 @@ func chunk(payload string) string {
 const done = "data: [DONE]\n\n"
 
 // read drains a stream and returns the events.
-func read(t *testing.T, reader poo.StreamReader) []poo.StreamEvent {
+func read(t *testing.T, reader poo.StreamReader) []poo.StreamItem {
 	t.Helper()
-	var events []poo.StreamEvent
+	var events []poo.StreamItem
 	for {
 		ev, err := reader.Next()
 		if err == io.EOF {
@@ -79,7 +79,7 @@ func read(t *testing.T, reader poo.StreamReader) []poo.StreamEvent {
 }
 
 // textOf returns the text of the delta events.
-func textOf(events []poo.StreamEvent) string {
+func textOf(events []poo.StreamItem) string {
 	var b strings.Builder
 	for _, ev := range events {
 		if ev.Kind == "delta" && ev.Delta != nil && ev.Delta.Kind == "text" {
@@ -93,13 +93,13 @@ func textOf(events []poo.StreamEvent) string {
 //
 // A test that fails on purpose does not wait the plan's backoff, and
 // the test that covers the backoff waits for it on purpose.
-func fastRetry(cfg openai.Config) openai.Config {
+func fastRetry(cfg openai.Options) openai.Options {
 	cfg.Backoff = []time.Duration{time.Millisecond, time.Millisecond}
 	return cfg
 }
 
 // toolCallsOf returns the tool call events.
-func toolCallsOf(events []poo.StreamEvent) []poo.ToolCallDelta {
+func toolCallsOf(events []poo.StreamItem) []poo.ToolCallDelta {
 	var calls []poo.ToolCallDelta
 	for _, ev := range events {
 		if ev.Kind == "tool_call" && ev.ToolCall != nil {
@@ -113,7 +113,7 @@ func TestANativeToolCallIsRead(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"ls\"}"}}]},"finish_reason":"tool_calls"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model:     "m",
@@ -154,7 +154,7 @@ func TestFinishReasonLengthIsRead(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"role":"assistant","content":"partial"},"finish_reason":"length"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestAContextLengthErrorIsMapped(t *testing.T) {
 
 	srv := newSSEServer(t, body)
 	srv.status = http.StatusBadRequest
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err == nil {
@@ -207,7 +207,7 @@ func TestAContextLengthErrorInTheMessageIsMapped(t *testing.T) {
 
 	srv := newSSEServer(t, body)
 	srv.status = http.StatusBadRequest
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -226,7 +226,7 @@ func TestReasoningContentDeltasDoNotBreakTheStream(t *testing.T) {
 		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 1024})
 	if err != nil {
@@ -255,7 +255,7 @@ func TestTheUsageChunkIsRead(t *testing.T) {
 		chunk(`{"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":8,"total_tokens":128}}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 1024})
 	if err != nil {
@@ -286,7 +286,7 @@ func TestTheCacheReadCountIsRead(t *testing.T) {
 		chunk(`{"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":96}}}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 1024})
 	if err != nil {
@@ -313,7 +313,7 @@ func TestMaxTokensIsAlwaysSent(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 4096})
 	if err != nil {
@@ -343,7 +343,7 @@ func TestAnAuthorizationHeaderIsSent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", APIKey: "secret-token"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", APIKey: "secret-token"})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -360,7 +360,7 @@ func TestTheTextModeSendsNoToolsAndParsesTheCall(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}</tool_call>"},"finish_reason":"stop"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model:     "m",
@@ -391,7 +391,7 @@ func TestTheTextModeSendsNoToolsAndParsesTheCall(t *testing.T) {
 func TestAnAuthFailureIsMapped(t *testing.T) {
 	srv := newSSEServer(t, `{"error":{"message":"invalid api key","code":"invalid_api_key"}}`)
 	srv.status = http.StatusUnauthorized
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -406,7 +406,7 @@ func TestAnAuthFailureIsMapped(t *testing.T) {
 func TestAServerFailureIsMapped(t *testing.T) {
 	srv := newSSEServer(t, `{"error":{"message":"boom"}}`)
 	srv.status = http.StatusInternalServerError
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -420,7 +420,7 @@ func TestAServerFailureIsMapped(t *testing.T) {
 
 func TestTheStreamStopsWhenTheContextEnds(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	reader, _, err := tr.Stream(ctx, poo.ChatRequest{Model: "m", MaxTokens: 16})
@@ -451,7 +451,7 @@ func TestTheStreamStopsWhenTheContextEnds(t *testing.T) {
 func TestTheRequestCarriesTheWholeHistory(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model: "m",
@@ -483,7 +483,7 @@ func TestTheRequestCarriesTheWholeHistory(t *testing.T) {
 func TestAToolResultMessageBecomesAToolMessage(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model: "m",
@@ -520,7 +520,7 @@ func TestTheURLIsBuiltFromTheBase(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL + "/v1", Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL + "/v1", Model: "m"})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -536,7 +536,7 @@ func TestTheURLIsBuiltFromTheBase(t *testing.T) {
 func TestAnAssistantToolCallBecomesAToolCallMessage(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model: "m",
@@ -577,7 +577,7 @@ func TestAnErrorChunkEndsTheStream(t *testing.T) {
 	body := chunk(`{"error":{"message":"the model died","type":"server_error"}}`)
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -604,7 +604,7 @@ func TestAnErrorChunkEndsTheStream(t *testing.T) {
 func TestTheUsageChunkIsAskedForInTextMode(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -634,7 +634,7 @@ func TestTheTimeToTheFirstTokenIsMeasured(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -656,7 +656,7 @@ func TestTheTimeToTheFirstTokenIsMeasured(t *testing.T) {
 func TestTheRequestIsStreamed(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -675,7 +675,7 @@ func TestTheRequestIsStreamed(t *testing.T) {
 
 func TestTheTransportUsesTheContext(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -699,7 +699,7 @@ func TestTheBaseURLIsTrimmed(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL + "/v1/", Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL + "/v1/", Model: "m"})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -716,7 +716,7 @@ func TestTheStreamIgnoresAChunkItCannotRead(t *testing.T) {
 	body := "data: {not json}\n\n" + chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -734,7 +734,7 @@ func TestTheStreamHandlesACommentLine(t *testing.T) {
 	body := ": keep-alive\n\n" + chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -752,7 +752,7 @@ func TestTheRequestIsSentToTheChatCompletionsPath(t *testing.T) {
 	// The body is a valid chat completion, so the transport's own shape is
 	// checked rather than the server's.
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -774,7 +774,7 @@ func TestTheRequestIsSentToTheChatCompletionsPath(t *testing.T) {
 func TestTheErrorBodyIsReadWhenTheStatusIsNotOK(t *testing.T) {
 	srv := newSSEServer(t, "not json at all")
 	srv.status = http.StatusBadGateway
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -794,7 +794,7 @@ func TestEveryRequestHasAUsageReport(t *testing.T) {
 	// usage report, so a consumer can see the time to the first token.
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -824,7 +824,7 @@ func TestOnlyOneUsageReportIsProduced(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) +
 		chunk(`{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2}}`) + done
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -852,7 +852,7 @@ func TestTheChunkedArgumentsAreJoined(t *testing.T) {
 		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -884,7 +884,7 @@ func TestTheNativeToolCallWinsOverTheParsedOne(t *testing.T) {
 		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "auto"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "auto"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 1024})
 	if err != nil {
@@ -911,7 +911,7 @@ func TestTheNativeToolCallWinsOverAnUnclosedParsedOne(t *testing.T) {
 		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "auto"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "auto"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 1024})
 	if err != nil {
@@ -932,7 +932,7 @@ func TestTheAutoModeSendsTheToolsAndParsesTheText(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}</tool_call>"},"finish_reason":"stop"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "auto"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "auto"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model:     "m",
@@ -956,7 +956,7 @@ func TestTheAutoModeSendsTheToolsAndParsesTheText(t *testing.T) {
 func TestTheToolSchemaIsSentAsTheParameters(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model:     "m",
@@ -991,7 +991,7 @@ func TestTheToolSchemaIsSentAsTheParameters(t *testing.T) {
 func TestTheRequestBodyIsValidJSON(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model:     "m",
@@ -1019,10 +1019,10 @@ func TestTheReasoningEffortIsSentOnlyWhenSet(t *testing.T) {
 	for _, effort := range []string{"", "low"} {
 		body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 		srv := newSSEServer(t, body)
-		tr := openai.New(openai.Config{
+		tr := openai.New(openai.Options{
 			BaseURL: srv.URL,
 			Model:   "m",
-			Info: poo.ModelInfo{Reasoning: poo.ReasoningControl{
+			ModelInfo: poo.ModelInfo{Reasoning: poo.ReasoningControl{
 				Mode: poo.ReasoningEffort,
 			}},
 			ReasoningEffort: effort,

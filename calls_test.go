@@ -78,7 +78,7 @@ func TestTheCallIDsLeaveACallWithNoMessageAlone(t *testing.T) {
 // handle.
 func TestTheRestoredSessionContinuesTheHandles(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"hi"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"hi"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}
@@ -90,7 +90,7 @@ func TestTheRestoredSessionContinuesTheHandles(t *testing.T) {
 	// The restored session makes a call of its own.
 	restoredSink := &recordingSink{}
 	restoredTr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: json.RawMessage(`{"text":"again"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: json.RawMessage(`{"text":"again"}`)}}},
 		{text: "done"},
 	})
 	session, _, err := poo.Restore(restoreOptions(t, restoredTr, restoredSink), records)
@@ -121,7 +121,7 @@ func TestTheRestoredSessionContinuesTheHandles(t *testing.T) {
 // used, so a delivery note never names an earlier message.
 func TestTheRestoredSessionContinuesTheMessageIDs(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"hi"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"hi"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}
@@ -168,7 +168,7 @@ func TestTheRestoredSessionContinuesTheJobInputIDs(t *testing.T) {
 		&poo.JobEnded{
 			RecordMeta: poo.NewRecordMeta("job.ended"),
 			SessionID:  "s1",
-			Job:        "j1",
+			JobID:      "j1",
 			Handle:     "r1",
 			Tool:       "job",
 			RunID:      "r1",

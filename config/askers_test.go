@@ -234,7 +234,7 @@ func runWithTheReadCall(t *testing.T, runtime *config.Runtime) (*pootest.Transpo
 		Mode:         "logged",
 		CreatedAt:    "2026-10-22T12:00:00Z",
 		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ID: "test-model"},
+		Model:        poo.SessionModel{ModelID: "test-model"},
 		ContextLimit: 32768,
 		Profile:      "code",
 	}

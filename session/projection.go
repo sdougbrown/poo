@@ -33,7 +33,7 @@ type Metadata struct {
 	// with.
 	SettingsHash string
 	// Tools are the tools linked into the session.
-	Tools []poo.SessionTool
+	Tools []poo.ToolInfo
 	// Model is the model the session talks to.
 	Model poo.SessionModel
 	// ContextLimit is the model's context window, in tokens.
@@ -71,16 +71,16 @@ func metadataOfRecord(created *poo.SessionCreated) Metadata {
 		Tools:        created.Tools,
 		Model:        created.Model,
 		ContextLimit: created.ContextLimit,
-		ToolsMode:    created.ToolsMode,
+		ToolsMode:    string(created.ToolsMode),
 		Build:        created.Build,
 	}
 }
 
-// Summary is what a store shows about one session.
+// Listing is what a store shows about one session.
 //
 // It is a projection: a summary is computed from the session's records,
 // and it is not the session itself.
-type Summary struct {
+type Listing struct {
 	// ID identifies the session.
 	ID string
 	// CreatedAt is when the session was created.
@@ -112,7 +112,7 @@ type Projection struct{}
 
 // Summarize computes the summary of a session from its header and its
 // records.
-func (Projection) Summarize(meta Metadata, recs []poo.Record) Summary {
+func (Projection) Summarize(meta Metadata, recs []poo.Record) Listing {
 	scan := &scanned{}
 	for _, rec := range recs {
 		line := summaryLine{Record: rec.Meta().Record, TS: rec.Meta().TS}
@@ -126,7 +126,7 @@ func (Projection) Summarize(meta Metadata, recs []poo.Record) Summary {
 		}
 		scan.add(line)
 	}
-	sum := Summary{
+	sum := Listing{
 		ID:           meta.SessionID,
 		CreatedAt:    meta.CreatedAt,
 		Mode:         meta.Mode,

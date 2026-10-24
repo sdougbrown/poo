@@ -107,11 +107,11 @@ func (s *systemOneServer) requestSizes() []int {
 type recordingSink struct {
 	mu sync.Mutex
 	// recs holds the records, in the order they arrived.
-	recs []decide.Record
+	recs []decide.Decision
 }
 
 // Record keeps one record.
-func (s *recordingSink) Record(ctx context.Context, rec decide.Record) error {
+func (s *recordingSink) Record(ctx context.Context, rec decide.Decision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recs = append(s.recs, rec)
@@ -119,10 +119,10 @@ func (s *recordingSink) Record(ctx context.Context, rec decide.Record) error {
 }
 
 // records returns the records written.
-func (s *recordingSink) records() []decide.Record {
+func (s *recordingSink) records() []decide.Decision {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]decide.Record(nil), s.recs...)
+	return append([]decide.Decision(nil), s.recs...)
 }
 
 // found is the search's structured result.

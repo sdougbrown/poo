@@ -74,8 +74,8 @@ func TestASessionRoundTripsThroughItsFile(t *testing.T) {
 	if loaded.RecoveredTail {
 		t.Error("the load reports a recovered tail, want none")
 	}
-	if len(loaded.Requeue) != 0 {
-		t.Errorf("the load queues %d job results, want none", len(loaded.Requeue))
+	if len(loaded.Jobs) != 0 {
+		t.Errorf("the load queues %d job results, want none", len(loaded.Jobs))
 	}
 }
 

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
+	osexec "os/exec"
+
+	"github.com/sdougbrown/poo/exec"
 	"sync"
 	"syscall"
 	"time"
@@ -40,7 +42,7 @@ func (l *Local) Name() string { return "local" }
 // apart. The context ends the command: when it is done, the command's
 // process group is torn down. A context that has already ended starts
 // nothing.
-func (l *Local) Start(ctx context.Context, c Command, out io.Writer) (Process, error) {
+func (l *Local) Start(ctx context.Context, c exec.Command, out io.Writer) (exec.Process, error) {
 	if len(c.Argv) == 0 {
 		return nil, errors.New("bash: the command has no arguments")
 	}
@@ -50,7 +52,7 @@ func (l *Local) Start(ctx context.Context, c Command, out io.Writer) (Process, e
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(c.Argv[0], c.Argv[1:]...)
+	cmd := osexec.Command(c.Argv[0], c.Argv[1:]...)
 	cmd.Dir = c.Dir
 	// A nil Stdin makes the process read from the null device.
 	cmd.Stdin = nil
@@ -135,7 +137,7 @@ func (l *Local) Start(ctx context.Context, c Command, out io.Writer) (Process, e
 
 // localProcess is a command running in its own process group.
 type localProcess struct {
-	cmd  *exec.Cmd
+	cmd  *osexec.Cmd
 	pgid int
 	// pipes are the read ends of the capture, one per stream.
 	pipes  []*os.File
@@ -286,7 +288,7 @@ func (p *localProcess) killGroup(sig syscall.Signal) {
 // exitCode returns the command's exit code.
 //
 // A command that died from a signal has none, and its code is negative.
-func exitCode(cmd *exec.Cmd) int {
+func exitCode(cmd *osexec.Cmd) int {
 	if cmd.ProcessState == nil {
 		return -1
 	}

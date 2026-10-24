@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/exec/bwrap"
 	"github.com/sdougbrown/poo/tool/bash"
 )
@@ -20,7 +21,7 @@ func TestASignalDeathIsReportedTheSameWayByBothExecutors(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name string
-		exec bash.Executor
+		exec exec.Executor
 	}{
 		{"local", bash.NewLocal()},
 		{"bwrap", sandbox},

@@ -26,7 +26,7 @@ type provider struct {
 	// mu guards the fields below.
 	mu sync.Mutex
 	// turns are the answers the endpoint serves.
-	turns []Turn
+	turns []ScriptedAnswer
 	// requests are the bodies the endpoint received, in order.
 	requests []map[string]any
 	// index is the turn the next request gets.
@@ -44,7 +44,7 @@ type provider struct {
 const maxRepeats = 3
 
 // newProvider starts an endpoint that serves the turns.
-func newProvider(t interface{ Cleanup(func()) }, turns []Turn) *provider {
+func newProvider(t interface{ Cleanup(func()) }, turns []ScriptedAnswer) *provider {
 	p := &provider{turns: turns}
 	p.server = httptest.NewServer(http.HandlerFunc(p.serve))
 	t.Cleanup(p.server.Close)
@@ -73,9 +73,9 @@ func (p *provider) serve(w http.ResponseWriter, r *http.Request) {
 //
 // The last turn is served again when the requests run out, so a flow
 // that does not script every request still gets an answer.
-func (p *provider) next() Turn {
+func (p *provider) next() ScriptedAnswer {
 	if len(p.turns) == 0 {
-		return Turn{Text: "the answer"}
+		return ScriptedAnswer{Text: "the answer"}
 	}
 	if p.index < len(p.turns) {
 		turn := p.turns[p.index]
@@ -84,7 +84,7 @@ func (p *provider) next() Turn {
 	}
 	p.repeats++
 	if p.repeats > maxRepeats {
-		return Turn{Text: "the answer"}
+		return ScriptedAnswer{Text: "the answer"}
 	}
 	return p.turns[len(p.turns)-1]
 }
@@ -116,7 +116,7 @@ func (p *provider) requestBodies() []map[string]any {
 }
 
 // serve writes the turn's answer.
-func (t Turn) serve(w http.ResponseWriter) {
+func (t ScriptedAnswer) serve(w http.ResponseWriter) {
 	if t.Delay > 0 {
 		time.Sleep(t.Delay)
 	}
@@ -171,7 +171,7 @@ func (t Turn) serve(w http.ResponseWriter) {
 }
 
 // serveError writes the turn's failure.
-func (t Turn) serveError(w http.ResponseWriter) {
+func (t ScriptedAnswer) serveError(w http.ResponseWriter) {
 	failure := t.Error
 	if failure == nil {
 		failure = &ProviderError{Type: "server_error", Code: "internal_error", Message: "the endpoint failed"}

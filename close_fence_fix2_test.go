@@ -426,7 +426,7 @@ func TestNoRecordFollowsTheCloseOverRandomClosePoints(t *testing.T) {
 		policy := &fenceAskPolicy{release: make(chan struct{}), asked: make(chan struct{})}
 		tr := scripted([]fakeResponse{
 			{calls: []poo.ToolCall{jobCall("one", true), {
-				ID: "read-1", Name: "read", Arguments: json.RawMessage(`{"path":"x"}`),
+				CallID: "read-1", Name: "read", Arguments: json.RawMessage(`{"path":"x"}`),
 			}}},
 			{text: "the answer"},
 		})

@@ -70,12 +70,12 @@ type RunOptions struct {
 	MaxTurns int
 	// Out is the directory the report and the logs go to.
 	Out string
-	// RunsDir is the directory the workdirs are created under. It must
+	// RunsDir is the directory the working dirs are created under. It must
 	// be on the same filesystem as the report, and it is never /tmp.
 	RunsDir string
 	// PooBinary is the poo executable the runs use.
 	PooBinary string
-	// KeepWorkdirs leaves the workdirs behind after the run.
+	// KeepWorkdirs leaves the working dirs behind after the run.
 	KeepWorkdirs bool
 	// Sandbox is how a run is isolated from the rest of the machine:
 	// SandboxNone or SandboxBwrap.
@@ -96,8 +96,8 @@ type RunOptions struct {
 	Catalog []Model
 }
 
-// RunResult is the outcome of one task x model x seed.
-type RunResult struct {
+// CellResult is the outcome of one task x model x seed.
+type CellResult struct {
 	// Task, Model and Seed identify the run.
 	Task  string `json:"task"`
 	Model string `json:"model"`
@@ -143,7 +143,7 @@ type Report struct {
 	// Dir is where the report was written.
 	Dir string `json:"dir"`
 	// Results are the runs, in a stable order.
-	Results []RunResult `json:"results"`
+	Results []CellResult `json:"results"`
 }
 
 // Runner runs the runner.
@@ -172,8 +172,8 @@ func NewRunner(opts RunOptions) *Runner {
 		opts.PooBinary = DefaultPooBinary
 	}
 	// A path to the binary is made absolute here: the run executes it
-	// in the workdir, so a relative path would be resolved against the
-	// workdir rather than against the caller's directory. A bare name
+	// in the working dir, so a relative path would be resolved against the
+	// working dir rather than against the caller's directory. A bare name
 	// is looked up on PATH instead.
 	var pooErr error
 	if strings.ContainsRune(opts.PooBinary, filepath.Separator) {
@@ -262,8 +262,8 @@ func (r *Runner) Run(ctx context.Context) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The workdirs live under a directory of this invocation's own, so
-	// two invocations that share a work root do not share a workdir.
+	// The working dirs live under a directory of this invocation's own, so
+	// two invocations that share a work root do not share a working dir.
 	cellRunsDir, err := r.newRunsDir()
 	if err != nil {
 		return nil, err
@@ -341,7 +341,7 @@ func (r *Runner) newRunDir() (string, error) {
 // checkRunsDir refuses a work root the task set can be reached from.
 //
 // The task set holds the checks and the scripts that derive the
-// answers. A workdir under it, or under a directory that holds it, has
+// answers. A working dir under it, or under a directory that holds it, has
 // the task set one walk away.
 func (r *Runner) checkRunsDir() error {
 	if r.opts.TaskRoot == "" || r.opts.RunsDir == "" {
@@ -354,7 +354,7 @@ func (r *Runner) checkRunsDir() error {
 	if within(r.opts.RunsDir, tasks) || within(tasks, r.opts.RunsDir) {
 		return fmt.Errorf("eval: the work root %s and the task set %s must not contain one another", r.opts.RunsDir, tasks)
 	}
-	// A workdir anywhere in the task set's repository has the task set a
+	// A working dir anywhere in the task set's repository has the task set a
 	// walk up and a walk down away.
 	if repo := repositoryRoot(tasks); repo != "" && within(r.opts.RunsDir, repo) {
 		return fmt.Errorf("eval: the work root %s is inside the task set's repository %s", r.opts.RunsDir, repo)
@@ -386,10 +386,10 @@ func within(path, dir string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// newRunsDir creates the directory this invocation's workdirs live in.
+// newRunsDir creates the directory this invocation's working dirs live in.
 //
 // The directory carries a name of its own, so two invocations that share
-// a work root do not share a workdir.
+// a work root do not share a working dir.
 func (r *Runner) newRunsDir() (string, error) {
 	name, err := randomName()
 	if err != nil {
@@ -426,8 +426,8 @@ func (r *Runner) cells() []cell {
 //
 // The parallel limit is global, and each endpoint has its own smaller
 // limit, so two models on one endpoint do not both use it at once.
-func (r *Runner) execute(ctx context.Context, cells []cell, runsDir, cellRunsDir string, guard *sourceGuard) []RunResult {
-	results := make([]RunResult, len(cells))
+func (r *Runner) execute(ctx context.Context, cells []cell, runsDir, cellRunsDir string, guard *sourceGuard) []CellResult {
+	results := make([]CellResult, len(cells))
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, r.opts.Parallel)
@@ -457,7 +457,7 @@ func (r *Runner) execute(ctx context.Context, cells []cell, runsDir, cellRunsDir
 }
 
 // runOne makes one run: check out, run poo, run the check.
-func (r *Runner) runOne(ctx context.Context, j cell, runsDir, cellRunsDir string, guard *sourceGuard) RunResult {
+func (r *Runner) runOne(ctx context.Context, j cell, runsDir, cellRunsDir string, guard *sourceGuard) CellResult {
 	result := r.runJob(ctx, j, runsDir, cellRunsDir, guard)
 	if changed := guard.changed(j.task, r.fixtureRoot()); len(changed) > 0 {
 		result.SourceChanged = true
@@ -474,7 +474,7 @@ func (r *Runner) runOne(ctx context.Context, j cell, runsDir, cellRunsDir string
 }
 
 // portableText names the run's scratch directories by placeholders, so
-// a stored message holds no machine's paths: the workdir is $WORKDIR,
+// a stored message holds no machine's paths: the working dir is $WORKDIR,
 // the work root is $WORKROOT and the output directory is $OUT.
 func (r *Runner) portableText(text, cellRunsDir string, j cell) string {
 	if text == "" {
@@ -489,11 +489,11 @@ func (r *Runner) portableText(text, cellRunsDir string, j cell) string {
 }
 
 // runJob makes one run and leaves the source check to its caller.
-func (r *Runner) runJob(ctx context.Context, j cell, runsDir, cellRunsDir string, guard *sourceGuard) RunResult {
+func (r *Runner) runJob(ctx context.Context, j cell, runsDir, cellRunsDir string, guard *sourceGuard) CellResult {
 	started := time.Now()
-	result := RunResult{Task: j.task.ID, Model: j.model.Name, Seed: j.seed}
+	result := CellResult{Task: j.task.ID, Model: j.model.Name, Seed: j.seed}
 
-	// The report holds the log and the check's output. The workdir is
+	// The report holds the log and the check's output. The working dir is
 	// scratch, and lives under the work root, which is never /tmp.
 	runDir := jobDir(runsDir, j)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
@@ -511,14 +511,14 @@ func (r *Runner) runJob(ctx context.Context, j cell, runsDir, cellRunsDir string
 	if !r.opts.KeepWorkdirs {
 		// The run's own scratch goes. The directories above it do not:
 		// another seed of the same model may be running in one of them
-		// at the same time, and removing it would pull the workdir out
+		// at the same time, and removing it would pull the working dir out
 		// from under that run.
 		defer os.RemoveAll(seedRoot)
 	}
 
 	var err error
 	if strings.HasPrefix(j.task.Repo, "fixture:") {
-		// The workdir comes from the invocation's snapshot, never from
+		// The working dir comes from the invocation's snapshot, never from
 		// the repository's fixture, which a run may have edited.
 		var snap string
 		if snap, err = guard.snapshot(j.task, r.fixtureRoot()); err == nil {
@@ -579,7 +579,7 @@ func (r *Runner) runJob(ctx context.Context, j cell, runsDir, cellRunsDir string
 		}
 	}
 
-	// The check runs in the workdir, whatever the run did.
+	// The check runs in the working dir, whatever the run did.
 	checkExit, checkOut, checkErr := r.runCheck(runCtx, j.task, workdir, logPath, diff.Files)
 	result.CheckExit = checkExit
 	// The scratch directories are named by placeholders, as in every
@@ -624,7 +624,7 @@ func (r *Runner) fixtureRoot() string {
 	return DefaultFixtureRoot(r.opts.TaskRoot)
 }
 
-// checkout prepares the workdir for a run.
+// checkout prepares the working dir for a run.
 //
 // A git repo is cloned at its pinned sha. The directory is the one the
 // caller names, which is under the work root, never in /tmp. A fixture
@@ -754,7 +754,7 @@ func (r *Runner) runPoo(ctx context.Context, j cell, workdir, logPath string) (i
 	if r.opts.Sandbox == SandboxBwrap {
 		// Inside the sandbox the home directory and the tools' paths
 		// are the sandbox's own: nothing under the real home exists.
-		// The home is the sandbox's private /tmp, not the workdir, so
+		// The home is the sandbox's private /tmp, not the working dir, so
 		// what a tool installs there (pip --user, caches) stays out of
 		// the run's diff.
 		cmd.Env = append(cmd.Env, "HOME=/tmp", "PATH=/usr/bin:/bin")
@@ -841,12 +841,12 @@ func killGroup(pid int) error {
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }
 
-// runCheck runs a task's check.sh in the workdir.
+// runCheck runs a task's check.sh in the working dir.
 //
 // The check gets three environment variables, so it can see what the run
 // did without the runner having to parse its output:
 //
-//   - POO_WORKDIR: the workdir's absolute path.
+//   - POO_WORKDIR: the working dir's absolute path.
 //   - POO_SESSION_LOG: the session log's absolute path. A read-only
 //     task greps it for the answer the run recorded.
 //   - POO_CHANGED_FILES: the paths the run changed, one per line.
@@ -875,7 +875,7 @@ func (r *Runner) runCheck(ctx context.Context, t Task, workdir, logPath string, 
 		"POO_SESSION_LOG="+logPath,
 		"POO_CHANGED_FILES="+strings.Join(changed, "\n"),
 		// The check's own python must not leave bytecode in the
-		// workdir, or the diff would show files the model never
+		// working dir, or the diff would show files the model never
 		// touched.
 		"PYTHONDONTWRITEBYTECODE=1",
 	)

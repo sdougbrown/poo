@@ -31,9 +31,9 @@ type requestSettings struct {
 
 // requestSettings returns the settings a request is shaped by.
 func (t *Transport) requestSettings(req poo.ChatRequest) requestSettings {
-	info := req.Info
+	info := req.ModelInfo
 	if zeroModelInfo(info) {
-		info = t.cfg.Info
+		info = t.cfg.ModelInfo
 	}
 	return requestSettings{info: info, quirks: quirksFor(info.Quirks, t.logger)}
 }

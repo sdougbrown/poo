@@ -101,8 +101,8 @@ type PendingAsk struct {
 
 // PendingJob is a job that started and never ended.
 type PendingJob struct {
-	// Job is the job's identifier, e.g. "j3".
-	Job string
+	// JobID is the job's identifier, e.g. "j3".
+	JobID string
 	// Handle is the handle of the call the job came from.
 	Handle string
 	// Tool is the name of the tool the job runs.
@@ -237,12 +237,12 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 		rec := &poo.JobEnded{
 			RecordMeta: poo.NewRecordMeta("job.ended"),
 			SessionID:  pend.SessionID,
-			Job:        job.Job,
+			JobID:      job.JobID,
 			Handle:     job.Handle,
 			Tool:       job.Tool,
 			RunID:      job.RunID,
 			Outcome:    poo.JobOutcomeInterrupted,
-			InputID:    recoveredInputID(pend.SessionID, job.Job),
+			InputID:    recoveredInputID(pend.SessionID, job.JobID),
 			Text:       InterruptedJobText,
 			EndedAt:    at,
 		}
@@ -357,7 +357,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			state.jobs = append(state.jobs, *r)
 			state.jobEnded = append(state.jobEnded, false)
 		case *poo.JobEnded:
-			state.endJob(r.Job)
+			state.endJob(r.JobID)
 		case *poo.InputQueued:
 			if _, ok := state.inputs[r.InputID]; !ok {
 				state.inputs[r.InputID] = *r
@@ -440,7 +440,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			continue
 		}
 		pend.Jobs = append(pend.Jobs, PendingJob{
-			Job:    job.Job,
+			JobID:  job.JobID,
 			Handle: job.Handle,
 			Tool:   job.Tool,
 			RunID:  job.RunID,
@@ -524,7 +524,7 @@ func (s *pendingState) call(key string) *PendingCall {
 // endJob marks the first start of a job id as ended.
 func (s *pendingState) endJob(id string) {
 	for i := range s.jobs {
-		if s.jobs[i].Job == id && !s.jobEnded[i] {
+		if s.jobs[i].JobID == id && !s.jobEnded[i] {
 			s.jobEnded[i] = true
 			return
 		}

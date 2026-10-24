@@ -117,8 +117,8 @@ type JobStarted struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
-	// Job is the job's identifier, e.g. "j3".
-	Job string `json:"job"`
+	// JobID is the job's identifier, e.g. "j3".
+	JobID string `json:"job"`
 	// Handle is the handle of the tool call the job came from, e.g.
 	// "r1". The call returned at once with a "started" outcome.
 	Handle string `json:"handle"`
@@ -138,8 +138,8 @@ type JobEnded struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
-	// Job is the job's identifier, e.g. "j3".
-	Job string `json:"job"`
+	// JobID is the job's identifier, e.g. "j3".
+	JobID string `json:"job"`
 	// Handle is the handle of the tool call the job came from.
 	Handle string `json:"handle"`
 	// Tool is the name of the tool the job ran.
@@ -272,8 +272,8 @@ type jobQueueItem struct {
 
 // JobInfo describes one of the session's jobs.
 type JobInfo struct {
-	// Job is the job's identifier, e.g. "j3".
-	Job string
+	// JobID is the job's identifier, e.g. "j3".
+	JobID string
 	// Handle is the handle of the tool call the job came from.
 	Handle string
 	// Tool is the name of the tool the job runs.
@@ -311,7 +311,7 @@ func (s *Session) Jobs() []JobInfo {
 			continue
 		}
 		out = append(out, JobInfo{
-			Job:       job.id,
+			JobID:     job.id,
 			Handle:    job.handle,
 			Tool:      job.tool,
 			RunID:     job.runID,
@@ -324,7 +324,7 @@ func (s *Session) Jobs() []JobInfo {
 			continue
 		}
 		out = append(out, JobInfo{
-			Job:    item.result.job,
+			JobID:  item.result.job,
 			Handle: item.result.handle,
 			Tool:   item.result.tool,
 			RunID:  item.result.runID,
@@ -398,7 +398,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	err := s.writeDelivery(run.ctx, run, &JobStarted{
 		RecordMeta: NewRecordMeta("job.started"),
 		SessionID:  s.opts.SessionID,
-		Job:        jobID,
+		JobID:      jobID,
 		Handle:     handle,
 		Tool:       tool,
 		RunID:      run.id,
@@ -608,7 +608,7 @@ func (s *Session) completeJob(job *jobState, result ToolResult, outcome Outcome,
 	}
 
 	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{call: ToolCall{Name: job.tool, Arguments: job.arguments}})
-	info.Job = job.id
+	info.JobID = job.id
 	chain, hookErr := s.runAfterTool(completionCtx, job.runID, job.id, 0, info, result)
 
 	s.mu.Lock()
@@ -652,7 +652,7 @@ func stoppedText(partial string, err error, reason string) string {
 // the turn.
 func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 	env := s.toolEnvFor(job.runID, job.handle)
-	env.Job = job.id
+	env.JobID = job.id
 	return env
 }
 
@@ -668,7 +668,7 @@ func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, ca
 	rec := &JobEnded{
 		RecordMeta: NewRecordMeta("job.ended"),
 		SessionID:  s.opts.SessionID,
-		Job:        job.id,
+		JobID:      job.id,
 		Handle:     job.handle,
 		Tool:       job.tool,
 		RunID:      job.runID,
@@ -808,8 +808,8 @@ func jobOutcomeOf(outcome Outcome) JobOutcome {
 // the next run.
 func (s *Session) QueueJobResult(result JobResult) {
 	s.queueJobResult(jobResult{
-		id:      result.Job,
-		job:     result.Job,
+		id:      result.JobID,
+		job:     result.JobID,
 		handle:  result.Handle,
 		tool:    result.Tool,
 		outcome: jobOutcomeOf(result.Outcome),
@@ -1184,7 +1184,7 @@ func publicJobResults(results []jobResult) []JobResult {
 	out := make([]JobResult, 0, len(results))
 	for _, r := range results {
 		out = append(out, JobResult{
-			Job:     r.job,
+			JobID:   r.job,
 			Handle:  r.handle,
 			Tool:    r.tool,
 			Text:    r.text,
@@ -1562,8 +1562,8 @@ func (s *Session) writeJobEndedOnClose(job *jobState) {
 
 // jobSummary describes one job, for the jobs tool.
 type jobSummary struct {
-	// Job is the job's identifier.
-	Job string `json:"job"`
+	// JobID is the job's identifier.
+	JobID string `json:"job"`
 	// Handle is the handle of the tool call the job came from.
 	Handle string `json:"handle"`
 	// Tool is the name of the tool the job runs.
@@ -1592,7 +1592,7 @@ func (s *Session) jobSummaries() []jobSummary {
 		}
 		listed[job.id] = true
 		out = append(out, jobSummary{
-			Job:       job.id,
+			JobID:     job.id,
 			Handle:    job.handle,
 			Tool:      job.tool,
 			Summary:   job.summary,
@@ -1610,7 +1610,7 @@ func (s *Session) jobSummaries() []jobSummary {
 			summary = job.summary
 		}
 		out = append(out, jobSummary{
-			Job:     item.result.job,
+			JobID:   item.result.job,
 			Handle:  item.result.handle,
 			Tool:    item.result.tool,
 			Summary: summary,
@@ -1764,15 +1764,15 @@ func (t *JobTool) Spec() ToolSpec {
 func (t *JobTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepared, error) {
 	if t.name == CancelJobToolName {
 		var a struct {
-			Job string `json:"job"`
+			JobID string `json:"job"`
 		}
 		if err := decodeStrictJSON(raw, &a); err != nil {
 			return nil, InvalidArgsf("%s: %v", t.name, err)
 		}
-		if a.Job == "" {
+		if a.JobID == "" {
 			return nil, InvalidArgsf("%s: the job is required", t.name)
 		}
-		return &jobPrepared{job: a.Job}, nil
+		return &jobPrepared{job: a.JobID}, nil
 	}
 	return &jobPrepared{}, nil
 }
@@ -1798,7 +1798,7 @@ func (t *JobTool) Call(ctx context.Context, in Prepared, env ToolEnv) (ToolResul
 	}
 	var b strings.Builder
 	for _, s := range summaries {
-		fmt.Fprintf(&b, "%s · %s · %s · %s · %dms\n", s.Job, s.Tool, s.Status, s.Summary, s.ElapsedMS)
+		fmt.Fprintf(&b, "%s · %s · %s · %s · %dms\n", s.JobID, s.Tool, s.Status, s.Summary, s.ElapsedMS)
 	}
 	return ToolResult{Text: b.String()}, nil
 }

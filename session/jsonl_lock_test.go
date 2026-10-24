@@ -342,8 +342,8 @@ func TestAJobThatWasKilledIsRecovered(t *testing.T) {
 	if ended.Outcome != poo.JobOutcomeInterrupted {
 		t.Errorf("the job's outcome is %q, want %q", ended.Outcome, poo.JobOutcomeInterrupted)
 	}
-	if len(loaded.Requeue) != 1 {
-		t.Fatalf("the load queues %d job results, want 1", len(loaded.Requeue))
+	if len(loaded.Jobs) != 1 {
+		t.Fatalf("the load queues %d job results, want 1", len(loaded.Jobs))
 	}
 }
 
@@ -361,10 +361,10 @@ func TestAJobThatEndedIsQueuedAgainAfterAKill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the session: %v", err)
 	}
-	if len(loaded.Requeue) != 1 {
-		t.Fatalf("the load queues %d job results, want 1", len(loaded.Requeue))
+	if len(loaded.Jobs) != 1 {
+		t.Fatalf("the load queues %d job results, want 1", len(loaded.Jobs))
 	}
-	queued := loaded.Requeue[0]
+	queued := loaded.Jobs[0]
 	if queued.Text != "the job's result" {
 		t.Errorf("the queued result's text is %q, want the recorded text", queued.Text)
 	}
@@ -397,8 +397,8 @@ func TestADeliveredJobIsNotQueuedAgainAfterAKill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the session: %v", err)
 	}
-	if len(loaded.Requeue) != 0 {
-		t.Errorf("the load queues %d job results, want none", len(loaded.Requeue))
+	if len(loaded.Jobs) != 0 {
+		t.Errorf("the load queues %d job results, want none", len(loaded.Jobs))
 	}
 }
 

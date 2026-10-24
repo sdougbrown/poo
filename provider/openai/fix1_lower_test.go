@@ -27,7 +27,7 @@ func TestAStoppedWaitDoesNotClaimARetry(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Second},
@@ -77,7 +77,7 @@ func TestATransportTimeoutIsANetworkFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Timeout: 30 * time.Millisecond,

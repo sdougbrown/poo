@@ -6,13 +6,15 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+
+	"github.com/sdougbrown/poo/exec"
 )
 
 // result is what a command produced.
 type result struct {
-	// returncode is the command's exit status, nil when the process was
+	// exitCode is the command's exit status, nil when the process was
 	// killed by a signal.
-	returncode *int
+	exitCode *int
 	// timedOut reports that the command hit its timeout.
 	timedOut bool
 	// cancelled reports that the run's context ended the command.
@@ -49,7 +51,7 @@ func (t *Tool) run(ctx context.Context, command string, env poo.ToolEnv, timeout
 	}
 
 	runCtx := ctx
-	if env.Job == "" {
+	if env.JobID == "" {
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -61,7 +63,7 @@ func (t *Tool) run(ctx context.Context, command string, env poo.ToolEnv, timeout
 	if err := runCtx.Err(); err != nil {
 		return stopped(err), nil
 	}
-	proc, err := executor.Start(runCtx, Command{
+	proc, err := executor.Start(runCtx, exec.Command{
 		Argv: []string{"/bin/bash", "-c", command},
 		Dir:  env.WorkingDir,
 		Env:  ScrubEnv(env.Env, t.Scrub),
@@ -76,7 +78,7 @@ func (t *Tool) run(ctx context.Context, command string, env poo.ToolEnv, timeout
 	// A command that was killed has no exit code, and the model has to
 	// see that it failed.
 	if code >= 0 {
-		res.returncode = &code
+		res.exitCode = &code
 	}
 	// Only a command the executor stopped was stopped by the run's
 	// context: one that exited on its own keeps that outcome, however

@@ -43,10 +43,10 @@ func TestReviewPendingCallIdentifiesDecisionTarget(t *testing.T) {
 		requests = append(requests, string(raw))
 		return []decide.Answer{{ID: "allow", Probabilities: map[string]float64{"yes": 0.99, "no": 0.01}}}, nil
 	})
-	history := poo.NewHistory([]poo.Message{poo.NewTextMessage(poo.RoleUser, "clean build artifacts")}, nil, nil)
+	history := poo.NewHistoryView([]poo.Message{poo.NewTextMessage(poo.RoleUser, "clean build artifacts")}, nil, nil)
 	a := permissive.New(d, permissive.Options{})
 	for _, summary := range []string{"rm -rf ./dist", "rm -rf ~"} {
-		_, err := a.Ask(context.Background(), perm.Ask{Tool: "bash", Summary: summary, Class: poo.ClassSideEffecting, Reason: poo.ReasonPolicy, History: history})
+		_, err := a.Ask(context.Background(), perm.Ask{Tool: "bash", Summary: summary, Class: poo.ClassSideEffecting, Reason: poo.ReasonPolicy, HistoryView: history})
 		if err != nil {
 			t.Fatal(err)
 		}

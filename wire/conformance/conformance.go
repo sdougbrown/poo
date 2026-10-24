@@ -68,7 +68,7 @@ type Fixtures struct {
 	//
 	// A target that leaves them empty gets the suite's own turns: a
 	// plain answer, and another one.
-	Turns []Turn
+	Turns []ScriptedAnswer
 	// Model is the model identifier the settings name. An empty name
 	// is the suite's own.
 	Model string
@@ -77,8 +77,8 @@ type Fixtures struct {
 	ContextLimit int
 }
 
-// Turn is one scripted answer of the fake provider.
-type Turn struct {
+// ScriptedAnswer is one scripted answer of the fake provider.
+type ScriptedAnswer struct {
 	// Text is the text the assistant says.
 	Text string
 	// Chunks are the pieces the answer arrives in. A turn that names
@@ -133,7 +133,7 @@ const (
 
 // defaultTurns are the answers the provider gives when the target
 // brings no turns of its own.
-var defaultTurns = []Turn{
+var defaultTurns = []ScriptedAnswer{
 	{Text: "the first answer"},
 	{Text: "the second answer"},
 }
@@ -157,7 +157,7 @@ type suite struct {
 	contextLimit int
 	// turns are the answers the provider gives when a flow does not
 	// script its own.
-	turns []Turn
+	turns []ScriptedAnswer
 	// handshakeResult is what the binary announced in the handshake.
 	handshakeResult protocol.InitializeResult
 	// settingsCount is how many settings files the suite wrote.
@@ -254,7 +254,7 @@ func Run(t *testing.T, target Target) Report {
 	s.flow("handoff", s.handoff)
 	s.flow("kill", s.kill)
 	s.flow("jobs", s.jobs)
-	s.flow("attach and scrollback", s.attachAndScrollback)
+	s.flow("attach and scrollback", s.attachAndHistory)
 	s.flow("resume", s.resume)
 	s.flow("provider limit", s.providerLimit)
 	s.flow("failures", s.failures)

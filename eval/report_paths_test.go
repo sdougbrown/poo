@@ -12,7 +12,7 @@ func TestAWrittenReportHoldsNoAbsolutePaths(t *testing.T) {
 	dir := t.TempDir()
 	report := &Report{
 		Dir: dir,
-		Results: []RunResult{{
+		Results: []CellResult{{
 			LogPath: filepath.Join(dir, "runs", "run-1", "t", "m", "seed1", "session.jsonl"),
 		}},
 	}
@@ -39,7 +39,7 @@ func TestARelativeReportDirStillWritesRelativePaths(t *testing.T) {
 	dir := filepath.Join("results", "r")
 	report := &Report{
 		Dir: filepath.Join(base, dir),
-		Results: []RunResult{{
+		Results: []CellResult{{
 			LogPath: filepath.Join(base, dir, "runs", "run-1", "t", "m", "seed1", "session.jsonl"),
 		}},
 	}
@@ -154,7 +154,7 @@ func TestTheCheckOutputNamesNoWorkRootEither(t *testing.T) {
 	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
-	// The check prints a path above its workdir: the work root.
+	// The check prints a path above its working dir: the work root.
 	check := "#!/usr/bin/env bash\necho \"root: $(dirname \"$(dirname \"$(dirname \"$(dirname \"$(pwd)\")\")\")\")\"\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(task.Dir, "check.sh"), []byte(check), 0o755); err != nil {
 		t.Fatal(err)

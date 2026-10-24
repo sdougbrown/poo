@@ -47,7 +47,7 @@ func settleOf(t *testing.T, sink *recordingSink) *poo.RunSettled {
 // arrives while the provider is answering.
 func TestACancelledRequestSettlesCancelled(t *testing.T) {
 	srv := stallingEndpoint(t)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -84,7 +84,7 @@ func TestACancelledRequestSettlesCancelled(t *testing.T) {
 // deadline passes while the provider is answering.
 func TestADeadlineDuringTheRequestSettlesCancelled(t *testing.T) {
 	srv := stallingEndpoint(t)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -114,7 +114,7 @@ func TestADeadlineDuringTheRequestSettlesCancelled(t *testing.T) {
 // run.started is always followed by a run.settled.
 func TestAStartedRunAlwaysSettles(t *testing.T) {
 	srv := stallingEndpoint(t)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -152,7 +152,7 @@ func TestAStreamThatBreaksStillReportsItsUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -180,7 +180,7 @@ func TestTheTextModeDoesNotDuplicateTheProse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -226,7 +226,7 @@ func TestTheHistoryTheModelSeesHoldsTheProseOnce(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -265,7 +265,7 @@ func TestARateLimitCarriesTheWaitItAskedFor(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -285,8 +285,8 @@ func TestARateLimitCarriesTheWaitItAskedFor(t *testing.T) {
 	if settle.Detail.Provider.Status != http.StatusTooManyRequests {
 		t.Errorf("the provider's status is %d, want 429", settle.Detail.Provider.Status)
 	}
-	if settle.Detail.Provider.RetryAfterSec != 60 {
-		t.Errorf("the provider's retry-after is %d, want 60", settle.Detail.Provider.RetryAfterSec)
+	if settle.Detail.Provider.RetryAfterS != 60 {
+		t.Errorf("the provider's retry-after is %d, want 60", settle.Detail.Provider.RetryAfterS)
 	}
 }
 
@@ -302,14 +302,14 @@ func TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
 	runSession(t, s, "do the thing")
 	settle := settleOf(t, sink)
-	if settle.Detail.Provider == nil || settle.Detail.Provider.RetryAfterSec <= 30 || settle.Detail.Provider.RetryAfterSec > 45 {
+	if settle.Detail.Provider == nil || settle.Detail.Provider.RetryAfterS <= 30 || settle.Detail.Provider.RetryAfterS > 45 {
 		t.Errorf("the recorded retry-after is %+v, want more than 30 and at most 45 seconds", settle.Detail.Provider)
 	}
 }
@@ -334,7 +334,7 @@ func TestATruncatedStreamKeepsItsOriginalKind(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -404,7 +404,7 @@ func TestTheArgumentsAreRecordedAsTheModelSentThem(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text": broken`),
 			}},
