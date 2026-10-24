@@ -36,10 +36,10 @@ func runHelper() int {
 	}
 	status := os.NewFile(uintptr(fd), "bwrap-status")
 	// The command must not be able to write its own status: it would be
-	// reporting on itself. The descriptor is closed when the command is
+	// reporting on itself. The model info is closed when the command is
 	// executed.
 	syscall.CloseOnExec(fd)
-	// Bubblewrap's status descriptor is the helper's too. The command has
+	// Bubblewrap's status model info is the helper's too. The command has
 	// no business with it.
 	syscall.CloseOnExec(jsonStatusFD)
 	_ = syscall.Close(jsonStatusFD)
@@ -122,7 +122,7 @@ func runHelper() int {
 //
 // The executor holds the write end of a pipe whose read end this process
 // has, so the kernel closes it when the executor ends, however it ends.
-// A descriptor that is missing or unreadable reports nothing, and the
+// A model info that is missing or unreadable reports nothing, and the
 // watch then never fires.
 func watchParent() <-chan struct{} {
 	gone := make(chan struct{})
@@ -134,7 +134,7 @@ func watchParent() <-chan struct{} {
 	if file == nil {
 		return gone
 	}
-	// The command has no business with the descriptor.
+	// The command has no business with the model info.
 	syscall.CloseOnExec(fd)
 	go func() {
 		defer file.Close()
@@ -163,7 +163,7 @@ func waitReport(state *os.ProcessState) statusReport {
 	return statusReport{Exit: &code}
 }
 
-// writeStatus writes the report and closes the descriptor.
+// writeStatus writes the report and closes the model info.
 func writeStatus(status *os.File, report statusReport) {
 	if status == nil {
 		return

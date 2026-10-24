@@ -48,19 +48,19 @@ const (
 	KillGrace = 2 * time.Second
 )
 
-// The file descriptors the sandbox's helper and bubblewrap report on.
+// The file model infos the sandbox's helper and bubblewrap report on.
 const (
-	// statusFD is the descriptor the helper writes the command's wait
+	// statusFD is the model info the helper writes the command's wait
 	// status to.
 	statusFD = 3
-	// jsonStatusFD is the descriptor bubblewrap writes its status to.
+	// jsonStatusFD is the model info bubblewrap writes its status to.
 	jsonStatusFD = 4
-	// parentFD is the descriptor the helper watches for the executor's
+	// parentFD is the model info the helper watches for the executor's
 	// death.
 	parentFD = 5
-	// statusFDEnv names the descriptor for the helper.
+	// statusFDEnv names the model info for the helper.
 	statusFDEnv = "POO_BWRAP_STATUS_FD"
-	// parentFDEnv names the parent-death descriptor for the helper.
+	// parentFDEnv names the parent-death model info for the helper.
 	parentFDEnv = "POO_BWRAP_PARENT_FD"
 	// ReadyTimeout bounds the wait for bubblewrap's startup gate.
 	ReadyTimeout = 10 * time.Second
@@ -84,7 +84,7 @@ var DefaultROBinds = []string{"/usr", "/bin", "/lib", "/lib64", "/etc"}
 //
 // The executor asks it about every directory the sandbox mounts, not
 // only the working directory: a path the operator protects inside a
-// read-only or read-write bind has to be hidden as well. The paths it
+// read-only or read-write bind has to be masked as well. The paths it
 // returns are absolute; the executor masks the ones a bind reaches.
 //
 // A session's protected-path matcher satisfies it.
@@ -187,7 +187,7 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 	cmd.Dir = c.Dir
 	// A nil Stdin makes the sandbox read from the null device.
 	cmd.Stdin = nil
-	// The helper's descriptor is added to the command's environment; a
+	// The helper's model info is added to the command's environment; a
 	// nil environment means the caller's own.
 	env := c.Env
 	if env == nil {
@@ -388,7 +388,7 @@ func (e *Executor) args(c pooexec.Command) ([]string, error) {
 		"--proc", "/proc",
 		"--dev", "/dev",
 		"--tmpfs", "/tmp",
-		// The helper reports on its own descriptors.
+		// The helper reports on its own model infos.
 		"--json-status-fd", fmt.Sprintf("%d", jsonStatusFD),
 	}
 	if !e.opts.DisableNetwork {
@@ -451,13 +451,12 @@ func (e *Executor) roBinds() []string {
 
 // masks returns the arguments that hide the protected paths.
 //
-// A path inside a bound directory is hidden: a directory behind an empty
-// tmpfs, a file behind an empty device. A path that is a symlink is hidden
-// at the path it reaches, because a mount cannot land on a link. A path
-// outside every bound directory is not in the sandbox at all, so there is
-// nothing to hide.
-// The masker is asked about every bind, not only the working directory,
-// so a protected path inside a read-only or read-write bind is hidden too.
+// A path inside a bound directory is masked by mounting an empty tmpfs or
+// device over it. A symlink is masked at the path it reaches, because a
+// mount cannot land on a link. A path outside every bound directory is not
+// in the sandbox at all, so there is nothing to mask. The masker is asked
+// about every bind, not only the working directory, so protected paths in
+// read-only and read-write binds are masked too.
 func (e *Executor) masks(root string) ([][]string, error) {
 	if e.opts.Masker == nil {
 		return nil, nil

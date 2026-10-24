@@ -112,7 +112,7 @@ The first record of a log.
 | `chat` | object | The chat model. Absent when the session had none. |
 | `decider` | object | The decision model. Absent when the session had none. |
 
-A role holds a model descriptor: its `name`, its `model_id`, its `endpoint`,
+A role holds model info: its `name`, its `model_id`, its `endpoint`,
 its `api`, its `ops` and its `context_limit`. The roles are the ones the
 session ran with, not the ones the current settings would pick: a session
 loaded by another binary keeps the roles it was made with.
@@ -123,7 +123,7 @@ loaded by another binary keeps the roles it was made with.
 |---|---|---|
 | `id` | string | The provider's model identifier. |
 | `base_url` | string | The endpoint, without credentials. Absent when empty. |
-| `max_output` | integer | The model's output-token ceiling. Absent when unknown. |
+| `max_output` | integer | The model's output-token limit. Absent when unknown. |
 
 The `base_url` never carries credentials: a URL that names a user and a
 password is written without its userinfo, so a consumer can read the log
@@ -152,7 +152,7 @@ Each entry of `tools` holds:
 | `prompt_hash` | string | The hex SHA-256 of the prompt text. |
 | `started_at` | string | RFC 3339, UTC. |
 | `model_id` | string | The model the run talks to. |
-| `max_turns` | integer | The turn ceiling. `0` means the run is unlimited. |
+| `max_turns` | integer | The turn limit. `0` means the run is unlimited. |
 | `tools_mode` | string | How the run asks for tool calls. |
 | `reasoning_effort` | string | The `reasoning_effort` the run sends. Absent when it sends none. |
 | `trigger` | string | What started the run: `"prompt"` or `"job"`. Absent on a log written before the field existed. |
@@ -566,7 +566,7 @@ commit point.
 | 5b | `provider_error` | 20 | A provider request failed and cannot be retried, or the retry budget was spent. |
 | 6 | `context_exhausted` | 13 | The context window is full. |
 | 7 | `hook_continue_limit` | 12 | The `BeforeSettle` hooks asked for more continuations than the run allows. |
-| 8 | `max_turns` | 11 | The run hit its turn ceiling. |
+| 8 | `max_turns` | 11 | The run hit its turn limit. |
 | 8b | `budget_exhausted` | 14 | The run hit a token or time budget. |
 | 9 | `finished` | 0 | The model called the `finish` tool with a valid result. |
 | 9b | `stop_requested` | 0 | A hook or a stop condition asked the run to stop. |
@@ -586,7 +586,7 @@ before the model finished, and both settle `cancelled`.
 |---|---|
 | `end_turn` | The model stopped on its own. |
 | `output_truncated` | The provider stopped on the output-token limit. |
-| `max_turns` | The run hit its turn ceiling. |
+| `max_turns` | The run hit its turn limit. |
 | `max_run_tokens` | The run hit its token budget. |
 | `max_duration` | The run hit its wall-clock budget. |
 | `no_output_room` | The computed `max_tokens` was under 256, so the request was never sent. |

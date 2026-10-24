@@ -5,6 +5,9 @@
 // processes itself, so a binary chooses the executors it links without
 // the tool knowing where the command runs. The package also builds the
 // child environment, less the names the operator scrubs.
+//
+// Argument names distinguish three layers: Argv is process argv, Args
+// are CLI arguments, and Arguments are tool-call arguments.
 package exec
 
 import (
@@ -74,7 +77,7 @@ type Process interface {
 //
 // A sandbox asks it about every directory the sandbox mounts, not only the
 // working directory, so a path the operator protects inside a read-only or
-// read-write bind is hidden as well. The paths it returns are absolute; the
+// read-write bind is masked as well. The paths it returns are absolute; the
 // executor masks the ones a bind reaches.
 type Masker interface {
 	// Expand returns the protected paths at or under root.

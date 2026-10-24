@@ -177,7 +177,7 @@ type Session struct {
 	// The handle is the recording wrapper: every call writes a record
 	// to the session's store and emits the decision event.
 	decider decide.Decider
-	// deciderModel is the descriptor of the decision model.
+	// deciderModel is the model info of the decision model.
 	deciderModel ModelInfo
 	// log is the session's logger, when the consumer supplied one.
 	log *slog.Logger
@@ -398,7 +398,7 @@ type issuedCall struct {
 // Options configure a session.
 //
 // The options are the session's whole configuration, and every one of
-// them is a typed value: there is no hidden default for the context
+// them is a typed value: there is no implicit default for the context
 // window, and no option that silently changes the loop's behaviour.
 type Options struct {
 	// Transport sends the provider requests. A session without one
@@ -414,12 +414,12 @@ type Options struct {
 	SessionID string
 	// Model is the session's chat model.
 	//
-	// The descriptor names the model the session talks to: the
+	// The model info names the model the session talks to: the
 	// identifier the endpoint knows it by, the API it is reached
 	// through, the window the session measures against and the output
 	// ceiling the requests carry.
 	//
-	// The API is the Chat Completions API when the descriptor names
+	// The API is the Chat Completions API when the model info names
 	// none, because it is the only API v1 speaks. The window is
 	// required: a value of 0 or less is a construction error
 	// (ErrSessionInit), so no run starts without a window to measure
@@ -499,13 +499,13 @@ type Options struct {
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths []string
 
-	// MaxTurns is the turn ceiling. 0 means unlimited. A run that
+	// MaxTurns is the turn limit. 0 means unlimited. A run that
 	// reaches it settles max_turns.
 	MaxTurns int
-	// MaxRunTokens is the run's token ceiling. 0 means unlimited. A run
+	// MaxRunTokens is the run's token limit. 0 means unlimited. A run
 	// that reaches it settles budget_exhausted.
 	MaxRunTokens int
-	// MaxDuration is the run's wall-clock ceiling. 0 means unlimited. A
+	// MaxDuration is the run's wall-clock limit. 0 means unlimited. A
 	// run that reaches it settles budget_exhausted.
 	MaxDuration time.Duration
 	// MaxContinuations is how many BeforeSettle continuations a run may
@@ -601,7 +601,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	if opts.Transport == nil {
 		return nil, &ErrSessionInit{Cause: errors.New("poo: the session has no chat transport")}
 	}
-	// The session speaks the Chat Completions API unless the descriptor
+	// The session speaks the Chat Completions API unless the model info
 	// names another one: it is the only API v1 speaks, and an unknown
 	// API would skip the check that keeps a foreign block out of the
 	// requests.
@@ -747,14 +747,14 @@ const (
 	DefaultHardRatio = 0.97
 	// DefaultHookTimeout bounds one hook call.
 	DefaultHookTimeout = 30 * time.Second
-	// DefaultMaxOutput is the output-token ceiling a model without one
+	// DefaultMaxOutput is the output-token limit a model without one
 	// gets.
 	DefaultMaxOutput = 8192
 	// MinOutputTokens is the smallest output room a request may ask
 	// for. Below it, the context is effectively full.
 	MinOutputTokens = 256
 	// OutputReserve is the room the core keeps free when it computes
-	// the output ceiling.
+	// the output limit.
 	OutputReserve = 256
 	// CharsPerToken is the starting estimate of characters per token.
 	// The first usage report calibrates it.

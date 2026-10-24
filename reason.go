@@ -31,7 +31,7 @@ const (
 	// ReasonHookContinueLimit means the BeforeSettle hooks asked for
 	// more continuations than the run allows.
 	ReasonHookContinueLimit Reason = "hook_continue_limit"
-	// ReasonMaxTurns means the run hit its turn ceiling.
+	// ReasonMaxTurns means the run hit its turn limit.
 	ReasonMaxTurns Reason = "max_turns"
 	// ReasonBudgetExhausted means the run hit a token or time budget.
 	ReasonBudgetExhausted Reason = "budget_exhausted"
@@ -58,7 +58,7 @@ const (
 //
 // A lower number wins. The order is the plan's table: cancelled beats
 // everything, the failure reasons come next, and the natural reasons come
-// last, so a real failure is never hidden by a natural stop.
+// last, so a real failure is not obscured by a natural stop.
 //
 // provider_limit and provider_error share a level, because a single
 // failed request produces only one of them.

@@ -185,10 +185,9 @@ func (b *eventBus) emit(name EventName, payload map[string]any) Event {
 		default:
 			// The observer is too far behind. The event is dropped
 			// for that observer alone, and the count is held for the
-			// coalesced observer.dropped record the observer stage
-			// (Stage 4) writes. The record is never delivered to
-			// observers, so overflow diagnostics cannot cause more
-			// overflow.
+			// coalesced observer.dropped record the event bus writes.
+			// The record is never delivered to observers, so overflow
+			// diagnostics cannot cause more overflow.
 			o.mu.Lock()
 			o.dropped++
 			o.mu.Unlock()

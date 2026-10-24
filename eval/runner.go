@@ -24,9 +24,9 @@ import (
 const (
 	// DefaultSeeds is the number of times a task runs against a model.
 	DefaultSeeds = 3
-	// DefaultMaxTurns is the turn ceiling the runner passes to poo.
+	// DefaultMaxTurns is the turn limit the runner passes to poo.
 	DefaultMaxTurns = 50
-	// DefaultTimeoutS is the wall-clock ceiling for one run, in seconds.
+	// DefaultTimeoutS is the wall-clock limit for one run, in seconds.
 	DefaultTimeoutS = 300
 	// MaxParallelPerEndpoint is the most runs that may share an
 	// endpoint at the same time. Two models on one endpoint share its
@@ -50,7 +50,7 @@ const (
 	CheckTimeout = 120 * time.Second
 )
 
-// RunOptions configure one harness run.
+// RunOptions configure one runner run.
 type RunOptions struct {
 	// Models is the catalog to run against.
 	Models []Model
@@ -66,7 +66,7 @@ type RunOptions struct {
 	Seeds int
 	// Parallel is the most runs that may be in flight at the same time.
 	Parallel int
-	// MaxTurns is the turn ceiling passed to poo.
+	// MaxTurns is the turn limit passed to poo.
 	MaxTurns int
 	// Out is the directory the report and the logs go to.
 	Out string
@@ -91,7 +91,7 @@ type RunOptions struct {
 	Force bool
 	// Catalog is every model the run set knows about, whether or not
 	// this run uses it. The key variables the catalog names are removed
-	// from every environment the harness builds, so a run against one
+	// from every environment the runner builds, so a run against one
 	// model never carries another model's credential.
 	Catalog []Model
 }
@@ -110,7 +110,7 @@ type RunResult struct {
 	RunExit int `json:"run_exit"`
 	// SettleReason is why the run settled, as the log says.
 	SettleReason string `json:"settle_reason"`
-	// Metrics is what the harness measured.
+	// Metrics is what the runner measured.
 	Metrics Metrics `json:"metrics"`
 	// LogPath is the session log.
 	LogPath string `json:"log_path"`
@@ -125,16 +125,16 @@ type RunResult struct {
 	// Error is set when the run could not be made at all: the binary
 	// was missing, the task could not be checked out, the run timed out.
 	Error string `json:"error,omitempty"`
-	// DurationMS is the wall time of the whole run, harness included.
+	// DurationMS is the wall time of the whole run, runner included.
 	DurationMS int64 `json:"duration_ms"`
 }
 
-// Report is the result of a harness run.
+// Report is the result of a runner run.
 type Report struct {
 	// StartedAt and FinishedAt bound the run.
 	StartedAt  string `json:"started_at"`
 	FinishedAt string `json:"finished_at"`
-	// GitSHA is the commit the harness ran against.
+	// GitSHA is the commit the runner ran against.
 	GitSHA string `json:"git_sha"`
 	// Sandbox is how the runs were isolated.
 	Sandbox string `json:"sandbox,omitempty"`
@@ -146,11 +146,11 @@ type Report struct {
 	Results []RunResult `json:"results"`
 }
 
-// Runner runs the harness.
+// Runner runs the runner.
 type Runner struct {
 	opts RunOptions
 	// keyEnvs are the environment variables the catalog names as key
-	// variables. They are removed from every environment the harness
+	// variables. They are removed from every environment the runner
 	// builds, except the one the running model needs.
 	keyEnvs []string
 	// pooErr is why the poo binary could not be found, if it could not.
@@ -187,7 +187,7 @@ func NewRunner(opts RunOptions) *Runner {
 	}
 	// The out directory and the work root are made absolute here, not
 	// in the run: poo resolves a relative --log against its own working
-	// directory, and the harness opens the log against its own.
+	// directory, and the runner opens the log against its own.
 	if opts.Out != "" {
 		if abs, err := filepath.Abs(opts.Out); err == nil {
 			opts.Out = abs
@@ -199,7 +199,7 @@ func NewRunner(opts RunOptions) *Runner {
 		}
 	}
 	// The key variables the catalog names are known before the run, so
-	// every environment the harness builds can be scrubbed of them.
+	// every environment the runner builds can be scrubbed of them.
 	// The catalog the caller names holds every model the run set knows
 	// about; the models the run uses are added to it, so a run made
 	// without a catalog still scrubs its own model's key.
@@ -214,7 +214,7 @@ func (r *Runner) Seeds() int { return r.opts.Seeds }
 // Parallel returns the most runs that may be in flight at once.
 func (r *Runner) Parallel() int { return r.opts.Parallel }
 
-// Run executes the harness.
+// Run executes the runner.
 //
 // Every task runs against every model, once per seed. The runs happen in
 // parallel, up to the parallel limit, and no more than two of them share
@@ -409,7 +409,7 @@ type job struct {
 	seed  int
 }
 
-// jobs returns the runs the harness makes.
+// jobs returns the runs the runner makes.
 func (r *Runner) jobs() []job {
 	var out []job
 	for _, t := range r.opts.Tasks {
@@ -554,7 +554,7 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 		result.Error = fmt.Sprintf("the run timed out after %s", r.pooTimeout(j.task))
 	} else if pooExit != 0 {
 		// The run settled, but poo still failed: the exit says why the
-		// harness saw a failure instead of a clean end.
+		// runner saw a failure instead of a clean end.
 		result.Error = fmt.Sprintf("poo exited %d", pooExit)
 	}
 
@@ -596,7 +596,7 @@ func (r *Runner) runJob(ctx context.Context, j job, runsDir, workRoot string, gu
 	return result
 }
 
-// timeout returns the wall-clock ceiling for a task's run.
+// timeout returns the wall-clock limit for a task's run.
 func (r *Runner) timeout(t Task) time.Duration {
 	if t.TimeoutS > 0 {
 		return time.Duration(t.TimeoutS) * time.Second
@@ -604,11 +604,11 @@ func (r *Runner) timeout(t Task) time.Duration {
 	return DefaultTimeoutS * time.Second
 }
 
-// PooTimeoutMargin is how much sooner than the harness's deadline poo's
+// PooTimeoutMargin is how much sooner than the runner's deadline poo's
 // own timeout fires.
 const PooTimeoutMargin = 10 * time.Second
 
-// pooTimeout returns the timeout handed to poo: the harness's deadline
+// pooTimeout returns the timeout handed to poo: the runner's deadline
 // less PooTimeoutMargin, or less a tenth of it when the deadline is
 // short, so a small task keeps most of its budget.
 func (r *Runner) pooTimeout(t Task) time.Duration {
@@ -697,17 +697,17 @@ func (r *Runner) gitHasSHA(ctx context.Context, dir, sha string) bool {
 
 // runPoo runs the poo binary against a task.
 //
-// The binary is the real one: the harness measures what a user gets. A
+// The binary is the real one: the runner measures what a user gets. A
 // model's API key is passed by name, through --api-key-env, so the
 // runner never reads the value and never writes it anywhere. (The judge
 // reads its own key; see JudgeOptions.)
 //
 // The child runs in its own process group, and the group is killed when
 // the run's context ends. Killing only the process would leave its
-// children holding the output pipe, and the harness would wait for a
+// children holding the output pipe, and the runner would wait for a
 // run that was already over.
 func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (int, error) {
-	// The descriptor of the model names the flags the binary is given,
+	// The model info of the model names the flags the binary is given,
 	// so the catalog entry and the request agree.
 	model := j.model.ModelInfo()
 	args := []string{
@@ -719,7 +719,7 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 		"--max-turns", strconv.Itoa(r.opts.MaxTurns),
 		"--log", logPath,
 		"--working-dir", workdir,
-		// poo is given a deadline shorter than the harness's by a
+		// poo is given a deadline shorter than the runner's by a
 		// margin, so it settles and writes its settle record before
 		// the group kill rather than being killed mid-write.
 		"--timeout", r.pooTimeout(j.task).String(),
@@ -761,7 +761,7 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 	}
 	// The child runs in its own process group, and the group is killed
 	// when the run's context ends. Killing only the process would leave
-	// its children holding the output pipe, and the harness would wait
+	// its children holding the output pipe, and the runner would wait
 	// for a run that was already over.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// The cancel function kills the whole group, and the wait delay
@@ -779,7 +779,7 @@ func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (in
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			exit = exitErr.ExitCode()
-			// A process the harness killed reports a negative exit
+			// A process the runner killed reports a negative exit
 			// code, and there is no error to report beyond that: the
 			// run's own context says why it was killed.
 			if exit >= 0 {
@@ -844,7 +844,7 @@ func killGroup(pid int) error {
 // runCheck runs a task's check.sh in the workdir.
 //
 // The check gets three environment variables, so it can see what the run
-// did without the harness having to parse its output:
+// did without the runner having to parse its output:
 //
 //   - POO_WORKDIR: the workdir's absolute path.
 //   - POO_SESSION_LOG: the session log's absolute path. A read-only
@@ -852,7 +852,7 @@ func killGroup(pid int) error {
 //   - POO_CHANGED_FILES: the paths the run changed, one per line.
 //
 // The check has a small timeout: a check that hangs must not hang the
-// harness. It runs outside the sandbox, whatever the run's sandbox mode:
+// runner. It runs outside the sandbox, whatever the run's sandbox mode:
 // only poo is wrapped, so nothing here isolates the check's network or
 // filesystem.
 //
@@ -881,7 +881,7 @@ func (r *Runner) runCheck(ctx context.Context, t Task, workdir, logPath string, 
 	)
 	// The check runs in its own process group, and the group is killed
 	// when the check's context ends. A check that leaves a child behind
-	// must not hold the harness up.
+	// must not hold the runner up.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
 	cmd.WaitDelay = KillWaitDelay
@@ -1037,8 +1037,8 @@ func tail(s string, n int) string {
 	return s[k:]
 }
 
-// gitSHA returns the commit the harness ran against, or the empty string
-// when the harness runs outside a repository.
+// gitSHA returns the commit the runner ran against, or the empty string
+// when the runner runs outside a repository.
 func gitSHA() string {
 	return GitSHA("")
 }

@@ -28,9 +28,9 @@ type runOptions struct {
 	permissionFallback string
 	// reasoningEffort is the reasoning_effort the run sends.
 	reasoningEffort string
-	// maxTurns is the turn ceiling.
+	// maxTurns is the turn limit.
 	maxTurns int
-	// maxOutput is the model's output-token ceiling.
+	// maxOutput is the model's output-token limit.
 	maxOutput int
 	// logPath is the session log path.
 	logPath string
@@ -42,7 +42,7 @@ type runOptions struct {
 	// projectPrompt includes the working directory's project
 	// instructions in the prompt.
 	projectPrompt bool
-	// timeout is the wall-clock ceiling for the run.
+	// timeout is the wall-clock limit for the run.
 	timeout time.Duration
 	// noWaitJobs exits at the first settle, and the running jobs stop
 	// through the session's close.
@@ -321,7 +321,7 @@ func watchInterrupts(interrupts <-chan os.Signal, cancel context.CancelFunc, clo
 // modelWithFlags returns the model the run talks to.
 //
 // The catalog resolves the model the settings name, and the flags
-// change what it resolved: the ceiling and the reasoning control are
+// change what it resolved: the limit and the reasoning control are
 // the operator's.
 func modelWithFlags(runtime *config.Runtime, o *runOptions) poo.ModelInfo {
 	model := runtime.Options.Model

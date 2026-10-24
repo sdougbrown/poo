@@ -354,8 +354,8 @@ func (s *suite) lastChange(path string) time.Time {
 	return info.ModTime()
 }
 
-// attachAndScrollback covers the flow of a client that attaches to a
-// session after a crash: the scrollback holds what the session did, and
+// attachAndHistory covers the flow of a client that attaches to a
+// session after a crash: the history holds what the session did, and
 // the interrupted run is marked.
 func (s *suite) attachAndScrollback() {
 	s.t.Helper()
@@ -377,7 +377,7 @@ func (s *suite) attachAndScrollback() {
 	runID := s.prompt(c, sessionID, "do the thing")
 	s.waitToolCall(c, runID)
 
-	// The client reads the scrollback before the crash.
+	// The client reads the history before the crash.
 	before := s.history(c, sessionID, 0, 500)
 	if len(before.Items) == 0 {
 		s.t.Fatal("the session's scrollback is empty")
@@ -405,7 +405,7 @@ func (s *suite) attachAndScrollback() {
 		}
 	}
 
-	// The scrollback pages backwards: each page is older than the one
+	// The history pages backwards: each page is older than the one
 	// before it, and the union is the transcript the session recorded
 	// before the crash.
 	var after []protocol.HistoryItem
@@ -432,7 +432,7 @@ func (s *suite) attachAndScrollback() {
 	if len(after) < len(before.Items) {
 		s.t.Errorf("the scrollback holds %d items, want at least %d", len(after), len(before.Items))
 	}
-	// The scrollback holds what the session did before the crash.
+	// The history holds what the session did before the crash.
 	for _, item := range before.Items {
 		if !historyHas(after, item) {
 			s.t.Errorf("the scrollback lost the %q item %q", item.Type, item.Text)
@@ -452,7 +452,7 @@ func (s *suite) attachAndScrollback() {
 // historyHas reports whether the page holds the item.
 //
 // The item is the same when it has the same type, the same text and
-// the same handle: the scrollback is a projection, and a reader sees
+// the same handle: the history is a projection, and a reader sees
 // the same entry after the crash.
 func historyHas(items []protocol.HistoryItem, want protocol.HistoryItem) bool {
 	for _, item := range items {
@@ -937,7 +937,7 @@ func chunks(count, size int) []string {
 }
 
 // ephemeral covers the pass that keeps the sessions in memory: the
-// session runs, the scrollback is there, no file is written, and the
+// session runs, the history is there, no file is written, and the
 // session cannot be loaded.
 func (s *suite) ephemeral() {
 	s.t.Helper()
@@ -970,7 +970,7 @@ func (s *suite) ephemeral() {
 	runID := s.prompt(c, info.SessionID, "say hello")
 	s.settled(c, info.SessionID, runID)
 
-	// The scrollback is there, within the process.
+	// The history is there, within the process.
 	history := s.history(c, info.SessionID, 0, 100)
 	if len(history.Items) == 0 {
 		s.t.Error("the session's scrollback is empty")

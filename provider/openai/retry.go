@@ -179,7 +179,7 @@ type streamWithRetry struct {
 	// report is the request's own reporter: it hears every attempt that
 	// failed.
 	report func(poo.Attempt)
-	// settings are the descriptor and the quirks the request is shaped
+	// settings are the model info and the quirks the request is shaped
 	// by, so an attempt reopened after a failure reads the response the
 	// same way the first one did.
 	settings requestSettings

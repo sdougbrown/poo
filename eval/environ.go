@@ -9,9 +9,9 @@ import (
 	"strings"
 )
 
-// The harness builds the environments its subprocesses run in.
+// The runner builds the environments its subprocesses run in.
 //
-// The catalog names one key variable per model. The harness knows every
+// The catalog names one key variable per model. The runner knows every
 // key variable the catalog names, and it removes all of them from the
 // environments it builds — except the one the running model needs. A run
 // against a model with no key must not carry another model's credential
@@ -40,7 +40,7 @@ func keyEnvs(catalog []Model) []string {
 
 // scrubbedEnv returns the environment a subprocess runs in.
 //
-// The base environment is the harness's own, minus every key variable
+// The base environment is the runner's own, minus every key variable
 // the catalog names, plus the one key variable the running model needs.
 // The key is passed by name on the command line, so the value reaches
 // the process and nothing else.

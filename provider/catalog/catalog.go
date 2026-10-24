@@ -94,7 +94,7 @@ type Catalog struct {
 	roles      map[Role]string
 }
 
-// modelRef names the model a descriptor serves: an endpoint and the id
+// modelRef names the model a model info serves: an endpoint and the id
 // the endpoint calls it.
 type modelRef struct {
 	endpoint string
@@ -301,8 +301,8 @@ type Explanation struct {
 // Explain returns the model's fields and the layer that set each of
 // them.
 //
-// The fields come in the order of the descriptor, so the explanation
-// reads like the descriptor it explains.
+// The fields come in the order of the model info, so the explanation
+// reads like the model info it explains.
 func (c *Catalog) Explain(name string) (poo.ModelInfo, []Explanation, error) {
 	e, ok := c.entries[name]
 	if !ok {
@@ -433,7 +433,7 @@ func (c *Catalog) CredentialEnvNames() []string {
 	return names
 }
 
-// effective returns the model's effective descriptor.
+// effective returns the model's effective model info.
 func (c *Catalog) effective(name string) poo.ModelInfo {
 	e := c.entries[name]
 	info, _ := c.merge(e)

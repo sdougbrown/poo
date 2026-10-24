@@ -203,7 +203,7 @@ type Context struct {
 type Handoff struct {
 	// Ratio is the share of the window at which the handoff happens.
 	Ratio *float64 `json:"ratio,omitempty"`
-	// MaxTokens is the handoff's ceiling, in tokens.
+	// MaxTokens is the handoff's configured limit, in tokens.
 	MaxTokens *int `json:"max_tokens,omitempty"`
 }
 
@@ -253,11 +253,11 @@ type Env struct {
 
 // Limits are the run's limits. A limit of zero is off.
 type Limits struct {
-	// MaxTokensPerRun is the run's token ceiling.
+	// MaxTokensPerRun is the run's token limit.
 	MaxTokensPerRun int `json:"max_tokens_per_run,omitempty"`
-	// MaxDurationS is the run's wall-clock ceiling, in seconds.
+	// MaxDurationS is the run's wall-clock limit, in seconds.
 	MaxDurationS int `json:"max_duration_s,omitempty"`
-	// MaxTurns is the turn ceiling.
+	// MaxTurns is the turn limit.
 	MaxTurns int `json:"max_turns,omitempty"`
 	// MaxContinuations is how many continuations a run may take.
 	MaxContinuations int `json:"max_continuations,omitempty"`

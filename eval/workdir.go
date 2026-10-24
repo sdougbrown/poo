@@ -16,7 +16,7 @@ import (
 
 // copyTree copies a directory tree.
 //
-// The tree's own .git directory is skipped: the harness measures the
+// The tree's own .git directory is skipped: the runner measures the
 // workdir against a pristine copy of itself, and a checked-in .git would
 // only add noise to the diff.
 func copyTree(src, dst string) error {
@@ -39,7 +39,7 @@ func copyTree(src, dst string) error {
 		}
 		if !d.Type().IsRegular() {
 			// A symlink or a device file in a fixture is not something
-			// the harness copies.
+			// the runner copies.
 			return nil
 		}
 		return copyFile(path, filepath.Join(dst, rel))
@@ -153,7 +153,7 @@ func generatedFile(rel string) bool {
 //
 // A coding task's check runs the fixture's tests, and a model that
 // rewrote them would make the check pass without fixing anything. The
-// pristine copy is the one the harness took before the run, so the
+// pristine copy is the one the runner took before the run, so the
 // check always runs the tests the task shipped with.
 //
 // The tests directory is only restored when there is one: a task with
@@ -174,7 +174,7 @@ func restoreTests(pristine, workdir string) error {
 // pristine copy of it.
 //
 // The comparison does not need a repository: a fixture is a plain
-// directory, and the harness has to work on one.
+// directory, and the runner has to work on one.
 //
 // The scratch the diff needs lives under the run's own work root, never
 // in /tmp's shared space.

@@ -35,7 +35,7 @@ const (
 	MethodSessionConfigure = "session/configure"
 	// MethodSessionClose closes a session.
 	MethodSessionClose = "session/close"
-	// MethodSessionHistory pages a session's scrollback.
+	// MethodSessionHistory pages a session's history.
 	MethodSessionHistory = "session/history"
 	// MethodModelsList returns the effective model catalog.
 	MethodModelsList = "models/list"

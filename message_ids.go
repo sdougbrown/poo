@@ -55,7 +55,7 @@ func (ids *MessageIDs) Set(n int) {
 
 // Knows reports that the session has assigned the given message id.
 //
-// The registry is what a delivery note is validated against: every
+// The counter's assigned ids are what a delivery note is validated against: every
 // assistant-message id assigned in the session, including one still
 // streaming. A reference is validated once, at acceptance, and is never
 // re-validated however late the delivery is.

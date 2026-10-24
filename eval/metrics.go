@@ -13,9 +13,9 @@ import (
 	readtool "github.com/sdougbrown/poo/tool/read"
 )
 
-// Metrics is everything the harness measures about one run.
+// Metrics is everything the runner measures about one run.
 //
-// Every field comes from the session log. The harness never looks at the
+// Every field comes from the session log. The runner never looks at the
 // model's own claims about what it did; it reads what actually happened.
 type Metrics struct {
 	// Turns is the number of provider requests the run made.

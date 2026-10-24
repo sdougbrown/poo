@@ -424,7 +424,7 @@ func (s *suite) followUp() {
 	}
 }
 
-// history asks the session for its scrollback.
+// history asks the session for its history.
 func (s *suite) history(c *client, sessionID string, beforeSeq int64, limit int) protocol.HistoryResult {
 	s.t.Helper()
 	params := map[string]any{"session_id": sessionID}

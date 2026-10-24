@@ -7,6 +7,9 @@ import "encoding/json"
 // Every shape here is part of the contract: a field that is added is
 // announced by a capability, and a field that goes away bumps the
 // protocol version.
+//
+// A protocol.X is never a poo.X: the wire copy uses strings where the
+// core copy uses typed enums.
 
 // Client is the client the handshake names.
 type Client struct {
@@ -304,7 +307,7 @@ type HistoryParams struct {
 	Limit int `json:"limit,omitempty"`
 }
 
-// HistoryItem is one entry in a session's scrollback.
+// HistoryItem is one entry in a session's history.
 //
 // The item is a projection: it says what happened and where, and it
 // holds no more than a client shows.

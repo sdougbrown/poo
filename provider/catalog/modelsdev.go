@@ -20,7 +20,7 @@ type hostedEntry struct {
 	Env []string
 	// ContextLimit is the model's context window.
 	ContextLimit int
-	// MaxOutput is the model's output ceiling.
+	// MaxOutput is the model's output limit.
 	MaxOutput int
 	// Reasoning reports whether the model reasons.
 	Reasoning bool

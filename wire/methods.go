@@ -228,7 +228,7 @@ func (s *server) sessionClose(raw json.RawMessage) (any, *protocol.Error) {
 	return map[string]any{}, nil
 }
 
-// sessionHistory pages a session's scrollback.
+// sessionHistory pages a session's history.
 //
 // The page comes back oldest first, and the paging goes backwards:
 // has_more says that older items exist before the first returned one.
