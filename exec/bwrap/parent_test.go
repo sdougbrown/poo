@@ -105,6 +105,9 @@ started:
 		time.Sleep(50 * time.Millisecond)
 	}
 	left := sandboxPIDs(t, dir)
+	// Name the survivor before the sweep runs: the sweep's own kills
+	// would leave zombies behind and hide what was alive.
+	described := describe(left)
 	// A survivor is the test's own, because it names the test's
 	// directory. The sweep runs until the directory names nothing, so a
 	// bubblewrap that is still starting up cannot be left behind either.
@@ -118,7 +121,7 @@ started:
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("the sandbox outlived the process that started it: %s", describe(left))
+	t.Fatalf("the sandbox outlived the process that started it: %s", described)
 }
 
 // describe names each surviving sandbox process: its state, its parent
