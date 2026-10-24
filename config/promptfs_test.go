@@ -178,3 +178,48 @@ func TestARenderErrorSettlesTheRun(t *testing.T) {
 		}
 	}
 }
+
+// TestATemplateThatOnlyFailsAtRenderSettlesTheRun covers the templates
+// the load-time check leaves alone: they load, and the run settles as
+// hook_error with the file named.
+func TestATemplateThatOnlyFailsAtRenderSettlesTheRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+	}{
+		{"nested call", `{{define "part"}}{{.Model}}{{end}}{{template "part" .Model}}`},
+		{"builtin result", `{{(index .Tools 0).Bad}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime, err := buildWithPrompt(t, theModelSettings, fstest.MapFS{
+				"base.md": {Data: []byte(tc.text)},
+			})
+			if err != nil {
+				t.Fatalf("building the runtime: %v", err)
+			}
+			runtime.Options.Transport = pootest.NewTransport(pootest.Turn{Text: "done"})
+			sess, err := poo.New(runtime.Options)
+			if err != nil {
+				t.Fatalf("building the session: %v", err)
+			}
+			defer sess.Close()
+			runID, err := sess.Prompt(context.Background(), "do the thing")
+			if err != nil {
+				t.Fatalf("starting the run: %v", err)
+			}
+			result, err := sess.WaitRun(context.Background(), runID)
+			if err != nil {
+				t.Fatalf("waiting for the run: %v", err)
+			}
+			if result.Reason != poo.ReasonHookError {
+				t.Errorf("the run settled as %s, want hook_error", result.Reason)
+			}
+			if result.Detail.Source != "system_prompt" {
+				t.Errorf("the run's source is %q, want system_prompt", result.Detail.Source)
+			}
+			if !strings.Contains(result.Detail.Text, "base.md") {
+				t.Errorf("the settle text %q does not name the file", result.Detail.Text)
+			}
+		})
+	}
+}
