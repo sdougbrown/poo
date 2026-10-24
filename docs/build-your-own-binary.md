@@ -117,6 +117,18 @@ section's default text and keeps the alternatives the section already offers,
 including the embedded ones: omitting a variant from the directory does not
 remove a variant the section already had.
 
+A template is checked when it loads and rendered when the session is built. The
+model, tools, working directory, variant, settings and project file are all
+known by then. A template that renders for one session and not another fails
+the session, not the run. `config.Build` renders the prompt once, so `poo run`
+fails through the settings' own error path. The failure is a `config.Error` with
+the `invalid_value` code and the `system_prompt` field, and the file is named
+underneath. A session built over the wire is refused at `session/create` with
+the `invalid_settings` data code.
+
+A session that changes its model or variant renders the prompt again. A prompt
+that cannot render there refuses the change and leaves the session as it was.
+
 The layers apply in this order: the embedded default, the binary's directory,
 the settings (`system_prompt.*`) and the project's `AGENTS.md`. A later layer
 wins, so an operator's settings file still changes the prompt the binary ships.
