@@ -339,8 +339,8 @@ func TestTheRecordedOutcomeSplitsInvalidFromDeferred(t *testing.T) {
 	if _, err := invalid.Decide(context.Background(), nil, "", nil); !errors.Is(err, decide.ErrInvalidQuestion) {
 		t.Fatalf("the invalid call returned %v, want ErrInvalidQuestion", err)
 	}
-	if got := sink.records[0].Outcome; got != decide.OutcomeInvalid {
-		t.Errorf("the invalid call was recorded as %q, want %q", got, decide.OutcomeInvalid)
+	if got := sink.records[0].Outcome; got != decide.ResultInvalid {
+		t.Errorf("the invalid call was recorded as %q, want %q", got, decide.ResultInvalid)
 	}
 	if sink.records[0].Error != "" {
 		t.Errorf("the invalid call recorded the error %q, want none", sink.records[0].Error)
@@ -353,8 +353,8 @@ func TestTheRecordedOutcomeSplitsInvalidFromDeferred(t *testing.T) {
 	if _, err := failed.Decide(context.Background(), nil, "", nil); err == nil || errors.Is(err, decide.ErrInvalidQuestion) {
 		t.Fatalf("the failed call returned %v, want an unrelated error", err)
 	}
-	if got := sink2.records[0].Outcome; got != decide.OutcomeDeferred {
-		t.Errorf("the failed call was recorded as %q, want %q", got, decide.OutcomeDeferred)
+	if got := sink2.records[0].Outcome; got != decide.ResultDeferred {
+		t.Errorf("the failed call was recorded as %q, want %q", got, decide.ResultDeferred)
 	}
 	if sink2.records[0].Error != "the endpoint was unreachable" {
 		t.Errorf("the failed call recorded the error %q, want the decider's error", sink2.records[0].Error)
@@ -374,8 +374,8 @@ func TestASuccessIsRecordedAsOKWithItsAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deciding: %v", err)
 	}
-	if got := sink.records[0].Outcome; got != decide.OutcomeOK {
-		t.Errorf("the successful call was recorded as %q, want %q", got, decide.OutcomeOK)
+	if got := sink.records[0].Outcome; got != decide.ResultOK {
+		t.Errorf("the successful call was recorded as %q, want %q", got, decide.ResultOK)
 	}
 	if sink.records[0].Error != "" {
 		t.Errorf("the successful call recorded the error %q, want none", sink.records[0].Error)
@@ -442,8 +442,8 @@ func TestAMalformedAnswerIsRecordedAsADeferral(t *testing.T) {
 				t.Fatalf("the sink holds %d records, want 1", len(sink.records))
 			}
 			rec := sink.records[0]
-			if rec.Outcome != decide.OutcomeDeferred {
-				t.Errorf("the malformed answer was recorded as %q, want %q", rec.Outcome, decide.OutcomeDeferred)
+			if rec.Outcome != decide.ResultDeferred {
+				t.Errorf("the malformed answer was recorded as %q, want %q", rec.Outcome, decide.ResultDeferred)
 			}
 			if !strings.Contains(rec.Error, tt.want) {
 				t.Errorf("the record holds the error %q, want %q", rec.Error, tt.want)
@@ -742,7 +742,7 @@ func TestTheQuestionKindSurvivesARecordRoundTrip(t *testing.T) {
 		AskedBy:   "hook:policy",
 		Questions: questions,
 		StateHash: "abc",
-		Outcome:   decide.OutcomeOK,
+		Outcome:   decide.ResultOK,
 	}
 	raw, err := json.Marshal(rec)
 	if err != nil {

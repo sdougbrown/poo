@@ -339,8 +339,8 @@ func TestAJobThatWasKilledIsRecovered(t *testing.T) {
 	if !ok {
 		t.Fatalf("the last record is %T, want a job's end", loaded.Records[len(loaded.Records)-1])
 	}
-	if ended.Outcome != poo.JobOutcomeInterrupted {
-		t.Errorf("the job's outcome is %q, want %q", ended.Outcome, poo.JobOutcomeInterrupted)
+	if ended.Outcome != poo.OutcomeInterrupted {
+		t.Errorf("the job's outcome is %q, want %q", ended.Outcome, poo.OutcomeInterrupted)
 	}
 	if len(loaded.Jobs) != 1 {
 		t.Fatalf("the load queues %d job results, want 1", len(loaded.Jobs))

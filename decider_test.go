@@ -68,8 +68,8 @@ func TestTheSessionRecordsTheDecisionsItMakes(t *testing.T) {
 	}
 
 	rec := decisionRecord(t, sink)
-	if rec.Outcome != decide.OutcomeOK {
-		t.Errorf("the record's outcome is %q, want %q", rec.Outcome, decide.OutcomeOK)
+	if rec.Outcome != decide.ResultOK {
+		t.Errorf("the record's outcome is %q, want %q", rec.Outcome, decide.ResultOK)
 	}
 	if len(rec.Questions) != 1 || rec.Questions[0].ID != "q1" {
 		t.Errorf("the record holds the questions %v, want the one that was asked", rec.Questions)
@@ -90,8 +90,8 @@ func TestTheSessionRecordsTheDecisionsItMakes(t *testing.T) {
 			continue
 		}
 		found = true
-		if ev.Payload["outcome"] != decide.OutcomeOK {
-			t.Errorf("the event carries the outcome %v, want %q", ev.Payload["outcome"], decide.OutcomeOK)
+		if ev.Payload["outcome"] != decide.ResultOK {
+			t.Errorf("the event carries the outcome %v, want %q", ev.Payload["outcome"], decide.ResultOK)
 		}
 	}
 	if !found {
@@ -113,8 +113,8 @@ func TestTheSessionRecordsADeferredDecision(t *testing.T) {
 		t.Fatal("the call succeeded, want the decider's failure")
 	}
 	rec := decisionRecord(t, sink)
-	if rec.Outcome != decide.OutcomeDeferred {
-		t.Errorf("the record's outcome is %q, want %q", rec.Outcome, decide.OutcomeDeferred)
+	if rec.Outcome != decide.ResultDeferred {
+		t.Errorf("the record's outcome is %q, want %q", rec.Outcome, decide.ResultDeferred)
 	}
 	if rec.Error == "" {
 		t.Error("the record holds no error")

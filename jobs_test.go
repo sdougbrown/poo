@@ -612,7 +612,7 @@ func TestAnUnlaunchedJobCompletesThroughTheQueue(t *testing.T) {
 	if started < 0 || ended < 0 || started > ended {
 		t.Fatalf("records are %v; want job.started before job.ended", names)
 	}
-	if end.Outcome != poo.JobOutcomeCancelled {
+	if end.Outcome != poo.OutcomeCancelled {
 		t.Errorf("the unlaunched job ended %q, want cancelled", end.Outcome)
 	}
 	if end.InputID == "" {
@@ -765,7 +765,7 @@ func TestAPanickingJobEndsWithAFatalError(t *testing.T) {
 			continue
 		}
 		ended++
-		if e.Outcome != poo.JobOutcomeError {
+		if e.Outcome != poo.OutcomeError {
 			t.Errorf("the job ended %q, want error", e.Outcome)
 		}
 		if !strings.Contains(e.Text, "panic: the tool exploded") {

@@ -390,7 +390,7 @@ func (p *fenceAskPolicy) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) 
 		Tool:    info.Spec.Name,
 		Summary: "reads a file",
 		Class:   info.Spec.Class,
-		Reason:  poo.ReasonPolicy,
+		Reason:  poo.AskReasonPolicy,
 	}
 	ctx.Permissions.Asked(ask)
 	p.once.Do(func() { close(p.asked) })

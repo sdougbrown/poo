@@ -31,7 +31,7 @@ type Ask struct {
 	Class poo.ToolKind `json:"class"`
 	// Reason is why the call is being asked about: "policy" or
 	// "doom_loop".
-	Reason string `json:"reason"`
+	Reason poo.AskReason `json:"reason"`
 	// RepeatCount holds the doom loop's counts. It is set for a
 	// doom-loop ask, and absent for a policy ask.
 	RepeatCount *poo.RepeatCounts `json:"repeat_count,omitempty"`

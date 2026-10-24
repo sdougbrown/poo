@@ -270,7 +270,7 @@ func (p *Policy) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.Too
 	action, reason, counts := p.decide(info)
 	switch action {
 	case ActionAllow:
-		if reason == poo.ReasonDoomLoop {
+		if reason == poo.AskReasonDoomLoop {
 			// The loop is forgiven, so it starts over, and the outcome
 			// is visible even though no asker answered.
 			p.answer(ctx, decisionAllow, reason)
@@ -278,7 +278,7 @@ func (p *Policy) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.Too
 		}
 		return poo.Allow(), nil
 	case ActionDeny:
-		if reason == poo.ReasonDoomLoop {
+		if reason == poo.AskReasonDoomLoop {
 			p.answer(ctx, decisionDeny, reason)
 			return poo.Deny(fmt.Sprintf(DoomLoopDeniedText, doomLoopCount(counts))), nil
 		}
@@ -299,23 +299,23 @@ const (
 // only the doom loop applies, because the same malformed call repeated
 // is the same loop. The core gives it the preparation failure as its
 // result.
-func (p *Policy) decide(info poo.ToolCallInfo) (Action, string, *poo.RepeatCounts) {
+func (p *Policy) decide(info poo.ToolCallInfo) (Action, poo.AskReason, *poo.RepeatCounts) {
 	if info.PrepareFailed {
 		if counts, ok := p.doomLoopCounts(info); ok {
-			return p.doomLoop.Action, poo.ReasonDoomLoop, counts
+			return p.doomLoop.Action, poo.AskReasonDoomLoop, counts
 		}
-		return ActionAllow, poo.ReasonPolicy, nil
+		return ActionAllow, poo.AskReasonPolicy, nil
 	}
 	if counts, ok := p.doomLoopCounts(info); ok {
-		return p.doomLoop.Action, poo.ReasonDoomLoop, counts
+		return p.doomLoop.Action, poo.AskReasonDoomLoop, counts
 	}
 	if rule, ok := p.match(info); ok {
-		return rule.Action, poo.ReasonPolicy, nil
+		return rule.Action, poo.AskReasonPolicy, nil
 	}
 	if info.Spec.Class == poo.ClassReadOnly {
-		return ActionAllow, poo.ReasonPolicy, nil
+		return ActionAllow, poo.AskReasonPolicy, nil
 	}
-	return p.unmatched, poo.ReasonPolicy, nil
+	return p.unmatched, poo.AskReasonPolicy, nil
 }
 
 // doomLoopCounts returns the counts that trigger the doom loop.
@@ -428,7 +428,7 @@ func (p *Policy) reset(ctx poo.HookContext, info poo.ToolCallInfo) {
 // The plan makes the outcome visible either way: an allow and a deny
 // through the action are recorded as a permission answer, with the
 // policy as who answered and the loop as the reason.
-func (p *Policy) answer(ctx poo.HookContext, decision, reason string) {
+func (p *Policy) answer(ctx poo.HookContext, decision string, reason poo.AskReason) {
 	if ctx.Permissions == nil {
 		return
 	}
@@ -449,7 +449,7 @@ const policyName = "policy"
 // the run is waiting on, and the answer is reported when the ask is
 // resolved. The ask resolves once: an answer that arrives after the
 // resolution is dropped.
-func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason string, counts *poo.RepeatCounts) (poo.ToolDecision, error) {
+func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason poo.AskReason, counts *poo.RepeatCounts) (poo.ToolDecision, error) {
 	ask := Ask{
 		AskID:       p.nextAskID(),
 		SessionID:   ctx.SessionID,
@@ -479,7 +479,7 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason string, 
 	}
 	// A refused ask about a loop is the loop's refusal, whatever refused
 	// it: the model is told what it repeated, not who said no.
-	if reason == poo.ReasonDoomLoop {
+	if reason == poo.AskReasonDoomLoop {
 		return poo.Deny(fmt.Sprintf(DoomLoopDeniedText, doomLoopCount(counts))), nil
 	}
 	return poo.Deny(fmt.Sprintf(AskDeniedText, resolution.answeredBy)), nil

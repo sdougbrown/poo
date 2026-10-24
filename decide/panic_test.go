@@ -25,7 +25,7 @@ func TestRecordedDeciderPanicsDefer(t *testing.T) {
 			if !errors.Is(err, ErrDeferred) || len(answers) != 0 {
 				t.Fatalf("answers=%v err=%v", answers, err)
 			}
-			if len(records) != 1 || records[0].Outcome != OutcomeDeferred {
+			if len(records) != 1 || records[0].Outcome != ResultDeferred {
 				t.Fatalf("records=%+v", records)
 			}
 		})

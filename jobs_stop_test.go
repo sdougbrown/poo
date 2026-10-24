@@ -138,7 +138,7 @@ func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
 	if ended == nil {
 		t.Fatal("the log holds no job.ended record")
 	}
-	if ended.Outcome != poo.JobOutcomeCancelled {
+	if ended.Outcome != poo.OutcomeCancelled {
 		t.Errorf("the job ended %q, want cancelled", ended.Outcome)
 	}
 	// The result keeps the partial output the stopped call produced.
@@ -200,7 +200,7 @@ func TestTheJobTimeoutStopsTheJob(t *testing.T) {
 	if ended == nil {
 		t.Fatal("the log holds no job.ended record")
 	}
-	if ended.Outcome != poo.JobOutcomeError {
+	if ended.Outcome != poo.OutcomeError {
 		t.Errorf("the job ended %q, want error", ended.Outcome)
 	}
 	if !ended.TimedOut {
@@ -414,7 +414,7 @@ func TestTheSessionCloseStopsTheRunningJobs(t *testing.T) {
 	if ended == nil {
 		t.Fatal("the log holds no job.ended record")
 	}
-	if ended.Outcome != poo.JobOutcomeCancelled {
+	if ended.Outcome != poo.OutcomeCancelled {
 		t.Errorf("the job ended %q, want cancelled", ended.Outcome)
 	}
 	if ended.Cause != poo.CauseSessionClosed {
@@ -525,7 +525,7 @@ func TestTheJobRunsUnderTheSessionContext(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if ended.Outcome != poo.JobOutcomeOK {
+		if ended.Outcome != poo.OutcomeOK {
 			t.Errorf("the job ended %q, want ok", ended.Outcome)
 		}
 	}
@@ -790,7 +790,7 @@ func TestAJobTimeoutBeatsANilError(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if end.Outcome != poo.JobOutcomeError || !end.TimedOut {
+		if end.Outcome != poo.OutcomeError || !end.TimedOut {
 			t.Errorf("job.ended outcome=%s timed_out=%v; want error/timed_out", end.Outcome, end.TimedOut)
 		}
 		if !strings.Contains(end.Text, "the partial output") {

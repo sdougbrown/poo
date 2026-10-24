@@ -79,7 +79,7 @@ func TestTheRecordingDeciderWritesOneRecord(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("the sink holds %d records, want 1", len(records))
 	}
-	if records[0].Outcome != decide.OutcomeOK {
+	if records[0].Outcome != decide.ResultOK {
 		t.Errorf("the record's outcome is %q, want ok", records[0].Outcome)
 	}
 	if records[0].AskedBy != "the caller" {
@@ -106,7 +106,7 @@ func TestTheRecordingDeciderRecordsADeferral(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("the sink holds %d records, want 1", len(records))
 	}
-	if records[0].Outcome != decide.OutcomeDeferred {
+	if records[0].Outcome != decide.ResultDeferred {
 		t.Errorf("the record's outcome is %q, want deferred", records[0].Outcome)
 	}
 }

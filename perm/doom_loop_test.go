@@ -157,8 +157,8 @@ func TestTheDoomLoopAsksTheChain(t *testing.T) {
 		t.Fatalf("the asker was asked %d time(s), want 1", asker.Asks())
 	}
 	ask := asker.LastAsk()
-	if ask.Reason != poo.ReasonDoomLoop {
-		t.Errorf("the ask's reason is %q, want %q", ask.Reason, poo.ReasonDoomLoop)
+	if ask.Reason != poo.AskReasonDoomLoop {
+		t.Errorf("the ask's reason is %q, want %q", ask.Reason, poo.AskReasonDoomLoop)
 	}
 	if ask.RepeatCount == nil {
 		t.Fatal("the ask carries no repeat count")
@@ -173,8 +173,8 @@ func TestTheDoomLoopAsksTheChain(t *testing.T) {
 	if len(asked) != 1 {
 		t.Fatalf("the session emitted %d ask event(s), want 1", len(asked))
 	}
-	if asked[0].Payload["reason"] != poo.ReasonDoomLoop {
-		t.Errorf("the ask event's reason is %q, want %q", asked[0].Payload["reason"], poo.ReasonDoomLoop)
+	if asked[0].Payload["reason"] != poo.AskReasonDoomLoop {
+		t.Errorf("the ask event's reason is %q, want %q", asked[0].Payload["reason"], poo.AskReasonDoomLoop)
 	}
 }
 
