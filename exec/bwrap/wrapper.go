@@ -54,6 +54,13 @@ func runHelper() int {
 	// The helper watches the executor, so a poo that dies without a
 	// teardown still ends the command it left behind.
 	parentGone := watchParent()
+	// The executor's Start waits for this: the ready report is the
+	// helper's first act past bubblewrap's startup gate, whose death
+	// before its release would otherwise strand the namespace child
+	// (the gate is an eventfd and never reports the launcher's death).
+	// An owner that ends the moment Start returns finds the watch
+	// armed.
+	_, _ = status.Write([]byte(`{"started":true}` + "\n"))
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin = os.Stdin
