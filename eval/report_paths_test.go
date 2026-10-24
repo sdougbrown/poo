@@ -64,14 +64,14 @@ func TestTheCheckOutputNamesNoWorkdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := t.TempDir()
-	workRoot := filepath.Join(t.TempDir(), "work")
+	runsDir := filepath.Join(t.TempDir(), "work")
 	runner := NewRunner(RunOptions{
 		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  workRoot,
+		RunsDir:   runsDir,
 		PooBinary: fakePoo(t, logWritingPoo),
 	})
 	report, err := runner.Run(context.Background())
@@ -79,7 +79,7 @@ func TestTheCheckOutputNamesNoWorkdir(t *testing.T) {
 		t.Fatalf("the run failed: %v", err)
 	}
 	got := report.Results[0].CheckOutput
-	if strings.Contains(got, workRoot) {
+	if strings.Contains(got, runsDir) {
 		t.Errorf("the check output names the workdir: %q", got)
 	}
 	if !strings.Contains(got, "$WORKDIR/a.txt") {
@@ -160,14 +160,14 @@ func TestTheCheckOutputNamesNoWorkRootEither(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := t.TempDir()
-	workRoot := filepath.Join(t.TempDir(), "work")
+	runsDir := filepath.Join(t.TempDir(), "work")
 	runner := NewRunner(RunOptions{
 		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  workRoot,
+		RunsDir:   runsDir,
 		PooBinary: fakePoo(t, logWritingPoo),
 	})
 	report, err := runner.Run(context.Background())
@@ -175,7 +175,7 @@ func TestTheCheckOutputNamesNoWorkRootEither(t *testing.T) {
 		t.Fatalf("the run failed: %v", err)
 	}
 	got := report.Results[0].CheckOutput
-	if strings.Contains(got, workRoot) || !strings.Contains(got, "$WORKROOT") {
+	if strings.Contains(got, runsDir) || !strings.Contains(got, "$WORKROOT") {
 		t.Errorf("the check output is %q, want the work root written as $WORKROOT", got)
 	}
 }

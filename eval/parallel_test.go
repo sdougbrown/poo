@@ -98,7 +98,7 @@ func TestTheEndpointLimitHolds(t *testing.T) {
 		Seeds:     3,
 		Parallel:  6,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 	})
 	if _, err := runner.Run(context.Background()); err != nil {
@@ -140,7 +140,7 @@ func TestTheGlobalLimitHolds(t *testing.T) {
 		Seeds:     3,
 		Parallel:  1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 	})
 	if _, err := runner.Run(context.Background()); err != nil {
@@ -215,7 +215,7 @@ exit 0
 		Seeds:     seeds,
 		Parallel:  seeds,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 	})
 	if _, err := runner.Run(context.Background()); err != nil {
@@ -264,7 +264,7 @@ exit 0
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 	})
 

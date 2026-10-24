@@ -464,15 +464,15 @@ func (s *Session) loop(run *runState) []candidate {
 		// The next-request gate. Every path to a new request comes
 		// through it.
 		//
-		// A pending candidate settles the run: the gate never opens a
+		// A pending candidate settles the run: the request gate never opens a
 		// request while a candidate is pending. The run already holds
 		// it, so the loop returns nothing new.
-		gate := s.gate(run)
-		if gate.held {
+		requestGate := s.requestGate(run)
+		if requestGate.held {
 			return nil
 		}
-		if len(gate.candidates) > 0 {
-			return gate.candidates
+		if len(requestGate.candidates) > 0 {
+			return requestGate.candidates
 		}
 
 		s.mu.Lock()

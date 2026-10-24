@@ -57,7 +57,7 @@ exit 0`, 1))
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(t.TempDir(), "work"),
+		RunsDir:   filepath.Join(t.TempDir(), "work"),
 		PooBinary: poo,
 		Sandbox:   SandboxBwrap,
 	})
@@ -113,7 +113,7 @@ func TestASandboxThatFailsToStartSaysSo(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(t.TempDir(), "work"),
+		RunsDir:   filepath.Join(t.TempDir(), "work"),
 		PooBinary: "/nonexistent-dir/poo",
 		Sandbox:   SandboxBwrap,
 	})
@@ -163,7 +163,7 @@ func TestAPooThatExitsWithoutALogSaysSoWhateverTheSandbox(t *testing.T) {
 				TaskRoot:  taskRoot,
 				Seeds:     1,
 				Out:       out,
-				WorkRoot:  filepath.Join(t.TempDir(), "work"),
+				RunsDir:   filepath.Join(t.TempDir(), "work"),
 				PooBinary: fakePoo(t, "echo boom >&2\nexit 3\n"),
 				Sandbox:   mode,
 			})

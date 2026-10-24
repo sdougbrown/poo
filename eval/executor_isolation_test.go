@@ -108,11 +108,11 @@ func TestTheBwrapExecutorShowsTheTaskOnlyItsWorkdir(t *testing.T) {
 	endpoint := bashToolEndpoint(t,
 		"echo fixed > a.txt; cat ../beside.txt > seen.txt 2>/dev/null || true")
 
-	workRoot := filepath.Join(t.TempDir(), "work")
-	run := job{task: task, model: Model{Name: "m"}, seed: 1}
+	runsDir := filepath.Join(t.TempDir(), "work")
+	run := cell{task: task, model: Model{Name: "m"}, seed: 1}
 	// The file sits beside the workdir on the host, inside the seed's
 	// directory. It must not be visible to the sandboxed command.
-	seedRoot := jobDir(workRoot, run)
+	seedRoot := jobDir(runsDir, run)
 	if err := os.MkdirAll(seedRoot, 0o755); err != nil {
 		t.Fatalf("making the seed directory: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestTheBwrapExecutorShowsTheTaskOnlyItsWorkdir(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       t.TempDir(),
-		WorkRoot:  workRoot,
+		RunsDir:   runsDir,
 		PooBinary: buildPoo(t),
 		Executor:  ExecutorBwrap,
 	})

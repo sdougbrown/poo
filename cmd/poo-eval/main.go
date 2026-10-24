@@ -123,7 +123,7 @@ type runOptions struct {
 	tasksDir    string
 	fixturesDir string
 	pooBinary   string
-	workRoot    string
+	runsDir     string
 	keepWork    bool
 	sandbox     string
 	executor    string
@@ -147,7 +147,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.tasksDir, "tasks-dir", "", "The task set")
 	fs.StringVar(&o.fixturesDir, "fixtures-dir", "", "The fixtures the task set's fixture repos name")
 	fs.StringVar(&o.pooBinary, "poo", "", "The poo binary to run")
-	fs.StringVar(&o.workRoot, "work-root", "", "Where the workdirs are made (default: the user cache directory)")
+	fs.StringVar(&o.runsDir, "work-root", "", "Where the workdirs are made (default: the user cache directory)")
 	fs.BoolVar(&o.keepWork, "keep-workdirs", false, "Leave the workdirs behind")
 	fs.StringVar(&o.sandbox, "sandbox", eval.SandboxBwrap, "How a run is isolated: bwrap or none")
 	fs.StringVar(&o.executor, "executor", eval.ExecutorLocal, "The executor the model's commands run through: local or bwrap")
@@ -210,16 +210,16 @@ func runRun(args []string) int {
 	// The workdirs are scratch, removed when the run ends. They live
 	// outside the repository, so the task set is not an ancestor of
 	// them.
-	workRoot := o.workRoot
-	if workRoot == "" {
+	runsDir := o.runsDir
+	if runsDir == "" {
 		cache, err := os.UserCacheDir()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
 			return 1
 		}
-		workRoot = filepath.Join(cache, "poo-eval", "work")
+		runsDir = filepath.Join(cache, "poo-eval", "work")
 	}
-	if err := os.MkdirAll(workRoot, 0o755); err != nil {
+	if err := os.MkdirAll(runsDir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
 		return 1
 	}
@@ -234,7 +234,7 @@ func runRun(args []string) int {
 		Parallel:     o.parallel,
 		MaxTurns:     o.maxTurns,
 		Out:          o.out,
-		WorkRoot:     workRoot,
+		RunsDir:      runsDir,
 		PooBinary:    o.pooBinary,
 		KeepWorkdirs: o.keepWork,
 		Force:        o.force,

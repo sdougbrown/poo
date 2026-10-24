@@ -36,7 +36,7 @@ func TestARunThatEditsTheSourceIsInvalid(t *testing.T) {
 				TaskRoot:  taskRoot,
 				Seeds:     1,
 				Out:       out,
-				WorkRoot:  filepath.Join(out, "work"),
+				RunsDir:   filepath.Join(out, "work"),
 				PooBinary: editingPoo(t, filepath.Join(t.TempDir(), "rec"), target(fixtureRoot, task.Dir)),
 			})
 			report, err := runner.Run(context.Background())
@@ -67,7 +67,7 @@ func TestALaterRunStartsFromTheSnapshotNotTheEditedSource(t *testing.T) {
 		Seeds:     2,
 		Parallel:  1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: editingPoo(t, record, filepath.Join(fixtureRoot, "fix-a", "a.txt")),
 	})
 	if _, err := runner.Run(context.Background()); err != nil {
@@ -101,7 +101,7 @@ echo fixed > "$d/a.txt"
 		Seeds:     2,
 		Parallel:  1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: poisoner,
 	})
 	report, err := runner.Run(context.Background())
@@ -126,7 +126,7 @@ func TestAReportOfARunThatEditedItsSourceHoldsNoAbsolutePaths(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: editingPoo(t, filepath.Join(t.TempDir(), "rec"), filepath.Join(fixtureRoot, "fix-a", "a.txt")),
 	})
 	report, err := runner.Run(context.Background())
@@ -171,7 +171,7 @@ echo fixed > "$d/a.txt"
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: poisoner,
 	})
 	report, err := runner.Run(context.Background())
@@ -192,14 +192,14 @@ func TestARunErrorHoldsNoAbsolutePaths(t *testing.T) {
 echo "poo run: cannot write $l in $d" >&2
 exit 2
 `)
-	workRoot := filepath.Join(out, "work")
+	runsDir := filepath.Join(out, "work")
 	runner := NewRunner(RunOptions{
 		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  workRoot,
+		RunsDir:   runsDir,
 		PooBinary: poo,
 	})
 	report, err := runner.Run(context.Background())
@@ -217,7 +217,7 @@ exit 2
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, root := range []string{out, workRoot} {
+		for _, root := range []string{out, runsDir} {
 			if strings.Contains(string(data), root) {
 				t.Errorf("%s holds the absolute path %s", name, root)
 			}

@@ -17,18 +17,18 @@ const (
 	workdirName = "work"
 )
 
-// jobDir returns the directory of a job under a root: the runs
+// jobDir returns the directory of a cell under a root: the runs
 // directory for the log, or the work root for the scratch.
 //
 // The layout is <root>/<task>/<model>/seed<N>. The runner writes it and
 // the judge reads it back with parseRunDir.
-func jobDir(root string, j job) string {
+func jobDir(root string, j cell) string {
 	return filepath.Join(root, j.task.ID, j.model.Name, seedDirPrefix+strconv.Itoa(j.seed))
 }
 
-// jobWorkdir returns the directory a job works in.
-func jobWorkdir(workRoot string, j job) string {
-	return filepath.Join(jobDir(workRoot, j), workdirName)
+// jobWorkdir returns the directory a cell works in.
+func jobWorkdir(runsDir string, j cell) string {
+	return filepath.Join(jobDir(runsDir, j), workdirName)
 }
 
 // parseRunDir is the inverse of jobDir. It reads the task, the model and
