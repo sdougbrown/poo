@@ -14,14 +14,14 @@ Done means:
 - You then stop and say what you did, in a few sentences. Do not keep going after the task is done.
 --- tools.bash ---
 Bash:
-- Every bash call runs in a fresh shell. A cd, an exported variable or a background job from one call is gone by the next one, so use absolute paths or start each command where you want it.
+- Every bash call runs in a fresh shell. A cd, an exported variable or a background job from one call is gone by the next one. Use absolute paths, or start each command where you want it.
 - A command runs where the call starts it: `cd build && make` changes the directory for that call only, and `ls` on its own lists the working directory.
 - Background processes are killed when the command returns.
-- Work that has to keep running belongs in a background call: pass "background": true and the call returns at once, and the result arrives later as a message.
+- Work that has to keep running belongs in a background call. Pass "background": true and the call returns at once; the result arrives later as a message.
 - Long output is truncated with the middle elided. Use grep/sed/head/tail to inspect narrower ranges.
 --- tools.read ---
 Read:
-- The read shows a range of lines and names it, e.g. "[path · lines 1–2000 of 5312]".
+- The read shows a range of lines and names it, for example "[path · lines 1–2000 of 5312]".
 - Carry on from the last line you saw with offset, instead of reading the file again from the start.
 - A read that says "capped" stopped at the context budget: ask for the next range with offset.
 - A range past the end of the file comes back empty, with the file's line count in the header.
@@ -30,7 +30,7 @@ Read:
 Grep:
 - The pattern is an RE2 regular expression, matched line by line, and the output is "path:line:text".
 - Use the files_with_matches mode to find the files that hold a pattern, and the count mode to see how often it occurs.
-- The glob filter is matched against the path relative to the search root, e.g. "*.go".
+- The glob filter is matched against the path relative to the search root, for example "*.go".
 - An empty pattern in the files_with_matches mode lists the files.
 - Inside a git work tree the ignore rules hold, and outside one every file under the root is searched.
 - The last line says how many results were left out, and how many protected files were skipped.
