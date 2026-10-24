@@ -1,12 +1,14 @@
 package config_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // A binary's prompt directory replaces the defaults the build assembles,
@@ -137,5 +139,42 @@ func TestTheSettingsAfterTheReplacementStillApply(t *testing.T) {
 	want := "the operator's whole prompt with more\n"
 	if got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
+	}
+}
+
+// TestARenderErrorSettlesTheRun covers a loaded template that
+// type-checks and still fails on the data a run supplies: the error
+// names the file and settles the run instead of panicking the session.
+func TestARenderErrorSettlesTheRun(t *testing.T) {
+	runtime, err := buildWithPrompt(t, theModelSettings, fstest.MapFS{
+		"base.md": {Data: []byte("{{index .Tools 99}}\n")},
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	runtime.Options.Transport = pootest.NewTransport(pootest.Turn{Text: "done"})
+	sess, err := poo.New(runtime.Options)
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	defer sess.Close()
+	runID, err := sess.Prompt(context.Background(), "do the thing")
+	if err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	result, err := sess.WaitRun(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if result.Reason != poo.ReasonHookError {
+		t.Errorf("the run settled as %s, want hook_error", result.Reason)
+	}
+	if result.Detail.Source != "system_prompt" {
+		t.Errorf("the run's source is %q, want system_prompt", result.Detail.Source)
+	}
+	for _, want := range []string{"base.md", "index out of range"} {
+		if !strings.Contains(result.Detail.Text, want) {
+			t.Errorf("the settle text %q does not name %q", result.Detail.Text, want)
+		}
 	}
 }

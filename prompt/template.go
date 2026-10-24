@@ -45,6 +45,9 @@ func Environment() *Template { return environmentTemplate }
 type Template struct {
 	// name is the section the template renders.
 	name string
+	// source is the file a loaded template came from, when it is not
+	// the package's own prose.
+	source string
 	// tmpl is the compiled template.
 	tmpl *template.Template
 	// data returns what the template renders with. Nil renders with
@@ -55,16 +58,22 @@ type Template struct {
 // Compile parses a section's prose.
 //
 // The data function returns what the template renders with, and nil
-// renders with the environment. Compile renders the template once with
-// a zero environment, so a template that names a field its data does
-// not have is an error here and not in a run.
+// renders with the environment. Compile walks the template's parse tree
+// and checks every field chain against the data's type, so a template
+// that names a field the data does not have is an error here and not in
+// a run. The check covers every branch, including one the data would
+// not take.
 func Compile(name, text string, data func(Env) any) (*Template, error) {
 	tmpl, err := template.New(name).Parse(text)
 	if err != nil {
 		return nil, fmt.Errorf("prompt: the section %q: %w", name, err)
 	}
 	t := &Template{name: name, tmpl: tmpl, data: data}
-	if _, err := t.render(Env{}); err != nil {
+	sample := any(Env{})
+	if data != nil {
+		sample = data(Env{})
+	}
+	if err := validateTemplate(t, sample); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -92,16 +101,27 @@ func (t *Template) Data() func(Env) any { return t.data }
 //
 // A prompt file ends with a newline, and the section it holds does not:
 // Render drops one trailing newline, so a file that ends with a blank
-// line keeps the newline it meant. A prompt file that names a field its
-// data does not have is a bug in the prose, so Render panics; Compile
-// has already run the template once, and a template that compiles
-// renders.
+// line keeps the newline it meant.
+//
+// Render is the must-style path the packages that own their prose use:
+// their templates are compiled when the package loads, and a failure
+// here is a bug in the prose. A loaded file uses RenderError, because a
+// template can still fail on data a run supplies, and a consumer's
+// prose should not panic a session.
 func (t *Template) Render(env Env) string {
-	text, err := t.render(env)
+	text, err := t.RenderError(env)
 	if err != nil {
 		panic(err)
 	}
 	return text
+}
+
+// RenderError returns the section's text in an environment, or the
+// error the template reported.
+//
+// The error names the file the template came from, when it has one.
+func (t *Template) RenderError(env Env) (string, error) {
+	return t.render(env)
 }
 
 // render renders the template, dropping the file's final newline.
@@ -112,7 +132,11 @@ func (t *Template) render(env Env) (string, error) {
 	}
 	var b strings.Builder
 	if err := t.tmpl.Execute(&b, data); err != nil {
-		return "", fmt.Errorf("prompt: the section %q: %w", t.name, err)
+		err = fmt.Errorf("prompt: the section %q: %w", t.name, err)
+		if t.source != "" {
+			err = fmt.Errorf("%s: %w", t.source, err)
+		}
+		return "", err
 	}
 	return strings.TrimSuffix(b.String(), "\n"), nil
 }

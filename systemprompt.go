@@ -128,25 +128,31 @@ func setPromptVariants(b *prompt.Builder, section string, variants map[string]st
 // hooks' edits reach the run that is starting and not the next one. The
 // prompt is rendered once, here, and frozen for the length of the run.
 // It returns the variant it rendered in too, for the prompt's record.
-func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) (string, string) {
+//
+// A loaded template can fail on the data the run supplies; the error
+// goes to the run, which settles it as the failure it is.
+func (s *Session) renderSystemPrompt(beforeRun []SystemPromptEdit) (string, string, error) {
 	b, variant := s.promptCopy()
 	if b == nil {
-		return "", variant
+		return "", variant, nil
 	}
 	for _, edit := range beforeRun {
 		if edit != nil {
 			edit(b)
 		}
 	}
-	rendered := b.Render()
+	rendered, err := b.RenderError()
+	if err != nil {
+		return "", variant, err
+	}
 	// A raw prompt is the whole prompt, byte for byte. The builder adds
 	// a trailing newline to the sections it renders; that newline
 	// belongs to the rendered form, not to a raw prompt the consumer
 	// supplied.
 	if raw := s.opts.SystemPrompt; raw != "" && (rendered == raw || rendered == raw+"\n") {
-		return raw, variant
+		return raw, variant, nil
 	}
-	return rendered, variant
+	return rendered, variant, nil
 }
 
 // PromptState describes the session's system prompt.
@@ -177,7 +183,10 @@ func (s *Session) PromptState() PromptState {
 	if b == nil {
 		return PromptState{Preview: !rendered}
 	}
-	text := b.Render()
+	text, err := b.RenderError()
+	if err != nil {
+		return PromptState{Preview: !rendered}
+	}
 	// A raw prompt is the whole prompt, byte for byte.
 	if raw := s.opts.SystemPrompt; raw != "" && (text == raw || text == raw+"\n") {
 		text = raw

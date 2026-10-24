@@ -194,3 +194,69 @@ func TestTheFinalNewlineIsNotPartOfTheSection(t *testing.T) {
 		})
 	}
 }
+
+// TestFieldsInEveryBranchAreChecked covers the rule that validation is
+// not one execution: a field in a branch the data does not take is
+// still a field the data must have.
+func TestFieldsInEveryBranchAreChecked(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+	}{
+		{"unconditional", "{{.BadField}}"},
+		{"conditional", "{{if .Model}}{{.BadField}}{{end}}"},
+		{"range", "{{range .Tools}}{{.BadField}}{{end}}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := prompt.Load(fstest.MapFS{
+				"base.md": {Data: []byte(tc.text)},
+			}, baseSources())
+			if err == nil {
+				t.Fatal("loading a template with a missing field succeeded")
+			}
+			for _, want := range []string{"base.md", "BadField"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the error %q does not name %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestAValidToolIndexLoads covers the other side: a template that reads
+// the tools is valid even though the validation environment carries
+// none, because validation checks types and not one execution.
+func TestAValidToolIndexLoads(t *testing.T) {
+	dir, err := prompt.Load(fstest.MapFS{
+		"base.md": {Data: []byte("{{index .Tools 0}}\n")},
+	}, baseSources())
+	if err != nil {
+		t.Fatalf("loading the directory: %v", err)
+	}
+	b := prompt.New(prompt.Env{Tools: []string{"bash"}})
+	dir.Apply(b)
+	if got := b.Render(); got != "bash\n" {
+		t.Errorf("the prompt is %q, want the indexed tool", got)
+	}
+}
+
+// TestARenderErrorNamesTheFile covers the remaining failure: a template
+// can type-check and still fail on the data a run supplies, and the
+// error names the file instead of panicking.
+func TestARenderErrorNamesTheFile(t *testing.T) {
+	dir, err := prompt.Load(fstest.MapFS{
+		"base.md": {Data: []byte("{{index .Tools 0}}\n")},
+	}, baseSources())
+	if err != nil {
+		t.Fatalf("loading the directory: %v", err)
+	}
+	b := prompt.New(prompt.Env{})
+	dir.Apply(b)
+	text, err := b.RenderError()
+	if err == nil {
+		t.Fatalf("rendering an empty tool list returned %q", text)
+	}
+	if !strings.Contains(err.Error(), "base.md") {
+		t.Errorf("the error %q does not name the file", err)
+	}
+}

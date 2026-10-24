@@ -134,7 +134,7 @@ func (b *Builder) SetDefault(name, text string) {
 // and its alternatives uses SetTemplateDefault instead.
 func (b *Builder) SetTemplate(name string, t *Template) {
 	b.dropReplacement()
-	b.setDefault(name, Content{Render: t.Render})
+	b.setDefault(name, Content{renderError: t.RenderError})
 	b.clearVariants(name)
 	delete(b.extra, name)
 	b.place(name)
@@ -147,7 +147,7 @@ func (b *Builder) SetTemplate(name string, t *Template) {
 // together with its variants.
 func (b *Builder) SetTemplateDefault(name string, t *Template) {
 	b.dropReplacement()
-	b.setDefault(name, Content{Render: t.Render})
+	b.setDefault(name, Content{renderError: t.RenderError})
 	delete(b.extra, name)
 	b.place(name)
 }
@@ -225,7 +225,7 @@ func (b *Builder) SetVariant(name, variant, text string) {
 // default.
 func (b *Builder) SetTemplateVariant(name, variant string, t *Template) {
 	b.dropReplacement()
-	b.setVariant(name, variant, Content{Render: t.Render})
+	b.setVariant(name, variant, Content{renderError: t.RenderError})
 	b.place(name)
 }
 
@@ -273,6 +273,7 @@ func (b *Builder) RemoveVariant(name, variant string) {
 	if isDefaultVariant(variant) {
 		section.Text = ""
 		section.Render = nil
+		section.renderError = nil
 		b.sections[name] = section
 		return
 	}
@@ -362,25 +363,47 @@ type SectionText struct {
 // The texts are the ones Render joins: a section with no text renders
 // nothing, and it is not among them.
 func (b *Builder) Sections() []SectionText {
+	sections, err := b.SectionsError()
+	if err != nil {
+		panic(err)
+	}
+	return sections
+}
+
+// SectionsError returns the sections that render, in render order, with
+// their texts, or the error a section's template reported.
+func (b *Builder) SectionsError() ([]SectionText, error) {
 	var out []SectionText
 	for _, name := range b.order {
 		if isToolSection(name) {
 			continue
 		}
 		if name == toolSlot {
-			if text := b.sectionText(name); text != "" {
+			text, err := b.sectionTextError(name)
+			if err != nil {
+				return nil, err
+			}
+			if text != "" {
 				out = append(out, SectionText{Name: name, Text: text})
 			}
 			for _, tool := range b.toolNames() {
-				out = append(out, SectionText{Name: tool, Text: b.sectionText(tool)})
+				text, err := b.sectionTextError(tool)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, SectionText{Name: tool, Text: text})
 			}
 			continue
 		}
-		if text := b.sectionText(name); text != "" {
+		text, err := b.sectionTextError(name)
+		if err != nil {
+			return nil, err
+		}
+		if text != "" {
 			out = append(out, SectionText{Name: name, Text: text})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // Render renders the prompt.
@@ -392,9 +415,27 @@ func (b *Builder) Sections() []SectionText {
 // Every section renders in the variant the environment names: the
 // alternative the section offers for that name, or the section's
 // default text.
+//
+// Render is the must-style path: a section whose template fails panics.
+// A session renders through RenderError, because a loaded file's
+// template can fail on the data a run supplies.
 func (b *Builder) Render() string {
+	text, err := b.RenderError()
+	if err != nil {
+		panic(err)
+	}
+	return text
+}
+
+// RenderError renders the prompt, or returns the error a section's
+// template reported.
+//
+// The sections render in the order the builder holds, and their texts
+// are joined with a blank line. A section with no text renders nothing.
+// A prompt with no sections is empty.
+func (b *Builder) RenderError() (string, error) {
 	if b.replaced {
-		return b.text
+		return b.text, nil
 	}
 	var blocks []string
 	for _, name := range b.order {
@@ -402,20 +443,32 @@ func (b *Builder) Render() string {
 			continue
 		}
 		if name == toolSlot {
-			if text := b.sectionText(name); text != "" {
+			text, err := b.sectionTextError(name)
+			if err != nil {
+				return "", err
+			}
+			if text != "" {
 				blocks = append(blocks, text)
 			}
-			blocks = append(blocks, b.toolTexts()...)
+			texts, err := b.toolTextsError()
+			if err != nil {
+				return "", err
+			}
+			blocks = append(blocks, texts...)
 			continue
 		}
-		if text := b.sectionText(name); text != "" {
+		text, err := b.sectionTextError(name)
+		if err != nil {
+			return "", err
+		}
+		if text != "" {
 			blocks = append(blocks, text)
 		}
 	}
 	if len(blocks) == 0 {
-		return ""
+		return "", nil
 	}
-	return strings.Join(blocks, "\n\n") + "\n"
+	return strings.Join(blocks, "\n\n") + "\n", nil
 }
 
 // Copy returns a copy of the builder.
@@ -466,6 +519,7 @@ func (b *Builder) setDefault(name string, content Content) {
 	section.Name = name
 	section.Text = content.Text
 	section.Render = content.Render
+	section.renderError = content.renderError
 	b.sections[name] = section
 }
 
@@ -556,35 +610,34 @@ func (b *Builder) slotPosition(name string) int {
 	return pos
 }
 
-// sectionText returns a section's text, as it renders.
-//
-// The text is used as it is: the builder does not trim it, so a section
-// that ends in a newline ends in a newline.
-//
-// The section renders in the variant the environment names: the
-// alternative the section offers for that name, or the section's
-// default text.
-func (b *Builder) sectionText(name string) string {
+// sectionTextError returns a section's text, as it renders, or the
+// error its template reported.
+func (b *Builder) sectionTextError(name string) (string, error) {
 	section, ok := b.sections[name]
 	if !ok {
-		return ""
+		return "", nil
 	}
-	return section.content(b.env.Variant).String(b.env) + b.extra[name]
+	text, err := section.content(b.env.Variant).text(b.env)
+	if err != nil {
+		return "", err
+	}
+	return text + b.extra[name], nil
 }
 
-// toolTexts returns the texts of the tool sections, in the order the
-// environment offers the tools.
-//
-// A tool the environment does not hold has no section in the prompt:
-// the guidance a tool brings goes away with the tool.
-func (b *Builder) toolTexts() []string {
+// toolTextsError returns the texts of the tool sections, in the order
+// the environment offers the tools, or the error a template reported.
+func (b *Builder) toolTextsError() ([]string, error) {
 	var texts []string
 	for _, name := range b.toolNames() {
-		if text := b.sectionText(name); text != "" {
+		text, err := b.sectionTextError(name)
+		if err != nil {
+			return nil, err
+		}
+		if text != "" {
 			texts = append(texts, text)
 		}
 	}
-	return texts
+	return texts, nil
 }
 
 // toolNames returns the names of the tool sections that render, in the
@@ -616,7 +669,7 @@ func (s Section) content(variant string) Content {
 			return content
 		}
 	}
-	return Content{Text: s.Text, Render: s.Render}
+	return Content{Text: s.Text, Render: s.Render, renderError: s.renderError}
 }
 
 // isDefaultVariant reports whether a variant name names the default

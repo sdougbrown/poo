@@ -84,7 +84,12 @@ func runPrompt(args []string) int {
 	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model, project))
 
 	builder := poo.PromptBuilder(runtime.Options)
-	for _, section := range builder.Sections() {
+	sections, err := builder.SectionsError()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
+		return 1
+	}
+	for _, section := range sections {
 		fmt.Printf("--- %s ---\n%s\n", section.Name, section.Text)
 	}
 	return 0
