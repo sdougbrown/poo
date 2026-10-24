@@ -1069,10 +1069,11 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	// The catalog is the default for its section: the binary's own
 	// prompt directory and the settings' own sections come after it, so
 	// an operator who writes one keeps it.
+	var catalogTemplate *prompt.Template
 	if r.Registry != nil && r.offersRegistry() {
-		tmpl := r.Registry.Template(r.findTool())
+		catalogTemplate = r.Registry.Template(r.findTool())
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
-			b.SetTemplate(cli.SectionName, tmpl)
+			b.SetTemplate(cli.SectionName, catalogTemplate)
 		})
 	}
 	// The binary's own prompt directory replaces the defaults that are
@@ -1089,6 +1090,21 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 		}
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			dir.Apply(b)
+		})
+	}
+	// The replacement is a setting, so it applies after the directory's
+	// own prose. Clearing the sections first keeps the replacement whole
+	// even when the directory filled them, while a later setting still
+	// edits the base it leaves behind. The catalog is not the directory's:
+	// it goes back, as it was before the directory.
+	if opts.PromptFS != nil && settings.SystemPrompt.Replace != "" {
+		replace := settings.SystemPrompt.Replace
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			b.Replace("")
+			b.Set(BaseSection, replace)
+			if catalogTemplate != nil {
+				b.SetTemplate(cli.SectionName, catalogTemplate)
+			}
 		})
 	}
 	if baseFile != "" {

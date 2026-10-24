@@ -86,3 +86,56 @@ func TestAnUnknownPromptFileFailsTheBuild(t *testing.T) {
 		t.Errorf("the error %q does not name the file", err)
 	}
 }
+
+// TestTheReplaceSettingWinsOverABinarysPromptDirectory covers the
+// precedence the guide states: the operator's whole-prompt replacement
+// applies after the directory's files, so neither the directory's
+// default nor its variant is the prompt.
+func TestTheReplaceSettingWinsOverABinarysPromptDirectory(t *testing.T) {
+	body := theModelSettings + "system_prompt:\n  replace: the operator's whole prompt\n"
+	files := fstest.MapFS{
+		"base.md":             {Data: []byte("the binary's base\n")},
+		"base.small-local.md": {Data: []byte("the binary's small base\n")},
+		"environment.md":      {Data: []byte("the binary's environment\n")},
+	}
+	runtime, err := buildWithPrompt(t, body, files)
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	for _, variant := range []string{"", "small-local"} {
+		got := poo.PromptBuilder(runtime.Options).WithVariant(variant).Render()
+		want := "the operator's whole prompt\n"
+		if got != want {
+			t.Errorf("the prompt in variant %q is %q, want %q", variant, got, want)
+		}
+	}
+	if strings.Contains(poo.PromptBuilder(runtime.Options).Render(), "the binary's") {
+		t.Errorf("the prompt carries the directory's prose")
+	}
+
+	// Without a directory the replacement is the same whole prompt.
+	plain, err := buildWithPrompt(t, body, nil)
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if got := poo.PromptBuilder(plain.Options).Render(); got != "the operator's whole prompt\n" {
+		t.Errorf("the prompt without a directory is %q", got)
+	}
+}
+
+// TestTheSettingsAfterTheReplacementStillApply covers the rest of the
+// precedence: a setting after the replacement edits the base it leaves.
+func TestTheSettingsAfterTheReplacementStillApply(t *testing.T) {
+	body := theModelSettings + "system_prompt:\n  replace: the operator's whole prompt\n  append: ' with more'\n"
+	runtime, err := buildWithPrompt(t, body, fstest.MapFS{
+		"base.md": {Data: []byte("the binary's base\n")},
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	got := poo.PromptBuilder(runtime.Options).Render()
+	want := "the operator's whole prompt with more\n"
+	if got != want {
+		t.Errorf("the prompt is %q, want %q", got, want)
+	}
+}
