@@ -260,3 +260,43 @@ func TestARenderErrorNamesTheFile(t *testing.T) {
 		t.Errorf("the error %q does not name the file", err)
 	}
 }
+
+// TestTwoNamesForOneTargetAreAnError covers the canonical target: a
+// file and its default-variant sibling, and the two ways of spelling a
+// nested section, name the same section. The loader refuses both
+// instead of letting the walk order choose.
+func TestTwoNamesForOneTargetAreAnError(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		files fstest.MapFS
+	}{
+		{
+			name: "default variant",
+			files: fstest.MapFS{
+				"base.md":         {Data: []byte("A")},
+				"base.default.md": {Data: []byte("B")},
+			},
+		},
+		{
+			name: "nested section",
+			files: fstest.MapFS{
+				"a/b/c.md": {Data: []byte("A")},
+				"a.b/c.md": {Data: []byte("B")},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sources := baseSources()
+			sources["a.b.c"] = nil
+			_, err := prompt.Load(tc.files, sources)
+			if err == nil {
+				t.Fatal("loading two names for one target succeeded")
+			}
+			for name := range tc.files {
+				if !strings.Contains(err.Error(), name) {
+					t.Errorf("the error %q does not name %q", err, name)
+				}
+			}
+		})
+	}
+}

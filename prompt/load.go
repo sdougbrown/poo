@@ -55,6 +55,10 @@ type dirFile struct {
 // names the file, and so is a file that is not a .md file.
 func Load(fsys fs.FS, sources Sources) (*Dir, error) {
 	var files []dirFile
+	// targets holds the first file that names each canonical
+	// section-and-variant, so two names for one target are refused
+	// rather than silently overwriting one another.
+	targets := map[string]string{}
 	err := fs.WalkDir(fsys, ".", func(p string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("prompt: %s: %w", p, err)
@@ -70,6 +74,11 @@ func Load(fsys fs.FS, sources Sources) (*Dir, error) {
 		if !ok {
 			return fmt.Errorf("prompt: %s: unknown section %q", p, section)
 		}
+		target := section + "\x00" + variant
+		if first, ok := targets[target]; ok {
+			return fmt.Errorf("prompt: %s and %s both name the section %q", first, p, section)
+		}
+		targets[target] = p
 		text, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return fmt.Errorf("prompt: %s: %w", p, err)
@@ -128,6 +137,9 @@ func sectionOf(p string) (section, variant string, err error) {
 	}
 	if variant == "" && strings.HasSuffix(stem, ".") {
 		return "", "", fmt.Errorf("prompt: %s: no variant name", p)
+	}
+	if variant == DefaultVariant {
+		variant = ""
 	}
 	if dir := path.Dir(p); dir != "." {
 		section = strings.ReplaceAll(dir, "/", ".") + "." + leaf
