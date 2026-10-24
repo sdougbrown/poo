@@ -63,9 +63,10 @@ type Template struct {
 // The data function returns what the template renders with, and nil
 // renders with the environment. Compile walks the template's parse tree
 // and checks every field chain against the data's type, so a template
-// that names a field the data does not have is an error here and not in
-// a run. The check covers every branch, including one the data would
-// not take.
+// that provably names a field the data does not have is an error here
+// and not in a run. The check covers every branch, including one the
+// data would not take. A chain whose type the tree does not state — a
+// variable, a map, a function's result — is the run's to report.
 func Compile(name, text string, data func(Env) any) (*Template, error) {
 	tmpl, err := template.New(name).Parse(text)
 	if err != nil {

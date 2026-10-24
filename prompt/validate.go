@@ -9,27 +9,27 @@ import (
 // fieldValidator checks the field chains a template names against the
 // type of the data its section renders with.
 //
-// A chain is checked in every branch, not only the branches the
-// validation environment happens to take. A type the validator cannot
-// know — an interface, or the result of a function — leaves the chain
-// alone: the parse tree does not say what it holds.
-type fieldValidator struct {
-	// vars are the variables the template declares, by name.
-	vars map[string]reflect.Type
-}
+// It reports an error only where it can prove the access fails: a field
+// or method name the type does not have, reached through a chain it
+// models. A type it cannot know — an interface, a variable, a map's key
+// or element, the result of a function or a method — leaves the chain
+// alone, because the parse tree does not say what it holds and the run
+// reports the failure instead.
+type fieldValidator struct{}
 
 // validateTemplate walks a compiled template and returns the first field
-// chain its data type does not have.
+// chain its data type provably does not have.
+//
+// Only the template's own tree is checked. A {{define}} body is a
+// callee: the tree does not say what data the {{template}} call passes
+// it, so its fields are unknown here.
 func validateTemplate(tmpl *Template, data any) error {
-	root := reflect.TypeOf(data)
-	for _, associated := range tmpl.tmpl.Templates() {
-		if associated.Tree == nil || associated.Tree.Root == nil {
-			continue
-		}
-		v := &fieldValidator{vars: map[string]reflect.Type{"$": root}}
-		if err := v.walk(associated.Tree.Root, root); err != nil {
-			return fmt.Errorf("prompt: the section %q: %w", tmpl.name, err)
-		}
+	if tmpl.tmpl.Tree == nil || tmpl.tmpl.Tree.Root == nil {
+		return nil
+	}
+	v := &fieldValidator{}
+	if err := v.walk(tmpl.tmpl.Tree.Root, reflect.TypeOf(data)); err != nil {
+		return fmt.Errorf("prompt: the section %q: %w", tmpl.name, err)
 	}
 	return nil
 }
@@ -62,13 +62,7 @@ func (v *fieldValidator) walk(node parse.Node, dot reflect.Type) error {
 		if err != nil {
 			return err
 		}
-		bodyDot := rangeElement(typ)
-		saved := v.vars
-		v.vars = cloneTypes(saved)
-		v.declareRange(n.Pipe, bodyDot)
-		err = v.walk(n.List, bodyDot)
-		v.vars = saved
-		if err != nil {
+		if err := v.walk(n.List, rangeElement(typ)); err != nil {
 			return err
 		}
 		return v.walk(n.ElseList, dot)
@@ -77,21 +71,10 @@ func (v *fieldValidator) walk(node parse.Node, dot reflect.Type) error {
 		if err != nil {
 			return err
 		}
-		saved := v.vars
-		v.vars = cloneTypes(saved)
-		v.declareWith(n.Pipe, typ)
-		err = v.walk(n.List, typ)
-		v.vars = saved
-		if err != nil {
+		if err := v.walk(n.List, indirect(typ)); err != nil {
 			return err
 		}
 		return v.walk(n.ElseList, dot)
-	case *parse.TemplateNode:
-		if n.Pipe == nil {
-			return nil
-		}
-		_, err := v.pipe(n.Pipe, dot)
-		return err
 	}
 	return nil
 }
@@ -110,27 +93,16 @@ func (v *fieldValidator) pipe(pipe *parse.PipeNode, dot reflect.Type) (reflect.T
 		}
 		last = typ
 	}
-	if pipe.Decl != nil && last != nil {
-		for _, declaration := range pipe.Decl {
-			if len(declaration.Ident) > 0 {
-				v.vars[declaration.Ident[0]] = last
-			}
-		}
-	}
 	return last, nil
 }
 
 // command checks a command's arguments and returns the type of its
-// first one.
+// first one, unless it is a function call.
 func (v *fieldValidator) command(command *parse.CommandNode, dot reflect.Type) (reflect.Type, error) {
 	if len(command.Args) == 0 {
 		return nil, nil
 	}
 	first := command.Args[0]
-	typ, err := v.arg(first, dot)
-	if err != nil {
-		return nil, err
-	}
 	for _, arg := range command.Args[1:] {
 		if _, err := v.arg(arg, dot); err != nil {
 			return nil, err
@@ -140,7 +112,7 @@ func (v *fieldValidator) command(command *parse.CommandNode, dot reflect.Type) (
 		// A function's result is the function's own business.
 		return nil, nil
 	}
-	return typ, nil
+	return v.arg(first, dot)
 }
 
 // arg checks one argument and returns its type, when the validator
@@ -154,19 +126,7 @@ func (v *fieldValidator) arg(node parse.Node, dot reflect.Type) (reflect.Type, e
 		if err != nil {
 			return nil, err
 		}
-		if base == nil {
-			return nil, nil
-		}
 		return v.fieldType(base, n.Field)
-	case *parse.VariableNode:
-		if len(n.Ident) == 0 {
-			return nil, nil
-		}
-		typ := v.vars[n.Ident[0]]
-		if len(n.Ident) == 1 || typ == nil {
-			return typ, nil
-		}
-		return v.fieldType(typ, n.Ident[1:])
 	case *parse.PipeNode:
 		return v.pipe(n, dot)
 	case *parse.DotNode:
@@ -185,70 +145,70 @@ func (v *fieldValidator) arg(node parse.Node, dot reflect.Type) (reflect.Type, e
 // ends at.
 func (v *fieldValidator) fieldType(typ reflect.Type, fields []string) (reflect.Type, error) {
 	for _, field := range fields {
-		typ = indirect(typ)
 		if typ == nil || typ.Kind() == reflect.Interface {
 			return nil, nil
 		}
-		switch typ.Kind() {
+		// A method's result is the method's own business.
+		if hasMethod(typ, field) {
+			return nil, nil
+		}
+		base := indirect(typ)
+		if base == nil || base.Kind() == reflect.Interface {
+			return nil, nil
+		}
+		switch base.Kind() {
 		case reflect.Struct:
-			if member, ok := typ.FieldByName(field); ok {
-				typ = member.Type
-				continue
+			member, ok := base.FieldByName(field)
+			if !ok {
+				return nil, fmt.Errorf("the template names the field %q, which %s does not have", field, typ)
 			}
-			if _, ok := typ.MethodByName(field); ok {
-				return nil, nil
+			if member.PkgPath != "" {
+				return nil, fmt.Errorf("the template names the field %q, which %s does not export", field, typ)
 			}
-			return nil, fmt.Errorf("the template names the field %q, which %s does not have", field, typ)
+			typ = member.Type
 		case reflect.Map:
-			typ = typ.Elem()
-			continue
+			// A map's field chain is a key lookup, and the key is
+			// the run's to choose.
+			return nil, nil
 		default:
-			if _, ok := typ.MethodByName(field); ok {
-				return nil, nil
-			}
 			return nil, fmt.Errorf("the template names the field %q on %s, which has no fields", field, typ)
 		}
 	}
 	return typ, nil
 }
 
-// declareRange binds a range's variables: the index and the element.
-func (v *fieldValidator) declareRange(pipe *parse.PipeNode, element reflect.Type) {
-	if pipe == nil || pipe.Decl == nil {
-		return
+// hasMethod reports whether the type, or a pointer to it, has a method
+// of that name. A method call's result is unknown, so a name matches
+// either way.
+func hasMethod(typ reflect.Type, name string) bool {
+	if typ == nil {
+		return false
 	}
-	for i, declaration := range pipe.Decl {
-		if len(declaration.Ident) == 0 {
-			continue
-		}
-		if i == len(pipe.Decl)-1 {
-			v.vars[declaration.Ident[0]] = element
-			continue
-		}
-		v.vars[declaration.Ident[0]] = reflect.TypeOf(0)
+	if _, ok := typ.MethodByName(name); ok {
+		return true
 	}
-}
-
-// declareWith binds a with block's variable to the pipeline's result.
-func (v *fieldValidator) declareWith(pipe *parse.PipeNode, typ reflect.Type) {
-	if pipe == nil || pipe.Decl == nil {
-		return
+	base := indirect(typ)
+	if base == nil {
+		return false
 	}
-	for _, declaration := range pipe.Decl {
-		if len(declaration.Ident) > 0 {
-			v.vars[declaration.Ident[0]] = typ
-		}
+	if _, ok := base.MethodByName(name); ok {
+		return true
 	}
+	_, ok := reflect.PointerTo(base).MethodByName(name)
+	return ok
 }
 
 // rangeElement returns the type a range's body sees.
+//
+// A map's element is unknown: the tree does not say how a run fills the
+// map, and its key is the run's to choose.
 func rangeElement(typ reflect.Type) reflect.Type {
 	typ = indirect(typ)
 	if typ == nil {
 		return nil
 	}
 	switch typ.Kind() {
-	case reflect.Slice, reflect.Array, reflect.Chan, reflect.Map:
+	case reflect.Slice, reflect.Array, reflect.Chan:
 		return typ.Elem()
 	case reflect.String:
 		return reflect.TypeOf("")
@@ -262,14 +222,4 @@ func indirect(typ reflect.Type) reflect.Type {
 		typ = typ.Elem()
 	}
 	return typ
-}
-
-// cloneTypes copies a variable table, so a block may bind its own names
-// without changing the table around it.
-func cloneTypes(vars map[string]reflect.Type) map[string]reflect.Type {
-	out := make(map[string]reflect.Type, len(vars))
-	for name, typ := range vars {
-		out[name] = typ
-	}
-	return out
 }
