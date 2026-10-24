@@ -217,7 +217,7 @@ func TestTheNativeModePromptDoesNotAskForATextCall(t *testing.T) {
 		{Name: "read", Description: "Read a range of lines from a file."},
 	}
 	prompt := sessionPromptWith(t, "gemma4", tools, "native", "")
-	for _, needle := range []string{"tool_call", "Call a tool by writing"} {
+	for _, needle := range []string{"tool_call", "Write a tool call as a"} {
 		if strings.Contains(prompt, needle) {
 			t.Errorf("the native prompt mentions %q", needle)
 		}

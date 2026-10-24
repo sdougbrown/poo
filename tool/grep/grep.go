@@ -75,7 +75,7 @@ func (t *Tool) Spec() poo.ToolSpec {
   "properties": {
     "pattern": {"type": "string", "description": "The RE2 regular expression to search for."},
     "path": {"type": "string", "description": "The directory to search; the working directory by default."},
-    "glob": {"type": "string", "description": "A filter, matched against the path relative to the search root, e.g. *.go"},
+    "glob": {"type": "string", "description": "A filter, matched against the path relative to the search root, for example *.go"},
     "mode": {"type": "string", "description": "content (default), files_with_matches or count"}
   },
   "required": ["pattern"]
