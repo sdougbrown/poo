@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -120,6 +121,13 @@ type BuildOptions struct {
 	// A command that only shows the prompt does not need a model: the
 	// prompt names the model, and a name may be empty.
 	NoChatModel bool
+	// PromptFS is the prompt directory the binary embeds.
+	//
+	// The files replace the sections they name after the binary's
+	// embedded defaults and before the settings, so an operator's
+	// `system_prompt` settings keep the last word. A nil FS keeps the
+	// embedded defaults alone.
+	PromptFS fs.FS
 }
 
 // Runtime is what a build produced.
@@ -291,7 +299,26 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolvePrompt(opts, workingDir); err != nil {
 		return nil, err
 	}
+	// The prompt renders once here, so a loaded file that cannot render on
+	// this build's own model, tools, directory and settings fails the
+	// build rather than a session.
+	if err := poo.CheckPrompt(runtime.Options); err != nil {
+		return nil, promptRenderError(err)
+	}
 	return runtime, nil
+}
+
+// promptRenderError returns the build failure for a prompt that did not
+// render.
+//
+// The prompt's prose is what is wrong, so the failure names the setting
+// the prose came through, and the error underneath names the file.
+func promptRenderError(err error) *Error {
+	return &Error{
+		Code:  CodeInvalid,
+		Field: "system_prompt",
+		Err:   err,
+	}
 }
 
 // resolveProfile picks the profile the session is built from.
@@ -402,11 +429,12 @@ func (r *Runtime) findTool() bool {
 
 // offersRegistry reports whether the session offers the registry's tools.
 //
-// The catalog is a section of the prompt only when the model can call
-// what it lists: a tool left out of the build takes its guidance with it.
+// The catalog is a section of the prompt only when the model can call or
+// search what it lists: a tool left out of the build takes its guidance
+// with it.
 func (r *Runtime) offersRegistry() bool {
 	for _, name := range r.toolNames {
-		if name == cli.CallToolName {
+		if name == cli.CallToolName || name == cli.FindToolName {
 			return true
 		}
 	}
@@ -1058,6 +1086,53 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	if settings.SystemPrompt.Replace != "" {
 		r.Options.SystemPrompt = settings.SystemPrompt.Replace
 	}
+	// The catalog is the default for its section: the binary's own
+	// prompt directory and the settings' own sections come after it, so
+	// an operator who writes one keeps it.
+	var catalogTemplate *prompt.Template
+	if r.Registry != nil && r.offersRegistry() {
+		catalogTemplate = r.Registry.Template(r.findTool())
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			b.SetTemplate(cli.SectionName, catalogTemplate)
+		})
+	}
+	// The binary's own prompt directory replaces the defaults that are
+	// already in the builder. The settings come after it.
+	if opts.PromptFS != nil {
+		dir, err := prompt.Load(opts.PromptFS, promptSources(opts, r))
+		if err != nil {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "prompts",
+				Message: err.Error(),
+				Err:     err,
+			}
+		}
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			dir.Apply(b)
+			// A catalog the session cannot reach is not guidance
+			// the model can use. The file still loads, so one
+			// directory serves a code profile and a read-only one.
+			if !r.offersRegistry() {
+				b.Remove(cli.SectionName)
+			}
+		})
+	}
+	// The replacement is a setting, so it applies after the directory's
+	// own prose. Clearing the sections first keeps the replacement whole
+	// even when the directory filled them, while a later setting still
+	// edits the base it leaves behind. The catalog is not the directory's:
+	// it goes back, as it was before the directory.
+	if opts.PromptFS != nil && settings.SystemPrompt.Replace != "" {
+		replace := settings.SystemPrompt.Replace
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			b.Replace("")
+			b.Set(BaseSection, replace)
+			if catalogTemplate != nil {
+				b.SetTemplate(cli.SectionName, catalogTemplate)
+			}
+		})
+	}
 	if baseFile != "" {
 		text, err := os.ReadFile(baseFile)
 		if err != nil {
@@ -1075,14 +1150,6 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	if appendText != "" {
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			b.Append(BaseSection, appendText)
-		})
-	}
-	// The catalog is the default for its section: the settings' own
-	// sections come after it, so an operator who writes one keeps it.
-	if r.Registry != nil && r.offersRegistry() {
-		section := r.Registry.Section(r.findTool())
-		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
-			b.Set(cli.SectionName, section)
 		})
 	}
 	for name, text := range settings.SystemPrompt.Sections {
@@ -1114,6 +1181,35 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	// after them.
 	r.Options.Prompt = append(r.Options.Prompt, r.Prompt...)
 	return nil
+}
+
+// promptSources returns the sections the binary's prompt directory may
+// replace, with the data their templates render with.
+//
+// The sections are the ones the build can put in a prompt: the core's
+// own, every tool the binary links, the core's job tools and the cli
+// registry's. The catalog renders with the registry's own data, so a
+// replacement file renders the entries the way the default does.
+func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
+	sources := prompt.Sources{
+		"base":        nil,
+		"environment": nil,
+		"project":     nil,
+	}
+	for name, factory := range opts.Tools {
+		if factory == nil {
+			continue
+		}
+		sources[prompt.ToolSection(name)] = nil
+	}
+	sources[prompt.ToolSection(profile.JobsToolName)] = nil
+	sources[prompt.ToolSection(profile.CancelJobToolName)] = nil
+	if r.Registry != nil {
+		sources[prompt.ToolSection(cli.CallToolName)] = nil
+		sources[prompt.ToolSection(cli.FindToolName)] = nil
+		sources[cli.SectionName] = r.Registry.Template(r.findTool()).Data()
+	}
+	return sources
 }
 
 // OpenStore opens the store a session's records go to.
@@ -1169,7 +1265,14 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 	}
 	opts.Sink = store
 	opts.SessionID = created.SessionID
-	return poo.New(opts, append(fns, poo.WithPolicy(r.Policy))...)
+	sess, err := poo.New(opts, append(fns, poo.WithPolicy(r.Policy))...)
+	if err != nil {
+		if errors.Is(err, poo.ErrPromptRender) {
+			return nil, promptRenderError(err)
+		}
+		return nil, err
+	}
+	return sess, nil
 }
 
 // ResumeSession loads a session from the store and restores it.

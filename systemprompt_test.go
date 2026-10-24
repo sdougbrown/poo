@@ -227,3 +227,21 @@ func TestThePromptIsSentWithTheFirstRequestOnly(t *testing.T) {
 		t.Errorf("the prompt is %q, want the whole prompt", got)
 	}
 }
+
+// TestTheEnvironmentSectionTrimsTheModelsTrailingNewlines covers the
+// dynamic end of the core environment section: a model id that ends in a
+// newline renders the same section as the id without one.
+func TestTheEnvironmentSectionTrimsTheModelsTrailingNewlines(t *testing.T) {
+	build := func(modelID string) string {
+		return poo.PromptBuilder(poo.Options{
+			Model:      poo.ModelInfo{ModelID: modelID},
+			WorkingDir: "/fixed/work",
+		}).Render()
+	}
+	want := build("test-model")
+	for _, modelID := range []string{"test-model\n", "test-model\n\n"} {
+		if got := build(modelID); got != want {
+			t.Errorf("the prompt for model %q is %q, want %q", modelID, got, want)
+		}
+	}
+}

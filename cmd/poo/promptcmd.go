@@ -83,8 +83,10 @@ func runPrompt(args []string) int {
 	model := runtime.Options.Model
 	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model, project))
 
-	builder := poo.PromptBuilder(runtime.Options)
-	for _, section := range builder.Sections() {
+	// The build rendered the prompt; the sections the command adds after
+	// it are its own fixed templates, so the render cannot fail here.
+	sections := poo.PromptBuilder(runtime.Options).Sections()
+	for _, section := range sections {
 		fmt.Printf("--- %s ---\n%s\n", section.Name, section.Text)
 	}
 	return 0

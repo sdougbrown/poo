@@ -92,6 +92,9 @@ type Section struct {
 	Text string
 	// Render renders the section's default text, when it is dynamic.
 	Render func(Env) string
+	// renderError renders a loaded template, whose failure is the
+	// caller's to report.
+	renderError func(Env) (string, error)
 	// Variants holds the section's named alternatives, keyed by name.
 	//
 	// The default text is not among them: the empty name and
@@ -108,16 +111,32 @@ type Content struct {
 	Text string
 	// Render renders the text, when it is dynamic.
 	Render func(Env) string
+	// renderError renders a loaded template, whose failure is the
+	// caller's to report.
+	renderError func(Env) (string, error)
 }
 
 // String returns the content's text in the given environment.
 //
 // A dynamic content renders; a static one is its own text.
 func (c Content) String(env Env) string {
-	if c.Render != nil {
-		return c.Render(env)
+	text, err := c.text(env)
+	if err != nil {
+		panic(err)
 	}
-	return c.Text
+	return text
+}
+
+// text returns the content's text in the given environment, or the
+// error a loaded template reported.
+func (c Content) text(env Env) (string, error) {
+	if c.renderError != nil {
+		return c.renderError(env)
+	}
+	if c.Render != nil {
+		return c.Render(env), nil
+	}
+	return c.Text, nil
 }
 
 // DefaultOrder is the order the sections render in.

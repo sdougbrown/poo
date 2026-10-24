@@ -2,6 +2,7 @@ package cliregistry
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,13 +82,14 @@ func (t *CallTool) Spec() poo.ToolSpec {
 // The catalog has a section of its own, which the session renders; the
 // tool adds what the catalog cannot say: what a call does when it fails,
 // and where its output goes.
-const callSection = "Calling a registered CLI:\n" +
-	"- \"name\" is one line of the catalog, and \"args\" is an object of that CLI's arguments.\n" +
-	"- Arguments that do not fit the CLI's schema are refused before anything runs, with the reason.\n" +
-	"- The result is the command's output and its exit status, elided in the middle when it is long."
+//
+//go:embed call.md
+var callSectionText string
+
+var callSection = prompt.MustCompile("call_cli", callSectionText, nil)
 
 // PromptSection renders the tool's guidance.
-func (t *CallTool) PromptSection(prompt.Env) string { return callSection }
+func (t *CallTool) PromptSection(env prompt.Env) string { return callSection.Render(env) }
 
 // callArgs are the tool's arguments.
 type callArgs struct {

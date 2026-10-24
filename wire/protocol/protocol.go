@@ -102,6 +102,10 @@ const (
 	DataMethodNotFound = "method_not_found"
 	// DataInvalidParams means the params were wrong.
 	DataInvalidParams = "invalid_params"
+	// DataInvalidSettings means the settings a session was asked for
+	// describe no session this binary can build: a prompt file that does
+	// not render, for instance.
+	DataInvalidSettings = "invalid_settings"
 	// DataUnknownField means the params held a field the method does
 	// not know.
 	DataUnknownField = "unknown_field"

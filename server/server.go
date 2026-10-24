@@ -11,6 +11,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"sync"
 	"time"
 
@@ -55,6 +56,12 @@ type Options struct {
 	// (a typed result, say) adds it here, so the tool joins the profile
 	// and the client is told about it like every other tool.
 	SessionTools func(*config.Runtime) error
+	// PromptFS is the prompt directory the binary embeds.
+	//
+	// The files replace the sections they name after the binary's
+	// embedded defaults and before the settings. A nil FS keeps the
+	// embedded defaults alone.
+	PromptFS fs.FS
 }
 
 // New builds the server: the runtime the handshake reports, and the
@@ -72,9 +79,10 @@ func New(opts Options) (*Server, error) {
 		// The server has a wire, so the chain asks the client. The
 		// decide asker is there only when the settings name a decider
 		// model.
-		Askers: []string{"wire"},
-		Wire:   client,
-		Build:  opts.Build,
+		Askers:   []string{"wire"},
+		Wire:     client,
+		Build:    opts.Build,
+		PromptFS: opts.PromptFS,
 	}
 	runtime, err := config.Build(build)
 	if err != nil {
@@ -356,7 +364,11 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 			_ = store.Close()
 			return nil, nil, err
 		}
-		sess.SetPrompt(edits...)
+		if err := sess.SetPrompt(edits...); err != nil {
+			_ = sess.Close()
+			_ = store.Close()
+			return nil, nil, err
+		}
 	}
 	if deciderName != "" {
 		if err := sess.SetDecider(deciderModel, decider); err != nil {
@@ -459,7 +471,9 @@ func (f *Server) Configure(ctx context.Context, sess *poo.Session, params protoc
 		if err != nil {
 			return protocol.ModelRoles{}, err
 		}
-		sess.SetPrompt(edits...)
+		if err := sess.SetPrompt(edits...); err != nil {
+			return protocol.ModelRoles{}, err
+		}
 	}
 	if params.Models != nil && params.Models.Chat != "" {
 		model, ok := runtime.Models[params.Models.Chat]

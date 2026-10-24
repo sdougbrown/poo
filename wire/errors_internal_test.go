@@ -27,6 +27,7 @@ func TestCodeOf(t *testing.T) {
 		{"incompatible", poo.ErrSessionIncompatible, protocol.DataSessionIncompatible},
 		{"unanswered call", poo.ErrUnansweredCall, protocol.DataUnansweredCall},
 		{"unsupported mode", poo.ErrUnsupportedMode, protocol.DataUnsupportedMode},
+		{"prompt render", poo.ErrPromptRender, protocol.DataInvalidSettings},
 		{"no header", poo.ErrNoSessionHeader, protocol.DataCodecMismatch},
 		{"codec version", poo.ErrCodecVersion, protocol.DataCodecMismatch},
 		{"locked", storesession.ErrSessionLocked, protocol.DataSessionLocked},
