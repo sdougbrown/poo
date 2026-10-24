@@ -100,8 +100,11 @@ prompts/
 
 A file is a `text/template`. The template renders with the data the default it
 replaces carries. The library's environment section reads `{{.Cwd}}`,
-`{{.OS}}`, `{{.Date}}` and `{{.Model}}`, and the catalog reads its entry list. A section
-whose prose names no field renders the same text whatever the data is.
+`{{.OS}}`, `{{.Date}}` and `{{.Model}}`. The catalog section reads
+`{{.Search}}` (a bool), `{{.Count}}` (an int), `{{.Call}}` and `{{.Find}}` (the two
+tool names), and `{{.Entries}}`, a list whose entries have `{{.Name}}` and
+`{{.Description}}`. A section whose prose names no field renders the same text
+whatever the data is.
 
 A file's final newline is not part of the section. Each file ends with one, and
 the renderer drops it. A file that ends with a blank line keeps the newline it
@@ -109,11 +112,16 @@ meant.
 
 A file that names a section the binary does not build is an error that names
 the file. So is a file that is not markdown. A variant the directory does not
-carry falls back to the section's default text.
+carry falls back to the section's default text. A default file replaces the
+section's default text and keeps the alternatives the section already offers,
+including the embedded ones: omitting a variant from the directory does not
+remove a variant the section already had.
 
 The layers apply in this order: the embedded default, the binary's directory,
 the settings (`system_prompt.*`) and the project's `AGENTS.md`. A later layer
 wins, so an operator's settings file still changes the prompt the binary ships.
+The project layer is the consumer's to add: `server.New` loads no project file,
+and `poo prompt` includes one only when it is run with `--project-prompt`.
 
 ## Inject tools
 
