@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -95,4 +96,27 @@ func reviewPIDsInNamespace(ns string) []int {
 		}
 	}
 	return pids
+}
+
+// TestAStartThatLosesTheLauncherReportsThroughTheWait covers the
+// sandbox that dies before its startup gate: the ready report never
+// comes, so Start returns on the status stream's end rather than its
+// deadline, and the failed start is the wait's error.
+func TestAStartThatLosesTheLauncherReportsThroughTheWait(t *testing.T) {
+	exec := newExecutor(t, bwrap.Options{Binary: "/bin/false"})
+	dir := t.TempDir()
+	started := time.Now()
+	p, err := exec.Start(context.Background(), bash.Command{
+		Argv: []string{"/bin/true"},
+		Dir:  dir,
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("starting the sandbox: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed >= bwrap.ReadyTimeout {
+		t.Errorf("Start waited for its whole deadline: %v", elapsed)
+	}
+	if code, err := p.Wait(); err == nil {
+		t.Errorf("a launcher that died before the gate reports no error: code=%d", code)
+	}
 }

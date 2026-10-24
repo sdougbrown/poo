@@ -313,37 +313,13 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 		gated:      make(chan struct{}),
 	}
 	// The status readers run from here on: the gate wait below needs
-	// the JSON status, and a command that ends early still has its
-	// reports read.
+	// the helper's ready report, and a command that ends early still
+	// has its reports read. The wait and the context watcher start
+	// here too, so a sandbox that dies before the gate is reaped and
+	// torn down either way.
 	go p.readStatus()
 	go p.readJSONStatus()
-
-	// Start waits for bubblewrap's startup gate to pass. The launcher
-	// writes its child's pid to the JSON status pipe immediately
-	// before it releases the namespace child, so the line in the pipe
-	// is the gate passed: a launcher that dies during its own startup
-	// would otherwise strand the namespace child on the gate, which is
-	// an eventfd and never reports a death the way a pipe would. Past
-	// the gate, the helper ends the sandbox when the owner ends,
-	// however the owner ends. An end that arrives before the line (the
-	// sandbox died on the way up) is an EOF; the deadline covers a
-	// stalled launcher either way, and the context's cancellation
-	// kills the sandbox and ends the stream.
-	select {
-	case <-p.gated:
-	case <-p.childDone:
-	case <-ctx.Done():
-		// The cancellation's kill is on its way: the run below tears
-		// the rest down.
-		go p.Kill()
-		<-p.childDone
-	case <-time.After(ReadyTimeout):
-	}
-
 	go func() {
-		// The command's process is waited on here: the sandbox has
-		// either started or died, and its wait status is the same
-		// either way.
 		err := cmd.Wait()
 		close(done)
 		waited <- err
@@ -357,6 +333,32 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 		case <-p.finished:
 		}
 	}()
+	// Start waits for the sandbox's own init to report that it is
+	// running. The helper writes its ready report as its first act
+	// past bubblewrap's startup gate: a launcher that dies during its
+	// own startup would otherwise strand the namespace child on the
+	// gate, which is an eventfd and never reports a death the way a
+	// pipe would. Once the report is in, the helper's parent watch is
+	// armed, and the sandbox ends when the owner ends, however the
+	// owner ends. A sandbox that died on the way up is an EOF; the
+	// deadline below covers a stalled launcher.
+	select {
+	case <-p.gated:
+	case <-p.childDone:
+	case <-ctx.Done():
+		// The context watcher started below takes the kill; the wait
+		// reports what became of the sandbox.
+	case <-time.After(ReadyTimeout):
+		// The sandbox never made it past its startup gate. A launcher
+		// killed before the release leaves the namespace child behind,
+		// so the whole pre-gate process group goes with it.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-p.done
+		p.closePipes()
+		close(p.finished)
+		return nil, fmt.Errorf("bwrap: the sandbox did not pass its startup gate within %s", ReadyTimeout)
+	}
+
 	return p, nil
 }
 
@@ -696,6 +698,9 @@ type process struct {
 
 // statusReport is the wait status the helper writes.
 type statusReport struct {
+	// Started is the helper's own ready report: it is written once the
+	// helper runs and its parent watch is armed.
+	Started bool `json:"started,omitempty"`
 	// Exit is the command's exit status.
 	Exit *int `json:"exit,omitempty"`
 	// Signal is the signal that killed the command.
@@ -712,8 +717,26 @@ type jsonStatus struct {
 func (p *process) readStatus() {
 	defer close(p.statusDone)
 	defer p.statusR.Close()
-	var report statusReport
-	if err := json.NewDecoder(p.statusR).Decode(&report); err == nil {
+	dec := json.NewDecoder(p.statusR)
+	for {
+		var report statusReport
+		if err := dec.Decode(&report); err != nil {
+			return
+		}
+		if report.Started {
+			// The helper's first act past the sandbox's startup gate:
+			// its parent watch is armed, so an owner that ends from here
+			// on still ends the sandbox.
+			p.mu.Lock()
+			gated := p.gated
+			p.mu.Unlock()
+			select {
+			case <-gated:
+			default:
+				close(gated)
+			}
+			continue
+		}
 		p.mu.Lock()
 		p.status = report
 		p.mu.Unlock()
@@ -738,13 +761,6 @@ func (p *process) readJSONStatus() {
 			p.mu.Lock()
 			p.childPID = status.ChildPID
 			p.mu.Unlock()
-			// The launcher writes this document right before it
-			// releases the namespace child from its startup gate.
-			select {
-			case <-p.gated:
-			default:
-				close(p.gated)
-			}
 		}
 	}
 }
@@ -845,9 +861,11 @@ func (p *process) Kill() {
 		p.mu.Unlock()
 	}
 	if child <= 0 {
-		// The child is not known yet: signal the sandbox itself, which
-		// ends the namespace.
-		_ = p.cmd.Process.Signal(syscall.SIGTERM)
+		// The child is not known yet: signal the whole pre-gate process
+		// group. The namespace child is in it until it runs the command,
+		// and a launcher killed alone would leave it stranded at the
+		// startup gate.
+		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGTERM)
 		deadline := time.Now().Add(KillGrace)
 		for time.Now().Before(deadline) {
 			if !p.alive() {
@@ -855,7 +873,7 @@ func (p *process) Kill() {
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		_ = p.cmd.Process.Signal(syscall.SIGKILL)
+		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
 		return
 	}
 
