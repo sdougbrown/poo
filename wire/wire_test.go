@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/wire"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -1043,6 +1046,44 @@ func TestLoadOfALockedSession(t *testing.T) {
 	}
 	if rerr.Data == nil || rerr.Data.Code != protocol.DataSessionLocked {
 		t.Errorf("the data code = %+v, want %q", rerr.Data, protocol.DataSessionLocked)
+	}
+}
+
+// A prompt file that does not render refuses the session, and no request
+// reaches the endpoint.
+func TestCreateWithAPromptThatDoesNotRender(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+	}{
+		{"nested call", `{{define "part"}}{{.Model}}{{end}}{{template "part" .Model}}`},
+		{"builtin result", `{{(index .Tools 0).Bad}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, err := prompt.Load(fstest.MapFS{"base.md": {Data: []byte(tc.text)}}, prompt.Sources{"base": nil})
+			if err != nil {
+				t.Fatalf("loading the prompt file: %v", err)
+			}
+			transport := pootest.NewTransport()
+			factory := newTestFactory(t, func() poo.ChatTransport { return transport })
+			factory.prompt = []func(*prompt.Builder){dir.Apply}
+			h := newHarness(t, factory, wire.Bounds{})
+			h.initialize()
+
+			_, rerr := h.call(protocol.MethodSessionCreate, protocol.CreateParams{WorkingDir: factory.dir})
+			if rerr == nil {
+				t.Fatal("the create with a prompt that does not render was answered")
+			}
+			if rerr.Data == nil || rerr.Data.Code != protocol.DataInvalidSettings {
+				t.Fatalf("the data code = %+v, want %q", rerr.Data, protocol.DataInvalidSettings)
+			}
+			if !strings.Contains(rerr.Data.Detail, "base.md") {
+				t.Errorf("the failure %q does not name the file", rerr.Data.Detail)
+			}
+			if got := len(transport.Requests()); got != 0 {
+				t.Errorf("the endpoint got %d requests, want none", got)
+			}
+		})
 	}
 }
 
