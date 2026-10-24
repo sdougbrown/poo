@@ -21,7 +21,7 @@ var environmentText string
 var baseTemplate = MustCompile("base", baseText, nil)
 
 // environmentTemplate is the environment section's default prose.
-var environmentTemplate = MustCompile("environment", environmentText, nil)
+var environmentTemplate = MustCompileTrimmed("environment", environmentText, nil)
 
 // Base returns the base section's default prose.
 //
@@ -53,6 +53,9 @@ type Template struct {
 	// data returns what the template renders with. Nil renders with
 	// the environment.
 	data func(Env) any
+	// trimTrailingNewlines drops every trailing newline from the
+	// rendered text, not only the file's sentinel newline.
+	trimTrailingNewlines bool
 }
 
 // Compile parses a section's prose.
@@ -85,6 +88,31 @@ func Compile(name, text string, data func(Env) any) (*Template, error) {
 // that does not parse is a failure of the build and not of a run.
 func MustCompile(name, text string, data func(Env) any) *Template {
 	t, err := Compile(name, text, data)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+// CompileTrimmed parses prose whose section drops every trailing
+// newline, not only the file's sentinel newline.
+//
+// A section whose last line is a value the caller supplies uses it, so a
+// value that ends in a newline does not leave one behind. A file the
+// loader reads keeps the ordinary rule: only its own final newline is
+// dropped.
+func CompileTrimmed(name, text string, data func(Env) any) (*Template, error) {
+	t, err := Compile(name, text, data)
+	if err != nil {
+		return nil, err
+	}
+	t.trimTrailingNewlines = true
+	return t, nil
+}
+
+// MustCompileTrimmed is CompileTrimmed for the prose a package owns.
+func MustCompileTrimmed(name, text string, data func(Env) any) *Template {
+	t, err := CompileTrimmed(name, text, data)
 	if err != nil {
 		panic(err)
 	}
@@ -138,5 +166,9 @@ func (t *Template) render(env Env) (string, error) {
 		}
 		return "", err
 	}
-	return strings.TrimSuffix(b.String(), "\n"), nil
+	text := b.String()
+	if t.trimTrailingNewlines {
+		return strings.TrimRight(text, "\n"), nil
+	}
+	return strings.TrimSuffix(text, "\n"), nil
 }

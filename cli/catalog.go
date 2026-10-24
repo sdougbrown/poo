@@ -204,7 +204,7 @@ type catalogData struct {
 // The template renders with the catalog's data, so a prompt directory
 // that replaces the section renders with it too.
 func (c *Catalog) Template(search bool) *prompt.Template {
-	return prompt.MustCompile("catalog", catalogText, func(prompt.Env) any {
+	return prompt.MustCompileTrimmed("catalog", catalogText, func(prompt.Env) any {
 		return catalogData{
 			Search:  search,
 			Count:   c.Len(),
