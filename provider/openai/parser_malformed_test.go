@@ -140,7 +140,7 @@ func TestAFencedBlockThatIsNotACallComesBackOnceWhenStreamed(t *testing.T) {
 	text := "The fix:\n```python\ndef parse_csv(text):\n    return rows\n```\nDone."
 	for _, mode := range []string{"text", "auto"} {
 		for _, size := range []int{1, 3, 7} {
-			p := newParser(mode)
+			p := newParser(mode, "")
 			var prose strings.Builder
 			var calls int
 			collect := func(evs []poo.StreamEvent) {
@@ -176,7 +176,7 @@ func TestAFencedBlockThatIsNotACallComesBackOnceWhenStreamed(t *testing.T) {
 func TestAFencedCallStillParsesWhenStreamed(t *testing.T) {
 	text := "Running it.\n```json\n{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}\n```\n"
 	for _, size := range []int{1, 2, 5} {
-		p := newParser("text")
+		p := newParser("text", "")
 		var calls []string
 		var prose strings.Builder
 		collect := func(evs []poo.StreamEvent) {

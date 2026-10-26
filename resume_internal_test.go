@@ -11,7 +11,7 @@ import (
 // instead of being ignored.
 func TestResumeSettlesANonNaturalCandidate(t *testing.T) {
 	s := &Session{
-		opts:       Options{ContextLimit: 1},
+		opts:       Options{Model: ModelInfo{ContextLimit: 1}},
 		state:      StateRequesting,
 		events:     newEventBus(nil),
 		messageIDs: &MessageIDs{},

@@ -486,11 +486,10 @@ func TestAMixedBatchRunsTheJobAndTheCall(t *testing.T) {
 			"job":  jobTool,
 			"echo": echo,
 		},
-		ToolOrder:    []string{"job", "echo"},
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
+		ToolOrder: []string{"job", "echo"},
+		Sink:      sink,
+		SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
 	}
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
@@ -584,13 +583,12 @@ func TestAJobStoreFailureSettlesTheCurrentRun(t *testing.T) {
 		{text: "waiting b"},
 	})
 	s := newTestSession(t, poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"a": a, "b": b},
-		ToolOrder:    []string{"a", "b"},
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "m",
-		ContextLimit: 32768,
+		Transport: tr,
+		Tools:     map[string]poo.Tool{"a": a, "b": b},
+		ToolOrder: []string{"a", "b"},
+		Sink:      sink,
+		SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "m", ContextLimit: 32768},
 	})
 	if _, err := s.Prompt(context.Background(), "first"); err != nil {
 		t.Fatal(err)

@@ -38,7 +38,7 @@ func TestTheNoticeFiresOncePerRun(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, sink)
 	// A small window, so the estimate crosses the notice ratio.
-	opts.ContextLimit = 2000
+	opts.Model.ContextLimit = 2000
 	opts.NoticeRatio = 0.5
 
 	s := newTestSession(t, opts)
@@ -86,7 +86,7 @@ func TestTheNoticeRearmsAfterTheUsageDrops(t *testing.T) {
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, sink)
-	opts.ContextLimit = 2000
+	opts.Model.ContextLimit = 2000
 	opts.NoticeRatio = 0.5
 
 	s := newTestSession(t, opts)
@@ -121,7 +121,7 @@ func TestTheNoticeFiresAgainOnceTheUsageDroppedBelowTheRatio(t *testing.T) {
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, sink)
-	opts.ContextLimit = 2000
+	opts.Model.ContextLimit = 2000
 	opts.NoticeRatio = 0.5
 
 	s := newTestSession(t, opts)
@@ -161,7 +161,7 @@ func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	// A window small enough that the estimate shows in the output
 	// room.
-	opts.ContextLimit = 2000
+	opts.Model.ContextLimit = 2000
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
@@ -192,7 +192,7 @@ func TestTheEstimateUsesTheObservedRatio(t *testing.T) {
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
-	opts.ContextLimit = 32768
+	opts.Model.ContextLimit = 32768
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
@@ -229,7 +229,7 @@ func TestCrossingTheHardRatioSettlesContextExhausted(t *testing.T) {
 	tool := &echoTool{result: strings.Repeat("x", 2000)}
 
 	opts := testOptions(t, tr, tool, sink)
-	opts.ContextLimit = 1000
+	opts.Model.ContextLimit = 1000
 	opts.HardRatio = 0.5
 
 	s := newTestSession(t, opts)
@@ -267,7 +267,7 @@ func TestTheHardLimitSettlesWithItsOwnSource(t *testing.T) {
 	opts := testOptions(t, tr, tool, sink)
 	// A window big enough for the output room, but the estimate is
 	// over the hard ratio.
-	opts.ContextLimit = 20000
+	opts.Model.ContextLimit = 20000
 	opts.HardRatio = 0.5
 
 	s := newTestSession(t, opts)
@@ -326,7 +326,7 @@ func TestTheMaxTokensIsAlwaysComputed(t *testing.T) {
 	for _, limit := range []int{1024, 4096, 32768, 262144} {
 		tr := scripted([]fakeResponse{{text: "the answer"}})
 		opts := testOptions(t, tr, tool, &recordingSink{})
-		opts.ContextLimit = limit
+		opts.Model.ContextLimit = limit
 		s := newTestSession(t, opts)
 		runSession(t, s, "do the thing")
 		reqs := tr.Requests()
@@ -441,7 +441,7 @@ func TestTheCalibrationChangesTheOutputRoom(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	// A window small enough that the output room shows the estimate.
-	opts.ContextLimit = 2000
+	opts.Model.ContextLimit = 2000
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
@@ -477,7 +477,7 @@ func TestTheCalibrationIsClamped(t *testing.T) {
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
-	opts.ContextLimit = 2000
+	opts.Model.ContextLimit = 2000
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
@@ -521,7 +521,7 @@ func TestTheEstimateCountsTheReplyTheUsageReportLeftOut(t *testing.T) {
 	tool := &echoTool{result: "ok"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
-	opts.ContextLimit = 6000
+	opts.Model.ContextLimit = 6000
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")

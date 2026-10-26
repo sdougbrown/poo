@@ -23,7 +23,7 @@ func TestANetworkFailureIsNotReportedAsACancellation(t *testing.T) {
 	url := srv.URL
 	srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: url, Model: "m", Timeout: 3 * time.Second})
+	tr := openai.New(fastRetry(openai.Config{BaseURL: url, Model: "m", Timeout: 3 * time.Second}))
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err == nil {
 		t.Fatal("the request succeeded, want a network failure")
@@ -108,7 +108,7 @@ func TestTheStatusMapsTheErrorKind(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+			tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 			_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			pe, ok := err.(*poo.ProviderError)
 			if !ok {

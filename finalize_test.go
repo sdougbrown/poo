@@ -1078,9 +1078,9 @@ func TestAUsageWriteFailureIsTerminal(t *testing.T) {
 		usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 20},
 	}})
 	s := newTestSession(t, poo.Options{
-		Transport:    tr,
-		Sink:         sink,
-		ContextLimit: 32768,
+		Transport: tr,
+		Sink:      sink,
+		Model:     poo.ModelInfo{ContextLimit: 32768},
 	})
 	if _, err := s.Prompt(context.Background(), "start"); err != nil {
 		t.Fatalf("starting the run: %v", err)

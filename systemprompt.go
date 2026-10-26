@@ -34,7 +34,7 @@ func systemPromptEnv(opts *Options) prompt.Env {
 		Cwd:     opts.WorkingDir,
 		OS:      runtime.GOOS,
 		Date:    time.Now().UTC().Format("2006-01-02"),
-		Model:   opts.ModelID,
+		Model:   opts.Model.ModelID,
 		Tools:   tools,
 		Variant: opts.PromptVariant,
 	}

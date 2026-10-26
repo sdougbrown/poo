@@ -577,7 +577,7 @@ func TestTheBudgetIsRebasedOntoTheNewView(t *testing.T) {
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
 	opts.Compactor = compactor
-	opts.ContextLimit = 4000
+	opts.Model.ContextLimit = 4000
 	opts.HardRatio = 0.5
 	s := newTestSession(t, opts)
 
@@ -602,7 +602,7 @@ func TestTheHardLimitSettlesWithoutACompaction(t *testing.T) {
 	})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
-	opts.ContextLimit = 4000
+	opts.Model.ContextLimit = 4000
 	opts.HardRatio = 0.5
 	s := newTestSession(t, opts)
 
@@ -662,7 +662,7 @@ func TestTheCompactorsFailureAtTheHardLimitSettles(t *testing.T) {
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
 	opts.Compactor = compactor
-	opts.ContextLimit = 4000
+	opts.Model.ContextLimit = 4000
 	opts.HardRatio = 0.5
 	s := newTestSession(t, opts)
 

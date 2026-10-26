@@ -239,7 +239,7 @@ func TestNoOutputRoomSettlesContextExhaustedWithoutSending(t *testing.T) {
 	opts := testOptions(t, tr, tool, sink)
 	// A context limit this small leaves less than 256 tokens of room
 	// once the prompt is counted.
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")
@@ -259,8 +259,8 @@ func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
-	opts.ContextLimit = 4096
-	opts.MaxOutput = 0
+	opts.Model.ContextLimit = 4096
+	opts.Model.MaxOutput = 0
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "a short prompt")
@@ -286,8 +286,8 @@ func TestTheMaxOutputCapsTheMaxTokens(t *testing.T) {
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
-	opts.ContextLimit = 262144
-	opts.MaxOutput = 512
+	opts.Model.ContextLimit = 262144
+	opts.Model.MaxOutput = 512
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "a short prompt")
@@ -301,8 +301,8 @@ func TestTheDefaultMaxTokensIsEightThousandAndNinetyTwo(t *testing.T) {
 	tool := &echoTool{result: "echoed"}
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
-	opts.ContextLimit = 262144
-	opts.MaxOutput = 0
+	opts.Model.ContextLimit = 262144
+	opts.Model.MaxOutput = 0
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "a short prompt")
@@ -372,7 +372,7 @@ func TestTheContextRunningOutMidRunSettlesContextExhausted(t *testing.T) {
 	sink := &recordingSink{}
 
 	opts := testOptions(t, tr, tool, sink)
-	opts.ContextLimit = 2000
+	opts.Model.ContextLimit = 2000
 
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")
@@ -457,7 +457,7 @@ func TestMalformedArgumentsAreRecordedAsText(t *testing.T) {
 }
 
 func TestASessionWithoutATransportIsAConstructionError(t *testing.T) {
-	_, err := poo.New(poo.Options{ContextLimit: 1024})
+	_, err := poo.New(poo.Options{Model: poo.ModelInfo{ContextLimit: 1024}})
 	if err == nil {
 		t.Fatal("a session with no transport was built")
 	}

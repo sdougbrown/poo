@@ -78,6 +78,18 @@ func (b *Builder) WithVariant(name string) *Builder {
 	return out
 }
 
+// WithEnv returns a copy of the builder that renders in the given
+// environment.
+//
+// The copy is what a session keeps when the environment changes: the
+// dynamic sections follow the new environment, and the sections
+// themselves are unchanged.
+func (b *Builder) WithEnv(env Env) *Builder {
+	out := b.Copy()
+	out.env = env
+	return out
+}
+
 // Set replaces a section's text, whatever variant the prompt renders
 // in.
 //

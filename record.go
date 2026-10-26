@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/sdougbrown/poo/decide"
 )
 
 // FormatVersion is the version tag written into the first record of a
@@ -304,6 +306,29 @@ type Usage struct {
 	TTFTMS float64 `json:"ttft_ms"`
 }
 
+// ProviderAttempt is the record of one attempt of a request that
+// failed.
+//
+// The attempts are written for the audit: a reader of the log sees
+// what a request tried and what every attempt failed with.
+type ProviderAttempt struct {
+	RecordMeta
+	// RunID identifies the run the request belongs to.
+	RunID string `json:"run_id"`
+	// Turn is the turn the request belongs to.
+	Turn int `json:"turn"`
+	// Request is the 1-based number of the request within the run.
+	Request int `json:"request"`
+	// Attempt is the attempt's number, counting from one.
+	Attempt int `json:"attempt"`
+	// Error is the failure's message.
+	Error string `json:"error"`
+	// Kind is the provider's error kind, when the failure is one.
+	Kind string `json:"kind,omitempty"`
+	// DelayMS is how long the transport waited before the next attempt.
+	DelayMS int `json:"delay_ms,omitempty"`
+}
+
 // ProviderDetail describes why a provider request failed.
 type ProviderDetail struct {
 	// Kind is the failure class, e.g. "context_length" or "server".
@@ -317,6 +342,9 @@ type ProviderDetail struct {
 	// RetryAfterSec is how long the endpoint asked the client to wait, in
 	// seconds, when it said so.
 	RetryAfterSec int `json:"retry_after_s,omitempty"`
+	// ResetsAt is when the endpoint says its limit resets, in RFC 3339.
+	// It is absent when the endpoint said nothing about it.
+	ResetsAt string `json:"resets_at,omitempty"`
 }
 
 // SettleDetail explains why a run settled.
@@ -437,4 +465,62 @@ type HandoffRecord struct {
 	Handoff string `json:"handoff"`
 	// CreatedAt is the RFC 3339 time the handoff was written.
 	CreatedAt string `json:"created_at"`
+}
+
+// ModelsChanged records that the session switched models.
+//
+// The switch is recorded between the runs, so a reader of the log knows
+// which model answered which turn.
+type ModelsChanged struct {
+	RecordMeta
+	// From is the name of the model the session talked to.
+	From string `json:"from"`
+	// To is the name of the model the session talks to now.
+	To string `json:"to"`
+	// Warnings are the things the caller should know about the switch.
+	Warnings []string `json:"warnings,omitempty"`
+	// Omitted are the provider blocks that are left out of the requests
+	// from now on, because they belong to another API.
+	Omitted []OmittedBlock `json:"omitted,omitempty"`
+}
+
+// OmittedBlock is one kind of provider block left out of the requests.
+//
+// The block stays in the history, and the requests leave it out: the
+// model that made it is not the model the session talks to now.
+type OmittedBlock struct {
+	// API is the API the block belonged to.
+	API API `json:"api"`
+	// Type is the provider's own name for the payload.
+	Type string `json:"type"`
+	// Count is how many blocks of this kind are left out.
+	Count int `json:"count"`
+}
+
+// DecisionRecord records one decision call.
+//
+// One record is written per logical call, whatever the number of wire
+// requests it took. A call that did not answer is recorded too, with
+// the outcome that says why.
+type DecisionRecord struct {
+	RecordMeta
+	// Origin says who asked the questions.
+	Origin string `json:"origin"`
+	// Questions are the questions that were asked.
+	Questions []decide.Question `json:"questions"`
+	// StateHash is the hex SHA-256 of the state payload.
+	StateHash string `json:"state_hash"`
+	// Answers are the answers, when the call succeeded.
+	Answers []decide.Answer `json:"answers,omitempty"`
+	// Outcome is "ok", "deferred" or "invalid".
+	Outcome string `json:"outcome"`
+	// Error is the failure, when the call did not succeed.
+	Error string `json:"error,omitempty"`
+	// LatencyMS is how long the call took, in milliseconds.
+	LatencyMS float64 `json:"latency_ms"`
+	// Requests is the number of wire requests the call made. It is
+	// absent when the decider did not report one.
+	Requests *int `json:"requests,omitempty"`
+	// At is the RFC 3339 time of the call, in UTC.
+	At string `json:"at"`
 }

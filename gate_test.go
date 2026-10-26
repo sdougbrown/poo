@@ -125,7 +125,7 @@ func TestTheGateRunsOnTheBeforeSettleContinuePath(t *testing.T) {
 	opts.Compactor = compactor
 	// A window the run cannot answer in, so the gate's budget check
 	// stops it.
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")
@@ -148,7 +148,7 @@ func TestTheGateRunsOnTheInterruptedTurnPath(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Compactor = compactor
-	opts.ContextLimit = 1200
+	opts.Model.ContextLimit = 1200
 
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
@@ -190,7 +190,7 @@ func TestTheGateRunsOnTheStepSixPath(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Compactor = compactor
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")
@@ -216,7 +216,7 @@ func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Compactor = compactor
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 	// A window the run cannot answer in, so the gate's budget check
 	// stops it on the resumed path.
 	opts.MaxTurns = 5
@@ -254,7 +254,7 @@ func TestTheCompactingStateIsCancelledByAnInterrupt(t *testing.T) {
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Compactor = compactor
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
@@ -603,7 +603,7 @@ func TestTheGateRechecksTheOutputRoomAfterTheNotice(t *testing.T) {
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	opts := testOptions(t, tr, tool, sink)
-	opts.ContextLimit = 3000
+	opts.Model.ContextLimit = 3000
 	opts.NoticeRatio = 0.80
 
 	s := newTestSession(t, opts)
@@ -655,7 +655,7 @@ func TestAFailingCompactorOverTheHardLimitSettlesContextExhausted(t *testing.T) 
 	tool := &echoTool{result: "echoed"}
 	opts := testOptions(t, tr, tool, sink)
 	opts.Compactor = compactor
-	opts.ContextLimit = 3000
+	opts.Model.ContextLimit = 3000
 	// The gate runs on a continue path: the first turn continues, and
 	// the compaction fails before the second request.
 	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
@@ -690,7 +690,7 @@ func TestAFailingCompactorBelowTheHardLimitContinuesUncompacted(t *testing.T) {
 	tool := &echoTool{result: "echoed"}
 	opts := testOptions(t, tr, tool, sink)
 	opts.Compactor = compactor
-	opts.ContextLimit = 32768
+	opts.Model.ContextLimit = 32768
 	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
 
 	s := newTestSession(t, opts)
@@ -729,7 +729,7 @@ func TestTheNoticeNamesTheConfiguredRatio(t *testing.T) {
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	opts := testOptions(t, tr, tool, sink)
-	opts.ContextLimit = 3000
+	opts.Model.ContextLimit = 3000
 	opts.NoticeRatio = 0.60
 
 	s := newTestSession(t, opts)

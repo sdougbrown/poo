@@ -707,12 +707,15 @@ func (r *Runner) gitHasSHA(ctx context.Context, dir, sha string) bool {
 // children holding the output pipe, and the harness would wait for a
 // run that was already over.
 func (r *Runner) runPoo(ctx context.Context, j job, workdir, logPath string) (int, error) {
+	// The descriptor of the model names the flags the binary is given,
+	// so the catalog entry and the request agree.
+	model := j.model.ModelInfo()
 	args := []string{
 		"run",
-		"--base-url", j.model.BaseURL,
-		"--model-id", j.model.ModelID,
-		"--context-limit", strconv.Itoa(j.model.ContextLimit),
-		"--tools-mode", j.model.EffectiveToolsMode(),
+		"--base-url", model.Endpoint,
+		"--model-id", model.ModelID,
+		"--context-limit", strconv.Itoa(model.ContextLimit),
+		"--tools-mode", string(model.Tools.Mode),
 		"--max-turns", strconv.Itoa(r.opts.MaxTurns),
 		"--log", logPath,
 		"--working-dir", workdir,
