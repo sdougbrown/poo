@@ -13,11 +13,11 @@ import (
 type ChatRequest struct {
 	// Model is the provider's model identifier.
 	Model string
-	// Info is the descriptor the request is shaped from.
+	// Info is the model info the request is shaped from.
 	//
 	// A transport uses it for everything the model decides: the tools
 	// mode, the reasoning and temperature controls, the sampling
-	// defaults, the quirks and the output ceiling. A zero descriptor
+	// defaults, the quirks and the output limit. A zero model info
 	// leaves the transport's own configuration in charge, so a consumer
 	// that calls Stream directly can keep using Config.Info.
 	Info ModelInfo
@@ -25,7 +25,7 @@ type ChatRequest struct {
 	Messages []Message
 	// Tools are the tools the model may call.
 	Tools []ToolSpec
-	// MaxTokens is the output-token ceiling for this request. It is always
+	// MaxTokens is the output-token limit for this request. It is always
 	// computed by the caller, never left to the endpoint default.
 	MaxTokens int
 	// OnAttempt is called for every attempt that failed, so the caller
@@ -192,7 +192,7 @@ type UsageReport struct {
 //
 // It holds the serialized request body exactly as it went out. A fork
 // sends a body that is byte-identical to this one, apart from the
-// messages appended after the last one and the output ceiling.
+// messages appended after the last one and the output limit.
 //
 // The snapshot is what makes the payload, rather than a cache hit,
 // reproducible: a compaction strategy that forks the last request sends
@@ -218,7 +218,7 @@ type ChatTransport interface {
 	// with the snapshot of the request that was sent.
 	Stream(ctx context.Context, req ChatRequest) (StreamReader, Rendered, error)
 	// Fork sends a body that is byte-identical to the snapshot, apart
-	// from the appended messages and the output ceiling.
+	// from the appended messages and the output limit.
 	//
 	// A transport that cannot fork returns a typed error: the
 	// compaction seam needs a fork, and a transport that cannot do one

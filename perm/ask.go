@@ -6,7 +6,9 @@ import (
 	"github.com/sdougbrown/poo"
 )
 
-// Ask is one permission ask.
+// Ask is the internal view of a permission ask, paired with poo.PermissionAsk,
+// the public view. It carries the policy-only context the public view leaves
+// out.
 //
 // The ask carries what a client needs to answer it: the run that is
 // waiting, the call, and why the call is being asked about. The history

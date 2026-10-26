@@ -22,7 +22,7 @@ const (
 	// DefaultRatio is the share of the context window at which the
 	// strategy asks for a handoff.
 	DefaultRatio = 0.90
-	// DefaultMaxTokens is the output ceiling of the fork that asks for
+	// DefaultMaxTokens is the output limit of the fork that asks for
 	// the handoff.
 	DefaultMaxTokens = 2048
 	// Strategy is the name the compaction carries.
@@ -36,7 +36,7 @@ type Options struct {
 	// Ratio is the share of the context window at which the strategy
 	// asks for a handoff. It defaults to DefaultRatio.
 	Ratio float64
-	// MaxTokens is the output ceiling of the fork that asks for the
+	// MaxTokens is the output limit of the fork that asks for the
 	// handoff. It defaults to DefaultMaxTokens.
 	MaxTokens int
 }
@@ -45,7 +45,7 @@ type Options struct {
 type Compactor struct {
 	// ratio is the share of the window at which the strategy acts.
 	ratio float64
-	// maxTokens is the output ceiling of the fork.
+	// maxTokens is the output limit of the fork.
 	maxTokens int
 }
 
@@ -64,7 +64,7 @@ func New(opts Options) *Compactor {
 // Ratio returns the share of the window at which the strategy acts.
 func (c *Compactor) Ratio() float64 { return c.ratio }
 
-// MaxTokens returns the output ceiling of the fork.
+// MaxTokens returns the output limit of the fork.
 func (c *Compactor) MaxTokens() int { return c.maxTokens }
 
 // ShouldCompact reports whether the run should ask for a handoff.

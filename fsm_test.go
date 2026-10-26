@@ -1103,7 +1103,7 @@ func TestTheTypedOptionsConfigureTheSession(t *testing.T) {
 	if hook.calls == 0 {
 		t.Error("the after-turn hook never ran")
 	}
-	// The budget reached the session: the run's turn ceiling is five,
+	// The budget reached the session: the run's turn limit is five,
 	// and the hook stopped it first.
 	if res.Reason != poo.ReasonStopRequested {
 		t.Errorf("the run settled %q, want stop_requested", res.Reason)

@@ -28,9 +28,9 @@ type runOptions struct {
 	permissionFallback string
 	// reasoningEffort is the reasoning_effort the run sends.
 	reasoningEffort string
-	// maxTurns is the turn ceiling.
+	// maxTurns is the turn limit.
 	maxTurns int
-	// maxOutput is the model's output-token ceiling.
+	// maxOutput is the model's output-token limit.
 	maxOutput int
 	// logPath is the session log path.
 	logPath string
@@ -42,7 +42,7 @@ type runOptions struct {
 	// projectPrompt includes the working directory's project
 	// instructions in the prompt.
 	projectPrompt bool
-	// timeout is the wall-clock ceiling for the run.
+	// timeout is the wall-clock limit for the run.
 	timeout time.Duration
 	// noWaitJobs exits at the first settle, and the running jobs stop
 	// through the session's close.
@@ -55,13 +55,13 @@ func (o *runOptions) register(fs *flag.FlagSet) {
 	o.endpointFlags.register(fs)
 	fs.StringVar(&o.permissionFallback, "permission-fallback", "", "The decision when the asker chain is exhausted: allow or deny")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "The reasoning_effort to send, for models that think only when asked")
-	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn ceiling")
-	fs.IntVar(&o.maxOutput, "max-output", 0, "The model's output-token ceiling")
+	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn limit")
+	fs.IntVar(&o.maxOutput, "max-output", 0, "The model's output-token limit")
 	fs.StringVar(&o.logPath, "log", "", "The session log path")
 	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
 	fs.StringVar(&o.executor, "executor", "", "The executor the bash tool runs its commands through")
 	fs.BoolVar(&o.projectPrompt, "project-prompt", false, "Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt")
-	fs.DurationVar(&o.timeout, "timeout", 0, "The wall-clock ceiling for the run")
+	fs.DurationVar(&o.timeout, "timeout", 0, "The wall-clock limit for the run")
 	fs.BoolVar(&o.noWaitJobs, "no-wait-jobs", false, "Exit at the first settle; the running jobs stop through the session's close")
 }
 
@@ -321,7 +321,7 @@ func watchInterrupts(interrupts <-chan os.Signal, cancel context.CancelFunc, clo
 // modelWithFlags returns the model the run talks to.
 //
 // The catalog resolves the model the settings name, and the flags
-// change what it resolved: the ceiling and the reasoning control are
+// change what it resolved: the limit and the reasoning control are
 // the operator's.
 func modelWithFlags(runtime *config.Runtime, o *runOptions) poo.ModelInfo {
 	model := runtime.Options.Model

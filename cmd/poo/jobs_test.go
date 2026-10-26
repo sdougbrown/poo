@@ -65,7 +65,7 @@ func TestTheExitCodeComesFromTheSettleReason(t *testing.T) {
 		"--log", logPath,
 		"say hello",
 	)
-	// The turn ceiling settles the run, and the code is the table's.
+	// The turn limit settles the run, and the code is the table's.
 	if code != poo.ExitCode(poo.ReasonMaxTurns) {
 		t.Errorf("the exit code is %d, want %d; stderr: %s", code, poo.ExitCode(poo.ReasonMaxTurns), stderr)
 	}
@@ -151,7 +151,7 @@ func TestTheOneShotWithAStuckJobExitsAtTheFirstSettle(t *testing.T) {
 	r.Close()
 	outR.Close()
 
-	// The turn ceiling settles the run, and the code is the table's.
+	// The turn limit settles the run, and the code is the table's.
 	if code != poo.ExitCode(poo.ReasonMaxTurns) {
 		t.Errorf("the exit code is %d, want %d; stderr: %s", code, poo.ExitCode(poo.ReasonMaxTurns), stderr)
 	}
@@ -180,7 +180,7 @@ func TestTheOneShotPrintsTheLastRunsAnswer(t *testing.T) {
 		Model:     poo.ModelInfo{ContextLimit: 32768, ModelID: "m"},
 		SessionID: "s1",
 		// The finish call's own turn is the last one: the candidate
-		// it adds outranks nothing at the turn ceiling.
+		// it adds outranks nothing at the turn limit.
 		MaxTurns: 2,
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func TestTheOneShotPrintsTheFinishResult(t *testing.T) {
 		Model:     poo.ModelInfo{ContextLimit: 32768, ModelID: "m"},
 		SessionID: "s1",
 		// The finish call's own turn is the last one: the candidate
-		// it adds outranks nothing at the turn ceiling.
+		// it adds outranks nothing at the turn limit.
 		MaxTurns: 2,
 	})
 	if err != nil {

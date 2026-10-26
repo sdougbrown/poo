@@ -352,7 +352,7 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 		return nil, nil, err
 	}
 	// The recorder keeps the records the session writes, so the server
-	// can project them into the session's scrollback.
+	// can project them into the session's history.
 	recorder := &session.Recording{Store: store}
 	workDir := params.WorkingDir
 	if workDir == "" {

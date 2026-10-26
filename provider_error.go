@@ -84,8 +84,7 @@ func (e *ProviderError) Error() string {
 // failure always are. A rejection is not: the same request would be
 // refused again.
 //
-// Stage 6's retry budget consumes this and MaxRetryAfter; nothing calls
-// them yet.
+// The transport's retry budget consumes this and MaxRetryAfter.
 func (e *ProviderError) Retryable() bool {
 	switch e.Kind {
 	case ProviderKindRateLimited:
@@ -101,6 +100,6 @@ func (e *ProviderError) Retryable() bool {
 // be worth retrying.
 //
 // A limit that asks for longer is a provider limit, not a transient
-// failure: the run settles and a later run may succeed. Stage 6's retry
-// budget consumes it; nothing reads it yet.
+// failure: the run settles and a later run may succeed. The transport's
+// retry budget consumes this limit.
 const MaxRetryAfter = 30 * time.Second

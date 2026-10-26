@@ -160,7 +160,7 @@ type Info struct {
 	Warnings []string
 	// Records returns the session's records, oldest first.
 	//
-	// The server projects them into the session's scrollback, so a
+	// The server projects them into the session's history, so a
 	// factory that keeps its records anywhere can serve it.
 	Records func() []poo.Record
 	// Release releases what holds the session: the store that took

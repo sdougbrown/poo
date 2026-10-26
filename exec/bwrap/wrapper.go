@@ -31,7 +31,7 @@ func init() {
 func runHelper() int {
 	fd, err := strconv.Atoi(os.Getenv(statusFDEnv))
 	if err != nil || fd < 3 {
-		fmt.Fprintf(os.Stderr, "poo bwrap helper: bad status descriptor %q\n", os.Getenv(statusFDEnv))
+		fmt.Fprintf(os.Stderr, "poo bwrap helper: bad status file descriptor %q\n", os.Getenv(statusFDEnv))
 		return 127
 	}
 	status := os.NewFile(uintptr(fd), "bwrap-status")
@@ -135,7 +135,7 @@ func watchParent() <-chan struct{} {
 	if file == nil {
 		return gone
 	}
-	// The command has no business with the descriptor.
+	// The command has no business with the descriptors.
 	syscall.CloseOnExec(fd)
 	go func() {
 		defer file.Close()

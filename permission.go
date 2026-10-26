@@ -6,7 +6,9 @@ import (
 	"sort"
 )
 
-// PermissionAsk identifies a call waiting for authorization.
+// PermissionAsk is the public view of a permission ask; perm.Ask is its
+// internal counterpart, which carries the policy-only context this view leaves
+// out.
 type PermissionAsk struct {
 	// AskID names the ask. A client answers by it.
 	AskID string

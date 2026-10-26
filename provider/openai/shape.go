@@ -11,21 +11,21 @@ import (
 
 // The request shaping.
 //
-// The plan: the request carries the output ceiling, the sampling
-// parameters, the reasoning parameter and the tools. The ceiling is
+// The plan: the request carries the output limit, the sampling
+// parameters, the reasoning parameter and the tools. The limit is
 // always computed, the tools are always in a stable order, and the
 // reasoning parameter follows the model's reasoning control.
 
-// requestSettings is the descriptor one request is shaped by, with the
+// requestSettings is the model info one request is shaped by, with the
 // quirks it names.
 //
-// The request carries its own descriptor when the core supplies one; a
+// The request carries its own model info when the core supplies one; a
 // direct consumer that passes none keeps the transport's configured
 // one.
 type requestSettings struct {
-	// info is the model descriptor.
+	// info is the model's info.
 	info poo.ModelInfo
-	// quirks are the profiles the descriptor named, in its order.
+	// quirks are the profiles the model info named, in its order.
 	quirks []quirkProfile
 }
 
@@ -38,7 +38,7 @@ func (t *Transport) requestSettings(req poo.ChatRequest) requestSettings {
 	return requestSettings{info: info, quirks: quirksFor(info.Quirks, t.logger)}
 }
 
-// zeroModelInfo reports that a request carried no descriptor.
+// zeroModelInfo reports that a request carried no model info.
 func zeroModelInfo(info poo.ModelInfo) bool {
 	return info.Name == "" &&
 		info.Endpoint == "" &&
@@ -61,7 +61,7 @@ func zeroModelInfo(info poo.ModelInfo) bool {
 
 // reasoningSetting returns the reasoning setting the request uses.
 //
-// The configured setting wins, and the descriptor's reasoning control
+// The configured setting wins, and the model info's reasoning control
 // decides how it is spelled.
 func (t *Transport) reasoningSetting() string {
 	if t.cfg.Reasoning != "" {
@@ -72,7 +72,7 @@ func (t *Transport) reasoningSetting() string {
 
 // shapeReasoning sets the parameters that turn the reasoning on.
 //
-// The descriptor holds the rule: the setting is mapped through the
+// The model info holds the rule: the setting is mapped through the
 // model's reasoning control, and the fields the mapping names are the
 // ones the request carries.
 //
@@ -103,7 +103,7 @@ func reasonError(err error) string {
 
 // shapeSampling sets the sampling parameters the request carries.
 //
-// The descriptor holds the rule: the model's own defaults are the
+// The model info holds the rule: the model's own defaults are the
 // base, the configured overrides win over them, and a model that takes
 // no temperature never gets one.
 func (t *Transport) shapeSampling(info poo.ModelInfo, shape *requestShape) {
@@ -136,8 +136,8 @@ func configErrorf(format string, args ...any) error {
 // buildBody turns a core request into the wire payload.
 //
 // The payload is shaped in three passes: the request's own fields, the
-// descriptor's controls (the reasoning parameter, the sampling
-// parameters), and the quirks the descriptor named, in its order.
+// model info's controls (the reasoning parameter, the sampling
+// parameters), and the quirks the model info named, in its order.
 func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	return t.buildBodyWith(req, t.requestSettings(req))
 }
@@ -206,13 +206,13 @@ func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings)
 	return json.Marshal(out)
 }
 
-// maxTokens returns the output ceiling the request asks for.
+// maxTokens returns the output limit the request asks for.
 //
-// The caller computes the ceiling, because only it knows the size of
+// The caller computes the limit, because only it knows the size of
 // the history. A request that arrives without one gets the model's own
-// ceiling, or the default, and never the endpoint's.
+// limit, or the default, and never the endpoint's.
 //
-// The ceiling is at least one token: a request asks for room, and a
+// The limit is at least one token: a request asks for room, and a
 // room of zero is no room at all.
 func (t *Transport) maxTokens(req poo.ChatRequest, info poo.ModelInfo) int {
 	if req.MaxTokens > 0 {

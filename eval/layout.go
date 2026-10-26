@@ -35,7 +35,7 @@ func jobWorkdir(workRoot string, j job) string {
 // the seed out of a run's directory, relative to the runs directory.
 //
 // The last three components name the run. The directories above them
-// are the harness's own, and their names do not matter. A directory that
+// are the runner's own, and their names do not matter. A directory that
 // does not end in a seed's name is not a run's.
 func parseRunDir(runsDir, dir string) (task, model string, seed int, ok bool) {
 	rel, err := filepath.Rel(runsDir, dir)

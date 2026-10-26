@@ -52,7 +52,7 @@ type ModelSettings struct {
 	Inputs []poo.Modality
 	// ContextLimit is the model's context window.
 	ContextLimit int
-	// MaxOutput is the model's output ceiling.
+	// MaxOutput is the model's output limit.
 	MaxOutput int
 	// Reasoning is how the model's reasoning is controlled.
 	Reasoning *poo.ReasoningControl

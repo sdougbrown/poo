@@ -39,7 +39,7 @@ type ModelSwitch struct {
 //     next run's gate settles context_exhausted.
 //
 // The system prompt is rendered in the switch, because the environment
-// section names the model and the descriptor selects the variant. A prompt
+// section names the model and the model info selects the variant. A prompt
 // that cannot render in the new environment refuses the switch.
 //
 // The transport is the session's chat transport when the call names none,
@@ -109,7 +109,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	from := modelLabel(s.opts.Model)
 	outcome := ModelSwitch{From: from, To: name, Warnings: warnings}
 
-	// The descriptor selects the prompt's variant, and the environment
+	// The model info selects the prompt's variant, and the environment
 	// section names the model, so the prompt renders again in the new
 	// environment. A prompt that cannot render there refuses the switch,
 	// and the session keeps the model and the prompt it had.
@@ -124,13 +124,13 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	}
 
 	// The switch itself: the transport, the model's identity, the
-	// window and the output ceiling.
+	// window and the output limit.
 	if len(transport) == 1 && transport[0] != nil {
 		s.opts.Transport = transport[0]
 	}
 	// The model keeps the identifier the endpoint calls it by, and the
 	// name is the fallback. The wire API stays the one the session
-	// speaks, so the descriptor and the session agree.
+	// speaks, so the model info and the session agree.
 	info.ModelID = modelID
 	info.API = api
 	info.ContextLimit = limit

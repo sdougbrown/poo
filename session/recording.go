@@ -10,8 +10,8 @@ import (
 // Recording is a store that keeps the records it writes.
 //
 // The store writes every record to the store it wraps, and keeps a copy
-// of it. A consumer that serves a session's scrollback needs the
-// records: the scrollback is a projection of them, and a store that
+// of it. A consumer that serves a session's history needs the
+// records: the history is a projection of them, and a store that
 // only writes them to a file cannot hand them over.
 type Recording struct {
 	// Store is the store the records are written to.

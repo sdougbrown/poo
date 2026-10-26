@@ -12,9 +12,9 @@ import (
 )
 
 // LogRecord is one record of a session log, decoded into the fields the
-// harness measures.
+// runner measures.
 //
-// The harness decodes into a loose shape: a session log grows a field
+// The runner decodes into a loose shape: a session log grows a field
 // every stage, and a consumer that fails on an unknown field breaks on a
 // newer log. Only the fields the metrics need are typed.
 type LogRecord struct {
@@ -60,7 +60,7 @@ type LogRecord struct {
 		Arguments  json.RawMessage `json:"arguments"`
 		IsError    bool            `json:"is_error"`
 		// Provider is the block's opaque provider companion, when it
-		// has one. The harness does not interpret it.
+		// has one. The runner does not interpret it.
 		Provider *struct {
 			API      string          `json:"api"`
 			Type     string          `json:"type"`

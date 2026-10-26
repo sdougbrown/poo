@@ -1,4 +1,6 @@
 // Package caps holds the output caps the tools share with the settings.
+// Cap names a bound the code truncates with; Max names the constant bound
+// of a Cap.
 //
 // A tool's output is capped relative to the model's context window: the
 // cap is a fraction of the window in characters, and never above a fixed

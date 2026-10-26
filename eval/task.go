@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Task is one unit of work the harness measures.
+// Task is one unit of work the runner measures.
 //
 // A task is a repository (or a fixture directory), a prompt, a check that
 // says whether the run succeeded, and the metadata the report groups by.
@@ -21,8 +21,8 @@ type Task struct {
 	Repo string `json:"repo"`
 	// Prompt is what the run is asked to do.
 	Prompt string `json:"prompt"`
-	// TimeoutS is the wall-clock ceiling for the run, in seconds. Zero
-	// means the harness default.
+	// TimeoutS is the wall-clock limit for the run, in seconds. Zero
+	// means the runner default.
 	TimeoutS int `json:"timeout_s"`
 	// Tags are the labels a filter can select on.
 	Tags []string `json:"tags,omitempty"`
@@ -30,7 +30,7 @@ type Task struct {
 	// outside them is a diff-sanity finding, not a failure.
 	ExpectedPaths []string `json:"expected_paths,omitempty"`
 	// AllowTestEdits says the task's own prompt asks the run to change
-	// the fixture's tests. A coding task does not: the harness puts the
+	// the fixture's tests. A coding task does not: the runner puts the
 	// pristine tests back before the check runs, so a run that rewrote
 	// them did not fix the bug.
 	AllowTestEdits bool `json:"allow_test_edits,omitempty"`
@@ -42,7 +42,7 @@ type Task struct {
 
 // TestsDir is the directory a task's fixture keeps its tests in.
 //
-// A task with tests in it is a coding task: the harness puts the
+// A task with tests in it is a coding task: the runner puts the
 // fixture's own tests back before the check runs, and a change to a test
 // file is always an unexpected change.
 const TestsDir = "tests"

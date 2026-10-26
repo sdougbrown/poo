@@ -49,10 +49,9 @@ type observerSlot struct {
 	name string
 	// ch is the observer's buffer.
 	ch chan Event
-	// dropped counts the events the observer missed. The coalesced
-	// observer.dropped record is written by the observer stage (Stage
-	// 4) and is never delivered to observers, so the count itself is
-	// scaffolding until then.
+	// dropped counts the events the observer missed. The event bus
+	// writes them as a coalesced observer.dropped record, which is
+	// never delivered to observers.
 	dropped int
 	// done is closed when the observer's goroutine ends.
 	done chan struct{}
@@ -185,10 +184,9 @@ func (b *eventBus) emit(name EventName, payload map[string]any) Event {
 		default:
 			// The observer is too far behind. The event is dropped
 			// for that observer alone, and the count is held for the
-			// coalesced observer.dropped record the observer stage
-			// (Stage 4) writes. The record is never delivered to
-			// observers, so overflow diagnostics cannot cause more
-			// overflow.
+			// coalesced observer.dropped record the event bus writes.
+			// The record is never delivered to observers, so overflow
+			// diagnostics cannot cause more overflow.
 			o.mu.Lock()
 			o.dropped++
 			o.mu.Unlock()

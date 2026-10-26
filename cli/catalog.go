@@ -58,7 +58,7 @@ type Entry struct {
 type Catalog struct {
 	// registry is the compiled cli-registry registry.
 	registry *cliregistry.Registry
-	// tools are the compiled descriptors, by name.
+	// tools are the compiled tool descriptors, by name.
 	tools map[string]cliregistry.Tool
 	// entries are the CLIs, in name order.
 	entries []Entry

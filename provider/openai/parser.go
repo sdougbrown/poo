@@ -44,7 +44,7 @@ const (
 
 // callFormats holds the shapes the parser reads.
 //
-// A model writes its calls in one shape, and the descriptor names it. A
+// A model writes its calls in one shape, and the model info names it. A
 // format that names no shape reads them all.
 type callFormats struct {
 	// hermes reads a tagged block with a JSON body.

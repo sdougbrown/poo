@@ -65,14 +65,14 @@ func (m Model) Endpoint() string {
 	return strings.TrimRight(m.BaseURL, "/")
 }
 
-// ModelInfo returns the descriptor of the model.
+// ModelInfo returns the model's info.
 //
-// The descriptor is what the harness reads: the identifier the endpoint
+// The model info is what the runner reads: the identifier the endpoint
 // knows the model by, the window it has, how it is asked for tool calls
 // and how its reasoning is controlled.
 //
 // The API is the Chat Completions API, because it is the only one the
-// harness speaks.
+// runner speaks.
 func (m Model) ModelInfo() poo.ModelInfo {
 	info := poo.ModelInfo{
 		Name:         m.Name,
@@ -93,7 +93,7 @@ func (m Model) ModelInfo() poo.ModelInfo {
 
 // LoadModels reads a model catalog.
 //
-// The catalog is a YAML list of model entries. A field the harness does
+// The catalog is a YAML list of model entries. A field the runner does
 // not know is an error: a typo in a context limit should not silently
 // become a default.
 func LoadModels(path string) ([]Model, error) {

@@ -418,7 +418,7 @@ func (s *Session) startDurationTimer(run *runState) func() {
 		case <-timer.C:
 			s.finalize(run, newCandidate(ReasonBudgetExhausted, SettleDetail{
 				Source: "max_duration",
-				Text:   fmt.Sprintf("the run took its %s ceiling", s.opts.MaxDuration),
+				Text:   fmt.Sprintf("the run took its %s limit", s.opts.MaxDuration),
 			}))
 		}
 	}()
@@ -779,7 +779,7 @@ func (s *Session) evaluateBudgets(run *runState, turn int) []candidate {
 	if s.opts.MaxTurns > 0 && turn >= s.opts.MaxTurns {
 		cands = append(cands, newCandidate(ReasonMaxTurns, SettleDetail{
 			Source: "max_turns",
-			Text:   fmt.Sprintf("the run reached its %d-turn ceiling", s.opts.MaxTurns),
+			Text:   fmt.Sprintf("the run reached its %d-turn limit", s.opts.MaxTurns),
 		}))
 	}
 	s.mu.Lock()
@@ -789,13 +789,13 @@ func (s *Session) evaluateBudgets(run *runState, turn int) []candidate {
 	if s.opts.MaxRunTokens > 0 && tokens >= s.opts.MaxRunTokens {
 		cands = append(cands, newCandidate(ReasonBudgetExhausted, SettleDetail{
 			Source: "max_run_tokens",
-			Text:   fmt.Sprintf("the run used %d tokens, and the ceiling is %d", tokens, s.opts.MaxRunTokens),
+			Text:   fmt.Sprintf("the run used %d tokens, and the limit is %d", tokens, s.opts.MaxRunTokens),
 		}))
 	}
 	if s.opts.MaxDuration > 0 && elapsed >= s.opts.MaxDuration {
 		cands = append(cands, newCandidate(ReasonBudgetExhausted, SettleDetail{
 			Source: "max_duration",
-			Text:   fmt.Sprintf("the run took %s, and the ceiling is %s", elapsed.Round(time.Millisecond), s.opts.MaxDuration),
+			Text:   fmt.Sprintf("the run took %s, and the limit is %s", elapsed.Round(time.Millisecond), s.opts.MaxDuration),
 		}))
 	}
 	return cands
@@ -1095,8 +1095,8 @@ func originForMode(mode InputMode) Origin {
 // A response that broke part way through is returned along with the
 // error, so the caller can still write the usage it produced.
 func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
-	// The model is read once, here: the request's body, its ceiling and
-	// every descriptor-derived decision come from this one value, so a
+	// The model is read once, here: the request's body, its token limit and
+	// every model info-derived decision come from this one value, so a
 	// switch between runs cannot reach a request half way.
 	s.mu.Lock()
 	model := s.opts.Model
@@ -1229,7 +1229,7 @@ func (s *Session) reportResponseErrors(run *runState, turn int, errs []StreamErr
 // response failure may open.
 //
 // A model that keeps reporting the same failure would otherwise keep the
-// run asking forever: MaxTurns is unlimited by default, and the Stage 7
+// run asking forever: MaxTurns is unlimited by default, and the
 // doom-loop counter only sees tool calls. After this many consecutive
 // notes, the note is still recorded, and the run settles naturally.
 const maxRecoverableNotes = 3

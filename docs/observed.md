@@ -110,7 +110,7 @@ before turn 50.
 
 **What:** the model fixes the bug, runs the tests, and then keeps
 re-running the same test command and restating its summary until the
-ceiling.
+limit.
 
 **Harness relevance:** `loop_or_reread` is gemma's most common
 pathology (see the judge table). The plan answers it twice: the
@@ -221,7 +221,7 @@ its defaults were read against the entries above:
   nudge belongs.
 - **Not stopping** (entry 4): doom-loop counting and `finish` are both
   planned. No change. The baseline gives Stage 3 a number to beat: 4 of
-  120 gemma runs at the ceiling.
+  120 gemma runs at the limit.
 - **`provider_error`:** none in this baseline. An earlier minimax run
   hit one Ollama HTTP/2 timeout, which the Stage 6 retry budget covers.
 - **`context_exhausted`:** none at gemma's 32768 limit, so the 80%

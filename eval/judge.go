@@ -147,7 +147,7 @@ type JudgeOptions struct {
 
 // Judge reads transcripts and reports what it sees.
 //
-// The judge is a model on an OpenAI-compatible endpoint. The harness
+// The judge is a model on an OpenAI-compatible endpoint. The runner
 // sends each transcript, with the check's outcome and the metrics, and
 // writes one verdict per transcript.
 type Judge struct {
@@ -258,7 +258,7 @@ func (j *Judge) Run(ctx context.Context) (*JudgeResult, error) {
 // that no run wrote a log: it names runs, and none of the logs it names
 // exists. The runner makes a run's directory before poo writes its log,
 // so a run in which every seed timed out leaves a runs directory with
-// no transcript in it. That is the harness's own output, and there is
+// no transcript in it. That is the runner's own output, and there is
 // nothing to judge. The judge says so on stderr, with the first error
 // the report holds.
 func (j *Judge) noRunWroteALog() bool {
@@ -409,7 +409,7 @@ func (j *Judge) judgeOne(ctx context.Context, t transcript, report *Report) (*Ve
 
 // markError records a failure on a verdict.
 //
-// The verdict needs the owner: the harness could not judge this
+// The verdict needs the owner: the runner could not judge this
 // transcript, and a reader has to know that the run went unjudged.
 func (j *Judge) markError(verdict *Verdict, err error) {
 	verdict.Error = err.Error()
@@ -430,7 +430,7 @@ type judgePayload struct {
 	CheckPassed bool `json:"check_passed"`
 	// CheckOutput is the tail of the check's output.
 	CheckOutput string `json:"check_output,omitempty"`
-	// Metrics holds the harness's numbers.
+	// Metrics holds the runner's numbers.
 	Metrics Metrics `json:"metrics"`
 	// Transcript is the transcript, summarized if it was too large.
 	Transcript string `json:"transcript"`
@@ -444,7 +444,7 @@ type judgePayload struct {
 // buildPayload assembles what the judge is sent.
 //
 // The check's outcome and the metrics come from the run's own report
-// entry, when the harness wrote one. The judge and a reader of the
+// entry, when the runner wrote one. The judge and a reader of the
 // report then see the same numbers, and the judge's "agrees with check"
 // question has the check's real answer to compare against.
 func (j *Judge) buildPayload(log *Log, transcript string, t transcript, report *Report) judgePayload {
@@ -926,7 +926,7 @@ func pathologyNames(pathologies []Pathology) []string {
 // normalizePathologies maps a judge's pathology names onto the known
 // set.
 //
-// A name the harness does not know becomes "other", so the table's
+// A name the runner does not know becomes "other", so the table's
 // columns stay fixed and the judge's own words are kept in the reason.
 func normalizePathologies(names []string) []Pathology {
 	out := make([]Pathology, 0, len(names))
