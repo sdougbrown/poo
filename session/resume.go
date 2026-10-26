@@ -37,14 +37,17 @@ type Resumed struct {
 // models it offers and the profile it knows. The records hold the
 // session's own metadata, and the restore checks it against those
 // settings.
-func Resume(ctx context.Context, store Store, id string, opts poo.Options) (*Resumed, error) {
+//
+// The options are the ones the session is built with: the hooks and the
+// observers a new session would carry.
+func Resume(ctx context.Context, store Store, id string, opts poo.Options, fns ...poo.Option) (*Resumed, error) {
 	loaded, err := store.Load(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	opts.Sink = store
 	opts.SessionID = loaded.ID
-	sess, restored, err := poo.Restore(opts, loaded.Records)
+	sess, restored, err := poo.Restore(opts, loaded.Records, fns...)
 	if err != nil {
 		return nil, err
 	}

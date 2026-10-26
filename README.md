@@ -48,6 +48,7 @@ that already exists, rather than appending a second session to it.
 | `poo/perm/decide` | An asker that answers a permission call with a decision model |
 | `poo/session` | Session seam: store, versioned codec, projection, authority |
 | `poo/wire` | JSON-RPC 2.0 control protocol over stdio |
+| `poo/wire/protocol` | The public contract: the method names, the error codes, and the request and result types a client depends on |
 | `poo/config` | Opt-in settings loading and validation |
 | `poo/cmd/poo` | The headless CLI |
 

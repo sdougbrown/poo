@@ -17,9 +17,15 @@ func executorRegistry() *bash.Registry {
 		return bash.NewLocal(), nil
 	})
 	registry.Register("bwrap", func(opts bash.Options) (bash.Executor, error) {
-		// The protected paths come from the settings, and the
-		// sandbox masks the ones they name.
-		return bwrap.New(bwrap.Options{Masker: opts.Masker})
+		// The settings name the sandbox's own options, and the
+		// protected paths come from the settings too, so the sandbox
+		// masks the ones they name.
+		return bwrap.New(bwrap.Options{
+			DisableNetwork: opts.Sandbox.DisableNetwork,
+			ROBinds:        opts.Sandbox.ROBinds,
+			RWBinds:        opts.Sandbox.RWBinds,
+			Masker:         opts.Masker,
+		})
 	})
 	return registry
 }
