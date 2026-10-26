@@ -19,15 +19,15 @@ func NewID() string {
 // A URL may carry credentials, and the log is a file a consumer reads,
 // so the userinfo is stripped before the model is written.
 func LoggedModel(model poo.ModelInfo) poo.ModelInfo {
-	model.Endpoint = LoggedBaseURL(model.Endpoint)
+	model.Endpoint = LoggedEndpoint(model.Endpoint)
 	return model
 }
 
-// LoggedBaseURL returns the base URL a log records.
+// LoggedEndpoint returns the base URL a log records.
 //
 // A URL may carry credentials, and the log is a file a consumer reads, so
 // the userinfo is stripped before it is written.
-func LoggedBaseURL(raw string) string {
+func LoggedEndpoint(raw string) string {
 	if raw == "" {
 		return ""
 	}

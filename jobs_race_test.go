@@ -72,7 +72,7 @@ func TestAJobFinishingBeforeTheWaitingEntrySendsTheRunToTheGate(t *testing.T) {
 	// The result was delivered to the run, and the run never waited.
 	delivered := 0
 	for _, rec := range sink.allRecords() {
-		if d, ok := rec.(*poo.InputDelivered); ok && d.Mode == poo.InputModeJob {
+		if d, ok := rec.(*poo.InputDeliveredRecord); ok && d.Mode == poo.InputModeJob {
 			delivered++
 		}
 	}
@@ -154,7 +154,7 @@ func TestAJobFinishingBeforeTheFinalizeCheckAbandonsTheFinalize(t *testing.T) {
 	// The result was delivered to the run that abandoned the finalize.
 	delivered := false
 	for _, rec := range sink.allRecords() {
-		d, ok := rec.(*poo.InputDelivered)
+		d, ok := rec.(*poo.InputDeliveredRecord)
 		if !ok || d.Mode != poo.InputModeJob {
 			continue
 		}
@@ -229,7 +229,7 @@ func TestAJobFinishingAfterTheCommitWakesAfterTheSettle(t *testing.T) {
 	// The result was never delivered to the settling run: it woke the
 	// session instead.
 	for _, rec := range sink.allRecords() {
-		d, ok := rec.(*poo.InputDelivered)
+		d, ok := rec.(*poo.InputDeliveredRecord)
 		if !ok || d.Mode != poo.InputModeJob {
 			continue
 		}
@@ -280,7 +280,7 @@ func TestAJobResultNeverReopensASettlingRun(t *testing.T) {
 	})
 	settles := 0
 	for _, rec := range sink.allRecords() {
-		if _, ok := rec.(*poo.RunSettled); ok {
+		if _, ok := rec.(*poo.RunSettledRecord); ok {
 			settles++
 		}
 	}
@@ -348,7 +348,7 @@ func TestAWakeRacingAPromptStartsOneRun(t *testing.T) {
 	})
 	starts := 0
 	for _, rec := range sink.allRecords() {
-		if _, ok := rec.(*poo.RunStarted); ok {
+		if _, ok := rec.(*poo.RunStartedRecord); ok {
 			starts++
 		}
 	}

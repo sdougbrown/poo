@@ -42,8 +42,8 @@ func TestAModelThatTwoEndpointsServeIsListedOnce(t *testing.T) {
 		StateDir: t.TempDir(),
 		Settings: catalog.Settings{
 			Endpoints: map[string]catalog.EndpointSettings{
-				"aaa": {BaseURL: first.URL},
-				"zzz": {BaseURL: second.URL},
+				"aaa": {Endpoint: first.URL},
+				"zzz": {Endpoint: second.URL},
 			},
 		},
 	})
@@ -79,8 +79,8 @@ func TestDiscoveryKeepsTheSettingsModel(t *testing.T) {
 		StateDir: t.TempDir(),
 		Settings: catalog.Settings{
 			Endpoints: map[string]catalog.EndpointSettings{
-				"aaa": {BaseURL: first.URL},
-				"zzz": {BaseURL: second.URL},
+				"aaa": {Endpoint: first.URL},
+				"zzz": {Endpoint: second.URL},
 			},
 			Models: map[string]catalog.ModelSettings{
 				"mine": {Endpoint: "zzz", ModelID: "shared", ContextLimit: 131072},

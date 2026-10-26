@@ -36,7 +36,7 @@ func TestTheRunnerMakesItsPathsAbsolute(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -72,7 +72,7 @@ func TestASecondRunDoesNotReadTheFirstRunsLog(t *testing.T) {
 	out := t.TempDir()
 	newRunner := func(force bool) *Runner {
 		return NewRunner(RunOptions{
-			Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+			Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 			Tasks:     []Task{task},
 			TaskRoot:  taskRoot,
 			Seeds:     1,
@@ -131,7 +131,7 @@ func TestTheRunnerRefusesANonEmptyOutDirectory(t *testing.T) {
 	}
 
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -165,7 +165,7 @@ func TestTheRunnerClearsTheRunsDirectoryWithForce(t *testing.T) {
 	}
 
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -204,7 +204,7 @@ func TestThePooBinaryPathIsMadeAbsolute(t *testing.T) {
 
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -253,7 +253,7 @@ fi
 
 	run := func(out string) *Report {
 		runner := NewRunner(RunOptions{
-			Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+			Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 			Tasks:     []Task{task},
 			TaskRoot:  taskRoot,
 			Seeds:     1,

@@ -136,7 +136,7 @@ func TestTwoStalledObserversGetCoalescedDroppedRecords(t *testing.T) {
 	// The records name the observers and count what they missed.
 	named := map[string]bool{}
 	for _, rec := range sink.allRecords() {
-		dropped, ok := rec.(*poo.ObserverDropped)
+		dropped, ok := rec.(*poo.ObserverDroppedRecord)
 		if !ok {
 			continue
 		}

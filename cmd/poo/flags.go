@@ -147,8 +147,8 @@ func workingDirectory(dir string) (string, error) {
 // The flags build a settings document, and the flags come last: they
 // change what the settings file said.
 type endpointFlags struct {
-	// baseURL is the endpoint's base URL.
-	baseURL string
+	// endpoint is the model's endpoint.
+	endpoint string
 	// modelID is the model identifier.
 	modelID string
 	// contextLimit is the model's context window in tokens.
@@ -161,7 +161,7 @@ type endpointFlags struct {
 
 // register adds the endpoint flags to a flag set.
 func (f *endpointFlags) register(fs *flag.FlagSet) {
-	fs.StringVar(&f.baseURL, "base-url", "", "The endpoint's base URL")
+	fs.StringVar(&f.endpoint, "endpoint", "", "The model's endpoint")
 	fs.StringVar(&f.modelID, "model-id", "", "The model identifier")
 	fs.IntVar(&f.contextLimit, "context-limit", 0, "The model's context window in tokens")
 	fs.StringVar(&f.apiKeyEnv, "api-key-env", "", "The environment variable holding the API key")
@@ -173,7 +173,7 @@ func (f *endpointFlags) register(fs *flag.FlagSet) {
 // The flags come last: they change what the settings file said. A flag
 // that was not given changes nothing.
 func (f *endpointFlags) apply(settings *config.Settings) {
-	if f.baseURL == "" {
+	if f.endpoint == "" {
 		return
 	}
 	name := f.modelID
@@ -187,7 +187,7 @@ func (f *endpointFlags) apply(settings *config.Settings) {
 		settings.Roles = map[string]string{}
 	}
 	settings.Endpoints[name] = config.Endpoint{
-		BaseURL:   f.baseURL,
+		Endpoint:  f.endpoint,
 		APIKeyEnv: f.apiKeyEnv,
 	}
 	toolsMode := f.toolsMode
@@ -215,15 +215,15 @@ func (f *endpointFlags) validate() error {
 	default:
 		return fmt.Errorf("--tools-mode must be native, text or auto, not %q", f.toolsMode)
 	}
-	named := f.baseURL != "" || f.modelID != "" || f.contextLimit > 0 || f.apiKeyEnv != "" || f.toolsMode != ""
+	named := f.endpoint != "" || f.modelID != "" || f.contextLimit > 0 || f.apiKeyEnv != "" || f.toolsMode != ""
 	if !named {
 		return nil
 	}
 	switch {
-	case f.baseURL == "":
-		return errors.New("--base-url is required with --model-id")
+	case f.endpoint == "":
+		return errors.New("--endpoint is required with --model-id")
 	case f.modelID == "":
-		return errors.New("--model-id is required with --base-url")
+		return errors.New("--model-id is required with --endpoint")
 	case f.contextLimit <= 0:
 		return errors.New("--context-limit is required and must be positive")
 	}

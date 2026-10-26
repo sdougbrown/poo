@@ -122,10 +122,10 @@ loaded by another binary keeps the roles it was made with.
 | Field | Type | Meaning |
 |---|---|---|
 | `id` | string | The provider's model identifier. |
-| `base_url` | string | The endpoint, without credentials. Absent when empty. |
+| `endpoint` | string | The endpoint, without credentials. Absent when empty. Renamed from `base_url` before v1; older logs carry `base_url`. |
 | `max_output` | integer | The model's output-token limit. Absent when unknown. |
 
-The `base_url` never carries credentials: a URL that names a user and a
+The `endpoint` never carries credentials: a URL that names a user and a
 password is written without its userinfo, so a consumer can read the log
 without picking up a secret.
 

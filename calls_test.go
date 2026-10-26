@@ -165,7 +165,7 @@ func TestTheRestoredSessionContinuesTheMessageIDs(t *testing.T) {
 func TestTheRestoredSessionContinuesTheJobInputIDs(t *testing.T) {
 	records := []poo.Record{
 		jobHeader("s1"),
-		&poo.JobEnded{
+		&poo.JobEndedRecord{
 			RecordMeta: poo.NewRecordMeta("job.ended"),
 			SessionID:  "s1",
 			JobID:      "j1",
@@ -177,7 +177,7 @@ func TestTheRestoredSessionContinuesTheJobInputIDs(t *testing.T) {
 			Text:       "the earlier result",
 			EndedAt:    "2026-01-01T00:00:01Z",
 		},
-		&poo.InputDelivered{
+		&poo.InputDeliveredRecord{
 			RecordMeta:  poo.NewRecordMeta("input.delivered"),
 			SessionID:   "s1",
 			RunID:       "r1",
@@ -221,18 +221,15 @@ func TestTheRestoredSessionContinuesTheJobInputIDs(t *testing.T) {
 }
 
 // jobHeader returns the header of a session that ran a job.
-func jobHeader(id string) *poo.SessionCreated {
-	return &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    id,
-		Mode:         "logged",
-		CreatedAt:    "2026-01-01T00:00:00Z",
-		WorkingDir:   "/tmp",
-		Tools:        []poo.ToolInfo{{Name: "job", Class: poo.ClassSideEffecting, Background: poo.BackgroundAlways}},
-		ContextLimit: 32768,
-		ToolsMode:    "native",
-		Build:        poo.BuildInfo{Name: "poo", Version: "test"},
+func jobHeader(id string) *poo.SessionCreatedRecord {
+	return &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  id,
+			Mode:       "logged",
+			CreatedAt:  "2026-01-01T00:00:00Z",
+			WorkingDir: "/tmp",
+			Tools:      []poo.ToolInfo{{Name: "job", Class: poo.ClassSideEffecting, Background: poo.BackgroundAlways}}, ContextLimit: 32768,
+			ToolsMode: "native"},
 	}
 }
 
@@ -240,7 +237,7 @@ func jobHeader(id string) *poo.SessionCreated {
 func jobEnds(sink *recordingSink) int {
 	count := 0
 	for _, rec := range sink.allRecords() {
-		if _, ok := rec.(*poo.JobEnded); ok {
+		if _, ok := rec.(*poo.JobEndedRecord); ok {
 			count++
 		}
 	}
@@ -248,10 +245,10 @@ func jobEnds(sink *recordingSink) int {
 }
 
 // lastJobEnd returns the last job end a sink holds.
-func lastJobEnd(sink *recordingSink) *poo.JobEnded {
-	var last *poo.JobEnded
+func lastJobEnd(sink *recordingSink) *poo.JobEndedRecord {
+	var last *poo.JobEndedRecord
 	for _, rec := range sink.allRecords() {
-		if r, ok := rec.(*poo.JobEnded); ok {
+		if r, ok := rec.(*poo.JobEndedRecord); ok {
 			last = r
 		}
 	}

@@ -93,7 +93,7 @@ func TestTheParsedCallsAreFlaggedInTheRecord(t *testing.T) {
 		fixture(t, "vllm-text-tool-call.sse"),
 		fixture(t, "vllm-answer.sse"),
 	)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "text"})
 
 	sink := &recordingSink{}
 	s, err := poo.New(poo.Options{
@@ -150,7 +150,7 @@ func TestTheWireCallsAreNotFlaggedAsParsed(t *testing.T) {
 		fixture(t, "vllm-native-tool-calls.sse"),
 		fixture(t, "vllm-answer.sse"),
 	)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "native"})
 
 	sink := &recordingSink{}
 	s, err := poo.New(poo.Options{

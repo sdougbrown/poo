@@ -19,7 +19,7 @@ import (
 // The methods a client calls and the server announces.
 //
 // The names are namespaced by what they act on: "poo/" is the binary
-// itself, "session/" is a session, "agent/" is a run and "job/" is a
+// itself, "session/" is a session, "run/" is a run and "job/" is a
 // background tool call.
 const (
 	// MethodInitialize is the handshake. It is the only method a client
@@ -39,18 +39,18 @@ const (
 	MethodSessionHistory = "session/history"
 	// MethodModelsList returns the effective model catalog.
 	MethodModelsList = "models/list"
-	// MethodAgentPrompt starts a run.
-	MethodAgentPrompt = "agent/prompt"
-	// MethodAgentMessage sends a message to the active run.
-	MethodAgentMessage = "agent/message"
-	// MethodAgentInspect reports a session's state and events.
-	MethodAgentInspect = "agent/inspect"
-	// MethodAgentCancel ends the active run.
-	MethodAgentCancel = "agent/cancel"
+	// MethodRunPrompt starts a run.
+	MethodRunPrompt = "run/prompt"
+	// MethodRunMessage sends a message to the active run.
+	MethodRunMessage = "run/message"
+	// MethodRunInspect reports a session's state and events.
+	MethodRunInspect = "run/inspect"
+	// MethodRunCancel ends the active run.
+	MethodRunCancel = "run/cancel"
 	// MethodJobCancel stops one background job.
 	MethodJobCancel = "job/cancel"
-	// MethodConfigGet returns the effective settings.
-	MethodConfigGet = "config/get"
+	// MethodSettingsGet returns the effective settings.
+	MethodSettingsGet = "settings/get"
 	// MethodPermissionAsk is the server's ask to the client. The
 	// request's id is the ask's id.
 	MethodPermissionAsk = "permission/ask"

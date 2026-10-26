@@ -20,7 +20,7 @@ func TestTheDiscoveryCacheIsPrivate(t *testing.T) {
 		StateDir: state,
 		Settings: catalog.Settings{
 			Endpoints: map[string]catalog.EndpointSettings{
-				"local": {BaseURL: srv.URL},
+				"local": {Endpoint: srv.URL},
 			},
 		},
 	})

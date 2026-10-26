@@ -119,7 +119,7 @@ func TestAFailureThatIsNotRecoverableEndsTheRun(t *testing.T) {
 // about it, so it can write the call again.
 func TestTheParseErrorIsVisibleToTheModel(t *testing.T) {
 	srv, bodies := malformedEndpoint(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "text"})
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
 	res := runSession(t, s, "hi")

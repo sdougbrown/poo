@@ -10,7 +10,7 @@ import (
 
 // SettingsFields holds the fields for Settings availability checks.
 type SettingsFields struct {
-	CliregistryPaths                []string "json:\"cliregistry.paths,omitempty\""
+	CliRegistryPaths                []string "json:\"cli_registry.paths,omitempty\""
 	ContextHandoffMaxTokens         *float64 "json:\"context.handoff.max_tokens,omitempty\""
 	ContextHandoffRatio             *float64 "json:\"context.handoff.ratio,omitempty\""
 	ContextHardRatio                *float64 "json:\"context.hard_ratio,omitempty\""
@@ -28,7 +28,7 @@ type SettingsFields struct {
 	LimitsMaxTurns                  *float64 "json:\"limits.max_turns,omitempty\""
 	PermissionAskers                []string "json:\"permission.askers,omitempty\""
 	PermissionChainTimeoutS         *float64 "json:\"permission.chain_timeout_s,omitempty\""
-	PermissionDecideApprove         *float64 "json:\"permission.decide.approve,omitempty\""
+	PermissionDecideAllow           *float64 "json:\"permission.decide.allow,omitempty\""
 	PermissionDecideDeny            *float64 "json:\"permission.decide.deny,omitempty\""
 	PermissionDecideTimeoutMs       *float64 "json:\"permission.decide.timeout_ms,omitempty\""
 	PermissionDoomLoopAction        *string  "json:\"permission.doom_loop.action,omitempty\""
@@ -61,13 +61,13 @@ type SettingsFields struct {
 
 // SettingsConditions holds the conditions for Settings availability checks.
 type SettingsConditions struct {
-	HasCliregistry bool "json:\"has_cliregistry\""
+	HasCliRegistry bool "json:\"has_cli_registry\""
 	HasDecider     bool "json:\"has_decider\""
 }
 
 // SettingsAvailability holds the availability status for each field.
 type SettingsAvailability struct {
-	CliregistryPaths                FieldStatus
+	CliRegistryPaths                FieldStatus
 	ContextHandoffMaxTokens         FieldStatus
 	ContextHandoffRatio             FieldStatus
 	ContextHardRatio                FieldStatus
@@ -85,7 +85,7 @@ type SettingsAvailability struct {
 	LimitsMaxTurns                  FieldStatus
 	PermissionAskers                FieldStatus
 	PermissionChainTimeoutS         FieldStatus
-	PermissionDecideApprove         FieldStatus
+	PermissionDecideAllow           FieldStatus
 	PermissionDecideDeny            FieldStatus
 	PermissionDecideTimeoutMs       FieldStatus
 	PermissionDoomLoopAction        FieldStatus
@@ -141,8 +141,8 @@ func contains(s []string, v string) bool {
 }
 func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) SettingsAvailability {
 	var _ = prev
-	CliregistryPathsEnabled := true
-	CliregistryPathsSatisfied := len(f.CliregistryPaths) > 0
+	CliRegistryPathsEnabled := true
+	CliRegistryPathsSatisfied := len(f.CliRegistryPaths) > 0
 	ContextHandoffMaxTokensEnabled := true
 	ContextHandoffMaxTokensSatisfied := f.ContextHandoffMaxTokens != nil
 	ContextHandoffRatioEnabled := true
@@ -177,8 +177,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	PermissionAskersSatisfied := len(f.PermissionAskers) > 0
 	PermissionChainTimeoutSEnabled := true
 	PermissionChainTimeoutSSatisfied := f.PermissionChainTimeoutS != nil
-	PermissionDecideApproveEnabled := c.HasDecider
-	PermissionDecideApproveSatisfied := f.PermissionDecideApprove != nil
+	PermissionDecideAllowEnabled := c.HasDecider
+	PermissionDecideAllowSatisfied := f.PermissionDecideAllow != nil
 	PermissionDecideDenyEnabled := c.HasDecider
 	PermissionDecideDenySatisfied := f.PermissionDecideDeny != nil
 	PermissionDecideTimeoutMsEnabled := c.HasDecider
@@ -237,10 +237,10 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	VersionSatisfied := f.Version != nil
 
 	return SettingsAvailability{
-		CliregistryPaths: FieldStatus{
-			Required:  CliregistryPathsEnabled && false,
-			Enabled:   CliregistryPathsEnabled,
-			Satisfied: CliregistryPathsSatisfied,
+		CliRegistryPaths: FieldStatus{
+			Required:  CliRegistryPathsEnabled && false,
+			Enabled:   CliRegistryPathsEnabled,
+			Satisfied: CliRegistryPathsSatisfied,
 			Fair:      true,
 			Reason: func() *string {
 				var reasons []string
@@ -723,18 +723,18 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
-		PermissionDecideApprove: FieldStatus{
-			Required:  PermissionDecideApproveEnabled && false,
-			Enabled:   PermissionDecideApproveEnabled,
-			Satisfied: PermissionDecideApproveSatisfied,
-			Fair:      f.PermissionDecideApprove != nil && *f.PermissionDecideApprove >= 0 && *f.PermissionDecideApprove <= 1,
+		PermissionDecideAllow: FieldStatus{
+			Required:  PermissionDecideAllowEnabled && false,
+			Enabled:   PermissionDecideAllowEnabled,
+			Satisfied: PermissionDecideAllowSatisfied,
+			Fair:      f.PermissionDecideAllow != nil && *f.PermissionDecideAllow >= 0 && *f.PermissionDecideAllow <= 1,
 			Reason: func() *string {
 				var reasons []string
 				if !(c.HasDecider) && "the decide threshold needs a decider model: roles.decider names one" != "" {
 					reasons = append(reasons, "the decide threshold needs a decider model: roles.decider names one")
 				}
-				if !(f.PermissionDecideApprove != nil && *f.PermissionDecideApprove >= 0 && *f.PermissionDecideApprove <= 1) && "permission.decide.approve must be between 0 and 1" != "" {
-					reasons = append(reasons, "permission.decide.approve must be between 0 and 1")
+				if !(f.PermissionDecideAllow != nil && *f.PermissionDecideAllow >= 0 && *f.PermissionDecideAllow <= 1) && "permission.decide.allow must be between 0 and 1" != "" {
+					reasons = append(reasons, "permission.decide.allow must be between 0 and 1")
 				}
 				if len(reasons) == 0 {
 					return nil
@@ -746,8 +746,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				if !(c.HasDecider) && "the decide threshold needs a decider model: roles.decider names one" != "" {
 					reasons = append(reasons, "the decide threshold needs a decider model: roles.decider names one")
 				}
-				if !(f.PermissionDecideApprove != nil && *f.PermissionDecideApprove >= 0 && *f.PermissionDecideApprove <= 1) && "permission.decide.approve must be between 0 and 1" != "" {
-					reasons = append(reasons, "permission.decide.approve must be between 0 and 1")
+				if !(f.PermissionDecideAllow != nil && *f.PermissionDecideAllow >= 0 && *f.PermissionDecideAllow <= 1) && "permission.decide.allow must be between 0 and 1" != "" {
+					reasons = append(reasons, "permission.decide.allow must be between 0 and 1")
 				}
 				if reasons == nil {
 					reasons = []string{}
@@ -1481,8 +1481,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 // depSatisfied reports whether a field value is satisfied.
 func depSatisfied(f SettingsFields, name string) bool {
 	switch name {
-	case "CliregistryPaths":
-		return len(f.CliregistryPaths) > 0
+	case "CliRegistryPaths":
+		return len(f.CliRegistryPaths) > 0
 	case "ContextHandoffMaxTokens":
 		return f.ContextHandoffMaxTokens != nil
 	case "ContextHandoffRatio":
@@ -1520,8 +1520,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return len(f.PermissionAskers) > 0
 	case "PermissionChainTimeoutS":
 		return f.PermissionChainTimeoutS != nil
-	case "PermissionDecideApprove":
-		return f.PermissionDecideApprove != nil
+	case "PermissionDecideAllow":
+		return f.PermissionDecideAllow != nil
 	case "PermissionDecideDeny":
 		return f.PermissionDecideDeny != nil
 	case "PermissionDecideTimeoutMs":
@@ -1720,7 +1720,7 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "LimitsMaxTurns", RuleType: "check", Expr: "f.LimitsMaxTurns != nil && *f.LimitsMaxTurns >= 0", Reason: "limits.max_turns must not be negative"},
 	{Field: "PermissionChainTimeoutS", RuleType: "check", Expr: "f.PermissionChainTimeoutS != nil && *f.PermissionChainTimeoutS >= 1", Reason: "permission.chain_timeout_s must be at least a second"},
 	{Field: "", RuleType: "enabledWhen", Expr: "c.HasDecider", Reason: "the decide threshold needs a decider model: roles.decider names one"},
-	{Field: "PermissionDecideApprove", RuleType: "check", Expr: "f.PermissionDecideApprove != nil && *f.PermissionDecideApprove >= 0 && *f.PermissionDecideApprove <= 1", Reason: "permission.decide.approve must be between 0 and 1"},
+	{Field: "PermissionDecideAllow", RuleType: "check", Expr: "f.PermissionDecideAllow != nil && *f.PermissionDecideAllow >= 0 && *f.PermissionDecideAllow <= 1", Reason: "permission.decide.allow must be between 0 and 1"},
 	{Field: "", RuleType: "enabledWhen", Expr: "c.HasDecider", Reason: "the decide threshold needs a decider model: roles.decider names one"},
 	{Field: "PermissionDecideDeny", RuleType: "check", Expr: "f.PermissionDecideDeny != nil && *f.PermissionDecideDeny >= 0 && *f.PermissionDecideDeny <= 1", Reason: "permission.decide.deny must be between 0 and 1"},
 	{Field: "", RuleType: "enabledWhen", Expr: "c.HasDecider", Reason: "the decide timeout needs a decider model: roles.decider names one"},
@@ -1753,9 +1753,9 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	var found bool
 	var explanations []string
 	switch fieldName {
-	case "CliregistryPaths", "cliregistry.paths":
+	case "CliRegistryPaths", "cli_registry.paths":
 		found = true
-		status = avail.CliregistryPaths
+		status = avail.CliRegistryPaths
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
@@ -1876,14 +1876,14 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: permission.chain_timeout_s must be at least a second")
-	case "PermissionDecideApprove", "permission.decide.approve":
+	case "PermissionDecideAllow", "permission.decide.allow":
 		found = true
-		status = avail.PermissionDecideApprove
+		status = avail.PermissionDecideAllow
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* enabledWhen: the decide threshold needs a decider model: roles.decider names one")
-		explanations = append(explanations, "* check: permission.decide.approve must be between 0 and 1")
+		explanations = append(explanations, "* check: permission.decide.allow must be between 0 and 1")
 	case "PermissionDecideDeny", "permission.decide.deny":
 		found = true
 		status = avail.PermissionDecideDeny

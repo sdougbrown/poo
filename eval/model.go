@@ -18,8 +18,8 @@ type Model struct {
 	// Name is the catalog's name for the model, e.g. "gemma4". It is the
 	// key a report and a comparison use.
 	Name string `yaml:"name" json:"name"`
-	// BaseURL is the endpoint's base URL, e.g. "http://localhost:4000/v1".
-	BaseURL string `yaml:"base_url" json:"base_url"`
+	// Endpoint is the model's endpoint. e.g. "http://localhost:4000/v1".
+	Endpoint string `yaml:"endpoint" json:"endpoint"`
 	// ModelID is the identifier the endpoint knows the model by.
 	ModelID string `yaml:"model_id" json:"model_id"`
 	// APIKeyEnv names the environment variable holding the API key. The
@@ -57,12 +57,13 @@ func (m Model) EffectiveToolsMode() string {
 	return m.ToolsMode
 }
 
-// Endpoint is the key that decides which runs may run at the same time.
+// ConcurrencyKey is the key that decides which runs may run at the
+// same time.
 //
 // Two models on the same endpoint share its capacity, so the runner
 // limits the concurrency per endpoint.
-func (m Model) Endpoint() string {
-	return strings.TrimRight(m.BaseURL, "/")
+func (m Model) ConcurrencyKey() string {
+	return strings.TrimRight(m.Endpoint, "/")
 }
 
 // ModelInfo returns the model's info.
@@ -76,7 +77,7 @@ func (m Model) Endpoint() string {
 func (m Model) ModelInfo() poo.ModelInfo {
 	info := poo.ModelInfo{
 		Name:         m.Name,
-		Endpoint:     m.BaseURL,
+		Endpoint:     m.Endpoint,
 		ModelID:      m.ModelID,
 		API:          poo.APIChatCompletions,
 		Ops:          []poo.Op{poo.OpChat},
@@ -130,8 +131,8 @@ func (m Model) validate() error {
 	switch {
 	case strings.TrimSpace(m.Name) == "":
 		return fmt.Errorf("name must not be empty")
-	case strings.TrimSpace(m.BaseURL) == "":
-		return fmt.Errorf("base_url must not be empty")
+	case strings.TrimSpace(m.Endpoint) == "":
+		return fmt.Errorf("endpoint must not be empty")
 	case strings.TrimSpace(m.ModelID) == "":
 		return fmt.Errorf("model_id must not be empty")
 	case m.ContextLimit <= 0:

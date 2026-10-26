@@ -15,8 +15,8 @@ Run the set with:
 
 ## Isolation
 
-`poo-eval run` uses `--sandbox bwrap` by default, which needs bubblewrap;
-`--sandbox none` turns it off, and the model's commands then run with
+`poo-eval run` uses `--isolation bwrap` by default, which needs bubblewrap;
+`--isolation none` turns it off, and the model's commands then run with
 your full privileges. Each run's
 poo process sees the system's read-only `/usr` and `/etc`, its own workdir
 at `/work`, its log directory at `/log`, and a private `/tmp` that is
@@ -24,7 +24,7 @@ also its `$HOME`, and nothing else: not the real home directory, the
 repository or the task set. What a tool installs into `$HOME`, such as
 `pip install --user`, stays out of the run's diff. The network is shared, so the
 model's endpoint is still reachable. `check.sh` runs outside the sandbox,
-because it needs the task set. With `--sandbox none`, a model that searches
+because it needs the task set. With `--isolation none`, a model that searches
 the filesystem can find the task set's checks, as minimax did in the
 first baseline with `find /`, and its result does not measure the task.
 

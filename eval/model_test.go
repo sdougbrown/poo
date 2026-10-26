@@ -17,7 +17,7 @@ import (
 func TestTheModelDescriptorComesFromTheCatalogEntry(t *testing.T) {
 	m := Model{
 		Name:            "gemma4",
-		BaseURL:         "http://localhost:4000/v1",
+		Endpoint:        "http://localhost:4000/v1",
 		ModelID:         "gemma4",
 		ContextLimit:    32768,
 		ToolsMode:       "text",
@@ -53,7 +53,7 @@ func TestTheModelDescriptorComesFromTheCatalogEntry(t *testing.T) {
 // TestTheModelWithoutAReasoningEffortHasNoReasoningControl covers the
 // entry that names no effort: the descriptor names no control either.
 func TestTheModelWithoutAReasoningEffortHasNoReasoningControl(t *testing.T) {
-	m := Model{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}
+	m := Model{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}
 	info := m.ModelInfo()
 	if info.Reasoning.Mode != "" {
 		t.Errorf("the reasoning control is %q, want none", info.Reasoning.Mode)

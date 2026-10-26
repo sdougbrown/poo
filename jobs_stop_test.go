@@ -50,7 +50,7 @@ func newGatedSink() *gatedSink {
 // Append holds the first job.ended record until the gate opens, and
 // collects every other record at once.
 func (s *gatedSink) Append(ctx context.Context, rec poo.Record) error {
-	if _, ok := rec.(*poo.JobEnded); ok {
+	if _, ok := rec.(*poo.JobEndedRecord); ok {
 		s.wrote.Do(func() { close(s.writing) })
 		<-s.gate
 	}
@@ -129,9 +129,9 @@ func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
 	if err := s.WaitJobs(ctx); err != nil {
 		t.Fatalf("waiting for the cancelled job's delivery: %v", err)
 	}
-	var ended *poo.JobEnded
+	var ended *poo.JobEndedRecord
 	for _, rec := range sink.allRecords() {
-		if e, ok := rec.(*poo.JobEnded); ok {
+		if e, ok := rec.(*poo.JobEndedRecord); ok {
 			ended = e
 		}
 	}
@@ -148,7 +148,7 @@ func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
 	// The result was delivered as a job input, and the model read it.
 	delivered := false
 	for _, rec := range sink.allRecords() {
-		if d, ok := rec.(*poo.InputDelivered); ok && d.InputID == ended.InputID {
+		if d, ok := rec.(*poo.InputDeliveredRecord); ok && d.InputID == ended.InputID {
 			delivered = d.Mode == poo.InputModeJob
 		}
 	}
@@ -191,9 +191,9 @@ func TestTheJobTimeoutStopsTheJob(t *testing.T) {
 	waitFor(t, "the job to time out", func() bool {
 		return sink.count("job.ended") == 1
 	})
-	var ended *poo.JobEnded
+	var ended *poo.JobEndedRecord
 	for _, rec := range sink.allRecords() {
-		if e, ok := rec.(*poo.JobEnded); ok {
+		if e, ok := rec.(*poo.JobEndedRecord); ok {
 			ended = e
 		}
 	}
@@ -405,9 +405,9 @@ func TestTheSessionCloseStopsTheRunningJobs(t *testing.T) {
 		t.Fatalf("closing the session: %v", err)
 	}
 	// The job got a job.ended record with the close's cause.
-	var ended *poo.JobEnded
+	var ended *poo.JobEndedRecord
 	for _, rec := range sink.allRecords() {
-		if e, ok := rec.(*poo.JobEnded); ok {
+		if e, ok := rec.(*poo.JobEndedRecord); ok {
 			ended = e
 		}
 	}
@@ -472,9 +472,9 @@ func TestTheJobHandleSurvivesTheTurnEnd(t *testing.T) {
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
-	var started *poo.JobStarted
+	var started *poo.JobStartedRecord
 	for _, rec := range sink.allRecords() {
-		if j, ok := rec.(*poo.JobStarted); ok {
+		if j, ok := rec.(*poo.JobStartedRecord); ok {
 			started = j
 		}
 	}
@@ -521,7 +521,7 @@ func TestTheJobRunsUnderTheSessionContext(t *testing.T) {
 		return sink.count("job.ended") == 1
 	})
 	for _, rec := range sink.allRecords() {
-		ended, ok := rec.(*poo.JobEnded)
+		ended, ok := rec.(*poo.JobEndedRecord)
 		if !ok {
 			continue
 		}
@@ -786,7 +786,7 @@ func TestAJobTimeoutBeatsANilError(t *testing.T) {
 	<-tool.entered
 	waitFor(t, "job completion", func() bool { return sink.count("job.ended") == 1 })
 	for _, rec := range sink.allRecords() {
-		end, ok := rec.(*poo.JobEnded)
+		end, ok := rec.(*poo.JobEndedRecord)
 		if !ok {
 			continue
 		}
@@ -818,7 +818,7 @@ func TestTheCloseKeepsAJobsPartialOutput(t *testing.T) {
 		t.Fatalf("closing: %v", err)
 	}
 	for _, rec := range sink.allRecords() {
-		end, ok := rec.(*poo.JobEnded)
+		end, ok := rec.(*poo.JobEndedRecord)
 		if !ok {
 			continue
 		}

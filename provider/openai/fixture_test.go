@@ -66,7 +66,7 @@ func TestTheRecordedStreamsAreRead(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := newSSEServer(t, fixture(t, c.fixture))
-			tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+			tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			if err != nil {
@@ -121,7 +121,7 @@ func TestTheTextToolCallFormatsAreParsed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := newSSEServer(t, fixture(t, c.fixture))
-			tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+			tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "text"})
 
 			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			if err != nil {
@@ -154,7 +154,7 @@ func TestTheTextToolCallFormatsAreParsed(t *testing.T) {
 // answers a tool call with no tool call.
 func TestTheEmptyToolCallsAreAFailure(t *testing.T) {
 	srv := newSSEServer(t, fixture(t, "vllm-empty-tool-calls.sse"))
-	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{Endpoint: srv.URL, Model: "m"}))
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -202,7 +202,7 @@ func TestTheEmptyToolCallsAreAFailure(t *testing.T) {
 // when the budget runs out.
 func TestTheEmptyToolCallsSettleTheRunAsAProviderError(t *testing.T) {
 	srv := newSSEServer(t, fixture(t, "vllm-empty-tool-calls.sse"))
-	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{Endpoint: srv.URL, Model: "m"}))
 
 	res := settleOf(t, tr)
 	if res.Reason != poo.ReasonProviderError {

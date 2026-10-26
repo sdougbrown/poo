@@ -270,10 +270,10 @@ func TestTheEventNamesAreThePlanNames(t *testing.T) {
 	}
 }
 
-// jobResultRunStarted builds the RunStarted record both job-result
+// jobResultRunStarted builds the RunStartedRecord record both job-result
 // tests pin, so the record shape is written in one place.
-func jobResultRunStarted() *poo.RunStarted {
-	return &poo.RunStarted{
+func jobResultRunStarted() *poo.RunStartedRecord {
+	return &poo.RunStartedRecord{
 		RecordMeta: poo.NewRecordMeta("run.started"),
 		RunID:      "r1",
 		Trigger:    poo.TriggerJob,
@@ -295,7 +295,7 @@ func TestTheJobResultRecordsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encoding: %v", err)
 	}
-	var back poo.RunStarted
+	var back poo.RunStartedRecord
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("decoding: %v", err)
 	}

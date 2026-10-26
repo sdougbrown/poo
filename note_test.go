@@ -388,7 +388,7 @@ func TestADroppedInputsNoteIsDroppedWithIt(t *testing.T) {
 	// The dropped record names the input, and the note is gone with it.
 	dropped := 0
 	for _, rec := range sink.allRecords() {
-		d, ok := rec.(*poo.InputDropped)
+		d, ok := rec.(*poo.InputDroppedRecord)
 		if !ok {
 			continue
 		}

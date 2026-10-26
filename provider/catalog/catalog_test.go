@@ -26,7 +26,7 @@ func generate(output string) error {
 func localSettings() catalog.Settings {
 	return catalog.Settings{
 		Endpoints: map[string]catalog.EndpointSettings{
-			"grace": {BaseURL: "http://localhost:4000/v1", APIKeyEnv: "GRACE_KEY"},
+			"grace": {Endpoint: "http://localhost:4000/v1", APIKeyEnv: "GRACE_KEY"},
 		},
 		Models: map[string]catalog.ModelSettings{
 			"gemma4": {Endpoint: "grace", ModelID: "gemma4"},
@@ -293,10 +293,10 @@ func TestTheChatRoleNeedsTheChatOperation(t *testing.T) {
 func TestTheCredentialsAreEnvOrStatic(t *testing.T) {
 	settings := localSettings()
 	settings.Endpoints["static"] = catalog.EndpointSettings{
-		BaseURL: "http://localhost:5000/v1",
-		APIKey:  "not-a-real-key",
+		Endpoint: "http://localhost:5000/v1",
+		APIKey:   "not-a-real-key",
 	}
-	settings.Endpoints["open"] = catalog.EndpointSettings{BaseURL: "http://localhost:6000/v1"}
+	settings.Endpoints["open"] = catalog.EndpointSettings{Endpoint: "http://localhost:6000/v1"}
 	c := catalog.New(catalog.Options{Settings: settings})
 	endpoints := c.Endpoints()
 	if got := endpoints["grace"].Credential.Source; got != catalog.CredentialEnv {

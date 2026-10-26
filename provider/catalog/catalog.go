@@ -187,7 +187,7 @@ func (c *Catalog) addSettingsModels() {
 			endpoint: model.Endpoint,
 			modelID:  model.ModelID,
 		}
-		e.settings = model.layer(name, endpoint.BaseURL, c.opts.Settings.Sampling[name])
+		e.settings = model.layer(name, endpoint.Endpoint, c.opts.Settings.Sampling[name])
 		curated, _, notes := c.curated.forModel(model.ModelID)
 		e.curated = curated
 		e.notes = notes
@@ -207,7 +207,7 @@ func (c *Catalog) addCuratedModels() {
 		}
 		curated, endpoint, notes := c.curated.forModel(id)
 		if served, ok := c.endpoints[endpoint]; ok {
-			curated.Endpoint = served.BaseURL
+			curated.Endpoint = served.Endpoint
 		}
 		e := &entry{
 			name:     id,

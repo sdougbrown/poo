@@ -49,7 +49,7 @@ func modelFromFlags(t *testing.T, o *runOptions) poo.ModelInfo {
 func TestTheModelDescriptorComesFromTheFlags(t *testing.T) {
 	o := runOptions{
 		endpointFlags: endpointFlags{
-			baseURL:      "http://localhost:4000/v1",
+			endpoint:     "http://localhost:4000/v1",
 			modelID:      "gemma4",
 			contextLimit: 32768,
 			toolsMode:    "text",
@@ -86,7 +86,7 @@ func TestTheModelDescriptorComesFromTheFlags(t *testing.T) {
 // catalog's family rule does. The rule knows how the family thinks,
 // and the setting says whether it does.
 func TestTheModelWithoutAReasoningFlagHasTheFamilyRule(t *testing.T) {
-	o := runOptions{endpointFlags: endpointFlags{baseURL: "http://localhost:4000/v1", modelID: "gemma4", contextLimit: 32768, toolsMode: "native"}}
+	o := runOptions{endpointFlags: endpointFlags{endpoint: "http://localhost:4000/v1", modelID: "gemma4", contextLimit: 32768, toolsMode: "native"}}
 	info := modelFromFlags(t, &o)
 	if info.Reasoning.Mode != poo.ReasoningToggle {
 		t.Errorf("the reasoning control is %q, want %q", info.Reasoning.Mode, poo.ReasoningToggle)
@@ -97,7 +97,7 @@ func TestTheModelWithoutAReasoningFlagHasTheFamilyRule(t *testing.T) {
 // the catalog knows nothing about: the descriptor names no control,
 // and the request carries no reasoning field.
 func TestAModelWithoutAFamilyRuleHasNoReasoningControl(t *testing.T) {
-	o := runOptions{endpointFlags: endpointFlags{baseURL: "http://localhost:4000/v1", modelID: "test-model", contextLimit: 32768, toolsMode: "native"}}
+	o := runOptions{endpointFlags: endpointFlags{endpoint: "http://localhost:4000/v1", modelID: "test-model", contextLimit: 32768, toolsMode: "native"}}
 	info := modelFromFlags(t, &o)
 	if info.Reasoning.Mode != "" {
 		t.Errorf("the reasoning control is %q, want none", info.Reasoning.Mode)
@@ -118,7 +118,7 @@ func TestTheRequestBodyCarriesTheModelAndTheCeiling(t *testing.T) {
 
 	dir := t.TempDir()
 	code, stderr := runCLI(t, "run",
-		"--base-url", srv.URL,
+		"--endpoint", srv.URL,
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--log", filepath.Join(dir, "session.jsonl"),

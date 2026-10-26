@@ -36,7 +36,7 @@ func rawData(s string) json.RawMessage { return json.RawMessage(s) }
 // API that the request does not need.
 func TestAnOptionalForeignBlockIsOmitted(t *testing.T) {
 	srv := newForkServer(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 	block := poo.ProviderBlock{API: poo.APIResponses, Type: "reasoning", Data: rawData(`"secret-payload"`)}
 	reader, _, err := tr.Stream(context.Background(), providerRequest(block))
@@ -69,7 +69,7 @@ func TestAnOptionalForeignBlockIsOmitted(t *testing.T) {
 // another API that the request cannot do without.
 func TestARequiredForeignBlockFailsTheRequest(t *testing.T) {
 	srv := newForkServer(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 	block := poo.ProviderBlock{API: poo.APIResponses, Type: "compaction", Data: rawData(`{}`), Required: true}
 
@@ -90,7 +90,7 @@ func TestARequiredForeignBlockFailsTheRequest(t *testing.T) {
 
 // A required block on a thinking block's companion is checked as well.
 func TestARequiredForeignCompanionFailsTheRequest(t *testing.T) {
-	tr := openai.New(openai.Options{BaseURL: "http://127.0.0.1:1", Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: "http://127.0.0.1:1", Model: "m"})
 	block := poo.ProviderBlock{API: poo.APIAnthropicMessages, Type: "thinking_signature", Data: rawData(`"sig"`), Required: true}
 	req := poo.ChatRequest{Model: "m", MaxTokens: 16, Messages: []poo.Message{{
 		Role: poo.RoleAssistant,
@@ -107,7 +107,7 @@ func TestARequiredForeignCompanionFailsTheRequest(t *testing.T) {
 // optional block is left out and a required one fails the request.
 func TestAChatCompletionsBlockIsOmittedOnlyWhenOptional(t *testing.T) {
 	srv := newForkServer(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 	optional := poo.ProviderBlock{API: poo.APIChatCompletions, Type: "x", Data: rawData(`"own-payload"`)}
 	reader, _, err := tr.Stream(context.Background(), providerRequest(optional))
@@ -130,7 +130,7 @@ func TestAChatCompletionsBlockIsOmittedOnlyWhenOptional(t *testing.T) {
 // follows a tool result in the same message.
 func TestARequiredBlockAfterAToolResultFailsTheRequest(t *testing.T) {
 	srv := newForkServer(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 	block := poo.ProviderBlock{API: poo.APIResponses, Type: "compaction", Data: rawData(`{}`), Required: true}
 	msg := poo.Message{Role: poo.RoleTool, Content: []poo.ContentBlock{
 		{Kind: poo.ContentToolResult, ToolCallID: "c1", Text: "out"},

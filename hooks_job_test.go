@@ -102,7 +102,7 @@ func TestTheJobsRedactionKeepsTheSecretOutOfTheStore(t *testing.T) {
 	waitFor(t, "the job to end", func() bool { return sink.count("job.ended") == 1 })
 	// The record the job's end carries holds no secret.
 	for _, rec := range sink.allRecords() {
-		ended, ok := rec.(*poo.JobEnded)
+		ended, ok := rec.(*poo.JobEndedRecord)
 		if !ok {
 			continue
 		}

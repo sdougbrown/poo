@@ -941,7 +941,7 @@ func (s *refusingDeliverySink) Append(ctx context.Context, rec poo.Record) error
 	if m, ok := rec.(*poo.MessageRecord); ok && m.Origin == poo.OriginFollowUp {
 		return errors.New("the store refused the follow-up record")
 	}
-	if _, ok := rec.(*poo.InputDelivered); ok {
+	if _, ok := rec.(*poo.InputDeliveredRecord); ok {
 		return errors.New("the store refused the delivered record")
 	}
 	return s.recordingSink.Append(ctx, rec)

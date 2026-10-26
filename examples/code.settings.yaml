@@ -24,7 +24,7 @@ profile: code
 # The endpoints the models are served by, and the models themselves.
 endpoints:
   grace:
-    base_url: "http://localhost:4000/v1"
+    endpoint: "http://localhost:4000/v1"
     # The key is read from the environment, and from nowhere else. The
     # name is scrubbed from the child environment, so a command the
     # model runs cannot read the credential.
@@ -74,7 +74,7 @@ permission:
   chain_timeout_s: 120
   # The decision asker's thresholds.
   decide:
-    approve: 0.85
+    allow: 0.85
     deny: 0.99
     timeout_ms: 1500
 
@@ -136,7 +136,7 @@ tools:
 # find_tool instead of listed. A registered CLI runs through the same
 # executor as bash, so a sandboxed session runs it in the sandbox;
 # docs/sandbox.md says what that means.
-cliregistry:
+cli_registry:
   paths: []
 
 # The run's limits. A limit of zero is off.

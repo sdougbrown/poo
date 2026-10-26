@@ -391,7 +391,7 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
-			Field:   "cliregistry.paths",
+			Field:   "cli_registry.paths",
 			Message: "the cli registry does not load",
 			Err:     err,
 		}
@@ -453,7 +453,7 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 		if !linksTool(opts, name) {
 			return &Error{
 				Code:    CodeUnsupported,
-				Field:   "cliregistry.paths",
+				Field:   "cli_registry.paths",
 				Message: fmt.Sprintf("the settings name a cli registry, and this binary does not link the %q tool", name),
 			}
 		}
@@ -575,7 +575,7 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 	}
 	for name, endpoint := range s.Endpoints {
 		settings.Endpoints[name] = catalog.EndpointSettings{
-			BaseURL:   endpoint.BaseURL,
+			Endpoint:  endpoint.Endpoint,
 			APIKeyEnv: endpoint.APIKeyEnv,
 		}
 	}
@@ -767,9 +767,9 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		executor, err := opts.Executors.New(executorName, exec.Options{
 			Masker: protected,
 			Sandbox: exec.SandboxOptions{
-				DisableNetwork: settings.Tools.Bwrap.Network != nil && !*settings.Tools.Bwrap.Network,
-				ROBinds:        settings.Tools.Bwrap.ROBinds,
-				RWBinds:        settings.Tools.Bwrap.RWBinds,
+				Network: settings.Tools.Bwrap.Network,
+				ROBinds: settings.Tools.Bwrap.ROBinds,
+				RWBinds: settings.Tools.Bwrap.RWBinds,
 			},
 		})
 		if err != nil {
@@ -944,8 +944,8 @@ func (r *Runtime) newDeciderAsker(model poo.ModelInfo) (perm.Asker, error) {
 		return nil, err
 	}
 	askerOptions := permissive.Options{}
-	if value := r.Settings.Permission.Decide.Approve; value != nil {
-		askerOptions.Approve = *value
+	if value := r.Settings.Permission.Decide.Allow; value != nil {
+		askerOptions.Allow = *value
 	}
 	if value := r.Settings.Permission.Decide.Deny; value != nil {
 		askerOptions.Deny = *value
@@ -1099,7 +1099,7 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 		if err != nil {
 			return &Error{
 				Code:    CodeInvalid,
-				Field:   "prompts",
+				Field:   "system_prompt",
 				Message: err.Error(),
 				Err:     err,
 			}
@@ -1248,7 +1248,7 @@ func (r *Runtime) OpenStore(mode, dir string) (session.Store, error) {
 // The options are the session's own: a consumer that changes them —
 // the observer that sends the events to a client, say — passes them
 // along.
-func (r *Runtime) CreateSession(ctx context.Context, store session.Store, created *poo.SessionCreated, fns ...poo.Option) (*poo.Session, error) {
+func (r *Runtime) CreateSession(ctx context.Context, store session.Store, created *poo.SessionCreatedRecord, fns ...poo.Option) (*poo.Session, error) {
 	if store == nil {
 		return nil, &Error{
 			Code:    CodeUnsupported,
@@ -1406,7 +1406,7 @@ func (r *Runtime) DeciderModel() (poo.ModelInfo, error) {
 func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	apiKey := r.apiKey(model.Name)
 	transport := openai.New(openai.Options{
-		BaseURL:    model.Endpoint,
+		Endpoint:   model.Endpoint,
 		Model:      model.ModelID,
 		APIKey:     apiKey,
 		ToolsMode:  string(model.Tools.Mode),

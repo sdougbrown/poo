@@ -397,7 +397,7 @@ func TestTheSettleRecordCarriesTheReason(t *testing.T) {
 	runSession(t, s, "do the thing")
 	records := sink.allRecords()
 	last := records[len(records)-1]
-	settled, ok := last.(*poo.RunSettled)
+	settled, ok := last.(*poo.RunSettledRecord)
 	if !ok {
 		t.Fatalf("the last record is %T, want a run.settled", last)
 	}

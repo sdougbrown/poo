@@ -71,15 +71,6 @@ const (
 // tool's argument or the core's.
 const BackgroundArgName = "background"
 
-// JobCause says why a job ended, when the ending was not the job's own
-// doing.
-type JobCause string
-
-const (
-	// CauseSessionClosed means the session closed while the job ran.
-	CauseSessionClosed JobCause = "session_closed"
-)
-
 // The reasons a result is held.
 const (
 	// HeldOnIdle means the results were held because the session was
@@ -88,16 +79,13 @@ const (
 	// HeldWakeLimit means the results were held because the session had
 	// taken as many unattended wakes as it may.
 	HeldWakeLimit = "wake_limit"
-	// HeldSessionClosed means the results were held because the session
-	// closed.
-	HeldSessionClosed = "session_closed"
 )
 
-// JobStarted records that a job was accepted and started.
+// JobStartedRecord records that a job was accepted and started.
 //
 // The record is the acceptance: the job, the call it came from, the run
 // that started it and the tool it runs.
-type JobStarted struct {
+type JobStartedRecord struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -114,11 +102,11 @@ type JobStarted struct {
 	StartedAt string `json:"started_at"`
 }
 
-// JobEnded records that a job finished.
+// JobEndedRecord records that a job finished.
 //
 // The record carries the result the model will read, so a held result
 // survives a crash and a load can deliver it.
-type JobEnded struct {
+type JobEndedRecord struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -133,7 +121,7 @@ type JobEnded struct {
 	// Outcome is how the job ended.
 	Outcome Outcome `json:"outcome"`
 	// Cause says why the job ended, when something else ended it.
-	Cause JobCause `json:"cause,omitempty"`
+	Cause Cause `json:"cause,omitempty"`
 	// TimedOut reports that the job hit the jobs timeout.
 	TimedOut bool `json:"timed_out,omitempty"`
 	// InputID identifies the queued result. It is the id the delivery
@@ -158,11 +146,11 @@ type JobEnded struct {
 	EndedAt string `json:"ended_at"`
 }
 
-// InputHeld records that job results were held instead of delivered.
+// InputHeldRecord records that job results were held instead of delivered.
 //
 // The results are not lost: a later run delivers them, or a load
 // recovers them.
-type InputHeld struct {
+type InputHeldRecord struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -379,7 +367,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	// The acceptance record is written before the goroutine starts. A
 	// write the run's finalization abandons is not a store failure: the
 	// run settled while the record was in flight.
-	err := s.writeDelivery(run.ctx, run, &JobStarted{
+	err := s.writeDelivery(run.ctx, run, &JobStartedRecord{
 		RecordMeta: NewRecordMeta("job.started"),
 		SessionID:  s.opts.SessionID,
 		JobID:      jobID,
@@ -562,7 +550,7 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 // The chain runs on a context of its own, so a cancellation, a timeout
 // or a session close cannot discard its decision. The caller names the
 // cause when the close owns the completion.
-func (s *Session) completeJob(job *jobState, result ToolResult, outcome Outcome, timedOut, fatal bool, cause JobCause) {
+func (s *Session) completeJob(job *jobState, result ToolResult, outcome Outcome, timedOut, fatal bool, cause Cause) {
 	s.mu.Lock()
 	if job.ended || job.completing {
 		s.mu.Unlock()
@@ -648,8 +636,8 @@ func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 //
 // The record carries the hook-processed result, so a held result never
 // leaks what a hook would have redacted.
-func (s *Session) jobEnded(job *jobState, inputID string, outcome Outcome, cause JobCause, timedOut, fatal bool, text string, out afterToolOutcome) (*JobEnded, map[string]any) {
-	rec := &JobEnded{
+func (s *Session) jobEnded(job *jobState, inputID string, outcome Outcome, cause Cause, timedOut, fatal bool, text string, out afterToolOutcome) (*JobEndedRecord, map[string]any) {
+	rec := &JobEndedRecord{
 		RecordMeta: NewRecordMeta("job.ended"),
 		SessionID:  s.opts.SessionID,
 		JobID:      job.id,
@@ -692,7 +680,7 @@ func (s *Session) jobEnded(job *jobState, inputID string, outcome Outcome, cause
 // The result is queued on the session's job queue, and the queue is
 // acted on by the delivery rules: a run that is open takes it at the
 // next turn end, and an idle session wakes or holds it.
-func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome, timedOut, fatal bool, cause JobCause) {
+func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome, timedOut, fatal bool, cause Cause) {
 	s.mu.Lock()
 	if job.ended {
 		s.mu.Unlock()
@@ -942,7 +930,7 @@ func (s *Session) handleIdleJobResults() {
 // lock is released, because the write takes it too; the write's
 // registration is taken here, so the decision and the registration are
 // one step.
-func (s *Session) holdJobResultsLocked(reason string) {
+func (s *Session) holdJobResultsLocked(reason Cause) {
 	if len(s.jobQueue) == 0 {
 		return
 	}
@@ -967,12 +955,12 @@ func (s *Session) holdJobResultsLocked(reason string) {
 		return
 	}
 	s.pendingHeld = &heldRecord{
-		rec: &InputHeld{
+		rec: &InputHeldRecord{
 			RecordMeta: NewRecordMeta("input.held"),
 			SessionID:  s.opts.SessionID,
 			RunID:      runID,
 			Jobs:       jobs,
-			Reason:     reason,
+			Reason:     string(reason),
 			HeldAt:     nowRFC3339(),
 		},
 		gate: gate,
@@ -1504,7 +1492,7 @@ func (s *Session) closeJobs() {
 	// The queued results are recorded as held.
 	s.mu.Lock()
 	if len(s.jobQueue) > 0 {
-		s.holdJobResultsLocked(HeldSessionClosed)
+		s.holdJobResultsLocked(CauseSessionClosed)
 	}
 	s.mu.Unlock()
 	s.writePendingHeld()

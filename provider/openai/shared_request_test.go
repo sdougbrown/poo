@@ -29,7 +29,7 @@ func TestAForksTimeToTheFirstTokenIncludesTheWaitForHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 	_, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -76,7 +76,7 @@ func brokenBodyServer(t *testing.T) *httptest.Server {
 // the connection cuts short.
 func TestABodyThatBreaksMidReadIsANetworkFailure(t *testing.T) {
 	srv := brokenBodyServer(t)
-	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{Endpoint: srv.URL, Model: "m"}))
 
 	check := func(t *testing.T, err error) {
 		t.Helper()
@@ -119,7 +119,7 @@ func slowTwoWriteErrorServer(t *testing.T, status int) *httptest.Server {
 func TestASlowErrorBodyIsReadUnderTheTimeout(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusBadRequest} {
 		srv := slowTwoWriteErrorServer(t, status)
-		tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", Timeout: 5 * time.Second})
+		tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", Timeout: 5 * time.Second})
 		_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 		var pe *poo.ProviderError
 		if !errors.As(err, &pe) {

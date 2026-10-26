@@ -75,8 +75,8 @@ type Endpoint struct {
 	// Name is the endpoint's name: the settings' key, or a hosted
 	// provider's id.
 	Name string
-	// BaseURL is the endpoint's base URL.
-	BaseURL string
+	// Endpoint is the endpoint's base URL.
+	Endpoint string
 	// Credential is how the endpoint's key is read.
 	Credential Credential
 }

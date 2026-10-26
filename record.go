@@ -61,8 +61,8 @@ type RecordSink interface {
 type SessionModel struct {
 	// ModelID is the provider's model identifier.
 	ModelID string `json:"id"`
-	// BaseURL is the endpoint the session talks to, without credentials.
-	BaseURL string `json:"base_url,omitempty"`
+	// Endpoint is the endpoint the session talks to, without credentials.
+	Endpoint string `json:"endpoint,omitempty"`
 	// MaxOutput is the model's output-token limit, 0 when unknown.
 	MaxOutput int `json:"max_output,omitempty"`
 }
@@ -94,34 +94,6 @@ type SessionMetadata struct {
 	SettingsHash string `json:"settings_hash"`
 	// Build names the binary that produced the session.
 	Build BuildInfo `json:"build"`
-}
-
-// SessionCreated is the first record of a session log.
-//
-// It carries the session's metadata: everything a session needs to be
-// rebuilt by another binary.
-type SessionCreated struct {
-	RecordMeta
-	// Format is the record vocabulary version.
-	Format string `json:"format"`
-	// SessionID identifies the session.
-	SessionID string `json:"session_id"`
-	// Mode is the persistence mode: "logged" or "ephemeral".
-	Mode string `json:"mode"`
-	// CreatedAt is the RFC 3339 creation time in UTC.
-	CreatedAt string `json:"created_at"`
-	// WorkingDir is the absolute directory the run works in.
-	WorkingDir string `json:"working_dir"`
-	// Profile is the name of the profile the session was built with.
-	Profile string `json:"profile,omitempty"`
-	// Roles are the models the session talked to: the effective roles,
-	// not the ones the current settings would pick.
-	Roles ModelRoles `json:"roles"`
-	// Tools are the tools linked into the session, in call order.
-	Tools []ToolInfo `json:"tools"`
-	// SettingsHash is the hash of the settings the session was built
-	// with.
-	SettingsHash string `json:"settings_hash,omitempty"`
 	// Model is the model the session talks to.
 	Model SessionModel `json:"model"`
 	// ContextLimit is the model's context window in tokens.
@@ -132,27 +104,23 @@ type SessionCreated struct {
 	// ReasoningEffort is the reasoning_effort the session sends, empty
 	// when it sends none.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	// Build names the binary that produced the session.
-	Build BuildInfo `json:"build"`
+}
+
+// SessionCreatedRecord is the first record of a session log.
+//
+// It carries the session's metadata: everything a session needs to be
+// rebuilt by another binary.
+type SessionCreatedRecord struct {
+	RecordMeta
+	SessionMetadata
 }
 
 // Metadata returns the session's metadata.
 //
 // The metadata is the header record's own fields: the record is the
 // metadata, written as a record.
-func (c *SessionCreated) Metadata() SessionMetadata {
-	return SessionMetadata{
-		Format:       c.Format,
-		SessionID:    c.SessionID,
-		Mode:         c.Mode,
-		CreatedAt:    c.CreatedAt,
-		WorkingDir:   c.WorkingDir,
-		Profile:      c.Profile,
-		Roles:        c.Roles,
-		Tools:        c.Tools,
-		SettingsHash: c.SettingsHash,
-		Build:        c.Build,
-	}
+func (c *SessionCreatedRecord) Metadata() SessionMetadata {
+	return c.SessionMetadata
 }
 
 // BuildInfo names the binary that produced a session.
@@ -161,8 +129,8 @@ type BuildInfo struct {
 	Version string `json:"version"`
 }
 
-// RunStarted records the beginning of a run.
-type RunStarted struct {
+// RunStartedRecord records the beginning of a run.
+type RunStartedRecord struct {
 	RecordMeta
 	// RunID identifies the run.
 	RunID string `json:"run_id"`
@@ -367,12 +335,12 @@ type HookDecision struct {
 	Text string `json:"text,omitempty"`
 }
 
-// ObserverDropped records the events an observer missed.
+// ObserverDroppedRecord records the events an observer missed.
 //
 // The record is written at most once a second per observer, and it is
 // never delivered to an observer: overflow diagnostics must not cause
 // more overflow.
-type ObserverDropped struct {
+type ObserverDroppedRecord struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -384,8 +352,8 @@ type ObserverDropped struct {
 	DroppedAt string `json:"dropped_at"`
 }
 
-// Usage records the token accounting of one provider request.
-type Usage struct {
+// UsageRecord records the token accounting of one provider request.
+type UsageRecord struct {
 	RecordMeta
 	// RunID identifies the run the request belongs to.
 	RunID string `json:"run_id"`
@@ -405,12 +373,12 @@ type Usage struct {
 	TTFTMS float64 `json:"ttft_ms"`
 }
 
-// ProviderAttempt is the record of one attempt of a request that
+// ProviderAttemptRecord is the record of one attempt of a request that
 // failed.
 //
 // The attempts are written for the audit: a reader of the log sees
 // what a request tried and what every attempt failed with.
-type ProviderAttempt struct {
+type ProviderAttemptRecord struct {
 	RecordMeta
 	// RunID identifies the run the request belongs to.
 	RunID string `json:"run_id"`
@@ -483,11 +451,11 @@ type UndeliveredInput struct {
 	Mode string `json:"mode"`
 }
 
-// RunSettled records the end of a run. A run settles; a job ends. Finish
+// RunSettledRecord records the end of a run. A run settles; a job ends. Finish
 // names the model's typed answer, including the finish tool and provider
 // stop reason; end is otherwise generic. The run seal stops record writes
 // for that run; the session fence makes close refuse new writes.
-type RunSettled struct {
+type RunSettledRecord struct {
 	RecordMeta
 	// RunID identifies the run.
 	RunID string `json:"run_id"`
@@ -569,11 +537,11 @@ type HandoffRecord struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// ModelsChanged records that the session switched models.
+// ModelsChangedRecord records that the session switched models.
 //
 // The switch is recorded between the runs, so a reader of the log knows
 // which model answered which turn.
-type ModelsChanged struct {
+type ModelsChangedRecord struct {
 	RecordMeta
 	// From is the name of the model the session talked to.
 	From string `json:"from"`

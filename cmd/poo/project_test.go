@@ -39,7 +39,7 @@ func TestTheProjectPromptFlagAddsTheInstructions(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -76,7 +76,7 @@ func TestTheProjectInstructionsAreNotThereWithoutTheFlag(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -106,7 +106,7 @@ func TestTheProjectPromptFailsOnAFileItCannotRead(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,

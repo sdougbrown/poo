@@ -24,11 +24,11 @@ func TestEveryFieldTheMetricsUseSurvivesTheRealWriter(t *testing.T) {
 	readArgs := json.RawMessage(`{"path":"a.go","offset":3,"limit":10}`)
 	bashArgs := json.RawMessage(`{"command":"ls -la"}`)
 	records := []poo.Record{
-		&poo.SessionCreated{
-			RecordMeta: poo.NewRecordMeta("session.created"), Format: poo.FormatVersion,
-			SessionID: "s", WorkingDir: "/w", ContextLimit: 32768, ToolsMode: "native",
+		&poo.SessionCreatedRecord{
+			RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+				SessionID: "s", WorkingDir: "/w", ContextLimit: 32768, ToolsMode: "native"},
 		},
-		&poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started"), RunID: "r"},
+		&poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started"), RunID: "r"},
 		&poo.MessageRecord{
 			RecordMeta: poo.NewRecordMetaFrom("message", poo.OriginModel), RunID: "r", Turn: 1, Role: poo.RoleAssistant,
 			Content: []poo.ContentBlock{
@@ -36,7 +36,7 @@ func TestEveryFieldTheMetricsUseSurvivesTheRealWriter(t *testing.T) {
 				{Kind: poo.ContentToolCall, ToolCallID: "c1", Name: "read", Arguments: readArgs},
 			},
 		},
-		&poo.Usage{
+		&poo.UsageRecord{
 			RecordMeta: poo.NewRecordMeta("usage"), RunID: "r", Turn: 1, Request: 1,
 			InputTokens: 100, OutputTokens: 20, CacheReadTokens: &cache, TTFTMS: 150,
 		},
@@ -50,7 +50,7 @@ func TestEveryFieldTheMetricsUseSurvivesTheRealWriter(t *testing.T) {
 		&poo.ToolCallRecord{
 			RecordMeta: poo.NewRecordMeta("tool.call"), RunID: "r", Turn: 2, Handle: "r2", Tool: "bash", Arguments: bashArgs,
 		},
-		&poo.RunSettled{
+		&poo.RunSettledRecord{
 			RecordMeta: poo.NewRecordMeta("run.settled"), RunID: "r", Reason: poo.ReasonEndTurn,
 			Detail: poo.SettleDetail{Source: "end_turn"}, Turns: 2,
 		},

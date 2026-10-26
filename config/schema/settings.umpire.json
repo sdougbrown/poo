@@ -13,7 +13,7 @@
     "permission.doom_loop.action": { "isEmpty": "string" },
     "permission.askers": { "isEmpty": "array" },
     "permission.chain_timeout_s": { "isEmpty": "number" },
-    "permission.decide.approve": { "isEmpty": "number" },
+    "permission.decide.allow": { "isEmpty": "number" },
     "permission.decide.deny": { "isEmpty": "number" },
     "permission.decide.timeout_ms": { "isEmpty": "number" },
     "system_prompt.base_file": { "isEmpty": "string" },
@@ -43,7 +43,7 @@
     "jobs.max_unattended_wakes": { "isEmpty": "number" },
     "reasoning.chat": { "isEmpty": "string" },
     "finish.schema_file": { "isEmpty": "string" },
-    "cliregistry.paths": { "isEmpty": "array" },
+    "cli_registry.paths": { "isEmpty": "array" },
     "session.mode": { "isEmpty": "string" },
     "session.dir": { "isEmpty": "string" },
     "session.retention.max_age_days": { "isEmpty": "number" },
@@ -51,12 +51,12 @@
   },
   "conditions": {
     "has_decider": { "type": "boolean", "description": "the settings name a model for the decider role" },
-    "has_cliregistry": { "type": "boolean", "description": "the settings name a cli registry" }
+    "has_cli_registry": { "type": "boolean", "description": "the settings name a cli registry" }
   },
   "rules": [
     {
       "type": "requires",
-      "field": "permission.decide.approve",
+      "field": "permission.decide.allow",
       "when": { "op": "cond", "condition": "has_decider" },
       "reason": "the decide threshold needs a decider model: roles.decider names one"
     },
@@ -187,11 +187,11 @@
     },
     {
       "type": "check",
-      "field": "permission.decide.approve",
+      "field": "permission.decide.allow",
       "op": "range",
       "min": 0,
       "max": 1,
-      "reason": "permission.decide.approve must be between 0 and 1"
+      "reason": "permission.decide.allow must be between 0 and 1"
     },
     {
       "type": "check",

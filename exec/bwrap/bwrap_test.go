@@ -237,7 +237,8 @@ func TestTheNetworkIsCutWhenTheSettingsSaySo(t *testing.T) {
 		t.Errorf("the shared network did not reach the listener: %q", got)
 	}
 
-	cut := newExecutor(t, bwrap.Options{DisableNetwork: true})
+	off := false
+	cut := newExecutor(t, bwrap.Options{Network: &off})
 	if got := call(t, cut, command, t.TempDir()); !strings.Contains(got, "refused") {
 		t.Errorf("the cut network reached the listener: %q", got)
 	}

@@ -121,12 +121,12 @@ func (r *permissionReporter) BeginPermission(ask PermissionAsk, opts PermissionR
 // the seal resolves as cancelled without writing anything.
 func (s *Session) beginPermission(run *runState, ask PermissionAsk, opts PermissionRequestOptions) *PermissionRequest {
 	p := NewPermissionRequest(ask, opts)
-	p.logDrop = func(in PermissionInput) {
+	p.logDrop = func(in PermissionTransition) {
 		s.logWarn("stale permission input dropped", slog.String("run_id", run.id), slog.String("ask_id", ask.AskID), slog.Uint64("attempt", in.Attempt))
 	}
 	s.mu.Lock()
 	if run.sealed || run.committed || run.finalizing {
-		p.Send(PermissionInput{Kind: PermissionSeal})
+		p.Send(PermissionTransition{Kind: PermissionSeal})
 		s.mu.Unlock()
 		return p
 	}
@@ -184,7 +184,7 @@ func (s *Session) reportPermissionAnswered(run *runState, answer PermissionAnswe
 			// The request resolved already. The echo needs its record,
 			// not a second resolution.
 		default:
-			p.Send(PermissionInput{Kind: PermissionPolicyAnswer, Answer: answer})
+			p.Send(PermissionTransition{Kind: PermissionPolicyAnswer, Answer: answer})
 		}
 	}
 	s.mu.Unlock()

@@ -61,7 +61,7 @@ an essay. Each source records exactly what was read and when.
   catches `InterruptAgentFlow` subclasses (`Submitted`, `LimitsExceeded`,
   `TimeExceeded`, `UserInterruption`, `FormatError`) and turns them into
   messages. Poo uses an explicit FSM with a closed settle-reason enum, because
-  the wire protocol, `agent/inspect` and session replay all depend on a known
+  the wire protocol, `run/inspect` and session replay all depend on a known
   state set.
 - **Format-error retries as a loop counter.** mini tolerates up to
   `max_consecutive_format_errors` malformed responses. Poo treats a malformed
@@ -178,6 +178,6 @@ treating background work as part of the conversation but not part of its
 current work: the conversation goes idle while a background task runs, and an
 ordinary abort leaves it alone. Poo's v1 equivalent question is whether an
 `idle` session with outstanding background work is reported as available for
-a new run, and whether `agent/cancel` reaches that work. Poo v1 has no
+a new run, and whether `run/cancel` reaches that work. Poo v1 has no
 background tasks, so there is nothing to model today. This is raised for the
 owner's judgment, not decided here.

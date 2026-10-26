@@ -217,17 +217,15 @@ func TestAPromptThatFailsInTheSessionsVariantFailsTheSession(t *testing.T) {
 
 	transport := pootest.NewTransport(pootest.Turn{Text: "done"})
 	runtime.Options.Transport = transport
-	created := &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    "s1",
-		Mode:         "ephemeral",
-		CreatedAt:    "2026-10-22T12:00:00Z",
-		WorkingDir:   t.TempDir(),
-		Model:        poo.SessionModel{ModelID: "test-model"},
-		ContextLimit: 32768,
-		Profile:      "code",
-		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "ephemeral",
+			CreatedAt:  "2026-10-22T12:00:00Z",
+			WorkingDir: t.TempDir(),
+
+			Profile: "code", Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
 	}
 	sess, err := runtime.CreateSession(context.Background(), store, created, poo.WithPromptVariant("small-local"))
 	if err == nil {

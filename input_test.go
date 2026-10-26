@@ -562,7 +562,7 @@ type holdingInputSink struct {
 
 // Append holds the input's acceptance record until the test releases it.
 func (s *holdingInputSink) Append(ctx context.Context, rec poo.Record) error {
-	if queued, ok := rec.(*poo.InputQueued); ok && queued.Mode == s.mode {
+	if queued, ok := rec.(*poo.InputQueuedRecord); ok && queued.Mode == s.mode {
 		s.once.Do(func() {
 			s.heldID = queued.InputID
 			close(s.entered)
@@ -572,7 +572,7 @@ func (s *holdingInputSink) Append(ctx context.Context, rec poo.Record) error {
 			}
 		})
 	}
-	if delivered, ok := rec.(*poo.InputDelivered); ok && delivered.InputID == s.heldID {
+	if delivered, ok := rec.(*poo.InputDeliveredRecord); ok && delivered.InputID == s.heldID {
 		s.deliveredOnce.Do(func() { close(s.delivered) })
 	}
 	if err := ctx.Err(); err != nil {
@@ -1835,7 +1835,7 @@ type blockingQueuedSink struct {
 
 // Append holds the queued record until the test releases it.
 func (s *blockingQueuedSink) Append(ctx context.Context, rec poo.Record) error {
-	if _, ok := rec.(*poo.InputQueued); ok {
+	if _, ok := rec.(*poo.InputQueuedRecord); ok {
 		s.once.Do(func() { close(s.entered) })
 		<-s.release
 	}

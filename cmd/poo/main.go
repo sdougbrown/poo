@@ -30,7 +30,7 @@ Shared flags:
   --profile <name>             The profile to run under: base, code or search
 
 Run flags:
-  --base-url <url>       The endpoint's base URL, e.g. http://localhost:4000/v1
+  --endpoint <url>       The model's endpoint, e.g. http://localhost:4000/v1
   --model-id <id>        The model identifier
   --context-limit <n>    The model's context window in tokens (required)
   --api-key-env <var>    The environment variable holding the API key

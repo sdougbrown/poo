@@ -35,17 +35,17 @@ func (s *server) dispatch(req protocol.Request) (any, *protocol.Error) {
 		return s.sessionHistory(req.Params)
 	case protocol.MethodModelsList:
 		return s.modelsList(req.Params)
-	case protocol.MethodAgentPrompt:
+	case protocol.MethodRunPrompt:
 		return s.agentPrompt(req.Params)
-	case protocol.MethodAgentMessage:
+	case protocol.MethodRunMessage:
 		return s.agentMessage(req.Params)
-	case protocol.MethodAgentInspect:
+	case protocol.MethodRunInspect:
 		return s.agentInspect(req.Params)
-	case protocol.MethodAgentCancel:
+	case protocol.MethodRunCancel:
 		return s.agentCancel(req.Params)
 	case protocol.MethodJobCancel:
 		return s.jobCancel(req.Params)
-	case protocol.MethodConfigGet:
+	case protocol.MethodSettingsGet:
 		return s.configGet(req.Params)
 	}
 	return nil, protocol.Errorf(protocol.CodeMethodNotFound, protocol.DataMethodNotFound,
@@ -290,11 +290,11 @@ func (s *server) modelsList(raw json.RawMessage) (any, *protocol.Error) {
 
 // configGet returns the effective settings.
 func (s *server) configGet(raw json.RawMessage) (any, *protocol.Error) {
-	var params protocol.ConfigParams
+	var params protocol.SettingsParams
 	if err := protocol.DecodeParams(raw, &params); err != nil {
 		return nil, paramsFailure(err)
 	}
-	settings, err := s.factory.Config(context.Background())
+	settings, err := s.factory.Settings(context.Background())
 	if err != nil {
 		return nil, failure(err)
 	}
@@ -307,7 +307,7 @@ func (s *server) configGet(raw json.RawMessage) (any, *protocol.Error) {
 // agentPrompt starts a run.
 //
 // The call returns at once: the run goes on in the background, and the
-// client watches it through the events and agent/inspect.
+// client watches it through the events and run/inspect.
 func (s *server) agentPrompt(raw json.RawMessage) (any, *protocol.Error) {
 	var params protocol.PromptParams
 	if err := protocol.DecodeParams(raw, &params); err != nil {

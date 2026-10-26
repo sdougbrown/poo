@@ -33,7 +33,7 @@ func servedSettings(t *testing.T, profile, roles string) *config.Settings {
   "profile": "` + profile + `",
   "session": {"mode": "logged"},
   "endpoints": {
-    "grace": {"base_url": "http://user:secret@grace:4000/v1", "api_key_env": "POO_TEST_KEY"}
+    "grace": {"endpoint": "http://user:secret@grace:4000/v1", "api_key_env": "POO_TEST_KEY"}
   },
   "models": {
     "chat-model": {"endpoint": "grace", "model_id": "chat-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "inputs": ["text"], "context_limit": 32768},

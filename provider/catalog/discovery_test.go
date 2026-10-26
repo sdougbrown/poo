@@ -78,7 +78,7 @@ func ollamaServer(t *testing.T, contextLength int, capabilities []string) *httpt
 func settingsFor(baseURL string) catalog.Settings {
 	return catalog.Settings{
 		Endpoints: map[string]catalog.EndpointSettings{
-			"local": {BaseURL: baseURL},
+			"local": {Endpoint: baseURL},
 		},
 		Models: map[string]catalog.ModelSettings{
 			"gemma4": {Endpoint: "local", ModelID: "gemma4"},

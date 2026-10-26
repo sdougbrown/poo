@@ -112,8 +112,8 @@ func hostedLayer(hosted hostedEntry) (poo.ModelInfo, Endpoint) {
 		info.PromptCache = mode
 	}
 	endpoint := Endpoint{
-		Name:    hosted.Provider,
-		BaseURL: hosted.BaseURL,
+		Name:     hosted.Provider,
+		Endpoint: hosted.Endpoint,
 		Credential: Credential{
 			Source: CredentialEnv,
 			Env:    firstOf(hosted.Env),

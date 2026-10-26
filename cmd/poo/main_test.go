@@ -66,12 +66,12 @@ func TestTheRequiredFlagsAreChecked(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"no base url", []string{"run", "--model-id", "m", "--context-limit", "1024", "hi"}, "--base-url"},
-		{"no model id", []string{"run", "--base-url", "http://x", "--context-limit", "1024", "hi"}, "--model-id"},
-		{"no context limit", []string{"run", "--base-url", "http://x", "--model-id", "m", "hi"}, "--context-limit"},
-		{"a zero context limit", []string{"run", "--base-url", "http://x", "--model-id", "m", "--context-limit", "0", "hi"}, "--context-limit"},
-		{"no prompt", []string{"run", "--base-url", "http://x", "--model-id", "m", "--context-limit", "1024"}, "prompt"},
-		{"a bad tools mode", []string{"run", "--base-url", "http://x", "--model-id", "m", "--context-limit", "1024", "--tools-mode", "weird", "hi"}, "--tools-mode"},
+		{"no base url", []string{"run", "--model-id", "m", "--context-limit", "1024", "hi"}, "--endpoint"},
+		{"no model id", []string{"run", "--endpoint", "http://x", "--context-limit", "1024", "hi"}, "--model-id"},
+		{"no context limit", []string{"run", "--endpoint", "http://x", "--model-id", "m", "hi"}, "--context-limit"},
+		{"a zero context limit", []string{"run", "--endpoint", "http://x", "--model-id", "m", "--context-limit", "0", "hi"}, "--context-limit"},
+		{"no prompt", []string{"run", "--endpoint", "http://x", "--model-id", "m", "--context-limit", "1024"}, "prompt"},
+		{"a bad tools mode", []string{"run", "--endpoint", "http://x", "--model-id", "m", "--context-limit", "1024", "--tools-mode", "weird", "hi"}, "--tools-mode"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

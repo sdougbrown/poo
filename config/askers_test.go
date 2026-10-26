@@ -227,16 +227,15 @@ func runWithTheReadCall(t *testing.T, runtime *config.Runtime) (*pootest.Transpo
 		pootest.Turn{Text: "done"},
 	)
 	runtime.Options.Transport = transport
-	created := &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    "s1",
-		Mode:         "logged",
-		CreatedAt:    "2026-10-22T12:00:00Z",
-		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ModelID: "test-model"},
-		ContextLimit: 32768,
-		Profile:      "code",
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			CreatedAt:  "2026-10-22T12:00:00Z",
+			WorkingDir: workDir,
+
+			Profile: "code", Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
 	}
 	session, err := runtime.CreateSession(context.Background(), runtime.Store, created)
 	if err != nil {

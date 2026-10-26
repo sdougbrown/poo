@@ -26,7 +26,7 @@ func TestTheNotificationNamesTheSession(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 
@@ -49,7 +49,7 @@ func TestTheCloseReleasesTheWaiterWithTheOutcome(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	result, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
+	result, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 	if rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
@@ -61,7 +61,7 @@ func TestTheCloseReleasesTheWaiterWithTheOutcome(t *testing.T) {
 
 	// The client waits for the run, and closes the session while it
 	// waits.
-	waiting := h.callAsync(protocol.MethodAgentInspect, protocol.InspectParams{
+	waiting := h.callAsync(protocol.MethodRunInspect, protocol.InspectParams{
 		SessionID: sessionID,
 		Wait: &protocol.InspectWait{
 			Until:     "settled",

@@ -364,7 +364,7 @@ type Delivered struct {
 	UpToChars int `json:"upto_chars"`
 }
 
-// PromptParams are the params of agent/prompt.
+// PromptParams are the params of run/prompt.
 type PromptParams struct {
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -374,13 +374,13 @@ type PromptParams struct {
 	Delivered *Delivered `json:"delivered,omitempty"`
 }
 
-// PromptResult is the result of agent/prompt.
+// PromptResult is the result of run/prompt.
 type PromptResult struct {
 	// RunID identifies the run the prompt started.
 	RunID string `json:"run_id"`
 }
 
-// MessageParams are the params of agent/message.
+// MessageParams are the params of run/message.
 type MessageParams struct {
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -393,7 +393,7 @@ type MessageParams struct {
 	Delivered *Delivered `json:"delivered,omitempty"`
 }
 
-// MessageResult is the result of agent/message.
+// MessageResult is the result of run/message.
 type MessageResult struct {
 	// InputID identifies the accepted input.
 	InputID string `json:"input_id"`
@@ -409,7 +409,7 @@ type InspectWait struct {
 	TimeoutMS int `json:"timeout_ms,omitempty"`
 }
 
-// InspectParams are the params of agent/inspect.
+// InspectParams are the params of run/inspect.
 type InspectParams struct {
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -478,7 +478,7 @@ type Settled struct {
 	Detail SettleDetail `json:"detail"`
 }
 
-// InspectResult is the result of agent/inspect.
+// InspectResult is the result of run/inspect.
 type InspectResult struct {
 	// Events are the session's events, oldest first.
 	Events []Event `json:"events"`
@@ -493,7 +493,7 @@ type InspectResult struct {
 	TimedOut bool `json:"timed_out"`
 }
 
-// CancelParams are the params of agent/cancel.
+// CancelParams are the params of run/cancel.
 type CancelParams struct {
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -509,8 +509,8 @@ type JobCancelParams struct {
 	JobID string `json:"job"`
 }
 
-// ConfigParams are the params of config/get.
-type ConfigParams struct{}
+// SettingsParams are the params of settings/get.
+type SettingsParams struct{}
 
 // Event is one session event.
 //

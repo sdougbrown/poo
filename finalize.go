@@ -143,7 +143,7 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 
 	// Step 7: the outcome records are written with a context of their
 	// own, because the run's context has ended.
-	settle := &RunSettled{RecordMeta: NewRecordMeta("run.settled"),
+	settle := &RunSettledRecord{RecordMeta: NewRecordMeta("run.settled"),
 		RunID:     run.id,
 		Reason:    reason,
 		Detail:    detail,
@@ -374,7 +374,7 @@ func (s *Session) collectUndelivered(run *runState) []UndeliveredInput {
 func (s *Session) dropUndelivered(run *runState, inputs []UndeliveredInput, reason Reason) {
 	for _, input := range inputs {
 		mode := InputMode(input.Mode)
-		_ = s.write(run.ctx, &InputDropped{
+		_ = s.write(run.ctx, &InputDroppedRecord{
 			RecordMeta: NewRecordMeta("input.dropped"),
 			SessionID:  s.opts.SessionID,
 			RunID:      run.id,
@@ -507,7 +507,7 @@ func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) 
 		select {
 		case <-ask.Done():
 		default:
-			ask.Send(PermissionInput{Kind: PermissionSeal})
+			ask.Send(PermissionTransition{Kind: PermissionSeal})
 		}
 	}
 	// A call record whose write the finalization stopped waiting for is
@@ -770,7 +770,7 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	// The input is recorded before the call returns, so an accepted
 	// input is never lost. The write runs outside the lock, so a drain
 	// never hangs on the store.
-	if err := s.writeClaimed(context.Background(), &InputQueued{
+	if err := s.writeClaimed(context.Background(), &InputQueuedRecord{
 		RecordMeta:   NewRecordMeta("input.queued"),
 		SessionID:    s.opts.SessionID,
 		RunID:        run.id,

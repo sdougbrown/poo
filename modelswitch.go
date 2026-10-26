@@ -141,7 +141,7 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	s.promptSections = promptSections
 	s.mu.Unlock()
 
-	rec := &ModelsChanged{
+	rec := &ModelsChangedRecord{
 		RecordMeta: NewRecordMeta("session.models_changed"),
 		From:       from,
 		To:         name,

@@ -51,11 +51,11 @@ func (h *providerBlockHook) SessionStart(poo.HookContext) (poo.StartDecision, er
 }
 
 // modelsChanged returns the model-switch record the sink kept.
-func modelsChanged(t *testing.T, sink *recordingSink) *poo.ModelsChanged {
+func modelsChanged(t *testing.T, sink *recordingSink) *poo.ModelsChangedRecord {
 	t.Helper()
-	var found *poo.ModelsChanged
+	var found *poo.ModelsChangedRecord
 	for _, rec := range sink.allRecords() {
-		if m, ok := rec.(*poo.ModelsChanged); ok {
+		if m, ok := rec.(*poo.ModelsChangedRecord); ok {
 			found = m
 		}
 	}

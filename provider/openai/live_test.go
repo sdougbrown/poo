@@ -21,9 +21,9 @@ func TestTheChatTransportTalksToALiveEndpoint(t *testing.T) {
 		t.Skip("POO_CHAT_URL and POO_CHAT_MODEL are not set")
 	}
 	tr := openai.New(openai.Options{
-		BaseURL: url,
-		Model:   model,
-		APIKey:  os.Getenv("POO_CHAT_API_KEY"),
+		Endpoint: url,
+		Model:    model,
+		APIKey:   os.Getenv("POO_CHAT_API_KEY"),
 	})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model:     model,

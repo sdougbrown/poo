@@ -30,7 +30,7 @@ func TestARunPrintsItsAnswerOnStdout(t *testing.T) {
 
 	code, stderr, stdout := runCLIWithStdout(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -57,7 +57,7 @@ func TestTheExitCodeComesFromTheSettleReason(t *testing.T) {
 
 	code, stderr, _ := runCLIWithStdout(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--max-turns", "1",
@@ -86,7 +86,7 @@ func TestTheOneShotWithAStuckJobExitsAtTheFirstSettle(t *testing.T) {
 
 	args := []string{
 		"run",
-		"--base-url", endpoint.URL + "/v1",
+		"--endpoint", endpoint.URL + "/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--max-turns", "1",

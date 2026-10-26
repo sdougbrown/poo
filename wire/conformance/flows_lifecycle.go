@@ -173,7 +173,7 @@ func (s *suite) jobCancelWakesTheSession() {
 	c.waitEvent("job started", func(e event) bool {
 		return e.Type == "job.started" && e.Payload["run_id"] == runID
 	})
-	c.call(protocol.MethodAgentCancel, map[string]any{
+	c.call(protocol.MethodRunCancel, map[string]any{
 		"session_id": sessionID,
 		"run_id":     runID,
 	}, &struct{}{})
@@ -724,7 +724,7 @@ func (s *suite) failureBusy() {
 	c, sessionID := s.open(turns, nil)
 	s.prompt(c, sessionID, "say hello")
 
-	failure := c.refuse(protocol.MethodAgentPrompt, map[string]any{
+	failure := c.refuse(protocol.MethodRunPrompt, map[string]any{
 		"session_id": sessionID,
 		"text":       "and again",
 	})
@@ -781,7 +781,7 @@ func (s *suite) teardownCloseRacingARun() {
 	// The client waits for the run, and closes the session while it
 	// waits. The wait is given a moment to start, so the close finds
 	// a waiter and not a request that has not been read yet.
-	waiting := c.send(protocol.MethodAgentInspect, map[string]any{
+	waiting := c.send(protocol.MethodRunInspect, map[string]any{
 		"session_id": sessionID,
 		"wait": map[string]any{
 			"until":      "settled",

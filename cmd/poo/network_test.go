@@ -22,7 +22,7 @@ func TestANetworkFailureIsAProviderError(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", url+"/v1",
+		"--endpoint", url+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,

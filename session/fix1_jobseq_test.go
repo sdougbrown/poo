@@ -65,7 +65,7 @@ func TestARestoredSessionContinuesTheJobIDs(t *testing.T) {
 	for time.Now().Before(deadline) {
 		recs := logRecords(t, dir+"/s1.jsonl")
 		for _, rec := range recs {
-			if started, ok := rec.(*poo.JobStarted); ok {
+			if started, ok := rec.(*poo.JobStartedRecord); ok {
 				sawStart = true
 				if started.JobID != "j1" {
 					// A job id past the recorded one: the counter continued.
@@ -105,7 +105,7 @@ func TestAJobOfARestoredSessionIsRecoveredOnTheNextLoad(t *testing.T) {
 	// its result again.
 	ends := 0
 	for _, rec := range loaded.Records {
-		if e, ok := rec.(*poo.JobEnded); ok && e.JobID == "j1" {
+		if e, ok := rec.(*poo.JobEndedRecord); ok && e.JobID == "j1" {
 			ends++
 		}
 	}

@@ -99,7 +99,7 @@ func testPermissionSealHandoff(t *testing.T, storeFirst bool) {
 	// Cleanup may acquire the writer before its original caller resumes.
 	s.settlePendingAsks(run)
 	<-done
-	_ = s.write(context.Background(), &RunSettled{RecordMeta: NewRecordMeta("run.settled"), RunID: run.id})
+	_ = s.write(context.Background(), &RunSettledRecord{RecordMeta: NewRecordMeta("run.settled"), RunID: run.id})
 	checkPermissionHandoff(t, s, sink)
 }
 

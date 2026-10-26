@@ -91,7 +91,7 @@ func TestTheJobResultIsDeliveredInCompletionOrder(t *testing.T) {
 	// has the lower id.
 	ids := map[string]bool{}
 	for _, rec := range sink.allRecords() {
-		ended, ok := rec.(*poo.JobEnded)
+		ended, ok := rec.(*poo.JobEndedRecord)
 		if !ok {
 			continue
 		}
@@ -106,7 +106,7 @@ func TestTheJobResultIsDeliveredInCompletionOrder(t *testing.T) {
 	// The deliveries follow the queue's order.
 	var delivered []string
 	for _, rec := range sink.allRecords() {
-		d, ok := rec.(*poo.InputDelivered)
+		d, ok := rec.(*poo.InputDeliveredRecord)
 		if !ok || d.Mode != poo.InputModeJob {
 			continue
 		}
@@ -124,7 +124,7 @@ func TestTheJobResultIsDeliveredInCompletionOrder(t *testing.T) {
 func countJobDeliveries(sink *recordingSink) int {
 	n := 0
 	for _, rec := range sink.allRecords() {
-		d, ok := rec.(*poo.InputDelivered)
+		d, ok := rec.(*poo.InputDeliveredRecord)
 		if !ok || d.Mode != poo.InputModeJob {
 			continue
 		}

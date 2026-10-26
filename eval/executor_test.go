@@ -33,7 +33,7 @@ echo "$args" > "$(dirname "$log")/args.txt"
 
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -71,7 +71,7 @@ func TestAnUnknownExecutorIsRefused(t *testing.T) {
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,

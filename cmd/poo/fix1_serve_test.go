@@ -49,7 +49,7 @@ func TestCreateAndConfigureReportTheSessionsModels(t *testing.T) {
 	endpoint := newFakeEndpoint(t, fix1DoneAnswer())
 	settings := filepath.Join(dir, "settings.json")
 	body := `{"version":1,
-		"endpoints":{"test":{"base_url":"` + endpoint.URL + `/v1"}},
+		"endpoints":{"test":{"endpoint":"` + endpoint.URL + `/v1"}},
 		"models":{
 			"first-model":{"endpoint":"test","model_id":"first-model","api":"chat_completions","tools_mode":"native","ops":["chat"],"context_limit":32768},
 			"second-model":{"endpoint":"test","model_id":"second-model","api":"chat_completions","tools_mode":"native","ops":["chat"],"context_limit":32768},
@@ -120,7 +120,7 @@ func TestJobsCapabilityFollowsTheTools(t *testing.T) {
 			endpoint := newFakeEndpoint(t, fix1DoneAnswer())
 			settings := filepath.Join(dir, "settings.json")
 			body := `{"version":1,
-				"endpoints":{"test":{"base_url":"` + endpoint.URL + `/v1"}},
+				"endpoints":{"test":{"endpoint":"` + endpoint.URL + `/v1"}},
 				"models":{"test-model":{"endpoint":"test","model_id":"test-model","api":"chat_completions","tools_mode":"native","ops":["chat"],"context_limit":32768}},
 				"roles":{"chat":"test-model"},
 				"profile":"code",
@@ -142,10 +142,10 @@ func TestJobsCapabilityFollowsTheTools(t *testing.T) {
 	}
 }
 
-// TestConfigGetReportsTheEffectiveSettings covers config/get: it
+// TestSettingsGetReportsTheEffectiveSettings covers settings/get: it
 // returns the settings the command runs with, so a flag is in the
 // document.
-func TestConfigGetReportsTheEffectiveSettings(t *testing.T) {
+func TestSettingsGetReportsTheEffectiveSettings(t *testing.T) {
 	dir := t.TempDir()
 	endpoint := newFakeEndpoint(t, fix1DoneAnswer())
 	settings := theSettings(t, dir, endpoint.URL+"/v1")
@@ -160,18 +160,18 @@ func TestConfigGetReportsTheEffectiveSettings(t *testing.T) {
 		"protocol_versions": []int{1},
 		"client":            map[string]any{"name": "test", "version": "test"},
 	})
-	answer := client.call(t, "config/get", map[string]any{})
+	answer := client.call(t, "settings/get", map[string]any{})
 	effective := result(t, answer)
 	if effective["profile"] != "search" {
-		t.Errorf("config/get reports the profile %v, want the effective search", effective["profile"])
+		t.Errorf("settings/get reports the profile %v, want the effective search", effective["profile"])
 	}
 	permission, _ := effective["permission"].(map[string]any)
 	if permission["unmatched"] != "deny" {
-		t.Errorf("config/get reports permission.unmatched %v, want the effective deny", permission["unmatched"])
+		t.Errorf("settings/get reports permission.unmatched %v, want the effective deny", permission["unmatched"])
 	}
 	session, _ := effective["session"].(map[string]any)
 	if session["dir"] != filepath.Join(dir, "sessions") {
-		t.Errorf("config/get reports the session dir %v, want the effective one", session["dir"])
+		t.Errorf("settings/get reports the session dir %v, want the effective one", session["dir"])
 	}
 }
 

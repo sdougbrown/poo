@@ -67,6 +67,9 @@ func Parse(data []byte, format Format) (*Settings, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The cliregistry key was renamed to cli_registry; a settings
+	// file that predates the rename still loads.
+	normalized = aliasKey(normalized, "cliregistry", "cli_registry")
 	var settings Settings
 	decoder := json.NewDecoder(bytes.NewReader(normalized))
 	decoder.DisallowUnknownFields()
@@ -78,6 +81,52 @@ func Parse(data []byte, format Format) (*Settings, error) {
 		return nil, err
 	}
 	return &settings, nil
+}
+
+// aliasKey renames a settings key at any depth, when the new name is
+// absent and the old one is present.
+//
+// A key the settings renamed before v1 still loads: the decoded
+// document carries the old name under the new one, and the strict
+// decode sees only the new name.
+func aliasKey(document []byte, from, to string) []byte {
+	if !bytes.Contains(document, []byte(`"`+from+`"`)) {
+		return document
+	}
+	var value any
+	if err := json.Unmarshal(document, &value); err != nil {
+		return document
+	}
+	out, err := json.Marshal(renameKey(value, from, to))
+	if err != nil {
+		return document
+	}
+	return out
+}
+
+func renameKey(value any, from, to string) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			name := key
+			if key == from {
+				if _, has := v[to]; !has {
+					name = to
+				}
+			}
+			out[name] = renameKey(item, from, to)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = renameKey(item, from, to)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 // namesAskers reports whether the document names the asker chain, even

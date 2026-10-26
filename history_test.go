@@ -69,12 +69,12 @@ func projectionRecords(t *testing.T) []poo.Record {
 		return rec
 	}
 	records = append(records,
-		stamp(&poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started"), RunID: "run-2", PromptHash: "hash", StartedAt: "2026-01-01T00:00:00Z", ModelID: "test-model"}),
+		stamp(&poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started"), RunID: "run-2", PromptHash: "hash", StartedAt: "2026-01-01T00:00:00Z", ModelID: "test-model"}),
 		stamp(&poo.PermissionAskedRecord{RecordMeta: poo.NewRecordMeta("permission.asked"), RunID: "run-2", AskID: "ask-1", Tool: "echo", Summary: "read a file", Class: poo.ClassReadOnly, Reason: "policy"}),
 		stamp(&poo.PermissionAnsweredRecord{RecordMeta: poo.NewRecordMeta("permission.answered"), RunID: "run-2", AskID: "ask-1", Decision: "deny", AnsweredBy: "the client", Provenance: "answered"}),
 		stamp(&poo.ToolCallRecord{RecordMeta: poo.NewRecordMetaFrom("tool.call", poo.OriginModel), RunID: "run-2", Turn: 1, Handle: "r9", Tool: "echo", Arguments: json.RawMessage(`{"text":"three"}`)}),
 		stamp(&poo.ToolResultRecord{RecordMeta: poo.NewRecordMetaFrom("tool.result", poo.OriginTool), RunID: "run-2", Turn: 1, Handle: "r9", Tool: "echo", Outcome: poo.OutcomeInterrupted, Text: "[r9 · echo]\noutcome unknown; the process stopped during this call"}),
-		stamp(&poo.RunSettled{RecordMeta: poo.NewRecordMeta("run.settled"), RunID: "run-2", Reason: poo.ReasonInterrupted, Detail: poo.SettleDetail{Source: "recovery"}, SettledAt: "2026-01-01T00:00:00Z"}),
+		stamp(&poo.RunSettledRecord{RecordMeta: poo.NewRecordMeta("run.settled"), RunID: "run-2", Reason: poo.ReasonInterrupted, Detail: poo.SettleDetail{Source: "recovery"}, SettledAt: "2026-01-01T00:00:00Z"}),
 	)
 	return records
 }

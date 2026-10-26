@@ -58,7 +58,7 @@ type entry struct {
 	Provider     string
 	ModelID      string
 	Name         string
-	BaseURL      string
+	Endpoint     string
 	Env          []string
 	ContextLimit int
 	MaxOutput    int
@@ -128,7 +128,7 @@ func collect(providers map[string]provider) []entry {
 				Provider:     providerID,
 				ModelID:      id,
 				Name:         m.Name,
-				BaseURL:      p.API,
+				Endpoint:     p.API,
 				Env:          p.Env,
 				ContextLimit: m.Limit.Context,
 				MaxOutput:    m.Limit.Output,
@@ -150,8 +150,8 @@ func writeEntry(b *strings.Builder, e entry) {
 	if e.Name != "" {
 		fmt.Fprintf(b, "\t\tName:         %q,\n", e.Name)
 	}
-	if e.BaseURL != "" {
-		fmt.Fprintf(b, "\t\tBaseURL:      %q,\n", e.BaseURL)
+	if e.Endpoint != "" {
+		fmt.Fprintf(b, "\t\tEndpoint:     %q,\n", e.Endpoint)
 	}
 	if len(e.Env) > 0 {
 		fmt.Fprintf(b, "\t\tEnv:          []string{%s},\n", quoteList(e.Env))

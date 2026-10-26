@@ -39,9 +39,9 @@ func brokenStreamServer(t *testing.T) *httptest.Server {
 func TestThePartialAssistantMessageAfterADeltaIsRecorded(t *testing.T) {
 	srv := brokenStreamServer(t)
 	tr := openai.New(openai.Options{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
+		Endpoint: srv.URL,
+		Model:    "m",
+		Backoff:  []time.Duration{time.Millisecond, time.Millisecond},
 	})
 	tool := &echoTool{}
 	sink := &recordingSink{}
@@ -90,9 +90,9 @@ func TestThePartialAssistantMessageAfterADeltaIsRecorded(t *testing.T) {
 func TestTheAttemptAfterADeltaKeepsItsKind(t *testing.T) {
 	srv := brokenStreamServer(t)
 	tr := openai.New(openai.Options{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
+		Endpoint: srv.URL,
+		Model:    "m",
+		Backoff:  []time.Duration{time.Millisecond, time.Millisecond},
 	})
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
@@ -102,7 +102,7 @@ func TestTheAttemptAfterADeltaKeepsItsKind(t *testing.T) {
 	}
 	var kind string
 	for _, rec := range sink.allRecords() {
-		if a, ok := rec.(*poo.ProviderAttempt); ok {
+		if a, ok := rec.(*poo.ProviderAttemptRecord); ok {
 			kind = a.Kind
 		}
 	}

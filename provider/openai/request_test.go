@@ -45,7 +45,7 @@ func TestTheMaxTokensAreComputed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
-			tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ModelInfo: c.info})
+			tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ModelInfo: c.info})
 
 			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m"})
 			if err != nil {
@@ -71,7 +71,7 @@ func TestTheMaxTokensAreComputed(t *testing.T) {
 func TestTheSamplingOverridesReachTheBody(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		ModelInfo: poo.ModelInfo{Sampling: poo.Sampling{Temperature: ptr(0.3), TopP: ptr(0.9)}},
 		Sampling: poo.Sampling{
@@ -110,7 +110,7 @@ func TestAFixedTemperatureModelNeverGetsOne(t *testing.T) {
 	for _, control := range []poo.TempMode{poo.TempFixed, poo.TempUnsupported} {
 		srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 		tr := openai.New(openai.Options{
-			BaseURL:   srv.URL,
+			Endpoint:  srv.URL,
 			Model:     "m",
 			ModelInfo: poo.ModelInfo{Temperature: control},
 			Sampling:  poo.Sampling{Temperature: ptr(0.7)},
@@ -179,8 +179,8 @@ func TestTheReasoningParameterFollowsTheMode(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 			tr := openai.New(openai.Options{
-				BaseURL: srv.URL,
-				Model:   "m",
+				Endpoint: srv.URL,
+				Model:    "m",
 				ModelInfo: poo.ModelInfo{Reasoning: poo.ReasoningControl{
 					Mode:  c.mode,
 					Param: c.param,
@@ -222,7 +222,7 @@ func TestTheReasoningParameterFollowsTheMode(t *testing.T) {
 func TestAModelThatCannotThinkIsAskedNotTo(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		ModelInfo: poo.ModelInfo{Reasoning: poo.ReasoningControl{Mode: poo.ReasoningNone}},
 		Reasoning: "low",
@@ -243,7 +243,7 @@ func TestAModelThatCannotThinkIsAskedNotTo(t *testing.T) {
 func TestAModelThatCannotThinkIsAskedNotToSendAnything(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		ModelInfo: poo.ModelInfo{Reasoning: poo.ReasoningControl{Mode: poo.ReasoningNone}},
 		Reasoning: "off",
@@ -269,8 +269,8 @@ func TestAModelThatCannotThinkIsAskedNotToSendAnything(t *testing.T) {
 func TestAToggleModelIsSwitchedOff(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 	tr := openai.New(openai.Options{
-		BaseURL: srv.URL,
-		Model:   "m",
+		Endpoint: srv.URL,
+		Model:    "m",
 		ModelInfo: poo.ModelInfo{Reasoning: poo.ReasoningControl{
 			Mode: poo.ReasoningToggle,
 		}},
@@ -300,7 +300,7 @@ func TestAToggleModelIsSwitchedOff(t *testing.T) {
 func TestAModelWithoutAReasoningControlRefusesTheSetting(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		ModelInfo: poo.ModelInfo{},
 		Reasoning: "low",
@@ -320,7 +320,7 @@ func TestAModelWithoutAReasoningControlRefusesTheSetting(t *testing.T) {
 // the same tools in different orders send the same array.
 func TestTheToolsAreSentInAStableOrder(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "native"})
 
 	tools := []poo.ToolSpec{
 		{Name: "read", Description: "read a file", Schema: json.RawMessage(`{"type":"object"}`)},

@@ -38,7 +38,7 @@ type Error struct {
 	// Code is the failure's code, e.g. "unavailable_field".
 	Code string
 	// Field is the setting the failure is about, named as the settings
-	// name it, e.g. "permission.decide.approve".
+	// name it, e.g. "permission.decide.allow".
 	Field string
 	// Message describes the failure.
 	Message string

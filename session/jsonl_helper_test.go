@@ -24,19 +24,18 @@ func newTestStore(t *testing.T) (string, *FileStore) {
 }
 
 // createdRecord returns the header of a session.
-func createdRecord(id string) *poo.SessionCreated {
-	return &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    id,
-		Mode:         string(ModeLogged),
-		CreatedAt:    "2026-10-20T00:00:00Z",
-		WorkingDir:   "/tmp",
-		Model:        poo.SessionModel{ModelID: "m"},
-		Tools:        []poo.ToolInfo{{Name: "bash", Class: poo.ClassSideEffecting}, {Name: "read", Class: poo.ClassReadOnly}},
-		ContextLimit: 32768,
-		ToolsMode:    "native",
-		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
+func createdRecord(id string) *poo.SessionCreatedRecord {
+	return &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  id,
+			Mode:       string(ModeLogged),
+			CreatedAt:  "2026-10-20T00:00:00Z",
+			WorkingDir: "/tmp",
+
+			Tools: []poo.ToolInfo{{Name: "bash", Class: poo.ClassSideEffecting}, {Name: "read", Class: poo.ClassReadOnly}}, Build: poo.BuildInfo{Name: "poo", Version: "0.1.0"}, Model: poo.SessionModel{ModelID: "m"},
+
+			ContextLimit: 32768,
+			ToolsMode:    "native"},
 	}
 }
 
@@ -110,8 +109,8 @@ func recordNames(recs []poo.Record) []string {
 }
 
 // runStarted returns a run's first record.
-func runStarted(runID string) *poo.RunStarted {
-	return &poo.RunStarted{
+func runStarted(runID string) *poo.RunStartedRecord {
+	return &poo.RunStartedRecord{
 		RecordMeta: poo.NewRecordMeta("run.started"),
 		RunID:      runID,
 		StartedAt:  "2026-10-20T00:00:00Z",
@@ -157,8 +156,8 @@ func permissionAsked(runID, askID, tool string) *poo.PermissionAskedRecord {
 }
 
 // jobStarted returns a job's first record.
-func jobStarted(job, handle, tool, runID string) *poo.JobStarted {
-	return &poo.JobStarted{
+func jobStarted(job, handle, tool, runID string) *poo.JobStartedRecord {
+	return &poo.JobStartedRecord{
 		RecordMeta: poo.NewRecordMeta("job.started"),
 		SessionID:  "s1",
 		JobID:      job,
@@ -170,8 +169,8 @@ func jobStarted(job, handle, tool, runID string) *poo.JobStarted {
 }
 
 // jobEnded returns a job's last record.
-func jobEnded(job, handle, tool, runID, inputID, text string) *poo.JobEnded {
-	return &poo.JobEnded{
+func jobEnded(job, handle, tool, runID, inputID, text string) *poo.JobEndedRecord {
+	return &poo.JobEndedRecord{
 		RecordMeta: poo.NewRecordMeta("job.ended"),
 		SessionID:  "s1",
 		JobID:      job,
@@ -186,8 +185,8 @@ func jobEnded(job, handle, tool, runID, inputID, text string) *poo.JobEnded {
 }
 
 // inputQueued returns the record of an accepted input.
-func inputQueued(inputID string, mode poo.InputMode) *poo.InputQueued {
-	return &poo.InputQueued{
+func inputQueued(inputID string, mode poo.InputMode) *poo.InputQueuedRecord {
+	return &poo.InputQueuedRecord{
 		RecordMeta: poo.NewRecordMeta("input.queued"),
 		SessionID:  "s1",
 		InputID:    inputID,
@@ -198,8 +197,8 @@ func inputQueued(inputID string, mode poo.InputMode) *poo.InputQueued {
 }
 
 // inputDelivered returns the record of an input that reached the model.
-func inputDelivered(inputID string, mode poo.InputMode) *poo.InputDelivered {
-	return &poo.InputDelivered{
+func inputDelivered(inputID string, mode poo.InputMode) *poo.InputDeliveredRecord {
+	return &poo.InputDeliveredRecord{
 		RecordMeta:  poo.NewRecordMeta("input.delivered"),
 		SessionID:   "s1",
 		RunID:       "r1",

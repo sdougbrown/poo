@@ -20,7 +20,7 @@ import (
 // TestTheDeciderAllowsAConfidentCall covers the plan's rule: a
 // confident approval allows the call.
 func TestTheDeciderAllowsAConfidentCall(t *testing.T) {
-	asker := permissive.New(pootest.NewDecider(0.9), permissive.Options{})
+	asker := permissive.New(pootest.NewStubDecider(0.9), permissive.Options{})
 
 	decision, err := asker.Ask(context.Background(), perm.Ask{Tool: "bash"})
 	if err != nil {
@@ -34,7 +34,7 @@ func TestTheDeciderAllowsAConfidentCall(t *testing.T) {
 // TestTheDeciderRefusesAConfidentCall covers the plan's rule: a
 // confident refusal denies the call.
 func TestTheDeciderRefusesAConfidentCall(t *testing.T) {
-	asker := permissive.New(pootest.NewDecider(0.01), permissive.Options{})
+	asker := permissive.New(pootest.NewStubDecider(0.01), permissive.Options{})
 
 	decision, err := asker.Ask(context.Background(), perm.Ask{Tool: "bash"})
 	if err != nil {
@@ -48,7 +48,7 @@ func TestTheDeciderRefusesAConfidentCall(t *testing.T) {
 // TestTheDeciderDefersAnUncertainCall covers the plan's rule: a model
 // that is not confident defers.
 func TestTheDeciderDefersAnUncertainCall(t *testing.T) {
-	asker := permissive.New(pootest.NewDecider(0.5), permissive.Options{})
+	asker := permissive.New(pootest.NewStubDecider(0.5), permissive.Options{})
 
 	decision, err := asker.Ask(context.Background(), perm.Ask{Tool: "bash"})
 	if err != nil {
@@ -62,7 +62,7 @@ func TestTheDeciderDefersAnUncertainCall(t *testing.T) {
 // TestTheDeciderDefersOnAFailure covers the plan's rule: a decider that
 // failed never allows a call.
 func TestTheDeciderDefersOnAFailure(t *testing.T) {
-	decider := pootest.NewDecider(0.99)
+	decider := pootest.NewStubDecider(0.99)
 	decider.SetError(errors.New("the endpoint is down"))
 	asker := permissive.New(decider, permissive.Options{})
 
@@ -98,9 +98,9 @@ func TestTheDeciderIsUnavailableWithoutADecider(t *testing.T) {
 // TestTheThresholdsAreConfigurable covers the plan's rule: the
 // thresholds belong to the caller.
 func TestTheThresholdsAreConfigurable(t *testing.T) {
-	asker := permissive.New(pootest.NewDecider(0.6), permissive.Options{
-		Approve: 0.5,
-		Deny:    0.99,
+	asker := permissive.New(pootest.NewStubDecider(0.6), permissive.Options{
+		Allow: 0.5,
+		Deny:  0.99,
 	})
 
 	decision, err := asker.Ask(context.Background(), perm.Ask{Tool: "bash"})
@@ -115,7 +115,7 @@ func TestTheThresholdsAreConfigurable(t *testing.T) {
 // TestTheEvidenceComesFromTheHistory covers the plan's rule: the
 // evidence is the recent conversation.
 func TestTheEvidenceComesFromTheHistory(t *testing.T) {
-	decider := pootest.NewDecider(0.9)
+	decider := pootest.NewStubDecider(0.9)
 	asker := permissive.New(decider, permissive.Options{})
 	history := poo.NewHistoryView([]poo.Message{
 		poo.NewTextMessage(poo.RoleUser, "clean the build directory"),
@@ -144,7 +144,7 @@ func TestTheEvidenceComesFromTheHistory(t *testing.T) {
 // TestTheDeciderAsksOneQuestion covers the question: the model is asked
 // whether the call may run, and nothing else.
 func TestTheDeciderAsksOneQuestion(t *testing.T) {
-	decider := pootest.NewDecider(0.9)
+	decider := pootest.NewStubDecider(0.9)
 	asker := permissive.New(decider, permissive.Options{})
 
 	if _, err := asker.Ask(context.Background(), perm.Ask{Tool: "bash"}); err != nil {
@@ -169,12 +169,12 @@ func TestTheDeciderAsksOneQuestion(t *testing.T) {
 // TestTheBudgetIsTheLatencyBudget covers the plan's rule: the decide
 // asker has a budget of its own.
 func TestTheBudgetIsTheLatencyBudget(t *testing.T) {
-	asker := permissive.New(pootest.NewDecider(0.9), permissive.Options{})
+	asker := permissive.New(pootest.NewStubDecider(0.9), permissive.Options{})
 
 	if got := asker.Budget(); got != permissive.DefaultTimeout {
 		t.Errorf("the asker's budget is %v, want %v", got, permissive.DefaultTimeout)
 	}
-	asker = permissive.New(pootest.NewDecider(0.9), permissive.Options{Timeout: 5 * time.Second})
+	asker = permissive.New(pootest.NewStubDecider(0.9), permissive.Options{Timeout: 5 * time.Second})
 	if got := asker.Budget(); got != 5*time.Second {
 		t.Errorf("the asker's budget is %v, want 5s", got)
 	}
@@ -183,7 +183,7 @@ func TestTheBudgetIsTheLatencyBudget(t *testing.T) {
 // TestAnUncertainDecisionMovesOnToTheNextAsker covers the plan's rule:
 // the decide asker defers, and the chain moves on.
 func TestAnUncertainDecisionMovesOnToTheNextAsker(t *testing.T) {
-	decider := pootest.NewDecider(0.5)
+	decider := pootest.NewStubDecider(0.5)
 	next := &countingAsker{decision: perm.DecisionAllow}
 	policy, err := perm.New(perm.Options{
 		Askers: []perm.Asker{permissive.New(decider, permissive.Options{}), next},
@@ -208,7 +208,7 @@ func TestAnUncertainDecisionMovesOnToTheNextAsker(t *testing.T) {
 // TestAFailedDecisionMovesOnToTheNextAsker covers the plan's rule: a
 // decider that failed never allows a call.
 func TestAFailedDecisionMovesOnToTheNextAsker(t *testing.T) {
-	decider := pootest.NewDecider(0.99)
+	decider := pootest.NewStubDecider(0.99)
 	decider.SetError(errors.New("the endpoint is down"))
 	next := &countingAsker{decision: perm.DecisionAllow}
 	policy, err := perm.New(perm.Options{

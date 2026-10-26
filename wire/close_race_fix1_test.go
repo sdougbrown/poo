@@ -10,7 +10,7 @@ import (
 )
 
 // TestACloseRacingAPromptLeavesNoRun proves the close ordering over
-// the wire: a session/close that races an agent/prompt either refuses
+// the wire: a session/close that races an run/prompt either refuses
 // the prompt or finalizes its run, so the session has no run after the
 // close returns.
 func TestACloseRacingAPromptLeavesNoRun(t *testing.T) {
@@ -22,7 +22,7 @@ func TestACloseRacingAPromptLeavesNoRun(t *testing.T) {
 
 	for i := 0; i < 50; i++ {
 		sessionID := createSession(t, h)
-		prompt := h.callAsync(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
+		prompt := h.callAsync(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 		closeAnswer := h.callAsync(protocol.MethodSessionClose, protocol.CloseParams{SessionID: sessionID})
 		<-prompt
 		<-closeAnswer

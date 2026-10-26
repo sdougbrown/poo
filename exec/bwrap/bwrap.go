@@ -101,10 +101,10 @@ type Masker = pooexec.Masker
 type Options struct {
 	// Binary is the bwrap executable. Empty means the one on PATH.
 	Binary string
-	// DisableNetwork gives the sandbox its own empty network
-	// namespace instead of the host's. The network is shared unless
-	// this is set.
-	DisableNetwork bool
+	// Network says whether the sandbox shares the host's network
+	// namespace. Nil and true share it; false gives the sandbox its
+	// own empty one.
+	Network *bool
 	// ROBinds are the host paths mounted read-only. The default list
 	// is used when it is empty.
 	ROBinds []string
@@ -423,7 +423,7 @@ func (e *Executor) args(c pooexec.Command) ([]string, error) {
 		// The helper reports on its own file descriptors.
 		"--json-status-fd", fmt.Sprintf("%d", jsonStatusFD),
 	}
-	if !e.opts.DisableNetwork {
+	if e.opts.Network == nil || *e.opts.Network {
 		// The network is the host's, unless the settings cut it.
 		args = append(args, "--share-net")
 	}
@@ -498,8 +498,8 @@ func (e *Executor) masks(root string) ([][]string, error) {
 		return nil, err
 	}
 	paths = append([]string(nil), paths...)
-	// The shortest path first, so a directory is hidden before the
-	// files inside it, and a file inside a hidden directory is not
+	// The shortest path first, so a directory is masked before the
+	// files inside it, and a file inside a masked directory is not
 	// masked again.
 	sort.Slice(paths, func(i, j int) bool { return len(paths[i]) < len(paths[j]) })
 

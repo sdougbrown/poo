@@ -24,8 +24,8 @@ import (
 
 // Options configures the transport.
 type Options struct {
-	// BaseURL is the endpoint's base, e.g. "http://localhost:4000/v1".
-	BaseURL string
+	// Endpoint is the endpoint's base, e.g. "http://localhost:4000/v1".
+	Endpoint string
 	// Model is the model identifier.
 	Model string
 	// APIKey is the bearer token, empty when the endpoint needs none.
@@ -319,7 +319,7 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 		}
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.BaseURL), bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.Endpoint), bytes.NewReader(body))
 	if err != nil {
 		release()
 		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}

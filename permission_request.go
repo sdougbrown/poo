@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-// PermissionInput is a message to a pending permission request.
+// PermissionTransition is a message to a pending permission request.
 //
 // Answers and deadlines name the attempt that produced them, so an
 // input for an attempt that already ended is dropped instead of applied.
-type PermissionInput struct {
+type PermissionTransition struct {
 	// Kind is the transition the input asks for.
 	Kind PermissionInputKind
 	// Attempt is the token of the attempt the input belongs to.
@@ -84,7 +84,7 @@ type PermissionRequest struct {
 	answer          *PermissionAnswer
 	done            chan struct{}
 	// logDrop reports an input that was dropped as stale.
-	logDrop func(PermissionInput)
+	logDrop func(PermissionTransition)
 
 	// io serializes the request's records, including seal cleanup. A
 	// submitted append is never abandoned or retried by another writer.
@@ -106,7 +106,7 @@ func NewPermissionRequest(ask PermissionAsk, opts PermissionRequestOptions) *Per
 	if opts.Fallback != "allow" {
 		opts.Fallback = "deny"
 	}
-	return &PermissionRequest{ask: ask, options: opts, done: make(chan struct{}), logDrop: func(in PermissionInput) {
+	return &PermissionRequest{ask: ask, options: opts, done: make(chan struct{}), logDrop: func(in PermissionTransition) {
 		slog.Debug("stale permission input dropped", "ask_id", ask.AskID, "attempt", in.Attempt)
 	}}
 }
@@ -132,7 +132,7 @@ func (p *PermissionRequest) Result() PermissionAnswer {
 // Send applies one input under the request lock. Expired attempts cannot
 // answer, even when their result and deadline channels are both ready.
 // The returned attempt token tags subsequent messages from that Asker.
-func (p *PermissionRequest) Send(in PermissionInput) uint64 {
+func (p *PermissionRequest) Send(in PermissionTransition) uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	drop := func() {

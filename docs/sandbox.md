@@ -167,7 +167,7 @@ docker run --rm -it --network none -v "$PWD:/work" -w /work ghcr.io/sdougbrown/p
   poo run --working-dir /work --log /work/session.jsonl "..."
 ```
 
-The eval harness does the first of these: `poo-eval run --sandbox bwrap`
+The eval harness does the first of these: `poo-eval run --isolation bwrap`
 wraps the whole `poo` process, and `poo-eval run --executor bwrap`
 wraps the model's commands in a sandbox of their own, bound to the
 task's workdir. The two are layers, not alternatives: a run may use

@@ -163,7 +163,7 @@ permission rule that names a tool the binary does not register is a typed
 error. So is a cli registry whose `call_cli` the binary does not link.
 
 The settings still decode and validate in `config`. `tools.bash.*`, the
-executor name and `cliregistry.paths` are settings, not tools. Nothing in
+executor name and `cli_registry.paths` are settings, not tools. Nothing in
 `config` imports a tool package, so reading a settings file links none.
 
 The executors are the same seam. A binary registers the ones it links, and

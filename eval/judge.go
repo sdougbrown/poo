@@ -34,8 +34,8 @@ var judgePrompt string
 
 // Defaults for the judge.
 const (
-	// DefaultJudgeBaseURL is the endpoint the judge talks to.
-	DefaultJudgeBaseURL = "http://localhost:4000/v1"
+	// DefaultJudgeEndpoint is the endpoint the judge talks to.
+	DefaultJudgeEndpoint = "http://localhost:4000/v1"
 	// DefaultJudgeModel is the model the judge is.
 	DefaultJudgeModel = "deepseek-flash"
 	// DefaultJudgeMaxChars is the size a transcript may have before it
@@ -120,8 +120,8 @@ type Verdict struct {
 
 // JudgeOptions configure a judging run.
 type JudgeOptions struct {
-	// BaseURL is the judge's endpoint.
-	BaseURL string
+	// Endpoint is the judge's endpoint.
+	Endpoint string
 	// Model is the judge's model identifier.
 	Model string
 	// APIKeyEnv names the environment variable holding the judge's API
@@ -163,8 +163,8 @@ type Judge struct {
 
 // NewJudge returns a judge with the options filled in.
 func NewJudge(opts JudgeOptions) (*Judge, error) {
-	if opts.BaseURL == "" {
-		opts.BaseURL = DefaultJudgeBaseURL
+	if opts.Endpoint == "" {
+		opts.Endpoint = DefaultJudgeEndpoint
 	}
 	if opts.Model == "" {
 		opts.Model = DefaultJudgeModel
@@ -554,7 +554,7 @@ func (j *Judge) post(ctx context.Context, userMessage string, withMaxTokens bool
 		return 0, nil, fmt.Errorf("eval: encoding the judge request: %w", err)
 	}
 
-	url := openai.ChatURL(j.opts.BaseURL)
+	url := openai.ChatURL(j.opts.Endpoint)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, fmt.Errorf("eval: making the judge request: %w", err)

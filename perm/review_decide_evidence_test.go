@@ -15,7 +15,7 @@ import (
 // the decision model must be shown the call it is asked to approve. The
 // live evaluation puts the command in the ask's summary.
 func TestReviewTheDecideAskerShowsTheCall(t *testing.T) {
-	decider := pootest.NewDecider(0.9)
+	decider := pootest.NewStubDecider(0.9)
 	asker := permissive.New(decider, permissive.Options{})
 	history := poo.NewHistoryView([]poo.Message{
 		poo.NewTextMessage(poo.RoleUser, "clean up the disk space"),

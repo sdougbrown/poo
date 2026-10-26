@@ -25,10 +25,10 @@ func sandboxExecutors() *bash.Registry {
 	})
 	registry.Register("bwrap", func(opts exec.Options) (exec.Executor, error) {
 		return bwrap.New(bwrap.Options{
-			DisableNetwork: opts.Sandbox.DisableNetwork,
-			ROBinds:        opts.Sandbox.ROBinds,
-			RWBinds:        opts.Sandbox.RWBinds,
-			Masker:         opts.Masker,
+			Network: opts.Sandbox.Network,
+			ROBinds: opts.Sandbox.ROBinds,
+			RWBinds: opts.Sandbox.RWBinds,
+			Masker:  opts.Masker,
 		})
 	})
 	return registry
@@ -101,7 +101,7 @@ func TestTheSandboxProtectsALiteralFile(t *testing.T) {
   bash:
     executor: bwrap
   protected_paths: [%q]
-cliregistry:
+cli_registry:
   paths: [%q]
 `, protected, registry)
 	settings, err := config.Parse([]byte(document), config.FormatYAML)
@@ -141,7 +141,7 @@ func TestTheSettingsExecutorRunsTheCLI(t *testing.T) {
   bash:
     executor: bwrap
   protected_paths: [%q]
-cliregistry:
+cli_registry:
   paths: [%q]
 `, protected, registry)
 	settings, err := config.Parse([]byte(document), config.FormatYAML)

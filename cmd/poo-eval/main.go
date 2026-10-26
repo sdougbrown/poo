@@ -41,7 +41,7 @@ Run flags:
   --poo <path>         The poo binary to run (default: poo)
   --work-root DIR      Where the workdirs are made (default: the user cache directory)
   --keep-workdirs      Leave the workdirs behind after the run
-  --sandbox <mode>     How a run is isolated: bwrap (default, needs bubblewrap) or none
+  --isolation <mode>   How a run is isolated: bwrap (default, needs bubblewrap) or none
   --executor <name>    The executor the model's commands run through: local (default) or bwrap
   --force              Clear the out directory's runs before the run
 
@@ -53,7 +53,7 @@ Replay flags:
   --max-turns <n>      The turn limit the replay uses (default: the recording's)
 
 Judge flags:
-  --base-url <url>     The judge's endpoint (default: http://localhost:4000/v1)
+  --endpoint <url>     The judge's endpoint (default: http://localhost:4000/v1)
   --model <id>         The judge's model (default: deepseek-flash)
   --api-key-env <var>  The environment variable holding the judge's API key
   --out <dir>          Where the verdicts go (default: <results-dir>/judgments)
@@ -149,7 +149,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.pooBinary, "poo", "", "The poo binary to run")
 	fs.StringVar(&o.runsDir, "work-root", "", "Where the workdirs are made (default: the user cache directory)")
 	fs.BoolVar(&o.keepWork, "keep-workdirs", false, "Leave the workdirs behind")
-	fs.StringVar(&o.sandbox, "sandbox", eval.SandboxBwrap, "How a run is isolated: bwrap or none")
+	fs.StringVar(&o.sandbox, "isolation", eval.SandboxBwrap, "How a run is isolated: bwrap or none")
 	fs.StringVar(&o.executor, "executor", eval.ExecutorLocal, "The executor the model's commands run through: local or bwrap")
 	fs.BoolVar(&o.force, "force", false, "Clear the out directory's runs before the run")
 
@@ -364,7 +364,7 @@ func runJudge(args []string) int {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 
 	var opts eval.JudgeOptions
-	fs.StringVar(&opts.BaseURL, "base-url", eval.DefaultJudgeBaseURL, "The judge's endpoint")
+	fs.StringVar(&opts.Endpoint, "endpoint", eval.DefaultJudgeEndpoint, "The judge's endpoint")
 	fs.StringVar(&opts.Model, "model", eval.DefaultJudgeModel, "The judge's model")
 	fs.StringVar(&opts.APIKeyEnv, "api-key-env", "", "The environment variable holding the judge's API key")
 	fs.StringVar(&opts.OutDir, "out", "", "Where the verdicts go")

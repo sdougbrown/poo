@@ -508,20 +508,20 @@ func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, 
 	id := "sess-" + strconv.Itoa(f.ids)
 	f.mu.Unlock()
 	model := f.model()
-	if _, err := store.Create(ctx, &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    id,
-		Mode:         mode,
-		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-		WorkingDir:   f.dir,
-		Model:        poo.SessionModel{ModelID: "test-model"},
-		Tools:        f.pooTools(),
-		ContextLimit: 8192,
-		ToolsMode:    "native",
-		Profile:      "code",
-		Roles:        poo.ModelRoles{Chat: &model},
-		Build:        poo.BuildInfo{Name: "poo-test", Version: "test"},
+	if _, err := store.Create(ctx, &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  id,
+			Mode:       mode,
+			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+			WorkingDir: f.dir,
+
+			Tools: f.pooTools(),
+
+			Profile: "code",
+			Roles:   poo.ModelRoles{Chat: &model}, Model: poo.SessionModel{ModelID: "test-model"},
+
+			ContextLimit: 8192,
+			ToolsMode:    "native"},
 	}); err != nil {
 		_ = store.Close()
 		return nil, nil, err
@@ -641,8 +641,8 @@ func (f *testFactory) Models(ctx context.Context, refresh bool) ([]protocol.Mode
 	}}, nil
 }
 
-// Config returns the effective settings.
-func (f *testFactory) Config(ctx context.Context) (map[string]any, error) {
+// Settings returns the effective settings.
+func (f *testFactory) Settings(ctx context.Context) (map[string]any, error) {
 	return map[string]any{"version": 1}, nil
 }
 

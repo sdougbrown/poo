@@ -146,7 +146,7 @@ func TestResumeReportsEachWarningOnce(t *testing.T) {
 	created := testHeader("s1", tool)
 	created.Build = poo.BuildInfo{Name: "poo", Version: "old"}
 	created.SettingsHash = "old-settings"
-	writeSession(t, dir, "s1", created, runStarted("r1"), &poo.RunSettled{
+	writeSession(t, dir, "s1", created, runStarted("r1"), &poo.RunSettledRecord{
 		RecordMeta: poo.NewRecordMeta("run.settled"),
 		RunID:      "r1",
 		Reason:     poo.ReasonEndTurn,

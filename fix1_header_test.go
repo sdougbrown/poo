@@ -21,16 +21,14 @@ func TestTheHeaderTheRunCommandWritesCanBeRestored(t *testing.T) {
 	// poo.ToolInfo{Name: spec.Name, Class: spec.Class})
 	recorded := []poo.ToolInfo{{Name: spec.Name, Class: spec.Class}}
 	// the header the run command writes for this tool
-	created := &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    "s1",
-		Mode:         "logged",
-		WorkingDir:   "/tmp",
-		Tools:        recorded,
-		Model:        poo.SessionModel{ModelID: "m"},
-		ContextLimit: 32768,
-		ToolsMode:    "native",
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			WorkingDir: "/tmp",
+			Tools:      recorded, Model: poo.SessionModel{ModelID: "m"},
+			ContextLimit: 32768,
+			ToolsMode:    "native"},
 	}
 	records := []poo.Record{created}
 

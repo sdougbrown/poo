@@ -39,7 +39,7 @@ type Settings struct {
 	// Permission are the permission policy's settings.
 	Permission Permission `json:"permission,omitempty"`
 	// SystemPrompt are the system prompt's settings.
-	SystemPrompt SystemPrompt `json:"system_prompt,omitempty"`
+	SystemPrompt PromptSettings `json:"system_prompt,omitempty"`
 	// Context are the context window's settings.
 	Context Context `json:"context,omitempty"`
 	// Tools are the tools' settings.
@@ -55,7 +55,7 @@ type Settings struct {
 	// Finish are the typed result's settings.
 	Finish Finish `json:"finish,omitempty"`
 	// CLIRegistry are the cli registry's settings.
-	CLIRegistry CLIRegistry `json:"cliregistry,omitempty"`
+	CLIRegistry CLIRegistry `json:"cli_registry,omitempty"`
 	// Session are the session's settings.
 	Session Session `json:"session,omitempty"`
 }
@@ -66,8 +66,8 @@ type Settings struct {
 // variable that holds it, and the variable is the only place a key
 // comes from.
 type Endpoint struct {
-	// BaseURL is the endpoint's base URL.
-	BaseURL string `json:"base_url"`
+	// Endpoint is the model's endpoint.
+	Endpoint string `json:"endpoint"`
 	// APIKeyEnv names the environment variable holding the key.
 	APIKeyEnv string `json:"api_key_env,omitempty"`
 }
@@ -163,8 +163,8 @@ type Rule struct {
 
 // Decide are the decision asker's settings.
 type Decide struct {
-	// Approve is the probability at which a call is allowed.
-	Approve *float64 `json:"approve,omitempty"`
+	// Allow is the probability at which a call is allowed.
+	Allow *float64 `json:"allow,omitempty"`
 	// Deny is the probability at which a call is refused.
 	Deny *float64 `json:"deny,omitempty"`
 	// TimeoutMS is the per-call latency budget, in milliseconds.
@@ -175,7 +175,7 @@ type Decide struct {
 //
 // The base file and the replacement text are mutually exclusive: the
 // prompt is either the file's text or the replacement, never both.
-type SystemPrompt struct {
+type PromptSettings struct {
 	// BaseFile is the file holding the prompt's base section.
 	BaseFile string `json:"base_file,omitempty"`
 	// Replace is the text that takes the place of the whole prompt.

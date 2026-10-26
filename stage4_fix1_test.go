@@ -106,10 +106,10 @@ func fixCall(name, text string) poo.ToolCall {
 }
 
 // fixJobEnded returns the job.ended record the sink holds.
-func fixJobEnded(t *testing.T, sink *recordingSink) *poo.JobEnded {
+func fixJobEnded(t *testing.T, sink *recordingSink) *poo.JobEndedRecord {
 	t.Helper()
 	for _, rec := range sink.allRecords() {
-		if ended, ok := rec.(*poo.JobEnded); ok {
+		if ended, ok := rec.(*poo.JobEndedRecord); ok {
 			return ended
 		}
 	}

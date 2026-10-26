@@ -1086,7 +1086,7 @@ type writeGate struct {
 // registration its decision was taken under.
 type heldRecord struct {
 	// rec is the held record.
-	rec *InputHeld
+	rec *InputHeldRecord
 	// gate is the write's registration.
 	gate *writeGate
 }

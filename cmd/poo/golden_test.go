@@ -59,7 +59,7 @@ func promptFor(t *testing.T, name string) string {
 	t.Helper()
 	dir := t.TempDir()
 	settings := filepath.Join(dir, "settings.yaml")
-	body := "version: 1\nendpoints:\n  test:\n    base_url: http://localhost:4000/v1\nmodels:\n  test-model:\n    endpoint: test\n    model_id: test-model\n    api: chat_completions\n    tools_mode: native\n    ops: [chat]\n    context_limit: 32768\nroles:\n  chat: test-model\n"
+	body := "version: 1\nendpoints:\n  test:\n    endpoint: http://localhost:4000/v1\nmodels:\n  test-model:\n    endpoint: test\n    model_id: test-model\n    api: chat_completions\n    tools_mode: native\n    ops: [chat]\n    context_limit: 32768\nroles:\n  chat: test-model\n"
 	if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
 		t.Fatalf("writing the settings: %v", err)
 	}

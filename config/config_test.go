@@ -17,7 +17,7 @@ version: 1
 profile: code
 endpoints:
   grace:
-    base_url: http://grace:4000/v1
+    endpoint: http://grace:4000/v1
     api_key_env: GRACE_KEY
 models:
   gemma4:
@@ -47,7 +47,7 @@ permission:
   askers: [decide]
   chain_timeout_s: 120
   decide:
-    approve: 0.85
+    allow: 0.85
     deny: 0.99
     timeout_ms: 1500
 system_prompt:
@@ -90,7 +90,7 @@ sampling:
   gemma4:
     temperature: 1.0
     top_p: 0.95
-cliregistry:
+cli_registry:
   paths: [./registry]
 session:
   mode: logged
@@ -106,7 +106,7 @@ version = 1
 profile = "code"
 
 [endpoints.grace]
-base_url = "http://grace:4000/v1"
+endpoint = "http://grace:4000/v1"
 api_key_env = "GRACE_KEY"
 
 [models.gemma4]
@@ -137,7 +137,7 @@ near_threshold = 5
 action = "ask"
 
 [permission.decide]
-approve = 0.85
+allow = 0.85
 deny = 0.99
 timeout_ms = 1500
 
@@ -197,7 +197,7 @@ chat = "off"
 temperature = 1.0
 top_p = 0.95
 
-[cliregistry]
+[cli_registry]
 paths = ["./registry"]
 
 [session]
@@ -214,7 +214,7 @@ const theJSON = `{
   "version": 1,
   "profile": "code",
   "endpoints": {
-    "grace": {"base_url": "http://grace:4000/v1", "api_key_env": "GRACE_KEY"}
+    "grace": {"endpoint": "http://grace:4000/v1", "api_key_env": "GRACE_KEY"}
   },
   "models": {
     "gemma4": {
@@ -236,7 +236,7 @@ const theJSON = `{
     "rules": [{"tool": "bash", "command_prefix": "git status", "action": "allow"}],
     "askers": ["decide"],
     "chain_timeout_s": 120,
-    "decide": {"approve": 0.85, "deny": 0.99, "timeout_ms": 1500}
+    "decide": {"allow": 0.85, "deny": 0.99, "timeout_ms": 1500}
   },
   "system_prompt": {"append": "more", "sections": {"house": "style"}, "remove": ["noise"]},
   "context": {
@@ -255,7 +255,7 @@ const theJSON = `{
   "jobs": {"max_running": 4, "timeout_s": 1800, "on_idle": "wake", "max_unattended_wakes": 0},
   "reasoning": {"chat": "off"},
   "sampling": {"gemma4": {"temperature": 1, "top_p": 0.95}},
-  "cliregistry": {"paths": ["./registry"]},
+  "cli_registry": {"paths": ["./registry"]},
   "session": {
     "mode": "logged",
     "dir": "~/.local/state/poo/sessions",
@@ -334,7 +334,7 @@ func TestAnUnknownKeyIsRejected(t *testing.T) {
 // check: a field the settings set but the other settings do not allow
 // is a failure that names the field and explains itself.
 func TestAnUnavailableFieldIsNamedWithItsChallenge(t *testing.T) {
-	_, err := config.Parse([]byte("version: 1\npermission:\n  decide:\n    approve: 0.9\n"), config.FormatYAML)
+	_, err := config.Parse([]byte("version: 1\npermission:\n  decide:\n    allow: 0.9\n"), config.FormatYAML)
 	if err == nil {
 		t.Fatal("the settings decoded, want a failure")
 	}
@@ -343,8 +343,8 @@ func TestAnUnavailableFieldIsNamedWithItsChallenge(t *testing.T) {
 		t.Fatalf("the failure is %v, want an unavailable field", err)
 	}
 	field, ok := config.FieldOf(err)
-	if !ok || field != "permission.decide.approve" {
-		t.Errorf("the failure names %q, want permission.decide.approve", field)
+	if !ok || field != "permission.decide.allow" {
+		t.Errorf("the failure names %q, want permission.decide.allow", field)
 	}
 	var settingsErr *config.Error
 	if !asError(err, &settingsErr) {
@@ -466,5 +466,41 @@ func TestTheExampleSettingsDecode(t *testing.T) {
 	}
 	if settings.Roles["chat"] == "" {
 		t.Error("the example names no chat model")
+	}
+}
+
+// TestAnOldRegistryKeyStillLoads covers the cliregistry → cli_registry
+// rename: a settings file that predates the rename loads to the same
+// settings the new name gives, a value that merely names the tool
+// survives untouched, and a file that names both fails loudly.
+func TestAnOldRegistryKeyStillLoads(t *testing.T) {
+	fromOld, err := config.Parse([]byte("version: 1\ncliregistry:\n  paths: [\"./registry\"]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("the old key did not load: %v", err)
+	}
+	fromNew, err := config.Parse([]byte("version: 1\ncli_registry:\n  paths: [\"./registry\"]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("the new key did not load: %v", err)
+	}
+	if strings.Join(fromOld.CLIRegistry.Paths, ",") != strings.Join(fromNew.CLIRegistry.Paths, ",") {
+		t.Errorf("the old key loaded %v, want %v", fromOld.CLIRegistry.Paths, fromNew.CLIRegistry.Paths)
+	}
+	valued, err := config.Parse([]byte("version: 1\ncliregistry:\n  paths: [\"cliregistry\", \"tool/cliregistry\"]\nsystem_prompt:\n  replace: \"mentions cliregistry in prose\"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("a value naming the tool did not load: %v", err)
+	}
+	if got := strings.Join(valued.CLIRegistry.Paths, ","); got != "cliregistry,tool/cliregistry" {
+		t.Errorf("the paths came out %q, want the word intact", got)
+	}
+	if valued.SystemPrompt.Replace != "mentions cliregistry in prose" {
+		t.Errorf("the value came out %q, want the word intact", valued.SystemPrompt.Replace)
+	}
+	both, err := config.Parse([]byte("version: 1\ncliregistry:\n  paths: [\"./a\"]\ncli_registry:\n  paths: [\"./b\"]\n"), config.FormatYAML)
+	if err == nil {
+		t.Fatalf("the settings named both keys and loaded: %+v", both)
+	}
+	code, ok := config.CodeOf(err)
+	if !ok || code != config.CodeUnknownField {
+		t.Errorf("naming both keys failed with %v, want an unknown field", err)
 	}
 }

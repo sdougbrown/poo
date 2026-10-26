@@ -175,7 +175,7 @@ func TestTheServeOffersTheTypedResultTool(t *testing.T) {
 	}
 	settings := filepath.Join(dir, "settings.json")
 	body := `{"version":1,
-		"endpoints":{"test":{"base_url":"http://localhost:4000/v1"}},
+		"endpoints":{"test":{"endpoint":"http://localhost:4000/v1"}},
 		"models":{"test-model":{"endpoint":"test","model_id":"test-model","api":"chat_completions","tools_mode":"native","ops":["chat"],"context_limit":32768}},
 		"roles":{"chat":"test-model"},
 		"finish":{"schema_file":"` + schema + `"}}`

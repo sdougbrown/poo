@@ -37,7 +37,7 @@ echo fixed > "$dir/a.txt"
 `+logWritingPoo)
 
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -100,7 +100,7 @@ echo fixed > "$dir/a.txt"
 
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -144,7 +144,7 @@ sleep 30
 
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -182,7 +182,7 @@ printf '%s' "$args" > "`+capture+`"
 `+logWritingPoo)
 
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -266,7 +266,7 @@ echo fixed > "$dir/a.txt"
 
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,

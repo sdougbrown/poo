@@ -219,7 +219,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 				return err
 			}
 		}
-		rec := &poo.RunSettled{
+		rec := &poo.RunSettledRecord{
 			RecordMeta: poo.NewRecordMeta("run.settled"),
 			RunID:      run.RunID,
 			Reason:     poo.ReasonInterrupted,
@@ -234,7 +234,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 		}
 	}
 	for _, job := range pend.Jobs {
-		rec := &poo.JobEnded{
+		rec := &poo.JobEndedRecord{
 			RecordMeta: poo.NewRecordMeta("job.ended"),
 			SessionID:  pend.SessionID,
 			JobID:      job.JobID,
@@ -251,7 +251,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 		}
 	}
 	for _, input := range pend.Inputs {
-		rec := &poo.InputDropped{
+		rec := &poo.InputDroppedRecord{
 			RecordMeta: poo.NewRecordMeta("input.dropped"),
 			SessionID:  pend.SessionID,
 			RunID:      input.RunID,
@@ -290,15 +290,15 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		messages: map[string]bool{},
 		asks:     map[string]*PendingAsk{},
 		answered: map[string]bool{},
-		inputs:   map[string]poo.InputQueued{},
+		inputs:   map[string]poo.InputQueuedRecord{},
 		fate:     map[string]bool{},
 		callIDs:  poo.CallIDs(recs),
 	}
 	for _, rec := range recs {
 		switch r := rec.(type) {
-		case *poo.RunStarted:
+		case *poo.RunStartedRecord:
 			state.run(r.RunID)
-		case *poo.RunSettled:
+		case *poo.RunSettledRecord:
 			state.run(r.RunID)
 			state.settled[r.RunID] = true
 		case *poo.ToolCallRecord:
@@ -353,19 +353,19 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			}
 		case *poo.PermissionAnsweredRecord:
 			state.answered[askIdentity(r.RunID, r.AskID)] = true
-		case *poo.JobStarted:
+		case *poo.JobStartedRecord:
 			state.jobs = append(state.jobs, *r)
 			state.jobEnded = append(state.jobEnded, false)
-		case *poo.JobEnded:
+		case *poo.JobEndedRecord:
 			state.endJob(r.JobID)
-		case *poo.InputQueued:
+		case *poo.InputQueuedRecord:
 			if _, ok := state.inputs[r.InputID]; !ok {
 				state.inputs[r.InputID] = *r
 				state.inputOrder = append(state.inputOrder, r.InputID)
 			}
-		case *poo.InputDelivered:
+		case *poo.InputDeliveredRecord:
 			state.fate[r.InputID] = true
-		case *poo.InputDropped:
+		case *poo.InputDroppedRecord:
 			state.fate[r.InputID] = true
 		}
 	}
@@ -486,11 +486,11 @@ type pendingState struct {
 	// jobs are the jobs that started, in order. A job id may repeat in
 	// a log written before the counter continued, so the order is what
 	// pairs each end with a start.
-	jobs []poo.JobStarted
+	jobs []poo.JobStartedRecord
 	// jobEnded reports which of the started jobs have ended.
 	jobEnded []bool
 	// inputs are the inputs that were queued, by id.
-	inputs map[string]poo.InputQueued
+	inputs map[string]poo.InputQueuedRecord
 	// inputOrder is the order the inputs were queued in.
 	inputOrder []string
 	// fate are the inputs that were delivered or dropped.

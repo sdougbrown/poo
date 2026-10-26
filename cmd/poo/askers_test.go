@@ -53,7 +53,7 @@ func runServeWithPermission(t *testing.T, permission string) (int, string) {
 	return runCLI(t,
 		"serve",
 		"--settings", path,
-		"--base-url", "http://127.0.0.1:1/v1",
+		"--endpoint", "http://127.0.0.1:1/v1",
 		"--model-id", "test-model",
 		"--context-limit", "8192",
 		"--ephemeral",

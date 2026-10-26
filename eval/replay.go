@@ -311,9 +311,9 @@ func replayJobResults(log *Log) []poo.JobResult {
 	for _, r := range log.Records {
 		switch r.Record {
 		case "input.delivered":
-			records = append(records, &poo.InputDelivered{InputID: r.InputID})
+			records = append(records, &poo.InputDeliveredRecord{InputID: r.InputID})
 		case "job.ended":
-			records = append(records, &poo.JobEnded{
+			records = append(records, &poo.JobEndedRecord{
 				JobID:   r.JobID,
 				Handle:  r.Handle,
 				Tool:    r.Tool,

@@ -52,7 +52,7 @@ exit 0`, 1))
 
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -108,7 +108,7 @@ func TestASandboxThatFailsToStartSaysSo(t *testing.T) {
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -158,7 +158,7 @@ func TestAPooThatExitsWithoutALogSaysSoWhateverTheSandbox(t *testing.T) {
 			task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 			out := t.TempDir()
 			runner := NewRunner(RunOptions{
-				Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+				Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 				Tasks:     []Task{task},
 				TaskRoot:  taskRoot,
 				Seeds:     1,

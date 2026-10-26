@@ -16,19 +16,17 @@ import (
 // The restore: a session rebuilt from the records of an earlier one.
 
 // header returns a session header record for a test.
-func header(sessionID string) *poo.SessionCreated {
-	return &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    sessionID,
-		Mode:         "logged",
-		CreatedAt:    "2026-01-01T00:00:00Z",
-		WorkingDir:   "/tmp",
-		Profile:      "code",
-		Roles:        poo.ModelRoles{Chat: &poo.ModelInfo{Name: "fast", ModelID: "test-model", ContextLimit: 32768}},
-		Tools:        []poo.ToolInfo{{Name: "echo", Class: poo.ClassReadOnly, Background: poo.BackgroundNever}},
-		SettingsHash: "settings-1",
-		Build:        poo.BuildInfo{Name: "poo", Version: "test"},
+func header(sessionID string) *poo.SessionCreatedRecord {
+	return &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:    sessionID,
+			Mode:         "logged",
+			CreatedAt:    "2026-01-01T00:00:00Z",
+			WorkingDir:   "/tmp",
+			Profile:      "code",
+			Roles:        poo.ModelRoles{Chat: &poo.ModelInfo{Name: "fast", ModelID: "test-model", ContextLimit: 32768}},
+			Tools:        []poo.ToolInfo{{Name: "echo", Class: poo.ClassReadOnly, Background: poo.BackgroundNever}},
+			SettingsHash: "settings-1", Build: poo.BuildInfo{Name: "poo", Version: "test"}},
 	}
 }
 
@@ -291,8 +289,8 @@ func TestTheRestoreRejectsAnotherFormat(t *testing.T) {
 func TestTheRestoreRequeuesAnUndeliveredJobResult(t *testing.T) {
 	records := []poo.Record{
 		header("s1"),
-		&poo.JobStarted{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
-		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.OutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
+		&poo.JobStartedRecord{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
+		&poo.JobEndedRecord{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.OutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
 	}
 	pending := poo.PendingJobResults(records)
 	if len(pending) != 1 {
@@ -303,7 +301,7 @@ func TestTheRestoreRequeuesAnUndeliveredJobResult(t *testing.T) {
 	}
 
 	// A delivered result is in the history already.
-	records = append(records, &poo.InputDelivered{RecordMeta: poo.NewRecordMeta("input.delivered"), SessionID: "s1", RunID: "run-1", InputID: "s1-ji1", Mode: poo.InputModeJob})
+	records = append(records, &poo.InputDeliveredRecord{RecordMeta: poo.NewRecordMeta("input.delivered"), SessionID: "s1", RunID: "run-1", InputID: "s1-ji1", Mode: poo.InputModeJob})
 	if pending := poo.PendingJobResults(records); len(pending) != 0 {
 		t.Errorf("the records hold %d pending job results, want none", len(pending))
 	}
@@ -403,8 +401,8 @@ func TestTheRestoreHoldsTheSteeringAndTheCompactions(t *testing.T) {
 func TestTheRestoredSessionHoldsTheUndeliveredJobResults(t *testing.T) {
 	records := []poo.Record{
 		header("s1"),
-		&poo.JobStarted{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
-		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.OutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
+		&poo.JobStartedRecord{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
+		&poo.JobEndedRecord{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.OutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
 	}
 	tr := scripted([]fakeResponse{{text: "ok"}})
 	sink := &recordingSink{}

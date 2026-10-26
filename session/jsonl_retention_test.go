@@ -26,7 +26,7 @@ func sessionAt(t *testing.T, dir, id string, at time.Time) string {
 	started.StartedAt = at.Format(time.RFC3339Nano)
 	// The run settled, so a load of the session recovers nothing and
 	// the session's last activity stays where it was.
-	settled := &poo.RunSettled{
+	settled := &poo.RunSettledRecord{
 		RecordMeta: poo.RecordMeta{Record: "run.settled", Seq: 3, TS: at.Format(time.RFC3339Nano)},
 		RunID:      "r1",
 		Reason:     poo.ReasonEndTurn,
