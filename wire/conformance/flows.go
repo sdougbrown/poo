@@ -167,6 +167,25 @@ func (s *suite) inspect(c *client, sessionID string, wait *protocol.InspectWait,
 	return result
 }
 
+// sendMessage sends a message with the mode the call names, and the
+// result names an input.
+func (s *suite) sendMessage(c *client, sessionID, text, mode string) protocol.MessageResult {
+	s.t.Helper()
+	raw := c.call(protocol.MethodAgentMessage, map[string]any{
+		"session_id": sessionID,
+		"text":       text,
+		"mode":       mode,
+	}, &protocol.MessageResult{})
+	var message protocol.MessageResult
+	if err := json.Unmarshal(raw, &message); err != nil {
+		s.t.Fatalf("decoding the message: %v", err)
+	}
+	if message.InputID == "" {
+		s.t.Errorf("the message returned no input id: %s", string(raw))
+	}
+	return message
+}
+
 // settled waits for a run to settle and returns the outcome.
 func (s *suite) settled(c *client, sessionID, runID string) protocol.Settled {
 	s.t.Helper()
@@ -444,31 +463,32 @@ func (s *suite) history(c *client, sessionID string, beforeSeq int64, limit int)
 
 // steer covers the flow of a client that redirects a run: the message
 // arrives at the next turn.
+//
+// The command waits for the marker the flow writes once the message is
+// accepted, and acknowledges it; the flow waits for that acknowledgement
+// before it settles, so the run is still inside its tool call when the
+// steer arrives.
 func (s *suite) steer() {
 	s.t.Helper()
 	if s.skipWithoutTool("bash") {
 		return
 	}
+	marker := filepath.Join(s.dir, "steer.marker")
+	s.resetMarker(marker)
 	turns := []Turn{
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo first"}}}},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": s.markerCommand(marker)}}}},
 		{Text: "the answer"},
 	}
 	c, sessionID := s.open(turns, nil)
 
 	runID := s.prompt(c, sessionID, "do the thing")
 	s.waitToolCall(c, runID)
-	raw := c.call(protocol.MethodAgentMessage, map[string]any{
-		"session_id": sessionID,
-		"text":       "the steered message",
-		"mode":       "steer",
-	}, &protocol.MessageResult{})
-	var message protocol.MessageResult
-	if err := json.Unmarshal(raw, &message); err != nil {
-		s.t.Fatalf("decoding the message: %v", err)
-	}
-	if message.InputID == "" {
-		s.t.Errorf("the message returned no input id: %s", string(raw))
-	}
+	s.sendMessage(c, sessionID, "the steered message", "steer")
+	// The message is accepted, so the tool may see the marker and end.
+	s.markMarker(marker)
+	// The tool confirms it saw the marker while its call was open, or the
+	// flow fails here instead of testing a post-tool-call message.
+	s.waitMarkerSeen(marker)
 
 	s.settled(c, sessionID, runID)
 
@@ -506,11 +526,7 @@ func (s *suite) interrupt() {
 
 	runID := s.prompt(c, sessionID, "do the thing")
 	s.waitToolCall(c, runID)
-	c.call(protocol.MethodAgentMessage, map[string]any{
-		"session_id": sessionID,
-		"text":       "stop that",
-		"mode":       "interrupt",
-	}, &protocol.MessageResult{})
+	s.sendMessage(c, sessionID, "stop that", "interrupt")
 
 	c.waitEvent("the interrupted turn", func(e event) bool {
 		return e.Type == "turn.interrupted" && e.Payload["run_id"] == runID
@@ -534,13 +550,20 @@ func (s *suite) interrupt() {
 // followUpMessage covers the flow of a client that queues a message for
 // the run's natural stop: the message is delivered after the model
 // stopped, and the run carries on.
+//
+// The command waits for the marker the flow writes once the message is
+// accepted, and acknowledges it; the flow waits for that acknowledgement
+// before it settles, so the run is still inside its tool call when the
+// follow-up arrives.
 func (s *suite) followUpMessage() {
 	s.t.Helper()
 	if s.skipWithoutTool("bash") {
 		return
 	}
+	marker := filepath.Join(s.dir, "follow-up.marker")
+	s.resetMarker(marker)
 	turns := []Turn{
-		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo first"}}}},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": s.markerCommand(marker)}}}},
 		{Text: "the answer"},
 		{Text: "the answer after the follow-up"},
 	}
@@ -548,11 +571,12 @@ func (s *suite) followUpMessage() {
 
 	runID := s.prompt(c, sessionID, "do the thing")
 	s.waitToolCall(c, runID)
-	c.call(protocol.MethodAgentMessage, map[string]any{
-		"session_id": sessionID,
-		"text":       "the queued message",
-		"mode":       "follow_up",
-	}, &protocol.MessageResult{})
+	s.sendMessage(c, sessionID, "the queued message", "follow_up")
+	// The message is accepted, so the tool may see the marker and end.
+	s.markMarker(marker)
+	// The tool confirms it saw the marker while its call was open, or the
+	// flow fails here instead of testing a post-tool-call message.
+	s.waitMarkerSeen(marker)
 
 	settled := s.settled(c, sessionID, runID)
 	if settled.Reason != "end_turn" {
