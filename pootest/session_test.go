@@ -27,13 +27,12 @@ func TestTheScriptedTransportDrivesASession(t *testing.T) {
 	sink := pootest.NewSink()
 
 	session, err := poo.New(poo.Options{
-		Transport:    transport,
-		Tools:        map[string]poo.Tool{"echo": &echoTool{}},
-		ToolOrder:    []string{"echo"},
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
+		Transport: transport,
+		Tools:     map[string]poo.Tool{"echo": &echoTool{}},
+		ToolOrder: []string{"echo"},
+		Sink:      sink,
+		SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
 	})
 	if err != nil {
 		t.Fatalf("building the session: %v", err)
@@ -75,12 +74,11 @@ func TestTheFailingSinkStopsASession(t *testing.T) {
 	sink.FailAt(1)
 
 	session, err := poo.New(poo.Options{
-		Transport:    transport,
-		Tools:        map[string]poo.Tool{},
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
+		Transport: transport,
+		Tools:     map[string]poo.Tool{},
+		Sink:      sink,
+		SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
 	})
 	if err != nil {
 		t.Fatalf("building the session: %v", err)
@@ -113,13 +111,12 @@ func TestTheScriptedCompactorDrivesASession(t *testing.T) {
 	sink := pootest.NewSink()
 
 	session, err := poo.New(poo.Options{
-		Transport:    transport,
-		Tools:        map[string]poo.Tool{},
-		Sink:         sink,
-		SessionID:    "s1",
-		ModelID:      "test-model",
-		ContextLimit: 32768,
-		Compactor:    compactor,
+		Transport: transport,
+		Tools:     map[string]poo.Tool{},
+		Sink:      sink,
+		SessionID: "s1",
+		Model:     poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		Compactor: compactor,
 	})
 	if err != nil {
 		t.Fatalf("building the session: %v", err)

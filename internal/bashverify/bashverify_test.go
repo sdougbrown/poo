@@ -414,14 +414,13 @@ func TestABackgroundJobIsStoppedByCancelJob(t *testing.T) {
 			)
 			sink := pootest.NewSink()
 			s, err := poo.New(poo.Options{
-				Transport:    tr,
-				Tools:        map[string]poo.Tool{"bash": tool},
-				ToolOrder:    []string{"bash"},
-				Sink:         sink,
-				SessionID:    "s1",
-				ModelID:      "test-model",
-				ContextLimit: 32768,
-				WorkingDir:   dir,
+				Transport:  tr,
+				Tools:      map[string]poo.Tool{"bash": tool},
+				ToolOrder:  []string{"bash"},
+				Sink:       sink,
+				SessionID:  "s1",
+				Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+				WorkingDir: dir,
 			})
 			if err != nil {
 				t.Fatalf("building the session: %v", err)
@@ -513,15 +512,14 @@ func TestAScrubbedVariableStaysVisibleToAHostTool(t *testing.T) {
 				pootest.Turn{Text: "done"},
 			)
 			s, err := poo.New(poo.Options{
-				Transport:    tr,
-				Tools:        map[string]poo.Tool{"bash": bashTool, "host": host},
-				ToolOrder:    []string{"bash", "host"},
-				Sink:         pootest.NewSink(),
-				SessionID:    "s1",
-				ModelID:      "test-model",
-				ContextLimit: 32768,
-				WorkingDir:   dir,
-				Env:          []string{"POO_TEST_API_KEY=super-secret-value", "PATH=/usr/bin"},
+				Transport:  tr,
+				Tools:      map[string]poo.Tool{"bash": bashTool, "host": host},
+				ToolOrder:  []string{"bash", "host"},
+				Sink:       pootest.NewSink(),
+				SessionID:  "s1",
+				Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+				WorkingDir: dir,
+				Env:        []string{"POO_TEST_API_KEY=super-secret-value", "PATH=/usr/bin"},
 			})
 			if err != nil {
 				t.Fatalf("building the session: %v", err)

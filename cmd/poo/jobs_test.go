@@ -174,12 +174,11 @@ func TestTheOneShotPrintsTheLastRunsAnswer(t *testing.T) {
 		pootest.Turn{Text: "woken answer"},
 	)
 	s, err := poo.New(poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"job": tool},
-		ToolOrder:    []string{"job"},
-		ContextLimit: 32768,
-		SessionID:    "s1",
-		ModelID:      "m",
+		Transport: tr,
+		Tools:     map[string]poo.Tool{"job": tool},
+		ToolOrder: []string{"job"},
+		Model:     poo.ModelInfo{ContextLimit: 32768, ModelID: "m"},
+		SessionID: "s1",
 		// The finish call's own turn is the last one: the candidate
 		// it adds outranks nothing at the turn ceiling.
 		MaxTurns: 2,
@@ -221,12 +220,11 @@ func TestTheOneShotPrintsTheFinishResult(t *testing.T) {
 		},
 	)
 	s, err := poo.New(poo.Options{
-		Transport:    tr,
-		Tools:        map[string]poo.Tool{"finish": tool},
-		ToolOrder:    []string{"finish"},
-		ContextLimit: 32768,
-		SessionID:    "s1",
-		ModelID:      "m",
+		Transport: tr,
+		Tools:     map[string]poo.Tool{"finish": tool},
+		ToolOrder: []string{"finish"},
+		Model:     poo.ModelInfo{ContextLimit: 32768, ModelID: "m"},
+		SessionID: "s1",
 		// The finish call's own turn is the last one: the candidate
 		// it adds outranks nothing at the turn ceiling.
 		MaxTurns: 2,

@@ -106,8 +106,15 @@ func TestTheTimeoutBoundsTheWholeRequest(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Errorf("the stream ran for %v, want the 60ms timeout to end it", elapsed)
 	}
-	if !errors.Is(last, context.DeadlineExceeded) {
-		t.Errorf("the stream ended with %v, want the deadline to have passed", last)
+	var perr *poo.ProviderError
+	if !errors.As(last, &perr) {
+		t.Fatalf("the stream ended with %T (%v), want a provider error", last, last)
+	}
+	if perr.Kind != poo.ProviderKindInterruptedStream {
+		t.Errorf("the failure's kind is %q, want interrupted_stream", perr.Kind)
+	}
+	if perr.Code != string(poo.ProviderKindNetwork) {
+		t.Errorf("the failure's code is %q, want the original network kind", perr.Code)
 	}
 }
 
@@ -274,7 +281,7 @@ func TestAnErrorChunkWithoutAMessageIsStillAnError(t *testing.T) {
 	for _, errBody := range []string{`{"error":{}}`, `{"error":{"code":1}}`} {
 		t.Run(errBody, func(t *testing.T) {
 			srv := newSSEServer(t, chunk(errBody))
-			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+			tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
 			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			if err != nil {
 				t.Fatalf("starting the request: %v", err)

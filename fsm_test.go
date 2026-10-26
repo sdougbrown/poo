@@ -793,7 +793,7 @@ func TestTheGateChecksTheBudgetOnEveryPath(t *testing.T) {
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Compactor = compactor
 	// A window so small that the run cannot answer in it.
-	opts.ContextLimit = 300
+	opts.Model.ContextLimit = 300
 
 	s := newTestSession(t, opts)
 	res := runSession(t, s, "do the thing")

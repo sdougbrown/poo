@@ -205,17 +205,20 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 	compactions := recordedCompactions(log)
 
 	session, err := poo.New(poo.Options{
-		Transport:    transport,
-		Tools:        map[string]poo.Tool{},
-		ToolOrder:    nil,
-		Sink:         recorder,
-		SessionID:    "replay",
-		ModelID:      "replay",
-		ContextLimit: contextLimit,
-		MaxTurns:     maxTurns,
-		WorkingDir:   opts.WorkingDir,
-		BeforeRun:    beforeRun,
-		Compactor:    newRecordedCompactor(compactions, transport),
+		Transport: transport,
+		Tools:     map[string]poo.Tool{},
+		ToolOrder: nil,
+		Sink:      recorder,
+		SessionID: "replay",
+		Model: poo.ModelInfo{
+			ModelID:      "replay",
+			API:          poo.APIChatCompletions,
+			ContextLimit: contextLimit,
+		},
+		MaxTurns:   maxTurns,
+		WorkingDir: opts.WorkingDir,
+		BeforeRun:  beforeRun,
+		Compactor:  newRecordedCompactor(compactions, transport),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("eval: replaying %s: %w", path, err)

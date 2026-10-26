@@ -55,7 +55,7 @@ func TestInterruptDuringACompactionRechecksTheGate(t *testing.T) {
 	tr := scripted([]fakeResponse{fix2Turn(), {text: "done"}})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: "output"}, sink)
-	opts.ContextLimit = 10000
+	opts.Model.ContextLimit = 10000
 	opts.Compactor = &fix2Compactor{
 		should: func(v poo.View, b poo.Budget) bool { return b.Turns == 1 && !used.Load() },
 		compact: func(ctx context.Context, _ poo.View, _ poo.ForkFunc) (poo.Compaction, error) {

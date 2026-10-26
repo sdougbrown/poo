@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/sdougbrown/poo"
 )
 
 // Model is one entry of the model catalog.
@@ -61,6 +63,32 @@ func (m Model) EffectiveToolsMode() string {
 // limits the concurrency per endpoint.
 func (m Model) Endpoint() string {
 	return strings.TrimRight(m.BaseURL, "/")
+}
+
+// ModelInfo returns the descriptor of the model.
+//
+// The descriptor is what the harness reads: the identifier the endpoint
+// knows the model by, the window it has, how it is asked for tool calls
+// and how its reasoning is controlled.
+//
+// The API is the Chat Completions API, because it is the only one the
+// harness speaks.
+func (m Model) ModelInfo() poo.ModelInfo {
+	info := poo.ModelInfo{
+		Name:         m.Name,
+		Endpoint:     m.BaseURL,
+		ModelID:      m.ModelID,
+		API:          poo.APIChatCompletions,
+		Ops:          []poo.Op{poo.OpChat},
+		ContextLimit: m.ContextLimit,
+		Tools:        poo.ToolCalling{Mode: poo.ToolsMode(m.EffectiveToolsMode())},
+	}
+	if m.ReasoningEffort != "" {
+		// The catalog names an effort level, and the effort level is what
+		// the model takes.
+		info.Reasoning = poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort}
+	}
+	return info
 }
 
 // LoadModels reads a model catalog.

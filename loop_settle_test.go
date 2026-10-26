@@ -454,7 +454,7 @@ func TestAParentCancelDuringTheSettleHookWins(t *testing.T) {
 	h := &cancelAtSettleHook{entered: make(chan struct{})}
 	s := newTestSession(t, poo.Options{
 		Transport:    scripted([]fakeResponse{{text: "done"}}),
-		ContextLimit: 32768,
+		Model:        poo.ModelInfo{ContextLimit: 32768},
 		BeforeSettle: []poo.BeforeSettleHook{h},
 	})
 	ctx, cancel := context.WithCancel(context.Background())

@@ -371,6 +371,8 @@ const (
 	// observers — and the coalesced record is written by the stage that
 	// owns observers (Stage 4).
 	EventObserverDropped EventName = "observer.dropped"
+	// EventModelsChanged is emitted when the session switches models.
+	EventModelsChanged EventName = "session.models_changed"
 )
 
 // Event is one thing that happened in a session.
