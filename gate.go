@@ -6,39 +6,39 @@ import (
 	"fmt"
 )
 
-// gateResult is what the next-request gate decided.
-type gateResult struct {
-	// candidates are the settle candidates the gate produced. An empty
-	// list with held unset means the gate opened a request.
+// requestGateResult is what the next-request gate decided.
+type requestGateResult struct {
+	// candidates are the settle candidates the request gate produced. An empty
+	// list with held unset means the request gate opened a request.
 	candidates []candidate
 	// held reports that the run already holds a candidate, which the
-	// finalization will pick up from the run: the gate does not hand it
+	// finalization will pick up from the run: the request gate does not hand it
 	// back, so no candidate is counted twice.
 	held bool
 }
 
-// gate is the next-request gate.
+// requestGate is the next-request gate.
 //
 // Every path to a new request goes through this one gate: the first
 // request of a run, a turn that processed a call, a BeforeSettle
 // continuation, an interrupted turn, an input delivered at finalize
 // step 1, and an input delivered while waiting.
 //
-// The gate never opens a request while a candidate is pending.
-func (s *Session) gate(run *runState) gateResult {
-	// The compactor gets one chance in a gate pass. An interrupt that
-	// ends the compaction restarts the gate for the candidates, the
+// The request gate never opens a request while a candidate is pending.
+func (s *Session) requestGate(run *runState) requestGateResult {
+	// The compactor gets one chance in a request gate pass. An interrupt that
+	// ends the compaction restarts the request gate for the candidates, the
 	// budget and the notice, but not for a second compaction the
 	// interrupt already ended.
 	compactionTried := false
-gateLoop:
+requestGateLoop:
 	for {
 		// Step 0: a pending candidate settles the run.
 		s.mu.Lock()
 		held := len(run.candidates) > 0
 		s.mu.Unlock()
 		if held {
-			return gateResult{held: true}
+			return requestGateResult{held: true}
 		}
 
 		// Step 1: the compactor.
@@ -48,7 +48,7 @@ gateLoop:
 		// compact ends the run with its handoff.
 		//
 		// An interrupt that ends the compaction is not a compaction
-		// failure: the gate restarts from its first step, so the pending
+		// failure: the request gate restarts from its first step, so the pending
 		// candidates, the compactor, the budget and the notice are all
 		// checked again instead of the interrupt opening a request by
 		// itself.
@@ -61,29 +61,29 @@ gateLoop:
 			s.transition(StateCompacting)
 			outcome, err := s.compact(run)
 			// The run may have settled while the compactor was running.
-			// Nothing the gate does after that may move the state, open a
+			// Nothing the request gate does after that may move the state, open a
 			// request, or record anything.
 			if errors.Is(err, errRunWindingDown) || s.runWindingDown(run) {
-				return gateResult{held: true}
+				return requestGateResult{held: true}
 			}
 			if errors.Is(err, errCompactionInterrupted) {
 				s.clearInterrupt(run)
 				s.drainInputs(run, false)
 				s.transition(StateRequesting)
-				continue gateLoop
+				continue requestGateLoop
 			}
 			if errors.Is(err, errCompactionStore) {
 				// The compaction record was refused, and the run holds
-				// the store_error candidate. The gate never opens a
+				// the store_error candidate. The request gate never opens a
 				// request while a candidate is pending.
-				return gateResult{held: true}
+				return requestGateResult{held: true}
 			}
 			if err != nil {
 				// The compactor failed. Below the hard limit the run
 				// continues uncompacted; at or above it the run settles
 				// context_exhausted.
 				if s.overHardLimit() {
-					return gateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
+					return requestGateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
 						Source: "compaction_failed",
 						Text:   err.Error(),
 					})}}
@@ -91,24 +91,24 @@ gateLoop:
 			} else if outcome.candidate != nil {
 				// The compactor refused to compact: the run ends with
 				// the handoff it wrote.
-				return gateResult{candidates: []candidate{*outcome.candidate}}
+				return requestGateResult{candidates: []candidate{*outcome.candidate}}
 			}
 			s.transition(StateRequesting)
 		}
-		break gateLoop
+		break requestGateLoop
 	}
 
 	// Step 2: the budget check.
 	maxTokens := s.maxTokens()
 	if maxTokens < MinOutputTokens {
 		// No room to answer.
-		return gateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
+		return requestGateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
 			Source: "no_output_room",
 			Text:   fmt.Sprintf("the computed max_tokens %d is under the %d-token minimum", maxTokens, MinOutputTokens),
 		})}}
 	}
 	if s.overHardLimit() {
-		return gateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
+		return requestGateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
 			Source: "hard_limit",
 			Text: fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token window",
 				s.estimatedInput(), int(s.opts.HardRatio*100), s.opts.Model.ContextLimit),
@@ -123,14 +123,14 @@ gateLoop:
 	// already forbids.
 	maxTokens = s.maxTokens()
 	if maxTokens < MinOutputTokens {
-		return gateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
+		return requestGateResult{candidates: []candidate{newCandidate(ReasonContextExhausted, SettleDetail{
 			Source: "no_output_room",
 			Text:   fmt.Sprintf("the computed max_tokens %d is under the %d-token minimum", maxTokens, MinOutputTokens),
 		})}}
 	}
 
 	// Step 4: the run requests.
-	return gateResult{}
+	return requestGateResult{}
 }
 
 // overHardLimit reports that the estimated input is at or above the hard
@@ -208,7 +208,7 @@ type compactionOutcome struct {
 var errCompactionInterrupted = errors.New("poo: the compaction was interrupted")
 
 // errCompactionStore reports that the store refused a compaction record.
-// The candidate is already on the run, and the gate re-enters its
+// The candidate is already on the run, and the request gate re-enters its
 // candidate check.
 var errCompactionStore = errors.New("poo: the compaction record was refused")
 

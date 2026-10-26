@@ -41,7 +41,7 @@ func TestTheRunnerMakesItsPathsAbsolute(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       "relout",
-		WorkRoot:  filepath.Join(base, "work"),
+		RunsDir:   filepath.Join(base, "work"),
 		PooBinary: fakePoo(t, logWritingPoo),
 	})
 
@@ -77,7 +77,7 @@ func TestASecondRunDoesNotReadTheFirstRunsLog(t *testing.T) {
 			TaskRoot:  taskRoot,
 			Seeds:     1,
 			Out:       out,
-			WorkRoot:  filepath.Join(out, "work"),
+			RunsDir:   filepath.Join(out, "work"),
 			PooBinary: fakePoo(t, logWritingPoo),
 			Force:     force,
 		})
@@ -136,7 +136,7 @@ func TestTheRunnerRefusesANonEmptyOutDirectory(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: fakePoo(t, logWritingPoo),
 	})
 
@@ -170,7 +170,7 @@ func TestTheRunnerClearsTheRunsDirectoryWithForce(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: fakePoo(t, logWritingPoo),
 		Force:     true,
 	})
@@ -209,7 +209,7 @@ func TestThePooBinaryPathIsMadeAbsolute(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: relative,
 	})
 
@@ -232,7 +232,7 @@ func TestTwoRunsDoNotShareAWorkRoot(t *testing.T) {
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 
-	workRoot := filepath.Join(t.TempDir(), "work")
+	runsDir := filepath.Join(t.TempDir(), "work")
 	marker := filepath.Join(t.TempDir(), "seen.txt")
 	binary := fakePoo(t, `
 dir=""
@@ -258,7 +258,7 @@ fi
 			TaskRoot:  taskRoot,
 			Seeds:     1,
 			Out:       out,
-			WorkRoot:  workRoot,
+			RunsDir:   runsDir,
 			PooBinary: binary,
 		})
 		report, err := runner.Run(context.Background())

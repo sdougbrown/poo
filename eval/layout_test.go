@@ -8,7 +8,7 @@ import (
 )
 
 func TestTheJudgeReadsTheDirectoryTheRunnerNames(t *testing.T) {
-	j := job{task: Task{ID: "t"}, model: Model{Name: "m"}, seed: 7}
+	j := cell{task: Task{ID: "t"}, model: Model{Name: "m"}, seed: 7}
 	runsDir := filepath.Join(t.TempDir(), runsDirName)
 	// The runner writes each invocation's runs under a run-<id>
 	// directory of its own.
@@ -54,7 +54,7 @@ func TestARunWhoseSeedsAllTimedOutLeavesNothingToJudge(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     2,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 	})
 	report, err := runner.Run(t.Context())

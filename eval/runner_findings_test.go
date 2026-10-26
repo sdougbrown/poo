@@ -34,7 +34,7 @@ func TestABarePooNameIsFoundOnThePath(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: "poo",
 	})
 	report, err := runner.Run(context.Background())
@@ -58,7 +58,7 @@ func TestAPooBinaryThatCannotBeFoundFailsTheRun(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: "no-such-poo",
 	})
 	report, err := runner.Run(context.Background())
@@ -74,7 +74,7 @@ func TestAWorkRootOnTheTaskSetsPathIsRefused(t *testing.T) {
 	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
-	for name, workRoot := range map[string]string{
+	for name, runsDir := range map[string]string{
 		"inside the task set": filepath.Join(taskRoot, "work"),
 		"the task set itself": taskRoot,
 		"above the task set":  filepath.Dir(taskRoot),
@@ -85,7 +85,7 @@ func TestAWorkRootOnTheTaskSetsPathIsRefused(t *testing.T) {
 			TaskRoot:  taskRoot,
 			Seeds:     1,
 			Out:       t.TempDir(),
-			WorkRoot:  workRoot,
+			RunsDir:   runsDir,
 			PooBinary: fakePoo(t, logWritingPoo),
 		})
 		if _, err := runner.Run(context.Background()); err == nil {
@@ -109,7 +109,7 @@ echo stray > "$d/stray.txt"
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: poo,
 	})
 	report, err := runner.Run(context.Background())
@@ -159,9 +159,9 @@ func refusesWorkRootIn(t *testing.T, repo string) {
 	t.Helper()
 	runner := NewRunner(RunOptions{
 		TaskRoot: filepath.Join(repo, "evals", "tasks"),
-		WorkRoot: filepath.Join(repo, ".cache", "eval-work"),
+		RunsDir:  filepath.Join(repo, ".cache", "eval-work"),
 	})
-	err := runner.checkWorkRoot()
+	err := runner.checkRunsDir()
 	if err == nil || !strings.Contains(err.Error(), "inside the task set's repository") {
 		t.Errorf("a work root inside the task set's repository gave %v, want a refusal", err)
 	}
@@ -181,7 +181,7 @@ func TestARunWithAWorkRootInsideTheRepositoryIsRefused(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       t.TempDir(),
-		WorkRoot:  filepath.Join(repo, ".cache", "eval-work"),
+		RunsDir:   filepath.Join(repo, ".cache", "eval-work"),
 		PooBinary: fakePoo(t, logWritingPoo),
 	})
 	_, err := runner.Run(context.Background())
