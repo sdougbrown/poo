@@ -572,10 +572,11 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 				RunID:      run.id,
 				Turn:       call.turn,
 				Handle:     call.handle,
+				CallID:     call.id,
 				Tool:       call.tool,
 				Arguments:  recordArgs(call.arguments),
 			}); err != nil && !errors.Is(err, errCallRecordSealed) {
-				s.addCandidate(run, storeErrorCandidate(err))
+				s.noteStoreError(run, err)
 			}
 		}
 		outcome := OutcomeSkipped

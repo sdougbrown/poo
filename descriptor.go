@@ -153,6 +153,46 @@ const (
 	CacheNone CacheMode = "none"
 )
 
+// ModelRoles are the models a session talks to.
+//
+// The roles are the effective ones: the chat model the session's turns
+// go to, and the decision model it asks when it has one. A role that is
+// not set is a role the session does not have.
+type ModelRoles struct {
+	// Chat is the chat model, or nil when the session has none.
+	Chat *ModelInfo `json:"chat,omitempty"`
+	// Decider is the decision model, or nil when the session has none.
+	Decider *ModelInfo `json:"decider,omitempty"`
+}
+
+// Models returns the roles' models, in a fixed order: the chat model
+// first, then the decision model.
+func (r ModelRoles) Models() []*ModelInfo {
+	out := make([]*ModelInfo, 0, 2)
+	if r.Chat != nil {
+		out = append(out, r.Chat)
+	}
+	if r.Decider != nil {
+		out = append(out, r.Decider)
+	}
+	return out
+}
+
+// Profile is a named tool set with its own defaults.
+//
+// A profile is what a session is built from: the tools it links, and
+// the policy it applies to a call the profile does not cover. The core
+// keeps the name and the tools; the policy belongs to the consumer.
+type Profile struct {
+	// Name is the profile's name.
+	Name string `json:"name"`
+	// Tools are the tools the profile links, in offer order.
+	Tools []ToolInfo `json:"tools"`
+	// Unmatched says what the profile does with a side-effecting call
+	// no rule covers: "allow", "ask" or "deny".
+	Unmatched string `json:"unmatched,omitempty"`
+}
+
 // HasOp reports whether the model serves an operation.
 func (m ModelInfo) HasOp(op Op) bool {
 	for _, o := range m.Ops {

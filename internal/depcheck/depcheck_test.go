@@ -67,6 +67,7 @@ func TestFixtures(t *testing.T) {
 		{
 			name: "cycle",
 			want: []string{
+				"cannot check " + m + "cycle/session: import cycle not allowed",
 				"cannot check " + m + "cycle: import cycle not allowed",
 				m + "cycle imports " + m + "cycle/session",
 			},
@@ -106,6 +107,14 @@ func TestFixtures(t *testing.T) {
 			},
 		},
 		{
+			// The session package may import the core package and the
+			// decide package and no more.
+			name: "session",
+			want: []string{
+				m + "session/session imports " + m + "session/extra",
+			},
+		},
+		{
 			name: "ignored",
 		},
 		{
@@ -138,6 +147,7 @@ func TestSkippedPackages(t *testing.T) {
 		m + "/prompt (does not exist yet)",
 		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
+		m + "/session (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
@@ -159,6 +169,7 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 		m + "/prompt (does not exist yet)",
 		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
+		m + "/session (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
@@ -185,6 +196,7 @@ func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
 		m + "/prompt (does not exist yet)",
 		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
+		m + "/session (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
