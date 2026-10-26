@@ -78,9 +78,6 @@ type Session struct {
 	// from the view, and a delivery note still renders from the
 	// original recorded message.
 	recorded map[string]Message
-	// repeats counts the consecutive repeats of a call, for the doom
-	// loop.
-	repeats *repeatCounter
 	// repeatCounts are the repeat counts of each call, by handle.
 	//
 	// The counts are per call, so a batch that runs in parallel does
@@ -293,12 +290,20 @@ type runState struct {
 	// an input's acceptance checks the seal when it is claimed, so
 	// nothing is added for the run after it.
 	sealed bool
+	// asks are the permission asks the run has published and not yet
+	// answered, by ask id. The finalization resolves the ones still
+	// pending before it settles.
+	asks map[string]*PermissionRequest
 	// jobStarts counts the job acceptance records whose writes are still
 	// in flight. The finalization waits for them as it does for the
 	// pending calls.
 	jobStarts int
 	// workDone is signalled when a pending call gets its result.
 	workDone chan struct{}
+	// repeats and the current permission call belong to this run.
+	repeats          *repeatCounter
+	permissionHandle string
+	permissionTool   string
 
 	// accepting are the inputs whose acceptance record is still being
 	// written. The finalization waits for them, and reports the ones it
@@ -594,7 +599,6 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		resultMeta:        map[string]resultMeta{},
 		recorded:          map[string]Message{},
 		messageIDs:        ids,
-		repeats:           newRepeatCounter(),
 		noticeArmed:       true,
 		jobs:              map[string]*jobState{},
 		jobQueued:         make(chan struct{}, 1),
@@ -814,10 +818,10 @@ func (s *Session) lastRepeatCountsLocked() RepeatCounts {
 // RepeatCounts are the repeat counters of one call.
 type RepeatCounts struct {
 	// Exact is how many times the model made this exact call.
-	Exact int
+	Exact int `json:"exact"`
 	// Near is how many times the model made a call with the same
 	// primary argument.
-	Near int
+	Near int `json:"near"`
 }
 
 // hookMessage turns a hook's appended message into a user message.
@@ -999,8 +1003,17 @@ type runWriteClaim struct {
 // seal cancels it, so the write never follows run.settled.
 func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.beginRunWriteLocked(run)
+}
+
+// beginRunWriteLocked claims a record's write against the run's seal.
+//
+// The caller holds the session's lock. The claim is made under the
+// lock, so a write that registers work and claims its record does so
+// atomically with respect to the seal.
+func (s *Session) beginRunWriteLocked(run *runState) (context.Context, func(), bool) {
 	if run.sealed {
-		s.mu.Unlock()
 		return nil, nil, false
 	}
 	base := run.ctx
@@ -1012,7 +1025,6 @@ func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
 	claim := &runWriteClaim{cancel: cancel, timeout: timeout}
 	run.writeClaims = append(run.writeClaims, claim)
 	run.runWrites++
-	s.mu.Unlock()
 
 	release := func() {
 		cancel(nil)

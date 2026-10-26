@@ -117,6 +117,22 @@ func (p *prepared) Summary() string {
 	return fmt.Sprintf("%q in %s", p.source, p.root)
 }
 
+// CanonicalKey returns the call's prepared input.
+func (p *prepared) CanonicalKey() json.RawMessage {
+	key, _ := json.Marshal(struct {
+		Pattern string `json:"pattern"`
+		Root    string `json:"root"`
+		Glob    string `json:"glob"`
+		Mode    string `json:"mode"`
+	}{p.source, p.root, p.glob, p.mode})
+	return key
+}
+
+// EvidenceArguments returns the arguments a decision model may see.
+func (p *prepared) EvidenceArguments() json.RawMessage {
+	return p.CanonicalKey()
+}
+
 // Prepare validates the arguments.
 //
 // The pattern is compiled here, so an invalid regular expression is a

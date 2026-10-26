@@ -123,6 +123,29 @@ func (p *prepared) Summary() string {
 	return fmt.Sprintf("%s (offset %d, limit %d)", p.path, p.offset, p.limit)
 }
 
+// CanonicalKey returns the call's prepared input.
+//
+// The resolved path is the file the call reads, so two spellings of the
+// same path share the key.
+func (p *prepared) CanonicalKey() json.RawMessage {
+	key, _ := json.Marshal(struct {
+		Path   string `json:"path"`
+		Offset int    `json:"offset"`
+		Limit  int    `json:"limit"`
+	}{p.abs, p.offset, p.limit})
+	return key
+}
+
+// EvidenceArguments returns the arguments a decision model may see.
+func (p *prepared) EvidenceArguments() json.RawMessage {
+	args, _ := json.Marshal(struct {
+		Path   string `json:"path"`
+		Offset int    `json:"offset"`
+		Limit  int    `json:"limit"`
+	}{p.path, p.offset, p.limit})
+	return args
+}
+
 // Prepare validates the arguments.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args

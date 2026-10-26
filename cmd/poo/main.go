@@ -20,6 +20,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/handoff"
+	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/prompt/agentsmd"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
@@ -241,6 +242,17 @@ func runRun(args []string) int {
 		"edit": editTool,
 	}
 	toolOrder := []string{"bash", "read"}
+	// The code profile allows every unmatched side-effecting call. The
+	// command installs no asker chain, so a doom loop that asks falls
+	// back, and the load-time warning names that fallback.
+	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAllow, WorkingDir: absWorkDir})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 1
+	}
+	if warning := perm.Warning(policy, policy.Askers()); warning != "" {
+		fmt.Fprintf(os.Stderr, "poo run: warning: %s\n", warning)
+	}
 	toolSpecs := make([]poo.ToolSpec, 0, len(toolOrder))
 	// The session's tool list derives from the same specs: one source
 	// for the name and class, so the log cannot drift from the wire.
@@ -296,7 +308,7 @@ func runRun(args []string) int {
 		// session that reaches the window writes a handoff and settles
 		// context_exhausted with the note.
 		Compactor: handoff.New(handoff.Options{}),
-	}, poo.WithPrompt(systemPrompt(o.modelID, toolSpecs, o.toolsMode, project)))
+	}, poo.WithPrompt(systemPrompt(o.modelID, toolSpecs, o.toolsMode, project)), poo.WithPolicy(policy))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1

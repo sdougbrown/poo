@@ -80,8 +80,10 @@ func (s *Session) runAfterTool(ctx context.Context, runID, job string, turn int,
 	}
 	current := result
 	for _, h := range s.opts.AfterTool {
+		hookInfo := info
+		hookInfo.Arguments = cloneArguments(info.Arguments)
 		hookOut, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
-			return h.AfterTool(s.hookContextFor(hctx, runID, job, turn, false), info, current)
+			return h.AfterTool(s.hookContextFor(hctx, runID, job, turn, false), hookInfo, current)
 		})
 		if hookOut.interrupted {
 			// The hook's decision is discarded, and that is not a
