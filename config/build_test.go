@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,10 +10,12 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/code"
+	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
@@ -458,5 +461,185 @@ func TestTheRuntimeCreatesAndResumesASession(t *testing.T) {
 	}
 	if len(resumed.Loaded.Records) == 0 {
 		t.Error("the loaded session holds no records")
+	}
+}
+
+// readOnlyTools are the tools a binary that can change nothing links.
+func readOnlyTools() map[string]config.ToolFactory {
+	return map[string]config.ToolFactory{
+		"read": func(config.ToolOptions) poo.Tool { return read.New() },
+		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
+	}
+}
+
+// readOnlyBuild builds a runtime for a binary with the read-only tools.
+func readOnlyBuild(t *testing.T, settings *config.Settings, executors *bash.Registry) (*config.Runtime, error) {
+	t.Helper()
+	return config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: search.Name,
+		Tools:          readOnlyTools(),
+		Profiles:       []profile.Profile{search.Profile()},
+		Executors:      executors,
+	})
+}
+
+// TestAnExecutorWithoutTheBashToolIsRefused covers the seam's settings
+// side: tools.bash.executor belongs to the bash tool, so a binary that
+// does not link the tool refuses the setting by name.
+func TestAnExecutorWithoutTheBashToolIsRefused(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+tools:
+  bash:
+    executor: bwrap
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = readOnlyBuild(t, settings, nil)
+	if err == nil {
+		t.Fatal("a binary without bash built a settings file that names an executor")
+	}
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the failure is %v, want a settings failure", err)
+	}
+	if failure.Field != "tools.bash.executor" {
+		t.Errorf("the failure names the field %q, want tools.bash.executor", failure.Field)
+	}
+	if !strings.Contains(failure.Message, "bash") {
+		t.Errorf("the message %q does not name the tool", failure.Message)
+	}
+}
+
+// TestAReadOnlyBuildNeedsNoExecutor covers the other half: a profile that
+// offers no bash builds without an executor, so a read-only binary passes
+// no registry.
+func TestAReadOnlyBuildNeedsNoExecutor(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := readOnlyBuild(t, settings, nil)
+	if err != nil {
+		t.Fatalf("building a read-only runtime: %v", err)
+	}
+	want := []string{"read", "grep"}
+	if len(runtime.Options.ToolOrder) != len(want) {
+		t.Fatalf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
+	}
+	for i, name := range want {
+		if runtime.Options.ToolOrder[i] != name {
+			t.Errorf("the tool %d is %q, want %q", i, runtime.Options.ToolOrder[i], name)
+		}
+	}
+}
+
+// TestABashSettingWithoutTheBashToolIsRefused covers every leaf the bash
+// tool owns: a binary that does not link the tool refuses the leaf by
+// name, and an explicit zero is still present.
+func TestABashSettingWithoutTheBashToolIsRefused(t *testing.T) {
+	for _, tc := range []struct{ name, leaf, document string }{
+		{"timeout", "tools.bash.timeout_s", "tools:\n  bash: {timeout_s: 17}\n"},
+		{"zero timeout", "tools.bash.timeout_s", "tools:\n  bash: {timeout_s: 0}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+tc.document), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			_, err = readOnlyBuild(t, settings, nil)
+			var failure *config.Error
+			if !errors.As(err, &failure) {
+				t.Fatalf("a binary without bash accepted %s: %v", tc.leaf, err)
+			}
+			if failure.Code != config.CodeUnsupported || failure.Field != tc.leaf {
+				t.Errorf("the failure is %+v, want unsupported on %s", failure, tc.leaf)
+			}
+			if !strings.Contains(failure.Message, "bash") {
+				t.Errorf("the message %q does not name the tool", failure.Message)
+			}
+		})
+	}
+}
+
+// TestACLIRegistryWithoutTheBashToolBuildsAnExecutor covers the executor's
+// other caller: call_cli runs a command too, so a binary that offers it
+// gets the session's executor, and a binary that carries no executor at
+// all is told so rather than left without one.
+func TestACLIRegistryWithoutTheBashToolBuildsAnExecutor(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(dir)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	files := profile.Profile{Name: "files", Tools: []string{"edit"}}
+	var got exec.Executor
+	build := func(executors *bash.Registry) (*config.Runtime, error) {
+		return config.Build(config.BuildOptions{
+			Settings:       settings,
+			WorkingDir:     t.TempDir(),
+			DefaultProfile: files.Name,
+			Tools: map[string]config.ToolFactory{
+				"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+				"call_cli": func(opts config.ToolOptions) poo.Tool {
+					got = opts.Executor
+					return cliregistry.NewCall(opts.Registry).WithExecutor(opts.Executor)
+				},
+			},
+			Profiles:  []profile.Profile{files},
+			Executors: executors,
+		})
+	}
+
+	runtime, err := build(theExecutors())
+	if err != nil {
+		t.Fatalf("building a runtime with call_cli and no bash: %v", err)
+	}
+	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	if got == nil {
+		t.Error("call_cli was built with no executor")
+	}
+
+	_, err = build(nil)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a binary with call_cli and no executor built anyway: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "tools.bash.executor" {
+		t.Errorf("the failure is %+v, want unsupported on tools.bash.executor", failure)
+	}
+	if !strings.Contains(failure.Message, "links no executor") {
+		t.Errorf("the message %q does not say the binary links no executor", failure.Message)
+	}
+}
+
+// TestANilBashFactoryIsNotLinked covers the linked predicate: a map
+// entry with no constructor is not a tool the binary offers, so the
+// executor setting it names is refused.
+func TestANilBashFactoryIsNotLinked(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"tools:\n  bash: {executor: local}\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	tools := readOnlyTools()
+	tools["bash"] = nil
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "base",
+		Tools:          tools,
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a nil bash factory accepted tools.bash.executor: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "tools.bash.executor" {
+		t.Errorf("the failure is %+v, want unsupported on tools.bash.executor", failure)
 	}
 }

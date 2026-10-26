@@ -1,9 +1,9 @@
-package bash_test
+package exec_test
 
 import (
 	"testing"
 
-	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/exec"
 )
 
 // TestTheEnvironmentLosesTheScrubbedNames covers the plan's
@@ -17,7 +17,7 @@ func TestTheEnvironmentLosesTheScrubbedNames(t *testing.T) {
 		"POO_TEST_PLAIN=visible",
 	}
 
-	got := bash.ScrubEnv(base, bash.Scrub{
+	got := exec.ScrubEnv(base, exec.Scrub{
 		Names: []string{"POO_TEST_API_KEY"},
 		Globs: []string{"POO_TEST_SECRET_*"},
 	})
@@ -38,7 +38,7 @@ func TestTheEnvironmentLosesTheScrubbedNames(t *testing.T) {
 func TestAPassthroughLimitsTheEnvironment(t *testing.T) {
 	base := []string{"POO_TEST_KEEP=kept", "POO_TEST_OTHER=dropped"}
 
-	got := bash.ScrubEnv(base, bash.Scrub{Passthrough: []string{"POO_TEST_KEEP"}})
+	got := exec.ScrubEnv(base, exec.Scrub{Passthrough: []string{"POO_TEST_KEEP"}})
 	if len(got) != 1 || got[0] != "POO_TEST_KEEP=kept" {
 		t.Errorf("the environment is %v, want only the passthrough name", got)
 	}
@@ -50,7 +50,7 @@ func TestAPassthroughLimitsTheEnvironment(t *testing.T) {
 func TestAScrubbedNameStaysGoneThroughAPassthrough(t *testing.T) {
 	base := []string{"POO_TEST_KEEP=kept", "POO_TEST_API_KEY=secret"}
 
-	got := bash.ScrubEnv(base, bash.Scrub{
+	got := exec.ScrubEnv(base, exec.Scrub{
 		Names:       []string{"POO_TEST_API_KEY"},
 		Passthrough: []string{"POO_TEST_KEEP", "POO_TEST_API_KEY"},
 	})
@@ -63,10 +63,10 @@ func TestAScrubbedNameStaysGoneThroughAPassthrough(t *testing.T) {
 // command uses: a nil base with nothing to scrub inherits the parent's
 // environment.
 func TestTheChildEnvironmentKeepsItsContract(t *testing.T) {
-	if got := bash.ChildEnv(nil, nil); got != nil {
+	if got := exec.ChildEnv(nil, nil); got != nil {
 		t.Errorf("the environment is %v, want nil so the child inherits", got)
 	}
-	got := bash.ChildEnv([]string{"A=1", "B=2"}, []string{"A"})
+	got := exec.ChildEnv([]string{"A=1", "B=2"}, []string{"A"})
 	if len(got) != 1 || got[0] != "B=2" {
 		t.Errorf("the environment is %v, want only B", got)
 	}

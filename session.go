@@ -3,6 +3,7 @@ package poo
 import (
 	"context"
 	"crypto/sha256"
+
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -751,7 +752,9 @@ const (
 	// the output ceiling.
 	OutputReserve = 256
 	// CharsPerToken is the starting estimate of characters per token.
-	// The first usage report calibrates it.
+	// The first usage report calibrates it. The tools' caps share the
+	// scale: they take this constant, so one recalibration moves every
+	// consumer.
 	CharsPerToken = 3.5
 	// MinCharsPerToken and MaxCharsPerToken bound the calibration.
 	MinCharsPerToken = 2.0

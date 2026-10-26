@@ -16,8 +16,18 @@
 //   - the session package may import the standard library, the core
 //     package and the decide package
 //   - the tool/cliregistry package may import the standard library, the core
-//     package, the prompt package, the decide package, the bash package and
-//     the packages outside the module that hold a cli registry
+//     package, the cli package, the prompt package, the decide package, the
+//     bash package and the packages outside the module that hold a cli
+//     registry
+//   - the cli package may import the standard library and the packages
+//     outside the module that hold a cli registry
+//   - the server package may import the packages it composes: the core,
+//     the settings, the profiles, the executors, the permission policy,
+//     the sessions, the catalogs and the wire
+//   - the exec package may import the standard library only, and the
+//     exec/bwrap package may import the exec package
+//   - the protect package may import the standard library only
+//   - the caps package may import the standard library only
 //
 // The import graph comes from "go list -e -deps -json", and the toolchain
 // decides what counts as the standard library. The rules cover each checked
@@ -90,9 +100,37 @@ func (c Checker) rules() []rule {
 		{path: m + "/perm", allowed: []string{m}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
+		{path: m + "/exec"},
+		{path: m + "/exec/bwrap", allowed: []string{m + "/exec"}},
+		{path: m + "/protect"},
+		{path: m + "/internal/caps"},
+		{path: m + "/cli", external: true},
+		{
+			path: m + "/server",
+			allowed: []string{
+				m,
+				m + "/cli",
+				m + "/compact/handoff",
+				m + "/config",
+				m + "/decide",
+				m + "/exec",
+				m + "/internal/caps",
+				m + "/perm",
+				m + "/perm/decide",
+				m + "/profile",
+				m + "/prompt",
+				m + "/protect",
+				m + "/provider/catalog",
+				m + "/provider/openai",
+				m + "/session",
+				m + "/wire",
+				m + "/wire/protocol",
+			},
+			external: true,
+		},
 		{
 			path:     m + "/tool/cliregistry",
-			allowed:  []string{m, m + "/decide", m + "/prompt", m + "/tool/bash"},
+			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/prompt", m + "/tool/bash"},
 			external: true,
 		},
 	}

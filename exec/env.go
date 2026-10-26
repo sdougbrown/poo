@@ -1,4 +1,4 @@
-package bash
+package exec
 
 import (
 	"os"

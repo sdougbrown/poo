@@ -1,27 +1,42 @@
-package bash_test
+package exec_test
 
 import (
+	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
-	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/exec"
 )
+
+// localStub is an executor the registry tests build: the registry
+// holds constructors, and what the constructor returns is the test's
+// own.
+type localStub struct{}
+
+// Name is the name the stub answers to.
+func (localStub) Name() string { return "local" }
+
+// Start runs nothing: the stub is only built, never started.
+func (localStub) Start(context.Context, exec.Command, io.Writer) (exec.Process, error) {
+	return nil, nil
+}
 
 // TestTheRegistryBuildsTheExecutorItHolds covers the registry: the
 // name selects the constructor, and the executor comes back.
 func TestTheRegistryBuildsTheExecutorItHolds(t *testing.T) {
-	registry := bash.NewRegistry()
-	registry.Register("local", func(bash.Options) (bash.Executor, error) {
-		return bash.NewLocal(), nil
+	registry := exec.NewRegistry()
+	registry.Register("local", func(exec.Options) (exec.Executor, error) {
+		return localStub{}, nil
 	})
 
-	exec, err := registry.New("local", bash.Options{})
+	built, err := registry.New("local", exec.Options{})
 	if err != nil {
 		t.Fatalf("building the executor: %v", err)
 	}
-	if exec.Name() != "local" {
-		t.Errorf("the executor is named %q, want local", exec.Name())
+	if built.Name() != "local" {
+		t.Errorf("the executor is named %q, want local", built.Name())
 	}
 }
 
@@ -29,19 +44,19 @@ func TestTheRegistryBuildsTheExecutorItHolds(t *testing.T) {
 // name the binary does not link is a configuration error, and never a
 // fallback to another executor.
 func TestAnUnknownExecutorIsATypedError(t *testing.T) {
-	registry := bash.NewRegistry()
-	registry.Register("local", func(bash.Options) (bash.Executor, error) {
-		return bash.NewLocal(), nil
+	registry := exec.NewRegistry()
+	registry.Register("local", func(exec.Options) (exec.Executor, error) {
+		return localStub{}, nil
 	})
 
-	exec, err := registry.New("bwrap", bash.Options{})
+	built, err := registry.New("bwrap", exec.Options{})
 	if err == nil {
 		t.Fatal("an executor the registry does not hold was built")
 	}
-	if exec != nil {
-		t.Errorf("the failed build returned %v, want nothing", exec)
+	if built != nil {
+		t.Errorf("the failed build returned %v, want nothing", built)
 	}
-	var unknown *bash.ErrUnknownExecutor
+	var unknown *exec.ErrUnknownExecutor
 	if !errors.As(err, &unknown) {
 		t.Fatalf("the failure is %v, want an unknown executor", err)
 	}

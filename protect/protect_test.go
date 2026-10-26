@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/sdougbrown/poo/tool/protect"
+	"github.com/sdougbrown/poo/protect"
 )
 
 // masker is the shape a sandboxing executor declares for the paths it

@@ -9,6 +9,8 @@ The customization story is "import it and make your own", not "use our binary
 and our plugin surface". Tools, providers and policy modules are ordinary Go
 packages wired at compile time, so a consumer compiles a harness containing
 exactly what it wants — and what it leaves out cannot be reached at runtime.
+[docs/build-your-own-binary.md](docs/build-your-own-binary.md) is the recipe:
+the factory, the injected tools, the conformance suite and the closure gate.
 
 **Status: experimental.** The Go APIs, settings and wire protocol may change
 without a deprecation period until the TUI launches.
@@ -43,6 +45,10 @@ that already exists, rather than appending a second session to it.
 | `poo/prompt` | The system prompt's vocabulary: named sections, the alternatives they offer, and the environment they read |
 | `poo/pootest` | Exported test helpers: a scripted transport, an in-memory sink, a stub decider, a scripted compactor |
 | `poo/tool/*` | Opt-in tools: `read`, `edit`, `grep`, `bash`, `cliregistry` |
+| `poo/cli` | The cli registry's catalog: the manifests a session may call |
+| `poo/exec` | The executor contract a binary fills: a command, its environment, and where it runs |
+| `poo/protect` | The protected-path matcher: the paths a tool must not touch |
+| `poo/server` | The `wire.Factory` a `serve` command is built from |
 | `poo/provider/*` | Provider seam and transports |
 | `poo/perm` | Permission engine: the policy over tool calls, the doom loop's action, and the asker chain that answers a call the policy asks about |
 | `poo/perm/decide` | An asker that answers a permission call with a decision model |

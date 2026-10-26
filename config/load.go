@@ -73,10 +73,29 @@ func Parse(data []byte, format Format) (*Settings, error) {
 	if err := decoder.Decode(&settings); err != nil {
 		return nil, decodeError(err)
 	}
+	settings.Permission.askersNamed = namesAskers(normalized)
 	if err := settings.Check(); err != nil {
 		return nil, err
 	}
 	return &settings, nil
+}
+
+// namesAskers reports whether the document names the asker chain, even
+// an empty one.
+//
+// The settings hold a list, and an empty list decodes the same as an
+// absent one: the document is read a second time for the key's
+// presence, and the first read is the values.
+func namesAskers(document []byte) bool {
+	var named struct {
+		Permission struct {
+			Askers *[]string `json:"askers"`
+		} `json:"permission"`
+	}
+	if err := json.Unmarshal(document, &named); err != nil {
+		return false
+	}
+	return named.Permission.Askers != nil
 }
 
 // unknownField matches the field a strict decode did not recognize.

@@ -68,6 +68,8 @@ permission:
     - class: read_only
       action: allow
   # The asker chain, in order. The decide asker needs a decider model.
+  # An empty list means no askers, so an ask goes straight to the fallback;
+  # an absent list takes the binary's own chain.
   askers: [decide]
   chain_timeout_s: 120
   # The decision asker's thresholds.

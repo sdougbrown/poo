@@ -25,7 +25,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.PermissionDoomLoopThreshold = count(s.Permission.DoomLoop.Threshold)
 	f.PermissionDoomLoopNearThreshold = count(s.Permission.DoomLoop.NearThreshold)
 	f.PermissionDoomLoopAction = pointer(s.Permission.DoomLoop.Action)
-	f.PermissionAskers = list(s.Permission.Askers)
+	f.PermissionAskers = askers(s.Permission)
 	f.PermissionChainTimeoutS = count(s.Permission.ChainTimeoutS)
 	f.PermissionDecideApprove = share(s.Permission.Decide.Approve)
 	f.PermissionDecideDeny = share(s.Permission.Decide.Deny)
@@ -158,4 +158,16 @@ func list(values []string) []string {
 		return nil
 	}
 	return append([]string(nil), values...)
+}
+
+// askers returns the asker chain the fields hold.
+//
+// The chain is the one list whose emptiness says something: a chain the
+// settings name with no askers is present and empty, and the fields
+// hold an empty list for it rather than none.
+func askers(permission Permission) []string {
+	if !permission.AskersNamed() {
+		return nil
+	}
+	return append([]string{}, permission.Askers...)
 }

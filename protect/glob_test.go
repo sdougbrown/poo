@@ -3,7 +3,7 @@ package protect_test
 import (
 	"testing"
 
-	"github.com/sdougbrown/poo/tool/protect"
+	"github.com/sdougbrown/poo/protect"
 )
 
 // TestATrailingSlashStillProtects covers the way an operator writes a

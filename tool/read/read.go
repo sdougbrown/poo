@@ -17,8 +17,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/prompt"
-	"github.com/sdougbrown/poo/tool/protect"
+	"github.com/sdougbrown/poo/protect"
 )
 
 // Defaults for the read tool.
@@ -34,9 +35,8 @@ const (
 	// context.
 	MaxLineChars = 2000
 	// OutputCapMax is the largest read output the model ever sees.
-	OutputCapMax = 70000
-	// CharsPerToken is the core's estimate of characters per token, so
-	// the tool's caps and the session's estimator measure on one scale.
+	OutputCapMax = caps.ReadOutputMax
+	// CharsPerToken is the plan's estimate of characters per token.
 	CharsPerToken = poo.CharsPerToken
 	// BinarySniffBytes is how much of a file is read to decide whether it
 	// is binary.
@@ -48,14 +48,7 @@ const (
 // The cap is context-relative: min(70000, floor(0.10 × context_limit × 3.5))
 // characters.
 func OutputCap(contextLimit int) int {
-	cap := int(0.10 * float64(contextLimit) * CharsPerToken)
-	if cap > OutputCapMax {
-		return OutputCapMax
-	}
-	if cap < 0 {
-		return 0
-	}
-	return cap
+	return caps.ReadOutput(contextLimit, CharsPerToken)
 }
 
 // Tool is the read tool.

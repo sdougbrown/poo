@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -106,6 +107,7 @@ func (s *suite) start(settings string, endpoint *provider, extra ...string) *cli
 	args = append(args, extra...)
 
 	cmd := exec.Command(s.target.Binary, args...)
+	cmd.Env = append(os.Environ(), s.target.Env...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		s.t.Fatalf("the binary's input: %v", err)
