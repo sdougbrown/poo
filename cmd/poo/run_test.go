@@ -542,11 +542,14 @@ func TestTheCommandDefaultsToHandoff(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "run.jsonl")
 
+	// The prompt, the system prompt and the tool schemas put the second
+	// request between the handoff ratio (90%) and the hard limit (97%)
+	// of the window. A larger system prompt may need a larger window.
 	runCLI(t,
 		"run",
 		"--base-url", endpoint.URL+"/v1",
 		"--model-id", "test-model",
-		"--context-limit", "30000",
+		"--context-limit", "31000",
 		"--working-dir", dir,
 		"--log", logPath,
 		strings.Repeat("x", 100000),
