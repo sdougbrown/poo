@@ -17,7 +17,7 @@ import (
 
 // open starts a binary with the given turns and returns a client and
 // the session it opened.
-func (s *suite) open(turns []Turn, extra map[string]any) (*client, string) {
+func (s *suite) open(turns []ScriptedAnswer, extra map[string]any) (*client, string) {
 	s.t.Helper()
 	endpoint := newProvider(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, extra)
@@ -327,7 +327,7 @@ func (s *suite) promptAndStream() {
 // that runs out is not a failure.
 func (s *suite) statusAndWait() {
 	s.t.Helper()
-	turns := []Turn{{Text: "the answer", Delay: 300 * time.Millisecond}}
+	turns := []ScriptedAnswer{{Text: "the answer", Delay: 300 * time.Millisecond}}
 	c, sessionID := s.open(turns, nil)
 	runID := s.prompt(c, sessionID, "say hello")
 
@@ -368,7 +368,7 @@ func (s *suite) permissionGate() {
 	if s.skipWithoutTool("bash") {
 		return
 	}
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo allowed"}}}},
 		{Text: "the first answer"},
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo refused"}}}},
@@ -475,7 +475,7 @@ func (s *suite) steer() {
 	}
 	marker := filepath.Join(s.dir, "steer.marker")
 	s.resetMarker(marker)
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": s.markerCommand(marker)}}}},
 		{Text: "the answer"},
 	}
@@ -518,7 +518,7 @@ func (s *suite) interrupt() {
 		return
 	}
 	command := s.boundedCommand()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 		{Text: "the answer after the interrupt"},
 	}
@@ -562,7 +562,7 @@ func (s *suite) followUpMessage() {
 	}
 	marker := filepath.Join(s.dir, "follow-up.marker")
 	s.resetMarker(marker)
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": s.markerCommand(marker)}}}},
 		{Text: "the answer"},
 		{Text: "the answer after the follow-up"},
@@ -606,7 +606,7 @@ func (s *suite) typedResult() {
 	extra := map[string]any{
 		"finish": map[string]any{"schema_file": schema},
 	}
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "finish", Arguments: map[string]any{
 			"result": map[string]any{"answer": "the result"},
 		}}}},
@@ -702,7 +702,7 @@ func (s *suite) kill() {
 		return
 	}
 	command := s.boundedCommand()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 	}
 	c, sessionID := s.open(turns, nil)

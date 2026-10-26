@@ -34,7 +34,7 @@ type ModelInfo struct {
 	// Reasoning is how the model's reasoning is controlled.
 	Reasoning ReasoningControl `json:"reasoning,omitempty"`
 	// Temperature is whether the model accepts a temperature.
-	Temperature TempControl `json:"temperature,omitempty"`
+	Temperature TempMode `json:"temperature,omitempty"`
 	// PromptCache is how the model's prompt cache is used.
 	PromptCache CacheMode `json:"prompt_cache,omitempty"`
 	// PromptVariant selects the prompt sections' variant text.
@@ -129,16 +129,16 @@ const (
 	ReasoningBudget ReasoningMode = "budget"
 )
 
-// TempControl is whether a model accepts a temperature.
-type TempControl string
+// TempMode is whether a model accepts a temperature.
+type TempMode string
 
 const (
 	// TempFree accepts any temperature.
-	TempFree TempControl = "free"
+	TempFree TempMode = "free"
 	// TempFixed takes no temperature: none is ever sent.
-	TempFixed TempControl = "fixed"
+	TempFixed TempMode = "fixed"
 	// TempUnsupported rejects a temperature.
-	TempUnsupported TempControl = "unsupported"
+	TempUnsupported TempMode = "unsupported"
 )
 
 // CacheMode is how a model's prompt cache is used.

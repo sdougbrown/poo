@@ -214,7 +214,7 @@ func TestTheLongChangeCheckWantsEveryTimeout(t *testing.T) {
 	}
 }
 
-// raiseTimeouts raises every request timeout in a workdir.
+// raiseTimeouts raises every request timeout in a working dir.
 func raiseTimeouts(t *testing.T, workdir string, seconds int) {
 	t.Helper()
 	err := filepath.Walk(filepath.Join(workdir, "shop"), func(path string, info os.FileInfo, err error) error {

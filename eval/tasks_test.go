@@ -29,7 +29,7 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// runCheck runs a task's check.sh in a workdir and returns its exit code.
+// runCheck runs a task's check.sh in a working dir and returns its exit code.
 func runCheck(t *testing.T, taskDir, workdir, sessionLog, changed string) int {
 	t.Helper()
 	cmd := exec.Command("/bin/bash", filepath.Join(taskDir, "check.sh"))

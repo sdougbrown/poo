@@ -7,18 +7,18 @@ import (
 	"testing"
 )
 
-// Nothing in a model's workdir may hold the answer.
+// Nothing in a model's working dir may hold the answer.
 //
-// The workdir is a copy of the fixture, and the model works in it. A
+// The working dir is a copy of the fixture, and the model works in it. A
 // check script, a task file or an answer derivation in there is
 // something the model can read, and a model that reads it learns the
 // answer without doing the work.
 //
-// The harness makes the workdir, so the property is held for every
-// task: the workdir is the fixture and nothing else.
+// The harness makes the working dir, so the property is held for every
+// task: the working dir is the fixture and nothing else.
 
 // The names a task tree uses for the things that must not be in a
-// workdir.
+// working dir.
 var answerFileNames = []string{
 	"check.sh",
 	"check_answer.py",
@@ -60,11 +60,11 @@ func TestNoFixtureHoldsAnAnswerFile(t *testing.T) {
 	}
 }
 
-// The workdir the harness makes holds the fixture and nothing else.
+// The working dir the harness makes holds the fixture and nothing else.
 //
 // The harness copies the fixture, so the check is on the copy: the
 // answer derivation is in the task tree, and the task tree is never in
-// the workdir.
+// the working dir.
 func TestTheWorkdirIsTheFixtureAndNothingElse(t *testing.T) {
 	root := repoRoot(t)
 	tasks, err := LoadTasks(filepath.Join(root, "evals", "tasks"))
@@ -73,7 +73,7 @@ func TestTheWorkdirIsTheFixtureAndNothingElse(t *testing.T) {
 	}
 	for _, task := range tasks {
 		t.Run(task.ID, func(t *testing.T) {
-			// The workdir is made the way the harness makes it: the
+			// The working dir is made the way the harness makes it: the
 			// fixture is snapshotted into the work root, and the run
 			// copies the snapshot.
 			fixtures := filepath.Join(root, "evals", "fixtures")
@@ -108,7 +108,7 @@ func TestTheWorkdirIsTheFixtureAndNothingElse(t *testing.T) {
 						found = append(found, rel)
 					}
 				}
-				// The task's own directory is never in the workdir.
+				// The task's own directory is never in the working dir.
 				if strings.HasPrefix(rel, "tasks") {
 					found = append(found, rel)
 				}

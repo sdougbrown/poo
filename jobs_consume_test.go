@@ -55,8 +55,8 @@ func TestAFailedDeliveryLeavesTheResultQueued(t *testing.T) {
 func TestTheJobResultIsDeliveredInCompletionOrder(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{
-			{ID: "call_1", Name: "job", Arguments: json.RawMessage(`{"text":"one"}`)},
-			{ID: "call_2", Name: "job", Arguments: json.RawMessage(`{"text":"two"}`)},
+			{CallID: "call_1", Name: "job", Arguments: json.RawMessage(`{"text":"one"}`)},
+			{CallID: "call_2", Name: "job", Arguments: json.RawMessage(`{"text":"two"}`)},
 		}},
 		{text: "the answer"},
 	})
@@ -139,7 +139,7 @@ func TestTheJobsToolListsTheHeldJobs(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
 		{calls: []poo.ToolCall{{
-			ID:        "call_2",
+			CallID:    "call_2",
 			Name:      "jobs",
 			Arguments: json.RawMessage(`{}`),
 		}}},
@@ -180,7 +180,7 @@ func TestTheJobsToolListsTheHeldJobs(t *testing.T) {
 func TestCancelJobOnAnUnknownJobIsReported(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{{
-			ID:        "call_1",
+			CallID:    "call_1",
 			Name:      "cancel_job",
 			Arguments: json.RawMessage(`{"job":"j9"}`),
 		}}},
@@ -460,7 +460,7 @@ func TestTheJobsToolListsOnlyRunningAndHeldJobs(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
 		{text: "waiting now"},
-		{calls: []poo.ToolCall{{ID: "call_list", Name: "jobs", Arguments: json.RawMessage(`{}`)}}},
+		{calls: []poo.ToolCall{{CallID: "call_list", Name: "jobs", Arguments: json.RawMessage(`{}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}

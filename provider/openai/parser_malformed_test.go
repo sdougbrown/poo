@@ -143,7 +143,7 @@ func TestAFencedBlockThatIsNotACallComesBackOnceWhenStreamed(t *testing.T) {
 			p := newParser(mode, "")
 			var prose strings.Builder
 			var calls int
-			collect := func(evs []poo.StreamEvent) {
+			collect := func(evs []poo.StreamItem) {
 				for _, ev := range evs {
 					switch ev.Kind {
 					case "delta":
@@ -179,7 +179,7 @@ func TestAFencedCallStillParsesWhenStreamed(t *testing.T) {
 		p := newParser("text", "")
 		var calls []string
 		var prose strings.Builder
-		collect := func(evs []poo.StreamEvent) {
+		collect := func(evs []poo.StreamItem) {
 			for _, ev := range evs {
 				switch ev.Kind {
 				case "delta":

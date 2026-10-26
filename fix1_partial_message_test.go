@@ -38,7 +38,7 @@ func brokenStreamServer(t *testing.T) *httptest.Server {
 // loop drops it on the settle path.
 func TestThePartialAssistantMessageAfterADeltaIsRecorded(t *testing.T) {
 	srv := brokenStreamServer(t)
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
@@ -89,7 +89,7 @@ func TestThePartialAssistantMessageAfterADeltaIsRecorded(t *testing.T) {
 // stream had already shown the model part of the answer.
 func TestTheAttemptAfterADeltaKeepsItsKind(t *testing.T) {
 	srv := brokenStreamServer(t)
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Millisecond, time.Millisecond},

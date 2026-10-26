@@ -27,16 +27,16 @@ func newCandidate(reason Reason, detail SettleDetail) candidate {
 // A custom condition is a plain function of the state, so a consumer
 // does not need a type to express one:
 //
-//	poo.StopCondition(func(s poo.StopState) (bool, string) {
+//	poo.StopCondition(func(s poo.TurnSnapshot) (bool, string) {
 //		return s.Turn > 10, "ten turns is enough"
 //	})
-type StopCondition func(state StopState) (stop bool, detail string)
+type StopCondition func(state TurnSnapshot) (stop bool, detail string)
 
-// StopState is what a stop condition is asked about.
+// TurnSnapshot is what a stop condition is asked about.
 //
 // The state carries what the turn did, so a condition can look at the
 // calls that ran and their outcomes.
-type StopState struct {
+type TurnSnapshot struct {
 	// Turn is the turn that just ended, counting from one.
 	Turn int
 	// Calls are the calls the turn made, in order.
@@ -63,7 +63,7 @@ type CallState struct {
 // job counts: `started` is not an error. The condition is asked after
 // the whole batch, so the batch always completes first.
 func HasToolCall(name string) StopCondition {
-	return func(state StopState) (bool, string) {
+	return func(state TurnSnapshot) (bool, string) {
 		for _, c := range state.Calls {
 			if c.Tool != name || c.IsError {
 				continue

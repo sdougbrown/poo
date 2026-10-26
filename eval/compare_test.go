@@ -11,13 +11,13 @@ import (
 )
 
 // makeReport builds a report with the given runs.
-func makeReport(dir string, results ...RunResult) *Report {
+func makeReport(dir string, results ...CellResult) *Report {
 	return &Report{Dir: dir, StartedAt: "2026-10-20T00:00:00Z", Results: results}
 }
 
 // makeRun builds one run result.
-func makeRun(model string, seed int, success bool, metrics Metrics) RunResult {
-	return RunResult{Task: "t", Model: model, Seed: seed, Success: success, Metrics: metrics}
+func makeRun(model string, seed int, success bool, metrics Metrics) CellResult {
+	return CellResult{Task: "t", Model: model, Seed: seed, Success: success, Metrics: metrics}
 }
 
 func TestASmallSuccessDropIsNotARegression(t *testing.T) {
@@ -214,8 +214,8 @@ func TestTheMarkdownReportHoldsTheNumbers(t *testing.T) {
 
 func TestTheSummaryCountsThePathsOutsideTheExpectedOnes(t *testing.T) {
 	report := makeReport("d",
-		RunResult{Task: "t", Model: "m", Seed: 1, Success: true, Metrics: Metrics{UnexpectedFiles: []string{"other.go"}}},
-		RunResult{Task: "t", Model: "m", Seed: 2, Success: true, Metrics: Metrics{}},
+		CellResult{Task: "t", Model: "m", Seed: 1, Success: true, Metrics: Metrics{UnexpectedFiles: []string{"other.go"}}},
+		CellResult{Task: "t", Model: "m", Seed: 2, Success: true, Metrics: Metrics{}},
 	)
 	summary := Summarize(report)
 	if summary.Overall.UnexpectedFiles != 1 {

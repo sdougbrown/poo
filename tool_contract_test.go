@@ -33,7 +33,7 @@ func (t *recordingPrepareTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) 
 // reaches it.
 func TestPrepareReceivesThePrepareEnv(t *testing.T) {
 	tr := scripted([]fakeResponse{{
-		calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{}`)}},
+		calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{}`)}},
 	}})
 	sink := &recordingSink{}
 	tool := &recordingPrepareTool{}

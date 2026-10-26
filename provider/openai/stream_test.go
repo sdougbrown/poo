@@ -22,7 +22,7 @@ func TestAnEventSplitOverTwoDataLinesIsRead(t *testing.T) {
 		"data: \"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n" + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -49,7 +49,7 @@ func TestTheTimeToTheFirstTokenIgnoresARoleOnlyChunk(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -84,7 +84,7 @@ func TestTheTimeoutBoundsTheWholeRequest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", Timeout: 60 * time.Millisecond})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", Timeout: 60 * time.Millisecond})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -133,7 +133,7 @@ func TestACancelledStreamEndsWithTheContextsError(t *testing.T) {
 	defer srv.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	reader, _, err := tr.Stream(ctx, poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -165,7 +165,7 @@ func TestAStreamThatFailsAfterItsDeltasStillReportsItsUsage(t *testing.T) {
 		chunk(`{"error":{"message":"the model crashed","type":"server_error"}}`)
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -200,7 +200,7 @@ func TestTheEventAfterTheUsageIsTheEndOfTheStream(t *testing.T) {
 		chunk(`{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2}}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -236,7 +236,7 @@ func TestAContextLengthErrorInAStreamChunkIsMapped(t *testing.T) {
 	body := chunk(`{"error":{"message":"This model's maximum context length is 8192 tokens","type":"invalid_request_error","code":"context_length_exceeded"}}`)
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -263,7 +263,7 @@ func TestAContextLengthErrorInAStreamChunkIsMapped(t *testing.T) {
 func TestAContextLengthErrorInAServerResponseIsMapped(t *testing.T) {
 	srv := newSSEServer(t, `{"error":{"message":"maximum context length exceeded","code":"context_length_exceeded"}}`)
 	srv.status = http.StatusInternalServerError
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -281,7 +281,7 @@ func TestAnErrorChunkWithoutAMessageIsStillAnError(t *testing.T) {
 	for _, errBody := range []string{`{"error":{}}`, `{"error":{"code":1}}`} {
 		t.Run(errBody, func(t *testing.T) {
 			srv := newSSEServer(t, chunk(errBody))
-			tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+			tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			if err != nil {
 				t.Fatalf("starting the request: %v", err)
@@ -327,7 +327,7 @@ func TestAnErrorBodyIsReadBeforeTheTimeoutIsReleased(t *testing.T) {
 	for name, status := range map[string]int{"a non-200 status": http.StatusBadRequest, "a 200 with a JSON error": http.StatusOK} {
 		t.Run(name, func(t *testing.T) {
 			srv := slowErrorServer(t, status, first, rest)
-			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", Timeout: 5 * time.Second})
+			tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", Timeout: 5 * time.Second})
 			_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			var pe *poo.ProviderError
 			if !errors.As(err, &pe) {
@@ -347,7 +347,7 @@ func TestAnEventLineOver64KiBIsRead(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"`+big+`"}}]}`) +
 		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -376,7 +376,7 @@ func TestAnEventLineOver64KiBIsRead(t *testing.T) {
 // a full message instead of deltas. Its content must reach the stream.
 func TestAFinalMessageChunkIsRead(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"message":{"role":"assistant","content":"the answer"}}]}`))
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -409,7 +409,7 @@ func TestAStreamThatBreaksAfterItsDeltaKeepsItsKind(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -455,7 +455,7 @@ func TestAStreamThatBreaksBeforeItsDeltaIsNetwork(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)

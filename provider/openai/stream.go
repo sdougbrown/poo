@@ -83,7 +83,7 @@ type streamReader struct {
 	// cancel releases the request's context, when the transport made one.
 	cancel context.CancelFunc
 	// pending holds events the reader has decoded but not yet returned.
-	pending []poo.StreamEvent
+	pending []poo.StreamItem
 	// data holds the `data:` lines of the event being read. An event's
 	// payload may span several lines, which the SSE grammar joins with a
 	// newline.
@@ -115,7 +115,7 @@ type streamReader struct {
 	deferParsed bool
 	// deferred holds the calls the model wrote as text, waiting to see
 	// whether the response carries a native call.
-	deferred []poo.StreamEvent
+	deferred []poo.StreamItem
 	// emptyToolCalls reports that the model asked for tool calls and
 	// sent none. The failure is reported when the response ends, so the
 	// usage the endpoint sends after the finish reason is not lost.
@@ -138,7 +138,7 @@ func (r *streamReader) init() {
 }
 
 // Next returns the next event.
-func (r *streamReader) Next() (poo.StreamEvent, error) {
+func (r *streamReader) Next() (poo.StreamItem, error) {
 	r.init()
 
 	if len(r.pending) > 0 {
@@ -148,9 +148,9 @@ func (r *streamReader) Next() (poo.StreamEvent, error) {
 	}
 	if r.done {
 		if r.err != nil {
-			return poo.StreamEvent{}, r.err
+			return poo.StreamItem{}, r.err
 		}
-		return poo.StreamEvent{}, io.EOF
+		return poo.StreamItem{}, io.EOF
 	}
 
 	for {
@@ -210,9 +210,9 @@ func (r *streamReader) Next() (poo.StreamEvent, error) {
 }
 
 // take removes the next queued event and reports whether there was one.
-func (r *streamReader) take() (poo.StreamEvent, bool) {
+func (r *streamReader) take() (poo.StreamItem, bool) {
 	if len(r.pending) == 0 {
-		return poo.StreamEvent{}, false
+		return poo.StreamItem{}, false
 	}
 	ev := r.pending[0]
 	r.pending = r.pending[1:]
@@ -258,7 +258,7 @@ func (r *streamReader) dispatch() error {
 // The parser is flushed, so a text-mode tool call that arrived without a
 // trailing newline is not lost, and the usage report is produced, so every
 // request has one.
-func (r *streamReader) close() (poo.StreamEvent, error) {
+func (r *streamReader) close() (poo.StreamItem, error) {
 	if err := r.dispatch(); err != nil {
 		// The event ended the stream. The usage is still reported.
 		return r.fail(err)
@@ -289,17 +289,17 @@ func (r *streamReader) close() (poo.StreamEvent, error) {
 		return ev, nil
 	}
 	if r.err != nil {
-		return poo.StreamEvent{}, r.err
+		return poo.StreamItem{}, r.err
 	}
-	return poo.StreamEvent{}, io.EOF
+	return poo.StreamItem{}, io.EOF
 }
 
 // withoutToolCalls drops the tool call events from a list of events.
 //
 // The endpoint sent a call of its own, so a call the model wrote as
 // text is not one the model made.
-func withoutToolCalls(events []poo.StreamEvent) []poo.StreamEvent {
-	out := make([]poo.StreamEvent, 0, len(events))
+func withoutToolCalls(events []poo.StreamItem) []poo.StreamItem {
+	out := make([]poo.StreamItem, 0, len(events))
 	for _, ev := range events {
 		if ev.Kind == "tool_call" {
 			continue
@@ -316,7 +316,7 @@ func withoutToolCalls(events []poo.StreamEvent) []poo.StreamEvent {
 // more specific failure and replaces the read error. The usage report
 // follows, so a consumer sees the request's accounting even when the
 // stream broke. The failure itself is returned by the next call.
-func (r *streamReader) fail(err error) (poo.StreamEvent, error) {
+func (r *streamReader) fail(err error) (poo.StreamItem, error) {
 	if derr := r.dispatch(); derr != nil {
 		err = derr
 	}
@@ -326,7 +326,7 @@ func (r *streamReader) fail(err error) (poo.StreamEvent, error) {
 	if ev, ok := r.take(); ok {
 		return ev, nil
 	}
-	return poo.StreamEvent{}, err
+	return poo.StreamItem{}, err
 }
 
 // ReportUsage returns the usage report the reader holds.
@@ -380,8 +380,8 @@ func (r *streamReader) providerError(body *errorBody) error {
 }
 
 // events turns one chunk into the events it carries.
-func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
-	var out []poo.StreamEvent
+func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
+	var out []poo.StreamItem
 
 	for _, choice := range chunk.Choices {
 		delta := choice.Delta
@@ -395,13 +395,13 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 
 		if thinking := delta.ReasoningContent; thinking != "" {
 			r.markFirstToken()
-			out = append(out, poo.StreamEvent{
+			out = append(out, poo.StreamItem{
 				Kind:  "delta",
 				Delta: &poo.Delta{Kind: "thinking", Text: thinking},
 			})
 		} else if thinking := delta.Reasoning; thinking != "" {
 			r.markFirstToken()
-			out = append(out, poo.StreamEvent{
+			out = append(out, poo.StreamItem{
 				Kind:  "delta",
 				Delta: &poo.Delta{Kind: "thinking", Text: thinking},
 			})
@@ -434,7 +434,7 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 			// text, so the parsed ones are dropped.
 			r.deferred = nil
 			complete := isCompleteJSON(tc.Function.Arguments)
-			out = append(out, poo.StreamEvent{
+			out = append(out, poo.StreamItem{
 				Kind: "tool_call",
 				ToolCall: &poo.ToolCallDelta{
 					Index:     tc.Index,
@@ -457,7 +457,7 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 				// finish reason is not lost.
 				r.emptyToolCalls = true
 			}
-			out = append(out, poo.StreamEvent{
+			out = append(out, poo.StreamItem{
 				Kind:         "finish",
 				FinishReason: poo.FinishReason(choice.FinishReason),
 			})
@@ -476,7 +476,7 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamEvent, error) {
 		}
 		r.usage = u
 		r.usageSent = true
-		out = append(out, poo.StreamEvent{Kind: "usage", Usage: u})
+		out = append(out, poo.StreamItem{Kind: "usage", Usage: u})
 	}
 
 	return out, nil
@@ -508,12 +508,12 @@ func (r *streamReader) ttftMS() float64 {
 // Every request gets one, so a consumer can see the time to the first
 // token even when the endpoint reports no token counts. A request whose
 // endpoint reported its own usage already has one.
-func (r *streamReader) appendUsage(evs []poo.StreamEvent) []poo.StreamEvent {
+func (r *streamReader) appendUsage(evs []poo.StreamItem) []poo.StreamItem {
 	if r.usageSent {
 		return evs
 	}
 	r.ensureUsage()
-	return append(evs, poo.StreamEvent{Kind: "usage", Usage: r.usage})
+	return append(evs, poo.StreamItem{Kind: "usage", Usage: r.usage})
 }
 
 // ensureUsage builds the usage report a request gets when the endpoint

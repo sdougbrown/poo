@@ -53,7 +53,7 @@ func emptyToolCallsThenAnswer(t *testing.T) *httptest.Server {
 // only when the request ends with a failure.
 func TestARetriedAttemptsUsageIsCounted(t *testing.T) {
 	srv := emptyToolCallsThenAnswer(t)
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Millisecond, time.Millisecond},

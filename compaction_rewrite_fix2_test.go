@@ -15,7 +15,7 @@ import (
 func TestFailedRewriteIsAtomic(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		fix2Turn(),
-		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}

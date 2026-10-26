@@ -22,8 +22,8 @@ import (
 func TestTwoResultsFinishingWhileIdleStartOneWokenRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{
-			{ID: "call_1", Name: "job", Arguments: json.RawMessage(`{"text":"one"}`)},
-			{ID: "call_2", Name: "job", Arguments: json.RawMessage(`{"text":"two"}`)},
+			{CallID: "call_1", Name: "job", Arguments: json.RawMessage(`{"text":"one"}`)},
+			{CallID: "call_2", Name: "job", Arguments: json.RawMessage(`{"text":"two"}`)},
 		}},
 		{text: "the woken answer"},
 	})
@@ -221,7 +221,7 @@ func wakeLimitSession(t *testing.T, limit int) (*poo.Session, *recordingSink, *p
 	t.Helper()
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{{
-			ID:        "call_1",
+			CallID:    "call_1",
 			Name:      "job",
 			Arguments: json.RawMessage(`{"text":"one"}`),
 		}}},
@@ -471,7 +471,7 @@ func TestAMixedBatchRunsTheJobAndTheCall(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{
 			jobCall("one", true),
-			{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
+			{CallID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"two"}`)},
 		}},
 		{text: "the answer"},
 	})
@@ -577,9 +577,9 @@ func TestAJobStoreFailureSettlesTheCurrentRun(t *testing.T) {
 	b := pootest.NewJobTool("b", poo.BackgroundAlways)
 	sink := &failingSink{failRecord: "job.ended"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "a", Name: "a", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "a", Name: "a", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "waiting a"},
-		{calls: []poo.ToolCall{{ID: "b", Name: "b", Arguments: []byte(`{"text":"two"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "b", Name: "b", Arguments: []byte(`{"text":"two"}`)}}},
 		{text: "waiting b"},
 	})
 	s := newTestSession(t, poo.Options{

@@ -188,8 +188,8 @@ func TestTheRunnerClearsTheRunsDirectoryWithForce(t *testing.T) {
 }
 
 func TestThePooBinaryPathIsMadeAbsolute(t *testing.T) {
-	// The binary runs in the workdir, so a relative path would be
-	// resolved against the workdir rather than against the caller's
+	// The binary runs in the working dir, so a relative path would be
+	// resolved against the working dir rather than against the caller's
 	// directory.
 	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
@@ -227,7 +227,7 @@ func TestThePooBinaryPathIsMadeAbsolute(t *testing.T) {
 
 func TestTwoRunsDoNotShareAWorkRoot(t *testing.T) {
 	// Two harness invocations must not share a work root, or one
-	// removes the other's workdir.
+	// removes the other's working dir.
 	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")

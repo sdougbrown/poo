@@ -16,6 +16,7 @@ import (
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/prompt/agentsmd"
+	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/session"
 )
 
@@ -95,7 +96,7 @@ func runRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 2
 	}
-	if settings.Roles[config.RoleChat] == "" && o.baseURL == "" {
+	if settings.Roles[string(catalog.RoleChat)] == "" && o.baseURL == "" {
 		fmt.Fprintf(os.Stderr, "poo run: --base-url, --model-id and --context-limit are required, or a settings file that names a chat model\n")
 		return 2
 	}
@@ -180,10 +181,10 @@ func runRun(args []string) int {
 		Mode:         runtime.SessionMode,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
 		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ID: model.ModelID, BaseURL: session.LoggedBaseURL(model.Endpoint), MaxOutput: model.MaxOutput},
+		Model:        poo.SessionModel{ModelID: model.ModelID, BaseURL: session.LoggedBaseURL(model.Endpoint), MaxOutput: model.MaxOutput},
 		Tools:        runtime.SessionTools(),
 		ContextLimit: model.ContextLimit,
-		ToolsMode:    string(model.Tools.Mode),
+		ToolsMode:    poo.ToolsMode(model.Tools.Mode),
 		// The metadata says what the session ran with: the profile it
 		// was built from, and the models it talked to.
 		Profile: runtime.Profile.Name,

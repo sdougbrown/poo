@@ -41,7 +41,7 @@ func TestTheBwrapSandboxHidesEverythingButTheWorkdir(t *testing.T) {
 		t.Skipf("no home directory: %v", err)
 	}
 	// The fake run writes its log as the real one does, then records what
-	// it could see outside the workdir.
+	// it could see outside the working dir.
 	poo := fakePoo(t, strings.Replace(logWritingPoo, "exit 0",
 		`{ cat `+secret+` 2>&1; ls `+taskRoot+` 2>&1; echo "home=$HOME pwd=$(pwd)"
 if ls '`+repo+`' >/dev/null 2>&1; then echo repo=readable; else echo repo=hidden; fi
@@ -86,7 +86,7 @@ exit 0`, 1))
 		t.Errorf("the run saw %q, want its home in /tmp and its working directory /work", seen)
 	}
 	// A tool that installs into the home directory, as pip --user does,
-	// leaves nothing in the workdir's diff.
+	// leaves nothing in the working dir's diff.
 	if len(res.Metrics.UnexpectedFiles) != 0 {
 		t.Errorf("the run's home directory reached the diff: %v", res.Metrics.UnexpectedFiles)
 	}

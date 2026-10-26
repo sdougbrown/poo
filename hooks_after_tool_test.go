@@ -43,7 +43,7 @@ func (h *recordingAfterTool) AfterTool(ctx poo.HookContext, info poo.ToolCallInf
 	h.seen = append(h.seen, result)
 	decision := h.decision
 	h.runIDs = append(h.runIDs, ctx.RunID)
-	h.jobs = append(h.jobs, ctx.Job)
+	h.jobs = append(h.jobs, ctx.JobID)
 	session := h.session
 	h.mu.Unlock()
 	if session != nil {
@@ -99,7 +99,7 @@ func TestAnAnnotationKeepsTheOriginalInTheRecord(t *testing.T) {
 	tool := &echoTool{result: "the original"}
 	hook := &recordingAfterTool{decision: poo.Annotate("and the note")}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}
@@ -133,7 +133,7 @@ func TestAReplacementKeepsTheOriginalInTheRecord(t *testing.T) {
 	tool := &echoTool{result: "the original"}
 	hook := &recordingAfterTool{decision: poo.Replace(poo.ToolResult{Text: "the replacement"})}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}
@@ -168,7 +168,7 @@ func TestARedactionNeverWritesTheOriginal(t *testing.T) {
 	tool := &echoTool{result: "the output with " + secret}
 	hook := &recordingAfterTool{decision: poo.Redact(poo.ToolResult{Text: "[the output was redacted]"})}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}
@@ -211,7 +211,7 @@ func TestTheChainRunsInRegistrationOrder(t *testing.T) {
 	second := &recordingAfterTool{name: "second", names: names, decision: poo.Annotate("the second note")}
 	tool := &echoTool{result: "the original"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}
@@ -246,7 +246,7 @@ func TestARedactionWinsOverAReplacement(t *testing.T) {
 		Replaced: &poo.ToolResult{Text: "the replacement"},
 	}}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}

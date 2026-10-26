@@ -10,6 +10,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/provider/catalog"
 )
 
 // sharedFlags are the flags every command takes.
@@ -197,11 +198,11 @@ func (f *endpointFlags) apply(settings *config.Settings) {
 		Endpoint:     name,
 		ModelID:      f.modelID,
 		API:          string(poo.APIChatCompletions),
-		ToolsMode:    toolsMode,
+		ToolsMode:    poo.ToolsMode(toolsMode),
 		Ops:          []string{string(poo.OpChat)},
 		ContextLimit: f.contextLimit,
 	}
-	settings.Roles[config.RoleChat] = name
+	settings.Roles[string(catalog.RoleChat)] = name
 }
 
 // validate checks the flags that describe one model.

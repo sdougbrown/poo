@@ -104,7 +104,7 @@ type Summary struct {
 func Summarize(report *Report) Summary {
 	summary := Summary{Overall: aggregate(report.Results)}
 
-	byModel := map[string][]RunResult{}
+	byModel := map[string][]CellResult{}
 	var modelOrder []string
 	for _, r := range report.Results {
 		if _, ok := byModel[r.Model]; !ok {
@@ -116,7 +116,7 @@ func Summarize(report *Report) Summary {
 	for _, m := range modelOrder {
 		runs := byModel[m]
 		ms := ModelSummary{Model: m, Overall: aggregate(runs), ByTask: map[string]Aggregate{}}
-		byTask := map[string][]RunResult{}
+		byTask := map[string][]CellResult{}
 		for _, r := range runs {
 			byTask[r.Task] = append(byTask[r.Task], r)
 		}
@@ -126,7 +126,7 @@ func Summarize(report *Report) Summary {
 		summary.Models = append(summary.Models, ms)
 	}
 
-	byTask := map[string][]RunResult{}
+	byTask := map[string][]CellResult{}
 	var taskOrder []string
 	for _, r := range report.Results {
 		if _, ok := byTask[r.Task]; !ok {
@@ -137,7 +137,7 @@ func Summarize(report *Report) Summary {
 	sort.Strings(taskOrder)
 	for _, t := range taskOrder {
 		ts := TaskSummary{Task: t, ByModel: map[string]Aggregate{}}
-		byModel := map[string][]RunResult{}
+		byModel := map[string][]CellResult{}
 		for _, r := range byTask[t] {
 			byModel[r.Model] = append(byModel[r.Model], r)
 		}
@@ -156,14 +156,14 @@ func Summarize(report *Report) Summary {
 // per-seed means. The runs inside one seed share whatever the seed gave
 // them, so the seed is the unit the noise floor names, and the spread of
 // the per-seed means is the noise.
-func aggregate(runs []RunResult) Aggregate {
+func aggregate(runs []CellResult) Aggregate {
 	agg := Aggregate{Runs: len(runs), SettleReasons: map[string]int{}}
 	if len(runs) == 0 {
 		return agg
 	}
 
 	// The runs of each seed, so a metric's per-seed means can be found.
-	bySeed := map[int][]RunResult{}
+	bySeed := map[int][]CellResult{}
 	for _, r := range runs {
 		bySeed[r.Seed] = append(bySeed[r.Seed], r)
 	}
@@ -172,7 +172,7 @@ func aggregate(runs []RunResult) Aggregate {
 
 	// spreadOf returns the standard deviation of a metric's per-seed
 	// means.
-	spreadOf := func(get func(RunResult) float64) float64 {
+	spreadOf := func(get func(CellResult) float64) float64 {
 		var perSeed []float64
 		for _, s := range seeds {
 			var values []float64
@@ -219,7 +219,7 @@ func aggregate(runs []RunResult) Aggregate {
 		}
 	}
 	agg.SuccessRate = float64(successes) / float64(len(runs))
-	agg.SuccessSpread = spreadOf(func(r RunResult) float64 {
+	agg.SuccessSpread = spreadOf(func(r CellResult) float64 {
 		if r.Success {
 			return 1
 		}
@@ -227,23 +227,23 @@ func aggregate(runs []RunResult) Aggregate {
 	})
 
 	agg.Turns = round2(mean(turns))
-	agg.TurnsSpread = round2(spreadOf(func(r RunResult) float64 { return float64(r.Metrics.Turns) }))
+	agg.TurnsSpread = round2(spreadOf(func(r CellResult) float64 { return float64(r.Metrics.Turns) }))
 	agg.InputTokens = round2(mean(input))
-	agg.InputSpread = round2(spreadOf(func(r RunResult) float64 { return float64(r.Metrics.InputTokens) }))
+	agg.InputSpread = round2(spreadOf(func(r CellResult) float64 { return float64(r.Metrics.InputTokens) }))
 	agg.OutputTokens = round2(mean(output))
-	agg.OutputSpread = round2(spreadOf(func(r RunResult) float64 { return float64(r.Metrics.OutputTokens) }))
+	agg.OutputSpread = round2(spreadOf(func(r CellResult) float64 { return float64(r.Metrics.OutputTokens) }))
 	agg.WallMS = round2(mean(wall))
-	agg.WallSpread = round2(spreadOf(func(r RunResult) float64 { return r.Metrics.WallMS }))
+	agg.WallSpread = round2(spreadOf(func(r CellResult) float64 { return r.Metrics.WallMS }))
 	agg.TTFTMS = round2(mean(ttft))
-	agg.TTFTSpread = round2(spreadOf(func(r RunResult) float64 { return r.Metrics.TTFTMS }))
+	agg.TTFTSpread = round2(spreadOf(func(r CellResult) float64 { return r.Metrics.TTFTMS }))
 	agg.TTFTTrend = round2(mean(trend))
-	agg.TTFTTrendSpread = round2(spreadOf(func(r RunResult) float64 { return r.Metrics.TTFTTrend }))
+	agg.TTFTTrendSpread = round2(spreadOf(func(r CellResult) float64 { return r.Metrics.TTFTTrend }))
 	agg.ToolErrorRate = round4(mean(toolErr))
-	agg.ToolErrorSpread = round4(spreadOf(func(r RunResult) float64 { return r.Metrics.ToolErrorRate }))
+	agg.ToolErrorSpread = round4(spreadOf(func(r CellResult) float64 { return r.Metrics.ToolErrorRate }))
 	agg.TextParseRate = round4(mean(parse))
-	agg.TextParseSpread = round4(spreadOf(func(r RunResult) float64 { return r.Metrics.TextParseRate }))
+	agg.TextParseSpread = round4(spreadOf(func(r CellResult) float64 { return r.Metrics.TextParseRate }))
 	agg.RereadRate = round4(mean(reread))
-	agg.RereadSpread = round4(spreadOf(func(r RunResult) float64 { return r.Metrics.RereadRate }))
+	agg.RereadSpread = round4(spreadOf(func(r CellResult) float64 { return r.Metrics.RereadRate }))
 	agg.DiffLines = round2(mean(diffLines))
 	if cacheReported {
 		v := round4(mean(cacheRatios))
@@ -385,7 +385,7 @@ func portable(dir string, report *Report) *Report {
 	}
 	out := *report
 	out.Dir = "."
-	out.Results = make([]RunResult, len(report.Results))
+	out.Results = make([]CellResult, len(report.Results))
 	for i, r := range report.Results {
 		if rel, err := filepath.Rel(dir, r.LogPath); err == nil && r.LogPath != "" {
 			r.LogPath = rel

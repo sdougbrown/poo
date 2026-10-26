@@ -254,17 +254,17 @@ func TestTheQuestionsAreSplitIntoBatches(t *testing.T) {
 // TestTheEvidenceIsFramedAsData covers the evidence: the payload frames
 // the turns as data to assess, not instructions to follow.
 func TestTheEvidenceIsFramedAsData(t *testing.T) {
-	payload := decide.Evidence([]decide.Turn{
+	payload := decide.Evidence([]decide.Utterance{
 		{Role: "user", Text: "fix the bug"},
 		{Role: "tool", ToolName: "bash", ToolInput: `{"command":"ls"}`, ToolOutput: "a.go"},
-	}, decide.EvidenceOptions{Cwd: "/work"})
+	}, decide.EvidenceOptions{WorkingDir: "/work"})
 
 	frame, ok := payload.(decide.EvidencePayload)
 	if !ok {
 		t.Fatalf("the evidence is a %T, want the evidence payload", payload)
 	}
-	if frame.Cwd != "/work" {
-		t.Errorf("the payload's working directory is %q, want /work", frame.Cwd)
+	if frame.WorkingDir != "/work" {
+		t.Errorf("the payload's working directory is %q, want /work", frame.WorkingDir)
 	}
 	if len(frame.Turns) != 2 {
 		t.Fatalf("the payload holds %d turns, want 2", len(frame.Turns))
@@ -457,7 +457,7 @@ func TestAMalformedAnswerIsRecordedAsADeferral(t *testing.T) {
 // the caller gets or the error the caller sees.
 func TestASinkThatRefusesARecordDoesNotFailTheDecision(t *testing.T) {
 	writes := 0
-	broken := decide.SinkFunc(func(ctx context.Context, rec decide.Record) error {
+	broken := decide.SinkFunc(func(ctx context.Context, rec decide.Decision) error {
 		writes++
 		return errors.New("the log is full")
 	})
@@ -661,11 +661,11 @@ func TestTheUnreportedRequestCountIsAbsentFromTheRecord(t *testing.T) {
 // recordingSink keeps the records it receives.
 type recordingSink struct {
 	// records holds the records, in order.
-	records []decide.Record
+	records []decide.Decision
 }
 
 // Record keeps one record.
-func (s *recordingSink) Record(ctx context.Context, rec decide.Record) error {
+func (s *recordingSink) Record(ctx context.Context, rec decide.Decision) error {
 	s.records = append(s.records, rec)
 	return nil
 }
@@ -738,8 +738,8 @@ func TestTheQuestionKindSurvivesARecordRoundTrip(t *testing.T) {
 		{ID: "q3", Instructions: "how bad?", Kind: decide.Score{Levels: []string{"low", "mid", "high"}}},
 	}
 
-	rec := decide.Record{
-		Origin:    "hook:policy",
+	rec := decide.Decision{
+		AskedBy:   "hook:policy",
 		Questions: questions,
 		StateHash: "abc",
 		Outcome:   decide.OutcomeOK,
@@ -748,7 +748,7 @@ func TestTheQuestionKindSurvivesARecordRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encoding: %v", err)
 	}
-	var back decide.Record
+	var back decide.Decision
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("decoding: %v", err)
 	}

@@ -85,7 +85,7 @@ func bashToolEndpoint(t *testing.T, command string) *httptest.Server {
 
 // TestTheBwrapExecutorShowsTheTaskOnlyItsWorkdir covers the eval
 // isolation: a run with --executor bwrap gives the model's bash a sandbox
-// bound to the task's workdir. A file beside the workdir is not there.
+// bound to the task's working dir. A file beside the working dir is not there.
 func TestTheBwrapExecutorShowsTheTaskOnlyItsWorkdir(t *testing.T) {
 	requireBwrap(t)
 	if _, err := exec.LookPath("go"); err != nil {
@@ -96,7 +96,7 @@ func TestTheBwrapExecutorShowsTheTaskOnlyItsWorkdir(t *testing.T) {
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 	// The check passes only when the fix is in place and the file beside
-	// the workdir did not leak into it.
+	// the working dir did not leak into it.
 	check := "#!/usr/bin/env bash\nset -uo pipefail\n" +
 		"grep -q fixed a.txt || exit 1\n" +
 		"if grep -q the-beside seen.txt 2>/dev/null; then exit 1; fi\n" +
@@ -110,7 +110,7 @@ func TestTheBwrapExecutorShowsTheTaskOnlyItsWorkdir(t *testing.T) {
 
 	runsDir := filepath.Join(t.TempDir(), "work")
 	run := cell{task: task, model: Model{Name: "m"}, seed: 1}
-	// The file sits beside the workdir on the host, inside the seed's
+	// The file sits beside the working dir on the host, inside the seed's
 	// directory. It must not be visible to the sandboxed command.
 	seedRoot := jobDir(runsDir, run)
 	if err := os.MkdirAll(seedRoot, 0o755); err != nil {

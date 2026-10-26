@@ -18,7 +18,7 @@ func TestTheHeaderTheRunCommandWritesCanBeRestored(t *testing.T) {
 		t.Fatalf("the bash tool's background mode is %q, want %q", spec.Background, poo.BackgroundAllowed)
 	}
 	// cmd/poo/main.go: sessionTools = append(sessionTools,
-	// poo.SessionTool{Name: spec.Name, Class: spec.Class})
+	// poo.ToolInfo{Name: spec.Name, Class: spec.Class})
 	recorded := []poo.ToolInfo{{Name: spec.Name, Class: spec.Class}}
 	// the header the run command writes for this tool
 	created := &poo.SessionCreated{
@@ -28,7 +28,7 @@ func TestTheHeaderTheRunCommandWritesCanBeRestored(t *testing.T) {
 		Mode:         "logged",
 		WorkingDir:   "/tmp",
 		Tools:        recorded,
-		Model:        poo.SessionModel{ID: "m"},
+		Model:        poo.SessionModel{ModelID: "m"},
 		ContextLimit: 32768,
 		ToolsMode:    "native",
 	}

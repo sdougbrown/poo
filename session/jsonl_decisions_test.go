@@ -20,8 +20,8 @@ func TestTheDecisionSinkWritesStandaloneRecords(t *testing.T) {
 		t.Fatalf("opening the sink: %v", err)
 	}
 	ctx := context.Background()
-	rec := decide.Record{
-		Origin:    "permission",
+	rec := decide.Decision{
+		AskedBy:   "permission",
 		StateHash: "abc",
 		Outcome:   decide.OutcomeOK,
 		LatencyMS: 12.5,
@@ -30,7 +30,7 @@ func TestTheDecisionSinkWritesStandaloneRecords(t *testing.T) {
 	if err := sink.Record(ctx, rec); err != nil {
 		t.Fatalf("recording: %v", err)
 	}
-	if err := sink.Record(ctx, decide.Record{Origin: "other", Outcome: decide.OutcomeDeferred}); err != nil {
+	if err := sink.Record(ctx, decide.Decision{AskedBy: "other", Outcome: decide.OutcomeDeferred}); err != nil {
 		t.Fatalf("recording: %v", err)
 	}
 	if err := sink.Close(); err != nil {
@@ -73,7 +73,7 @@ func TestTheDecisionSinkIsASink(t *testing.T) {
 	}
 	defer sink.Close()
 	var asSink decide.Sink = sink
-	if err := asSink.Record(context.Background(), decide.Record{Outcome: decide.OutcomeOK}); err != nil {
+	if err := asSink.Record(context.Background(), decide.Decision{Outcome: decide.OutcomeOK}); err != nil {
 		t.Fatalf("recording: %v", err)
 	}
 }

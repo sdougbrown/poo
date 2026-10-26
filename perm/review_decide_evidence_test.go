@@ -17,15 +17,15 @@ import (
 func TestReviewTheDecideAskerShowsTheCall(t *testing.T) {
 	decider := pootest.NewDecider(0.9)
 	asker := permissive.New(decider, permissive.Options{})
-	history := poo.NewHistory([]poo.Message{
+	history := poo.NewHistoryView([]poo.Message{
 		poo.NewTextMessage(poo.RoleUser, "clean up the disk space"),
 	}, nil, nil)
 	if _, err := asker.Ask(t.Context(), perm.Ask{
-		Tool:    "bash",
-		Summary: "rm -rf ~",
-		Class:   poo.ClassSideEffecting,
-		Reason:  poo.ReasonPolicy,
-		History: history,
+		Tool:        "bash",
+		Summary:     "rm -rf ~",
+		Class:       poo.ClassSideEffecting,
+		Reason:      poo.ReasonPolicy,
+		HistoryView: history,
 	}); err != nil {
 		t.Fatalf("asking: %v", err)
 	}

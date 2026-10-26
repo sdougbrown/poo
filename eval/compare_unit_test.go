@@ -5,8 +5,8 @@ import (
 )
 
 // run builds one run result for a comparison.
-func comparisonRun(model string, seed int, success bool, input, output int) RunResult {
-	return RunResult{
+func comparisonRun(model string, seed int, success bool, input, output int) CellResult {
+	return CellResult{
 		Model:   model,
 		Seed:    seed,
 		Success: success,
@@ -16,7 +16,7 @@ func comparisonRun(model string, seed int, success bool, input, output int) RunR
 
 // comparisonReport builds a report whose runs all belong to the named
 // directory, so Compare can tell the sides apart.
-func comparisonReport(dir string, runs ...RunResult) *Report {
+func comparisonReport(dir string, runs ...CellResult) *Report {
 	return &Report{Dir: dir, Results: runs}
 }
 

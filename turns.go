@@ -58,7 +58,7 @@ func (s *Session) openTurn(runTurn int) int {
 		start: len(s.history),
 		end:   len(s.history),
 	})
-	s.turns = append(s.turns, TurnSummary{Index: runTurn, Session: turn})
+	s.turns = append(s.turns, TurnSummary{Index: runTurn, TurnIndex: turn})
 	return turn
 }
 

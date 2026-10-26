@@ -196,12 +196,12 @@ func TestTheTwoStreamEnvelopeCutsBetweenCharacters(t *testing.T) {
 func TestTheCombinedStreamEnvelopeIsUnchanged(t *testing.T) {
 	zero, fail := 0, 3
 	cases := []bash.Observation{
-		{Returncode: &zero, Output: "success\n", Cap: 40},
-		{Returncode: &fail, Output: "failure\n", Cap: 40},
+		{ExitCode: &zero, Output: "success\n", Cap: 40},
+		{ExitCode: &fail, Output: "failure\n", Cap: 40},
 		{TimedOut: true, Output: "partial\n", Cap: 40},
-		{Returncode: &zero, Output: strings.Repeat("aé🙂", 50), Cap: 11},
+		{ExitCode: &zero, Output: strings.Repeat("aé🙂", 50), Cap: 11},
 		{Output: "invalid\xff\xc3\xa9", Cap: 5},
-		{Returncode: &zero, Cap: 0},
+		{ExitCode: &zero, Cap: 0},
 	}
 	rng := rand.New(rand.NewSource(10))
 	for i := 0; i < 5000; i++ {
@@ -212,10 +212,10 @@ func TestTheCombinedStreamEnvelopeIsUnchanged(t *testing.T) {
 			code = &fail
 		}
 		cases = append(cases, bash.Observation{
-			Returncode: code,
-			TimedOut:   i%2 == 0,
-			Output:     string(b),
-			Cap:        1 + rng.Intn(210),
+			ExitCode: code,
+			TimedOut: i%2 == 0,
+			Output:   string(b),
+			Cap:      1 + rng.Intn(210),
 		})
 	}
 	for i, o := range cases {
@@ -237,8 +237,8 @@ func baselineEnvelope(o bash.Observation) (string, json.RawMessage) {
 	}
 	// A killed process has no exit code, so the field is null.
 	var code any
-	if o.Returncode != nil {
-		code = *o.Returncode
+	if o.ExitCode != nil {
+		code = *o.ExitCode
 	}
 	fields := []baselineField{
 		{bash.EnvelopeReturncode, code},

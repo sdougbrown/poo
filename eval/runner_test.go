@@ -16,7 +16,7 @@ import (
 // fakePoo writes a shell script that stands in for the poo binary.
 //
 // The script writes a session log with the given number of turns, and
-// then changes a file in the workdir, so the harness has something to
+// then changes a file in the working dir, so the harness has something to
 // measure.
 func fakePoo(t *testing.T, body string) string {
 	t.Helper()
@@ -179,7 +179,7 @@ func TestTheRunnerMeasuresAFailingCheck(t *testing.T) {
 }
 
 func TestTheWorkdirLivesUnderTheWorkRoot(t *testing.T) {
-	// The workdir is under the work root the caller names, never in
+	// The working dir is under the work root the caller names, never in
 	// /tmp's shared space.
 	fixtureRoot := fakeFixture(t, "fix-a", "old\n")
 	taskRoot := filepath.Join(filepath.Dir(fixtureRoot), "tasks")

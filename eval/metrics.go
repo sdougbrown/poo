@@ -73,7 +73,7 @@ type Metrics struct {
 	SettleSource string `json:"settle_source"`
 
 	// ChangedFiles are the paths the run changed, relative to the
-	// workdir.
+	// working dir.
 	ChangedFiles []string `json:"changed_files,omitempty"`
 	// UnexpectedFiles are the changed paths that are outside the task's
 	// expected_paths.
@@ -88,7 +88,7 @@ type Metrics struct {
 
 // ComputeMetrics measures one run from its session log.
 //
-// The diff is measured separately, because it needs the workdir, and it is
+// The diff is measured separately, because it needs the working dir, and it is
 // passed in as a Diff.
 func ComputeMetrics(log *Log, diff Diff) Metrics {
 	m := Metrics{
@@ -176,9 +176,9 @@ func ComputeMetrics(log *Log, diff Diff) Metrics {
 	return m
 }
 
-// Diff is what a run changed in the workdir.
+// Diff is what a run changed in the working dir.
 type Diff struct {
-	// Files are the changed paths, relative to the workdir.
+	// Files are the changed paths, relative to the working dir.
 	Files []string `json:"files"`
 	// Lines is the size of the diff, in changed lines.
 	Lines int `json:"lines"`

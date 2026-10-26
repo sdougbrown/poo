@@ -43,8 +43,8 @@ func projectionRecords(t *testing.T) []poo.Record {
 
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{
-			{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
-			{ID: "c2", Name: "denied", Arguments: json.RawMessage(`{"text":"two"}`)},
+			{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)},
+			{CallID: "c2", Name: "denied", Arguments: json.RawMessage(`{"text":"two"}`)},
 		}},
 		{text: "done"},
 	})

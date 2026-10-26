@@ -13,6 +13,8 @@
 // session gets the same pieces a Go consumer would build by hand.
 package config
 
+import "github.com/sdougbrown/poo"
+
 //go:generate go run github.com/umpire-tools/umpire-go-gen@v0.2.1 -i schema/settings.umpire.json -output-file settings_gen.go -pkg config
 
 // Settings are the settings a configuration file holds.
@@ -84,7 +86,7 @@ type Model struct {
 	API string `json:"api,omitempty"`
 	// ToolsMode is how the run asks for tool calls. Empty means
 	// whatever the model needs.
-	ToolsMode string `json:"tools_mode,omitempty"`
+	ToolsMode poo.ToolsMode `json:"tools_mode,omitempty"`
 	// Ops are the operations the model serves.
 	Ops []string `json:"ops,omitempty"`
 	// Inputs are the modalities the model reads.
@@ -95,8 +97,8 @@ type Model struct {
 
 // Decider are the decider's settings.
 type Decider struct {
-	// TimeoutMs is the per-call latency budget, in milliseconds.
-	TimeoutMs *int `json:"timeout_ms,omitempty"`
+	// TimeoutMS is the per-call latency budget, in milliseconds.
+	TimeoutMS *int `json:"timeout_ms,omitempty"`
 }
 
 // Permission are the permission policy's settings.
@@ -165,8 +167,8 @@ type Decide struct {
 	Approve *float64 `json:"approve,omitempty"`
 	// Deny is the probability at which a call is refused.
 	Deny *float64 `json:"deny,omitempty"`
-	// TimeoutMs is the per-call latency budget, in milliseconds.
-	TimeoutMs *int `json:"timeout_ms,omitempty"`
+	// TimeoutMS is the per-call latency budget, in milliseconds.
+	TimeoutMS *int `json:"timeout_ms,omitempty"`
 }
 
 // SystemPrompt are the system prompt's settings.
@@ -215,7 +217,7 @@ type Tools struct {
 	// bubblewrap one.
 	Bwrap Bwrap `json:"bwrap,omitempty"`
 	// Env are the child environment's rules.
-	Env Env `json:"env,omitempty"`
+	Env ChildEnv `json:"env,omitempty"`
 	// ProtectedPaths are the globs of the paths the tools must not
 	// touch.
 	ProtectedPaths []string `json:"protected_paths,omitempty"`
@@ -239,12 +241,12 @@ type Bwrap struct {
 	RWBinds []string `json:"rw_binds,omitempty"`
 }
 
-// Env are the child environment's rules.
+// ChildEnv are the child environment's rules.
 //
 // The environment a command gets is the session's environment minus the
 // names the operator asked to keep out of it. A passthrough list limits
 // the environment to exactly the names on it.
-type Env struct {
+type ChildEnv struct {
 	// Scrub are the names of the variables to remove.
 	Scrub []string `json:"scrub,omitempty"`
 	// Passthrough are the names the child keeps, and nothing else.

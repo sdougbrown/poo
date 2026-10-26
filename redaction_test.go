@@ -139,7 +139,7 @@ func secretOptions(t *testing.T, tr poo.ChatTransport, tool poo.Tool, sink poo.R
 // secretScript is the script a run with a secret tool follows.
 func secretScript() *pootest.Transport {
 	return scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 }

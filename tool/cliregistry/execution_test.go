@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/exec/bwrap"
 	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/pootest"
@@ -54,11 +55,11 @@ func execTool(t *testing.T, command []string, extra map[string]any) *cliregistry
 // nothing about the sandbox.
 func sandbox(t *testing.T) *bwrap.Executor {
 	t.Helper()
-	exec, err := bwrap.New(bwrap.Options{})
+	executor, err := bwrap.New(bwrap.Options{})
 	if err != nil {
 		t.Fatalf("the bwrap executor is unavailable: %v", err)
 	}
-	return exec
+	return executor
 }
 
 // runCall prepares and runs one call with no arguments.
@@ -182,15 +183,15 @@ func TestTheCLIRunsUnderBothExecutors(t *testing.T) {
 	command := []string{"/bin/sh", "-c", `printf 'cwd=%s\n' "$(pwd)"; printf 'key=%s\n' "$` + name + `"`}
 
 	cases := []struct {
-		name string
-		exec bash.Executor
+		name     string
+		executor exec.Executor
 	}{
 		{"local", bash.NewLocal()},
 		{"bwrap", sandbox(t)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			tool := execTool(t, command, nil).WithExecutor(c.exec)
+			tool := execTool(t, command, nil).WithExecutor(c.executor)
 			res, err := runCall(t, tool, poo.ToolEnv{
 				PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
 				Env:        bash.ScrubEnv(os.Environ(), bash.Scrub{Names: []string{name}}),
@@ -240,7 +241,7 @@ const procfsHelperEnv = "POO_CLI_PROC_HELPER"
 // environment a process was started with: a test's Setenv is not part of
 // it, so the secret has to be in the environment the parent was started
 // with.
-func assertProcfsSecret(t *testing.T, executor bash.Executor, want bool) {
+func assertProcfsSecret(t *testing.T, executor exec.Executor, want bool) {
 	t.Helper()
 	if os.Getenv(procfsHelperEnv) == "1" {
 		tool := execTool(t, []string{"/bin/sh", "-c",
@@ -263,7 +264,7 @@ func assertProcfsSecret(t *testing.T, executor bash.Executor, want bool) {
 	if err != nil {
 		t.Fatalf("finding the test binary: %v", err)
 	}
-	cmd := exec.Command(exe, "-test.run=^"+t.Name()+"$", "-test.timeout=60s")
+	cmd := osexec.Command(exe, "-test.run=^"+t.Name()+"$", "-test.timeout=60s")
 	cmd.Env = []string{
 		procfsHelperEnv + "=1",
 		procKey + "=" + procSecret,
@@ -538,12 +539,12 @@ func TestASameGroupChildDoesNotOutliveTheCall(t *testing.T) {
 
 // startedExecutor counts the commands an executor was asked to start.
 type startedExecutor struct {
-	bash.Executor
+	exec.Executor
 	starts atomic.Int64
 }
 
 // Start counts the command and hands it to the executor it wraps.
-func (s *startedExecutor) Start(ctx context.Context, c bash.Command, out io.Writer) (bash.Process, error) {
+func (s *startedExecutor) Start(ctx context.Context, c exec.Command, out io.Writer) (exec.Process, error) {
 	s.starts.Add(1)
 	return s.Executor.Start(ctx, c, out)
 }
@@ -554,8 +555,8 @@ func (s *startedExecutor) Start(ctx context.Context, c bash.Command, out io.Writ
 func TestAnAlreadyCancelledCallStartsNothing(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "marker")
-	exec := &startedExecutor{Executor: bash.NewLocal()}
-	tool := execTool(t, []string{"/bin/sh", "-c", `printf executed > "$1"`, "probe", marker}, nil).WithExecutor(exec)
+	executor := &startedExecutor{Executor: bash.NewLocal()}
+	tool := execTool(t, []string{"/bin/sh", "-c", `printf executed > "$1"`, "probe", marker}, nil).WithExecutor(executor)
 	prepared, err := prepare(t, tool, `{"name":"probe","args":{}}`)
 	if err != nil {
 		t.Fatalf("preparing the call: %v", err)
@@ -567,7 +568,7 @@ func TestAnAlreadyCancelledCallStartsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("running the CLI: %v", err)
 	}
-	if got := exec.starts.Load(); got != 0 {
+	if got := executor.starts.Load(); got != 0 {
 		t.Errorf("the executor was asked to start %d commands for a cancelled call", got)
 	}
 	if !res.IsError {

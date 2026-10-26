@@ -443,14 +443,14 @@ func TestTheTimeoutComesFromTheSettingsOrTheTool(t *testing.T) {
 		{
 			name:         "the settings fill what the tool leaves unset",
 			tool:         bash.Tool{},
-			settings:     poo.ToolSettings{BashTimeoutSeconds: 1},
+			settings:     poo.ToolSettings{BashTimeoutS: 1},
 			sleep:        "2",
 			wantTimedOut: true,
 		},
 		{
 			name:         "the settings override a set tool field",
 			tool:         bash.Tool{Timeout: time.Second},
-			settings:     poo.ToolSettings{BashTimeoutSeconds: 2},
+			settings:     poo.ToolSettings{BashTimeoutS: 2},
 			sleep:        "1.5",
 			wantTimedOut: false,
 		},

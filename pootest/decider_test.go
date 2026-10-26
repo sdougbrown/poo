@@ -82,8 +82,8 @@ func TestTheRecordingDeciderWritesOneRecord(t *testing.T) {
 	if records[0].Outcome != decide.OutcomeOK {
 		t.Errorf("the record's outcome is %q, want ok", records[0].Outcome)
 	}
-	if records[0].Origin != "the caller" {
-		t.Errorf("the record's origin is %q, want the caller", records[0].Origin)
+	if records[0].AskedBy != "the caller" {
+		t.Errorf("the record's origin is %q, want the caller", records[0].AskedBy)
 	}
 	if records[0].StateHash == "" {
 		t.Error("the record holds no state hash")
@@ -120,8 +120,8 @@ func TestTheScriptedCompactorAnswersWithItsScript(t *testing.T) {
 	}
 	c := pootest.NewCompactor(true, compaction)
 
-	view := poo.NewHistory(nil, nil, nil)
-	if !c.ShouldCompact(view, poo.Budget{ContextLimit: 100}) {
+	view := poo.NewHistoryView(nil, nil, nil)
+	if !c.ShouldCompact(view, poo.ContextBudget{ContextLimit: 100}) {
 		t.Error("the compactor declined to compact, want the scripted answer")
 	}
 	got, err := c.Compact(context.Background(), view, nil)
@@ -149,7 +149,7 @@ func TestTheScriptedCompactorFails(t *testing.T) {
 	want := errors.New("the compaction failed")
 	c.SetError(want)
 
-	if _, err := c.Compact(context.Background(), poo.NewHistory(nil, nil, nil), nil); !errors.Is(err, want) {
+	if _, err := c.Compact(context.Background(), poo.NewHistoryView(nil, nil, nil), nil); !errors.Is(err, want) {
 		t.Errorf("the compaction returned %v, want %v", err, want)
 	}
 }

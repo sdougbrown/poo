@@ -23,11 +23,11 @@ func (r *Runtime) ToolSpecs() []poo.ToolSpec {
 //
 // The list derives from the specs the session offers: one source for a
 // tool's name and class, so the log cannot drift from the wire.
-func (r *Runtime) SessionTools() []poo.SessionTool {
+func (r *Runtime) SessionTools() []poo.ToolInfo {
 	specs := r.ToolSpecs()
-	tools := make([]poo.SessionTool, 0, len(specs))
+	tools := make([]poo.ToolInfo, 0, len(specs))
 	for _, spec := range specs {
-		tools = append(tools, poo.SessionTool{
+		tools = append(tools, poo.ToolInfo{
 			Name:       spec.Name,
 			Class:      spec.Class,
 			Background: spec.Background,

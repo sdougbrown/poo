@@ -17,7 +17,7 @@ type PermissionAsk struct {
 	// Summary describes the call.
 	Summary string
 	// Class is the tool's class.
-	Class ToolClass
+	Class ToolKind
 	// Reason is why the call is being asked about: "policy" or
 	// "doom_loop".
 	Reason string

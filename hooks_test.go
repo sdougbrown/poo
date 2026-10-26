@@ -278,7 +278,7 @@ func jobResultRunStarted() *poo.RunStarted {
 		RunID:      "r1",
 		Trigger:    poo.TriggerJob,
 		Jobs: []poo.JobResult{{
-			Job:     "j3",
+			JobID:   "j3",
 			Handle:  "r1",
 			Tool:    "bash",
 			Text:    "the result",
@@ -302,7 +302,7 @@ func TestTheJobResultRecordsRoundTrip(t *testing.T) {
 	if back.Trigger != poo.TriggerJob {
 		t.Errorf("the trigger is %q, want job", back.Trigger)
 	}
-	if len(back.Jobs) != 1 || back.Jobs[0].Job != "j3" {
+	if len(back.Jobs) != 1 || back.Jobs[0].JobID != "j3" {
 		t.Errorf("the jobs are %+v, want one j3", back.Jobs)
 	}
 }

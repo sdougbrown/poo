@@ -291,7 +291,7 @@ func TestAResumedSessionKeepsOneCatalog(t *testing.T) {
 		Mode:         "logged",
 		CreatedAt:    "2026-10-22T12:00:00Z",
 		WorkingDir:   runtime.Options.WorkingDir,
-		Model:        poo.SessionModel{ID: "test-model"},
+		Model:        poo.SessionModel{ModelID: "test-model"},
 		ContextLimit: 32768,
 		Profile:      "code",
 		Tools:        runtime.Profile.Tools,

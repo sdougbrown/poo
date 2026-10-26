@@ -623,9 +623,9 @@ func (s *Session) wakeWaiters(run *runState, result Result) {
 //
 // The run settles `cancelled` unless a higher-precedence candidate has
 // already been committed. Cancelling a session with no run is a no-op.
-func (s *Session) Cancel(reason string) {
-	if reason == "" {
-		reason = "cancel:client"
+func (s *Session) Cancel(source string) {
+	if source == "" {
+		source = "cancel:client"
 	}
 	s.mu.Lock()
 	run := s.run
@@ -634,7 +634,7 @@ func (s *Session) Cancel(reason string) {
 		return
 	}
 	s.finalize(run, newCandidate(ReasonCancelled, SettleDetail{
-		Source: reason,
+		Source: source,
 		Text:   "the run was cancelled",
 	}))
 }

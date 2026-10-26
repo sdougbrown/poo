@@ -20,7 +20,7 @@ func parse(t *testing.T, mode, text string) (calls []poo.ToolCallDelta, prose st
 		}
 		return nil, text
 	}
-	var events []poo.StreamEvent
+	var events []poo.StreamItem
 	events = append(events, p.feed(text)...)
 	events = append(events, p.flush()...)
 	for _, ev := range events {
@@ -151,7 +151,7 @@ func TestTheNativeModeLeavesTheParserOff(t *testing.T) {
 func TestACallSplitAcrossChunksIsStillFound(t *testing.T) {
 	p := newParser("text", "")
 
-	var events []poo.StreamEvent
+	var events []poo.StreamItem
 	events = append(events, p.feed("<tool_call>{\"name\": \"bash\", ")...)
 	events = append(events, p.feed("\"arguments\": {\"command\": \"ls\"}}</tool_call>")...)
 	events = append(events, p.flush()...)
@@ -257,7 +257,7 @@ func TestTheProseSurvivesTheChunking(t *testing.T) {
 func TestACallWithoutAClosingTagIsStillFound(t *testing.T) {
 	p := newParser("text", "")
 
-	var events []poo.StreamEvent
+	var events []poo.StreamItem
 	events = append(events, p.feed(`<tool_call>{"name": "bash", "arguments": {"command": "ls"}}`)...)
 	events = append(events, p.flush()...)
 
@@ -297,7 +297,7 @@ func TestAnInlineObjectSplitAcrossChunksStaysProse(t *testing.T) {
 	// The prose before the object does not end in a newline, so the
 	// object does not start a line, wherever the chunk boundary falls.
 	p := newParser("text", "")
-	var events []poo.StreamEvent
+	var events []poo.StreamItem
 	events = append(events, p.feed("use ")...)
 	events = append(events, p.feed(`{"name":"bash","arguments":{"command":"ls"}} now`)...)
 	events = append(events, p.flush()...)

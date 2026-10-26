@@ -23,10 +23,10 @@ import (
 // the answer is what is left.
 func TestTheThinkTagsAreStrippedIntoThinking(t *testing.T) {
 	srv := newSSEServer(t, fixture(t, "vllm-think-tags.sse"))
-	tr := openai.New(openai.Config{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Info:    poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkThinkTags}},
+	tr := openai.New(openai.Options{
+		BaseURL:   srv.URL,
+		Model:     "m",
+		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkThinkTags}},
 	})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
@@ -54,10 +54,10 @@ func TestTheThinkTagsAreStrippedIntoThinking(t *testing.T) {
 // model is asked to think through its chat template.
 func TestTheChatTemplateThinkingIsAskedFor(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
-	tr := openai.New(openai.Config{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Info:    poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkChatTemplateThinking}},
+	tr := openai.New(openai.Options{
+		BaseURL:   srv.URL,
+		Model:     "m",
+		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkChatTemplateThinking}},
 	})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
@@ -80,11 +80,11 @@ func TestTheChatTemplateThinkingIsAskedFor(t *testing.T) {
 // schema parser reads the simplified schema.
 func TestTheToolSchemasAreSimplified(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL:   srv.URL,
 		Model:     "m",
 		ToolsMode: "native",
-		Info:      poo.ModelInfo{Name: "weak", Quirks: []string{openai.QuirkSimplifyToolSchemas}},
+		ModelInfo: poo.ModelInfo{Name: "weak", Quirks: []string{openai.QuirkSimplifyToolSchemas}},
 	})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
@@ -132,11 +132,11 @@ func TestTheDegenerateStreamIsOnlyLogged(t *testing.T) {
 
 	var log bytes.Buffer
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Logger:  slog.New(slog.NewTextHandler(&log, nil)),
-		Info:    poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkDegenerateStream}},
+	tr := openai.New(openai.Options{
+		BaseURL:   srv.URL,
+		Model:     "m",
+		Logger:    slog.New(slog.NewTextHandler(&log, nil)),
+		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkDegenerateStream}},
 	})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
@@ -159,11 +159,11 @@ func TestTheDegenerateStreamIsOnlyLogged(t *testing.T) {
 // calls read.
 func TestTheTextToolCallsAreReadInNativeMode(t *testing.T) {
 	srv := newSSEServer(t, fixture(t, "vllm-text-tool-call.sse"))
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL:   srv.URL,
 		Model:     "m",
 		ToolsMode: "native",
-		Info:      poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkTextToolCalls}},
+		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkTextToolCalls}},
 	})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
@@ -185,10 +185,10 @@ func TestTheTextToolCallsAreReadInNativeMode(t *testing.T) {
 // profiles are applied in the order the descriptor names them.
 func TestTheQuirksAreAppliedInTheDescriptorsOrder(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
-		Info: poo.ModelInfo{
+		ModelInfo: poo.ModelInfo{
 			Name:   "gemma4",
 			Quirks: []string{openai.QuirkChatTemplateThinking, openai.QuirkSimplifyToolSchemas},
 		},
@@ -212,11 +212,11 @@ func TestTheQuirksAreAppliedInTheDescriptorsOrder(t *testing.T) {
 func TestAnUnknownQuirkIsNoted(t *testing.T) {
 	var log bytes.Buffer
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
-	tr := openai.New(openai.Config{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Logger:  slog.New(slog.NewTextHandler(&log, nil)),
-		Info:    poo.ModelInfo{Name: "gemma4", Quirks: []string{"not_a_quirk"}},
+	tr := openai.New(openai.Options{
+		BaseURL:   srv.URL,
+		Model:     "m",
+		Logger:    slog.New(slog.NewTextHandler(&log, nil)),
+		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{"not_a_quirk"}},
 	})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})

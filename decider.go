@@ -68,10 +68,10 @@ type decisionSink struct {
 }
 
 // Record writes one decision record and emits the event.
-func (sink *decisionSink) Record(ctx context.Context, rec decide.Record) error {
+func (sink *decisionSink) Record(ctx context.Context, rec decide.Decision) error {
 	err := sink.session.write(ctx, &DecisionRecord{
 		RecordMeta: NewRecordMeta("decision"),
-		Origin:     rec.Origin,
+		Origin:     rec.AskedBy,
 		Questions:  rec.Questions,
 		StateHash:  rec.StateHash,
 		Answers:    rec.Answers,
@@ -82,7 +82,7 @@ func (sink *decisionSink) Record(ctx context.Context, rec decide.Record) error {
 		At:         rec.At,
 	})
 	sink.session.events.emit(EventDecision, map[string]any{
-		"origin":     rec.Origin,
+		"origin":     rec.AskedBy,
 		"outcome":    rec.Outcome,
 		"questions":  len(rec.Questions),
 		"answers":    len(rec.Answers),
@@ -123,7 +123,7 @@ func checkDeciderModel(model ModelInfo) error {
 // The turns are data to assess, not instructions. The frame and the
 // working directory are added by decide.Evidence, which builds the
 // payload the decision model is asked about.
-func EvidenceTurns(history View, n int) []decide.Turn {
+func EvidenceTurns(history View, n int) []decide.Utterance {
 	if history == nil {
 		return nil
 	}
@@ -131,11 +131,11 @@ func EvidenceTurns(history View, n int) []decide.Turn {
 		n = DefaultEvidenceTurns
 	}
 	messages := history.Messages()
-	turns := make([]decide.Turn, 0, len(messages))
+	turns := make([]decide.Utterance, 0, len(messages))
 	for _, msg := range messages {
 		switch msg.Role {
 		case RoleUser:
-			turns = append(turns, decide.Turn{
+			turns = append(turns, decide.Utterance{
 				Role: "user",
 				Text: excerpt(msg.Text(), EvidenceTextCap),
 			})
@@ -144,12 +144,12 @@ func EvidenceTurns(history View, n int) []decide.Turn {
 			calls := msg.ToolCalls()
 			if len(calls) == 0 {
 				if text != "" {
-					turns = append(turns, decide.Turn{Role: "assistant", Text: text})
+					turns = append(turns, decide.Utterance{Role: "assistant", Text: text})
 				}
 				continue
 			}
 			for _, call := range calls {
-				turns = append(turns, decide.Turn{
+				turns = append(turns, decide.Utterance{
 					Role:      "assistant",
 					Text:      text,
 					ToolName:  call.Name,
@@ -161,7 +161,7 @@ func EvidenceTurns(history View, n int) []decide.Turn {
 				if block.Kind != ContentToolResult {
 					continue
 				}
-				turns = append(turns, decide.Turn{
+				turns = append(turns, decide.Utterance{
 					Role:       "tool",
 					ToolName:   block.Name,
 					ToolOutput: excerpt(block.Text, EvidenceOutputCap),

@@ -59,19 +59,13 @@ type RecordSink interface {
 
 // SessionModel describes the model a session talks to.
 type SessionModel struct {
-	// ID is the provider's model identifier.
-	ID string `json:"id"`
+	// ModelID is the provider's model identifier.
+	ModelID string `json:"id"`
 	// BaseURL is the endpoint the session talks to, without credentials.
 	BaseURL string `json:"base_url,omitempty"`
 	// MaxOutput is the model's output-token limit, 0 when unknown.
 	MaxOutput int `json:"max_output,omitempty"`
 }
-
-// SessionTool is the name the session's metadata used for a tool.
-//
-// It is the tool's name, its class and its background mode, which is
-// what ToolInfo is.
-type SessionTool = ToolInfo
 
 // SessionMetadata is what a session's header record holds.
 //
@@ -134,7 +128,7 @@ type SessionCreated struct {
 	ContextLimit int `json:"context_limit"`
 	// ToolsMode is how the session asks for tool calls: "native", "text"
 	// or "auto".
-	ToolsMode string `json:"tools_mode"`
+	ToolsMode ToolsMode `json:"tools_mode"`
 	// ReasoningEffort is the reasoning_effort the session sends, empty
 	// when it sends none.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
@@ -181,7 +175,7 @@ type RunStarted struct {
 	// MaxTurns is the run's turn limit, 0 when unlimited.
 	MaxTurns int `json:"max_turns"`
 	// ToolsMode is how the run asks for tool calls.
-	ToolsMode string `json:"tools_mode"`
+	ToolsMode ToolsMode `json:"tools_mode"`
 	// ReasoningEffort is the reasoning_effort the run sends, empty when
 	// it sends none.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
@@ -322,7 +316,7 @@ type PermissionAskedRecord struct {
 	// Summary describes the call.
 	Summary string `json:"summary,omitempty"`
 	// Class is the tool's class.
-	Class ToolClass `json:"class,omitempty"`
+	Class ToolKind `json:"class,omitempty"`
 	// Reason is why the call is being asked about.
 	Reason string `json:"reason,omitempty"`
 	// RepeatCount holds the doom loop's counts, when the ask is one.
@@ -444,9 +438,9 @@ type ProviderDetail struct {
 	// holds the kind a failure had before it was reclassified: an
 	// interrupted stream keeps the kind it broke in here.
 	Code string `json:"code,omitempty"`
-	// RetryAfterSec is how long the endpoint asked the client to wait, in
+	// RetryAfterS is how long the endpoint asked the client to wait, in
 	// seconds, when it said so.
-	RetryAfterSec int `json:"retry_after_s,omitempty"`
+	RetryAfterS int `json:"retry_after_s,omitempty"`
 	// ResetsAt is when the endpoint says its limit resets, in RFC 3339.
 	// It is absent when the endpoint said nothing about it.
 	ResetsAt string `json:"resets_at,omitempty"`

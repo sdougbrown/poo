@@ -97,7 +97,7 @@ func TestThePolicySlotRunsFirst(t *testing.T) {
 
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}
@@ -135,7 +135,7 @@ func TestTheFirstResultBecomesTheCallsResult(t *testing.T) {
 
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -162,7 +162,7 @@ func TestARefusalWinsOverAResult(t *testing.T) {
 
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -185,7 +185,7 @@ func TestThePolicySlotIsNotSubjectToTheHookDeadline(t *testing.T) {
 	policy := &slowPolicy{delay: 150 * time.Millisecond}
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -211,7 +211,7 @@ func TestThePolicySlotsResultIsIgnored(t *testing.T) {
 	policy := &recordingBeforeTool{name: "policy", decision: poo.ShortCircuit(poo.ToolResult{Text: "the policy's answer"})}
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -234,7 +234,7 @@ func TestAHookThatMissesItsDeadlineSettlesTheRun(t *testing.T) {
 	stalling := &stallingBeforeTool{}
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})

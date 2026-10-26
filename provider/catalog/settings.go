@@ -57,7 +57,7 @@ type ModelSettings struct {
 	// Reasoning is how the model's reasoning is controlled.
 	Reasoning *poo.ReasoningControl
 	// Temperature is whether the model accepts a temperature.
-	Temperature poo.TempControl
+	Temperature poo.TempMode
 	// PrefixCache reports whether the endpoint caches prompt prefixes.
 	PrefixCache *bool
 	// PromptCache is how the model's prompt cache is used.

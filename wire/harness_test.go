@@ -493,7 +493,7 @@ func (f *testFactory) Roles() protocol.ModelRoles {
 }
 
 // Create builds a session.
-func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, env wire.Env) (*poo.Session, *wire.Info, error) {
+func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, env wire.FactoryEnv) (*poo.Session, *wire.Info, error) {
 	mode := params.Mode
 	if mode == "" {
 		mode = "logged"
@@ -515,7 +515,7 @@ func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, 
 		Mode:         mode,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
 		WorkingDir:   f.dir,
-		Model:        poo.SessionModel{ID: "test-model"},
+		Model:        poo.SessionModel{ModelID: "test-model"},
 		Tools:        f.pooTools(),
 		ContextLimit: 8192,
 		ToolsMode:    "native",
@@ -572,7 +572,7 @@ func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, 
 }
 
 // Load opens a recorded session.
-func (f *testFactory) Load(ctx context.Context, params protocol.LoadParams, env wire.Env) (*poo.Session, *wire.Info, error) {
+func (f *testFactory) Load(ctx context.Context, params protocol.LoadParams, env wire.FactoryEnv) (*poo.Session, *wire.Info, error) {
 	store, err := session.NewStore(f.dir, session.WithBuild(poo.BuildInfo{Name: "poo-test", Version: "test"}))
 	if err != nil {
 		return nil, nil, err
@@ -659,7 +659,7 @@ func (f *testFactory) openStore(mode string) (session.Store, error) {
 // The wire asker is in the chain, so a client that declared the
 // permission_answers capability is asked about the calls the policy
 // wants to ask about.
-func (f *testFactory) policy(env wire.Env) (*perm.Policy, error) {
+func (f *testFactory) policy(env wire.FactoryEnv) (*perm.Policy, error) {
 	opts := perm.Options{Unmatched: f.unmatched, WorkingDir: f.dir}
 	if env.Client != nil {
 		opts.Askers = []perm.Asker{perm.NewWireAsker(env.Client, 0)}

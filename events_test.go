@@ -9,7 +9,7 @@ import (
 
 // deltaTransport answers with a fixed set of stream events.
 type deltaTransport struct {
-	events []poo.StreamEvent
+	events []poo.StreamItem
 }
 
 // Stream hands out the fixed events.
@@ -26,7 +26,7 @@ func (t *deltaTransport) Fork(ctx context.Context, prev poo.Rendered, appended [
 // delta carries the fragment's text, so a client can display it and
 // reconstruct the message across several multi-byte fragments.
 func TestMessageDeltaCarriesItsFragment(t *testing.T) {
-	tr := &deltaTransport{events: []poo.StreamEvent{
+	tr := &deltaTransport{events: []poo.StreamItem{
 		{Kind: "delta", Delta: &poo.Delta{Kind: "thinking", Text: "rea"}},
 		{Kind: "delta", Delta: &poo.Delta{Kind: "thinking", Text: "soning 🐈"}},
 		{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "hel"}},

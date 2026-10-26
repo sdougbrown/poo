@@ -29,7 +29,7 @@ func TestAnAnsweredAskLogsNoStaleInput(t *testing.T) {
 		t.Fatalf("building the policy: %v", err)
 	}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}

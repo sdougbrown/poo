@@ -21,7 +21,7 @@ func TestTheEventsCarrySessionMonotonicNumbers(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -179,7 +179,7 @@ func TestTheGateRunsOnTheStepSixPath(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -357,7 +357,7 @@ type blockingCompactor struct {
 }
 
 // ShouldCompact says yes.
-func (c *blockingCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+func (c *blockingCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	return true
 }
 
@@ -381,7 +381,7 @@ type releasingCompactor struct {
 }
 
 // ShouldCompact says yes.
-func (c *releasingCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+func (c *releasingCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	return true
 }
 
@@ -455,7 +455,7 @@ func TestTheCompactionRecordNamesItsFormAndTokens(t *testing.T) {
 	// The replacement covers a turn, so the compaction waits for one.
 	compactor.SetShouldAfter(1)
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the answer"},
 	})
 	tool := &echoTool{result: "echoed"}
@@ -500,7 +500,7 @@ type forkCaptureCompactor struct {
 
 // ShouldCompact compacts on the run's second gate: the first one opens
 // the run's first request, and a compactor cannot fork before one.
-func (c *forkCaptureCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+func (c *forkCaptureCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	c.gates++
 	return c.gates == 2
 }
@@ -597,7 +597,7 @@ func TestTheGateRechecksTheOutputRoomAfterTheNotice(t *testing.T) {
 	// estimate just inside the notice's ratio, so the notice's own
 	// tokens are what take the room to answer away.
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 2475}},
+		{calls: []poo.ToolCall{{CallID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 2475}},
 		{text: "the second answer"},
 	})
 	sink := &recordingSink{}
@@ -631,7 +631,7 @@ type failingGateCompactor struct {
 }
 
 // ShouldCompact compacts on the run's second gate only.
-func (c *failingGateCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+func (c *failingGateCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	c.gates++
 	return c.gates == 2
 }
@@ -723,7 +723,7 @@ func TestTheNoticeNamesTheConfiguredRatio(t *testing.T) {
 	// estimate past the configured ratio; a natural stop would settle
 	// without a gate pass.
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 1800}},
+		{calls: []poo.ToolCall{{CallID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 1800}},
 		{text: "the second answer"},
 	})
 	sink := &recordingSink{}

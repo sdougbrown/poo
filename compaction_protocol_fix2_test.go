@@ -22,7 +22,7 @@ func TestInterruptDiscardsASuccessfulCompaction(t *testing.T) {
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: "output"}, sink)
 	opts.Compactor = &fix2Compactor{
-		should: func(v poo.View, b poo.Budget) bool { return b.Turns == 1 && !used.Load() },
+		should: func(v poo.View, b poo.ContextBudget) bool { return b.Turns == 1 && !used.Load() },
 		compact: func(ctx context.Context, _ poo.View, _ poo.ForkFunc) (poo.Compaction, error) {
 			used.Store(true)
 			close(entered)
@@ -57,7 +57,7 @@ func TestInterruptDuringACompactionRechecksTheGate(t *testing.T) {
 	opts := testOptions(t, tr, &echoTool{result: "output"}, sink)
 	opts.Model.ContextLimit = 10000
 	opts.Compactor = &fix2Compactor{
-		should: func(v poo.View, b poo.Budget) bool { return b.Turns == 1 && !used.Load() },
+		should: func(v poo.View, b poo.ContextBudget) bool { return b.Turns == 1 && !used.Load() },
 		compact: func(ctx context.Context, _ poo.View, _ poo.ForkFunc) (poo.Compaction, error) {
 			used.Store(true)
 			close(entered)

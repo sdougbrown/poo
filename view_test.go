@@ -16,7 +16,7 @@ import (
 // out copies, and the nested content and tool payloads are deep-copied on
 // access.
 func TestTheViewReturnsDeepCopies(t *testing.T) {
-	history := poo.NewHistory([]poo.Message{
+	history := poo.NewHistoryView([]poo.Message{
 		{
 			Role:   poo.RoleAssistant,
 			Origin: poo.OriginModel,
@@ -72,7 +72,7 @@ func TestTheViewReturnsDeepCopies(t *testing.T) {
 // TestTheViewCopiesTheDeliveryNote covers the note: it is part of the
 // message, so it is copied with it.
 func TestTheViewCopiesTheDeliveryNote(t *testing.T) {
-	history := poo.NewHistory([]poo.Message{{
+	history := poo.NewHistoryView([]poo.Message{{
 		Role: poo.RoleUser,
 		Content: []poo.ContentBlock{
 			{Kind: poo.ContentText, Text: "the user typed this"},
@@ -96,7 +96,7 @@ func TestTheViewCopiesTheDeliveryNote(t *testing.T) {
 // TestTheViewCopiesTheToolResult covers the tool result the view hands
 // out: its structured payload is copied too.
 func TestTheViewCopiesTheToolResult(t *testing.T) {
-	history := poo.NewHistory(nil, map[string]poo.ToolResult{
+	history := poo.NewHistoryView(nil, map[string]poo.ToolResult{
 		"r1": {Text: "the result", Structured: json.RawMessage(`{"count":1}`)},
 	}, nil)
 
@@ -126,7 +126,7 @@ func TestTheHistoryCopiesTheMessagesItIsBuiltFrom(t *testing.T) {
 		Role:    poo.RoleUser,
 		Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "the prompt"}},
 	}}
-	history := poo.NewHistory(messages, nil, nil)
+	history := poo.NewHistoryView(messages, nil, nil)
 	messages[0].Content[0].Text = "mutated"
 
 	if got := history.Messages(); got[0].Text() != "the prompt" {
@@ -145,7 +145,7 @@ type resultPeekHook struct {
 func (h *resultPeekHook) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) {
 	if !h.seen {
 		h.seen = true
-		r, ok := ctx.History.Result("r1")
+		r, ok := ctx.HistoryView.Result("r1")
 		h.text, h.ok = r.Text, ok
 	}
 	return poo.TurnDecision{}, nil
@@ -155,7 +155,7 @@ func (h *resultPeekHook) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error
 // asks the view for a tool result gets the result the call produced.
 func TestTheViewCarriesTheToolResult(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)}}},
 		{text: "done"},
 	})
 	tool := &echoTool{result: "echoed"}
@@ -181,7 +181,7 @@ func TestTheViewCarriesTheToolResult(t *testing.T) {
 // caller that mutates the returned slice, its entries or the calls does
 // not change the history's turns.
 func TestTheViewReturnsTurnSummariesAsCopies(t *testing.T) {
-	history := poo.NewHistory(nil, nil, []poo.TurnSummary{{
+	history := poo.NewHistoryView(nil, nil, []poo.TurnSummary{{
 		Index: 1,
 		Calls: []poo.ToolCallSummary{{Handle: "r1", Tool: "bash"}},
 	}})

@@ -74,7 +74,7 @@ func TestARetryBeforeTheFirstDeltaSucceeds(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -95,7 +95,7 @@ func TestARetryBeforeTheFirstDeltaSucceeds(t *testing.T) {
 func TestTheBudgetIsThreeAttempts(t *testing.T) {
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`)
 
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err == nil {
 		t.Fatal("the request succeeded, want a failure")
@@ -117,7 +117,7 @@ func TestTheBudgetIsThreeAttempts(t *testing.T) {
 func TestTheBudgetExhaustionSettlesTheRun(t *testing.T) {
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`)
 
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 	res := settleOf(t, tr)
 	if res.Reason != poo.ReasonProviderError {
 		t.Errorf("the run settled %q, want provider_error", res.Reason)
@@ -134,7 +134,7 @@ func TestAnErrorAfterADeltaIsNotRetried(t *testing.T) {
 		chunk(`{"error":{"message":"the model crashed","type":"server_error"}}`)
 	srv := newSSEServer(t, body)
 
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
 		t.Fatalf("starting the request: %v", err)
@@ -166,7 +166,7 @@ func TestTheCallsOfABrokenStreamAreNotRun(t *testing.T) {
 		chunk(`{"error":{"message":"the model crashed","type":"server_error"}}`)
 	srv := newSSEServer(t, body)
 
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 	tool := &echoTool{}
 
 	s, err := poo.New(poo.Options{
@@ -207,7 +207,7 @@ func TestTheCallsOfABrokenStreamAreNotRun(t *testing.T) {
 func TestACancellationDuringTheBackoffEndsTheRun(t *testing.T) {
 	srv := newCountingServer(t, http.StatusInternalServerError, `{"error":{"message":"boom"}}`)
 
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Second, 2 * time.Second},
@@ -271,7 +271,7 @@ func TestTheRetryAfterOverridesTheBackoff(t *testing.T) {
 
 	var delays []time.Duration
 	var retried []bool
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
@@ -313,7 +313,7 @@ func TestTheAttemptsAreReported(t *testing.T) {
 
 	var mu sync.Mutex
 	var attempts []openai.Attempt
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
@@ -362,7 +362,7 @@ func TestTheRequestHearsTheAttempts(t *testing.T) {
 
 	var mu sync.Mutex
 	var attempts []poo.Attempt
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Millisecond, time.Millisecond},

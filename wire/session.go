@@ -271,7 +271,7 @@ func detailOf(detail poo.SettleDetail) protocol.SettleDetail {
 			Kind:        detail.Provider.Kind,
 			Status:      detail.Provider.Status,
 			Code:        detail.Provider.Code,
-			RetryAfterS: detail.Provider.RetryAfterSec,
+			RetryAfterS: detail.Provider.RetryAfterS,
 			ResetsAt:    detail.Provider.ResetsAt,
 		}
 	}

@@ -175,7 +175,7 @@ func failingEndpoint(t *testing.T, failures int) *httptest.Server {
 // to the record.
 func TestTheRealTransportReportsItsAttempts(t *testing.T) {
 	srv := failingEndpoint(t, 2)
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
@@ -203,7 +203,7 @@ func TestTheRealTransportReportsItsAttempts(t *testing.T) {
 // included.
 func TestTheFailedRequestKeepsEveryAttempt(t *testing.T) {
 	srv := failingEndpoint(t, 10)
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Millisecond, time.Millisecond},

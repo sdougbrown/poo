@@ -223,10 +223,10 @@ func ToolResultMessage(id, name, text string, isError bool) Message {
 
 // ToolCall is a request from the model to run a tool.
 type ToolCall struct {
-	// ID is the provider's identifier for the call. The tool's result
+	// CallID is the provider's identifier for the call. The tool's result
 	// goes back to the model under this id, because that is the id the
 	// provider matches it against.
-	ID string `json:"id"`
+	CallID string `json:"id"`
 	// Name is the tool the model called.
 	Name string `json:"name"`
 	// Arguments are the raw JSON arguments.

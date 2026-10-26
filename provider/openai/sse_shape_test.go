@@ -24,7 +24,7 @@ func TestEventsSeparatedByOneNewlineAreRead(t *testing.T) {
 		"data: [DONE]\n"
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -55,7 +55,7 @@ func TestAnEventSplitOverTwoDataLinesIsStillJoined(t *testing.T) {
 		"data: \"delta\":{\"content\":\"multi\"},\"finish_reason\":\"stop\"}]}\n"
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -76,7 +76,7 @@ func TestEventsSeparatedByABlankLineAreRead(t *testing.T) {
 		chunk(`{"choices":[{"index":0,"delta":{"content":"two"},"finish_reason":"stop"}]}`) + done
 
 	srv := newSSEServer(t, body)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestTheEventsArriveInOrder(t *testing.T) {
 	for name, body := range shapes {
 		t.Run(name, func(t *testing.T) {
 			srv := newSSEServer(t, body)
-			tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+			tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			if err != nil {
@@ -153,7 +153,7 @@ func TestAnEventBeforeABrokenConnectionIsKept(t *testing.T) {
 		_ = conn.Close()
 	}))
 	defer srv.Close()
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {

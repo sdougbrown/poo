@@ -63,8 +63,8 @@ func TestAFaultAtEveryRecoveryBoundaryIsFinished(t *testing.T) {
 			if counts["input.dropped"] != 1 {
 				t.Errorf("the session holds %d dropped inputs, want 1", counts["input.dropped"])
 			}
-			if len(loaded.Requeue) != 1 {
-				t.Errorf("the load queues %d job results, want 1", len(loaded.Requeue))
+			if len(loaded.Jobs) != 1 {
+				t.Errorf("the load queues %d job results, want 1", len(loaded.Jobs))
 			}
 			// A third load adds nothing.
 			before := len(loaded.Records)
