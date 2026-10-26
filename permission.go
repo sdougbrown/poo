@@ -6,6 +6,18 @@ import (
 	"sort"
 )
 
+// AskReason is why a call is being asked about. The values are the
+// permission policy's vocabulary: the settle reasons are a different
+// set (Reason).
+type AskReason string
+
+const (
+	// AskReasonPolicy means a policy rule asked about the call.
+	AskReasonPolicy AskReason = "policy"
+	// AskReasonDoomLoop means the doom loop asked about the call.
+	AskReasonDoomLoop AskReason = "doom_loop"
+)
+
 // PermissionAsk is the public view of a permission ask; perm.Ask is its
 // internal counterpart, which carries the policy-only context this view leaves
 // out.
@@ -20,7 +32,7 @@ type PermissionAsk struct {
 	Class ToolKind
 	// Reason is why the call is being asked about: "policy" or
 	// "doom_loop".
-	Reason string
+	Reason AskReason
 	// RepeatCount holds the doom loop's counts, and is nil for a policy
 	// ask.
 	RepeatCount *RepeatCounts
@@ -39,7 +51,7 @@ type PermissionAnswer struct {
 	// "default", "no_asker", "cancelled" or "interrupted".
 	Provenance string
 	// Reason is why the call was being asked about.
-	Reason string
+	Reason AskReason
 }
 
 // The provenances a permission answer can carry.
@@ -59,14 +71,6 @@ const (
 	// ProvenanceInterrupted means an interrupt ended the activity while
 	// the ask was pending.
 	ProvenanceInterrupted = "interrupted"
-)
-
-// The reasons a call is being asked about.
-const (
-	// ReasonPolicy means a policy rule asked about the call.
-	ReasonPolicy = "policy"
-	// ReasonDoomLoop means the doom loop asked about the call.
-	ReasonDoomLoop = "doom_loop"
 )
 
 // PermissionReporter is the policy slot's seam to the core.

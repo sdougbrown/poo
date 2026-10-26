@@ -10,7 +10,7 @@ import (
 
 func TestPermissionRequestRejectsStaleAttempts(t *testing.T) {
 	now := time.Unix(0, 0)
-	p := NewPermissionRequest(PermissionAsk{AskID: "a", Reason: ReasonPolicy}, PermissionRequestOptions{Now: func() time.Time { return now }, Deadline: now.Add(time.Hour), Fallback: "deny"})
+	p := NewPermissionRequest(PermissionAsk{AskID: "a", Reason: AskReasonPolicy}, PermissionRequestOptions{Now: func() time.Time { return now }, Deadline: now.Add(time.Hour), Fallback: "deny"})
 	drops := 0
 	p.logDrop = func(PermissionInput) { drops++ }
 	firstDeadline := now.Add(time.Minute)

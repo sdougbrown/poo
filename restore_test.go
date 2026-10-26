@@ -292,7 +292,7 @@ func TestTheRestoreRequeuesAnUndeliveredJobResult(t *testing.T) {
 	records := []poo.Record{
 		header("s1"),
 		&poo.JobStarted{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
-		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.JobOutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
+		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.OutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
 	}
 	pending := poo.PendingJobResults(records)
 	if len(pending) != 1 {
@@ -404,7 +404,7 @@ func TestTheRestoredSessionHoldsTheUndeliveredJobResults(t *testing.T) {
 	records := []poo.Record{
 		header("s1"),
 		&poo.JobStarted{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
-		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.JobOutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
+		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.OutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
 	}
 	tr := scripted([]fakeResponse{{text: "ok"}})
 	sink := &recordingSink{}

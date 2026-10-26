@@ -172,7 +172,7 @@ func TestTheRestoredSessionContinuesTheJobInputIDs(t *testing.T) {
 			Handle:     "r1",
 			Tool:       "job",
 			RunID:      "r1",
-			Outcome:    poo.JobOutcomeOK,
+			Outcome:    poo.OutcomeOK,
 			InputID:    "s1-ji1",
 			Text:       "the earlier result",
 			EndedAt:    "2026-01-01T00:00:01Z",

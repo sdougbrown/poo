@@ -46,7 +46,7 @@ func TestReviewPendingCallIdentifiesDecisionTarget(t *testing.T) {
 	history := poo.NewHistoryView([]poo.Message{poo.NewTextMessage(poo.RoleUser, "clean build artifacts")}, nil, nil)
 	a := permissive.New(d, permissive.Options{})
 	for _, summary := range []string{"rm -rf ./dist", "rm -rf ~"} {
-		_, err := a.Ask(context.Background(), perm.Ask{Tool: "bash", Summary: summary, Class: poo.ClassSideEffecting, Reason: poo.ReasonPolicy, HistoryView: history})
+		_, err := a.Ask(context.Background(), perm.Ask{Tool: "bash", Summary: summary, Class: poo.ClassSideEffecting, Reason: poo.AskReasonPolicy, HistoryView: history})
 		if err != nil {
 			t.Fatal(err)
 		}

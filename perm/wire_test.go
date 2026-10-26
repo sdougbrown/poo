@@ -144,8 +144,8 @@ func TestTheWireAskCarriesTheDoomLoopReasonAndTheRepeatCount(t *testing.T) {
 		t.Fatalf("the client was asked %d time(s), want 1", len(asks))
 	}
 	ask := asks[0]
-	if ask.Reason != poo.ReasonDoomLoop {
-		t.Errorf("the ask's reason is %q, want %q", ask.Reason, poo.ReasonDoomLoop)
+	if ask.Reason != poo.AskReasonDoomLoop {
+		t.Errorf("the ask's reason is %q, want %q", ask.Reason, poo.AskReasonDoomLoop)
 	}
 	if ask.RepeatCount == nil {
 		t.Fatal("the ask carries no repeat count")
@@ -162,8 +162,8 @@ func TestTheWireAskCarriesTheDoomLoopReasonAndTheRepeatCount(t *testing.T) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("decoding the ask: %v", err)
 	}
-	if payload["reason"] != poo.ReasonDoomLoop {
-		t.Errorf("the payload's reason is %v, want %q", payload["reason"], poo.ReasonDoomLoop)
+	if payload["reason"] != string(poo.AskReasonDoomLoop) {
+		t.Errorf("the payload's reason is %v, want %q", payload["reason"], poo.AskReasonDoomLoop)
 	}
 	counts, ok := payload["repeat_count"].(map[string]any)
 	if !ok {

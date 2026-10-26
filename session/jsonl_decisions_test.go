@@ -23,14 +23,14 @@ func TestTheDecisionSinkWritesStandaloneRecords(t *testing.T) {
 	rec := decide.Decision{
 		AskedBy:   "permission",
 		StateHash: "abc",
-		Outcome:   decide.OutcomeOK,
+		Outcome:   decide.ResultOK,
 		LatencyMS: 12.5,
 		Questions: []decide.Question{{ID: "q1", Kind: decide.Choice{Options: []decide.Option{{Name: "yes"}}}}},
 	}
 	if err := sink.Record(ctx, rec); err != nil {
 		t.Fatalf("recording: %v", err)
 	}
-	if err := sink.Record(ctx, decide.Decision{AskedBy: "other", Outcome: decide.OutcomeDeferred}); err != nil {
+	if err := sink.Record(ctx, decide.Decision{AskedBy: "other", Outcome: decide.ResultDeferred}); err != nil {
 		t.Fatalf("recording: %v", err)
 	}
 	if err := sink.Close(); err != nil {
@@ -55,8 +55,8 @@ func TestTheDecisionSinkWritesStandaloneRecords(t *testing.T) {
 	if first["origin"] != "permission" {
 		t.Errorf("the line's origin is %v, want permission", first["origin"])
 	}
-	if first["outcome"] != decide.OutcomeOK {
-		t.Errorf("the line's outcome is %v, want %q", first["outcome"], decide.OutcomeOK)
+	if first["outcome"] != decide.ResultOK {
+		t.Errorf("the line's outcome is %v, want %q", first["outcome"], decide.ResultOK)
 	}
 	if first["state_hash"] != "abc" {
 		t.Errorf("the line's state hash is %v, want abc", first["state_hash"])
@@ -73,7 +73,7 @@ func TestTheDecisionSinkIsASink(t *testing.T) {
 	}
 	defer sink.Close()
 	var asSink decide.Sink = sink
-	if err := asSink.Record(context.Background(), decide.Decision{Outcome: decide.OutcomeOK}); err != nil {
+	if err := asSink.Record(context.Background(), decide.Decision{Outcome: decide.ResultOK}); err != nil {
 		t.Fatalf("recording: %v", err)
 	}
 }

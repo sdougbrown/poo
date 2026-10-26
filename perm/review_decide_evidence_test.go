@@ -24,7 +24,7 @@ func TestReviewTheDecideAskerShowsTheCall(t *testing.T) {
 		Tool:        "bash",
 		Summary:     "rm -rf ~",
 		Class:       poo.ClassSideEffecting,
-		Reason:      poo.ReasonPolicy,
+		Reason:      poo.AskReasonPolicy,
 		HistoryView: history,
 	}); err != nil {
 		t.Fatalf("asking: %v", err)

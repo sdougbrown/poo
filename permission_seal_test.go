@@ -48,7 +48,7 @@ func permissionHandoffSession(t *testing.T, storeFirst bool) (*Session, *runStat
 	run := &runState{id: "run", ctx: ctx, cancel: cancel, pendingCalls: map[string]*issuedCall{}, workDone: make(chan struct{}, 1)}
 	s := &Session{opts: Options{Sink: sink}, run: run, events: newEventBus(nil), recordWriteBudget: time.Second}
 	t.Cleanup(s.events.stop)
-	s.reportPermissionAsked(run, PermissionAsk{AskID: "a1", Tool: "bash", Reason: ReasonPolicy})
+	s.reportPermissionAsked(run, PermissionAsk{AskID: "a1", Tool: "bash", Reason: AskReasonPolicy})
 	return s, run, sink
 }
 

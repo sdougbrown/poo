@@ -460,15 +460,16 @@ type Decision struct {
 	At string `json:"at"`
 }
 
-// Outcomes a record can carry.
+// Results a record can carry: how the decide call ended. The word is
+// decide's own — the core's Outcome is a different set of values.
 const (
-	// OutcomeOK means the questions were answered.
-	OutcomeOK = "ok"
-	// OutcomeDeferred means the call could not be answered.
-	OutcomeDeferred = "deferred"
-	// OutcomeInvalid means the questions were wrong, and no request was
+	// ResultOK means the questions were answered.
+	ResultOK = "ok"
+	// ResultDeferred means the call could not be answered.
+	ResultDeferred = "deferred"
+	// ResultInvalid means the questions were wrong, and no request was
 	// sent.
-	OutcomeInvalid = "invalid"
+	ResultInvalid = "invalid"
 )
 
 // Sink receives a decision record.
@@ -520,11 +521,11 @@ func (d *recordedDecider) Decide(ctx context.Context, state any, instructions st
 	rec.Requests = requests
 	switch {
 	case err == nil:
-		rec.Outcome = OutcomeOK
+		rec.Outcome = ResultOK
 	case errors.Is(err, ErrInvalidQuestion):
-		rec.Outcome = OutcomeInvalid
+		rec.Outcome = ResultInvalid
 	default:
-		rec.Outcome = OutcomeDeferred
+		rec.Outcome = ResultDeferred
 		rec.Error = err.Error()
 	}
 	// An answer set that does not match the questions is no answer, so
@@ -533,7 +534,7 @@ func (d *recordedDecider) Decide(ctx context.Context, state any, instructions st
 	// caller validates too, and its result says what the model reads.
 	if err == nil {
 		if verr := ValidateAnswers(qs, answers); verr != nil {
-			rec.Outcome = OutcomeDeferred
+			rec.Outcome = ResultDeferred
 			rec.Error = verr.Error()
 		}
 	}

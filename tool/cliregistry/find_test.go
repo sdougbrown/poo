@@ -307,7 +307,7 @@ func TestMalformedAnswersKeepDiagnostic(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("got %d decision records, want 1", len(records))
 	}
-	if records[0].Error == "" || records[0].Outcome == decide.OutcomeOK {
+	if records[0].Error == "" || records[0].Outcome == decide.ResultOK {
 		t.Fatalf("search failed but decision record says outcome=%q error=%q", records[0].Outcome, records[0].Error)
 	}
 }
