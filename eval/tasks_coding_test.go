@@ -71,7 +71,7 @@ JSON
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 	})
 	report, err := runner.Run(context.Background())

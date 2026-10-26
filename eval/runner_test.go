@@ -109,7 +109,7 @@ func TestTheRunnerRunsTheTasksAndMeasuresThem(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     2,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: fakePoo(t, logWritingPoo),
 	})
 
@@ -162,7 +162,7 @@ func TestTheRunnerMeasuresAFailingCheck(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: fakePoo(t, logWritingPoo),
 	})
 
@@ -186,7 +186,7 @@ func TestTheWorkdirLivesUnderTheWorkRoot(t *testing.T) {
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 
 	out := t.TempDir()
-	workRoot := filepath.Join(out, "work")
+	runsDir := filepath.Join(out, "work")
 	// The fake poo writes down where it ran, so the harness's layout can
 	// be checked.
 	marker := filepath.Join(out, "workdir.txt")
@@ -207,7 +207,7 @@ printf '%s' "$dir" > "`+marker+`"
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  workRoot,
+		RunsDir:   runsDir,
 		PooBinary: binary,
 	})
 	if _, err := runner.Run(context.Background()); err != nil {
@@ -219,8 +219,8 @@ printf '%s' "$dir" > "`+marker+`"
 		t.Fatalf("reading the marker: %v", err)
 	}
 	got := string(where)
-	if !strings.HasPrefix(got, workRoot) {
-		t.Errorf("the workdir is %q, want it under %q", got, workRoot)
+	if !strings.HasPrefix(got, runsDir) {
+		t.Errorf("the workdir is %q, want it under %q", got, runsDir)
 	}
 }
 
@@ -236,7 +236,7 @@ func TestTheRunnerReportsAMissingBinary(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: filepath.Join(t.TempDir(), "does-not-exist"),
 	})
 
@@ -274,7 +274,7 @@ printf '%s' "$args" > "`+capture+`"
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 	})
 	if _, err := runner.Run(context.Background()); err != nil {
@@ -403,7 +403,7 @@ func TestAFixtureRootOfItsOwnIsUsedWhenTheTaskSetIsElsewhere(t *testing.T) {
 		FixtureRoot: fixtures,
 		Seeds:       1,
 		Out:         out,
-		WorkRoot:    filepath.Join(out, "work"),
+		RunsDir:     filepath.Join(out, "work"),
 		PooBinary:   fakePoo(t, logWritingPoo),
 	})
 	report, err := runner.Run(context.Background())
@@ -453,7 +453,7 @@ exit 130
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 	})
 	report, err := runner.Run(context.Background())
@@ -478,7 +478,7 @@ func TestARunTheHarnessKilledQuotesTheDeadlineItEnforced(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: fakePoo(t, "sleep 30\n"),
 	})
 	report, err := runner.Run(context.Background())
@@ -523,7 +523,7 @@ func TestANonZeroExitWithALogKeepsItsCause(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: fakePoo(t, strings.Replace(logWritingPoo, "exit 0", "exit 1", 1)),
 	})
 
@@ -554,7 +554,7 @@ func TestARunThatEditsTheSourceFixtureIsReportedInvalid(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: fakePoo(t, tamperingPoo(filepath.Join(fixtureRoot, "fix-a", "a.txt"))),
 	})
 

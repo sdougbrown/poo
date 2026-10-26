@@ -276,7 +276,7 @@ func TestTheRunnerPassesTheReasoningEffort(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: poo,
 	})
 	if _, err := runner.Run(context.Background()); err != nil {

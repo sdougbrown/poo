@@ -48,7 +48,7 @@ func TestTheKeyDoesNotReachTheCheckEnvironment(t *testing.T) {
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: fakePoo(t, logWritingPoo),
 	})
 
@@ -97,7 +97,7 @@ env > "`+capture+`"
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 		// The catalog names a key variable for another model. The run
 		// must not carry it.
@@ -141,7 +141,7 @@ env > "`+capture+`"
 		TaskRoot:  taskRoot,
 		Seeds:     1,
 		Out:       out,
-		WorkRoot:  filepath.Join(out, "work"),
+		RunsDir:   filepath.Join(out, "work"),
 		PooBinary: binary,
 	})
 
