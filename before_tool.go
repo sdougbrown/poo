@@ -2,6 +2,8 @@ package poo
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -26,17 +28,11 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 	ctx := s.activityContext(run)
 	info := s.toolCallInfo(turn, handle, tool, prepared, plan)
 
-	// The policy slot runs first. It is exempt from the hook deadline:
-	// the permission engine keeps its own chain deadline and always
-	// returns a decision.
-	if policy := s.opts.Policy; policy != nil {
-		decision, err := s.callPolicy(ctx, policy, turn, info)
-		if err != nil {
-			return ToolDecision{}, false, err
-		}
-		if decision.Denied {
-			return decision, false, nil
-		}
+	if plan.policyErr != nil {
+		return ToolDecision{}, false, plan.policyErr
+	}
+	if plan.policy != nil && plan.policy.Denied {
+		return *plan.policy, false, nil
 	}
 
 	// The consumer hooks run in registration order. A refusal stops the
@@ -44,8 +40,10 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 	// looks for a refusal.
 	var result *ToolResult
 	for _, h := range s.opts.BeforeTool {
+		hookInfo := info
+		hookInfo.Arguments = cloneArguments(info.Arguments)
 		out, err := s.callHook(ctx, h, func(hctx context.Context) (any, error) {
-			return h.BeforeTool(s.hookContext(hctx, turn, false), info)
+			return h.BeforeTool(s.hookContext(hctx, turn, false), hookInfo)
 		})
 		if out.interrupted {
 			// The hook's decision is discarded, and that is not a
@@ -82,8 +80,14 @@ func (s *Session) runBeforeTool(run *runState, turn int, handle, tool string, pr
 // always returns a decision. A run's cancellation still cancels the
 // slot's context, and a decision that arrives after the cancellation is
 // discarded: the call is refused rather than allowed.
-func (s *Session) callPolicy(ctx context.Context, h PolicyHook, turn int, info ToolCallInfo) (ToolDecision, error) {
-	decision, err := h.BeforeTool(s.hookContext(ctx, turn, false), info)
+func (s *Session) callPolicy(ctx context.Context, run *runState, h PolicyHook, turn int, info ToolCallInfo) (ToolDecision, error) {
+	// The slot gets the permission seam, so it can report the asks it
+	// made and clear the counters of a loop it allowed. An interrupt is
+	// its own provenance, so the slot can tell it from a cancelled run.
+	hctx := s.hookContext(ctx, turn, false)
+	hctx.Permissions = &permissionReporter{session: s, run: run}
+	hctx.Interrupted = errors.Is(context.Cause(ctx), errInterrupted)
+	decision, err := h.BeforeTool(hctx, info)
 	if ctx.Err() != nil {
 		// The run ended while the slot was thinking. Its decision is
 		// discarded, and the call is refused: a run that is ending
@@ -114,6 +118,7 @@ func (s *Session) toolCallInfo(turn int, handle, tool string, prepared Prepared,
 		// the same shape the call has.
 		Spec:            s.toolSpecFor(tool),
 		Prepared:        prepared,
+		Arguments:       cloneArguments(plan.call.Arguments),
 		Handle:          handle,
 		RepeatCount:     counts.exact,
 		NearRepeatCount: counts.near,
@@ -127,4 +132,29 @@ func (s *Session) toolCallInfo(turn int, handle, tool string, prepared Prepared,
 func (s *Session) repeatCountFor(handle string) repeatCounts {
 	counts := s.RepeatCountsFor(handle)
 	return repeatCounts{exact: counts.Exact, near: counts.Near}
+}
+
+// resetRepeats clears the repeat counters of one call.
+//
+// The policy slot calls this when it allows a doom loop: the loop starts
+// over. Model-ordered policy dispatch ensures that the next call is
+// counted from the reset rather than a precomputed snapshot.
+func (s *Session) resetRepeats(run *runState, handle string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run == nil || s.run != run || run.sealed || run.committed || run.permissionHandle != handle || run.repeats == nil {
+		return
+	}
+	run.repeats.reset(run.permissionTool)
+}
+
+// cloneArguments returns a copy of a call's arguments.
+//
+// A hook gets its own copy, so neither the model's history nor another
+// hook sees what it changes.
+func cloneArguments(raw json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
 }

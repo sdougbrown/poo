@@ -44,7 +44,8 @@ that already exists, rather than appending a second session to it.
 | `poo/pootest` | Exported test helpers: a scripted transport, an in-memory sink, a stub decider, a scripted compactor |
 | `poo/tool/*` | Opt-in tools: `read`, `edit`, `grep`, `bash`, `cliregistry` |
 | `poo/provider/*` | Provider seam and transports |
-| `poo/perm` | Permission engine: policy over tool calls |
+| `poo/perm` | Permission engine: the policy over tool calls, the doom loop's action, and the asker chain that answers a call the policy asks about |
+| `poo/perm/decide` | An asker that answers a permission call with a decision model |
 | `poo/session` | Session seam: store, versioned codec, projection, authority |
 | `poo/wire` | JSON-RPC 2.0 control protocol over stdio |
 | `poo/config` | Opt-in settings loading and validation |

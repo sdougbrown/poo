@@ -378,10 +378,12 @@ func TestTheRepeatCountsCoverTheExactAndNearKeys(t *testing.T) {
 	if second.Near != 2 {
 		t.Errorf("the second call's near count is %d, want 2", second.Near)
 	}
-	// The third call is the first one again, so the exact count is 2.
+	// The third call is the first one again, but the call before it was
+	// a different exact call, so the consecutive exact streak starts
+	// over.
 	third := s.RepeatCountsFor("r3")
-	if third.Exact != 2 {
-		t.Errorf("the third call's exact count is %d, want 2", third.Exact)
+	if third.Exact != 1 {
+		t.Errorf("the third call's exact count is %d, want 1: the exact streak broke", third.Exact)
 	}
 	if third.Near != 3 {
 		t.Errorf("the third call's near count is %d, want 3", third.Near)
