@@ -278,7 +278,7 @@ func TestAContextLengthErrorSetsTheExitCode(t *testing.T) {
 	}
 }
 
-func TestTheDefaultLogPathIsUsedWhenNoneIsGiven(t *testing.T) {
+func TestTheSessionGoesToTheStoreWhenNoLogIsGiven(t *testing.T) {
 	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
 		"data: [DONE]\n\n"
 	endpoint := newFakeEndpoint(t, body)
@@ -290,6 +290,7 @@ func TestTheDefaultLogPathIsUsedWhenNoneIsGiven(t *testing.T) {
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
+		"--session-dir", dir,
 		"say hello",
 	)
 	if code != 0 {
@@ -298,16 +299,16 @@ func TestTheDefaultLogPathIsUsedWhenNoneIsGiven(t *testing.T) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("reading the working directory: %v", err)
+		t.Fatalf("reading the session directory: %v", err)
 	}
 	found := false
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "poo-session-") && strings.HasSuffix(e.Name(), ".jsonl") {
+		if strings.HasSuffix(e.Name(), ".jsonl") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("the working directory holds %d entries, want a session log", len(entries))
+		t.Errorf("the session directory holds %d entries, want a session", len(entries))
 	}
 }
 

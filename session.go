@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,6 +103,15 @@ type Session struct {
 	broken bool
 	// closed reports that the session is closing or closed.
 	closed bool
+	// fenced reports that the close has begun: a record write that has
+	// not registered yet is refused, and the close waits for the ones
+	// that have before it flushes.
+	fenced bool
+	// gates are the record writes that are in flight, by registration.
+	gates []*writeGate
+	// gatesDone is signalled when a write deregisters, so the close can
+	// wait for them without polling.
+	gatesDone chan struct{}
 
 	// steerQueue holds the steer and interrupt messages, in arrival
 	// order.
@@ -123,11 +133,12 @@ type Session struct {
 	jobCompletions int
 	// jobQueue holds the finished job results, in completion order.
 	jobQueue []jobQueueItem
-	// pendingHeld is the held record that is waiting to be written.
+	// pendingHeld is the held record that is waiting to be written, with
+	// the write registration its decision was taken under.
 	//
 	// The write takes the session's lock, so the record is built under
 	// the lock and written outside it.
-	pendingHeld *InputHeld
+	pendingHeld *heldRecord
 	// raceHooks are the seams the job races are tested at.
 	raceHooks *JobRaceHooks
 	// sealHooks are the seams the seal protocol is tested at.
@@ -185,6 +196,11 @@ type Session struct {
 	// lastPromptText is the last rendered prompt that was recorded, so
 	// an unchanged prompt is not written again.
 	lastPromptText string
+	// promptRendered reports that a run has rendered the prompt.
+	//
+	// The state tells a client that the prompt it reads is a preview:
+	// before the first run, nothing has rendered it yet.
+	promptRendered bool
 
 	// waiters are the goroutines waiting for the run to settle.
 	waiters []chan Result
@@ -631,6 +647,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		noticeArmed:       true,
 		jobs:              map[string]*jobState{},
 		jobQueued:         make(chan struct{}, 1),
+		gatesDone:         make(chan struct{}, 1),
 		deciderModel:      opts.DeciderModel,
 	}
 	// A construction that fails rolls back everything it started. The
@@ -762,6 +779,29 @@ func (s *Session) Running() bool {
 	return s.run != nil
 }
 
+// ActiveRunID returns the id of the run that is active.
+//
+// It is empty when the session has no run.
+func (s *Session) ActiveRunID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.run == nil {
+		return ""
+	}
+	return s.run.id
+}
+
+// RunResult returns the outcome of a run that has settled.
+//
+// It reports false for a run the session does not know: a run that is
+// still going and a run that never was are both unknown to it.
+func (s *Session) RunResult(runID string) (Result, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, ok := s.runResults[runID]
+	return result, ok
+}
+
 // Transitions returns the states the session moved through, in order.
 func (s *Session) Transitions() []State {
 	s.mu.Lock()
@@ -771,6 +811,24 @@ func (s *Session) Transitions() []State {
 
 // ID returns the session's identifier.
 func (s *Session) ID() string { return s.opts.SessionID }
+
+// ChatModel returns the model the session talks to.
+func (s *Session) ChatModel() ModelInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opts.Model
+}
+
+// DeciderModel returns the decision model and reports whether the
+// session has one.
+func (s *Session) DeciderModel() (ModelInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deciderModel.Name == "" && s.deciderModel.ModelID == "" {
+		return ModelInfo{}, false
+	}
+	return s.deciderModel, true
+}
 
 // Broken reports that the store failed and the session cannot be used.
 func (s *Session) Broken() bool {
@@ -987,11 +1045,141 @@ func (s *Session) markBroken() {
 // write appends one record to the sink.
 //
 // A refused write marks the session broken: the store is the session's
-// memory, and a session that cannot write cannot be trusted.
+// memory, and a session that cannot write cannot be trusted. A write the
+// close has fenced is abandoned instead: the session is going away, and
+// the record is one nobody will read.
 func (s *Session) write(ctx context.Context, rec Record) error {
+	return s.writeClaimed(ctx, rec, nil)
+}
+
+// writeClaimed appends one record whose write was registered under the
+// session's lock, in the same critical section as the decision that
+// produced it.
+//
+// The registration is the caller's; the write releases it.
+func (s *Session) writeClaimed(ctx context.Context, rec Record, gate *writeGate) error {
 	wctx, cancel := s.recordContext(ctx)
 	defer cancel()
-	return s.appendRecord(wctx, rec, nil, nil)
+	return s.appendRecord(wctx, rec, nil, gate)
+}
+
+// writeGate is the registration of one record write against the close's
+// fence.
+type writeGate struct {
+	// record names the record, so a close that outlives its wait can say
+	// which write held it up.
+	record string
+	// released reports that the write has ended.
+	released bool
+}
+
+// heldRecord is a held record waiting to be written, with the write
+// registration its decision was taken under.
+type heldRecord struct {
+	// rec is the held record.
+	rec *InputHeld
+	// gate is the write's registration.
+	gate *writeGate
+}
+
+// beginWriteLocked registers a record write against the close's fence.
+//
+// The caller holds the session's lock, so a decision taken in the same
+// critical section has its write counted before the close can fence the
+// session. The gate is released with endWrite. ok is false once the close
+// has fenced the session, and the write is then abandoned.
+func (s *Session) beginWriteLocked(record string) (*writeGate, bool) {
+	if s.fenced {
+		return nil, false
+	}
+	if s.gatesDone == nil {
+		s.gatesDone = make(chan struct{}, 1)
+	}
+	gate := &writeGate{record: record}
+	s.gates = append(s.gates, gate)
+	return gate, true
+}
+
+// beginWrite registers a record write, taking the session's lock.
+func (s *Session) beginWrite(record string) (*writeGate, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.beginWriteLocked(record)
+}
+
+// endWrite releases a registration and wakes a close that is waiting.
+func (s *Session) endWrite(gate *writeGate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.endWriteLocked(gate)
+}
+
+// endWriteLocked releases a registration.
+//
+// The caller holds the session's lock.
+func (s *Session) endWriteLocked(gate *writeGate) {
+	if gate == nil || gate.released {
+		return
+	}
+	gate.released = true
+	for i, held := range s.gates {
+		if held == gate {
+			s.gates = append(s.gates[:i], s.gates[i+1:]...)
+			break
+		}
+	}
+	s.signalGatesLocked()
+}
+
+// signalGatesLocked wakes the close, which waits for the writes.
+//
+// The caller holds the session's lock.
+func (s *Session) signalGatesLocked() {
+	if s.gatesDone == nil {
+		return
+	}
+	select {
+	case s.gatesDone <- struct{}{}:
+	default:
+	}
+}
+
+// awaitWrites waits for the record writes that are in flight, bounded by
+// the record-write budget.
+//
+// The wait names the writes it is still waiting for when the bound runs
+// out, so a close that cannot finish says which records held it up.
+func (s *Session) awaitWrites() error {
+	deadline := time.After(s.recordBudget())
+	for {
+		s.mu.Lock()
+		if len(s.gates) == 0 {
+			s.mu.Unlock()
+			return nil
+		}
+		done := s.gatesDone
+		s.mu.Unlock()
+		select {
+		case <-done:
+		case <-deadline:
+			s.mu.Lock()
+			names := s.gateNamesLocked()
+			s.mu.Unlock()
+			return fmt.Errorf("poo: closing the session: the %s writes are still in flight: %w",
+				strings.Join(names, ", "), ErrCloseStalled)
+		}
+	}
+}
+
+// gateNamesLocked returns the names of the record writes in flight.
+//
+// The caller holds the session's lock.
+func (s *Session) gateNamesLocked() []string {
+	out := make([]string, 0, len(s.gates))
+	for _, gate := range s.gates {
+		out = append(out, gate.record)
+	}
+	return out
 }
 
 // writeRun appends one record that belongs to a run.
@@ -1072,52 +1260,62 @@ func (s *Session) beginRunWriteLocked(run *runState) (context.Context, func(), b
 	return ctx, release, true
 }
 
+// errWriteFenced reports that the close refused a record write: the
+// record is abandoned, and the store is not at fault.
+var errWriteFenced = errors.New("poo: the close fenced the record writer")
+
+// appendToSink writes one record to the session's store.
+//
+// The write is registered against the close's fence before it calls the
+// sink: a close that has begun refuses it, and a close that has not yet
+// waits for it. A registration the caller took under the session's lock
+// together with the decision that produced the record is handed in; a nil
+// one is taken here. Either way the registration is released when the
+// write ends.
+func (s *Session) appendToSink(ctx context.Context, rec Record, gate *writeGate) error {
+	if s.opts.Sink == nil {
+		s.endWrite(gate)
+		return nil
+	}
+	if gate == nil {
+		var ok bool
+		gate, ok = s.beginWrite(rec.Meta().Record)
+		if !ok {
+			return errWriteFenced
+		}
+	}
+	defer s.endWrite(gate)
+	s.mu.Lock()
+	sunk := s.sunk
+	s.mu.Unlock()
+	if sunk {
+		return errors.New("poo: the session store is broken")
+	}
+	return s.opts.Sink.Append(ctx, rec)
+}
+
 // appendRecord appends one record under the context given.
 //
 // A refused write marks the session broken, unless the run the record
-// belongs to is sealed: a record the finalization ended at the seal, or
-// stopped waiting for, is abandoned, and its sink's refusal says nothing
-// about the store. A record that belongs to no run is never abandoned.
-//
-// A caller may pass an abandonment predicate; it is consulted before
-// the write and again on a failure, so the refusal happens without a
-// write when the rule says so.
-func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runState, abandoned func() (bool, error)) error {
-	if s.opts.Sink == nil {
+// belongs to is sealed or the close has fenced the writer: a record the
+// finalization ended at the seal, or the close refused, is abandoned, and
+// its sink's refusal says nothing about the store.
+func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runState, gate *writeGate) error {
+	err := s.appendToSink(ctx, rec, gate)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errWriteFenced):
 		return nil
 	}
+	if errors.Is(context.Cause(ctx), errCallRecordSealed) || s.sealedRun(sealedRun) {
+		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
+	}
 	s.mu.Lock()
-	if s.sunk {
-		s.mu.Unlock()
-		return errors.New("poo: the session store is broken")
-	}
+	s.sunk = true
+	s.broken = true
 	s.mu.Unlock()
-
-	// A caller that owns the abandonment rule decides first, before the
-	// write and again on a failure: a write the run settled around is
-	// the caller's to report, and it does not break the session.
-	if abandoned != nil {
-		if isAbandoned, err := abandoned(); isAbandoned {
-			return err
-		}
-	}
-
-	if err := s.opts.Sink.Append(ctx, rec); err != nil {
-		if abandoned != nil {
-			if isAbandoned, err := abandoned(); isAbandoned {
-				return err
-			}
-		}
-		if errors.Is(context.Cause(ctx), errCallRecordSealed) || s.sealedRun(sealedRun) {
-			return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
-		}
-		s.mu.Lock()
-		s.sunk = true
-		s.broken = true
-		s.mu.Unlock()
-		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
-	}
-	return nil
+	return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
 }
 
 // sealedRun reports that the finalization has sealed a run.

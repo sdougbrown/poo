@@ -61,16 +61,19 @@ func (s *Session) Prompt(ctx context.Context, text string, opts ...InputOption) 
 // results carries them, and the results are appended before the run's
 // first request.
 func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, note *DeliveryNote, jobs ...jobResult) (string, error) {
+	// The admission is the last step of the reservation, and the
+	// session's lock decides it together with Close: a close that got
+	// the lock first refuses the run, and a run that got it first is
+	// the run the close finalizes.
+	s.raceHook("start")
 	s.mu.Lock()
-	// The state was checked under a previous lock hold (Prompt, the
-	// wake paths), but a Close may have landed between that check and
-	// this one. A closed session takes no new run: the records it
-	// writes would land after the final flush, and its drive would run
-	// with no one to cancel it.
 	if s.closed {
 		s.mu.Unlock()
 		return "", ErrSessionClosed
 	}
+	// A session whose store failed takes no new run either: the state
+	// was checked in Prompt under an earlier lock hold, and a store
+	// failure may have landed between the two.
 	if s.broken {
 		s.mu.Unlock()
 		return "", ErrSessionBroken
@@ -181,6 +184,9 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	// The system prompt is rendered once per run, after the before-run
 	// hooks, and it is frozen for the length of the run.
 	if promptText, promptVariant := s.renderSystemPrompt(decisions.edits); promptText != "" {
+		s.mu.Lock()
+		s.promptRendered = true
+		s.mu.Unlock()
 		if s.runWindingDown(run) {
 			return runID, nil
 		}
@@ -958,21 +964,50 @@ var errDeliveryAbandoned = errors.New("poo: the delivery was abandoned")
 
 // writeDelivery writes a record for an input's delivery.
 //
-// The write policy is the appendRecord one; what is different is the
-// abandonment rule: a delivery is in-flight work that finalization step
-// 3 may abandon, so a write the run settled around is reported as
-// abandoned instead of breaking the session.
+// Unlike write, a cancellation from the run's finalization abandons the
+// write instead of breaking the session: the delivery is in-flight work
+// that finalization step 3 may abandon. A write the close has fenced is
+// abandoned for the same reason.
 func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) error {
+	if s.opts.Sink == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.sunk {
+		s.mu.Unlock()
+		return errors.New("poo: the session store is broken")
+	}
+	// The delivery's decision and its write's registration are one step
+	// under the lock, so a close that sees the run sees the write too.
+	abandoned := run.committed || run.finalizing || ctx.Err() != nil
+	gate, ok := s.beginWriteLocked(rec.Meta().Record)
+	s.mu.Unlock()
+	if abandoned {
+		s.endWrite(gate)
+		return errDeliveryAbandoned
+	}
+	if !ok {
+		return errDeliveryAbandoned
+	}
 	wctx, cancel := context.WithTimeout(ctx, s.recordBudget())
 	defer cancel()
-	return s.appendRecord(wctx, rec, nil, func() (bool, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if run.committed || run.finalizing || ctx.Err() != nil {
-			return true, errDeliveryAbandoned
+	if err := s.appendToSink(wctx, rec, gate); err != nil {
+		if errors.Is(err, errWriteFenced) {
+			return errDeliveryAbandoned
 		}
-		return false, nil
-	})
+		s.mu.Lock()
+		abandoned := run.committed || run.finalizing || ctx.Err() != nil
+		if !abandoned {
+			s.sunk = true
+			s.broken = true
+		}
+		s.mu.Unlock()
+		if abandoned {
+			return errDeliveryAbandoned
+		}
+		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
+	}
+	return nil
 }
 
 // finishDelivery releases a delivered input's in-flight claim.

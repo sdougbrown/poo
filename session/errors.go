@@ -27,6 +27,9 @@ const (
 	// CodeStoreError means the store could not read or write a
 	// session.
 	CodeStoreError = "store_error"
+	// CodeInvalidSessionID means the id could reach outside the session
+	// directory.
+	CodeInvalidSessionID = "invalid_session_id"
 )
 
 // The failures the store reports.
@@ -45,6 +48,9 @@ var (
 	// ErrCodecMismatch means the log was written in a format the codec
 	// does not know.
 	ErrCodecMismatch = &Error{Code: CodeCodecMismatch, Message: "the log's format does not match the codec"}
+	// ErrInvalidSessionID means the id names something outside the
+	// session directory.
+	ErrInvalidSessionID = &Error{Code: CodeInvalidSessionID, Message: "the session id is not a plain name"}
 )
 
 // Error is a store failure with a code.
