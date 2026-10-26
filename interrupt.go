@@ -1,5 +1,7 @@
 package poo
 
+import "errors"
+
 // Cause names why a message was cut short.
 type Cause string
 
@@ -111,7 +113,9 @@ func (s *Session) recordPartialCause(run *runState, turn int, resp *response, ca
 	if resp == nil {
 		return
 	}
-	_, _ = s.recordAssistantResponse(run, turn, resp, true, cause)
+	if _, err := s.recordAssistantResponse(run, turn, resp, true, cause); err != nil && !errors.Is(err, errCallRecordSealed) {
+		s.noteStoreError(run, err)
+	}
 }
 
 // skipInterruptedCalls records the calls that an interrupt stopped
@@ -143,6 +147,7 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 			RunID:      run.id,
 			Turn:       turn,
 			Handle:     handle,
+			CallID:     call.ID,
 			Tool:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
 		})

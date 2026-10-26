@@ -260,7 +260,7 @@ func runRun(args []string) int {
 	for _, name := range toolOrder {
 		spec := tools[name].Spec()
 		toolSpecs = append(toolSpecs, spec)
-		sessionTools = append(sessionTools, poo.SessionTool{Name: spec.Name, Class: spec.Class})
+		sessionTools = append(sessionTools, poo.SessionTool{Name: spec.Name, Class: spec.Class, Background: spec.Background})
 	}
 
 	settings := poo.ToolSettings{
@@ -282,6 +282,10 @@ func runRun(args []string) int {
 		Tools:        sessionTools,
 		ContextLimit: o.contextLimit,
 		ToolsMode:    o.toolsMode,
+		// The metadata says what the session ran with: the profile it
+		// was built from, and the models it talked to.
+		Profile: cmdProfile,
+		Roles:   poo.ModelRoles{Chat: &model},
 
 		ReasoningEffort: o.reasoningEffort,
 		Build:           poo.BuildInfo{Name: "poo", Version: version},
@@ -481,3 +485,10 @@ func defaultLogPath(dir string) string {
 
 // version is the build's version.
 const version = "0.1.0"
+
+// cmdProfile is the profile the command builds its sessions from.
+//
+// The command links the tools a profile names, and the profile's name
+// goes into the session's metadata, so a session that is loaded later
+// knows what it was made with.
+const cmdProfile = "code"

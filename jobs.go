@@ -159,6 +159,9 @@ type JobEnded struct {
 	InputID string `json:"input_id"`
 	// Text is the result the model reads.
 	Text string `json:"text"`
+	// Fatal reports that the job failed with an error that wraps
+	// ErrFatal. A run that receives the result settles tool_fatal.
+	Fatal bool `json:"fatal,omitempty"`
 	// Original is the result the tool produced, when a hook replaced
 	// it. It is absent for a redacted result.
 	Original *ToolResultData `json:"original,omitempty"`
@@ -352,7 +355,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 		if errors.Is(err, errDeliveryAbandoned) || winding {
 			return "", false, true
 		}
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 		return "", false, false
 	}
 	if winding {
@@ -599,7 +602,7 @@ func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 //
 // The record carries the hook-processed result, so a held result never
 // leaks what a hook would have redacted.
-func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, cause JobCause, timedOut bool, text string, out afterToolOutcome) (*JobEnded, map[string]any) {
+func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, cause JobCause, timedOut, fatal bool, text string, out afterToolOutcome) (*JobEnded, map[string]any) {
 	rec := &JobEnded{
 		RecordMeta: NewRecordMeta("job.ended"),
 		SessionID:  s.opts.SessionID,
@@ -610,6 +613,7 @@ func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, ca
 		Outcome:    outcome,
 		Cause:      cause,
 		TimedOut:   timedOut,
+		Fatal:      fatal,
 		InputID:    inputID,
 		Text:       text,
 		Redacted:   out.redacted,
@@ -652,7 +656,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 	s.jobCompletions++
 	jobOutcome := jobOutcomeOf(outcome)
 	s.inputSeq++
-	inputID := fmt.Sprintf("%s-ji%d", s.opts.SessionID, s.inputSeq)
+	inputID := jobInputID(s.opts.SessionID, s.inputSeq)
 	runID := job.runID
 	handle := job.handle
 	tool := job.tool
@@ -668,7 +672,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 
 	// The hook-processed result is what gets recorded and emitted, so a
 	// held result never leaks what a hook would have redacted.
-	rec, payload := s.jobEnded(job, inputID, jobOutcome, cause, timedOut, text, out)
+	rec, payload := s.jobEnded(job, inputID, jobOutcome, cause, timedOut, fatal, text, out)
 	if err := s.write(hookCompletionContext(job.ctx), rec); err != nil {
 		// The store refused the job's end. The session is broken at
 		// once: the wakes stop, and the run that is still open gets
@@ -723,6 +727,24 @@ func jobOutcomeOf(outcome Outcome) JobOutcome {
 	default:
 		return JobOutcomeError
 	}
+}
+
+// QueueJobResult delivers a finished job's result to the session, as if
+// the job had just ended.
+//
+// The result takes the session's idle policy: an idle session wakes a
+// run with it, and a session that holds its idle results keeps it for
+// the next run.
+func (s *Session) QueueJobResult(result JobResult) {
+	s.queueJobResult(jobResult{
+		id:      result.Job,
+		job:     result.Job,
+		handle:  result.Handle,
+		tool:    result.Tool,
+		outcome: jobOutcomeOf(result.Outcome),
+		text:    result.Text,
+		fatal:   result.Fatal,
+	})
 }
 
 // queueJobResult puts a finished result on the session's job queue and
@@ -1005,7 +1027,7 @@ func (s *Session) failJobDelivery(run *runState, item jobQueueItem, err error) {
 	s.abandonJobDeliveryLocked(run, item)
 	s.mu.Unlock()
 	if !errors.Is(err, errDeliveryAbandoned) {
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 	}
 }
 
@@ -1042,6 +1064,28 @@ func (s *Session) removeJobDeliveryLocked(run *runState, item jobQueueItem) {
 // jobResultText renders the text the model reads for a job result.
 func jobResultText(result jobResult) string {
 	return fmt.Sprintf("[job %s · %s finished (%s): %s]", result.job, result.tool, result.outcome, result.text)
+}
+
+// jobInputID returns the input id a job result is queued under.
+//
+// The id keeps the session's prefix, so a reader of the log can tell
+// where the result came from, and the number names the result in the
+// session's order of job results.
+func jobInputID(sessionID string, seq int) string {
+	return fmt.Sprintf("%s-ji%d", sessionID, seq)
+}
+
+// jobInputSeq returns the number a job result's input id carries.
+//
+// The number is the result's place in the session's order of job
+// results. An id that is not one of the session's has no number: the
+// recovery's own ids name the job they belong to.
+func jobInputSeq(sessionID, inputID string) int {
+	prefix := sessionID + "-ji"
+	if !strings.HasPrefix(inputID, prefix) {
+		return 0
+	}
+	return digits(inputID[len(prefix):])
 }
 
 // publicJobResults turns the internal results into the public ones the

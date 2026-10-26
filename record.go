@@ -67,25 +67,45 @@ type SessionModel struct {
 	MaxOutput int `json:"max_output,omitempty"`
 }
 
-// SessionTool describes one tool linked into a session.
-type SessionTool struct {
-	// Name is the tool's identifier.
-	Name string `json:"name"`
-	// Class is the tool's side-effect class.
-	Class ToolClass `json:"class"`
-	// Background is the tool's background mode. A session loaded from
-	// the record is incompatible with the current build when a tool's
-	// mode changed.
-	Background Background `json:"background,omitempty"`
-}
+// SessionTool is the name the session's metadata used for a tool.
+//
+// It is the tool's name, its class and its background mode, which is
+// what ToolInfo is.
+type SessionTool = ToolInfo
 
-// BuildInfo names the binary that produced a session.
-type BuildInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+// SessionMetadata is what a session's header record holds.
+//
+// It is everything a session needs to be rebuilt: the format it was
+// written in, its identity, the profile and the roles it ran with, the
+// tools it linked, and the settings and the binary that produced it.
+type SessionMetadata struct {
+	// Format is the record vocabulary version.
+	Format string `json:"format"`
+	// SessionID identifies the session.
+	SessionID string `json:"session_id"`
+	// Mode is the persistence mode: "logged" or "ephemeral".
+	Mode string `json:"mode"`
+	// CreatedAt is the RFC 3339 creation time in UTC.
+	CreatedAt string `json:"created_at"`
+	// WorkingDir is the absolute directory the run works in.
+	WorkingDir string `json:"working_dir"`
+	// Profile is the name of the profile the session was built with.
+	Profile string `json:"profile"`
+	// Roles are the models the session talked to.
+	Roles ModelRoles `json:"roles"`
+	// Tools are the tools linked into the session, in call order.
+	Tools []ToolInfo `json:"tools"`
+	// SettingsHash is the hash of the settings the session was built
+	// with.
+	SettingsHash string `json:"settings_hash"`
+	// Build names the binary that produced the session.
+	Build BuildInfo `json:"build"`
 }
 
 // SessionCreated is the first record of a session log.
+//
+// It carries the session's metadata: everything a session needs to be
+// rebuilt by another binary.
 type SessionCreated struct {
 	RecordMeta
 	// Format is the record vocabulary version.
@@ -98,10 +118,18 @@ type SessionCreated struct {
 	CreatedAt string `json:"created_at"`
 	// WorkingDir is the absolute directory the run works in.
 	WorkingDir string `json:"working_dir"`
+	// Profile is the name of the profile the session was built with.
+	Profile string `json:"profile,omitempty"`
+	// Roles are the models the session talked to: the effective roles,
+	// not the ones the current settings would pick.
+	Roles ModelRoles `json:"roles"`
+	// Tools are the tools linked into the session, in call order.
+	Tools []ToolInfo `json:"tools"`
+	// SettingsHash is the hash of the settings the session was built
+	// with.
+	SettingsHash string `json:"settings_hash,omitempty"`
 	// Model is the model the session talks to.
 	Model SessionModel `json:"model"`
-	// Tools are the tools linked into the session, in call order.
-	Tools []SessionTool `json:"tools"`
 	// ContextLimit is the model's context window in tokens.
 	ContextLimit int `json:"context_limit"`
 	// ToolsMode is how the session asks for tool calls: "native", "text"
@@ -112,6 +140,31 @@ type SessionCreated struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// Build names the binary that produced the session.
 	Build BuildInfo `json:"build"`
+}
+
+// Metadata returns the session's metadata.
+//
+// The metadata is the header record's own fields: the record is the
+// metadata, written as a record.
+func (c *SessionCreated) Metadata() SessionMetadata {
+	return SessionMetadata{
+		Format:       c.Format,
+		SessionID:    c.SessionID,
+		Mode:         c.Mode,
+		CreatedAt:    c.CreatedAt,
+		WorkingDir:   c.WorkingDir,
+		Profile:      c.Profile,
+		Roles:        c.Roles,
+		Tools:        c.Tools,
+		SettingsHash: c.SettingsHash,
+		Build:        c.Build,
+	}
+}
+
+// BuildInfo names the binary that produced a session.
+type BuildInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // RunStarted records the beginning of a run.
@@ -198,6 +251,11 @@ type ToolCallRecord struct {
 	Turn int `json:"turn"`
 	// Handle is the call's identifier within the turn, e.g. "r1".
 	Handle string `json:"handle"`
+	// CallID is the provider's id of the call. It is the id the model's
+	// message carries and the id the result answers, so a reader pairs a
+	// call with its message and its result by this id, never by the
+	// order the records landed in.
+	CallID string `json:"call_id,omitempty"`
 	// Tool is the name of the tool the model called.
 	Tool string `json:"tool"`
 	// Arguments are the raw arguments the model sent. They are a JSON
@@ -220,10 +278,16 @@ type ToolResultRecord struct {
 	Turn int `json:"turn"`
 	// Handle is the call's identifier within the turn.
 	Handle string `json:"handle"`
+	// CallID is the provider's id of the call. It is the same id the
+	// call's record and the message that carries the result name.
+	CallID string `json:"call_id,omitempty"`
 	// Tool is the name of the tool that ran.
 	Tool string `json:"tool"`
 	// Outcome is the call's outcome.
 	Outcome Outcome `json:"outcome"`
+	// IsError reports that the result is a recoverable failure, as the
+	// message the model sees says.
+	IsError bool `json:"is_error,omitempty"`
 	// Text is the model-facing text of the result.
 	Text string `json:"text"`
 	// Structured is the optional side-channel payload.

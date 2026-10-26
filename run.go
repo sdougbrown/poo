@@ -944,7 +944,7 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 	fail := func(err error) {
 		s.abandonDelivery(run, input)
 		if !errors.Is(err, errDeliveryAbandoned) {
-			s.addCandidate(run, storeErrorCandidate(err))
+			s.noteStoreError(run, err)
 		}
 	}
 	return s.deliverMessageRecords(run, msg, input.id, input.mode, note, fail, func() {
@@ -1029,6 +1029,18 @@ func (s *Session) signalWorkLocked(run *runState) {
 // refused.
 func storeErrorCandidate(err error) candidate {
 	return newCandidate(ReasonStoreError, SettleDetail{Source: "store", Text: err.Error()})
+}
+
+// noteStoreError reports a record the store refused.
+//
+// A write the run's finalization sealed is not a failure: the
+// finalization owns the record, and the store refusing it means the
+// record is no longer wanted.
+func (s *Session) noteStoreError(run *runState, err error) {
+	if err == nil || errors.Is(err, errCallRecordSealed) {
+		return
+	}
+	s.addCandidate(run, storeErrorCandidate(err))
 }
 
 // originForMode returns the origin an input's message carries.
@@ -1234,7 +1246,7 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 		CacheReadTokens: usage.CacheReadTokens,
 		TTFTMS:          usage.TTFTMS,
 	}); err != nil {
-		s.addCandidate(run, storeErrorCandidate(err))
+		s.noteStoreError(run, err)
 		return false
 	}
 	s.events.emit(EventUsage, map[string]any{

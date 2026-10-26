@@ -27,7 +27,7 @@ func TestRecordedSystemPromptsUseTheRecord(t *testing.T) {
 // never falls back to a freshly rendered prompt: the last recorded
 // prompt is the one the later runs carried.
 func TestARecordedPromptRepeatsForLaterRuns(t *testing.T) {
-	h := &recordedPrompt{prompts: []string{"one", "two"}}
+	h := poo.NewRecordedPrompts([]string{"one", "two"})
 	for i, want := range []string{"one", "two", "two", "two"} {
 		decision, err := h.BeforeRun(poo.HookContext{}, poo.RunTrigger{})
 		if err != nil {
