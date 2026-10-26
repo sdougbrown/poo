@@ -96,8 +96,8 @@ func runRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 2
 	}
-	if settings.Roles[string(catalog.RoleChat)] == "" && o.baseURL == "" {
-		fmt.Fprintf(os.Stderr, "poo run: --base-url, --model-id and --context-limit are required, or a settings file that names a chat model\n")
+	if settings.Roles[string(catalog.RoleChat)] == "" && o.endpoint == "" {
+		fmt.Fprintf(os.Stderr, "poo run: --endpoint, --model-id and --context-limit are required, or a settings file that names a chat model\n")
 		return 2
 	}
 
@@ -174,24 +174,25 @@ func runRun(args []string) int {
 	chatModel := session.LoggedModel(model)
 
 	sessionID := session.NewID()
-	created := &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    sessionID,
-		Mode:         runtime.SessionMode,
-		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ModelID: model.ModelID, BaseURL: session.LoggedBaseURL(model.Endpoint), MaxOutput: model.MaxOutput},
-		Tools:        runtime.SessionTools(),
-		ContextLimit: model.ContextLimit,
-		ToolsMode:    poo.ToolsMode(model.Tools.Mode),
-		// The metadata says what the session ran with: the profile it
-		// was built from, and the models it talked to.
-		Profile: runtime.Profile.Name,
-		Roles:   poo.ModelRoles{Chat: &chatModel},
-
-		ReasoningEffort: o.reasoningEffort,
-		Build:           poo.BuildInfo{Name: "poo", Version: version},
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"),
+		SessionMetadata: poo.SessionMetadata{
+			Format:     poo.FormatVersion,
+			SessionID:  sessionID,
+			Mode:       runtime.SessionMode,
+			CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+			WorkingDir: workDir,
+			Tools:      runtime.SessionTools(),
+			// The metadata says what the session ran with: the profile
+			// it was built from, and the models it talked to.
+			Profile:         runtime.Profile.Name,
+			Roles:           poo.ModelRoles{Chat: &chatModel},
+			Build:           poo.BuildInfo{Name: "poo", Version: version},
+			Model:           poo.SessionModel{ModelID: model.ModelID, Endpoint: session.LoggedEndpoint(model.Endpoint), MaxOutput: model.MaxOutput},
+			ContextLimit:    model.ContextLimit,
+			ToolsMode:       poo.ToolsMode(model.Tools.Mode),
+			ReasoningEffort: o.reasoningEffort,
+		},
 	}
 	if deciderModel, _, err := runtime.Decider(); err == nil {
 		deciderModel = session.LoggedModel(deciderModel)
@@ -420,7 +421,7 @@ func promptMutation(runtime *config.Runtime, model poo.ModelInfo, project string
 //
 // The records go to the log the caller asked for, or to the store the
 // settings name. An ephemeral session writes nothing.
-func openSink(ctx context.Context, runtime *config.Runtime, created *poo.SessionCreated, logPath, workDir string) (*sink, error) {
+func openSink(ctx context.Context, runtime *config.Runtime, created *poo.SessionCreatedRecord, logPath, workDir string) (*sink, error) {
 	if logPath != "" {
 		if !filepath.IsAbs(logPath) {
 			logPath = filepath.Join(workDir, logPath)

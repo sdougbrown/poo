@@ -70,23 +70,20 @@ func testOptions(id string, tool poo.Tool, transport poo.ChatTransport) poo.Opti
 }
 
 // testHeader returns the header of the session the helper creates.
-func testHeader(id string, tool poo.Tool) *poo.SessionCreated {
+func testHeader(id string, tool poo.Tool) *poo.SessionCreatedRecord {
 	model := testModel()
-	return &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    id,
-		Mode:         string(ModeLogged),
-		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-		WorkingDir:   "/tmp",
-		Profile:      testProfile,
-		Roles:        poo.ModelRoles{Chat: &model},
-		Tools:        []poo.ToolInfo{testToolInfo(tool)},
-		SettingsHash: testSettingsHash,
-		Model:        poo.SessionModel{ModelID: model.ModelID, BaseURL: model.Endpoint},
-		ContextLimit: model.ContextLimit,
-		ToolsMode:    "native",
-		Build:        poo.BuildInfo{Name: "poo", Version: "test"},
+	return &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:    id,
+			Mode:         string(ModeLogged),
+			CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+			WorkingDir:   "/tmp",
+			Profile:      testProfile,
+			Roles:        poo.ModelRoles{Chat: &model},
+			Tools:        []poo.ToolInfo{testToolInfo(tool)},
+			SettingsHash: testSettingsHash, Build: poo.BuildInfo{Name: "poo", Version: "test"}, Model: poo.SessionModel{ModelID: model.ModelID, Endpoint: model.Endpoint},
+			ContextLimit: model.ContextLimit,
+			ToolsMode:    "native"},
 	}
 }
 
@@ -299,7 +296,7 @@ func TestAKilledSessionIsRestored(t *testing.T) {
 
 	// The synthetic records are there, and the settle is last.
 	recs := resumed.Loaded.Records
-	settled, ok := recs[len(recs)-1].(*poo.RunSettled)
+	settled, ok := recs[len(recs)-1].(*poo.RunSettledRecord)
 	if !ok {
 		t.Fatalf("the last record is %T, want a settle record", recs[len(recs)-1])
 	}
@@ -378,7 +375,7 @@ func TestAKilledSessionIsRestored(t *testing.T) {
 	// made is in the file the session was loaded from.
 	starts := 0
 	for _, rec := range logRecords(t, path) {
-		if _, ok := rec.(*poo.RunStarted); ok {
+		if _, ok := rec.(*poo.RunStartedRecord); ok {
 			starts++
 		}
 	}

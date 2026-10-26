@@ -24,14 +24,13 @@ func TestThePruneOlderThanFlagDeletesTheOldSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opening the store: %v", err)
 	}
-	created := &poo.SessionCreated{
-		RecordMeta: poo.NewRecordMeta("session.created"),
-		Format:     poo.FormatVersion,
-		SessionID:  "old-session",
-		Mode:       "logged",
-		CreatedAt:  old.UTC().Format(time.RFC3339Nano),
-		Model:      poo.SessionModel{ModelID: "test-model"},
-		Profile:    "code",
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID: "old-session",
+			Mode:      "logged",
+			CreatedAt: old.UTC().Format(time.RFC3339Nano),
+
+			Profile: "code", Model: poo.SessionModel{ModelID: "test-model"}},
 	}
 	if _, err := store.Create(context.Background(), created); err != nil {
 		t.Fatalf("creating the session: %v", err)

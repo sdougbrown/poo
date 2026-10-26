@@ -439,7 +439,7 @@ func (s *suite) settings(endpoint *provider, contextLimit int, extra map[string]
 	document := map[string]any{
 		"version": 1,
 		"endpoints": map[string]any{
-			"fake": map[string]any{"base_url": endpoint.server.URL + "/v1"},
+			"fake": map[string]any{"endpoint": endpoint.server.URL + "/v1"},
 		},
 		"models": map[string]any{
 			s.model: map[string]any{

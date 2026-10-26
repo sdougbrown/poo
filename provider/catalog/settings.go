@@ -23,8 +23,8 @@ type Settings struct {
 
 // EndpointSettings is one endpoint in the settings.
 type EndpointSettings struct {
-	// BaseURL is the endpoint's base URL.
-	BaseURL string
+	// Endpoint is the endpoint's base URL.
+	Endpoint string
 	// APIKeyEnv names the environment variable holding the key.
 	APIKeyEnv string
 	// APIKey is a key written in the settings themselves.
@@ -105,7 +105,7 @@ func (m ModelSettings) layer(name, endpointURL string, sampling poo.Sampling) po
 // settings name the variable that holds the key, or they carry the key
 // themselves. An endpoint that names neither needs no key.
 func (e EndpointSettings) endpoint(name string) Endpoint {
-	endpoint := Endpoint{Name: name, BaseURL: e.BaseURL}
+	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint}
 	switch {
 	case e.APIKeyEnv != "":
 		endpoint.Credential = Credential{Source: CredentialEnv, Env: e.APIKeyEnv}

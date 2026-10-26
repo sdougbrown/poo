@@ -28,7 +28,7 @@ func registrySettings(paths ...string) string {
 	for _, path := range paths {
 		quoted = append(quoted, fmt.Sprintf("%q", path))
 	}
-	return theModelSettings + "cliregistry:\n  paths: [" + strings.Join(quoted, ", ") + "]\n"
+	return theModelSettings + "cli_registry:\n  paths: [" + strings.Join(quoted, ", ") + "]\n"
 }
 
 // withDecider is a settings document with a chat model that also serves
@@ -37,7 +37,7 @@ const withDecider = `
 version: 1
 endpoints:
   test:
-    base_url: http://localhost:4000/v1
+    endpoint: http://localhost:4000/v1
 models:
   test-model:
     endpoint: test
@@ -133,7 +133,7 @@ func TestALargeRegistryIsSearchedInsteadOfListed(t *testing.T) {
 	}
 	dir := registry(t, names...)
 	// The decider role needs a model that answers systemone questions.
-	settings, err := config.Parse([]byte(withDecider+"cliregistry:\n  paths: [\""+dir+"\"]\n"), config.FormatYAML)
+	settings, err := config.Parse([]byte(withDecider+"cli_registry:\n  paths: [\""+dir+"\"]\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
@@ -166,7 +166,7 @@ const withoutDeciderModel = `
 version: 1
 endpoints:
   test:
-    base_url: http://localhost:4000/v1
+    endpoint: http://localhost:4000/v1
 models:
   test-model:
     endpoint: test
@@ -188,7 +188,7 @@ func TestASearchNeedsTheSessionsDecider(t *testing.T) {
 		names = append(names, fmt.Sprintf("entry-%03d", i))
 	}
 	dir := registry(t, names...)
-	settings, err := config.Parse([]byte(withoutDeciderModel+"cliregistry:\n  paths: [\""+dir+"\"]\n"), config.FormatYAML)
+	settings, err := config.Parse([]byte(withoutDeciderModel+"cli_registry:\n  paths: [\""+dir+"\"]\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
@@ -284,17 +284,16 @@ func TestAResumedSessionKeepsOneCatalog(t *testing.T) {
 	defer runtime.Store.Close()
 	runtime.Options.Transport = pootest.NewTransport(pootest.Turn{Text: "done"})
 
-	created := &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    "s1",
-		Mode:         "logged",
-		CreatedAt:    "2026-10-22T12:00:00Z",
-		WorkingDir:   runtime.Options.WorkingDir,
-		Model:        poo.SessionModel{ModelID: "test-model"},
-		ContextLimit: 32768,
-		Profile:      "code",
-		Tools:        runtime.Profile.Tools,
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			CreatedAt:  "2026-10-22T12:00:00Z",
+			WorkingDir: runtime.Options.WorkingDir,
+
+			Profile: "code",
+			Tools:   runtime.Profile.Tools, Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
 	}
 	session, err := runtime.CreateSession(context.Background(), runtime.Store, created)
 	if err != nil {
@@ -359,7 +358,7 @@ func TestTheFindThresholdIsThirtyEntries(t *testing.T) {
 			for i := 0; i < tt.entries; i++ {
 				names = append(names, fmt.Sprintf("entry-%03d", i))
 			}
-			settings, err := config.Parse([]byte(withDecider+"cliregistry:\n  paths: [\""+registry(t, names...)+"\"]\n"), config.FormatYAML)
+			settings, err := config.Parse([]byte(withDecider+"cli_registry:\n  paths: [\""+registry(t, names...)+"\"]\n"), config.FormatYAML)
 			if err != nil {
 				t.Fatalf("decoding the settings: %v", err)
 			}
@@ -380,7 +379,7 @@ func TestTheFindThresholdIsThirtyEntries(t *testing.T) {
 }
 
 // TestARegistryPathIsRelativeToTheWorkingDirectory covers the path: a
-// relative `cliregistry.paths` entry is resolved against the directory
+// relative `cli_registry.paths` entry is resolved against the directory
 // the session works in, not the directory the process was started in.
 func TestARegistryPathIsRelativeToTheWorkingDirectory(t *testing.T) {
 	dir := registry(t, "deploy")
@@ -430,8 +429,8 @@ func TestARegistryPathThatIsNotThereNamesTheField(t *testing.T) {
 	if !errors.As(err, &failure) {
 		t.Fatalf("the failure is %T, want a config error", err)
 	}
-	if failure.Field != "cliregistry.paths" {
-		t.Errorf("the failure names %q, want cliregistry.paths", failure.Field)
+	if failure.Field != "cli_registry.paths" {
+		t.Errorf("the failure names %q, want cli_registry.paths", failure.Field)
 	}
 	if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file") {
 		t.Errorf("the failure %q does not keep the cause", err)
@@ -463,8 +462,8 @@ func TestARegistryThatDoesNotLoadIsAnError(t *testing.T) {
 	if !errors.As(err, &failure) {
 		t.Errorf("the failure is %T, want a config error", err)
 	}
-	if failure.Field != "cliregistry.paths" {
-		t.Errorf("the failure names %q, want cliregistry.paths", failure.Field)
+	if failure.Field != "cli_registry.paths" {
+		t.Errorf("the failure names %q, want cli_registry.paths", failure.Field)
 	}
 }
 
@@ -480,10 +479,10 @@ func TestARegistryWithoutCallCLIIsRefused(t *testing.T) {
 	_, err = readOnlyBuild(t, settings, nil)
 	var failure *config.Error
 	if !errors.As(err, &failure) {
-		t.Fatalf("a binary without call_cli accepted cliregistry.paths: %v", err)
+		t.Fatalf("a binary without call_cli accepted cli_registry.paths: %v", err)
 	}
-	if failure.Code != config.CodeUnsupported || failure.Field != "cliregistry.paths" {
-		t.Errorf("the failure is %+v, want unsupported on cliregistry.paths", failure)
+	if failure.Code != config.CodeUnsupported || failure.Field != "cli_registry.paths" {
+		t.Errorf("the failure is %+v, want unsupported on cli_registry.paths", failure)
 	}
 	if !strings.Contains(failure.Message, "call_cli") {
 		t.Errorf("the message %q does not name the tool", failure.Message)

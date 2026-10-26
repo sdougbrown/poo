@@ -162,7 +162,7 @@ func (c *Catalog) applyDiscovery(found *discovery) {
 				c.entries[id] = e
 				c.modelIndex[modelRef{endpoint: endpoint, modelID: id}] = e
 			}
-			e.discovery = discoveredLayer(model, c.endpoints[endpoint].BaseURL)
+			e.discovery = discoveredLayer(model, c.endpoints[endpoint].Endpoint)
 		}
 	}
 }
@@ -222,15 +222,15 @@ func (c *Catalog) probeEndpoint(ctx context.Context, endpoint Endpoint, modelIDs
 	// answer costs one timeout and not three.
 	ctx, cancel := context.WithTimeout(ctx, c.probeTimeout())
 	defer cancel()
-	list, err := c.probeOpenAI(ctx, client, endpoint.BaseURL)
+	list, err := c.probeOpenAI(ctx, client, endpoint.Endpoint)
 	if err != nil {
 		return nil, "", err
 	}
-	props, err := c.probeLlamaCPP(ctx, client, endpoint.BaseURL)
+	props, err := c.probeLlamaCPP(ctx, client, endpoint.Endpoint)
 	if err != nil {
 		return nil, "", err
 	}
-	shown, err := c.probeOllama(ctx, client, endpoint.BaseURL, c.candidates(modelIDs, list))
+	shown, err := c.probeOllama(ctx, client, endpoint.Endpoint, c.candidates(modelIDs, list))
 	if err != nil {
 		return nil, "", err
 	}

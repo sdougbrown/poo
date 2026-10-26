@@ -67,7 +67,7 @@ func TestNoWaitJobsStopsTheRunningJob(t *testing.T) {
 	go func() {
 		code, stderr := runCLI(t,
 			"run",
-			"--base-url", endpoint.URL+"/v1",
+			"--endpoint", endpoint.URL+"/v1",
 			"--model-id", "test-model",
 			"--context-limit", "32768",
 			"--no-wait-jobs",
@@ -153,7 +153,7 @@ func TestTheExitCodeIsTheFirstNonZeroAcrossWakes(t *testing.T) {
 
 	code, stderr, stdout := runCLIWithStdout(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--max-turns", "1",
@@ -206,7 +206,7 @@ func TestTheInterruptWithAJobRunningSettlesCancelled(t *testing.T) {
 	go func() {
 		code, stderr := runCLI(t,
 			"run",
-			"--base-url", server.URL+"/v1",
+			"--endpoint", server.URL+"/v1",
 			"--model-id", "test-model",
 			"--context-limit", "32768",
 			"--working-dir", dir,
@@ -258,7 +258,7 @@ jobs:
 	code, stderr, _ := runCLIWithStdout(t,
 		"run",
 		"--settings", settingsPath,
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--max-turns", "1",

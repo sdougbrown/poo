@@ -138,7 +138,7 @@ func writeReadOnlySettings(t *testing.T) string {
 	body := "version: 1\n" +
 		"endpoints:\n" +
 		"  test:\n" +
-		"    base_url: http://127.0.0.1:1/v1\n" +
+		"    endpoint: http://127.0.0.1:1/v1\n" +
 		"models:\n" +
 		"  test-model:\n" +
 		"    endpoint: test\n" +

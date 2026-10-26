@@ -50,10 +50,10 @@ func (t *retryingTransport) Stream(ctx context.Context, req poo.ChatRequest) (po
 }
 
 // attemptRecords returns the attempt records the sink kept.
-func attemptRecords(sink *recordingSink) []*poo.ProviderAttempt {
-	var out []*poo.ProviderAttempt
+func attemptRecords(sink *recordingSink) []*poo.ProviderAttemptRecord {
+	var out []*poo.ProviderAttemptRecord
 	for _, rec := range sink.allRecords() {
-		if a, ok := rec.(*poo.ProviderAttempt); ok {
+		if a, ok := rec.(*poo.ProviderAttemptRecord); ok {
 			out = append(out, a)
 		}
 	}
@@ -176,9 +176,9 @@ func failingEndpoint(t *testing.T, failures int) *httptest.Server {
 func TestTheRealTransportReportsItsAttempts(t *testing.T) {
 	srv := failingEndpoint(t, 2)
 	tr := openai.New(openai.Options{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
+		Endpoint: srv.URL,
+		Model:    "m",
+		Backoff:  []time.Duration{time.Millisecond, time.Millisecond},
 	})
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
@@ -204,9 +204,9 @@ func TestTheRealTransportReportsItsAttempts(t *testing.T) {
 func TestTheFailedRequestKeepsEveryAttempt(t *testing.T) {
 	srv := failingEndpoint(t, 10)
 	tr := openai.New(openai.Options{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
+		Endpoint: srv.URL,
+		Model:    "m",
+		Backoff:  []time.Duration{time.Millisecond, time.Millisecond},
 	})
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))

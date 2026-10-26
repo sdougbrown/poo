@@ -96,7 +96,7 @@ func TestARunWritesItsLogAndSettles(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -160,7 +160,7 @@ func TestARunThatCallsABashToolRunsIt(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -225,7 +225,7 @@ func TestTheMaxTurnsCeilingSetsTheExitCode(t *testing.T) {
 
 	code, _ := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--max-turns", "2",
@@ -255,7 +255,7 @@ func TestAContextLengthErrorSetsTheExitCode(t *testing.T) {
 
 	code, _ := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -286,7 +286,7 @@ func TestTheSessionGoesToTheStoreWhenNoLogIsGiven(t *testing.T) {
 	dir := t.TempDir()
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -327,7 +327,7 @@ func TestTheAPIKeyIsScrubbedFromTheChildEnvironment(t *testing.T) {
 	t.Setenv("POO_TEST_KEY", "super-secret-value")
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--api-key-env", "POO_TEST_KEY",
@@ -369,7 +369,7 @@ func TestTheReasoningEffortIsRecordedInTheLog(t *testing.T) {
 		endpoint := newFakeEndpoint(t, body)
 		dir := t.TempDir()
 		logPath := filepath.Join(dir, "run.jsonl")
-		args := append([]string{"run", "--base-url", endpoint.URL + "/v1", "--model-id", "m", "--context-limit", "32768", "--working-dir", dir, "--log", logPath}, tc.args...)
+		args := append([]string{"run", "--endpoint", endpoint.URL + "/v1", "--model-id", "m", "--context-limit", "32768", "--working-dir", dir, "--log", logPath}, tc.args...)
 		if code, stderr := runCLI(t, append(args, "hi")...); code != 0 {
 			t.Fatalf("the exit code is %d; stderr: %s", code, stderr)
 		}
@@ -396,7 +396,7 @@ func TestTheLogCarriesTheNewRecordFields(t *testing.T) {
 	logPath := filepath.Join(dir, "run.jsonl")
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -464,7 +464,7 @@ func TestATruncatedAnswerSetsTheExitCode(t *testing.T) {
 
 	code, _ := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -492,7 +492,7 @@ func TestAProviderLimitSetsTheExitCode(t *testing.T) {
 
 	code, _ := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -521,7 +521,7 @@ func TestTheRunSettlesEndTurnWithZero(t *testing.T) {
 
 	code, _ := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -548,7 +548,7 @@ func TestTheCommandDefaultsToHandoff(t *testing.T) {
 	// of the window. A larger system prompt may need a larger window.
 	runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "31000",
 		"--working-dir", dir,
@@ -584,7 +584,7 @@ func TestARunWarnsWhenNoAskerCanAnswer(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -614,7 +614,7 @@ func TestTheRunHeaderRecordsTheToolsBackgroundMode(t *testing.T) {
 	logPath := filepath.Join(dir, "run.jsonl")
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,

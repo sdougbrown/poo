@@ -149,12 +149,12 @@ func (s *Sink) Messages() []*poo.MessageRecord {
 // finished.
 //
 // The record is live, as Records' are.
-func (s *Sink) Settled() *poo.RunSettled {
+func (s *Sink) Settled() *poo.RunSettledRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var last *poo.RunSettled
+	var last *poo.RunSettledRecord
 	for _, rec := range s.records {
-		if r, ok := rec.(*poo.RunSettled); ok {
+		if r, ok := rec.(*poo.RunSettledRecord); ok {
 			last = r
 		}
 	}

@@ -50,7 +50,7 @@ type Metadata struct {
 // with the core's own type: a field the core names is read as the core
 // reads it.
 func metadataOf(line []byte) (Metadata, error) {
-	var created poo.SessionCreated
+	var created poo.SessionCreatedRecord
 	if err := json.Unmarshal(line, &created); err != nil {
 		return Metadata{}, &Error{Code: CodeCorruptLog, Message: "the log does not start with a session", Err: err}
 	}
@@ -58,7 +58,7 @@ func metadataOf(line []byte) (Metadata, error) {
 }
 
 // metadataOfRecord returns the header a session's header record holds.
-func metadataOfRecord(created *poo.SessionCreated) Metadata {
+func metadataOfRecord(created *poo.SessionCreatedRecord) Metadata {
 	return Metadata{
 		Format:       created.Format,
 		SessionID:    created.SessionID,
@@ -117,9 +117,9 @@ func (Projection) Summarize(meta Metadata, recs []poo.Record) Listing {
 	for _, rec := range recs {
 		line := summaryLine{Record: rec.Meta().Record, TS: rec.Meta().TS}
 		switch r := rec.(type) {
-		case *poo.RunSettled:
+		case *poo.RunSettledRecord:
 			line.Reason = string(r.Reason)
-		case *poo.SessionCreated:
+		case *poo.SessionCreatedRecord:
 			line.CreatedAt = r.CreatedAt
 			line.Mode = r.Mode
 			line.Build = r.Build

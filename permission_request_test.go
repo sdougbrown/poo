@@ -12,21 +12,21 @@ func TestPermissionRequestRejectsStaleAttempts(t *testing.T) {
 	now := time.Unix(0, 0)
 	p := NewPermissionRequest(PermissionAsk{AskID: "a", Reason: AskReasonPolicy}, PermissionRequestOptions{Now: func() time.Time { return now }, Deadline: now.Add(time.Hour), Fallback: "deny"})
 	drops := 0
-	p.logDrop = func(PermissionInput) { drops++ }
+	p.logDrop = func(PermissionTransition) { drops++ }
 	firstDeadline := now.Add(time.Minute)
-	first := p.Send(PermissionInput{Kind: PermissionAttempt, Deadline: firstDeadline})
+	first := p.Send(PermissionTransition{Kind: PermissionAttempt, Deadline: firstDeadline})
 	now = firstDeadline
-	p.Send(PermissionInput{Kind: PermissionExplicitAnswer, Attempt: first, Deadline: firstDeadline, Answer: PermissionAnswer{Decision: "allow"}})
+	p.Send(PermissionTransition{Kind: PermissionExplicitAnswer, Attempt: first, Deadline: firstDeadline, Answer: PermissionAnswer{Decision: "allow"}})
 	if p.Result().Decision != "" {
 		t.Fatal("expired answer resolved the ask")
 	}
 	secondDeadline := now.Add(time.Minute)
-	second := p.Send(PermissionInput{Kind: PermissionAttempt, Deadline: secondDeadline})
-	p.Send(PermissionInput{Kind: PermissionBudget, Attempt: first, Deadline: now.Add(-time.Minute)})
-	p.Send(PermissionInput{Kind: PermissionAttemptExpired, Attempt: first})
-	p.Send(PermissionInput{Kind: PermissionExplicitAnswer, Attempt: first, Deadline: firstDeadline, Answer: PermissionAnswer{Decision: "deny"}})
-	p.Send(PermissionInput{Kind: PermissionExplicitAnswer, Attempt: second, Deadline: secondDeadline, Answer: PermissionAnswer{Decision: "allow", AnsweredBy: "second"}})
-	p.Send(PermissionInput{Kind: PermissionSeal})
+	second := p.Send(PermissionTransition{Kind: PermissionAttempt, Deadline: secondDeadline})
+	p.Send(PermissionTransition{Kind: PermissionBudget, Attempt: first, Deadline: now.Add(-time.Minute)})
+	p.Send(PermissionTransition{Kind: PermissionAttemptExpired, Attempt: first})
+	p.Send(PermissionTransition{Kind: PermissionExplicitAnswer, Attempt: first, Deadline: firstDeadline, Answer: PermissionAnswer{Decision: "deny"}})
+	p.Send(PermissionTransition{Kind: PermissionExplicitAnswer, Attempt: second, Deadline: secondDeadline, Answer: PermissionAnswer{Decision: "allow", AnsweredBy: "second"}})
+	p.Send(PermissionTransition{Kind: PermissionSeal})
 	if got := p.Result(); got.Decision != "allow" || got.AnsweredBy != "second" || got.AskID != "a" {
 		t.Fatalf("answer=%+v", got)
 	}
@@ -40,13 +40,13 @@ func TestPermissionRequestCancellationWinsReadyAnswer(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(context.Background())
 		deadline := time.Now().Add(time.Hour)
 		p := NewPermissionRequest(PermissionAsk{}, PermissionRequestOptions{Context: ctx, Deadline: deadline, Fallback: "allow"})
-		token := p.Send(PermissionInput{Kind: PermissionAttempt, Deadline: deadline})
+		token := p.Send(PermissionTransition{Kind: PermissionAttempt, Deadline: deadline})
 		cause := context.Canceled
 		if interrupted {
 			cause = errInterrupted
 		}
 		cancel(cause)
-		p.Send(PermissionInput{Kind: PermissionExplicitAnswer, Attempt: token, Deadline: deadline, Answer: PermissionAnswer{Decision: "allow"}})
+		p.Send(PermissionTransition{Kind: PermissionExplicitAnswer, Attempt: token, Deadline: deadline, Answer: PermissionAnswer{Decision: "allow"}})
 		want := ProvenanceCancelled
 		if interrupted {
 			want = ProvenanceInterrupted
@@ -61,9 +61,9 @@ func TestPermissionRequestConcurrentResolution(t *testing.T) {
 	deadline := time.Now().Add(time.Hour)
 	p := NewPermissionRequest(PermissionAsk{AskID: "one"}, PermissionRequestOptions{Deadline: deadline})
 	var drops atomic.Int32
-	p.logDrop = func(PermissionInput) { drops.Add(1) }
-	token := p.Send(PermissionInput{Kind: PermissionAttempt, Deadline: deadline})
-	inputs := []PermissionInput{
+	p.logDrop = func(PermissionTransition) { drops.Add(1) }
+	token := p.Send(PermissionTransition{Kind: PermissionAttempt, Deadline: deadline})
+	inputs := []PermissionTransition{
 		{Kind: PermissionExplicitAnswer, Attempt: token, Deadline: deadline, Answer: PermissionAnswer{Decision: "allow", AnsweredBy: "client"}},
 		{Kind: PermissionCancel}, {Kind: PermissionInterrupt}, {Kind: PermissionSeal},
 		{Kind: PermissionDeferred, Attempt: token}, {Kind: PermissionAttemptExpired, Attempt: token},
@@ -73,7 +73,7 @@ func TestPermissionRequestConcurrentResolution(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, input := range inputs {
 		wg.Add(1)
-		go func(input PermissionInput) { defer wg.Done(); <-start; p.Send(input) }(input)
+		go func(input PermissionTransition) { defer wg.Done(); <-start; p.Send(input) }(input)
 	}
 	close(start)
 	wg.Wait()
@@ -89,7 +89,7 @@ func TestPermissionRequestConcurrentResolution(t *testing.T) {
 	if got.Decision == "allow" && got.AnsweredBy != "client" {
 		t.Fatalf("non-explicit allow: %+v", got)
 	}
-	p.Send(PermissionInput{Kind: PermissionSeal})
+	p.Send(PermissionTransition{Kind: PermissionSeal})
 	if p.Result() != got || drops.Load() == 0 {
 		t.Fatal("terminal answer was not stable")
 	}

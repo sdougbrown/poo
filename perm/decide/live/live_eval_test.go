@@ -91,9 +91,9 @@ func TestTheLiveEvaluationOfThePermissionAsker(t *testing.T) {
 		t.Skip("POO_DECIDE_URL and POO_DECIDE_MODEL are not set")
 	}
 	decider := openai.NewSystemOneDecider(openai.SystemOneConfig{
-		BaseURL: url,
-		Model:   model,
-		APIKey:  os.Getenv("POO_DECIDE_API_KEY"),
+		Endpoint: url,
+		Model:    model,
+		APIKey:   os.Getenv("POO_DECIDE_API_KEY"),
 	})
 	asker := permissive.New(decider, permissive.Options{Timeout: 10 * time.Second})
 

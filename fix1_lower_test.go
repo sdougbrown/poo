@@ -24,7 +24,7 @@ import (
 // history without bound.
 func TestTheParseErrorLoopIsBounded(t *testing.T) {
 	srv, requests := unparseableCallEndpoint(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "text"})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, &recordingSink{}))
 
 	res := runSession(t, s, "hi")
@@ -87,7 +87,7 @@ func TestTwoSessionsSendTheSameToolOrder(t *testing.T) {
 		for _, name := range order {
 			tools[name] = &fix1NamedTool{name: name}
 		}
-		tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
+		tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "native"})
 		s := newTestSession(t, poo.Options{
 			Transport:    tr,
 			Tools:        tools,
@@ -143,9 +143,9 @@ func TestTheMessageDeltaNamesTheAttempt(t *testing.T) {
 	defer srv.Close()
 
 	tr := openai.New(openai.Options{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Backoff: []time.Duration{time.Millisecond},
+		Endpoint: srv.URL,
+		Model:    "m",
+		Backoff:  []time.Duration{time.Millisecond},
 	})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, &recordingSink{}))
 	runSession(t, s, "hi")

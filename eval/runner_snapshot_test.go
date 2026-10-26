@@ -31,7 +31,7 @@ func TestARunThatEditsTheSourceIsInvalid(t *testing.T) {
 			task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 			out := t.TempDir()
 			runner := NewRunner(RunOptions{
-				Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+				Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 				Tasks:     []Task{task},
 				TaskRoot:  taskRoot,
 				Seeds:     1,
@@ -61,7 +61,7 @@ func TestALaterRunStartsFromTheSnapshotNotTheEditedSource(t *testing.T) {
 	record := filepath.Join(t.TempDir(), "rec")
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     2,
@@ -95,7 +95,7 @@ echo poisoned >> "$s/fixtures/fix-a/a.txt"
 echo fixed > "$d/a.txt"
 `)
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     2,
@@ -121,7 +121,7 @@ func TestAReportOfARunThatEditedItsSourceHoldsNoAbsolutePaths(t *testing.T) {
 	task := fakeTask(t, taskRoot, "fix-a", "fix-a", "fixed")
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -166,7 +166,7 @@ echo x > "$s/fixtures/fix-a/evil.pyc"
 echo fixed > "$d/a.txt"
 `)
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -194,7 +194,7 @@ exit 2
 `)
 	runsDir := filepath.Join(out, "work")
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,

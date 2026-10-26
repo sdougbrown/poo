@@ -16,7 +16,7 @@
 # the text tool-call parser.
 
 - name: gemma4
-  base_url: http://localhost:4000/v1
+  endpoint: http://localhost:4000/v1
   model_id: gemma4
   context_limit: 32768
   tools_mode: auto
@@ -28,7 +28,7 @@
     wire format, so the text parser has to read them.
 
 - name: gemma4-think
-  base_url: http://localhost:4000/v1
+  endpoint: http://localhost:4000/v1
   model_id: gemma4
   context_limit: 32768
   tools_mode: auto
@@ -40,7 +40,7 @@
     mode. It shows what thinking changes for the same weights.
 
 - name: qwen
-  base_url: http://localhost:4000/v1
+  endpoint: http://localhost:4000/v1
   model_id: qwen
   context_limit: 262144
   notes: >-
@@ -48,7 +48,7 @@
     answer, so the transcript shows the model's thinking.
 
 - name: minimax-m3.1-flash
-  base_url: https://ollama.com/v1
+  endpoint: https://ollama.com/v1
   model_id: minimax-m3.1-flash
   api_key_env: OLLAMA_API_KEY
   context_limit: 262144

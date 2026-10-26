@@ -23,7 +23,7 @@ func TestANetworkFailureIsNotReportedAsACancellation(t *testing.T) {
 	url := srv.URL
 	srv.Close()
 
-	tr := openai.New(fastRetry(openai.Options{BaseURL: url, Model: "m", Timeout: 3 * time.Second}))
+	tr := openai.New(fastRetry(openai.Options{Endpoint: url, Model: "m", Timeout: 3 * time.Second}))
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err == nil {
 		t.Fatal("the request succeeded, want a network failure")
@@ -50,7 +50,7 @@ func TestANetworkFailureIsNotReportedAsACancellation(t *testing.T) {
 // the request was refused, and nothing else.
 func TestAnErrorBodyWithA200IsAnInvalidRequest(t *testing.T) {
 	srv := newSSEServer(t, `{"error":{"message":"something odd"}}`)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -69,7 +69,7 @@ func TestAnErrorBodyWithA200IsAnInvalidRequest(t *testing.T) {
 // failure: the body's fields win over the default.
 func TestAnErrorBodyWithItsOwnKindKeepsIt(t *testing.T) {
 	srv := newSSEServer(t, `{"error":{"message":"maximum context length exceeded","code":"context_length_exceeded"}}`)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	pe, ok := err.(*poo.ProviderError)
@@ -108,7 +108,7 @@ func TestTheStatusMapsTheErrorKind(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
+			tr := openai.New(fastRetry(openai.Options{Endpoint: srv.URL, Model: "m"}))
 			_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 			pe, ok := err.(*poo.ProviderError)
 			if !ok {

@@ -13,7 +13,7 @@ summary and the judge's verdicts are.
 
 `evals/results/2026-10-21-003728-f6a832f/`: 20 tasks × 4 models × 3
 seeds = 240 runs at `f6a832f`, each inside the bwrap sandbox
-(`--sandbox bwrap`), `--max-turns 50`.
+(`--isolation bwrap`), `--max-turns 50`.
 
 | model | endpoint | context | success | turns | tool err | reread | settle |
 |---|---|---|---|---|---|---|---|
@@ -131,7 +131,7 @@ the bwrap sandbox. Inside the sandbox the same searches find nothing
 outside `/work`, and the source fixtures stayed unchanged for all 240
 runs.
 
-**Harness relevance:** this is why `poo-eval run --sandbox bwrap`, which
+**Harness relevance:** this is why `poo-eval run --isolation bwrap`, which
 wraps the whole `poo` process, is the eval isolation (owner decision,
 2026-10-21). An executor that confines only bash would leave `read`,
 which runs inside poo's own process, able to open the answer key. The

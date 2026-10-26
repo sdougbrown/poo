@@ -16,8 +16,8 @@ import (
 // after the descriptor's controls and setRaw merges the leaf.
 func TestTheDescriptorReasoningBeatsTheQuirk(t *testing.T) {
 	tr := New(Options{
-		BaseURL: "http://127.0.0.1:1/v1",
-		Model:   "gemma4",
+		Endpoint: "http://127.0.0.1:1/v1",
+		Model:    "gemma4",
 		ModelInfo: poo.ModelInfo{
 			Name:      "gemma4",
 			Reasoning: poo.ReasoningControl{Mode: poo.ReasoningToggle, Param: poo.ReasoningPathToggle},

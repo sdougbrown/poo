@@ -16,7 +16,7 @@ import (
 // TestTheStubDeciderAnswersEveryQuestion covers the decider: every
 // question gets an answer, and the distribution sums to one.
 func TestTheStubDeciderAnswersEveryQuestion(t *testing.T) {
-	d := pootest.NewDecider(0.7)
+	d := pootest.NewStubDecider(0.7)
 	questions := []decide.Question{
 		{ID: "q1", Instructions: "is it a bug?", Kind: decide.Bool{True: "yes", False: "no"}},
 		{
@@ -52,7 +52,7 @@ func TestTheStubDeciderAnswersEveryQuestion(t *testing.T) {
 // TestTheStubDeciderFails covers the failure the decider is told to
 // return.
 func TestTheStubDeciderFails(t *testing.T) {
-	d := pootest.NewDecider(0.5)
+	d := pootest.NewStubDecider(0.5)
 	want := errors.New("the endpoint is down")
 	d.SetError(want)
 
@@ -65,7 +65,7 @@ func TestTheStubDeciderFails(t *testing.T) {
 // one record per logical call, whatever the outcome.
 func TestTheRecordingDeciderWritesOneRecord(t *testing.T) {
 	sink := pootest.NewRecordingSink()
-	inner := pootest.NewDecider(0.5)
+	inner := pootest.NewStubDecider(0.5)
 	recorder := decide.Recorded(inner, sink, "the caller")
 
 	questions := []decide.Question{
@@ -95,7 +95,7 @@ func TestTheRecordingDeciderWritesOneRecord(t *testing.T) {
 // caller.
 func TestTheRecordingDeciderRecordsADeferral(t *testing.T) {
 	sink := pootest.NewRecordingSink()
-	inner := pootest.NewDecider(0.5)
+	inner := pootest.NewStubDecider(0.5)
 	inner.SetError(decide.ErrDeferred)
 	recorder := decide.Recorded(inner, sink, "the caller")
 
@@ -157,7 +157,7 @@ func TestTheScriptedCompactorFails(t *testing.T) {
 // TestTheStubDeciderNamesItsChoice covers SetChoice: the choice the test
 // sets is the answer's choice, and the answers still validate.
 func TestTheStubDeciderNamesItsChoice(t *testing.T) {
-	d := pootest.NewDecider(0.5)
+	d := pootest.NewStubDecider(0.5)
 	d.SetChoice("b")
 	questions := []decide.Question{
 		{ID: "q1", Instructions: "which?", Kind: decide.Choice{Options: []decide.Option{
@@ -214,7 +214,7 @@ func TestTheScriptedCompactorForksTheCallItIsGiven(t *testing.T) {
 // choice with one option gets a probability of one, so the answer
 // validates.
 func TestTheStubDeciderAnswersASingleOptionChoice(t *testing.T) {
-	d := pootest.NewDecider(0.5)
+	d := pootest.NewStubDecider(0.5)
 	questions := []decide.Question{
 		{ID: "q1", Instructions: "which?", Kind: decide.Choice{Options: []decide.Option{
 			{Name: "only"},

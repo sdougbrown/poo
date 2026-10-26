@@ -107,7 +107,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	// The run's own record of its beginning. The write is claimed
 	// against the seal, so a run that settles while it is in flight
 	// cannot get run.settled first.
-	if err := s.writeRun(run, &RunStarted{
+	if err := s.writeRun(run, &RunStartedRecord{
 		RecordMeta: NewRecordMeta("run.started"),
 		RunID:      runID,
 		PromptHash: hashText(text),
@@ -905,7 +905,7 @@ func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID stri
 		fail(err)
 		return false
 	}
-	if err := s.writeDelivery(run.ctx, run, &InputDelivered{
+	if err := s.writeDelivery(run.ctx, run, &InputDeliveredRecord{
 		RecordMeta:  NewRecordMeta("input.delivered"),
 		SessionID:   s.opts.SessionID,
 		RunID:       run.id,
@@ -1157,7 +1157,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 // the request tried and what every attempt failed with. The failure
 // that ended the request is in the run's settle record as well.
 func (s *Session) reportAttempt(run *runState, turn int, attempt Attempt) {
-	rec := &ProviderAttempt{
+	rec := &ProviderAttemptRecord{
 		RecordMeta: NewRecordMeta("provider.attempt"),
 		RunID:      run.id,
 		Turn:       turn,
@@ -1271,7 +1271,7 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 	run.tokens += usage.InputTokens + usage.OutputTokens
 	s.mu.Unlock()
 	s.observeUsage(usage, requestChars)
-	if err := s.write(run.ctx, &Usage{
+	if err := s.write(run.ctx, &UsageRecord{
 		RecordMeta:      NewRecordMeta("usage"),
 		RunID:           run.id,
 		Turn:            turn,

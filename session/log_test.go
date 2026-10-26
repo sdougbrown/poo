@@ -56,20 +56,17 @@ func TestTheLogHoldsOneJSONObjectPerLine(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if err := log.Append(ctx, &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    "s1",
-		Mode:         "logged",
-		CreatedAt:    "2026-10-20T00:00:00Z",
-		WorkingDir:   "/tmp",
-		ContextLimit: 32768,
-		ToolsMode:    "native",
-		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
+	if err := log.Append(ctx, &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			CreatedAt:  "2026-10-20T00:00:00Z",
+			WorkingDir: "/tmp", ContextLimit: 32768,
+			ToolsMode: "native"},
 	}); err != nil {
 		t.Fatalf("appending: %v", err)
 	}
-	if err := log.Append(ctx, &poo.RunStarted{
+	if err := log.Append(ctx, &poo.RunStartedRecord{
 		RecordMeta: poo.NewRecordMeta("run.started"),
 		RunID:      "r1",
 		PromptHash: "abc",
@@ -111,7 +108,7 @@ func TestTheRecordsCarryTheirSequenceNumberAndTimestamp(t *testing.T) {
 	}
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		if err := log.Append(ctx, &poo.RunStarted{
+		if err := log.Append(ctx, &poo.RunStartedRecord{
 			RecordMeta: poo.NewRecordMeta("run.started"),
 			RunID:      "r1",
 		}); err != nil {
@@ -149,7 +146,7 @@ func TestAnExistingLogIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("opening the log: %v", err)
 	}
-	if err := log.Append(ctx, &poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started")}); err != nil {
+	if err := log.Append(ctx, &poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started")}); err != nil {
 		t.Fatalf("appending: %v", err)
 	}
 	if err := log.Close(); err != nil {
@@ -186,7 +183,7 @@ func TestTheUsageRecordCarriesTheCacheReadCount(t *testing.T) {
 	}
 	ctx := context.Background()
 	cached := 96
-	if err := log.Append(ctx, &poo.Usage{
+	if err := log.Append(ctx, &poo.UsageRecord{
 		RecordMeta:      poo.NewRecordMeta("usage"),
 		RunID:           "r1",
 		Turn:            1,
@@ -223,7 +220,7 @@ func TestTheCacheReadCountIsAbsentWhenTheEndpointReportsNone(t *testing.T) {
 		t.Fatalf("opening the log: %v", err)
 	}
 	ctx := context.Background()
-	if err := log.Append(ctx, &poo.Usage{
+	if err := log.Append(ctx, &poo.UsageRecord{
 		RecordMeta:   poo.NewRecordMeta("usage"),
 		RunID:        "r1",
 		InputTokens:  120,
@@ -309,7 +306,7 @@ func TestAnAppendAfterTheContextIsDoneFailsAndLeavesTheLogEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	rec := &poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started")}
+	rec := &poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started")}
 	if err := log.Append(ctx, rec); !errors.Is(err, context.Canceled) {
 		t.Errorf("the append returned %v, want context.Canceled", err)
 	}

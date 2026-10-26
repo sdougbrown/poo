@@ -136,9 +136,9 @@ type Factory interface {
 	Configure(ctx context.Context, sess *poo.Session, params protocol.ConfigureParams) (protocol.ModelRoles, error)
 	// Models returns the effective model catalog.
 	Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo, error)
-	// Config returns the effective settings, with the credentials
+	// Settings returns the effective settings, with the credentials
 	// redacted.
-	Config(ctx context.Context) (map[string]any, error)
+	Settings(ctx context.Context) (map[string]any, error)
 }
 
 // Info is what the factory says about a session it built.
@@ -543,12 +543,12 @@ func knownMethod(method string) bool {
 		protocol.MethodSessionClose,
 		protocol.MethodSessionHistory,
 		protocol.MethodModelsList,
-		protocol.MethodAgentPrompt,
-		protocol.MethodAgentMessage,
-		protocol.MethodAgentInspect,
-		protocol.MethodAgentCancel,
+		protocol.MethodRunPrompt,
+		protocol.MethodRunMessage,
+		protocol.MethodRunInspect,
+		protocol.MethodRunCancel,
 		protocol.MethodJobCancel,
-		protocol.MethodConfigGet:
+		protocol.MethodSettingsGet:
 		return true
 	}
 	return false

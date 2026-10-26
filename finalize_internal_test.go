@@ -111,15 +111,15 @@ func TestAnInputAcceptedWhileTheFinalizationWaitsHasAFate(t *testing.T) {
 	for _, rec := range sink.records {
 		names = append(names, rec.Meta().Record)
 		switch rec := rec.(type) {
-		case *InputQueued:
+		case *InputQueuedRecord:
 			if rec.InputID == id {
 				queued++
 			}
-		case *InputDelivered:
+		case *InputDeliveredRecord:
 			if rec.InputID == id {
 				delivered++
 			}
-		case *InputDropped:
+		case *InputDroppedRecord:
 			if rec.InputID == id {
 				dropped++
 			}

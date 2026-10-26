@@ -134,7 +134,7 @@ func (s *suite) checkSessionTools(got, want []protocol.ToolInfo, profiles []prot
 // prompt starts a run and returns its id.
 func (s *suite) prompt(c *client, sessionID, text string) string {
 	s.t.Helper()
-	raw := c.call(protocol.MethodAgentPrompt, map[string]any{
+	raw := c.call(protocol.MethodRunPrompt, map[string]any{
 		"session_id": sessionID,
 		"text":       text,
 	}, &protocol.PromptResult{})
@@ -159,7 +159,7 @@ func (s *suite) inspect(c *client, sessionID string, wait *protocol.InspectWait,
 	if afterSeq > 0 {
 		params["after_seq"] = afterSeq
 	}
-	raw := c.call(protocol.MethodAgentInspect, params, &protocol.InspectResult{})
+	raw := c.call(protocol.MethodRunInspect, params, &protocol.InspectResult{})
 	var result protocol.InspectResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		s.t.Fatalf("decoding the inspect: %v", err)
@@ -171,7 +171,7 @@ func (s *suite) inspect(c *client, sessionID string, wait *protocol.InspectWait,
 // result names an input.
 func (s *suite) sendMessage(c *client, sessionID, text, mode string) protocol.MessageResult {
 	s.t.Helper()
-	raw := c.call(protocol.MethodAgentMessage, map[string]any{
+	raw := c.call(protocol.MethodRunMessage, map[string]any{
 		"session_id": sessionID,
 		"text":       text,
 		"mode":       mode,
@@ -664,7 +664,7 @@ func (s *suite) heardAndSaid() {
 		s.t.Fatalf("the delta names no message: %v", delta.Payload)
 	}
 
-	raw := c.call(protocol.MethodAgentPrompt, map[string]any{
+	raw := c.call(protocol.MethodRunPrompt, map[string]any{
 		"session_id": sessionID,
 		"text":       "and again",
 		"delivered": map[string]any{
@@ -709,7 +709,7 @@ func (s *suite) kill() {
 
 	runID := s.prompt(c, sessionID, "do the thing")
 	s.waitToolCall(c, runID)
-	c.call(protocol.MethodAgentCancel, map[string]any{
+	c.call(protocol.MethodRunCancel, map[string]any{
 		"session_id": sessionID,
 		"run_id":     runID,
 	}, &struct{}{})

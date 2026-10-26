@@ -168,7 +168,7 @@ func TestPromptRunsAndSettles(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	result, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{
+	result, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{
 		SessionID: sessionID,
 		Text:      "hi",
 	})
@@ -197,7 +197,7 @@ func TestEventsArriveInOrder(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	h.event("run.settled")
@@ -225,12 +225,12 @@ func TestSecondPromptWhileRunningIsBusy(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	transport.waitStarted(t)
 
-	_, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "again"})
+	_, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "again"})
 	if rerr == nil {
 		t.Fatal("the second prompt was answered")
 	}
@@ -247,7 +247,7 @@ func TestMessageWithoutARunIsNotRunning(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	_, rerr := h.call(protocol.MethodAgentMessage, protocol.MessageParams{SessionID: sessionID, Text: "hi"})
+	_, rerr := h.call(protocol.MethodRunMessage, protocol.MessageParams{SessionID: sessionID, Text: "hi"})
 	if rerr == nil {
 		t.Fatal("the message was answered")
 	}
@@ -268,7 +268,7 @@ func TestPermissionAskAllowed(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	ask := theAsk(t, h)
@@ -303,7 +303,7 @@ func TestPermissionAskDenied(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	ask := theAsk(t, h)
@@ -332,7 +332,7 @@ func TestPermissionAskNeverAnswered(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	theAsk(t, h)
@@ -366,7 +366,7 @@ func TestPermissionAskNeedsTheCapability(t *testing.T) {
 	}
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	select {
@@ -387,12 +387,12 @@ func TestInspectPagesTheEvents(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	h.event("run.settled")
 
-	result, rerr := h.call(protocol.MethodAgentInspect, protocol.InspectParams{SessionID: sessionID})
+	result, rerr := h.call(protocol.MethodRunInspect, protocol.InspectParams{SessionID: sessionID})
 	if rerr != nil {
 		t.Fatalf("the inspect was refused: %v", rerr)
 	}
@@ -412,7 +412,7 @@ func TestInspectPagesTheEvents(t *testing.T) {
 
 	// The page after the first event holds the rest.
 	after := inspected.Events[0].Seq
-	result, rerr = h.call(protocol.MethodAgentInspect, protocol.InspectParams{SessionID: sessionID, AfterSeq: after})
+	result, rerr = h.call(protocol.MethodRunInspect, protocol.InspectParams{SessionID: sessionID, AfterSeq: after})
 	if rerr != nil {
 		t.Fatalf("the second inspect was refused: %v", rerr)
 	}
@@ -438,7 +438,7 @@ func TestInspectTimeout(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	result, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
+	result, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 	if rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
@@ -448,7 +448,7 @@ func TestInspectTimeout(t *testing.T) {
 	}
 	transport.waitStarted(t)
 
-	result, rerr = h.call(protocol.MethodAgentInspect, protocol.InspectParams{
+	result, rerr = h.call(protocol.MethodRunInspect, protocol.InspectParams{
 		SessionID: sessionID,
 		Wait: &protocol.InspectWait{
 			Until:     "settled",
@@ -480,7 +480,7 @@ func TestInspectWaitsForTheSettle(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	result, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
+	result, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 	if rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
@@ -492,7 +492,7 @@ func TestInspectWaitsForTheSettle(t *testing.T) {
 
 	answers := make(chan protocol.InspectResult, 1)
 	go func() {
-		raw, rerr := h.call(protocol.MethodAgentInspect, protocol.InspectParams{
+		raw, rerr := h.call(protocol.MethodRunInspect, protocol.InspectParams{
 			SessionID: sessionID,
 			Wait: &protocol.InspectWait{
 				Until:     "settled",
@@ -540,7 +540,7 @@ func TestCloseEndsTheRun(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	transport.waitStarted(t)
@@ -578,7 +578,7 @@ func TestCloseRacingASettlingRun(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	result, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
+	result, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 	if rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
@@ -590,7 +590,7 @@ func TestCloseRacingASettlingRun(t *testing.T) {
 	// The client waits for the settle, and the close races it.
 	answers := make(chan protocol.InspectResult, 1)
 	go func() {
-		raw, rerr := h.call(protocol.MethodAgentInspect, protocol.InspectParams{
+		raw, rerr := h.call(protocol.MethodRunInspect, protocol.InspectParams{
 			SessionID: sessionID,
 			Wait: &protocol.InspectWait{
 				Until:     "settled",
@@ -633,7 +633,7 @@ func TestCloseTellsAWaitingInspect(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	result, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
+	result, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 	if rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
@@ -647,7 +647,7 @@ func TestCloseTellsAWaitingInspect(t *testing.T) {
 	// tells it the session is closed.
 	answers := make(chan *protocol.Error, 1)
 	go func() {
-		_, rerr := h.call(protocol.MethodAgentInspect, protocol.InspectParams{
+		_, rerr := h.call(protocol.MethodRunInspect, protocol.InspectParams{
 			SessionID: sessionID,
 			Wait: &protocol.InspectWait{
 				Until:     "settled",
@@ -684,7 +684,7 @@ func TestCancelIsIdempotent(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	result, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
+	result, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 	if rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
@@ -694,7 +694,7 @@ func TestCancelIsIdempotent(t *testing.T) {
 	}
 	transport.waitStarted(t)
 
-	if _, rerr := h.call(protocol.MethodAgentCancel, protocol.CancelParams{SessionID: sessionID, RunID: prompted.RunID}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunCancel, protocol.CancelParams{SessionID: sessionID, RunID: prompted.RunID}); rerr != nil {
 		t.Fatalf("the cancel was refused: %v", rerr)
 	}
 	settled := h.event("run.settled")
@@ -702,11 +702,11 @@ func TestCancelIsIdempotent(t *testing.T) {
 		t.Errorf("the run settled %q, want cancelled", settled.Reason)
 	}
 	// The run has settled, so the cancel again is answered.
-	if _, rerr := h.call(protocol.MethodAgentCancel, protocol.CancelParams{SessionID: sessionID, RunID: prompted.RunID}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunCancel, protocol.CancelParams{SessionID: sessionID, RunID: prompted.RunID}); rerr != nil {
 		t.Fatalf("the second cancel was refused: %v", rerr)
 	}
 	// A run the session never had is not found.
-	_, rerr = h.call(protocol.MethodAgentCancel, protocol.CancelParams{SessionID: sessionID, RunID: "nope"})
+	_, rerr = h.call(protocol.MethodRunCancel, protocol.CancelParams{SessionID: sessionID, RunID: "nope"})
 	if rerr == nil {
 		t.Fatal("the cancel of an unknown run was answered")
 	}
@@ -724,7 +724,7 @@ func TestEOFTeardownEndsTheRun(t *testing.T) {
 
 	h.initialize()
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	transport.waitStarted(t)
@@ -749,7 +749,7 @@ func TestEOFTeardownWithAPendingAsk(t *testing.T) {
 
 	h.initialize()
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	theAsk(t, h)
@@ -776,7 +776,7 @@ func TestQueueOverflowFailsTheTransport(t *testing.T) {
 
 	// The client stopped reading, so the answer never arrives: the
 	// server fails the transport instead.
-	h.send(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
+	h.send(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 	err := h.wait()
 	if err == nil {
 		t.Fatal("the server reported no failure, want the transport failure")
@@ -812,7 +812,7 @@ func TestWriteStallFailsTheTransport(t *testing.T) {
 
 	// The client stopped reading, so the answer never arrives: the
 	// server fails the transport instead.
-	h.send(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
+	h.send(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"})
 	err := h.wait()
 	if err == nil {
 		t.Fatal("the server reported no failure, want the transport failure")
@@ -831,7 +831,7 @@ func TestHistoryPagesBackwards(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	h.event("run.settled")
@@ -1133,7 +1133,7 @@ func TestNoGoroutineIsLeftBehind(t *testing.T) {
 	h := newHarness(t, factory, wire.Bounds{})
 	h.initialize()
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	h.event("run.settled")

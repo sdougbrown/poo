@@ -36,7 +36,7 @@ func TestADeadlineDuringTheRunSettlesCancelled(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--timeout", "200ms",
@@ -90,7 +90,7 @@ func TestAMissingWorkingDirectoryFails(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", missing,
@@ -107,9 +107,9 @@ func TestAMissingWorkingDirectoryFails(t *testing.T) {
 	}
 }
 
-// TestTheBaseURLCredentialsAreNotLogged covers a base URL that carries a
+// TestTheEndpointCredentialsAreNotLogged covers a base URL that carries a
 // password: the log must not hold it.
-func TestTheBaseURLCredentialsAreNotLogged(t *testing.T) {
+func TestTheEndpointCredentialsAreNotLogged(t *testing.T) {
 	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
 		"data: [DONE]\n\n"
 	endpoint := newFakeEndpoint(t, body)
@@ -119,7 +119,7 @@ func TestTheBaseURLCredentialsAreNotLogged(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", "http://user:s3cret@"+strings.TrimPrefix(endpoint.URL, "http://")+"/v1",
+		"--endpoint", "http://user:s3cret@"+strings.TrimPrefix(endpoint.URL, "http://")+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -146,7 +146,7 @@ func TestTheBaseURLCredentialsAreNotLogged(t *testing.T) {
 	recs := readLog(t, logPath)
 	created := recs[0]
 	model, _ := created["model"].(map[string]any)
-	base, _ := model["base_url"].(string)
+	base, _ := model["endpoint"].(string)
 	if !strings.Contains(base, endpoint.URL) {
 		t.Errorf("the logged base URL is %q, want the endpoint", base)
 	}
@@ -164,7 +164,7 @@ func TestAnExistingLogPathIsRefused(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -177,7 +177,7 @@ func TestAnExistingLogPathIsRefused(t *testing.T) {
 
 	code, stderr = runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -258,7 +258,7 @@ func TestTheNativeModeRunSendsTheToolsNatively(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -325,7 +325,7 @@ func TestAWorkingDirectoryThatIsAFileFails(t *testing.T) {
 
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", file,

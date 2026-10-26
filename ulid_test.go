@@ -44,7 +44,7 @@ func TestRunAndInputIDsAreULIDs(t *testing.T) {
 		}
 	}
 	for _, rec := range sink.allRecords() {
-		if r, ok := rec.(*poo.RunStarted); ok && r.RunID != runID {
+		if r, ok := rec.(*poo.RunStartedRecord); ok && r.RunID != runID {
 			t.Errorf("run.started names %q, want %q", r.RunID, runID)
 		}
 	}

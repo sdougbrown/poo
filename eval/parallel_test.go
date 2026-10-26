@@ -82,8 +82,8 @@ func TestTheEndpointLimitHolds(t *testing.T) {
 
 	endpoint := "http://localhost:4000/v1"
 	models := []Model{
-		{Name: "a", BaseURL: endpoint, ModelID: "m", ContextLimit: 32768},
-		{Name: "b", BaseURL: endpoint, ModelID: "m", ContextLimit: 32768},
+		{Name: "a", Endpoint: endpoint, ModelID: "m", ContextLimit: 32768},
+		{Name: "b", Endpoint: endpoint, ModelID: "m", ContextLimit: 32768},
 	}
 
 	// The fake poo is one script per model, but both models share the
@@ -127,8 +127,8 @@ func TestTheGlobalLimitHolds(t *testing.T) {
 
 	endpoint := "http://localhost:4000/v1"
 	models := []Model{
-		{Name: "a", BaseURL: endpoint, ModelID: "m", ContextLimit: 32768},
-		{Name: "b", BaseURL: endpoint, ModelID: "m", ContextLimit: 32768},
+		{Name: "a", Endpoint: endpoint, ModelID: "m", ContextLimit: 32768},
+		{Name: "b", Endpoint: endpoint, ModelID: "m", ContextLimit: 32768},
 	}
 	binary := fakePoo(t, counter.script(endpoint))
 
@@ -209,7 +209,7 @@ exit 0
 
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     seeds,
@@ -259,7 +259,7 @@ exit 0
 
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,

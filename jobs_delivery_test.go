@@ -315,7 +315,7 @@ func TestACancelledRunsJobResultWakesTheSession(t *testing.T) {
 	// The woken run carries the job results.
 	found := false
 	for _, rec := range sink.allRecords() {
-		started, ok := rec.(*poo.RunStarted)
+		started, ok := rec.(*poo.RunStartedRecord)
 		if !ok {
 			continue
 		}
@@ -591,7 +591,7 @@ func TestOnIdleHoldDeliversToAnOpenRun(t *testing.T) {
 	}
 	delivered := 0
 	for _, rec := range sink.allRecords() {
-		if d, ok := rec.(*poo.InputDelivered); ok && d.Mode == poo.InputModeJob {
+		if d, ok := rec.(*poo.InputDeliveredRecord); ok && d.Mode == poo.InputModeJob {
 			delivered++
 		}
 	}

@@ -19,10 +19,10 @@ func TestTheSinkKeepsEveryRecord(t *testing.T) {
 	sink := pootest.NewSink()
 	ctx := context.Background()
 
-	if err := sink.Append(ctx, &poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started")}); err != nil {
+	if err := sink.Append(ctx, &poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started")}); err != nil {
 		t.Fatalf("appending: %v", err)
 	}
-	if err := sink.Append(ctx, &poo.RunSettled{RecordMeta: poo.NewRecordMeta("run.settled")}); err != nil {
+	if err := sink.Append(ctx, &poo.RunSettledRecord{RecordMeta: poo.NewRecordMeta("run.settled")}); err != nil {
 		t.Fatalf("appending: %v", err)
 	}
 
@@ -42,10 +42,10 @@ func TestTheSinkFailsOnTheNthAppend(t *testing.T) {
 	sink.FailAt(2)
 	ctx := context.Background()
 
-	if err := sink.Append(ctx, &poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started")}); err != nil {
+	if err := sink.Append(ctx, &poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started")}); err != nil {
 		t.Fatalf("the first append failed: %v", err)
 	}
-	err := sink.Append(ctx, &poo.RunSettled{RecordMeta: poo.NewRecordMeta("run.settled")})
+	err := sink.Append(ctx, &poo.RunSettledRecord{RecordMeta: poo.NewRecordMeta("run.settled")})
 	if !errors.Is(err, pootest.ErrSinkFailed) {
 		t.Errorf("the second append returned %v, want ErrSinkFailed", err)
 	}
@@ -65,7 +65,7 @@ func TestTheSinkTakesTheFailureError(t *testing.T) {
 	sink.SetError(want)
 	sink.FailAt(1)
 
-	err := sink.Append(context.Background(), &poo.RunStarted{RecordMeta: poo.NewRecordMeta("run.started")})
+	err := sink.Append(context.Background(), &poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started")})
 	if !errors.Is(err, want) {
 		t.Errorf("the append returned %v, want %v", err, want)
 	}
@@ -86,7 +86,7 @@ func TestTheSinkSerializesConcurrentAppends(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			for i := 0; i < each; i++ {
-				_ = sink.Append(ctx, &poo.Usage{RecordMeta: poo.NewRecordMeta("usage")})
+				_ = sink.Append(ctx, &poo.UsageRecord{RecordMeta: poo.NewRecordMeta("usage")})
 			}
 		}(w)
 	}

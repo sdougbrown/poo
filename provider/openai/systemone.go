@@ -23,8 +23,8 @@ const DefaultDeciderTimeout = 1500 * time.Millisecond
 
 // SystemOneConfig configures the systemone decider.
 type SystemOneConfig struct {
-	// BaseURL is the endpoint's base, e.g. "http://localhost:8000/v1".
-	BaseURL string
+	// Endpoint is the endpoint's base, e.g. "http://localhost:8000/v1".
+	Endpoint string
 	// Model is the identifier the endpoint calls the model.
 	Model string
 	// APIKey is the bearer token, empty when the endpoint needs none.
@@ -77,8 +77,8 @@ func NewSystemOneDeciderFor(model poo.ModelInfo, cfg SystemOneConfig) (*SystemOn
 		return nil, fmt.Errorf("openai: the model %q does not serve the %q operation",
 			modelName(model), poo.OpSystemOne)
 	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = model.Endpoint
+	if cfg.Endpoint == "" {
+		cfg.Endpoint = model.Endpoint
 	}
 	if cfg.Model == "" {
 		cfg.Model = model.ModelID
@@ -205,7 +205,7 @@ func (d *SystemOneDecider) askBatch(ctx context.Context, state any, instructions
 // The request is counted before it goes out, so a request that never
 // reached the endpoint is still counted.
 func (d *SystemOneDecider) post(ctx context.Context, body []byte) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, SystemOneURL(d.cfg.BaseURL), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, SystemOneURL(d.cfg.Endpoint), bytes.NewReader(body))
 	if err != nil {
 		return nil, deferred(err)
 	}

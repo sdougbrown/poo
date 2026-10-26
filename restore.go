@@ -277,9 +277,9 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 
 // sessionHeader returns the session's header record, or nil when the
 // records hold none.
-func sessionHeader(records []Record) *SessionCreated {
+func sessionHeader(records []Record) *SessionCreatedRecord {
 	for _, rec := range records {
-		if created, ok := rec.(*SessionCreated); ok {
+		if created, ok := rec.(*SessionCreatedRecord); ok {
 			return created
 		}
 	}
@@ -405,13 +405,13 @@ func PendingJobResults(records []Record) []JobResult {
 func pendingJobResults(records []Record) []jobResult {
 	delivered := map[string]bool{}
 	for _, rec := range records {
-		if d, ok := rec.(*InputDelivered); ok {
+		if d, ok := rec.(*InputDeliveredRecord); ok {
 			delivered[d.InputID] = true
 		}
 	}
 	var out []jobResult
 	for _, rec := range records {
-		ended, ok := rec.(*JobEnded)
+		ended, ok := rec.(*JobEndedRecord)
 		if !ok {
 			continue
 		}
@@ -513,7 +513,7 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 				return fmt.Errorf("poo: restoring the compaction of the run %s: %w", r.RunID, err)
 			}
 			out.Compactions++
-		case *RunSettled:
+		case *RunSettledRecord:
 			if r.Reason == ReasonInterrupted {
 				out.Interrupted = append(out.Interrupted, r.RunID)
 			}
@@ -546,9 +546,9 @@ func (s *Session) seedCounters(records []Record) {
 			handles = max(handles, handleSeq(r.Handle))
 		case *MessageRecord:
 			messages = max(messages, messageSeq(r.MessageID))
-		case *JobStarted:
+		case *JobStartedRecord:
 			jobs = max(jobs, seqOf(r.JobID, 'j'))
-		case *JobEnded:
+		case *JobEndedRecord:
 			jobs = max(jobs, seqOf(r.JobID, 'j'))
 			inputs = max(inputs, jobInputSeq(s.opts.SessionID, r.InputID))
 		}
@@ -577,10 +577,10 @@ func scanRuns(records []Record, out *Restored) ([]string, map[string]int) {
 	}
 	for _, rec := range records {
 		switch r := rec.(type) {
-		case *RunStarted:
+		case *RunStartedRecord:
 			note(r.RunID)
 			out.Runs = append(out.Runs, r.RunID)
-		case *RunSettled:
+		case *RunSettledRecord:
 			note(r.RunID)
 			if r.Turns > turns[r.RunID] {
 				turns[r.RunID] = r.Turns
@@ -589,7 +589,7 @@ func scanRuns(records []Record, out *Restored) ([]string, map[string]int) {
 			if r.Turn > turns[r.RunID] {
 				turns[r.RunID] = r.Turn
 			}
-		case *Usage:
+		case *UsageRecord:
 			if r.Turn > turns[r.RunID] {
 				turns[r.RunID] = r.Turn
 			}

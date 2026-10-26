@@ -136,7 +136,7 @@ type Server struct {
 	// settings are the settings the build was made from.
 	settings *config.Settings
 	// effective are the settings a command line leaves after its
-	// overrides: the document config/get reports.
+	// overrides: the document settings/get reports.
 	effective *config.Settings
 	// workDir is the directory the tools work in.
 	workDir string
@@ -572,13 +572,13 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 	return out, nil
 }
 
-// Config returns the effective settings, with the credentials
+// Settings returns the effective settings, with the credentials
 // redacted.
 //
 // The settings name the environment variables the keys come from and
 // never the keys themselves, so the document is the settings as they
 // are.
-func (f *Server) Config(ctx context.Context) (map[string]any, error) {
+func (f *Server) Settings(ctx context.Context) (map[string]any, error) {
 	settings := f.effective
 	// The settings name environment variables, never keys. A base URL
 	// may carry credentials all the same, and the document is what the
@@ -586,7 +586,7 @@ func (f *Server) Config(ctx context.Context) (map[string]any, error) {
 	redacted := *settings
 	redacted.Endpoints = make(map[string]config.Endpoint, len(settings.Endpoints))
 	for name, endpoint := range settings.Endpoints {
-		endpoint.BaseURL = session.LoggedBaseURL(endpoint.BaseURL)
+		endpoint.Endpoint = session.LoggedEndpoint(endpoint.Endpoint)
 		redacted.Endpoints[name] = endpoint
 	}
 	encoded, err := json.Marshal(&redacted)
@@ -605,7 +605,7 @@ func (f *Server) Config(ctx context.Context) (map[string]any, error) {
 // The roles are the models the session runs with: the chat model the
 // runtime was built for, and the decision model the caller resolved. A
 // model with no name is no model, so the header records no decider.
-func (f *Server) created(runtime *config.Runtime, mode, workDir string, decider poo.ModelInfo) (*poo.SessionCreated, error) {
+func (f *Server) created(runtime *config.Runtime, mode, workDir string, decider poo.ModelInfo) (*poo.SessionCreatedRecord, error) {
 	model := runtime.Options.Model
 	chat := session.LoggedModel(model)
 	roles := poo.ModelRoles{Chat: &chat}
@@ -613,20 +613,22 @@ func (f *Server) created(runtime *config.Runtime, mode, workDir string, decider 
 		logged := session.LoggedModel(decider)
 		roles.Decider = &logged
 	}
-	return &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    session.NewID(),
-		Mode:         mode,
-		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ModelID: model.ModelID, BaseURL: session.LoggedBaseURL(model.Endpoint), MaxOutput: model.MaxOutput},
-		Tools:        runtime.SessionTools(),
-		ContextLimit: model.ContextLimit,
-		ToolsMode:    poo.ToolsMode(model.Tools.Mode),
-		Profile:      runtime.Profile.Name,
-		Roles:        roles,
-		Build:        f.build.Build,
+	return &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"),
+		SessionMetadata: poo.SessionMetadata{
+			Format:       poo.FormatVersion,
+			SessionID:    session.NewID(),
+			Mode:         mode,
+			CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+			WorkingDir:   workDir,
+			Tools:        runtime.SessionTools(),
+			Profile:      runtime.Profile.Name,
+			Roles:        roles,
+			Build:        f.build.Build,
+			Model:        poo.SessionModel{ModelID: model.ModelID, Endpoint: session.LoggedEndpoint(model.Endpoint), MaxOutput: model.MaxOutput},
+			ContextLimit: model.ContextLimit,
+			ToolsMode:    poo.ToolsMode(model.Tools.Mode),
+		},
 	}, nil
 }
 

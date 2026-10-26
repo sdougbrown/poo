@@ -255,7 +255,7 @@ func TestTheJudgeVerdictIsWritten(t *testing.T) {
 		t.Fatalf("writing the log: %v", err)
 	}
 
-	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: resultsDir})
+	judge, err := NewJudge(JudgeOptions{Endpoint: server.URL, ResultsDir: resultsDir})
 	if err != nil {
 		t.Fatalf("making the judge: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestOneUnreadableTranscriptDoesNotStopTheJudge(t *testing.T) {
 		t.Fatalf("writing the log: %v", err)
 	}
 
-	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: resultsDir})
+	judge, err := NewJudge(JudgeOptions{Endpoint: server.URL, ResultsDir: resultsDir})
 	if err != nil {
 		t.Fatalf("making the judge: %v", err)
 	}

@@ -23,7 +23,7 @@ func TestTheSettingsPathSendsTheSameRequest(t *testing.T) {
 	flagsDir := t.TempDir()
 	flagsCode, flagsStderr := runCLI(t,
 		"run",
-		"--base-url", fromFlags.URL+"/v1",
+		"--endpoint", fromFlags.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", flagsDir,
@@ -40,7 +40,7 @@ func TestTheSettingsPathSendsTheSameRequest(t *testing.T) {
 	settings := fmt.Sprintf(`version: 1
 endpoints:
   test:
-    base_url: %s/v1
+    endpoint: %s/v1
 models:
   test-model:
     endpoint: test

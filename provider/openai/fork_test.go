@@ -52,7 +52,7 @@ func newForkServer(t *testing.T) *forkServer {
 // replaced, and the prefix is byte-identical.
 func TestTheForkSendsTheSamePrefix(t *testing.T) {
 	srv := newForkServer(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 	req := poo.ChatRequest{
 		Model:     "m",
@@ -119,7 +119,7 @@ func TestTheForkSendsTheSamePrefix(t *testing.T) {
 // body to fork.
 func TestTheForkWithoutASnapshotIsRefused(t *testing.T) {
 	srv := newForkServer(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 	if _, err := tr.Fork(context.Background(), poo.Rendered{}, nil, 0); err == nil {
 		t.Error("the fork of an empty snapshot succeeded, want a failure")
@@ -130,7 +130,7 @@ func TestTheForkWithoutASnapshotIsRefused(t *testing.T) {
 // has the same keys in the same order, so the prefix is byte-identical.
 func TestTheForkKeepsTheBodyKeyOrder(t *testing.T) {
 	srv := newForkServer(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 	req := poo.ChatRequest{
 		Model:     "m",
@@ -164,7 +164,7 @@ func TestTheForkKeepsTheBodyKeyOrder(t *testing.T) {
 // transport rendered.
 func TestAForkOfAnotherAPIsSnapshotIsRefused(t *testing.T) {
 	srv := newForkServer(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
 	_, err := tr.Fork(context.Background(), poo.Rendered{API: poo.APIResponses, Body: []byte(`{"messages":[]}`)}, nil, 16)
 	var pe *poo.ProviderError

@@ -10,6 +10,8 @@ const (
 	CauseInterrupt Cause = "interrupt"
 	// CauseProviderError means the provider's stream broke.
 	CauseProviderError Cause = "provider_error"
+	// CauseSessionClosed means the session closed while the work ran.
+	CauseSessionClosed Cause = "session_closed"
 )
 
 // interruptedActivityTurn finishes a turn that an interrupt cut short.
@@ -85,7 +87,7 @@ func (s *Session) emitInterrupted(run *runState, turn int) {
 		"turn":      turn,
 		"input_ids": ids,
 	})
-	_ = s.write(run.ctx, &TurnInterrupted{
+	_ = s.write(run.ctx, &TurnInterruptedRecord{
 		RecordMeta:    NewRecordMeta("turn.interrupted"),
 		SessionID:     s.opts.SessionID,
 		RunID:         run.id,

@@ -66,7 +66,7 @@ func TestTheCheckOutputNamesNoWorkdir(t *testing.T) {
 	out := t.TempDir()
 	runsDir := filepath.Join(t.TempDir(), "work")
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,
@@ -162,7 +162,7 @@ func TestTheCheckOutputNamesNoWorkRootEither(t *testing.T) {
 	out := t.TempDir()
 	runsDir := filepath.Join(t.TempDir(), "work")
 	runner := NewRunner(RunOptions{
-		Models:    []Model{{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768}},
+		Models:    []Model{{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768}},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
 		Seeds:     1,

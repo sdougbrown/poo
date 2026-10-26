@@ -439,7 +439,7 @@ func (r *Runner) execute(ctx context.Context, cells []cell, runsDir, cellRunsDir
 	endpointSem := map[string]chan struct{}{}
 
 	for i, j := range cells {
-		endpoint := j.model.Endpoint()
+		endpoint := j.model.ConcurrencyKey()
 		semEP, ok := endpointSem[endpoint]
 		if !ok {
 			semEP = make(chan struct{}, MaxParallelPerEndpoint)
@@ -717,7 +717,7 @@ func (r *Runner) runPoo(ctx context.Context, j cell, workdir, logPath string) (i
 	model := j.model.ModelInfo()
 	args := []string{
 		"run",
-		"--base-url", model.Endpoint,
+		"--endpoint", model.Endpoint,
 		"--model-id", model.ModelID,
 		"--context-limit", strconv.Itoa(model.ContextLimit),
 		"--tools-mode", string(model.Tools.Mode),

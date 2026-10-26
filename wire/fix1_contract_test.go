@@ -51,7 +51,7 @@ func TestARequestWithAnotherJSONRPCVersionIsInvalid(t *testing.T) {
 	ch := make(chan *protocol.Response, 1)
 	h.pending[id] = ch
 	h.mu.Unlock()
-	h.write(map[string]any{"jsonrpc": "1.0", "id": id, "method": protocol.MethodConfigGet})
+	h.write(map[string]any{"jsonrpc": "1.0", "id": id, "method": protocol.MethodSettingsGet})
 	resp := <-ch
 	if resp.Error == nil {
 		t.Fatal("the request with jsonrpc 1.0 was served")
@@ -90,7 +90,7 @@ func TestConfigureDuringARunIsBusy(t *testing.T) {
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	if _, rerr := h.call(protocol.MethodAgentPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	transport.waitStarted(t)

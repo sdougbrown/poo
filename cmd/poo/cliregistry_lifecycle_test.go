@@ -49,7 +49,7 @@ func TestARunReapsTheCLIsChildren(t *testing.T) {
 				t.Fatalf("writing the registry: %v", err)
 			}
 			settings := filepath.Join(dir, "settings.yaml")
-			document := fmt.Sprintf("version: 1\nsession:\n  mode: ephemeral\ncliregistry:\n  paths: [%q]\n", registry)
+			document := fmt.Sprintf("version: 1\nsession:\n  mode: ephemeral\ncli_registry:\n  paths: [%q]\n", registry)
 			if err := os.WriteFile(settings, []byte(document), 0o600); err != nil {
 				t.Fatalf("writing the settings: %v", err)
 			}
@@ -61,7 +61,7 @@ func TestARunReapsTheCLIsChildren(t *testing.T) {
 			args := []string{
 				"run",
 				"--settings", settings,
-				"--base-url", endpoint.URL + "/v1",
+				"--endpoint", endpoint.URL + "/v1",
 				"--model-id", "test-model",
 				"--context-limit", "32768",
 				"--working-dir", dir,

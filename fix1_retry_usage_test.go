@@ -54,9 +54,9 @@ func emptyToolCallsThenAnswer(t *testing.T) *httptest.Server {
 func TestARetriedAttemptsUsageIsCounted(t *testing.T) {
 	srv := emptyToolCallsThenAnswer(t)
 	tr := openai.New(openai.Options{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Backoff: []time.Duration{time.Millisecond, time.Millisecond},
+		Endpoint: srv.URL,
+		Model:    "m",
+		Backoff:  []time.Duration{time.Millisecond, time.Millisecond},
 	})
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
@@ -68,7 +68,7 @@ func TestARetriedAttemptsUsageIsCounted(t *testing.T) {
 	var input, output int
 	var records int
 	for _, rec := range sink.allRecords() {
-		usage, ok := rec.(*poo.Usage)
+		usage, ok := rec.(*poo.UsageRecord)
 		if !ok {
 			continue
 		}

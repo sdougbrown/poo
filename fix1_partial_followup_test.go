@@ -40,7 +40,7 @@ func TestTheNextRunPairsABrokenStreamsCallsWithResults(t *testing.T) {
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer srv.Close()
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", Backoff: []time.Duration{time.Millisecond, time.Millisecond}})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", Backoff: []time.Duration{time.Millisecond, time.Millisecond}})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, &recordingSink{}))
 	runSession(t, s, "hi")
 	runSession(t, s, "again")

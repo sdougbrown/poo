@@ -14,8 +14,8 @@ type hostedEntry struct {
 	ModelID string
 	// Name is the model's display name.
 	Name string
-	// BaseURL is the provider's API base URL.
-	BaseURL string
+	// Endpoint is the provider's API base URL.
+	Endpoint string
 	// Env names the environment variables that hold the provider's key.
 	Env []string
 	// ContextLimit is the model's context window.

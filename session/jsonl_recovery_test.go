@@ -124,7 +124,7 @@ func TestAnInterruptedRunIsMarkedInterrupted(t *testing.T) {
 	}
 
 	// The settle record is last.
-	settled, ok := recs[len(recs)-1].(*poo.RunSettled)
+	settled, ok := recs[len(recs)-1].(*poo.RunSettledRecord)
 	if !ok {
 		t.Fatalf("the last record is %T, want a settle record", recs[len(recs)-1])
 	}
@@ -183,7 +183,7 @@ func TestARecoveryThatFailsPartwayIsFinishedByTheNextLoad(t *testing.T) {
 			}
 		case *poo.PermissionAnsweredRecord:
 			answers++
-		case *poo.RunSettled:
+		case *poo.RunSettledRecord:
 			settles++
 		}
 	}
@@ -197,7 +197,7 @@ func TestARecoveryThatFailsPartwayIsFinishedByTheNextLoad(t *testing.T) {
 		t.Errorf("the session holds %d settle records, want 1", settles)
 	}
 	// The settle record is still last.
-	if _, ok := recs[len(recs)-1].(*poo.RunSettled); !ok {
+	if _, ok := recs[len(recs)-1].(*poo.RunSettledRecord); !ok {
 		t.Errorf("the last record is %T, want a settle record", recs[len(recs)-1])
 	}
 }
@@ -266,7 +266,7 @@ func TestTheSessionIsUsableAfterARecovery(t *testing.T) {
 	}
 	found := false
 	for _, rec := range loaded.Records {
-		if started, ok := rec.(*poo.RunStarted); ok && started.RunID == "r2" {
+		if started, ok := rec.(*poo.RunStartedRecord); ok && started.RunID == "r2" {
 			found = true
 		}
 	}
@@ -292,7 +292,7 @@ func TestAnUnfinishedJobIsEndedAndQueued(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the session: %v", err)
 	}
-	ended, ok := loaded.Records[len(loaded.Records)-1].(*poo.JobEnded)
+	ended, ok := loaded.Records[len(loaded.Records)-1].(*poo.JobEndedRecord)
 	if !ok {
 		t.Fatalf("the last record is %T, want a job's end", loaded.Records[len(loaded.Records)-1])
 	}
@@ -378,7 +378,7 @@ func TestAJobOfAnOldRunIsStillRecovered(t *testing.T) {
 		createdRecord("s1"),
 		runStarted("r1"),
 		jobStarted("j1", "r1", "bash", "r1"),
-		&poo.RunSettled{
+		&poo.RunSettledRecord{
 			RecordMeta: poo.NewRecordMeta("run.settled"),
 			RunID:      "r1",
 			Reason:     poo.ReasonEndTurn,
@@ -391,7 +391,7 @@ func TestAJobOfAnOldRunIsStillRecovered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the session: %v", err)
 	}
-	ended, ok := loaded.Records[len(loaded.Records)-1].(*poo.JobEnded)
+	ended, ok := loaded.Records[len(loaded.Records)-1].(*poo.JobEndedRecord)
 	if !ok {
 		t.Fatalf("the last record is %T, want a job's end", loaded.Records[len(loaded.Records)-1])
 	}
@@ -420,7 +420,7 @@ func TestAQueuedInputWithNoFateIsDropped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the session: %v", err)
 	}
-	dropped, ok := loaded.Records[len(loaded.Records)-1].(*poo.InputDropped)
+	dropped, ok := loaded.Records[len(loaded.Records)-1].(*poo.InputDroppedRecord)
 	if !ok {
 		t.Fatalf("the last record is %T, want a dropped input", loaded.Records[len(loaded.Records)-1])
 	}

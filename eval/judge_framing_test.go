@@ -70,7 +70,7 @@ func TestAJudgeErrorNeedsTheOwner(t *testing.T) {
 		t.Fatalf("writing the log: %v", err)
 	}
 
-	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: resultsDir})
+	judge, err := NewJudge(JudgeOptions{Endpoint: server.URL, ResultsDir: resultsDir})
 	if err != nil {
 		t.Fatalf("making the judge: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestTheJudgeRequestCarriesTheNonce(t *testing.T) {
 	}))
 	defer server.Close()
 
-	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: t.TempDir()})
+	judge, err := NewJudge(JudgeOptions{Endpoint: server.URL, ResultsDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("making the judge: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestAnEmptyAnswerIsAskedAgainWithoutTheToolCallTag(t *testing.T) {
 		t.Fatalf("writing the log: %v", err)
 	}
 
-	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: resultsDir})
+	judge, err := NewJudge(JudgeOptions{Endpoint: server.URL, ResultsDir: resultsDir})
 	if err != nil {
 		t.Fatalf("making the judge: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestTheJudgeRequestCarriesMaxTokens(t *testing.T) {
 			}))
 			defer server.Close()
 
-			judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: t.TempDir(), MaxTokens: tc.set})
+			judge, err := NewJudge(JudgeOptions{Endpoint: server.URL, ResultsDir: t.TempDir(), MaxTokens: tc.set})
 			if err != nil {
 				t.Fatalf("making the judge: %v", err)
 			}
@@ -369,7 +369,7 @@ func TestAnEndpointThatCapsMaxTokensIsAskedAgainWithoutIt(t *testing.T) {
 	}))
 	defer server.Close()
 
-	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: t.TempDir()})
+	judge, err := NewJudge(JudgeOptions{Endpoint: server.URL, ResultsDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("making the judge: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestAnUnrelatedBadRequestIsNotRetried(t *testing.T) {
 		http.Error(w, "unknown model", http.StatusBadRequest)
 	}))
 	defer server.Close()
-	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL, ResultsDir: t.TempDir()})
+	judge, err := NewJudge(JudgeOptions{Endpoint: server.URL, ResultsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestCroppingAndTruncatingKeepWholeCharacters(t *testing.T) {
 	}
 }
 
-func TestABaseURLThatEndsInChatCompletionsIsNotDoubled(t *testing.T) {
+func TestAEndpointThatEndsInChatCompletionsIsNotDoubled(t *testing.T) {
 	var path string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
@@ -457,7 +457,7 @@ func TestABaseURLThatEndsInChatCompletionsIsNotDoubled(t *testing.T) {
 	}))
 	defer server.Close()
 
-	judge, err := NewJudge(JudgeOptions{BaseURL: server.URL + "/v1/chat/completions", ResultsDir: t.TempDir()})
+	judge, err := NewJudge(JudgeOptions{Endpoint: server.URL + "/v1/chat/completions", ResultsDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

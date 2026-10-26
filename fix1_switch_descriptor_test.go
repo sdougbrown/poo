@@ -64,7 +64,7 @@ func TestASwitchShapesEverythingTheNextRequestNeeds(t *testing.T) {
 		MaxOutput:    4096,
 		Tools:        poo.ToolCalling{Mode: poo.ToolsNative},
 	}
-	oldTransport := openai.New(openai.Options{BaseURL: oldServer.URL, Model: first.ModelID, ModelInfo: first})
+	oldTransport := openai.New(openai.Options{Endpoint: oldServer.URL, Model: first.ModelID, ModelInfo: first})
 	sink := &recordingSink{}
 	s := newTestSession(t, poo.Options{
 		Transport:    oldTransport,
@@ -90,7 +90,7 @@ func TestASwitchShapesEverythingTheNextRequestNeeds(t *testing.T) {
 		Reasoning:    poo.ReasoningControl{Mode: poo.ReasoningToggle, Param: poo.ReasoningPathToggle},
 	}
 	nextTransport := openai.New(openai.Options{
-		BaseURL:   nextServer.URL,
+		Endpoint:  nextServer.URL,
 		Model:     next.ModelID,
 		ModelInfo: next,
 		Reasoning: "low",

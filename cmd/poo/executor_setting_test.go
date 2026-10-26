@@ -17,7 +17,7 @@ func TestAnUnknownExecutorIsAnErrorInEveryProfile(t *testing.T) {
 	body := `version: 1
 endpoints:
   test:
-    base_url: http://127.0.0.1:1/v1
+    endpoint: http://127.0.0.1:1/v1
 models:
   test-model:
     endpoint: test

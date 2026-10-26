@@ -146,8 +146,8 @@ func TestFindToolAsksFourRequests(t *testing.T) {
 	catalog := wideCatalog(t)
 	server := newSystemOneServer(t)
 	model := openai.NewSystemOneDecider(openai.SystemOneConfig{
-		BaseURL: server.URL,
-		Model:   "test-model",
+		Endpoint: server.URL,
+		Model:    "test-model",
 	})
 
 	res, err := preparedCall(t, cliregistry.NewFind(catalog), `{"intent":"print the words I give it"}`, poo.ToolEnv{Decider: model})

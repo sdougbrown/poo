@@ -24,7 +24,7 @@ func TestThePermissionFallbackFlagIsApplied(t *testing.T) {
 	controlCode, controlStderr := runCLI(t,
 		"run",
 		"--settings", settingsPath,
-		"--base-url", controlEndpoint.URL+"/v1",
+		"--endpoint", controlEndpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", controlDir,
@@ -43,7 +43,7 @@ func TestThePermissionFallbackFlagIsApplied(t *testing.T) {
 	endpoint := newFakeEndpointSequence(t, []string{fix1BashCall(), fix1DoneAnswer()})
 	code, stderr := runCLI(t,
 		"run",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--permission-unmatched", "ask",

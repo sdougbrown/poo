@@ -19,7 +19,7 @@ func TestTextWithAToolCallsFinishIsNotAFailure(t *testing.T) {
 		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`) +
 		done
 	srv := newSSEServer(t, body)
-	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{Endpoint: srv.URL, Model: "m"}))
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
 	if err != nil {

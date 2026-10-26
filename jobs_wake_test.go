@@ -88,7 +88,7 @@ func TestTwoResultsFinishingWhileIdleStartOneWokenRun(t *testing.T) {
 	// Exactly one woken run started, and it carries both results.
 	woken := 0
 	for _, rec := range sink.allRecords() {
-		started, ok := rec.(*poo.RunStarted)
+		started, ok := rec.(*poo.RunStartedRecord)
 		if !ok || started.Trigger != poo.TriggerJob {
 			continue
 		}
@@ -126,9 +126,9 @@ func TestTheWakeLimitHoldsTheResultsPastTheLimit(t *testing.T) {
 	if sink.count("input.held") != 1 {
 		t.Errorf("the log holds %d input.held records, want 1", sink.count("input.held"))
 	}
-	var held *poo.InputHeld
+	var held *poo.InputHeldRecord
 	for _, rec := range sink.allRecords() {
-		if h, ok := rec.(*poo.InputHeld); ok {
+		if h, ok := rec.(*poo.InputHeldRecord); ok {
 			held = h
 		}
 	}
@@ -203,7 +203,7 @@ func releaseJobAndWait(t *testing.T, s *poo.Session, sink *recordingSink, tool *
 func wokenRuns(sink *recordingSink) int {
 	n := 0
 	for _, rec := range sink.allRecords() {
-		started, ok := rec.(*poo.RunStarted)
+		started, ok := rec.(*poo.RunStartedRecord)
 		if !ok || started.Trigger != poo.TriggerJob {
 			continue
 		}
@@ -334,7 +334,7 @@ func TestASinkFailureOnTheJobEndBreaksTheSession(t *testing.T) {
 	// The session is broken, and no wake happened.
 	starts := 0
 	for _, rec := range broken.records {
-		if _, ok := rec.(*poo.RunStarted); ok {
+		if _, ok := rec.(*poo.RunStartedRecord); ok {
 			starts++
 		}
 	}

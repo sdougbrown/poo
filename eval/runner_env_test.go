@@ -42,7 +42,7 @@ func TestTheKeyDoesNotReachTheCheckEnvironment(t *testing.T) {
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
 		Models: []Model{
-			{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768, APIKeyEnv: "THE_KEY"},
+			{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768, APIKeyEnv: "THE_KEY"},
 		},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
@@ -91,7 +91,7 @@ env > "`+capture+`"
 
 	runner := NewRunner(RunOptions{
 		Models: []Model{
-			{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768},
+			{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768},
 		},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,
@@ -102,8 +102,8 @@ env > "`+capture+`"
 		// The catalog names a key variable for another model. The run
 		// must not carry it.
 		Catalog: []Model{
-			{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768},
-			{Name: "other", BaseURL: "http://y", ModelID: "o", ContextLimit: 32768, APIKeyEnv: "THE_KEY"},
+			{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768},
+			{Name: "other", Endpoint: "http://y", ModelID: "o", ContextLimit: 32768, APIKeyEnv: "THE_KEY"},
 		},
 	})
 
@@ -135,7 +135,7 @@ env > "`+capture+`"
 
 	runner := NewRunner(RunOptions{
 		Models: []Model{
-			{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768, APIKeyEnv: "THE_KEY"},
+			{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768, APIKeyEnv: "THE_KEY"},
 		},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,

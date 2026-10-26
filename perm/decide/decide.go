@@ -17,8 +17,8 @@ import (
 
 // The defaults the asker uses when nothing says otherwise.
 const (
-	// DefaultApprove is the probability at which a call is allowed.
-	DefaultApprove = 0.85
+	// DefaultAllow is the probability at which a call is allowed.
+	DefaultAllow = 0.85
 	// DefaultDeny is the probability at which a call is refused.
 	DefaultDeny = 0.99
 	// DefaultTimeout is the per-call latency budget.
@@ -38,9 +38,9 @@ const (
 
 // Options configure the asker.
 type Options struct {
-	// Approve is the probability at which a call is allowed. It
-	// defaults to DefaultApprove.
-	Approve float64
+	// Allow is the probability at which a call is allowed. It
+	// defaults to DefaultAllow.
+	Allow float64
 	// Deny is the probability at which a call is refused. It defaults
 	// to DefaultDeny.
 	Deny float64
@@ -59,8 +59,8 @@ type Options struct {
 type ModelAsker struct {
 	// decider is the decision model.
 	decider decide.Decider
-	// approve is the probability that allows a call.
-	approve float64
+	// allow is the probability that allows a call.
+	allow float64
 	// deny is the probability that refuses a call.
 	deny float64
 	// timeout is the per-call latency budget.
@@ -77,9 +77,9 @@ var _ perm.Asker = (*ModelAsker)(nil)
 // A nil decider makes the asker unavailable: the chain skips it, and
 // the fallback decides.
 func New(decider decide.Decider, opts Options) *ModelAsker {
-	approve := opts.Approve
-	if approve == 0 {
-		approve = DefaultApprove
+	allow := opts.Allow
+	if allow == 0 {
+		allow = DefaultAllow
 	}
 	deny := opts.Deny
 	if deny == 0 {
@@ -95,7 +95,7 @@ func New(decider decide.Decider, opts Options) *ModelAsker {
 	}
 	return &ModelAsker{
 		decider: decide.Recorded(decider, nil, "permission"),
-		approve: approve,
+		allow:   allow,
 		deny:    deny,
 		timeout: timeout,
 		turns:   turns,
@@ -126,7 +126,7 @@ func (a *ModelAsker) AskerName() string { return "decide" }
 
 // Ask asks the decision model about the call.
 //
-// A confident answer decides: a probability at or above the approve
+// A confident answer decides: a probability at or above the allow
 // threshold allows the call, and a probability at or above the deny
 // threshold refuses it. Anything else defers, and so does a decider
 // that failed, timed out or answered badly: a decision that could not
@@ -162,7 +162,7 @@ func (a *ModelAsker) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, erro
 	if !ok {
 		return perm.DecisionDefer, nil
 	}
-	if answer.Probabilities["yes"] >= a.approve {
+	if answer.Probabilities["yes"] >= a.allow {
 		return perm.DecisionAllow, nil
 	}
 	if answer.Probabilities["no"] >= a.deny {

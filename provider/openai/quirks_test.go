@@ -24,7 +24,7 @@ import (
 func TestTheThinkTagsAreStrippedIntoThinking(t *testing.T) {
 	srv := newSSEServer(t, fixture(t, "vllm-think-tags.sse"))
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkThinkTags}},
 	})
@@ -55,7 +55,7 @@ func TestTheThinkTagsAreStrippedIntoThinking(t *testing.T) {
 func TestTheChatTemplateThinkingIsAskedFor(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkChatTemplateThinking}},
 	})
@@ -81,7 +81,7 @@ func TestTheChatTemplateThinkingIsAskedFor(t *testing.T) {
 func TestTheToolSchemasAreSimplified(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		ToolsMode: "native",
 		ModelInfo: poo.ModelInfo{Name: "weak", Quirks: []string{openai.QuirkSimplifyToolSchemas}},
@@ -133,7 +133,7 @@ func TestTheDegenerateStreamIsOnlyLogged(t *testing.T) {
 	var log bytes.Buffer
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		Logger:    slog.New(slog.NewTextHandler(&log, nil)),
 		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkDegenerateStream}},
@@ -160,7 +160,7 @@ func TestTheDegenerateStreamIsOnlyLogged(t *testing.T) {
 func TestTheTextToolCallsAreReadInNativeMode(t *testing.T) {
 	srv := newSSEServer(t, fixture(t, "vllm-text-tool-call.sse"))
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		ToolsMode: "native",
 		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{openai.QuirkTextToolCalls}},
@@ -186,8 +186,8 @@ func TestTheTextToolCallsAreReadInNativeMode(t *testing.T) {
 func TestTheQuirksAreAppliedInTheDescriptorsOrder(t *testing.T) {
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 	tr := openai.New(openai.Options{
-		BaseURL: srv.URL,
-		Model:   "m",
+		Endpoint: srv.URL,
+		Model:    "m",
 		ModelInfo: poo.ModelInfo{
 			Name:   "gemma4",
 			Quirks: []string{openai.QuirkChatTemplateThinking, openai.QuirkSimplifyToolSchemas},
@@ -213,7 +213,7 @@ func TestAnUnknownQuirkIsNoted(t *testing.T) {
 	var log bytes.Buffer
 	srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 	tr := openai.New(openai.Options{
-		BaseURL:   srv.URL,
+		Endpoint:  srv.URL,
 		Model:     "m",
 		Logger:    slog.New(slog.NewTextHandler(&log, nil)),
 		ModelInfo: poo.ModelInfo{Name: "gemma4", Quirks: []string{"not_a_quirk"}},

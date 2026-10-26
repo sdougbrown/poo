@@ -335,7 +335,7 @@ func TestAJobThatWasKilledIsRecovered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the session: %v", err)
 	}
-	ended, ok := loaded.Records[len(loaded.Records)-1].(*poo.JobEnded)
+	ended, ok := loaded.Records[len(loaded.Records)-1].(*poo.JobEndedRecord)
 	if !ok {
 		t.Fatalf("the last record is %T, want a job's end", loaded.Records[len(loaded.Records)-1])
 	}
@@ -375,7 +375,7 @@ func TestAJobThatEndedIsQueuedAgainAfterAKill(t *testing.T) {
 	// time.
 	ends := 0
 	for _, rec := range loaded.Records {
-		if _, ok := rec.(*poo.JobEnded); ok {
+		if _, ok := rec.(*poo.JobEndedRecord); ok {
 			ends++
 		}
 	}

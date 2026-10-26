@@ -9,7 +9,7 @@ import (
 	"github.com/sdougbrown/poo/decide"
 )
 
-// Decider is a stub decision model.
+// StubDecider is a stub decision model.
 //
 // It answers every question with the same probability for its first
 // option, so a test can drive a decision without a model.
@@ -17,7 +17,7 @@ import (
 // A question with more than one option gets a distribution that sums to
 // one: the first option takes the configured probability and the rest
 // share what is left.
-type Decider struct {
+type StubDecider struct {
 	mu sync.Mutex
 	// probability is the probability of the first option.
 	probability float64
@@ -33,49 +33,49 @@ type Decider struct {
 	states []any
 }
 
-// NewDecider returns a decider that answers with the given probability
+// NewStubDecider returns a decider that answers with the given probability
 // for the first option.
-func NewDecider(probability float64) *Decider {
-	return &Decider{probability: probability}
+func NewStubDecider(probability float64) *StubDecider {
+	return &StubDecider{probability: probability}
 }
 
 // SetChoice makes the decider name an option as its choice.
-func (d *Decider) SetChoice(name string) {
+func (d *StubDecider) SetChoice(name string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.choice = name
 }
 
 // SetError makes the decider fail.
-func (d *Decider) SetError(err error) {
+func (d *StubDecider) SetError(err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.err = err
 }
 
 // Calls returns how many calls the decider served.
-func (d *Decider) Calls() int {
+func (d *StubDecider) Calls() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.calls
 }
 
 // Questions returns the questions of every call, in order.
-func (d *Decider) Questions() [][]decide.Question {
+func (d *StubDecider) Questions() [][]decide.Question {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return append([][]decide.Question(nil), d.questions...)
 }
 
 // States returns the state of every call, in order.
-func (d *Decider) States() []any {
+func (d *StubDecider) States() []any {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return append([]any(nil), d.states...)
 }
 
 // Decide answers the questions.
-func (d *Decider) Decide(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
+func (d *StubDecider) Decide(ctx context.Context, state any, instructions string, qs []decide.Question) ([]decide.Answer, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 

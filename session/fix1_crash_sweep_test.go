@@ -48,27 +48,24 @@ func (fix1DenyPolicy) BeforeTool(_ poo.HookContext, info poo.ToolCallInfo) (poo.
 
 // fix1CrashSession returns the tools and header a crash sweep session is
 // built with.
-func fix1CrashSession(t *testing.T) (poo.Tool, poo.Tool, *poo.SessionCreated) {
+func fix1CrashSession(t *testing.T) (poo.Tool, poo.Tool, *poo.SessionCreatedRecord) {
 	t.Helper()
 	echo := fix1EchoTool{}
 	job := pootest.NewJobTool("job", poo.BackgroundAlways)
 	job.SetResult("the job's output")
 	model := testModel()
-	header := &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    "s1",
-		Mode:         string(ModeLogged),
-		CreatedAt:    "2026-10-20T00:00:00Z",
-		WorkingDir:   "/tmp",
-		Profile:      testProfile,
-		Roles:        poo.ModelRoles{Chat: &model},
-		Tools:        []poo.ToolInfo{testToolInfo(echo), testToolInfo(job)},
-		SettingsHash: testSettingsHash,
-		Model:        poo.SessionModel{ModelID: model.ModelID, BaseURL: model.Endpoint},
-		ContextLimit: model.ContextLimit,
-		ToolsMode:    "native",
-		Build:        poo.BuildInfo{Name: "poo", Version: "test"},
+	header := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:    "s1",
+			Mode:         string(ModeLogged),
+			CreatedAt:    "2026-10-20T00:00:00Z",
+			WorkingDir:   "/tmp",
+			Profile:      testProfile,
+			Roles:        poo.ModelRoles{Chat: &model},
+			Tools:        []poo.ToolInfo{testToolInfo(echo), testToolInfo(job)},
+			SettingsHash: testSettingsHash, Build: poo.BuildInfo{Name: "poo", Version: "test"}, Model: poo.SessionModel{ModelID: model.ModelID, Endpoint: model.Endpoint},
+			ContextLimit: model.ContextLimit,
+			ToolsMode:    "native"},
 	}
 	return echo, job, header
 }
@@ -219,7 +216,7 @@ func fix1CrashLog(t *testing.T) [][]byte {
 			if callsInMessage > batch {
 				batch = callsInMessage
 			}
-		case *poo.JobStarted:
+		case *poo.JobStartedRecord:
 			jobs++
 		case *poo.PermissionAskedRecord:
 			ask = true

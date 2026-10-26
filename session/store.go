@@ -59,7 +59,7 @@ type Store interface {
 
 	// Create starts a session in the store and makes it the store's
 	// current session. It returns the session's id.
-	Create(ctx context.Context, created *poo.SessionCreated) (string, error)
+	Create(ctx context.Context, created *poo.SessionCreatedRecord) (string, error)
 
 	// Load reads a session's records, recovers the session, and makes
 	// it the store's current session.
@@ -231,7 +231,7 @@ func (s *FileStore) path(id string) string {
 //
 // The created record's mode must be a mode this build supports: a
 // durable session is refused with ErrUnsupportedMode.
-func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreated) (string, error) {
+func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreatedRecord) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -298,7 +298,7 @@ func (s *FileStore) Create(ctx context.Context, created *poo.SessionCreated) (st
 // The file is built in a temporary file and renamed into place. A
 // failure at any step of the construction leaves neither the session's
 // file nor the temporary file behind.
-func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *poo.SessionCreated) error {
+func (s *FileStore) writeSessionFile(ctx context.Context, path string, created *poo.SessionCreatedRecord) error {
 	tmp := path + ".tmp"
 	// A temporary file from a crashed construction is stale: the lock
 	// says no one is building this session.
@@ -422,7 +422,7 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) 
 	if err != nil {
 		return nil, err
 	}
-	created, ok := recs[0].(*poo.SessionCreated)
+	created, ok := recs[0].(*poo.SessionCreatedRecord)
 	if !ok {
 		return nil, &Error{Code: CodeCorruptLog, Message: "the log does not start with a session"}
 	}
@@ -601,7 +601,7 @@ func (s *FileStore) Flush(ctx context.Context) error {
 // happened.
 func (s *FileStore) needsSync(rec poo.Record) bool {
 	switch r := rec.(type) {
-	case *poo.RunStarted, *poo.RunSettled:
+	case *poo.RunStartedRecord, *poo.RunSettledRecord:
 		return true
 	case *poo.ToolResultRecord:
 		return s.open.tools[r.Tool] == poo.ClassSideEffecting

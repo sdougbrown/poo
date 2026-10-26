@@ -128,9 +128,9 @@ func (s *systemOneServer) body(i int) string {
 func (s *systemOneServer) decider(t *testing.T, timeout time.Duration) *openai.SystemOneDecider {
 	t.Helper()
 	return openai.NewSystemOneDecider(openai.SystemOneConfig{
-		BaseURL: s.URL,
-		Model:   "gemma4",
-		Timeout: timeout,
+		Endpoint: s.URL,
+		Model:    "gemma4",
+		Timeout:  timeout,
 	})
 }
 
@@ -615,10 +615,10 @@ func TestTheSystemOneDeciderTalksToALiveEndpoint(t *testing.T) {
 		t.Skip("POO_SYSTEMONE_URL and POO_SYSTEMONE_MODEL are not set")
 	}
 	dec := openai.NewSystemOneDecider(openai.SystemOneConfig{
-		BaseURL: url,
-		Model:   model,
-		APIKey:  os.Getenv("POO_SYSTEMONE_API_KEY"),
-		Timeout: 30 * time.Second,
+		Endpoint: url,
+		Model:    model,
+		APIKey:   os.Getenv("POO_SYSTEMONE_API_KEY"),
+		Timeout:  30 * time.Second,
 	})
 	answers, err := dec.Decide(context.Background(),
 		decide.EvidencePayload{Instructions: "the state", WorkingDir: "/tmp"},

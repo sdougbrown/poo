@@ -27,7 +27,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.PermissionDoomLoopAction = pointer(s.Permission.DoomLoop.Action)
 	f.PermissionAskers = askers(s.Permission)
 	f.PermissionChainTimeoutS = count(s.Permission.ChainTimeoutS)
-	f.PermissionDecideApprove = share(s.Permission.Decide.Approve)
+	f.PermissionDecideAllow = share(s.Permission.Decide.Allow)
 	f.PermissionDecideDeny = share(s.Permission.Decide.Deny)
 	f.PermissionDecideTimeoutMs = count(s.Permission.Decide.TimeoutMS)
 
@@ -65,7 +65,7 @@ func fieldsOf(s *Settings) SettingsFields {
 
 	f.FinishSchemaFile = text(s.Finish.SchemaFile)
 
-	f.CliregistryPaths = list(s.CLIRegistry.Paths)
+	f.CliRegistryPaths = list(s.CLIRegistry.Paths)
 
 	f.SessionMode = pointer(s.Session.Mode)
 	f.SessionDir = pointer(s.Session.Dir)
@@ -82,7 +82,7 @@ func fieldsOf(s *Settings) SettingsFields {
 func conditionsOf(s *Settings) SettingsConditions {
 	return SettingsConditions{
 		HasDecider:     s.Roles["decider"] != "",
-		HasCliregistry: len(s.CLIRegistry.Paths) > 0,
+		HasCliRegistry: len(s.CLIRegistry.Paths) > 0,
 	}
 }
 

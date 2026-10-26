@@ -50,7 +50,7 @@ func decisionRecord(t *testing.T, sink *recordingSink) *poo.DecisionRecord {
 // TestTheSessionRecordsTheDecisionsItMakes covers the wiring: the
 // session's decider writes a record and emits the event.
 func TestTheSessionRecordsTheDecisionsItMakes(t *testing.T) {
-	inner := pootest.NewDecider(0.7)
+	inner := pootest.NewStubDecider(0.7)
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, pootest.NewTransport(), &echoTool{}, sink),
 		poo.WithDecider(deciderModel(), inner))
@@ -102,7 +102,7 @@ func TestTheSessionRecordsTheDecisionsItMakes(t *testing.T) {
 // TestTheSessionRecordsADeferredDecision covers the failure: a decision
 // that could not be made is recorded too.
 func TestTheSessionRecordsADeferredDecision(t *testing.T) {
-	inner := pootest.NewDecider(0.7)
+	inner := pootest.NewStubDecider(0.7)
 	inner.SetError(errors.New("the model is down"))
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, pootest.NewTransport(), &echoTool{}, sink),
@@ -131,7 +131,7 @@ func TestTheSessionRefusesADeciderModelWithoutTheOperation(t *testing.T) {
 		Ops:     []poo.Op{poo.OpChat},
 	}
 	_, err := poo.New(testOptions(t, pootest.NewTransport(), &echoTool{}, &recordingSink{}),
-		poo.WithDecider(model, pootest.NewDecider(0.7)))
+		poo.WithDecider(model, pootest.NewStubDecider(0.7)))
 	if err == nil {
 		t.Fatal("the session was built with a decider model without the operation")
 	}
@@ -147,7 +147,7 @@ func TestTheSessionRefusesADeciderModelWithoutTheOperation(t *testing.T) {
 func TestTheSessionGivesTheDeciderToTheHooksAndTheTools(t *testing.T) {
 	hook := &deciderHook{}
 	tool := &deciderTool{}
-	inner := pootest.NewDecider(0.7)
+	inner := pootest.NewStubDecider(0.7)
 	opts := poo.Options{
 		Transport:  pootest.NewTransport(pootest.Turn{Calls: []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`"x"`), ID: "c1"}}}),
 		Tools:      map[string]poo.Tool{"echo": tool},

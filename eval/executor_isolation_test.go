@@ -123,7 +123,7 @@ func TestTheBwrapExecutorShowsTheTaskOnlyItsWorkdir(t *testing.T) {
 	runner := NewRunner(RunOptions{
 		Models: []Model{{
 			Name:         "m",
-			BaseURL:      endpoint.URL + "/v1",
+			Endpoint:     endpoint.URL + "/v1",
 			ModelID:      "m",
 			ContextLimit: 32768,
 		}},

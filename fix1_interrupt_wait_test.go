@@ -30,9 +30,9 @@ func TestAnInterruptDuringTheRetryWait(t *testing.T) {
 	defer srv.Close()
 
 	tr := openai.New(openai.Options{
-		BaseURL: srv.URL,
-		Model:   "m",
-		Backoff: []time.Duration{500 * time.Millisecond, 500 * time.Millisecond},
+		Endpoint: srv.URL,
+		Model:    "m",
+		Backoff:  []time.Duration{500 * time.Millisecond, 500 * time.Millisecond},
 	})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{}, sink)
@@ -77,10 +77,10 @@ func TestAnInterruptDuringTheRetryWait(t *testing.T) {
 }
 
 // fix1AttemptRecords returns the attempt records the sink kept.
-func fix1AttemptRecords(sink *recordingSink) []*poo.ProviderAttempt {
-	var out []*poo.ProviderAttempt
+func fix1AttemptRecords(sink *recordingSink) []*poo.ProviderAttemptRecord {
+	var out []*poo.ProviderAttemptRecord
 	for _, rec := range sink.allRecords() {
-		if a, ok := rec.(*poo.ProviderAttempt); ok {
+		if a, ok := rec.(*poo.ProviderAttemptRecord); ok {
 			out = append(out, a)
 		}
 	}

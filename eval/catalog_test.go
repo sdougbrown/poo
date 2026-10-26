@@ -13,13 +13,13 @@ func TestTheModelCatalogIsRead(t *testing.T) {
 	path := filepath.Join(dir, "models.yaml")
 	content := `
 - name: gemma4
-  base_url: http://localhost:4000/v1
+  endpoint: http://localhost:4000/v1
   model_id: gemma4
   context_limit: 32768
   notes: the low-budget run
 
 - name: minimax
-  base_url: https://ollama.com/v1
+  endpoint: https://ollama.com/v1
   model_id: minimax-m3.1-flash
   api_key_env: OLLAMA_API_KEY
   context_limit: 262144
@@ -56,11 +56,11 @@ func TestABadModelCatalogIsRejected(t *testing.T) {
 		content string
 		want    string
 	}{
-		{"no name", "- base_url: http://x\n  model_id: m\n  context_limit: 10\n", "name"},
-		{"no context limit", "- name: m\n  base_url: http://x\n  model_id: m\n", "context_limit"},
-		{"a zero context limit", "- name: m\n  base_url: http://x\n  model_id: m\n  context_limit: 0\n", "context_limit"},
-		{"a bad tools mode", "- name: m\n  base_url: http://x\n  model_id: m\n  context_limit: 10\n  tools_mode: weird\n", "tools_mode"},
-		{"an unknown field", "- name: m\n  base_url: http://x\n  model_id: m\n  context_limit: 10\n  wat: 1\n", "wat"},
+		{"no name", "- endpoint: http://x\n  model_id: m\n  context_limit: 10\n", "name"},
+		{"no context limit", "- name: m\n  endpoint: http://x\n  model_id: m\n", "context_limit"},
+		{"a zero context limit", "- name: m\n  endpoint: http://x\n  model_id: m\n  context_limit: 0\n", "context_limit"},
+		{"a bad tools mode", "- name: m\n  endpoint: http://x\n  model_id: m\n  context_limit: 10\n  tools_mode: weird\n", "tools_mode"},
+		{"an unknown field", "- name: m\n  endpoint: http://x\n  model_id: m\n  context_limit: 10\n  wat: 1\n", "wat"},
 		{"no models", "[]\n", "no models"},
 	}
 	for _, c := range cases {
@@ -86,11 +86,11 @@ func TestTwoModelsWithTheSameNameAreRejected(t *testing.T) {
 	path := filepath.Join(dir, "models.yaml")
 	content := `
 - name: m
-  base_url: http://x
+  endpoint: http://x
   model_id: m
   context_limit: 10
 - name: m
-  base_url: http://y
+  endpoint: http://y
   model_id: m
   context_limit: 10
 `
@@ -270,7 +270,7 @@ func TestTheRunnerPassesTheReasoningEffort(t *testing.T) {
 	out := t.TempDir()
 	runner := NewRunner(RunOptions{
 		Models: []Model{
-			{Name: "m", BaseURL: "http://x", ModelID: "m", ContextLimit: 32768, ReasoningEffort: "low"},
+			{Name: "m", Endpoint: "http://x", ModelID: "m", ContextLimit: 32768, ReasoningEffort: "low"},
 		},
 		Tasks:     []Task{task},
 		TaskRoot:  taskRoot,

@@ -31,7 +31,7 @@ func TestASessionRoundTripsThroughItsFile(t *testing.T) {
 	if err := store.Append(ctx, toolResult("r1", 1, "r1", "bash", poo.OutcomeOK)); err != nil {
 		t.Fatalf("appending: %v", err)
 	}
-	if err := store.Append(ctx, &poo.RunSettled{
+	if err := store.Append(ctx, &poo.RunSettledRecord{
 		RecordMeta: poo.NewRecordMeta("run.settled"),
 		RunID:      "r1",
 		Reason:     poo.ReasonEndTurn,
@@ -181,7 +181,7 @@ func TestTheMigrationHookMigratesAnOlderLog(t *testing.T) {
 
 	header := createdRecord("s1")
 	header.Format = "poo-session-v-1"
-	writeSession(t, dir, "s1", header, runStarted("r1"), &poo.RunSettled{
+	writeSession(t, dir, "s1", header, runStarted("r1"), &poo.RunSettledRecord{
 		RecordMeta: poo.NewRecordMeta("run.settled"),
 		RunID:      "r1",
 		Reason:     poo.ReasonEndTurn,

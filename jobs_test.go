@@ -595,7 +595,7 @@ func TestAnUnlaunchedJobCompletesThroughTheQueue(t *testing.T) {
 
 	names := sink.Names()
 	started, ended := -1, -1
-	var end *poo.JobEnded
+	var end *poo.JobEndedRecord
 	for i, name := range names {
 		switch name {
 		case "job.started":
@@ -605,7 +605,7 @@ func TestAnUnlaunchedJobCompletesThroughTheQueue(t *testing.T) {
 		}
 	}
 	for _, rec := range sink.allRecords() {
-		if r, ok := rec.(*poo.JobEnded); ok {
+		if r, ok := rec.(*poo.JobEndedRecord); ok {
 			end = r
 		}
 	}
@@ -760,7 +760,7 @@ func TestAPanickingJobEndsWithAFatalError(t *testing.T) {
 
 	ended := 0
 	for _, rec := range sink.allRecords() {
-		e, ok := rec.(*poo.JobEnded)
+		e, ok := rec.(*poo.JobEndedRecord)
 		if !ok {
 			continue
 		}

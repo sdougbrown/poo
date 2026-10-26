@@ -107,14 +107,14 @@ func (c *chain) askReported(ctx context.Context, ask Ask, reporter poo.Permissio
 		// Nobody was asked, and the answer says so.
 		kind = poo.PermissionNoAsker
 	}
-	offer(request, poo.PermissionInput{Kind: kind})
+	offer(request, poo.PermissionTransition{Kind: kind})
 	return resolutionOf(request)
 }
 
 // offer sends an input the chain owns, unless the request has already
 // resolved. The chain hands its terminal answer back through the
 // reporter, and that echo is not a stale input.
-func offer(p *poo.PermissionRequest, in poo.PermissionInput) {
+func offer(p *poo.PermissionRequest, in poo.PermissionTransition) {
 	select {
 	case <-p.Done():
 	default:
@@ -131,7 +131,7 @@ func resolutionOf(p *poo.PermissionRequest) resolution {
 // own absolute budget. The worker never mutates a terminal decision.
 func (c *chain) attempt(chainCtx, runCtx context.Context, ask Ask, asker Asker, p *poo.PermissionRequest, chainDeadline time.Time) {
 	start := c.clock.Now()
-	token := p.Send(poo.PermissionInput{Kind: poo.PermissionAttempt, Deadline: chainDeadline})
+	token := p.Send(poo.PermissionTransition{Kind: poo.PermissionAttempt, Deadline: chainDeadline})
 	select {
 	case <-p.Done():
 		return
@@ -171,18 +171,18 @@ func (c *chain) attempt(chainCtx, runCtx context.Context, ask Ask, asker Asker, 
 			if err != nil {
 				return struct{}{}, err
 			}
-			p.Send(poo.PermissionInput{Kind: poo.PermissionExplicitAnswer, Attempt: token, Deadline: deadline, Answer: poo.PermissionAnswer{Decision: string(decision), AnsweredBy: name}})
+			p.Send(poo.PermissionTransition{Kind: poo.PermissionExplicitAnswer, Attempt: token, Deadline: deadline, Answer: poo.PermissionAnswer{Decision: string(decision), AnsweredBy: name}})
 			return struct{}{}, nil
 		})
 		if err != nil {
-			p.Send(poo.PermissionInput{Kind: poo.PermissionDeferred, Attempt: token})
+			p.Send(poo.PermissionTransition{Kind: poo.PermissionDeferred, Attempt: token})
 		}
 	}()
 	var timer <-chan time.Time
 	for {
 		select {
 		case deadline := <-budgetReady:
-			offer(p, poo.PermissionInput{Kind: poo.PermissionBudget, Attempt: token, Deadline: deadline})
+			offer(p, poo.PermissionTransition{Kind: poo.PermissionBudget, Attempt: token, Deadline: deadline})
 			timer = c.clock.After(deadline.Sub(c.clock.Now()))
 			close(proceed)
 		case <-finished:
@@ -190,7 +190,7 @@ func (c *chain) attempt(chainCtx, runCtx context.Context, ask Ask, asker Asker, 
 			// ended, so the chain has nothing to add.
 			return
 		case <-timer:
-			offer(p, poo.PermissionInput{Kind: poo.PermissionAttemptExpired, Attempt: token})
+			offer(p, poo.PermissionTransition{Kind: poo.PermissionAttemptExpired, Attempt: token})
 			return
 		case <-p.Done():
 			return
@@ -202,7 +202,7 @@ func (c *chain) attempt(chainCtx, runCtx context.Context, ask Ask, asker Asker, 
 					kind = poo.PermissionInterrupt
 				}
 			}
-			offer(p, poo.PermissionInput{Kind: kind})
+			offer(p, poo.PermissionTransition{Kind: kind})
 			return
 		}
 	}

@@ -102,9 +102,10 @@ type Options struct {
 // The options are plain data, so the executor that is a sandbox reads
 // them without the tool package knowing what a sandbox is.
 type SandboxOptions struct {
-	// DisableNetwork gives the sandbox its own empty network
-	// namespace instead of the host's.
-	DisableNetwork bool
+	// Network says whether the sandbox shares the host's network
+	// namespace. Nil and true share it; false gives the sandbox its
+	// own empty one.
+	Network *bool
 	// ROBinds are the host paths the sandbox mounts read-only.
 	ROBinds []string
 	// RWBinds are the host paths the sandbox mounts read-write.

@@ -83,11 +83,11 @@ type inputRequest struct {
 	delivered *DeliveryNote
 }
 
-// InputQueued records an input the session accepted.
+// InputQueuedRecord records an input the session accepted.
 //
 // The record is written before the call that accepted the input returns,
 // so an accepted input is never lost: its fate is in the records.
-type InputQueued struct {
+type InputQueuedRecord struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -108,8 +108,8 @@ type InputQueued struct {
 	QueuedAt string `json:"queued_at"`
 }
 
-// InputDelivered records an input that reached the model.
-type InputDelivered struct {
+// InputDeliveredRecord records an input that reached the model.
+type InputDeliveredRecord struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -123,11 +123,11 @@ type InputDelivered struct {
 	DeliveredAt string `json:"delivered_at"`
 }
 
-// InputDropped records an input that never reached the model.
+// InputDroppedRecord records an input that never reached the model.
 //
 // The reason is the run's final settle reason, so a reader can tell why
 // a message the client accepted was never seen by the model.
-type InputDropped struct {
+type InputDroppedRecord struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
@@ -143,11 +143,11 @@ type InputDropped struct {
 	DroppedAt string `json:"dropped_at"`
 }
 
-// TurnInterrupted records a turn that an interrupt cut short.
+// TurnInterruptedRecord records a turn that an interrupt cut short.
 //
 // The record follows the turn's end: a client reads it as a note on the
 // turn that just closed.
-type TurnInterrupted struct {
+type TurnInterruptedRecord struct {
 	RecordMeta
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`

@@ -47,7 +47,7 @@ func unparseableCallEndpoint(t *testing.T) (*httptest.Server, func() int) {
 // the model only in a later run.
 func TestTheParseErrorGetsASecondTurn(t *testing.T) {
 	srv, requests := unparseableCallEndpoint(t)
-	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "text"})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, &recordingSink{}))
 
 	res := runSession(t, s, "hi")

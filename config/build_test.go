@@ -86,7 +86,7 @@ const theModelSettings = `
 version: 1
 endpoints:
   test:
-    base_url: http://localhost:4000/v1
+    endpoint: http://localhost:4000/v1
     api_key_env: POO_TEST_KEY
 models:
   test-model:
@@ -387,17 +387,15 @@ func TestTheSessionWorksInTheDirectoryItsHeaderNames(t *testing.T) {
 	defer runtime.Store.Close()
 
 	workDir := t.TempDir()
-	created := &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    "s1",
-		Mode:         "logged",
-		CreatedAt:    "2026-10-22T12:00:00Z",
-		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ModelID: "test-model"},
-		ContextLimit: 32768,
-		Profile:      "code",
-		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			CreatedAt:  "2026-10-22T12:00:00Z",
+			WorkingDir: workDir,
+
+			Profile: "code", Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
 	}
 	sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
 	if err != nil {
@@ -428,17 +426,15 @@ func TestTheRuntimeCreatesAndResumesASession(t *testing.T) {
 	runtime := build(t, settings, config.Overrides{})
 	defer runtime.Store.Close()
 
-	created := &poo.SessionCreated{
-		RecordMeta:   poo.NewRecordMeta("session.created"),
-		Format:       poo.FormatVersion,
-		SessionID:    "s1",
-		Mode:         "logged",
-		CreatedAt:    "2026-10-22T12:00:00Z",
-		WorkingDir:   t.TempDir(),
-		Model:        poo.SessionModel{ModelID: "test-model"},
-		ContextLimit: 32768,
-		Profile:      "code",
-		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			CreatedAt:  "2026-10-22T12:00:00Z",
+			WorkingDir: t.TempDir(),
+
+			Profile: "code", Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
 	}
 	sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
 	if err != nil {

@@ -34,7 +34,7 @@ func TestServeSpeaksTheProtocol(t *testing.T) {
 	codes := make(chan int, 1)
 	go func() {
 		codes <- runServe([]string{
-			"--base-url", endpoint.URL,
+			"--endpoint", endpoint.URL,
 			"--model-id", "test-model",
 			"--context-limit", "8192",
 			"--session-dir", filepath.Join(dir, "sessions"),
@@ -109,7 +109,7 @@ func TestServeSpeaksTheProtocol(t *testing.T) {
 	write(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      "3",
-		"method":  "agent/prompt",
+		"method":  "run/prompt",
 		"params":  map[string]any{"session_id": sessionID, "text": "hello"},
 	})
 	answer = read()

@@ -19,7 +19,7 @@ func theSettings(t *testing.T, dir, baseURL string) string {
 	body := `version: 1
 endpoints:
   test:
-    base_url: ` + baseURL + `
+    endpoint: ` + baseURL + `
 models:
   test-model:
     endpoint: test
@@ -246,7 +246,7 @@ func TestTheFinishResultStaysOnStdout(t *testing.T) {
 	code, stderr, stdout := runCLIWithStdout(t,
 		"run",
 		"--settings", settingsPath,
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -286,7 +286,7 @@ func TestTheFinishResultStaysOnStdoutAfterAWokenReply(t *testing.T) {
 	code, stderr, stdout := runCLIWithStdout(t,
 		"run",
 		"--settings", settingsPath,
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,
@@ -313,7 +313,7 @@ func TestTheEphemeralModeWritesNothing(t *testing.T) {
 	code, stderr := runCLI(t,
 		"run",
 		"--ephemeral",
-		"--base-url", endpoint.URL+"/v1",
+		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
 		"--working-dir", dir,

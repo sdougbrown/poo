@@ -21,7 +21,7 @@ Stage 1 is the walking skeleton: enough of a harness to put a real model on
 a real task and measure what happens.
 
 ```
-poo run --base-url http://localhost:4000/v1 --model-id gemma4 \
+poo run --endpoint http://localhost:4000/v1 --model-id gemma4 \
   --context-limit 262144 --max-turns 8 --log session.jsonl \
   "List the Go packages in this repository."
 ```
