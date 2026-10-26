@@ -36,7 +36,7 @@ func TestARunThatCallsAToolExecutesIt(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -74,7 +74,7 @@ func TestTheSecondRequestCarriesTheToolResult(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -123,7 +123,7 @@ func TestTheMaxTurnsCeilingSettlesMaxTurns(t *testing.T) {
 	// at its ceiling.
 	tr := scripted([]fakeResponse{{
 		calls: []poo.ToolCall{{
-			ID:        "call_1",
+			CallID:    "call_1",
 			Name:      "echo",
 			Arguments: json.RawMessage(`{"text":"again"}`),
 		}},
@@ -315,7 +315,7 @@ func TestAnUnknownToolIsARecoverableError(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "nope",
 				Arguments: json.RawMessage(`{}`),
 			}},
@@ -339,7 +339,7 @@ func TestTheSessionMovesThroughTheLoopStates(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text":"hello"}`),
 			}},
@@ -363,7 +363,7 @@ func TestTheContextRunningOutMidRunSettlesContextExhausted(t *testing.T) {
 	// request has no room left.
 	tr := scripted([]fakeResponse{{
 		calls: []poo.ToolCall{{
-			ID:        "call_1",
+			CallID:    "call_1",
 			Name:      "echo",
 			Arguments: json.RawMessage(`{"text":"hello"}`),
 		}},
@@ -422,7 +422,7 @@ func TestMalformedArgumentsAreRecordedAsText(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: json.RawMessage(`{"text": broken`),
 			}},

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
@@ -14,7 +15,7 @@ import (
 // keeps the interleaved stream.
 func TestTheExecutorCapturesTheStreamsApart(t *testing.T) {
 	ctx := context.Background()
-	command := bash.Command{
+	command := exec.Command{
 		Argv: []string{"/bin/sh", "-c", "echo to-the-stdout; echo to-the-stderr 1>&2"},
 		Env:  []string{"PATH=/usr/bin:/bin"},
 	}

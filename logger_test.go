@@ -216,7 +216,7 @@ func TestALateToolResultIsLogged(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},

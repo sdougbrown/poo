@@ -51,7 +51,7 @@ func (s *JSONLDecisionSink) Path() string { return s.path }
 //
 // The write is serialized, so a concurrent record never interleaves two
 // records' bytes.
-func (s *JSONLDecisionSink) Record(ctx context.Context, rec decide.Record) error {
+func (s *JSONLDecisionSink) Record(ctx context.Context, rec decide.Decision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.f == nil {
@@ -60,7 +60,7 @@ func (s *JSONLDecisionSink) Record(ctx context.Context, rec decide.Record) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	line, err := json.Marshal(decisionLine{Record: rec, Name: "decision"})
+	line, err := json.Marshal(decisionLine{Decision: rec, Name: "decision"})
 	if err != nil {
 		return &Error{Code: CodeStoreError, Message: "encoding the decision", Err: err}
 	}
@@ -95,8 +95,8 @@ func (s *JSONLDecisionSink) Close() error {
 // The line carries the record's name, so a file of decisions is
 // self-describing the way a session log is.
 type decisionLine struct {
-	// Record is the decision the line holds.
-	decide.Record
+	// Decision is the decision the line holds.
+	decide.Decision
 	// Name is the record's name.
 	Name string `json:"record"`
 }

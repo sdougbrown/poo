@@ -19,7 +19,7 @@ type mutatingHook struct {
 
 // AfterTurn changes every copy the view hands out.
 func (h *mutatingHook) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) {
-	for _, m := range ctx.History.Messages() {
+	for _, m := range ctx.HistoryView.Messages() {
 		for i := range m.Content {
 			m.Content[i].Text = "changed"
 			if len(m.Content[i].Arguments) > 0 {
@@ -31,14 +31,14 @@ func (h *mutatingHook) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) 
 			h.mutated++
 		}
 	}
-	for _, turn := range ctx.History.Turns() {
+	for _, turn := range ctx.HistoryView.Turns() {
 		for i := range turn.Calls {
 			turn.Calls[i].Summary = "changed"
 			turn.Calls[i].Outcome = poo.OutcomeError
 		}
 	}
 	for handle := range map[string]bool{"r1": true} {
-		if r, ok := ctx.History.Result(handle); ok {
+		if r, ok := ctx.HistoryView.Result(handle); ok {
 			r.Text = "changed"
 			r.Structured = json.RawMessage(`"changed"`)
 		}
@@ -53,7 +53,7 @@ func TestMutatingTheViewDoesNotChangeTheHistory(t *testing.T) {
 	hook := &mutatingHook{}
 	tool := &echoTool{result: "the tool's output"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})

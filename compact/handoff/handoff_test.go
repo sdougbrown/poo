@@ -333,7 +333,7 @@ type forkCompactor struct {
 }
 
 // ShouldCompact says yes once the run has asked the model something.
-func (c *forkCompactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+func (c *forkCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	return budget.Turns >= 1
 }
 

@@ -17,7 +17,7 @@ import (
 // copyTree copies a directory tree.
 //
 // The tree's own .git directory is skipped: the runner measures the
-// workdir against a pristine copy of itself, and a checked-in .git would
+// working dir against a pristine copy of itself, and a checked-in .git would
 // only add noise to the diff.
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
@@ -149,7 +149,7 @@ func generatedFile(rel string) bool {
 	return strings.HasSuffix(base, ".pyc") || strings.HasSuffix(base, ".pyo")
 }
 
-// restoreTests puts the fixture's own tests back into the workdir.
+// restoreTests puts the fixture's own tests back into the working dir.
 //
 // A coding task's check runs the fixture's tests, and a model that
 // rewrote them would make the check pass without fixing anything. The
@@ -170,7 +170,7 @@ func restoreTests(pristine, workdir string) error {
 	return copyTree(src, dst)
 }
 
-// measureDiff reports what a run changed, comparing the workdir against a
+// measureDiff reports what a run changed, comparing the working dir against a
 // pristine copy of it.
 //
 // The comparison does not need a repository: a fixture is a plain

@@ -11,6 +11,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/exec/bwrap"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
@@ -19,10 +20,10 @@ import (
 // sandboxExecutors are the executors a binary that links the sandbox has.
 func sandboxExecutors() *bash.Registry {
 	registry := bash.NewRegistry()
-	registry.Register("local", func(bash.Options) (bash.Executor, error) {
+	registry.Register("local", func(exec.Options) (exec.Executor, error) {
 		return bash.NewLocal(), nil
 	})
-	registry.Register("bwrap", func(opts bash.Options) (bash.Executor, error) {
+	registry.Register("bwrap", func(opts exec.Options) (exec.Executor, error) {
 		return bwrap.New(bwrap.Options{
 			DisableNetwork: opts.Sandbox.DisableNetwork,
 			ROBinds:        opts.Sandbox.ROBinds,

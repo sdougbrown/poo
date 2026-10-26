@@ -15,17 +15,17 @@ import (
 
 // parseEvents runs the parser over a text and returns the events it
 // produced.
-func parseEvents(t *testing.T, format, text string) []poo.StreamEvent {
+func parseEvents(t *testing.T, format, text string) []poo.StreamItem {
 	t.Helper()
 	p := newParser("text", format)
-	var events []poo.StreamEvent
+	var events []poo.StreamItem
 	events = append(events, p.feed(text)...)
 	events = append(events, p.flush()...)
 	return events
 }
 
 // callsOf returns the tool call events.
-func callsOf(events []poo.StreamEvent) []poo.ToolCallDelta {
+func callsOf(events []poo.StreamItem) []poo.ToolCallDelta {
 	var calls []poo.ToolCallDelta
 	for _, ev := range events {
 		if ev.Kind == "tool_call" && ev.ToolCall != nil {

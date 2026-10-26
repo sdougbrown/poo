@@ -1,12 +1,12 @@
 package poo
 
-// History is a concrete read-only view of a model's history.
+// HistoryView is a concrete read-only view of a model's history.
 //
 // The view hands out copies: a caller that mutates what it got back
 // changes nothing, and neither the model's history nor another caller's
 // copy changes. Nested content and tool payloads are deep-copied on
 // access.
-type History struct {
+type HistoryView struct {
 	// messages is the model's history, oldest first.
 	messages []Message
 	// turns summarises each turn.
@@ -15,12 +15,12 @@ type History struct {
 	results map[string]ToolResult
 }
 
-// NewHistory returns a view over a set of messages.
+// NewHistoryView returns a view over a set of messages.
 //
 // The messages, the tool results and the turn summaries are copied, so the
 // caller cannot change the view by changing what it passed in.
-func NewHistory(messages []Message, results map[string]ToolResult, turns []TurnSummary) *History {
-	h := &History{
+func NewHistoryView(messages []Message, results map[string]ToolResult, turns []TurnSummary) *HistoryView {
+	h := &HistoryView{
 		messages: CloneMessages(messages),
 		results:  map[string]ToolResult{},
 	}
@@ -36,12 +36,12 @@ func NewHistory(messages []Message, results map[string]ToolResult, turns []TurnS
 }
 
 // Messages returns the model's history, in model order.
-func (h *History) Messages() []Message {
+func (h *HistoryView) Messages() []Message {
 	return CloneMessages(h.messages)
 }
 
 // Turns returns a summary of each turn.
-func (h *History) Turns() []TurnSummary {
+func (h *HistoryView) Turns() []TurnSummary {
 	out := make([]TurnSummary, len(h.turns))
 	for i, t := range h.turns {
 		out[i] = t
@@ -51,7 +51,7 @@ func (h *History) Turns() []TurnSummary {
 }
 
 // Result returns the tool result with the given handle.
-func (h *History) Result(handle string) (ToolResult, bool) {
+func (h *HistoryView) Result(handle string) (ToolResult, bool) {
 	r, ok := h.results[handle]
 	if !ok {
 		return ToolResult{}, false

@@ -96,7 +96,7 @@ func (m *Memory) Pending(ctx context.Context, id string) (*Pending, error) {
 }
 
 // List returns the summary of the session the memory holds.
-func (m *Memory) List(ctx context.Context) ([]Summary, error) {
+func (m *Memory) List(ctx context.Context) ([]Listing, error) {
 	recs := m.Records()
 	if len(recs) == 0 {
 		return nil, nil
@@ -106,7 +106,7 @@ func (m *Memory) List(ctx context.Context) ([]Summary, error) {
 		return nil, &Error{Code: CodeCorruptLog, Message: "the session does not start with a session"}
 	}
 	meta := metadataOfRecord(created)
-	return []Summary{Projection{}.Summarize(meta, recs)}, nil
+	return []Listing{Projection{}.Summarize(meta, recs)}, nil
 }
 
 // Prune deletes nothing: the memory holds no files.

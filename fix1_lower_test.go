@@ -24,7 +24,7 @@ import (
 // history without bound.
 func TestTheParseErrorLoopIsBounded(t *testing.T) {
 	srv, requests := unparseableCallEndpoint(t)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, &recordingSink{}))
 
 	res := runSession(t, s, "hi")
@@ -87,7 +87,7 @@ func TestTwoSessionsSendTheSameToolOrder(t *testing.T) {
 		for _, name := range order {
 			tools[name] = &fix1NamedTool{name: name}
 		}
-		tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
+		tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
 		s := newTestSession(t, poo.Options{
 			Transport:    tr,
 			Tools:        tools,
@@ -142,7 +142,7 @@ func TestTheMessageDeltaNamesTheAttempt(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{time.Millisecond},
@@ -183,7 +183,7 @@ func (t *lateAttemptTransport) Stream(_ context.Context, req poo.ChatRequest) (p
 		}
 		close(t.reported)
 	}()
-	return &fakeReader{events: []poo.StreamEvent{
+	return &fakeReader{events: []poo.StreamItem{
 		{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "done"}},
 		{Kind: "finish", FinishReason: poo.FinishStop},
 	}}, poo.Rendered{API: poo.APIChatCompletions}, nil

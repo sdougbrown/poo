@@ -54,7 +54,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
 				opts.Transport = scripted([]fakeResponse{{
 					calls: []poo.ToolCall{{
-						ID:        "call_1",
+						CallID:    "call_1",
 						Name:      "echo",
 						Arguments: []byte(`{"text":"hello"}`),
 					}},
@@ -72,7 +72,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 				opts.Transport = scripted([]fakeResponse{{
 					usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 20},
 					calls: []poo.ToolCall{{
-						ID:        "call_1",
+						CallID:    "call_1",
 						Name:      "echo",
 						Arguments: []byte(`{"text":"hello"}`),
 					}},
@@ -89,7 +89,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
 				opts.Transport = scripted([]fakeResponse{{
 					calls: []poo.ToolCall{{
-						ID:        "call_1",
+						CallID:    "call_1",
 						Name:      "echo",
 						Arguments: []byte(`{"text":"hello"}`),
 					}},
@@ -127,7 +127,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
 				opts.Transport = scripted([]fakeResponse{{
 					calls: []poo.ToolCall{{
-						ID:        "call_1",
+						CallID:    "call_1",
 						Name:      "echo",
 						Arguments: []byte(`{"text":"hello"}`),
 					}},
@@ -203,7 +203,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
 				opts.Transport = scripted([]fakeResponse{{
 					calls: []poo.ToolCall{{
-						ID:        "call_1",
+						CallID:    "call_1",
 						Name:      "finish",
 						Arguments: []byte(`{"result":{"answer":"42"}}`),
 					}},
@@ -278,7 +278,7 @@ func TestTheInputEventsAreEmitted(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -325,7 +325,7 @@ func TestTheRunAndTurnEventsAreEmitted(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},

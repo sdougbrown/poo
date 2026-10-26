@@ -18,10 +18,10 @@ type Loaded struct {
 	// RecoveredTail reports that the log's last line was cut short and
 	// the file was truncated.
 	RecoveredTail bool
-	// Requeue are the job results that were never delivered, in
+	// Jobs are the job results that were never delivered, in
 	// completion order. The restore queues them again: a job's outcome
 	// is a fact the model must see.
-	Requeue []poo.JobResult
+	Jobs []poo.JobResult
 	// Warnings report what changed since the session was written: a
 	// different build, or different settings. The records are still
 	// readable.

@@ -13,14 +13,14 @@ import (
 type ChatRequest struct {
 	// Model is the provider's model identifier.
 	Model string
-	// Info is the model info the request is shaped from.
+	// ModelInfo is the model info the request is shaped from.
 	//
 	// A transport uses it for everything the model decides: the tools
 	// mode, the reasoning and temperature controls, the sampling
 	// defaults, the quirks and the output limit. A zero model info
 	// leaves the transport's own configuration in charge, so a consumer
-	// that calls Stream directly can keep using Config.Info.
-	Info ModelInfo
+	// that calls Stream directly can keep using Options.ModelInfo.
+	ModelInfo ModelInfo
 	// Messages is the model's history, oldest first.
 	Messages []Message
 	// Tools are the tools the model may call.
@@ -119,7 +119,7 @@ const (
 type StreamReader interface {
 	// Next returns the next piece of the response. It returns io.EOF when
 	// the response is complete.
-	Next() (StreamEvent, error)
+	Next() (StreamItem, error)
 	// Close releases the response.
 	Close() error
 }
@@ -136,8 +136,8 @@ type UsageReporter interface {
 	ReportUsage() *UsageReport
 }
 
-// StreamEvent is one piece of a provider response.
-type StreamEvent struct {
+// StreamItem is one piece of a provider response.
+type StreamItem struct {
 	// Delta is a text or thinking fragment. It is set when Kind is
 	// "delta".
 	Delta *Delta

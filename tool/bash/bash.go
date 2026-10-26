@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sdougbrown/poo/exec"
+
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/internal/caps"
 )
@@ -97,7 +99,7 @@ type Tool struct {
 	// taken from the run's settings.
 	ObservationCap int
 	// Executor runs the command. Nil means the local executor.
-	Executor Executor
+	Executor exec.Executor
 	// Scrub describes the environment the child gets.
 	Scrub Scrub
 }
@@ -110,7 +112,7 @@ type Option func(*Tool)
 // The local executor runs the command in poo's own process space. A
 // sandboxed executor runs it somewhere else, where the credentials the
 // host tools use are not.
-func WithExecutor(e Executor) Option {
+func WithExecutor(e exec.Executor) Option {
 	return func(t *Tool) { t.Executor = e }
 }
 
@@ -218,7 +220,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	if s := env.Settings.BashTimeoutSeconds; s > 0 {
+	if s := env.Settings.BashTimeoutS; s > 0 {
 		timeout = time.Duration(s) * time.Second
 	}
 
@@ -236,10 +238,10 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 
 	text, structured := Envelope(Observation{
-		Returncode: res.returncode,
-		TimedOut:   res.timedOut,
-		Output:     res.output,
-		Cap:        cap,
+		ExitCode: res.exitCode,
+		TimedOut: res.timedOut,
+		Output:   res.output,
+		Cap:      cap,
 	})
 
 	return poo.ToolResult{
@@ -249,6 +251,6 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		// that it failed, or it will read the partial output as a
 		// finished command. A process that died by a signal has no return
 		// code and failed the same way.
-		IsError: res.timedOut || res.cancelled || res.returncode == nil,
+		IsError: res.timedOut || res.cancelled || res.exitCode == nil,
 	}, nil
 }

@@ -126,14 +126,14 @@ func (d *Decider) Decide(ctx context.Context, state any, instructions string, qs
 type RecordingSink struct {
 	mu sync.Mutex
 	// records holds the records, in order.
-	records []decide.Record
+	records []decide.Decision
 }
 
 // NewRecordingSink returns an empty sink.
 func NewRecordingSink() *RecordingSink { return &RecordingSink{} }
 
 // Record keeps one record.
-func (s *RecordingSink) Record(ctx context.Context, rec decide.Record) error {
+func (s *RecordingSink) Record(ctx context.Context, rec decide.Decision) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.records = append(s.records, rec)
@@ -141,10 +141,10 @@ func (s *RecordingSink) Record(ctx context.Context, rec decide.Record) error {
 }
 
 // Records returns the records the sink kept, in order.
-func (s *RecordingSink) Records() []decide.Record {
+func (s *RecordingSink) Records() []decide.Decision {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]decide.Record(nil), s.records...)
+	return append([]decide.Decision(nil), s.records...)
 }
 
 // Compactor is a scripted compactor.
@@ -225,7 +225,7 @@ func (c *Compactor) Forks() []ForkCall {
 }
 
 // ShouldCompact answers the scripted decision.
-func (c *Compactor) ShouldCompact(view poo.View, budget poo.Budget) bool {
+func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.shouldAfter > 0 && len(view.Turns()) < c.shouldAfter {

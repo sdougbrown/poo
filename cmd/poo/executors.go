@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/exec/bwrap"
 	"github.com/sdougbrown/poo/tool/bash"
 )
@@ -13,10 +14,10 @@ import (
 // executor it did not choose.
 func executorRegistry() *bash.Registry {
 	registry := bash.NewRegistry()
-	registry.Register("local", func(bash.Options) (bash.Executor, error) {
+	registry.Register("local", func(exec.Options) (exec.Executor, error) {
 		return bash.NewLocal(), nil
 	})
-	registry.Register("bwrap", func(opts bash.Options) (bash.Executor, error) {
+	registry.Register("bwrap", func(opts exec.Options) (exec.Executor, error) {
 		// The settings name the sandbox's own options, and the
 		// protected paths come from the settings too, so the sandbox
 		// masks the ones they name.

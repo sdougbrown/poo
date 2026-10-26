@@ -104,8 +104,8 @@ type Options struct {
 	Bounds Bounds
 }
 
-// Env is what the server gives the factory when it builds a session.
-type Env struct {
+// FactoryEnv is what the server gives the factory when it builds a session.
+type FactoryEnv struct {
 	// Observer sees the session's events. The server sends them to the
 	// client as notifications.
 	Observer poo.Observer
@@ -128,9 +128,9 @@ type Factory interface {
 	// Roles returns the models this binary talks to.
 	Roles() protocol.ModelRoles
 	// Create builds a session.
-	Create(ctx context.Context, params protocol.CreateParams, env Env) (*poo.Session, *Info, error)
+	Create(ctx context.Context, params protocol.CreateParams, env FactoryEnv) (*poo.Session, *Info, error)
 	// Load opens a recorded session.
-	Load(ctx context.Context, params protocol.LoadParams, env Env) (*poo.Session, *Info, error)
+	Load(ctx context.Context, params protocol.LoadParams, env FactoryEnv) (*poo.Session, *Info, error)
 	// Configure applies a configuration change to a session between
 	// its runs.
 	Configure(ctx context.Context, sess *poo.Session, params protocol.ConfigureParams) (protocol.ModelRoles, error)

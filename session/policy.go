@@ -44,10 +44,10 @@ type PruneResult struct {
 	// Deleted are the sessions the prune deleted, in the order it
 	// deleted them. A dry run lists the sessions it would have
 	// deleted.
-	Deleted []Summary
+	Deleted []Listing
 	// Skipped are the sessions the prune skipped because another
 	// process held their lock.
-	Skipped []Summary
+	Skipped []Listing
 	// Removed are the stale temporary files the prune removed.
 	Removed []string
 }

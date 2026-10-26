@@ -94,14 +94,14 @@ type Options struct {
 	// The settings name the sandbox's own options: the network, the
 	// binds and the paths to mask. The executor that is a sandbox
 	// reads them, and the executor that is not ignores them.
-	Sandbox Sandbox
+	Sandbox SandboxOptions
 }
 
-// Sandbox holds a sandbox's options.
+// SandboxOptions holds a sandbox's options.
 //
 // The options are plain data, so the executor that is a sandbox reads
 // them without the tool package knowing what a sandbox is.
-type Sandbox struct {
+type SandboxOptions struct {
 	// DisableNetwork gives the sandbox its own empty network
 	// namespace instead of the host's.
 	DisableNetwork bool

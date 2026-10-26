@@ -29,7 +29,7 @@ type Ask struct {
 	// Summary describes the call.
 	Summary string `json:"summary"`
 	// Class is the tool's class: "read_only" or "side_effecting".
-	Class poo.ToolClass `json:"class"`
+	Class poo.ToolKind `json:"class"`
 	// Reason is why the call is being asked about: "policy" or
 	// "doom_loop".
 	Reason string `json:"reason"`
@@ -40,9 +40,9 @@ type Ask struct {
 	// model to see them. A tool that names none exposes the raw
 	// arguments the model wrote.
 	Arguments json.RawMessage `json:"arguments,omitempty"`
-	// History is the model's history, for an asker that reads
+	// HistoryView is the model's history, for an asker that reads
 	// evidence.
-	History poo.View `json:"-"`
+	HistoryView poo.View `json:"-"`
 	// WorkingDir is the directory the run works in.
 	WorkingDir string `json:"-"`
 	// Interrupted reports that an interrupt ended the activity while

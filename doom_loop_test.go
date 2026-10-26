@@ -18,9 +18,9 @@ func TestTheExactKeyIsTheCanonicalCall(t *testing.T) {
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{
-			{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"a","n":1}`)},
-			{ID: "c2", Name: "echo", Arguments: []byte(`{"n":1,"text":"a"}`)},
-			{ID: "c3", Name: "echo", Arguments: []byte(`{"text":"b","n":1}`)},
+			{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"a","n":1}`)},
+			{CallID: "c2", Name: "echo", Arguments: []byte(`{"n":1,"text":"a"}`)},
+			{CallID: "c3", Name: "echo", Arguments: []byte(`{"text":"b","n":1}`)},
 		}},
 		{text: "done"},
 	})
@@ -50,9 +50,9 @@ func TestAnotherToolDoesNotBreakTheStreak(t *testing.T) {
 	other := &namedTool{name: "other", echoTool: echoTool{result: "the other effect"}}
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{
-			{ID: "c1", Name: "echo", Arguments: []byte(`{"path":"a"}`)},
-			{ID: "c2", Name: "other", Arguments: []byte(`{"text":"x"}`)},
-			{ID: "c3", Name: "echo", Arguments: []byte(`{"path":"a"}`)},
+			{CallID: "c1", Name: "echo", Arguments: []byte(`{"path":"a"}`)},
+			{CallID: "c2", Name: "other", Arguments: []byte(`{"text":"x"}`)},
+			{CallID: "c3", Name: "echo", Arguments: []byte(`{"path":"a"}`)},
 		}},
 		{text: "done"},
 	})
@@ -79,7 +79,7 @@ func TestThePolicySeesTheCountsAndTheArguments(t *testing.T) {
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{
-			{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"a"}`)},
+			{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"a"}`)},
 		}},
 		{text: "done"},
 	})
@@ -106,8 +106,8 @@ func TestThePolicySeesTheCountsAndTheArguments(t *testing.T) {
 func TestTheStreakContinuesAcrossTurns(t *testing.T) {
 	tool := &echoTool{result: "the effect", primaryArg: "text"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"a"}`)}}},
-		{calls: []poo.ToolCall{{ID: "c2", Name: "echo", Arguments: []byte(`{"text":"a"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"a"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"a"}`)}}},
 		{text: "done"},
 	})
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))

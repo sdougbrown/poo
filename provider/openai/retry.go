@@ -201,7 +201,7 @@ type streamWithRetry struct {
 //
 // A failure that arrives before the response carried a delta is retried,
 // so the caller sees the events of the attempt that answered.
-func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
+func (s *streamWithRetry) Next() (poo.StreamItem, error) {
 	for {
 		if s.current == nil {
 			reader, err := s.transport.open(s.ctx, s.body, s.settings)
@@ -209,11 +209,11 @@ func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 				wait, ok := s.transport.policy.delay(s.attempt, err)
 				if !ok {
 					s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
-					return poo.StreamEvent{}, err
+					return poo.StreamItem{}, err
 				}
 				if werr := waitFor(s.ctx, wait); werr != nil {
 					s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
-					return poo.StreamEvent{}, werr
+					return poo.StreamItem{}, werr
 				}
 				s.transport.reportAttempt(s.report, s.attempt, err, wait, true)
 				s.attempt++
@@ -235,12 +235,12 @@ func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 			return ev, nil
 		}
 		if errors.Is(err, io.EOF) {
-			return poo.StreamEvent{}, io.EOF
+			return poo.StreamItem{}, io.EOF
 		}
 		// The request's own context ended: the run is stopping, and
 		// the failure is the context's.
 		if s.ctx.Err() != nil {
-			return poo.StreamEvent{}, err
+			return poo.StreamItem{}, err
 		}
 		if s.seen {
 			// The attempt carried part of the answer, so the request
@@ -256,7 +256,7 @@ func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 				s.current = nil
 				if werr := waitFor(s.ctx, wait); werr != nil {
 					s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
-					return poo.StreamEvent{}, werr
+					return poo.StreamItem{}, werr
 				}
 				s.transport.reportAttempt(s.report, s.attempt, err, wait, true)
 				s.attempt++
@@ -266,7 +266,7 @@ func (s *streamWithRetry) Next() (poo.StreamEvent, error) {
 		// The attempt that failed and was not tried again: it is the
 		// last one, and the record holds it too.
 		s.transport.reportAttempt(s.report, s.attempt, err, 0, false)
-		return poo.StreamEvent{}, err
+		return poo.StreamItem{}, err
 	}
 }
 

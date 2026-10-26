@@ -52,11 +52,11 @@ type Options struct {
 	Turns int
 }
 
-// Asker answers a permission ask with a decision model.
+// ModelAsker answers a permission ask with a decision model.
 //
 // The asker is unavailable without a decider: there is no model to ask,
 // and the chain skips it.
-type Asker struct {
+type ModelAsker struct {
 	// decider is the decision model.
 	decider decide.Decider
 	// approve is the probability that allows a call.
@@ -70,13 +70,13 @@ type Asker struct {
 }
 
 // The asker is one link of the permission chain.
-var _ perm.Asker = (*Asker)(nil)
+var _ perm.Asker = (*ModelAsker)(nil)
 
 // New returns an asker that asks the given decision model.
 //
 // A nil decider makes the asker unavailable: the chain skips it, and
 // the fallback decides.
-func New(decider decide.Decider, opts Options) *Asker {
+func New(decider decide.Decider, opts Options) *ModelAsker {
 	approve := opts.Approve
 	if approve == 0 {
 		approve = DefaultApprove
@@ -93,7 +93,7 @@ func New(decider decide.Decider, opts Options) *Asker {
 	if turns <= 0 {
 		turns = poo.DefaultEvidenceTurns
 	}
-	return &Asker{
+	return &ModelAsker{
 		decider: decide.Recorded(decider, nil, "permission"),
 		approve: approve,
 		deny:    deny,
@@ -103,7 +103,7 @@ func New(decider decide.Decider, opts Options) *Asker {
 }
 
 // Available reports whether there is a model to ask.
-func (a *Asker) Available() bool {
+func (a *ModelAsker) Available() bool {
 	return a.decider != nil
 }
 
@@ -112,17 +112,17 @@ func (a *Asker) Available() bool {
 //
 // A build with a decider can always ask it, and a build without one can
 // never.
-func (a *Asker) CanEverAnswer() bool {
+func (a *ModelAsker) CanEverAnswer() bool {
 	return a.decider != nil
 }
 
 // Budget is the per-call latency budget.
-func (a *Asker) Budget() time.Duration {
+func (a *ModelAsker) Budget() time.Duration {
 	return a.timeout
 }
 
 // AskerName is the name the asker's answers carry.
-func (a *Asker) AskerName() string { return "decide" }
+func (a *ModelAsker) AskerName() string { return "decide" }
 
 // Ask asks the decision model about the call.
 //
@@ -131,15 +131,15 @@ func (a *Asker) AskerName() string { return "decide" }
 // threshold refuses it. Anything else defers, and so does a decider
 // that failed, timed out or answered badly: a decision that could not
 // be made is not a permission grant.
-func (a *Asker) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
+func (a *ModelAsker) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
 	if a.decider == nil {
 		return perm.DecisionDefer, nil
 	}
 	question := a.question()
 	state := decide.Evidence(
-		poo.EvidenceTurns(ask.History, a.turns),
+		poo.EvidenceTurns(ask.HistoryView, a.turns),
 		decide.EvidenceOptions{
-			Cwd: ask.WorkingDir,
+			WorkingDir: ask.WorkingDir,
 			Call: &decide.Call{
 				Tool:      ask.Tool,
 				Summary:   ask.Summary,
@@ -172,7 +172,7 @@ func (a *Asker) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
 }
 
 // question returns the question the asker asks.
-func (a *Asker) question() decide.Question {
+func (a *ModelAsker) question() decide.Question {
 	return decide.Question{
 		ID:           QuestionID,
 		Instructions: Instructions,

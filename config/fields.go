@@ -18,7 +18,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.RolesChat = text(s.Roles["chat"])
 	f.RolesDecider = text(s.Roles["decider"])
 
-	f.DeciderTimeoutMs = count(s.Decider.TimeoutMs)
+	f.DeciderTimeoutMs = count(s.Decider.TimeoutMS)
 
 	f.PermissionUnmatched = pointer(s.Permission.Unmatched)
 	f.PermissionFallback = pointer(s.Permission.Fallback)
@@ -29,7 +29,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.PermissionChainTimeoutS = count(s.Permission.ChainTimeoutS)
 	f.PermissionDecideApprove = share(s.Permission.Decide.Approve)
 	f.PermissionDecideDeny = share(s.Permission.Decide.Deny)
-	f.PermissionDecideTimeoutMs = count(s.Permission.Decide.TimeoutMs)
+	f.PermissionDecideTimeoutMs = count(s.Permission.Decide.TimeoutMS)
 
 	f.SystemPromptBaseFile = text(s.SystemPrompt.BaseFile)
 	f.SystemPromptReplace = text(s.SystemPrompt.Replace)

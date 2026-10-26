@@ -36,7 +36,7 @@ func (h *recordingTurnHook) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, er
 	h.calls++
 	h.interrupted = append(h.interrupted, ctx.Interrupted)
 	var outcomes []poo.Outcome
-	for _, turn := range ctx.History.Turns() {
+	for _, turn := range ctx.HistoryView.Turns() {
 		for _, call := range turn.Calls {
 			outcomes = append(outcomes, call.Outcome)
 		}
@@ -125,7 +125,7 @@ func TestTheAfterTurnHookSeesAnInterruptedTurn(t *testing.T) {
 		return poo.ToolResult{Text: "the effect"}, nil
 	}}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -160,7 +160,7 @@ func TestAHooksRecordNeverFollowsTheSettleRecord(t *testing.T) {
 	hook := &recordingTurnHook{decision: poo.AppendMessages(poo.NewTextMessage(poo.RoleUser, "the hook's note"))}
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	sink := &hookRecordSink{entered: make(chan struct{}), release: make(chan struct{})}
@@ -243,7 +243,7 @@ func TestTheAfterTurnHookSeesTheTurnsCalls(t *testing.T) {
 	hook := &recordingTurnHook{}
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})

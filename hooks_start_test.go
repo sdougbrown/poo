@@ -55,7 +55,7 @@ func (h *recordingStartHook) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigg
 func (h *recordingStartHook) record(ctx poo.HookContext) {
 	h.mu.Lock()
 	h.calls++
-	h.histories = append(h.histories, len(ctx.History.Messages()))
+	h.histories = append(h.histories, len(ctx.HistoryView.Messages()))
 	wait := h.wait
 	h.mu.Unlock()
 	if wait != nil {

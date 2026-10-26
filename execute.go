@@ -212,7 +212,7 @@ func (s *Session) beginTurn(run *runState, turn int, plans []callPlan) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.turns {
-		if s.turns[i].Session != run.globalTurn {
+		if s.turns[i].TurnIndex != run.globalTurn {
 			continue
 		}
 		for _, p := range plans {
@@ -407,7 +407,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			RunID:      run.id,
 			Turn:       turn,
 			Handle:     handle,
-			CallID:     call.ID,
+			CallID:     call.CallID,
 			Tool:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
 			Mode:       m,
@@ -440,7 +440,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if !record("") {
 			return
 		}
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    SkippedTruncatedText,
 			IsError: true,
 		}, OutcomeSkipped)
@@ -452,7 +452,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if !record(CallModeSync) {
 			return
 		}
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    fmt.Sprintf("unknown tool %q", call.Name),
 			IsError: true,
 		}, OutcomeError)
@@ -478,7 +478,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 				return
 			}
 			if err != nil {
-				s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+				s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
 					Text:    err.Error(),
 					IsError: true,
 				}, OutcomeError)
@@ -496,7 +496,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 				if text == "" {
 					text = "The call was refused."
 				}
-				s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+				s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
 					Text:    text,
 					IsError: true,
 				}, OutcomeDenied)
@@ -509,7 +509,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if plan.prepareErr != nil {
 			text = plan.prepareErr.Error()
 		}
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, OutcomeError)
@@ -529,7 +529,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if !record(CallModeSync) {
 			return
 		}
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    err.Error(),
 			IsError: true,
 		}, OutcomeError)
@@ -547,7 +547,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			if !record(CallModeSync) {
 				return
 			}
-			s.recordResult(run, turn, handle, call.Name, call.ID, *decision.Result, OutcomeOK)
+			s.recordResult(run, turn, handle, call.Name, call.CallID, *decision.Result, OutcomeOK)
 		}
 		return
 	}
@@ -561,7 +561,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if text == "" {
 			text = "The call was refused."
 		}
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, OutcomeDenied)
@@ -573,7 +573,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		if !record(CallModeSync) {
 			return
 		}
-		s.recordResult(run, turn, handle, call.Name, call.ID, *decision.Result, OutcomeOK)
+		s.recordResult(run, turn, handle, call.Name, call.CallID, *decision.Result, OutcomeOK)
 		return
 	}
 
@@ -686,7 +686,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// The after-tool chain runs before the result is recorded or
 	// emitted, so the record, the event and the model see the same
 	// sanitized result.
-	out := s.recordToolResult(run, turn, handle, call.Name, call.ID, s.toolCallInfo(turn, handle, call.Name, prepared, plan), result, outcome)
+	out := s.recordToolResult(run, turn, handle, call.Name, call.CallID, s.toolCallInfo(turn, handle, call.Name, prepared, plan), result, outcome)
 	if fatalCandidate != nil {
 		fatalCandidate.detail.Text = out.result.Text
 		s.addCandidate(run, *fatalCandidate)
@@ -709,7 +709,7 @@ func (s *Session) startJobCall(run *runState, turn int, handle string, call Tool
 	if !ok {
 		// There was no free slot. The failure is recoverable: the
 		// model sees the message and may wait or cancel one.
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
+		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
 			Text:    TooManyJobsText,
 			IsError: true,
 		}, OutcomeError)
@@ -717,7 +717,7 @@ func (s *Session) startJobCall(run *runState, turn int, handle string, call Tool
 	}
 
 	text := fmt.Sprintf(StartedText, jobID, call.Name)
-	s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{Text: text}, OutcomeStarted)
+	s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{Text: text}, OutcomeStarted)
 	s.events.emit(EventJobStarted, map[string]any{
 		"job":    jobID,
 		"handle": handle,
@@ -933,7 +933,7 @@ func (s *Session) rememberResult(handle, tool string, outcome Outcome, result To
 		return
 	}
 	for i := range s.turns {
-		if s.turns[i].Session != meta.turn {
+		if s.turns[i].TurnIndex != meta.turn {
 			continue
 		}
 		for j := range s.turns[i].Calls {
@@ -973,14 +973,14 @@ func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 		run.pendingCalls[p.handle] = &issuedCall{
 			handle:     p.handle,
 			tool:       p.call.Name,
-			id:         p.call.ID,
+			id:         p.call.CallID,
 			turn:       turn,
 			globalTurn: run.globalTurn,
 			arguments:  p.call.Arguments,
 		}
 		s.resultMeta[p.handle] = resultMeta{
 			tool:   p.call.Name,
-			callID: p.call.ID,
+			callID: p.call.CallID,
 			turn:   run.globalTurn,
 		}
 	}
@@ -1010,14 +1010,14 @@ func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCal
 	run.pendingCalls[handle] = &issuedCall{
 		handle:     handle,
 		tool:       call.Name,
-		id:         call.ID,
+		id:         call.CallID,
 		turn:       turn,
 		globalTurn: run.globalTurn,
 		arguments:  call.Arguments,
 	}
 	s.resultMeta[handle] = resultMeta{
 		tool:   call.Name,
-		callID: call.ID,
+		callID: call.CallID,
 		turn:   run.globalTurn,
 	}
 	if run.workDone == nil {

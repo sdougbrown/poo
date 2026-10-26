@@ -105,7 +105,7 @@ func TestTheServedHeaderRecordsTheDeciderTheSessionRunsWith(t *testing.T) {
 				Mode:       "logged",
 				SessionDir: t.TempDir(),
 				Models:     test.models,
-			}, wire.Env{})
+			}, wire.FactoryEnv{})
 			if err != nil {
 				t.Fatalf("creating the session: %v", err)
 			}
@@ -184,7 +184,7 @@ func TestAServedLoggedSessionWithADeciderLoads(t *testing.T) {
 				Mode:       "logged",
 				SessionDir: dir,
 				Models:     test.models,
-			}, wire.Env{})
+			}, wire.FactoryEnv{})
 			if err != nil {
 				t.Fatalf("creating the session: %v", err)
 			}
@@ -203,7 +203,7 @@ func TestAServedLoggedSessionWithADeciderLoads(t *testing.T) {
 				t.Fatalf("releasing the store: %v", err)
 			}
 
-			loaded, info, err := srv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.Env{})
+			loaded, info, err := srv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.FactoryEnv{})
 			if err != nil {
 				t.Fatalf("loading the session: %v", err)
 			}
@@ -240,7 +240,7 @@ func TestAServedSessionWhoseRecordedDeciderThisBuildCannotBuildIsIncompatible(t 
 		Mode:       "logged",
 		SessionDir: dir,
 		Models:     &protocol.ModelRoles{Decider: "other-decider"},
-	}, wire.Env{})
+	}, wire.FactoryEnv{})
 	if err != nil {
 		t.Fatalf("creating the session: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestAServedSessionWhoseRecordedDeciderThisBuildCannotBuildIsIncompatible(t 
 	model.Ops = []string{"chat"}
 	degraded.Models["other-decider"] = model
 	degradedSrv := newServer(t, degraded)
-	_, _, err = degradedSrv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.Env{})
+	_, _, err = degradedSrv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.FactoryEnv{})
 	if !errors.Is(err, poo.ErrSessionIncompatible) {
 		t.Fatalf("loading the session: %v, want %v", err, poo.ErrSessionIncompatible)
 	}
@@ -274,7 +274,7 @@ func TestAServedSessionWhoseRecordedDeciderThisBuildCannotBuildIsIncompatible(t 
 
 	// The store the failed load opened is released, so the session loads
 	// from the settings that can still build its decider.
-	loaded, info, err := srv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.Env{})
+	loaded, info, err := srv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.FactoryEnv{})
 	if err != nil {
 		t.Fatalf("loading the session after the failed load: %v", err)
 	}

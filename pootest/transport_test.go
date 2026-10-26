@@ -16,9 +16,9 @@ import (
 // of each request and says so when the script runs out.
 
 // read drains a stream and returns the events.
-func read(t *testing.T, reader poo.StreamReader) []poo.StreamEvent {
+func read(t *testing.T, reader poo.StreamReader) []poo.StreamItem {
 	t.Helper()
-	var events []poo.StreamEvent
+	var events []poo.StreamItem
 	for {
 		ev, err := reader.Next()
 		if errors.Is(err, io.EOF) {

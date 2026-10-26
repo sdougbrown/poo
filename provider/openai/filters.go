@@ -21,9 +21,9 @@ import (
 // back until it can decide.
 type textFilter interface {
 	// feed takes a text delta and returns the events it produced.
-	feed(text string) []poo.StreamEvent
+	feed(text string) []poo.StreamItem
 	// flush returns the events the filter holds at the end of a stream.
-	flush() []poo.StreamEvent
+	flush() []poo.StreamItem
 }
 
 // applyFilters runs the text through the filters, in order.
@@ -31,21 +31,21 @@ type textFilter interface {
 // Each filter's text goes to the next filter, and the events are queued
 // as they are made, so a filter's own events keep their place in the
 // answer.
-func applyFilters(filters []textFilter, text string) []poo.StreamEvent {
+func applyFilters(filters []textFilter, text string) []poo.StreamItem {
 	if len(filters) == 0 {
-		return []poo.StreamEvent{textEvent(text)}
+		return []poo.StreamItem{textEvent(text)}
 	}
 	return feedFilter(filters, text, 0)
 }
 
 // feedFilter feeds the text to the filter at the index, and the
 // filter's text to the one after it.
-func feedFilter(filters []textFilter, text string, idx int) []poo.StreamEvent {
+func feedFilter(filters []textFilter, text string, idx int) []poo.StreamItem {
 	events := filters[idx].feed(text)
 	if idx+1 >= len(filters) {
 		return events
 	}
-	var out []poo.StreamEvent
+	var out []poo.StreamItem
 	for _, ev := range events {
 		if ev.Kind == "delta" && ev.Delta != nil && ev.Delta.Kind == "text" {
 			out = append(out, feedFilter(filters, ev.Delta.Text, idx+1)...)
@@ -57,8 +57,8 @@ func feedFilter(filters []textFilter, text string, idx int) []poo.StreamEvent {
 }
 
 // flushFilters flushes the filters, in order.
-func flushFilters(filters []textFilter) []poo.StreamEvent {
-	var out []poo.StreamEvent
+func flushFilters(filters []textFilter) []poo.StreamItem {
+	var out []poo.StreamItem
 	for _, f := range filters {
 		out = append(out, f.flush()...)
 	}
@@ -95,9 +95,9 @@ func newThinkFilter() *thinkFilter {
 //
 // The thinking is held until its block closes, because the closing tag
 // may be split over two deltas.
-func (f *thinkFilter) feed(text string) []poo.StreamEvent {
+func (f *thinkFilter) feed(text string) []poo.StreamItem {
 	f.buf += text
-	var out []poo.StreamEvent
+	var out []poo.StreamItem
 	for {
 		if f.thinking {
 			i := strings.Index(f.buf, thinkClose)
@@ -141,8 +141,8 @@ func (f *thinkFilter) feed(text string) []poo.StreamEvent {
 //
 // A thinking block that never closed is still thinking, and the text
 // after it is the answer.
-func (f *thinkFilter) flush() []poo.StreamEvent {
-	var out []poo.StreamEvent
+func (f *thinkFilter) flush() []poo.StreamItem {
+	var out []poo.StreamItem
 	if f.thinking {
 		f.inside.WriteString(f.buf)
 		out = append(out, thinkingEvent(f.inside.String()))
@@ -189,7 +189,7 @@ func newDegenerateFilter(logger *slog.Logger, model string) *degenerateFilter {
 //
 // The filter never holds the text back: the answer reaches the consumer
 // as it arrives.
-func (f *degenerateFilter) feed(text string) []poo.StreamEvent {
+func (f *degenerateFilter) feed(text string) []poo.StreamItem {
 	if text != "" && text == f.last {
 		f.repeats++
 	} else {
@@ -203,10 +203,10 @@ func (f *degenerateFilter) feed(text string) []poo.StreamEvent {
 			"repeats", f.repeats,
 		)
 	}
-	return []poo.StreamEvent{textEvent(text)}
+	return []poo.StreamItem{textEvent(text)}
 }
 
 // flush returns the events the filter holds at the end of a stream.
-func (f *degenerateFilter) flush() []poo.StreamEvent {
+func (f *degenerateFilter) flush() []poo.StreamItem {
 	return nil
 }

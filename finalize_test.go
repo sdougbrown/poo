@@ -145,7 +145,7 @@ func TestAToolFatalSettlesTheRunOnce(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -223,7 +223,7 @@ func TestACancelDuringAToolSettlesTheRunOnce(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -260,7 +260,7 @@ func TestARecoverableToolErrorLeavesTheRunRunning(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -406,7 +406,7 @@ func TestEveryIssuedCallGetsAResult(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -457,7 +457,7 @@ func TestALateCompletionDoesNotMutateTheSettledRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -601,7 +601,7 @@ func TestABeforeToolHookErrorSettlesTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
-				ID:        "call_1",
+				CallID:    "call_1",
 				Name:      "echo",
 				Arguments: []byte(`{"text":"hello"}`),
 			}},
@@ -653,7 +653,7 @@ func TestACallThatFinishesAsTheRunSettlesGetsOneResult(t *testing.T) {
 		tr := scripted([]fakeResponse{
 			{
 				calls: []poo.ToolCall{{
-					ID:        "call_1",
+					CallID:    "call_1",
 					Name:      "echo",
 					Arguments: []byte(`{"text":"hello"}`),
 				}},
@@ -724,7 +724,7 @@ func TestAFailingFlushAfterTheSettleIsReported(t *testing.T) {
 // session-monotonic handles: the second turn's call does not reuse the
 // first turn's handle, and the second run's does not reuse either.
 func TestAHandleNamesOneCallForTheLifeOfTheSession(t *testing.T) {
-	call := poo.ToolCall{ID: "call", Name: "echo", Arguments: []byte(`{}`)}
+	call := poo.ToolCall{CallID: "call", Name: "echo", Arguments: []byte(`{}`)}
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{call}},
 		{calls: []poo.ToolCall{call}},
@@ -754,7 +754,7 @@ func TestAHandleNamesOneCallForTheLifeOfTheSession(t *testing.T) {
 // winner is never among them.
 func TestACandidateRaisedInTheBatchIsListedOnce(t *testing.T) {
 	tr := scripted([]fakeResponse{{
-		calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
+		calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
 	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
@@ -778,7 +778,7 @@ func TestACandidateRaisedInTheBatchIsListedOnce(t *testing.T) {
 // loser appears once.
 func TestALosingCandidateIsListedOnce(t *testing.T) {
 	tr := scripted([]fakeResponse{{
-		calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
+		calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"hello"}`)}},
 	}})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
@@ -805,8 +805,8 @@ func TestALosingCandidateIsListedOnce(t *testing.T) {
 func TestAFatalToolErrorSkipsTheRestOfTheBatch(t *testing.T) {
 	tr := scripted([]fakeResponse{{
 		calls: []poo.ToolCall{
-			{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
-			{ID: "call_2", Name: "echo", Arguments: []byte(`{"text":"two"}`)},
+			{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
+			{CallID: "call_2", Name: "echo", Arguments: []byte(`{"text":"two"}`)},
 		},
 	}})
 	sink := &recordingSink{}
@@ -857,7 +857,7 @@ func (t *lateAnswerTransport) Stream(ctx context.Context, req poo.ChatRequest) (
 	t.once.Do(func() { close(t.entered) })
 	<-t.release
 	r := fakeResponse{text: "late answer", calls: []poo.ToolCall{{
-		ID:        "call_1",
+		CallID:    "call_1",
 		Name:      "echo",
 		Arguments: []byte(`{"text":"late"}`),
 	}}}
@@ -952,7 +952,7 @@ func (s *refusingDeliverySink) Append(ctx context.Context, rec poo.Record) error
 // duplicate is listed neither as a loser nor twice.
 func TestTheWinnerIsNotListedAsItsOwnLoser(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{text: "the first answer", calls: []poo.ToolCall{{ID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the first answer", calls: []poo.ToolCall{{CallID: "call_1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "the second answer"},
 	})
 	sink := &refusingDeliverySink{recordingSink: &recordingSink{}}

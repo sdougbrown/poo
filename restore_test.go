@@ -55,7 +55,7 @@ func TestTheRestoredSessionSendsTheSameNextRequest(t *testing.T) {
 	// The original session runs twice: the second run's request is the
 	// one the restored session has to reproduce.
 	original := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"hi"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"hi"}`)}}},
 		{text: "done"},
 		{text: "ok"},
 	})
@@ -125,7 +125,7 @@ func TestTheRestoredSessionSendsTheSameNextRequest(t *testing.T) {
 // the messages, the hook-appended messages and the tool results.
 func TestTheRestoreRebuildsTheHistory(t *testing.T) {
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"hi"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"hi"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}
@@ -291,14 +291,14 @@ func TestTheRestoreRejectsAnotherFormat(t *testing.T) {
 func TestTheRestoreRequeuesAnUndeliveredJobResult(t *testing.T) {
 	records := []poo.Record{
 		header("s1"),
-		&poo.JobStarted{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", Job: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
-		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", Job: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.JobOutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
+		&poo.JobStarted{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
+		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.JobOutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
 	}
 	pending := poo.PendingJobResults(records)
 	if len(pending) != 1 {
 		t.Fatalf("the records hold %d pending job results, want 1", len(pending))
 	}
-	if pending[0].Job != "j1" || pending[0].Text != "the job said something" {
+	if pending[0].JobID != "j1" || pending[0].Text != "the job said something" {
 		t.Errorf("the pending result is %+v, want the job's result", pending[0])
 	}
 
@@ -354,7 +354,7 @@ func TestTheRestoreHoldsTheSteeringAndTheCompactions(t *testing.T) {
 	})
 	compactor.SetShouldAfter(1)
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	sink := &recordingSink{}
@@ -403,8 +403,8 @@ func TestTheRestoreHoldsTheSteeringAndTheCompactions(t *testing.T) {
 func TestTheRestoredSessionHoldsTheUndeliveredJobResults(t *testing.T) {
 	records := []poo.Record{
 		header("s1"),
-		&poo.JobStarted{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", Job: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
-		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", Job: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.JobOutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
+		&poo.JobStarted{RecordMeta: poo.NewRecordMeta("job.started"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1"},
+		&poo.JobEnded{RecordMeta: poo.NewRecordMeta("job.ended"), SessionID: "s1", JobID: "j1", Handle: "r1", Tool: "echo", RunID: "run-1", Outcome: poo.JobOutcomeOK, InputID: "s1-ji1", Text: "the job said something"},
 	}
 	tr := scripted([]fakeResponse{{text: "ok"}})
 	sink := &recordingSink{}
@@ -567,7 +567,7 @@ func TestTheRestoreRejectsAToolThatIsNoLongerLinked(t *testing.T) {
 // the restored session sends, not the caller's defaults.
 func TestTheRestoreSendsTheRecordedToolsModeAndReasoning(t *testing.T) {
 	created := header("s1")
-	created.ToolsMode = string(poo.ToolsText)
+	created.ToolsMode = poo.ToolsText
 	created.ReasoningEffort = "low"
 	tr := scripted([]fakeResponse{{text: "done"}})
 	opts := restoreOptions(t, tr, &recordingSink{})
@@ -583,10 +583,10 @@ func TestTheRestoreSendsTheRecordedToolsModeAndReasoning(t *testing.T) {
 	if len(requests) != 1 {
 		t.Fatalf("the restored session made %d requests, want 1", len(requests))
 	}
-	if got := requests[0].Info.Tools.Mode; got != poo.ToolsText {
+	if got := requests[0].ModelInfo.Tools.Mode; got != poo.ToolsText {
 		t.Errorf("the restored request's tools mode is %q, want %q", got, poo.ToolsText)
 	}
-	if got := requests[0].Info.Reasoning.Mode; got != poo.ReasoningEffort {
+	if got := requests[0].ModelInfo.Reasoning.Mode; got != poo.ReasoningEffort {
 		t.Errorf("the restored request's reasoning mode is %q, want %q", got, poo.ReasoningEffort)
 	}
 }

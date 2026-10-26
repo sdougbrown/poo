@@ -323,7 +323,7 @@ func TestACancelledRunsJobResultWakesTheSession(t *testing.T) {
 			continue
 		}
 		found = true
-		if len(started.Jobs) != 1 || started.Jobs[0].Job != "j1" {
+		if len(started.Jobs) != 1 || started.Jobs[0].JobID != "j1" {
 			t.Errorf("the woken run carries %v, want one job", started.Jobs)
 		}
 	}
@@ -447,7 +447,7 @@ func TestAnInterruptDuringExecutingStopsTheCallAndNotTheJob(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{
 			jobCall("one", true),
-			{ID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)},
+			{CallID: "call_2", Name: "echo", Arguments: json.RawMessage(`{"text":"hello"}`)},
 		}},
 		{text: "the second answer"},
 	})

@@ -302,14 +302,14 @@ func TestAnUnfinishedJobIsEndedAndQueued(t *testing.T) {
 	if ended.Text != InterruptedJobText {
 		t.Errorf("the job's text is %q, want %q", ended.Text, InterruptedJobText)
 	}
-	if len(loaded.Requeue) != 1 {
-		t.Fatalf("the load queues %d job results, want 1", len(loaded.Requeue))
+	if len(loaded.Jobs) != 1 {
+		t.Fatalf("the load queues %d job results, want 1", len(loaded.Jobs))
 	}
-	if loaded.Requeue[0].Job != "j1" {
-		t.Errorf("the queued result is for %q, want j1", loaded.Requeue[0].Job)
+	if loaded.Jobs[0].JobID != "j1" {
+		t.Errorf("the queued result is for %q, want j1", loaded.Jobs[0].JobID)
 	}
-	if loaded.Requeue[0].Outcome != poo.OutcomeInterrupted {
-		t.Errorf("the queued result's outcome is %q, want %q", loaded.Requeue[0].Outcome, poo.OutcomeInterrupted)
+	if loaded.Jobs[0].Outcome != poo.OutcomeInterrupted {
+		t.Errorf("the queued result's outcome is %q, want %q", loaded.Jobs[0].Outcome, poo.OutcomeInterrupted)
 	}
 }
 
@@ -330,12 +330,12 @@ func TestAJobThatEndedIsQueuedAgain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the session: %v", err)
 	}
-	if len(loaded.Requeue) != 1 {
-		t.Fatalf("the load queues %d job results, want 1", len(loaded.Requeue))
+	if len(loaded.Jobs) != 1 {
+		t.Fatalf("the load queues %d job results, want 1", len(loaded.Jobs))
 	}
-	queued := loaded.Requeue[0]
-	if queued.Job != "j1" {
-		t.Errorf("the queued result is for %q, want j1", queued.Job)
+	queued := loaded.Jobs[0]
+	if queued.JobID != "j1" {
+		t.Errorf("the queued result is for %q, want j1", queued.JobID)
 	}
 	if queued.Text != "the job's result" {
 		t.Errorf("the queued result's text is %q, want the recorded text", queued.Text)
@@ -363,8 +363,8 @@ func TestADeliveredJobIsNotQueuedAgain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the session: %v", err)
 	}
-	if len(loaded.Requeue) != 0 {
-		t.Errorf("the load queues %d job results, want none", len(loaded.Requeue))
+	if len(loaded.Jobs) != 0 {
+		t.Errorf("the load queues %d job results, want none", len(loaded.Jobs))
 	}
 }
 
@@ -395,11 +395,11 @@ func TestAJobOfAnOldRunIsStillRecovered(t *testing.T) {
 	if !ok {
 		t.Fatalf("the last record is %T, want a job's end", loaded.Records[len(loaded.Records)-1])
 	}
-	if ended.Job != "j1" {
-		t.Errorf("the ended job is %q, want j1", ended.Job)
+	if ended.JobID != "j1" {
+		t.Errorf("the ended job is %q, want j1", ended.JobID)
 	}
-	if len(loaded.Requeue) != 1 {
-		t.Errorf("the load queues %d job results, want 1", len(loaded.Requeue))
+	if len(loaded.Jobs) != 1 {
+		t.Errorf("the load queues %d job results, want 1", len(loaded.Jobs))
 	}
 }
 

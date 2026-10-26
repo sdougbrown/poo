@@ -181,7 +181,7 @@ func TestTheErrorKindTableGivesTheSettleReason(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			srv := errorServer(t, c.status, errorFixture(t, c.fixture), c.header)
-			tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+			tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 
 			res := settleOf(t, tr)
 			if res.Reason != c.wantReason {
@@ -210,7 +210,7 @@ func TestANetworkFailureIsItsOwnRow(t *testing.T) {
 	url := srv.URL
 	srv.Close()
 
-	tr := openai.New(fastRetry(openai.Config{BaseURL: url, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: url, Model: "m"}))
 	res := settleOf(t, tr)
 	if res.Reason != poo.ReasonProviderError {
 		t.Errorf("the run settled %q, want provider_error", res.Reason)
@@ -230,7 +230,7 @@ func TestANetworkFailureIsItsOwnRow(t *testing.T) {
 // transport does not know keeps its own name in the record.
 func TestAnUnknownCodeIsKeptRaw(t *testing.T) {
 	srv := errorServer(t, http.StatusBadRequest, `{"error":{"message":"weird","code":"model_overloaded_later"}}`, nil)
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 
 	res := settleOf(t, tr)
 	if res.Detail.Provider == nil {
@@ -256,7 +256,7 @@ func TestARateLimitOverThirtySecondsIsAProviderLimit(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m"})
 	res := settleOf(t, tr)
 	if res.Reason != poo.ReasonProviderLimit {
 		t.Errorf("the run settled %q, want provider_limit", res.Reason)
@@ -264,8 +264,8 @@ func TestARateLimitOverThirtySecondsIsAProviderLimit(t *testing.T) {
 	if res.Detail.Provider == nil {
 		t.Fatalf("the settle record has no provider detail: %+v", res.Detail)
 	}
-	if res.Detail.Provider.RetryAfterSec != 120 {
-		t.Errorf("the failure's wait is %d seconds, want 120", res.Detail.Provider.RetryAfterSec)
+	if res.Detail.Provider.RetryAfterS != 120 {
+		t.Errorf("the failure's wait is %d seconds, want 120", res.Detail.Provider.RetryAfterS)
 	}
 	if requests != 1 {
 		t.Errorf("the endpoint got %d requests, want 1: the wait is over the budget", requests)
@@ -279,7 +279,7 @@ func TestTheResetTimeIsRecorded(t *testing.T) {
 		`{"error":{"message":"slow down","code":"rate_limit_exceeded"}}`,
 		map[string]string{"x-ratelimit-reset-requests": "6m0s"})
 
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 	res := settleOf(t, tr)
 	if res.Detail.Provider == nil {
 		t.Fatalf("the settle record has no provider detail: %+v", res.Detail)
@@ -304,7 +304,7 @@ func TestTheResetTimeInTheBodyIsRecorded(t *testing.T) {
 		itoa(when.Unix()) + `}`
 	srv := errorServer(t, http.StatusTooManyRequests, body, nil)
 
-	tr := openai.New(fastRetry(openai.Config{BaseURL: srv.URL, Model: "m"}))
+	tr := openai.New(fastRetry(openai.Options{BaseURL: srv.URL, Model: "m"}))
 	res := settleOf(t, tr)
 	if res.Detail.Provider == nil {
 		t.Fatalf("the settle record has no provider detail: %+v", res.Detail)

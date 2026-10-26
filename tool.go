@@ -17,7 +17,7 @@ type ToolInfo struct {
 	// Name is the tool's identifier.
 	Name string `json:"name"`
 	// Class is the tool's side-effect class.
-	Class ToolClass `json:"class"`
+	Class ToolKind `json:"class"`
 	// Background is the tool's background mode. A session loaded from
 	// the record is incompatible with the current build when a tool's
 	// mode changed.
@@ -34,7 +34,7 @@ type ToolSpec struct {
 	Schema json.RawMessage `json:"schema"`
 	// Class marks a tool that only reads (ReadOnly) or one that changes
 	// something (SideEffecting).
-	Class ToolClass `json:"class"`
+	Class ToolKind `json:"class"`
 	// PrimaryArg names the argument most likely to drive a doom loop.
 	PrimaryArg string `json:"primary_arg,omitempty"`
 	// Background says whether the model may run the tool in the
@@ -42,14 +42,14 @@ type ToolSpec struct {
 	Background Background `json:"background,omitempty"`
 }
 
-// ToolClass is the side-effect class of a tool.
-type ToolClass string
+// ToolKind is the side-effect class of a tool.
+type ToolKind string
 
 const (
 	// ClassReadOnly marks a tool that cannot change anything.
-	ClassReadOnly ToolClass = "read_only"
+	ClassReadOnly ToolKind = "read_only"
 	// ClassSideEffecting marks a tool that can change the world.
-	ClassSideEffecting ToolClass = "side_effecting"
+	ClassSideEffecting ToolKind = "side_effecting"
 )
 
 // Background says whether a tool call may become a background job.
@@ -87,7 +87,7 @@ type ToolEnv struct {
 	Handle string
 	// Job is the identifier of the job this call runs as, e.g. "j3". It is
 	// empty when the call runs in the turn.
-	Job string
+	JobID string
 	// Env is the scrubbed child environment for a subprocess tool.
 	Env []string
 	// Decider is the decision model, or nil when there is none.
@@ -98,8 +98,8 @@ type ToolEnv struct {
 
 // ToolSettings holds the tunable knobs a tool reads.
 type ToolSettings struct {
-	// BashTimeoutSeconds is the per-call timeout for the bash tool.
-	BashTimeoutSeconds int
+	// BashTimeoutS is the per-call timeout for the bash tool.
+	BashTimeoutS int
 	// ObservationCapChars is the cap on the observation shown to the model.
 	ObservationCapChars int
 	// ReadOutputCapChars is the cap on the read tool's output.

@@ -19,7 +19,7 @@ func TestACallWhoseRecordFailsStartsNoEffect(t *testing.T) {
 	sink := &failingSink{failRecord: "tool.call"}
 	tool := &echoTool{result: "effect executed"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
@@ -133,7 +133,7 @@ func TestATruncatedInvalidBackgroundIsSkipped(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
 			finish: poo.FinishLength,
-			calls:  []poo.ToolCall{{ID: "c", Name: "job", Arguments: []byte(`{"text":"one","background":null}`)}},
+			calls:  []poo.ToolCall{{CallID: "c", Name: "job", Arguments: []byte(`{"text":"one","background":null}`)}},
 		},
 		{text: "done"},
 	})
@@ -188,7 +188,7 @@ func TestALateDispatchWritesNoRecordAfterTheSettle(t *testing.T) {
 	sink := &recordingSink{}
 	tool := &dispatchBarrier{entered: make(chan struct{}), release: make(chan struct{})}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, &tool.echoTool, sink)
@@ -283,8 +283,8 @@ func TestSkippedCallRecordsPrecedeTheSettle(t *testing.T) {
 		return poo.ToolResult{Text: "partial"}, ctx.Err()
 	}}
 	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{
-		{ID: "a", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
-		{ID: "b", Name: "echo", Arguments: []byte(`{"text":"two"}`)},
+		{CallID: "a", Name: "echo", Arguments: []byte(`{"text":"one"}`)},
+		{CallID: "b", Name: "echo", Arguments: []byte(`{"text":"two"}`)},
 	}}})
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
 	sealed := make(chan struct{})

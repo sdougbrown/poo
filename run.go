@@ -114,7 +114,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		StartedAt:  nowRFC3339(),
 		ModelID:    s.opts.Model.ModelID,
 		MaxTurns:   s.opts.MaxTurns,
-		ToolsMode:  s.opts.ToolsMode,
+		ToolsMode:  ToolsMode(s.opts.ToolsMode),
 
 		ReasoningEffort: s.opts.ReasoningEffort,
 		Trigger:         trigger,
@@ -367,7 +367,7 @@ func (s *Session) recordAssistantResponse(run *runState, turn int, resp *respons
 	for _, call := range resp.calls {
 		content = append(content, ContentBlock{
 			Kind:       ContentToolCall,
-			ToolCallID: call.ID,
+			ToolCallID: call.CallID,
 			Name:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
 			Origin:     call.Origin,
@@ -747,7 +747,7 @@ func (s *Session) evaluateStopConditions(run *runState, turn int) []candidate {
 	s.mu.Lock()
 	tokens := run.tokens
 	s.mu.Unlock()
-	state := StopState{
+	state := TurnSnapshot{
 		Turn:      turn,
 		Calls:     s.callStates(run.globalTurn),
 		RunTokens: tokens,
@@ -810,7 +810,7 @@ func (s *Session) callStates(turn int) []CallState {
 	defer s.mu.Unlock()
 	var out []CallState
 	for _, t := range s.turns {
-		if t.Session != turn {
+		if t.TurnIndex != turn {
 			continue
 		}
 		for _, c := range t.Calls {
@@ -1113,7 +1113,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 
 	reader, rendered, err := s.opts.Transport.Stream(actCtx, ChatRequest{
 		Model:     model.ModelID,
-		Info:      model,
+		ModelInfo: model,
 		Messages:  messages,
 		Tools:     tools,
 		MaxTokens: maxTokens,
@@ -1325,7 +1325,7 @@ func (s *Session) accountInterruptedRequest(run *runState, turn int, resp *respo
 	for _, call := range resp.calls {
 		assistant.Content = append(assistant.Content, ContentBlock{
 			Kind:       ContentToolCall,
-			ToolCallID: call.ID,
+			ToolCallID: call.CallID,
 			Name:       call.Name,
 			Arguments:  recordArgs(call.Arguments),
 		})
@@ -1414,7 +1414,7 @@ func (s *Session) settleForError(err error) (Reason, SettleDetail, error) {
 		// seconds is not recorded as thirty, which the rule reads as
 		// retryable.
 		retryAfter := int((pe.RetryAfter + time.Second - 1) / time.Second)
-		provider := &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code, RetryAfterSec: retryAfter}
+		provider := &ProviderDetail{Kind: kind, Status: pe.Status, Code: pe.Code, RetryAfterS: retryAfter}
 		// The time the endpoint says its limit resets travels with the
 		// failure too, so a consumer can tell when another attempt
 		// could succeed.
@@ -1602,7 +1602,7 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 			if id != "" {
 				if k, seen := byID[callSlot{idx, id}]; seen {
 					key, ok = k, true
-				} else if ok && calls[key].ID != "" {
+				} else if ok && calls[key].CallID != "" {
 					ok = false
 				}
 			}
@@ -1624,7 +1624,7 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 				byID[callSlot{idx, id}] = key
 			}
 			if ev.ToolCall.ID != "" {
-				existing.ID = ev.ToolCall.ID
+				existing.CallID = ev.ToolCall.ID
 			}
 			if ev.ToolCall.Name != "" {
 				existing.Name = ev.ToolCall.Name

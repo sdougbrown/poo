@@ -16,7 +16,7 @@ func (reviewMutatingArguments) BeforeTool(_ poo.HookContext, info poo.ToolCallIn
 
 func TestReviewArgumentsDoNotAliasModelHistory(t *testing.T) {
 	tool := &echoTool{result: "effect"}
-	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}}, {text: "done"}})
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}}, {text: "done"}})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, tool, sink)
 	opts.BeforeTool = []poo.BeforeToolHook{reviewMutatingArguments{}}

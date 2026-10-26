@@ -47,7 +47,7 @@ func TestAnAfterToolHookCannotEditAnotherHooksArguments(t *testing.T) {
 	reader := &readingAfterTool{}
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})
@@ -79,7 +79,7 @@ func TestABeforeToolHookCannotEditAnotherHooksArguments(t *testing.T) {
 	reader := &readingBeforeTool{}
 	tool := &echoTool{result: "the effect"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, tool, &recordingSink{})

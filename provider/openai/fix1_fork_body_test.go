@@ -113,7 +113,7 @@ func stripField(t *testing.T, body, field string) string {
 // fields the fork is allowed to change and compares what is left.
 func TestTheForkDiffersOnlyInTheMessagesAndTheCeiling(t *testing.T) {
 	srv := newFix1BodyServer(t)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "native"})
 
 	req := poo.ChatRequest{
 		Model:     "m",

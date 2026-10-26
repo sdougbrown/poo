@@ -102,7 +102,7 @@ func fixOpts(t *testing.T, tr poo.ChatTransport, tool poo.Tool, sink poo.RecordS
 // fixCall is a call of a fix-pass tool.
 func fixCall(name, text string) poo.ToolCall {
 	raw, _ := json.Marshal(map[string]any{"text": text, "background": true})
-	return poo.ToolCall{ID: "call_" + text, Name: name, Arguments: raw}
+	return poo.ToolCall{CallID: "call_" + text, Name: name, Arguments: raw}
 }
 
 // fixJobEnded returns the job.ended record the sink holds.
@@ -264,7 +264,7 @@ func (h *fixPolicyOnInterrupt) BeforeTool(ctx poo.HookContext, info poo.ToolCall
 func TestAPolicyThatFailsOnInterruptDoesNotSettleHookError(t *testing.T) {
 	entered := make(chan struct{})
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
@@ -360,7 +360,7 @@ func TestARedactionSurvivesALaterHookFailure(t *testing.T) {
 	for _, mode := range []string{"error", "timeout"} {
 		t.Run(mode, func(t *testing.T) {
 			tr := scripted([]fakeResponse{
-				{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{}`)}}},
+				{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{}`)}}},
 				{text: "done"},
 			})
 			sink := &recordingSink{}
@@ -400,7 +400,7 @@ func TestAFatalErrorsTextIsTheHookProcessedResult(t *testing.T) {
 		return poo.ToolResult{}, poo.Fatalf("failed with token %s", secret)
 	}}
 	sink := &recordingSink{}
-	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{}`)}}}})
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{}`)}}}})
 	opts := testOptions(t, tr, tool, sink)
 	opts.AfterTool = []poo.AfterToolHook{fixAfterFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
 		return poo.Redact(poo.ToolResult{Text: "safe failure", IsError: true}), nil
@@ -917,7 +917,7 @@ func TestTheViewOrderMatchesTheRequestOrder(t *testing.T) {
 	var histories [][]poo.Message
 	opts.AfterTurn = []poo.AfterTurnHook{fixTurnFunc(func(ctx poo.HookContext) (poo.TurnDecision, error) {
 		mu.Lock()
-		histories = append(histories, ctx.History.Messages())
+		histories = append(histories, ctx.HistoryView.Messages())
 		mu.Unlock()
 		return poo.TurnDecision{}, nil
 	})}
@@ -974,7 +974,7 @@ func TestAPromptReplacementDoesNotReachTheNextRequest(t *testing.T) {
 // recorded system prompt and never re-renders it, so a prompt change
 // between the recording and the replay does not change the replay.
 func TestReplayUsesTheRecordedPrompt(t *testing.T) {
-	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{}`)}}}})
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{}`)}}}})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{}, sink)
 	opts.SystemPrompt = "x"
@@ -1052,7 +1052,7 @@ func (h *fixStallingBeforeTool) BeforeTool(ctx poo.HookContext, info poo.ToolCal
 func TestAHookErrorsSourceNamesTheHook(t *testing.T) {
 	t.Run("before_tool", func(t *testing.T) {
 		tr := scripted([]fakeResponse{
-			{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+			{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 			{text: "done"},
 		})
 		opts := testOptions(t, tr, &echoTool{result: "the effect"}, &recordingSink{})
@@ -1069,7 +1069,7 @@ func TestAHookErrorsSourceNamesTheHook(t *testing.T) {
 	})
 	t.Run("after_tool", func(t *testing.T) {
 		tr := scripted([]fakeResponse{
-			{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+			{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
 			{text: "done"},
 		})
 		opts := testOptions(t, tr, &echoTool{result: "the effect"}, &recordingSink{})

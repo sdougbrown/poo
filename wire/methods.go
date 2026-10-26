@@ -104,7 +104,7 @@ func (s *server) sessionCreate(raw json.RawMessage) (any, *protocol.Error) {
 			"this process does not serve the %q mode", params.Mode)
 	}
 	obs := &observer{srv: s}
-	sess, info, err := s.factory.Create(context.Background(), params, Env{Observer: obs, Client: s.client})
+	sess, info, err := s.factory.Create(context.Background(), params, FactoryEnv{Observer: obs, Client: s.client})
 	if err != nil {
 		return nil, failure(err)
 	}
@@ -129,7 +129,7 @@ func (s *server) sessionLoad(raw json.RawMessage) (any, *protocol.Error) {
 		return nil, invalidParams("the session id is required")
 	}
 	obs := &observer{srv: s}
-	sess, info, err := s.factory.Load(context.Background(), params, Env{Observer: obs, Client: s.client})
+	sess, info, err := s.factory.Load(context.Background(), params, FactoryEnv{Observer: obs, Client: s.client})
 	if err != nil {
 		return nil, failure(err)
 	}
@@ -457,7 +457,7 @@ func (s *server) agentCancel(raw json.RawMessage) (any, *protocol.Error) {
 		entry.sess.Cancel(sourceCancelClient)
 		return map[string]any{}, nil
 	}
-	if _, settled := entry.sess.RunResult(params.RunID); settled {
+	if _, settled := entry.sess.Result(params.RunID); settled {
 		// The run has settled already. The cancel is idempotent.
 		return map[string]any{}, nil
 	}
@@ -478,10 +478,10 @@ func (s *server) jobCancel(raw json.RawMessage) (any, *protocol.Error) {
 	if rerr != nil {
 		return nil, rerr
 	}
-	if params.Job == "" {
+	if params.JobID == "" {
 		return nil, invalidParams("the job id is required")
 	}
-	err := entry.sess.CancelJob(params.Job)
+	err := entry.sess.CancelJob(params.JobID)
 	if err != nil && !errors.Is(err, poo.ErrUnknownJob) {
 		return nil, failure(err)
 	}
@@ -494,7 +494,7 @@ func jobsOf(sess *poo.Session) []protocol.JobInfo {
 	out := make([]protocol.JobInfo, 0, len(jobs))
 	for _, job := range jobs {
 		out = append(out, protocol.JobInfo{
-			Job:       job.Job,
+			JobID:     job.JobID,
 			Tool:      job.Tool,
 			Handle:    job.Handle,
 			RunID:     job.RunID,
@@ -506,9 +506,9 @@ func jobsOf(sess *poo.Session) []protocol.JobInfo {
 }
 
 // promptOf returns the session's system prompt.
-func promptOf(sess *poo.Session) protocol.PromptState {
+func promptOf(sess *poo.Session) protocol.PromptStateInfo {
 	state := sess.PromptState()
-	return protocol.PromptState{
+	return protocol.PromptStateInfo{
 		Text:     state.Text,
 		Hash:     state.Hash,
 		Sections: state.Sections,

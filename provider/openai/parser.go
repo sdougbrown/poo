@@ -148,7 +148,7 @@ const MistralCallsOpen = "[TOOL_CALLS]"
 const textCallIndexBase = 1000
 
 // feed takes a text delta and returns the events it produced.
-func (p *parser) feed(text string) []poo.StreamEvent {
+func (p *parser) feed(text string) []poo.StreamItem {
 	if !p.on() {
 		return nil
 	}
@@ -161,11 +161,11 @@ func (p *parser) feed(text string) []poo.StreamEvent {
 // A call that arrived without its closing marker is still a call, as long
 // as its body parses. A body that does not parse stays in the model's
 // prose, exactly as the model wrote it.
-func (p *parser) flush() []poo.StreamEvent {
+func (p *parser) flush() []poo.StreamItem {
 	if !p.on() {
 		return nil
 	}
-	var out []poo.StreamEvent
+	var out []poo.StreamItem
 	if p.inCall {
 		// The call never closed. The body is what arrived, plus the tail
 		// the parser held back in case it was the start of the closing
@@ -202,8 +202,8 @@ func (p *parser) flush() []poo.StreamEvent {
 }
 
 // drain consumes the buffer, returning the events it produced.
-func (p *parser) drain() []poo.StreamEvent {
-	var out []poo.StreamEvent
+func (p *parser) drain() []poo.StreamItem {
+	var out []poo.StreamItem
 	for {
 		if p.inCall {
 			ev, done := p.consumeCall()
@@ -293,7 +293,7 @@ func (p *parser) openCall(kind callKind) {
 // buffer is emptied as the text arrives. The closing marker may straddle
 // the two, so the search is over the whole body and what is left of the
 // buffer, and the text before the marker is moved into the body.
-func (p *parser) consumeCall() ([]poo.StreamEvent, bool) {
+func (p *parser) consumeCall() ([]poo.StreamItem, bool) {
 	switch p.callKind {
 	case kindTagged:
 		return p.consumeUntil(ToolCallClose)
@@ -310,7 +310,7 @@ func (p *parser) consumeCall() ([]poo.StreamEvent, bool) {
 //
 // The marker may straddle the body and the buffer, so the search is over
 // the two together.
-func (p *parser) consumeUntil(marker string) ([]poo.StreamEvent, bool) {
+func (p *parser) consumeUntil(marker string) ([]poo.StreamItem, bool) {
 	combined := p.callBody + p.buf
 	// The search starts far enough back that a marker split across the
 	// body and the buffer is still found.
@@ -342,7 +342,7 @@ func (p *parser) consumeUntil(marker string) ([]poo.StreamEvent, bool) {
 	if events, _, ok := p.parseBody(p.callBody); ok {
 		return events, true
 	}
-	return []poo.StreamEvent{textEvent(p.callText), parseErrorEvent(p.callText, p.lastReason)}, true
+	return []poo.StreamItem{textEvent(p.callText), parseErrorEvent(p.callText, p.lastReason)}, true
 }
 
 // consumeArray advances a call that is a JSON array.
@@ -350,7 +350,7 @@ func (p *parser) consumeUntil(marker string) ([]poo.StreamEvent, bool) {
 // The array ends at its matching bracket. The scan runs over the new
 // text only: the body already counted the brackets it holds, and
 // counting them again would unbalance the depth.
-func (p *parser) consumeArray() ([]poo.StreamEvent, bool) {
+func (p *parser) consumeArray() ([]poo.StreamItem, bool) {
 	for i := 0; i < len(p.buf); i++ {
 		c := p.buf[i]
 		if p.inString {
@@ -381,7 +381,7 @@ func (p *parser) consumeArray() ([]poo.StreamEvent, bool) {
 				if events, _, ok := p.parseMistral(p.callBody); ok {
 					return events, true
 				}
-				return []poo.StreamEvent{textEvent(p.callText), parseErrorEvent(p.callText, p.lastReason)}, true
+				return []poo.StreamItem{textEvent(p.callText), parseErrorEvent(p.callText, p.lastReason)}, true
 			}
 		}
 	}
@@ -396,7 +396,7 @@ func (p *parser) consumeArray() ([]poo.StreamEvent, bool) {
 // The body ends at the object's matching brace. The scan runs over the
 // new text only: the body already counted the braces it holds, and
 // counting them again would unbalance the depth.
-func (p *parser) consumeJSON() ([]poo.StreamEvent, bool) {
+func (p *parser) consumeJSON() ([]poo.StreamItem, bool) {
 	for i := 0; i < len(p.buf); i++ {
 		c := p.buf[i]
 		if p.inString {
@@ -427,7 +427,7 @@ func (p *parser) consumeJSON() ([]poo.StreamEvent, bool) {
 				if events, _, ok := p.parseBody(p.callBody); ok {
 					return events, true
 				}
-				return []poo.StreamEvent{textEvent(p.callText), parseErrorEvent(p.callText, p.lastReason)}, true
+				return []poo.StreamItem{textEvent(p.callText), parseErrorEvent(p.callText, p.lastReason)}, true
 			}
 		}
 	}
@@ -487,7 +487,7 @@ type callStart struct {
 // track records what a batch of events leaves behind: prose that does
 // not end in a newline leaves the buffer mid-line, and a call does not.
 // It returns the events unchanged.
-func (p *parser) track(events ...poo.StreamEvent) []poo.StreamEvent {
+func (p *parser) track(events ...poo.StreamItem) []poo.StreamItem {
 	for _, ev := range events {
 		switch ev.Kind {
 		case "delta":
@@ -564,7 +564,7 @@ func (p *parser) readsMarker(marker string) bool {
 //
 // It returns the events the call produced, the reason the body is not a
 // call, and whether it is one.
-func (p *parser) parseBody(body string) ([]poo.StreamEvent, string, bool) {
+func (p *parser) parseBody(body string) ([]poo.StreamItem, string, bool) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		p.lastReason = "the call is empty"
@@ -590,7 +590,7 @@ func (p *parser) parseBody(body string) ([]poo.StreamEvent, string, bool) {
 }
 
 // parseCallBody reads a JSON call body.
-func (p *parser) parseCallBody(body string) ([]poo.StreamEvent, string, bool) {
+func (p *parser) parseCallBody(body string) ([]poo.StreamItem, string, bool) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return nil, "the call is empty", false
@@ -621,14 +621,14 @@ func (p *parser) parseCallBody(body string) ([]poo.StreamEvent, string, bool) {
 	if !ok {
 		return nil, "the call has no name", false
 	}
-	return []poo.StreamEvent{ev}, "", true
+	return []poo.StreamItem{ev}, "", true
 }
 
 // parseMistral reads a Mistral-style call list.
 //
 // The list is a JSON array of calls, and the arguments of a call may be
 // an object or a string holding one.
-func (p *parser) parseMistral(body string) ([]poo.StreamEvent, string, bool) {
+func (p *parser) parseMistral(body string) ([]poo.StreamItem, string, bool) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return nil, "the call list is empty", false
@@ -643,7 +643,7 @@ func (p *parser) parseMistral(body string) ([]poo.StreamEvent, string, bool) {
 	if len(calls) == 0 {
 		return nil, "the call list is empty", false
 	}
-	var out []poo.StreamEvent
+	var out []poo.StreamItem
 	for _, c := range calls {
 		args := "{}"
 		if len(c.Arguments) > 0 {
@@ -668,7 +668,7 @@ func (p *parser) parseMistral(body string) ([]poo.StreamEvent, string, bool) {
 }
 
 // parseXMLCall reads a Qwen-style XML call body.
-func (p *parser) parseXMLCall(body string) ([]poo.StreamEvent, string, bool) {
+func (p *parser) parseXMLCall(body string) ([]poo.StreamItem, string, bool) {
 	nm := between(body, "<name>", "</name>")
 	if nm == "" {
 		return nil, "the call has no name element", false
@@ -685,7 +685,7 @@ func (p *parser) parseXMLCall(body string) ([]poo.StreamEvent, string, bool) {
 	if !ok {
 		return nil, "the call has no name", false
 	}
-	return []poo.StreamEvent{ev}, "", true
+	return []poo.StreamItem{ev}, "", true
 }
 
 // isJSONObject reports whether a raw JSON value is an object.
@@ -712,15 +712,15 @@ func between(s, open, close string) string {
 }
 
 // toolEvent builds a tool call event.
-func (p *parser) toolEvent(name, args string) (poo.StreamEvent, bool) {
+func (p *parser) toolEvent(name, args string) (poo.StreamItem, bool) {
 	if name == "" {
-		return poo.StreamEvent{}, false
+		return poo.StreamItem{}, false
 	}
 	if !isJSONObject(json.RawMessage(args)) {
 		args = "{}"
 	}
 	p.seq++
-	return poo.StreamEvent{
+	return poo.StreamItem{
 		Kind: "tool_call",
 		ToolCall: &poo.ToolCallDelta{
 			// The parsed calls start after the provider's own calls, so
@@ -738,13 +738,13 @@ func (p *parser) toolEvent(name, args string) (poo.StreamEvent, bool) {
 }
 
 // textEvent builds a text delta.
-func textEvent(text string) poo.StreamEvent {
-	return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: text}}
+func textEvent(text string) poo.StreamItem {
+	return poo.StreamItem{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: text}}
 }
 
 // thinkingEvent builds a thinking delta.
-func thinkingEvent(text string) poo.StreamEvent {
-	return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "thinking", Text: text}}
+func thinkingEvent(text string) poo.StreamItem {
+	return poo.StreamItem{Kind: "delta", Delta: &poo.Delta{Kind: "thinking", Text: text}}
 }
 
 // parseErrorEvent builds the event that reports a tool call the model
@@ -752,11 +752,11 @@ func thinkingEvent(text string) poo.StreamEvent {
 //
 // The failure is recoverable: the text is not lost, and the model gets
 // another turn.
-func parseErrorEvent(text, reason string) poo.StreamEvent {
+func parseErrorEvent(text, reason string) poo.StreamItem {
 	if reason == "" {
 		reason = "the call is not one this model writes"
 	}
-	return poo.StreamEvent{
+	return poo.StreamItem{
 		Kind: "error",
 		Error: &poo.StreamError{
 			Message:     "your tool call could not be parsed: " + reason,

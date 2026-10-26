@@ -21,7 +21,7 @@ func TestARefusedToolResultSettlesStoreError(t *testing.T) {
 	sink := &failingSink{failRecord: "tool.result"}
 	tool := &echoTool{result: "the tool said something"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
@@ -48,7 +48,7 @@ func TestARefusedToolResultMessageSettlesStoreError(t *testing.T) {
 	sink := &failingSink{failRecord: "message", failAfter: 3}
 	tool := &echoTool{result: "the tool said something"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
@@ -128,13 +128,13 @@ type interruptingReader struct {
 }
 
 // Next yields the reply and then waits.
-func (r *interruptingReader) Next() (poo.StreamEvent, error) {
+func (r *interruptingReader) Next() (poo.StreamItem, error) {
 	if r.stage == 0 {
 		r.stage++
-		return poo.StreamEvent{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "half an answer"}}, nil
+		return poo.StreamItem{Kind: "delta", Delta: &poo.Delta{Kind: "text", Text: "half an answer"}}, nil
 	}
 	<-r.ctx.Done()
-	return poo.StreamEvent{}, r.ctx.Err()
+	return poo.StreamItem{}, r.ctx.Err()
 }
 
 // Close releases the reply.
@@ -170,7 +170,7 @@ func TestARefusedPartialMessageSettlesStoreError(t *testing.T) {
 func TestTheStoreErrorSaysTheStoreRefused(t *testing.T) {
 	sink := &failingSink{failRecord: "tool.result"}
 	tr := scripted([]fakeResponse{
-		{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
 		{text: "done"},
 	})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))

@@ -14,11 +14,11 @@ import (
 
 // fix2Compactor is a compactor whose two decisions the test scripts.
 type fix2Compactor struct {
-	should  func(poo.View, poo.Budget) bool
+	should  func(poo.View, poo.ContextBudget) bool
 	compact func(context.Context, poo.View, poo.ForkFunc) (poo.Compaction, error)
 }
 
-func (c *fix2Compactor) ShouldCompact(v poo.View, b poo.Budget) bool {
+func (c *fix2Compactor) ShouldCompact(v poo.View, b poo.ContextBudget) bool {
 	return c.should(v, b)
 }
 
@@ -27,7 +27,7 @@ func (c *fix2Compactor) Compact(ctx context.Context, v poo.View, f poo.ForkFunc)
 }
 
 func fix2Turn() fakeResponse {
-	return fakeResponse{calls: []poo.ToolCall{{ID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}}
+	return fakeResponse{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}}
 }
 
 func fix2Summary() poo.Compaction {
@@ -70,14 +70,14 @@ type fix2PartialReader struct {
 	sent    bool
 }
 
-func (r *fix2PartialReader) Next() (poo.StreamEvent, error) {
+func (r *fix2PartialReader) Next() (poo.StreamItem, error) {
 	if !r.sent {
 		r.sent = true
-		return poo.StreamEvent{Kind: "tool_call", ToolCall: &poo.ToolCallDelta{Index: 0, ID: "c2", Name: "echo", Arguments: []byte(`{}`), Complete: true}}, nil
+		return poo.StreamItem{Kind: "tool_call", ToolCall: &poo.ToolCallDelta{Index: 0, ID: "c2", Name: "echo", Arguments: []byte(`{}`), Complete: true}}, nil
 	}
 	close(r.started)
 	<-r.ctx.Done()
-	return poo.StreamEvent{}, r.ctx.Err()
+	return poo.StreamItem{}, r.ctx.Err()
 }
 
 func (*fix2PartialReader) Close() error { return nil }

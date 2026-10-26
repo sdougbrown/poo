@@ -599,7 +599,7 @@ type countingSink struct {
 }
 
 // Record counts one record.
-func (s *countingSink) Record(ctx context.Context, rec decide.Record) error {
+func (s *countingSink) Record(ctx context.Context, rec decide.Decision) error {
 	s.count++
 	return nil
 }
@@ -621,7 +621,7 @@ func TestTheSystemOneDeciderTalksToALiveEndpoint(t *testing.T) {
 		Timeout: 30 * time.Second,
 	})
 	answers, err := dec.Decide(context.Background(),
-		decide.EvidencePayload{Instructions: "the state", Cwd: "/tmp"},
+		decide.EvidencePayload{Instructions: "the state", WorkingDir: "/tmp"},
 		"answer the question",
 		[]decide.Question{{
 			ID:           "q1",

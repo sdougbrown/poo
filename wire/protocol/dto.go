@@ -219,8 +219,8 @@ type GetParams struct {
 
 // JobInfo describes one of a session's jobs.
 type JobInfo struct {
-	// Job is the job's identifier.
-	Job string `json:"job"`
+	// JobID is the job's identifier.
+	JobID string `json:"job"`
 	// Tool is the name of the tool the job runs.
 	Tool string `json:"tool"`
 	// Handle is the handle of the tool call the job came from.
@@ -233,8 +233,8 @@ type JobInfo struct {
 	Status string `json:"status"`
 }
 
-// PromptState is the session's system prompt.
-type PromptState struct {
+// PromptStateInfo is the session's system prompt.
+type PromptStateInfo struct {
 	// Text is the rendered prompt.
 	Text string `json:"text"`
 	// Hash is the hash of the text.
@@ -255,7 +255,7 @@ type GetResult struct {
 	// Jobs are the session's jobs.
 	Jobs []JobInfo `json:"jobs"`
 	// Prompt is the session's system prompt.
-	Prompt PromptState `json:"prompt"`
+	Prompt PromptStateInfo `json:"prompt"`
 	// Broken says the session's store failed and the session cannot be
 	// used any more.
 	Broken bool `json:"broken"`
@@ -505,8 +505,8 @@ type CancelParams struct {
 type JobCancelParams struct {
 	// SessionID identifies the session.
 	SessionID string `json:"session_id"`
-	// Job is the job's identifier.
-	Job string `json:"job"`
+	// JobID is the job's identifier.
+	JobID string `json:"job"`
 }
 
 // ConfigParams are the params of config/get.

@@ -22,8 +22,8 @@ import (
 	"github.com/sdougbrown/poo"
 )
 
-// Config configures the transport.
-type Config struct {
+// Options configures the transport.
+type Options struct {
 	// BaseURL is the endpoint's base, e.g. "http://localhost:4000/v1".
 	BaseURL string
 	// Model is the model identifier.
@@ -37,9 +37,9 @@ type Config struct {
 	// is set, for endpoints whose models think only when asked to. A
 	// model info that names a reasoning control wins over this one.
 	ReasoningEffort string
-	// Info is the model's info. It names the reasoning control,
+	// ModelInfo is the model's info. It names the reasoning control,
 	// the temperature control, the tools mode and the quirks.
-	Info poo.ModelInfo
+	ModelInfo poo.ModelInfo
 	// Reasoning is the reasoning setting: "off", "low", "medium",
 	// "high", or a number of thinking tokens.
 	Reasoning string
@@ -71,7 +71,7 @@ type Config struct {
 
 // Transport is the OpenAI-compatible chat transport.
 type Transport struct {
-	cfg  Config
+	cfg  Options
 	http *http.Client
 	// policy is the retry policy.
 	policy retryPolicy
@@ -80,7 +80,7 @@ type Transport struct {
 }
 
 // New returns a transport.
-func New(cfg Config) *Transport {
+func New(cfg Options) *Transport {
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{Transport: &http.Transport{

@@ -69,7 +69,7 @@ type Store interface {
 	Pending(ctx context.Context, id string) (*Pending, error)
 
 	// List returns the summaries of the sessions in the store.
-	List(ctx context.Context) ([]Summary, error)
+	List(ctx context.Context) ([]Listing, error)
 
 	// Prune deletes the sessions a policy marks.
 	Prune(ctx context.Context, policy Policy) (*PruneResult, error)
@@ -137,7 +137,7 @@ type openSession struct {
 	// tools are the tool classes the session was created with, by
 	// name. A tool that is not named here has no class, and its
 	// results are not synced.
-	tools map[string]poo.ToolClass
+	tools map[string]poo.ToolKind
 }
 
 // Option configures a store.
@@ -470,7 +470,7 @@ func (s *FileStore) loadLocked(ctx context.Context, id string, lock *Authority) 
 		Metadata:      meta,
 		Records:       recs,
 		RecoveredTail: torn,
-		Requeue:       poo.PendingJobResults(recs),
+		Jobs:          poo.PendingJobResults(recs),
 		Warnings:      s.warnings(meta),
 	}, nil
 }
@@ -686,7 +686,7 @@ func (s *FileStore) recordsOf(open *openSession) []poo.Record {
 // session's id, when it was created, its profile and build, how many
 // runs it had, why its last run settled, how big its file is, and
 // whether a process holds its lock.
-func (s *FileStore) List(ctx context.Context) ([]Summary, error) {
+func (s *FileStore) List(ctx context.Context) ([]Listing, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.listLocked()
@@ -695,12 +695,12 @@ func (s *FileStore) List(ctx context.Context) ([]Summary, error) {
 // listLocked lists the sessions in the store.
 //
 // The caller holds the lock.
-func (s *FileStore) listLocked() ([]Summary, error) {
+func (s *FileStore) listLocked() ([]Listing, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, &Error{Code: CodeStoreError, Message: "reading " + s.dir, Err: err}
 	}
-	out := make([]Summary, 0, len(entries))
+	out := make([]Listing, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
 			continue
@@ -722,19 +722,19 @@ func (s *FileStore) listLocked() ([]Summary, error) {
 }
 
 // summarize computes the summary of one session.
-func (s *FileStore) summarize(id string) (Summary, error) {
+func (s *FileStore) summarize(id string) (Listing, error) {
 	path := s.path(id)
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return Summary{}, ErrSessionNotFound
+			return Listing{}, ErrSessionNotFound
 		}
-		return Summary{}, &Error{Code: CodeStoreError, Message: "stating " + path, Err: err}
+		return Listing{}, &Error{Code: CodeStoreError, Message: "stating " + path, Err: err}
 	}
-	sum := Summary{ID: id, Size: info.Size()}
+	sum := Listing{ID: id, Size: info.Size()}
 	scan, err := scanSummary(path)
 	if err != nil {
-		return Summary{}, err
+		return Listing{}, err
 	}
 	sum.CreatedAt = scan.created
 	sum.Mode = scan.mode
@@ -745,7 +745,7 @@ func (s *FileStore) summarize(id string) (Summary, error) {
 	sum.LastActivity = scan.lastActivity
 	locked, err := Locked(LockPath(s.dir, id))
 	if err != nil {
-		return Summary{}, err
+		return Listing{}, err
 	}
 	sum.Locked = locked
 	return sum, nil
@@ -779,7 +779,7 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 	// The count rule keeps the newest sessions, and it counts the
 	// locked ones: a locked session is one of the sessions that are
 	// kept.
-	byActivity := make([]Summary, len(summaries))
+	byActivity := make([]Listing, len(summaries))
 	copy(byActivity, summaries)
 	sort.Slice(byActivity, func(i, j int) bool {
 		if !byActivity[i].LastActivity.Equal(byActivity[j].LastActivity) {
@@ -865,7 +865,7 @@ func (s *FileStore) Prune(ctx context.Context, policy Policy) (*PruneResult, err
 // markedBy reports whether a policy marks a session.
 //
 // With both rules set, a session is marked when either rule marks it.
-func (s *FileStore) markedBy(sum Summary, policy Policy, now time.Time, kept map[string]bool, boundary time.Time) bool {
+func (s *FileStore) markedBy(sum Listing, policy Policy, now time.Time, kept map[string]bool, boundary time.Time) bool {
 	if policy.MaxAge > 0 && now.Sub(sum.LastActivity) > policy.MaxAge {
 		return true
 	}
@@ -921,8 +921,8 @@ func (s *FileStore) removeStaleTmp(now time.Time) ([]string, error) {
 }
 
 // toolClasses returns the tool classes of a session, by name.
-func toolClasses(tools []poo.SessionTool) map[string]poo.ToolClass {
-	out := make(map[string]poo.ToolClass, len(tools))
+func toolClasses(tools []poo.ToolInfo) map[string]poo.ToolKind {
+	out := make(map[string]poo.ToolKind, len(tools))
 	for _, tool := range tools {
 		out[tool.Name] = tool.Class
 	}

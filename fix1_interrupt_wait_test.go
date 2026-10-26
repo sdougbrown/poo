@@ -29,7 +29,7 @@ func TestAnInterruptDuringTheRetryWait(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := openai.New(openai.Config{
+	tr := openai.New(openai.Options{
 		BaseURL: srv.URL,
 		Model:   "m",
 		Backoff: []time.Duration{500 * time.Millisecond, 500 * time.Millisecond},

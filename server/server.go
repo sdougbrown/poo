@@ -22,6 +22,7 @@ import (
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/profile"
+	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/wire"
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -185,7 +186,7 @@ func (f *Server) runtimeFor(profile, model string) (*config.Runtime, error) {
 		settings.Roles[name] = entry
 	}
 	if model != "" {
-		settings.Roles[config.RoleChat] = model
+		settings.Roles[string(catalog.RoleChat)] = model
 	}
 	opts := f.build
 	opts.Settings = &settings
@@ -307,7 +308,7 @@ func rolesOf(sess *poo.Session, runtime *config.Runtime) protocol.ModelRoles {
 }
 
 // Create builds a session.
-func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env wire.Env) (*poo.Session, *wire.Info, error) {
+func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env wire.FactoryEnv) (*poo.Session, *wire.Info, error) {
 	f.client.set(env.Client)
 	model := ""
 	deciderName := ""
@@ -404,7 +405,7 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 }
 
 // Load opens a recorded session.
-func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.Env) (*poo.Session, *wire.Info, error) {
+func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.FactoryEnv) (*poo.Session, *wire.Info, error) {
 	f.client.set(env.Client)
 	dir := params.SessionDir
 	if dir == "" {
@@ -619,10 +620,10 @@ func (f *Server) created(runtime *config.Runtime, mode, workDir string, decider 
 		Mode:         mode,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
 		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ID: model.ModelID, BaseURL: session.LoggedBaseURL(model.Endpoint), MaxOutput: model.MaxOutput},
+		Model:        poo.SessionModel{ModelID: model.ModelID, BaseURL: session.LoggedBaseURL(model.Endpoint), MaxOutput: model.MaxOutput},
 		Tools:        runtime.SessionTools(),
 		ContextLimit: model.ContextLimit,
-		ToolsMode:    string(model.Tools.Mode),
+		ToolsMode:    poo.ToolsMode(model.Tools.Mode),
 		Profile:      runtime.Profile.Name,
 		Roles:        roles,
 		Build:        f.build.Build,

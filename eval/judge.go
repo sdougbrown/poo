@@ -470,16 +470,16 @@ func (j *Judge) buildPayload(log *Log, transcript string, t transcript, report *
 
 // runEntry returns the report entry of a run, when the report holds
 // one. A nil report holds none.
-func runEntry(report *Report, t transcript) (RunResult, bool) {
+func runEntry(report *Report, t transcript) (CellResult, bool) {
 	if report == nil {
-		return RunResult{}, false
+		return CellResult{}, false
 	}
 	for _, r := range report.Results {
 		if r.Task == t.task && r.Model == t.model && r.Seed == t.seed {
 			return r, true
 		}
 	}
-	return RunResult{}, false
+	return CellResult{}, false
 }
 
 // ask sends the payload to the judge and returns its answer.

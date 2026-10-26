@@ -23,7 +23,7 @@ func (s *suite) handoff() {
 	}
 	// The model calls a tool, so the run carries on and the gate asks
 	// the compactor whether the window is full.
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo hello"}}}},
 		{Text: "the handoff note"},
 	}
@@ -107,7 +107,7 @@ func (s *suite) jobs() {
 // the result is delivered, and the run settles.
 func (s *suite) jobRunsAndSettles() {
 	s.t.Helper()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{
 			"command":    "sleep 1",
 			"background": true,
@@ -160,7 +160,7 @@ func (s *suite) waitForState(c *client, sessionID, want string) {
 // result arrives later and wakes the session.
 func (s *suite) jobCancelWakesTheSession() {
 	s.t.Helper()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{
 			"command":    "sleep 1",
 			"background": true,
@@ -199,7 +199,7 @@ func (s *suite) jobCancelWakesTheSession() {
 func (s *suite) jobCancelStopsTheJob() {
 	s.t.Helper()
 	command := s.boundedCommand()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{
 			"command":    command,
 			"background": true,
@@ -234,7 +234,7 @@ func (s *suite) jobCancelStopsTheJob() {
 func (s *suite) jobStopsWithTheSession() {
 	s.t.Helper()
 	beat := filepath.Join(s.dir, "job.beat")
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{
 			"command":    "while true; do date +%s%N > " + beat + "; sleep 0.1; done",
 			"background": true,
@@ -357,7 +357,7 @@ func (s *suite) lastChange(path string) time.Time {
 // attachAndScrollback covers the flow of a client that attaches to a
 // session after a crash: the history holds what the session did, and
 // the interrupted run is marked.
-func (s *suite) attachAndScrollback() {
+func (s *suite) attachAndHistory() {
 	s.t.Helper()
 	if s.skipWithoutTool("bash") {
 		return
@@ -365,7 +365,7 @@ func (s *suite) attachAndScrollback() {
 	// The command ends by itself: the binary dies, and the command goes
 	// on without it.
 	command := s.boundedCommand()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 	}
 	endpoint := newProvider(s.t, turns)
@@ -474,7 +474,7 @@ func (s *suite) resume() {
 	// The command ends by itself: the binary dies, and the command goes
 	// on without it.
 	command := s.boundedCommand()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 		{Text: "the answer after the resume"},
 	}
@@ -526,7 +526,7 @@ func (s *suite) resume() {
 // and the next prompt works once the endpoint recovers.
 func (s *suite) providerLimit() {
 	s.t.Helper()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{
 			Status: 429,
 			Error: &ProviderError{
@@ -592,7 +592,7 @@ func (s *suite) failures() {
 // anything: the request is retried, and the run goes on.
 func (s *suite) failureBeforeTheDelta() {
 	s.t.Helper()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{
 			Status: 500,
 			Error: &ProviderError{
@@ -620,7 +620,7 @@ func (s *suite) failureBeforeTheDelta() {
 // provider error.
 func (s *suite) failureAfterTheDelta() {
 	s.t.Helper()
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{Text: "the first part", FailAfterDelta: true},
 	}
 	c, sessionID := s.open(turns, nil)
@@ -720,7 +720,7 @@ func (s *suite) failureUnsupportedVersion() {
 // refuses it with busy.
 func (s *suite) failureBusy() {
 	s.t.Helper()
-	turns := []Turn{{Text: "the answer", Delay: time.Second}}
+	turns := []ScriptedAnswer{{Text: "the answer", Delay: time.Second}}
 	c, sessionID := s.open(turns, nil)
 	s.prompt(c, sessionID, "say hello")
 
@@ -737,7 +737,7 @@ func (s *suite) failureBusy() {
 // server refuses the load with session_locked.
 func (s *suite) failureLockedSession() {
 	s.t.Helper()
-	turns := []Turn{{Text: "the answer"}}
+	turns := []ScriptedAnswer{{Text: "the answer"}}
 	endpoint := newProvider(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 
@@ -774,7 +774,7 @@ func (s *suite) teardown() {
 // the waiter of the run gets the run's outcome.
 func (s *suite) teardownCloseRacingARun() {
 	s.t.Helper()
-	turns := []Turn{{Text: "the answer", Delay: 500 * time.Millisecond}}
+	turns := []ScriptedAnswer{{Text: "the answer", Delay: 500 * time.Millisecond}}
 	c, sessionID := s.open(turns, nil)
 	runID := s.prompt(c, sessionID, "say hello")
 
@@ -812,7 +812,7 @@ func (s *suite) teardownHangUp() {
 	}
 	// The command is a short one: the run waits for the ask, not for
 	// the command, and the binary hangs up while the ask is pending.
-	turns := []Turn{
+	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "true"}}}},
 	}
 	c, sessionID := s.open(turns, nil)
@@ -856,7 +856,7 @@ func (s *suite) slowClientQueueOverflow() {
 	s.t.Helper()
 	// The answer is bigger than the queue, and it comes in pieces, so
 	// the queue fills while the writer waits for the client.
-	turns := []Turn{{Chunks: chunks(80, 256<<10)}}
+	turns := []ScriptedAnswer{{Chunks: chunks(80, 256<<10)}}
 	endpoint := newProvider(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 	c := s.start(settings, endpoint)
@@ -883,7 +883,7 @@ func (s *suite) slowClientQueueOverflow() {
 func (s *suite) slowClientWriteStall() {
 	s.t.Helper()
 	// The answer is bigger than the pipe and smaller than the queue.
-	turns := []Turn{{Chunks: chunks(200, 1<<10)}}
+	turns := []ScriptedAnswer{{Chunks: chunks(200, 1<<10)}}
 	endpoint := newProvider(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 	c := s.start(settings, endpoint)
@@ -941,7 +941,7 @@ func chunks(count, size int) []string {
 // session cannot be loaded.
 func (s *suite) ephemeral() {
 	s.t.Helper()
-	turns := []Turn{{Text: "the answer"}}
+	turns := []ScriptedAnswer{{Text: "the answer"}}
 	endpoint := newProvider(s.t, turns)
 	// The pass has a directory of its own, so the check for the files
 	// it wrote is about its own files.

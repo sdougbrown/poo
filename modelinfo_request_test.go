@@ -59,7 +59,7 @@ func TestEffectiveSamplingOverridesFieldByField(t *testing.T) {
 }
 
 func TestEffectiveSamplingDropsTheTemperatureOfAFixedModel(t *testing.T) {
-	for _, mode := range []poo.TempControl{poo.TempFixed, poo.TempUnsupported} {
+	for _, mode := range []poo.TempMode{poo.TempFixed, poo.TempUnsupported} {
 		model := poo.ModelInfo{
 			Temperature: mode,
 			Sampling:    poo.Sampling{Temperature: ptr(0.7)},

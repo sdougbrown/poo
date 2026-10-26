@@ -50,7 +50,7 @@ func theProfiles() []profile.Profile {
 // theExecutors are the executors a binary links.
 func theExecutors() *bash.Registry {
 	registry := bash.NewRegistry()
-	registry.Register("local", func(bash.Options) (bash.Executor, error) {
+	registry.Register("local", func(exec.Options) (exec.Executor, error) {
 		return bash.NewLocal(), nil
 	})
 	return registry
@@ -394,7 +394,7 @@ func TestTheSessionWorksInTheDirectoryItsHeaderNames(t *testing.T) {
 		Mode:         "logged",
 		CreatedAt:    "2026-10-22T12:00:00Z",
 		WorkingDir:   workDir,
-		Model:        poo.SessionModel{ID: "test-model"},
+		Model:        poo.SessionModel{ModelID: "test-model"},
 		ContextLimit: 32768,
 		Profile:      "code",
 		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},
@@ -435,7 +435,7 @@ func TestTheRuntimeCreatesAndResumesASession(t *testing.T) {
 		Mode:         "logged",
 		CreatedAt:    "2026-10-22T12:00:00Z",
 		WorkingDir:   t.TempDir(),
-		Model:        poo.SessionModel{ID: "test-model"},
+		Model:        poo.SessionModel{ModelID: "test-model"},
 		ContextLimit: 32768,
 		Profile:      "code",
 		Build:        poo.BuildInfo{Name: "poo", Version: "0.1.0"},

@@ -77,7 +77,7 @@ type LogRecord struct {
 	Text      string          `json:"text"`
 
 	// The job's fields.
-	Job     string `json:"job"`
+	JobID   string `json:"job"`
 	InputID string `json:"input_id"`
 	Fatal   bool   `json:"fatal"`
 

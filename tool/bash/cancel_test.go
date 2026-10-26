@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
@@ -23,7 +24,7 @@ func TestAnAlreadyCancelledLocalStartRunsNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	proc, err := bash.NewLocal().Start(ctx, bash.Command{
+	proc, err := bash.NewLocal().Start(ctx, exec.Command{
 		Argv: []string{"/bin/sh", "-c", `printf executed > "$1"`, "probe", marker},
 		Dir:  dir,
 	}, io.Discard)
@@ -42,12 +43,12 @@ func TestAnAlreadyCancelledLocalStartRunsNothing(t *testing.T) {
 
 // startedExecutor counts the commands an executor was asked to start.
 type startedExecutor struct {
-	bash.Executor
+	exec.Executor
 	starts atomic.Int64
 }
 
 // Start counts the command and hands it to the executor it wraps.
-func (s *startedExecutor) Start(ctx context.Context, c bash.Command, out io.Writer) (bash.Process, error) {
+func (s *startedExecutor) Start(ctx context.Context, c exec.Command, out io.Writer) (exec.Process, error) {
 	s.starts.Add(1)
 	return s.Executor.Start(ctx, c, out)
 }
@@ -57,8 +58,8 @@ func (s *startedExecutor) Start(ctx context.Context, c bash.Command, out io.Writ
 // cancel observation, not an error the run has to classify.
 func TestAnAlreadyCancelledCallIsReportedAsCancelled(t *testing.T) {
 	dir := t.TempDir()
-	exec := &startedExecutor{Executor: bash.NewLocal()}
-	tool := &bash.Tool{Timeout: 30 * time.Second, Executor: exec}
+	executor := &startedExecutor{Executor: bash.NewLocal()}
+	tool := &bash.Tool{Timeout: 30 * time.Second, Executor: executor}
 	prepared, err := tool.Prepare([]byte(`{"command":"printf executed > marker"}`), poo.PrepareEnv{WorkingDir: dir})
 	if err != nil {
 		t.Fatalf("preparing: %v", err)
@@ -73,7 +74,7 @@ func TestAnAlreadyCancelledCallIsReportedAsCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
-	if got := exec.starts.Load(); got != 0 {
+	if got := executor.starts.Load(); got != 0 {
 		t.Errorf("the executor was asked to start %d commands for a cancelled call", got)
 	}
 	if !res.IsError {

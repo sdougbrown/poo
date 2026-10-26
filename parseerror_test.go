@@ -87,12 +87,12 @@ type failingReader struct {
 }
 
 // Next reports the failure, and then ends.
-func (r *failingReader) Next() (poo.StreamEvent, error) {
+func (r *failingReader) Next() (poo.StreamItem, error) {
 	if r.reported {
-		return poo.StreamEvent{}, io.EOF
+		return poo.StreamItem{}, io.EOF
 	}
 	r.reported = true
-	return poo.StreamEvent{Kind: "error", Error: r.err}, nil
+	return poo.StreamItem{Kind: "error", Error: r.err}, nil
 }
 
 // Close releases the response.
@@ -119,7 +119,7 @@ func TestAFailureThatIsNotRecoverableEndsTheRun(t *testing.T) {
 // about it, so it can write the call again.
 func TestTheParseErrorIsVisibleToTheModel(t *testing.T) {
 	srv, bodies := malformedEndpoint(t)
-	tr := openai.New(openai.Config{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
+	tr := openai.New(openai.Options{BaseURL: srv.URL, Model: "m", ToolsMode: "text"})
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
 	res := runSession(t, s, "hi")

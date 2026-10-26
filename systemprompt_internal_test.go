@@ -26,7 +26,7 @@ type promptTransport struct {
 	// requests holds the requests the transport received.
 	requests []ChatRequest
 	// turns holds the responses, in order.
-	turns [][]StreamEvent
+	turns [][]StreamItem
 	// index is the next response to serve.
 	index int
 }
@@ -58,14 +58,14 @@ func (t *promptTransport) received() []ChatRequest {
 
 // promptReader is the read side of one scripted response.
 type promptReader struct {
-	events []StreamEvent
+	events []StreamItem
 	index  int
 }
 
 // Next returns the next piece of the response.
-func (r *promptReader) Next() (StreamEvent, error) {
+func (r *promptReader) Next() (StreamItem, error) {
 	if r.index >= len(r.events) {
-		return StreamEvent{}, io.EOF
+		return StreamItem{}, io.EOF
 	}
 	event := r.events[r.index]
 	r.index++
@@ -76,16 +76,16 @@ func (r *promptReader) Next() (StreamEvent, error) {
 func (r *promptReader) Close() error { return nil }
 
 // textTurn returns a response that ends the turn with a text.
-func textTurn(text string) []StreamEvent {
-	return []StreamEvent{
+func textTurn(text string) []StreamItem {
+	return []StreamItem{
 		{Kind: "delta", Delta: &Delta{Kind: "text", Text: text}},
 		{Kind: "finish", FinishReason: FinishStop},
 	}
 }
 
 // toolCallTurn returns a response that calls a tool.
-func toolCallTurn(name string) []StreamEvent {
-	return []StreamEvent{
+func toolCallTurn(name string) []StreamItem {
+	return []StreamItem{
 		{Kind: "tool_call", ToolCall: &ToolCallDelta{
 			Index:     0,
 			ID:        "call_1",
@@ -191,7 +191,7 @@ func (p blockingPrepared) Summary() string { return "the call" }
 // run's requests.
 func TestThePromptIsRenderedOnceForTheRun(t *testing.T) {
 	tool := newBlockingTool()
-	tr := &promptTransport{turns: [][]StreamEvent{
+	tr := &promptTransport{turns: [][]StreamItem{
 		toolCallTurn(tool.Spec().Name),
 		textTurn("the answer"),
 	}}
@@ -231,7 +231,7 @@ func TestThePromptIsRenderedOnceForTheRun(t *testing.T) {
 // change between the runs: the next run renders the session's prompt
 // again, and it is the changed one.
 func TestThePromptChangesBetweenRuns(t *testing.T) {
-	tr := &promptTransport{turns: [][]StreamEvent{textTurn("the answer"), textTurn("the second answer")}}
+	tr := &promptTransport{turns: [][]StreamItem{textTurn("the answer"), textTurn("the second answer")}}
 	s := promptSession(t, tr)
 
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
