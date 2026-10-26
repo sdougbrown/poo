@@ -13,7 +13,7 @@ func TestTheCaptureCapNeverSplitsARune(t *testing.T) {
 	// The euro sign is three bytes, so a cap that is not a multiple of
 	// three lands in the middle of one.
 	for _, limit := range []int{1, 2, 4, 5, 7, 8, 10} {
-		b := &cappedBuffer{limit: limit}
+		b := NewCappedBuffer(limit)
 		_, _ = b.Write([]byte(strings.Repeat("€", 10)))
 		got := b.String()
 		if !utf8.ValidString(got) {
@@ -33,7 +33,7 @@ func TestTheCaptureCapNeverSplitsARune(t *testing.T) {
 // TestTheCaptureCapKeepsWholeCharacters covers the same cap with a
 // limit that lands on a character boundary.
 func TestTheCaptureCapKeepsWholeCharacters(t *testing.T) {
-	b := &cappedBuffer{limit: 9}
+	b := NewCappedBuffer(9)
 	_, _ = b.Write([]byte(strings.Repeat("€", 10)))
 	if got := b.String(); got != strings.Repeat("€", 3) {
 		t.Errorf("the capture is %q, want three euro signs", got)
@@ -45,7 +45,7 @@ func TestTheCaptureCapKeepsWholeCharacters(t *testing.T) {
 // command printed.
 func TestTheCaptureKeepsInvalidBytesItDidNotCut(t *testing.T) {
 	for _, out := range []string{"ok\xff", "\xff", "a\xe2\x82"} {
-		b := &cappedBuffer{limit: 1 << 20}
+		b := NewCappedBuffer(1 << 20)
 		_, _ = b.Write([]byte(out))
 		if got := b.String(); got != out {
 			t.Errorf("the capture of %q is %q, want it unchanged", out, got)

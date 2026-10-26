@@ -1,0 +1,5 @@
+#!/bin/sh
+# A fixture CLI: it prints its arguments, one per line.
+for arg in "$@"; do
+	echo "$arg"
+done

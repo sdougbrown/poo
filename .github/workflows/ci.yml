@@ -25,6 +25,15 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          # The sandbox needs unprivileged user namespaces. Ubuntu 24.04
+          # restricts them for unprivileged binaries, and the knob is
+          # absent on the kernels that do not.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
       - name: Vet
         run: go vet ./...
 
@@ -70,11 +79,11 @@ jobs:
       - name: Check the sandbox
         run: |
           if ! bwrap --unshare-all --ro-bind / / -- /bin/true; then
-            echo "::warning::bubblewrap cannot create a sandbox here; the executor tests will skip and say so"
+            echo "::warning::bubblewrap cannot create a sandbox here; the required config and cli-registry sandbox tests will fail"
           fi
 
       - name: Executors
-        run: go test -race -v ./exec/bwrap/ ./internal/bashverify/ ./tool/bash/
+        run: go test -race -v ./config/ ./tool/cliregistry/ ./exec/bwrap/ ./internal/bashverify/ ./tool/bash/
 
       - name: Conformance in the sandbox
         env:

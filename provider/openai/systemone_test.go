@@ -33,6 +33,10 @@ type systemOneServer struct {
 	delay time.Duration
 	// status is the HTTP status the server answers with.
 	status int
+	// active is how many requests the server is answering now.
+	active int
+	// peak is the most requests the server answered at once.
+	peak int
 }
 
 // newSystemOneServer starts a server that answers the questions it is
@@ -44,7 +48,16 @@ func newSystemOneServer(t *testing.T) *systemOneServer {
 		raw, _ := io.ReadAll(r.Body)
 		s.mu.Lock()
 		s.bodies = append(s.bodies, string(raw))
+		s.active++
+		if s.active > s.peak {
+			s.peak = s.active
+		}
 		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			s.active--
+			s.mu.Unlock()
+		}()
 
 		if s.delay > 0 {
 			select {
@@ -95,6 +108,13 @@ func (s *systemOneServer) count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.bodies)
+}
+
+// peakConcurrency returns the most requests the server answered at once.
+func (s *systemOneServer) peakConcurrency() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.peak
 }
 
 // body returns the request body at the given index.
@@ -303,6 +323,34 @@ func TestTheSystemOneDeciderAnswersAScoreQuestion(t *testing.T) {
 	}
 	if len(question.Criteria) != 2 || question.Criteria[0] != "fine" {
 		t.Errorf("the criteria are %v, want the two levels", question.Criteria)
+	}
+}
+
+// TestTheSystemOneDeciderKeepsFourRequestsInFlight covers the ceiling: a
+// call whose questions need ten requests opens no more than four of them
+// at once.
+func TestTheSystemOneDeciderKeepsFourRequestsInFlight(t *testing.T) {
+	srv := newSystemOneServer(t)
+	srv.delay = 5 * time.Millisecond
+	questions := make([]decide.Question, 0, 600)
+	for i := 0; i < 600; i++ {
+		id := fmt.Sprintf("q%03d", i)
+		questions = append(questions, choiceQuestion(id))
+		srv.answers[id] = map[string]any{
+			"probabilities": map[string]float64{"approve": 0.5, "deny": 0.5},
+			"choice":        "approve",
+		}
+	}
+	dec := srv.decider(t, 30*time.Second)
+
+	if _, err := dec.Decide(context.Background(), "the state", "", questions); err != nil {
+		t.Fatalf("asking the questions: %v", err)
+	}
+	if srv.count() != 10 {
+		t.Errorf("the call made %d requests, want 10", srv.count())
+	}
+	if got := srv.peakConcurrency(); got > decide.MaxRequestsInFlight {
+		t.Errorf("the call had %d requests in flight, the most is %d", got, decide.MaxRequestsInFlight)
 	}
 }
 

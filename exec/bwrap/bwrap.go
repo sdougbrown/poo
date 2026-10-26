@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -54,8 +55,13 @@ const (
 	statusFD = 3
 	// jsonStatusFD is the descriptor bubblewrap writes its status to.
 	jsonStatusFD = 4
+	// parentFD is the descriptor the helper watches for the executor's
+	// death.
+	parentFD = 5
 	// statusFDEnv names the descriptor for the helper.
 	statusFDEnv = "POO_BWRAP_STATUS_FD"
+	// parentFDEnv names the parent-death descriptor for the helper.
+	parentFDEnv = "POO_BWRAP_PARENT_FD"
 	// helperArg is the first argument the helper is invoked with.
 	helperArg = "__poo_bwrap_helper__"
 	// helperPath is where the helper is bound inside the sandbox.
@@ -148,10 +154,18 @@ func (e *Executor) Name() string { return Name }
 // the filesystem is there, and $HOME is not mounted unless a bind names
 // it.
 //
-// The output of stdout and stderr goes to out as one stream.
+// The output of stdout and stderr goes to out as one stream, unless the
+// command names a writer for stderr: then the two streams are captured
+// apart. A context that has already ended starts nothing: Start returns
+// its error and no sandbox.
 func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (bash.Process, error) {
 	if len(c.Argv) == 0 {
 		return nil, errors.New("bwrap: the command has no arguments")
+	}
+	// The sandbox is a process of its own, so a context that is over
+	// before it starts would still let a fast command run first.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	// An empty directory means the caller's own, and the sandbox binds
 	// it under its own name.
@@ -177,10 +191,15 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 	if env == nil {
 		env = os.Environ()
 	}
-	cmd.Env = append(append([]string(nil), env...), fmt.Sprintf("%s=%d", statusFDEnv, statusFD))
+	cmd.Env = append(append([]string(nil), env...),
+		fmt.Sprintf("%s=%d", statusFDEnv, statusFD),
+		fmt.Sprintf("%s=%d", parentFDEnv, parentFD))
 	// The sandbox runs in its own process group, so the whole group can
-	// be signalled at once.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// be signalled at once. The parent-death signal ties bubblewrap to
+	// poo: --die-with-parent ties the sandbox to bubblewrap, so a poo
+	// that dies without running a teardown takes the sandbox with it
+	// instead of leaving it to init.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 
 	pr, pw, err := os.Pipe()
 	if err != nil {
@@ -200,11 +219,11 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 		statusW.Close()
 		return nil, err
 	}
-	cmd.Stdout = pw
-	cmd.Stderr = pw
-	cmd.ExtraFiles = []*os.File{statusW, jsonW}
-
-	if err := cmd.Start(); err != nil {
+	// The parent-death pipe is the sandbox's tie to poo. The helper holds
+	// the read end and poo the write end, so the kernel tells the helper
+	// when poo ends, whatever ends it.
+	parentR, parentW, err := os.Pipe()
+	if err != nil {
 		pr.Close()
 		pw.Close()
 		statusR.Close()
@@ -213,17 +232,66 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 		jsonW.Close()
 		return nil, err
 	}
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+	var errPr, errW *os.File
+	if c.Stderr != nil {
+		errPr, errW, err = os.Pipe()
+		if err != nil {
+			pr.Close()
+			pw.Close()
+			statusR.Close()
+			statusW.Close()
+			jsonR.Close()
+			jsonW.Close()
+			parentR.Close()
+			parentW.Close()
+			return nil, err
+		}
+		cmd.Stderr = errW
+	}
+	cmd.ExtraFiles = []*os.File{statusW, jsonW, parentR}
+
+	if err := cmd.Start(); err != nil {
+		pr.Close()
+		pw.Close()
+		if errW != nil {
+			errPr.Close()
+			errW.Close()
+		}
+		statusR.Close()
+		statusW.Close()
+		jsonR.Close()
+		jsonW.Close()
+		parentR.Close()
+		parentW.Close()
+		return nil, err
+	}
 	// The parent's copies of the write ends are closed, so the pipes
 	// reach EOF once every writer is gone.
 	pw.Close()
+	if errW != nil {
+		errW.Close()
+	}
 	statusW.Close()
 	jsonW.Close()
+	parentR.Close()
 
-	drained := make(chan struct{})
-	go func() {
-		defer close(drained)
-		_, _ = io.Copy(out, pr)
-	}()
+	pipes := []*os.File{pr}
+	writers := []io.Writer{out}
+	if errPr != nil {
+		pipes = append(pipes, errPr)
+		writers = append(writers, c.Stderr)
+	}
+	drains := make([]chan struct{}, 0, len(pipes))
+	for i, pipe := range pipes {
+		drained := make(chan struct{})
+		drains = append(drains, drained)
+		go func(pipe *os.File, w io.Writer) {
+			defer close(drained)
+			_, _ = io.Copy(w, pipe)
+		}(pipe, writers[i])
+	}
 
 	done := make(chan struct{})
 	waited := make(chan error, 1)
@@ -235,11 +303,12 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 
 	p := &process{
 		cmd:        cmd,
-		pr:         pr,
+		pipes:      pipes,
 		statusR:    statusR,
 		jsonR:      jsonR,
+		parentW:    parentW,
 		waited:     waited,
-		drained:    drained,
+		drains:     drains,
 		done:       done,
 		finished:   make(chan struct{}),
 		statusDone: make(chan struct{}),
@@ -275,6 +344,11 @@ func (e *Executor) args(c bash.Command) ([]string, error) {
 		// A session of its own, so the command's processes are not in
 		// the caller's process group.
 		"--new-session",
+		// The helper is the sandbox's init, so the namespace lives
+		// exactly as long as the helper does. Bubblewrap's own init is
+		// a process between the sandbox and the command, and a parent
+		// that dies while it starts up leaves it behind.
+		"--as-pid-1",
 		// A fresh /proc, /dev and /tmp: the command sees its own
 		// processes and nobody else's.
 		"--proc", "/proc",
@@ -344,8 +418,10 @@ func (e *Executor) roBinds() []string {
 // masks returns the arguments that hide the protected paths.
 //
 // A path inside a bound directory is hidden: a directory behind an empty
-// tmpfs, a file behind an empty device. A path outside every bound
-// directory is not in the sandbox at all, so there is nothing to hide.
+// tmpfs, a file behind an empty device. A path that is a symlink is hidden
+// at the path it reaches, because a mount cannot land on a link. A path
+// outside every bound directory is not in the sandbox at all, so there is
+// nothing to hide.
 // The masker is asked about every bind, not only the working directory,
 // so a protected path inside a read-only or read-write bind is hidden too.
 func (e *Executor) masks(root string) ([][]string, error) {
@@ -365,10 +441,8 @@ func (e *Executor) masks(root string) ([][]string, error) {
 	var out [][]string
 	var hidden []string
 	for _, path := range paths {
-		if path == "" || !e.bound(path, root) {
-			continue
-		}
-		if underAny(hidden, path) {
+		path, ok := e.destination(path, root)
+		if !ok || underAny(hidden, path) {
 			continue
 		}
 		info, err := os.Stat(path)
@@ -384,6 +458,48 @@ func (e *Executor) masks(root string) ([][]string, error) {
 		out = append(out, []string{"--dev-bind", "/dev/null", path})
 	}
 	return out, nil
+}
+
+// destination returns the path to mask for one masker path, and whether
+// the sandbox holds that path.
+//
+// A mount cannot land on a symlink, so a link is masked at the path it
+// reaches: that is the path a command reads through it. A target outside
+// every bind is not in the sandbox at all, and needs no mount; a link that
+// cannot be resolved is not masked either. A bind's own path is the
+// exception: the sandbox creates a directory of that name for the mount,
+// so a bind whose host path is a symlink is still masked by name.
+func (e *Executor) destination(path, root string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	if !e.isBind(path, root) {
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			target, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return "", false
+			}
+			path = target
+		}
+	}
+	if !e.bound(path, root) {
+		return "", false
+	}
+	return path, true
+}
+
+// isBind reports whether a path is one of the directories the sandbox
+// mounts.
+func (e *Executor) isBind(path, root string) bool {
+	if path == root || path == resolveBind {
+		return true
+	}
+	for _, dir := range e.roBinds() {
+		if dir == path {
+			return true
+		}
+	}
+	return slices.Contains(e.opts.RWBinds, path)
 }
 
 // expandBinds returns the protected paths the sandbox's binds reach.
@@ -500,12 +616,17 @@ func probe(binary string, opts Options) error {
 
 // process is a sandbox that is running.
 type process struct {
-	cmd     *exec.Cmd
-	pr      *os.File
+	cmd *exec.Cmd
+	// pipes are the read ends of the capture, one per stream.
+	pipes   []*os.File
 	statusR *os.File
 	jsonR   *os.File
+	// parentW is the write end of the parent-death pipe. Closing it
+	// tells the helper that poo is ending.
+	parentW *os.File
 	waited  chan error
-	drained chan struct{}
+	// drains report that a stream has been read to its end.
+	drains []chan struct{}
 	// done is closed when the sandbox's own process has been reaped.
 	done chan struct{}
 	// finished is closed when the wait is over, so the context watcher
@@ -522,8 +643,14 @@ type process struct {
 	// exited reports that the sandbox has ended. A kill after that
 	// would signal a process that may belong to another one by now.
 	exited bool
-	code   int
-	err    error
+	// stopping reports that a kill is taking the sandbox, rather than
+	// the command exiting on its own.
+	stopping bool
+	// stopped reports that a kill took the command. It is decided when
+	// the sandbox's own process is reaped.
+	stopped bool
+	code    int
+	err     error
 	// status is what the helper reported about the command's wait.
 	status statusReport
 	// childPID is bubblewrap's child in the host's pid space: the
@@ -589,6 +716,12 @@ func (p *process) Wait() (int, error) {
 	p.waitOnce.Do(func() {
 		err := <-p.waited
 
+		// The command's own process has ended: whatever the teardown
+		// of what it left behind does, this is its outcome.
+		p.mu.Lock()
+		p.stopped = p.stopping
+		p.mu.Unlock()
+
 		// The helper's report arrives before bubblewrap exits, so the
 		// wait is bounded and does not hold a finished call for long.
 		select {
@@ -610,15 +743,18 @@ func (p *process) Wait() (int, error) {
 		p.exited = true
 		p.mu.Unlock()
 
-		// A descendant may still hold the pipe open. The wait is
+		// A descendant may still hold a pipe open. The wait is
 		// bounded, so the call cannot hang on it.
-		select {
-		case <-p.drained:
-		case <-time.After(KillGrace):
-			p.pr.Close()
-			<-p.drained
+		deadline := time.After(KillGrace)
+		for _, drained := range p.drains {
+			select {
+			case <-drained:
+			case <-deadline:
+				p.closePipes()
+				<-drained
+			}
 		}
-		p.pr.Close()
+		p.closePipes()
 		close(p.finished)
 	})
 
@@ -627,22 +763,31 @@ func (p *process) Wait() (int, error) {
 	return p.code, p.err
 }
 
+// Stopped reports whether the command was killed instead of exiting on
+// its own.
+func (p *process) Stopped() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.stopped
+}
+
 // Kill stops the sandbox.
 //
 // The helper gets SIGTERM, and it gives the command the same graceful
 // window the local executor gives: SIGTERM, then SIGKILL after the grace
-// period. The sandbox's processes are its init's children, so the kernel
-// ends the namespace when the helper exits; a descendant that left the
-// process group dies with the namespace, which is the escape the local
-// executor cannot close.
+// period. The helper is the sandbox's init, so the kernel ends the
+// namespace when the helper exits; a descendant that left the process
+// group dies with the namespace, which is the escape the local executor
+// cannot close.
 func (p *process) Kill() {
 	p.mu.Lock()
-	exited := p.exited
-	child := p.childPID
-	p.mu.Unlock()
-	if exited {
+	if p.exited {
+		p.mu.Unlock()
 		return
 	}
+	p.stopping = true
+	child := p.childPID
+	p.mu.Unlock()
 	if child <= 0 {
 		// The child may not have been read yet: a cancellation can
 		// arrive as soon as the sandbox starts. Give the status stream
@@ -684,6 +829,14 @@ func (p *process) Kill() {
 	}
 	_ = syscall.Kill(child, syscall.SIGKILL)
 	_ = p.cmd.Process.Signal(syscall.SIGKILL)
+}
+
+// closePipes closes the ends the wait has finished with.
+func (p *process) closePipes() {
+	for _, pipe := range p.pipes {
+		pipe.Close()
+	}
+	p.parentW.Close()
 }
 
 // alive reports whether the sandbox's own process is still there.

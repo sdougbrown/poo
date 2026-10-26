@@ -15,6 +15,7 @@ import (
 	"github.com/sdougbrown/poo/profile/code"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/tool/cliregistry"
 	"github.com/sdougbrown/poo/tool/edit"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
@@ -29,6 +30,12 @@ func theTools() map[string]config.ToolFactory {
 		"read": func(config.ToolOptions) poo.Tool { return read.New() },
 		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+		"call_cli": func(opts config.ToolOptions) poo.Tool {
+			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
+		},
+		"find_tool": func(opts config.ToolOptions) poo.Tool {
+			return cliregistry.NewFind(opts.Registry)
+		},
 	}
 }
 
@@ -49,14 +56,21 @@ func theExecutors() *bash.Registry {
 // build builds a runtime for the settings.
 func build(t *testing.T, settings *config.Settings, overrides config.Overrides) *config.Runtime {
 	t.Helper()
+	return buildIn(t, settings, overrides, t.TempDir(), theExecutors())
+}
+
+// buildIn builds a runtime for the settings in a working directory, with
+// the executors the binary links.
+func buildIn(t *testing.T, settings *config.Settings, overrides config.Overrides, workingDir string, executors *bash.Registry) *config.Runtime {
+	t.Helper()
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
 		Overrides:      overrides,
-		WorkingDir:     t.TempDir(),
+		WorkingDir:     workingDir,
 		DefaultProfile: "code",
 		Tools:          theTools(),
 		Profiles:       theProfiles(),
-		Executors:      theExecutors(),
+		Executors:      executors,
 	})
 	if err != nil {
 		t.Fatalf("building the runtime: %v", err)

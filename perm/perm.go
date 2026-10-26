@@ -477,6 +477,11 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason string, 
 	if resolution.decision == DecisionAllow {
 		return poo.Allow(), nil
 	}
+	// A refused ask about a loop is the loop's refusal, whatever refused
+	// it: the model is told what it repeated, not who said no.
+	if reason == poo.ReasonDoomLoop {
+		return poo.Deny(fmt.Sprintf(DoomLoopDeniedText, doomLoopCount(counts))), nil
+	}
 	return poo.Deny(fmt.Sprintf(AskDeniedText, resolution.answeredBy)), nil
 }
 
