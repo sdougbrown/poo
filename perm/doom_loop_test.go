@@ -178,6 +178,47 @@ func TestTheDoomLoopAsksTheChain(t *testing.T) {
 	}
 }
 
+// TestADoomLoopAskThatIsDeniedIsStillTheLoop covers the ask action: the
+// loop asked, the ask was refused, and the model is told what the loop
+// was, with the count, rather than who refused the ask.
+func TestADoomLoopAskThatIsDeniedIsStillTheLoop(t *testing.T) {
+	tests := []struct {
+		name string
+		// askers is the chain the ask goes to. No askers means the
+		// fallback decides.
+		askers []perm.Asker
+	}{
+		{name: "the fallback"},
+		{name: "a client's answer", askers: []perm.Asker{&fakeAsker{decision: perm.DecisionDeny, available: true}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The doom loop's default action is to ask.
+			policy, err := perm.New(perm.Options{Askers: tt.askers})
+			if err != nil {
+				t.Fatalf("building the policy: %v", err)
+			}
+			tool := &readTool{}
+			s := newSession(t, []pootest.Turn{
+				{Calls: []pootest.Call{
+					readCall("c1", "a.go", 0),
+					readCall("c2", "a.go", 0),
+					readCall("c3", "a.go", 0),
+				}},
+				{Text: "done"},
+			}, map[string]poo.Tool{"read": tool}, []string{"read"}, policy)
+
+			s.run(t)
+
+			denied := deniedResult(t, s, "r3")
+			want := fmt.Sprintf(perm.DoomLoopDeniedText, 3)
+			if denied != want {
+				t.Errorf("the model saw %q, want %q", denied, want)
+			}
+		})
+	}
+}
+
 // TestTheDoomLoopDenialIsVisible covers the plan's rule: the model sees
 // the outcome of a loop, and nothing is silently skipped.
 func TestTheDoomLoopDenialIsVisible(t *testing.T) {

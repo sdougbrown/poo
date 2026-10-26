@@ -10,6 +10,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // The restore: a session rebuilt from the records of an earlier one.
@@ -598,5 +599,55 @@ func TestTheRestoreRefusesADurableSession(t *testing.T) {
 	_, _, err := poo.Restore(restoreOptions(t, scripted(nil), &recordingSink{}), []poo.Record{created})
 	if !errors.Is(err, poo.ErrUnsupportedMode) {
 		t.Fatalf("the restore returned %v, want an unsupported mode", err)
+	}
+}
+
+// TestTheRestoreAppliesOptionFuncsAfterTheRecordedPrompt covers the order
+// around the recorded prompt: the record replaces the construction-time
+// prompt before the option functions run, so their edits land on the
+// recorded text, and a resume edit is never cleared after it was applied.
+func TestTheRestoreAppliesOptionFuncsAfterTheRecordedPrompt(t *testing.T) {
+	for _, recorded := range []bool{false, true} {
+		name := "without_record"
+		if recorded {
+			name = "with_record"
+		}
+		t.Run(name, func(t *testing.T) {
+			opts := restoreOptions(t, scripted(nil), &recordingSink{})
+			opts.SystemPrompt = "construction base"
+			opts.Prompt = []func(*prompt.Builder){func(b *prompt.Builder) { b.Set("construction", "construction section") }}
+			records := []poo.Record{header("s1")}
+			if recorded {
+				records = append(records, &poo.SystemPromptRecord{Text: "recorded base"})
+			}
+			seen := false
+			observer := func(o *poo.Options) {
+				seen = true
+				if recorded && (o.SystemPrompt != "recorded base" || len(o.Prompt) != 0) {
+					t.Errorf("option saw prompt=%q edits=%d; want recorded prompt and cleared edits", o.SystemPrompt, len(o.Prompt))
+				}
+				if !recorded && (o.SystemPrompt != "construction base" || len(o.Prompt) != 1) {
+					t.Errorf("without a record, option lost construction state: %q edits=%d", o.SystemPrompt, len(o.Prompt))
+				}
+			}
+			s, _, err := poo.Restore(opts, records, observer, poo.WithPrompt(func(b *prompt.Builder) { b.Append("base", "explicit resume edit") }))
+			if err != nil {
+				t.Fatalf("restoring the session: %v", err)
+			}
+			t.Cleanup(func() { s.Close() })
+			if !seen {
+				t.Fatal("option did not run")
+			}
+			text := s.PromptState().Text
+			if !strings.Contains(text, "explicit resume edit") {
+				t.Errorf("explicit resume edit lost: %q", text)
+			}
+			if recorded && (strings.Contains(text, "construction") || !strings.Contains(text, "recorded base")) {
+				t.Errorf("recorded prompt not preserved: %q", text)
+			}
+			if !recorded && !strings.Contains(text, "construction section") {
+				t.Errorf("construction edits lost without a record: %q", text)
+			}
+		})
 	}
 }
