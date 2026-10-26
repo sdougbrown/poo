@@ -36,6 +36,8 @@ func codeOf(err error) string {
 		return protocol.DataUnansweredCall
 	case errors.Is(err, poo.ErrUnsupportedMode):
 		return protocol.DataUnsupportedMode
+	case errors.Is(err, poo.ErrPromptRender):
+		return protocol.DataInvalidSettings
 	case errors.Is(err, poo.ErrNoSessionHeader), errors.Is(err, poo.ErrCodecVersion):
 		return protocol.DataCodecMismatch
 	case errors.Is(err, storesession.ErrInvalidSessionID):

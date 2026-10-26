@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
@@ -486,5 +487,53 @@ func TestARegistryWithoutCallCLIIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(failure.Message, "call_cli") {
 		t.Errorf("the message %q does not name the tool", failure.Message)
+	}
+}
+
+// TestAPromptDirectoriesCatalogFollowsTheSession covers the catalog a
+// directory supplies: the file loads for one directory, and its text
+// applies only when the session offers a tool that reads the catalog.
+func TestAPromptDirectoriesCatalogFollowsTheSession(t *testing.T) {
+	dir := registry(t, "deploy")
+	prompts := fstest.MapFS{
+		"catalog.md": {Data: []byte("Call {{.Call}} with the registered CLIs.\n")},
+	}
+	buildPrompt := func(body string, readonly bool) *config.Runtime {
+		t.Helper()
+		settings, err := config.Parse([]byte(body), config.FormatYAML)
+		if err != nil {
+			t.Fatalf("decoding the settings: %v", err)
+		}
+		profiles := []profile.Profile{base.Profile(), code.Profile(), search.Profile()}
+		runtime, err := config.Build(config.BuildOptions{
+			Settings:       settings,
+			WorkingDir:     t.TempDir(),
+			DefaultProfile: "code",
+			Tools:          theTools(),
+			Profiles:       profiles,
+			Executors:      theExecutors(),
+			PromptFS:       prompts,
+		})
+		if err != nil {
+			t.Fatalf("building the runtime: %v", err)
+		}
+		if readonly == hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+			t.Fatalf("the session offers %v, and the case says readonly=%v", runtime.Options.ToolOrder, readonly)
+		}
+		return runtime
+	}
+
+	code := buildPrompt(registrySettings(dir), false)
+	if text := poo.PromptBuilder(code.Options).Render(); !strings.Contains(text, "Call call_cli with the registered CLIs.") {
+		t.Errorf("the code session's prompt does not carry the directory's catalog: %q", text)
+	}
+
+	readonly := buildPrompt(registrySettings(dir)+"profile: search\n", true)
+	text := poo.PromptBuilder(readonly.Options).Render()
+	if strings.Contains(text, "Call call_cli") {
+		t.Errorf("the read-only session's prompt carries the directory's catalog: %q", text)
+	}
+	if strings.Contains(text, "Registered CLIs:") {
+		t.Errorf("the read-only session's prompt carries the embedded catalog: %q", text)
 	}
 }

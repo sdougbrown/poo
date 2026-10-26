@@ -26,7 +26,6 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/internal/caps"
-	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/protect"
 )
 
@@ -634,21 +633,4 @@ func truncateLine(line string) string {
 		count++
 	}
 	return line
-}
-
-// section is the guidance the tool brings to the system prompt.
-//
-// The tool shows where it searched and what it left out, so the model
-// can narrow the search and carry on.
-const section = "Grep:\n" +
-	"- The pattern is an RE2 regular expression, matched line by line, and the output is \"path:line:text\".\n" +
-	"- Use the files_with_matches mode to find the files that hold a pattern, and the count mode to see how often it occurs.\n" +
-	"- The glob filter is matched against the path relative to the search root, e.g. \"*.go\".\n" +
-	"- An empty pattern in the files_with_matches mode lists the files.\n" +
-	"- Inside a git work tree the ignore rules hold, and outside one every file under the root is searched.\n" +
-	"- The last line says how many results were left out, and how many protected files were skipped."
-
-// PromptSection renders the tool's own section of the system prompt.
-func (t *Tool) PromptSection(env prompt.Env) string {
-	return section
 }

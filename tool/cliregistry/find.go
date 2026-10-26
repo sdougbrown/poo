@@ -2,6 +2,7 @@ package cliregistry
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -71,13 +72,14 @@ func (t *FindTool) Spec() poo.ToolSpec {
 //
 // The catalog's own section says the catalog is behind a search. The tool
 // adds how to search it and what a search costs.
-const findSection = "Finding a tool:\n" +
-	"- Call find_tool with what you want to do, in your own words, and it returns the registered CLIs that fit, best first, with their arguments.\n" +
-	"- A search asks the decision model one question per registered tool, so call it when you need a tool you have not used before, not before every call.\n" +
-	"- find_tool narrows the list; it never chooses for you. Call the tool it returns with call_cli."
+//
+//go:embed find.md
+var findSectionText string
+
+var findSection = prompt.MustCompile("find_tool", findSectionText, nil)
 
 // PromptSection renders the tool's guidance.
-func (t *FindTool) PromptSection(prompt.Env) string { return findSection }
+func (t *FindTool) PromptSection(env prompt.Env) string { return findSection.Render(env) }
 
 // findArgs are the tool's arguments.
 type findArgs struct {

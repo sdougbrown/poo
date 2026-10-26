@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/sdougbrown/poo/prompt"
 )
 
 // A job is a background tool call. It belongs to the session, not to the
@@ -1813,30 +1811,6 @@ type jobPrepared struct {
 
 // Summary describes the call.
 func (p *jobPrepared) Summary() string { return p.job }
-
-// JobsPromptSection is the model's guidance about background jobs, as
-// the core's own jobs tool renders it.
-func JobsPromptSection() string {
-	return (&JobTool{name: JobsToolName}).PromptSection(prompt.Env{})
-}
-
-// PromptSection renders the section that tells the model about the
-// background jobs.
-//
-// The section is the model's guidance, and it names the two tools the
-// core registers for it. The cancel_job tool has no section of its
-// own: the jobs tool's section names both.
-func (t *JobTool) PromptSection(env prompt.Env) string {
-	if t.name == CancelJobToolName {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("Background jobs:\n")
-	b.WriteString("- A tool that says it may run in the background takes a \"background\": true argument. The call returns at once with a job handle, and the job's result arrives later as a message.\n")
-	b.WriteString("- Use the jobs tool to see the jobs that are running, and cancel_job to stop one. There is no wait_job: ending your turn is how you wait.\n")
-	b.WriteString("- A job keeps running when the turn ends and when the run is cancelled, so a long command belongs in one.\n")
-	return b.String()
-}
 
 // decodeStrictJSON decodes one JSON value and nothing else.
 func decodeStrictJSON(raw json.RawMessage, into any) error {

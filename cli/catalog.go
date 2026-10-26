@@ -12,11 +12,14 @@
 package cli
 
 import (
+	_ "embed"
 	"fmt"
 	"sort"
 	"strings"
 
 	cliregistry "github.com/sdougbrown/cli-registry"
+
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // The names the catalog and its tools answer to.
@@ -173,26 +176,46 @@ func (c *Catalog) Plan(name string, args map[string]any) (*cliregistry.Plan, err
 	return c.registry.Plan(tool, args)
 }
 
-// Section renders the catalog's section of the system prompt.
+//go:embed catalog.md
+var catalogText string
+
+// catalogData is the data the catalog's section template renders with.
+//
+// Search says the catalog is behind a search rather than listed whole.
+// Count is the number of registered CLIs, Call and Find are the tools
+// that run one and that search the catalog, and Entries are the CLIs, in
+// name order.
+type catalogData struct {
+	Search  bool
+	Count   int
+	Call    string
+	Find    string
+	Entries []Entry
+}
+
+// Template returns the catalog's section of the system prompt as a
+// template.
 //
 // The full catalog is one line per entry: the name the model calls the
 // CLI by, and what it does. A session that searches the catalog instead
 // is told what the search is and how to use it, and the entries stay out
 // of the prompt.
+//
+// The template renders with the catalog's data, so a prompt directory
+// that replaces the section renders with it too.
+func (c *Catalog) Template(search bool) *prompt.Template {
+	return prompt.MustCompileTrimmed("catalog", catalogText, func(prompt.Env) any {
+		return catalogData{
+			Search:  search,
+			Count:   c.Len(),
+			Call:    CallToolName,
+			Find:    FindToolName,
+			Entries: c.entries,
+		}
+	})
+}
+
+// Section renders the catalog's section of the system prompt.
 func (c *Catalog) Section(search bool) string {
-	if search {
-		return fmt.Sprintf("Registered CLIs:\n"+
-			"%d command-line tools are registered, too many to list here. "+
-			"Call %s with what you want to do, and it returns the tools that fit, with their arguments. "+
-			"Then call %s with the name it gives you.",
-			c.Len(), FindToolName, CallToolName)
-	}
-	var b strings.Builder
-	b.WriteString("Registered CLIs:\n")
-	fmt.Fprintf(&b, "Call one with %s: \"name\" is the line's name, and \"args\" is an object of its arguments. "+
-		"The tool checks the arguments against the CLI's own schema and says what is wrong with them.\n", CallToolName)
-	for _, entry := range c.entries {
-		fmt.Fprintf(&b, "%s: %s\n", entry.Name, entry.Description)
-	}
-	return strings.TrimRight(b.String(), "\n")
+	return c.Template(search).Render(prompt.Env{})
 }

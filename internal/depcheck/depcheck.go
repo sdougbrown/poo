@@ -19,8 +19,8 @@
 //     package, the cli package, the prompt package, the decide package, the
 //     bash package and the packages outside the module that hold a cli
 //     registry
-//   - the cli package may import the standard library and the packages
-//     outside the module that hold a cli registry
+//   - the cli package may import the standard library, the prompt package
+//     and the packages outside the module that hold a cli registry
 //   - the server package may import the packages it composes: the core,
 //     the settings, the profiles, the executors, the permission policy,
 //     the sessions, the catalogs and the wire
@@ -104,7 +104,7 @@ func (c Checker) rules() []rule {
 		{path: m + "/exec/bwrap", allowed: []string{m + "/exec"}},
 		{path: m + "/protect"},
 		{path: m + "/internal/caps"},
-		{path: m + "/cli", external: true},
+		{path: m + "/cli", allowed: []string{m + "/prompt"}, external: true},
 		{
 			path: m + "/server",
 			allowed: []string{
