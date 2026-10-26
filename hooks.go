@@ -384,10 +384,9 @@ const (
 	EventCompactionStarted EventName = "compaction.started"
 	// EventCompactionEnded is emitted when a compaction ends.
 	EventCompactionEnded EventName = "compaction.ended"
-	// EventObserverDropped names the observer-overflow diagnostic. The
-	// plan makes it a record-only diagnostic — it is never delivered to
-	// observers — and the coalesced record is written by the stage that
-	// owns observers (Stage 4).
+	// EventObserverDropped names the observer-overflow diagnostic. It
+	// is a record-only diagnostic, never delivered to observers; the
+	// event bus writes the coalesced record.
 	EventObserverDropped EventName = "observer.dropped"
 	// EventModelsChanged is emitted when the session switches models.
 	EventModelsChanged EventName = "session.models_changed"

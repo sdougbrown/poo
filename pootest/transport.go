@@ -103,7 +103,7 @@ type Fork struct {
 	Prev poo.Rendered
 	// Appended are the messages the fork appended.
 	Appended []poo.Message
-	// MaxTokens is the output ceiling the fork asked for.
+	// MaxTokens is the output limit the fork asked for.
 	MaxTokens int
 }
 

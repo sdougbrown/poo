@@ -15,7 +15,7 @@ import (
 // ScriptedTurn is one recorded provider response.
 //
 // A replay reads the provider's answers out of a recorded session and
-// feeds them back to the harness, so the harness can be checked against
+// feeds them back to the runner, so the runner can be checked against
 // what it did last time without a live model.
 type ScriptedTurn struct {
 	// Text is the assistant's text, if any.
@@ -82,7 +82,7 @@ func ScriptFromLog(log *Log) (*Script, error) {
 // ToScript turns the recorded script into a pootest script.
 //
 // The recorded format stays the eval's own, so a recording from an older
-// harness still replays. The transport is pootest's.
+// runner still replays. The transport is pootest's.
 func (s *Script) ToScript() pootest.Script {
 	out := pootest.Script{Turns: make([]pootest.Turn, 0, len(s.Turns))}
 	for _, t := range s.Turns {
@@ -159,9 +159,9 @@ type ReplayResult struct {
 	Jobs []string `json:"jobs,omitempty"`
 }
 
-// Replay re-runs a recorded session through the current harness.
+// Replay re-runs a recorded session through the current runner.
 //
-// The harness reads the session's provider responses from the recording,
+// The runner reads the session's provider responses from the recording,
 // so the replay needs no model and no network. The result is the
 // recorded tool-call sequence beside the replayed one, and whether they
 // are the same.
@@ -454,7 +454,7 @@ type ReplayOptions struct {
 	WorkingDir string
 	// ContextLimit is the context window the replay uses.
 	ContextLimit int
-	// MaxTurns is the turn ceiling the replay uses.
+	// MaxTurns is the turn limit the replay uses.
 	MaxTurns int
 }
 
@@ -527,7 +527,7 @@ func (c *callRecorder) Flush(ctx context.Context) error { return nil }
 // diffCalls compares two tool-call sequences.
 //
 // The comparison is on the tool's name and the arguments: the handle and
-// the turn may move when the harness changes, and the call itself may
+// the turn may move when the runner changes, and the call itself may
 // not.
 func diffCalls(recorded, replayed []CallStep) (bool, []string) {
 	var differences []string

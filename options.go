@@ -12,7 +12,7 @@ import (
 // Option changes a session's options when the session is built.
 //
 // The options are the session's whole configuration, and an option is a
-// typed value: there is no hidden default for the context window, and
+// typed value: there is no implicit default for the context window, and
 // no option that silently changes the loop's behaviour.
 type Option func(*Options)
 

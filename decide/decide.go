@@ -25,8 +25,8 @@ import (
 // Errors the package reports.
 //
 // ErrDeferred is a deferral, not a failure: the caller's question could
-// not be answered, and the caller decides what happens next. It is never
-// an approval.
+// not be answered, and the caller decides what happens next. A deferral
+// is not a permission grant and not a denial.
 var (
 	// ErrDeferred means the decision could not be made.
 	ErrDeferred = errors.New("decide: the decision was deferred")

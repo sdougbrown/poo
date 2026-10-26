@@ -33,7 +33,7 @@ Run flags:
   --tasks <terms>      Comma-separated task ids or tags; empty means the whole set
   --seeds <n>          How many times each task runs against each model (default 3)
   --parallel <n>       How many runs may be in flight at once (default 1, at most 2 per endpoint)
-  --max-turns <n>      The turn ceiling passed to poo (default 50)
+  --max-turns <n>      The turn limit passed to poo (default 50)
   --out <dir>          Where the report goes (default: evals/results/<date>-<git sha>)
   --models-file <path> The model catalog (default: evals/models.yaml)
   --tasks-dir <path>   The task set (default: evals/tasks)
@@ -50,7 +50,7 @@ Compare flags:
 
 Replay flags:
   --context-limit <n>  The context window the replay uses (default: the recording's)
-  --max-turns <n>      The turn ceiling the replay uses (default: the recording's)
+  --max-turns <n>      The turn limit the replay uses (default: the recording's)
 
 Judge flags:
   --base-url <url>     The judge's endpoint (default: http://localhost:4000/v1)
@@ -141,7 +141,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.tasks, "tasks", "", "The task ids or tags to run")
 	fs.IntVar(&o.seeds, "seeds", 0, "How many times each task runs against each model")
 	fs.IntVar(&o.parallel, "parallel", 0, "How many runs may be in flight at once")
-	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn ceiling passed to poo")
+	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn limit passed to poo")
 	fs.StringVar(&o.out, "out", "", "Where the report goes")
 	fs.StringVar(&o.modelsFile, "models-file", "", "The model catalog")
 	fs.StringVar(&o.tasksDir, "tasks-dir", "", "The task set")
@@ -184,8 +184,8 @@ func runRun(args []string) int {
 		return 1
 	}
 	// The whole catalog is passed to the runner, not just the models the
-	// run uses: the key variables every model names are removed from
-	// every environment the harness builds.
+	// run uses. The key variables every model names are removed from
+	// every environment the runner builds.
 	catalog := models
 	models = eval.SelectModels(models, splitList(o.models))
 	if len(models) == 0 {
@@ -317,7 +317,7 @@ func runReplay(args []string) int {
 
 	var contextLimit, maxTurns int
 	fs.IntVar(&contextLimit, "context-limit", 0, "The context window the replay uses")
-	fs.IntVar(&maxTurns, "max-turns", 0, "The turn ceiling the replay uses")
+	fs.IntVar(&maxTurns, "max-turns", 0, "The turn limit the replay uses")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

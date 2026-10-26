@@ -9,7 +9,7 @@ import (
 // The sandbox modes a run can use.
 const (
 	// SandboxNone runs poo directly. A model can reach anything the
-	// harness's user can, including the task set and its checks.
+	// runner's user can, including the task set and its checks.
 	SandboxNone = "none"
 	// SandboxBwrap runs poo under bubblewrap. The run sees the system's
 	// read-only /usr and /etc, its own workdir at /work and its log
@@ -56,9 +56,9 @@ const (
 
 // checkExecutor reports whether an executor can be used.
 //
-// The executor is chosen by the binary that runs, not by the harness:
-// the harness only says which one the run wants. The check here is for
-// the one thing the harness knows: a sandboxed executor needs
+// The executor is chosen by the binary that runs, not by the runner:
+// the runner only says which one the run wants. The check here is for
+// the one thing the runner knows: a sandboxed executor needs
 // bubblewrap on the host.
 func checkExecutor(name string) error {
 	switch name {

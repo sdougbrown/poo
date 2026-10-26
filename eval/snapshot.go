@@ -14,7 +14,7 @@ import (
 // A run copies its workdir from a snapshot of the fixture taken before the
 // first run, so a model that edits the repository's fixture cannot change
 // the start of a later run. The hashes taken at the same moment let the
-// harness tell that a run edited the source anyway.
+// runner tell that a run edited the source anyway.
 type sourceGuard struct {
 	// snapshots maps a fixture's source directory to its snapshot.
 	snapshots map[string]string

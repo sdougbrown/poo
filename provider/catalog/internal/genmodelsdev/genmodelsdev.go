@@ -46,7 +46,7 @@ type model struct {
 	Modalities struct {
 		Input []string `json:"input"`
 	} `json:"modalities"`
-	// Limit is the model's context window and output ceiling.
+	// Limit is the model's context window and output limit.
 	Limit struct {
 		Context int `json:"context"`
 		Output  int `json:"output"`

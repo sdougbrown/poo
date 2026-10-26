@@ -19,7 +19,7 @@ type Compactor interface {
 }
 
 // ForkFunc sends a request that is byte-identical to the last main
-// request, apart from the appended messages and the output ceiling.
+// request, apart from the appended messages and the output limit.
 //
 // Core binds it to the transport's Fork and to the last request's
 // snapshot, so a strategy cannot build a fork request any other way.

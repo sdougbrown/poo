@@ -10,14 +10,14 @@ import (
 //
 // A quirk profile is a named set of changes one model needs: the way
 // its request is shaped and the way its response is repaired. The
-// descriptor names the profiles it needs, and the transport applies
+// model info names the profiles it needs, and the transport applies
 // them in that order.
 //
 // A profile without a recorded fixture and a test does not belong here.
 
 // The names of the profiles the transport ships.
 //
-// A descriptor names them, so the names are part of the contract
+// A model info names them, so the names are part of the contract
 // between the catalog and the transport.
 const (
 	// QuirkThinkTags strips the thinking a model writes in its own tags
@@ -42,7 +42,7 @@ const (
 // the other repairs the response as it is read. A profile that has
 // nothing to do at one of the two points leaves that hook nil.
 type quirkProfile struct {
-	// name is the profile's name, as a descriptor spells it.
+	// name is the profile's name, as a model info spells it.
 	name string
 	// shapeRequest changes the request before it is serialized.
 	shapeRequest func(*requestShape)
@@ -60,8 +60,8 @@ type requestShape struct {
 	request *chatRequest
 	// params holds the named parameters the request carries.
 	params map[string]json.RawMessage
-	// claimed holds the parameter paths the descriptor's controls
-	// already named. A quirk may add what the descriptor did not, never
+	// claimed holds the parameter paths the model info's controls
+	// already named. A quirk may add what the model info did not, never
 	// override it.
 	claimed map[string]bool
 }
@@ -131,21 +131,21 @@ func mergeJSON(first, second []byte) ([]byte, error) {
 // quirks holds the registered profiles, by name.
 var quirks = map[string]quirkProfile{}
 
-// registerQuirk registers a profile, so a descriptor can name it.
+// registerQuirk registers a profile, so a model info can name it.
 func registerQuirk(p quirkProfile) {
 	quirks[p.name] = p
 }
 
-// quirksFor returns the profiles a descriptor named, in its order.
+// quirksFor returns the profiles a model info named, in its order.
 //
-// A name no profile answers is noted and skipped: a descriptor may
+// A name no profile answers is noted and skipped: a model info may
 // name a quirk that a later version ships.
 func quirksFor(names []string, logger *slog.Logger) []quirkProfile {
 	var out []quirkProfile
 	for _, name := range names {
 		p, ok := quirks[name]
 		if !ok {
-			logger.Warn("the descriptor named a quirk the transport does not know", "quirk", name)
+			logger.Warn("the model info named a quirk the transport does not know", "quirk", name)
 			continue
 		}
 		out = append(out, p)
@@ -242,7 +242,7 @@ func simplifySchema(raw json.RawMessage) json.RawMessage {
 
 // textFilters returns the filters the response is read through.
 //
-// The quirks add theirs in the order the descriptor named them, and the
+// The quirks add theirs in the order the model info named them, and the
 // parser is last: it reads the text the others passed on.
 func (t *Transport) textFilters(settings requestSettings) []textFilter {
 	repair := &responseRepair{logger: t.logger, model: settings.info.Name}

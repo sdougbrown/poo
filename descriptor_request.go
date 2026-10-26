@@ -25,7 +25,7 @@ const (
 
 // MaxTokens computes the output room for a request against a model.
 //
-// The room is the model's own output ceiling, or DefaultMaxOutput when
+// The room is the model's own output limit, or DefaultMaxOutput when
 // the model declares none, and it never exceeds the window that is left
 // after the prompt. The value is always computed, so a request always
 // carries a max_tokens and never the endpoint's own default.

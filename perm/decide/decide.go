@@ -130,7 +130,7 @@ func (a *Asker) AskerName() string { return "decide" }
 // threshold allows the call, and a probability at or above the deny
 // threshold refuses it. Anything else defers, and so does a decider
 // that failed, timed out or answered badly: a decision that could not
-// be made is never an approval.
+// be made is not a permission grant.
 func (a *Asker) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
 	if a.decider == nil {
 		return perm.DecisionDefer, nil
@@ -153,7 +153,7 @@ func (a *Asker) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
 	if err != nil {
 		return perm.DecisionDefer, err
 	}
-	// A malformed answer is never an approval: the model answered, but
+	// A malformed answer is not a permission grant: the model answered, but
 	// the answer cannot be used, so the ask defers to the next asker.
 	if err := decide.ValidateAnswers([]decide.Question{question}, answers); err != nil {
 		return perm.DecisionDefer, nil

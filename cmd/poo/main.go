@@ -36,14 +36,14 @@ Run flags:
   --api-key-env <var>    The environment variable holding the API key
   --tools-mode <mode>    native (default), text or auto
   --reasoning-effort <e> reasoning_effort to send (e.g. low), for models that think only when asked
-  --max-turns <n>        The turn ceiling; 0 means unlimited
-  --max-output <n>       The model's output-token ceiling
+  --max-turns <n>        The turn limit; 0 means unlimited
+  --max-output <n>       The model's output-token limit
   --permission-fallback  The decision when the asker chain is exhausted: allow or deny
   --log <path>           The session log path
   --working-dir <dir>    The directory the tools work in (default: the current one)
   --executor <name>      The executor the bash tool runs commands through: local (default) or bwrap
   --project-prompt       Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt
-  --timeout <dur>        The wall-clock ceiling for the run, e.g. 5m
+  --timeout <dur>        The wall-clock limit for the run, e.g. 5m
   --no-wait-jobs         Exit at the first settle; the running jobs stop through the session's close
 
 Serve:

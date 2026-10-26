@@ -63,7 +63,7 @@ type SessionModel struct {
 	ID string `json:"id"`
 	// BaseURL is the endpoint the session talks to, without credentials.
 	BaseURL string `json:"base_url,omitempty"`
-	// MaxOutput is the model's output-token ceiling, 0 when unknown.
+	// MaxOutput is the model's output-token limit, 0 when unknown.
 	MaxOutput int `json:"max_output,omitempty"`
 }
 
@@ -178,7 +178,7 @@ type RunStarted struct {
 	StartedAt string `json:"started_at"`
 	// ModelID is the model the run talks to.
 	ModelID string `json:"model_id"`
-	// MaxTurns is the turn ceiling, 0 when the run is unlimited.
+	// MaxTurns is the run's turn limit, 0 when unlimited.
 	MaxTurns int `json:"max_turns"`
 	// ToolsMode is how the run asks for tool calls.
 	ToolsMode string `json:"tools_mode"`
@@ -489,7 +489,10 @@ type UndeliveredInput struct {
 	Mode string `json:"mode"`
 }
 
-// RunSettled records the end of a run.
+// RunSettled records the end of a run. A run settles; a job ends. Finish
+// names the model's typed answer, including the finish tool and provider
+// stop reason; end is otherwise generic. The run seal stops record writes
+// for that run; the session fence makes close refuse new writes.
 type RunSettled struct {
 	RecordMeta
 	// RunID identifies the run.

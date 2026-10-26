@@ -31,20 +31,20 @@ type Config struct {
 	// APIKey is the bearer token, empty when the endpoint needs none.
 	APIKey string
 	// ToolsMode is how the run asks for tool calls: "native", "text" or
-	// "auto". A descriptor that names a mode wins over this one.
+	// "auto". A model info that names a mode wins over this one.
 	ToolsMode string
 	// ReasoningEffort is sent as the request's reasoning_effort when it
 	// is set, for endpoints whose models think only when asked to. A
-	// descriptor that names a reasoning control wins over this one.
+	// model info that names a reasoning control wins over this one.
 	ReasoningEffort string
-	// Info is the model's descriptor. It names the reasoning control,
+	// Info is the model's info. It names the reasoning control,
 	// the temperature control, the tools mode and the quirks.
 	Info poo.ModelInfo
 	// Reasoning is the reasoning setting: "off", "low", "medium",
 	// "high", or a number of thinking tokens.
 	Reasoning string
 	// Sampling holds the sampling overrides. They win over the
-	// descriptor's own defaults, field by field.
+	// model info's own defaults, field by field.
 	Sampling poo.Sampling
 	// Logger receives the transport's notes, such as a degenerate
 	// stream. A nil logger drops them.
@@ -105,7 +105,7 @@ func New(cfg Config) *Transport {
 
 // toolsMode returns how the run asks for tool calls.
 //
-// A descriptor that names a mode wins over the configured one.
+// A model info that names a mode wins over the configured one.
 func (t *Transport) toolsMode(info poo.ModelInfo) string {
 	if mode := info.Tools.Mode; mode != "" {
 		return string(mode)
@@ -257,7 +257,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 }
 
 // Fork sends a body that is byte-identical to the snapshot, apart from
-// the appended messages and the output ceiling.
+// the appended messages and the output limit.
 //
 // The snapshot holds the serialized body, so the fork re-sends it with
 // the appended messages added after the last one. The key order and
@@ -394,7 +394,7 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 // forkBody appends messages to a serialized request body.
 //
 // The body is decoded, the messages are appended after the last one and
-// the output ceiling is replaced, and the result is serialized again. The
+// the output limit is replaced, and the result is serialized again. The
 // key order is the one the body already had, because the keys are
 // written in the transport's own order and any key it does not know
 // keeps its position.
@@ -446,7 +446,7 @@ func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error
 		if err != nil {
 			return nil, &poo.ProviderError{
 				Kind:    poo.ProviderKindInvalidRequest,
-				Message: "the output ceiling does not encode",
+				Message: "the output limit does not encode",
 			}
 		}
 		payload["max_tokens"] = raw
@@ -632,7 +632,7 @@ func convertMessage(m poo.Message) (chatMessage, error) {
 			// The block's payload is opaque and has no wire field here.
 			// checkProviderBlock has already refused a required block, so
 			// what is left is optional and omitted. The plan's "the
-			// omission is recorded" is the loop's job (Stage 3/6): the
+			// omission is recorded" is the loop's responsibility: the
 			// transport cannot write records.
 		case poo.ContentText:
 			text.WriteString(c.Text)

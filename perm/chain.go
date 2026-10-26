@@ -73,6 +73,9 @@ func (c *chain) ask(ctx context.Context, ask Ask) resolution {
 // and resolution boundary as timers, cancellation and the seal.
 func (c *chain) askReported(ctx context.Context, ask Ask, reporter poo.PermissionReporter) resolution {
 	deadline := c.clock.Now().Add(c.timeout)
+	// Copy the shared public fields from perm's internal ask view; the
+	// internal view also carries the policy-only context the public one
+	// omits.
 	public := poo.PermissionAsk{AskID: ask.AskID, Tool: ask.Tool, Summary: ask.Summary, Class: ask.Class, Reason: ask.Reason, RepeatCount: ask.RepeatCount}
 	opts := poo.PermissionRequestOptions{Context: ctx, Deadline: deadline, Now: c.clock.Now, Fallback: string(c.fallback)}
 	var request *poo.PermissionRequest

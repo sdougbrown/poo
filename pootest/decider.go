@@ -175,7 +175,7 @@ type Compactor struct {
 type ForkCall struct {
 	// Appended are the messages the compactor appended.
 	Appended []poo.Message
-	// MaxTokens is the output ceiling the compactor asked for.
+	// MaxTokens is the output limit the compactor asked for.
 	MaxTokens int
 }
 
