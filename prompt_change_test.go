@@ -22,9 +22,11 @@ func TestThePromptChangeIsInTheNextRun(t *testing.T) {
 	s := newTestSession(t, opts)
 	runSession(t, s, "do the thing")
 
-	s.SetPrompt(func(b *prompt.Builder) {
+	if err := s.SetPrompt(func(b *prompt.Builder) {
 		b.Set("house", "the house style")
-	})
+	}); err != nil {
+		t.Fatalf("changing the prompt: %v", err)
+	}
 	runSession(t, s, "do the other thing")
 
 	reqs := tr.Requests()

@@ -61,6 +61,85 @@ the fallback, and an absent list takes the binary's own chain (`[wire]` in
 is created from it. The typed result's `finish` tool is added that way,
 because the settings opt into it and no profile names it.
 
+## Your own prompt
+
+Each prompt section lives in a markdown file beside the code that owns it, and
+the package embeds it. A binary that wants its own prose embeds a directory and
+hands it to the factory:
+
+```go
+//go:embed prompts
+var promptDir embed.FS
+
+prompts, err := fs.Sub(promptDir, "prompts")
+if err != nil {
+	return err
+}
+srv, err := server.New(server.Options{
+	// ...
+	PromptFS: prompts,
+})
+```
+
+`config.BuildOptions.PromptFS` is the same directory for a binary that builds
+its runtime without the factory.
+
+Each file is named after the section it replaces. The names are the default
+order's (`prompt.Order()`): `base`, `catalog`, `environment` and `project`, and
+`tools.<tool>` for a tool's own section. A directory in the path names the
+section's prefix, so a tool's file is `tools/bash.md`. A variant is a sibling
+whose name carries it, `tools/bash.small-local.md`.
+
+```
+prompts/
+  base.md
+  environment.md
+  tools/bash.md
+  tools/bash.small-local.md
+```
+
+A file is a `text/template`. The template renders with the data the default it
+replaces carries. The library's environment section reads `{{.Cwd}}`,
+`{{.OS}}`, `{{.Date}}` and `{{.Model}}`. The catalog section reads
+`{{.Search}}` (a bool), `{{.Count}}` (an int), `{{.Call}}` and `{{.Find}}` (the two
+tool names), and `{{.Entries}}`, a list whose entries have `{{.Name}}` and
+`{{.Description}}`. A section whose prose names no field renders the same text
+whatever the data is.
+
+A file's final newline is not part of the section. Each file ends with one, and
+the renderer drops it. A file that ends with a blank line keeps the newline it
+meant.
+
+A file that names a section the binary does not build is an error that names
+the file. So is a file that is not markdown. A linked tool's section loads
+for every profile. Only profiles that offer the tool render its section.
+One directory can serve a binary with different tool profiles. A variant the directory does not
+carry falls back to the section's default text. A default file replaces the
+section's default text and keeps the alternatives the section already offers,
+including the embedded ones: omitting a variant from the directory does not
+remove a variant the section already had.
+
+A template is checked when it loads and rendered when the session is built. The
+model, tools, working directory, variant, settings and project file are all
+known by then. A template that renders for one session and not another fails
+the session, not the run. `config.Build` renders the prompt once, so `poo run`
+fails through the settings' own error path. The failure is a `config.Error` with
+the `invalid_value` code and the `system_prompt` field, and the file is named
+underneath. A session built over the wire is refused at `session/create` with
+the `invalid_settings` data code.
+
+A session that changes its model or variant renders the prompt again. A prompt
+that cannot render there refuses the change and leaves the session as it was.
+
+The layers apply in this order: the embedded default, the binary's directory,
+the settings (`system_prompt.*`) and the project's `AGENTS.md`. A later layer
+wins, so an operator's settings file still changes the prompt the binary ships.
+`system_prompt.replace` clears the directory's sections. If the session offers
+registry tools, the build restores the embedded catalog after replacement, so
+a directory's `catalog.md` does not apply.
+The project layer is the consumer's to add: `server.New` loads no project file,
+and `poo prompt` includes one only when it is run with `--project-prompt`.
+
 ## Inject tools
 
 A tool constructor takes the settings' resolved options and returns a

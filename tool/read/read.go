@@ -18,7 +18,6 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/internal/caps"
-	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/protect"
 )
 
@@ -78,22 +77,6 @@ func (t *Tool) Spec() poo.ToolSpec {
 		Class:      poo.ClassReadOnly,
 		PrimaryArg: "path",
 	}
-}
-
-// section is the guidance the tool brings to the system prompt.
-//
-// The tool shows a range of a file and names it, so the model knows
-// where it is in the file and can carry on from there.
-const section = "Read:\n" +
-	"- The read shows a range of lines and names it, e.g. \"[path · lines 1–2000 of 5312]\".\n" +
-	"- Carry on from the last line you saw with offset, instead of reading the file again from the start.\n" +
-	"- A read that says \"capped\" stopped at the context budget: ask for the next range with offset.\n" +
-	"- A range past the end of the file comes back empty, with the file's line count in the header.\n" +
-	"- A binary file is refused, with its size; use grep or a command to look inside it."
-
-// PromptSection renders the tool's own section of the system prompt.
-func (t *Tool) PromptSection(env prompt.Env) string {
-	return section
 }
 
 // args are the tool's arguments.

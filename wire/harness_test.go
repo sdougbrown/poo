@@ -13,6 +13,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/perm"
+	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/wire"
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -452,6 +453,8 @@ type testFactory struct {
 	ids int
 	// flushErr is the failure a session's flush returns, when it is set.
 	flushErr error
+	// prompt are the prompt changes the session is built with.
+	prompt []func(*prompt.Builder)
 }
 
 // newTestFactory returns a factory over a temporary directory.
@@ -544,6 +547,7 @@ func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, 
 		Build:      poo.BuildInfo{Name: "poo-test", Version: "test"},
 		WorkingDir: f.dir,
 		ToolsMode:  "native",
+		Prompt:     f.prompt,
 	}, poo.WithObserver(env.Observer), poo.WithPolicy(policy))
 	if err != nil {
 		_ = store.Close()

@@ -669,18 +669,32 @@ func (f fixStartFunc) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (po
 // TestStartupWritesNothingAfterTheSeal covers the plan's seal: a
 // cancellation during the prompt render settles the run, and the
 // startup writes nothing else for it.
+//
+// The session renders its prompt when it is built, so the run's render is
+// the one of the prompt a hook edited: the build's render is the first
+// call, and the run's is the second.
 func TestStartupWritesNothingAfterTheSeal(t *testing.T) {
 	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	sink := &recordingSink{}
 	tr := scripted([]fakeResponse{{text: "done"}})
 	opts := testOptions(t, tr, &echoTool{}, sink)
+	renders := 0
 	opts.Prompt = []func(*prompt.Builder){func(b *prompt.Builder) {
 		b.SetRender("base", func(prompt.Env) string {
+			renders++
+			if renders < 2 {
+				return ""
+			}
 			close(entered)
 			<-release
 			return ""
 		})
 	}}
+	opts.BeforeRun = []poo.BeforeRunHook{fixStartFunc(func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error) {
+		return poo.StartDecision{SystemPrompt: func(s prompt.Sections) {
+			s.Append("base", "the hook's edit")
+		}}, nil
+	})}
 	s := newTestSession(t, opts)
 	go func() {
 		defer close(done)

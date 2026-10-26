@@ -14,8 +14,10 @@
 package main
 
 import (
+	"embed"
 	"flag"
 	"fmt"
+	iofs "io/fs"
 	"os"
 
 	"github.com/sdougbrown/poo"
@@ -31,6 +33,15 @@ import (
 
 // version is the build's version.
 const version = "0.0.1"
+
+// promptDir is the binary's own prompt directory.
+//
+// It replaces the base section with the read-only contract, so the
+// prompt the model reads is the one this binary is about. The runtime
+// settings still apply on top of it.
+//
+//go:embed prompts
+var promptDir embed.FS
 
 // identityEnv is the variable the binary's identity is read from.
 const identityEnv = "POO_READONLY_ID"
@@ -78,11 +89,17 @@ func run(args []string) int {
 	if *ephemeral {
 		overrides.SessionMode = "ephemeral"
 	}
+	prompts, err := iofs.Sub(promptDir, "prompts")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo-readonly: %v\n", err)
+		return 2
+	}
 	srv, err := server.New(server.Options{
 		Settings:       settings,
 		Overrides:      overrides,
 		WorkingDir:     dir,
 		DefaultProfile: search.Name,
+		PromptFS:       prompts,
 		Tools: map[string]config.ToolFactory{
 			"read": func(config.ToolOptions) poo.Tool { return read.New() },
 			"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
