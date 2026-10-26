@@ -13,7 +13,8 @@ import (
 
 // TestRepoImports checks the poo module itself: the core package may import
 // the standard library plus poo/prompt and poo/decide, and poo/prompt,
-// poo/decide and poo/wire/protocol may import the standard library only.
+// poo/prompt/agentsmd, poo/decide and poo/wire/protocol may import the
+// standard library only.
 func TestRepoImports(t *testing.T) {
 	root := moduleRoot(t)
 	modulePath := modulePathOf(t, root)
@@ -73,6 +74,14 @@ func TestFixtures(t *testing.T) {
 			name: "allowed",
 		},
 		{
+			// The agentsmd loader may import the standard library
+			// only, so the helper it reaches for is a finding.
+			name: "agentsmd",
+			want: []string{
+				m + "agentsmd/prompt/agentsmd imports " + m + "agentsmd/helper",
+			},
+		},
+		{
 			name: "wireproto",
 			want: []string{m + "wireproto/wire/protocol imports " + m + "wireproto/extra"},
 		},
@@ -116,6 +125,7 @@ func TestSkippedPackages(t *testing.T) {
 	want := []string{
 		m + "/decide (no non-test Go files)",
 		m + "/prompt (does not exist yet)",
+		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
@@ -133,6 +143,7 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 		m + " (no non-test Go files)",
 		m + "/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",
+		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {
@@ -155,6 +166,7 @@ func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
 	want := []string{
 		m + "/decide (does not exist yet)",
 		m + "/prompt (does not exist yet)",
+		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
 	}
 	if !slices.Equal(res.Skipped, want) {

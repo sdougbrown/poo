@@ -216,7 +216,7 @@ func TestTheNativeModePromptDoesNotAskForATextCall(t *testing.T) {
 		{Name: "bash", Description: "Run a shell command."},
 		{Name: "read", Description: "Read a range of lines from a file."},
 	}
-	prompt := renderPrompt("gemma4", tools, "native")
+	prompt := sessionPromptWith(t, "gemma4", tools, "native", "")
 	for _, needle := range []string{"tool_call", "Call a tool by writing"} {
 		if strings.Contains(prompt, needle) {
 			t.Errorf("the native prompt mentions %q", needle)
@@ -236,7 +236,7 @@ func TestTheTextModePromptAsksForATextCall(t *testing.T) {
 		{Name: "read", Description: "Read a range of lines from a file."},
 	}
 	for _, mode := range []string{"text", "auto"} {
-		prompt := renderPrompt("gemma4", tools, mode)
+		prompt := sessionPromptWith(t, "gemma4", tools, mode, "")
 		for _, needle := range []string{"tool_call", "bash: Run a shell command."} {
 			if !strings.Contains(prompt, needle) {
 				t.Errorf("the %s prompt does not mention %q", mode, needle)
@@ -270,8 +270,22 @@ func TestTheNativeModeRunSendsTheToolsNatively(t *testing.T) {
 	}
 
 	tools, _ := endpoint.requests[0]["tools"].([]any)
-	if len(tools) != 2 {
-		t.Errorf("the request held %d tools, want 2", len(tools))
+	// The bash tool may run in the background, so the core registers
+	// the jobs tools beside it.
+	if len(tools) != 4 {
+		t.Errorf("the request held %d tools, want 4", len(tools))
+	}
+	names := map[string]bool{}
+	for _, tool := range tools {
+		m, _ := tool.(map[string]any)
+		fn, _ := m["function"].(map[string]any)
+		name, _ := fn["name"].(string)
+		names[name] = true
+	}
+	for _, want := range []string{"bash", "read", "jobs", "cancel_job"} {
+		if !names[want] {
+			t.Errorf("the request does not offer the %q tool", want)
+		}
 	}
 
 	// The system prompt never asks for a text call.

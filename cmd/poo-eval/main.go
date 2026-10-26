@@ -42,6 +42,7 @@ Run flags:
   --work-root DIR      Where the workdirs are made (default: the user cache directory)
   --keep-workdirs      Leave the workdirs behind after the run
   --sandbox <mode>     How a run is isolated: bwrap (default, needs bubblewrap) or none
+  --executor <name>    The executor the model's commands run through: local (default) or bwrap
   --force              Clear the out directory's runs before the run
 
 Compare flags:
@@ -125,6 +126,7 @@ type runOptions struct {
 	workRoot    string
 	keepWork    bool
 	sandbox     string
+	executor    string
 	force       bool
 }
 
@@ -148,6 +150,7 @@ func runRun(args []string) int {
 	fs.StringVar(&o.workRoot, "work-root", "", "Where the workdirs are made (default: the user cache directory)")
 	fs.BoolVar(&o.keepWork, "keep-workdirs", false, "Leave the workdirs behind")
 	fs.StringVar(&o.sandbox, "sandbox", eval.SandboxBwrap, "How a run is isolated: bwrap or none")
+	fs.StringVar(&o.executor, "executor", eval.ExecutorLocal, "The executor the model's commands run through: local or bwrap")
 	fs.BoolVar(&o.force, "force", false, "Clear the out directory's runs before the run")
 
 	if err := fs.Parse(args); err != nil {
@@ -236,6 +239,7 @@ func runRun(args []string) int {
 		KeepWorkdirs: o.keepWork,
 		Force:        o.force,
 		Sandbox:      o.sandbox,
+		Executor:     o.executor,
 	})
 
 	fmt.Fprintf(os.Stderr, "poo-eval: %d model(s) x %d task(s) x %d seed(s) -> %s\n",

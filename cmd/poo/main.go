@@ -20,9 +20,12 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/handoff"
+	"github.com/sdougbrown/poo/prompt/agentsmd"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/tool/bash"
+	"github.com/sdougbrown/poo/tool/edit"
+	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
 )
 
@@ -42,6 +45,8 @@ Run flags:
   --max-output <n>       The model's output-token ceiling
   --log <path>           The session log path
   --working-dir <dir>    The directory the tools work in (default: the current one)
+  --executor <name>      The executor the bash tool runs commands through: local (default) or bwrap
+  --project-prompt       Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt
   --timeout <dur>        The wall-clock ceiling for the run, e.g. 5m
   --no-wait-jobs         Exit at the first settle; the running jobs stop through the session's close
 `
@@ -81,7 +86,13 @@ type runOptions struct {
 	reasoningEffort string
 	logPath         string
 	workingDir      string
-	timeout         time.Duration
+	// executor is the executor the bash tool runs its commands
+	// through.
+	executor string
+	// projectPrompt includes the working directory's project
+	// instructions in the prompt.
+	projectPrompt bool
+	timeout       time.Duration
 	// noWaitJobs exits at the first settle, and the running jobs stop
 	// through the session's close.
 	noWaitJobs bool
@@ -104,6 +115,8 @@ func runRun(args []string) int {
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "The reasoning_effort to send, for models that think only when asked")
 	fs.StringVar(&o.logPath, "log", "", "The session log path")
 	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
+	fs.StringVar(&o.executor, "executor", "local", "The executor the bash tool runs commands through")
+	fs.BoolVar(&o.projectPrompt, "project-prompt", false, "Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt")
 	fs.DurationVar(&o.timeout, "timeout", 0, "The wall-clock ceiling for the run")
 	fs.BoolVar(&o.noWaitJobs, "no-wait-jobs", false, "Exit at the first settle; the running jobs stop through the session's close")
 
@@ -140,6 +153,18 @@ func runRun(args []string) int {
 	if !info.IsDir() {
 		fmt.Fprintf(os.Stderr, "poo run: --working-dir %s is not a directory\n", absWorkDir)
 		return 2
+	}
+
+	// The project's instructions are opt-in: the flag asks for them, and
+	// the loader reads the working directory only.
+	project := ""
+	if o.projectPrompt {
+		text, err := agentsmd.Load(absWorkDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "poo run: --project-prompt: %v\n", err)
+			return 2
+		}
+		project = text
 	}
 
 	logPath := o.logPath
@@ -185,12 +210,30 @@ func runRun(args []string) int {
 		ReasoningEffort: o.reasoningEffort,
 	})
 
-	bashTool := bash.New()
-	readTool := read.New()
+	// The executor is chosen before the session starts: a session that
+	// asked for an executor that cannot run fails here, and never runs
+	// its commands through another one.
+	executor, err := executorRegistry().New(o.executor, bash.Options{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 2
+	}
 
+	bashTool := bash.New(bash.WithExecutor(executor))
+	readTool := read.New()
+	grepTool := grep.New()
+	editTool := edit.New()
+
+	// The tools the binary links, and the tools a run offers.
+	//
+	// The order is the offer order, and it is what a run enables: the
+	// grep and the edit tools are linked into the binary, but a run
+	// does not offer them until a profile names them.
 	tools := map[string]poo.Tool{
 		"bash": bashTool,
 		"read": readTool,
+		"grep": grepTool,
+		"edit": editTool,
 	}
 	toolOrder := []string{"bash", "read"}
 	toolSpecs := make([]poo.ToolSpec, 0, len(toolOrder))
@@ -251,7 +294,7 @@ func runRun(args []string) int {
 		// session that reaches the window writes a handoff and settles
 		// context_exhausted with the note.
 		Compactor: handoff.New(handoff.Options{}),
-	}, poo.WithPrompt(systemPrompt(o.modelID, toolSpecs, o.toolsMode)))
+	}, poo.WithPrompt(systemPrompt(o.modelID, toolSpecs, o.toolsMode, project)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1
