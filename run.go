@@ -90,8 +90,9 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		wake:            make(chan struct{}, 1),
 	}
 	s.run = run
-	s.turns = nil
-	s.results = map[string]ToolResult{}
+	// The turn summaries and the results belong to the session, not to
+	// the run: a turn keeps its number across the runs, and a handle
+	// names a call for the life of the session.
 	s.repeats = newRepeatCounter()
 	s.transitionLocked(StateRequesting)
 	// The results that were held are delivered at the start of the run,
@@ -100,8 +101,10 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	held := s.takeHeldResultsLocked()
 	s.mu.Unlock()
 
-	// The run's own record of its beginning.
-	if err := s.write(ctx, &RunStarted{
+	// The run's own record of its beginning. The write is claimed
+	// against the seal, so a run that settles while it is in flight
+	// cannot get run.settled first.
+	if err := s.writeRun(run, &RunStarted{
 		RecordMeta: NewRecordMeta("run.started"),
 		RunID:      runID,
 		PromptHash: hashText(text),
@@ -129,44 +132,119 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		"jobs":        jobPayload(jobs),
 	})
 
-	// The system prompt is the first thing the model sees, and it is
-	// frozen for the length of the run. The history persists across a
-	// session's runs, so the prompt is appended once: a woken run
-	// reuses the copy the first run put there.
-	if s.opts.SystemPrompt != "" && !s.hasSystemMessage() {
-		msg := NewTextMessage(RoleSystem, s.opts.SystemPrompt)
-		msg.Origin = OriginSystem
-		s.appendMessages(msg)
-		if err := s.write(ctx, &MessageRecord{
-			RecordMeta: NewRecordMetaFrom("message", msg.Origin),
-			RunID:      runID,
-			Role:       msg.Role,
-			Content:    msg.Content,
-		}); err != nil {
-			s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
-				Source: "store",
-				Text:   err.Error(),
-			}))
-			return runID, nil
-		}
-	}
+	// The wall-clock budget starts when the run is admitted, before the
+	// startup hooks and the prompt render, so a blocked hook cannot
+	// outlive MaxDuration.
+	stopTimer := s.startDurationTimer(run)
+	s.mu.Lock()
+	run.stopTimer = stopTimer
+	s.mu.Unlock()
 
 	// The held results are delivered before the prompt's text, so the
 	// model sees them first. A woken run's job results are appended
 	// before its first request too, and they are recorded with the
 	// delivery the queue gave them.
+	//
+	// The results are delivered before the before-run hooks, so a woken
+	// run's hooks see the results that woke the run.
 	for _, result := range held {
 		s.deliverJobResult(run, result)
 	}
 	for _, result := range jobs {
 		s.deliverJobResult(run, result)
 	}
+	if s.runWindingDown(run) {
+		return runID, nil
+	}
+
+	// The before-run hooks run at the start of every run, before the
+	// first request. The trigger says what started the run.
+	decisions, err := s.runBeforeRun(run, RunTrigger{
+		Kind:   trigger,
+		Prompt: text,
+		Jobs:   publicJobResults(jobs),
+	})
+	if err != nil {
+		// A hook that failed settles the run with hook_error.
+		s.finalize(run, newCandidate(ReasonHookError, SettleDetail{
+			Source: hookFailureSource(err, "before_run"),
+			Text:   err.Error(),
+		}))
+		return runID, nil
+	}
+	// The finalization owns the run: the startup writes nothing more
+	// for it.
+	if s.runWindingDown(run) {
+		return runID, nil
+	}
+
+	// The system prompt is rendered once per run, after the before-run
+	// hooks, and it is frozen for the length of the run.
+	if promptText, promptVariant := s.renderSystemPrompt(decisions.edits); promptText != "" {
+		if s.runWindingDown(run) {
+			return runID, nil
+		}
+		// A prompt that differs from the last one is recorded whole,
+		// with its hash and variant, so a replay never re-renders it.
+		if s.promptChanged(promptText) {
+			if err := s.writeRun(run, &SystemPromptRecord{
+				RecordMeta: NewRecordMeta("system_prompt"),
+				RunID:      runID,
+				Variant:    promptVariant,
+				Text:       promptText,
+				Hash:       hashText(promptText),
+			}); err != nil {
+				if s.runWindingDown(run) {
+					return runID, nil
+				}
+				s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
+					Source: "store",
+					Text:   err.Error(),
+				}))
+				return runID, nil
+			}
+			s.rememberPrompt(promptText)
+		}
+		msg := NewTextMessage(RoleSystem, promptText)
+		msg.Origin = OriginSystem
+		// The history persists across a session's runs, so the prompt's
+		// message is recorded and appended once: a woken run reuses the
+		// copy the first run put there, and its own frozen copy is what
+		// its request carries.
+		if !s.hasSystemMessage() {
+			if err := s.writeRun(run, &MessageRecord{
+				RecordMeta: NewRecordMetaFrom("message", msg.Origin),
+				RunID:      runID,
+				Role:       msg.Role,
+				Content:    msg.Content,
+			}); err != nil {
+				if s.runWindingDown(run) {
+					return runID, nil
+				}
+				s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
+					Source: "store",
+					Text:   err.Error(),
+				}))
+				return runID, nil
+			}
+			s.appendMessages(msg)
+		}
+		s.mu.Lock()
+		run.systemMessage = &msg
+		s.mu.Unlock()
+	}
+
+	// The messages the before-run hooks appended follow the system
+	// prompt.
+	s.appendStartMessages(run, decisions)
+	if s.runWindingDown(run) {
+		return runID, nil
+	}
 
 	user := NewTextMessage(RoleUser, withDeliveryNote(text, note))
 	user.Origin = OriginUser
 	user.DeliveryNote = note
-	s.appendMessages(user)
-	if err := s.write(ctx, &MessageRecord{
+	if err := s.writeRun(run, &MessageRecord{
 		RecordMeta:   NewRecordMetaFrom("message", user.Origin),
 		RunID:        runID,
 		Turn:         0,
@@ -174,12 +252,19 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		Content:      user.Content,
 		DeliveryNote: note,
 	}); err != nil {
+		if s.runWindingDown(run) {
+			return runID, nil
+		}
 		// The store refused a record. The run settles store_error, and
 		// the session is broken.
 		s.finalize(run, newCandidate(ReasonStoreError, SettleDetail{
 			Source: "store",
 			Text:   err.Error(),
 		}))
+		return runID, nil
+	}
+	s.appendMessages(user)
+	if s.runWindingDown(run) {
 		return runID, nil
 	}
 
@@ -208,9 +293,9 @@ func (s *Session) drive(run *runState) {
 	}()
 
 	// The duration budget is a timer: it fires even while a tool is
-	// running, and it settles the run through the normal protocol.
-	stopTimer := s.startDurationTimer(run)
-	defer stopTimer()
+	// running, and it settles the run through the normal protocol. It
+	// started when the run was admitted, before the startup hooks.
+	defer s.stopRunTimer(run)
 
 	cands := s.loop(run)
 	for {
@@ -293,6 +378,8 @@ func (s *Session) recordAssistantResponse(run *runState, turn int, resp *respons
 	msg.Partial = partial
 	msg.Cause = cause
 	s.appendMessages(msg)
+	s.recordMessage(msg)
+	s.growSpan(run.globalTurn)
 	return msg, s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
 		RunID:      run.id,
@@ -326,6 +413,17 @@ func (s *Session) startDurationTimer(run *runState) func() {
 		}
 	}()
 	return func() { close(stop) }
+}
+
+// stopRunTimer stops the run's wall-clock timer, if it is still running.
+func (s *Session) stopRunTimer(run *runState) {
+	s.mu.Lock()
+	stop := run.stopTimer
+	run.stopTimer = nil
+	s.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 // loop drives the requesting/executing cycle and returns the candidates
@@ -374,13 +472,20 @@ func (s *Session) loop(run *runState) []candidate {
 		s.transitionLocked(StateRequesting)
 		s.mu.Unlock()
 
+		// The turn starts here: the session numbers it, and the
+		// span it occupies in the view begins.
+		run.globalTurn = s.openTurn(turn)
+
 		s.events.emit(EventTurnStarted, map[string]any{"run_id": run.id, "turn": turn})
 
 		resp, rendered, err := s.request(run, turn)
 		// The run may have settled while the request was in flight.
 		// What the request produced then is a late completion: it
-		// never mutates the history, the records or the events.
+		// never mutates the history, the records or the events. The
+		// response is dropped and logged once; its deltas are not
+		// logged one by one.
 		if s.runWindingDown(run) {
+			s.logLateProviderResponse(run.id, turn)
 			return nil
 		}
 		if rendered.Body != nil || rendered.Messages > 0 {
@@ -447,6 +552,9 @@ func (s *Session) loop(run *runState) []candidate {
 		processed := false
 		if len(resp.calls) > 0 {
 			processed = s.executeBatch(run, turn, resp.calls, truncated)
+			// The turn's messages are all in the view now, so the
+			// turn's span is complete.
+			s.growSpan(run.globalTurn)
 			// An interrupt during the batch cut the turn short. The
 			// unstarted calls are skipped, and the run continues.
 			if s.interruptPending(run) {
@@ -574,7 +682,7 @@ func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool) tu
 			})}}
 		}
 		return turnOutcome{candidates: []candidate{newCandidate(ReasonHookError, SettleDetail{
-			Source: "before_settle",
+			Source: hookFailureSource(err, "before_settle"),
 			Text:   err.Error(),
 		})}}
 	}
@@ -599,7 +707,7 @@ func (s *Session) evaluateStopConditions(run *runState, turn int) []candidate {
 	s.mu.Unlock()
 	state := StopState{
 		Turn:      turn,
-		Calls:     s.callStates(turn),
+		Calls:     s.callStates(run.globalTurn),
 		RunTokens: tokens,
 	}
 	var cands []candidate
@@ -652,12 +760,15 @@ func (s *Session) evaluateBudgets(run *runState, turn int) []candidate {
 }
 
 // callStates returns the calls of a turn and their outcomes.
+//
+// The turn is the session's number for the turn, so the summaries of
+// the earlier runs are not mixed in.
 func (s *Session) callStates(turn int) []CallState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []CallState
 	for _, t := range s.turns {
-		if t.Index != turn {
+		if t.Session != turn {
 			continue
 		}
 		for _, c := range t.Calls {
@@ -816,7 +927,7 @@ var errDeliveryAbandoned = errors.New("poo: the delivery was abandoned")
 // 3 may abandon, so a write the run settled around is reported as
 // abandoned instead of breaking the session.
 func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) error {
-	wctx, cancel := context.WithTimeout(ctx, recordWriteBudget)
+	wctx, cancel := context.WithTimeout(ctx, s.recordBudget())
 	defer cancel()
 	return s.appendRecord(wctx, rec, nil, func() (bool, error) {
 		s.mu.Lock()
@@ -902,7 +1013,7 @@ func originForMode(mode InputMode) Origin {
 // error, so the caller can still write the usage it produced.
 func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
 	s.mu.Lock()
-	messages := CloneMessages(s.history)
+	messages := s.modelMessagesLocked()
 	tools := s.toolSpecs()
 	requestChars := s.historyCharsLocked()
 	s.mu.Unlock()

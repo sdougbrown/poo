@@ -106,7 +106,10 @@ func TestTheFailingSinkStopsASession(t *testing.T) {
 // session with the scripted compactor asks it before every request.
 func TestTheScriptedCompactorDrivesASession(t *testing.T) {
 	transport := pootest.NewTransport(pootest.Turn{Text: "the answer"})
-	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "test"})
+	compactor := pootest.NewCompactor(true, poo.Compaction{
+		Strategy: "test",
+		End:      &poo.EndRun{Handoff: "the handoff"},
+	})
 	sink := pootest.NewSink()
 
 	session, err := poo.New(poo.Options{

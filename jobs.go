@@ -159,6 +159,16 @@ type JobEnded struct {
 	InputID string `json:"input_id"`
 	// Text is the result the model reads.
 	Text string `json:"text"`
+	// Original is the result the tool produced, when a hook replaced
+	// it. It is absent for a redacted result.
+	Original *ToolResultData `json:"original,omitempty"`
+	// Redacted reports that a hook redacted the result.
+	Redacted bool `json:"redacted,omitempty"`
+	// RedactedBy names the hook that redacted the result.
+	RedactedBy string `json:"redacted_by,omitempty"`
+	// Hooks are the after-tool hooks' decisions, in the order the
+	// hooks ran. A redacted chain's decisions carry no contents.
+	Hooks []HookDecision `json:"hooks,omitempty"`
 	// EndedAt is the RFC 3339 end time in UTC.
 	EndedAt string `json:"ended_at"`
 }
@@ -209,6 +219,22 @@ type jobState struct {
 	// partialText is what the job's tool had produced when it stopped.
 	// The close keeps it in the job.ended record it writes.
 	partialText string
+	// prepared is the validated call the job runs, so a completion the
+	// close owns can still name the call to its hooks.
+	prepared Prepared
+	// completing reports that the job's completion owns the chain, so
+	// only one caller runs it.
+	completing bool
+	// completionCtx is the context the completion chain runs under. It
+	// is the session's, not the job's, so a cancelled job still completes
+	// its chain; the close ends it when the chain outlives the teardown.
+	completionCtx context.Context
+	// completionCancel ends the completion chain, so the close can take
+	// ownership of a chain that outlived its teardown deadline.
+	completionCancel context.CancelFunc
+	// completionDone is closed when the completion chain has written the
+	// job's terminal records.
+	completionDone chan struct{}
 }
 
 // jobResult is a job's finished result, waiting for its delivery.
@@ -262,7 +288,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 	// about. A run that is winding down admits nothing: no new effect
 	// starts after the finalization has begun.
 	s.mu.Lock()
-	if run.committed || run.finalizing {
+	if run.committed || run.finalizing || run.interruptPending {
 		s.mu.Unlock()
 		return "", false, true
 	}
@@ -287,6 +313,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 		ctx:       ctx,
 		cancel:    cancel,
 		done:      make(chan struct{}),
+		prepared:  prepared,
 	}
 	s.jobs[jobID] = job
 	s.jobOrder = append(s.jobOrder, jobID)
@@ -331,7 +358,7 @@ func (s *Session) startJob(run *runState, handle, tool string, prepared Prepared
 		// of its result, which wakes a run or is held like any other. The
 		// acceptance claim is held until that completion is written, so
 		// the finalization cannot commit before the job has one.
-		s.finishJob(job, OutcomeCancelled, "the run settled before the job started", false, false)
+		s.finishJob(job, OutcomeCancelled, afterToolOutcome{result: ToolResult{Text: "the run settled before the job started"}}, false, false, "")
 		// The job never had a goroutine, so nothing else closes its done
 		// channel: a close that waits for it would wait for a job that
 		// cannot finish.
@@ -418,13 +445,13 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	// result and the fatal flag set.
 	defer func() {
 		if r := recover(); r != nil {
-			s.finishJob(job, OutcomeError, fmt.Sprintf("panic: %v", r), false, true)
+			s.finishJob(job, OutcomeError, afterToolOutcome{result: ToolResult{Text: fmt.Sprintf("panic: %v", r), IsError: true}}, false, true, "")
 		}
 	}()
 
 	tool, ok := s.opts.Tools[job.tool]
 	if !ok {
-		s.finishJob(job, OutcomeError, "the tool is gone", false, false)
+		s.completeJob(job, ToolResult{Text: "the tool is gone", IsError: true}, OutcomeError, false, false, "")
 		return
 	}
 
@@ -444,34 +471,98 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	// belongs to the job, and the receiving run settles tool_fatal.
 	fatal := err != nil && errors.Is(err, ErrFatal)
 
-	// A job that the session closed stops is not recorded here: the
-	// close writes the record with its cause, so a job gets exactly
-	// one job.ended.
-	if s.jobCtx.Err() != nil {
-		return
-	}
-
 	// The job's context decides a timeout or a cancellation before a
 	// nil error can call the job successful: a cooperative tool returns
 	// its partial output and no error when it is stopped.
+	outcome := OutcomeOK
+	text := result.Text
 	switch {
 	case timedOut:
 		// The job ran out of time. The outcome is an error with the
 		// timeout flag, and the partial output is the result.
-		s.finishJob(job, OutcomeError, stoppedText(result.Text, err, "the job ran out of time"), true, fatal)
+		outcome = OutcomeError
+		text = stoppedText(result.Text, err, "the job ran out of time")
 	case errors.Is(ctx.Err(), context.Canceled):
-		// The job was stopped on purpose.
-		s.finishJob(job, OutcomeCancelled, stoppedText(result.Text, err, "the job was cancelled"), false, fatal)
+		// The job was stopped on purpose, or the session is closing.
+		outcome = OutcomeCancelled
+		text = stoppedText(result.Text, err, "the job was cancelled")
 	case err == nil:
-		s.finishJob(job, OutcomeOK, result.Text, false, false)
 	case errors.Is(err, context.Canceled):
-		s.finishJob(job, OutcomeCancelled, stoppedText(result.Text, err, "the job was cancelled"), false, fatal)
+		outcome = OutcomeCancelled
+		text = stoppedText(result.Text, err, "the job was cancelled")
 	default:
 		// The policy is the stopped branches': the partial output is
 		// the job's result, and the error explains a job that
 		// produced none.
-		s.finishJob(job, OutcomeError, stoppedText(result.Text, err, "the job failed"), false, fatal)
+		outcome = OutcomeError
+		text = stoppedText(result.Text, err, "the job failed")
 	}
+
+	// The chain runs once, at the completion, under a context of its
+	// own. A close is a completion too: it sets the cause and the text,
+	// and the chain still sees the partial output before it is held.
+	s.completeJob(job, ToolResult{Text: text, IsError: outcome == OutcomeError}, outcome, timedOut, fatal, "")
+}
+
+// completeJob runs a job's after-tool chain once and records its end.
+//
+// The chain runs on a context of its own, so a cancellation, a timeout
+// or a session close cannot discard its decision. The caller names the
+// cause when the close owns the completion.
+func (s *Session) completeJob(job *jobState, result ToolResult, outcome Outcome, timedOut, fatal bool, cause JobCause) {
+	s.mu.Lock()
+	if job.ended || job.completing {
+		s.mu.Unlock()
+		return
+	}
+	job.completing = true
+	if job.completionCtx == nil {
+		job.completionCtx, job.completionCancel = context.WithCancel(context.Background())
+		job.completionDone = make(chan struct{})
+	}
+	completionCtx := job.completionCtx
+	completionDone := job.completionDone
+	prepared := job.prepared
+	closing := cause != "" || s.jobCtx.Err() != nil
+	s.mu.Unlock()
+	// The chain's terminal record is written before this closes: the
+	// close waits for it before its final flush.
+	defer close(completionDone)
+
+	if closing && cause == "" {
+		cause = CauseSessionClosed
+	}
+	if cause == CauseSessionClosed {
+		outcome = OutcomeCancelled
+		result.IsError = true
+		result.Text = closedJobText(result.Text)
+	}
+
+	info := s.toolCallInfo(0, job.handle, job.tool, prepared, callPlan{})
+	info.Job = job.id
+	chain, hookErr := s.runAfterTool(completionCtx, job.runID, job.id, 0, info, result)
+
+	s.mu.Lock()
+	job.completing = false
+	s.mu.Unlock()
+
+	if hookErr != nil {
+		// The failure belongs to the job: no run owns it, so it is
+		// not a hook_error.
+		s.finishJob(job, OutcomeError, afterToolOutcome{result: ToolResult{Text: hookErr.Error(), IsError: true}}, false, fatal, cause)
+		return
+	}
+	s.finishJob(job, outcome, chain, timedOut, fatal, cause)
+}
+
+// closedJobText adds the close's note to the partial output a stopped
+// job produced.
+func closedJobText(partial string) string {
+	const note = "the session closed while the job was running"
+	if partial == "" {
+		return note
+	}
+	return partial + "\n" + note
 }
 
 // stoppedText returns the partial output a stopped job produced, and the
@@ -501,7 +592,10 @@ func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 // record's fields and the event's move together. The cause names the
 // close when the close wrote the record, and is empty on the finish
 // path.
-func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, cause JobCause, timedOut bool, text string) (*JobEnded, map[string]any) {
+//
+// The record carries the hook-processed result, so a held result never
+// leaks what a hook would have redacted.
+func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, cause JobCause, timedOut bool, text string, out afterToolOutcome) (*JobEnded, map[string]any) {
 	rec := &JobEnded{
 		RecordMeta: NewRecordMeta("job.ended"),
 		SessionID:  s.opts.SessionID,
@@ -514,7 +608,17 @@ func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, ca
 		TimedOut:   timedOut,
 		InputID:    inputID,
 		Text:       text,
+		Redacted:   out.redacted,
+		RedactedBy: out.redactedBy,
+		Hooks:      out.decisions,
 		EndedAt:    nowRFC3339(),
+	}
+	if out.original != nil {
+		rec.Original = &ToolResultData{
+			Text:       out.original.Text,
+			Structured: out.original.Structured,
+			IsError:    out.original.IsError,
+		}
 	}
 	payload := map[string]any{
 		"job":      job.id,
@@ -534,7 +638,7 @@ func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, ca
 // The result is queued on the session's job queue, and the queue is
 // acted on by the delivery rules: a run that is open takes it at the
 // next turn end, and an idle session wakes or holds it.
-func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOut, fatal bool) {
+func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome, timedOut, fatal bool, cause JobCause) {
 	s.mu.Lock()
 	if job.ended {
 		s.mu.Unlock()
@@ -548,6 +652,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 	runID := job.runID
 	handle := job.handle
 	tool := job.tool
+	text := out.result.Text
 	s.mu.Unlock()
 	// The completion stays outstanding until its record is written and
 	// its result is queued, so a waiter cannot slip through the gap.
@@ -558,11 +663,9 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, text string, timedOu
 	}()
 
 	// The hook-processed result is what gets recorded and emitted, so a
-	// held result never leaks what a hook would have redacted. The
-	// after-tool chain is Stage 4's; the core records the tool's own
-	// result for now.
-	rec, payload := s.jobEnded(job, inputID, jobOutcome, "", timedOut, text)
-	if err := s.write(context.WithoutCancel(job.ctx), rec); err != nil {
+	// held result never leaks what a hook would have redacted.
+	rec, payload := s.jobEnded(job, inputID, jobOutcome, cause, timedOut, text, out)
+	if err := s.write(hookCompletionContext(job.ctx), rec); err != nil {
 		// The store refused the job's end. The session is broken at
 		// once: the wakes stop, and the run that is still open gets
 		// the store_error candidate.
@@ -1249,12 +1352,35 @@ func (s *Session) closeJobs() {
 	// The teardown is bounded once for the whole wait, so a job that
 	// ignores its context never holds the close up, however many jobs
 	// are still running.
-	teardown, stopTeardown := context.WithTimeout(context.Background(), recordWriteBudget)
+	teardown, stopTeardown := context.WithTimeout(context.Background(), s.recordBudget())
 	defer stopTeardown()
 	for _, job := range jobs {
 		select {
 		case <-job.done:
 		case <-teardown.Done():
+		}
+	}
+
+	// A completion chain that outlived the teardown deadline is the
+	// close's: it ends the chain, waits for the terminal records it
+	// writes, and writes them itself if the chain still does not finish.
+	completionDeadline := time.After(s.recordBudget())
+	for _, job := range jobs {
+		s.mu.Lock()
+		completing := job.completing
+		ended := job.ended
+		done := job.completionDone
+		cancel := job.completionCancel
+		s.mu.Unlock()
+		if ended || !completing {
+			continue
+		}
+		if cancel != nil {
+			cancel()
+		}
+		select {
+		case <-done:
+		case <-completionDeadline:
 		}
 	}
 
@@ -1273,27 +1399,30 @@ func (s *Session) closeJobs() {
 	s.writePendingHeld()
 }
 
-// writeJobEndedOnClose writes the job.ended record of a job that the
-// close stopped.
+// writeJobEndedOnClose completes a job the close stopped.
+//
+// The job's goroutine normally completes it, chain included, before the
+// close's wait ends. A job that ignored its context and outlived that
+// wait is completed here: the chain runs on a context of its own, and
+// the record keeps the partial output with the close's cause.
 func (s *Session) writeJobEndedOnClose(job *jobState) {
 	s.mu.Lock()
 	if job.ended {
 		s.mu.Unlock()
 		return
 	}
-	job.ended = true
-	s.inputSeq++
-	inputID := fmt.Sprintf("%s-ji%d", s.opts.SessionID, s.inputSeq)
+	if job.completing {
+		// The chain outlived the close's bound. The close takes the job
+		// and writes a terminal record with no unredacted payload: the
+		// chain's own record, if it ever finishes, finds the job ended
+		// and writes nothing.
+		s.mu.Unlock()
+		s.finishJob(job, OutcomeCancelled, afterToolOutcome{result: ToolResult{Text: closedJobText(""), IsError: true}}, false, false, CauseSessionClosed)
+		return
+	}
 	partial := job.partialText
 	s.mu.Unlock()
-
-	text := "the session closed while the job was running"
-	if partial != "" {
-		text = partial + "\n" + text
-	}
-	rec, payload := s.jobEnded(job, inputID, JobOutcomeCancelled, CauseSessionClosed, false, text)
-	s.write(context.Background(), rec)
-	s.events.emit(EventJobEnded, payload)
+	s.completeJob(job, ToolResult{Text: partial, IsError: true}, OutcomeCancelled, false, false, CauseSessionClosed)
 }
 
 // jobSummary describes one job, for the jobs tool.

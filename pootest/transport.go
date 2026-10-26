@@ -86,6 +86,13 @@ type Transport struct {
 	forkTurns []Turn
 	// forkIndex is the next forked response to hand out.
 	forkIndex int
+	// window is the window the native compaction returns.
+	window poo.ProviderWindow
+	// windowErr is the failure the native compaction returns, when it
+	// is set.
+	windowErr error
+	// compacts counts the native compactions the transport served.
+	compacts int
 	// err is the failure the transport returns when it is set.
 	err error
 }
@@ -122,6 +129,48 @@ func (t *Transport) SetForkTurns(turns ...Turn) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.forkTurns = turns
+}
+
+// SetWindow sets the window the native compaction returns.
+//
+// The transport is the session's own transport, so a window it returns
+// is a window the core accepts.
+func (t *Transport) SetWindow(w poo.ProviderWindow) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.window = w
+}
+
+// SetWindowError makes the native compaction fail.
+func (t *Transport) SetWindowError(err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.windowErr = err
+}
+
+// Compactions returns how many native compactions the transport served.
+func (t *Transport) Compactions() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.compacts
+}
+
+// Compact returns the window the transport was scripted with.
+//
+// It is the transport's native compaction capability: a provider window
+// is the provider's own compacted state, so it can only come from the
+// session's own transport.
+func (t *Transport) Compact(ctx context.Context, prev poo.Rendered) (poo.ProviderWindow, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.compacts++
+	if t.windowErr != nil {
+		return poo.ProviderWindow{}, t.windowErr
+	}
+	if len(t.window.Items) == 0 {
+		return poo.ProviderWindow{}, errors.New("pootest: the transport has no window")
+	}
+	return t.window, nil
 }
 
 // Requests returns the requests the transport received, in order.

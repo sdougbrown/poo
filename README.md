@@ -40,7 +40,7 @@ that already exists, rather than appending a second session to it.
 |---|---|
 | `poo` | Core: agent loop FSM, tool registry, hooks, event stream, session lifecycle |
 | `poo/decide` | Decision-model types: questions, answers, the decider, the recording wrapper |
-| `poo/prompt` | The system prompt's vocabulary: named sections and the environment they read |
+| `poo/prompt` | The system prompt's vocabulary: named sections, the alternatives they offer, and the environment they read |
 | `poo/pootest` | Exported test helpers: a scripted transport, an in-memory sink, a stub decider, a scripted compactor |
 | `poo/tool/*` | Opt-in tools: `read`, `edit`, `grep`, `bash`, `cliregistry` |
 | `poo/provider/*` | Provider seam and transports |

@@ -13,7 +13,7 @@ func TestResumeSettlesANonNaturalCandidate(t *testing.T) {
 	s := &Session{
 		opts:       Options{ContextLimit: 1},
 		state:      StateRequesting,
-		events:     newEventBus(),
+		events:     newEventBus(nil),
 		messageIDs: &MessageIDs{},
 		repeats:    newRepeatCounter(),
 	}

@@ -26,7 +26,7 @@ func TestARunThatEndsOnItsOwnSettlesEndTurn(t *testing.T) {
 	names := sink.Names()
 	// The system message, the user's prompt, the model's answer and the
 	// settle record.
-	want := []string{"run.started", "message", "message", "message", "run.settled"}
+	want := []string{"run.started", "system_prompt", "message", "message", "message", "run.settled"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("the records are %v, want %v", names, want)
 	}
@@ -99,8 +99,8 @@ func TestTheSecondRequestCarriesTheToolResult(t *testing.T) {
 	if last.Role != poo.RoleTool {
 		t.Errorf("the last message's role is %q, want tool", last.Role)
 	}
-	if last.Content[0].Text != "the echoed text" {
-		t.Errorf("the last message holds %q, want the tool's output", last.Content[0].Text)
+	if want := poo.HandleLine("r1", "echo") + "\n" + "the echoed text"; last.Content[0].Text != want {
+		t.Errorf("the last message holds %q, want %q", last.Content[0].Text, want)
 	}
 	// The result carries the provider's call id, because that is the id
 	// the provider matches it against.
@@ -271,9 +271,9 @@ func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
 	mt := reqs[0].MaxTokens
 	// The room is the limit minus the estimated input minus 256, and the
 	// model's own ceiling is 8192 by default. The estimate covers the
-	// history at request time: the system message ("the system prompt")
-	// and the user message ("a short prompt") hold 23 and 18 chars, and
-	// the plan estimates at 3.5 chars per token, so 41*10/35 = 11.
+	// history at request time: the raw system message ("the system
+	// prompt") is sent verbatim, the user message is "a short prompt",
+	// and the plan estimates at 3.5 chars per token, so 41*10/35 = 11.
 	estimate := (len("system") + len("the system prompt") + len("user") + len("a short prompt")) * 10 / 35
 	want := 4096 - estimate - 256
 	if mt != want {

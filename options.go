@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // Option changes a session's options when the session is built.
@@ -68,12 +70,89 @@ func WithBeforeTool(h BeforeToolHook) Option {
 	}
 }
 
+// WithPolicy fills the policy slot.
+//
+// The slot is a before-tool hook that only ever allows or denies, and
+// it runs before every other before-tool hook. It is exempt from the
+// hook deadline: the permission engine keeps its own chain deadline and
+// always returns a decision.
+func WithPolicy(h PolicyHook) Option {
+	return func(opts *Options) {
+		opts.Policy = h
+	}
+}
+
+// WithAfterTool adds an after-tool hook.
+//
+// The hooks run after a call ran and before the model sees the result.
+// They may keep it, annotate it, replace it or redact it.
+//
+// A job's chain runs at the job's completion, under the session's own
+// context, and never again when the result is delivered.
+func WithAfterTool(h AfterToolHook) Option {
+	return func(opts *Options) {
+		opts.AfterTool = append(opts.AfterTool, h)
+	}
+}
+
+// WithBeforeRun adds a before-run hook.
+//
+// The hooks run at the start of every run, before the first request.
+// The trigger says what started the run.
+func WithBeforeRun(h BeforeRunHook) Option {
+	return func(opts *Options) {
+		opts.BeforeRun = append(opts.BeforeRun, h)
+	}
+}
+
+// WithSessionStart adds a session-start hook.
+//
+// The hook runs once, when the session is built, before the first run.
+func WithSessionStart(h SessionStartHook) Option {
+	return func(opts *Options) {
+		opts.SessionStart = append(opts.SessionStart, h)
+	}
+}
+
 // WithObserver adds an observer.
 //
 // The observers see every event, in the session's order.
 func WithObserver(o Observer) Option {
 	return func(opts *Options) {
 		opts.Observers = append(opts.Observers, o)
+	}
+}
+
+// WithPrompt changes the session's system prompt.
+//
+// The mutation is called with the session's prompt builder, after the
+// core's own sections and the tools' sections are in it, and before the
+// session's first run. Several mutations compose, in the order they
+// were added, so a consumer may change the prompt in as many layers as
+// it needs.
+//
+// A mutation that sets a section changes that section, a mutation that
+// removes one takes it away, and a mutation that replaces the prompt
+// takes the whole thing over.
+func WithPrompt(edit func(*prompt.Builder)) Option {
+	return func(opts *Options) {
+		opts.Prompt = append(opts.Prompt, edit)
+	}
+}
+
+// WithPromptVariant sets the prompt variant the session's prompt
+// renders in.
+//
+// The variant names an alternative text for the sections that offer
+// one: the base section and the tools' sections. A section that offers
+// no alternative for the variant renders its default text, so a
+// variant that no section offers changes nothing.
+//
+// The variant is fixed for the length of a run, like the prompt itself,
+// and it may change between the runs.
+func WithPromptVariant(name string) Option {
+	return func(opts *Options) {
+		opts.PromptVariant = name
 	}
 }
 

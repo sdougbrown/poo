@@ -109,7 +109,7 @@ func TestARunWritesItsLogAndSettles(t *testing.T) {
 
 	recs := readLog(t, logPath)
 	got := names(recs)
-	want := []string{"session.created", "run.started", "message", "message", "message", "usage", "run.settled"}
+	want := []string{"session.created", "run.started", "system_prompt", "message", "message", "message", "usage", "run.settled"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("the records are %v, want %v", got, want)
 	}
@@ -529,5 +529,40 @@ func TestTheRunSettlesEndTurnWithZero(t *testing.T) {
 	)
 	if code != 0 {
 		t.Fatalf("the exit code is %d, want 0", code)
+	}
+}
+
+// TestTheCommandDefaultsToHandoff covers the plan's rule: cmd/poo gives
+// a session the handoff strategy when none is configured.
+func TestTheCommandDefaultsToHandoff(t *testing.T) {
+	main := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"echo hi\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"
+	fork := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"the handoff note"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+	endpoint := newFakeEndpointSequence(t, []string{main, fork})
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+
+	runCLI(t,
+		"run",
+		"--base-url", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "30000",
+		"--working-dir", dir,
+		"--log", logPath,
+		strings.Repeat("x", 100000),
+	)
+
+	recs := readLog(t, logPath)
+	var handoff map[string]any
+	for _, rec := range recs {
+		if rec["record"] == "handoff" {
+			handoff = rec
+		}
+	}
+	if handoff == nil {
+		t.Fatalf("the log holds no handoff record: %v", names(recs))
+	}
+	if handoff["handoff"] != "the handoff note" {
+		t.Errorf("the handoff is %v, want the fork's text", handoff["handoff"])
 	}
 }

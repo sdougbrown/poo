@@ -189,18 +189,23 @@ func callsFromPlans(plans []callPlan) []ToolCall {
 
 // beginTurn records the turn's calls in the turn's summary.
 //
-// The caller holds the session's lock.
+// The turn's summary was made when the turn started, so the calls join
+// the summary the run is in.
 func (s *Session) beginTurn(run *runState, turn int, plans []callPlan) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	summary := TurnSummary{Index: turn}
-	for _, p := range plans {
-		summary.Calls = append(summary.Calls, ToolCallSummary{
-			Handle: p.handle,
-			Tool:   p.call.Name,
-		})
+	for i := range s.turns {
+		if s.turns[i].Session != run.globalTurn {
+			continue
+		}
+		for _, p := range plans {
+			s.turns[i].Calls = append(s.turns[i].Calls, ToolCallSummary{
+				Handle: p.handle,
+				Tool:   p.call.Name,
+			})
+		}
+		return
 	}
-	s.turns = append(s.turns, summary)
 }
 
 // nextHandle returns the next tool-result handle, r<n>.
@@ -455,10 +460,11 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 
 	// The before-tool hooks run after the validation and before the
 	// call, and they may refuse it or answer it themselves.
-	decision, err := s.runBeforeTool(run, turn, handle, call.Name, prepared, plan)
+	decision, interrupted, err := s.runBeforeTool(run, turn, handle, call.Name, prepared, plan)
 	// The hook may have outlived the run: a decision that arrives after
 	// the finalization began is discarded, and the call starts nothing.
 	if s.runWindingDown(run) {
+		s.logLateHookDecision(run.id, handle, call.Name, turn)
 		return
 	}
 	if err != nil {
@@ -470,9 +476,21 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			IsError: true,
 		}, OutcomeError)
 		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
-			Source: "before_tool",
+			Source: hookFailureSource(err, "before_tool"),
 			Text:   err.Error(),
 		}))
+		return
+	}
+	// An interrupted authorization starts no call and admits no job. A
+	// result an earlier hook gave before the interrupt is still the
+	// call's result.
+	if interrupted || s.interruptPending(run) {
+		if decision.Result != nil {
+			if !record(CallModeSync) {
+				return
+			}
+			s.recordResult(run, turn, handle, call.Name, call.ID, *decision.Result, OutcomeOK)
+		}
 		return
 	}
 	if decision.Denied {
@@ -506,7 +524,8 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// names.
 
 	// A call that becomes a job returns at once, and its result
-	// arrives later as an input.
+	// arrives later as an input. An interrupt that arrived after the
+	// authorization refuses the admission.
 	if s.callBecomesJob(call.Name, plan.background) {
 		if !record(CallModeJob) {
 			return
@@ -534,7 +553,11 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 
 	callCtx := s.activityContext(run)
 	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
-	if err == nil && callCtx.Err() != nil {
+	// The outcome is decided by the core, not by the tool.
+	outcome := OutcomeOK
+	var fatalCandidate *candidate
+	switch {
+	case err == nil && callCtx.Err() != nil:
 		// The call's context ended while the call ran: the tool saw
 		// the cancellation and gave back what it had. The outcome says
 		// the call was cancelled, and the result carries the partial
@@ -545,83 +568,75 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		} else {
 			text = text + "\n" + CancelledInterruptedText
 		}
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-			Text:    text,
-			IsError: true,
-		}, OutcomeCancelled)
-		return
-	}
-	if err == nil && s.interruptPending(run) {
+		result = ToolResult{Text: text, IsError: true}
+		outcome = OutcomeCancelled
+	case err == nil && s.interruptPending(run):
 		// The call was cut short by an interrupt, even though the tool
 		// returned a result: the tool saw the cancellation and gave
 		// back what it had. The outcome says the call was cancelled,
 		// and the result carries the partial output with the note.
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-			Text:    interruptNote(result.Text),
-			IsError: true,
-		}, OutcomeCancelled)
-		return
-	}
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, errInterrupted) {
+		result = ToolResult{Text: interruptNote(result.Text), IsError: true}
+		outcome = OutcomeCancelled
+	case err != nil:
+		switch {
+		case errors.Is(err, context.Canceled) || errors.Is(err, errInterrupted):
 			// The call was cut short. The outcome says which: a call
 			// that never started is skipped, and one that was running
 			// is cancelled. The partial output the tool returned stays
 			// in the result, with the note.
 			if s.interruptPending(run) {
-				s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-					Text:    interruptNote(result.Text),
-					IsError: true,
-				}, OutcomeCancelled)
-				return
-			}
-			text := result.Text
-			if text == "" {
-				text = err.Error()
+				result = ToolResult{Text: interruptNote(result.Text), IsError: true}
 			} else {
-				text = text + "\n" + err.Error()
+				text := result.Text
+				if text == "" {
+					text = err.Error()
+				} else {
+					text = text + "\n" + err.Error()
+				}
+				result = ToolResult{Text: text, IsError: true}
 			}
-			s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-				Text:    text,
-				IsError: true,
-			}, OutcomeCancelled)
-			return
-		}
-		// A tool error that wraps ErrFatal is the environment being
-		// unusable: the run settles tool_fatal.
-		if errors.Is(err, ErrFatal) {
-			s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-				Text:    err.Error(),
-				IsError: true,
-			}, OutcomeError)
-			s.addCandidate(run, newCandidate(ReasonToolFatal, SettleDetail{
+			outcome = OutcomeCancelled
+		case errors.Is(err, ErrFatal):
+			// A tool error that wraps ErrFatal is the environment being
+			// unusable: the run settles tool_fatal. The published text
+			// is the hook-processed result, so a redaction covers it
+			// too; the fatal classification is kept separately.
+			result = ToolResult{Text: err.Error(), IsError: true}
+			outcome = OutcomeError
+			fatalCandidate = &candidate{reason: ReasonToolFatal, detail: SettleDetail{
 				Source: "tool:" + call.Name,
 				Text:   err.Error(),
-			}))
-			return
+			}}
+		default:
+			// Any other error is recoverable: it goes back to the model
+			// and the run continues.
+			result = ToolResult{Text: err.Error(), IsError: true}
+			outcome = OutcomeError
 		}
-		// Any other error is recoverable: it goes back to the model
-		// and the run continues.
-		s.recordResult(run, turn, handle, call.Name, call.ID, ToolResult{
-			Text:    err.Error(),
-			IsError: true,
-		}, OutcomeError)
-		return
 	}
 
 	// A valid finish call settles the run as finished, with the result.
-	// The recognition keys on the prepared value the call carries, not
-	// on the tool's name: FinishResult is the finish tool's own, and a
-	// consumer that renames the tool keeps the settle.
-	if raw, ok := prepared.(FinishResult); ok {
-		s.addCandidate(run, newCandidate(ReasonFinished, SettleDetail{
-			Source: "finish",
-			Text:   "the model called finish with a valid result",
-			Result: raw.FinishResult(),
-		}))
+	if outcome == OutcomeOK {
+		// The recognition keys on the prepared value the call carries, not
+		// on the tool's name: FinishResult is the finish tool's own, and a
+		// consumer that renames the tool keeps the settle.
+		if raw, ok := prepared.(FinishResult); ok {
+			s.addCandidate(run, newCandidate(ReasonFinished, SettleDetail{
+				Source: "finish",
+				Text:   "the model called finish with a valid result",
+				Result: raw.FinishResult(),
+			}))
+		}
 	}
 
-	s.recordResult(run, turn, handle, call.Name, call.ID, result, OutcomeOK)
+	// The after-tool chain runs before the result is recorded or
+	// emitted, so the record, the event and the model see the same
+	// sanitized result.
+	out := s.recordToolResult(run, turn, handle, call.Name, call.ID, s.toolCallInfo(turn, handle, call.Name, prepared, plan), result, outcome)
+	if fatalCandidate != nil {
+		fatalCandidate.detail.Text = out.result.Text
+		s.addCandidate(run, *fatalCandidate)
+	}
 }
 
 // startJobCall turns a call into a background job.
@@ -699,12 +714,40 @@ func (s *Session) recordResult(run *runState, turn int, handle, tool, callID str
 	won, tracked := s.claimResult(run, handle)
 	if !won {
 		// The finalization already gave the call a synthetic result.
+		s.logLateToolResult(run.id, handle, tool, turn)
 		return
 	}
-	s.writeResult(run, turn, handle, tool, callID, result, outcome)
+	s.writeResult(run, turn, handle, tool, callID, result, outcome, afterToolOutcome{result: result})
 	if tracked {
 		s.finishResultWrite(run)
 	}
+}
+
+// recordToolResult runs the after-tool chain and records the result.
+//
+// The chain runs before the result is recorded or emitted, so the
+// record, the event and the model all see the same sanitized result. A
+// hook that fails settles the run with hook_error, and the call keeps
+// the result the tool gave.
+func (s *Session) recordToolResult(run *runState, turn int, handle, tool, callID string, info ToolCallInfo, result ToolResult, outcome Outcome) afterToolOutcome {
+	out, err := s.runAfterTool(hookCompletionContext(run.ctx), run.id, "", turn, info, result)
+	if err != nil {
+		s.addCandidate(run, newCandidate(ReasonHookError, SettleDetail{
+			Source: hookFailureSource(err, "after_tool"),
+			Text:   err.Error(),
+		}))
+	}
+	won, tracked := s.claimResult(run, handle)
+	if !won {
+		// The finalization already gave the call a synthetic result.
+		s.logLateToolResult(run.id, handle, tool, turn)
+		return out
+	}
+	s.writeResult(run, turn, handle, tool, callID, out.result, outcome, out)
+	if tracked {
+		s.finishResultWrite(run)
+	}
+	return out
 }
 
 // finishResultWrite marks the end of a claimed result's write, so the
@@ -762,18 +805,35 @@ func (s *Session) beginCallRecordLocked(run *runState, call *issuedCall) {
 // writeResult writes a call's result record and puts it in the model's
 // view.
 //
-// The caller has claimed the call's result.
-func (s *Session) writeResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome) {
-	if err := s.write(run.ctx, &ToolResultRecord{
+// The caller has claimed the call's result. The chain's outcome
+// carries the original the hooks replaced and the decisions they made:
+// a redacted result's record holds no original at all.
+//
+// The result's model-facing text starts with the handle line, so the
+// model can name the result later and a strategy can find it.
+func (s *Session) writeResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome, out afterToolOutcome) {
+	text := modelFacingText(handle, tool, result.Text)
+	rec := &ToolResultRecord{
 		RecordMeta: NewRecordMetaFrom("tool.result", OriginTool),
 		RunID:      run.id,
 		Turn:       turn,
 		Handle:     handle,
 		Tool:       tool,
 		Outcome:    outcome,
-		Text:       result.Text,
+		Text:       text,
 		Structured: result.Structured,
-	}); err != nil {
+		Redacted:   out.redacted,
+		RedactedBy: out.redactedBy,
+		Hooks:      out.decisions,
+	}
+	if out.original != nil {
+		rec.Original = &ToolResultData{
+			Text:       out.original.Text,
+			Structured: out.original.Structured,
+			IsError:    out.original.IsError,
+		}
+	}
+	if err := s.write(run.ctx, rec); err != nil {
 		s.addCandidate(run, newCandidate(ReasonStoreError, SettleDetail{
 			Source: "store",
 			Text:   err.Error(),
@@ -781,10 +841,11 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 	}
 
 	// The result goes into the model's view and the turn's summary.
-	msg := ToolResultMessage(callID, tool, result.Text, result.IsError)
+	msg := ToolResultMessage(callID, tool, text, result.IsError)
 	msg.Origin = OriginTool
 	s.appendMessages(msg)
-	s.rememberResult(run, turn, handle, tool, outcome, result)
+	result.Text = text
+	s.rememberResult(handle, tool, outcome, result)
 
 	_ = s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),
@@ -799,18 +860,24 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		"handle":  handle,
 		"tool":    tool,
 		"outcome": string(outcome),
-		"text":    result.Text,
+		"text":    text,
 	})
 }
 
 // rememberResult records a call's outcome and result in the turn's
 // summary.
-func (s *Session) rememberResult(run *runState, turn int, handle, tool string, outcome Outcome, result ToolResult) {
+func (s *Session) rememberResult(handle, tool string, outcome Outcome, result ToolResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.results[handle] = copyResult(result)
+	// The turn the call was made in is the turn the summary belongs
+	// to, and the handle knows it.
+	meta, ok := s.resultMeta[handle]
+	if !ok {
+		return
+	}
 	for i := range s.turns {
-		if s.turns[i].Index != turn {
+		if s.turns[i].Session != meta.turn {
 			continue
 		}
 		for j := range s.turns[i].Calls {
@@ -848,11 +915,17 @@ func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 			continue
 		}
 		run.pendingCalls[p.handle] = &issuedCall{
-			handle:    p.handle,
-			tool:      p.call.Name,
-			id:        p.call.ID,
-			turn:      turn,
-			arguments: p.call.Arguments,
+			handle:     p.handle,
+			tool:       p.call.Name,
+			id:         p.call.ID,
+			turn:       turn,
+			globalTurn: run.globalTurn,
+			arguments:  p.call.Arguments,
+		}
+		s.resultMeta[p.handle] = resultMeta{
+			tool:   p.call.Name,
+			callID: p.call.ID,
+			turn:   run.globalTurn,
 		}
 	}
 }
@@ -879,11 +952,17 @@ func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCal
 		return false
 	}
 	run.pendingCalls[handle] = &issuedCall{
-		handle:    handle,
-		tool:      call.Name,
-		id:        call.ID,
-		turn:      turn,
-		arguments: call.Arguments,
+		handle:     handle,
+		tool:       call.Name,
+		id:         call.ID,
+		turn:       turn,
+		globalTurn: run.globalTurn,
+		arguments:  call.Arguments,
+	}
+	s.resultMeta[handle] = resultMeta{
+		tool:   call.Name,
+		callID: call.ID,
+		turn:   run.globalTurn,
 	}
 	if run.workDone == nil {
 		run.workDone = make(chan struct{}, 1)
@@ -920,7 +999,7 @@ func (s *Session) reserveCallRecord(run *runState, handle string) (*issuedCall, 
 func (s *Session) startCall(run *runState, handle string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed {
+	if run.sealed || run.interruptPending {
 		return false
 	}
 	call, ok := run.pendingCalls[handle]
@@ -979,11 +1058,14 @@ func (s *Session) claimResult(run *runState, handle string) (won, tracked bool) 
 // never mutates a settled run.
 func (s *Session) addCandidate(run *runState, c candidate) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if run.committed {
+		runID := run.id
+		s.mu.Unlock()
+		s.logLateCandidate(runID, c)
 		return
 	}
 	run.candidates = append(run.candidates, c)
+	s.mu.Unlock()
 }
 
 // FinishToolName is the name the typed-result tool is called by.

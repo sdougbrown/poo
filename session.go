@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // Session is a conversation with a model.
@@ -23,6 +26,13 @@ type Session struct {
 
 	// opts are the session's configuration.
 	opts Options
+	// recordWriteBudget bounds one record write or flush on this
+	// session.
+	//
+	// It is per session, copied from the default when the session is
+	// built, so a test that shrinks it never races another session's
+	// run goroutine.
+	recordWriteBudget time.Duration
 
 	// state is where the session is in the FSM.
 	state State
@@ -32,12 +42,41 @@ type Session struct {
 
 	// history is the model's view: what has been said so far.
 	history []Message
-	// turns summarises each turn of the current run.
+	// turns summarises each turn of the session.
+	//
+	// The summaries cover every turn of the session, not only the
+	// current run's: the compaction seam names a range of turns, and a
+	// range may cross a run boundary.
 	turns []TurnSummary
-	// results holds the tool results of the current run, by handle.
+	// results holds the tool results of the session, by handle.
+	//
+	// A handle names a call for the life of the session, so its result
+	// stays known after the run that made it has settled.
 	results map[string]ToolResult
+	// resultMeta holds what the session knows about each result: the
+	// tool it called and the provider's id for the call.
+	//
+	// The core needs both to validate a compaction's rewrites and to
+	// find the result in the view.
+	resultMeta map[string]resultMeta
+	// spans holds the session's turns, in order, with the range of the
+	// view each one occupies.
+	//
+	// The spans are the seam's map from a turn to the messages it
+	// occupies, so a compaction can cut a range of turns out of the
+	// view.
+	spans []turnSpan
+	// turnSeq numbers the session's turns. The number never restarts,
+	// so a turn keeps its number when a compaction removes it.
+	turnSeq int
 	// messageIDs hands out the session-monotonic message ids.
 	messageIDs *MessageIDs
+	// recorded holds the recorded messages, by id.
+	//
+	// The record outlives the view: a compaction may remove a message
+	// from the view, and a delivery note still renders from the
+	// original recorded message.
+	recorded map[string]Message
 	// repeats counts the consecutive repeats of a call, for the doom
 	// loop.
 	repeats *repeatCounter
@@ -124,6 +163,23 @@ type Session struct {
 	// noticeArmed reports that the context notice may fire. The notice
 	// re-arms when the estimate drops back below the notice ratio.
 	noticeArmed bool
+	// log is the session's logger, when the consumer supplied one.
+	log *slog.Logger
+	// logs is the non-blocking dispatcher behind log.
+	logs *logDispatcher
+	// promptBuilder holds the sections the system prompt is assembled
+	// from. A run renders a copy of it, so a run's prompt may change
+	// without the session's prompt changing.
+	promptBuilder *prompt.Builder
+	// promptVariant is the variant the prompt renders in.
+	//
+	// It may change between the runs: the prompt a run carries is
+	// rendered once, at the start of the run, so a change never
+	// reaches a run that is going.
+	promptVariant string
+	// lastPromptText is the last rendered prompt that was recorded, so
+	// an unchanged prompt is not written again.
+	lastPromptText string
 
 	// waiters are the goroutines waiting for the run to settle.
 	waiters []chan Result
@@ -154,12 +210,24 @@ type runState struct {
 	cancel context.CancelCauseFunc
 	// turn counts the provider requests made so far.
 	turn int
+	// globalTurn is the session's number for the turn the run is in.
+	//
+	// The run's turn number counts from one in every run, and the
+	// session's number counts from one for the life of the session. The
+	// compaction seam names a turn by the session's number.
+	globalTurn int
 	// requests counts the provider requests made so far.
 	requests int
 	// tokens counts the run's cumulative input and output tokens.
 	tokens int
 	// startedAt is when the run began.
 	startedAt time.Time
+	// stopTimer stops the run's wall-clock budget timer.
+	stopTimer func()
+	// systemMessage is the prompt this run rendered, frozen for the
+	// run. Earlier runs' system messages stay in the record but are
+	// not sent again.
+	systemMessage *Message
 	// trigger says what started the run.
 	trigger TriggerKind
 	// continuations counts the BeforeSettle continuations the run took.
@@ -197,6 +265,14 @@ type runState struct {
 	// being written. The finalization waits for them as it does for the
 	// pending calls.
 	resultWrites int
+	// runWrites counts the records a hook wrote for the run whose
+	// writes are still in flight. The finalization waits for them, so
+	// a hook that appends a message while the finalization is under
+	// way cannot add a record after run.settled.
+	runWrites int
+	// writeClaims are the claimed hook writes, so the seal can end a
+	// write the finalization stopped waiting for.
+	writeClaims []*runWriteClaim
 	// callWrites counts the tool.call records whose writes are still in
 	// flight. The finalization waits for them, so no record of the run
 	// follows run.settled.
@@ -264,6 +340,9 @@ type issuedCall struct {
 	id string
 	// turn is the turn the call belongs to.
 	turn int
+	// globalTurn is the session's number for the turn the call belongs
+	// to.
+	globalTurn int
 	// arguments are the model's arguments, kept so the finalization can
 	// write the call's record when the call was claimed before its
 	// record was written.
@@ -310,7 +389,26 @@ type Options struct {
 	// MaxOutput is the model's output-token ceiling, 0 when unknown.
 	MaxOutput int
 	// SystemPrompt is the system message prepended to the model's view.
+	//
+	// The text is the whole prompt: the sections the core assembles are
+	// not used when it is set, and the text is the prompt's base
+	// section, so a later edit still has somewhere to go.
 	SystemPrompt string
+	// Prompt changes the session's system prompt.
+	//
+	// Every mutation is called with the session's prompt builder, in
+	// the order they were added, after the core's own sections and the
+	// tools' sections are in it. A mutation that is nil is skipped.
+	Prompt []func(*prompt.Builder)
+	// PromptVariant names the prompt variant the prompt renders in.
+	//
+	// The variant picks the alternative text of the sections that
+	// offer one; a section that offers none renders its default text.
+	// The empty name and "default" mean the default text.
+	//
+	// It is the variant the session starts in. The session's own
+	// variant may change between the runs.
+	PromptVariant string
 	// WorkingDir is the directory the tools work in.
 	WorkingDir string
 	// Env is the scrubbed child environment for the tools.
@@ -372,11 +470,32 @@ type Options struct {
 	BeforeSettle []BeforeSettleHook
 	// BeforeTool runs after a call is validated and before it runs.
 	//
-	// The policy slot is a before-tool hook that only ever allows or
-	// denies, and it is installed here as the first one.
+	// The hooks run after the policy slot, in registration order.
 	BeforeTool []BeforeToolHook
+	// Policy is the policy slot: the before-tool hook the permission
+	// engine fills.
+	//
+	// The slot runs before every other before-tool hook, and it is
+	// exempt from the hook deadline: the permission engine keeps its
+	// own chain deadline and always returns a decision.
+	Policy PolicyHook
+	// AfterTool runs after a call ran and before the model sees the
+	// result.
+	//
+	// A job's chain runs at the job's completion, under the session's
+	// own context.
+	AfterTool []AfterToolHook
 	// Jobs configures the session's background jobs.
 	Jobs JobOptions
+	// Logger receives the core's diagnostic messages: observer errors
+	// and overflow, candidates that arrive after the commit point, and
+	// completions that arrive after it.
+	//
+	// Nil means a no-op. The core logs outside the session lock, so a
+	// log call never changes a record or an event, and never fails a
+	// run. A consumer's handler should not block: a slog call is
+	// synchronous.
+	Logger *slog.Logger
 }
 
 // New builds a session.
@@ -431,17 +550,38 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	opts.MessageIDs = ids
 
 	s := &Session{
-		opts:        opts,
-		state:       StateIdle,
-		results:     map[string]ToolResult{},
-		messageIDs:  ids,
-		repeats:     newRepeatCounter(),
-		events:      newEventBus(),
-		noticeArmed: true,
-		jobs:        map[string]*jobState{},
-		jobQueued:   make(chan struct{}, 1),
+		opts:              opts,
+		recordWriteBudget: defaultRecordWriteBudget,
+		state:             StateIdle,
+		results:           map[string]ToolResult{},
+		resultMeta:        map[string]resultMeta{},
+		recorded:          map[string]Message{},
+		messageIDs:        ids,
+		repeats:           newRepeatCounter(),
+		noticeArmed:       true,
+		jobs:              map[string]*jobState{},
+		jobQueued:         make(chan struct{}, 1),
 	}
+	// A construction that fails rolls back everything it started. The
+	// event bus's reporter is a goroutine, and no session is returned
+	// for the caller to close.
+	complete := false
+	defer func() {
+		if complete {
+			return
+		}
+		if s.events != nil {
+			s.events.stop()
+		}
+		if s.jobCancel != nil {
+			s.jobCancel(nil)
+		}
+	}()
 	s.est.charsPerToken = CharsPerToken
+	if opts.Logger != nil {
+		s.logs = newLogDispatcher(opts.Logger.Handler())
+		s.log = slog.New(s.logs.handler())
+	}
 
 	// The job tools are the core's own, and they are registered
 	// whenever a tool may run in the background.
@@ -449,28 +589,37 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		return nil, &ErrSessionInit{Cause: err}
 	}
 
-	// The observers start before anything can emit an event, and they
-	// are stopped if the construction fails.
+	// The prompt is assembled from the sections the core and the
+	// consumer put in the builder. The job tools are registered by
+	// now, so their own sections are in it too.
+	s.promptBuilder = buildPrompt(&s.opts)
+	s.promptVariant = s.opts.PromptVariant
+
+	// The observers start before anything can emit an event, and the
+	// bus's reporter starts with them.
+	s.events = newEventBus(s.logger().With(slog.String("session_id", opts.SessionID)))
 	for _, o := range opts.Observers {
 		s.events.addObserver(o)
 	}
+	// The overflow records are the store's, and they are written by the
+	// event bus's own reporter.
+	s.events.setDropReporter(s.writeObserverDropped)
 
 	// The session-start hooks' output is buffered: a construction that
 	// fails leaves nothing written.
 	buffered, err := s.runSessionStart()
 	if err != nil {
-		s.events.stop()
 		return nil, err
 	}
 	for _, rec := range buffered {
 		if err := s.write(context.Background(), rec); err != nil {
-			s.events.stop()
 			return nil, &ErrSessionInit{Cause: err}
 		}
 	}
 	// The jobs' context is created after every fallible step, so a
 	// construction that fails has no cancellation to leak.
 	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
+	complete = true
 	return s, nil
 }
 
@@ -630,35 +779,6 @@ type RepeatCounts struct {
 	Near int
 }
 
-// runSessionStart runs the session-start hooks.
-//
-// The hooks' output is buffered in memory: a construction that fails
-// leaves nothing written.
-func (s *Session) runSessionStart() ([]Record, error) {
-	if len(s.opts.SessionStart) == 0 {
-		return nil, nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.opts.HookTimeout)
-	defer cancel()
-	var buffered []Record
-	for _, h := range s.opts.SessionStart {
-		decision, err := h.SessionStart(s.hookContext(ctx, 0, false))
-		if err != nil {
-			return nil, &ErrSessionInit{Cause: fmt.Errorf("poo: the session_start hook: %w", err)}
-		}
-		for _, msg := range decision.Append {
-			msg = hookMessage(msg, hookName(h))
-			s.appendMessages(msg)
-			buffered = append(buffered, &MessageRecord{
-				RecordMeta: NewRecordMetaFrom("message", msg.Origin),
-				Role:       msg.Role,
-				Content:    msg.Content,
-			})
-		}
-	}
-	return buffered, nil
-}
-
 // hookMessage turns a hook's appended message into a user message.
 //
 // The step's output enters the history as a user-role message tagged
@@ -672,9 +792,17 @@ func hookMessage(msg Message, name string) Message {
 
 // hookContext builds the context a hook is called with.
 func (s *Session) hookContext(ctx context.Context, turn int, interrupted bool) HookContext {
+	return s.hookContextFor(ctx, "", "", turn, interrupted)
+}
+
+// hookContextFor builds the context a hook is called with, naming the
+// run and the job the hook runs for.
+//
+// A job's completion names the run that started the job, which may
+// already have settled, and the job itself.
+func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn int, interrupted bool) HookContext {
 	s.mu.Lock()
-	runID := ""
-	if s.run != nil {
+	if runID == "" && s.run != nil {
 		runID = s.run.id
 	}
 	s.mu.Unlock()
@@ -682,6 +810,7 @@ func (s *Session) hookContext(ctx context.Context, turn int, interrupted bool) H
 		Context:     ctx,
 		SessionID:   s.opts.SessionID,
 		RunID:       runID,
+		Job:         job,
 		Turn:        turn,
 		Interrupted: interrupted,
 		History:     s.view(),
@@ -693,7 +822,30 @@ func (s *Session) hookContext(ctx context.Context, turn int, interrupted bool) H
 func (s *Session) view() View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return NewHistory(s.history, s.results, s.turns)
+	return NewHistory(s.modelMessagesLocked(), s.results, s.turns)
+}
+
+// modelMessagesLocked returns the messages in the order the model reads
+// them.
+//
+// The current run's own system prompt comes first, and the rest of the
+// history follows in the order it was recorded. Earlier runs' system
+// messages stay in the records, but they are not sent again: a run's
+// prompt is frozen for that run.
+//
+// The caller holds the session's lock.
+func (s *Session) modelMessagesLocked() []Message {
+	messages := make([]Message, 0, len(s.history)+1)
+	if s.run != nil && s.run.systemMessage != nil {
+		messages = append(messages, *s.run.systemMessage)
+	}
+	for _, msg := range s.history {
+		if msg.Role == RoleSystem {
+			continue
+		}
+		messages = append(messages, msg)
+	}
+	return CloneMessages(messages)
 }
 
 // budget returns the run's context budget.
@@ -707,12 +859,17 @@ func (s *Session) budget() Budget {
 //
 // The caller holds the session's lock.
 func (s *Session) budgetLocked() Budget {
+	turns := 0
+	if s.run != nil {
+		turns = s.run.turn
+	}
 	return Budget{
 		ContextLimit:   s.opts.ContextLimit,
 		EstimatedInput: s.estimatedInputLocked(),
 		NoticeRatio:    s.opts.NoticeRatio,
 		HardRatio:      s.opts.HardRatio,
 		CharsPerToken:  s.est.charsPerToken,
+		Turns:          turns,
 	}
 }
 
@@ -721,6 +878,20 @@ func (s *Session) appendMessages(msgs ...Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.history = append(s.history, msgs...)
+}
+
+// recordMessage keeps a message under its id.
+//
+// The record outlives the view: a compaction may remove a message from
+// the view, and a delivery note still renders from the original
+// recorded message.
+func (s *Session) recordMessage(msg Message) {
+	if msg.ID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recorded[msg.ID] = msg
 }
 
 // markBroken marks the session broken.
@@ -739,9 +910,79 @@ func (s *Session) markBroken() {
 // A refused write marks the session broken: the store is the session's
 // memory, and a session that cannot write cannot be trusted.
 func (s *Session) write(ctx context.Context, rec Record) error {
-	wctx, cancel := recordContext(ctx)
+	wctx, cancel := s.recordContext(ctx)
 	defer cancel()
 	return s.appendRecord(wctx, rec, nil, nil)
+}
+
+// writeRun appends one record that belongs to a run.
+//
+// The record is claimed against the run's seal: a hook that appends a
+// message while the finalization is under way writes nothing, because
+// the run's records are the finalization's from the seal on. A write
+// that is claimed before the seal is waited for by the finalization, so
+// no record of the run follows run.settled.
+func (s *Session) writeRun(run *runState, rec Record) error {
+	if run == nil {
+		return s.write(context.Background(), rec)
+	}
+	ctx, release, ok := s.beginRunWrite(run)
+	if !ok {
+		// The finalization sealed the run: the record is abandoned.
+		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
+	}
+	defer release()
+	return s.appendRecord(ctx, rec, run, nil)
+}
+
+// runWriteClaim is one claimed hook write for a run.
+type runWriteClaim struct {
+	// cancel ends the write, with the seal's cause when the
+	// finalization stops waiting for it.
+	cancel context.CancelCauseFunc
+	// timeout ends the claim's own record-write budget.
+	timeout context.CancelFunc
+}
+
+// beginRunWrite claims a record's write against the run's seal.
+//
+// The claim is made under the session's lock, so a write that arrives
+// after the seal is refused, and one that arrives before it is waited
+// for by the finalization. The returned context ignores the run's own
+// cancellation, because the record has to say what the run did, and the
+// seal cancels it, so the write never follows run.settled.
+func (s *Session) beginRunWrite(run *runState) (context.Context, func(), bool) {
+	s.mu.Lock()
+	if run.sealed {
+		s.mu.Unlock()
+		return nil, nil, false
+	}
+	base := run.ctx
+	if base == nil {
+		base = context.Background()
+	}
+	timed, timeout := context.WithTimeout(context.WithoutCancel(base), s.recordBudget())
+	ctx, cancel := context.WithCancelCause(timed)
+	claim := &runWriteClaim{cancel: cancel, timeout: timeout}
+	run.writeClaims = append(run.writeClaims, claim)
+	run.runWrites++
+	s.mu.Unlock()
+
+	release := func() {
+		cancel(nil)
+		timeout()
+		s.mu.Lock()
+		for i, held := range run.writeClaims {
+			if held == claim {
+				run.writeClaims = append(run.writeClaims[:i], run.writeClaims[i+1:]...)
+				break
+			}
+		}
+		run.runWrites--
+		s.signalWorkLocked(run)
+		s.mu.Unlock()
+	}
+	return ctx, release, true
 }
 
 // appendRecord appends one record under the context given.
@@ -826,21 +1067,32 @@ func (s *Session) writeCallRecord(run *runState, call *issuedCall, rec Record) e
 	if base == nil {
 		base = context.Background()
 	}
-	wctx, cancel := context.WithTimeout(context.WithoutCancel(base), recordWriteBudget)
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(base), s.recordBudget())
 	defer cancel()
 	return s.appendRecord(wctx, rec, run, nil)
 }
 
-// recordWriteBudget bounds one record write or flush.
-var recordWriteBudget = 5 * time.Second
+// defaultRecordWriteBudget bounds one record write or flush.
+const defaultRecordWriteBudget = 5 * time.Second
+
+// recordBudget returns the session's record-write budget.
+//
+// A session built by hand in a test may not have one; the default
+// covers it.
+func (s *Session) recordBudget() time.Duration {
+	if s.recordWriteBudget > 0 {
+		return s.recordWriteBudget
+	}
+	return defaultRecordWriteBudget
+}
 
 // recordContext returns the context a record write runs under.
 //
 // A record is written even when the run's context has ended, because the
 // log has to say what the run did and how it ended. The write is still
 // bounded, so a store that never answers cannot hang the process.
-func recordContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), recordWriteBudget)
+func (s *Session) recordContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), s.recordBudget())
 }
 
 // hashText returns the hex SHA-256 of a text.

@@ -216,7 +216,7 @@ func TestTheNativeModePromptDoesNotAskForATextCall(t *testing.T) {
 		{Name: "bash", Description: "Run a shell command."},
 		{Name: "read", Description: "Read a range of lines from a file."},
 	}
-	prompt := systemPrompt("gemma4", tools, "native")
+	prompt := renderPrompt("gemma4", tools, "native")
 	for _, needle := range []string{"tool_call", "Call a tool by writing"} {
 		if strings.Contains(prompt, needle) {
 			t.Errorf("the native prompt mentions %q", needle)
@@ -236,7 +236,7 @@ func TestTheTextModePromptAsksForATextCall(t *testing.T) {
 		{Name: "read", Description: "Read a range of lines from a file."},
 	}
 	for _, mode := range []string{"text", "auto"} {
-		prompt := systemPrompt("gemma4", tools, mode)
+		prompt := renderPrompt("gemma4", tools, mode)
 		for _, needle := range []string{"tool_call", "bash: Run a shell command."} {
 			if !strings.Contains(prompt, needle) {
 				t.Errorf("the %s prompt does not mention %q", mode, needle)
