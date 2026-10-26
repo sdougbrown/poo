@@ -144,7 +144,7 @@ func (a *ModelAsker) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, erro
 				Tool:      ask.Tool,
 				Summary:   ask.Summary,
 				Class:     string(ask.Class),
-				Reason:    ask.Reason,
+				Reason:    string(ask.Reason),
 				Arguments: ask.Arguments,
 			},
 		},

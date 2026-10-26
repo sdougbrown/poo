@@ -318,7 +318,7 @@ type PermissionAskedRecord struct {
 	// Class is the tool's class.
 	Class ToolKind `json:"class,omitempty"`
 	// Reason is why the call is being asked about.
-	Reason string `json:"reason,omitempty"`
+	Reason AskReason `json:"reason,omitempty"`
 	// RepeatCount holds the doom loop's counts, when the ask is one.
 	RepeatCount *RepeatCounts `json:"repeat_count,omitempty"`
 }
@@ -339,7 +339,7 @@ type PermissionAnsweredRecord struct {
 	// Provenance is how the ask was resolved.
 	Provenance string `json:"provenance"`
 	// Reason is why the call was being asked about.
-	Reason string `json:"reason,omitempty"`
+	Reason AskReason `json:"reason,omitempty"`
 }
 
 // ToolResultData is a tool result's own data.

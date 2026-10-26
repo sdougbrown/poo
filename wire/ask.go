@@ -50,7 +50,7 @@ func (c *wireClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, erro
 		Tool:      ask.Tool,
 		Summary:   ask.Summary,
 		Class:     string(ask.Class),
-		Reason:    ask.Reason,
+		Reason:    string(ask.Reason),
 	}
 	if ask.RepeatCount != nil {
 		params.RepeatCount = &protocol.RepeatCount{

@@ -241,7 +241,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 			Handle:     job.Handle,
 			Tool:       job.Tool,
 			RunID:      job.RunID,
-			Outcome:    poo.JobOutcomeInterrupted,
+			Outcome:    poo.OutcomeInterrupted,
 			InputID:    recoveredInputID(pend.SessionID, job.JobID),
 			Text:       InterruptedJobText,
 			EndedAt:    at,

@@ -135,8 +135,8 @@ func TestTheUnmatchedActionAndTheFallbackAreIndependent(t *testing.T) {
 	if len(asked) != 1 {
 		t.Fatalf("the session emitted %d ask event(s), want 1", len(asked))
 	}
-	if asked[0].Payload["reason"] != poo.ReasonPolicy {
-		t.Errorf("the ask's reason is %q, want %q", asked[0].Payload["reason"], poo.ReasonPolicy)
+	if asked[0].Payload["reason"] != poo.AskReasonPolicy {
+		t.Errorf("the ask's reason is %q, want %q", asked[0].Payload["reason"], poo.AskReasonPolicy)
 	}
 	answered := s.events(t, poo.EventPermissionAnswered)
 	if len(answered) != 1 {

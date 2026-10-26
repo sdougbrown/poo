@@ -106,7 +106,7 @@ func TestTheLiveEvaluationOfThePermissionAsker(t *testing.T) {
 				Tool:        tt.tool,
 				Summary:     tt.summary,
 				Class:       poo.ClassSideEffecting,
-				Reason:      poo.ReasonPolicy,
+				Reason:      poo.AskReasonPolicy,
 				HistoryView: history,
 			})
 			if err != nil {

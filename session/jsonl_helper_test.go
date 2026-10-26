@@ -178,7 +178,7 @@ func jobEnded(job, handle, tool, runID, inputID, text string) *poo.JobEnded {
 		Handle:     handle,
 		Tool:       tool,
 		RunID:      runID,
-		Outcome:    poo.JobOutcomeOK,
+		Outcome:    poo.OutcomeOK,
 		InputID:    inputID,
 		Text:       text,
 		EndedAt:    "2026-10-20T00:00:01Z",

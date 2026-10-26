@@ -71,22 +71,6 @@ const (
 // tool's argument or the core's.
 const BackgroundArgName = "background"
 
-// JobOutcome is how a job ended.
-type JobOutcome string
-
-const (
-	// JobOutcomeOK means the job finished its work.
-	JobOutcomeOK JobOutcome = "ok"
-	// JobOutcomeError means the job failed, or ran out of time.
-	JobOutcomeError JobOutcome = "error"
-	// JobOutcomeCancelled means the job was stopped on purpose: by
-	// cancel_job, by the client, or by the session closing.
-	JobOutcomeCancelled JobOutcome = "cancelled"
-	// JobOutcomeInterrupted means the job's outcome is unknown: the
-	// process stopped while the job ran.
-	JobOutcomeInterrupted JobOutcome = "interrupted"
-)
-
 // JobCause says why a job ended, when the ending was not the job's own
 // doing.
 type JobCause string
@@ -147,7 +131,7 @@ type JobEnded struct {
 	// RunID identifies the run that started the job.
 	RunID string `json:"run_id"`
 	// Outcome is how the job ended.
-	Outcome JobOutcome `json:"outcome"`
+	Outcome Outcome `json:"outcome"`
 	// Cause says why the job ended, when something else ended it.
 	Cause JobCause `json:"cause,omitempty"`
 	// TimedOut reports that the job hit the jobs timeout.
@@ -254,7 +238,7 @@ type jobResult struct {
 	// runID identifies the run that started the job.
 	runID string
 	// outcome is how the job ended.
-	outcome JobOutcome
+	outcome Outcome
 	// text is the result the model reads.
 	text string
 	// fatal reports that the job failed with an error that wraps
@@ -664,7 +648,7 @@ func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 //
 // The record carries the hook-processed result, so a held result never
 // leaks what a hook would have redacted.
-func (s *Session) jobEnded(job *jobState, inputID string, outcome JobOutcome, cause JobCause, timedOut, fatal bool, text string, out afterToolOutcome) (*JobEnded, map[string]any) {
+func (s *Session) jobEnded(job *jobState, inputID string, outcome Outcome, cause JobCause, timedOut, fatal bool, text string, out afterToolOutcome) (*JobEnded, map[string]any) {
 	rec := &JobEnded{
 		RecordMeta: NewRecordMeta("job.ended"),
 		SessionID:  s.opts.SessionID,
@@ -787,16 +771,16 @@ func (s *Session) addStoreError() {
 }
 
 // jobOutcomeOf maps a call outcome to a job outcome.
-func jobOutcomeOf(outcome Outcome) JobOutcome {
+func jobOutcomeOf(outcome Outcome) Outcome {
 	switch outcome {
 	case OutcomeOK:
-		return JobOutcomeOK
+		return OutcomeOK
 	case OutcomeCancelled:
-		return JobOutcomeCancelled
+		return OutcomeCancelled
 	case OutcomeInterrupted:
-		return JobOutcomeInterrupted
+		return OutcomeInterrupted
 	default:
-		return JobOutcomeError
+		return OutcomeError
 	}
 }
 
@@ -1033,18 +1017,10 @@ func (s *Session) takeHeldResultsLocked() []jobResult {
 }
 
 // jobOutcomeToCallOutcome maps a job outcome to the outcome a delivered
-// result carries.
-func jobOutcomeToCallOutcome(outcome JobOutcome) Outcome {
-	switch outcome {
-	case JobOutcomeOK:
-		return OutcomeOK
-	case JobOutcomeCancelled:
-		return OutcomeCancelled
-	case JobOutcomeInterrupted:
-		return OutcomeInterrupted
-	default:
-		return OutcomeError
-	}
+// result carries. Both vocabularies name the same outcomes, so the
+// mapping defers to jobOutcomeOf.
+func jobOutcomeToCallOutcome(outcome Outcome) Outcome {
+	return jobOutcomeOf(outcome)
 }
 
 // deliverJobResult appends one job result to the model's view.
