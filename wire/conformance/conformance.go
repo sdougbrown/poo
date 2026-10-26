@@ -19,9 +19,12 @@ package conformance
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,8 +165,6 @@ type suite struct {
 	handshakeResult protocol.InitializeResult
 	// settingsCount is how many settings files the suite wrote.
 	settingsCount int
-	// commands is how many commands the suite scripted.
-	commands int
 	// commandSeconds is how long a scripted command runs.
 	commandSeconds int
 	// flowName is the name of the flow that is running.
@@ -307,8 +308,125 @@ func (s *suite) flow(name string, run func()) {
 // without it. A command that ends by itself leaves nothing behind.
 func (s *suite) boundedCommand() string {
 	s.t.Helper()
-	s.commands++
 	return fmt.Sprintf("sleep %d", s.commandSeconds)
+}
+
+// markerWaitSteps is how many 50ms steps a marker wait takes before it
+// gives up: about ten seconds.
+const markerWaitSteps = 200
+
+// markerReceiptSuffix names the file a marker command writes once it has
+// seen the marker.
+const markerReceiptSuffix = ".seen"
+
+// markerReceipt returns the path of the receipt for a marker.
+//
+// The receipt is the tool's acknowledgement of the marker, and the flow
+// never writes it: waiting for it is not the same as waiting for the
+// marker the flow itself wrote.
+func markerReceipt(marker string) string {
+	return marker + markerReceiptSuffix
+}
+
+// markerCommand returns a command that waits, bounded, for the marker
+// and then ends with the receipt written.
+//
+// The wait holds the run inside its tool call while a flow sends its
+// message: the marker is written once the input is accepted. A wait that
+// runs out ends without a receipt and with a failing exit, so a timeout
+// is never mistaken for the tool having seen the marker. Like
+// boundedCommand, the command ends by itself, so a binary that dies
+// leaves nothing behind.
+//
+// The flows pass an absolute path, so the wait does not depend on the
+// working directory the executor gives the command.
+func (s *suite) markerCommand(marker string) string {
+	s.t.Helper()
+	return markerCommandSteps(marker, markerWaitSteps)
+}
+
+// markerCommandSteps returns markerCommand with the given poll budget, so
+// a test can watch the wait give up without waiting the flow's ten
+// seconds.
+func markerCommandSteps(marker string, steps int) string {
+	return fmt.Sprintf(
+		`i=0; while [ "$i" -lt %d ]; do if [ -e %s ]; then printf seen > %s; exit 0; fi; sleep 0.05; i=$((i+1)); done; echo 'the marker did not appear' >&2; exit 1`,
+		steps, shellQuote(marker), shellQuote(markerReceipt(marker)))
+}
+
+// shellQuote returns s as one shell word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// markerReceiptPoll is how often the flow looks for the tool's receipt,
+// and markerReceiptTimeout is how long it looks.
+//
+// The tool's own wait is about ten seconds, and the flow writes the
+// marker within moments of the tool call starting, so a receipt that is
+// not there within five seconds is the flow's failure, not a slow
+// machine.
+const (
+	markerReceiptPoll    = 10 * time.Millisecond
+	markerReceiptTimeout = 5 * time.Second
+)
+
+// awaitMarkerReceipt waits, bounded, for the receipt that says the tool
+// saw the marker, and returns an error when it does not arrive.
+//
+// An absent receipt is the only status that means "not yet": any other
+// failure means the path itself cannot be read, and a wait that reported
+// that as a timeout would blame the marker ordering for a filesystem.
+func awaitMarkerReceipt(marker string, timeout time.Duration) error {
+	receipt := markerReceipt(marker)
+	deadline := time.Now().Add(timeout)
+	for {
+		_, err := os.Stat(receipt)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("checking for the tool's receipt for %s: %w", marker, err)
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("the tool never saw %s: no receipt while its call was open", marker)
+		}
+		time.Sleep(markerReceiptPoll)
+	}
+}
+
+// waitMarkerSeen waits, bounded, for the tool's receipt that says it saw
+// the marker.
+//
+// The marker lands while the bash tool is still waiting for it: a marker
+// the tool never acknowledges is the flow's failure, not a silent
+// ten-second timeout that would leave the flow testing a
+// post-tool-call message.
+func (s *suite) waitMarkerSeen(marker string) {
+	s.t.Helper()
+	if err := awaitMarkerReceipt(marker, markerReceiptTimeout); err != nil {
+		s.t.Fatal(err)
+	}
+}
+
+// resetMarker removes a flow's marker and the tool's receipt, so only the
+// tool of this run can write the acknowledgement the flow waits for.
+func (s *suite) resetMarker(marker string) {
+	s.t.Helper()
+	for _, path := range []string{marker, markerReceipt(marker)} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			s.t.Fatalf("removing a stale marker: %v", err)
+		}
+	}
+}
+
+// markMarker records that the flow's input was accepted, so the tool may
+// see the marker and end.
+func (s *suite) markMarker(marker string) {
+	s.t.Helper()
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		s.t.Fatalf("writing the marker: %v", err)
+	}
 }
 
 // settings writes a settings file for a flow and returns its path.

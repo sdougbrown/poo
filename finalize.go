@@ -807,7 +807,6 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	// acceptance sees it and abandons, and the resumed run delivers it.
 	late := run.inputsClosed || run.sealed || committed
 	waiting := !late && s.run == run && s.state == StateWaiting
-	reason := run.result.Reason
 	// An interrupt aborts the activity that is running. The abort is
 	// raised before the acceptance claim is released, so a finalization
 	// that waits for this acceptance and then takes the run back clears
@@ -831,9 +830,8 @@ func (s *Session) Send(text string, mode InputMode, opts ...InputOption) (string
 	s.mu.Unlock()
 
 	if late {
-		if committed {
-			s.dropUndelivered(run, []UndeliveredInput{{InputID: id, Mode: string(mode)}}, reason)
-		}
+		// The finalization reports the input, whether it took the claim
+		// or the hand-over above gave it the entry.
 		return id, nil
 	}
 

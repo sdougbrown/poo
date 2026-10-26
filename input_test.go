@@ -445,7 +445,7 @@ func inputAcceptedAtTheNaturalStop(t *testing.T, mode poo.InputMode, afterAccept
 	// The settle hook holds the run at the natural stop, so the input is
 	// accepted while the run is still open.
 	hook := &blockingBeforeSettle{started: make(chan struct{}), release: make(chan struct{})}
-	observer := &settlingObserver{seen: make(chan struct{})}
+	observer := &eventObserver{event: poo.EventRunSettling, seen: make(chan struct{})}
 
 	opts := testOptions(t, tr, tool, sink)
 	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
@@ -581,8 +581,12 @@ func (s *holdingInputSink) Append(ctx context.Context, rec poo.Record) error {
 	return s.recordingSink.Append(ctx, rec)
 }
 
-// settlingObserver closes its channel when the run enters finalization.
-type settlingObserver struct {
+// eventObserver closes its channel when the run reaches the event it
+// names: the settling wait and the settled wait are the same observer
+// with a different event.
+type eventObserver struct {
+	// event is the run event the observer closes on.
+	event poo.EventName
 	// seen is the channel the observer closes.
 	seen chan struct{}
 	// once guards the channel, so a second run does not close it
@@ -590,9 +594,9 @@ type settlingObserver struct {
 	once sync.Once
 }
 
-// Observe closes the channel on the first settling event.
-func (o *settlingObserver) Observe(ev poo.Event) error {
-	if ev.Name == poo.EventRunSettling {
+// Observe closes the channel on the first matching event.
+func (o *eventObserver) Observe(ev poo.Event) error {
+	if ev.Name == o.event {
 		o.once.Do(func() { close(o.seen) })
 	}
 	return nil
@@ -1856,7 +1860,7 @@ func TestASteerAcceptedDuringAFinalizeIsReportedAsUndelivered(t *testing.T) {
 	// record's write from there lands it in the window where the run
 	// is closed but not yet sealed.
 	settling := make(chan struct{})
-	obs := &settlingObserver{seen: settling}
+	obs := &eventObserver{event: poo.EventRunSettling, seen: settling}
 	opts.Observers = []poo.Observer{obs}
 
 	s := newTestSession(t, opts)
@@ -1899,7 +1903,76 @@ func TestASteerAcceptedDuringAFinalizeIsReportedAsUndelivered(t *testing.T) {
 	if n := sink.count("input.delivered"); n != 0 {
 		t.Errorf("the log holds %d input.delivered records, want none", n)
 	}
+	if n := sink.count("input.dropped"); n != 1 {
+		t.Errorf("the log holds %d input.dropped records, want 1", n)
+	}
 	if n := len(tr.Requests()); n != 1 {
 		t.Errorf("the run made %d requests, want 1: the steer never reaches the model", n)
+	}
+}
+
+// TestALateAcceptanceIsReportedAsDroppedOnce covers the window in which
+// an acceptance's record write outlives the record-write budget and
+// lands after the run has committed: the seal takes the claim, the run
+// settles with the input in its detail, and the input is reported
+// dropped exactly once.
+func TestALateAcceptanceIsReportedAsDroppedOnce(t *testing.T) {
+	hook := &blockingBeforeSettle{started: make(chan struct{}), release: make(chan struct{})}
+	sink := &blockingQueuedSink{recordingSink: &recordingSink{}, entered: make(chan struct{}), release: make(chan struct{})}
+	settled := make(chan struct{})
+	obs := &eventObserver{event: poo.EventRunSettled, seen: settled}
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	tool := &echoTool{result: "echoed"}
+
+	opts := testOptions(t, tr, tool, sink)
+	opts.BeforeSettle = []poo.BeforeSettleHook{hook}
+	opts.Observers = []poo.Observer{obs}
+
+	s := newTestSession(t, opts)
+	poo.SetRecordWriteBudget(s, 50*time.Millisecond)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-hook.started
+	var inputID string
+	sent := make(chan error, 1)
+	go func() {
+		id, err := s.Send("and then this", poo.Steer)
+		inputID = id
+		sent <- err
+	}()
+	<-sink.entered
+	// The finalization runs while the acceptance's write is still in
+	// flight: the budget expires, the seal takes the claim, and the run
+	// commits. The write lands afterwards.
+	close(hook.release)
+	<-settled
+	close(sink.release)
+	if err := <-sent; err != nil {
+		t.Fatalf("sending the steer: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if n := len(res.Detail.UndeliveredInput); n != 1 {
+		t.Fatalf("the settle detail lists %d undelivered inputs, want 1: %+v",
+			n, res.Detail.UndeliveredInput)
+	}
+	if input := res.Detail.UndeliveredInput[0]; input.InputID != inputID || input.Mode != string(poo.Steer) {
+		t.Errorf("the settle detail lists %+v, want the accepted steer %s", input, inputID)
+	}
+	if n := sink.count("input.dropped"); n != 1 {
+		t.Errorf("the log holds %d input.dropped records, want 1", n)
+	}
+	dropped := 0
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventInputDropped {
+			dropped++
+		}
+	}
+	if dropped != 1 {
+		t.Errorf("the session emitted %d input.dropped events, want 1", dropped)
 	}
 }
