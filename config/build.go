@@ -14,19 +14,19 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/exec"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/perm"
 	permissive "github.com/sdougbrown/poo/perm/decide"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/protect"
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
-	"github.com/sdougbrown/poo/tool/bash"
-	"github.com/sdougbrown/poo/tool/cliregistry"
-	"github.com/sdougbrown/poo/tool/protect"
-	"github.com/sdougbrown/poo/tool/read"
 )
 
 // The names the settings and the profiles use.
@@ -37,6 +37,8 @@ const (
 	RoleDecider = "decider"
 	// BaseSection is the name of the prompt's base section.
 	BaseSection = "base"
+	// ToolBash is the name of the bash tool.
+	ToolBash = "bash"
 )
 
 // The defaults the settings take when they do not say otherwise.
@@ -100,7 +102,7 @@ type BuildOptions struct {
 	// Profiles are the profiles the binary links.
 	Profiles []profile.Profile
 	// Executors are the executors the binary links.
-	Executors *bash.Registry
+	Executors *exec.Registry
 	// Askers are the names of the askers the binary can ask, in the
 	// order the chain asks them when the settings do not say.
 	Askers []string
@@ -135,7 +137,7 @@ type Runtime struct {
 	Catalog *catalog.Catalog
 	// Registry is the cli registry the session offers, or nil when the
 	// settings name none.
-	Registry *cliregistry.Catalog
+	Registry *cli.Catalog
 	// deciderModel is the model the session's decider asks, when there
 	// is one.
 	deciderModel poo.ModelInfo
@@ -232,14 +234,14 @@ type ToolFactory func(ToolOptions) poo.Tool
 type ToolOptions struct {
 	// Executor is the executor the tools that run a command use:
 	// bash, and the registered CLIs.
-	Executor bash.Executor
+	Executor exec.Executor
 	// Scrub is the rules for the child environment.
-	Scrub bash.Scrub
+	Scrub exec.Scrub
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths *protect.Set
 	// Registry is the cli registry the registry's tools call. It is nil
 	// when the settings name no registry.
-	Registry *cliregistry.Catalog
+	Registry *cli.Catalog
 	// Search reports that the session searches the catalog instead of
 	// listing it, so call_cli points an unknown name at the search.
 	Search bool
@@ -322,15 +324,14 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	}
 	r.Profile = poo.Profile{Name: chosen.Name, Unmatched: chosen.Unmatched}
 	for _, tool := range chosen.Tools {
-		factory, ok := opts.Tools[tool]
-		if !ok || factory == nil {
+		if !linksTool(opts, tool) {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "profile",
 				Message: fmt.Sprintf("the profile %q offers the tool %q, and this binary does not link it", chosen.Name, tool),
 			}
 		}
-		r.Profile.Tools = append(r.Profile.Tools, toolInfo(factory))
+		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[tool]))
 		r.toolNames = append(r.toolNames, tool)
 	}
 	// The registry is the settings' opt-in: a session whose settings name
@@ -363,7 +364,7 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 		}
 		resolved = append(resolved, path)
 	}
-	catalog, err := cliregistry.Load(resolved...)
+	catalog, err := cli.Load(resolved...)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
@@ -395,7 +396,7 @@ func (r *Runtime) resolveDecider() {
 // decider role the settings name and the catalog cannot resolve gives
 // the session none.
 func (r *Runtime) findTool() bool {
-	return r.Registry != nil && r.Registry.Len() > cliregistry.FindThreshold &&
+	return r.Registry != nil && r.Registry.Len() > cli.FindThreshold &&
 		r.deciderErr == nil && r.decider != nil
 }
 
@@ -405,7 +406,7 @@ func (r *Runtime) findTool() bool {
 // what it lists: a tool left out of the build takes its guidance with it.
 func (r *Runtime) offersRegistry() bool {
 	for _, name := range r.toolNames {
-		if name == cliregistry.CallToolName {
+		if name == cli.CallToolName {
 			return true
 		}
 	}
@@ -414,24 +415,30 @@ func (r *Runtime) offersRegistry() bool {
 
 // addRegistryTools offers the registry's tools to the session.
 //
-// The tools join a profile that already offers a side-effecting tool: a
-// registered CLI can change anything, so a read-only profile stays
-// read-only. A binary that links no such tool cannot honour the settings,
-// and the operator is told which tool is missing.
+// The catalog needs the tools that read it, and a binary that links none
+// of them cannot honour the settings: the operator is told which tool is
+// missing, whatever profile the session runs under. The tools themselves
+// join a profile that already offers a side-effecting tool: a registered
+// CLI can change anything, so a read-only profile stays read-only.
 func (r *Runtime) addRegistryTools(opts BuildOptions) error {
-	if r.Registry == nil || !offersSideEffects(r.Profile.Tools) {
+	if r.Registry == nil {
 		return nil
 	}
-	for _, name := range registryToolNames(r.findTool()) {
-		factory, ok := opts.Tools[name]
-		if !ok || factory == nil {
+	names := registryToolNames(r.findTool())
+	for _, name := range names {
+		if !linksTool(opts, name) {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "cliregistry.paths",
 				Message: fmt.Sprintf("the settings name a cli registry, and this binary does not link the %q tool", name),
 			}
 		}
-		r.Profile.Tools = append(r.Profile.Tools, toolInfo(factory))
+	}
+	if !offersSideEffects(r.Profile.Tools) {
+		return nil
+	}
+	for _, name := range names {
+		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[name]))
 		r.toolNames = append(r.toolNames, name)
 	}
 	return nil
@@ -444,9 +451,9 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 // call_cli is all the model needs.
 func registryToolNames(find bool) []string {
 	if find {
-		return []string{cliregistry.CallToolName, cliregistry.FindToolName}
+		return []string{cli.CallToolName, cli.FindToolName}
 	}
-	return []string{cliregistry.CallToolName}
+	return []string{cli.CallToolName}
 }
 
 // offersSideEffects reports whether a tool set can change anything.
@@ -467,7 +474,7 @@ func offersSideEffects(tools []poo.ToolInfo) bool {
 // something would run in it.
 func (r *Runtime) needsExecutor() bool {
 	for _, name := range r.toolNames {
-		if name == "bash" || name == cliregistry.CallToolName {
+		if name == ToolBash || name == cli.CallToolName {
 			return true
 		}
 	}
@@ -509,19 +516,18 @@ func resolveProfiles(opts BuildOptions, registry, find bool) []poo.Profile {
 	for _, definition := range opts.Profiles {
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
 		for _, tool := range definition.Tools {
-			factory, ok := opts.Tools[tool]
-			if !ok || factory == nil {
+			if !linksTool(opts, tool) {
 				continue
 			}
-			resolved.Tools = append(resolved.Tools, toolInfo(factory))
+			resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[tool]))
 		}
 		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
 			continue
 		}
 		if registry && offersSideEffects(resolved.Tools) {
 			for _, name := range registryToolNames(find) {
-				if factory, ok := opts.Tools[name]; ok && factory != nil {
-					resolved.Tools = append(resolved.Tools, toolInfo(factory))
+				if linksTool(opts, name) {
+					resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
 				}
 			}
 		}
@@ -601,7 +607,16 @@ func (r *Runtime) resolveModels(opts BuildOptions) error {
 	return nil
 }
 
-// linkedTool reports whether the binary links a tool.
+// linksTool reports whether the binary links a tool.
+//
+// A map entry with no constructor links nothing: the binary has no way
+// to build the tool, so it does not offer it.
+func linksTool(opts BuildOptions, name string) bool {
+	factory, ok := opts.Tools[name]
+	return ok && factory != nil
+}
+
+// linkedTool reports whether a settings rule may name a tool.
 //
 // The core's own job tools are linked by the core, so a rule may name
 // them.
@@ -609,8 +624,7 @@ func linkedTool(opts BuildOptions, name string) bool {
 	if name == profile.JobsToolName || name == profile.CancelJobToolName {
 		return true
 	}
-	_, ok := opts.Tools[name]
-	return ok
+	return linksTool(opts, name)
 }
 
 // isChatRole reports whether a failure is about the chat role.
@@ -671,39 +685,64 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	}
 	r.ProtectedPaths = append([]string(nil), settings.Tools.ProtectedPaths...)
 
-	scrub := bash.Scrub{
+	scrub := exec.Scrub{
 		Names:       append([]string(nil), settings.Tools.Env.Scrub...),
 		Passthrough: append([]string(nil), settings.Tools.Env.Passthrough...),
 	}
 	if r.Catalog != nil {
 		scrub.Names = append(scrub.Names, r.Catalog.CredentialEnvNames()...)
 	}
-	r.Env = bash.ScrubEnv(os.Environ(), scrub)
+	r.Env = exec.ScrubEnv(os.Environ(), scrub)
 
 	executorName := DefaultExecutor
 	if settings.Tools.Bash.Executor != nil {
 		executorName = *settings.Tools.Bash.Executor
 	}
-	if opts.Executors == nil {
-		return &Error{
-			Code:    CodeUnsupported,
-			Field:   "tools.bash.executor",
-			Message: "this binary links no executor",
+	// A settings file cannot set up a tool the binary lacks: every bash
+	// leaf belongs to the bash tool, so a binary without the tool
+	// refuses the leaf by name.
+	if !linksTool(opts, ToolBash) {
+		if settings.Tools.Bash.Executor != nil {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.executor",
+				Message: fmt.Sprintf("the settings name an executor for the %q tool, and this binary does not link it", ToolBash),
+			}
+		}
+		if settings.Tools.Bash.TimeoutS != nil {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.timeout_s",
+				Message: fmt.Sprintf("the settings name a timeout for the %q tool, and this binary does not link it", ToolBash),
+			}
 		}
 	}
-	if !opts.Executors.Has(executorName) {
-		return &Error{
-			Code:    CodeUnsupported,
-			Field:   "tools.bash.executor",
-			Message: fmt.Sprintf("this binary links no executor named %q", executorName),
+
+	// A binary that links bash, or offers a tool that runs a command,
+	// must be able to resolve the executor's name whatever profile runs:
+	// a typo is a settings failure, not a failure to discover later.
+	if linksTool(opts, ToolBash) || r.needsExecutor() {
+		if opts.Executors == nil {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.executor",
+				Message: "this binary links no executor",
+			}
+		}
+		if !opts.Executors.Has(executorName) {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.bash.executor",
+				Message: fmt.Sprintf("this binary links no executor named %q", executorName),
+			}
 		}
 	}
 
 	toolOptions := ToolOptions{Scrub: scrub, ProtectedPaths: protected, Registry: r.Registry, Search: r.findTool()}
 	if r.needsExecutor() {
-		executor, err := opts.Executors.New(executorName, bash.Options{
+		executor, err := opts.Executors.New(executorName, exec.Options{
 			Masker: protected,
-			Sandbox: bash.Sandbox{
+			Sandbox: exec.Sandbox{
 				DisableNetwork: settings.Tools.Bwrap.Network != nil && !*settings.Tools.Bwrap.Network,
 				ROBinds:        settings.Tools.Bwrap.ROBinds,
 				RWBinds:        settings.Tools.Bwrap.RWBinds,
@@ -722,10 +761,10 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	tools := map[string]poo.Tool{}
 	var order []string
 	for _, tool := range r.toolNames {
-		factory, ok := opts.Tools[tool]
-		if !ok || factory == nil {
+		if !linksTool(opts, tool) {
 			continue
 		}
+		factory := opts.Tools[tool]
 		tools[tool] = factory(toolOptions)
 		order = append(order, tool)
 	}
@@ -791,7 +830,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		chainTimeout = time.Duration(*settings.Permission.ChainTimeoutS) * time.Second
 	}
 
-	askers, err := r.resolveAskers(opts, settings.Permission.Askers)
+	askers, err := r.resolveAskers(opts, settings.Permission)
 	if err != nil {
 		return err
 	}
@@ -817,13 +856,16 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 // resolveAskers builds the asker chain.
 //
 // The chain is the one the settings name, or the one the binary asks by
-// default. The decide asker is only in the chain when a decider model
-// is configured: a chain that asks a model that is not there would wait
-// for an answer that cannot come. The wire asker is only in the chain
-// when the binary has a wire client.
-func (r *Runtime) resolveAskers(opts BuildOptions, named []string) ([]perm.Asker, error) {
-	names := named
-	if len(names) == 0 {
+// default. An explicit empty chain is a chain with no askers: an ask
+// goes straight to the fallback. A chain the settings do not name is
+// absent, and the binary's own askers apply. The decide asker is only
+// in the chain when a decider model is configured: a chain that asks a
+// model that is not there would wait for an answer that cannot come.
+// The wire asker is only in the chain when the binary has a wire
+// client.
+func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]perm.Asker, error) {
+	names := permission.Askers
+	if !permission.AskersNamed() {
 		names = opts.Askers
 	}
 	decider, deciderErr := r.DeciderModel()
@@ -832,7 +874,7 @@ func (r *Runtime) resolveAskers(opts BuildOptions, named []string) ([]perm.Asker
 		switch name {
 		case "decide":
 			if deciderErr != nil {
-				if len(named) > 0 {
+				if permission.AskersNamed() {
 					// The settings name the decide asker and no
 					// decider model is configured: the ask would
 					// wait for an answer that cannot come.
@@ -978,8 +1020,8 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	if settings.Tools.Bash.TimeoutS != nil {
 		r.Options.Settings.BashTimeoutSeconds = *settings.Tools.Bash.TimeoutS
 	}
-	r.Options.Settings.ObservationCapChars = bash.ObservationCap(model.ContextLimit)
-	r.Options.Settings.ReadOutputCapChars = read.OutputCap(model.ContextLimit)
+	r.Options.Settings.ObservationCapChars = caps.Observation(model.ContextLimit, poo.CharsPerToken)
+	r.Options.Settings.ReadOutputCapChars = caps.ReadOutput(model.ContextLimit, poo.CharsPerToken)
 
 	strategy := DefaultContextStrategy
 	if settings.Context.Strategy != nil {
@@ -1040,7 +1082,7 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	if r.Registry != nil && r.offersRegistry() {
 		section := r.Registry.Section(r.findTool())
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
-			b.Set(cliregistry.SectionName, section)
+			b.Set(cli.SectionName, section)
 		})
 	}
 	for name, text := range settings.SystemPrompt.Sections {

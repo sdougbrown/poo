@@ -250,7 +250,8 @@ func TestTheChainExhaustedAppliesTheDefault(t *testing.T) {
 }
 
 // TestTheFallbackCanAllow covers the plan's rule: the fallback is a
-// decision, and it can allow.
+// decision, and it can allow. A chain with no askers asks nobody, so no
+// timer is started and the answer says no asker was configured.
 func TestTheFallbackCanAllow(t *testing.T) {
 	clock := newFakeClock()
 	chain := &chain{
@@ -266,6 +267,12 @@ func TestTheFallbackCanAllow(t *testing.T) {
 	}
 	if res.answeredBy != "fallback" {
 		t.Errorf("the ask was answered by %q, want the fallback", res.answeredBy)
+	}
+	if res.provenance != "no_asker" {
+		t.Errorf("the ask's provenance is %q, want %q", res.provenance, "no_asker")
+	}
+	if pending := clock.Pending(); pending != 0 {
+		t.Errorf("the chain started %d timer(s), want 0: no wait happened", pending)
 	}
 }
 

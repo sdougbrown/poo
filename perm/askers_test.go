@@ -53,7 +53,8 @@ func TestADenyGivesTheModelAVisibleDeniedResult(t *testing.T) {
 }
 
 // TestWithNoAskersTheFallbackApplies covers the plan's rule: a chain
-// with no askers applies the fallback.
+// with no askers applies the fallback, and the answer says no asker was
+// configured.
 func TestWithNoAskersTheFallbackApplies(t *testing.T) {
 	policy, err := perm.New(perm.Options{})
 	if err != nil {
@@ -74,8 +75,8 @@ func TestWithNoAskersTheFallbackApplies(t *testing.T) {
 	if len(answered) != 1 {
 		t.Fatalf("the session emitted %d answer event(s), want 1", len(answered))
 	}
-	if answered[0].Payload["provenance"] != poo.ProvenanceDefault {
-		t.Errorf("the answer's provenance is %q, want %q", answered[0].Payload["provenance"], poo.ProvenanceDefault)
+	if answered[0].Payload["provenance"] != poo.ProvenanceNoAsker {
+		t.Errorf("the answer's provenance is %q, want %q", answered[0].Payload["provenance"], poo.ProvenanceNoAsker)
 	}
 	if answered[0].Payload["answered_by"] != "fallback" {
 		t.Errorf("the answer's answered_by is %q, want the fallback", answered[0].Payload["answered_by"])

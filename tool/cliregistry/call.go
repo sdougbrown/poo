@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/sdougbrown/cli-registry"
+	registry "github.com/sdougbrown/cli-registry"
 	"github.com/sdougbrown/cli-registry/schema"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
 )
@@ -103,7 +104,7 @@ type preparedCall struct {
 	// args are the CLI's arguments.
 	args map[string]any
 	// plan is the command the call runs.
-	plan *cli.Plan
+	plan *registry.Plan
 	// key is the call's canonical input.
 	key json.RawMessage
 }
@@ -136,13 +137,12 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	if err := decodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("%s: %v", CallToolName, err)
 	}
-	tool, ok := t.catalog.tools[a.Name]
-	if !ok {
+	if _, ok := t.catalog.Lookup(a.Name); !ok {
 		if t.catalog.Len() == 0 {
 			return nil, poo.InvalidArgsf("%s: no CLI is registered", CallToolName)
 		}
 		return nil, poo.InvalidArgsf("%s: no CLI named %q; %s",
-			CallToolName, a.Name, t.catalog.namesHint(t.search))
+			CallToolName, a.Name, t.catalog.NamesHint(t.search))
 	}
 	args := map[string]any{}
 	if len(a.Args) > 0 {
@@ -156,7 +156,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 			return nil, poo.InvalidArgsf("%s: %s: args must be an object: %v", CallToolName, a.Name, err)
 		}
 	}
-	plan, err := t.catalog.registry.Plan(tool, args)
+	plan, err := t.catalog.Plan(a.Name, args)
 	if err != nil {
 		return nil, planError(a.Name, err)
 	}
@@ -176,7 +176,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 // unusable — a binding that cannot be built, or a working directory that
 // does not resolve — and it is reported as it is.
 func planError(name string, err error) error {
-	var invalid *cli.ValidationError
+	var invalid *registry.ValidationError
 	if errors.As(err, &invalid) {
 		return poo.InvalidArgsf("%s: %s: %s", CallToolName, name, issuesText(invalid.Issues))
 	}
@@ -219,14 +219,14 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 
 	cap := env.Settings.ObservationCapChars
 	if cap <= 0 {
-		cap = bash.ObservationCapMax
+		cap = caps.ObservationMax
 	}
 
 	// A context that has already ended runs nothing: starting the
 	// command only for the executor to stop it gives a fast command
 	// time for its side effects. The call is classified the way a
 	// stopped one is.
-	if res, ok := stoppedResult(ctx.Err(), cli.Output{}, cap); ok {
+	if res, ok := stoppedResult(ctx.Err(), registry.Output{}, cap); ok {
 		return res, nil
 	}
 
@@ -257,7 +257,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	}
 	code, _ := proc.Wait()
 
-	out := cli.Output{
+	out := registry.Output{
 		Stdout:    []byte(stdout.String()),
 		Stderr:    []byte(stderr.String()),
 		Truncated: stdout.Truncated() || stderr.Truncated(),
@@ -295,7 +295,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 // Whatever the command wrote before it was stopped is kept: it is the
 // output the model needs to see why the call did not finish. A deadline
 // is a timeout; a cancellation is a failure without one.
-func stoppedResult(err error, out cli.Output, cap int) (poo.ToolResult, bool) {
+func stoppedResult(err error, out registry.Output, cap int) (poo.ToolResult, bool) {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		text, structured := bash.Envelope(bash.Observation{
@@ -346,7 +346,7 @@ func envLookup(environ []string) func(string) (string, bool) {
 // both streams, and may try something else. Anything else is the
 // environment being unusable, and it goes back as an error.
 func failed(err error, cap int) (poo.ToolResult, error) {
-	var exited *cli.ExecError
+	var exited *registry.ExecError
 	if errors.As(err, &exited) {
 		// A process that died by a signal has no exit status, so the
 		// field is null, as it is in bash's envelope.

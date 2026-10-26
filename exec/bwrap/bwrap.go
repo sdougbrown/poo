@@ -32,7 +32,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sdougbrown/poo/tool/bash"
+	pooexec "github.com/sdougbrown/poo/exec"
 )
 
 // The names and defaults of the executor.
@@ -86,7 +86,7 @@ var DefaultROBinds = []string{"/usr", "/bin", "/lib", "/lib64", "/etc"}
 // returns are absolute; the executor masks the ones a bind reaches.
 //
 // A session's protected-path matcher satisfies it.
-type Masker = bash.Masker
+type Masker = pooexec.Masker
 
 // Options configure the executor.
 type Options struct {
@@ -158,7 +158,7 @@ func (e *Executor) Name() string { return Name }
 // command names a writer for stderr: then the two streams are captured
 // apart. A context that has already ended starts nothing: Start returns
 // its error and no sandbox.
-func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (bash.Process, error) {
+func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) (pooexec.Process, error) {
 	if len(c.Argv) == 0 {
 		return nil, errors.New("bwrap: the command has no arguments")
 	}
@@ -329,7 +329,7 @@ func (e *Executor) Start(ctx context.Context, c bash.Command, out io.Writer) (ba
 }
 
 // args returns the bubblewrap arguments for a command.
-func (e *Executor) args(c bash.Command) ([]string, error) {
+func (e *Executor) args(c pooexec.Command) ([]string, error) {
 	helper, err := helperExecutable()
 	if err != nil {
 		return nil, err

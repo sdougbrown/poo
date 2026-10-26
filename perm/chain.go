@@ -86,6 +86,7 @@ func (c *chain) askReported(ctx context.Context, ask Ask, reporter poo.Permissio
 	}
 	chainCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
+	var asked int
 	for _, asker := range c.askers {
 		if asker == nil {
 			continue
@@ -96,8 +97,14 @@ func (c *chain) askReported(ctx context.Context, ask Ask, reporter poo.Permissio
 		default:
 		}
 		c.attempt(chainCtx, ctx, ask, asker, request, deadline)
+		asked++
 	}
-	offer(request, poo.PermissionInput{Kind: poo.PermissionExhausted})
+	kind := poo.PermissionExhausted
+	if asked == 0 {
+		// Nobody was asked, and the answer says so.
+		kind = poo.PermissionNoAsker
+	}
+	offer(request, poo.PermissionInput{Kind: kind})
 	return resolutionOf(request)
 }
 

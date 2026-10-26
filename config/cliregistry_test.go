@@ -466,3 +466,25 @@ func TestARegistryThatDoesNotLoadIsAnError(t *testing.T) {
 		t.Errorf("the failure names %q, want cliregistry.paths", failure.Field)
 	}
 }
+
+// TestARegistryWithoutCallCLIIsRefused covers the settings' requirement:
+// a catalog is useless to a binary that links no tool over it, so the
+// paths are refused by name even when the running profile is read-only.
+func TestARegistryWithoutCallCLIIsRefused(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(dir)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = readOnlyBuild(t, settings, nil)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a binary without call_cli accepted cliregistry.paths: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "cliregistry.paths" {
+		t.Errorf("the failure is %+v, want unsupported on cliregistry.paths", failure)
+	}
+	if !strings.Contains(failure.Message, "call_cli") {
+		t.Errorf("the message %q does not name the tool", failure.Message)
+	}
+}

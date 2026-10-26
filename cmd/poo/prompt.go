@@ -71,8 +71,3 @@ func toolCallsSection(tools []poo.ToolSpec) string {
 	b.WriteString("Call one tool at a time, and wait for its result before the next call.")
 	return b.String()
 }
-
-// newSessionID returns a fresh identifier for a session.
-func newSessionID() string {
-	return poo.NewULID()
-}
