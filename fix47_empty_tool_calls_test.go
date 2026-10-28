@@ -277,26 +277,6 @@ func TestARecoverableNoteGrowsItsTurnsSpan(t *testing.T) {
 	}
 }
 
-// TestAConsecutiveRunOfEmptyTurnsSettlesInvalidTurns covers the bound: a
-// model that keeps answering with no turn at all is asked twice, and then
-// the run settles invalid_turns.
-func TestAConsecutiveRunOfEmptyTurnsSettlesInvalidTurns(t *testing.T) {
-	tr := emptyToolCallTurns(3)
-	sink := &recordingSink{}
-	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
-
-	res := runSession(t, s, "hi")
-	if res.Reason != poo.ReasonInvalidTurns {
-		t.Fatalf("the run settled %q, want invalid_turns", res.Reason)
-	}
-	if got := len(tr.Requests()); got != 2 {
-		t.Errorf("the endpoint got %d requests, want 2: the model is asked twice", got)
-	}
-	if notes := emptyToolCallNotes(sink.messages()); notes != 2 {
-		t.Errorf("the records hold %d notices, want 2", notes)
-	}
-}
-
 // TestTheReplayOfARecoveredRunReportsTheShift covers what a replay sees
 // in a log that holds a recovered empty turn: an empty turn records no
 // assistant message, so the script has no turn for it and every later

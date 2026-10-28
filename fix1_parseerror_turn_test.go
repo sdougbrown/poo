@@ -54,8 +54,7 @@ func TestTheParseErrorGetsASecondTurn(t *testing.T) {
 	if res.Reason != poo.ReasonInvalidTurns {
 		t.Fatalf("the run settled %q, want invalid_turns", res.Reason)
 	}
-	if got := requests(); got < 2 {
-		t.Errorf("the endpoint got %d requests, want 2: the model is told about the parse error and tries again",
-			got)
+	if got := requests(); got != 3 {
+		t.Errorf("the endpoint got %d requests, want the three-note budget", got)
 	}
 }
