@@ -205,26 +205,60 @@ func (f *endpointFlags) apply(settings *config.Settings) {
 	settings.Roles[string(catalog.RoleChat)] = name
 }
 
+// given returns the flags that describe a model and were given.
+//
+// The context limit counts when it is positive: a zero is the flag's
+// default, and the check reports a zero as a value, not as a flag that
+// was not given.
+func (f *endpointFlags) given() []string {
+	flags := make([]string, 0, 5)
+	if f.endpoint != "" {
+		flags = append(flags, "--endpoint")
+	}
+	if f.modelID != "" {
+		flags = append(flags, "--model-id")
+	}
+	if f.contextLimit > 0 {
+		flags = append(flags, "--context-limit")
+	}
+	if f.apiKeyEnv != "" {
+		flags = append(flags, "--api-key-env")
+	}
+	if f.toolsMode != "" {
+		flags = append(flags, "--tools-mode")
+	}
+	return flags
+}
+
 // validate checks the flags that describe one model.
 //
 // The flags that name a model describe one model, so they are all or
-// none of them.
+// none of them, and the message names the flags that were given.
 func (f *endpointFlags) validate() error {
 	switch f.toolsMode {
 	case "", "native", "text", "auto":
 	default:
 		return fmt.Errorf("--tools-mode must be native, text or auto, not %q", f.toolsMode)
 	}
-	named := f.endpoint != "" || f.modelID != "" || f.contextLimit > 0 || f.apiKeyEnv != "" || f.toolsMode != ""
-	if !named {
+	given := f.given()
+	if len(given) == 0 {
 		return nil
 	}
-	switch {
-	case f.endpoint == "":
-		return errors.New("--endpoint is required with --model-id")
-	case f.modelID == "":
-		return errors.New("--model-id is required with --endpoint")
-	case f.contextLimit <= 0:
+	var missing []string
+	if f.endpoint == "" {
+		missing = append(missing, "--endpoint")
+	}
+	if f.modelID == "" {
+		missing = append(missing, "--model-id")
+	}
+	if len(missing) > 0 {
+		needs := "needs"
+		if len(given) > 1 {
+			needs = "need"
+		}
+		return fmt.Errorf("%s %s %s", strings.Join(given, " and "), needs, strings.Join(missing, " and "))
+	}
+	if f.contextLimit <= 0 {
 		return errors.New("--context-limit is required and must be positive")
 	}
 	return nil
