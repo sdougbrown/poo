@@ -137,3 +137,52 @@ func TestAValidTurnResetsTheUnparsedCallCount(t *testing.T) {
 		t.Errorf("the endpoint got %d requests, want 5", got)
 	}
 }
+
+// TestTheAlternatingUnusableTurnsSettleInvalidTurns covers the shared
+// bound: a turn whose call did not parse, an empty turn, and another
+// unparsed call are three unusable turns in a row. Neither kind reached
+// its own bound, and the run settles invalid_turns all the same.
+func TestTheAlternatingUnusableTurnsSettleInvalidTurns(t *testing.T) {
+	srv, bodies := streamEndpoint(t, unparseableCallStream, emptyToolCallsStream,
+		unparseableCallStream, answerStream)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "text"})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+
+	res := runSession(t, s, "hi")
+	if res.Reason != poo.ReasonInvalidTurns {
+		t.Fatalf("the run settled %q (%s), want invalid_turns: three unusable turns in a row reach the shared bound",
+			res.Reason, res.Detail.Source)
+	}
+	if res.Detail.Source != "unparsed_calls" {
+		t.Errorf("the settle source is %q, want unparsed_calls: the last turn's call did not parse",
+			res.Detail.Source)
+	}
+	if !strings.Contains(res.Detail.Text, "3 turns") {
+		t.Errorf("the settle text is %q, want it to name the three turns", res.Detail.Text)
+	}
+	if got := len(bodies()); got != 3 {
+		t.Errorf("the endpoint got %d requests, want 3: the mix settles at the shared bound", got)
+	}
+}
+
+// TestAValidTurnResetsBothUnusableTurnCounts covers the reset: an
+// unparsed call, an empty turn, a call that parses, then the same two
+// again. The parseable call resets both counts, so the run answers
+// instead of settling at either bound.
+func TestAValidTurnResetsBothUnusableTurnCounts(t *testing.T) {
+	srv, bodies := streamEndpoint(t, unparseableCallStream, emptyToolCallsStream,
+		parseableCallStream, unparseableCallStream, emptyToolCallsStream, answerStream)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "text"})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+
+	res := runSession(t, s, "hi")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn: the parseable call reset both counts",
+			res.Reason, res.Detail.Source)
+	}
+	if got := len(bodies()); got != 6 {
+		t.Errorf("the endpoint got %d requests, want 6", got)
+	}
+}

@@ -584,17 +584,20 @@ func (s *Session) loop(run *runState) []candidate {
 
 		// A turn that asked for tool calls and sent none is the model's
 		// own slip, and it is the run's to recover: the turn carries no
-		// call and no answer, so the model is told what it sent. A turn
-		// that carries either ends the run of empty turns.
+		// call and no answer, so the model is told what it sent. Only a
+		// usable turn, one with a call or answer text, ends a run of
+		// unusable turns; an unusable turn of one kind leaves the other
+		// kind's count alone.
 		empty := emptyToolCallTurn(resp)
-		if !empty {
-			s.resetEmptyTurns(run)
+		if usableTurn(resp) {
+			s.resetUnusableTurns(run)
 		}
 
 		// A failure the transport reported about the response is
 		// visible: the model is told, and the record holds it. A note
 		// that opened another turn is a continuation, like a steer. A
-		// run of notes that reached its bound settles invalid_turns.
+		// run of unusable turns that reached a bound settles
+		// invalid_turns.
 		var note turnNote
 		var noteErr error
 		switch {
@@ -602,8 +605,6 @@ func (s *Session) loop(run *runState) []candidate {
 			note, noteErr = s.reportResponseErrors(run, turn, resp.errors)
 		case empty:
 			note, noteErr = s.reportEmptyToolCallTurn(run, turn)
-		default:
-			s.resetRecoverableNotes(run)
 		}
 		if noteErr != nil {
 			var perr *ProviderError
@@ -1254,7 +1255,7 @@ func (s *Session) reportResponseErrors(run *runState, turn int, errs []StreamErr
 	if err := s.appendModelNote(run, turn, strings.Join(notes, "\n")); err != nil {
 		return turnNote{}, err
 	}
-	return s.noteRecoverable(run), nil
+	return s.noteUnusableTurn(run, unparsedCallsSource), nil
 }
 
 // appendModelNote puts a note in the model's view and in the records.
@@ -1288,53 +1289,85 @@ func (s *Session) reportEmptyToolCallTurn(run *runState, turn int) (turnNote, er
 	if err := s.appendModelNote(run, turn, EmptyToolCallsText); err != nil {
 		return turnNote{}, err
 	}
-	return s.noteEmptyTurn(run), nil
+	return s.noteUnusableTurn(run, emptyTurnsSource), nil
+}
+
+// usableTurn reports whether the turn carried something the run could use:
+// a tool call, or text the model could have meant as an answer. A turn the
+// transport reported a failure for carries neither: the text it holds is
+// the call that failed to parse.
+func usableTurn(resp *response) bool {
+	if resp == nil || len(resp.errors) > 0 {
+		return false
+	}
+	if len(resp.calls) > 0 {
+		return true
+	}
+	for _, block := range resp.content {
+		if block.Kind == ContentText && block.Text != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // emptyToolCallTurn reports whether the response asked for tool calls and
 // sent none: it carries no call and no text the model could have meant as
 // an answer.
 func emptyToolCallTurn(resp *response) bool {
-	if resp == nil || resp.finish != FinishToolCalls || len(resp.calls) > 0 {
-		return false
-	}
-	for _, block := range resp.content {
-		if block.Kind == ContentText && block.Text != "" {
-			return false
+	return resp != nil && resp.finish == FinishToolCalls && !usableTurn(resp)
+}
+
+// The kinds of unusable turn, as the settle detail names them.
+const (
+	unparsedCallsSource = "unparsed_calls"
+	emptyTurnsSource    = "empty_turns"
+)
+
+// maxUnusableTurns bounds the consecutive turns a run may fail to use, of
+// either kind.
+//
+// A model that keeps producing unusable turns would otherwise keep the run
+// asking forever: MaxTurns is unlimited by default, and the doom-loop
+// counter only sees tool calls. A run of one kind of unusable turn counts
+// against this bound as well as against its own, so a model that alternates
+// the two cannot outlast both. The note of the turn that reaches it is still
+// recorded, and the run settles invalid_turns.
+const maxUnusableTurns = 3
+
+// noteUnusableTurn counts an unusable turn of the given kind. It reports
+// whether the note opens another turn or, at a bound, the candidate that
+// settles the run.
+//
+// A run of empty turns alone settles at maxEmptyTurns, the stricter bound.
+// Either kind, or a mix of the two, settles at maxUnusableTurns. The
+// candidate's source names the kind of the last turn, so a mix is named for
+// the turn the run failed to use last.
+func (s *Session) noteUnusableTurn(run *runState, kind string) turnNote {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.unusableTurns++
+	if kind == emptyTurnsSource {
+		run.emptyTurns++
+		if run.emptyTurns >= maxEmptyTurns {
+			return turnNote{bound: invalidTurnsCandidate(kind, fmt.Sprintf(
+				"the model sent %d turns in a row that asked for tool calls and sent none",
+				run.emptyTurns))}
 		}
 	}
-	return true
-}
-
-// maxRecoverableNotes bounds the consecutive turns a recoverable
-// response failure may open.
-//
-// A model that keeps reporting the same failure would otherwise keep the
-// run asking forever: MaxTurns is unlimited by default, and the
-// doom-loop counter only sees tool calls. After this many consecutive
-// notes, the note is still recorded, and the run settles invalid_turns.
-const maxRecoverableNotes = 3
-
-// noteRecoverable counts a recoverable note. It reports whether the note
-// opens another turn or, at the bound, the candidate that settles the
-// run.
-func (s *Session) noteRecoverable(run *runState) turnNote {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	run.recoverableNotes++
-	if run.recoverableNotes < maxRecoverableNotes {
+	if run.unusableTurns < maxUnusableTurns {
 		return turnNote{continued: true}
 	}
-	return turnNote{bound: invalidTurnsCandidate("unparsed_calls", fmt.Sprintf(
-		"the model sent %d turns in a row whose tool calls could not be parsed",
-		run.recoverableNotes))}
-}
-
-// resetRecoverableNotes ends a run of recoverable notes.
-func (s *Session) resetRecoverableNotes(run *runState) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	run.recoverableNotes = 0
+	// The run of empty turns is short of its own bound, so an unparsed
+	// call before the last turn is the only thing that made this a mix.
+	if kind == unparsedCallsSource && run.emptyTurns == 0 {
+		return turnNote{bound: invalidTurnsCandidate(kind, fmt.Sprintf(
+			"the model sent %d turns in a row whose tool calls could not be parsed",
+			run.unusableTurns))}
+	}
+	return turnNote{bound: invalidTurnsCandidate(kind, fmt.Sprintf(
+		"the model sent %d turns in a row the run could not use",
+		run.unusableTurns))}
 }
 
 // maxEmptyTurns bounds the consecutive turns a model may answer with tool
@@ -1343,28 +1376,17 @@ func (s *Session) resetRecoverableNotes(run *runState) {
 // An empty turn holds nothing to read, so a second notice is a second
 // chance and a third would repeat the request that already failed twice.
 // After this many consecutive empty turns the notice is still recorded,
-// and the run settles invalid_turns, the way a run of recoverable notes
-// does.
+// and the run settles invalid_turns, the way a run of unparsed calls does.
 const maxEmptyTurns = 2
 
-// noteEmptyTurn counts an empty turn. It reports whether the turn opens
-// another request or, at the bound, the candidate that settles the run.
-func (s *Session) noteEmptyTurn(run *runState) turnNote {
+// resetUnusableTurns ends the run of unusable turns, of both kinds.
+//
+// Every unusable turn counts against both bounds, and a usable turn is the
+// only thing that clears them.
+func (s *Session) resetUnusableTurns(run *runState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	run.emptyTurns++
-	if run.emptyTurns < maxEmptyTurns {
-		return turnNote{continued: true}
-	}
-	return turnNote{bound: invalidTurnsCandidate("empty_turns", fmt.Sprintf(
-		"the model sent %d turns in a row that asked for tool calls and sent none",
-		run.emptyTurns))}
-}
-
-// resetEmptyTurns ends a run of empty turns.
-func (s *Session) resetEmptyTurns(run *runState) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	run.unusableTurns = 0
 	run.emptyTurns = 0
 }
 

@@ -255,11 +255,15 @@ type runState struct {
 	trigger TriggerKind
 	// continuations counts the BeforeSettle continuations the run took.
 	continuations int
-	// recoverableNotes counts the consecutive turns a recoverable
-	// response failure opened.
-	recoverableNotes int
+	// unusableTurns counts the consecutive turns the run could not use:
+	// turns whose calls did not parse, empty tool-call turns, and any mix
+	// of the two. A turn that carries a usable call or answer text is the
+	// only thing that resets it; an unusable turn of one kind leaves the
+	// other kind's count where it is. The bound is maxUnusableTurns.
+	unusableTurns int
 	// emptyTurns counts the consecutive turns the model answered with
-	// tool calls it never sent.
+	// tool calls it never sent. It resets with unusableTurns and under the
+	// same rule, and its bound, maxEmptyTurns, is the stricter one.
 	emptyTurns int
 	// noticeFired reports that the context notice already fired in
 	// this run.

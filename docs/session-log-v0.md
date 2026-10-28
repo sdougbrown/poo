@@ -590,8 +590,8 @@ before the model finished, and both settle `cancelled`.
 | `max_turns` | The run hit its turn limit. |
 | `max_run_tokens` | The run hit its token budget. |
 | `max_duration` | The run hit its wall-clock budget. |
-| `empty_turns` | The model reached the bound on consecutive turns that asked for tool calls and sent none. The detail's text says how many turns. |
-| `unparsed_calls` | The model reached the bound on consecutive turns whose tool calls did not parse. The detail's text says how many turns. |
+| `empty_turns` | The model reached the bound on consecutive turns that asked for tool calls and sent none. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
+| `unparsed_calls` | The model reached the bound on consecutive turns whose tool calls did not parse. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
 | `no_output_room` | The computed `max_tokens` was under 256, so the request was never sent. |
 | `hard_limit` | The estimate crossed the hard ratio of the context window. |
 | `compaction_failed` | The compactor failed at or above the hard ratio. |
