@@ -140,8 +140,14 @@ func TestThePrintFlagsAreAnAliasForRun(t *testing.T) {
 			if len(endpoint.requests) != 1 {
 				t.Fatalf("the endpoint got %d requests, want 1", len(endpoint.requests))
 			}
-			messages, _ := endpoint.requests[0]["messages"].([]any)
-			last, _ := messages[len(messages)-1].(map[string]any)
+			messages, ok := endpoint.requests[0]["messages"].([]any)
+			if !ok || len(messages) == 0 {
+				t.Fatalf("the request's messages are %v, want a non-empty list", endpoint.requests[0]["messages"])
+			}
+			last, ok := messages[len(messages)-1].(map[string]any)
+			if !ok {
+				t.Fatalf("the last message is %v, want an object", messages[len(messages)-1])
+			}
 			if last["role"] != "user" {
 				t.Fatalf("the last message's role is %v, want user", last["role"])
 			}
@@ -186,6 +192,42 @@ func TestAPrintFlagTakesTheRunsFlagsFirst(t *testing.T) {
 	}
 	if stdout != "done\n" {
 		t.Errorf("the answer is %q, want done", stdout)
+	}
+}
+
+// TestAPrintFlagLeavesAPromptOfSeveralWordsInOrder covers an unquoted
+// prompt: the words keep their order, as they do after run.
+func TestAPrintFlagLeavesAPromptOfSeveralWordsInOrder(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+	dir := t.TempDir()
+
+	code, stderr, _ := runCLIWithStdout(t,
+		"-p",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--ephemeral",
+		"say", "hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if len(endpoint.requests) != 1 {
+		t.Fatalf("the endpoint got %d requests, want 1", len(endpoint.requests))
+	}
+	messages, ok := endpoint.requests[0]["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("the request's messages are %v, want a non-empty list", endpoint.requests[0]["messages"])
+	}
+	last, ok := messages[len(messages)-1].(map[string]any)
+	if !ok {
+		t.Fatalf("the last message is %v, want an object", messages[len(messages)-1])
+	}
+	if last["content"] != "say hello" {
+		t.Errorf("the prompt is %v, want say hello", last["content"])
 	}
 }
 

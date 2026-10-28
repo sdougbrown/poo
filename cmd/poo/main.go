@@ -87,12 +87,11 @@ func run(args []string) int {
 
 // runPrint runs the print alias.
 //
-// The first argument is the prompt, and the arguments after it are the
-// run's own flags. The prompt moves behind them because the flag set
-// stops at the first argument that is not a flag. Arguments that start
-// with a flag are already in the run's own order.
+// A prompt followed by flags moves behind them, because the flag set
+// stops at the first argument that is not a flag. Any other order is
+// already the run's own, and passes through unchanged.
 func runPrint(args []string) int {
-	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+	if len(args) < 2 || strings.HasPrefix(args[0], "-") || !strings.HasPrefix(args[1], "-") {
 		return runRun(args)
 	}
 	rest := make([]string, 0, len(args))
