@@ -3,15 +3,19 @@ package poo_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/eval"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/provider/openai"
 )
@@ -189,6 +193,116 @@ func TestAConsecutiveRunOfEmptyTurnsSettlesNaturally(t *testing.T) {
 	if notes != 2 {
 		t.Errorf("the records hold %d notices, want 2", notes)
 	}
+}
+
+// TestTheReplayOfARecoveredRunReportsTheShift covers what a replay sees
+// in a log that holds a recovered empty turn: an empty turn records no
+// assistant message, so the script has no turn for it and every later
+// turn replays one request early. The replay must report that rather
+// than a match.
+func TestTheReplayOfARecoveredRunReportsTheShift(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Finish: "tool_calls", InputTokens: 1082, OutputTokens: 18},
+		pootest.Turn{Calls: []pootest.Call{{Name: "echo", Arguments: []byte(`{"text":"hi"}`)}},
+			InputTokens: 100, OutputTokens: 5},
+		pootest.Turn{Text: "done", InputTokens: 110, OutputTokens: 4},
+	)
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+	res := runSession(t, s, "hi")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	if got := len(tr.Requests()); got != 3 {
+		t.Fatalf("the recorded run made %d requests, want 3", got)
+	}
+
+	path := writeSessionLog(t, append([]poo.Record{header("s1")}, sink.allRecords()...))
+
+	log, err := eval.ParseLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := eval.ScriptFromLog(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(script.Turns) != 2 {
+		t.Errorf("the script holds %d turns, want 2: the empty turn records no assistant message", len(script.Turns))
+	}
+
+	result, err := eval.Replay(path, eval.ReplayOptions{WorkingDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("the replay failed: %v", err)
+	}
+	if len(result.Recorded) != 1 || len(result.Replayed) != 1 {
+		t.Fatalf("the recording holds %d calls and the replay made %d, want one each",
+			len(result.Recorded), len(result.Replayed))
+	}
+	recorded, replayed := result.Recorded[0], result.Replayed[0]
+	if recorded.Turn != 2 || replayed.Turn != 1 {
+		t.Fatalf("the recorded call was at turn %d and the replayed one at turn %d, want 2 and 1",
+			recorded.Turn, replayed.Turn)
+	}
+	if result.Match {
+		t.Errorf("the replay reports a match although it sent the call at turn %d and the recording at turn %d",
+			replayed.Turn, recorded.Turn)
+	}
+	if len(result.Differences) == 0 {
+		t.Error("the replay reported no difference for a shifted call")
+	}
+	var named bool
+	for _, difference := range result.Differences {
+		if strings.Contains(difference, "no assistant message") {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("the replay's differences do not name the request the script cannot replay: %v", result.Differences)
+	}
+}
+
+// TestAReplayOfABoundedRunHasNoScript covers the other side: a run that
+// settled at the empty-turn bound holds no assistant message at all, so
+// the replay cannot build a script and says so.
+func TestAReplayOfABoundedRunHasNoScript(t *testing.T) {
+	tr := emptyToolCallTurns(3)
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+	res := runSession(t, s, "hi")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+
+	path := writeSessionLog(t, append([]poo.Record{header("s1")}, sink.allRecords()...))
+
+	log, err := eval.ParseLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eval.ScriptFromLog(log); err == nil {
+		t.Error("the script was built from a run whose model never said anything")
+	}
+}
+
+// writeSessionLog writes records as a session log and returns its path.
+func writeSessionLog(t *testing.T, records []poo.Record) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := json.NewEncoder(f)
+	for _, rec := range records {
+		if err := enc.Encode(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // TestTheRestoredSessionKeepsTheEmptyTurnNotice covers the replay: the

@@ -151,9 +151,10 @@ type ReplayResult struct {
 	// A replay applies the compactions the recording holds, and never
 	// runs the strategy that made them.
 	Compactions int `json:"compactions"`
-	// Match reports whether the two sequences are the same.
+	// Match reports whether the replay reproduced the recording: the
+	// same calls, in the same turns.
 	Match bool `json:"match"`
-	// Differences describe where the two sequences part.
+	// Differences describe where the replay and the recording part.
 	Differences []string `json:"differences,omitempty"`
 	// Jobs are the job results the replay delivered, in order.
 	Jobs []string `json:"jobs,omitempty"`
@@ -269,6 +270,10 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 			path, result.Compactions, len(compactions))
 	}
 	result.Match, result.Differences = diffCalls(result.Recorded, result.Replayed)
+	if difference := unreplayedRequests(log, script); difference != "" {
+		result.Differences = append(result.Differences, difference)
+		result.Match = false
+	}
 	return result, nil
 }
 
@@ -524,11 +529,28 @@ func (c *callRecorder) Append(ctx context.Context, rec poo.Record) error {
 // Flush pushes buffered records out.
 func (c *callRecorder) Flush(ctx context.Context) error { return nil }
 
+// unreplayedRequests describes the requests a script cannot replay.
+//
+// A request whose response recorded no assistant message has no turn in
+// the script: a turn that asks for tool calls and sends none records
+// none, and so does a request that failed. The replay sends every later
+// turn one request early, and the recording's request count against the
+// script's is the difference that names it.
+func unreplayedRequests(log *Log, script *Script) string {
+	requests, turns := len(log.Usages()), len(script.Turns)
+	if requests <= turns {
+		return ""
+	}
+	return fmt.Sprintf("the recording made %d request(s) and the script holds %d turn(s): %d request(s) recorded no assistant message, so every later turn replays early",
+		requests, turns, requests-turns)
+}
+
 // diffCalls compares two tool-call sequences.
 //
-// The comparison is on the tool's name and the arguments: the handle and
-// the turn may move when the runner changes, and the call itself may
-// not.
+// The comparison is on the tool's name, the arguments, and the turn the
+// call was made in. The handle a recording used may move when the runner
+// changes, but a call in another turn is a different conversation, and a
+// replay that shifted one says so.
 func diffCalls(recorded, replayed []CallStep) (bool, []string) {
 	var differences []string
 	n := len(recorded)
@@ -544,6 +566,10 @@ func diffCalls(recorded, replayed []CallStep) (bool, []string) {
 		if !sameArgs(a.Arguments, b.Arguments) {
 			differences = append(differences, fmt.Sprintf("step %d: recorded %s %s, replayed %s %s",
 				i+1, a.Tool, string(a.Arguments), b.Tool, string(b.Arguments)))
+			continue
+		}
+		if a.Turn != b.Turn {
+			differences = append(differences, fmt.Sprintf("step %d: recorded at turn %d, replayed at turn %d", i+1, a.Turn, b.Turn))
 		}
 	}
 	if len(recorded) > len(replayed) {

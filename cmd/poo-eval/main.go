@@ -347,10 +347,10 @@ func runReplay(args []string) int {
 		fmt.Printf("compactions:     %d applied from the recording\n", result.Compactions)
 	}
 	if result.Match {
-		fmt.Printf("match: the tool-call sequence is the same\n")
+		fmt.Printf("match: the replay reproduced the recording\n")
 		return 0
 	}
-	fmt.Printf("match: the tool-call sequence differs\n")
+	fmt.Printf("match: the replay differs from the recording\n")
 	for _, d := range result.Differences {
 		fmt.Printf("  %s\n", d)
 	}
