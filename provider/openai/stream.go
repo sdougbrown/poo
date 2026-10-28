@@ -106,8 +106,6 @@ type streamReader struct {
 	// usage holds the usage report, so a stream that fails before its
 	// usage chunk arrives can still report what it knows.
 	usage *poo.UsageReport
-	// sawText reports that the response carried text.
-	sawText bool
 	// sawToolCall reports that the response carried a tool call.
 	sawToolCall bool
 	// deferParsed reports that the calls the model writes as text wait
@@ -395,7 +393,6 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 
 		if delta.Content != "" {
 			r.markFirstToken()
-			r.sawText = true
 			// The filters own the text: they strip the call markup and
 			// the thinking tags, and they emit the prose themselves.
 			// Emitting the raw delta as well would double the prose and

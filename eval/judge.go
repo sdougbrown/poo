@@ -469,20 +469,9 @@ func (j *Judge) buildPayload(log *Log, transcript string, t transcript, report *
 			settledEndTurn = r.Reason == string(poo.ReasonEndTurn)
 		}
 	}
-	payload.CheckPassed = settledEndTurn && hasAssistantMessage(log)
+	payload.CheckPassed = settledEndTurn && len(log.ModelMessages()) > 0
 	payload.Metrics = ComputeMetrics(log, Diff{})
 	return payload
-}
-
-// hasAssistantMessage reports whether the log holds a recorded model
-// response. A run that settled without one never answered.
-func hasAssistantMessage(log *Log) bool {
-	for _, r := range log.Records {
-		if r.Record == "message" && r.Origin == "model" {
-			return true
-		}
-	}
-	return false
 }
 
 // runEntry returns the report entry of a run, when the report holds

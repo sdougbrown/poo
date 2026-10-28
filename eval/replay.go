@@ -55,10 +55,7 @@ type Script struct {
 // nothing to replay.
 func ScriptFromLog(log *Log) (*Script, error) {
 	script := &Script{}
-	for _, r := range log.Records {
-		if r.Record != "message" || r.Origin != "model" {
-			continue
-		}
+	for _, r := range log.ModelMessages() {
 		turn := ScriptedTurn{Finish: "stop"}
 		for _, c := range r.Content {
 			switch c.Kind {
