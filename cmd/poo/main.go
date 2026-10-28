@@ -93,8 +93,8 @@ func run(args []string) int {
 // read with the run's own flags: each flag the run defines moves ahead
 // of the prompt, and every other argument is a word of the prompt, in
 // order. From the first argument that is not a flag the run defines,
-// the rest is the prompt, as it is after run. A flag with a bad value
-// fails the way it does after run.
+// or after a "--", the rest is the prompt, as it is after run. A flag
+// with a bad value fails the way it does after run.
 func runPrint(args []string) int {
 	fs := flag.NewFlagSet("poo -p", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -113,8 +113,14 @@ func runPrint(args []string) int {
 			words = append(words, rest...)
 			break
 		}
-		flags = append(flags, rest[:len(rest)-len(fs.Args())]...)
+		consumed := rest[:len(rest)-len(fs.Args())]
 		rest = fs.Args()
+		if terminated(fs, consumed) {
+			flags = append(flags, consumed[:len(consumed)-1]...)
+			words = append(words, rest...)
+			break
+		}
+		flags = append(flags, consumed...)
 		if len(rest) == 0 {
 			break
 		}
@@ -122,4 +128,30 @@ func runPrint(args []string) int {
 		rest = rest[1:]
 	}
 	return runRun(append(flags, words...))
+}
+
+// terminated reports whether a parse round ended at a "--" terminator.
+//
+// A "--" that follows a flag that takes a value is that flag's value,
+// not a terminator.
+func terminated(fs *flag.FlagSet, consumed []string) bool {
+	n := len(consumed)
+	if n == 0 || consumed[n-1] != "--" {
+		return false
+	}
+	if n == 1 {
+		return true
+	}
+	prev := consumed[n-2]
+	if !strings.HasPrefix(prev, "-") || strings.Contains(prev, "=") {
+		return true
+	}
+	f := fs.Lookup(strings.TrimLeft(prev, "-"))
+	if f == nil {
+		return true
+	}
+	if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+		return true
+	}
+	return false
 }
