@@ -93,8 +93,13 @@ func TestTheWarningFiresForADoomLoopSetToAsk(t *testing.T) {
 	}
 	askers := []perm.Asker{perm.NewWireAsker(nil, 0)}
 
-	if warning := perm.Warning(policy, askers); !strings.Contains(warning, "deny") {
-		t.Errorf("the load warned %q, want a warning that names the fallback", warning)
+	warning := perm.Warning(policy, askers)
+
+	if warning == "" {
+		t.Fatal("the load printed no warning, want one: the doom loop is set to ask")
+	}
+	if !strings.Contains(warning, "deny") {
+		t.Errorf("the warning is %q, want it to name the fallback", warning)
 	}
 }
 
