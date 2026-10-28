@@ -138,6 +138,9 @@ type Policy struct { // rules are the policy's rules, in order.
 	unmatched Action
 	// doomLoop is the doom loop's settings.
 	doomLoop DoomLoop
+	// doomLoopActionSet reports whether the options named the doom
+	// loop's action, rather than taking the default.
+	doomLoopActionSet bool
 	// chain is the asker chain.
 	chain *chain
 	// workingDir is the directory the run works in.
@@ -191,6 +194,8 @@ func New(opts Options) (*Policy, error) {
 		unmatched:  unmatched,
 		doomLoop:   doomLoop,
 		workingDir: opts.WorkingDir,
+
+		doomLoopActionSet: opts.DoomLoop.Action != "",
 		chain: &chain{
 			askers:   append([]Asker(nil), opts.Askers...),
 			timeout:  timeout,
@@ -547,12 +552,16 @@ func (p *Policy) Askers() []Asker {
 
 // canAsk reports whether the policy can produce a configured ask.
 //
-// The unmatched action and a rule that asks are the asks an operator
-// chose. The doom loop's action is not counted: every policy has one,
-// and with no asker to answer it the loop's ask takes the policy's
-// fallback decision, like any other ask.
+// The unmatched action, a rule that asks and a doom loop whose action
+// the options set to ask are the asks an operator chose. The doom
+// loop's default ask is not counted: every policy has one, and with no
+// asker to answer it the loop's ask takes the policy's fallback
+// decision, like any other ask.
 func (p *Policy) canAsk() bool {
 	if p.unmatched == ActionAsk {
+		return true
+	}
+	if p.doomLoopActionSet && p.doomLoop.Action == ActionAsk {
 		return true
 	}
 	for _, rule := range p.rules {
