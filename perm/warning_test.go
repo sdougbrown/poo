@@ -62,9 +62,10 @@ func TestTheWarningIsSilentWhenThePolicyCannotAsk(t *testing.T) {
 	}
 }
 
-// TestTheWarningFiresForADoomLoopThatAsks covers the plan's rule: the
-// doom loop's ask is an ask too.
-func TestTheWarningFiresForADoomLoopThatAsks(t *testing.T) {
+// TestTheWarningIsSilentWhenOnlyTheDoomLoopAsks covers the default
+// path: the doom loop's own ask is not one an operator configured, so
+// a chain that cannot answer it is not warned about at load.
+func TestTheWarningIsSilentWhenOnlyTheDoomLoopAsks(t *testing.T) {
 	policy, err := perm.New(perm.Options{
 		Unmatched: perm.ActionAllow,
 		DoomLoop:  perm.DoomLoop{Action: perm.ActionAsk},
@@ -74,13 +75,8 @@ func TestTheWarningFiresForADoomLoopThatAsks(t *testing.T) {
 	}
 	askers := []perm.Asker{perm.NewWireAsker(nil, 0)}
 
-	warning := perm.Warning(policy, askers)
-
-	if warning == "" {
-		t.Fatal("the load printed no warning, want one: the doom loop asks")
-	}
-	if !strings.Contains(warning, "deny") {
-		t.Errorf("the warning is %q, want it to name the fallback", warning)
+	if warning := perm.Warning(policy, askers); warning != "" {
+		t.Errorf("the load warned %q, want no warning: only the doom loop asks", warning)
 	}
 }
 
