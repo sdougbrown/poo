@@ -17,6 +17,9 @@ import (
 // invalidTurnsExitCode is the exit code of an invalid_turns settle.
 const invalidTurnsExitCode = 15
 
+// parseFailureText is how the notice for a call that did not parse begins.
+const parseFailureText = "your tool call could not be parsed"
+
 // parseableCallStream is a text-mode tool call that parses, so the turn
 // that carries it resets the run's invalid-turn counters.
 const parseableCallStream = `data: {"choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\": \"echo\", \"arguments\": {\"text\": \"hi\"}}</tool_call>"},"finish_reason":null}]}` + "\n\n" +
@@ -47,13 +50,7 @@ func TestTheEmptyTurnBoundSettlesInvalidTurns(t *testing.T) {
 	if got := len(tr.Requests()); got != 2 {
 		t.Errorf("the endpoint got %d requests, want the two-turn budget", got)
 	}
-	var notes int
-	for _, rec := range sink.messages() {
-		if rec.Role == poo.RoleUser && rec.Turn > 0 {
-			notes++
-		}
-	}
-	if notes != 2 {
+	if notes := emptyToolCallNotes(sink.messages()); notes != 2 {
 		t.Errorf("the records hold %d notices, want 2: the last turn's note is still recorded", notes)
 	}
 }
@@ -84,8 +81,13 @@ func TestTheUnparsedCallBoundSettlesInvalidTurns(t *testing.T) {
 	}
 	var notes int
 	for _, rec := range sink.messages() {
-		if rec.Role == poo.RoleUser && rec.Turn > 0 {
-			notes++
+		if rec.Role != poo.RoleUser {
+			continue
+		}
+		for _, block := range rec.Content {
+			if block.Kind == poo.ContentText && strings.HasPrefix(block.Text, parseFailureText) {
+				notes++
+			}
 		}
 	}
 	if notes != 3 {

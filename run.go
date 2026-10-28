@@ -1261,6 +1261,9 @@ func (s *Session) reportResponseErrors(run *runState, turn int, errs []StreamErr
 //
 // The note is the turn's own message: the model reads it in its next
 // request, and a resumed session reads the same history.
+//
+// The note is also the turn's last message, so the turn's span ends
+// after it.
 func (s *Session) appendModelNote(run *runState, turn int, text string) error {
 	msg := NewTextMessage(RoleUser, text)
 	msg.Origin = OriginUser
@@ -1274,6 +1277,7 @@ func (s *Session) appendModelNote(run *runState, turn int, text string) error {
 	}); err != nil {
 		return err
 	}
+	s.growSpan(run.globalTurn)
 	return nil
 }
 
@@ -1284,9 +1288,6 @@ func (s *Session) reportEmptyToolCallTurn(run *runState, turn int) (turnNote, er
 	if err := s.appendModelNote(run, turn, EmptyToolCallsText); err != nil {
 		return turnNote{}, err
 	}
-	// The note is the turn's only message, so the turn's span ends
-	// after it.
-	s.growSpan(run.globalTurn)
 	return s.noteEmptyTurn(run), nil
 }
 

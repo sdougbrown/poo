@@ -115,6 +115,33 @@ func emptyToolCallTurns(empty int, then ...pootest.Turn) *pootest.Transport {
 	return pootest.NewTransport(append(turns, then...)...)
 }
 
+// emptyToolCallNotes counts the notices an empty turn opened.
+func emptyToolCallNotes(recs []*poo.MessageRecord) int {
+	var notes int
+	for _, rec := range recs {
+		for _, block := range rec.Content {
+			if block.Kind == poo.ContentText && block.Text == poo.EmptyToolCallsText {
+				notes++
+			}
+		}
+	}
+	return notes
+}
+
+// oneMessageTurn fails unless the session turn's span covers exactly one
+// message, and returns that message.
+func oneMessageTurn(t *testing.T, s *poo.Session, turn int) poo.Message {
+	t.Helper()
+	msgs, ok := poo.TurnSpanMessages(s, turn)
+	if !ok {
+		t.Fatalf("the session holds no span for turn %d", turn)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("turn %d covers %d messages, want 1", turn, len(msgs))
+	}
+	return msgs[0]
+}
+
 // TestATurnThatAsksForToolCallsAndSendsNoneIsRecovered covers the model
 // that answers with finish_reason "tool_calls" and no call in the
 // response.
@@ -166,6 +193,88 @@ func TestATurnThatAsksForToolCallsAndSendsNoneIsRecovered(t *testing.T) {
 	if calls := tool.Calls(); len(calls) != 0 {
 		t.Errorf("the tool ran %d times, want 0", len(calls))
 	}
+
+	// The note is the turn's only message, so the turn's span ends after
+	// it.
+	msg := oneMessageTurn(t, s, 1)
+	if msg.Role != poo.RoleUser || msg.Text() != poo.EmptyToolCallsText {
+		t.Errorf("the empty turn covers %s %q, want the notice", msg.Role, msg.Text())
+	}
+}
+
+// TestATurnThatSendsTextWithItsToolCallsFinishIsNotAnEmptyTurn covers the
+// boundary: a turn whose finish reason says tool calls but that sent text
+// and no call is not an empty turn, so the model is not told anything.
+func TestATurnThatSendsTextWithItsToolCallsFinishIsNotAnEmptyTurn(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Finish: "tool_calls"},
+		pootest.Turn{Text: "the answer", Finish: "tool_calls"},
+	)
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+
+	res := runSession(t, s, "hi")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q (%s), want end_turn: the second turn answered",
+			res.Reason, res.Detail.Source)
+	}
+	if got := len(tr.Requests()); got != 2 {
+		t.Errorf("the endpoint got %d requests, want 2", got)
+	}
+	if got := emptyToolCallNotes(sink.messages()); got != 1 {
+		t.Errorf("the records hold %d notices, want 1: only the first turn was empty", got)
+	}
+}
+
+// TestATextTurnResetsTheEmptyTurnCount covers the reset through a text
+// turn: one empty turn, the turn that answered, and two empty turns after
+// it. The run settles at the last two; without the reset the third
+// request would reach the bound.
+func TestATextTurnResetsTheEmptyTurnCount(t *testing.T) {
+	tr := pootest.NewTransport(
+		pootest.Turn{Finish: "tool_calls"},
+		pootest.Turn{Text: "the answer"},
+		pootest.Turn{Finish: "tool_calls"},
+		pootest.Turn{Finish: "tool_calls"},
+	)
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	// The text turn is the answer, so the settle hook sends the run back
+	// to the model once: the two empty turns after it are what the reset
+	// is read from.
+	opts.BeforeSettle = []poo.BeforeSettleHook{&continuingBeforeSettle{stopAfter: 1}}
+	s := newTestSession(t, opts)
+
+	res := runSession(t, s, "hi")
+	if res.Reason != poo.ReasonInvalidTurns {
+		t.Fatalf("the run settled %q (%s), want invalid_turns", res.Reason, res.Detail.Source)
+	}
+	if res.Detail.Source != "empty_turns" {
+		t.Errorf("the settle source is %q, want empty_turns", res.Detail.Source)
+	}
+	if got := len(tr.Requests()); got != 4 {
+		t.Errorf("the endpoint got %d requests, want 4: the text turn reset the count", got)
+	}
+}
+
+// TestARecoverableNoteGrowsItsTurnsSpan covers the span of a turn whose
+// response carried nothing but a recoverable failure: no assistant message
+// is recorded, so the note is the turn's only message and the turn's span
+// ends after it.
+func TestARecoverableNoteGrowsItsTurnsSpan(t *testing.T) {
+	const note = "the stream broke"
+	tr := &failingTransport{err: &poo.StreamError{Message: note, Recoverable: true}}
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+
+	res := runSession(t, s, "hi")
+	if res.Reason != poo.ReasonInvalidTurns {
+		t.Fatalf("the run settled %q (%s), want invalid_turns", res.Reason, res.Detail.Source)
+	}
+	msg := oneMessageTurn(t, s, 1)
+	if msg.Role != poo.RoleUser || msg.Text() != note {
+		t.Errorf("the note-only turn covers %s %q, want the note %q", msg.Role, msg.Text(), note)
+	}
 }
 
 // TestAConsecutiveRunOfEmptyTurnsSettlesInvalidTurns covers the bound: a
@@ -183,13 +292,7 @@ func TestAConsecutiveRunOfEmptyTurnsSettlesInvalidTurns(t *testing.T) {
 	if got := len(tr.Requests()); got != 2 {
 		t.Errorf("the endpoint got %d requests, want 2: the model is asked twice", got)
 	}
-	var notes int
-	for _, rec := range sink.messages() {
-		if rec.Role == poo.RoleUser && rec.Turn > 0 {
-			notes++
-		}
-	}
-	if notes != 2 {
+	if notes := emptyToolCallNotes(sink.messages()); notes != 2 {
 		t.Errorf("the records hold %d notices, want 2", notes)
 	}
 }
