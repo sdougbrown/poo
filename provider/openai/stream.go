@@ -116,10 +116,6 @@ type streamReader struct {
 	// deferred holds the calls the model wrote as text, waiting to see
 	// whether the response carries a native call.
 	deferred []poo.StreamItem
-	// emptyToolCalls reports that the model asked for tool calls and
-	// sent none. The failure is reported when the response ends, so the
-	// usage the endpoint sends after the finish reason is not lost.
-	emptyToolCalls bool
 }
 
 // newSSEScanner returns a scanner for SSE lines. A single event line can
@@ -275,16 +271,6 @@ func (r *streamReader) close() (poo.StreamItem, error) {
 	r.deferred = nil
 	r.pending = append(r.pending, flushed...)
 	r.pending = r.appendUsage(r.pending)
-	// The model asked for tool calls and sent none: the response is the
-	// server's own failure, and it is retried like one. The failure is
-	// reported after the usage, so the tokens the attempt cost are
-	// counted.
-	if r.emptyToolCalls && !r.sawText && !r.sawToolCall {
-		r.err = &poo.ProviderError{
-			Kind:    poo.ProviderKindServer,
-			Message: "the model asked for tool calls but sent none",
-		}
-	}
 	if ev, ok := r.take(); ok {
 		return ev, nil
 	}
@@ -449,14 +435,6 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 		}
 
 		if choice.FinishReason != "" {
-			if choice.FinishReason == "tool_calls" && !r.sawText && !r.sawToolCall {
-				// The model asked for tool calls and sent none. The
-				// response is the server's own failure, and it is
-				// retried like one. The failure is reported when the
-				// response ends, so the usage chunk that follows the
-				// finish reason is not lost.
-				r.emptyToolCalls = true
-			}
 			out = append(out, poo.StreamItem{
 				Kind:         "finish",
 				FinishReason: poo.FinishReason(choice.FinishReason),

@@ -258,6 +258,9 @@ type runState struct {
 	// recoverableNotes counts the consecutive turns a recoverable
 	// response failure opened.
 	recoverableNotes int
+	// emptyTurns counts the consecutive turns the model answered with
+	// tool calls it never sent.
+	emptyTurns int
 	// noticeFired reports that the context notice already fired in
 	// this run.
 	noticeFired bool

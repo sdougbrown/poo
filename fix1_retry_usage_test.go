@@ -12,17 +12,17 @@ import (
 	"github.com/sdougbrown/poo/provider/openai"
 )
 
-// emptyToolCallsThenAnswer answers the first request with the
-// recorded empty-tool_calls stream and the second one with an answer,
-// so a request is retried once and then succeeds.
-func emptyToolCallsThenAnswer(t *testing.T) *httptest.Server {
+// brokenAttemptThenAnswer answers the first attempt with the usage the
+// attempt spent and then an endpoint failure, and the second one with an
+// answer, so a request is retried once and then succeeds.
+func brokenAttemptThenAnswer(t *testing.T) *httptest.Server {
 	t.Helper()
 	var mu sync.Mutex
-	requests := 0
-	// The recorded stream: finish_reason tool_calls, no call, and a
-	// usage chunk of 1082 prompt and 18 completion tokens.
-	empty := "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
-		"data: {\"choices\":[{\"index\":0,\"delta\":{}}],\"usage\":{\"completion_tokens\":18,\"prompt_tokens\":1082,\"total_tokens\":1100}}\n\n" +
+	attempts := 0
+	// The recorded stream: the usage chunk of 1082 prompt and 18
+	// completion tokens, then the failure that ends the attempt.
+	broken := "data: {\"choices\":[{\"index\":0,\"delta\":{}}],\"usage\":{\"completion_tokens\":18,\"prompt_tokens\":1082,\"total_tokens\":1100}}\n\n" +
+		"data: {\"error\":{\"message\":\"the endpoint failed\",\"type\":\"server_error\",\"code\":\"internal_error\"}}\n\n" +
 		"data: [DONE]\n\n"
 	answer := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n" +
 		"data: {\"choices\":[{\"index\":0,\"delta\":{}}],\"usage\":{\"completion_tokens\":5,\"prompt_tokens\":100,\"total_tokens\":105}}\n\n" +
@@ -30,12 +30,12 @@ func emptyToolCallsThenAnswer(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		mu.Lock()
-		requests++
-		n := requests
+		attempts++
+		n := attempts
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
 		if n == 1 {
-			_, _ = io.WriteString(w, empty)
+			_, _ = io.WriteString(w, broken)
 			return
 		}
 		_, _ = io.WriteString(w, answer)
@@ -48,11 +48,10 @@ func emptyToolCallsThenAnswer(t *testing.T) *httptest.Server {
 // request that is retried: the attempt that failed spent 1082 prompt and
 // 18 completion tokens, and the request that answered spent 100 and 5.
 //
-// The run's usage record holds the answer's numbers only: the failed
-// attempt's usage is kept in streamWithRetry.usage, and it is reported
-// only when the request ends with a failure.
+// The run's usage record holds both attempts' numbers, so the request
+// that broke is not counted as free.
 func TestARetriedAttemptsUsageIsCounted(t *testing.T) {
-	srv := emptyToolCallsThenAnswer(t)
+	srv := brokenAttemptThenAnswer(t)
 	tr := openai.New(openai.Options{
 		Endpoint: srv.URL,
 		Model:    "m",

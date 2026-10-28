@@ -582,26 +582,38 @@ func (s *Session) loop(run *runState) []candidate {
 			}
 		}
 
+		// A turn that asked for tool calls and sent none is the model's
+		// own slip, and it is the run's to recover: the turn carries no
+		// call and no answer, so the model is told what it sent. A turn
+		// that carries either ends the run of empty turns.
+		empty := emptyToolCallTurn(resp)
+		if !empty {
+			s.resetEmptyTurns(run)
+		}
+
 		// A failure the transport reported about the response is
 		// visible: the model is told, and the record holds it. A note
 		// that opened another turn is a continuation, like a steer.
 		noted := false
-		if len(resp.errors) > 0 {
-			var err error
-			noted, err = s.reportResponseErrors(run, turn, resp.errors)
-			if err != nil {
-				var perr *ProviderError
-				if errors.As(err, &perr) {
-					reason, detail, _ := s.settleForError(perr)
-					return []candidate{newCandidate(reason, detail)}
-				}
-				return []candidate{newCandidate(ReasonStoreError, SettleDetail{
-					Source: "store",
-					Text:   err.Error(),
-				})}
-			}
-		} else {
+		var noteErr error
+		switch {
+		case len(resp.errors) > 0:
+			noted, noteErr = s.reportResponseErrors(run, turn, resp.errors)
+		case empty:
+			noted, noteErr = s.reportEmptyToolCallTurn(run, turn)
+		default:
 			s.resetRecoverableNotes(run)
+		}
+		if noteErr != nil {
+			var perr *ProviderError
+			if errors.As(noteErr, &perr) {
+				reason, detail, _ := s.settleForError(perr)
+				return []candidate{newCandidate(reason, detail)}
+			}
+			return []candidate{newCandidate(ReasonStoreError, SettleDetail{
+				Source: "store",
+				Text:   noteErr.Error(),
+			})}
 		}
 
 		// The turn ended. The turn-end algorithm decides what happens
@@ -1189,6 +1201,10 @@ func (s *Session) reportAttempt(run *runState, turn int, attempt Attempt) {
 	})
 }
 
+// EmptyToolCallsText is the note the model reads after a turn that asked
+// for tool calls and sent none.
+const EmptyToolCallsText = "Your last turn asked to call tools and sent none. Call a tool, or answer in prose."
+
 // reportResponseErrors makes the failures the transport reported about
 // the response visible.
 //
@@ -1210,7 +1226,18 @@ func (s *Session) reportResponseErrors(run *runState, turn int, errs []StreamErr
 	if len(notes) == 0 {
 		return false, nil
 	}
-	msg := NewTextMessage(RoleUser, strings.Join(notes, "\n"))
+	if err := s.appendModelNote(run, turn, strings.Join(notes, "\n")); err != nil {
+		return false, err
+	}
+	return s.noteRecoverable(run), nil
+}
+
+// appendModelNote puts a note in the model's view and in the records.
+//
+// The note is the turn's own message: the model reads it in its next
+// request, and a resumed session reads the same history.
+func (s *Session) appendModelNote(run *runState, turn int, text string) error {
+	msg := NewTextMessage(RoleUser, text)
 	msg.Origin = OriginUser
 	s.appendMessages(msg)
 	if err := s.write(run.ctx, &MessageRecord{
@@ -1220,9 +1247,36 @@ func (s *Session) reportResponseErrors(run *runState, turn int, errs []StreamErr
 		Role:       msg.Role,
 		Content:    msg.Content,
 	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// reportEmptyToolCallTurn tells the model what its empty turn looked like
+// and reports whether the notice opens another turn.
+func (s *Session) reportEmptyToolCallTurn(run *runState, turn int) (bool, error) {
+	if err := s.appendModelNote(run, turn, EmptyToolCallsText); err != nil {
 		return false, err
 	}
-	return s.noteRecoverable(run), nil
+	// The note is the turn's only message, so the turn's span ends
+	// after it.
+	s.growSpan(run.globalTurn)
+	return s.noteEmptyTurn(run), nil
+}
+
+// emptyToolCallTurn reports whether the response asked for tool calls and
+// sent none: it carries no call and no text the model could have meant as
+// an answer.
+func emptyToolCallTurn(resp *response) bool {
+	if resp == nil || resp.finish != FinishToolCalls || len(resp.calls) > 0 {
+		return false
+	}
+	for _, block := range resp.content {
+		if block.Kind == ContentText && block.Text != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // maxRecoverableNotes bounds the consecutive turns a recoverable
@@ -1248,6 +1302,31 @@ func (s *Session) resetRecoverableNotes(run *runState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run.recoverableNotes = 0
+}
+
+// maxEmptyTurns bounds the consecutive turns a model may answer with tool
+// calls it never sends.
+//
+// An empty turn holds nothing to read, so a second notice is a second
+// chance and a third would repeat the request that already failed twice.
+// After this many consecutive empty turns the notice is still recorded,
+// and the run settles naturally, the way a run of recoverable notes does.
+const maxEmptyTurns = 2
+
+// noteEmptyTurn counts an empty turn and reports whether it opens another
+// turn.
+func (s *Session) noteEmptyTurn(run *runState) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.emptyTurns++
+	return run.emptyTurns < maxEmptyTurns
+}
+
+// resetEmptyTurns ends a run of empty turns.
+func (s *Session) resetEmptyTurns(run *runState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.emptyTurns = 0
 }
 
 // toolSpecs returns the tools the model may call, in offer order.
