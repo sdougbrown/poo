@@ -536,8 +536,12 @@ func (c *callRecorder) Flush(ctx context.Context) error { return nil }
 // none, and so does a request that failed. The replay sends every later
 // turn one request early, and the recording's request count against the
 // script's is the difference that names it.
+//
+// The count is the log's: a response that carried no usage leaves no
+// usage record, so counting those would hide the requests the script
+// cannot replay.
 func unreplayedRequests(log *Log, script *Script) string {
-	requests, turns := len(log.Usages()), len(script.Turns)
+	requests, turns := log.Turns(), len(script.Turns)
 	if requests <= turns {
 		return ""
 	}
