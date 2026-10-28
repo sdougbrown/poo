@@ -231,6 +231,55 @@ func TestAPrintFlagLeavesAPromptOfSeveralWordsInOrder(t *testing.T) {
 	}
 }
 
+// TestAPrintPromptKeepsAWordThatLooksLikeAFlag covers a prompt word
+// that starts with a dash and is not one of the run's flags: it stays
+// in the prompt, as it does after run.
+func TestAPrintPromptKeepsAWordThatLooksLikeAFlag(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+	dir := t.TempDir()
+
+	code, stderr, _ := runCLIWithStdout(t,
+		"-p",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--ephemeral",
+		"say", "-hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if len(endpoint.requests) != 1 {
+		t.Fatalf("the endpoint got %d requests, want 1", len(endpoint.requests))
+	}
+	messages, ok := endpoint.requests[0]["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("the request's messages are %v, want a non-empty list", endpoint.requests[0]["messages"])
+	}
+	last, ok := messages[len(messages)-1].(map[string]any)
+	if !ok {
+		t.Fatalf("the last message is %v, want an object", messages[len(messages)-1])
+	}
+	if last["content"] != "say -hello" {
+		t.Errorf("the prompt is %v, want say -hello", last["content"])
+	}
+}
+
+// TestAPrintFlagWithABadValueFails covers a run flag with a value it
+// refuses: the run reports it, and the flag is not taken for the prompt.
+func TestAPrintFlagWithABadValueFails(t *testing.T) {
+	code, stderr := runCLI(t, "-p", "fix it", "--max-turns", "many")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "max-turns") {
+		t.Errorf("the error is %q, want it to name --max-turns", stderr)
+	}
+}
+
 func TestTheHelpNamesThePrintAlias(t *testing.T) {
 	_, _, stdout := runCLIWithStdout(t, "--help")
 	if !strings.Contains(stdout, "poo -p") {

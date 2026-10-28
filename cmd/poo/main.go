@@ -6,7 +6,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -15,7 +17,7 @@ const usage = `poo runs a session against an OpenAI-compatible endpoint.
 
 Usage:
   poo run [flags] "prompt"
-  poo -p "prompt" [flags]      An alias for poo run; --print is the same flag
+  poo -p "prompt" [flags]      poo run, with the run's flags before or after the prompt (also --print)
   poo serve [flags]
   poo models [--json] [--explain <name>]
   poo prompt [flags]
@@ -87,15 +89,37 @@ func run(args []string) int {
 
 // runPrint runs the print alias.
 //
-// A prompt followed by flags moves behind them, because the flag set
-// stops at the first argument that is not a flag. Any other order is
-// already the run's own, and passes through unchanged.
+// The run's flags may come before or after the prompt. The arguments are
+// read with the run's own flags: each flag the run defines moves ahead
+// of the prompt, and every other argument is a word of the prompt, in
+// order. From the first argument that is not a flag the run defines,
+// the rest is the prompt, as it is after run. A flag with a bad value
+// fails the way it does after run.
 func runPrint(args []string) int {
-	if len(args) < 2 || strings.HasPrefix(args[0], "-") || !strings.HasPrefix(args[1], "-") {
-		return runRun(args)
+	fs := flag.NewFlagSet("poo -p", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var o runOptions
+	o.register(fs)
+
+	var flags, words []string
+	rest := args
+	for len(rest) > 0 {
+		if err := fs.Parse(rest); err != nil {
+			if !strings.HasPrefix(err.Error(), "flag provided but not defined") {
+				// A bad value or a help request is the run's to
+				// report.
+				return runRun(append(flags, rest...))
+			}
+			words = append(words, rest...)
+			break
+		}
+		flags = append(flags, rest[:len(rest)-len(fs.Args())]...)
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		words = append(words, rest[0])
+		rest = rest[1:]
 	}
-	rest := make([]string, 0, len(args))
-	rest = append(rest, args[1:]...)
-	rest = append(rest, args[0])
-	return runRun(rest)
+	return runRun(append(flags, words...))
 }
