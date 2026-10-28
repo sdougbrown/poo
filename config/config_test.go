@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -509,16 +510,18 @@ func TestAnOldRegistryKeyStillLoads(t *testing.T) {
 // an endpoint: a settings file that predates the rename loads to the
 // settings the new name gives, and a file that names both fails loudly.
 func TestAnOldBaseURLKeyStillLoads(t *testing.T) {
-	fromOld, err := config.Parse([]byte("version: 1\nendpoints:\n  grace:\n    base_url: \"http://grace:4000/v1\"\n"), config.FormatYAML)
+	// The entry's other keys survive the rename, and a value that holds
+	// the old name is a value, not a key.
+	fromOld, err := config.Parse([]byte("version: 1\nendpoints:\n  grace:\n    base_url: \"http://grace:4000/v1\"\n    api_key_env: \"base_url\"\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("the old key did not load: %v", err)
 	}
-	fromNew, err := config.Parse([]byte("version: 1\nendpoints:\n  grace:\n    endpoint: \"http://grace:4000/v1\"\n"), config.FormatYAML)
+	fromNew, err := config.Parse([]byte("version: 1\nendpoints:\n  grace:\n    endpoint: \"http://grace:4000/v1\"\n    api_key_env: \"base_url\"\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("the new key did not load: %v", err)
 	}
-	if fromOld.Endpoints["grace"].Endpoint != fromNew.Endpoints["grace"].Endpoint {
-		t.Errorf("the old key loaded %q, want %q", fromOld.Endpoints["grace"].Endpoint, fromNew.Endpoints["grace"].Endpoint)
+	if !reflect.DeepEqual(fromOld.Endpoints["grace"], fromNew.Endpoints["grace"]) {
+		t.Errorf("the old key loaded %+v, want %+v", fromOld.Endpoints["grace"], fromNew.Endpoints["grace"])
 	}
 	both, err := config.Parse([]byte("version: 1\nendpoints:\n  grace:\n    base_url: \"http://a:4000/v1\"\n    endpoint: \"http://b:4000/v1\"\n"), config.FormatYAML)
 	if err == nil {

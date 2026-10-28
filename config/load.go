@@ -93,14 +93,24 @@ func Parse(data []byte, format Format) (*Settings, error) {
 // document carries the old name under the new one, and the strict
 // decode sees only the new name.
 func aliasKey(document []byte, from, to string) []byte {
-	if !bytes.Contains(document, []byte(`"`+from+`"`)) {
+	return rewrite(document, from, func(value any) any {
+		return renameKey(value, from, to)
+	})
+}
+
+// rewrite applies a change to a decoded settings document, when the
+// document mentions a key. A document that does not decode, or whose
+// change does not encode, is returned as it was: the strict decode then
+// reports what is wrong with it.
+func rewrite(document []byte, key string, change func(any) any) []byte {
+	if !bytes.Contains(document, []byte(`"`+key+`"`)) {
 		return document
 	}
 	var value any
 	if err := json.Unmarshal(document, &value); err != nil {
 		return document
 	}
-	out, err := json.Marshal(renameKey(value, from, to))
+	out, err := json.Marshal(change(value))
 	if err != nil {
 		return document
 	}
@@ -130,27 +140,22 @@ func renameFields(fields map[string]any, from, to string) map[string]any {
 // The rename stays inside the endpoints: a key with the old name
 // anywhere else in the document keeps its name.
 func aliasEndpointKey(document []byte, from, to string) []byte {
-	if !bytes.Contains(document, []byte(`"`+from+`"`)) {
-		return document
-	}
-	var root map[string]any
-	if err := json.Unmarshal(document, &root); err != nil {
-		return document
-	}
-	endpoints, ok := root["endpoints"].(map[string]any)
-	if !ok {
-		return document
-	}
-	for name, entry := range endpoints {
-		if fields, ok := entry.(map[string]any); ok {
-			endpoints[name] = renameFields(fields, from, to)
+	return rewrite(document, from, func(value any) any {
+		root, ok := value.(map[string]any)
+		if !ok {
+			return value
 		}
-	}
-	out, err := json.Marshal(root)
-	if err != nil {
-		return document
-	}
-	return out
+		endpoints, ok := root["endpoints"].(map[string]any)
+		if !ok {
+			return value
+		}
+		for name, entry := range endpoints {
+			if fields, ok := entry.(map[string]any); ok {
+				endpoints[name] = renameFields(fields, from, to)
+			}
+		}
+		return root
+	})
 }
 
 func renameKey(value any, from, to string) any {
