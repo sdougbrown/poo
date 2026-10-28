@@ -8,12 +8,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 const usage = `poo runs a session against an OpenAI-compatible endpoint.
 
 Usage:
   poo run [flags] "prompt"
+  poo -p "prompt" [flags]      An alias for poo run; --print is the same flag
   poo serve [flags]
   poo models [--json] [--explain <name>]
   poo prompt [flags]
@@ -64,6 +66,8 @@ func run(args []string) int {
 	switch args[0] {
 	case "run":
 		return runRun(args[1:])
+	case "-p", "--print":
+		return runPrint(args[1:])
 	case "serve":
 		return runServe(args[1:])
 	case "models":
@@ -79,4 +83,20 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
+}
+
+// runPrint runs the print alias.
+//
+// The first argument is the prompt, and the arguments after it are the
+// run's own flags. The prompt moves behind them because the flag set
+// stops at the first argument that is not a flag. Arguments that start
+// with a flag are already in the run's own order.
+func runPrint(args []string) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return runRun(args)
+	}
+	rest := make([]string, 0, len(args))
+	rest = append(rest, args[1:]...)
+	rest = append(rest, args[0])
+	return runRun(rest)
 }
