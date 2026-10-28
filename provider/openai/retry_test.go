@@ -89,6 +89,57 @@ func TestARetryBeforeTheFirstDeltaSucceeds(t *testing.T) {
 	}
 }
 
+// TestAFailedRequestsAttemptsAreAllCounted covers the accounting of a
+// request that exhausts its retry budget: every attempt spends its tokens
+// and reports them before it breaks, and the failed request's report
+// holds all of them.
+func TestAFailedRequestsAttemptsAreAllCounted(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":18,"prompt_tokens":1082,"total_tokens":1100}}`) +
+		chunk(`{"error":{"message":"the model crashed","type":"server_error"}}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(fastRetry(openai.Options{Endpoint: srv.URL, Model: "m"}))
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	var last error
+	for {
+		_, err := reader.Next()
+		if err != nil {
+			last = err
+			break
+		}
+	}
+	if last == nil {
+		t.Fatal("the stream did not fail")
+	}
+	var pe *poo.ProviderError
+	if !asProviderError(last, &pe) {
+		t.Fatalf("the error is %T, want a provider error", last)
+	}
+	if pe.Kind != poo.ProviderKindServer {
+		t.Errorf("the failure's kind is %q, want server", pe.Kind)
+	}
+	if len(srv.requests) != 3 {
+		t.Errorf("the endpoint got %d requests, want 3: the failure is retried", len(srv.requests))
+	}
+	reporter, ok := reader.(poo.UsageReporter)
+	if !ok {
+		t.Fatal("the reader reports no usage")
+	}
+	usage := reporter.ReportUsage()
+	if usage == nil {
+		t.Fatal("the failed request reported no usage")
+	}
+	if usage.InputTokens != 3246 || usage.OutputTokens != 54 {
+		t.Errorf("the failed request counted %d input and %d output tokens, want 3246 and 54: every attempt spent tokens",
+			usage.InputTokens, usage.OutputTokens)
+	}
+}
+
 // TestTheBudgetIsThreeAttempts covers the budget: a request that keeps
 // failing gets three attempts, and the third failure is the one the
 // caller sees.
