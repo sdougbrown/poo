@@ -72,6 +72,7 @@ func TestTheRequiredFlagsAreChecked(t *testing.T) {
 		{"a zero context limit", []string{"run", "--endpoint", "http://x", "--model-id", "m", "--context-limit", "0", "hi"}, "--context-limit"},
 		{"no prompt", []string{"run", "--endpoint", "http://x", "--model-id", "m", "--context-limit", "1024"}, "prompt"},
 		{"a bad tools mode", []string{"run", "--endpoint", "http://x", "--model-id", "m", "--context-limit", "1024", "--tools-mode", "weird", "hi"}, "--tools-mode"},
+		{"only a context limit", []string{"run", "--context-limit", "1000", "hi"}, "--context-limit needs --endpoint and --model-id"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -83,26 +84,6 @@ func TestTheRequiredFlagsAreChecked(t *testing.T) {
 				t.Errorf("the error is %q, want it to name %s", stderr, c.want)
 			}
 		})
-	}
-}
-
-// TestTheModelFlagsNameTheFlagThatWasGiven covers the error message of
-// a command that gives one of the model flags and not the others.
-//
-// The command gave the context limit and never gave a model id, so the
-// message is the context limit's, not the model id's.
-func TestTheModelFlagsNameTheFlagThatWasGiven(t *testing.T) {
-	dir := t.TempDir()
-	settingsPath := filepath.Join(dir, "settings.yaml")
-	if err := os.WriteFile(settingsPath, []byte("version: 1\n"), 0o600); err != nil {
-		t.Fatalf("writing the settings: %v", err)
-	}
-	code, stderr := runCLI(t, "run", "--settings", settingsPath, "--context-limit", "1000", "say hi")
-	if code != 2 {
-		t.Errorf("the exit code is %d, want 2", code)
-	}
-	if !strings.Contains(stderr, "--context-limit") {
-		t.Errorf("the error is %q, want it to name --context-limit", stderr)
 	}
 }
 
