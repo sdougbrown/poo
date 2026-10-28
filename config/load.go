@@ -107,6 +107,23 @@ func aliasKey(document []byte, from, to string) []byte {
 	return out
 }
 
+// renameFields returns the fields with the key renamed, when the new
+// name is absent and the old one is present. The values are not
+// descended into.
+func renameFields(fields map[string]any, from, to string) map[string]any {
+	out := make(map[string]any, len(fields))
+	for key, item := range fields {
+		name := key
+		if key == from {
+			if _, taken := fields[to]; !taken {
+				name = to
+			}
+		}
+		out[name] = item
+	}
+	return out
+}
+
 // aliasEndpointKey renames a key inside each entry of the endpoints
 // map, when the new name is absent and the old one is present.
 //
@@ -125,17 +142,9 @@ func aliasEndpointKey(document []byte, from, to string) []byte {
 		return document
 	}
 	for name, entry := range endpoints {
-		fields, ok := entry.(map[string]any)
-		if !ok {
-			continue
+		if fields, ok := entry.(map[string]any); ok {
+			endpoints[name] = renameFields(fields, from, to)
 		}
-		value, has := fields[from]
-		if _, taken := fields[to]; !has || taken {
-			continue
-		}
-		delete(fields, from)
-		fields[to] = value
-		endpoints[name] = fields
 	}
 	out, err := json.Marshal(root)
 	if err != nil {
@@ -147,15 +156,9 @@ func aliasEndpointKey(document []byte, from, to string) []byte {
 func renameKey(value any, from, to string) any {
 	switch v := value.(type) {
 	case map[string]any:
-		out := make(map[string]any, len(v))
-		for key, item := range v {
-			name := key
-			if key == from {
-				if _, has := v[to]; !has {
-					name = to
-				}
-			}
-			out[name] = renameKey(item, from, to)
+		out := renameFields(v, from, to)
+		for key, item := range out {
+			out[key] = renameKey(item, from, to)
 		}
 		return out
 	case []any:

@@ -503,11 +503,6 @@ func TestAnOldRegistryKeyStillLoads(t *testing.T) {
 	if !ok || code != config.CodeUnknownField {
 		t.Errorf("naming both keys failed with %v, want an unknown field", err)
 	}
-	// Outside an endpoint the old name is not renamed: a base_url key
-	// anywhere else stays unknown.
-	if _, err := config.Parse([]byte("version: 1\nbase_url: \"http://a:4000/v1\"\n"), config.FormatYAML); err == nil {
-		t.Error("a base_url key outside the endpoints loaded")
-	}
 }
 
 // TestAnOldBaseURLKeyStillLoads covers the base_url → endpoint rename on
@@ -532,5 +527,10 @@ func TestAnOldBaseURLKeyStillLoads(t *testing.T) {
 	code, ok := config.CodeOf(err)
 	if !ok || code != config.CodeUnknownField {
 		t.Errorf("naming both keys failed with %v, want an unknown field", err)
+	}
+	// Outside an endpoint the old name is not renamed: a base_url key
+	// anywhere else stays unknown.
+	if _, err := config.Parse([]byte("version: 1\nbase_url: \"http://a:4000/v1\"\n"), config.FormatYAML); err == nil {
+		t.Error("a base_url key outside the endpoints loaded")
 	}
 }
