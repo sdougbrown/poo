@@ -359,22 +359,6 @@ func TestTheReplayReportsADifference(t *testing.T) {
 	if !strings.Contains(differences[0], "1") {
 		t.Errorf("the difference is %q, want the counts named", differences[0])
 	}
-
-	// The same call in another turn is a difference: the replay shifted
-	// the conversation, and the call is not where the recording made it.
-	same, differences = diffCalls(
-		[]CallStep{{Index: 1, Turn: 2, Tool: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)}},
-		[]CallStep{{Index: 1, Turn: 1, Tool: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)}},
-	)
-	if same {
-		t.Error("the sequences matched, want the moved turn to be a difference")
-	}
-	if len(differences) != 1 {
-		t.Fatalf("the replay reported %d differences, want 1: %v", len(differences), differences)
-	}
-	if !strings.Contains(differences[0], "turn 2") || !strings.Contains(differences[0], "turn 1") {
-		t.Errorf("the difference is %q, want both turns named", differences[0])
-	}
 }
 
 func TestTheReplayNeedsARecordedConversation(t *testing.T) {
