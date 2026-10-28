@@ -70,6 +70,9 @@ func Parse(data []byte, format Format) (*Settings, error) {
 	// The cliregistry key was renamed to cli_registry; a settings
 	// file that predates the rename still loads.
 	normalized = aliasKey(normalized, "cliregistry", "cli_registry")
+	// The base_url key on an endpoint was renamed to endpoint; a
+	// settings file that predates the rename still loads.
+	normalized = aliasEndpointKey(normalized, "base_url", "endpoint")
 	var settings Settings
 	decoder := json.NewDecoder(bytes.NewReader(normalized))
 	decoder.DisallowUnknownFields()
@@ -98,6 +101,43 @@ func aliasKey(document []byte, from, to string) []byte {
 		return document
 	}
 	out, err := json.Marshal(renameKey(value, from, to))
+	if err != nil {
+		return document
+	}
+	return out
+}
+
+// aliasEndpointKey renames a key inside each entry of the endpoints
+// map, when the new name is absent and the old one is present.
+//
+// The rename stays inside the endpoints: a key with the old name
+// anywhere else in the document keeps its name.
+func aliasEndpointKey(document []byte, from, to string) []byte {
+	if !bytes.Contains(document, []byte(`"`+from+`"`)) {
+		return document
+	}
+	var root map[string]any
+	if err := json.Unmarshal(document, &root); err != nil {
+		return document
+	}
+	endpoints, ok := root["endpoints"].(map[string]any)
+	if !ok {
+		return document
+	}
+	for name, entry := range endpoints {
+		fields, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		value, has := fields[from]
+		if _, taken := fields[to]; !has || taken {
+			continue
+		}
+		delete(fields, from)
+		fields[to] = value
+		endpoints[name] = fields
+	}
+	out, err := json.Marshal(root)
 	if err != nil {
 		return document
 	}
