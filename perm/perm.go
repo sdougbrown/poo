@@ -553,10 +553,11 @@ func (p *Policy) Askers() []Asker {
 // canAsk reports whether the policy can produce a configured ask.
 //
 // The unmatched action, a rule that asks and a doom loop whose action
-// the options set to ask are the asks an operator chose. The doom
-// loop's default ask is not counted: every policy has one, and with no
-// asker to answer it the loop's ask takes the policy's fallback
-// decision, like any other ask.
+// the options set to ask all count. An unmatched ask counts even as the
+// default: with no asker, every side-effecting call no rule covers takes
+// the fallback. The doom loop's default ask does not count: it takes the
+// fallback only for a call repeated past the threshold, which is what
+// the loop is for.
 func (p *Policy) canAsk() bool {
 	if p.unmatched == ActionAsk {
 		return true
@@ -575,9 +576,9 @@ func (p *Policy) canAsk() bool {
 // Warning returns the warning a config load prints, or an empty string
 // when there is nothing to warn about.
 //
-// The warning fires when a rule or the unmatched action can ask and no
-// asker in the chain can ever answer one: every ask then falls back to
-// the policy's fallback decision, and the warning names it.
+// The warning fires when the policy can ask (see canAsk) and no asker in
+// the chain can ever answer one: every ask then falls back to the
+// policy's fallback decision, and the warning names it.
 func Warning(policy *Policy, askers []Asker) string {
 	if policy == nil || !policy.canAsk() {
 		return ""
