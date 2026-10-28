@@ -456,12 +456,13 @@ func (j *Judge) buildPayload(log *Log, transcript string, t transcript, report *
 		return payload
 	}
 
-	// No report entry: the log alone. The settle reason is the closest
-	// thing to a check's verdict, and the metrics come from the log.
-	// A run that settled end_turn without recording an assistant
-	// message never answered: a turn that asks for tool calls and sends
-	// none is recovered until the run reaches its bound, and settles
-	// the same way. That is not a passed check.
+	// No report entry: the log alone. Only end_turn can stand for a
+	// check's verdict, and the metrics come from the log. A run that
+	// settled another reason did not stop on its own, and a run that
+	// settled end_turn without recording an assistant message never
+	// answered: a turn that asks for tool calls and sends none is
+	// recovered until the run reaches its bound, and that bound settles
+	// invalid_turns. Neither is a passed check.
 	settledEndTurn := false
 	for _, r := range log.Records {
 		if r.Record == "run.settled" {

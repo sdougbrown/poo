@@ -278,6 +278,40 @@ func TestAContextLengthErrorSetsTheExitCode(t *testing.T) {
 	}
 }
 
+func TestAnInvalidTurnBoundSetsTheExitCode(t *testing.T) {
+	// Every answer asks for tool calls and sends none, so the run
+	// recovers each turn until it reaches the bound.
+	body := "data: " + `{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+
+	code, _ := runCLI(t,
+		"run",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--log", logPath,
+		"loop with no call",
+	)
+	if code != 15 {
+		t.Fatalf("the exit code is %d, want 15", code)
+	}
+
+	recs := readLog(t, logPath)
+	settled := recs[len(recs)-1]
+	if settled["reason"] != "invalid_turns" {
+		t.Errorf("the settle reason is %v, want invalid_turns", settled["reason"])
+	}
+	detail, _ := settled["detail"].(map[string]any)
+	if detail["source"] != "empty_turns" {
+		t.Errorf("the settle source is %v, want empty_turns", detail["source"])
+	}
+}
+
 func TestTheSessionGoesToTheStoreWhenNoLogIsGiven(t *testing.T) {
 	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
 		"data: [DONE]\n\n"

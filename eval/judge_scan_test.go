@@ -27,32 +27,46 @@ func TestTheVerdictFileNameIsFlat(t *testing.T) {
 }
 
 // TestTheJudgeDoesNotPassARunThatSaidNothing covers the judge's no-report
-// rule: a run that settled end_turn without a single assistant message
-// never answered, so the settle reason alone is not a passed check.
+// rule: only a run that settled end_turn answered, so a run that settled
+// any other reason, or that recorded no assistant message, is not a
+// passed check. A model that kept producing invalid turns settles
+// invalid_turns, and the judge must not read that as a pass.
 func TestTheJudgeDoesNotPassARunThatSaidNothing(t *testing.T) {
-	settled := LogRecord{Record: "run.settled", Reason: string(poo.ReasonEndTurn)}
 	cases := []struct {
 		name    string
+		reason  poo.Reason
 		records []LogRecord
 		want    bool
 	}{
 		{
-			name:    "an empty-turn bound",
-			records: []LogRecord{settled},
+			name:   "end_turn without an answer",
+			reason: poo.ReasonEndTurn,
 		},
 		{
-			name: "an answer",
+			name:   "an answer",
+			reason: poo.ReasonEndTurn,
 			records: []LogRecord{
 				{Record: "message", Origin: "model", Role: "assistant"},
-				settled,
 			},
 			want: true,
+		},
+		{
+			name:   "an invalid-turn bound",
+			reason: poo.ReasonInvalidTurns,
+		},
+		{
+			name:   "an invalid-turn bound after an answer",
+			reason: poo.ReasonInvalidTurns,
+			records: []LogRecord{
+				{Record: "message", Origin: "model", Role: "assistant"},
+			},
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			records := append([]LogRecord{{Record: "run.settled", Reason: string(c.reason)}}, c.records...)
 			judge := &Judge{}
-			payload := judge.buildPayload(&Log{Records: c.records}, "the transcript",
+			payload := judge.buildPayload(&Log{Records: records}, "the transcript",
 				transcript{task: "long-find-error-in-log", model: "gemma4", seed: 1}, nil)
 			if payload.CheckPassed != c.want {
 				t.Errorf("the judge read the run as check_passed=%v, want %v", payload.CheckPassed, c.want)

@@ -21,15 +21,16 @@ import (
 // The endpoint never stops writing a call that does not parse. The
 // note is still recorded, the model gets another turn, and the run
 // stops after the consecutive-note budget instead of growing the
-// history without bound.
+// history without bound. The bound settles invalid_turns: the model
+// kept producing turns the run could not use.
 func TestTheParseErrorLoopIsBounded(t *testing.T) {
 	srv, requests := unparseableCallEndpoint(t)
 	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "text"})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, &recordingSink{}))
 
 	res := runSession(t, s, "hi")
-	if res.Reason != poo.ReasonEndTurn {
-		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	if res.Reason != poo.ReasonInvalidTurns {
+		t.Fatalf("the run settled %q, want invalid_turns", res.Reason)
 	}
 	if got := requests(); got != 3 {
 		t.Errorf("the endpoint got %d requests, want the three-note budget", got)

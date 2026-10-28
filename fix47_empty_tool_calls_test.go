@@ -83,7 +83,7 @@ func TestTheRecordedEmptyTurnIsRecovered(t *testing.T) {
 
 // TestAServerThatKeepsSendingTheEmptyTurnSettles covers the endpoint
 // whose every answer is the empty stream: the run asks twice and settles
-// as a natural stop, the way the recoverable-note bound settles.
+// invalid_turns, the reason the bounds on unusable turns give.
 func TestAServerThatKeepsSendingTheEmptyTurnSettles(t *testing.T) {
 	srv, bodies := streamEndpoint(t, emptyToolCallsStream)
 	tr := openai.New(openai.Options{
@@ -94,8 +94,8 @@ func TestAServerThatKeepsSendingTheEmptyTurnSettles(t *testing.T) {
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, &recordingSink{}))
 
 	res := runSession(t, s, "hi")
-	if res.Reason != poo.ReasonEndTurn {
-		t.Fatalf("the run settled %q (%s), want end_turn", res.Reason, res.Detail.Source)
+	if res.Reason != poo.ReasonInvalidTurns {
+		t.Fatalf("the run settled %q (%s), want invalid_turns", res.Reason, res.Detail.Source)
 	}
 	if got := len(bodies()); got != 2 {
 		t.Errorf("the endpoint got %d requests, want 2", got)
@@ -168,18 +168,17 @@ func TestATurnThatAsksForToolCallsAndSendsNoneIsRecovered(t *testing.T) {
 	}
 }
 
-// TestAConsecutiveRunOfEmptyTurnsSettlesNaturally covers the bound: a
+// TestAConsecutiveRunOfEmptyTurnsSettlesInvalidTurns covers the bound: a
 // model that keeps answering with no turn at all is asked twice, and then
-// the run settles the way the recoverable-note bound settles, as a
-// natural stop.
-func TestAConsecutiveRunOfEmptyTurnsSettlesNaturally(t *testing.T) {
+// the run settles invalid_turns.
+func TestAConsecutiveRunOfEmptyTurnsSettlesInvalidTurns(t *testing.T) {
 	tr := emptyToolCallTurns(3)
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
 
 	res := runSession(t, s, "hi")
-	if res.Reason != poo.ReasonEndTurn {
-		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	if res.Reason != poo.ReasonInvalidTurns {
+		t.Fatalf("the run settled %q, want invalid_turns", res.Reason)
 	}
 	if got := len(tr.Requests()); got != 2 {
 		t.Errorf("the endpoint got %d requests, want 2: the model is asked twice", got)
@@ -270,8 +269,8 @@ func TestAReplayOfABoundedRunHasNoScript(t *testing.T) {
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
 	res := runSession(t, s, "hi")
-	if res.Reason != poo.ReasonEndTurn {
-		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	if res.Reason != poo.ReasonInvalidTurns {
+		t.Fatalf("the run settled %q, want invalid_turns", res.Reason)
 	}
 
 	path := writeSessionLog(t, append([]poo.Record{header("s1")}, sink.allRecords()...))

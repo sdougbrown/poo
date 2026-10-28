@@ -35,6 +35,11 @@ const (
 	ReasonMaxTurns Reason = "max_turns"
 	// ReasonBudgetExhausted means the run hit a token or time budget.
 	ReasonBudgetExhausted Reason = "budget_exhausted"
+	// ReasonInvalidTurns means the model kept producing turns the run
+	// could not use: it asked for tool calls and sent none, or its
+	// calls did not parse, for as many consecutive turns as the run
+	// allows. It is a failure, not a natural stop.
+	ReasonInvalidTurns Reason = "invalid_turns"
 	// ReasonFinished means the model called the finish tool with a
 	// valid result.
 	ReasonFinished Reason = "finished"
@@ -73,10 +78,11 @@ var reasonPrecedence = map[Reason]int{
 	ReasonHookContinueLimit: 7,
 	ReasonMaxTurns:          8,
 	ReasonBudgetExhausted:   9,
-	ReasonFinished:          10,
-	ReasonStopRequested:     11,
-	ReasonOutputTruncated:   12,
-	ReasonEndTurn:           13,
+	ReasonInvalidTurns:      10,
+	ReasonFinished:          11,
+	ReasonStopRequested:     12,
+	ReasonOutputTruncated:   13,
+	ReasonEndTurn:           14,
 }
 
 // Precedence returns the arbitration order of a reason.
@@ -118,6 +124,8 @@ func ExitCode(r Reason) int {
 		return 13
 	case ReasonBudgetExhausted:
 		return 14
+	case ReasonInvalidTurns:
+		return 15
 	case ReasonToolFatal:
 		return 21
 	case ReasonHookError:
