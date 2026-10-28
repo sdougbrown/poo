@@ -72,6 +72,7 @@ func TestTheRequiredFlagsAreChecked(t *testing.T) {
 		{"a zero context limit", []string{"run", "--endpoint", "http://x", "--model-id", "m", "--context-limit", "0", "hi"}, "--context-limit"},
 		{"no prompt", []string{"run", "--endpoint", "http://x", "--model-id", "m", "--context-limit", "1024"}, "prompt"},
 		{"a bad tools mode", []string{"run", "--endpoint", "http://x", "--model-id", "m", "--context-limit", "1024", "--tools-mode", "weird", "hi"}, "--tools-mode"},
+		{"only a context limit", []string{"run", "--context-limit", "1000", "hi"}, "--context-limit needs --endpoint and --model-id"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
