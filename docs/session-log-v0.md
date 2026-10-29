@@ -568,6 +568,7 @@ commit point.
 | 7 | `hook_continue_limit` | 12 | The `BeforeSettle` hooks asked for more continuations than the run allows. |
 | 8 | `max_turns` | 11 | The run hit its turn limit. |
 | 8b | `budget_exhausted` | 14 | The run hit a token or time budget. |
+| 8c | `invalid_turns` | 15 | The model kept producing turns the run could not use: it asked for tool calls and sent none, or its calls did not parse, for as many consecutive turns as the run allows. |
 | 9 | `finished` | 0 | The model called the `finish` tool with a valid result. |
 | 9b | `stop_requested` | 0 | A hook or a stop condition asked the run to stop. |
 | 10 | `output_truncated` | 10 | The provider stopped on the output-token limit. |
@@ -589,6 +590,8 @@ before the model finished, and both settle `cancelled`.
 | `max_turns` | The run hit its turn limit. |
 | `max_run_tokens` | The run hit its token budget. |
 | `max_duration` | The run hit its wall-clock budget. |
+| `empty_turns` | The model reached the bound on consecutive turns that asked for tool calls and sent none. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
+| `unparsed_calls` | The model reached the bound on consecutive turns whose tool calls did not parse. The detail's text says how many turns. A run that mixed the two kinds of unusable turn is named for its last turn. |
 | `no_output_room` | The computed `max_tokens` was under 256, so the request was never sent. |
 | `hard_limit` | The estimate crossed the hard ratio of the context window. |
 | `compaction_failed` | The compactor failed at or above the hard ratio. |

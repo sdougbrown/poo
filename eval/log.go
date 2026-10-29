@@ -252,15 +252,24 @@ func (l *Log) SettleTurns() int {
 	return 0
 }
 
+// ModelMessages returns the log's message records the model wrote, in
+// order.
+func (l *Log) ModelMessages() []LogRecord {
+	var out []LogRecord
+	for _, r := range l.Records {
+		if r.Record == "message" && r.Origin == "model" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // FinalMessage returns the last text the model produced, which is the
 // answer a read-only task is judged on.
 func (l *Log) FinalMessage() string {
 	var b strings.Builder
 	found := false
-	for _, r := range l.Records {
-		if r.Record != "message" || r.Origin != "model" {
-			continue
-		}
+	for _, r := range l.ModelMessages() {
 		if found {
 			b.Reset()
 		}

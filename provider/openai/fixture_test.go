@@ -2,6 +2,8 @@ package openai_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -146,13 +148,13 @@ func TestTheTextToolCallFormatsAreParsed(t *testing.T) {
 	}
 }
 
-// TestTheEmptyToolCallsAreAFailure covers the plan's rule: a response
-// whose finish reason is tool_calls but which carries no tool call and
-// no text is the server's own failure, and it is retried like one.
+// TestTheEmptyToolCallsTurnIsATurn covers the recorded homelab stream: a
+// finish reason of tool_calls with no call and no text in it.
 //
-// The fixture is the recorded one: the homelab vLLM's gemma4 parser
-// answers a tool call with no tool call.
-func TestTheEmptyToolCallsAreAFailure(t *testing.T) {
+// The turn is not a failure, so the stream ends the way any turn does and
+// the request is not repeated. The transport reports the turn's own
+// usage, and what the run does with an empty turn is the core's.
+func TestTheEmptyToolCallsTurnIsATurn(t *testing.T) {
 	srv := newSSEServer(t, fixture(t, "vllm-empty-tool-calls.sse"))
 	tr := openai.New(fastRetry(openai.Options{Endpoint: srv.URL, Model: "m"}))
 
@@ -162,56 +164,34 @@ func TestTheEmptyToolCallsAreAFailure(t *testing.T) {
 	}
 	defer reader.Close()
 
-	var last error
+	var finish poo.FinishReason
 	for {
-		_, err := reader.Next()
-		if err != nil {
-			last = err
+		ev, err := reader.Next()
+		if errors.Is(err, io.EOF) {
 			break
 		}
+		if err != nil {
+			t.Fatalf("the stream failed: %v", err)
+		}
+		if ev.Kind == "finish" {
+			finish = ev.FinishReason
+		}
 	}
-	if last == nil {
-		t.Fatal("the stream did not fail")
+	if finish != poo.FinishToolCalls {
+		t.Errorf("the finish reason is %q, want tool_calls", finish)
 	}
-	pe, ok := last.(*poo.ProviderError)
-	if !ok {
-		t.Fatalf("the error is %T, want a provider error", last)
+	if len(srv.requests) != 1 {
+		t.Errorf("the endpoint got %d requests, want 1: the turn is not retried", len(srv.requests))
 	}
-	if pe.Kind != poo.ProviderKindServer {
-		t.Errorf("the failure's kind is %q, want server", pe.Kind)
-	}
-	if len(srv.requests) != 3 {
-		t.Errorf("the endpoint got %d requests, want 3: the failure is retried", len(srv.requests))
-	}
-	// Every attempt cost tokens, and the report says so.
 	reporter, ok := reader.(poo.UsageReporter)
 	if !ok {
 		t.Fatal("the reader reports no usage")
 	}
 	usage := reporter.ReportUsage()
 	if usage == nil {
-		t.Fatal("the failed request reported no usage")
+		t.Fatal("the request reported no usage")
 	}
-	if usage.OutputTokens != 54 {
-		t.Errorf("the request's output tokens are %d, want the three attempts' 54", usage.OutputTokens)
-	}
-}
-
-// TestTheEmptyToolCallsSettleTheRunAsAProviderError covers the same
-// failure from the run's side: the run settles as a provider error
-// when the budget runs out.
-func TestTheEmptyToolCallsSettleTheRunAsAProviderError(t *testing.T) {
-	srv := newSSEServer(t, fixture(t, "vllm-empty-tool-calls.sse"))
-	tr := openai.New(fastRetry(openai.Options{Endpoint: srv.URL, Model: "m"}))
-
-	res := settleOf(t, tr)
-	if res.Reason != poo.ReasonProviderError {
-		t.Errorf("the run settled %q, want provider_error", res.Reason)
-	}
-	if res.Detail.Provider == nil {
-		t.Fatalf("the settle record has no provider detail: %+v", res.Detail)
-	}
-	if res.Detail.Provider.Kind != "server" {
-		t.Errorf("the failure's kind is %q, want server", res.Detail.Provider.Kind)
+	if usage.OutputTokens != 18 {
+		t.Errorf("the request's output tokens are %d, want the attempt's 18", usage.OutputTokens)
 	}
 }

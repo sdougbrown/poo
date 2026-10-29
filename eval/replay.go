@@ -55,10 +55,7 @@ type Script struct {
 // nothing to replay.
 func ScriptFromLog(log *Log) (*Script, error) {
 	script := &Script{}
-	for _, r := range log.Records {
-		if r.Record != "message" || r.Origin != "model" {
-			continue
-		}
+	for _, r := range log.ModelMessages() {
 		turn := ScriptedTurn{Finish: "stop"}
 		for _, c := range r.Content {
 			switch c.Kind {
@@ -151,9 +148,10 @@ type ReplayResult struct {
 	// A replay applies the compactions the recording holds, and never
 	// runs the strategy that made them.
 	Compactions int `json:"compactions"`
-	// Match reports whether the two sequences are the same.
+	// Match reports whether the replay reproduced the recording: the
+	// same calls, in the same turns.
 	Match bool `json:"match"`
-	// Differences describe where the two sequences part.
+	// Differences describe where the replay and the recording part.
 	Differences []string `json:"differences,omitempty"`
 	// Jobs are the job results the replay delivered, in order.
 	Jobs []string `json:"jobs,omitempty"`
@@ -269,6 +267,10 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 			path, result.Compactions, len(compactions))
 	}
 	result.Match, result.Differences = diffCalls(result.Recorded, result.Replayed)
+	if difference := unreplayedRequests(log, script); difference != "" {
+		result.Differences = append(result.Differences, difference)
+		result.Match = false
+	}
 	return result, nil
 }
 
@@ -523,6 +525,26 @@ func (c *callRecorder) Append(ctx context.Context, rec poo.Record) error {
 
 // Flush pushes buffered records out.
 func (c *callRecorder) Flush(ctx context.Context) error { return nil }
+
+// unreplayedRequests describes the requests a script cannot replay.
+//
+// A request whose response recorded no assistant message has no turn in
+// the script: a turn that asks for tool calls and sends none records
+// none, and so does a request that failed. The replay sends every later
+// turn one request early, and the recording's request count against the
+// script's is the difference that names it.
+//
+// The count is the log's: a response that carried no usage leaves no
+// usage record, so counting those would hide the requests the script
+// cannot replay.
+func unreplayedRequests(log *Log, script *Script) string {
+	requests, turns := log.Turns(), len(script.Turns)
+	if requests <= turns {
+		return ""
+	}
+	return fmt.Sprintf("the recording made %d request(s) and the script holds %d turn(s): %d request(s) recorded no assistant message, so every later turn replays early",
+		requests, turns, requests-turns)
+}
 
 // diffCalls compares two tool-call sequences.
 //

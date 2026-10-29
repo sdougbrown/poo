@@ -121,6 +121,16 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			act: func(t *testing.T, s *poo.Session) {},
 		},
 		{
+			name:   "invalid_turns",
+			want:   poo.ReasonInvalidTurns,
+			source: "empty_turns",
+			build: func(t *testing.T, opts *poo.Options) *poo.Session {
+				opts.Transport = scripted([]fakeResponse{{finish: poo.FinishToolCalls}})
+				return newTestSession(t, *opts)
+			},
+			act: func(t *testing.T, s *poo.Session) {},
+		},
+		{
 			name:   "tool_fatal",
 			want:   poo.ReasonToolFatal,
 			source: "tool:echo",

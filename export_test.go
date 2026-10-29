@@ -49,6 +49,19 @@ func SessionView(s *Session) View { return s.view() }
 // it.
 func Messages(s *Session) []Message { return s.view().Messages() }
 
+// TurnSpanMessages returns the messages one session turn's span covers.
+//
+// The second result reports whether the session has a span for the turn.
+func TurnSpanMessages(s *Session, turn int) (msgs []Message, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	span, ok := s.spanForTurnLocked(turn)
+	if !ok {
+		return nil, false
+	}
+	return append([]Message(nil), s.history[span.start:span.end]...), true
+}
+
 // SessionProfile returns the profile the session was built with.
 func SessionProfile(s *Session) string { return s.opts.Profile }
 
