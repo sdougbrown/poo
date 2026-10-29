@@ -138,6 +138,9 @@ type Policy struct { // rules are the policy's rules, in order.
 	unmatched Action
 	// doomLoop is the doom loop's settings.
 	doomLoop DoomLoop
+	// doomLoopActionSet reports whether the options named the doom
+	// loop's action, rather than taking the default.
+	doomLoopActionSet bool
 	// chain is the asker chain.
 	chain *chain
 	// workingDir is the directory the run works in.
@@ -191,6 +194,8 @@ func New(opts Options) (*Policy, error) {
 		unmatched:  unmatched,
 		doomLoop:   doomLoop,
 		workingDir: opts.WorkingDir,
+
+		doomLoopActionSet: opts.DoomLoop.Action != "",
 		chain: &chain{
 			askers:   append([]Asker(nil), opts.Askers...),
 			timeout:  timeout,
@@ -545,15 +550,19 @@ func (p *Policy) Askers() []Asker {
 	return append([]Asker(nil), p.chain.askers...)
 }
 
-// canAsk reports whether the policy can produce an ask.
+// canAsk reports whether the policy can produce a configured ask.
 //
-// The unmatched action, a rule that asks and the doom loop's action all
-// ask.
+// The unmatched action, a rule that asks and a doom loop whose action
+// the options set to ask all count. An unmatched ask counts even as the
+// default: with no asker, every side-effecting call no rule covers takes
+// the fallback. The doom loop's default ask does not count: it takes the
+// fallback only for a call repeated past the threshold, which is what
+// the loop is for.
 func (p *Policy) canAsk() bool {
 	if p.unmatched == ActionAsk {
 		return true
 	}
-	if p.doomLoop.Action == ActionAsk {
+	if p.doomLoopActionSet && p.doomLoop.Action == ActionAsk {
 		return true
 	}
 	for _, rule := range p.rules {
@@ -567,9 +576,9 @@ func (p *Policy) canAsk() bool {
 // Warning returns the warning a config load prints, or an empty string
 // when there is nothing to warn about.
 //
-// The warning fires when the policy can produce asks and no asker in the
-// chain can ever answer one: every ask then falls back to the policy's
-// fallback decision, and the warning names it.
+// The warning fires when the policy can ask (see canAsk) and no asker in
+// the chain can ever answer one: every ask then falls back to the
+// policy's fallback decision, and the warning names it.
 func Warning(policy *Policy, askers []Asker) string {
 	if policy == nil || !policy.canAsk() {
 		return ""

@@ -621,6 +621,7 @@ func TestARunWarnsWhenNoAskerCanAnswer(t *testing.T) {
 		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
 		"--context-limit", "32768",
+		"--permission-unmatched", "ask",
 		"--working-dir", dir,
 		"--log", logPath,
 		"say hello",
