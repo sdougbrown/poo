@@ -17,8 +17,8 @@ without a deprecation period until the TUI launches.
 
 ## What works today
 
-Stage 1 is the walking skeleton: enough of a harness to put a real model on
-a real task and measure what happens.
+A session runs against an OpenAI-compatible endpoint and settles with a
+reason:
 
 ```
 poo run --endpoint http://localhost:4000/v1 --model-id gemma4 \
@@ -26,15 +26,91 @@ poo run --endpoint http://localhost:4000/v1 --model-id gemma4 \
   "List the Go packages in this repository."
 ```
 
-The command talks to an OpenAI-compatible endpoint, runs the `bash` and
-`read` tools, and settles with a reason. The exit code says why: 0 for
-`end_turn`, 11 for `max_turns`, 13 for `context_exhausted`, 20 for
-`provider_error` and 130 for `cancelled`.
+**Profiles.** The profile decides which tools a session offers. Pick one
+with `--profile`; the default is `code`.
 
-Every run writes an append-only JSONL log. The record names and their
-fields are in [docs/session-log-v0.md](docs/session-log-v0.md). A log holds
-one session: `poo run` creates the file exclusively and refuses a path
-that already exists, rather than appending a second session to it.
+| Profile | Tools |
+|---|---|
+| `base` | none |
+| `code` | `bash`, `read`, `grep`, `edit` |
+| `search` | `read`, `grep` |
+
+A settings file that names `finish.schema_file` also gets the typed
+`finish` tool.
+
+**Exit codes.** The exit code says why a run ended:
+
+| Code | Reason |
+|---|---|
+| 0 | `end_turn`, `finished`, `stop_requested` |
+| 10 | `output_truncated` |
+| 11 | `max_turns` |
+| 12 | `hook_continue_limit` |
+| 13 | `context_exhausted` |
+| 14 | `budget_exhausted` |
+| 20 | `provider_error` |
+| 21 | `tool_fatal` |
+| 22 | `hook_error` |
+| 23 | `store_error` |
+| 24 | `provider_limit` |
+| 130 | `cancelled` |
+
+`poo run` exits 2 when it refuses its arguments, its settings or a prompt
+that does not render. It exits 1 for a failure with no code of its own.
+
+**Permissions.** A policy checks every tool call before it runs.
+- A rule matches a tool name, a tool class or a bash command prefix.
+- `permission.unmatched` (or `--permission-unmatched`) decides what happens
+  to a side-effecting call no rule covers: `allow`, `ask` or `deny`.
+- An `ask` goes through the asker chain. The `decide` asker asks a decision
+  model. The `wire` asker asks the client of `poo serve`.
+- `--permission-fallback` is the answer when no asker answers.
+- A call repeated too often is a doom loop, and the file tools refuse the
+  globs in `tools.protected_paths`.
+
+The policy is in `poo/perm`.
+
+**Sessions.** A logged session writes one JSONL file under `session.dir`,
+one record per line. [docs/session-log-v0.md](docs/session-log-v0.md) lists
+the records.
+- `--log <path>` writes the log to a new file of your choice. It never
+  extends an existing file.
+- `--ephemeral` writes nothing.
+- `poo sessions list` and `poo sessions prune` read and trim the store.
+- `session/load` over the wire (or `session.Resume` in Go) resumes a
+  stored session. A torn tail is recovered, an unfinished run is marked
+  `interrupted`, and undelivered job results are queued.
+
+**The wire.** `poo serve` speaks JSON-RPC 2.0 on stdin and stdout, one
+object per line.
+- Sessions: `session/create`, `session/load`, `session/configure`,
+  `session/history`, `session/close`.
+- Runs: `run/prompt`, `run/message`, `run/inspect`, `run/cancel`.
+- The server also sends events, permission asks and job updates.
+
+The contract is `poo/wire/protocol`. The conformance suite in
+`poo/wire/conformance` drives any binary through it.
+
+**Prompts.** The system prompt is a set of named markdown sections, each
+embedded beside the package that owns it.
+- A binary can replace sections with its own directory
+  (`server.Options.PromptFS`).
+- The `system_prompt.*` settings, `--system-prompt` and
+  `--append-system-prompt` (`@file` reads a file) apply on top.
+- `poo prompt` prints the sections a session would send.
+
+**CLI registry.** When the settings list manifests in `cli_registry.paths`,
+a profile with a side-effecting tool also offers `call_cli`. It runs one
+registered command through the session's executor. Above 30 entries, with
+a decision model configured, the profile also offers `find_tool` to search
+the catalog. The code is in `poo/cli` and `poo/tool/cliregistry`.
+
+**Your own binary.** A consumer links only the packages it wants, hands
+its tools, profiles and executors to `server.New`, and serves the result
+with `wire.Serve`. What it leaves out is not in the binary.
+[docs/build-your-own-binary.md](docs/build-your-own-binary.md) is the
+recipe, including the prompt directory, the conformance suite and the
+closure gate.
 
 ## Layout
 
