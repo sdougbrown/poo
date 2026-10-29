@@ -104,6 +104,263 @@ func TestTheHelpIsPrinted(t *testing.T) {
 	}
 }
 
+// TestThePrintFlagsAreAnAliasForRun covers the alias: the flag takes the
+// prompt, and the flags that follow it are still the run's own.
+func TestThePrintFlagsAreAnAliasForRun(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: " + `{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3}}` + "\n\n" +
+		"data: [DONE]\n\n"
+
+	for _, alias := range []string{"-p", "--print"} {
+		t.Run(alias, func(t *testing.T) {
+			endpoint := newFakeEndpoint(t, body)
+			dir := t.TempDir()
+			logPath := filepath.Join(dir, "run.jsonl")
+
+			code, stderr, stdout := runCLIWithStdout(t,
+				alias, "say hello",
+				"--endpoint", endpoint.URL+"/v1",
+				"--model-id", "test-model",
+				"--context-limit", "32768",
+				"--working-dir", dir,
+				"--log", logPath,
+			)
+			if code != 0 {
+				t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+			}
+			if stdout != "done\n" {
+				t.Errorf("the answer is %q, want done", stdout)
+			}
+
+			// The log confirms the run: the flags after the prompt were
+			// read, not taken for more of the prompt.
+			if got := names(readLog(t, logPath)); got[0] != "session.created" {
+				t.Errorf("the first record is %q, want session.created", got[0])
+			}
+
+			if len(endpoint.requests) != 1 {
+				t.Fatalf("the endpoint got %d requests, want 1", len(endpoint.requests))
+			}
+			messages, ok := endpoint.requests[0]["messages"].([]any)
+			if !ok || len(messages) == 0 {
+				t.Fatalf("the request's messages are %v, want a non-empty list", endpoint.requests[0]["messages"])
+			}
+			last, ok := messages[len(messages)-1].(map[string]any)
+			if !ok {
+				t.Fatalf("the last message is %v, want an object", messages[len(messages)-1])
+			}
+			if last["role"] != "user" {
+				t.Fatalf("the last message's role is %v, want user", last["role"])
+			}
+			if last["content"] != "say hello" {
+				t.Errorf("the prompt is %v, want say hello", last["content"])
+			}
+		})
+	}
+}
+
+// TestAPrintFlagWithoutAPromptIsTheRunsOwnError covers the missing
+// prompt: the alias adds nothing of its own.
+func TestAPrintFlagWithoutAPromptIsTheRunsOwnError(t *testing.T) {
+	code, stderr := runCLI(t, "-p")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "a prompt is required") {
+		t.Errorf("the error is %q, want it to name the prompt", stderr)
+	}
+}
+
+// TestAPrintFlagTakesTheRunsFlagsFirst covers flags written before the
+// prompt: they are passed through in the run's own order.
+func TestAPrintFlagTakesTheRunsFlagsFirst(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+	dir := t.TempDir()
+
+	code, stderr, stdout := runCLIWithStdout(t,
+		"-p",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--ephemeral",
+		"say hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if stdout != "done\n" {
+		t.Errorf("the answer is %q, want done", stdout)
+	}
+}
+
+// TestAPrintFlagLeavesAPromptOfSeveralWordsInOrder covers an unquoted
+// prompt: the words keep their order, as they do after run.
+func TestAPrintFlagLeavesAPromptOfSeveralWordsInOrder(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+	dir := t.TempDir()
+
+	code, stderr, _ := runCLIWithStdout(t,
+		"-p",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--ephemeral",
+		"say", "hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if len(endpoint.requests) != 1 {
+		t.Fatalf("the endpoint got %d requests, want 1", len(endpoint.requests))
+	}
+	messages, ok := endpoint.requests[0]["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("the request's messages are %v, want a non-empty list", endpoint.requests[0]["messages"])
+	}
+	last, ok := messages[len(messages)-1].(map[string]any)
+	if !ok {
+		t.Fatalf("the last message is %v, want an object", messages[len(messages)-1])
+	}
+	if last["content"] != "say hello" {
+		t.Errorf("the prompt is %v, want say hello", last["content"])
+	}
+}
+
+// TestAPrintPromptKeepsAWordThatLooksLikeAFlag covers a prompt word
+// that starts with a dash and is not one of the run's flags: it stays
+// in the prompt, as it does after run.
+func TestAPrintPromptKeepsAWordThatLooksLikeAFlag(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+	dir := t.TempDir()
+
+	code, stderr, _ := runCLIWithStdout(t,
+		"-p",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--ephemeral",
+		"say", "-hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if len(endpoint.requests) != 1 {
+		t.Fatalf("the endpoint got %d requests, want 1", len(endpoint.requests))
+	}
+	messages, ok := endpoint.requests[0]["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("the request's messages are %v, want a non-empty list", endpoint.requests[0]["messages"])
+	}
+	last, ok := messages[len(messages)-1].(map[string]any)
+	if !ok {
+		t.Fatalf("the last message is %v, want an object", messages[len(messages)-1])
+	}
+	if last["content"] != "say -hello" {
+		t.Errorf("the prompt is %v, want say -hello", last["content"])
+	}
+}
+
+// TestAPrintFlagWithABadValueFails covers a run flag with a value it
+// refuses: the run reports it, and the flag is not taken for the prompt.
+func TestAPrintFlagWithABadValueFails(t *testing.T) {
+	code, stderr := runCLI(t, "-p", "fix it", "--max-turns", "many")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "max-turns") {
+		t.Errorf("the error is %q, want it to name --max-turns", stderr)
+	}
+}
+
+// TestAPrintFlagBetweenPromptWordsIsAFlag covers a run flag placed
+// between two words of the prompt: the flag applies, and the words keep
+// their order.
+func TestAPrintFlagBetweenPromptWordsIsAFlag(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "run.jsonl")
+
+	code, stderr, _ := runCLIWithStdout(t,
+		"-p", "say",
+		"--log", logPath,
+		"hello",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if _, err := os.Stat(logPath); err != nil {
+		t.Errorf("the run wrote no log at %s, want --log applied: %v", logPath, err)
+	}
+	if got := printedPrompt(t, endpoint); got != "say hello" {
+		t.Errorf("the prompt is %q, want say hello", got)
+	}
+}
+
+// TestAPrintPromptAfterTheTerminatorIsAllWords covers "--": every
+// argument after it is a word of the prompt, flag-shaped or not.
+func TestAPrintPromptAfterTheTerminatorIsAllWords(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+	dir := t.TempDir()
+
+	code, stderr, _ := runCLIWithStdout(t,
+		"-p",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--ephemeral",
+		"--", "explain", "--max-turns",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if got := printedPrompt(t, endpoint); got != "explain --max-turns" {
+		t.Errorf("the prompt is %q, want explain --max-turns", got)
+	}
+}
+
+// printedPrompt returns the text of the last message the endpoint got.
+func printedPrompt(t *testing.T, endpoint *fakeEndpoint) string {
+	t.Helper()
+	if len(endpoint.requests) != 1 {
+		t.Fatalf("the endpoint got %d requests, want 1", len(endpoint.requests))
+	}
+	messages, ok := endpoint.requests[0]["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("the request's messages are %v, want a non-empty list", endpoint.requests[0]["messages"])
+	}
+	last, ok := messages[len(messages)-1].(map[string]any)
+	if !ok {
+		t.Fatalf("the last message is %v, want an object", messages[len(messages)-1])
+	}
+	text, _ := last["content"].(string)
+	return text
+}
+
+func TestTheHelpNamesThePrintAlias(t *testing.T) {
+	_, _, stdout := runCLIWithStdout(t, "--help")
+	if !strings.Contains(stdout, "poo -p") {
+		t.Errorf("the help is %q, want it to name the alias", stdout)
+	}
+}
+
 func TestTheDefaultSessionDirectoryIsUnderTheStateDirectory(t *testing.T) {
 	settings := &config.Settings{Version: 1}
 	dir, err := config.SessionDirectory(settings, config.Overrides{})
