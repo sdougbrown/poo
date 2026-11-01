@@ -305,6 +305,10 @@ const (
 	reportMarkdownFile = "report.md"
 )
 
+// ReportMarkdownPath is where a run's readable report lives in its
+// directory.
+func ReportMarkdownPath(dir string) string { return filepath.Join(dir, reportMarkdownFile) }
+
 // reportFiles are the files of a run's report that a baseline holds.
 var reportFiles = []string{reportJSONFile, reportMarkdownFile, summaryFile}
 

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"github.com/sdougbrown/poo/eval"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
 
@@ -54,8 +56,23 @@ func TestARunDefaultNameCarriesTheDateAndTheSHA(t *testing.T) {
 	if filepath.Dir(filepath.Dir(out)) != filepath.Join(root, "evals") {
 		t.Errorf("the default report directory is %s, want it under %s", out, filepath.Join(root, "evals"))
 	}
+	// The temporary root is no repository, so the commit part may be
+	// missing; the date and time never are.
 	name := filepath.Base(out)
-	if len(name) < len("2006-01-02-150405") {
-		t.Errorf("the run's directory name %q is shorter than a date stamp", name)
+	if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-\d{6}(-[0-9a-f]{7,})?$`).MatchString(name) {
+		t.Errorf("the run's directory name %q is not <date>-<time>[-<sha>]", name)
+	}
+}
+
+func TestCompareOfTwoNamedReportsNeedsNoRepository(t *testing.T) {
+	baseline, candidate := t.TempDir(), t.TempDir()
+	for _, dir := range []string{baseline, candidate} {
+		if err := eval.WriteReport(dir, &eval.Report{}); err != nil {
+			t.Fatalf("writing a report: %v", err)
+		}
+	}
+	t.Chdir(t.TempDir())
+	if code := runCompare([]string{baseline, candidate}); code != 0 {
+		t.Fatalf("compare of two named reports outside a repository exited %d, want 0", code)
 	}
 }

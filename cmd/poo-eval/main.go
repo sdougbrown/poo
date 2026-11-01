@@ -266,7 +266,7 @@ func runRun(args []string) int {
 
 	summary := eval.Summarize(report)
 	fmt.Fprintf(os.Stderr, "poo-eval: success %.1f%% over %d run(s); report: %s\n",
-		summary.Overall.SuccessRate*100, len(report.Results), filepath.Join(o.out, "report.md"))
+		summary.Overall.SuccessRate*100, len(report.Results), eval.ReportMarkdownPath(o.out))
 	if n := report.SourceChanged(); n > 0 {
 		fmt.Fprintf(os.Stderr, "poo-eval: %d run(s) are invalid: the source fixture changed during the run; the source was not restored\n", n)
 		return 1
@@ -285,10 +285,15 @@ func runCompare(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	root, err := repoRoot()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
-		return 2
+	// Only the default baseline needs the repository: two named report
+	// directories compare from anywhere.
+	var root string
+	if len(fs.Args()) == 1 {
+		var err error
+		if root, err = repoRoot(); err != nil {
+			fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
+			return 2
+		}
 	}
 	baselinePath, candidatePath, ok := comparePaths(root, fs.Args())
 	if !ok {
