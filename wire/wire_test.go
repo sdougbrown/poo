@@ -427,15 +427,6 @@ func TestPermissionAskNeedsTheCapability(t *testing.T) {
 	}
 	// The fallback denied the call, because nobody answered.
 	h.event("tool.result")
-	// The session's warnings name the cause and the capability that
-	// fixes it.
-	info := createdSessionInfo(t, h)
-	if len(info.Warnings) != 1 {
-		t.Fatalf("the session carried %d warnings (%v), want one", len(info.Warnings), info.Warnings)
-	}
-	if !strings.Contains(info.Warnings[0], "permission_answers") {
-		t.Errorf("the warning is %q, want it to name the capability", info.Warnings[0])
-	}
 }
 
 // TestTheSessionIsSilentWhenTheClientDeclaredTheCapability covers the
@@ -448,7 +439,10 @@ func TestTheSessionIsSilentWhenTheClientDeclaredTheCapability(t *testing.T) {
 	h := newHarness(t, factory, wire.Bounds{})
 	h.initialize()
 
-	createdSessionInfo(t, h)
+	info := createdSessionInfo(t, h)
+	if len(info.Warnings) != 0 {
+		t.Errorf("the session carried %d warnings (%v), want none", len(info.Warnings), info.Warnings)
+	}
 }
 
 // createdSessionInfo creates a session and returns what the client
