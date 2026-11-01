@@ -78,6 +78,8 @@ A record that someone produced also carries an `origin`:
 | `compaction` | Once per compaction a compactor produced. |
 | `session.models_changed` | Once per model switch, between the runs. |
 | `decision` | Once per decision call, failures included. |
+| `permission.asked` | Once per permission ask, when the run starts waiting for an answer. |
+| `permission.answered` | Once per permission ask, when the answer arrives. |
 | `run.settled` | Once per run, when the run ends. |
 
 The fields of the records grow over time. A consumer must tolerate a field
@@ -507,6 +509,36 @@ reader of the log sees the calls that could not be answered too.
 | `latency_ms` | number | How long the call took, in milliseconds. |
 | `requests` | integer | The number of wire requests the call made. **Absent** when the decider did not report one. |
 | `at` | string | RFC 3339, UTC. |
+
+## `permission.asked`
+
+The ask a run is waiting on. The record is written when the run starts
+waiting, before any asker has answered.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | string | The run that is waiting. |
+| `ask_id` | string | The ask's identifier. A client answers by it. |
+| `tool` | string | The name of the tool the model called. |
+| `summary` | string | What the call does. **Absent** when the tool has no summary. |
+| `class` | string | The tool's class: `"read_only"` or `"side_effecting"`. **Absent** when the tool names none. |
+| `reason` | string | Why the call is being asked about: `"policy"` or `"doom_loop"`. **Absent** when there is none. |
+| `repeat_count` | object | The doom loop's counts, for a doom-loop ask: `exact` and `near`. **Absent** for a policy ask. |
+
+## `permission.answered`
+
+The answer that resolved an ask. It follows its `permission.asked`, and it
+is written whatever the decision was.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run_id` | string | The run the answer belongs to. |
+| `ask_id` | string | The ask the answer resolves. **Absent** for a doom loop's deterministic action, which answers no ask. |
+| `decision` | string | `"allow"` or `"deny"`. |
+| `answered_by` | string | Who answered: an asker, the chain's fallback, the policy's own action, or `"cancelled"` for a run that ended. |
+| `provenance` | string | How the ask was resolved: `"answered"`, `"timeout"`, `"default"`, `"no_asker"`, `"cancelled"` or `"interrupted"`. |
+| `reason` | string | Why the call was being asked about. **Absent** when there is none. |
+| `message` | string | The note the answer carried for the model: the model saw it in the refused call's tool result. **Absent** when the answer carried none. |
 
 ## `run.settled`
 
