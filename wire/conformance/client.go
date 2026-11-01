@@ -60,6 +60,9 @@ type client struct {
 	// ask answers the server's permission asks. An empty answer means
 	// the client does not answer.
 	ask func(protocol.AskParams) string
+	// askMessage is the note the client's answers carry, on top of the
+	// decision ask answers. An empty note sends no message.
+	askMessage func(protocol.AskParams) string
 	// next is the id of the next request.
 	next int
 	// paused reports that the client stopped reading.
@@ -267,10 +270,16 @@ func (c *client) answerAsk(msg message) {
 		// The client does not answer: the ask runs out of time.
 		return
 	}
+	result := map[string]any{"decision": decision}
+	if c.askMessage != nil {
+		if message := c.askMessage(params); message != "" {
+			result["message"] = message
+		}
+	}
 	c.writeRaw(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      json.RawMessage(msg.ID),
-		"result":  map[string]any{"decision": decision},
+		"result":  result,
 	})
 }
 
