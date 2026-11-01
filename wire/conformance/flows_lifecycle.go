@@ -553,7 +553,7 @@ func (s *suite) answerBeforeEvents() {
 			ScriptedAnswer{Text: "the answer"},
 		)
 	}
-	holding := newProvider(s.t, turns)
+	holding := newEndpoint(s.t, turns)
 	settings := s.settings(holding, s.contextLimit, map[string]any{
 		"jobs": map[string]any{"on_idle": "hold"},
 	})
@@ -592,7 +592,7 @@ func (s *suite) answerBeforeEvents() {
 	for i := 0; i < sessions; i++ {
 		answers = append(answers, ScriptedAnswer{Text: "the answer after the wake"})
 	}
-	waking := newProvider(s.t, answers)
+	waking := newEndpoint(s.t, answers)
 	settings = s.settings(waking, s.contextLimit, map[string]any{
 		"jobs": map[string]any{"on_idle": "wake"},
 	})
