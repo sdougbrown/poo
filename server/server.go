@@ -234,6 +234,13 @@ func (f *Server) Profiles() []protocol.ProfileInfo {
 	return out
 }
 
+// DefaultProfile returns the profile a session runs under when its
+// params name none.
+//
+// It is the profile the default runtime was resolved to, which is the
+// runtime session/create falls back to.
+func (f *Server) DefaultProfile() string { return f.runtime.Profile.Name }
+
 // Capabilities returns what this binary can do.
 func (f *Server) Capabilities() protocol.Capabilities {
 	runtime, err := f.runtimeFor("", "")

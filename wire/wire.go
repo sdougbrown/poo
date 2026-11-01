@@ -123,6 +123,9 @@ type FactoryEnv struct {
 type Factory interface {
 	// Profiles returns the profiles the binary offers.
 	Profiles() []protocol.ProfileInfo
+	// DefaultProfile returns the profile a session runs under when
+	// its params name none.
+	DefaultProfile() string
 	// Capabilities returns what this binary can do.
 	Capabilities() protocol.Capabilities
 	// Roles returns the models this binary talks to.

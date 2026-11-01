@@ -47,7 +47,7 @@ return wire.Serve(wire.Options{
 ```
 
 The factory maps the protocol onto `config`: the handshake reports the
-profiles, the capabilities and the models. A session's profile and model
+profiles, the default profile, the capabilities and the models. A session's profile and model
 pick a runtime, and the store, the prompt overrides and the permission
 asks are the session's own.
 

@@ -53,6 +53,20 @@ func (s *suite) handshake(c *client) protocol.InitializeResult {
 	if len(result.Profiles) == 0 {
 		s.t.Error("the handshake offers no profile")
 	}
+	if result.DefaultProfile == "" {
+		s.t.Error("the handshake names no default profile")
+	} else {
+		offered := false
+		for _, profile := range result.Profiles {
+			if profile.Name == result.DefaultProfile {
+				offered = true
+				break
+			}
+		}
+		if !offered {
+			s.t.Errorf("the handshake names the default profile %q, which it does not offer", result.DefaultProfile)
+		}
+	}
 	s.handshakeResult = result
 	return result
 }
@@ -129,6 +143,35 @@ func (s *suite) checkSessionTools(got, want []protocol.ToolInfo, profiles []prot
 			s.t.Errorf("the session offers %q, a tool of another profile", tool.Name)
 		}
 	}
+}
+
+// defaultProfile covers the handshake's default profile: the session a
+// create names no profile for runs under it, and it offers the tools
+// the profile names.
+func (s *suite) defaultProfile() {
+	s.t.Helper()
+	endpoint := newProvider(s.t, s.turns)
+	settings := s.settings(endpoint, s.contextLimit, nil)
+	c := s.start(settings, endpoint)
+	s.handshake(c)
+
+	var want []protocol.ToolInfo
+	for _, profile := range s.handshakeResult.Profiles {
+		if profile.Name == s.handshakeResult.DefaultProfile {
+			want = profile.Tools
+		}
+	}
+	if want == nil {
+		s.t.Fatalf("the handshake names the default profile %q, which it does not offer", s.handshakeResult.DefaultProfile)
+	}
+	raw := c.call(protocol.MethodSessionCreate, map[string]any{
+		"working_dir": s.dir,
+	}, &protocol.SessionInfo{})
+	var info protocol.SessionInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
+		s.t.Fatalf("decoding the session: %v", err)
+	}
+	s.checkSessionTools(info.Tools, want, s.handshakeResult.Profiles)
 }
 
 // prompt starts a run and returns its id.

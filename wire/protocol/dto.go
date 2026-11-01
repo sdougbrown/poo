@@ -153,6 +153,9 @@ type InitializeResult struct {
 	Build Build `json:"build"`
 	// Profiles are the profiles the binary offers.
 	Profiles []ProfileInfo `json:"profiles"`
+	// DefaultProfile is the profile a session runs under when its
+	// params name none.
+	DefaultProfile string `json:"default_profile,omitempty"`
 	// Models are the models the binary talks to.
 	Models ModelRoles `json:"models"`
 	// Capabilities are the things the binary can do.
@@ -163,8 +166,8 @@ type InitializeResult struct {
 type CreateParams struct {
 	// WorkingDir is the directory the session's tools work in.
 	WorkingDir string `json:"working_dir"`
-	// Profile is the profile to build the session from. It defaults to
-	// the binary's default profile.
+	// Profile is the profile to build the session from. It defaults
+	// to the handshake's default_profile.
 	Profile string `json:"profile,omitempty"`
 	// Mode is the persistence mode: "logged" or "ephemeral". It
 	// defaults to the process default.

@@ -477,6 +477,10 @@ func (f *testFactory) Profiles() []protocol.ProfileInfo {
 	}}
 }
 
+// DefaultProfile returns the profile a session runs under when its
+// params name none.
+func (f *testFactory) DefaultProfile() string { return "code" }
+
 // Capabilities returns what this binary can do.
 func (f *testFactory) Capabilities() protocol.Capabilities {
 	return protocol.Capabilities{

@@ -15,6 +15,7 @@ import (
 	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/wire"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -45,6 +46,46 @@ func TestInitializeReportsTheBinary(t *testing.T) {
 	}
 	if !result.Capabilities.Compaction {
 		t.Error("the binary compacts, so the capability should say so")
+	}
+}
+
+// The handshake names the default profile, and a session whose params
+// name no profile runs under it.
+func TestInitializeNamesTheDefaultProfile(t *testing.T) {
+	factory := newTestFactory(t, func() poo.ChatTransport { return pootest.NewTransport() })
+	h := newHarness(t, factory, wire.Bounds{})
+
+	result := h.initialize()
+	if result.DefaultProfile == "" {
+		t.Fatal("the handshake names no default profile")
+	}
+	offered := false
+	for _, profile := range result.Profiles {
+		if profile.Name == result.DefaultProfile {
+			offered = true
+			break
+		}
+	}
+	if !offered {
+		t.Errorf("the default profile %q is not one the handshake offers", result.DefaultProfile)
+	}
+
+	// The header a session writes names the profile it runs under, so
+	// it is the record of what session/create fell back to.
+	raw, rerr := h.call(protocol.MethodSessionCreate, protocol.CreateParams{WorkingDir: factory.dir})
+	if rerr != nil {
+		t.Fatalf("the session was refused: %v", rerr)
+	}
+	var info protocol.SessionInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
+		t.Fatalf("decoding the session: %v", err)
+	}
+	meta, err := session.MetadataOf(factory.dir, info.SessionID)
+	if err != nil {
+		t.Fatalf("reading the header: %v", err)
+	}
+	if meta.Profile != result.DefaultProfile {
+		t.Errorf("the session runs under the profile %q, want the handshake's %q", meta.Profile, result.DefaultProfile)
 	}
 }
 

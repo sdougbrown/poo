@@ -69,6 +69,39 @@ func newServer(t *testing.T, settings *config.Settings) *server.Server {
 	return srv
 }
 
+// The handshake names the default profile, and it is the profile a
+// session whose params name none runs under.
+func TestTheHandshakeNamesTheDefaultProfile(t *testing.T) {
+	// The settings name no profile, so the binary's own default runs.
+	srv := newServer(t, servedSettings(t, "", `{"chat": "chat-model"}`))
+	if got := srv.DefaultProfile(); got == "" {
+		t.Fatal("the server names no default profile")
+	}
+	sess, info, err := srv.Create(context.Background(), protocol.CreateParams{
+		Mode:       "logged",
+		SessionDir: t.TempDir(),
+	}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("closing the session: %v", err)
+		}
+		if err := info.Release(); err != nil {
+			t.Errorf("releasing the store: %v", err)
+		}
+	}()
+
+	meta, err := session.MetadataOf(info.SessionDir, sess.ID())
+	if err != nil {
+		t.Fatalf("reading the header: %v", err)
+	}
+	if got := srv.DefaultProfile(); got != meta.Profile {
+		t.Errorf("the default profile is %q, want the %q profile the session ran under", got, meta.Profile)
+	}
+}
+
 // TestTheServedHeaderRecordsTheDeciderTheSessionRunsWith covers the
 // header a served logged session writes: it names the decision model
 // the session runs with, whether the settings named it or the request
