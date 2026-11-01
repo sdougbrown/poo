@@ -85,10 +85,16 @@ srv, err := server.New(server.Options{
 its runtime without the factory.
 
 Each file is named after the section it replaces. The names are the default
-order's (`prompt.Order()`): `base`, `catalog`, `environment` and `project`, and
-`tools.<tool>` for a tool's own section. A directory in the path names the
-section's prefix, so a tool's file is `tools/bash.md`. A variant is a sibling
-whose name carries it, `tools/bash.small-local.md`.
+order's (`prompt.Order()`): `base`, `profile`, `catalog`, `environment` and
+`project`, and `tools.<tool>` for a tool's own section. A directory in the path
+names the section's prefix, so a tool's file is `tools/bash.md`. A variant is a
+sibling whose name carries it, `tools/bash.small-local.md`.
+
+A profile can bring a section of its own. `profile.Profile.Prompt` is the
+profile's prose, and it renders in the `profile` section, right after `base`:
+the code profile's coding-agent guidance lives there, and a profile that offers
+no tool of its own ships none. A binary's `profile.md` replaces it, the way
+`base.md` replaces the base.
 
 ```
 prompts/

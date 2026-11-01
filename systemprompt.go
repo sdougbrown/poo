@@ -52,10 +52,10 @@ func systemPromptEnv(opts *Options) prompt.Env {
 // baseSection is the operating contract the model works under, as the
 // prompt package embeds it.
 //
-// It is the shape mini-swe-agent uses: what the model is, how to work, and
-// what "done" looks like. The guidance for a tool is not here: a tool
-// brings a section of its own, and a tool that is not linked takes its
-// guidance with it.
+// It says what the model is, how to work, and what "done" looks like,
+// and nothing about the tools it works through: the guidance for a
+// tool is not here, and neither is the prose of a profile, which
+// brings a section of its own.
 var baseSection = prompt.Base()
 
 // environmentSection renders the environment section.

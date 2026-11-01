@@ -346,6 +346,15 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 		}
 	}
 	r.Profile = poo.Profile{Name: chosen.Name, Unmatched: chosen.Unmatched}
+	// The profile's own prompt section is the profile's, so it goes in
+	// before the binary's directory and the settings: a later layer
+	// still wins over it.
+	if chosen.Prompt != "" {
+		text := chosen.Prompt
+		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+			b.Set(prompt.ProfileSection, text)
+		})
+	}
 	for _, tool := range chosen.Tools {
 		if !linksTool(opts, tool) {
 			return &Error{
@@ -1194,6 +1203,7 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 	sources := prompt.Sources{
 		"base":        nil,
+		"profile":     nil,
 		"environment": nil,
 		"project":     nil,
 	}

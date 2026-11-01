@@ -139,6 +139,13 @@ func (c Content) text(env Env) (string, error) {
 	return c.Text, nil
 }
 
+// ProfileSection is the name of the prompt's profile section.
+//
+// A profile whose own prose the build applies renders there: the
+// section sits right after the base, so the profile's own words sit
+// beside the operating contract every profile shares.
+const ProfileSection = "profile"
+
 // DefaultOrder is the order the sections render in.
 //
 // "tools" stands for the per-tool sections, which are named
@@ -148,7 +155,7 @@ func (c Content) text(env Env) (string, error) {
 //
 // The slice is read-only: a consumer that changes it changes the prompt
 // for everybody.
-var DefaultOrder = []string{"base", "tools", "catalog", "environment", "project"}
+var DefaultOrder = []string{"base", "profile", "tools", "catalog", "environment", "project"}
 
 // Order returns the order the sections render in.
 //

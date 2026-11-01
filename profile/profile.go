@@ -40,6 +40,14 @@ type Profile struct {
 	// An empty unmatched action means the permission policy's own
 	// default applies.
 	Unmatched string
+	// Prompt is the profile's own prompt section, as the model reads
+	// it. It renders right after the base section, so the profile's
+	// own words sit beside the operating contract every profile
+	// shares.
+	//
+	// An empty prompt adds no section: the profile runs on the base
+	// section alone.
+	Prompt string
 }
 
 // HasTool reports whether the profile offers the named tool.
