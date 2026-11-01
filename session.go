@@ -243,6 +243,11 @@ type runState struct {
 	requests int
 	// tokens counts the run's cumulative input and output tokens.
 	tokens int
+	// usage is the run's cumulative token accounting: the sum of what
+	// its requests reported. It is nil until the first request reports
+	// usage, so a run whose providers report none settles without a
+	// usage total.
+	usage *SettleUsage
 	// startedAt is when the run began.
 	startedAt time.Time
 	// stopTimer stops the run's wall-clock budget timer.

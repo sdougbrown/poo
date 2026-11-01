@@ -66,6 +66,7 @@ func (r fakeResponse) turn() pootest.Turn {
 	if r.usage != nil {
 		t.InputTokens = r.usage.InputTokens
 		t.OutputTokens = r.usage.OutputTokens
+		t.CacheReadTokens = r.usage.CacheReadTokens
 	}
 	return t
 }

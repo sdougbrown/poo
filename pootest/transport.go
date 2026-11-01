@@ -53,6 +53,9 @@ type Turn struct {
 	// reported.
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
+	// CacheReadTokens is the number of prompt tokens the endpoint
+	// served from its cache, when it reported one.
+	CacheReadTokens *int `json:"cache_read_tokens,omitempty"`
 	// Err is the failure the request returns, when it fails.
 	Err error `json:"-"`
 }
@@ -456,8 +459,9 @@ func (r *reader) Next() (poo.StreamItem, error) {
 			return poo.StreamItem{
 				Kind: "usage",
 				Usage: &poo.UsageReport{
-					InputTokens:  r.turn.InputTokens,
-					OutputTokens: r.turn.OutputTokens,
+					InputTokens:     r.turn.InputTokens,
+					OutputTokens:    r.turn.OutputTokens,
+					CacheReadTokens: r.turn.CacheReadTokens,
 				},
 			}, nil
 		default:

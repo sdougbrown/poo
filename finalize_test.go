@@ -1,7 +1,9 @@
 package poo_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -1091,5 +1093,82 @@ func TestAUsageWriteFailureIsTerminal(t *testing.T) {
 	}
 	if res.Reason != poo.ReasonStoreError || !s.Broken() {
 		t.Fatalf("usage append failed: reason=%s broken=%v; want store_error and broken", res.Reason, s.Broken())
+	}
+}
+
+// TestTheSettleDetailCarriesTheRunUsageTotal covers the settle's usage
+// total: a run whose requests report usage settles with the sum of what
+// they reported, in the detail the record and the events carry.
+func TestTheSettleDetailCarriesTheRunUsageTotal(t *testing.T) {
+	cached1, cached2 := 40, 60
+	tr := scripted([]fakeResponse{
+		{
+			calls: []poo.ToolCall{{CallID: "c", Name: "echo", Arguments: []byte(`{"text":"hi"}`)}},
+			usage: &poo.UsageReport{InputTokens: 100, OutputTokens: 10, CacheReadTokens: &cached1},
+		},
+		{text: "all done", usage: &poo.UsageReport{InputTokens: 200, OutputTokens: 20, CacheReadTokens: &cached2}},
+	})
+	sink := &recordingSink{}
+
+	s := newTestSession(t, testOptions(t, tr, &echoTool{result: "echoed"}, sink))
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	if res.Detail.Usage == nil {
+		t.Fatal("the settle detail carries no usage total")
+	}
+	usage := res.Detail.Usage
+	if usage.InputTokens != 300 || usage.OutputTokens != 30 {
+		t.Errorf("the usage total is %d/%d, want 300/30", usage.InputTokens, usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 100 {
+		t.Errorf("the cache-read total is %d, want 100", usage.CacheReadTokens)
+	}
+	var settled *poo.RunSettledRecord
+	for _, rec := range sink.allRecords() {
+		if s, ok := rec.(*poo.RunSettledRecord); ok {
+			settled = s
+		}
+	}
+	if settled == nil {
+		t.Fatal("the log holds no run.settled record")
+	}
+	if settled.Detail.Usage == nil || settled.Detail.Usage.InputTokens != 300 ||
+		settled.Detail.Usage.OutputTokens != 30 || settled.Detail.Usage.CacheReadTokens != 100 {
+		t.Errorf("the settle record's usage total is %+v, want 300/30 with 100 cache-read", settled.Detail.Usage)
+	}
+}
+
+// TestARunWithoutReportedUsageSettlesWithoutAUsageTotal covers the
+// additive shape: a run whose provider reports no usage settles without
+// a usage total, so an existing settle record keeps its bytes.
+func TestARunWithoutReportedUsageSettlesWithoutAUsageTotal(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "all done"}})
+	sink := &recordingSink{}
+
+	s := newTestSession(t, testOptions(t, tr, &echoTool{result: "echoed"}, sink))
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	if res.Detail.Usage != nil {
+		t.Errorf("the settle detail carries a usage total %+v, want none", res.Detail.Usage)
+	}
+	var settled *poo.RunSettledRecord
+	for _, rec := range sink.allRecords() {
+		if s, ok := rec.(*poo.RunSettledRecord); ok {
+			settled = s
+		}
+	}
+	if settled == nil {
+		t.Fatal("the log holds no run.settled record")
+	}
+	b, err := json.Marshal(settled)
+	if err != nil {
+		t.Fatalf("marshaling the settle record: %v", err)
+	}
+	if bytes.Contains(b, []byte(`"usage"`)) {
+		t.Errorf("the settle record carries a usage total: %s", b)
 	}
 }

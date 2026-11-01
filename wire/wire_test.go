@@ -231,6 +231,39 @@ func TestPromptRunsAndSettles(t *testing.T) {
 	}
 }
 
+// The settled event carries the run's usage total.
+func TestTheSettledEventCarriesTheUsageTotal(t *testing.T) {
+	cached := 5
+	factory := newTestFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(pootest.Turn{
+			Text: "hello", Finish: "stop",
+			InputTokens: 12, OutputTokens: 3, CacheReadTokens: &cached,
+		})
+	})
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+		t.Fatalf("the prompt was refused: %v", rerr)
+	}
+	settled := h.event("run.settled")
+	b, err := json.Marshal(settled.Fields["detail"])
+	if err != nil {
+		t.Fatalf("marshaling the detail: %v", err)
+	}
+	var detail protocol.SettleDetail
+	if err := json.Unmarshal(b, &detail); err != nil {
+		t.Fatalf("decoding the detail: %v", err)
+	}
+	if detail.Usage == nil {
+		t.Fatal("the settled event carries no usage total")
+	}
+	if detail.Usage.InputTokens != 12 || detail.Usage.OutputTokens != 3 || detail.Usage.CacheReadTokens != 5 {
+		t.Errorf("the usage total is %+v, want 12/3 with 5 cache-read", detail.Usage)
+	}
+}
+
 // The events arrive in sequence order.
 func TestEventsArriveInOrder(t *testing.T) {
 	factory := newTestFactory(t, func() poo.ChatTransport {
