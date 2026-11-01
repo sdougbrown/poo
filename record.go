@@ -417,6 +417,18 @@ type ProviderDetail struct {
 	ResetsAt string `json:"resets_at,omitempty"`
 }
 
+// SettleUsage is the token accounting of a run's provider requests.
+type SettleUsage struct {
+	// InputTokens is the number of prompt tokens the requests reported.
+	InputTokens int `json:"input_tokens"`
+	// OutputTokens is the number of completion tokens the requests
+	// reported.
+	OutputTokens int `json:"output_tokens"`
+	// CacheReadTokens is the number of prompt tokens served from the
+	// providers' caches. It is absent when no request reported one.
+	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
+}
+
 // SettleDetail explains why a run settled.
 type SettleDetail struct {
 	// Source names the condition that settled the run.
@@ -440,6 +452,9 @@ type SettleDetail struct {
 	// Result is the payload of a valid finish call, when the run
 	// settled as finished.
 	Result json.RawMessage `json:"result,omitempty"`
+	// Usage is the run's token accounting: the sum of what its requests
+	// reported. It is absent when no request reported usage.
+	Usage *SettleUsage `json:"usage,omitempty"`
 }
 
 // UndeliveredInput is an accepted input that never reached the model.

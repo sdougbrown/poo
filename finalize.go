@@ -430,6 +430,10 @@ func (s *Session) commitLocked(run *runState) (Reason, SettleDetail) {
 	if len(losing) > 0 {
 		detail.Losing = append(detail.Losing, losing...)
 	}
+	if run.usage != nil {
+		usage := *run.usage
+		detail.Usage = &usage
+	}
 	return winner.reason, detail
 }
 

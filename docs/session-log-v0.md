@@ -564,6 +564,15 @@ The end of a run. It is the last record of a run.
 | `undelivered_input` | array of objects | The accepted inputs that never reached the model. Absent when there were none. |
 | `jobs_running` | array of strings | The jobs that were still running when the run settled. Absent when there were none. |
 | `result` | any | The payload of a valid `finish` call, when the run settled as finished. Absent otherwise. |
+| `usage` | object | The run's token accounting: the sum of what its requests reported. Absent when no request reported usage. |
+
+A `usage` entry holds:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `input_tokens` | integer | The prompt tokens the requests reported, in total. |
+| `output_tokens` | integer | The completion tokens the requests reported, in total. |
+| `cache_read_tokens` | integer | The prompt tokens the providers served from their caches, in total. Absent when no request reported one. |
 
 A `undelivered_input` entry holds:
 

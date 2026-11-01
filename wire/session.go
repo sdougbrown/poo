@@ -275,6 +275,13 @@ func detailOf(detail poo.SettleDetail) protocol.SettleDetail {
 			ResetsAt:    detail.Provider.ResetsAt,
 		}
 	}
+	if detail.Usage != nil {
+		out.Usage = &protocol.SettleUsage{
+			InputTokens:     detail.Usage.InputTokens,
+			OutputTokens:    detail.Usage.OutputTokens,
+			CacheReadTokens: detail.Usage.CacheReadTokens,
+		}
+	}
 	for _, input := range detail.UndeliveredInput {
 		out.UndeliveredInput = append(out.UndeliveredInput, protocol.UndeliveredInput{
 			InputID: input.InputID,

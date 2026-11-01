@@ -1409,6 +1409,14 @@ func (s *Session) toolSpecs() []ToolSpec {
 func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
 	s.mu.Lock()
 	run.tokens += usage.InputTokens + usage.OutputTokens
+	if run.usage == nil {
+		run.usage = &SettleUsage{}
+	}
+	run.usage.InputTokens += usage.InputTokens
+	run.usage.OutputTokens += usage.OutputTokens
+	if usage.CacheReadTokens != nil {
+		run.usage.CacheReadTokens += *usage.CacheReadTokens
+	}
 	s.mu.Unlock()
 	s.observeUsage(usage, requestChars)
 	if err := s.write(run.ctx, &UsageRecord{
