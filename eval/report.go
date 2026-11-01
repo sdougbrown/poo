@@ -277,7 +277,7 @@ func WriteReport(dir string, report *Report) error {
 		return fmt.Errorf("eval: encoding the summary: %w", err)
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(filepath.Join(dir, "summary.json"), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, summaryFile), data, 0o644); err != nil {
 		return fmt.Errorf("eval: writing the summary: %w", err)
 	}
 
@@ -286,13 +286,73 @@ func WriteReport(dir string, report *Report) error {
 		return fmt.Errorf("eval: encoding the report: %w", err)
 	}
 	full = append(full, '\n')
-	if err := os.WriteFile(filepath.Join(dir, "report.json"), full, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, reportJSONFile), full, 0o644); err != nil {
 		return fmt.Errorf("eval: writing the report: %w", err)
 	}
 
 	markdown := RenderMarkdown(report, summary)
-	if err := os.WriteFile(filepath.Join(dir, "report.md"), []byte(markdown), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, reportMarkdownFile), []byte(markdown), 0o644); err != nil {
 		return fmt.Errorf("eval: writing the report: %w", err)
+	}
+	return nil
+}
+
+// The files of a run's report. WriteReport writes them, and a baseline
+// holds exactly these.
+const (
+	summaryFile        = "summary.json"
+	reportJSONFile     = "report.json"
+	reportMarkdownFile = "report.md"
+)
+
+// ReportMarkdownPath is where a run's readable report lives in its
+// directory.
+func ReportMarkdownPath(dir string) string { return filepath.Join(dir, reportMarkdownFile) }
+
+// reportFiles are the files of a run's report that a baseline holds.
+var reportFiles = []string{reportJSONFile, reportMarkdownFile, summaryFile}
+
+// AcceptBaseline replaces a baseline directory with a run's report files.
+//
+// The baseline holds the report's files and nothing else: the raw runs
+// and the comparisons stay where the run wrote them. A directory that
+// does not hold a run's report, or that is the baseline itself or lies
+// inside it, is refused, and the baseline is left as it was.
+func AcceptBaseline(baseline, runDir string) error {
+	base, err := filepath.Abs(baseline)
+	if err != nil {
+		return fmt.Errorf("eval: resolving %s: %w", baseline, err)
+	}
+	run, err := filepath.Abs(runDir)
+	if err != nil {
+		return fmt.Errorf("eval: resolving %s: %w", runDir, err)
+	}
+	if rel, err := filepath.Rel(base, run); err == nil && (rel == "." || !strings.HasPrefix(rel, "..")) {
+		return fmt.Errorf("eval: %s is the baseline or inside it; accept a run's own directory", runDir)
+	}
+	// A report the compare cannot read would break every later compare
+	// against the baseline, so it is refused before anything changes.
+	if _, err := LoadReport(runDir); err != nil {
+		return fmt.Errorf("eval: %s does not hold a readable report: %w", runDir, err)
+	}
+	files := make(map[string][]byte, len(reportFiles))
+	for _, name := range reportFiles {
+		data, err := os.ReadFile(filepath.Join(runDir, name))
+		if err != nil {
+			return fmt.Errorf("eval: %s does not hold a run's report: %w", runDir, err)
+		}
+		files[name] = data
+	}
+	if err := os.RemoveAll(baseline); err != nil {
+		return fmt.Errorf("eval: removing %s: %w", baseline, err)
+	}
+	if err := os.MkdirAll(baseline, 0o755); err != nil {
+		return fmt.Errorf("eval: creating %s: %w", baseline, err)
+	}
+	for _, name := range reportFiles {
+		if err := os.WriteFile(filepath.Join(baseline, name), files[name], 0o644); err != nil {
+			return fmt.Errorf("eval: writing %s: %w", name, err)
+		}
 	}
 	return nil
 }

@@ -39,8 +39,9 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Raw eval transcripts hold local paths; the reports and verdicts are committed.
-evals/results/**/runs/
+# Every run's report and raw transcripts go to an ignored directory; the
+# accepted baseline at evals/baseline is what the repository keeps.
+evals/runs/
 
 # The poo binary, built at the repo root by `go build ./cmd/poo`
 /poo

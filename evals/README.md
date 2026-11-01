@@ -13,6 +13,28 @@ Run the set with:
 
     poo-eval run --models gemma4,qwen --seeds 3
 
+## Reports and the baseline
+
+A run writes its report to `evals/runs/<date>-<git sha>/`, an ignored
+directory, with the raw transcripts under its `runs/`. Nothing from a
+run is committed until it is accepted:
+
+    poo-eval accept evals/runs/<date>-<git sha>
+
+`accept` replaces `evals/baseline/` with the run's report files
+(`report.json`, `report.md`, `summary.json`) and nothing else; commit
+the changed baseline in the same PR that produced the run. Compare a
+new run against the accepted baseline with one argument:
+
+    poo-eval compare evals/runs/<date>-<git sha>
+
+or name both sides explicitly, as before:
+
+    poo-eval compare <baseline-dir> <candidate-dir>
+
+The comparison is written to the candidate's directory. Older accepted
+baselines stay in git history.
+
 ## Isolation
 
 `poo-eval run` uses `--isolation bwrap` by default, which needs bubblewrap;

@@ -5,7 +5,7 @@ response, exactly as an endpoint sent it.
 
 | Fixture | Where it came from |
 |---|---|
-| `vllm-empty-tool-calls.sse` | **Recorded.** The homelab vLLM's gemma4 parser, copied from `evals/results/2026-10-22-071648-e1346cb/gemma4-empty-tool-calls.log` (2026-10-22). The stream ends with `finish_reason: "tool_calls"` and no tool call. |
+| `vllm-empty-tool-calls.sse` | **Recorded.** The homelab vLLM's gemma4 parser, copied from `evals/results/2026-10-22-071648-e1346cb/gemma4-empty-tool-calls.log` (2026-10-22; the report directory is in git history). The stream ends with `finish_reason: "tool_calls"` and no tool call. |
 | `vllm-answer.sse` | **Shaped.** The vLLM chunk shape of the recorded stream above, with an answer and a usage chunk. |
 | `vllm-answer-no-usage.sse` | **Shaped.** The same shape without the usage chunk. |
 | `llamacpp-answer.sse` | **Shaped.** The llama.cpp server's chunk shape, with the timings object its last chunk carries. |

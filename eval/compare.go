@@ -232,7 +232,7 @@ func Compare(baseline, candidate *Report) Comparison {
 //
 // The directory holds report.json, which the runner wrote.
 func LoadReport(dir string) (*Report, error) {
-	path := filepath.Join(dir, "report.json")
+	path := filepath.Join(dir, reportJSONFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("eval: reading %s: %w", path, err)
