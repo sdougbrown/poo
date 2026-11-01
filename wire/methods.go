@@ -92,6 +92,21 @@ func negotiate(versions []int) (int, bool) {
 // second one.
 type responseQueued struct{}
 
+// answerNewSession answers a request that built or opened a session.
+//
+// The response names the session: it is queued before the session is
+// attached, so the client never reads an event of a session the
+// response has not named. The returned sentinel tells the dispatch the
+// response is queued already, and the caller adds no second one.
+func (s *server) answerNewSession(req protocol.Request, entry *session, obs *observer) (any, *protocol.Error) {
+	if rerr := s.respondResult(req, sessionInfoOf(entry)); rerr != nil {
+		return nil, rerr
+	}
+	obs.attach(entry)
+	s.register(entry)
+	return responseQueued{}, nil
+}
+
 // sessionCreate starts a session.
 //
 // The response is queued before the session is attached, so the client
@@ -121,17 +136,11 @@ func (s *server) sessionCreate(req protocol.Request) (any, *protocol.Error) {
 			"the factory built no session")
 	}
 	entry := newSession(sess, info)
-	result := sessionInfoOf(entry)
-	// The response names the session: it is queued before the session's
-	// events can reach the client, so the client never sees an event
-	// for a session it has not been told about.
-	if rerr := s.respondResult(req, result); rerr != nil {
-		return nil, rerr
+	out, rerr := s.answerNewSession(req, entry, obs)
+	if rerr == nil {
+		s.sessionCreated(entry)
 	}
-	obs.attach(entry)
-	s.register(entry)
-	s.sessionCreated(entry)
-	return responseQueued{}, nil
+	return out, rerr
 }
 
 // sessionLoad opens a recorded session.
@@ -157,16 +166,7 @@ func (s *server) sessionLoad(req protocol.Request) (any, *protocol.Error) {
 			"the factory loaded no session")
 	}
 	entry := newSession(sess, info)
-	result := sessionInfoOf(entry)
-	// The response names the session: it is queued before the session's
-	// events can reach the client, so the client never sees an event
-	// for a session it has not been told about.
-	if rerr := s.respondResult(req, result); rerr != nil {
-		return nil, rerr
-	}
-	obs.attach(entry)
-	s.register(entry)
-	return responseQueued{}, nil
+	return s.answerNewSession(req, entry, obs)
 }
 
 // sessionInfoOf returns what the client learns about a session.
