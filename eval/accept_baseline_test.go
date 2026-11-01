@@ -82,3 +82,29 @@ func TestAnAcceptRefusesADirectoryWithoutAReport(t *testing.T) {
 		t.Errorf("the refused accept changed the baseline: %s is %q", before, data)
 	}
 }
+
+func TestAnAcceptRefusesTheBaselineItself(t *testing.T) {
+	baseline := filepath.Join(t.TempDir(), "baseline")
+	if err := os.MkdirAll(filepath.Join(baseline, "inner"), 0o755); err != nil {
+		t.Fatalf("making the baseline: %v", err)
+	}
+	for _, dir := range []string{baseline, filepath.Join(baseline, "inner")} {
+		for _, name := range reportFiles {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("kept\n"), 0o644); err != nil {
+				t.Fatalf("writing %s: %v", name, err)
+			}
+		}
+	}
+
+	for _, runDir := range []string{baseline, filepath.Join(baseline, "inner")} {
+		if err := AcceptBaseline(baseline, runDir); err == nil {
+			t.Fatalf("AcceptBaseline(%s) accepted a directory inside the baseline", runDir)
+		}
+	}
+	for _, name := range reportFiles {
+		data, err := os.ReadFile(filepath.Join(baseline, name))
+		if err != nil || string(data) != "kept\n" {
+			t.Fatalf("the baseline's %s = %q, %v; want it left as it was", name, data, err)
+		}
+	}
+}
