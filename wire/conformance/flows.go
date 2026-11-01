@@ -418,6 +418,10 @@ func (s *suite) permissionGate() {
 		{Text: "the second answer"},
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo unanswered"}}}},
 		{Text: "the third answer"},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo message refused"}}}},
+		{Text: "the fourth answer"},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo message allowed"}}}},
+		{Text: "the fifth answer"},
 	}
 	c, sessionID := s.open(turns, nil)
 
@@ -444,6 +448,45 @@ func (s *suite) permissionGate() {
 	s.settled(c, sessionID, runID)
 	if outcome := s.toolOutcome(c, runID); outcome != "ok" {
 		s.t.Errorf("the unanswered call ended %q, want ok: the fallback allows it", outcome)
+	}
+
+	// The client refuses the call and tells the model why: the message
+	// reaches the model in the denied result, and the answer's event
+	// carries it.
+	c.ask = func(protocol.AskParams) string { return protocol.DecisionDeny }
+	c.askMessage = func(protocol.AskParams) string { return "not while I am watching" }
+	runID = s.prompt(c, sessionID, "run the command")
+	s.settled(c, sessionID, runID)
+	if outcome := s.toolOutcome(c, runID); outcome != "denied" {
+		s.t.Errorf("the refused call ended %q, want denied", outcome)
+	}
+	evt := c.waitEvent("tool result", func(e event) bool {
+		return e.Type == "tool.result" && e.Payload["run_id"] == runID
+	})
+	if text, _ := evt.Payload["text"].(string); !strings.Contains(text, "not while I am watching") {
+		s.t.Errorf("the denied result says %q, want the client's message", text)
+	}
+	answered := c.waitEvent("the answered event", func(e event) bool {
+		return e.Type == "permission.answered" && e.Payload["run_id"] == runID
+	})
+	if answered.Payload["message"] != "not while I am watching" {
+		s.t.Errorf("the answer's message = %v, want the client's", answered.Payload["message"])
+	}
+
+	// The client allows the call, and the message still rides along:
+	// the tool runs, and the answer's event carries the message.
+	c.ask = func(protocol.AskParams) string { return protocol.DecisionAllow }
+	c.askMessage = func(protocol.AskParams) string { return "mind the working tree" }
+	runID = s.prompt(c, sessionID, "run the command")
+	s.settled(c, sessionID, runID)
+	if outcome := s.toolOutcome(c, runID); outcome != "ok" {
+		s.t.Errorf("the allowed call ended %q, want ok", outcome)
+	}
+	answered = c.waitEvent("the answered event", func(e event) bool {
+		return e.Type == "permission.answered" && e.Payload["run_id"] == runID
+	})
+	if answered.Payload["message"] != "mind the working tree" {
+		s.t.Errorf("the answer's message = %v, want the client's", answered.Payload["message"])
 	}
 }
 

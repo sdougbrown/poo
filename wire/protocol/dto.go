@@ -593,6 +593,10 @@ type RepeatCount struct {
 type AskResult struct {
 	// Decision is "allow" or "deny".
 	Decision string `json:"decision"`
+	// Message is the optional note the answer carries for the model. A
+	// refused call's tool result shows it, and the session log keeps
+	// it. A client that has nothing to say omits it.
+	Message string `json:"message,omitempty"`
 }
 
 // The decisions a client may answer an ask with.

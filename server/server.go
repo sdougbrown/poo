@@ -745,11 +745,23 @@ func (c *lateClient) PermissionAnswers() bool {
 
 // Ask sends the ask to the client and waits for its answer.
 func (c *lateClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
+	answer, err := c.AskWithMessage(ctx, ask)
+	return answer.Decision, err
+}
+
+// AskWithMessage sends the ask to the connected client and waits for
+// its answer, with the message the answer carries. A client without
+// the message seam is asked through its Ask.
+func (c *lateClient) AskWithMessage(ctx context.Context, ask perm.Ask) (perm.Answer, error) {
 	client := c.current()
 	if client == nil {
-		return perm.DecisionDefer, nil
+		return perm.Answer{Decision: perm.DecisionDefer}, nil
 	}
-	return client.Ask(ctx, ask)
+	if messenger, ok := client.(perm.MessageClient); ok {
+		return messenger.AskWithMessage(ctx, ask)
+	}
+	decision, err := client.Ask(ctx, ask)
+	return perm.Answer{Decision: decision}, err
 }
 
 // contains says whether the list holds the value.

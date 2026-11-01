@@ -17,6 +17,25 @@ const (
 	DecisionDefer Decision = "defer"
 )
 
+// Answer is an ask's answer: the decision and the optional message it
+// carries for the model.
+type Answer struct {
+	// Decision is the answer's decision.
+	Decision Decision
+	// Message is the note the answer carries for the model. It is
+	// empty when the answer carries none.
+	Message string
+}
+
+// MessageAsker is an Asker whose answers can carry a message for the
+// model. The chain asks such an asker through AskWithMessage; an asker
+// that implements only Ask is asked through Ask, and its answers
+// carry no message.
+type MessageAsker interface {
+	Asker
+	AskWithMessage(ctx context.Context, ask Ask) (Answer, error)
+}
+
 // Asker answers a permission request within its budget. Zero Budget
 // uses the chain deadline. Errors, panics and unknown answers defer.
 type Asker interface {
@@ -54,6 +73,7 @@ type resolution struct {
 	decision   Decision
 	answeredBy string
 	provenance string
+	message    string
 }
 
 // guard is the single recovery boundary for extension calls, including
@@ -127,7 +147,16 @@ func offer(p *poo.PermissionRequest, in poo.PermissionTransition) {
 
 func resolutionOf(p *poo.PermissionRequest) resolution {
 	answer := p.Result()
-	return resolution{decision: Decision(answer.Decision), answeredBy: answer.AnsweredBy, provenance: answer.Provenance}
+	return resolution{decision: Decision(answer.Decision), answeredBy: answer.AnsweredBy, provenance: answer.Provenance, message: answer.Message}
+}
+
+// askAnswer asks one asker, through the message seam when it has one.
+func askAnswer(ctx context.Context, ask Ask, asker Asker) (Answer, error) {
+	if messenger, ok := asker.(MessageAsker); ok {
+		return messenger.AskWithMessage(ctx, ask)
+	}
+	decision, err := asker.Ask(ctx, ask)
+	return Answer{Decision: decision}, err
 }
 
 // attempt bounds metadata by the remaining chain budget and Ask by its
@@ -170,11 +199,11 @@ func (c *chain) attempt(chainCtx, runCtx context.Context, ask Ask, asker Asker, 
 			remaining := deadline.Sub(c.clock.Now())
 			askCtx, stop := context.WithTimeout(ctx, remaining)
 			defer stop()
-			decision, err := asker.Ask(askCtx, ask)
+			answer, err := askAnswer(askCtx, ask, asker)
 			if err != nil {
 				return struct{}{}, err
 			}
-			p.Send(poo.PermissionTransition{Kind: poo.PermissionExplicitAnswer, Attempt: token, Deadline: deadline, Answer: poo.PermissionAnswer{Decision: string(decision), AnsweredBy: name}})
+			p.Send(poo.PermissionTransition{Kind: poo.PermissionExplicitAnswer, Attempt: token, Deadline: deadline, Answer: poo.PermissionAnswer{Decision: string(answer.Decision), AnsweredBy: name, Message: answer.Message}})
 			return struct{}{}, nil
 		})
 		if err != nil {

@@ -308,6 +308,9 @@ type PermissionAnsweredRecord struct {
 	Provenance string `json:"provenance"`
 	// Reason is why the call was being asked about.
 	Reason AskReason `json:"reason,omitempty"`
+	// Message is the note the answer carried for the model. It is
+	// absent when the answer carried none.
+	Message string `json:"message,omitempty"`
 }
 
 // ToolResultData is a tool result's own data.

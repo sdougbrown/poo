@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -460,6 +462,179 @@ func createdSessionInfo(t *testing.T, h *harness) protocol.SessionInfo {
 		t.Fatalf("decoding the session info: %v", err)
 	}
 	return info
+}
+
+// A client that answers a permission ask with a message has the
+// message shown to the model and kept in the answered record.
+func TestPermissionAskDeniedWithAMessage(t *testing.T) {
+	factory := permissionFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(
+			pootest.Turn{Calls: []pootest.Call{{Name: "test", Arguments: json.RawMessage(`{}`)}}},
+			pootest.Turn{Text: "done", Finish: "stop"},
+		)
+	})
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+		t.Fatalf("the prompt was refused: %v", rerr)
+	}
+	ask := theAsk(t, h)
+	h.answerWith(&protocol.Request{ID: json.RawMessage(`"` + ask.AskID + `"`)}, map[string]any{
+		"decision": protocol.DecisionDeny,
+		"message":  "not while I am watching",
+	})
+
+	settled := h.event("run.settled")
+	if settled.Reason != "end_turn" {
+		t.Errorf("the run settled %q, want end_turn", settled.Reason)
+	}
+	result := h.event("tool.result")
+	if result.Fields["outcome"] != "denied" {
+		t.Errorf("the tool's outcome = %v, want denied", result.Fields["outcome"])
+	}
+	if text, _ := result.Fields["text"].(string); !strings.Contains(text, "not while I am watching") {
+		t.Errorf("the denied result says %q, want the client's message", text)
+	}
+	answered := h.event("permission.answered")
+	if answered.Fields["message"] != "not while I am watching" {
+		t.Errorf("the answer's message = %v, want the client's", answered.Fields["message"])
+	}
+	// The record in the log keeps the message too.
+	line := theAnsweredLine(t, factory, sessionID)
+	if !strings.Contains(line, `"message":"not while I am watching"`) {
+		t.Errorf("the answered record says %s, want the client's message", line)
+	}
+}
+
+// A client that answers an allowance with a message has the tool run,
+// and the message kept in the answered record: a message longer than
+// the bound is cut at a rune boundary, in the event and in the record.
+func TestPermissionAskAllowedWithAMessage(t *testing.T) {
+	factory := permissionFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(
+			pootest.Turn{Calls: []pootest.Call{{Name: "test", Arguments: json.RawMessage(`{}`)}}},
+			pootest.Turn{Text: "done", Finish: "stop"},
+		)
+	})
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+		t.Fatalf("the prompt was refused: %v", rerr)
+	}
+	ask := theAsk(t, h)
+	message := "mind the working tree" + strings.Repeat("🌱", 2500)
+	bounded := "mind the working tree" + strings.Repeat("🌱", 1979)
+	h.answerWith(&protocol.Request{ID: json.RawMessage(`"` + ask.AskID + `"`)}, map[string]any{
+		"decision": protocol.DecisionAllow,
+		"message":  message,
+	})
+
+	settled := h.event("run.settled")
+	if settled.Reason != "end_turn" {
+		t.Errorf("the run settled %q, want end_turn", settled.Reason)
+	}
+	result := h.event("tool.result")
+	if result.Fields["outcome"] != "ok" {
+		t.Errorf("the tool's outcome = %v, want ok", result.Fields["outcome"])
+	}
+	answered := h.event("permission.answered")
+	if answered.Fields["message"] != bounded {
+		t.Errorf("the answer's message = %v, want the bounded message", answered.Fields["message"])
+	}
+	// The record in the log keeps the bounded message too.
+	line := theAnsweredLine(t, factory, sessionID)
+	if !strings.Contains(line, `"message":"`+bounded+`"`) {
+		t.Errorf("the answered record says %s, want the bounded message", line)
+	}
+	if strings.Contains(line, `"message":"`+message+`"`) {
+		t.Errorf("the answered record carries the whole message, want the bound: %s", line)
+	}
+}
+
+// A client that answers without a message writes the records the older
+// core wrote: the log line carries no message field.
+func TestPermissionAskWithoutAMessageKeepsTheRecords(t *testing.T) {
+	factory := permissionFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(
+			pootest.Turn{Calls: []pootest.Call{{Name: "test", Arguments: json.RawMessage(`{}`)}}},
+			pootest.Turn{Text: "done", Finish: "stop"},
+		)
+	})
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+		t.Fatalf("the prompt was refused: %v", rerr)
+	}
+	ask := theAsk(t, h)
+	h.answer(&protocol.Request{ID: json.RawMessage(`"` + ask.AskID + `"`)}, protocol.DecisionDeny)
+
+	h.event("run.settled")
+	answered := h.event("permission.answered")
+	if _, ok := answered.Fields["message"]; ok {
+		t.Errorf("the answer's event carries a message: %v", answered.Fields)
+	}
+	line := theAnsweredLine(t, factory, sessionID)
+	if strings.Contains(line, `"message"`) {
+		t.Errorf("the answered record carries a message field: %s", line)
+	}
+}
+
+// A message longer than the bound is cut at the bound, at a rune
+// boundary: the model sees a bounded note, whatever the client sent.
+func TestPermissionAskMessageIsBounded(t *testing.T) {
+	factory := permissionFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(
+			pootest.Turn{Calls: []pootest.Call{{Name: "test", Arguments: json.RawMessage(`{}`)}}},
+			pootest.Turn{Text: "done", Finish: "stop"},
+		)
+	})
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+		t.Fatalf("the prompt was refused: %v", rerr)
+	}
+	ask := theAsk(t, h)
+	message := strings.Repeat("x", 1999) + strings.Repeat("🎯", 500)
+	h.answerWith(&protocol.Request{ID: json.RawMessage(`"` + ask.AskID + `"`)}, map[string]any{
+		"decision": protocol.DecisionDeny,
+		"message":  message,
+	})
+
+	h.event("run.settled")
+	result := h.event("tool.result")
+	text, _ := result.Fields["text"].(string)
+	want := strings.Repeat("x", 1999) + "🎯"
+	if !strings.Contains(text, want) {
+		t.Error("the denied result does not carry the bounded message")
+	}
+	if strings.Contains(text, message) {
+		t.Error("the denied result carries the whole message, want the bound")
+	}
+}
+
+// theAnsweredLine returns the permission.answered line of a session's
+// log.
+func theAnsweredLine(t *testing.T, factory *testFactory, sessionID string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(factory.dir, sessionID+".jsonl"))
+	if err != nil {
+		t.Fatalf("reading the session log: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, `"permission.answered"`) {
+			return line
+		}
+	}
+	t.Fatal("the log holds no answered record")
+	return ""
 }
 
 // The inspect pages through the events.

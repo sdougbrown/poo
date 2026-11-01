@@ -32,6 +32,16 @@ type Client interface {
 	Ask(ctx context.Context, ask Ask) (Decision, error)
 }
 
+// MessageClient is a Client whose answers can carry a message for the
+// model. The wire implements it; a client that implements only Ask is
+// asked through Ask, and its answers carry no message.
+type MessageClient interface {
+	Client
+	// AskWithMessage sends the ask and waits for the answer, with the
+	// answer's message.
+	AskWithMessage(ctx context.Context, ask Ask) (Answer, error)
+}
+
 // WireAsker asks a wire client.
 //
 // The asker is the seam the wire implements: the wire sends the ask as
@@ -91,16 +101,39 @@ func (a *WireAsker) AsksClient() bool { return true }
 // A client that is not there, a failure and an answer that is neither an
 // allowance nor a refusal are all deferrals.
 func (a *WireAsker) Ask(ctx context.Context, ask Ask) (Decision, error) {
+	answer, err := a.AskWithMessage(ctx, ask)
+	return answer.Decision, err
+}
+
+// AskWithMessage sends the ask to the client and waits for its answer,
+// with the message the answer carries.
+//
+// A client without the message seam is asked through its Ask, and its
+// answers carry no message. An answer that is neither an allowance nor
+// a refusal is a deferral that answers nothing, so its message is
+// dropped with it.
+func (a *WireAsker) AskWithMessage(ctx context.Context, ask Ask) (Answer, error) {
 	if !a.Available() {
-		return DecisionDefer, nil
+		return Answer{Decision: DecisionDefer}, nil
+	}
+	if client, ok := a.client.(MessageClient); ok {
+		answer, err := client.AskWithMessage(ctx, ask)
+		if err != nil {
+			return Answer{Decision: DecisionDefer}, err
+		}
+		switch answer.Decision {
+		case DecisionAllow, DecisionDeny:
+			return answer, nil
+		}
+		return Answer{Decision: DecisionDefer}, nil
 	}
 	decision, err := a.client.Ask(ctx, ask)
 	if err != nil {
-		return DecisionDefer, err
+		return Answer{Decision: DecisionDefer}, err
 	}
 	switch decision {
 	case DecisionAllow, DecisionDeny:
-		return decision, nil
+		return Answer{Decision: decision}, nil
 	}
-	return DecisionDefer, nil
+	return Answer{Decision: DecisionDefer}, nil
 }

@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/perm"
+	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/search"
@@ -480,4 +484,168 @@ func TestTheHandshakeProfilesWriteNoToolsForAToollessProfile(t *testing.T) {
 	if got, want := string(encoded), `[{"name":"base","tools":null}]`; got != want {
 		t.Errorf("the profiles encode as %s, want %s", got, want)
 	}
+}
+
+// askingProfile is the profile a served session runs under when its
+// model calls the side-effecting tool: the profile offers that tool
+// alone, and every side-effecting call is asked about.
+var askingProfile = profile.Profile{
+	Name:      "asking",
+	Tools:     []string{"test"},
+	Unmatched: "ask",
+}
+
+// servedTool is a side-effecting tool the scripted model calls.
+type servedTool struct{}
+
+// Spec describes the tool.
+func (servedTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        "test",
+		Description: "a tool the tests call",
+		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Class:       poo.ClassSideEffecting,
+	}
+}
+
+// Prepare validates the call's arguments.
+func (servedTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	return servedPrepared{}, nil
+}
+
+// Call runs the tool.
+func (servedTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	return poo.ToolResult{Text: "the tool ran"}, nil
+}
+
+// servedPrepared is a validated call of the served tool.
+type servedPrepared struct{}
+
+// Summary describes the call.
+func (servedPrepared) Summary() string { return "the test tool" }
+
+// askOnlyClient is a wire client that declared the permission_answers
+// capability and has no message seam: it answers through its Ask.
+type askOnlyClient struct {
+	mu sync.Mutex
+	// decision is what the client answers.
+	decision perm.Decision
+	// asks holds the asks the client was given.
+	asks []perm.Ask
+}
+
+// Connected reports whether a client is connected.
+func (c *askOnlyClient) Connected() bool { return true }
+
+// PermissionAnswers reports whether the client declared the capability.
+func (c *askOnlyClient) PermissionAnswers() bool { return true }
+
+// Ask answers the ask.
+func (c *askOnlyClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.asks = append(c.asks, ask)
+	return c.decision, nil
+}
+
+// Asks returns the asks the client was given.
+func (c *askOnlyClient) Asks() []perm.Ask {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]perm.Ask(nil), c.asks...)
+}
+
+// TestAServedSessionAsksAnAskOnlyClientThroughItsAsk covers the late
+// client's fallback: a served session whose client has no message seam
+// is asked through its Ask, and its decision reaches the permission
+// answer.
+func TestAServedSessionAsksAnAskOnlyClientThroughItsAsk(t *testing.T) {
+	client := &askOnlyClient{decision: perm.DecisionAllow}
+	srv, err := server.New(server.Options{
+		Settings:   servedSettings(t, askingProfile.Name, `{"chat": "chat-model"}`),
+		WorkingDir: t.TempDir(),
+		Profiles:   []profile.Profile{askingProfile},
+		Tools: map[string]config.ToolFactory{
+			"test": func(config.ToolOptions) poo.Tool { return servedTool{} },
+		},
+		Build: poo.BuildInfo{Name: "poo-test", Version: "0.0.1"},
+	})
+	if err != nil {
+		t.Fatalf("building the server: %v", err)
+	}
+	ctx := context.Background()
+	sess, info, err := srv.Create(ctx, protocol.CreateParams{
+		Mode:       "logged",
+		SessionDir: t.TempDir(),
+	}, wire.FactoryEnv{Client: client})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("closing the session: %v", err)
+		}
+		if err := info.Release(); err != nil {
+			t.Errorf("releasing the store: %v", err)
+		}
+	}()
+
+	// The session runs on a scripted transport: the model calls the
+	// side-effecting tool, then ends the run.
+	transport := pootest.NewTransport(
+		pootest.Turn{Calls: []pootest.Call{{Name: "test", Arguments: json.RawMessage(`{}`)}}},
+		pootest.Turn{Text: "done", Finish: "stop"},
+	)
+	model := poo.ModelInfo{
+		Name:         "chat-model",
+		ModelID:      "chat-model",
+		API:          poo.APIChatCompletions,
+		Ops:          []poo.Op{poo.OpChat},
+		Inputs:       []poo.Modality{poo.ModalityText},
+		ContextLimit: 32768,
+		Tools:        poo.ToolCalling{Mode: poo.ToolsNative},
+	}
+	if _, err := sess.SetModel(model, transport); err != nil {
+		t.Fatalf("switching the model: %v", err)
+	}
+	if _, err := sess.Prompt(ctx, "hi"); err != nil {
+		t.Fatalf("the prompt failed: %v", err)
+	}
+	if _, err := sess.Wait(ctx); err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+
+	// The client was asked through its Ask, and its allowance answered
+	// the ask, so the tool ran.
+	asks := client.Asks()
+	if len(asks) != 1 {
+		t.Fatalf("the client was asked %d times, want once", len(asks))
+	}
+	if asks[0].Tool != "test" {
+		t.Errorf("the ask names the tool %q, want the test tool", asks[0].Tool)
+	}
+	line := theAnsweredLine(t, info.SessionDir, sess.ID())
+	if !strings.Contains(line, `"decision":"allow"`) {
+		t.Errorf("the answered record says %s, want the client's allowance", line)
+	}
+	if strings.Contains(line, `"message"`) {
+		t.Errorf("the answered record carries a message: %s", line)
+	}
+}
+
+// theAnsweredLine returns the permission.answered line of a session's
+// log.
+func theAnsweredLine(t *testing.T, dir, sessionID string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, sessionID+".jsonl"))
+	if err != nil {
+		t.Fatalf("reading the session log: %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, `"permission.answered"`) {
+			return line
+		}
+	}
+	t.Fatal("the log holds no answered record")
+	return ""
 }

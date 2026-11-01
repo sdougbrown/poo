@@ -11,6 +11,11 @@ import (
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
+// maxAnswerMessage is the longest message an answer may carry for the
+// model. The note reaches the refused call's tool result and the
+// session's log, so a longer one is cut at a rune boundary.
+const maxAnswerMessage = 2000
+
 // wireClient is the connected client.
 //
 // It is the perm.Client the asker chain asks: the client answered the
@@ -33,15 +38,22 @@ func (c *wireClient) PermissionAnswers() bool {
 }
 
 // Ask sends the ask to the client and waits for its answer.
+func (c *wireClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
+	answer, err := c.AskWithMessage(ctx, ask)
+	return answer.Decision, err
+}
+
+// AskWithMessage sends the ask to the client and waits for its answer,
+// with the message the answer carries.
 //
 // The request's id is the ask's id, so the client answers it without
 // keeping a mapping of its own. A client that answers with an error, a
 // client that answers with something that is not a decision, and a
 // client that does not answer at all are all deferrals: the chain
 // moves on to the next asker.
-func (c *wireClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
+func (c *wireClient) AskWithMessage(ctx context.Context, ask perm.Ask) (perm.Answer, error) {
 	if !c.PermissionAnswers() {
-		return perm.DecisionDefer, nil
+		return perm.Answer{Decision: perm.DecisionDefer}, nil
 	}
 	params := protocol.AskParams{
 		SessionID: ask.SessionID,
@@ -60,11 +72,11 @@ func (c *wireClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, erro
 	}
 	encoded, err := json.Marshal(params)
 	if err != nil {
-		return perm.DecisionDefer, fmt.Errorf("wire: encoding the ask: %w", err)
+		return perm.Answer{Decision: perm.DecisionDefer}, fmt.Errorf("wire: encoding the ask: %w", err)
 	}
 	id, err := json.Marshal(ask.AskID)
 	if err != nil {
-		return perm.DecisionDefer, fmt.Errorf("wire: encoding the ask id: %w", err)
+		return perm.Answer{Decision: perm.DecisionDefer}, fmt.Errorf("wire: encoding the ask id: %w", err)
 	}
 	answers := make(chan *protocol.Response, 1)
 	key := idKey(id)
@@ -82,7 +94,7 @@ func (c *wireClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, erro
 		Method:  protocol.MethodPermissionAsk,
 		Params:  encoded,
 	}); err != nil {
-		return perm.DecisionDefer, err
+		return perm.Answer{Decision: perm.DecisionDefer}, err
 	}
 	budget := c.srv.bounds.AskBudget
 	timer := time.NewTimer(budget)
@@ -91,31 +103,41 @@ func (c *wireClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, erro
 	case answer := <-answers:
 		return decisionOf(answer)
 	case <-ctx.Done():
-		return perm.DecisionDefer, ctx.Err()
+		return perm.Answer{Decision: perm.DecisionDefer}, ctx.Err()
 	case <-timer.C:
-		return perm.DecisionDefer, fmt.Errorf("wire: the client did not answer the ask within %s", budget)
+		return perm.Answer{Decision: perm.DecisionDefer}, fmt.Errorf("wire: the client did not answer the ask within %s", budget)
 	}
 }
 
-// decisionOf reads the decision out of a client's answer.
+// decisionOf reads the answer out of a client's answer.
 //
 // An error answer and an answer that is not a decision are deferrals.
-func decisionOf(answer *protocol.Response) (perm.Decision, error) {
+func decisionOf(answer *protocol.Response) (perm.Answer, error) {
 	if answer == nil {
-		return perm.DecisionDefer, errors.New("wire: the client sent no answer")
+		return perm.Answer{Decision: perm.DecisionDefer}, errors.New("wire: the client sent no answer")
 	}
 	if answer.Error != nil {
-		return perm.DecisionDefer, errors.New(answer.Error.Message)
+		return perm.Answer{Decision: perm.DecisionDefer}, errors.New(answer.Error.Message)
 	}
 	var result protocol.AskResult
 	if err := json.Unmarshal(answer.Result, &result); err != nil {
-		return perm.DecisionDefer, fmt.Errorf("wire: decoding the answer: %w", err)
+		return perm.Answer{Decision: perm.DecisionDefer}, fmt.Errorf("wire: decoding the answer: %w", err)
 	}
 	switch result.Decision {
 	case protocol.DecisionAllow:
-		return perm.DecisionAllow, nil
+		return perm.Answer{Decision: perm.DecisionAllow, Message: boundMessage(result.Message)}, nil
 	case protocol.DecisionDeny:
-		return perm.DecisionDeny, nil
+		return perm.Answer{Decision: perm.DecisionDeny, Message: boundMessage(result.Message)}, nil
 	}
-	return perm.DecisionDefer, nil
+	return perm.Answer{Decision: perm.DecisionDefer}, nil
+}
+
+// boundMessage cuts a message longer than the bound at a rune
+// boundary.
+func boundMessage(message string) string {
+	runes := []rune(message)
+	if len(runes) <= maxAnswerMessage {
+		return message
+	}
+	return string(runes[:maxAnswerMessage])
 }
