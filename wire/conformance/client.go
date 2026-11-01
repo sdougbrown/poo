@@ -64,6 +64,8 @@ type client struct {
 	next int
 	// paused reports that the client stopped reading.
 	paused bool
+	// seq counts the messages the client read, in order.
+	seq int
 	// err is the binary's exit error.
 	err error
 }
@@ -77,6 +79,9 @@ type answer struct {
 	// failureRaw is the failure as it came, so the client can read it
 	// under the decode rule.
 	failureRaw json.RawMessage
+	// Arrived is the answer's place in the order the client read the
+	// binary's messages. A flow that pins the wire's order reads it.
+	Arrived int
 }
 
 // event is one event the binary sent.
@@ -94,6 +99,9 @@ type event struct {
 	At string
 	// Payload is the event's own data.
 	Payload map[string]any
+	// Arrived is the event's place in the order the client read the
+	// binary's messages. A flow that pins the wire's order reads it.
+	Arrived int
 }
 
 // start starts the binary and returns the client that drives it.
@@ -274,6 +282,8 @@ func (c *client) record(raw json.RawMessage) {
 		return
 	}
 	c.mu.Lock()
+	c.seq++
+	evt.Arrived = c.seq
 	c.events = append(c.events, evt)
 	changed := c.changed
 	c.changed = make(chan struct{})
@@ -289,6 +299,8 @@ func (c *client) deliver(line []byte, msg message) {
 	if ok {
 		delete(c.answers, key)
 	}
+	c.seq++
+	arrived := c.seq
 	c.mu.Unlock()
 	if !ok {
 		// The answer is for a request the client wrote by hand.
@@ -301,7 +313,7 @@ func (c *client) deliver(line []byte, msg message) {
 		}
 		return
 	}
-	ans := &answer{result: msg.Result}
+	ans := &answer{result: msg.Result, Arrived: arrived}
 	if len(msg.Error) > 0 {
 		var failure protocol.Error
 		if err := json.Unmarshal(msg.Error, &failure); err == nil {

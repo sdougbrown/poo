@@ -521,6 +521,141 @@ func (s *suite) resume() {
 	}
 }
 
+// answerBeforeEvents covers the resumed session a job wakes: the load
+// queues the held job result again, the wake starts a run, and the
+// run's events reach the client only after the response that named the
+// session. Several sessions are pinned, so the wake's delivery race
+// gets several chances to run ahead of the response.
+func (s *suite) answerBeforeEvents() {
+	s.t.Helper()
+	if s.skipWithoutTool("bash") {
+		return
+	}
+	if !s.hasBackground() {
+		s.skip(fmt.Sprintf("the profile %q offers no tool that may run in the background", s.profile))
+		return
+	}
+	// The first binary holds results: each run calls the bash tool,
+	// the tool starts a job in the background, and the model's next
+	// answer ends the turn, so the run waits for the job. The run is
+	// cancelled then, so the job ends while the session is idle, and
+	// its result is held instead of delivered. The second binary wakes
+	// each session at load: the held result is queued again, and the
+	// idle policy wakes a run with it.
+	const sessions = 5
+	turns := make([]ScriptedAnswer, 0, sessions*2)
+	for i := 0; i < sessions; i++ {
+		turns = append(turns,
+			ScriptedAnswer{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{
+				"command":    "sleep 1",
+				"background": true,
+			}}}},
+			ScriptedAnswer{Text: "the answer"},
+		)
+	}
+	holding := newProvider(s.t, turns)
+	settings := s.settings(holding, s.contextLimit, map[string]any{
+		"jobs": map[string]any{"on_idle": "hold"},
+	})
+	c := s.start(settings, holding)
+	s.handshake(c)
+
+	ids := make([]string, 0, sessions)
+	for i := 0; i < sessions; i++ {
+		sessionID := s.create(c)
+		runID := s.prompt(c, sessionID, "start a job")
+		c.waitEvent("job started", func(e event) bool {
+			return e.Type == "job.started" && e.Payload["run_id"] == runID
+		})
+		// The run waits for the job now: the model's second answer ended
+		// its turn, and the running job holds the run open.
+		s.waitForState(c, sessionID, "waiting")
+		c.call(protocol.MethodRunCancel, map[string]any{
+			"session_id": sessionID,
+			"run_id":     runID,
+		}, &struct{}{})
+		settled := s.settled(c, sessionID, runID)
+		if settled.Reason != "cancelled" {
+			s.t.Errorf("the run of %s settled %q, want cancelled", sessionID, settled.Reason)
+		}
+		ids = append(ids, sessionID)
+	}
+
+	// Each job ends while its session is idle: the result is held, so
+	// the log holds it without a delivery.
+	for _, sessionID := range ids {
+		s.waitForHeldJob(c, sessionID)
+	}
+	c.kill()
+
+	answers := make([]ScriptedAnswer, 0, sessions)
+	for i := 0; i < sessions; i++ {
+		answers = append(answers, ScriptedAnswer{Text: "the answer after the wake"})
+	}
+	waking := newProvider(s.t, answers)
+	settings = s.settings(waking, s.contextLimit, map[string]any{
+		"jobs": map[string]any{"on_idle": "wake"},
+	})
+	other := s.start(settings, waking)
+	s.handshake(other)
+	for _, sessionID := range ids {
+		pending := other.send(protocol.MethodSessionLoad, map[string]any{
+			"session_id": sessionID,
+		})
+		answer := pending.wait(s.t)
+		if answer.failure != nil {
+			s.t.Fatalf("the load of %s was refused: %s (%s)", sessionID, answer.failure.Message, dataCode(answer.failure))
+		}
+
+		// The wake happened: the session runs again, and the response
+		// that named it was on the wire before any event of it was.
+		woken := other.waitEvent("the woken run", func(e event) bool {
+			return e.Type == "run.started" && e.SessionID == sessionID
+		})
+		for _, evt := range other.eventList() {
+			if evt.SessionID != sessionID {
+				continue
+			}
+			if evt.Arrived < answer.Arrived {
+				s.t.Errorf("the %q event of the session the response named arrived before the response", evt.Type)
+			}
+		}
+		wokenID, _ := woken.Payload["run_id"].(string)
+		if wokenID == "" {
+			s.t.Fatalf("the woken run names no id: %v", woken.Payload)
+		}
+		settled := s.settled(other, sessionID, wokenID)
+		if settled.Reason != "end_turn" {
+			s.t.Errorf("the woken run of %s settled %q, want end_turn", sessionID, settled.Reason)
+		}
+	}
+}
+
+// waitForHeldJob waits for the session's jobs to be held.
+//
+// A held result is in the log without a delivery, so the load that
+// follows queues it again and acts on it.
+func (s *suite) waitForHeldJob(c *client, sessionID string) {
+	s.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		raw := c.call(protocol.MethodSessionGet, map[string]any{
+			"session_id": sessionID,
+		}, &protocol.GetResult{})
+		var state protocol.GetResult
+		if err := json.Unmarshal(raw, &state); err != nil {
+			s.t.Fatalf("decoding the session: %v", err)
+		}
+		for _, job := range state.Jobs {
+			if job.Status == "held" {
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.t.Fatal("the job's result was never held")
+}
+
 // providerLimit covers the flow of a client whose endpoint runs out of
 // quota: the run settles as a provider limit, the session is whole,
 // and the next prompt works once the endpoint recovers.

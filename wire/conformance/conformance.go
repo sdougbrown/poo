@@ -261,6 +261,7 @@ func Run(t *testing.T, target Target) Report {
 	s.flow("jobs", s.jobs)
 	s.flow("attach and scrollback", s.attachAndHistory)
 	s.flow("resume", s.resume)
+	s.flow("answer before events", s.answerBeforeEvents)
 	s.flow("provider limit", s.providerLimit)
 	s.flow("failures", s.failures)
 	s.flow("teardown", s.teardown)
