@@ -448,23 +448,25 @@ func newEndpoint(t interface{ Cleanup(func()) }, turns []ScriptedAnswer) *FakeEn
 // extra document holds the settings a flow needs.
 func (s *suite) settings(endpoint *FakeEndpoint, contextLimit int, extra map[string]any) string {
 	s.t.Helper()
-	document := map[string]any{}
+	document := map[string]any{
+		"session": map[string]any{
+			"mode": "logged",
+			"dir":  s.sessions,
+		},
+		"permission": map[string]any{
+			// A side-effecting call no rule covers is asked about,
+			// and the client answers it. The chain gives up after
+			// two seconds, so a client that does not answer does not
+			// hold the run up.
+			"unmatched":       "ask",
+			"fallback":        "allow",
+			"askers":          []string{"wire"},
+			"chain_timeout_s": 2,
+		},
+	}
+	// A flow's own settings override the defaults.
 	for name, value := range extra {
 		document[name] = value
-	}
-	document["session"] = map[string]any{
-		"mode": "logged",
-		"dir":  s.sessions,
-	}
-	document["permission"] = map[string]any{
-		// A side-effecting call no rule covers is asked about, and
-		// the client answers it. The chain gives up after two
-		// seconds, so a client that does not answer does not hold
-		// the run up.
-		"unmatched":       "ask",
-		"fallback":        "allow",
-		"askers":          []string{"wire"},
-		"chain_timeout_s": 2,
 	}
 	// Every flow has a settings file of its own: a binary that starts
 	// late must not read the settings of the flow that came after it.
