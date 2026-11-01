@@ -592,17 +592,6 @@ func Warning(policy *Policy, askers []Asker) string {
 		policy.chain.fallback)
 }
 
-// WireClientWarning returns the warning a connected wire client that
-// cannot answer reads with its session, or an empty string when there
-// is nothing to warn about.
-//
-// The warning fires when the policy can ask, the chain asks the wire
-// client, and the client did not declare the permission_answers
-// capability: the client is then never asked, and every ask falls back
-// to the policy's fallback decision, which the warning names together
-// with the capability that fixes it. A chain whose other asker can
-// answer is not warned about: the ask does not fall back.
-
 // canEverAnswer reports whether the asker may answer an ask at some
 // point in this build.
 //
@@ -632,6 +621,16 @@ func declaresAnswers(client Client) bool {
 	return err == nil && answers
 }
 
+// WireClientWarning returns the warning a connected wire client that
+// cannot answer reads with its session, or an empty string when there
+// is nothing to warn about.
+//
+// The warning fires when the policy can ask, the chain asks the wire
+// client, and the client did not declare the permission_answers
+// capability: the client is then never asked, and every ask falls back
+// to the policy's fallback decision, which the warning names together
+// with the capability that fixes it. A chain whose other asker can
+// answer is not warned about: the ask does not fall back.
 func WireClientWarning(policy *Policy, askers []Asker, client Client) string {
 	if policy == nil || !policy.canAsk() || client == nil {
 		return ""
