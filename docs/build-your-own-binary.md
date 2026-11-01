@@ -56,6 +56,12 @@ explicit empty list is a chain with no askers, so an `ask` goes straight to
 the fallback, and an absent list takes the binary's own chain (`[wire]` in
 `poo serve`).
 
+A chain that asks the wire only reaches a client that declared
+`capabilities.permission_answers` in `poo/initialize`. A client that did
+not is never asked, and every ask falls back; the session's create and
+load results say so in their `warnings`, so a consumer learns the
+capability it is missing with the first session it opens.
+
 `server.Options.Overrides` carries what a command line changed.
 `SessionTools` changes every runtime the factory builds, before a session
 is created from it. The typed result's `finish` tool is added that way,

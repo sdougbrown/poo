@@ -25,9 +25,11 @@ type Client struct {
 //
 // A client that does not declare permission_answers is never asked
 // about a permission: it may not answer, and asking it would wait for
-// a reply that never comes.
+// a reply that never comes. The session's create and load results
+// carry a warning that says so.
 type ClientCapabilities struct {
 	// PermissionAnswers says the client answers permission asks.
+	// Without it the client is never asked, and every ask falls back.
 	PermissionAnswers bool `json:"permission_answers,omitempty"`
 }
 
@@ -210,7 +212,9 @@ type SessionInfo struct {
 	// InterruptedRuns are the runs the load marked interrupted.
 	InterruptedRuns []string `json:"interrupted_runs,omitempty"`
 	// Warnings are the things the client should know about the
-	// session.
+	// session. One of them is why the client never sees a
+	// permission/ask: a policy that can ask, a chain that asks the
+	// wire, and a client that did not declare permission_answers.
 	Warnings []string `json:"warnings,omitempty"`
 }
 
