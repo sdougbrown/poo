@@ -150,7 +150,7 @@ func (s *suite) checkSessionTools(got, want []protocol.ToolInfo, profiles []prot
 // the profile names.
 func (s *suite) defaultProfile() {
 	s.t.Helper()
-	endpoint := newProvider(s.t, s.turns)
+	endpoint := newEndpoint(s.t, s.turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 	c := s.start(settings, endpoint)
 	s.handshake(c)
