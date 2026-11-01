@@ -1125,15 +1125,7 @@ func TestTheSettleDetailCarriesTheRunUsageTotal(t *testing.T) {
 	if usage.CacheReadTokens != 100 {
 		t.Errorf("the cache-read total is %d, want 100", usage.CacheReadTokens)
 	}
-	var settled *poo.RunSettledRecord
-	for _, rec := range sink.allRecords() {
-		if s, ok := rec.(*poo.RunSettledRecord); ok {
-			settled = s
-		}
-	}
-	if settled == nil {
-		t.Fatal("the log holds no run.settled record")
-	}
+	settled := settleOf(t, sink)
 	if settled.Detail.Usage == nil || settled.Detail.Usage.InputTokens != 300 ||
 		settled.Detail.Usage.OutputTokens != 30 || settled.Detail.Usage.CacheReadTokens != 100 {
 		t.Errorf("the settle record's usage total is %+v, want 300/30 with 100 cache-read", settled.Detail.Usage)
@@ -1155,15 +1147,7 @@ func TestARunWithoutReportedUsageSettlesWithoutAUsageTotal(t *testing.T) {
 	if res.Detail.Usage != nil {
 		t.Errorf("the settle detail carries a usage total %+v, want none", res.Detail.Usage)
 	}
-	var settled *poo.RunSettledRecord
-	for _, rec := range sink.allRecords() {
-		if s, ok := rec.(*poo.RunSettledRecord); ok {
-			settled = s
-		}
-	}
-	if settled == nil {
-		t.Fatal("the log holds no run.settled record")
-	}
+	settled := settleOf(t, sink)
 	b, err := json.Marshal(settled)
 	if err != nil {
 		t.Fatalf("marshaling the settle record: %v", err)
