@@ -53,6 +53,11 @@ const (
 	MethodSettingsGet = "settings/get"
 	// MethodPermissionAsk is the server's ask to the client. The
 	// request's id is the ask's id.
+	//
+	// Only a client that declared the permission_answers capability in
+	// poo/initialize receives asks. A client that did not is never
+	// asked: every ask falls back, and the session's create and load
+	// results say so in their warnings.
 	MethodPermissionAsk = "permission/ask"
 	// MethodEvent is the notification the server sends for every
 	// session event.

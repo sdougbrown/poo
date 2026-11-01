@@ -583,13 +583,22 @@ func Warning(policy *Policy, askers []Asker) string {
 	if policy == nil || !policy.canAsk() {
 		return ""
 	}
-	for _, asker := range askers {
-		if canEverAnswer(asker) {
-			return ""
-		}
+	if anyCanAnswer(askers) {
+		return ""
 	}
 	return fmt.Sprintf("the permission policy can ask, but no asker in the chain can ever answer; every ask falls back to %q",
 		policy.chain.fallback)
+}
+
+// anyCanAnswer reports whether any asker in the chain may answer an
+// ask at some point in this build.
+func anyCanAnswer(askers []Asker) bool {
+	for _, asker := range askers {
+		if canEverAnswer(asker) {
+			return true
+		}
+	}
+	return false
 }
 
 // canEverAnswer reports whether the asker may answer an ask at some
@@ -608,6 +617,59 @@ func canEverAnswer(asker Asker) bool {
 		return true, nil
 	})
 	return err == nil && available
+}
+
+// declaresAnswers reports whether the client said it answers asks.
+//
+// A client that fails to say so is taken as one that cannot: the ask
+// would wait for a reply that may not come.
+func declaresAnswers(client Client) bool {
+	answers, err := guard(func() (bool, error) {
+		return client.PermissionAnswers(), nil
+	})
+	return err == nil && answers
+}
+
+// WireClientWarning returns the warning a connected wire client that
+// cannot answer reads with its session, or an empty string when there
+// is nothing to warn about.
+//
+// The warning fires when the policy can ask, the chain asks the wire
+// client, and the client did not declare the permission_answers
+// capability: the client is then never asked, and every ask falls back
+// to the policy's fallback decision, which the warning names together
+// with the capability that fixes it. A chain whose other asker can
+// answer is not warned about: the ask does not fall back.
+func WireClientWarning(policy *Policy, askers []Asker, client Client) string {
+	if policy == nil || !policy.canAsk() || client == nil {
+		return ""
+	}
+	// A chain without the wire asker, and one whose other asker can
+	// answer, are the load warning's business, not this one's.
+	if !declaresAnswers(client) {
+		return wireClientFallback(askers, policy)
+	}
+	return ""
+}
+
+// wireClientFallback builds the warning a connected client that cannot
+// answer reads, or an empty string when the chain does not ask the wire
+// or another asker can answer.
+func wireClientFallback(askers []Asker, policy *Policy) string {
+	var rest []Asker
+	hasWire := false
+	for _, asker := range askers {
+		if asking, ok := asker.(ClientAsking); ok && asking.AsksClient() {
+			hasWire = true
+			continue
+		}
+		rest = append(rest, asker)
+	}
+	if !hasWire || anyCanAnswer(rest) {
+		return ""
+	}
+	return fmt.Sprintf("the permission policy can ask, but the client did not declare the permission_answers capability and is never asked; every ask falls back to %q; declare capabilities.permission_answers in poo/initialize to receive the asks",
+		policy.chain.fallback)
 }
 
 // askerName returns the name an asker's answers carry.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/search"
@@ -67,6 +68,139 @@ func newServer(t *testing.T, settings *config.Settings) *server.Server {
 		t.Fatalf("building the server: %v", err)
 	}
 	return srv
+}
+
+// silentClient is a wire client that is connected but answers nothing:
+// it did not declare the permission_answers capability, so the asker
+// chain never asks it.
+type silentClient struct{}
+
+func (silentClient) Connected() bool { return true }
+func (silentClient) PermissionAnswers() bool {
+	return false
+}
+func (silentClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
+	return perm.DecisionDefer, nil
+}
+
+// answeringClient is a wire client that declared the permission_answers
+// capability.
+type answeringClient struct{}
+
+func (answeringClient) Connected() bool { return true }
+func (answeringClient) PermissionAnswers() bool {
+	return true
+}
+func (answeringClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
+	return perm.DecisionDefer, nil
+}
+
+// TestAServedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack
+// covers the session warning a served factory builds: a client that is
+// connected but did not declare the permission_answers capability reads
+// one warning with its session, and a client that declared it reads
+// none.
+func TestAServedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack(t *testing.T) {
+	tests := []struct {
+		name     string
+		client   perm.Client
+		wantAsks bool
+	}{
+		{
+			name:     "a client that did not declare the capability",
+			client:   silentClient{},
+			wantAsks: true,
+		},
+		{
+			name:     "a client that declared the capability",
+			client:   answeringClient{},
+			wantAsks: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			settings := servedSettings(t, search.Name, `{"chat": "chat-model"}`)
+			// The policy asks about every side-effecting call, so the
+			// chain's wire asker is what would answer it.
+			ask := "ask"
+			settings.Permission.Unmatched = &ask
+			srv := newServer(t, settings)
+			sess, info, err := srv.Create(context.Background(), protocol.CreateParams{
+				Mode:       "logged",
+				SessionDir: t.TempDir(),
+			}, wire.FactoryEnv{Client: test.client})
+			if err != nil {
+				t.Fatalf("creating the session: %v", err)
+			}
+			defer func() {
+				if err := sess.Close(); err != nil {
+					t.Errorf("closing the session: %v", err)
+				}
+				if err := info.Release(); err != nil {
+					t.Errorf("releasing the store: %v", err)
+				}
+			}()
+
+			if got := len(info.Warnings); (test.wantAsks && got != 1) || (!test.wantAsks && got != 0) {
+				t.Fatalf("the session carried %d warnings (%v), want %d", got, info.Warnings, map[bool]int{true: 1, false: 0}[test.wantAsks])
+			}
+			if test.wantAsks {
+				warning := info.Warnings[0]
+				if !strings.Contains(warning, "permission_answers") {
+					t.Errorf("the warning is %q, want it to name the capability", warning)
+				}
+			}
+		})
+	}
+}
+
+// TestALoadedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack
+// covers the load path's session warning: a client that is connected
+// but did not declare the permission_answers capability reads the
+// warning with the session it loads, too.
+func TestALoadedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack(t *testing.T) {
+	ctx := context.Background()
+	settings := servedSettings(t, search.Name, `{"chat": "chat-model"}`)
+	// The policy asks about every side-effecting call, so the chain's
+	// wire asker is what would answer it.
+	ask := "ask"
+	settings.Permission.Unmatched = &ask
+	srv := newServer(t, settings)
+	dir := t.TempDir()
+	sess, info, err := srv.Create(ctx, protocol.CreateParams{
+		Mode:       "logged",
+		SessionDir: dir,
+	}, wire.FactoryEnv{Client: silentClient{}})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	id := sess.ID()
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if err := info.Release(); err != nil {
+		t.Fatalf("releasing the store: %v", err)
+	}
+
+	loaded, info, err := srv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.FactoryEnv{Client: silentClient{}})
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+	defer func() {
+		if err := loaded.Close(); err != nil {
+			t.Errorf("closing the loaded session: %v", err)
+		}
+		if err := info.Release(); err != nil {
+			t.Errorf("releasing the store: %v", err)
+		}
+	}()
+
+	if got := len(info.Warnings); got != 1 {
+		t.Fatalf("the loaded session carried %d warnings (%v), want one", got, info.Warnings)
+	}
+	if warning := info.Warnings[0]; !strings.Contains(warning, "permission_answers") {
+		t.Errorf("the warning is %q, want it to name the capability", warning)
+	}
 }
 
 // The handshake names the default profile, and it is the profile a

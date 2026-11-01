@@ -405,6 +405,11 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 		Records: recorder.Records,
 		Release: store.Close,
 	}
+	// The client reads the warning with the session it built: a client
+	// that cannot answer is told why every ask falls back.
+	if warning := perm.WireClientWarning(runtime.Policy, runtime.Askers, env.Client); warning != "" {
+		info.Warnings = append(info.Warnings, warning)
+	}
 	if mode == string(session.ModeLogged) {
 		info.SessionDir = storeDir(store)
 	}
@@ -476,6 +481,11 @@ func (f *Server) Load(ctx context.Context, params protocol.LoadParams, env wire.
 		Warnings:        resumed.Restored.Warnings,
 		Records:         func() []poo.Record { return recorder.RecordsWith(loaded.Records) },
 		Release:         store.Close,
+	}
+	// The client reads the warning with the session it opened: a client
+	// that cannot answer is told why every ask falls back.
+	if warning := perm.WireClientWarning(runtime.Policy, runtime.Askers, env.Client); warning != "" {
+		info.Warnings = append(info.Warnings, warning)
 	}
 	return resumed.Session, info, nil
 }

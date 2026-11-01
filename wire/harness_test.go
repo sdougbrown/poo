@@ -629,6 +629,11 @@ func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, 
 			return store.Close()
 		},
 	}
+	// The client reads the warning with the session it built, as a
+	// real factory's client does.
+	if warning := perm.WireClientWarning(policy, policy.Askers(), env.Client); warning != "" {
+		info.Warnings = append(info.Warnings, warning)
+	}
 	return sess, info, nil
 }
 
@@ -681,6 +686,9 @@ func (f *testFactory) Load(ctx context.Context, params protocol.LoadParams, env 
 			f.mu.Unlock()
 			return store.Close()
 		},
+	}
+	if warning := perm.WireClientWarning(policy, policy.Askers(), env.Client); warning != "" {
+		info.Warnings = append(info.Warnings, warning)
 	}
 	return resumed.Session, info, nil
 }

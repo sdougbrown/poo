@@ -103,6 +103,99 @@ func TestTheWarningFiresForADoomLoopSetToAsk(t *testing.T) {
 	}
 }
 
+// The wire client warning is the session-time counterpart of the load
+// warning: a client that is connected but cannot answer is told, with
+// its session, why every ask falls back.
+
+// TestTheWireClientWarningFiresForAClientWithoutTheCapability covers
+// the plan's rule: a policy that can ask, a chain that asks the wire,
+// and a client that did not declare the permission_answers capability
+// are warned about when the session is built. The warning names the
+// cause and the capability that fixes it.
+func TestTheWireClientWarningFiresForAClientWithoutTheCapability(t *testing.T) {
+	client := &fakeClient{connected: true}
+	askers := []perm.Asker{perm.NewWireAsker(client, 0)}
+	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAsk, Askers: askers})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+
+	warning := perm.WireClientWarning(policy, policy.Askers(), client)
+
+	if warning == "" {
+		t.Fatal("the session carried no warning, want one: the client cannot answer")
+	}
+	if !strings.Contains(warning, "permission_answers") {
+		t.Errorf("the warning is %q, want it to name the capability", warning)
+	}
+	if !strings.Contains(warning, "deny") {
+		t.Errorf("the warning is %q, want it to name the fallback", warning)
+	}
+}
+
+// TestTheWireClientWarningIsSilentWhenTheClientDeclaredTheCapability
+// covers the other side: a client that declared the capability is not
+// warned about.
+func TestTheWireClientWarningIsSilentWhenTheClientDeclaredTheCapability(t *testing.T) {
+	client := &fakeClient{connected: true, answers: true}
+	askers := []perm.Asker{perm.NewWireAsker(client, 0)}
+	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAsk, Askers: askers})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+
+	if warning := perm.WireClientWarning(policy, policy.Askers(), client); warning != "" {
+		t.Errorf("the session warned %q, want no warning", warning)
+	}
+}
+
+// TestTheWireClientWarningIsSilentWhenThePolicyCannotAsk covers a
+// policy that never asks: there is nothing to warn about.
+func TestTheWireClientWarningIsSilentWhenThePolicyCannotAsk(t *testing.T) {
+	client := &fakeClient{connected: true}
+	askers := []perm.Asker{perm.NewWireAsker(client, 0)}
+	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAllow, Askers: askers})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+
+	if warning := perm.WireClientWarning(policy, policy.Askers(), client); warning != "" {
+		t.Errorf("the session warned %q, want no warning: the policy cannot ask", warning)
+	}
+}
+
+// TestTheWireClientWarningIsSilentWithoutAWireAsker covers a chain that
+// does not ask the wire: the client's capability is not what answers
+// the asks, so there is nothing to warn about.
+func TestTheWireClientWarningIsSilentWithoutAWireAsker(t *testing.T) {
+	client := &fakeClient{connected: true}
+	askers := []perm.Asker{&fakeAsker{available: true}}
+	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAsk, Askers: askers})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+
+	if warning := perm.WireClientWarning(policy, policy.Askers(), client); warning != "" {
+		t.Errorf("the session warned %q, want no warning: the chain does not ask the wire", warning)
+	}
+}
+
+// TestTheWireClientWarningIsSilentWhenAnotherAskerCanAnswer covers a
+// chain that asks the wire and another asker that can answer: the ask
+// does not fall back, so the client is not warned about it.
+func TestTheWireClientWarningIsSilentWhenAnotherAskerCanAnswer(t *testing.T) {
+	client := &fakeClient{connected: true}
+	askers := []perm.Asker{perm.NewWireAsker(client, 0), &fakeAsker{available: true}}
+	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAsk, Askers: askers})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+
+	if warning := perm.WireClientWarning(policy, policy.Askers(), client); warning != "" {
+		t.Errorf("the session warned %q, want no warning: another asker answers", warning)
+	}
+}
+
 // TestTheWarningFiresForAnAskRule covers the plan's rule: a rule that
 // asks is an ask too.
 func TestTheWarningFiresForAnAskRule(t *testing.T) {
@@ -118,5 +211,28 @@ func TestTheWarningFiresForAnAskRule(t *testing.T) {
 
 	if warning := perm.Warning(policy, askers); warning == "" {
 		t.Fatal("the load printed no warning, want one: a rule asks")
+	}
+}
+
+// deadAsker is an asker that can never answer, like a model asker with
+// no decider.
+type deadAsker struct{ fakeAsker }
+
+// CanEverAnswer reports that the asker never answers.
+func (a *deadAsker) CanEverAnswer() bool { return false }
+
+// TestTheWireClientWarningFiresBesideAnAskerThatCannotAnswer covers a
+// chain whose other asker can never answer: every ask still falls back,
+// so the client is warned.
+func TestTheWireClientWarningFiresBesideAnAskerThatCannotAnswer(t *testing.T) {
+	client := &fakeClient{connected: true}
+	askers := []perm.Asker{perm.NewWireAsker(client, 0), &deadAsker{}}
+	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAsk, Askers: askers})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+
+	if warning := perm.WireClientWarning(policy, policy.Askers(), client); !strings.Contains(warning, "permission_answers") {
+		t.Errorf("the session warned %q, want the capability named: the other asker never answers", warning)
 	}
 }

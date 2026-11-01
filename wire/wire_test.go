@@ -390,7 +390,8 @@ func TestPermissionAskNeverAnswered(t *testing.T) {
 }
 
 // A client that did not declare the permission_answers capability is
-// never asked.
+// never asked, and it reads one warning with its session that says why
+// its asks fall back.
 func TestPermissionAskNeedsTheCapability(t *testing.T) {
 	factory := permissionFactory(t, func() poo.ChatTransport {
 		return pootest.NewTransport(
@@ -406,7 +407,16 @@ func TestPermissionAskNeedsTheCapability(t *testing.T) {
 		t.Fatalf("the handshake failed: %v", rerr)
 	}
 
-	sessionID := createSession(t, h)
+	// The session's warning names the cause and the capability that
+	// fixes it.
+	sessionInfo := createdSessionInfo(t, h)
+	sessionID := sessionInfo.SessionID
+	if len(sessionInfo.Warnings) != 1 {
+		t.Fatalf("the session carried %d warnings (%v), want one", len(sessionInfo.Warnings), sessionInfo.Warnings)
+	}
+	if !strings.Contains(sessionInfo.Warnings[0], "permission_answers") {
+		t.Errorf("the warning is %q, want it to name the capability", sessionInfo.Warnings[0])
+	}
 	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
@@ -417,6 +427,39 @@ func TestPermissionAskNeedsTheCapability(t *testing.T) {
 	}
 	// The fallback denied the call, because nobody answered.
 	h.event("tool.result")
+}
+
+// TestTheSessionIsSilentWhenTheClientDeclaredTheCapability covers the
+// other side: a client that declared the capability reads no warning
+// with its session.
+func TestTheSessionIsSilentWhenTheClientDeclaredTheCapability(t *testing.T) {
+	factory := permissionFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(pootest.Turn{Text: "hello", Finish: "stop"})
+	})
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	info := createdSessionInfo(t, h)
+	if len(info.Warnings) != 0 {
+		t.Errorf("the session carried %d warnings (%v), want none", len(info.Warnings), info.Warnings)
+	}
+}
+
+// createdSessionInfo creates a session and returns what the client
+// learned about it.
+func createdSessionInfo(t *testing.T, h *harness) protocol.SessionInfo {
+	t.Helper()
+	result, rerr := h.call(protocol.MethodSessionCreate, protocol.CreateParams{
+		WorkingDir: h.factory.dir,
+	})
+	if rerr != nil {
+		t.Fatalf("the session could not be created: %v", rerr)
+	}
+	var info protocol.SessionInfo
+	if err := json.Unmarshal(result, &info); err != nil {
+		t.Fatalf("decoding the session info: %v", err)
+	}
+	return info
 }
 
 // The inspect pages through the events.

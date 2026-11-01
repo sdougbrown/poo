@@ -83,6 +83,9 @@ func (a *WireAsker) Budget() time.Duration {
 // AskerName is the name the asker's answers carry.
 func (a *WireAsker) AskerName() string { return "wire" }
 
+// AsksClient marks the asker as the one that asks the wire client.
+func (a *WireAsker) AsksClient() bool { return true }
+
 // Ask sends the ask to the client and waits for its answer.
 //
 // A client that is not there, a failure and an answer that is neither an
