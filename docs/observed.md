@@ -5,9 +5,10 @@ the plan: the observed failure modes, written down so that Stage 3's
 failure table and defaults can be checked against them before Stage 3
 starts.
 
-Every entry names the runs it came from. The raw transcripts are not
-committed (`evals/results/**/runs/` is ignored); the report, the
-summary and the judge's verdicts are.
+Every entry names the runs it came from. The raw transcripts were never
+committed, and the dated report directories were retired in favour of
+one accepted baseline at `evals/baseline/`; the reports this document
+names are in git history.
 
 ## The baseline
 
