@@ -50,6 +50,9 @@ type PermissionAnswer struct {
 	// Provenance is how the ask was resolved: "answered", "timeout",
 	// "default", "no_asker", "cancelled" or "interrupted".
 	Provenance string
+	// Message is the note the answer carries for the model. It is
+	// empty when the answer carries none.
+	Message string
 	// Reason is why the call was being asked about.
 	Reason AskReason
 }
@@ -243,11 +246,15 @@ func (s *Session) persistPermission(run *runState, p *PermissionRequest) {
 		return
 	}
 	p.answerWritten = true
-	rec := &PermissionAnsweredRecord{RecordMeta: NewRecordMeta("permission.answered"), RunID: run.id, AskID: answer.AskID, Decision: answer.Decision, AnsweredBy: answer.AnsweredBy, Provenance: answer.Provenance, Reason: answer.Reason}
+	rec := &PermissionAnsweredRecord{RecordMeta: NewRecordMeta("permission.answered"), RunID: run.id, AskID: answer.AskID, Decision: answer.Decision, AnsweredBy: answer.AnsweredBy, Provenance: answer.Provenance, Reason: answer.Reason, Message: answer.Message}
 	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
 		s.noteStoreError(run, err)
 	}
-	s.events.emit(EventPermissionAnswered, map[string]any{"run_id": run.id, "ask_id": answer.AskID, "decision": answer.Decision, "answered_by": answer.AnsweredBy, "provenance": answer.Provenance, "reason": answer.Reason})
+	payload := map[string]any{"run_id": run.id, "ask_id": answer.AskID, "decision": answer.Decision, "answered_by": answer.AnsweredBy, "provenance": answer.Provenance, "reason": answer.Reason}
+	if answer.Message != "" {
+		payload["message"] = answer.Message
+	}
+	s.events.emit(EventPermissionAnswered, payload)
 }
 
 // settlePendingAsks drains every request's single writer before settlement.

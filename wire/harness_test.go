@@ -421,10 +421,17 @@ func (h *harness) ask() *protocol.Request {
 // answer answers a permission ask.
 func (h *harness) answer(req *protocol.Request, decision string) {
 	h.t.Helper()
+	h.answerWith(req, map[string]any{"decision": decision})
+}
+
+// answerWith answers a request the server sent with the result object
+// the client chose.
+func (h *harness) answerWith(req *protocol.Request, result map[string]any) {
+	h.t.Helper()
 	h.write(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      json.RawMessage(req.ID),
-		"result":  map[string]any{"decision": decision},
+		"result":  result,
 	})
 }
 

@@ -66,6 +66,10 @@ const (
 	// AskDeniedText is the text a refused ask shows the model. The name
 	// is who refused it: an asker, or the fallback.
 	AskDeniedText = "Blocked: the permission ask was denied by %s."
+	// AskDeniedMessageText is the text a refused ask with a message
+	// shows the model. The name is who refused it, and the message is
+	// the note the answer carried.
+	AskDeniedMessageText = "Blocked: the permission ask was denied by %s: %s."
 )
 
 // Rule is one policy rule.
@@ -477,6 +481,7 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason poo.AskR
 			AnsweredBy: resolution.answeredBy,
 			Provenance: resolution.provenance,
 			Reason:     ask.Reason,
+			Message:    resolution.message,
 		})
 	}
 	if resolution.decision == DecisionAllow {
@@ -487,7 +492,11 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason poo.AskR
 	if reason == poo.AskReasonDoomLoop {
 		return poo.Deny(fmt.Sprintf(DoomLoopDeniedText, doomLoopCount(counts))), nil
 	}
-	return poo.Deny(fmt.Sprintf(AskDeniedText, resolution.answeredBy)), nil
+	denied := fmt.Sprintf(AskDeniedText, resolution.answeredBy)
+	if resolution.message != "" {
+		denied = fmt.Sprintf(AskDeniedMessageText, resolution.answeredBy, resolution.message)
+	}
+	return poo.Deny(denied), nil
 }
 
 // argumentsOf returns the arguments a decision model may see.

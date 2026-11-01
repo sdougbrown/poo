@@ -26,6 +26,9 @@ type fakeClient struct {
 	answers bool
 	// decision is what the client answers.
 	decision perm.Decision
+	// message is the note the client's answer carries, when the client
+	// has the message seam.
+	message string
 	// err is the failure the client returns, when it is set.
 	err error
 	// asks holds the asks the client was given.
@@ -57,6 +60,15 @@ func (c *fakeClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, erro
 		return perm.DecisionDefer, err
 	}
 	return decision, nil
+}
+
+// AskWithMessage answers the ask with the client's message.
+func (c *fakeClient) AskWithMessage(ctx context.Context, ask perm.Ask) (perm.Answer, error) {
+	decision, err := c.Ask(ctx, ask)
+	if err != nil {
+		return perm.Answer{Decision: perm.DecisionDefer}, err
+	}
+	return perm.Answer{Decision: decision, Message: c.message}, nil
 }
 
 // Asks returns the asks the client was given.
@@ -262,5 +274,57 @@ func TestTheWireAskerAnswersWhenTheClientAnswers(t *testing.T) {
 	}
 	if answered[0].Payload["answered_by"] != "wire" {
 		t.Errorf("the answer's answered_by is %q, want the wire", answered[0].Payload["answered_by"])
+	}
+}
+
+// TestTheWireAskerCarriesTheClientMessage covers the message seam: the
+// asker hands the client's message to the chain, and a client without
+// the seam still answers without one.
+func TestTheWireAskerCarriesTheClientMessage(t *testing.T) {
+	client := &fakeClient{connected: true, answers: true, decision: perm.DecisionDeny, message: "not while I am watching"}
+	asker := perm.NewWireAsker(client, 0)
+
+	answer, err := asker.AskWithMessage(context.Background(), perm.Ask{AskID: "a1"})
+	if err != nil {
+		t.Fatalf("the ask failed: %v", err)
+	}
+	if answer.Decision != perm.DecisionDeny {
+		t.Errorf("the answer's decision is %q, want %q", answer.Decision, perm.DecisionDeny)
+	}
+	if answer.Message != "not while I am watching" {
+		t.Errorf("the answer's message is %q, want the client's", answer.Message)
+	}
+
+	// A client without the message seam answers through the old path.
+	plain := &fakeClient{connected: true, answers: true, decision: perm.DecisionDeny}
+	asker = perm.NewWireAsker(plain, 0)
+	answer, err = asker.AskWithMessage(context.Background(), perm.Ask{AskID: "a2"})
+	if err != nil {
+		t.Fatalf("the ask failed: %v", err)
+	}
+	if answer.Decision != perm.DecisionDeny {
+		t.Errorf("the answer's decision is %q, want %q", answer.Decision, perm.DecisionDeny)
+	}
+	if answer.Message != "" {
+		t.Errorf("the answer's message is %q, want none", answer.Message)
+	}
+}
+
+// TestTheWireAskerNormalizesAnUnknownAnswer covers the client that
+// answers with neither an allowance nor a refusal: the asker defers,
+// whatever the answer carries.
+func TestTheWireAskerNormalizesAnUnknownAnswer(t *testing.T) {
+	client := &fakeClient{connected: true, answers: true, decision: perm.Decision("later"), message: "soon"}
+	asker := perm.NewWireAsker(client, 0)
+
+	answer, err := asker.AskWithMessage(context.Background(), perm.Ask{AskID: "a1"})
+	if err != nil {
+		t.Fatalf("the ask failed: %v", err)
+	}
+	if answer.Decision != perm.DecisionDefer {
+		t.Errorf("the answer's decision is %q, want a deferral", answer.Decision)
+	}
+	if answer.Message != "" {
+		t.Errorf("the answer's message is %q, want none: a deferral answers nothing", answer.Message)
 	}
 }
