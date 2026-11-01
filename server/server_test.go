@@ -70,8 +70,6 @@ func newServer(t *testing.T, settings *config.Settings) *server.Server {
 	return srv
 }
 
-// The handshake names the default profile, and it is the profile a
-// session whose params name none runs under.
 // silentClient is a wire client that is connected but answers nothing:
 // it did not declare the permission_answers capability, so the asker
 // chain never asks it.
@@ -156,6 +154,57 @@ func TestAServedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack(t *testing
 	}
 }
 
+// TestALoadedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack
+// covers the load path's session warning: a client that is connected
+// but did not declare the permission_answers capability reads the
+// warning with the session it loads, too.
+func TestALoadedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack(t *testing.T) {
+	ctx := context.Background()
+	settings := servedSettings(t, search.Name, `{"chat": "chat-model"}`)
+	// The policy asks about every side-effecting call, so the chain's
+	// wire asker is what would answer it.
+	ask := "ask"
+	settings.Permission.Unmatched = &ask
+	srv := newServer(t, settings)
+	dir := t.TempDir()
+	sess, info, err := srv.Create(ctx, protocol.CreateParams{
+		Mode:       "logged",
+		SessionDir: dir,
+	}, wire.FactoryEnv{Client: silentClient{}})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	id := sess.ID()
+	if err := sess.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if err := info.Release(); err != nil {
+		t.Fatalf("releasing the store: %v", err)
+	}
+
+	loaded, info, err := srv.Load(ctx, protocol.LoadParams{SessionID: id, SessionDir: dir}, wire.FactoryEnv{Client: silentClient{}})
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+	defer func() {
+		if err := loaded.Close(); err != nil {
+			t.Errorf("closing the loaded session: %v", err)
+		}
+		if err := info.Release(); err != nil {
+			t.Errorf("releasing the store: %v", err)
+		}
+	}()
+
+	if got := len(info.Warnings); got != 1 {
+		t.Fatalf("the loaded session carried %d warnings (%v), want one", got, info.Warnings)
+	}
+	if warning := info.Warnings[0]; !strings.Contains(warning, "permission_answers") {
+		t.Errorf("the warning is %q, want it to name the capability", warning)
+	}
+}
+
+// The handshake names the default profile, and it is the profile a
+// session whose params name none runs under.
 func TestTheHandshakeNamesTheDefaultProfile(t *testing.T) {
 	// The settings name no profile, so the binary's own default runs.
 	srv := newServer(t, servedSettings(t, "", `{"chat": "chat-model"}`))
