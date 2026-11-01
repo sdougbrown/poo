@@ -22,9 +22,9 @@ const DefaultInspectTimeout = 30 * time.Second
 func (s *server) dispatch(req protocol.Request) (any, *protocol.Error) {
 	switch req.Method {
 	case protocol.MethodSessionCreate:
-		return s.sessionCreate(req.Params)
+		return s.sessionCreate(req)
 	case protocol.MethodSessionLoad:
-		return s.sessionLoad(req.Params)
+		return s.sessionLoad(req)
 	case protocol.MethodSessionGet:
 		return s.sessionGet(req.Params)
 	case protocol.MethodSessionConfigure:
@@ -87,10 +87,38 @@ func negotiate(versions []int) (int, bool) {
 	return best, best > 0
 }
 
+// responseQueued is what a method that answers itself returns: the
+// response is in the output queue already, and the caller adds no
+// second one.
+type responseQueued struct{}
+
+// answerNewSession answers a request that built or opened a session.
+//
+// The response names the session: it is queued before the session is
+// attached, so the client never reads an event of a session the
+// response has not named. The returned sentinel tells the dispatch the
+// response is queued already, and the caller adds no second one.
+func (s *server) answerNewSession(req protocol.Request, entry *session, obs *observer) (any, *protocol.Error) {
+	// The session is registered before its response is queued: requests
+	// are dispatched concurrently, so a client that names the session the
+	// moment it reads the response must find it.
+	s.register(entry)
+	if rerr := s.respondResult(req, sessionInfoOf(entry)); rerr != nil {
+		// The session stays registered, so closing the server still
+		// closes it and releases its store.
+		return nil, rerr
+	}
+	obs.attach(entry)
+	return responseQueued{}, nil
+}
+
 // sessionCreate starts a session.
-func (s *server) sessionCreate(raw json.RawMessage) (any, *protocol.Error) {
+//
+// The response is queued before the session is attached, so the client
+// never reads an event of a session the response has not named.
+func (s *server) sessionCreate(req protocol.Request) (any, *protocol.Error) {
 	var params protocol.CreateParams
-	if err := protocol.DecodeParams(raw, &params); err != nil {
+	if err := protocol.DecodeParams(req.Params, &params); err != nil {
 		return nil, paramsFailure(err)
 	}
 	if params.WorkingDir == "" {
@@ -113,16 +141,21 @@ func (s *server) sessionCreate(raw json.RawMessage) (any, *protocol.Error) {
 			"the factory built no session")
 	}
 	entry := newSession(sess, info)
-	obs.attach(entry)
-	s.register(entry)
-	s.sessionCreated(entry)
-	return sessionInfoOf(entry), nil
+	out, rerr := s.answerNewSession(req, entry, obs)
+	if rerr == nil {
+		s.sessionCreated(entry)
+	}
+	return out, rerr
 }
 
 // sessionLoad opens a recorded session.
-func (s *server) sessionLoad(raw json.RawMessage) (any, *protocol.Error) {
+//
+// Like the create, the response is queued before the session is
+// attached, so the client never reads an event of a session the
+// response has not named.
+func (s *server) sessionLoad(req protocol.Request) (any, *protocol.Error) {
 	var params protocol.LoadParams
-	if err := protocol.DecodeParams(raw, &params); err != nil {
+	if err := protocol.DecodeParams(req.Params, &params); err != nil {
 		return nil, paramsFailure(err)
 	}
 	if params.SessionID == "" {
@@ -138,9 +171,7 @@ func (s *server) sessionLoad(raw json.RawMessage) (any, *protocol.Error) {
 			"the factory loaded no session")
 	}
 	entry := newSession(sess, info)
-	obs.attach(entry)
-	s.register(entry)
-	return sessionInfoOf(entry), nil
+	return s.answerNewSession(req, entry, obs)
 }
 
 // sessionInfoOf returns what the client learns about a session.

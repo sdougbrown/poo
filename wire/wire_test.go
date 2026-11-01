@@ -1195,3 +1195,23 @@ func TestNoGoroutineIsLeftBehind(t *testing.T) {
 	}
 	t.Errorf("the server left %d goroutines behind", runtime.NumGoroutine()-before)
 }
+
+// TestUncodableResultAnswersAnError covers a result the server cannot
+// encode: the request is still answered, with the failure, so the
+// client does not wait for an answer that never comes.
+func TestUncodableResultAnswersAnError(t *testing.T) {
+	factory := newTestFactory(t, nil)
+	factory.settings = func() (map[string]any, error) {
+		return map[string]any{"broken": make(chan int)}, nil
+	}
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	_, rerr := h.call(protocol.MethodSettingsGet, nil)
+	if rerr == nil {
+		t.Fatal("the server answered the settings it could not encode with a result")
+	}
+	if rerr.Code != protocol.CodeInternalError || rerr.Data == nil || rerr.Data.Code != protocol.DataInternalError {
+		t.Errorf("the failure is %d/%s, want %d/%s", rerr.Code, rerr.Data, protocol.CodeInternalError, protocol.DataInternalError)
+	}
+}

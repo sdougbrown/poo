@@ -57,6 +57,18 @@ type harness struct {
 	stray chan []byte
 	// all holds every event the server sent, in order.
 	all []event
+	// arrivals are the messages the server sent, in the order the
+	// client read them: responses and notifications alike.
+	arrivals []arrival
+}
+
+// arrival is one message the server sent, as the client read it.
+type arrival struct {
+	// id is the response's id, when the message is a response.
+	id string
+	// method is the message's method, when the message is a
+	// notification or a request the server sent.
+	method string
 }
 
 // event is one notification the server sent.
@@ -161,6 +173,15 @@ func (h *harness) dispatch(line []byte) {
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return
 	}
+	a := arrival{}
+	if msg.Method != "" {
+		a.method = msg.Method
+	} else {
+		_ = json.Unmarshal(msg.ID, &a.id)
+	}
+	h.mu.Lock()
+	h.arrivals = append(h.arrivals, a)
+	h.mu.Unlock()
 	switch {
 	case msg.Method != "" && len(msg.ID) > 0:
 		// The server asks the client something.
@@ -202,6 +223,31 @@ func (h *harness) dispatch(line []byte) {
 		default:
 		}
 	}
+}
+
+// arrivalOrder returns the messages the server sent, in the order the
+// client read them.
+func (h *harness) arrivalOrder() []arrival {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]arrival(nil), h.arrivals...)
+}
+
+// notificationsBefore returns the notifications the client read before
+// the response to the request the id names.
+func (h *harness) notificationsBefore(id string) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []string
+	for _, a := range h.arrivals {
+		if a.id == id {
+			return out
+		}
+		if a.method != "" {
+			out = append(out, a.method)
+		}
+	}
+	return nil
 }
 
 // write sends a message to the server.
@@ -443,6 +489,14 @@ type testFactory struct {
 	transport func() poo.ChatTransport
 	// unmatched is the action for a side-effecting call no rule covers.
 	unmatched perm.Action
+	// onCreate fires an event while a session is created, when it is
+	// set.
+	onCreate func(poo.Observer)
+	// onLoad fires an event while a session is loaded, when it is set.
+	onLoad func(poo.Observer)
+	// settings returns the settings the factory reports, when it is
+	// set.
+	settings func() (map[string]any, error)
 	// mu guards the fields below it.
 	mu sync.Mutex
 	// sessions are the sessions the factory built.
@@ -560,6 +614,9 @@ func (f *testFactory) Create(ctx context.Context, params protocol.CreateParams, 
 	f.mu.Lock()
 	f.sessions = append(f.sessions, sess)
 	f.mu.Unlock()
+	if f.onCreate != nil {
+		f.onCreate(env.Observer)
+	}
 	info := &wire.Info{
 		Mode:    mode,
 		Tools:   f.toolInfos(),
@@ -604,6 +661,9 @@ func (f *testFactory) Load(ctx context.Context, params protocol.LoadParams, env 
 	f.mu.Lock()
 	f.sessions = append(f.sessions, resumed.Session)
 	f.mu.Unlock()
+	if f.onLoad != nil {
+		f.onLoad(env.Observer)
+	}
 	loaded := resumed.Loaded
 	records := recorder.RecordsWith(loaded.Records)
 	info := &wire.Info{
@@ -647,6 +707,9 @@ func (f *testFactory) Models(ctx context.Context, refresh bool) ([]protocol.Mode
 
 // Settings returns the effective settings.
 func (f *testFactory) Settings(ctx context.Context) (map[string]any, error) {
+	if f.settings != nil {
+		return f.settings()
+	}
 	return map[string]any{"version": 1}, nil
 }
 

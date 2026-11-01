@@ -439,6 +439,11 @@ func (s *server) handleLine(line []byte) {
 	}
 	go func() {
 		result, rerr := s.dispatch(req)
+		if _, answered := result.(responseQueued); answered {
+			// The method queued its response itself, in the order it
+			// chose: the caller adds no second one.
+			return
+		}
 		s.respond(req, result, rerr)
 	}()
 }
@@ -455,13 +460,30 @@ func (s *server) respond(req protocol.Request, result any, rerr *protocol.Error)
 		s.respondError(req.ID, rerr)
 		return
 	}
+	if rerr := s.respondResult(req, result); rerr != nil {
+		// A result that cannot be encoded is still answered: the client
+		// hears the failure instead of waiting for an answer that never
+		// comes.
+		s.respondError(req.ID, rerr)
+	}
+}
+
+// respondResult queues the answer to a request.
+//
+// The methods that name a session queue their response themselves, so
+// the response is in the ordered writer before the session's first
+// notification can be.
+func (s *server) respondResult(req protocol.Request, result any) *protocol.Error {
+	if len(req.ID) == 0 {
+		return nil
+	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
-		s.respondError(req.ID, protocol.Errorf(protocol.CodeInternalError, protocol.DataInternalError,
-			"the result could not be encoded: %v", err))
-		return
+		return protocol.Errorf(protocol.CodeInternalError, protocol.DataInternalError,
+			"the result could not be encoded: %v", err)
 	}
 	_ = s.send(protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: encoded})
+	return nil
 }
 
 // respondError writes a failure to a request.
