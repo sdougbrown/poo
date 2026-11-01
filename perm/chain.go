@@ -28,6 +28,9 @@ type Asker interface {
 // Availability reports whether an Asker can ever answer in this mode.
 type Availability interface{ CanEverAnswer() bool }
 
+// ClientAsking marks the Asker that asks the wire client.
+type ClientAsking interface{ AsksClient() bool }
+
 const fallbackName = "fallback"
 
 type chain struct {

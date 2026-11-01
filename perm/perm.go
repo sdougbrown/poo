@@ -583,13 +583,22 @@ func Warning(policy *Policy, askers []Asker) string {
 	if policy == nil || !policy.canAsk() {
 		return ""
 	}
-	for _, asker := range askers {
-		if canEverAnswer(asker) {
-			return ""
-		}
+	if anyCanAnswer(askers) {
+		return ""
 	}
 	return fmt.Sprintf("the permission policy can ask, but no asker in the chain can ever answer; every ask falls back to %q",
 		policy.chain.fallback)
+}
+
+// anyCanAnswer reports whether any asker in the chain may answer an
+// ask at some point in this build.
+func anyCanAnswer(askers []Asker) bool {
+	for _, asker := range askers {
+		if canEverAnswer(asker) {
+			return true
+		}
+	}
+	return false
 }
 
 // canEverAnswer reports whether the asker may answer an ask at some
@@ -647,17 +656,16 @@ func WireClientWarning(policy *Policy, askers []Asker, client Client) string {
 // answer reads, or an empty string when the chain does not ask the wire
 // or another asker can answer.
 func wireClientFallback(askers []Asker, policy *Policy) string {
+	var rest []Asker
 	hasWire := false
 	for _, asker := range askers {
-		if _, ok := asker.(*WireAsker); ok {
+		if asking, ok := asker.(ClientAsking); ok && asking.AsksClient() {
 			hasWire = true
 			continue
 		}
-		if canEverAnswer(asker) {
-			return ""
-		}
+		rest = append(rest, asker)
 	}
-	if !hasWire {
+	if !hasWire || anyCanAnswer(rest) {
 		return ""
 	}
 	return fmt.Sprintf("the permission policy can ask, but the client did not declare the permission_answers capability and is never asked; every ask falls back to %q; declare capabilities.permission_answers in poo/initialize to receive the asks",
