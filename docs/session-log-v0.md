@@ -538,7 +538,7 @@ is written whatever the decision was.
 | `answered_by` | string | Who answered: an asker, the chain's fallback, the policy's own action, or `"cancelled"` for a run that ended. |
 | `provenance` | string | How the ask was resolved: `"answered"`, `"timeout"`, `"default"`, `"no_asker"`, `"cancelled"` or `"interrupted"`. |
 | `reason` | string | Why the call was being asked about. **Absent** when there is none. |
-| `message` | string | The note the answer carried for the model: the model saw it in the refused call's tool result. **Absent** when the answer carried none. |
+| `message` | string | The note the answer carried for the model. For a policy ask the model saw it in the refused call's tool result; for a doom-loop ask the model sees the doom loop's own refusal text instead, and the record keeps the message. **Absent** when the answer carried none. |
 
 ## `run.settled`
 

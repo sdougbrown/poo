@@ -78,6 +78,37 @@ func (c *fakeClient) Asks() []perm.Ask {
 	return append([]perm.Ask(nil), c.asks...)
 }
 
+// plainClient is a client with no message seam: it implements only the
+// Client the asker falls back to.
+type plainClient struct {
+	mu sync.Mutex
+	// decision is what the client answers.
+	decision perm.Decision
+	// asks holds the asks the client was given.
+	asks []perm.Ask
+}
+
+// Connected reports whether a client is connected.
+func (c *plainClient) Connected() bool { return true }
+
+// PermissionAnswers reports whether the client declared the capability.
+func (c *plainClient) PermissionAnswers() bool { return true }
+
+// Ask answers the ask.
+func (c *plainClient) Ask(ctx context.Context, ask perm.Ask) (perm.Decision, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.asks = append(c.asks, ask)
+	return c.decision, nil
+}
+
+// Asks returns the asks the client was given.
+func (c *plainClient) Asks() []perm.Ask {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]perm.Ask(nil), c.asks...)
+}
+
 // TestTheWireAskerNeedsAClientThatDeclaredTheCapability covers the
 // plan's rule: the wire asker is available only when a client is
 // connected and declared the permission_answers capability.
@@ -295,8 +326,9 @@ func TestTheWireAskerCarriesTheClientMessage(t *testing.T) {
 		t.Errorf("the answer's message is %q, want the client's", answer.Message)
 	}
 
-	// A client without the message seam answers through the old path.
-	plain := &fakeClient{connected: true, answers: true, decision: perm.DecisionDeny}
+	// A client that implements only Client is asked through its Ask,
+	// and its decision reaches the answer with no message.
+	plain := &plainClient{decision: perm.DecisionDeny}
 	asker = perm.NewWireAsker(plain, 0)
 	answer, err = asker.AskWithMessage(context.Background(), perm.Ask{AskID: "a2"})
 	if err != nil {
@@ -307,6 +339,10 @@ func TestTheWireAskerCarriesTheClientMessage(t *testing.T) {
 	}
 	if answer.Message != "" {
 		t.Errorf("the answer's message is %q, want none", answer.Message)
+	}
+	asks := plain.Asks()
+	if len(asks) != 1 || asks[0].AskID != "a2" {
+		t.Errorf("the client was asked %+v, want the one ask a2", asks)
 	}
 }
 

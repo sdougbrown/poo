@@ -509,7 +509,8 @@ func TestPermissionAskDeniedWithAMessage(t *testing.T) {
 }
 
 // A client that answers an allowance with a message has the tool run,
-// and the message kept in the answered record.
+// and the message kept in the answered record: a message longer than
+// the bound is cut at a rune boundary, in the event and in the record.
 func TestPermissionAskAllowedWithAMessage(t *testing.T) {
 	factory := permissionFactory(t, func() poo.ChatTransport {
 		return pootest.NewTransport(
@@ -525,9 +526,11 @@ func TestPermissionAskAllowedWithAMessage(t *testing.T) {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	ask := theAsk(t, h)
+	message := "mind the working tree" + strings.Repeat("🌱", 2500)
+	bounded := "mind the working tree" + strings.Repeat("🌱", 1979)
 	h.answerWith(&protocol.Request{ID: json.RawMessage(`"` + ask.AskID + `"`)}, map[string]any{
 		"decision": protocol.DecisionAllow,
-		"message":  "mind the working tree",
+		"message":  message,
 	})
 
 	settled := h.event("run.settled")
@@ -539,8 +542,16 @@ func TestPermissionAskAllowedWithAMessage(t *testing.T) {
 		t.Errorf("the tool's outcome = %v, want ok", result.Fields["outcome"])
 	}
 	answered := h.event("permission.answered")
-	if answered.Fields["message"] != "mind the working tree" {
-		t.Errorf("the answer's message = %v, want the client's", answered.Fields["message"])
+	if answered.Fields["message"] != bounded {
+		t.Errorf("the answer's message = %v, want the bounded message", answered.Fields["message"])
+	}
+	// The record in the log keeps the bounded message too.
+	line := theAnsweredLine(t, factory, sessionID)
+	if !strings.Contains(line, `"message":"`+bounded+`"`) {
+		t.Errorf("the answered record says %s, want the bounded message", line)
+	}
+	if strings.Contains(line, `"message":"`+message+`"`) {
+		t.Errorf("the answered record carries the whole message, want the bound: %s", line)
 	}
 }
 
