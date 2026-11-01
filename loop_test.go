@@ -484,14 +484,27 @@ func asSessionInit(err error, target **poo.ErrSessionInit) bool {
 }
 
 func TestTheSessionRefusesASecondPromptWhileARunIsActive(t *testing.T) {
-	tr := scripted([]fakeResponse{{text: "hello"}})
-	tool := &echoTool{result: "echoed"}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "hello"},
+	})
+	// The tool holds the run until the second prompt has been refused, so
+	// the run cannot settle first and make room for it.
+	started, release := make(chan struct{}), make(chan struct{})
+	tool := &echoTool{call: func(ctx context.Context) (poo.ToolResult, error) {
+		close(started)
+		<-release
+		return poo.ToolResult{Text: "echoed"}, nil
+	}}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
 	if _, err := s.Prompt(context.Background(), "first"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	if _, err := s.Prompt(context.Background(), "second"); err == nil {
+	<-started
+	_, err := s.Prompt(context.Background(), "second")
+	close(release)
+	if err == nil {
 		t.Fatal("the session accepted a second prompt")
 	}
 	if _, err := s.Wait(context.Background()); err != nil {
