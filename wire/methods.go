@@ -99,11 +99,15 @@ type responseQueued struct{}
 // response has not named. The returned sentinel tells the dispatch the
 // response is queued already, and the caller adds no second one.
 func (s *server) answerNewSession(req protocol.Request, entry *session, obs *observer) (any, *protocol.Error) {
+	// The session is registered before its response is queued: requests
+	// are dispatched concurrently, so a client that names the session the
+	// moment it reads the response must find it.
+	s.register(entry)
 	if rerr := s.respondResult(req, sessionInfoOf(entry)); rerr != nil {
+		s.removeSession(entry.id)
 		return nil, rerr
 	}
 	obs.attach(entry)
-	s.register(entry)
 	return responseQueued{}, nil
 }
 
