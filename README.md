@@ -89,7 +89,9 @@ object per line.
 - The server also sends events, permission asks and job updates.
 
 The contract is `poo/wire/protocol`. The conformance suite in
-`poo/wire/conformance` drives any binary through it.
+`poo/wire/conformance` drives any binary through it. Its fake endpoint
+is exported (`conformance.NewFakeEndpoint`), so a client's own tests
+can run a real binary against scripted turns.
 
 **Prompts.** The system prompt is a set of named markdown sections, each
 embedded beside the package that owns it.
@@ -131,6 +133,7 @@ closure gate.
 | `poo/session` | Session seam: store, versioned codec, projection, authority |
 | `poo/wire` | JSON-RPC 2.0 control protocol over stdio |
 | `poo/wire/protocol` | The public contract: the method names, the error codes, and the request and result types a client depends on |
+| `poo/wire/conformance` | The black-box suite that drives any binary through the contract, and the scripted fake endpoint its tests and a client's tests share |
 | `poo/config` | Opt-in settings loading and validation |
 | `poo/cmd/poo` | The headless CLI |
 

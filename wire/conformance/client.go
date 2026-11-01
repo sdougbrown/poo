@@ -44,7 +44,7 @@ type client struct {
 	// stderr holds what the binary wrote to its error output.
 	stderr *syncBuffer
 	// endpoint is the fake endpoint the binary talks to.
-	endpoint *provider
+	endpoint *FakeEndpoint
 
 	// mu guards the fields below.
 	mu sync.Mutex
@@ -100,7 +100,7 @@ type event struct {
 //
 // The settings file is the one the flow wrote, and the extra
 // arguments are the ones the flow needs.
-func (s *suite) start(settings string, endpoint *provider, extra ...string) *client {
+func (s *suite) start(settings string, endpoint *FakeEndpoint, extra ...string) *client {
 	s.t.Helper()
 	args := append([]string{}, s.target.Args...)
 	args = append(args, "--settings", settings)
@@ -498,7 +498,7 @@ func (c *client) requests() []map[string]any {
 	if c.endpoint == nil {
 		return nil
 	}
-	return c.endpoint.requestBodies()
+	return c.endpoint.RequestBodies()
 }
 
 // events returns the events the binary sent.

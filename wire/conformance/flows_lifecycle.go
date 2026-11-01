@@ -27,7 +27,7 @@ func (s *suite) handoff() {
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo hello"}}}},
 		{Text: "the handoff note"},
 	}
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, handoffWindow, nil)
 	c := s.start(settings, endpoint)
 	s.handshake(c)
@@ -240,7 +240,7 @@ func (s *suite) jobStopsWithTheSession() {
 			"background": true,
 		}}}},
 	}
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 	c := s.start(settings, endpoint)
 	s.handshake(c)
@@ -368,7 +368,7 @@ func (s *suite) attachAndHistory() {
 	turns := []ScriptedAnswer{
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 	}
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 	c := s.start(settings, endpoint)
 	s.handshake(c)
@@ -478,7 +478,7 @@ func (s *suite) resume() {
 		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": command}}}},
 		{Text: "the answer after the resume"},
 	}
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 	c := s.start(settings, endpoint)
 	s.handshake(c)
@@ -690,7 +690,7 @@ func (s *suite) failureExplicitNull() {
 // handshake: the server refuses it with not_initialized.
 func (s *suite) failureBeforeTheHandshake() {
 	s.t.Helper()
-	endpoint := newProvider(s.t, s.turns)
+	endpoint := newEndpoint(s.t, s.turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 	// The client does not shake hands: the method comes first.
 	c := s.start(settings, endpoint)
@@ -738,7 +738,7 @@ func (s *suite) failureBusy() {
 func (s *suite) failureLockedSession() {
 	s.t.Helper()
 	turns := []ScriptedAnswer{{Text: "the answer"}}
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 
 	// The first process holds the session: it created it, and it has
@@ -857,7 +857,7 @@ func (s *suite) slowClientQueueOverflow() {
 	// The answer is bigger than the queue, and it comes in pieces, so
 	// the queue fills while the writer waits for the client.
 	turns := []ScriptedAnswer{{Chunks: chunks(80, 256<<10)}}
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 	c := s.start(settings, endpoint)
 	s.handshake(c)
@@ -884,7 +884,7 @@ func (s *suite) slowClientWriteStall() {
 	s.t.Helper()
 	// The answer is bigger than the pipe and smaller than the queue.
 	turns := []ScriptedAnswer{{Chunks: chunks(200, 1<<10)}}
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, nil)
 	c := s.start(settings, endpoint)
 	s.handshake(c)
@@ -906,7 +906,7 @@ func (s *suite) slowClientWriteStall() {
 // reloadAfterAFailure proves the transport failure released the
 // sessions: another process loads the session that the failed process
 // served.
-func (s *suite) reloadAfterAFailure(settings string, endpoint *provider, sessionID string) {
+func (s *suite) reloadAfterAFailure(settings string, endpoint *FakeEndpoint, sessionID string) {
 	s.t.Helper()
 	second := s.start(settings, endpoint)
 	s.handshake(second)
@@ -942,7 +942,7 @@ func chunks(count, size int) []string {
 func (s *suite) ephemeral() {
 	s.t.Helper()
 	turns := []ScriptedAnswer{{Text: "the answer"}}
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	// The pass has a directory of its own, so the check for the files
 	// it wrote is about its own files.
 	directory := filepath.Join(s.dir, "ephemeral")

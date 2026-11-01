@@ -6,20 +6,23 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
 
-// provider is the fake OpenAI-compatible endpoint.
+// FakeEndpoint is a scripted OpenAI-compatible endpoint.
 //
-// The endpoint answers the requests the binary makes with the turns it
-// was given, in order, and it records the requests, so a flow can read
-// what the model was asked.
+// A wire client's tests start one, point their binary's settings at it
+// with WriteSettings, and read back the requests the binary made with
+// RequestBodies. It serves the turns it was given, in order, and it
+// serves its last turn again when the turns run out, so a test that
+// does not script every request still gets an answer.
 //
 // The endpoint serves the chat completions path and the systemone
 // path: a binary with a decider model asks the second one.
-type provider struct {
+type FakeEndpoint struct {
 	// server is the running endpoint.
 	server *httptest.Server
 
@@ -35,66 +38,117 @@ type provider struct {
 	repeats int
 }
 
-// maxRepeats is how many times the provider serves its last turn
+// maxRepeats is how many times the endpoint serves its last turn
 // before it answers plainly.
 //
-// A flow that scripts a turn the model keeps asking for would
-// otherwise run forever: the provider repeats the turn, and the model
+// A test that scripts a turn the model keeps asking for would
+// otherwise run forever: the endpoint repeats the turn, and the model
 // asks for it again.
 const maxRepeats = 3
 
-// newProvider starts an endpoint that serves the turns.
-func newProvider(t interface{ Cleanup(func()) }, turns []ScriptedAnswer) *provider {
-	p := &provider{turns: turns}
-	p.server = httptest.NewServer(http.HandlerFunc(p.serve))
-	t.Cleanup(p.server.Close)
-	return p
+// NewFakeEndpoint starts an endpoint that serves the turns.
+//
+// The caller closes the endpoint: a test that skips its cleanup leaves
+// the address bound.
+func NewFakeEndpoint(turns ...ScriptedAnswer) *FakeEndpoint {
+	e := &FakeEndpoint{turns: turns}
+	e.server = httptest.NewServer(http.HandlerFunc(e.serve))
+	return e
+}
+
+// URL returns the base address of the endpoint. The chat completions
+// path is URL + "/v1".
+func (e *FakeEndpoint) URL() string { return e.server.URL }
+
+// Close shuts the endpoint down.
+func (e *FakeEndpoint) Close() { e.server.Close() }
+
+// RequestBodies returns the bodies the endpoint received, in order.
+func (e *FakeEndpoint) RequestBodies() []map[string]any {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]map[string]any, 0, len(e.requests))
+	out = append(out, e.requests...)
+	return out
+}
+
+// WriteSettings writes the settings document that points a poo binary
+// at the endpoint to the file at path, and returns the write's error,
+// if any. The document names the model on the endpoint and its context
+// limit, and the extra settings the caller passes at the top level: a
+// key the caller names overrides the document's own.
+func (e *FakeEndpoint) WriteSettings(path, model string, contextLimit int, extra map[string]any) error {
+	document := map[string]any{
+		"version": 1,
+		"endpoints": map[string]any{
+			"fake": map[string]any{"endpoint": e.server.URL + "/v1"},
+		},
+		"models": map[string]any{
+			model: map[string]any{
+				"endpoint":      "fake",
+				"model_id":      model,
+				"api":           "chat_completions",
+				"tools_mode":    "native",
+				"ops":           []string{"chat"},
+				"context_limit": contextLimit,
+			},
+		},
+		"roles": map[string]any{"chat": model},
+	}
+	for name, value := range extra {
+		document[name] = value
+	}
+	encoded, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, encoded, 0o600)
 }
 
 // serve answers one request.
-func (p *provider) serve(w http.ResponseWriter, r *http.Request) {
+func (e *FakeEndpoint) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	var decoded map[string]any
 	_ = json.Unmarshal(body, &decoded)
 
 	if strings.HasSuffix(r.URL.Path, "/systemone") {
-		p.serveSystemone(w)
+		e.serveSystemone(w)
 		return
 	}
 
-	p.mu.Lock()
-	p.requests = append(p.requests, decoded)
-	turn := p.next()
-	p.mu.Unlock()
+	e.mu.Lock()
+	e.requests = append(e.requests, decoded)
+	turn := e.next()
+	e.mu.Unlock()
 	turn.serve(w)
 }
 
 // next returns the turn the next request gets.
 //
-// The last turn is served again when the requests run out, so a flow
+// The last turn is served again when the requests run out, so a test
 // that does not script every request still gets an answer.
-func (p *provider) next() ScriptedAnswer {
-	if len(p.turns) == 0 {
+func (e *FakeEndpoint) next() ScriptedAnswer {
+	if len(e.turns) == 0 {
 		return ScriptedAnswer{Text: "the answer"}
 	}
-	if p.index < len(p.turns) {
-		turn := p.turns[p.index]
-		p.index++
+	if e.index < len(e.turns) {
+		turn := e.turns[e.index]
+		e.index++
 		return turn
 	}
-	p.repeats++
-	if p.repeats > maxRepeats {
+	e.repeats++
+	if e.repeats > maxRepeats {
 		return ScriptedAnswer{Text: "the answer"}
 	}
-	return p.turns[len(p.turns)-1]
+	return e.turns[len(e.turns)-1]
 }
 
 // serveSystemone answers a systemone request.
 //
-// The decider's answer is a plain refusal: the suite does not test the
-// decision model, and a binary that asks one gets an answer it can
-// read.
-func (p *provider) serveSystemone(w http.ResponseWriter) {
+// The decider's answer is a plain refusal: neither the suite nor a
+// client's test exercises the decision model, and a binary that asks
+// one gets an answer it can read.
+func (e *FakeEndpoint) serveSystemone(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	answer := map[string]any{
 		"object":  "systemone.response",
@@ -104,15 +158,6 @@ func (p *provider) serveSystemone(w http.ResponseWriter) {
 		"usage":   nil,
 	}
 	_ = json.NewEncoder(w).Encode(answer)
-}
-
-// requests returns the bodies the endpoint received.
-func (p *provider) requestBodies() []map[string]any {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	out := make([]map[string]any, 0, len(p.requests))
-	out = append(out, p.requests...)
-	return out
 }
 
 // serve writes the turn's answer.
