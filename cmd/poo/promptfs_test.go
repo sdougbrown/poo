@@ -83,7 +83,7 @@ func TestTheReadOnlyBinaryPromptIsItsOwn(t *testing.T) {
 	if !strings.Contains(state.Prompt.Text, "You are poo-readonly") {
 		t.Errorf("the session's prompt is not the binary's own:\n%s", state.Prompt.Text)
 	}
-	if strings.Contains(state.Prompt.Text, "You are an agent.") {
+	if strings.Contains(state.Prompt.Text, "Keep going until the task is done.") {
 		t.Errorf("the session's prompt is still the embedded base:\n%s", state.Prompt.Text)
 	}
 }

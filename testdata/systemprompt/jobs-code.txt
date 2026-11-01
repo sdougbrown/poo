@@ -1,5 +1,3 @@
-You are an agent. You solve the task through the tools you are given.
-
 Keep going until the task is done. Do not stop to ask whether to go on.
 
 Done means:

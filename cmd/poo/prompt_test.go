@@ -87,7 +87,7 @@ func TestTheNativeModePromptIsTheContract(t *testing.T) {
 	prompt := sessionPrompt(t, "gemma4", "native", "")
 
 	for _, want := range []string{
-		"You are an agent. You solve the task through the tools you are given.",
+		"Keep going until the task is done.",
 		"You are a coding agent. You solve the task by inspecting the code and changing what is needed.",
 		"Done means:",
 		"Bash:",
@@ -106,7 +106,7 @@ func TestTheNativeModePromptIsTheContract(t *testing.T) {
 	}
 	// The sections render in the plan's order.
 	order := []string{
-		"You are an agent.",
+		"Keep going until the task is done.",
 		"You are a coding agent.",
 		"Bash:",
 		"Read:",

@@ -96,7 +96,7 @@ func TestAMissingVariantFallsBackToTheDefault(t *testing.T) {
 	}
 
 	embedded := loadedBase(t, fstest.MapFS{})
-	if got := embedded.WithVariant("small-local").Render(); !strings.Contains(got, "You are an agent.") {
+	if got := embedded.WithVariant("small-local").Render(); !strings.Contains(got, "Keep going until the task is done.") {
 		t.Errorf("the variant without a file is %q, want the embedded base", got)
 	}
 }
