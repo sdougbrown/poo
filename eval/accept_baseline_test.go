@@ -8,10 +8,8 @@ import (
 
 func TestAnAcceptedBaselineHoldsTheReportFilesOnly(t *testing.T) {
 	runDir := t.TempDir()
-	for _, name := range reportFiles {
-		if err := os.WriteFile(filepath.Join(runDir, name), []byte("# "+name+"\n"), 0o644); err != nil {
-			t.Fatalf("writing %s: %v", name, err)
-		}
+	if err := WriteReport(runDir, &Report{}); err != nil {
+		t.Fatalf("writing the run's report: %v", err)
 	}
 	// The run's own scratch: the raw runs and the comparison stay out
 	// of the baseline.
@@ -43,7 +41,11 @@ func TestAnAcceptedBaselineHoldsTheReportFilesOnly(t *testing.T) {
 		if err != nil {
 			t.Fatalf("reading the baseline's %s: %v", name, err)
 		}
-		if string(data) != "# "+name+"\n" {
+		want, err := os.ReadFile(filepath.Join(runDir, name))
+		if err != nil {
+			t.Fatalf("reading the run's %s: %v", name, err)
+		}
+		if string(data) != string(want) {
 			t.Errorf("the baseline's %s is %q, want the run's report", name, data)
 		}
 	}
@@ -106,5 +108,27 @@ func TestAnAcceptRefusesTheBaselineItself(t *testing.T) {
 		if err != nil || string(data) != "kept\n" {
 			t.Fatalf("the baseline's %s = %q, %v; want it left as it was", name, data, err)
 		}
+	}
+}
+
+func TestAnAcceptRefusesAnUnreadableReport(t *testing.T) {
+	runDir := t.TempDir()
+	for _, name := range reportFiles {
+		if err := os.WriteFile(filepath.Join(runDir, name), []byte("not json\n"), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", name, err)
+		}
+	}
+	baseline := filepath.Join(t.TempDir(), "baseline")
+	if err := os.MkdirAll(baseline, 0o755); err != nil {
+		t.Fatalf("making the baseline: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(baseline, reportJSONFile), []byte("kept\n"), 0o644); err != nil {
+		t.Fatalf("writing the baseline: %v", err)
+	}
+	if err := AcceptBaseline(baseline, runDir); err == nil {
+		t.Fatal("AcceptBaseline accepted a report it cannot read")
+	}
+	if data, err := os.ReadFile(filepath.Join(baseline, reportJSONFile)); err != nil || string(data) != "kept\n" {
+		t.Fatalf("the baseline's report = %q, %v; want it left as it was", data, err)
 	}
 }

@@ -27,7 +27,7 @@ Usage:
   poo-eval compare [baseline] <candidate> [flags]
   poo-eval accept <run-dir>
   poo-eval replay <session.jsonl> [flags]
-  poo-eval judge  <results-dir> [flags]
+  poo-eval judge  <run-dir> [flags]
 
 Run flags:
   --models <names>     Comma-separated model names; empty means the whole catalog
@@ -63,7 +63,7 @@ Judge flags:
   --endpoint <url>     The judge's endpoint (default: http://localhost:4000/v1)
   --model <id>         The judge's model (default: deepseek-flash)
   --api-key-env <var>  The environment variable holding the judge's API key
-  --out <dir>          Where the verdicts go (default: <results-dir>/judgments)
+  --out <dir>          Where the verdicts go (default: <run-dir>/judgments)
   --max-chars <n>      The size a transcript may have before it is summarized (default: 60000)
   --max-tokens <n>     The reply budget sent as max_tokens (default: 16384)
 `
@@ -437,7 +437,7 @@ func runJudge(args []string) int {
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		fmt.Fprintf(os.Stderr, "poo-eval judge: a results directory is needed\n\n%s", usage)
+		fmt.Fprintf(os.Stderr, "poo-eval judge: a run directory is needed\n\n%s", usage)
 		return 2
 	}
 	opts.ResultsDir = rest[0]

@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/sdougbrown/poo/eval"
 	"path/filepath"
 	"regexp"
 	"testing"
+
+	"github.com/sdougbrown/poo/eval"
 )
 
 func TestACompareWithoutABaselineComparesAgainstTheAcceptedOne(t *testing.T) {

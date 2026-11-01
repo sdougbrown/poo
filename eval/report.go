@@ -330,6 +330,11 @@ func AcceptBaseline(baseline, runDir string) error {
 	if rel, err := filepath.Rel(base, run); err == nil && (rel == "." || !strings.HasPrefix(rel, "..")) {
 		return fmt.Errorf("eval: %s is the baseline or inside it; accept a run's own directory", runDir)
 	}
+	// A report the compare cannot read would break every later compare
+	// against the baseline, so it is refused before anything changes.
+	if _, err := LoadReport(runDir); err != nil {
+		return fmt.Errorf("eval: %s does not hold a readable report: %w", runDir, err)
+	}
 	files := make(map[string][]byte, len(reportFiles))
 	for _, name := range reportFiles {
 		data, err := os.ReadFile(filepath.Join(runDir, name))
