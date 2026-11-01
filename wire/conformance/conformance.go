@@ -15,10 +15,13 @@
 // forward-compatibility rule: a field a known shape does not have is a
 // failure, unless an announced capability covers it, and an unknown
 // capability key or an unknown event type is tolerated.
+//
+// The fake endpoint is exported. A wire client's tests start the same
+// endpoint the suite runs, script their turns with the suite's answer
+// types, and read back the requests the binary made.
 package conformance
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -430,56 +433,44 @@ func (s *suite) markMarker(marker string) {
 	}
 }
 
+// newEndpoint starts an endpoint that serves the turns and closes it
+// when the test ends.
+func newEndpoint(t interface{ Cleanup(func()) }, turns []ScriptedAnswer) *FakeEndpoint {
+	endpoint := NewFakeEndpoint(turns...)
+	t.Cleanup(endpoint.Close)
+	return endpoint
+}
+
 // settings writes a settings file for a flow and returns its path.
 //
 // The file points the binary at the fake endpoint, names the model and
 // the profile, and puts the session logs in the suite's directory. The
 // extra document holds the settings a flow needs.
-func (s *suite) settings(endpoint *provider, contextLimit int, extra map[string]any) string {
+func (s *suite) settings(endpoint *FakeEndpoint, contextLimit int, extra map[string]any) string {
 	s.t.Helper()
-	document := map[string]any{
-		"version": 1,
-		"endpoints": map[string]any{
-			"fake": map[string]any{"endpoint": endpoint.server.URL + "/v1"},
-		},
-		"models": map[string]any{
-			s.model: map[string]any{
-				"endpoint":      "fake",
-				"model_id":      s.model,
-				"api":           "chat_completions",
-				"tools_mode":    "native",
-				"ops":           []string{"chat"},
-				"context_limit": contextLimit,
-			},
-		},
-		"roles": map[string]any{"chat": s.model},
-		"session": map[string]any{
-			"mode": "logged",
-			"dir":  s.sessions,
-		},
-		"permission": map[string]any{
-			// A side-effecting call no rule covers is asked about, and
-			// the client answers it. The chain gives up after two
-			// seconds, so a client that does not answer does not hold
-			// the run up.
-			"unmatched":       "ask",
-			"fallback":        "allow",
-			"askers":          []string{"wire"},
-			"chain_timeout_s": 2,
-		},
-	}
+	document := map[string]any{}
 	for name, value := range extra {
 		document[name] = value
 	}
-	encoded, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		s.t.Fatalf("encoding the settings: %v", err)
+	document["session"] = map[string]any{
+		"mode": "logged",
+		"dir":  s.sessions,
+	}
+	document["permission"] = map[string]any{
+		// A side-effecting call no rule covers is asked about, and
+		// the client answers it. The chain gives up after two
+		// seconds, so a client that does not answer does not hold
+		// the run up.
+		"unmatched":       "ask",
+		"fallback":        "allow",
+		"askers":          []string{"wire"},
+		"chain_timeout_s": 2,
 	}
 	// Every flow has a settings file of its own: a binary that starts
 	// late must not read the settings of the flow that came after it.
 	s.settingsCount++
 	path := filepath.Join(s.dir, fmt.Sprintf("settings-%d.json", s.settingsCount))
-	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+	if err := endpoint.WriteSettings(path, s.model, contextLimit, document); err != nil {
 		s.t.Fatalf("writing the settings: %v", err)
 	}
 	return path

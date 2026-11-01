@@ -221,6 +221,35 @@ binary that reads an identity before it serves (a socket path, a run id)
 is the case it is for. The value is the target's business, and setting it
 does not change the suite's own environment.
 
+## The fake endpoint
+
+A client's own tests do not need the suite. The fake endpoint the suite
+runs is exported, so a test can drive a real binary against scripted
+turns and read back what the model was asked:
+
+```go
+endpoint := conformance.NewFakeEndpoint(
+	conformance.ScriptedAnswer{Text: "hello from poo"},
+	conformance.ScriptedAnswer{ToolCalls: []conformance.ToolCall{
+		{Name: "bash", Arguments: map[string]any{"command": "echo hi"}},
+	}},
+)
+defer endpoint.Close()
+
+settings := filepath.Join(dir, "settings.json")
+if err := endpoint.WriteSettings(settings, "conformance-model", 32768, nil); err != nil {
+	return err
+}
+// start the binary with `--settings settings` and drive it over its
+// pipes; the endpoint answers the turns in order.
+```
+
+The turns are the suite's `ScriptedAnswer` values: text, streamed
+chunks, tool calls, provider errors, delays. The endpoint serves its
+last turn again when the turns run out, so a test that does not script
+every request still gets an answer. `RequestBodies` returns the bodies
+the endpoint received, in order, and `Close` shuts it down.
+
 ## The closure gate
 
 The point of composing a binary is what it does not link. Keep a test that

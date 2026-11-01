@@ -19,7 +19,7 @@ import (
 // the session it opened.
 func (s *suite) open(turns []ScriptedAnswer, extra map[string]any) (*client, string) {
 	s.t.Helper()
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, extra)
 	c := s.start(settings, endpoint)
 	s.handshake(c)
@@ -654,7 +654,7 @@ func (s *suite) typedResult() {
 			"result": map[string]any{"answer": "the result"},
 		}}}},
 	}
-	endpoint := newProvider(s.t, turns)
+	endpoint := newEndpoint(s.t, turns)
 	settings := s.settings(endpoint, s.contextLimit, extra)
 	c := s.start(settings, endpoint)
 	s.handshake(c)
