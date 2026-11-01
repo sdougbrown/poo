@@ -24,7 +24,8 @@ const usage = `poo-eval runs the poo eval harness.
 
 Usage:
   poo-eval run    [flags]
-  poo-eval compare <baseline> <candidate> [flags]
+  poo-eval compare [baseline] <candidate> [flags]
+  poo-eval accept <run-dir>
   poo-eval replay <session.jsonl> [flags]
   poo-eval judge  <results-dir> [flags]
 
@@ -34,7 +35,7 @@ Run flags:
   --seeds <n>          How many times each task runs against each model (default 3)
   --parallel <n>       How many runs may be in flight at once (default 1, at most 2 per endpoint)
   --max-turns <n>      The turn limit passed to poo (default 50)
-  --out <dir>          Where the report goes (default: evals/results/<date>-<git sha>)
+  --out <dir>          Where the report goes (default: evals/runs/<date>-<git sha>)
   --models-file <path> The model catalog (default: evals/models.yaml)
   --tasks-dir <path>   The task set (default: evals/tasks)
   --fixtures-dir <path> The fixtures (default: the fixtures directory beside the task set)
@@ -47,6 +48,12 @@ Run flags:
 
 Compare flags:
   --out <dir>          Where the comparison goes (default: the candidate's directory)
+
+The compare baseline defaults to the accepted baseline at evals/baseline;
+two directory arguments name the baseline and the candidate explicitly.
+
+Accept takes a run's directory and copies its report files into
+evals/baseline, replacing the accepted baseline.
 
 Replay flags:
   --context-limit <n>  The context window the replay uses (default: the recording's)
@@ -76,6 +83,8 @@ func run(args []string) int {
 		return runRun(args[1:])
 	case "compare":
 		return runCompare(args[1:])
+	case "accept":
+		return runAccept(args[1:])
 	case "replay":
 		return runReplay(args[1:])
 	case "judge":
@@ -172,7 +181,7 @@ func runRun(args []string) int {
 		o.fixturesDir = eval.DefaultFixtureRoot(o.tasksDir)
 	}
 	if o.out == "" {
-		o.out = filepath.Join(root, "evals", "results", defaultRunName(root))
+		o.out = defaultOutDir(root)
 	}
 	if o.pooBinary == "" {
 		o.pooBinary = pooBinaryPath()
@@ -276,18 +285,23 @@ func runCompare(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	rest := fs.Args()
-	if len(rest) != 2 {
-		fmt.Fprintf(os.Stderr, "poo-eval compare: a baseline and a candidate are needed\n\n%s", usage)
+	root, err := repoRoot()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
+		return 2
+	}
+	baselinePath, candidatePath, ok := comparePaths(root, fs.Args())
+	if !ok {
+		fmt.Fprintf(os.Stderr, "poo-eval compare: a baseline and a candidate are needed, or a candidate alone to compare against the accepted baseline\n\n%s", usage)
 		return 2
 	}
 
-	baseline, err := eval.LoadReport(rest[0])
+	baseline, err := eval.LoadReport(baselinePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
 		return 1
 	}
-	candidate, err := eval.LoadReport(rest[1])
+	candidate, err := eval.LoadReport(candidatePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
 		return 1
@@ -295,7 +309,7 @@ func runCompare(args []string) int {
 
 	cmp := eval.Compare(baseline, candidate)
 	if out == "" {
-		out = filepath.Join(rest[1], "comparison")
+		out = filepath.Join(candidatePath, "comparison")
 	}
 	if err := eval.WriteComparison(out, cmp); err != nil {
 		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
@@ -306,6 +320,49 @@ func runCompare(args []string) int {
 		len(cmp.Regressions), len(cmp.Improvements), filepath.Join(out, "comparison.md"))
 	// A regression is a signal for the stage's author, not a broken
 	// command, so the exit code stays zero.
+	return 0
+}
+
+// comparePaths resolves a compare invocation's two report directories.
+//
+// One argument names the candidate, and the baseline is the accepted
+// one. Two arguments name the baseline and the candidate.
+func comparePaths(root string, args []string) (baseline, candidate string, ok bool) {
+	switch len(args) {
+	case 1:
+		return baselineDir(root), args[0], true
+	case 2:
+		return args[0], args[1], true
+	default:
+		return "", "", false
+	}
+}
+
+// runAccept executes `poo-eval accept`.
+func runAccept(args []string) int {
+	fs := flag.NewFlagSet("poo-eval accept", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		fmt.Fprintf(os.Stderr, "poo-eval accept: a run's directory is needed\n\n%s", usage)
+		return 2
+	}
+
+	root, err := repoRoot()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
+		return 2
+	}
+	baseline := baselineDir(root)
+	if err := eval.AcceptBaseline(baseline, rest[0]); err != nil {
+		fmt.Fprintf(os.Stderr, "poo-eval: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "poo-eval: the accepted baseline is %s's report: %s\n", rest[0], baseline)
 	return 0
 }
 
@@ -404,6 +461,16 @@ func runJudge(args []string) int {
 	fmt.Fprintf(os.Stderr, "poo-eval: judged %d transcript(s), %d need the owner; verdicts: %s\n",
 		len(result.Verdicts), flagged, filepath.Join(result.OutDir, "summary.md"))
 	return 0
+}
+
+// baselineDir returns the repository's accepted baseline directory.
+func baselineDir(root string) string {
+	return filepath.Join(root, "evals", "baseline")
+}
+
+// defaultOutDir returns the directory a run's report goes to.
+func defaultOutDir(root string) string {
+	return filepath.Join(root, "evals", "runs", defaultRunName(root))
 }
 
 // defaultRunName returns the name a run's report directory gets.

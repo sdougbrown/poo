@@ -297,6 +297,39 @@ func WriteReport(dir string, report *Report) error {
 	return nil
 }
 
+// reportFiles are the files of a run's report that a baseline holds.
+var reportFiles = []string{"report.json", "report.md", "summary.json"}
+
+// AcceptBaseline replaces a baseline directory with a run's report files.
+//
+// The baseline holds the report's files and nothing else: the raw runs
+// and the comparisons stay where the run wrote them. A directory that
+// does not hold a run's report is refused, and the baseline is left as
+// it was.
+func AcceptBaseline(baseline, runDir string) error {
+	for _, name := range reportFiles {
+		if _, err := os.Stat(filepath.Join(runDir, name)); err != nil {
+			return fmt.Errorf("eval: %s does not hold a run's report: %w", runDir, err)
+		}
+	}
+	if err := os.RemoveAll(baseline); err != nil {
+		return fmt.Errorf("eval: removing %s: %w", baseline, err)
+	}
+	if err := os.MkdirAll(baseline, 0o755); err != nil {
+		return fmt.Errorf("eval: creating %s: %w", baseline, err)
+	}
+	for _, name := range reportFiles {
+		data, err := os.ReadFile(filepath.Join(runDir, name))
+		if err != nil {
+			return fmt.Errorf("eval: reading %s: %w", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(baseline, name), data, 0o644); err != nil {
+			return fmt.Errorf("eval: writing %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // RenderMarkdown renders a report as a markdown table.
 //
 // The table has one row per model and one per task, plus a row for the

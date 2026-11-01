@@ -14,7 +14,9 @@
 //   - The metrics: everything computed from a session log, which is the only
 //     source of truth about a run.
 //   - The report: JSON plus a markdown table, written under
-//     evals/results/<date>-<git sha>.
+//     evals/runs/<date>-<git sha>, an ignored directory. The accepted
+//     baseline lives at evals/baseline, and accept replaces it with a
+//     run's report files.
 //   - Compare: two reports, and the noise floor that decides whether a
 //     difference is a regression.
 //   - Replay: a recorded session, re-run through the current harness with a
