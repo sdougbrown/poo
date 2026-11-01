@@ -104,7 +104,8 @@ func (s *server) answerNewSession(req protocol.Request, entry *session, obs *obs
 	// moment it reads the response must find it.
 	s.register(entry)
 	if rerr := s.respondResult(req, sessionInfoOf(entry)); rerr != nil {
-		s.removeSession(entry.id)
+		// The session stays registered, so closing the server still
+		// closes it and releases its store.
 		return nil, rerr
 	}
 	obs.attach(entry)
