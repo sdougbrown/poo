@@ -16,6 +16,7 @@ func (s *server) initializeResult(version int) any {
 		ProtocolVersion: version,
 		Build:           s.opts.Build,
 		Profiles:        s.factory.Profiles(),
+		DefaultProfile:  s.factory.DefaultProfile(),
 		Models:          s.factory.Roles(),
 		Capabilities:    s.factory.Capabilities(),
 	}

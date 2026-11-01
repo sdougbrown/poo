@@ -243,6 +243,7 @@ func Run(t *testing.T, target Target) Report {
 	s.sessions = filepath.Join(s.dir, "sessions")
 
 	s.flow("spawn", s.spawn)
+	s.flow("default profile", s.defaultProfile)
 	s.flow("prompt and stream", s.promptAndStream)
 	s.flow("status and wait", s.statusAndWait)
 	s.flow("permission gate", s.permissionGate)
