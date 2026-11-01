@@ -213,3 +213,26 @@ func TestTheWarningFiresForAnAskRule(t *testing.T) {
 		t.Fatal("the load printed no warning, want one: a rule asks")
 	}
 }
+
+// deadAsker is an asker that can never answer, like a model asker with
+// no decider.
+type deadAsker struct{ fakeAsker }
+
+// CanEverAnswer reports that the asker never answers.
+func (a *deadAsker) CanEverAnswer() bool { return false }
+
+// TestTheWireClientWarningFiresBesideAnAskerThatCannotAnswer covers a
+// chain whose other asker can never answer: every ask still falls back,
+// so the client is warned.
+func TestTheWireClientWarningFiresBesideAnAskerThatCannotAnswer(t *testing.T) {
+	client := &fakeClient{connected: true}
+	askers := []perm.Asker{perm.NewWireAsker(client, 0), &deadAsker{}}
+	policy, err := perm.New(perm.Options{Unmatched: perm.ActionAsk, Askers: askers})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+
+	if warning := perm.WireClientWarning(policy, policy.Askers(), client); !strings.Contains(warning, "permission_answers") {
+		t.Errorf("the session warned %q, want the capability named: the other asker never answers", warning)
+	}
+}
