@@ -460,7 +460,12 @@ func (s *server) respond(req protocol.Request, result any, rerr *protocol.Error)
 		s.respondError(req.ID, rerr)
 		return
 	}
-	_ = s.respondResult(req, result)
+	if rerr := s.respondResult(req, result); rerr != nil {
+		// A result that cannot be encoded is still answered: the client
+		// hears the failure instead of waiting for an answer that never
+		// comes.
+		s.respondError(req.ID, rerr)
+	}
 }
 
 // respondResult queues the answer to a request.
