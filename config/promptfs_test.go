@@ -50,7 +50,7 @@ func TestABinarysPromptDirectoryReplacesTheDefaults(t *testing.T) {
 			t.Errorf("the prompt does not hold %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "You are a coding agent.") {
+	if strings.Contains(text, "You are an agent.") {
 		t.Errorf("the prompt still holds the embedded base:\n%s", text)
 	}
 }

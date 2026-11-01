@@ -54,6 +54,23 @@ func TestTheSearchPromptHasNoBashGuidance(t *testing.T) {
 	}
 }
 
+// TestTheReadOnlyPromptHasNoCodingAgentText covers the move: the
+// coding-agent guidance belongs to the code profile's own section, so
+// a read-only profile's prompt carries none of it.
+func TestTheReadOnlyPromptHasNoCodingAgentText(t *testing.T) {
+	got := promptFor(t, "search")
+	for _, needle := range []string{
+		"coding agent",
+		"Inspect before you edit",
+		"smallest change",
+		"Verify the change",
+	} {
+		if strings.Contains(got, needle) {
+			t.Errorf("the read-only prompt carries coding-agent text: %q is in\n%s", needle, got)
+		}
+	}
+}
+
 // promptFor returns the prompt of a profile.
 func promptFor(t *testing.T, name string) string {
 	t.Helper()

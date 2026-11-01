@@ -8,6 +8,8 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/profile/code"
+	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/read"
 )
@@ -34,8 +36,13 @@ func sessionPrompt(t *testing.T, modelID, toolsMode, project string) string {
 
 // sessionPromptWith is sessionPrompt with the tool specs the text mode
 // names.
+//
+// The profile's own section is applied the way the build applies it:
+// the command's sessions run under the code profile, and the profile's
+// prose comes with it.
 func sessionPromptWith(t *testing.T, modelID string, toolSpecs []poo.ToolSpec, toolsMode, project string) string {
 	t.Helper()
+	profilePrompt := code.Profile().Prompt
 	tr := pootest.NewTransport(pootest.Turn{Text: "done"})
 	s, err := poo.New(poo.Options{
 		Transport:  tr,
@@ -46,7 +53,8 @@ func sessionPromptWith(t *testing.T, modelID string, toolSpecs []poo.ToolSpec, t
 		WorkingDir: t.TempDir(),
 		Env:        os.Environ(),
 		ToolsMode:  toolsMode,
-	}, poo.WithPrompt(systemPrompt(modelID, toolSpecs, toolsMode, project)))
+	}, poo.WithPrompt(func(b *prompt.Builder) { b.Set(prompt.ProfileSection, profilePrompt) }),
+		poo.WithPrompt(systemPrompt(modelID, toolSpecs, toolsMode, project)))
 	if err != nil {
 		t.Fatalf("building the session: %v", err)
 	}
@@ -79,6 +87,7 @@ func TestTheNativeModePromptIsTheContract(t *testing.T) {
 	prompt := sessionPrompt(t, "gemma4", "native", "")
 
 	for _, want := range []string{
+		"You are an agent. You solve the task through the tools you are given.",
 		"You are a coding agent. You solve the task by inspecting the code and changing what is needed.",
 		"Done means:",
 		"Bash:",
@@ -97,6 +106,7 @@ func TestTheNativeModePromptIsTheContract(t *testing.T) {
 	}
 	// The sections render in the plan's order.
 	order := []string{
+		"You are an agent.",
 		"You are a coding agent.",
 		"Bash:",
 		"Read:",

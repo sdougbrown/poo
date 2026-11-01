@@ -8,13 +8,13 @@ import (
 )
 
 // The system prompt is assembled from named sections, and the builder
-// renders them in the order the plan fixes: the base, the tools, the
-// catalog, the environment and the project, and then the sections of
-// the consumer's own.
+// renders them in the order the plan fixes: the base, the profile's
+// own, the tools, the catalog, the environment and the project, and
+// then the sections of the consumer's own.
 //
 // The sections below are the ones this command sends. The base is the
-// operating contract, in the shape mini-swe-agent uses, and the tools
-// bring their own guidance.
+// operating contract, and the profile's own section is the code
+// profile's coding-agent guidance; the tools bring their own guidance.
 
 //go:embed environment.md
 var environmentText string

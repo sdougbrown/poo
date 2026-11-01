@@ -10,10 +10,24 @@
 // the settings or with the command line.
 package code
 
-import "github.com/sdougbrown/poo/profile"
+import (
+	_ "embed"
+
+	"github.com/sdougbrown/poo/profile"
+)
 
 // Name is the profile's name.
 const Name = "code"
+
+// promptText is the profile's own prompt section, as the model reads
+// it.
+//
+// The coding-agent guidance lives here and not in the prompt package's
+// base: a profile with no tools of its own renders no prose about
+// editing code.
+//
+//go:embed prompt.md
+var promptText string
 
 // Profile returns the code profile.
 //
@@ -24,5 +38,6 @@ func Profile() profile.Profile {
 		Name:      Name,
 		Tools:     []string{"bash", "read", "grep", "edit"},
 		Unmatched: "allow",
+		Prompt:    promptText,
 	}
 }
