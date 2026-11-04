@@ -1,0 +1,206 @@
+package config_test
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/pootest"
+)
+
+// The runtime's feeds: the manifest a settings file names is a command
+// the session runs, beside the session, for as long as the session is
+// open.
+
+// feedScript returns the absolute path of one fixture feed.
+//
+// The scripts are the feed package's own: the runtime runs the same
+// commands the runner's tests run, so a change to the protocol is a
+// change both packages see.
+func feedScript(t *testing.T, name string) string {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("..", "feed", "testdata", "bin", name))
+	if err != nil {
+		t.Fatalf("resolving the fixture feed %q: %v", name, err)
+	}
+	return path
+}
+
+// feedRunManifest writes a manifest with one long-lived feed and returns
+// its path.
+func feedRunManifest(t *testing.T, name, script, description string, env map[string]string) string {
+	t.Helper()
+	feed := map[string]any{
+		"description": description,
+		"command":     []string{feedScript(t, script)},
+		"on_idle":     "wake",
+	}
+	if env != nil {
+		feed["env"] = env
+	}
+	encoded, err := json.Marshal(map[string]any{"version": 1, "feeds": map[string]any{name: feed}})
+	if err != nil {
+		t.Fatalf("encoding the manifest: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "feeds.json")
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatalf("writing the manifest: %v", err)
+	}
+	return path
+}
+
+// waitUntil waits for a condition, so a test does not sleep for a guess.
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// theModelRead reports whether the model's requests carry a message with
+// this text and origin.
+func theModelRead(tr *pootest.Transport, text string, origin poo.Origin) bool {
+	for _, request := range tr.Requests() {
+		for _, message := range request.Messages {
+			if message.Origin != origin || len(message.Content) == 0 {
+				continue
+			}
+			if message.Content[0].Text == text {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestASessionRunsTheFeedItsSettingsName covers the runtime: the feed's
+// process runs beside the session, its message reaches the model under
+// the feed's origin, the session lists the feed with the jobs, and the
+// prompt says the feed exists.
+func TestASessionRunsTheFeedItsSettingsName(t *testing.T) {
+	workDir := t.TempDir()
+	manifest := feedRunManifest(t, "chat", "chat", "Messages from the fixture feed.", nil)
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+	transport := pootest.NewTransport(pootest.Turn{Text: "the answer"}, pootest.Turn{Text: "the answer"})
+	runtime.Options.Transport = transport
+
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			CreatedAt:  "2026-11-04T12:00:00Z",
+			WorkingDir: workDir,
+
+			Profile: "code",
+			Tools:   runtime.Profile.Tools, Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
+	}
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+
+	// The feed's first message wakes an idle run, and the model reads it
+	// as the feed's input.
+	waitUntil(t, "the feed's message in the model's view", func() bool {
+		return theModelRead(transport, "[feed chat · from alice: the first message]", poo.FeedOrigin("chat"))
+	})
+
+	// The feed is a job-shaped entry, under its origin and the feed tool.
+	listed := false
+	for _, job := range sess.Jobs() {
+		if job.JobID != "feed:chat" {
+			continue
+		}
+		listed = true
+		if job.Tool != poo.FeedToolName {
+			t.Errorf("the feed is listed as the tool %q, want %q", job.Tool, poo.FeedToolName)
+		}
+	}
+	if !listed {
+		t.Errorf("the session does not list the feed: %v", sess.Jobs())
+	}
+
+	// The prompt says the feed is there, and what it is for.
+	if text := sess.PromptState().Text; !strings.Contains(text, "chat: Messages from the fixture feed.") {
+		t.Errorf("the prompt does not list the feed: %q", text)
+	}
+}
+
+// TestTheSettingsExecutorRunsTheFeedCommand covers the executor: a
+// session that runs a feed builds the executor its settings name, and
+// hands it to the feed, the same way the tools get it.
+func TestTheSettingsExecutorRunsTheFeedCommand(t *testing.T) {
+	manifest := feedRunManifest(t, "chat", "chat", "Messages from the fixture feed.", nil)
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\ntools:\n  bash:\n    executor: bwrap\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), sandboxExecutors())
+	defer runtime.Store.Close()
+	if runtime.Executor == nil {
+		t.Fatal("the build kept no executor for the feed")
+	}
+	if got := runtime.Executor.Name(); got != "bwrap" {
+		t.Errorf("the feed's executor is %q, want the one the settings name", got)
+	}
+	if len(runtime.FeedSpecs) != 1 || runtime.FeedSpecs[0].Name != "chat" {
+		t.Errorf("the build ran %v, want the chat feed", runtime.FeedSpecs)
+	}
+}
+
+// TestAFeedCannotReachAScrubbedVariable covers the environment: the
+// manifest's reference reads the session's scrubbed environment, so a
+// name the settings scrub is not there for a feed's command, and the
+// attempt fails rather than starting with half an environment.
+func TestAFeedCannotReachAScrubbedVariable(t *testing.T) {
+	t.Setenv("POO_FIXTURE_SECRET", "the secret")
+	manifest := feedRunManifest(t, "echoenv", "echoenv", "The fixture's environment.", map[string]string{
+		"FIXTURE_ECHO": "env:POO_FIXTURE_SECRET",
+	})
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"session:\n  dir: "+t.TempDir()+"\ntools:\n  env:\n    scrub: [POO_FIXTURE_SECRET]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+	if len(runtime.FeedSpecs) != 1 {
+		t.Fatalf("the build ran %v, want the one feed", runtime.FeedSpecs)
+	}
+
+	emitted := 0
+	err = runtime.FeedSpecs[0].Run(context.Background(), poo.FeedIO{
+		Emit: func(string, string) error {
+			emitted++
+			return nil
+		},
+		Log: slog.New(slog.DiscardHandler),
+	})
+	if err == nil {
+		t.Fatal("the feed started with a variable the settings scrub")
+	}
+	if !strings.Contains(err.Error(), "POO_FIXTURE_SECRET") {
+		t.Errorf("the attempt failed with %q, want it to name the variable", err)
+	}
+	if emitted != 0 {
+		t.Errorf("the command ran anyway and emitted %d inputs", emitted)
+	}
+}

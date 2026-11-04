@@ -146,6 +146,13 @@ type Runtime struct {
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
+	// FeedSpecs are the feeds the session runs, built from the
+	// manifests, or nil when the settings name none.
+	FeedSpecs []poo.FeedSpec
+	// Executor is the executor the commands run through: the tools
+	// that run one, and the feeds. It is nil when nothing runs a
+	// command.
+	Executor exec.Executor
 	// deciderModel is the model the session's decider asks, when there
 	// is one.
 	deciderModel poo.ModelInfo
@@ -291,6 +298,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 		return nil, err
 	}
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
+		return nil, err
+	}
+	if err := runtime.resolveFeedRuns(workingDir); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolvePolicy(opts, workingDir); err != nil {
@@ -536,13 +546,18 @@ func offersSideEffects(tools []poo.ToolInfo) bool {
 	return false
 }
 
-// needsExecutor reports whether an offered tool runs a command.
+// needsExecutor reports whether an offered tool or a configured feed
+// runs a command.
 //
 // bash and call_cli run a command through the executor, so a session that
-// offers either one builds it; a read-only profile builds none, and a
-// settings file naming an executor this binary lacks is only an error when
-// something would run in it.
+// offers either one builds it; a feed is a command of its own, so a
+// session that runs one builds it too. A read-only profile with no feeds
+// builds none, and a settings file naming an executor this binary lacks is
+// only an error when something would run in it.
 func (r *Runtime) needsExecutor() bool {
+	if r.Feeds.Len() > 0 {
+		return true
+	}
 	for _, name := range r.toolNames {
 		if name == ToolBash || name == cli.CallToolName {
 			return true
@@ -827,6 +842,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 			}
 		}
 		toolOptions.Executor = executor
+		r.Executor = executor
 	}
 	tools := map[string]poo.Tool{}
 	var order []string
@@ -842,6 +858,88 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	r.Options.Tools = tools
 	r.Options.ToolOrder = order
 	return nil
+}
+
+// resolveFeedRuns builds the feeds the session runs.
+//
+// A feed is a command of the session's own, so it runs the way the
+// session's other commands do: through the executor the settings name,
+// in the directory the session works in, with the session's scrubbed
+// environment behind the manifest's own entries. A name the settings
+// scrub is not there for a manifest's `env:` reference to reach.
+//
+// The feeds are the session's options, so a new session and a restored
+// one run them alike.
+func (r *Runtime) resolveFeedRuns(workingDir string) error {
+	if r.Feeds.Len() == 0 {
+		return nil
+	}
+	if r.Executor == nil {
+		return &Error{
+			Code:    CodeUnsupported,
+			Field:   "feeds.paths",
+			Message: "this binary has no executor to run a feed's command",
+		}
+	}
+	lookup := envLookup(r.Env)
+	specs := make([]poo.FeedSpec, 0, r.Feeds.Len())
+	for _, spec := range r.Feeds.Specs() {
+		onIdle, err := onIdleOf(spec.OnIdle)
+		if err != nil {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "feeds.paths",
+				Message: fmt.Sprintf("the feed %q does not say when it may wake a run", spec.Name),
+				Err:     err,
+			}
+		}
+		specs = append(specs, poo.FeedSpec{
+			Name:        spec.Name,
+			Description: spec.Description,
+			Run:         feed.Runner(spec, r.Executor, lookup, workingDir),
+			Restart:     spec.Restart,
+			OnIdle:      onIdle,
+		})
+	}
+	r.FeedSpecs = specs
+	r.Options.Feeds = specs
+	return nil
+}
+
+// onIdleOf maps a manifest's on_idle onto the core's idle policy.
+//
+// The values are the loader's and the core's are its own, so the mapping
+// is one switch here: a value either side gains without the other fails
+// the build rather than being passed along or ignored.
+func onIdleOf(value string) (poo.OnIdle, error) {
+	switch value {
+	case "":
+		return "", nil
+	case feed.OnIdleWake:
+		return poo.OnIdleWake, nil
+	case feed.OnIdleHold:
+		return poo.OnIdleHold, nil
+	}
+	return "", fmt.Errorf("the on_idle %q is neither %q nor %q", value, feed.OnIdleWake, feed.OnIdleHold)
+}
+
+// envLookup returns a lookup over an environment's NAME=value entries.
+//
+// A feed's manifest resolves its `env:NAME` references through it,
+// against the session's own environment, less what the settings scrub.
+func envLookup(environ []string) func(string) (string, bool) {
+	values := make(map[string]string, len(environ))
+	for _, entry := range environ {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		values[name] = value
+	}
+	return func(name string) (string, bool) {
+		value, ok := values[name]
+		return value, ok
+	}
 }
 
 // resolvePolicy builds the permission policy and its asker chain.
