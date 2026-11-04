@@ -178,14 +178,25 @@ func TestADeliveryNoteOfZeroSaysNothingWasSeen(t *testing.T) {
 // TestAnUnknownMessageIDIsRefused covers the plan's rule: an unknown id
 // is refused, and nothing is queued.
 func TestAnUnknownMessageIDIsRefused(t *testing.T) {
-	tr := scripted([]fakeResponse{{text: "the answer"}})
+	tr := scripted([]fakeResponse{
+		{
+			calls: []poo.ToolCall{{
+				CallID:    "call_1",
+				Name:      "echo",
+				Arguments: []byte(`{"text":"hello"}`),
+			}},
+		},
+		{text: "the second answer"},
+	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
+	hold := newNoteHold(tool)
 
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	hold.wait(t)
 	_, err := s.Send("and this", poo.Steer, poo.WithDelivered("m999", 5))
 	if err == nil {
 		t.Fatal("the session accepted a note for an unknown message")
@@ -198,6 +209,7 @@ func TestAnUnknownMessageIDIsRefused(t *testing.T) {
 	if sink.count("input.queued") != 0 {
 		t.Errorf("the log holds %d input.queued records, want none", sink.count("input.queued"))
 	}
+	hold.finish()
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
@@ -206,13 +218,24 @@ func TestAnUnknownMessageIDIsRefused(t *testing.T) {
 // TestANegativeCharacterCountIsRefused covers the other half of the
 // rule: a negative count is refused.
 func TestANegativeCharacterCountIsRefused(t *testing.T) {
-	tr := scripted([]fakeResponse{{text: "the answer"}})
+	tr := scripted([]fakeResponse{
+		{
+			calls: []poo.ToolCall{{
+				CallID:    "call_1",
+				Name:      "echo",
+				Arguments: []byte(`{"text":"hello"}`),
+			}},
+		},
+		{text: "the second answer"},
+	})
 	tool := &echoTool{result: "echoed"}
+	hold := newNoteHold(tool)
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	hold.wait(t)
 	_, err := s.Send("and this", poo.Steer, poo.WithDelivered("m1", -1))
 	if err == nil {
 		t.Fatal("the session accepted a negative character count")
@@ -221,6 +244,7 @@ func TestANegativeCharacterCountIsRefused(t *testing.T) {
 	if !asInvalidInput(err, &invalid) {
 		t.Fatalf("the error is %T, want an ErrInvalidInput", err)
 	}
+	hold.finish()
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
