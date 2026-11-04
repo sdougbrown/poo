@@ -20,6 +20,10 @@ import (
 
 // FeedIO is what a feed's runner may use.
 type FeedIO struct {
+	// Dir is the session's working directory, where the feed's process
+	// runs. The session hands over its own: the directory a new session
+	// was created in, or, for a restored session, the recorded one.
+	Dir string
 	// Emit queues one input. It returns the session's refusal
 	// (ErrSessionClosed, ErrSessionBroken, a store error); the runner
 	// stops and returns that error.
@@ -372,6 +376,7 @@ func (s *Session) runFeedAttempt(f *feedState, attempt int) (err error) {
 		}
 	}()
 	return f.spec.Run(f.ctx, FeedIO{
+		Dir: s.opts.WorkingDir,
 		Emit: func(from, text string) error {
 			return s.emitFeedInput(f, attempt, from, text)
 		},

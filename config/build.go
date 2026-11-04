@@ -300,7 +300,7 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
 		return nil, err
 	}
-	if err := runtime.resolveFeedRuns(workingDir); err != nil {
+	if err := runtime.resolveFeedRuns(); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolvePolicy(opts, workingDir); err != nil {
@@ -870,7 +870,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 //
 // The feeds are the session's options, so a new session and a restored
 // one run them alike.
-func (r *Runtime) resolveFeedRuns(workingDir string) error {
+func (r *Runtime) resolveFeedRuns() error {
 	if r.Feeds.Len() == 0 {
 		return nil
 	}
@@ -899,8 +899,11 @@ func (r *Runtime) resolveFeedRuns(workingDir string) error {
 			Description: spec.Description,
 			Restart:     spec.Restart,
 			OnIdle:      onIdle,
+			// The session hands its own working directory to the run
+			// it calls, so a session created in another directory
+			// than the build's runs its feed there.
 			Run: func(ctx context.Context, io poo.FeedIO) error {
-				return run(ctx, workingDir, io.Emit, io.Log)
+				return run(ctx, io.Dir, io.Emit, io.Log)
 			},
 		})
 	}

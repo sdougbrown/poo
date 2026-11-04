@@ -1,0 +1,3 @@
+#!/bin/sh
+# A fixture feed: it emits the directory its process runs in.
+printf '{"text": "%s"}\n' "$(pwd)"

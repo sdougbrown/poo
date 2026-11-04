@@ -145,6 +145,51 @@ func TestASessionRunsTheFeedItsSettingsName(t *testing.T) {
 	}
 }
 
+// TestASessionRunsItsFeedInItsOwnDirectory covers the directory: a feed
+// runs where its session works, not where the binary's build was made, so
+// a session created in another directory reads that directory. The
+// fixture prints the directory its process runs in as the message's text.
+func TestASessionRunsItsFeedInItsOwnDirectory(t *testing.T) {
+	sessionDir := t.TempDir()
+	want, err := filepath.EvalSymlinks(sessionDir)
+	if err != nil {
+		t.Fatalf("resolving the session's directory: %v", err)
+	}
+	manifest := feedRunManifest(t, "here", "pwd", "The directory the feed runs in.", nil)
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	// The build's own directory is another one: the feed's directory is
+	// the session's, and a runner that ran where the build put it would
+	// print the build's.
+	runtime := build(t, settings, config.Overrides{})
+	defer runtime.Store.Close()
+	transport := pootest.NewTransport(pootest.Turn{Text: "the answer"}, pootest.Turn{Text: "the answer"})
+	runtime.Options.Transport = transport
+
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "logged",
+			CreatedAt:  "2026-11-04T12:00:00Z",
+			WorkingDir: sessionDir,
+
+			Profile: "code",
+			Tools:   runtime.Profile.Tools, Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
+	}
+	sess, err := runtime.CreateSession(context.Background(), runtime.Store, created)
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+
+	waitUntil(t, "the feed's message in the model's view", func() bool {
+		return theModelRead(transport, "[feed here: "+want+"]", poo.FeedOrigin("here"))
+	})
+}
+
 // TestTheSettingsExecutorRunsTheFeedCommand covers the executor: a
 // session that runs a feed builds the executor its settings name, and
 // hands it to the feed, the same way the tools get it.

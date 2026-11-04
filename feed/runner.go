@@ -29,7 +29,9 @@ var silentLogger = slog.New(slog.DiscardHandler)
 
 // Run is one attempt of a feed's process.
 //
-// dir is the directory the command runs in.
+// dir is the directory the command runs in. The session passes its own
+// working directory at the call, so a feed follows the session it runs
+// beside rather than the directory the binary was built in.
 type Run func(ctx context.Context, dir string, emit func(from, text string) error, log *slog.Logger) error
 
 // Runner returns the run that runs one attempt of a feed's command.
