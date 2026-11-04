@@ -16,11 +16,11 @@ import (
 // lists them, stops them, restarts them after a failure and ends every
 // attempt exactly once.
 
-// feedEnd returns the nth feed.ended record the sink kept, counting from
+// feedEnd returns the nth feed.ended record a log holds, counting from
 // one, or nil when the log holds fewer.
-func feedEnd(sink *recordingSink, n int) *poo.FeedEndedRecord {
+func feedEnd(records []poo.Record, n int) *poo.FeedEndedRecord {
 	var ends []*poo.FeedEndedRecord
-	for _, rec := range sink.allRecords() {
+	for _, rec := range records {
 		if ended, ok := rec.(*poo.FeedEndedRecord); ok {
 			ends = append(ends, ended)
 		}
@@ -165,7 +165,7 @@ func TestCancelJobStopsAFeed(t *testing.T) {
 	waitFor(t, "the feed to end", func() bool {
 		return sink.count("feed.ended") == 1
 	})
-	ended := feedEnd(sink, 1)
+	ended := feedEnd(sink.allRecords(), 1)
 	if ended.Outcome != poo.FeedCancelled {
 		t.Errorf("the attempt ended %q, want %q", ended.Outcome, poo.FeedCancelled)
 	}
@@ -179,6 +179,14 @@ func TestCancelJobStopsAFeed(t *testing.T) {
 	}
 	if jobs := s.Jobs(); len(jobs) != 0 {
 		t.Errorf("the session still lists the cancelled feed: %v", jobs)
+	}
+	// The feed is stopped, so a second cancel of it names no job, and
+	// neither does one that names a feed the session never had.
+	if err := s.CancelJob("feed:inbox"); !errors.Is(err, poo.ErrUnknownJob) {
+		t.Errorf("cancelling the stopped feed returned %v, want ErrUnknownJob", err)
+	}
+	if err := s.CancelJob("feed:nobody"); !errors.Is(err, poo.ErrUnknownJob) {
+		t.Errorf("cancelling an unknown feed returned %v, want ErrUnknownJob", err)
 	}
 }
 
@@ -197,7 +205,7 @@ func TestAFailingFeedEndsOnceAndDoesNotRestart(t *testing.T) {
 	waitFor(t, "the feed to end", func() bool {
 		return sink.count("feed.ended") == 1
 	})
-	ended := feedEnd(sink, 1)
+	ended := feedEnd(sink.allRecords(), 1)
 	if ended.Outcome != poo.FeedFailed {
 		t.Errorf("the attempt ended %q, want %q", ended.Outcome, poo.FeedFailed)
 	}
@@ -239,7 +247,7 @@ func TestARestartingFeedWaitsForTheBackoff(t *testing.T) {
 	waitFor(t, "the second attempt", func() bool {
 		return sink.count("feed.started") == 2
 	})
-	ended := feedEnd(sink, 1)
+	ended := feedEnd(sink.allRecords(), 1)
 	if ended == nil {
 		t.Fatal("the log holds no feed.ended record for the first attempt")
 	}
@@ -310,7 +318,7 @@ func TestTheCloseEndsAFeedOnce(t *testing.T) {
 	if n := sink.count("feed.ended"); n != 1 {
 		t.Fatalf("the close wrote %d feed.ended records, want 1", n)
 	}
-	ended := feedEnd(sink, 1)
+	ended := feedEnd(sink.allRecords(), 1)
 	if ended.Outcome != poo.FeedSessionClosed {
 		t.Errorf("the attempt ended %q, want %q", ended.Outcome, poo.FeedSessionClosed)
 	}
@@ -333,7 +341,7 @@ func TestAPanickingFeedEndsFailed(t *testing.T) {
 	waitFor(t, "the feed to end", func() bool {
 		return sink.count("feed.ended") == 1
 	})
-	ended := feedEnd(sink, 1)
+	ended := feedEnd(sink.allRecords(), 1)
 	if ended.Outcome != poo.FeedFailed {
 		t.Errorf("the attempt ended %q, want %q", ended.Outcome, poo.FeedFailed)
 	}
@@ -503,5 +511,225 @@ func TestTheRestoreStartsFeedsAfterThePendingInputs(t *testing.T) {
 	// The feed's first input joined it.
 	if len(held[1].Jobs) != 2 || held[1].Jobs[0] != "feed:digest" || held[1].Jobs[1] != "feed:inbox" {
 		t.Errorf("the feed's hold names %v, want [feed:digest feed:inbox]", held[1].Jobs)
+	}
+}
+
+// TestTheCloseIsBoundedWithAStuckFeed covers the close's bound: the
+// teardown is one deadline for the whole wait, so a runner that ignores
+// its context never holds the close up, and its attempt is recorded as
+// session_closed exactly once.
+func TestTheCloseIsBoundedWithAStuckFeed(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	gate := make(chan struct{})
+	started := make(chan struct{})
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
+		Name: "inbox",
+		Run: func(ctx context.Context, io poo.FeedIO) error {
+			close(started)
+			<-gate
+			return nil
+		},
+	}))
+	<-started
+	poo.SetRecordWriteBudget(s, 50*time.Millisecond)
+	done := make(chan error, 1)
+	go func() { done <- s.Close() }()
+	select {
+	case err := <-done:
+		close(gate)
+		if err != nil {
+			t.Errorf("closing: %v", err)
+		}
+	case <-time.After(6 * time.Second):
+		close(gate)
+		<-done
+		t.Fatal("Close still blocked after 6s with a stuck feed; the teardown bound must cover the wait")
+	}
+	if n := sink.count("feed.ended"); n != 1 {
+		t.Fatalf("the log holds %d feed.ended records, want 1", n)
+	}
+	if ended := feedEnd(sink.allRecords(), 1); ended.Outcome != poo.FeedSessionClosed {
+		t.Errorf("the attempt ended %q, want %q", ended.Outcome, poo.FeedSessionClosed)
+	}
+}
+
+// TestARefusedFeedInputBreaksTheFeed covers the store break: a store that
+// refuses a feed's input stops the feed, because a feed feeds the store
+// the session writes to, and the feed is never restarted.
+func TestARefusedFeedInputBreaksTheFeed(t *testing.T) {
+	// The wait is short, so a restart would show up at once.
+	defer poo.SetFeedRestartDelay(func(ran, prev time.Duration) time.Duration {
+		return time.Millisecond
+	})()
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &failingSink{failRecord: "input.queued", failAfter: 1}
+	// The feed emits twice: the first input is accepted, and the second
+	// one's acceptance is the record the store refuses.
+	type refused struct {
+		err     error
+		ctxLive bool
+	}
+	reported := make(chan refused, 1)
+	var attempts atomic.Int32
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
+		Name:    "inbox",
+		Restart: true,
+		OnIdle:  poo.OnIdleHold,
+		Run: func(ctx context.Context, io poo.FeedIO) error {
+			attempts.Add(1)
+			if err := io.Emit("", "the first"); err != nil {
+				reported <- refused{err: err, ctxLive: ctx.Err() == nil}
+				return err
+			}
+			err := io.Emit("", "the second")
+			// The session breaks the feed with the refused write, so the
+			// runner's context has ended by the time the emit returns.
+			reported <- refused{err: err, ctxLive: ctx.Err() == nil}
+			return err
+		},
+	}))
+	got := <-reported
+	if got.err == nil {
+		t.Fatal("the emit whose acceptance the store refused returned no error")
+	}
+	if errors.Is(got.err, poo.ErrSessionClosed) {
+		t.Errorf("the refused emit returned %v, want the store's error", got.err)
+	}
+	if got.ctxLive {
+		t.Error("the runner's context is still live after the store refused its input")
+	}
+	if !s.Broken() {
+		t.Error("the session is not broken")
+	}
+	// A feed the store broke is not restarted: a restart would start its
+	// next attempt within the wait the test's seam gives it.
+	time.Sleep(100 * time.Millisecond)
+	if n := attempts.Load(); n != 1 {
+		t.Errorf("the feed started %d attempts, want 1", n)
+	}
+	if n := sink.count("feed.started"); n != 1 {
+		t.Errorf("the log holds %d feed.started records, want 1", n)
+	}
+	// The broken store cannot record the feed's end, so the feed's own
+	// status is how the session says the attempt is over.
+	for _, job := range s.Jobs() {
+		if job.Tool == poo.FeedToolName && job.Status != poo.JobHeld {
+			t.Errorf("the session lists the broken feed as %v, want no attempt of it", job)
+		}
+	}
+}
+
+// TestAnEmitAfterTheAttemptEndedIsRefused covers the attempt's bound on
+// its own emits: a runner that emits after its attempt ended is refused,
+// so a delivery never joins a feed the session has ended.
+func TestAnEmitAfterTheAttemptEndedIsRefused(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	emits := make(chan func(from, text string) error, 1)
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
+		Name: "inbox",
+		Run: func(ctx context.Context, io poo.FeedIO) error {
+			emits <- io.Emit
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}))
+	emit := <-emits
+	if err := s.CancelJob("feed:inbox"); err != nil {
+		t.Fatalf("cancelling the feed: %v", err)
+	}
+	waitFor(t, "the attempt to end", func() bool {
+		return sink.count("feed.ended") == 1
+	})
+	err := emit("alice", "the late message")
+	if !errors.Is(err, poo.ErrSessionClosed) {
+		t.Errorf("the late emit returned %v, want ErrSessionClosed", err)
+	}
+	if n := sink.count("input.queued"); n != 0 {
+		t.Errorf("the log holds %d input.queued records, want none", n)
+	}
+	if n := sink.count("input.held"); n != 0 {
+		t.Errorf("the log holds %d input.held records, want none", n)
+	}
+}
+
+// TestTheCloseDuringTheRestartWait covers the close's other entry: a feed
+// that waits for its next attempt is stopped by the close, and the wait
+// that never became an attempt is not recorded as one.
+func TestTheCloseDuringTheRestartWait(t *testing.T) {
+	defer poo.SetFeedRestartDelay(func(ran, prev time.Duration) time.Duration {
+		return time.Hour
+	})()
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
+		Name:    "inbox",
+		Restart: true,
+		Run: func(ctx context.Context, io poo.FeedIO) error {
+			return errors.New("the feed broke")
+		},
+	}))
+	waitFor(t, "the feed to wait for its next attempt", func() bool {
+		return sink.count("feed.ended") == 1
+	})
+	if err := s.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if n := sink.count("feed.ended"); n != 1 {
+		t.Errorf("the log holds %d feed.ended records, want 1", n)
+	}
+	if ended := feedEnd(sink.allRecords(), 1); ended.Outcome != poo.FeedFailed {
+		t.Errorf("the attempt ended %q, want %q", ended.Outcome, poo.FeedFailed)
+	}
+	if n := sink.count("feed.started"); n != 1 {
+		t.Errorf("the feed started %d attempts, want 1", n)
+	}
+	if jobs := s.Jobs(); len(jobs) != 0 {
+		t.Errorf("the closed session still lists the feed: %v", jobs)
+	}
+}
+
+// TestAFeedSpecIsValidatedOnConstruction covers the construction's check:
+// a feed the session cannot run fails the build, and the error names the
+// feed.
+func TestAFeedSpecIsValidatedOnConstruction(t *testing.T) {
+	run := func(ctx context.Context, io poo.FeedIO) error { return nil }
+	for name, tc := range map[string]struct {
+		feeds []poo.FeedSpec
+		want  string
+	}{
+		"bad name": {
+			feeds: []poo.FeedSpec{{Name: "In Box", Run: run}},
+			want:  "In Box",
+		},
+		"duplicate name": {
+			feeds: []poo.FeedSpec{{Name: "inbox", Run: run}, {Name: "inbox", Run: run}},
+			want:  "inbox",
+		},
+		"no runner": {
+			feeds: []poo.FeedSpec{{Name: "inbox"}},
+			want:  "inbox",
+		},
+		"unknown idle policy": {
+			feeds: []poo.FeedSpec{{Name: "inbox", Run: run, OnIdle: poo.OnIdle("sometimes")}},
+			want:  "inbox",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := scripted([]fakeResponse{{text: "the answer"}})
+			sink := &recordingSink{}
+			_, err := poo.New(testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(tc.feeds...))
+			if err == nil {
+				t.Fatal("the session was built with an invalid feed")
+			}
+			var init *poo.ErrSessionInit
+			if !asSessionInit(err, &init) {
+				t.Fatalf("the error is %T, want an ErrSessionInit", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the error %q does not name the feed %q", err, tc.want)
+			}
+		})
 	}
 }
