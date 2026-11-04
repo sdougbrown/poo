@@ -71,9 +71,10 @@ func SessionChatModel(s *Session) ModelInfo { return s.opts.Model }
 // QueueFeedInput queues one feed's input for the model.
 //
 // The option that installs a feed is the supported entry, so a test
-// reaches the acceptance through this.
+// reaches the acceptance through this. The input belongs to no attempt,
+// so no attempt bounds it.
 func QueueFeedInput(s *Session, feed, from, text string) error {
-	return s.queueFeedInput(feed, from, text, "")
+	return s.queueFeedInput(feed, from, text, "", nil)
 }
 
 // SetFeedRestartDelay replaces how long a feed waits before its next

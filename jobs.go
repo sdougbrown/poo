@@ -845,7 +845,13 @@ const FeedToolName = "feed"
 // The feed's name is not validated here: a caller that takes a feed's
 // name validates it before it queues the input. The feed's idle policy
 // rides with the input; an empty policy is the session's.
-func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle) error {
+//
+// admit, when it is set, is asked whether the input may join the session
+// in the same critical section that decides the acceptance, before the
+// acceptance's write is registered: an emit that names the attempt it
+// belongs to is admitted before that attempt's end is claimed, or refused
+// after it, and never in between.
+func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle, admit func() bool) error {
 	origin := FeedOrigin(feed)
 	s.mu.Lock()
 	if s.broken {
@@ -853,6 +859,10 @@ func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle) error {
 		return ErrSessionBroken
 	}
 	if s.closed {
+		s.mu.Unlock()
+		return ErrSessionClosed
+	}
+	if admit != nil && !admit() {
 		s.mu.Unlock()
 		return ErrSessionClosed
 	}

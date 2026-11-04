@@ -283,11 +283,11 @@ func (s *Session) runFeed(f *feedState) {
 	defer close(f.done)
 	var wait time.Duration
 	for {
-		runAt, ok := s.beginFeedAttempt(f)
+		runAt, attempt, ok := s.beginFeedAttempt(f)
 		if !ok {
 			return
 		}
-		err := s.runFeedAttempt(f)
+		err := s.runFeedAttempt(f, attempt)
 		outcome := s.feedOutcome(f, err)
 		var delay time.Duration
 		if outcome == FeedExited || outcome == FeedFailed {
@@ -317,13 +317,16 @@ func (s *Session) runFeed(f *feedState) {
 // lock, so a close that sees the attempt waits for its record. A record
 // the store refuses stops the feed for good: the log cannot say the
 // attempt ran, so the session does not pretend it did.
-func (s *Session) beginFeedAttempt(f *feedState) (time.Time, bool) {
+//
+// The attempt's number is the token its emits are admitted by: an emit is
+// an input of the attempt that made it, and no other.
+func (s *Session) beginFeedAttempt(f *feedState) (time.Time, int, bool) {
 	startedAt := time.Now()
 	s.mu.Lock()
 	if s.closed || s.broken || f.ctx.Err() != nil {
 		s.mu.Unlock()
 		s.setFeedStatus(f, feedStopped)
-		return startedAt, false
+		return startedAt, 0, false
 	}
 	f.attempt++
 	f.startedAt = startedAt
@@ -340,18 +343,18 @@ func (s *Session) beginFeedAttempt(f *feedState) (time.Time, bool) {
 	s.mu.Unlock()
 	if !ok {
 		s.setFeedStatus(f, feedStopped)
-		return startedAt, false
+		return startedAt, attempt, false
 	}
 	if err := s.writeClaimed(context.Background(), rec, gate); err != nil {
 		s.setFeedStatus(f, feedStopped)
-		return startedAt, false
+		return startedAt, attempt, false
 	}
 	s.events.emit(EventFeedStarted, map[string]any{
 		"feed":    f.name,
 		"origin":  string(f.origin),
 		"attempt": attempt,
 	})
-	return startedAt, true
+	return startedAt, attempt, true
 }
 
 // runFeedAttempt runs one attempt of a feed.
@@ -359,7 +362,7 @@ func (s *Session) beginFeedAttempt(f *feedState) (time.Time, bool) {
 // A panic in a runner is the attempt's failure: a feed is the session's
 // own work, but a panic in whatever it wraps must not bring the process
 // down.
-func (s *Session) runFeedAttempt(f *feedState) (err error) {
+func (s *Session) runFeedAttempt(f *feedState, attempt int) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("poo: the feed %q panicked: %v", f.name, r)
@@ -367,7 +370,7 @@ func (s *Session) runFeedAttempt(f *feedState) (err error) {
 	}()
 	return f.spec.Run(f.ctx, FeedIO{
 		Emit: func(from, text string) error {
-			return s.emitFeedInput(f, from, text)
+			return s.emitFeedInput(f, attempt, from, text)
 		},
 		Log: s.feedLogger(f.name),
 	})
@@ -378,20 +381,19 @@ func (s *Session) feedLogger(name string) *slog.Logger {
 	return s.logger().With(slog.String("feed", name))
 }
 
-// emitFeedInput queues one input on behalf of a running attempt.
+// emitFeedInput queues one input on behalf of the attempt that emitted
+// it.
 //
-// An input the runner emits after the attempt's end is claimed is refused
-// with ErrSessionClosed: the delivery would join a feed the session has
-// already ended.
-func (s *Session) emitFeedInput(f *feedState, from, text string) error {
-	s.mu.Lock()
-	closed := s.closed || (f.attempt > 0 && f.ended >= f.attempt)
-	onIdle := f.spec.OnIdle
-	s.mu.Unlock()
-	if closed {
-		return ErrSessionClosed
-	}
-	return s.queueFeedInput(f.name, from, text, onIdle)
+// The input is the attempt's, so the acceptance is bound to the attempt:
+// the admission is decided in the critical section that accepts the
+// input, and an input the runner emits after its attempt's end is claimed
+// is refused with ErrSessionClosed. An emit that races its attempt's end
+// is therefore accepted before the end's claim, or refused after it,
+// never lost in between.
+func (s *Session) emitFeedInput(f *feedState, attempt int, from, text string) error {
+	return s.queueFeedInput(f.name, from, text, f.spec.OnIdle, func() bool {
+		return f.ended < attempt
+	})
 }
 
 // feedOutcome says how an attempt ended.
