@@ -810,6 +810,19 @@ func (s *suite) kill() {
 	})
 }
 
+// sessionState returns what session/get says about a session.
+func (s *suite) sessionState(c *client, sessionID string) protocol.GetResult {
+	s.t.Helper()
+	raw := c.call(protocol.MethodSessionGet, map[string]any{
+		"session_id": sessionID,
+	}, &protocol.GetResult{})
+	var state protocol.GetResult
+	if err := json.Unmarshal(raw, &state); err != nil {
+		s.t.Fatalf("decoding the session: %v", err)
+	}
+	return state
+}
+
 // requestHolds reports whether a request holds the text.
 func requestHolds(request map[string]any, text string) bool {
 	messages, _ := request["messages"].([]any)
