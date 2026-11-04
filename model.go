@@ -57,6 +57,21 @@ func HookOrigin(name string) Origin {
 	return Origin("hook:" + name)
 }
 
+// FeedOrigin returns the origin a feed's records and messages carry.
+//
+// The origin names the feed, so a reader of the record knows which feed
+// put the message there. A feed is a long-lived source that pushes
+// messages into a session; its messages never stand in for the user's
+// turn.
+func FeedOrigin(name string) Origin {
+	return Origin("feed:" + name)
+}
+
+// isFeedOrigin reports that the origin belongs to a feed.
+func isFeedOrigin(origin Origin) bool {
+	return strings.HasPrefix(string(origin), "feed:")
+}
+
 // API names a wire API.
 //
 // The model is provider-neutral, but a piece of opaque provider data is

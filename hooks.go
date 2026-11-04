@@ -409,12 +409,14 @@ type Event struct {
 
 // RunTrigger says what started a run.
 type RunTrigger struct {
-	// Kind is "prompt" or "job".
+	// Kind is "prompt", "job" or "feed".
 	Kind TriggerKind
 	// Prompt is the prompt text, for a prompt run.
 	Prompt string
 	// Jobs are the job results that started the run, for a job run.
 	Jobs []JobResult
+	// Feeds are the feeds whose inputs started the run, in queue order.
+	Feeds []string
 }
 
 // TriggerKind names what started a run.
@@ -425,29 +427,43 @@ const (
 	TriggerPrompt TriggerKind = "prompt"
 	// TriggerJob means one or more background jobs woke the session.
 	TriggerJob TriggerKind = "job"
+	// TriggerFeed means a feed's input woke the session, and no job's
+	// result joined it.
+	TriggerFeed TriggerKind = "feed"
 )
 
-// JobResult is a background job's result.
+// JobResult is a background job's result, or a feed's input.
 //
 // The job and the handle are two different things. The job is the
 // background job itself, named j<n>. The handle is the tool call the
 // job came from, named r<n>: the call returned at once with a "started"
 // outcome, and the job carries that call's handle, so a reader can tie
 // the job back to the call that started it.
+//
+// A feed's input is shaped like a result so that one queue, one idle
+// policy and one restore carry both: its job is the feed's origin, its
+// tool is "feed", and its text is the rendered text the model reads.
 type JobResult struct {
-	// JobID is the job's identifier, e.g. "j3".
+	// JobID is the job's identifier, e.g. "j3", or a feed's origin,
+	// e.g. "feed:inbox".
 	JobID string `json:"job"`
 	// Handle is the handle of the tool call the job came from (that
 	// call's ToolEnv.Handle), e.g.
-	// "r1".
+	// "r1". A feed's input has none.
 	Handle string `json:"handle"`
-	// Tool is the name of the tool the job ran.
+	// Tool is the name of the tool the job ran, or "feed".
 	Tool string `json:"tool"`
-	// Text is the job's result, as the model reads it.
+	// Text is the result, as the model reads it.
 	Text string `json:"text"`
-	// Outcome is the job's outcome.
+	// Outcome is the job's outcome. A feed's input is always ok.
 	Outcome Outcome `json:"outcome"`
 	// Fatal reports that the job failed with an error that wraps
 	// ErrFatal. The run that receives the result settles tool_fatal.
 	Fatal bool `json:"fatal,omitempty"`
+	// InputID is the id the input is queued under, when the caller
+	// knows it. An empty id queues the result under its job id.
+	InputID string `json:"input_id,omitempty"`
+	// Origin says where the input came from: a feed's origin for a
+	// feed's input, empty for a job's result.
+	Origin Origin `json:"origin,omitempty"`
 }

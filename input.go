@@ -2,10 +2,11 @@ package poo
 
 import "errors"
 
-// InputMode says how a client message reaches the model.
+// InputMode says how a message reaches the model.
 //
-// The three modes differ in when the message is delivered and in what
-// they do to the work that is running.
+// The client modes differ in when the message is delivered and in what
+// they do to the work that is running. The session's own modes are the
+// messages it produces itself, which are never the client's turn.
 type InputMode string
 
 const (
@@ -21,6 +22,11 @@ const (
 	// not a client message: it is the session's own work coming back,
 	// and it never carries a delivery note.
 	InputModeJob InputMode = "job"
+	// InputModeFeed is the mode a feed's input carries. A feed's input
+	// is not a client message either: it is a message from outside, it
+	// never carries a delivery note, and the model reads it as
+	// untrusted text.
+	InputModeFeed InputMode = "feed"
 )
 
 // String returns the mode's name.
@@ -96,8 +102,8 @@ type InputQueuedRecord struct {
 	RunID string `json:"run_id,omitempty"`
 	// InputID is the input's identifier.
 	InputID string `json:"input_id"`
-	// Mode is how the input is delivered: "steer", "interrupt" or
-	// "follow_up".
+	// Mode is how the input is delivered: "steer", "interrupt",
+	// "follow_up" or "feed".
 	Mode InputMode `json:"mode"`
 	// Text is the message text.
 	Text string `json:"text,omitempty"`
@@ -117,7 +123,8 @@ type InputDeliveredRecord struct {
 	RunID string `json:"run_id"`
 	// InputID is the input's identifier.
 	InputID string `json:"input_id"`
-	// Mode is how the input was delivered.
+	// Mode is how the input was delivered: "steer", "interrupt",
+	// "follow_up" or "feed".
 	Mode InputMode `json:"mode"`
 	// DeliveredAt is the RFC 3339 time the input was delivered, in UTC.
 	DeliveredAt string `json:"delivered_at"`

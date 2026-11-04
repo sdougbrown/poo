@@ -157,7 +157,8 @@ type InputHeldRecord struct {
 	// RunID identifies the run the results were held for, empty when
 	// the session had no run.
 	RunID string `json:"run_id,omitempty"`
-	// Jobs are the jobs whose results were held.
+	// Jobs are the jobs whose results were held, or the feeds whose
+	// inputs were held.
 	Jobs []string `json:"jobs"`
 	// Reason says why they were held: "on_idle", "wake_limit" or
 	// "session_closed".
@@ -213,25 +214,33 @@ type jobState struct {
 	completionDone chan struct{}
 }
 
-// jobResult is a job's finished result, waiting for its delivery.
+// jobResult is a job's finished result, waiting for its delivery, or a
+// feed's input waiting for the same.
 type jobResult struct {
 	// id is the input id the result is delivered under.
 	id string
-	// job is the job the result came from.
+	// job is the job the result came from, or the feed's origin for a
+	// feed's input.
 	job string
-	// handle is the handle of the tool call the job came from.
+	// handle is the handle of the tool call the job came from. A
+	// feed's input has none.
 	handle string
-	// tool is the name of the tool the job ran.
+	// tool is the name of the tool the job ran, or FeedToolName for a
+	// feed's input.
 	tool string
 	// runID identifies the run that started the job.
 	runID string
 	// outcome is how the job ended.
 	outcome Outcome
-	// text is the result the model reads.
+	// text is the result the model reads. A feed's input carries the
+	// text rendered at acceptance, and the delivery uses it verbatim.
 	text string
 	// fatal reports that the job failed with an error that wraps
 	// ErrFatal. The receiving run settles tool_fatal.
 	fatal bool
+	// origin is a feed's origin for a feed's input, and empty for a
+	// job's result.
+	origin Origin
 }
 
 // jobQueueItem is a queued result, in completion order.
@@ -778,16 +787,107 @@ func jobOutcomeOf(outcome Outcome) Outcome {
 // The result takes the session's idle policy: an idle session wakes a
 // run with it, and a session that holds its idle results keeps it for
 // the next run.
+//
+// A result that carries an InputID is delivered under it, and a feed's
+// result carries its input's id and origin, so a replay hands the
+// session the bytes a restore would.
 func (s *Session) QueueJobResult(result JobResult) {
+	id := result.JobID
+	if result.InputID != "" {
+		id = result.InputID
+	}
 	s.queueJobResult(jobResult{
-		id:      result.JobID,
+		id:      id,
 		job:     result.JobID,
 		handle:  result.Handle,
 		tool:    result.Tool,
 		outcome: jobOutcomeOf(result.Outcome),
 		text:    result.Text,
 		fatal:   result.Fatal,
+		origin:  result.Origin,
 	})
+}
+
+// FeedToolName is the tool name a feed's input is listed under.
+const FeedToolName = "feed"
+
+// QueueFeedInput queues one feed's input for the model.
+//
+// The model-facing text is rendered here, once, and the acceptance
+// record carries it: the delivery uses the stored text, live and after a
+// restore. A feed's message never stands in for the user's turn, so the
+// model reads it as untrusted text.
+//
+// The input joins the session's job queue, so the idle policy, the wake
+// limit and the close's held record act on it exactly as they do on a
+// job's result. An input the session cannot take returns
+// ErrSessionClosed or ErrSessionBroken, and a store that refuses its
+// record returns the store's error: the input is then not queued.
+func (s *Session) QueueFeedInput(feed, from, text string) error {
+	origin := FeedOrigin(feed)
+	s.mu.Lock()
+	if s.broken {
+		s.mu.Unlock()
+		return ErrSessionBroken
+	}
+	if s.closed {
+		s.mu.Unlock()
+		return ErrSessionClosed
+	}
+	// The acceptance's write is registered in the critical section that
+	// decides the input, so a close that begins now waits for it, and
+	// the completion stays outstanding until the result is queued.
+	gate, ok := s.beginWriteLocked("input.queued")
+	if !ok {
+		s.mu.Unlock()
+		return ErrSessionClosed
+	}
+	s.inputSeq++
+	inputID := jobInputID(s.opts.SessionID, s.inputSeq)
+	s.jobCompletions++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.jobCompletions--
+		s.mu.Unlock()
+	}()
+
+	rendered := feedInputText(feed, from, text)
+	if err := s.writeClaimed(context.Background(), &InputQueuedRecord{
+		RecordMeta: NewRecordMetaFrom("input.queued", origin),
+		SessionID:  s.opts.SessionID,
+		InputID:    inputID,
+		Mode:       InputModeFeed,
+		Text:       rendered,
+		QueuedAt:   nowRFC3339(),
+	}, gate); err != nil {
+		return err
+	}
+	s.events.emit(EventInputQueued, map[string]any{
+		"input_id": inputID,
+		"mode":     string(InputModeFeed),
+		"origin":   string(origin),
+	})
+	s.queueJobResult(jobResult{
+		id:      inputID,
+		job:     string(origin),
+		tool:    FeedToolName,
+		outcome: OutcomeOK,
+		text:    rendered,
+		origin:  origin,
+	})
+	return nil
+}
+
+// feedInputText renders the model-facing text of a feed's input.
+//
+// The text is rendered once, when the input is accepted, and the record
+// carries it: a restore delivers the same bytes.
+func feedInputText(feed, from, text string) string {
+	if from == "" {
+		return fmt.Sprintf("[feed %s: %s]", feed, text)
+	}
+	return fmt.Sprintf("[feed %s · from %s: %s]", feed, from, text)
 }
 
 // queueJobResult puts a finished result on the session's job queue and
@@ -909,7 +1009,7 @@ func (s *Session) handleIdleJobResults() {
 	// the first request goes through the gate. A Close or a break that
 	// lands between the check above and start's own keeps the results
 	// on the queue, where the close's held-record pass covers them.
-	if _, err := s.start(context.Background(), "", TriggerJob, nil, results...); err != nil {
+	if _, err := s.start(context.Background(), "", triggerFor(results), nil, results...); err != nil {
 		s.mu.Lock()
 		for _, result := range results {
 			s.jobQueue = append(s.jobQueue, jobQueueItem{result: result, held: true})
@@ -1052,7 +1152,14 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 
 	msg := NewTextMessage(RoleUser, jobResultText(result))
 	msg.Origin = OriginJob
-	if !s.deliverMessageRecords(run, msg, result.id, InputModeJob, nil, func(err error) {
+	mode := InputModeJob
+	if isFeedOrigin(result.origin) {
+		// A feed's input is a message from outside: it carries its
+		// origin, and the delivery says it was a feed's input.
+		msg.Origin = result.origin
+		mode = InputModeFeed
+	}
+	if !s.deliverMessageRecords(run, msg, result.id, mode, nil, result.origin, func(err error) {
 		s.failJobDelivery(run, item, err)
 	}, func() {
 		s.finishJobDelivery(run, item)
@@ -1113,15 +1220,48 @@ func (s *Session) removeJobDeliveryLocked(run *runState, item jobQueueItem) {
 }
 
 // jobResultText renders the text the model reads for a job result.
+//
+// A feed's input is already rendered: the text stored at acceptance is
+// the text the model reads, live and after a restore.
 func jobResultText(result jobResult) string {
+	if isFeedOrigin(result.origin) {
+		return result.text
+	}
 	return fmt.Sprintf("[job %s · %s finished (%s): %s]", result.job, result.tool, result.outcome, result.text)
 }
 
-// jobInputID returns the input id a job result is queued under.
+// triggerFor returns what the wake's results are: a feed's wake when
+// every result came from a feed, and a job's wake otherwise.
+func triggerFor(results []jobResult) TriggerKind {
+	for _, result := range results {
+		if !isFeedOrigin(result.origin) {
+			return TriggerJob
+		}
+	}
+	return TriggerFeed
+}
+
+// feedNames returns the distinct feeds the results came from, in queue
+// order.
+func feedNames(results []jobResult) []string {
+	var out []string
+	seen := map[Origin]bool{}
+	for _, result := range results {
+		if !isFeedOrigin(result.origin) || seen[result.origin] {
+			continue
+		}
+		seen[result.origin] = true
+		out = append(out, strings.TrimPrefix(string(result.origin), "feed:"))
+	}
+	return out
+}
+
+// jobInputID returns the input id a job result or a feed's input is
+// queued under.
 //
 // The id keeps the session's prefix, so a reader of the log can tell
 // where the result came from, and the number names the result in the
-// session's order of job results.
+// session's order of results.
 func jobInputID(sessionID string, seq int) string {
 	return fmt.Sprintf("%s-ji%d", sessionID, seq)
 }
@@ -1141,12 +1281,18 @@ func jobInputSeq(sessionID, inputID string) int {
 
 // publicJobResults turns the internal results into the public ones the
 // run.started record carries.
+//
+// Only a job's results are listed: a feed's inputs are the record's
+// Feeds, so the two columns never say the same thing twice.
 func publicJobResults(results []jobResult) []JobResult {
 	if len(results) == 0 {
 		return nil
 	}
 	out := make([]JobResult, 0, len(results))
 	for _, r := range results {
+		if isFeedOrigin(r.origin) {
+			continue
+		}
 		out = append(out, JobResult{
 			JobID:   r.job,
 			Handle:  r.handle,
@@ -1155,6 +1301,9 @@ func publicJobResults(results []jobResult) []JobResult {
 			Outcome: jobOutcomeToCallOutcome(r.outcome),
 			Fatal:   r.fatal,
 		})
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -1489,13 +1638,42 @@ func (s *Session) closeJobs() {
 		s.writeJobEndedOnClose(job)
 	}
 
-	// The queued results are recorded as held.
+	// The queued results are recorded as held. A completion that is
+	// still being written is waited for first, so an input the session
+	// accepted is queued before the hold pass takes the queue, and the
+	// close records what it held.
+	s.awaitJobCompletions()
 	s.mu.Lock()
 	if len(s.jobQueue) > 0 {
 		s.holdJobResultsLocked(CauseSessionClosed)
 	}
 	s.mu.Unlock()
 	s.writePendingHeld()
+}
+
+// awaitJobCompletions waits, bounded by the record-write budget, for the
+// completions that are still being recorded.
+//
+// The wait covers a job's end and a feed's acceptance: both hold their
+// completion until the result is on the queue, so a close that waits for
+// them holds a result it would otherwise miss.
+func (s *Session) awaitJobCompletions() {
+	deadline := time.After(s.recordBudget())
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		s.mu.Lock()
+		outstanding := s.jobCompletions
+		s.mu.Unlock()
+		if outstanding == 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			return
+		case <-tick.C:
+		}
+	}
 }
 
 // writeJobEndedOnClose completes a job the close stopped.
@@ -1793,18 +1971,27 @@ func decodeStrictJSON(raw json.RawMessage, into any) error {
 
 // jobPayload renders the job results a woken run carries, for the
 // run.started event.
+//
+// A feed's inputs are the event's feeds, so the jobs column stays the
+// job results' own.
 func jobPayload(results []jobResult) []map[string]any {
 	if len(results) == 0 {
 		return nil
 	}
 	out := make([]map[string]any, 0, len(results))
 	for _, r := range results {
+		if isFeedOrigin(r.origin) {
+			continue
+		}
 		out = append(out, map[string]any{
 			"job":     r.job,
 			"handle":  r.handle,
 			"tool":    r.tool,
 			"outcome": string(jobOutcomeToCallOutcome(r.outcome)),
 		})
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

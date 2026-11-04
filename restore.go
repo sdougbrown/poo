@@ -153,7 +153,8 @@ type Restored struct {
 	Runs []string `json:"runs,omitempty"`
 	// Interrupted are the runs that were interrupted.
 	Interrupted []string `json:"interrupted,omitempty"`
-	// Jobs are the job results that were queued again.
+	// Jobs are the results that were queued again: a job's result, or
+	// a feed's input.
 	Jobs []JobResult `json:"jobs,omitempty"`
 	// Messages is how many messages the restored history holds.
 	Messages int `json:"messages"`
@@ -170,8 +171,9 @@ type Restored struct {
 // system prompt. No hook runs and no prompt is rendered again, so a
 // session that was recorded under another prompt keeps that prompt.
 //
-// The job results that were never delivered are queued again, so they
-// follow the session's idle policy like any other result.
+// The job results that were never delivered, and a feed's accepted
+// inputs, are queued again, so they follow the session's idle policy
+// like any other result.
 //
 // The session takes new runs when the restore returns.
 func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored, error) {
@@ -386,8 +388,8 @@ func toolDifferences(recorded []ToolInfo, current map[string]Tool) []string {
 	return diffs
 }
 
-// PendingJobResults returns the job results the records hold that were
-// never delivered.
+// PendingJobResults returns the results the records hold that were
+// never delivered: a job's end, or a feed's accepted input.
 //
 // A result that was delivered is in the model's history already. A
 // result that was not is queued again, in completion order, so it
@@ -400,34 +402,55 @@ func PendingJobResults(records []Record) []JobResult {
 	return out
 }
 
-// pendingJobResults returns the job results that were never delivered,
-// in completion order.
+// pendingJobResults returns the results that were never delivered, in
+// completion order.
+//
+// A result is either a job's end or a feed's accepted input: a feed's
+// input has no terminal record of its own, because the input.queued
+// record is its acceptance and the delivered or dropped record is its
+// fate.
 func pendingJobResults(records []Record) []jobResult {
 	delivered := map[string]bool{}
+	fated := map[string]bool{}
 	for _, rec := range records {
-		if d, ok := rec.(*InputDeliveredRecord); ok {
-			delivered[d.InputID] = true
+		switch r := rec.(type) {
+		case *InputDeliveredRecord:
+			delivered[r.InputID] = true
+			fated[r.InputID] = true
+		case *InputDroppedRecord:
+			fated[r.InputID] = true
 		}
 	}
 	var out []jobResult
 	for _, rec := range records {
-		ended, ok := rec.(*JobEndedRecord)
-		if !ok {
-			continue
+		switch r := rec.(type) {
+		case *JobEndedRecord:
+			if delivered[r.InputID] {
+				continue
+			}
+			out = append(out, jobResult{
+				id:      r.InputID,
+				job:     r.JobID,
+				handle:  r.Handle,
+				tool:    r.Tool,
+				runID:   r.RunID,
+				outcome: r.Outcome,
+				text:    r.Text,
+				fatal:   r.Fatal,
+			})
+		case *InputQueuedRecord:
+			if r.Mode != InputModeFeed || fated[r.InputID] {
+				continue
+			}
+			out = append(out, jobResult{
+				id:      r.InputID,
+				job:     string(r.Origin),
+				tool:    FeedToolName,
+				outcome: OutcomeOK,
+				text:    r.Text,
+				origin:  r.Origin,
+			})
 		}
-		if delivered[ended.InputID] {
-			continue
-		}
-		out = append(out, jobResult{
-			id:      ended.InputID,
-			job:     ended.JobID,
-			handle:  ended.Handle,
-			tool:    ended.Tool,
-			runID:   ended.RunID,
-			outcome: ended.Outcome,
-			text:    ended.Text,
-			fatal:   ended.Fatal,
-		})
 	}
 	return out
 }
@@ -441,6 +464,8 @@ func publicJobResult(job jobResult) JobResult {
 		Text:    job.text,
 		Outcome: jobOutcomeToCallOutcome(job.outcome),
 		Fatal:   job.fatal,
+		InputID: job.id,
+		Origin:  job.origin,
 	}
 }
 
@@ -550,6 +575,11 @@ func (s *Session) seedCounters(records []Record) {
 			jobs = max(jobs, seqOf(r.JobID, 'j'))
 		case *JobEndedRecord:
 			jobs = max(jobs, seqOf(r.JobID, 'j'))
+			inputs = max(inputs, jobInputSeq(s.opts.SessionID, r.InputID))
+		case *InputQueuedRecord:
+			// A feed's input is queued under the job results' ids, so a
+			// restored session continues past it. A client input's id is
+			// a ULID, and has no number here.
 			inputs = max(inputs, jobInputSeq(s.opts.SessionID, r.InputID))
 		}
 	}

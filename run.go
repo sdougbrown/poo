@@ -107,6 +107,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 	// The run's own record of its beginning. The write is claimed
 	// against the seal, so a run that settles while it is in flight
 	// cannot get run.settled first.
+	feeds := feedNames(jobs)
 	if err := s.writeRun(run, &RunStartedRecord{
 		RecordMeta: NewRecordMeta("run.started"),
 		RunID:      runID,
@@ -119,6 +120,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		ReasoningEffort: s.opts.ReasoningEffort,
 		Trigger:         trigger,
 		Jobs:            publicJobResults(jobs),
+		Feeds:           feeds,
 	}); err != nil {
 		// The store refused the run's first record. The run cannot
 		// continue, so it goes through the normal finalization: it
@@ -128,12 +130,16 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		s.finalize(run, storeErrorCandidate(err))
 		return runID, nil
 	}
-	s.events.emit(EventRunStarted, map[string]any{
+	started := map[string]any{
 		"run_id":      runID,
 		"prompt_hash": hashText(text),
 		"trigger":     string(trigger),
 		"jobs":        jobPayload(jobs),
-	})
+	}
+	if len(feeds) > 0 {
+		started["feeds"] = feeds
+	}
+	s.events.emit(EventRunStarted, started)
 
 	// The wall-clock budget starts when the run is admitted, before the
 	// startup hooks and the prompt render, so a blocked hook cannot
@@ -166,6 +172,7 @@ func (s *Session) start(ctx context.Context, text string, trigger TriggerKind, n
 		Kind:   trigger,
 		Prompt: text,
 		Jobs:   publicJobResults(jobs),
+		Feeds:  feeds,
 	})
 	if err != nil {
 		// A hook that failed settles the run with hook_error.
@@ -906,13 +913,15 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 // input follows: the message record, then the input.delivered record,
 // then the history append, the delivery's finish, and the delivery
 // event. The records come before the history append, so a delivery the
-// finalization abandons must not mutate the view.
+// finalization abandons must not mutate the view. A non-empty origin is
+// the feed's: the delivery record and the event then say where the input
+// came from.
 //
 // The two delivery families differ in what a failed write does to the
 // input: the caller's fail hook handles the record writes' errors (the
 // client input is dropped and reported; a job result goes back on the
 // queue), and done releases the family's own claim.
-func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID string, mode InputMode, note *DeliveryNote, fail func(error), done func()) bool {
+func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID string, mode InputMode, note *DeliveryNote, origin Origin, fail func(error), done func()) bool {
 	if err := s.writeDelivery(run.ctx, run, &MessageRecord{
 		RecordMeta:   NewRecordMetaFrom("message", msg.Origin),
 		RunID:        run.id,
@@ -923,8 +932,12 @@ func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID stri
 		fail(err)
 		return false
 	}
+	meta := NewRecordMeta("input.delivered")
+	if origin != "" {
+		meta = NewRecordMetaFrom("input.delivered", origin)
+	}
 	if err := s.writeDelivery(run.ctx, run, &InputDeliveredRecord{
-		RecordMeta:  NewRecordMeta("input.delivered"),
+		RecordMeta:  meta,
 		SessionID:   s.opts.SessionID,
 		RunID:       run.id,
 		InputID:     inputID,
@@ -936,11 +949,15 @@ func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID stri
 	}
 	s.appendMessages(msg)
 	done()
-	s.events.emit(EventInputDelivered, map[string]any{
+	payload := map[string]any{
 		"run_id":   run.id,
 		"input_id": inputID,
 		"mode":     string(mode),
-	})
+	}
+	if origin != "" {
+		payload["origin"] = string(origin)
+	}
+	s.events.emit(EventInputDelivered, payload)
 	return true
 }
 
@@ -971,7 +988,7 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 			s.noteStoreError(run, err)
 		}
 	}
-	return s.deliverMessageRecords(run, msg, input.id, input.mode, note, fail, func() {
+	return s.deliverMessageRecords(run, msg, input.id, input.mode, note, "", fail, func() {
 		s.finishDelivery(run, input)
 	})
 }

@@ -147,10 +147,13 @@ type RunStartedRecord struct {
 	// ReasoningEffort is the reasoning_effort the run sends, empty when
 	// it sends none.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	// Trigger says what started the run: "prompt" or "job".
+	// Trigger says what started the run: "prompt", "job" or "feed".
 	Trigger TriggerKind `json:"trigger,omitempty"`
 	// Jobs are the job results that started a job run.
 	Jobs []JobResult `json:"jobs,omitempty"`
+	// Feeds are the feeds whose inputs started the run, in queue
+	// order.
+	Feeds []string `json:"feeds,omitempty"`
 }
 
 // SystemPromptRecord records a rendered system prompt.

@@ -432,6 +432,39 @@ func TestAQueuedInputWithNoFateIsDropped(t *testing.T) {
 	}
 }
 
+// TestAQueuedFeedInputIsNeverDropped covers the recovery's treatment of
+// a feed's input: it has no terminal record of its own, so the recovery
+// leaves it for the restore to deliver.
+func TestAQueuedFeedInputIsNeverDropped(t *testing.T) {
+	dir, store := newTestStore(t)
+	ctx := context.Background()
+
+	writeSession(t, dir, "s1",
+		createdRecord("s1"),
+		&poo.InputQueuedRecord{
+			RecordMeta: poo.NewRecordMetaFrom("input.queued", poo.FeedOrigin("inbox")),
+			SessionID:  "s1",
+			InputID:    "s1-ji1",
+			Mode:       poo.InputModeFeed,
+			Text:       "[feed inbox: hello]",
+			QueuedAt:   "2026-10-20T00:00:00Z",
+		},
+	)
+
+	loaded, err := store.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+	for _, rec := range loaded.Records {
+		if rec.Meta().Record == "input.dropped" {
+			t.Fatalf("the recovery dropped the feed's input: %+v", rec)
+		}
+	}
+	if len(loaded.Jobs) != 1 {
+		t.Errorf("the load queues %d inputs, want 1", len(loaded.Jobs))
+	}
+}
+
 // TestThePendingOperationsAreReported covers the pending query: it says
 // what a recovery would resolve.
 func TestThePendingOperationsAreReported(t *testing.T) {
