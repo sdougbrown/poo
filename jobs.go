@@ -866,6 +866,11 @@ func (s *Session) queueFeedInput(feed, from, text string) error {
 		Text:       rendered,
 		QueuedAt:   nowRFC3339(),
 	}, gate); err != nil {
+		// The store refused the input's acceptance. The session is broken
+		// at once: the wakes stop, and the run that is still open gets the
+		// store_error candidate.
+		s.markBroken()
+		s.addStoreError()
 		return err
 	}
 	s.events.emit(EventInputQueued, map[string]any{
