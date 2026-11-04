@@ -366,6 +366,53 @@ func TestTheRestoreDoesNotRedeliverADeliveredFeedInput(t *testing.T) {
 	}
 }
 
+// TestTheRestoreContinuesTheInputIDs covers the restore's counter: a
+// restored session's next feed input does not reuse the id the records
+// already gave one.
+func TestTheRestoreContinuesTheInputIDs(t *testing.T) {
+	queued := &poo.InputQueuedRecord{
+		RecordMeta: poo.NewRecordMetaFrom("input.queued", poo.FeedOrigin("inbox")),
+		SessionID:  "s1",
+		InputID:    "s1-ji1",
+		Mode:       poo.InputModeFeed,
+		Text:       "[feed inbox: the message]",
+		QueuedAt:   "2026-01-01T00:00:00Z",
+	}
+	delivered := &poo.InputDeliveredRecord{
+		RecordMeta:  poo.NewRecordMetaFrom("input.delivered", poo.FeedOrigin("inbox")),
+		SessionID:   "s1",
+		RunID:       "run-1",
+		InputID:     "s1-ji1",
+		Mode:        poo.InputModeFeed,
+		DeliveredAt: "2026-01-01T00:00:01Z",
+	}
+	tr := scripted(nil)
+	sink := &recordingSink{}
+	opts := restoreOptions(t, tr, sink)
+	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
+	restored, _, err := poo.Restore(opts, []poo.Record{header("s1"), queued, delivered})
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { restored.Close() })
+
+	if err := poo.QueueFeedInput(restored, "inbox", "", "the next message"); err != nil {
+		t.Fatalf("queueing the restored session's input: %v", err)
+	}
+	var next *poo.InputQueuedRecord
+	for _, rec := range sink.allRecords() {
+		if q, ok := rec.(*poo.InputQueuedRecord); ok {
+			next = q
+		}
+	}
+	if next == nil {
+		t.Fatal("the restored session wrote no acceptance for its input")
+	}
+	if next.InputID != "s1-ji2" {
+		t.Errorf("the restored session's input is %q, want s1-ji2", next.InputID)
+	}
+}
+
 // TestTwoPendingFeedInputsFromTheSameFeedSurviveRestore covers the
 // restore's order: two undelivered inputs of one feed are delivered in
 // the order they were accepted.
@@ -421,6 +468,61 @@ func TestTwoPendingFeedInputsFromTheSameFeedSurviveRestore(t *testing.T) {
 	}
 	if texts[0] != "[feed inbox: the first]" || texts[1] != "[feed inbox: the second]" {
 		t.Errorf("the model read %v, want the inputs in order", texts)
+	}
+}
+
+// TestAWakeNamesEachFeedOnce covers the wake's feeds column: one wake
+// takes inputs from two feeds, one of them twice, so the run names both
+// feeds in queue order.
+func TestAWakeNamesEachFeedOnce(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+
+	// The seam: the wake the first input reserves takes the two inputs
+	// queued inside it, so one wake covers all three.
+	queued := make(chan error, 2)
+	restore := s.SetJobRaceHooks(&poo.JobRaceHooks{
+		BeforeWake: func() {
+			queued <- poo.QueueFeedInput(s, "alerts", "", "the alert")
+			queued <- poo.QueueFeedInput(s, "inbox", "", "the second message")
+		},
+	})
+	defer restore()
+	if err := poo.QueueFeedInput(s, "inbox", "alice", "the message"); err != nil {
+		t.Fatalf("queueing the feed's input: %v", err)
+	}
+	for range 2 {
+		if err := <-queued; err != nil {
+			t.Fatalf("queueing an input inside the wake: %v", err)
+		}
+	}
+	waitFor(t, "the woken run to settle", func() bool {
+		return sink.Settled() != nil
+	})
+
+	var started *poo.RunStartedRecord
+	starts := 0
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.RunStartedRecord); ok {
+			started = r
+			starts++
+		}
+	}
+	if started == nil {
+		t.Fatal("the log holds no run.started record")
+	}
+	if starts != 1 {
+		t.Fatalf("the inputs started %d runs, want one wake", starts)
+	}
+	if started.Trigger != poo.TriggerFeed {
+		t.Errorf("the run's trigger is %q, want feed", started.Trigger)
+	}
+	if len(started.Feeds) != 2 || started.Feeds[0] != "inbox" || started.Feeds[1] != "alerts" {
+		t.Errorf("the run names the feeds %v, want [inbox alerts]", started.Feeds)
+	}
+	if len(started.Jobs) != 0 {
+		t.Errorf("the run names the jobs %v, want none", started.Jobs)
 	}
 }
 
@@ -547,6 +649,22 @@ func TestQueueJobResultWithAFeedIDDeliversAFeedInput(t *testing.T) {
 	}
 	if origin != poo.FeedOrigin("inbox") {
 		t.Errorf("the delivered message's origin is %q, want %q", origin, poo.FeedOrigin("inbox"))
+	}
+}
+
+// TestABrokenSessionRefusesAFeedInput covers the refusal a refused
+// acceptance leaves behind: the store failed, so the next input never
+// reaches it.
+func TestABrokenSessionRefusesAFeedInput(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &failingSink{failRecord: "input.queued"}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+	if err := poo.QueueFeedInput(s, "inbox", "", "the message"); err == nil {
+		t.Fatal("the refused acceptance returned no error")
+	}
+	err := poo.QueueFeedInput(s, "inbox", "", "the second message")
+	if !errors.Is(err, poo.ErrSessionBroken) {
+		t.Errorf("the broken session returned %v, want ErrSessionBroken", err)
 	}
 }
 
