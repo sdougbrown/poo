@@ -72,6 +72,30 @@ func ScrubEnv(base []string, scrub Scrub) []string {
 	return out
 }
 
+// Lookup returns a lookup over an environment's NAME=value entries.
+//
+// A feed's or a CLI's environment references are resolved through it,
+// so a name the environment does not hold is one the reference cannot
+// have. A nil environment means the host's own, the way it does for a
+// child that inherits one.
+func Lookup(environ []string) func(string) (string, bool) {
+	if environ == nil {
+		environ = os.Environ()
+	}
+	values := make(map[string]string, len(environ))
+	for _, kv := range environ {
+		name, value, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		values[name] = value
+	}
+	return func(name string) (string, bool) {
+		value, ok := values[name]
+		return value, ok
+	}
+}
+
 // passthroughSet returns the names a passthrough list holds, or nil
 // when the list is empty and everything is kept.
 func passthroughSet(names []string) map[string]bool {

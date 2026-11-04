@@ -888,7 +888,7 @@ func (r *Runtime) resolveFeedRuns() error {
 			Message: "this binary has no executor to run a feed's command",
 		}
 	}
-	lookup := envLookup(r.Env)
+	lookup := exec.Lookup(r.Env)
 	specs := make([]poo.FeedSpec, 0, r.Feeds.Len())
 	for _, spec := range r.Feeds.Specs() {
 		onIdle, err := onIdleOf(spec.OnIdle)
@@ -934,25 +934,6 @@ func onIdleOf(value string) (poo.OnIdle, error) {
 		return poo.OnIdleHold, nil
 	}
 	return "", fmt.Errorf("the on_idle %q is neither %q nor %q", value, feed.OnIdleWake, feed.OnIdleHold)
-}
-
-// envLookup returns a lookup over an environment's NAME=value entries.
-//
-// A feed's manifest resolves its `env:NAME` references through it,
-// against the session's own environment, less what the settings scrub.
-func envLookup(environ []string) func(string) (string, bool) {
-	values := make(map[string]string, len(environ))
-	for _, entry := range environ {
-		name, value, ok := strings.Cut(entry, "=")
-		if !ok {
-			continue
-		}
-		values[name] = value
-	}
-	return func(name string) (string, bool) {
-		value, ok := values[name]
-		return value, ok
-	}
 }
 
 // resolvePolicy builds the permission policy and its asker chain.

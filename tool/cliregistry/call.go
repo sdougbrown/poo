@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -210,7 +209,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	// A manifest's env:NAME is resolved against the session's scrubbed
 	// environment, never the host's: a name the scrub removed or the
 	// passthrough list left out is a reference the CLI cannot have.
-	environ, err := p.plan.ResolveEnv(envLookup(env.Env))
+	environ, err := p.plan.ResolveEnv(exec.Lookup(env.Env))
 	if err != nil {
 		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, err)
 	}
@@ -317,29 +316,6 @@ func stoppedResult(err error, out registry.Output, cap int) (poo.ToolResult, boo
 		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, true
 	}
 	return poo.ToolResult{}, false
-}
-
-// envLookup returns the lookup a plan resolves its env references with.
-//
-// The environment is the session's, already scrubbed, so a name the
-// scrub removed or the passthrough list left out is not there to read.
-// A nil environment means the host's own, the way it does for bash.
-func envLookup(environ []string) func(string) (string, bool) {
-	if environ == nil {
-		environ = os.Environ()
-	}
-	values := make(map[string]string, len(environ))
-	for _, kv := range environ {
-		name, value, ok := strings.Cut(kv, "=")
-		if !ok {
-			continue
-		}
-		values[name] = value
-	}
-	return func(name string) (string, bool) {
-		value, ok := values[name]
-		return value, ok
-	}
 }
 
 // failed renders a completed run outside the CLI's success codes as an
