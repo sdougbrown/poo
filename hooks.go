@@ -450,6 +450,10 @@ const (
 type JobResult struct {
 	// JobID is the job's identifier, e.g. "j3", or a feed's origin,
 	// e.g. "feed:inbox".
+	//
+	// The "feed:" prefix is reserved: an id that is a feed's origin
+	// (IsFeedOrigin) names a feed, so CancelJob stops that feed, and a
+	// job result must not use such an id.
 	JobID string `json:"job"`
 	// Handle is the handle of the tool call the job came from (that
 	// call's ToolEnv.Handle), e.g.

@@ -1647,6 +1647,10 @@ func (s *Session) cancelJob(jobID string) error {
 
 // CancelJob stops one of the session's jobs.
 //
+// An id that is a feed's origin (see IsFeedOrigin) names a feed and not
+// a job, so CancelJob stops that feed. The "feed:" prefix is reserved: a
+// job's id never carries it.
+//
 // The job's partial output is delivered like any result. A job that is
 // unknown or already finished is reported as `ErrUnknownJob`, and
 // stopping it twice is not an error the caller has to handle.
