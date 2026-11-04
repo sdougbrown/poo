@@ -267,10 +267,13 @@ type JobInfo struct {
 	RunID string
 	// StartedAt is when the job started, in RFC 3339.
 	StartedAt string
-	// Status is "running" or "held".
+	// Status is "running", "restarting" or "held".
 	//
 	// A held job is a finished job whose result waits for the next
-	// run: the work is done, and the model has not read it yet.
+	// run: the work is done, and the model has not read it yet. A feed
+	// is "running" while its attempt runs and "restarting" while it
+	// waits for the next attempt; a live feed's row replaces the held
+	// row of an input of it.
 	Status string
 }
 
@@ -287,16 +290,20 @@ const (
 // Jobs returns the session's jobs and feeds.
 //
 // The running jobs come first, in start order, the feeds follow them, in
-// configuration order, and the held results come last.
+// configuration order, and the held results come last. An id is listed
+// once: a live feed is listed as itself, and a held input of that feed is
+// not listed again.
 func (s *Session) Jobs() []JobInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]JobInfo, 0, len(s.jobOrder)+len(s.jobQueue))
+	listed := map[string]bool{}
 	for _, id := range s.jobOrder {
 		job, ok := s.jobs[id]
 		if !ok || job.ended {
 			continue
 		}
+		listed[job.id] = true
 		out = append(out, JobInfo{
 			JobID:     job.id,
 			Handle:    job.handle,
@@ -310,6 +317,7 @@ func (s *Session) Jobs() []JobInfo {
 		if !f.listed() {
 			continue
 		}
+		listed[string(f.origin)] = true
 		out = append(out, JobInfo{
 			JobID:     string(f.origin),
 			Tool:      FeedToolName,
@@ -318,9 +326,10 @@ func (s *Session) Jobs() []JobInfo {
 		})
 	}
 	for _, item := range s.jobQueue {
-		if !item.held {
+		if !item.held || listed[item.result.job] {
 			continue
 		}
+		listed[item.result.job] = true
 		out = append(out, JobInfo{
 			JobID:  item.result.job,
 			Handle: item.result.handle,
@@ -1785,7 +1794,9 @@ type jobSummary struct {
 	Tool string `json:"tool"`
 	// Summary describes the call.
 	Summary string `json:"summary,omitempty"`
-	// Status is "running" or "held".
+	// Status is "running", "restarting" or "held". A feed is
+	// "restarting" while it waits for its next attempt, and a held row
+	// is a result or an input that waits for the next run.
 	Status string `json:"status"`
 	// ElapsedMS is how long the job has been running, in milliseconds.
 	ElapsedMS int64 `json:"elapsed_ms"`
@@ -1819,6 +1830,9 @@ func (s *Session) jobSummaries() []jobSummary {
 		if !f.listed() {
 			continue
 		}
+		// A live feed is listed under its origin, so a held input of it
+		// must not repeat the id: the feed's own row wins.
+		listed[string(f.origin)] = true
 		summary := jobSummary{
 			JobID:  string(f.origin),
 			Tool:   FeedToolName,
@@ -1830,7 +1844,7 @@ func (s *Session) jobSummaries() []jobSummary {
 		out = append(out, summary)
 	}
 	for _, item := range s.jobQueue {
-		if listed[item.result.job] {
+		if !item.held || listed[item.result.job] {
 			continue
 		}
 		listed[item.result.job] = true

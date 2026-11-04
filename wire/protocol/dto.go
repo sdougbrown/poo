@@ -236,7 +236,7 @@ type JobInfo struct {
 	RunID string `json:"run_id,omitempty"`
 	// StartedAt is when the job started.
 	StartedAt string `json:"started_at,omitempty"`
-	// Status is "running" or "held".
+	// Status is "running", "restarting" or "held".
 	Status string `json:"status"`
 }
 
