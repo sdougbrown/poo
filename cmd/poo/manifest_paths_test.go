@@ -8,6 +8,52 @@ import (
 	"testing"
 )
 
+// TestServeReportsManifestOverrides checks the loaded paths and tools over the wire.
+func TestServeReportsManifestOverrides(t *testing.T) {
+	dir := t.TempDir()
+	feed := filepath.Join(dir, "feed.json")
+	registry := filepath.Join(dir, "registry.json")
+	for path, body := range map[string]string{
+		feed:     `{"version":1,"feeds":{"flagfeed":{"command":["true"]}}}`,
+		registry: `{"version":1,"tools":{"flagtool":{"description":"command","command":["true"],"inputSchema":{"type":"object","properties":{},"additionalProperties":false}}}}`,
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	envFeed := filepath.Join(dir, "env.json")
+	if err := os.WriteFile(envFeed, []byte(`{"version":1,"feeds":{"envfeed":{"command":["true"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("POO_FEEDS_PATH", envFeed)
+	endpoint := newFakeEndpoint(t, "")
+	settings := theSettings(t, dir, endpoint.URL+"/v1")
+	client := startServe(t, "--settings", settings, "--feeds-path", feed, "--cli-registry-path", registry)
+	handshake := result(t, client.call(t, "poo/initialize", map[string]any{"protocol_versions": []int{1}, "client": map[string]any{"name": "test", "version": "test"}}))
+	if !strings.Contains(fmt.Sprint(handshake), "call_cli") {
+		t.Fatalf("registry tool missing: %v", handshake)
+	}
+	effective := result(t, client.call(t, "settings/get", map[string]any{}))
+	feeds, _ := effective["feeds"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(feeds["paths"]), envFeed) || !strings.Contains(fmt.Sprint(feeds["paths"]), feed) {
+		t.Fatalf("feeds paths missing: %v", feeds)
+	}
+	registries, _ := effective["cli_registry"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(registries["paths"]), registry) {
+		t.Fatalf("registry path missing: %v", registries)
+	}
+}
+
+// TestPromptLoadsEnvironmentPaths checks that prompt uses environment manifests.
+func TestPromptLoadsEnvironmentPaths(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("POO_FEEDS_PATH", missing)
+	code, stderr := runCLI(t, "prompt")
+	if code == 0 || !strings.Contains(stderr, missing) {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+}
+
 func TestRunLoadsPathsInSettingsFlagEnvironmentOrder(t *testing.T) {
 	for _, kind := range []struct{ field, flag, env string }{
 		{"feeds", "--feeds-path", "POO_FEEDS_PATH"},
