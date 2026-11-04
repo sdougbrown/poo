@@ -55,6 +55,61 @@ func (r *records) logged() (int, int) {
 	return bytes, notices
 }
 
+// TestTheLineLimitIsOnCompleteLines covers the boundary: a complete
+// line of exactly the limit is a message, and one byte more fails the
+// attempt before the line is decoded.
+func TestTheLineLimitIsOnCompleteLines(t *testing.T) {
+	// {"text":""} is the shortest line the object describes, so the
+	// padding is the limit less what the line must carry.
+	lineWith := func(extra int) string {
+		return `{"text":"` + strings.Repeat("x", maxLineBytes-len(`{"text":""}`)+extra) + `"}`
+	}
+	for _, c := range []struct {
+		name  string
+		extra int
+	}{
+		{name: "at the limit"},
+		{name: "one byte past the limit", extra: 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var texts []string
+			reader := &lineReader{
+				emit: func(_, text string) error {
+					texts = append(texts, text)
+					return nil
+				},
+				cancel: func() {},
+			}
+			line := lineWith(c.extra)
+			if len(line) != maxLineBytes+c.extra {
+				t.Fatalf("the line is %d bytes, want %d", len(line), maxLineBytes+c.extra)
+			}
+			if _, err := reader.Write([]byte(line + "\n")); err != nil {
+				t.Fatalf("the writer failed: %v", err)
+			}
+			err := reader.finish()
+			if c.extra == 0 {
+				if err != nil {
+					t.Fatalf("the reader refused a line of exactly the limit: %v", err)
+				}
+				if len(texts) != 1 {
+					t.Errorf("the reader emitted %d inputs, want the one at the limit", len(texts))
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("the reader accepted a line one byte past the limit")
+			}
+			if !strings.Contains(err.Error(), "longer than") {
+				t.Errorf("the failure is %q, want it to name the limit", err)
+			}
+			if len(texts) != 0 {
+				t.Errorf("the line past the limit was delivered: %d inputs", len(texts))
+			}
+		})
+	}
+}
+
 // TestTheStderrStopsAtItsBudget covers the cap: one attempt logs at most
 // its budget of a command's stderr, then says once that the rest is
 // dropped.

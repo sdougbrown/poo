@@ -195,8 +195,13 @@ func (r *lineReader) failure() error {
 // accept decodes one line and emits the input it names.
 //
 // A blank line is skipped: a feed that separates its messages with one
-// is still describing itself, not sending an empty message.
+// is still describing itself, not sending an empty message. A line past
+// the limit is the attempt's failure before anything decodes it, so a
+// complete line is held to the same limit as one still arriving.
 func (r *lineReader) accept(line string) error {
+	if len(line) > maxLineBytes {
+		return r.fail(fmt.Errorf("a line is longer than %d bytes", maxLineBytes))
+	}
 	if strings.TrimSpace(line) == "" {
 		return nil
 	}
