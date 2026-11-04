@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"time"
 
@@ -50,16 +51,10 @@ func (s *suite) feeds() {
 // name, and skips the flow when it does not.
 //
 // A binary that runs no feed refuses a settings file that names one before
-// it serves, so the question is asked of a binary the suite starts with its
-// own settings: the capability is what a client reads to know whether a
-// manifest is worth writing.
+// it serves, so the flow reads the capability from the handshake the
+// earlier flows recorded, before it opens a session with a manifest.
 func (s *suite) announcesFeeds() bool {
 	s.t.Helper()
-	endpoint := newEndpoint(s.t, s.turns)
-	settings := s.settings(endpoint, s.contextLimit, nil)
-	c := s.start(settings, endpoint)
-	defer c.closeInput()
-	s.handshake(c)
 	if !s.handshakeResult.Capabilities.Feeds {
 		s.skip("the binary announces no feeds capability")
 		return false
@@ -149,7 +144,8 @@ func (s *suite) feedWakesTheSession() {
 }
 
 // feedHoldsItsInput covers the feed whose input is held: the manifest says
-// the input may not start a run, so it waits for one a prompt starts.
+// the input may not start a run, so it waits for one a prompt starts, and
+// that run takes it.
 func (s *suite) feedHoldsItsInput() {
 	s.t.Helper()
 	manifest := s.feedManifest(feedHoldName, map[string]any{
@@ -160,7 +156,7 @@ func (s *suite) feedHoldsItsInput() {
 	c, sessionID := s.open(s.turns, s.feedSettings(manifest))
 
 	held := c.waitEvent("the feed's input held", func(e event) bool {
-		return e.Type == "input.held" && lists(payloadNames(e.Payload, "jobs"), feedOrigin(feedHoldName))
+		return e.Type == "input.held" && slices.Contains(payloadNames(e.Payload, "jobs"), feedOrigin(feedHoldName))
 	})
 	if reason, _ := held.Payload["reason"].(string); reason != "on_idle" {
 		s.t.Errorf("the input of the feed is held for %q, want on_idle", reason)
@@ -168,6 +164,20 @@ func (s *suite) feedHoldsItsInput() {
 	// The held input started no run: it waits for the run something else
 	// starts.
 	s.noRun(c, sessionID, holdWindow)
+
+	// The run a prompt starts takes the held input, framed as the feed's.
+	runID := s.prompt(c, sessionID, "say hello")
+	s.settled(c, sessionID, runID)
+	want := fmt.Sprintf("[feed %s · from %s: %s]", feedHoldName, strconv.Quote(feedSender), feedText)
+	delivered := false
+	for _, request := range c.requests() {
+		if requestHolds(request, want) {
+			delivered = true
+		}
+	}
+	if !delivered {
+		s.t.Errorf("no request of the prompted run carries the held input %q", want)
+	}
 
 	// The close stops the feed, so nothing the manifest named outlives the
 	// session.
@@ -230,16 +240,6 @@ func (s *suite) feedSettings(manifest string) map[string]any {
 
 // feedOrigin returns the origin a feed's records and inputs carry.
 func feedOrigin(name string) string { return "feed:" + name }
-
-// lists reports whether a list of names holds one.
-func lists(names []string, want string) bool {
-	for _, name := range names {
-		if name == want {
-			return true
-		}
-	}
-	return false
-}
 
 // payloadNames returns a payload's field as a list of names.
 //
