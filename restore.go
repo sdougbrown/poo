@@ -566,11 +566,17 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 // thing, and they never repeat within a session. A restored session
 // carries on after the ones the records already used, so its own calls
 // and results are never confused with the earlier ones.
+//
+// A feed's attempt number names one attempt of that feed, so it too
+// carries on: the first attempt a restored session starts is the number
+// after the last the records hold. A feed the records never name starts
+// at its first attempt.
 func (s *Session) seedCounters(records []Record) {
 	handles := 0
 	messages := 0
 	inputs := 0
 	jobs := 0
+	attempts := map[string]int{}
 	for _, rec := range records {
 		switch r := rec.(type) {
 		case *ToolCallRecord:
@@ -589,12 +595,21 @@ func (s *Session) seedCounters(records []Record) {
 			// restored session continues past it. A client input's id is
 			// a ULID, and has no number here.
 			inputs = max(inputs, jobInputSeq(s.opts.SessionID, r.InputID))
+		case *FeedStartedRecord:
+			attempts[r.Feed] = max(attempts[r.Feed], r.Attempt)
+		case *FeedEndedRecord:
+			attempts[r.Feed] = max(attempts[r.Feed], r.Attempt)
 		}
 	}
 	s.handleSeq = handles
 	s.inputSeq = inputs
 	s.jobSeq = jobs
 	s.messageIDs.Set(messages)
+	for name, attempt := range attempts {
+		if f, ok := s.feeds[name]; ok && attempt > f.attempt {
+			f.attempt = attempt
+		}
+	}
 }
 
 // scanRuns returns the runs the records hold, in the order they

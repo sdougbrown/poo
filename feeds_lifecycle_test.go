@@ -460,6 +460,73 @@ func TestAFeedOnlySessionOffersTheJobTools(t *testing.T) {
 	}
 }
 
+// TestTheRestoreContinuesTheFeedAttempts covers the attempt counter: a
+// restored session's first attempt of a feed continues the numbers the
+// records hold, so the same log never names one attempt twice. A feed the
+// records never name starts at its first attempt.
+func TestTheRestoreContinuesTheFeedAttempts(t *testing.T) {
+	started := func(feed string, attempt int, at string) *poo.FeedStartedRecord {
+		return &poo.FeedStartedRecord{
+			RecordMeta: poo.NewRecordMetaFrom("feed.started", poo.FeedOrigin(feed)),
+			SessionID:  "s1",
+			Feed:       feed,
+			Attempt:    attempt,
+			StartedAt:  at,
+		}
+	}
+	ended := func(feed string, attempt int, at string) *poo.FeedEndedRecord {
+		return &poo.FeedEndedRecord{
+			RecordMeta: poo.NewRecordMetaFrom("feed.ended", poo.FeedOrigin(feed)),
+			SessionID:  "s1",
+			Feed:       feed,
+			Attempt:    attempt,
+			Outcome:    poo.FeedFailed,
+			EndedAt:    at,
+		}
+	}
+	records := []poo.Record{
+		header("s1"),
+		// The inbox ran two attempts before the process stopped, and the
+		// digest one.
+		started("inbox", 1, "2026-01-01T00:00:00Z"),
+		ended("inbox", 1, "2026-01-01T00:00:01Z"),
+		started("inbox", 2, "2026-01-01T00:00:02Z"),
+		ended("inbox", 2, "2026-01-01T00:00:03Z"),
+		started("digest", 1, "2026-01-01T00:00:04Z"),
+		ended("digest", 1, "2026-01-01T00:00:05Z"),
+	}
+	hold := func(ctx context.Context, io poo.FeedIO) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	sink := &recordingSink{}
+	opts := restoreOptions(t, scripted(nil), sink)
+	restored, _, err := poo.Restore(opts, records, poo.WithFeeds(
+		poo.FeedSpec{Name: "inbox", Run: hold},
+		// The audit is a feed the records never name.
+		poo.FeedSpec{Name: "audit", Run: hold},
+	))
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { restored.Close() })
+	waitFor(t, "both feeds to start", func() bool {
+		return sink.count("feed.started") == 2
+	})
+	attempts := map[string]int{}
+	for _, rec := range sink.allRecords() {
+		if s, ok := rec.(*poo.FeedStartedRecord); ok {
+			attempts[s.Feed] = s.Attempt
+		}
+	}
+	if got := attempts["inbox"]; got != 3 {
+		t.Errorf("the restored inbox started attempt %d, want 3", got)
+	}
+	if got := attempts["audit"]; got != 1 {
+		t.Errorf("the restored audit started attempt %d, want 1", got)
+	}
+}
+
 // TestTheRestoreStartsFeedsAfterThePendingInputs covers the order the
 // restore keeps: the inputs it queues are on the queue before any feed
 // runs, so a feed's first input joins them.
