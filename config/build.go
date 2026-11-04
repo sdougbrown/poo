@@ -19,6 +19,7 @@ import (
 	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/exec"
+	"github.com/sdougbrown/poo/feed"
 	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/perm"
 	permissive "github.com/sdougbrown/poo/perm/decide"
@@ -142,6 +143,9 @@ type Runtime struct {
 	// Registry is the cli registry the session offers, or nil when the
 	// settings name none.
 	Registry *cli.Catalog
+	// Feeds are the feed manifests the settings name, or nil when the
+	// settings name none.
+	Feeds *feed.Set
 	// deciderModel is the model the session's decider asks, when there
 	// is one.
 	deciderModel poo.ModelInfo
@@ -276,6 +280,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
 	}
+	if err := runtime.resolveFeeds(workingDir); err != nil {
+		return nil, err
+	}
 	if err := runtime.resolveModels(opts); err != nil {
 		return nil, err
 	}
@@ -389,14 +396,7 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	resolved := make([]string, 0, len(paths))
-	for _, path := range paths {
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(workingDir, path)
-		}
-		resolved = append(resolved, path)
-	}
-	catalog, err := cli.Load(resolved...)
+	catalog, err := cli.Load(againstDir(paths, workingDir)...)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
@@ -406,6 +406,43 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 		}
 	}
 	r.Registry = catalog
+	return nil
+}
+
+// againstDir resolves each relative path against dir and keeps each
+// absolute one.
+func againstDir(paths []string, dir string) []string {
+	resolved := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		resolved = append(resolved, path)
+	}
+	return resolved
+}
+
+// resolveFeeds loads the feed manifests the settings name.
+//
+// A relative path is resolved against the working directory, and every
+// manifest reachable from the paths joins one set. The set is loaded
+// once, when the session is built; a session never reloads it. Nothing
+// starts a feed here.
+func (r *Runtime) resolveFeeds(workingDir string) error {
+	paths := r.Settings.Feeds.Paths
+	if len(paths) == 0 {
+		return nil
+	}
+	set, err := feed.Load(againstDir(paths, workingDir)...)
+	if err != nil {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "feeds.paths",
+			Message: "the feeds do not load",
+			Err:     err,
+		}
+	}
+	r.Feeds = set
 	return nil
 }
 

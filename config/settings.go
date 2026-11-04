@@ -56,6 +56,8 @@ type Settings struct {
 	Finish Finish `json:"finish,omitempty"`
 	// CLIRegistry are the cli registry's settings.
 	CLIRegistry CLIRegistry `json:"cli_registry,omitempty"`
+	// Feeds are the feed manifests' settings.
+	Feeds Feeds `json:"feeds,omitempty"`
 	// Session are the session's settings.
 	Session Session `json:"session,omitempty"`
 }
@@ -311,6 +313,12 @@ type Finish struct {
 // CLIRegistry are the cli registry's settings.
 type CLIRegistry struct {
 	// Paths are the registry directories.
+	Paths []string `json:"paths,omitempty"`
+}
+
+// Feeds are the feed manifests' settings.
+type Feeds struct {
+	// Paths are the feed manifest directories.
 	Paths []string `json:"paths,omitempty"`
 }
 

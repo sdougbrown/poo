@@ -67,6 +67,8 @@ func fieldsOf(s *Settings) SettingsFields {
 
 	f.CliRegistryPaths = list(s.CLIRegistry.Paths)
 
+	f.FeedsPaths = list(s.Feeds.Paths)
+
 	f.SessionMode = pointer(s.Session.Mode)
 	f.SessionDir = pointer(s.Session.Dir)
 	f.SessionRetentionMaxAgeDays = count(s.Session.Retention.MaxAgeDays)
