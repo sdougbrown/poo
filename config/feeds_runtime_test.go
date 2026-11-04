@@ -127,7 +127,7 @@ func TestASessionRunsTheFeedItsSettingsName(t *testing.T) {
 	// The feed's first message wakes an idle run, and the model reads it
 	// as the feed's input.
 	waitUntil(t, "the feed's message in the model's view", func() bool {
-		return theModelRead(transport, "[feed chat · from \"alice\": the first message]", poo.FeedOrigin("chat"))
+		return theModelRead(transport, `<feed name="chat" from="alice">the first message</feed>`, poo.FeedOrigin("chat"))
 	})
 
 	// The feed is a job-shaped entry, under its origin and the feed tool.
@@ -192,7 +192,7 @@ func TestASessionRunsItsFeedInItsOwnDirectory(t *testing.T) {
 	defer sess.Close()
 
 	waitUntil(t, "the feed's message in the model's view", func() bool {
-		return theModelRead(transport, "[feed here: "+want+"]", poo.FeedOrigin("here"))
+		return theModelRead(transport, `<feed name="here">`+want+`</feed>`, poo.FeedOrigin("here"))
 	})
 }
 

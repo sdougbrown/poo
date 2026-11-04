@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -109,7 +108,7 @@ func (s *suite) feedWakesTheSession() {
 	if len(requests) == 0 {
 		s.t.Fatal("the woken run made no request")
 	}
-	if want := fmt.Sprintf("[feed %s · from %s: %s]", feedWakeName, strconv.Quote(feedSender), feedText); !requestHolds(requests[0], want) {
+	if want := fmt.Sprintf(`<feed name="%s" from="%s">%s</feed>`, feedWakeName, feedSender, feedText); !requestHolds(requests[0], want) {
 		s.t.Errorf("the woken run's request does not carry %q: %v", want, requests[0])
 	}
 
@@ -168,7 +167,7 @@ func (s *suite) feedHoldsItsInput() {
 	// The run a prompt starts takes the held input, framed as the feed's.
 	runID := s.prompt(c, sessionID, "say hello")
 	s.settled(c, sessionID, runID)
-	want := fmt.Sprintf("[feed %s · from %s: %s]", feedHoldName, strconv.Quote(feedSender), feedText)
+	want := fmt.Sprintf(`<feed name="%s" from="%s">%s</feed>`, feedHoldName, feedSender, feedText)
 	delivered := false
 	for _, request := range c.requests() {
 		if requestHolds(request, want) {
