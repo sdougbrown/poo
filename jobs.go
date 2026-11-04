@@ -719,7 +719,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 	// its result is queued, so a waiter cannot slip through the gap.
 	defer func() {
 		s.mu.Lock()
-		s.jobCompletions--
+		s.endJobCompletionLocked()
 		s.mu.Unlock()
 	}()
 
@@ -858,7 +858,7 @@ func (s *Session) queueFeedInput(feed, from, text string) error {
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
-		s.jobCompletions--
+		s.endJobCompletionLocked()
 		s.mu.Unlock()
 	}()
 
@@ -1676,19 +1676,18 @@ func (s *Session) closeJobs() {
 // them holds a result it would otherwise miss.
 func (s *Session) awaitJobCompletions() {
 	deadline := time.After(s.recordBudget())
-	tick := time.NewTicker(time.Millisecond)
-	defer tick.Stop()
 	for {
 		s.mu.Lock()
-		outstanding := s.jobCompletions
-		s.mu.Unlock()
-		if outstanding == 0 {
+		if s.jobCompletions == 0 {
+			s.mu.Unlock()
 			return
 		}
+		done := s.jobCompletionsDone
+		s.mu.Unlock()
 		select {
+		case <-done:
 		case <-deadline:
 			return
-		case <-tick.C:
 		}
 	}
 }

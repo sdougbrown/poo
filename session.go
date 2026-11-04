@@ -132,6 +132,9 @@ type Session struct {
 	// outstanding work, so it cannot return in the gap between the
 	// running job and its queued result.
 	jobCompletions int
+	// jobCompletionsDone is signalled when a completion finishes, so the
+	// close can wait for them without polling.
+	jobCompletionsDone chan struct{}
 	// jobQueue holds the finished job results, in completion order.
 	jobQueue []jobQueueItem
 	// pendingHeld is the held record that is waiting to be written, with
@@ -651,18 +654,19 @@ func New(opts Options, fns ...Option) (*Session, error) {
 	opts.MessageIDs = ids
 
 	s := &Session{
-		opts:              opts,
-		recordWriteBudget: defaultRecordWriteBudget,
-		state:             StateIdle,
-		results:           map[string]ToolResult{},
-		resultMeta:        map[string]resultMeta{},
-		recorded:          map[string]Message{},
-		messageIDs:        ids,
-		noticeArmed:       true,
-		jobs:              map[string]*jobState{},
-		jobQueued:         make(chan struct{}, 1),
-		gatesDone:         make(chan struct{}, 1),
-		deciderModel:      opts.DeciderModel,
+		opts:               opts,
+		recordWriteBudget:  defaultRecordWriteBudget,
+		state:              StateIdle,
+		results:            map[string]ToolResult{},
+		resultMeta:         map[string]resultMeta{},
+		recorded:           map[string]Message{},
+		messageIDs:         ids,
+		noticeArmed:        true,
+		jobs:               map[string]*jobState{},
+		jobQueued:          make(chan struct{}, 1),
+		jobCompletionsDone: make(chan struct{}, 1),
+		gatesDone:          make(chan struct{}, 1),
+		deciderModel:       opts.DeciderModel,
 	}
 	// A construction that fails rolls back everything it started. The
 	// event bus's reporter is a goroutine, and no session is returned
@@ -1161,6 +1165,21 @@ func (s *Session) signalGatesLocked() {
 	}
 	select {
 	case s.gatesDone <- struct{}{}:
+	default:
+	}
+}
+
+// endJobCompletionLocked retires one job completion and wakes a close
+// that waits for them.
+//
+// The caller holds the session's lock.
+func (s *Session) endJobCompletionLocked() {
+	s.jobCompletions--
+	if s.jobCompletionsDone == nil {
+		return
+	}
+	select {
+	case s.jobCompletionsDone <- struct{}{}:
 	default:
 	}
 }
