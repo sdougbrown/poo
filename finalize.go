@@ -1010,9 +1010,9 @@ func (s *Session) messagesByIDLocked(id string) (Message, bool) {
 
 // Close ends the session.
 //
-// An active run is cancelled, the jobs are stopped, the writes that are
-// still in flight are waited for, the observers are stopped and drained,
-// and the session's records are flushed.
+// An active run is cancelled, the feeds and the jobs are stopped, the
+// writes that are still in flight are waited for, the observers are
+// stopped and drained, and the session's records are flushed.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -1030,6 +1030,10 @@ func (s *Session) Close() error {
 			Text:   "the session was closed",
 		}))
 	}
+	// The feeds stop before the jobs are held: an input a feed accepts on
+	// the way down is on the queue when the close holds it, so a later
+	// load delivers it.
+	s.closeFeeds()
 	// The jobs are stopped before the fence, so a job's own record is
 	// written while the store still takes it.
 	s.closeJobs()

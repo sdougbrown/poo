@@ -175,6 +175,9 @@ type Restored struct {
 // inputs, are queued again, so they follow the session's idle policy
 // like any other result.
 //
+// The session's feeds start once those results are queued, so a feed's
+// first input joins them instead of racing the hold.
+//
 // The session takes new runs when the restore returns.
 func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored, error) {
 	created := sessionHeader(records)
@@ -248,6 +251,10 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 	// they appended, and running them again would say it twice.
 	opts.SessionStart = nil
 
+	// The feeds start last, once the results the restore queued are on
+	// the queue: a feed's first input joins them, and does not race the
+	// hold the idle policy puts on them.
+	opts.feedsDeferred = true
 	s, err := New(opts)
 	if err != nil {
 		return nil, Restored{}, err
@@ -274,6 +281,7 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 		s.queueJobResult(job)
 		restored.Jobs = append(restored.Jobs, publicJobResult(job))
 	}
+	s.startFeeds()
 	return s, restored, nil
 }
 

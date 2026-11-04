@@ -362,6 +362,10 @@ const (
 	EventJobStarted EventName = "job.started"
 	// EventJobEnded is emitted when a background job ends.
 	EventJobEnded EventName = "job.ended"
+	// EventFeedStarted is emitted when one attempt of a feed starts.
+	EventFeedStarted EventName = "feed.started"
+	// EventFeedEnded is emitted when one attempt of a feed ends.
+	EventFeedEnded EventName = "feed.ended"
 	// EventMessageDelta is emitted for each piece of a streamed message.
 	EventMessageDelta EventName = "message.delta"
 	// EventProviderRetry is emitted when a request is retried.
