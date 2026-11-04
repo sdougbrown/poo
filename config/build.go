@@ -389,9 +389,11 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 		return err
 	}
 	// The core adds the job tools on its own whenever a linked tool may
-	// run in the background, and the profile offers them with it.
-	r.Profile.Tools = withJobTools(r.Profile.Tools)
-	r.Profiles = resolveProfiles(opts, r.Registry != nil, r.findTool())
+	// run in the background or the session runs feeds, and the profile
+	// offers them with it.
+	feeds := r.Feeds.Len() > 0
+	r.Profile.Tools = withJobTools(r.Profile.Tools, feeds)
+	r.Profiles = resolveProfiles(opts, r.Registry != nil, r.findTool(), feeds)
 	return nil
 }
 
@@ -579,16 +581,21 @@ func toolInfo(factory ToolFactory) poo.ToolInfo {
 // withJobTools adds the core's job tools to a profile's tools.
 //
 // The core adds the job tools whenever a linked tool may run in the
-// background, so the profile offers them with it.
-func withJobTools(tools []poo.ToolInfo) []poo.ToolInfo {
+// background or the session runs feeds, so the profile offers them
+// with it.
+func withJobTools(tools []poo.ToolInfo, feeds bool) []poo.ToolInfo {
+	offered := feeds
 	for _, tool := range tools {
 		if tool.Background != poo.BackgroundNever {
-			return append(tools,
-				poo.ToolInfo{Name: profile.JobsToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever},
-				poo.ToolInfo{Name: profile.CancelJobToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
+			offered = true
 		}
 	}
-	return tools
+	if !offered {
+		return tools
+	}
+	return append(tools,
+		poo.ToolInfo{Name: profile.JobsToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever},
+		poo.ToolInfo{Name: profile.CancelJobToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
 }
 
 // resolveProfiles resolves every profile the binary links.
@@ -596,7 +603,7 @@ func withJobTools(tools []poo.ToolInfo) []poo.ToolInfo {
 // A profile that names a tool the binary does not link offers the
 // tools it has: the profile cannot be run with the others, and a
 // profile that cannot be run is not one the binary offers.
-func resolveProfiles(opts BuildOptions, registry, find bool) []poo.Profile {
+func resolveProfiles(opts BuildOptions, registry, find, feeds bool) []poo.Profile {
 	var out []poo.Profile
 	for _, definition := range opts.Profiles {
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
@@ -616,7 +623,7 @@ func resolveProfiles(opts BuildOptions, registry, find bool) []poo.Profile {
 				}
 			}
 		}
-		resolved.Tools = withJobTools(resolved.Tools)
+		resolved.Tools = withJobTools(resolved.Tools, feeds)
 		out = append(out, resolved)
 	}
 	return out

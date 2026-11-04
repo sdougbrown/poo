@@ -249,3 +249,22 @@ func TestAFeedCannotReachAScrubbedVariable(t *testing.T) {
 		t.Errorf("the command ran anyway and emitted %d inputs", emitted)
 	}
 }
+
+// TestAFeedOnlyProfileOffersTheJobTools covers the profile: the core
+// offers jobs and cancel_job to a session that runs feeds even when no
+// tool runs in the background, so the profile lists them too.
+func TestAFeedOnlyProfileOffersTheJobTools(t *testing.T) {
+	manifest := feedRunManifest(t, "chat", "chat", "Messages from the fixture feed.", nil)
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{Profile: "base"})
+	names := map[string]bool{}
+	for _, tool := range runtime.Profile.Tools {
+		names[tool.Name] = true
+	}
+	if !names["jobs"] || !names["cancel_job"] {
+		t.Errorf("the profile offers %v, want jobs and cancel_job", runtime.Profile.Tools)
+	}
+}
