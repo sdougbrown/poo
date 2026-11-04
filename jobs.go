@@ -793,7 +793,7 @@ func jobOutcomeOf(outcome Outcome) Outcome {
 // result carries its input's id and origin, so a replay hands the
 // session the bytes a restore would. A result whose job id is a feed's
 // origin, and that names no origin of its own, is a feed's input too:
-// it is rendered and triggered as one.
+// its text is delivered verbatim, and it triggers as one.
 func (s *Session) QueueJobResult(result JobResult) {
 	id := result.JobID
 	if result.InputID != "" {
@@ -831,9 +831,8 @@ const FeedToolName = "feed"
 // ErrSessionClosed or ErrSessionBroken, and a store that refuses its
 // record returns the store's error: the input is then not queued.
 //
-// The option that installs a feed is the supported entry: the feed's
-// name is validated, and the model is told what a feed's message is,
-// before an input arrives.
+// The feed's name is not validated here: a caller that takes a feed's
+// name validates it before it queues the input.
 func (s *Session) queueFeedInput(feed, from, text string) error {
 	origin := FeedOrigin(feed)
 	s.mu.Lock()
