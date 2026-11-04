@@ -418,11 +418,10 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 
 // resolveFeeds loads the feed manifests the settings name.
 //
-// A path is resolved against the working directory, and every manifest
-// reachable from the paths is one set. The set is loaded here, once:
-// the feeds a session may run are the ones its manifests hold when the
-// session is built, and a session does not reload one. Nothing starts a
-// feed here; the specs are the lifecycle's input.
+// A relative path is resolved against the working directory, and every
+// manifest reachable from the paths joins one set. The set is loaded
+// once, when the session is built; a session never reloads it. Nothing
+// starts a feed here.
 func (r *Runtime) resolveFeeds(workingDir string) error {
 	paths := r.Settings.Feeds.Paths
 	if len(paths) == 0 {

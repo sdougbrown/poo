@@ -1,16 +1,17 @@
 // Package feed holds the manifests of long-lived sources that feed
 // messages into a session.
 //
-// A feed is a small manifest describing a process that runs beside a
-// session and emits messages: its command, its environment, and how its
-// inputs behave when the session is idle. The package loads the
-// manifests the settings name and holds the validated specs; the
-// lifecycle that starts and stops the processes is the session's, and
-// the wiring of a spec to a real process is the config layer's.
+// A feed is a process that runs beside a session and emits messages.
+// Its manifest names the command, the environment, and what the
+// feed's inputs do when the session is idle.
 //
-// A feed's environment follows the same rules as a registered CLI's: an
-// entry is a literal, or an `env:NAME` reference the host resolves
-// against its own, scrubbed view of the environment.
+// The package loads the manifests the settings name and holds the
+// validated specs. The session owns the lifecycle that starts and stops
+// the processes. The config layer turns a spec into a real process.
+//
+// A feed's environment follows a registered CLI's rules. An entry is a
+// literal, or an `env:NAME` reference. The host resolves a reference
+// against its own scrubbed environment.
 package feed
 
 import (
@@ -91,9 +92,8 @@ type Set struct {
 // two manifests fails the load, and the failure names both files: an
 // origin has to mean one feed.
 //
-// A manifest whose version, command, name, on_idle or fields the loader
-// does not know fails the load, and the failure names the file and the
-// feed.
+// A bad version, command, name, on_idle or unknown field fails the
+// load. The failure names the file and the feed.
 func Load(paths ...string) (*Set, error) {
 	files, err := manifest.Discover(paths...)
 	if err != nil {
