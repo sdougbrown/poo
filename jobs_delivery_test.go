@@ -66,6 +66,44 @@ func TestTheRunWaitsForItsJobAndThenDelivers(t *testing.T) {
 	}
 }
 
+// TestAJobResultRendersAsOneElement covers the element the model reads
+// for a job's result: one `job` element naming the job, its tool and its
+// outcome, with the text escaped so it cannot close the element.
+func TestAJobResultRendersAsOneElement(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("a < b")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	tool.Release()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	want := `<job id="j1" tool="job" outcome="ok">a &lt; b</job>`
+	found := false
+	for _, m := range sink.messages() {
+		if m.Origin != poo.OriginJob {
+			continue
+		}
+		found = true
+		if got := m.Content[0].Text; got != want {
+			t.Errorf("the delivered text is %q, want %q", got, want)
+		}
+	}
+	if !found {
+		t.Fatal("the job's result did not reach the model's view")
+	}
+}
+
 // TestTheBeforeSettleHookRunsOnceAtTheRealSettle covers the plan's
 // rule: the settle hooks do not run when the run enters the waiting
 // state, because the run is not ending.

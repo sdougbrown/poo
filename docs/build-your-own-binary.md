@@ -268,11 +268,15 @@ queues it until a run is going, and a feed without `on_idle` inherits
 `jobs.on_idle`. A run that is woken or prompted takes every queued input,
 held ones included.
 
-**The model reads a feed's input as outside input.** The message is
-`[feed <name> · from "<from>": <text>]`, or `[feed <name>: <text>]` without
-a sender. It is not the user's turn, and it is untrusted like a tool
-result. The records are `feed.started` and `feed.ended`;
-[docs/session-log-v0.md](session-log-v0.md) lists them.
+**The model reads a feed's input as outside input.** The message is one
+XML element: `<feed name="<name>" from="<from>">` around the text, with
+the `from` attribute left out when the input has no sender. In the text,
+`&` becomes `&amp;` and `<` becomes `&lt;`, so the text cannot close the
+element; an attribute escapes those two as well as `"`, and a newline or
+a carriage return is written as a character reference. It is not the
+user's turn, and it is untrusted like a tool result. The records are
+`feed.started` and `feed.ended`; [docs/session-log-v0.md](session-log-v0.md)
+lists them.
 
 **Jobs.** A running feed is listed by `jobs` and by `session/get` as
 `feed:<name>` with the tool `feed`. `cancel_job feed:<name>` stops it until

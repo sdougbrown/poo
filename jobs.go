@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -926,14 +925,57 @@ func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle, admit f
 // feedInputText renders the model-facing text of a feed's input.
 //
 // The text is rendered once, when the input is accepted, and the record
-// carries it: a restore delivers the same bytes. The sender is quoted,
-// so a sender cannot close the envelope and write a second one.
+// carries it: a restore delivers the same bytes. The result is one
+// element, named for the feed and carrying the sender as an attribute
+// when the input has one.
 func feedInputText(feed, from, text string) string {
-	if from == "" {
-		return fmt.Sprintf("[feed %s: %s]", feed, text)
+	attrs := [][2]string{{"name", feed}}
+	if from != "" {
+		attrs = append(attrs, [2]string{"from", from})
 	}
-	return fmt.Sprintf("[feed %s · from %s: %s]", feed, strconv.Quote(from), text)
+	return outsideElement("feed", attrs, text)
 }
+
+// outsideElement renders outside data as one XML element.
+//
+// Outside data is a feed's input or a job's result: a message the model
+// reads but did not ask for. The closing tag ends it, so the text escapes
+// only the characters that read as markup, and an attribute escapes the
+// characters that end its value or spread the start tag across lines.
+func outsideElement(tag string, attrs [][2]string, text string) string {
+	var b strings.Builder
+	b.WriteByte('<')
+	b.WriteString(tag)
+	for _, attr := range attrs {
+		b.WriteByte(' ')
+		b.WriteString(attr[0])
+		b.WriteString(`="`)
+		b.WriteString(attributeEscaper.Replace(attr[1]))
+		b.WriteByte('"')
+	}
+	b.WriteByte('>')
+	b.WriteString(textEscaper.Replace(text))
+	b.WriteString(`</`)
+	b.WriteString(tag)
+	b.WriteByte('>')
+	return b.String()
+}
+
+// textEscaper escapes an element's text. `&` and `<` start markup, so
+// they become references; a newline, a quote and a `>` arrive as they
+// are.
+var textEscaper = strings.NewReplacer(`&`, `&amp;`, `<`, `&lt;`)
+
+// attributeEscaper escapes an attribute's value. `&` and `<` start
+// markup and the quote ends the value; a newline or a carriage return
+// becomes a character reference, so the start tag stays on one line.
+var attributeEscaper = strings.NewReplacer(
+	`&`, `&amp;`,
+	`<`, `&lt;`,
+	`"`, `&quot;`,
+	"\n", `&#10;`,
+	"\r", `&#13;`,
+)
 
 // queueJobResult puts a finished result on the session's job queue and
 // acts on it.
@@ -1299,7 +1341,11 @@ func jobResultText(result jobResult) string {
 	if IsFeedOrigin(result.origin) {
 		return result.text
 	}
-	return fmt.Sprintf("[job %s · %s finished (%s): %s]", result.job, result.tool, result.outcome, result.text)
+	return outsideElement("job", [][2]string{
+		{"id", result.job},
+		{"tool", result.tool},
+		{"outcome", string(result.outcome)},
+	}, result.text)
 }
 
 // triggerFor returns what the wake's results are: a feed's wake when
