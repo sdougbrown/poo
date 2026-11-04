@@ -2041,7 +2041,7 @@ func (t *JobTool) Call(ctx context.Context, in Prepared, env ToolEnv) (ToolResul
 	}
 	var b strings.Builder
 	for _, s := range summaries {
-		if s.Summary == "" {
+		if s.Tool == FeedToolName {
 			// A feed has no call to describe: its line names the feed
 			// and what it is doing.
 			fmt.Fprintf(&b, "%s · %s · %s · %dms\n", s.JobID, s.Tool, s.Status, s.ElapsedMS)
