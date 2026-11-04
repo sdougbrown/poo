@@ -1,0 +1,5 @@
+#!/bin/sh
+# A fixture feed: a message, with its diagnostics on stderr.
+printf '{"text": "the message"}\n'
+printf 'the diagnostic the model must not see\n' >&2
+sleep 60

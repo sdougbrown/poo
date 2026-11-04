@@ -1,0 +1,5 @@
+#!/bin/sh
+# A fixture feed: a message, then a line that is not one.
+printf '{"text": "the message before the failure"}\n'
+printf 'this is not a message\n'
+sleep 60

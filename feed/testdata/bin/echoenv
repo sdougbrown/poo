@@ -1,0 +1,3 @@
+#!/bin/sh
+# A fixture feed: it emits the values of the variables it was given.
+printf '{"text": "%s and %s"}\n' "$FIXTURE_ECHO" "$FIXTURE_REFERENCE"
