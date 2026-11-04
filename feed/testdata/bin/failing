@@ -1,0 +1,3 @@
+#!/bin/sh
+# A fixture feed: it fails without a message.
+exit 3

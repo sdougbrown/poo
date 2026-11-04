@@ -1,0 +1,3 @@
+#!/bin/sh
+# A fixture feed: its last line ends without a newline.
+printf '{"text": "the last message"}'

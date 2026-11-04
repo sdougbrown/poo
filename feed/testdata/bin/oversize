@@ -1,0 +1,5 @@
+#!/bin/sh
+# A fixture feed: one line longer than a line may be.
+head -c 1200000 /dev/zero | tr '\0' 'x'
+printf '\n'
+sleep 60

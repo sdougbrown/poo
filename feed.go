@@ -20,6 +20,10 @@ import (
 
 // FeedIO is what a feed's runner may use.
 type FeedIO struct {
+	// Dir is the session's working directory, where the feed's process
+	// runs. The session hands over its own: the directory a new session
+	// was created in, or, for a restored session, the recorded one.
+	Dir string
 	// Emit queues one input. It returns the session's refusal
 	// (ErrSessionClosed, ErrSessionBroken, a store error); the runner
 	// stops and returns that error.
@@ -43,6 +47,9 @@ type FeedSpec struct {
 	// Name is the feed's name. It is part of the feed's origin, so it
 	// has the shape of an origin's name: ^[a-z0-9][a-z0-9_-]*$.
 	Name string
+	// Description is what the feed is for. The prompt names it, so the
+	// model knows what may arrive beside the user's turn.
+	Description string
 	// Run runs one attempt.
 	Run FeedRunner
 	// Restart reports that the session starts the next attempt after an
@@ -369,6 +376,7 @@ func (s *Session) runFeedAttempt(f *feedState, attempt int) (err error) {
 		}
 	}()
 	return f.spec.Run(f.ctx, FeedIO{
+		Dir: s.opts.WorkingDir,
 		Emit: func(from, text string) error {
 			return s.emitFeedInput(f, attempt, from, text)
 		},

@@ -146,6 +146,10 @@ type Runtime struct {
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
+	// executor is the executor the commands run through: the tools
+	// that run one, and the feeds. It is nil when nothing runs a
+	// command.
+	executor exec.Executor
 	// deciderModel is the model the session's decider asks, when there
 	// is one.
 	deciderModel poo.ModelInfo
@@ -293,6 +297,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
 		return nil, err
 	}
+	if err := runtime.resolveFeedRuns(); err != nil {
+		return nil, err
+	}
 	if err := runtime.resolvePolicy(opts, workingDir); err != nil {
 		return nil, err
 	}
@@ -379,9 +386,11 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 		return err
 	}
 	// The core adds the job tools on its own whenever a linked tool may
-	// run in the background, and the profile offers them with it.
-	r.Profile.Tools = withJobTools(r.Profile.Tools)
-	r.Profiles = resolveProfiles(opts, r.Registry != nil, r.findTool())
+	// run in the background or the session runs feeds, and the profile
+	// offers them with it.
+	feeds := r.Feeds.Len() > 0
+	r.Profile.Tools = withJobTools(r.Profile.Tools, feeds)
+	r.Profiles = resolveProfiles(opts, r.Registry != nil, r.findTool(), feeds)
 	return nil
 }
 
@@ -536,13 +545,18 @@ func offersSideEffects(tools []poo.ToolInfo) bool {
 	return false
 }
 
-// needsExecutor reports whether an offered tool runs a command.
+// needsExecutor reports whether an offered tool or a configured feed
+// runs a command.
 //
 // bash and call_cli run a command through the executor, so a session that
-// offers either one builds it; a read-only profile builds none, and a
-// settings file naming an executor this binary lacks is only an error when
-// something would run in it.
+// offers either one builds it; a feed is a command of its own, so a
+// session that runs one builds it too. A read-only profile with no feeds
+// builds none, and a settings file naming an executor this binary lacks is
+// only an error when something would run in it.
 func (r *Runtime) needsExecutor() bool {
+	if r.Feeds.Len() > 0 {
+		return true
+	}
 	for _, name := range r.toolNames {
 		if name == ToolBash || name == cli.CallToolName {
 			return true
@@ -564,16 +578,21 @@ func toolInfo(factory ToolFactory) poo.ToolInfo {
 // withJobTools adds the core's job tools to a profile's tools.
 //
 // The core adds the job tools whenever a linked tool may run in the
-// background, so the profile offers them with it.
-func withJobTools(tools []poo.ToolInfo) []poo.ToolInfo {
+// background or the session runs feeds, so the profile offers them
+// with it.
+func withJobTools(tools []poo.ToolInfo, feeds bool) []poo.ToolInfo {
+	offered := feeds
 	for _, tool := range tools {
 		if tool.Background != poo.BackgroundNever {
-			return append(tools,
-				poo.ToolInfo{Name: profile.JobsToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever},
-				poo.ToolInfo{Name: profile.CancelJobToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
+			offered = true
 		}
 	}
-	return tools
+	if !offered {
+		return tools
+	}
+	return append(tools,
+		poo.ToolInfo{Name: profile.JobsToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever},
+		poo.ToolInfo{Name: profile.CancelJobToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
 }
 
 // resolveProfiles resolves every profile the binary links.
@@ -581,7 +600,7 @@ func withJobTools(tools []poo.ToolInfo) []poo.ToolInfo {
 // A profile that names a tool the binary does not link offers the
 // tools it has: the profile cannot be run with the others, and a
 // profile that cannot be run is not one the binary offers.
-func resolveProfiles(opts BuildOptions, registry, find bool) []poo.Profile {
+func resolveProfiles(opts BuildOptions, registry, find, feeds bool) []poo.Profile {
 	var out []poo.Profile
 	for _, definition := range opts.Profiles {
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
@@ -601,7 +620,7 @@ func resolveProfiles(opts BuildOptions, registry, find bool) []poo.Profile {
 				}
 			}
 		}
-		resolved.Tools = withJobTools(resolved.Tools)
+		resolved.Tools = withJobTools(resolved.Tools, feeds)
 		out = append(out, resolved)
 	}
 	return out
@@ -827,6 +846,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 			}
 		}
 		toolOptions.Executor = executor
+		r.executor = executor
 	}
 	tools := map[string]poo.Tool{}
 	var order []string
@@ -842,6 +862,74 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	r.Options.Tools = tools
 	r.Options.ToolOrder = order
 	return nil
+}
+
+// resolveFeedRuns builds the feeds the session runs.
+//
+// A feed is a command of the session's own, so it runs the way the
+// session's other commands do: through the executor the settings name,
+// in the directory the session works in, with the session's scrubbed
+// environment behind the manifest's own entries. A name the settings
+// scrub is not there for a manifest's `env:` reference to reach.
+//
+// The feeds are the session's options, so a new session and a restored
+// one run them alike.
+func (r *Runtime) resolveFeedRuns() error {
+	if r.Feeds.Len() == 0 {
+		return nil
+	}
+	if r.executor == nil {
+		return &Error{
+			Code:    CodeUnsupported,
+			Field:   "feeds.paths",
+			Message: "this binary has no executor to run a feed's command",
+		}
+	}
+	lookup := exec.Lookup(r.Env)
+	specs := make([]poo.FeedSpec, 0, r.Feeds.Len())
+	for _, spec := range r.Feeds.Specs() {
+		onIdle, err := onIdleOf(spec.OnIdle)
+		if err != nil {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "feeds.paths",
+				Message: fmt.Sprintf("the feed %q does not say when it may wake a run", spec.Name),
+				Err:     err,
+			}
+		}
+		run := feed.Runner(spec, r.executor, lookup)
+		specs = append(specs, poo.FeedSpec{
+			Name:        spec.Name,
+			Description: spec.Description,
+			Restart:     spec.Restart,
+			OnIdle:      onIdle,
+			// The session hands its own working directory to the run
+			// it calls, so a session created in another directory
+			// than the build's runs its feed there.
+			Run: func(ctx context.Context, io poo.FeedIO) error {
+				return run(ctx, io.Dir, io.Emit, io.Log)
+			},
+		})
+	}
+	r.Options.Feeds = specs
+	return nil
+}
+
+// onIdleOf maps a manifest's on_idle onto the core's idle policy.
+//
+// The values are the loader's and the core's are its own, so the mapping
+// is one switch here: a value either side gains without the other fails
+// the build rather than being passed along or ignored.
+func onIdleOf(value string) (poo.OnIdle, error) {
+	switch value {
+	case "":
+		return "", nil
+	case feed.OnIdleWake:
+		return poo.OnIdleWake, nil
+	case feed.OnIdleHold:
+		return poo.OnIdleHold, nil
+	}
+	return "", fmt.Errorf("the on_idle %q is neither %q nor %q", value, feed.OnIdleWake, feed.OnIdleHold)
 }
 
 // resolvePolicy builds the permission policy and its asker chain.

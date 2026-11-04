@@ -115,8 +115,9 @@ replaces carries. The library's environment section reads `{{.Cwd}}`,
 `{{.OS}}`, `{{.Date}}` and `{{.Model}}`. The catalog section reads
 `{{.Search}}` (a bool), `{{.Count}}` (an int), `{{.Call}}` and `{{.Find}}` (the two
 tool names), and `{{.Entries}}`, a list whose entries have `{{.Name}}` and
-`{{.Description}}`. A section whose prose names no field renders the same text
-whatever the data is.
+`{{.Description}}`. `tools/jobs.md` reads `{{.Feeds}}`, the feeds the session
+runs, each with a `{{.Name}}` and a `{{.Description}}`. A section whose prose
+names no field renders the same text whatever the data is.
 
 A file's final newline is not part of the section. Each file ends with one, and
 the renderer drops it. A file that ends with a blank line keeps the newline it

@@ -39,12 +39,17 @@ var ErrPromptRender = errors.New("a prompt section did not render")
 func systemPromptEnv(opts *Options) prompt.Env {
 	tools := make([]string, 0, len(opts.ToolOrder))
 	tools = append(tools, opts.ToolOrder...)
+	feeds := make([]prompt.Feed, 0, len(opts.Feeds))
+	for _, spec := range opts.Feeds {
+		feeds = append(feeds, prompt.Feed{Name: spec.Name, Description: spec.Description})
+	}
 	return prompt.Env{
 		Cwd:     opts.WorkingDir,
 		OS:      runtime.GOOS,
 		Date:    time.Now().UTC().Format("2006-01-02"),
 		Model:   opts.Model.ModelID,
 		Tools:   tools,
+		Feeds:   feeds,
 		Variant: opts.PromptVariant,
 	}
 }
