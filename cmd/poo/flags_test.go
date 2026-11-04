@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -76,5 +77,27 @@ func TestTheUnmatchedFlagChangesThePolicy(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "falls back") {
 		t.Errorf("stderr is %q, want it to warn about the fallback", stderr)
+	}
+}
+
+// TestAnEmptyManifestPathFlagIsSkipped covers the manifest-path flags: an
+// empty value, such as an unset variable expanded on the command line,
+// adds no path, so it never resolves to the working directory.
+func TestAnEmptyManifestPathFlagIsSkipped(t *testing.T) {
+	var f sharedFlags
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	f.register(fs)
+	if err := fs.Parse([]string{"--feeds-path", "", "--feeds-path", "feeds", "--cli-registry-path", ""}); err != nil {
+		t.Fatalf("parsing the flags: %v", err)
+	}
+	overrides, err := f.overrides()
+	if err != nil {
+		t.Fatalf("reading the overrides: %v", err)
+	}
+	if got := overrides.FeedsPaths; len(got) != 1 || got[0] != "feeds" {
+		t.Errorf("the feed paths are %q, want only %q", got, "feeds")
+	}
+	if got := overrides.CLIRegistryPaths; len(got) != 0 {
+		t.Errorf("the registry paths are %q, want none", got)
 	}
 }

@@ -19,9 +19,13 @@ type stringList []string
 // String returns the values, comma separated.
 func (s *stringList) String() string { return strings.Join(*s, ", ") }
 
-// Set adds one value.
+// Set adds one value. An empty value adds nothing, as an empty entry
+// in the matching environment variable does, so it never resolves to
+// the working directory.
 func (s *stringList) Set(value string) error {
-	*s = append(*s, value)
+	if value != "" {
+		*s = append(*s, value)
+	}
 	return nil
 }
 
