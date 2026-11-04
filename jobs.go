@@ -926,9 +926,10 @@ func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle, admit f
 // feedInputText renders the model-facing text of a feed's input.
 //
 // The text is rendered once, when the input is accepted, and the record
-// carries it: a restore delivers the same bytes. The sender is quoted
-// and the text is escaped, so neither can close the envelope and write
-// a second one.
+// carries it: a restore delivers the same bytes. The sender is a quoted
+// string, so its newlines and quotes are escaped and it reads as one
+// value. The text's `]` is escaped, so the text cannot close the
+// envelope and write a second one.
 func feedInputText(feed, from, text string) string {
 	text = envelopeEscaper.Replace(text)
 	if from == "" {
