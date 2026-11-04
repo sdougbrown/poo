@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/exec"
 )
 
@@ -28,12 +27,17 @@ const (
 // silentLogger drops what a runner that was given no logger says.
 var silentLogger = slog.New(slog.DiscardHandler)
 
-// Runner returns the runner that runs one attempt of a feed's command.
+// Run is one attempt of a feed's process.
 //
-// Each call starts the manifest's command once with the environment the
-// manifest declares, hands its stdout to the session line by line, and
-// reaps the process before it returns, so nothing the attempt started
-// outlives it.
+// dir is the directory the command runs in.
+type Run func(ctx context.Context, dir string, emit func(from, text string) error, log *slog.Logger) error
+
+// Runner returns the run that runs one attempt of a feed's command.
+//
+// Each call starts the manifest's command once in the directory it is
+// given, with the environment the manifest declares, hands its stdout to
+// the session line by line, and reaps the process before it returns, so
+// nothing the attempt started outlives it.
 //
 // A line is one JSON object naming the message the feed wants
 // delivered:
@@ -58,8 +62,8 @@ var silentLogger = slog.New(slog.DiscardHandler)
 // then the manifest's own entries, resolved through env. A reference
 // that does not resolve fails the attempt, and the command does not
 // start.
-func Runner(spec Spec, ex exec.Executor, env func(string) (string, bool), dir string) poo.FeedRunner {
-	return func(ctx context.Context, feed poo.FeedIO) error {
+func Runner(spec Spec, ex exec.Executor, env func(string) (string, bool)) Run {
+	return func(ctx context.Context, dir string, emit func(from, text string) error, log *slog.Logger) error {
 		resolved, err := spec.ResolveEnv(env)
 		if err != nil {
 			return fmt.Errorf("feed %q: %w", spec.Name, err)
@@ -69,8 +73,8 @@ func Runner(spec Spec, ex exec.Executor, env func(string) (string, bool), dir st
 		// stops it when the context ends.
 		runCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		stdout := &lineReader{emit: feed.Emit, cancel: cancel}
-		stderr := newStderrLog(feed.Log, maxStderrBytes)
+		stdout := &lineReader{emit: emit, cancel: cancel}
+		stderr := newStderrLog(log, maxStderrBytes)
 		proc, err := ex.Start(runCtx, exec.Command{
 			Argv:   spec.Command,
 			Dir:    dir,

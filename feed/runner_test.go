@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/sdougbrown/cli-registry"
-	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/feed"
 )
+
+// errRefused is what a test's emit reports when it stands in for a session
+// that will not take the input.
+var errRefused = errors.New("the session is closed")
 
 // emitted collects the inputs a runner's commands produce.
 type emitted struct {
@@ -64,11 +67,12 @@ func silent() *slog.Logger { return slog.New(slog.DiscardHandler) }
 func start(t *testing.T, c executorCase, spec feed.Spec, log *slog.Logger) (*emitted, context.CancelFunc, chan error) {
 	t.Helper()
 	got := &emitted{}
-	run := feed.Runner(spec, c.executor, envLookup(), t.TempDir())
+	dir := t.TempDir()
+	run := feed.Runner(spec, c.executor, envLookup())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, poo.FeedIO{Emit: got.emit, Log: log})
+		done <- run(ctx, dir, got.emit, log)
 	}()
 	return got, cancel, done
 }
@@ -265,18 +269,15 @@ func TestTheManifestEnvironmentReachesTheCommand(t *testing.T) {
 					{Name: "FIXTURE_REFERENCE", From: "FIXTURE_HOST", Reference: true},
 				},
 			}
-			run := feed.Runner(spec, c.executor, envLookup("FIXTURE_HOST=the reference"), t.TempDir())
+			run := feed.Runner(spec, c.executor, envLookup("FIXTURE_HOST=the reference"))
 			var mu sync.Mutex
 			var texts []string
-			err := run(context.Background(), poo.FeedIO{
-				Emit: func(from, text string) error {
-					mu.Lock()
-					defer mu.Unlock()
-					texts = append(texts, text)
-					return nil
-				},
-				Log: silent(),
-			})
+			err := run(context.Background(), t.TempDir(), func(from, text string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				texts = append(texts, text)
+				return nil
+			}, silent())
 			if err != nil {
 				t.Fatalf("the attempt failed: %v", err)
 			}
@@ -293,16 +294,16 @@ func TestTheManifestEnvironmentReachesTheCommand(t *testing.T) {
 func TestAnInputTheSessionRefusesEndsTheAttempt(t *testing.T) {
 	for _, c := range executorCases(t) {
 		t.Run(c.name, func(t *testing.T) {
-			got := &emitted{refuse: poo.ErrSessionClosed}
-			run := feed.Runner(feed.Spec{Name: "chat", Command: []string{script(t, "chat")}}, c.executor, envLookup(), t.TempDir())
+			got := &emitted{refuse: errRefused}
+			run := feed.Runner(feed.Spec{Name: "chat", Command: []string{script(t, "chat")}}, c.executor, envLookup())
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {
-				done <- run(ctx, poo.FeedIO{Emit: got.emit, Log: silent()})
+				done <- run(ctx, t.TempDir(), got.emit, silent())
 			}()
 			err := result(t, done)
-			if !errors.Is(err, poo.ErrSessionClosed) {
+			if !errors.Is(err, errRefused) {
 				t.Errorf("the attempt returned %v, want the session's refusal", err)
 			}
 		})

@@ -111,6 +111,17 @@ func TestFixtures(t *testing.T) {
 			},
 		},
 		{
+			// The feed package may import the exec package and the
+			// packages outside the module, and no other package of the
+			// module: the core and a package beside it are findings, the
+			// executor is not.
+			name: "feeds",
+			want: []string{
+				m + "feeds/feed imports " + m + "feeds",
+				m + "feeds/feed imports " + m + "feeds/helper",
+			},
+		},
+		{
 			// The session package may import the core package and the
 			// decide package and no more.
 			name: "session",

@@ -893,12 +893,15 @@ func (r *Runtime) resolveFeedRuns(workingDir string) error {
 				Err:     err,
 			}
 		}
+		run := feed.Runner(spec, r.Executor, lookup)
 		specs = append(specs, poo.FeedSpec{
 			Name:        spec.Name,
 			Description: spec.Description,
-			Run:         feed.Runner(spec, r.Executor, lookup, workingDir),
 			Restart:     spec.Restart,
 			OnIdle:      onIdle,
+			Run: func(ctx context.Context, io poo.FeedIO) error {
+				return run(ctx, workingDir, io.Emit, io.Log)
+			},
 		})
 	}
 	r.FeedSpecs = specs
