@@ -1263,11 +1263,12 @@ func feedNames(results []jobResult) []string {
 	var out []string
 	seen := map[Origin]bool{}
 	for _, result := range results {
-		if !IsFeedOrigin(result.origin) || seen[result.origin] {
+		name, ok := FeedName(result.origin)
+		if !ok || seen[result.origin] {
 			continue
 		}
 		seen[result.origin] = true
-		out = append(out, strings.TrimPrefix(string(result.origin), "feed:"))
+		out = append(out, name)
 	}
 	return out
 }

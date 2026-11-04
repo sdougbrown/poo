@@ -57,6 +57,9 @@ func HookOrigin(name string) Origin {
 	return Origin("hook:" + name)
 }
 
+// feedOriginPrefix is the one spelling of a feed's origin.
+const feedOriginPrefix = "feed:"
+
 // FeedOrigin returns the origin a feed's records and messages carry.
 //
 // The origin names the feed, so a reader of the record knows which feed
@@ -64,15 +67,29 @@ func HookOrigin(name string) Origin {
 // messages into a session; its messages never stand in for the user's
 // turn.
 func FeedOrigin(name string) Origin {
-	return Origin("feed:" + name)
+	return Origin(feedOriginPrefix + name)
+}
+
+// FeedName returns the feed an origin names, and reports whether the
+// origin is a feed's at all.
+//
+// A reader that takes a feed's name out of an origin uses this rather
+// than its own spelling of the prefix.
+func FeedName(o Origin) (string, bool) {
+	name, ok := strings.CutPrefix(string(o), feedOriginPrefix)
+	if !ok {
+		return "", false
+	}
+	return name, true
 }
 
 // IsFeedOrigin reports that the origin belongs to a feed.
 //
-// A reader that recognizes a feed's message, record or input id uses this
-// rather than its own spelling of the prefix.
+// A reader that recognizes a feed's message, record or input id uses
+// this rather than its own spelling of the prefix.
 func IsFeedOrigin(o Origin) bool {
-	return strings.HasPrefix(string(o), "feed:")
+	_, ok := FeedName(o)
+	return ok
 }
 
 // API names a wire API.
