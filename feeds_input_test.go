@@ -487,11 +487,17 @@ func TestACloseRacingAFeedAcceptanceKeepsTheInput(t *testing.T) {
 	}()
 	<-sink.at
 
-	// The close begins while the acceptance record is being written.
+	// The close begins while the acceptance record is being written. The
+	// write is released only once the close has set the session closed: an
+	// acceptance that finished first would wake a run, and the test would
+	// cover the other race.
 	closed := make(chan error, 1)
 	go func() {
 		closed <- s.Close()
 	}()
+	waitFor(t, "the close to set the session closed", func() bool {
+		return errors.Is(s.WaitJobs(context.Background()), poo.ErrSessionClosed)
+	})
 	close(sink.release)
 
 	if err := <-accepted; err != nil {
