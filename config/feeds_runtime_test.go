@@ -3,6 +3,7 @@ package config_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -249,6 +250,15 @@ func TestAFeedsOnlyBuildBuildsAnExecutor(t *testing.T) {
 	}
 	if len(runtime.Options.Feeds) != 1 {
 		t.Errorf("the build ran %v, want the one feed", runtime.Options.Feeds)
+	}
+
+	_, err = readOnlyBuild(t, settings, nil)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a binary with a feed and no executor built anyway: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported {
+		t.Errorf("the failure is %+v, want unsupported", failure)
 	}
 }
 
