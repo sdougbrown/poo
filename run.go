@@ -1032,14 +1032,14 @@ func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) 
 		}
 		s.mu.Lock()
 		abandoned := run.committed || run.finalizing || ctx.Err() != nil
-		if !abandoned {
-			s.sunk = true
-			s.broken = true
-		}
 		s.mu.Unlock()
 		if abandoned {
 			return errDeliveryAbandoned
 		}
+		// The store refused the delivery, so the session is broken like it
+		// is by every refused write: the feeds feed the store the session
+		// writes to, and they stop with it.
+		s.markBroken()
 		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
 	}
 	return nil

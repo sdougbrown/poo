@@ -71,7 +71,20 @@ func SessionChatModel(s *Session) ModelInfo { return s.opts.Model }
 // QueueFeedInput queues one feed's input for the model.
 //
 // The option that installs a feed is the supported entry, so a test
-// reaches the acceptance through this.
+// reaches the acceptance through this. The input belongs to no attempt,
+// so no attempt bounds it.
 func QueueFeedInput(s *Session, feed, from, text string) error {
-	return s.queueFeedInput(feed, from, text)
+	return s.queueFeedInput(feed, from, text, "", nil)
+}
+
+// SetFeedRestartDelay replaces how long the session's feeds wait before
+// their next attempt, and returns a function that restores the plan's
+// rule.
+//
+// The delay is per session, so a test never races another session's feed
+// supervisor.
+func SetFeedRestartDelay(s *Session, fn func(ran, prev time.Duration) time.Duration) func() {
+	previous := s.feedDelay
+	s.feedDelay = fn
+	return func() { s.feedDelay = previous }
 }

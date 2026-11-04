@@ -603,6 +603,87 @@ func TestAMixedWakeNamesTheJobAndTheFeed(t *testing.T) {
 	}
 }
 
+// TestAMixedIdleWakeTakesTheHeldResult covers the idle decision's mixed
+// case: a session that holds its idle results still wakes for a feed
+// whose own policy is wake, and the wake is the run the held result
+// waited for, so the woken run carries it too.
+func TestAMixedIdleWakeTakesTheHeldResult(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
+	emit := make(chan struct{})
+	s := newTestSession(t, opts, poo.WithFeeds(poo.FeedSpec{
+		Name:   "inbox",
+		OnIdle: poo.OnIdleWake,
+		Run: func(ctx context.Context, io poo.FeedIO) error {
+			<-emit
+			if err := io.Emit("", "the message"); err != nil {
+				return err
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}))
+
+	// The job's result arrives while the session is idle and its own
+	// policy is hold, so the result is held.
+	s.QueueJobResult(poo.JobResult{
+		JobID:   "j1",
+		Handle:  "r1",
+		Tool:    "job",
+		Text:    "the job's output",
+		Outcome: poo.OutcomeOK,
+	})
+	waitFor(t, "the job's result to be held", func() bool {
+		return sink.count("input.held") == 1
+	})
+
+	// The feed's input wakes the session, and the wake takes the result
+	// the session held.
+	close(emit)
+	waitFor(t, "the woken run to settle", func() bool {
+		return sink.Settled() != nil
+	})
+
+	var started *poo.RunStartedRecord
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.RunStartedRecord); ok {
+			started = r
+		}
+	}
+	if started == nil {
+		t.Fatal("the log holds no run.started record")
+	}
+	if len(started.Jobs) != 1 || started.Jobs[0].JobID != "j1" {
+		t.Errorf("the woken run names the jobs %v, want [j1]", started.Jobs)
+	}
+	if len(started.Feeds) != 1 || started.Feeds[0] != "inbox" {
+		t.Errorf("the woken run names the feeds %v, want [inbox]", started.Feeds)
+	}
+
+	// Both results reached the model, once each.
+	jobDelivered, feedDelivered := 0, 0
+	for _, rec := range sink.allRecords() {
+		delivered, ok := rec.(*poo.InputDeliveredRecord)
+		if !ok {
+			continue
+		}
+		switch delivered.Mode {
+		case poo.InputModeJob:
+			jobDelivered++
+		case poo.InputModeFeed:
+			feedDelivered++
+		}
+	}
+	if jobDelivered != 1 {
+		t.Errorf("the log holds %d job deliveries, want 1", jobDelivered)
+	}
+	if feedDelivered != 1 {
+		t.Errorf("the log holds %d feed deliveries, want 1", feedDelivered)
+	}
+}
+
 // TestABrokenSessionRefusesAFeedInput covers the refusal a refused
 // acceptance leaves behind: the store failed, so the next input never
 // reaches it.

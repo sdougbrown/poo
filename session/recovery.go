@@ -26,8 +26,8 @@ const (
 //
 // It is what a recovery resolves: a run that started and never settled,
 // a tool call with no result, a permission ask with no answer, a job
-// that started and never ended, and an input that was queued and never
-// reached the model.
+// that started and never ended, a feed's attempt that started and never
+// ended, and an input that was queued and never reached the model.
 type Pending struct {
 	// SessionID identifies the session.
 	SessionID string
@@ -37,6 +37,9 @@ type Pending struct {
 	// Jobs are the jobs that started and never ended, in the order
 	// they started.
 	Jobs []PendingJob
+	// Feeds are the feed attempts that started and never ended, in the
+	// order they started.
+	Feeds []PendingFeed
 	// Inputs are the inputs that were queued and never delivered or
 	// dropped, in the order they were queued.
 	Inputs []PendingInput
@@ -44,7 +47,7 @@ type Pending struct {
 
 // IsEmpty reports whether there is nothing to resolve.
 func (p *Pending) IsEmpty() bool {
-	return p == nil || (len(p.Runs) == 0 && len(p.Jobs) == 0 && len(p.Inputs) == 0)
+	return p == nil || (len(p.Runs) == 0 && len(p.Jobs) == 0 && len(p.Feeds) == 0 && len(p.Inputs) == 0)
 }
 
 // PendingRun is a run that started and never settled.
@@ -111,6 +114,16 @@ type PendingJob struct {
 	RunID string
 }
 
+// PendingFeed is one attempt of a feed that started and never ended.
+type PendingFeed struct {
+	// Feed is the feed's name.
+	Feed string
+	// Attempt numbers the feed's attempts in this session, from 1.
+	Attempt int
+	// StartedAt is the recorded start time.
+	StartedAt string
+}
+
 // PendingInput is an input that never reached the model.
 type PendingInput struct {
 	// InputID is the input's identifier.
@@ -142,8 +155,8 @@ type RecoveryPolicy interface {
 // An interrupted tool call is never re-executed: the effect may have
 // happened, and only the model can decide what to do about that. An
 // unanswered ask is denied, a run is settled as interrupted, a job's
-// outcome is unknown, and an input that never reached the model is
-// dropped.
+// outcome is unknown, a feed's attempt is ended without running the feed
+// again, and an input that never reached the model is dropped.
 type InterruptPolicy struct {
 	// Now is the policy's clock. The default is time.Now.
 	Now func() time.Time
@@ -155,9 +168,9 @@ func (InterruptPolicy) Name() string { return "interrupt" }
 // Resolve appends the records that resolve the pending operations.
 //
 // The order is the plan's: a run's results, then its answers, then its
-// settle record, then the jobs, then the inputs. The settle record is
-// last for its run, so a reader of the log sees the run's outcome after
-// everything that led to it.
+// settle record, then the jobs and the feeds, then the inputs. The settle
+// record is last for its run, so a reader of the log sees the run's
+// outcome after everything that led to it.
 func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend *Pending) error {
 	if pend == nil {
 		return nil
@@ -250,6 +263,19 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 			return err
 		}
 	}
+	for _, feed := range pend.Feeds {
+		rec := &poo.FeedEndedRecord{
+			RecordMeta: poo.NewRecordMetaFrom("feed.ended", poo.FeedOrigin(feed.Feed)),
+			SessionID:  pend.SessionID,
+			Feed:       feed.Feed,
+			Attempt:    feed.Attempt,
+			Outcome:    poo.FeedInterrupted,
+			EndedAt:    at,
+		}
+		if err := sink.Append(ctx, rec); err != nil {
+			return err
+		}
+	}
 	for _, input := range pend.Inputs {
 		rec := &poo.InputDroppedRecord{
 			RecordMeta: poo.NewRecordMeta("input.dropped"),
@@ -283,16 +309,17 @@ func recoveredInputID(sessionID, job string) string {
 // written is recovered from the message alone.
 func pendingOf(id string, recs []poo.Record) *Pending {
 	state := &pendingState{
-		runs:     map[string]*PendingRun{},
-		settled:  map[string]bool{},
-		calls:    map[string]*PendingCall{},
-		results:  map[string]*poo.ToolResultRecord{},
-		messages: map[string]bool{},
-		asks:     map[string]*PendingAsk{},
-		answered: map[string]bool{},
-		inputs:   map[string]poo.InputQueuedRecord{},
-		fate:     map[string]bool{},
-		callIDs:  poo.CallIDs(recs),
+		runs:       map[string]*PendingRun{},
+		settled:    map[string]bool{},
+		calls:      map[string]*PendingCall{},
+		results:    map[string]*poo.ToolResultRecord{},
+		messages:   map[string]bool{},
+		asks:       map[string]*PendingAsk{},
+		answered:   map[string]bool{},
+		inputs:     map[string]poo.InputQueuedRecord{},
+		fate:       map[string]bool{},
+		callIDs:    poo.CallIDs(recs),
+		feedStarts: map[string][]int{},
 	}
 	for _, rec := range recs {
 		switch r := rec.(type) {
@@ -358,6 +385,18 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			state.jobEnded = append(state.jobEnded, false)
 		case *poo.JobEndedRecord:
 			state.endJob(r.JobID)
+		case *poo.FeedStartedRecord:
+			state.feeds = append(state.feeds, *r)
+			state.feedEnded = append(state.feedEnded, false)
+			state.feedStarts[r.Feed] = append(state.feedStarts[r.Feed], len(state.feeds)-1)
+		case *poo.FeedEndedRecord:
+			for _, i := range state.feedStarts[r.Feed] {
+				if state.feedEnded[i] {
+					continue
+				}
+				state.feedEnded[i] = true
+				break
+			}
 		case *poo.InputQueuedRecord:
 			if _, ok := state.inputs[r.InputID]; !ok {
 				state.inputs[r.InputID] = *r
@@ -446,6 +485,16 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			RunID:  job.RunID,
 		})
 	}
+	for i, feed := range state.feeds {
+		if state.feedEnded[i] {
+			continue
+		}
+		pend.Feeds = append(pend.Feeds, PendingFeed{
+			Feed:      feed.Feed,
+			Attempt:   feed.Attempt,
+			StartedAt: feed.StartedAt,
+		})
+	}
 	for _, inputID := range state.inputOrder {
 		if state.fate[inputID] {
 			continue
@@ -495,6 +544,14 @@ type pendingState struct {
 	jobs []poo.JobStartedRecord
 	// jobEnded reports which of the started jobs have ended.
 	jobEnded []bool
+	// feeds are the feed attempts that started, in record order.
+	feeds []poo.FeedStartedRecord
+	// feedEnded reports which of the started attempts have ended.
+	feedEnded []bool
+	// feedStarts are the indexes of one feed's starts, by name. One
+	// feed's attempts never overlap, so the first start without an end
+	// is the one an end belongs to.
+	feedStarts map[string][]int
 	// inputs are the inputs that were queued, by id.
 	inputs map[string]poo.InputQueuedRecord
 	// inputOrder is the order the inputs were queued in.

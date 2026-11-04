@@ -242,6 +242,9 @@ type jobResult struct {
 	// origin is a feed's origin for a feed's input, and empty for a
 	// job's result.
 	origin Origin
+	// onIdle is the idle policy a feed asked for, and empty for a job's
+	// result: a result that carries none takes the session's.
+	onIdle OnIdle
 }
 
 // jobQueueItem is a queued result, in completion order.
@@ -264,10 +267,13 @@ type JobInfo struct {
 	RunID string
 	// StartedAt is when the job started, in RFC 3339.
 	StartedAt string
-	// Status is "running" or "held".
+	// Status is "running", "restarting" or "held".
 	//
 	// A held job is a finished job whose result waits for the next
-	// run: the work is done, and the model has not read it yet.
+	// run: the work is done, and the model has not read it yet. A feed
+	// is "running" while its attempt runs and "restarting" while it
+	// waits for the next attempt; a live feed's row replaces the held
+	// row of an input of it.
 	Status string
 }
 
@@ -277,21 +283,27 @@ const (
 	JobRunning = "running"
 	// JobHeld means the job's result is waiting for the next run.
 	JobHeld = "held"
+	// JobRestarting means the feed is waiting for its next attempt.
+	JobRestarting = "restarting"
 )
 
-// Jobs returns the session's jobs.
+// Jobs returns the session's jobs and feeds.
 //
-// The running jobs come first, in start order, and the held results
-// follow them.
+// The running jobs come first, in start order, the feeds follow them, in
+// configuration order, and the held results come last. An id is listed
+// once: a live feed is listed as itself, and a held input of that feed is
+// not listed again.
 func (s *Session) Jobs() []JobInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]JobInfo, 0, len(s.jobOrder)+len(s.jobQueue))
+	listed := map[string]bool{}
 	for _, id := range s.jobOrder {
 		job, ok := s.jobs[id]
 		if !ok || job.ended {
 			continue
 		}
+		listed[job.id] = true
 		out = append(out, JobInfo{
 			JobID:     job.id,
 			Handle:    job.handle,
@@ -301,10 +313,20 @@ func (s *Session) Jobs() []JobInfo {
 			Status:    JobRunning,
 		})
 	}
+	for _, f := range s.listedFeedsLocked() {
+		listed[string(f.origin)] = true
+		out = append(out, JobInfo{
+			JobID:     string(f.origin),
+			Tool:      FeedToolName,
+			StartedAt: f.startedAt.UTC().Format(time.RFC3339Nano),
+			Status:    f.status,
+		})
+	}
 	for _, item := range s.jobQueue {
-		if !item.held {
+		if !item.held || listed[item.result.job] {
 			continue
 		}
+		listed[item.result.job] = true
 		out = append(out, JobInfo{
 			JobID:  item.result.job,
 			Handle: item.result.handle,
@@ -827,8 +849,15 @@ const FeedToolName = "feed"
 // record returns the store's error: the input is then not queued.
 //
 // The feed's name is not validated here: a caller that takes a feed's
-// name validates it before it queues the input.
-func (s *Session) queueFeedInput(feed, from, text string) error {
+// name validates it before it queues the input. The feed's idle policy
+// rides with the input; an empty policy is the session's.
+//
+// admit, when it is set, is asked whether the input may join the session
+// in the same critical section that decides the acceptance, before the
+// acceptance's write is registered: an emit that names the attempt it
+// belongs to is admitted before that attempt's end is claimed, or refused
+// after it, and never in between.
+func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle, admit func() bool) error {
 	origin := FeedOrigin(feed)
 	s.mu.Lock()
 	if s.broken {
@@ -836,6 +865,10 @@ func (s *Session) queueFeedInput(feed, from, text string) error {
 		return ErrSessionBroken
 	}
 	if s.closed {
+		s.mu.Unlock()
+		return ErrSessionClosed
+	}
+	if admit != nil && !admit() {
 		s.mu.Unlock()
 		return ErrSessionClosed
 	}
@@ -885,6 +918,7 @@ func (s *Session) queueFeedInput(feed, from, text string) error {
 		outcome: OutcomeOK,
 		text:    rendered,
 		origin:  origin,
+		onIdle:  onIdle,
 	})
 	return nil
 }
@@ -960,6 +994,10 @@ func (s *Session) deliverJobResults() {
 
 // handleIdleJobResults wakes or holds the results that arrived while the
 // session was idle.
+//
+// The wake happens when at least one queued result may start a run. A
+// feed's input carries the feed's own on_idle, and a result that carries
+// none follows the session's setting, so a job's result always follows it.
 func (s *Session) handleIdleJobResults() {
 	s.mu.Lock()
 	if s.run != nil || s.reserved || s.closed || s.broken {
@@ -970,7 +1008,7 @@ func (s *Session) handleIdleJobResults() {
 		s.mu.Unlock()
 		return
 	}
-	if s.onIdle() == OnIdleHold {
+	if !s.wakesOnIdleLocked() {
 		s.holdJobResultsLocked(HeldOnIdle)
 		s.mu.Unlock()
 		s.writePendingHeld()
@@ -994,20 +1032,16 @@ func (s *Session) handleIdleJobResults() {
 	// reservation, and a prompt that arrives now is refused.
 	s.raceHook("wake")
 
-	// Every result that is queued at this moment joins the woken run.
-	// A held result waits for the next client prompt, so it does not
-	// join the wake.
+	// Every result that is queued at this moment joins the woken run,
+	// held ones included: a held result waits for the next run, and this
+	// is it. A held result leaves the queue here, so it is not also
+	// delivered as a held result at the run's start.
 	s.mu.Lock()
 	var results []jobResult
-	kept := s.jobQueue[:0]
 	for _, item := range s.jobQueue {
-		if item.held {
-			kept = append(kept, item)
-			continue
-		}
 		results = append(results, item.result)
 	}
-	s.jobQueue = kept
+	s.jobQueue = nil
 	if len(results) == 0 {
 		s.reserved = false
 		s.mu.Unlock()
@@ -1033,6 +1067,33 @@ func (s *Session) handleIdleJobResults() {
 	s.mu.Lock()
 	s.reserved = false
 	s.mu.Unlock()
+}
+
+// wakesOnIdleLocked reports whether a queued result may start a run.
+//
+// The caller holds the session's lock, and the queue is not empty. A held
+// result never starts one: it waits for the run something else starts.
+func (s *Session) wakesOnIdleLocked() bool {
+	for _, item := range s.jobQueue {
+		if item.held {
+			continue
+		}
+		if s.resultOnIdle(item.result) == OnIdleWake {
+			return true
+		}
+	}
+	return false
+}
+
+// resultOnIdle returns the idle policy a result carries.
+//
+// A feed's input carries the feed's policy, and every other result takes
+// the session's.
+func (s *Session) resultOnIdle(result jobResult) OnIdle {
+	if result.onIdle == OnIdleWake || result.onIdle == OnIdleHold {
+		return result.onIdle
+	}
+	return s.onIdle()
 }
 
 // holdJobResultsLocked marks the queued results as held.
@@ -1562,6 +1623,9 @@ func (s *Session) deliverWaitingInput(run *runState, input queuedInput) {
 // The job's partial output is delivered like any result. A job that is
 // already finished is not touched.
 func (s *Session) cancelJob(jobID string) error {
+	if name, ok := feedNameOf(jobID); ok {
+		return s.cancelFeed(name)
+	}
 	s.mu.Lock()
 	job, ok := s.jobs[jobID]
 	if !ok || job.ended {
@@ -1575,6 +1639,10 @@ func (s *Session) cancelJob(jobID string) error {
 }
 
 // CancelJob stops one of the session's jobs.
+//
+// An id that is a feed's origin (see IsFeedOrigin) names a feed and not
+// a job, so CancelJob stops that feed. The "feed:" prefix is reserved: a
+// job's id never carries it.
 //
 // The job's partial output is delivered like any result. A job that is
 // unknown or already finished is reported as `ErrUnknownJob`, and
@@ -1723,7 +1791,9 @@ type jobSummary struct {
 	Tool string `json:"tool"`
 	// Summary describes the call.
 	Summary string `json:"summary,omitempty"`
-	// Status is "running" or "held".
+	// Status is "running", "restarting" or "held". A feed is
+	// "restarting" while it waits for its next attempt, and a held row
+	// is a result or an input that waits for the next run.
 	Status string `json:"status"`
 	// ElapsedMS is how long the job has been running, in milliseconds.
 	ElapsedMS int64 `json:"elapsed_ms"`
@@ -1749,12 +1819,26 @@ func (s *Session) jobSummaries() []jobSummary {
 			Handle:    job.handle,
 			Tool:      job.tool,
 			Summary:   job.summary,
-			Status:    "running",
+			Status:    JobRunning,
 			ElapsedMS: time.Since(job.startedAt).Milliseconds(),
 		})
 	}
+	for _, f := range s.listedFeedsLocked() {
+		// A live feed is listed under its origin, so a held input of it
+		// must not repeat the id: the feed's own row wins.
+		listed[string(f.origin)] = true
+		summary := jobSummary{
+			JobID:  string(f.origin),
+			Tool:   FeedToolName,
+			Status: f.status,
+		}
+		if f.status == feedRunning {
+			summary.ElapsedMS = time.Since(f.startedAt).Milliseconds()
+		}
+		out = append(out, summary)
+	}
 	for _, item := range s.jobQueue {
-		if listed[item.result.job] {
+		if !item.held || listed[item.result.job] {
 			continue
 		}
 		listed[item.result.job] = true
@@ -1767,7 +1851,7 @@ func (s *Session) jobSummaries() []jobSummary {
 			Handle:  item.result.handle,
 			Tool:    item.result.tool,
 			Summary: summary,
-			Status:  "held",
+			Status:  JobHeld,
 		})
 	}
 	return out
@@ -1951,6 +2035,12 @@ func (t *JobTool) Call(ctx context.Context, in Prepared, env ToolEnv) (ToolResul
 	}
 	var b strings.Builder
 	for _, s := range summaries {
+		if s.Tool == FeedToolName {
+			// A feed has no call to describe: its line names the feed
+			// and what it is doing.
+			fmt.Fprintf(&b, "%s · %s · %s · %dms\n", s.JobID, s.Tool, s.Status, s.ElapsedMS)
+			continue
+		}
 		fmt.Fprintf(&b, "%s · %s · %s · %s · %dms\n", s.JobID, s.Tool, s.Status, s.Summary, s.ElapsedMS)
 	}
 	return ToolResult{Text: b.String()}, nil

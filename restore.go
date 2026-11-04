@@ -175,6 +175,9 @@ type Restored struct {
 // inputs, are queued again, so they follow the session's idle policy
 // like any other result.
 //
+// The session's feeds start once those results are queued, so a feed's
+// first input joins them instead of racing the hold.
+//
 // The session takes new runs when the restore returns.
 func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored, error) {
 	created := sessionHeader(records)
@@ -248,6 +251,10 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 	// they appended, and running them again would say it twice.
 	opts.SessionStart = nil
 
+	// The feeds start last, once the results the restore queued are on
+	// the queue: a feed's first input joins them, and does not race the
+	// hold the idle policy puts on them.
+	opts.feedsDeferred = true
 	s, err := New(opts)
 	if err != nil {
 		return nil, Restored{}, err
@@ -274,6 +281,7 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 		s.queueJobResult(job)
 		restored.Jobs = append(restored.Jobs, publicJobResult(job))
 	}
+	s.startFeeds()
 	return s, restored, nil
 }
 
@@ -558,11 +566,17 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 // thing, and they never repeat within a session. A restored session
 // carries on after the ones the records already used, so its own calls
 // and results are never confused with the earlier ones.
+//
+// A feed's attempt number names one attempt of that feed, so it too
+// carries on: the first attempt a restored session starts is the number
+// after the last the records hold. A feed the records never name starts
+// at its first attempt.
 func (s *Session) seedCounters(records []Record) {
 	handles := 0
 	messages := 0
 	inputs := 0
 	jobs := 0
+	attempts := map[string]int{}
 	for _, rec := range records {
 		switch r := rec.(type) {
 		case *ToolCallRecord:
@@ -581,12 +595,21 @@ func (s *Session) seedCounters(records []Record) {
 			// restored session continues past it. A client input's id is
 			// a ULID, and has no number here.
 			inputs = max(inputs, jobInputSeq(s.opts.SessionID, r.InputID))
+		case *FeedStartedRecord:
+			attempts[r.Feed] = max(attempts[r.Feed], r.Attempt)
+		case *FeedEndedRecord:
+			attempts[r.Feed] = max(attempts[r.Feed], r.Attempt)
 		}
 	}
 	s.handleSeq = handles
 	s.inputSeq = inputs
 	s.jobSeq = jobs
 	s.messageIDs.Set(messages)
+	for name, attempt := range attempts {
+		if f, ok := s.feeds[name]; ok && attempt > f.attempt {
+			f.attempt = attempt
+		}
+	}
 }
 
 // scanRuns returns the runs the records hold, in the order they

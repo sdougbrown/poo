@@ -6,8 +6,9 @@ import "fmt"
 // linked tool may be registered.
 //
 // The job tools are registered whenever a tool declares that it may run
-// in the background: a model that can start a job needs a way to see
-// them and a way to stop them.
+// in the background, and whenever the session runs a feed: a model that
+// can start a job needs a way to see them and a way to stop them, and a
+// feed is listed and stopped through the same two tools.
 //
 // A tool whose own schema defines the reserved background argument
 // cannot be registered: the core would not know whether the model meant
@@ -34,7 +35,7 @@ func (s *Session) registerJobTools() error {
 			hasBackground = true
 		}
 	}
-	if !hasBackground {
+	if !hasBackground && len(s.opts.Feeds) == 0 {
 		return nil
 	}
 	if _, taken := s.opts.Tools[JobsToolName]; taken {
@@ -42,6 +43,9 @@ func (s *Session) registerJobTools() error {
 	}
 	if _, taken := s.opts.Tools[CancelJobToolName]; taken {
 		return fmt.Errorf("poo: the tool %q is the core's own", CancelJobToolName)
+	}
+	if s.opts.Tools == nil {
+		s.opts.Tools = make(map[string]Tool, 2)
 	}
 	s.opts.Tools[JobsToolName] = &JobTool{session: s, name: JobsToolName}
 	s.opts.Tools[CancelJobToolName] = &JobTool{session: s, name: CancelJobToolName}

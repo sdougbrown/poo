@@ -158,6 +158,18 @@ type Session struct {
 	// with no client input in between.
 	unattendedWakes int
 
+	// feeds holds the session's feeds, by name.
+	feeds map[string]*feedState
+	// feedOrder is the feeds in configuration order, so a list is
+	// stable.
+	feedOrder []*feedState
+	// feedDelay is how long a feed waits before its next attempt.
+	//
+	// It is per session, copied from feedRestartDelay when the session is
+	// built, so a test that changes it never races another session's feed
+	// supervisor.
+	feedDelay func(ran, previous time.Duration) time.Duration
+
 	// events is the session's event bus.
 	events *eventBus
 
@@ -579,6 +591,19 @@ type Options struct {
 	AfterTool []AfterToolHook
 	// Jobs configures the session's background jobs.
 	Jobs JobOptions
+	// Feeds are the long-lived sources the session runs.
+	//
+	// A feed's input joins the session's job queue, so the idle policy,
+	// the wake limit and the close treat it as they treat a job's result.
+	// The session starts every feed when it is built, and a restored
+	// session starts them once the results it queued are on the queue.
+	Feeds []FeedSpec
+	// feedsDeferred holds the feeds' start back until the caller starts
+	// them.
+	//
+	// A restore queues the results it recovered before a feed may add an
+	// input of its own, so it defers the start and calls it itself.
+	feedsDeferred bool
 	// Logger receives the core's diagnostic messages: observer errors
 	// and overflow, candidates that arrive after the commit point, and
 	// completions that arrive after it.
@@ -635,6 +660,9 @@ func New(opts Options, fns ...Option) (*Session, error) {
 			return nil, &ErrSessionInit{Cause: err}
 		}
 	}
+	if err := checkFeeds(opts.Feeds); err != nil {
+		return nil, &ErrSessionInit{Cause: err}
+	}
 	if opts.MaxContinuations <= 0 {
 		opts.MaxContinuations = DefaultMaxContinuations
 	}
@@ -663,6 +691,8 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		messageIDs:         ids,
 		noticeArmed:        true,
 		jobs:               map[string]*jobState{},
+		feeds:              map[string]*feedState{},
+		feedDelay:          feedRestartDelay,
 		jobQueued:          make(chan struct{}, 1),
 		jobCompletionsDone: make(chan struct{}, 1),
 		gatesDone:          make(chan struct{}, 1),
@@ -731,8 +761,14 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		}
 	}
 	// The jobs' context is created after every fallible step, so a
-	// construction that fails has no cancellation to leak.
+	// construction that fails has no cancellation to leak. The feeds'
+	// contexts come from it, and the feeds start once the session takes
+	// runs.
 	s.jobCtx, s.jobCancel = context.WithCancelCause(context.Background())
+	s.buildFeeds()
+	if !opts.feedsDeferred {
+		s.startFeeds()
+	}
 	complete = true
 	return s, nil
 }
@@ -1062,9 +1098,16 @@ func (s *Session) recordMessage(msg Message) {
 // session's memory, and a session that cannot write cannot be trusted.
 func (s *Session) markBroken() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.broken = true
 	s.sunk = true
+	cancels := s.feedCancelsLocked()
+	s.mu.Unlock()
+	// A feed feeds the store the session writes to: a store that refuses
+	// a record keeps losing the inputs the feed produces, so the feeds
+	// stop with the session and are never restarted.
+	for _, cancel := range cancels {
+		cancel(ErrSessionBroken)
+	}
 }
 
 // write appends one record to the sink.
@@ -1351,10 +1394,7 @@ func (s *Session) appendRecord(ctx context.Context, rec Record, sealedRun *runSt
 	if errors.Is(context.Cause(ctx), errCallRecordSealed) || s.sealedRun(sealedRun) {
 		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, errCallRecordSealed)
 	}
-	s.mu.Lock()
-	s.sunk = true
-	s.broken = true
-	s.mu.Unlock()
+	s.markBroken()
 	return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
 }
 
