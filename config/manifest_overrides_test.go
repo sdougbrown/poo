@@ -11,14 +11,68 @@ import (
 	"github.com/sdougbrown/poo/config"
 )
 
-func TestManifestOverridesResolveAgainstWorkingDirectory(t *testing.T) {
-	feedPath := feedManifest(t)
-	registryPath := registry(t, "deploy")
+// TestOverrideFailuresNameTheirSources checks diagnostics for missing runtime capabilities.
+func TestOverrideFailuresNameTheirSources(t *testing.T) {
 	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := config.Build(config.BuildOptions{Settings: settings, WorkingDir: filepath.Dir(feedPath), Overrides: config.Overrides{FeedsPaths: []string{filepath.Base(feedPath)}, CLIRegistryPaths: []string{registryPath}}, DefaultProfile: "code", Tools: theTools(), Profiles: theProfiles(), Executors: theExecutors()})
+	t.Setenv("POO_CLI_REGISTRY_PATH", registry(t, "deploy"))
+	tools := theTools()
+	delete(tools, "call_cli")
+	_, err = config.Build(config.BuildOptions{Settings: settings, Overrides: config.EnvOverrides(config.Overrides{}), DefaultProfile: "code", Tools: tools, Profiles: theProfiles(), Executors: theExecutors()})
+	if err == nil || !strings.Contains(err.Error(), "POO_CLI_REGISTRY_PATH") {
+		t.Fatalf("registry failure does not name its environment source: %v", err)
+	}
+}
+
+// TestFeedOverrideFailureNamesItsSource checks a feed without an executor.
+func TestFeedOverrideFailureNamesItsSource(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("POO_FEEDS_PATH", feedManifest(t))
+	_, err = config.Build(config.BuildOptions{Settings: settings, Overrides: config.EnvOverrides(config.Overrides{}), DefaultProfile: "code", Tools: theTools(), Profiles: theProfiles()})
+	if err == nil || !strings.Contains(err.Error(), "POO_FEEDS_PATH") {
+		t.Fatalf("feed failure does not name its environment source: %v", err)
+	}
+}
+
+// TestManifestEnvironmentIsScrubbed checks the environment passed to session commands.
+func TestManifestEnvironmentIsScrubbed(t *testing.T) {
+	t.Setenv("POO_FEEDS_PATH", feedManifest(t))
+	t.Setenv("POO_CLI_REGISTRY_PATH", registry(t, "deploy"))
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := build(t, settings, config.EnvOverrides(config.Overrides{}))
+	for _, entry := range runtime.Env {
+		if strings.HasPrefix(entry, "POO_FEEDS_PATH=") || strings.HasPrefix(entry, "POO_CLI_REGISTRY_PATH=") {
+			t.Errorf("manifest variable reached the session environment: %s", entry)
+		}
+	}
+}
+
+// TestManifestOverridesResolveAgainstWorkingDirectory checks relative override paths.
+func TestManifestOverridesResolveAgainstWorkingDirectory(t *testing.T) {
+	feedPath := feedManifest(t)
+	registryDir := registry(t, "deploy")
+	registryPath := filepath.Join(registryDir, "registry.json")
+	feedPathInRegistry := filepath.Join(registryDir, "feeds.json")
+	body, err := os.ReadFile(feedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(feedPathInRegistry, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := config.Build(config.BuildOptions{Settings: settings, WorkingDir: filepath.Dir(registryPath), Overrides: config.Overrides{FeedsPaths: []string{filepath.Base(feedPathInRegistry)}, CLIRegistryPaths: []string{filepath.Base(registryPath)}}, DefaultProfile: "code", Tools: theTools(), Profiles: theProfiles(), Executors: theExecutors()})
 	if err != nil {
 		t.Fatal(err)
 	}

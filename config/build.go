@@ -325,7 +325,7 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
 		return nil, err
 	}
-	if err := runtime.resolveFeedRuns(); err != nil {
+	if err := runtime.resolveFeedRuns(opts); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolvePolicy(opts, workingDir); err != nil {
@@ -536,10 +536,14 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	names := registryToolNames(r.findTool())
 	for _, name := range names {
 		if !linksTool(opts, name) {
+			source := "the settings"
+			if len(opts.Overrides.CLIRegistryPaths) > 0 {
+				source = "the settings or POO_CLI_REGISTRY_PATH / --cli-registry-path"
+			}
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "cli_registry.paths",
-				Message: fmt.Sprintf("the settings name a cli registry, and this binary does not link the %q tool", name),
+				Message: fmt.Sprintf("%s name a cli registry, and this binary does not link the %q tool", source, name),
 			}
 		}
 	}
@@ -808,6 +812,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Names:       append([]string(nil), settings.Tools.Env.Scrub...),
 		Passthrough: append([]string(nil), settings.Tools.Env.Passthrough...),
 	}
+	scrub.Names = append(scrub.Names, "POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH")
 	if r.Catalog != nil {
 		scrub.Names = append(scrub.Names, r.Catalog.CredentialEnvNames()...)
 	}
@@ -841,18 +846,25 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	// must be able to resolve the executor's name whatever profile runs:
 	// a typo is a settings failure, not a failure to discover later.
 	if linksTool(opts, ToolBash) || r.needsExecutor() {
+		feedSource := ""
+		if r.Feeds.Len() > 0 {
+			feedSource = "the settings name a feed, and "
+			if len(opts.Overrides.FeedsPaths) > 0 {
+				feedSource = "the settings or POO_FEEDS_PATH / --feeds-path name a feed, and "
+			}
+		}
 		if opts.Executors == nil {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "tools.bash.executor",
-				Message: "this binary links no executor",
+				Message: feedSource + "this binary links no executor",
 			}
 		}
 		if !opts.Executors.Has(executorName) {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "tools.bash.executor",
-				Message: fmt.Sprintf("this binary links no executor named %q", executorName),
+				Message: fmt.Sprintf("%sthis binary links no executor named %q", feedSource, executorName),
 			}
 		}
 	}
@@ -904,15 +916,20 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 //
 // The feeds are the session's options, so a new session and a restored
 // one run them alike.
-func (r *Runtime) resolveFeedRuns() error {
+func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 	if r.Feeds.Len() == 0 {
 		return nil
 	}
 	if r.executor == nil {
+		source := "the settings"
+		if len(opts.Overrides.FeedsPaths) > 0 {
+			source = "the settings or POO_FEEDS_PATH / --feeds-path"
+		}
+		message := source + " name a feed, and this binary has no executor to run a feed's command"
 		return &Error{
 			Code:    CodeUnsupported,
 			Field:   "feeds.paths",
-			Message: "this binary has no executor to run a feed's command",
+			Message: message,
 		}
 	}
 	lookup := exec.Lookup(r.Env)
