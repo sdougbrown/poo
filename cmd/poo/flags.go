@@ -13,6 +13,14 @@ import (
 	"github.com/sdougbrown/poo/provider/catalog"
 )
 
+type stringList []string
+
+func (s *stringList) String() string { return strings.Join(*s, ", ") }
+func (s *stringList) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
 // sharedFlags are the flags every command takes.
 //
 // The settings are a command's configuration, and the flags change what
@@ -34,7 +42,9 @@ type sharedFlags struct {
 	// ephemeral runs the command without writing a session.
 	ephemeral bool
 	// profile is the profile the session is built from.
-	profile string
+	profile          string
+	feedsPaths       stringList
+	cliRegistryPaths stringList
 }
 
 // register adds the shared flags to a flag set.
@@ -46,6 +56,8 @@ func (f *sharedFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.sessionDir, "session-dir", "", "The directory the session files live in")
 	fs.BoolVar(&f.ephemeral, "ephemeral", false, "Run without writing a session")
 	fs.StringVar(&f.profile, "profile", "", "The profile to run under: base, code or search")
+	fs.Var(&f.feedsPaths, "feeds-path", "Additional feed manifest path (repeatable)")
+	fs.Var(&f.cliRegistryPaths, "cli-registry-path", "Additional cli registry manifest path (repeatable)")
 }
 
 // settings reads the settings file and returns the settings.
@@ -79,6 +91,8 @@ func (f *sharedFlags) overrides() (config.Overrides, error) {
 		SessionDir:          f.sessionDir,
 		SystemPrompt:        f.systemPrompt,
 		AppendSystemPrompt:  appended,
+		FeedsPaths:          f.feedsPaths,
+		CLIRegistryPaths:    f.cliRegistryPaths,
 	}
 	if f.ephemeral {
 		overrides.SessionMode = "ephemeral"

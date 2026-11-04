@@ -72,7 +72,7 @@ func New(opts Options) (*Server, error) {
 	client := &lateClient{}
 	build := config.BuildOptions{
 		Settings:       opts.Settings,
-		Overrides:      opts.Overrides,
+		Overrides:      config.EnvOverrides(opts.Overrides),
 		WorkingDir:     opts.WorkingDir,
 		DefaultProfile: opts.DefaultProfile,
 		Tools:          opts.Tools,

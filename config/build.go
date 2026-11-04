@@ -58,7 +58,8 @@ const (
 // The overrides a command line makes.
 //
 // The precedence is the profile, then the settings file, then these:
-// the last one that says something wins.
+// the last one that says something wins, except manifest paths add to
+// the settings' paths.
 type Overrides struct {
 	// Profile is the name of the profile the session is built from.
 	Profile string
@@ -77,6 +78,29 @@ type Overrides struct {
 	// AppendSystemPrompt is the text appended to the prompt's base
 	// section.
 	AppendSystemPrompt string
+	// FeedsPaths are additional feed manifest paths.
+	FeedsPaths []string
+	// CLIRegistryPaths are additional cli registry manifest paths.
+	CLIRegistryPaths []string
+}
+
+// EnvOverrides adds manifest paths from the environment after the caller's paths.
+// The returned path slices do not share storage with the caller's slices.
+func EnvOverrides(o Overrides) Overrides {
+	paths := func(existing []string, name string) []string {
+		result := append([]string{}, existing...)
+		if value, ok := os.LookupEnv(name); ok {
+			for _, path := range filepath.SplitList(value) {
+				if path != "" {
+					result = append(result, path)
+				}
+			}
+		}
+		return result
+	}
+	o.FeedsPaths = paths(o.FeedsPaths, "POO_FEEDS_PATH")
+	o.CLIRegistryPaths = paths(o.CLIRegistryPaths, "POO_CLI_REGISTRY_PATH")
+	return o
 }
 
 // BuildOptions are what a build needs.
@@ -284,7 +308,7 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
 	}
-	if err := runtime.resolveFeeds(workingDir); err != nil {
+	if err := runtime.resolveFeeds(opts, workingDir); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveModels(opts); err != nil {
@@ -394,18 +418,19 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	return nil
 }
 
-// resolveRegistry loads the cli registries the settings name.
+// resolveRegistry loads the cli registries the settings and overrides name.
 //
 // A path is resolved against the working directory, and every manifest
 // reachable from the paths is one catalog. The catalog is loaded here,
 // once: the commands a session may call are the ones its registry holds
 // when the session is built, and a session does not reload one.
 func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
-	paths := r.Settings.CLIRegistry.Paths
-	if len(paths) == 0 {
+	if len(r.Settings.CLIRegistry.Paths) == 0 && len(opts.Overrides.CLIRegistryPaths) == 0 {
 		return nil
 	}
-	catalog, err := cli.Load(againstDir(paths, workingDir)...)
+	paths := againstDir(r.Settings.CLIRegistry.Paths, workingDir)
+	paths = append(paths, againstDir(opts.Overrides.CLIRegistryPaths, workingDir)...)
+	catalog, err := cli.Load(paths...)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
@@ -431,18 +456,19 @@ func againstDir(paths []string, dir string) []string {
 	return resolved
 }
 
-// resolveFeeds loads the feed manifests the settings name.
+// resolveFeeds loads the feed manifests the settings and overrides name.
 //
 // A relative path is resolved against the working directory, and every
 // manifest reachable from the paths joins one set. The set is loaded
 // once, when the session is built; a session never reloads it. Nothing
 // starts a feed here.
-func (r *Runtime) resolveFeeds(workingDir string) error {
-	paths := r.Settings.Feeds.Paths
-	if len(paths) == 0 {
+func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
+	if len(r.Settings.Feeds.Paths) == 0 && len(opts.Overrides.FeedsPaths) == 0 {
 		return nil
 	}
-	set, err := feed.Load(againstDir(paths, workingDir)...)
+	paths := againstDir(r.Settings.Feeds.Paths, workingDir)
+	paths = append(paths, againstDir(opts.Overrides.FeedsPaths, workingDir)...)
+	set, err := feed.Load(paths...)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
