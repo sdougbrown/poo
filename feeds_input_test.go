@@ -89,7 +89,7 @@ func TestAFeedInputWakesAnIdleSession(t *testing.T) {
 	if origin != poo.FeedOrigin("inbox") {
 		t.Errorf("the delivered message's origin is %q, want %q", origin, poo.FeedOrigin("inbox"))
 	}
-	if want := "[feed inbox · from alice: the message]"; text != want {
+	if want := "[feed inbox · from \"alice\": the message]"; text != want {
 		t.Errorf("the delivered message is %q, want %q", text, want)
 	}
 }

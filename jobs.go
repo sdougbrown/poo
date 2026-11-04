@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -886,12 +887,13 @@ func (s *Session) queueFeedInput(feed, from, text string) error {
 // feedInputText renders the model-facing text of a feed's input.
 //
 // The text is rendered once, when the input is accepted, and the record
-// carries it: a restore delivers the same bytes.
+// carries it: a restore delivers the same bytes. The sender is quoted,
+// so a sender cannot close the envelope and write a second one.
 func feedInputText(feed, from, text string) string {
 	if from == "" {
 		return fmt.Sprintf("[feed %s: %s]", feed, text)
 	}
-	return fmt.Sprintf("[feed %s · from %s: %s]", feed, from, text)
+	return fmt.Sprintf("[feed %s · from %s: %s]", feed, strconv.Quote(from), text)
 }
 
 // queueJobResult puts a finished result on the session's job queue and
