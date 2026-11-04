@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"strings"
 	"time"
 )
 
@@ -520,7 +519,7 @@ func (s *Session) cancelFeed(name string) error {
 // A feed is listed under its origin, so a cancel names it the way the
 // list did.
 func feedNameOf(id string) (string, bool) {
-	name, ok := strings.CutPrefix(id, "feed:")
+	name, ok := FeedName(Origin(id))
 	return name, ok && name != ""
 }
 
