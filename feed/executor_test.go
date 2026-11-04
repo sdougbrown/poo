@@ -1,6 +1,7 @@
 package feed_test
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -53,21 +54,51 @@ type executorCase struct {
 
 // executorCases returns the executors the tests run against.
 //
-// A sandbox that cannot run is skipped with the reason logged: a host
-// without unprivileged user namespaces cannot run the sandboxed
-// executor, and the case says so rather than failing.
+// The sandbox is required, not skipped: CI runs this package in the job
+// that installs bubblewrap, and a case that quietly disappears there
+// proves nothing about the sandbox. A host that cannot create one fails
+// here, the way the cli-registry sandbox tests do.
 func executorCases(t *testing.T) []executorCase {
 	t.Helper()
-	cases := []executorCase{{name: "local", executor: bash.NewLocal(), local: true}}
-	// The sandbox sees the system directories and nothing else of the
-	// host, so the fixtures are mounted read-only beside them.
-	binds := append(append([]string{}, bwrap.DefaultROBinds...), fixtureDir(t))
-	sandbox, err := bwrap.New(bwrap.Options{ROBinds: binds})
+	cases, err := executorCasesFor(fixtureDir(t), newSandbox)
 	if err != nil {
-		t.Logf("skip: the bwrap executor is unavailable: %v", err)
-		return cases
+		t.Fatalf("the bwrap executor is unavailable: %v", err)
 	}
-	return append(cases, executorCase{name: "bwrap", executor: sandbox})
+	return cases
+}
+
+// newSandbox builds the sandbox the feed tests run in.
+//
+// The sandbox sees the system directories and nothing else of the host,
+// so the fixtures are mounted read-only beside them.
+func newSandbox(fixtures string) (exec.Executor, error) {
+	binds := append(append([]string{}, bwrap.DefaultROBinds...), fixtures)
+	return bwrap.New(bwrap.Options{ROBinds: binds})
+}
+
+// executorCasesFor returns the executors the tests run against, with the
+// sandbox the constructor builds. A sandbox that cannot be built is an
+// error rather than a case left out.
+func executorCasesFor(fixtures string, sandbox func(string) (exec.Executor, error)) ([]executorCase, error) {
+	cases := []executorCase{{name: "local", executor: bash.NewLocal(), local: true}}
+	executor, err := sandbox(fixtures)
+	if err != nil {
+		return cases, err
+	}
+	return append(cases, executorCase{name: "bwrap", executor: executor}), nil
+}
+
+// TestASandboxThatCannotStartFailsTheCases covers what CI relies on:
+// the sandboxed case is required, so a bubblewrap that cannot start is
+// the test's failure rather than a case that disappears.
+func TestASandboxThatCannotStartFailsTheCases(t *testing.T) {
+	errNoSandbox := errors.New("bubblewrap cannot create a sandbox here")
+	cases, err := executorCasesFor(t.TempDir(), func(string) (exec.Executor, error) {
+		return nil, errNoSandbox
+	})
+	if !errors.Is(err, errNoSandbox) {
+		t.Fatalf("a sandbox that cannot start returned %d cases and %v, want the constructor's failure", len(cases), err)
+	}
 }
 
 // envLookup returns a lookup over the environment, with extra entries
