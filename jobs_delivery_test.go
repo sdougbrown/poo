@@ -599,3 +599,54 @@ func TestOnIdleHoldDeliversToAnOpenRun(t *testing.T) {
 		t.Errorf("the run settled %s with %d job deliveries, want 1", res.Reason, delivered)
 	}
 }
+
+// TestAJobDeliveryCarriesNoOrigin covers the delivery's bytes: a job's
+// result is the session's own work, so its input.delivered record has no
+// origin and its delivery event names none. The origin is a feed's.
+func TestAJobDeliveryCarriesNoOrigin(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("the job's output")
+
+	s := newTestSession(t, jobOptions(t, tr, tool, sink))
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	tool.Release()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	records := 0
+	for _, rec := range sink.allRecords() {
+		delivered, ok := rec.(*poo.InputDeliveredRecord)
+		if !ok || delivered.Mode != poo.InputModeJob {
+			continue
+		}
+		records++
+		if delivered.Origin != "" {
+			t.Errorf("the job delivery's record carries the origin %q, want none", delivered.Origin)
+		}
+	}
+	if records != 1 {
+		t.Fatalf("the log holds %d job deliveries, want 1", records)
+	}
+	events := 0
+	for _, ev := range s.Events() {
+		if ev.Name != poo.EventInputDelivered || ev.Payload["mode"] != string(poo.InputModeJob) {
+			continue
+		}
+		events++
+		if origin, ok := ev.Payload["origin"]; ok {
+			t.Errorf("the job delivery's event carries the origin %v, want none", origin)
+		}
+	}
+	if events != 1 {
+		t.Errorf("the session emitted %d job delivery events, want 1", events)
+	}
+}
