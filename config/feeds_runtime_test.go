@@ -212,6 +212,26 @@ func TestTheSettingsExecutorRunsTheFeedCommand(t *testing.T) {
 	}
 }
 
+// TestAFeedsOnlyBuildBuildsAnExecutor covers the executor: a session that
+// runs a feed builds one even when its profile offers no tool that runs a
+// command, because the feed's own command runs through it.
+func TestAFeedsOnlyBuildBuildsAnExecutor(t *testing.T) {
+	manifest := feedRunManifest(t, "chat", "chat", "Messages from the fixture feed.", nil)
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	// readOnlyTools links neither bash nor call_cli, so the feed is the
+	// only thing in the build that runs a command.
+	runtime, err := readOnlyBuild(t, settings, theExecutors())
+	if err != nil {
+		t.Fatalf("a read-only binary with a feed did not build: %v", err)
+	}
+	if runtime.Executor == nil {
+		t.Fatal("the build kept no executor for the feed")
+	}
+}
+
 // TestAFeedCannotReachAScrubbedVariable covers the environment: the
 // manifest's reference reads the session's scrubbed environment, so a
 // name the settings scrub is not there for a feed's command, and the
