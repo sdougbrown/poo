@@ -67,9 +67,12 @@ func FeedOrigin(name string) Origin {
 	return Origin("feed:" + name)
 }
 
-// isFeedOrigin reports that the origin belongs to a feed.
-func isFeedOrigin(origin Origin) bool {
-	return strings.HasPrefix(string(origin), "feed:")
+// IsFeedOrigin reports that the origin belongs to a feed.
+//
+// A reader that recognizes a feed's message, record or input id uses this
+// rather than its own spelling of the prefix.
+func IsFeedOrigin(o Origin) bool {
+	return strings.HasPrefix(string(o), "feed:")
 }
 
 // API names a wire API.

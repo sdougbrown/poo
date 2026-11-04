@@ -913,15 +913,15 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 // input follows: the message record, then the input.delivered record,
 // then the history append, the delivery's finish, and the delivery
 // event. The records come before the history append, so a delivery the
-// finalization abandons must not mutate the view. A non-empty origin is
-// the feed's: the delivery record and the event then say where the input
-// came from.
+// finalization abandons must not mutate the view. A feed's message is
+// the only one whose delivery carries an origin: the delivery record and
+// the event then say where the input came from.
 //
 // The two delivery families differ in what a failed write does to the
 // input: the caller's fail hook handles the record writes' errors (the
 // client input is dropped and reported; a job result goes back on the
 // queue), and done releases the family's own claim.
-func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID string, mode InputMode, note *DeliveryNote, origin Origin, fail func(error), done func()) bool {
+func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID string, mode InputMode, note *DeliveryNote, fail func(error), done func()) bool {
 	if err := s.writeDelivery(run.ctx, run, &MessageRecord{
 		RecordMeta:   NewRecordMetaFrom("message", msg.Origin),
 		RunID:        run.id,
@@ -933,8 +933,8 @@ func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID stri
 		return false
 	}
 	meta := NewRecordMeta("input.delivered")
-	if origin != "" {
-		meta = NewRecordMetaFrom("input.delivered", origin)
+	if IsFeedOrigin(msg.Origin) {
+		meta = NewRecordMetaFrom("input.delivered", msg.Origin)
 	}
 	if err := s.writeDelivery(run.ctx, run, &InputDeliveredRecord{
 		RecordMeta:  meta,
@@ -954,8 +954,8 @@ func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID stri
 		"input_id": inputID,
 		"mode":     string(mode),
 	}
-	if origin != "" {
-		payload["origin"] = string(origin)
+	if IsFeedOrigin(msg.Origin) {
+		payload["origin"] = string(msg.Origin)
 	}
 	s.events.emit(EventInputDelivered, payload)
 	return true
@@ -988,7 +988,7 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 			s.noteStoreError(run, err)
 		}
 	}
-	return s.deliverMessageRecords(run, msg, input.id, input.mode, note, "", fail, func() {
+	return s.deliverMessageRecords(run, msg, input.id, input.mode, note, fail, func() {
 		s.finishDelivery(run, input)
 	})
 }

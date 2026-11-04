@@ -521,7 +521,7 @@ func (c *callRecorder) Append(ctx context.Context, rec poo.Record) error {
 		// The compaction reached the store, so the replay applied it.
 		c.compactions++
 	case *poo.MessageRecord:
-		if r.Origin != poo.OriginJob && !strings.HasPrefix(string(r.Origin), "feed:") {
+		if r.Origin != poo.OriginJob && !poo.IsFeedOrigin(r.Origin) {
 			return nil
 		}
 		for _, block := range r.Content {

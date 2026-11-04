@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -532,7 +531,7 @@ func TestACloseRacingAFeedAcceptanceKeepsTheInput(t *testing.T) {
 // the session delivered, and reports whether it found one.
 func deliveredMessage(sink *recordingSink) (string, poo.Origin, bool) {
 	for _, m := range sink.messages() {
-		if !strings.HasPrefix(string(m.Origin), "feed:") {
+		if !poo.IsFeedOrigin(m.Origin) {
 			continue
 		}
 		if len(m.Content) == 0 {

@@ -1153,13 +1153,13 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 	msg := NewTextMessage(RoleUser, jobResultText(result))
 	msg.Origin = OriginJob
 	mode := InputModeJob
-	if isFeedOrigin(result.origin) {
+	if IsFeedOrigin(result.origin) {
 		// A feed's input is a message from outside: it carries its
 		// origin, and the delivery says it was a feed's input.
 		msg.Origin = result.origin
 		mode = InputModeFeed
 	}
-	if !s.deliverMessageRecords(run, msg, result.id, mode, nil, result.origin, func(err error) {
+	if !s.deliverMessageRecords(run, msg, result.id, mode, nil, func(err error) {
 		s.failJobDelivery(run, item, err)
 	}, func() {
 		s.finishJobDelivery(run, item)
@@ -1224,7 +1224,7 @@ func (s *Session) removeJobDeliveryLocked(run *runState, item jobQueueItem) {
 // A feed's input is already rendered: the text stored at acceptance is
 // the text the model reads, live and after a restore.
 func jobResultText(result jobResult) string {
-	if isFeedOrigin(result.origin) {
+	if IsFeedOrigin(result.origin) {
 		return result.text
 	}
 	return fmt.Sprintf("[job %s · %s finished (%s): %s]", result.job, result.tool, result.outcome, result.text)
@@ -1234,7 +1234,7 @@ func jobResultText(result jobResult) string {
 // every result came from a feed, and a job's wake otherwise.
 func triggerFor(results []jobResult) TriggerKind {
 	for _, result := range results {
-		if !isFeedOrigin(result.origin) {
+		if !IsFeedOrigin(result.origin) {
 			return TriggerJob
 		}
 	}
@@ -1247,7 +1247,7 @@ func feedNames(results []jobResult) []string {
 	var out []string
 	seen := map[Origin]bool{}
 	for _, result := range results {
-		if !isFeedOrigin(result.origin) || seen[result.origin] {
+		if !IsFeedOrigin(result.origin) || seen[result.origin] {
 			continue
 		}
 		seen[result.origin] = true
@@ -1290,7 +1290,7 @@ func publicJobResults(results []jobResult) []JobResult {
 	}
 	out := make([]JobResult, 0, len(results))
 	for _, r := range results {
-		if isFeedOrigin(r.origin) {
+		if IsFeedOrigin(r.origin) {
 			continue
 		}
 		out = append(out, JobResult{
@@ -1980,7 +1980,7 @@ func jobPayload(results []jobResult) []map[string]any {
 	}
 	out := make([]map[string]any, 0, len(results))
 	for _, r := range results {
-		if isFeedOrigin(r.origin) {
+		if IsFeedOrigin(r.origin) {
 			continue
 		}
 		out = append(out, map[string]any{
