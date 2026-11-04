@@ -24,7 +24,8 @@ type RecordMeta struct {
 	// TS is the RFC 3339 timestamp with nanosecond precision, in UTC.
 	TS string `json:"ts"`
 	// Origin says who produced the record: "model", "tool", "user",
-	// "steer", "hook:<name>" and the rest of the closed set.
+	// "steer", "hook:<name>", "feed:<name>" and the rest of the
+	// closed set.
 	//
 	// It is empty on the records that no one produced: the session's own
 	// header, a run's boundaries, the usage accounting.
@@ -147,10 +148,13 @@ type RunStartedRecord struct {
 	// ReasoningEffort is the reasoning_effort the run sends, empty when
 	// it sends none.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	// Trigger says what started the run: "prompt" or "job".
+	// Trigger says what started the run: "prompt", "job" or "feed".
 	Trigger TriggerKind `json:"trigger,omitempty"`
 	// Jobs are the job results that started a job run.
 	Jobs []JobResult `json:"jobs,omitempty"`
+	// Feeds are the feeds whose inputs started the run, in queue
+	// order.
+	Feeds []string `json:"feeds,omitempty"`
 }
 
 // SystemPromptRecord records a rendered system prompt.
@@ -496,9 +500,9 @@ func NewRecordMeta(name string) RecordMeta {
 // origin.
 //
 // The origin says who produced the record, and every record carries one:
-// "model", "tool", "user", "steer", "hook:<name>" and the rest of the
-// closed set. A record that no one produced — the session's own header, a
-// run's boundaries — has no origin.
+// "model", "tool", "user", "steer", "hook:<name>", "feed:<name>" and
+// the rest of the closed set. A record that no one produced — the
+// session's own header, a run's boundaries — has no origin.
 func NewRecordMetaFrom(name string, origin Origin) RecordMeta {
 	return RecordMeta{Record: name, Origin: origin}
 }

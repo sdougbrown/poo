@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 )
@@ -183,5 +184,42 @@ func TestTheStoreErrorSaysTheStoreRefused(t *testing.T) {
 	}
 	if res.Detail.Source != "store" {
 		t.Errorf("the settle detail's source is %q, want store", res.Detail.Source)
+	}
+}
+
+// TestARefusedFeedAcceptanceSettlesStoreError covers the same row for a
+// feed's acceptance: the store refused the input.queued record while a
+// run was open, so the run settles store_error and the session breaks.
+func TestARefusedFeedAcceptanceSettlesStoreError(t *testing.T) {
+	inner := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{text: "done"},
+	})
+	tr := &openRunHoldTransport{inner: inner, at2: make(chan struct{}), release: make(chan struct{})}
+	sink := &failingSink{failRecord: "input.queued"}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tr.at2
+	// The held request is let go at the end, so a store error that does
+	// not reach the open run fails the wait rather than hanging it.
+	defer close(tr.release)
+	if err := poo.QueueFeedInput(s, "inbox", "", "the message"); err == nil {
+		t.Fatal("the refused acceptance returned no error")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := s.Wait(ctx)
+	if err != nil {
+		t.Fatalf("the store error did not reach the open run: %v", err)
+	}
+	if res.Reason != poo.ReasonStoreError {
+		t.Errorf("the run settled %q, want store_error", res.Reason)
+	}
+	if !s.Broken() {
+		t.Error("the session is not broken")
 	}
 }

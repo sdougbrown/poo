@@ -80,6 +80,7 @@ type LogRecord struct {
 	JobID   string `json:"job"`
 	InputID string `json:"input_id"`
 	Fatal   bool   `json:"fatal"`
+	Mode    string `json:"mode"`
 
 	// The usage record's fields.
 	Request         int     `json:"request"`

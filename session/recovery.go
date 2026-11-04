@@ -451,6 +451,12 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			continue
 		}
 		input := state.inputs[inputID]
+		if input.Mode == poo.InputModeFeed {
+			// A feed's input has no terminal record to recover: its own
+			// acceptance record is what a restore delivers, so the
+			// recovery leaves it alone rather than dropping it.
+			continue
+		}
 		pend.Inputs = append(pend.Inputs, PendingInput{
 			InputID: input.InputID,
 			RunID:   input.RunID,

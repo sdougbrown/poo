@@ -67,3 +67,11 @@ func SessionProfile(s *Session) string { return s.opts.Profile }
 
 // SessionChatModel returns the model the session talks to.
 func SessionChatModel(s *Session) ModelInfo { return s.opts.Model }
+
+// QueueFeedInput queues one feed's input for the model.
+//
+// The option that installs a feed is the supported entry, so a test
+// reaches the acceptance through this.
+func QueueFeedInput(s *Session, feed, from, text string) error {
+	return s.queueFeedInput(feed, from, text)
+}
