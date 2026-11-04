@@ -77,10 +77,14 @@ func QueueFeedInput(s *Session, feed, from, text string) error {
 	return s.queueFeedInput(feed, from, text, "", nil)
 }
 
-// SetFeedRestartDelay replaces how long a feed waits before its next
-// attempt, and returns a function that restores the plan's delay.
-func SetFeedRestartDelay(fn func(ran, prev time.Duration) time.Duration) func() {
-	previous := feedRestartDelay
-	feedRestartDelay = fn
-	return func() { feedRestartDelay = previous }
+// SetFeedRestartDelay replaces how long the session's feeds wait before
+// their next attempt, and returns a function that restores the plan's
+// rule.
+//
+// The delay is per session, so a test never races another session's feed
+// supervisor.
+func SetFeedRestartDelay(s *Session, fn func(ran, prev time.Duration) time.Duration) func() {
+	previous := s.feedDelay
+	s.feedDelay = fn
+	return func() { s.feedDelay = previous }
 }

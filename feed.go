@@ -145,13 +145,14 @@ const (
 	feedLongAttempt = 60 * time.Second
 )
 
-// feedRestartDelay returns how long the session waits before a feed's
-// next attempt.
+// feedRestartDelay returns how long a feed waits before its next
+// attempt. It is the rule a session's feeds follow unless a test gives
+// the session one of its own.
 //
 // An attempt that ran at least feedLongAttempt resets the wait, so a feed
 // that works for a while and then fails is not punished for its earlier
 // failures: a source that is down comes back within a minute.
-var feedRestartDelay = func(ran, previous time.Duration) time.Duration {
+func feedRestartDelay(ran, previous time.Duration) time.Duration {
 	if ran >= feedLongAttempt || previous <= 0 {
 		return feedFirstRestartDelay
 	}
@@ -290,7 +291,7 @@ func (s *Session) runFeed(f *feedState) {
 		outcome := s.feedOutcome(f, err)
 		var delay time.Duration
 		if outcome == FeedExited || outcome == FeedFailed {
-			delay = feedRestartDelay(time.Since(runAt), wait)
+			delay = s.feedDelay(time.Since(runAt), wait)
 		}
 		if !s.endFeedAttempt(f, outcome, err, delay) {
 			return

@@ -227,23 +227,28 @@ func TestAFailingFeedEndsOnceAndDoesNotRestart(t *testing.T) {
 // a failed attempt the feed starts again once the backoff has passed, and
 // the end record names the wait.
 func TestARestartingFeedWaitsForTheBackoff(t *testing.T) {
-	defer poo.SetFeedRestartDelay(func(ran, prev time.Duration) time.Duration {
-		return time.Millisecond
-	})()
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
+	// The first attempt fails once the test's delay is in place, so the
+	// restart the test waits for is the seam's.
+	fail := make(chan struct{})
 	var attempts atomic.Int32
-	newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
 		Name:    "inbox",
 		Restart: true,
 		Run: func(ctx context.Context, io poo.FeedIO) error {
 			if attempts.Add(1) == 1 {
+				<-fail
 				return errors.New("the first attempt failed")
 			}
 			<-ctx.Done()
 			return ctx.Err()
 		},
 	}))
+	poo.SetFeedRestartDelay(s, func(ran, prev time.Duration) time.Duration {
+		return time.Millisecond
+	})
+	close(fail)
 	waitFor(t, "the second attempt", func() bool {
 		return sink.count("feed.started") == 2
 	})
@@ -263,18 +268,23 @@ func TestARestartingFeedWaitsForTheBackoff(t *testing.T) {
 // asks about: a cancel while the feed waits for its next attempt ends the
 // feed with no new start.
 func TestACancelDuringTheBackoffStopsTheFeed(t *testing.T) {
-	defer poo.SetFeedRestartDelay(func(ran, prev time.Duration) time.Duration {
-		return time.Hour
-	})()
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
+	// The attempt fails once the test's delay is in place: the wait the
+	// cancel interrupts is the seam's, not the plan's.
+	fail := make(chan struct{})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
 		Name:    "inbox",
 		Restart: true,
 		Run: func(ctx context.Context, io poo.FeedIO) error {
+			<-fail
 			return errors.New("the feed broke")
 		},
 	}))
+	poo.SetFeedRestartDelay(s, func(ran, prev time.Duration) time.Duration {
+		return time.Hour
+	})
+	close(fail)
 	waitFor(t, "the attempt to end", func() bool {
 		return sink.count("feed.ended") == 1
 	})
@@ -625,10 +635,6 @@ func TestTheCloseIsBoundedWithAStuckFeed(t *testing.T) {
 // refuses a feed's input stops the feed, because a feed feeds the store
 // the session writes to, and the feed is never restarted.
 func TestARefusedFeedInputBreaksTheFeed(t *testing.T) {
-	// The wait is short, so a restart would show up at once.
-	defer poo.SetFeedRestartDelay(func(ran, prev time.Duration) time.Duration {
-		return time.Millisecond
-	})()
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &failingSink{failRecord: "input.queued", failAfter: 1}
 	// The feed emits twice: the first input is accepted, and the second
@@ -656,6 +662,16 @@ func TestARefusedFeedInputBreaksTheFeed(t *testing.T) {
 			return err
 		},
 	}))
+	// A restart would ask for its wait at once, so the question is the
+	// signal that the feed was not restarted.
+	restartAsked := make(chan struct{}, 1)
+	poo.SetFeedRestartDelay(s, func(ran, prev time.Duration) time.Duration {
+		select {
+		case restartAsked <- struct{}{}:
+		default:
+		}
+		return time.Millisecond
+	})
 	got := <-reported
 	if got.err == nil {
 		t.Fatal("the emit whose acceptance the store refused returned no error")
@@ -669,9 +685,24 @@ func TestARefusedFeedInputBreaksTheFeed(t *testing.T) {
 	if !s.Broken() {
 		t.Error("the session is not broken")
 	}
-	// A feed the store broke is not restarted: a restart would start its
-	// next attempt within the wait the test's seam gives it.
-	time.Sleep(100 * time.Millisecond)
+	// A feed the store broke is not restarted: the end claim it takes
+	// leaves it stopped, and the session asks for no wait at all.
+	waitFor(t, "the broken feed to stop", func() bool {
+		select {
+		case <-restartAsked:
+			t.Fatal("the broken session asked for a restart delay")
+		default:
+		}
+		for _, job := range s.Jobs() {
+			if job.Tool != poo.FeedToolName {
+				continue
+			}
+			if job.Status == poo.JobRunning || job.Status == poo.JobRestarting {
+				return false
+			}
+		}
+		return true
+	})
 	if n := attempts.Load(); n != 1 {
 		t.Errorf("the feed started %d attempts, want 1", n)
 	}
@@ -725,18 +756,23 @@ func TestAnEmitAfterTheAttemptEndedIsRefused(t *testing.T) {
 // that waits for its next attempt is stopped by the close, and the wait
 // that never became an attempt is not recorded as one.
 func TestTheCloseDuringTheRestartWait(t *testing.T) {
-	defer poo.SetFeedRestartDelay(func(ran, prev time.Duration) time.Duration {
-		return time.Hour
-	})()
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
+	// The attempt fails once the test's delay is in place: the wait the
+	// close cuts short is the seam's, not the plan's.
+	fail := make(chan struct{})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
 		Name:    "inbox",
 		Restart: true,
 		Run: func(ctx context.Context, io poo.FeedIO) error {
+			<-fail
 			return errors.New("the feed broke")
 		},
 	}))
+	poo.SetFeedRestartDelay(s, func(ran, prev time.Duration) time.Duration {
+		return time.Hour
+	})
+	close(fail)
 	waitFor(t, "the feed to wait for its next attempt", func() bool {
 		return sink.count("feed.ended") == 1
 	})

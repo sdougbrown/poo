@@ -163,6 +163,12 @@ type Session struct {
 	// feedOrder is the feeds in configuration order, so a list is
 	// stable.
 	feedOrder []*feedState
+	// feedDelay is how long a feed waits before its next attempt.
+	//
+	// It is per session, copied from feedRestartDelay when the session is
+	// built, so a test that changes it never races another session's feed
+	// supervisor.
+	feedDelay func(ran, previous time.Duration) time.Duration
 
 	// events is the session's event bus.
 	events *eventBus
@@ -686,6 +692,7 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		noticeArmed:        true,
 		jobs:               map[string]*jobState{},
 		feeds:              map[string]*feedState{},
+		feedDelay:          feedRestartDelay,
 		jobQueued:          make(chan struct{}, 1),
 		jobCompletionsDone: make(chan struct{}, 1),
 		gatesDone:          make(chan struct{}, 1),
