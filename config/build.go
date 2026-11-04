@@ -146,10 +146,10 @@ type Runtime struct {
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
-	// Executor is the executor the commands run through: the tools
+	// executor is the executor the commands run through: the tools
 	// that run one, and the feeds. It is nil when nothing runs a
 	// command.
-	Executor exec.Executor
+	executor exec.Executor
 	// deciderModel is the model the session's decider asks, when there
 	// is one.
 	deciderModel poo.ModelInfo
@@ -846,7 +846,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 			}
 		}
 		toolOptions.Executor = executor
-		r.Executor = executor
+		r.executor = executor
 	}
 	tools := map[string]poo.Tool{}
 	var order []string
@@ -878,7 +878,7 @@ func (r *Runtime) resolveFeedRuns() error {
 	if r.Feeds.Len() == 0 {
 		return nil
 	}
-	if r.Executor == nil {
+	if r.executor == nil {
 		return &Error{
 			Code:    CodeUnsupported,
 			Field:   "feeds.paths",
@@ -897,7 +897,7 @@ func (r *Runtime) resolveFeedRuns() error {
 				Err:     err,
 			}
 		}
-		run := feed.Runner(spec, r.Executor, lookup)
+		run := feed.Runner(spec, r.executor, lookup)
 		specs = append(specs, poo.FeedSpec{
 			Name:        spec.Name,
 			Description: spec.Description,

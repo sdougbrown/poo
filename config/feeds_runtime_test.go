@@ -3,16 +3,21 @@ package config_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/tool/bash"
 )
 
 // The runtime's feeds: the manifest a settings file names is a command
@@ -190,27 +195,46 @@ func TestASessionRunsItsFeedInItsOwnDirectory(t *testing.T) {
 	})
 }
 
-// TestTheSettingsExecutorRunsTheFeedCommand covers the executor: a
-// session that runs a feed builds the executor its settings name.
+// TestTheSettingsExecutorRunsTheFeedCommand covers the executor: a feed's
+// command runs through the executor the settings name, the same one the
+// session's other commands run through.
 func TestTheSettingsExecutorRunsTheFeedCommand(t *testing.T) {
 	manifest := feedRunManifest(t, "chat", "chat", "Messages from the fixture feed.", nil)
-	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\ntools:\n  bash:\n    executor: bwrap\n"), config.FormatYAML)
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"tools:\n  bash:\n    executor: counting\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
-	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), sandboxExecutors())
+	counting := &countingExecutor{Local: bash.NewLocal()}
+	executors := theExecutors()
+	executors.Register("counting", func(exec.Options) (exec.Executor, error) { return counting, nil })
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), executors)
 	defer runtime.Store.Close()
-	if runtime.Executor == nil {
-		t.Fatal("the build kept no executor for the feed")
+	if len(runtime.Options.Feeds) != 1 {
+		t.Fatalf("the build ran %v, want the one feed", runtime.Options.Feeds)
 	}
-	if got := runtime.Executor.Name(); got != "bwrap" {
-		t.Errorf("the feed's executor is %q, want the one the settings name", got)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
+		Emit: func(string, string) error {
+			cancel()
+			return nil
+		},
+		Log: slog.New(slog.DiscardHandler),
+		Dir: t.TempDir(),
+	})
+	if ctx.Err() == nil {
+		t.Fatalf("the feed ended before it emitted: %v", err)
+	}
+	if got, want := counting.started(), [][]string{{feedScript(t, "chat")}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the settings' executor started %q, want only the feed's command %q", got, want)
 	}
 }
 
 // TestAFeedsOnlyBuildBuildsAnExecutor covers the executor: a session that
 // runs a feed builds one even when its profile offers no tool that runs a
-// command, because the feed's own command runs through it.
+// command, because the feed's own command runs through it. A build with
+// no executor refuses the feed.
 func TestAFeedsOnlyBuildBuildsAnExecutor(t *testing.T) {
 	manifest := feedRunManifest(t, "chat", "chat", "Messages from the fixture feed.", nil)
 	settings, err := config.Parse([]byte(theFeedsSettings(manifest)), config.FormatYAML)
@@ -223,9 +247,35 @@ func TestAFeedsOnlyBuildBuildsAnExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a read-only binary with a feed did not build: %v", err)
 	}
-	if runtime.Executor == nil {
-		t.Fatal("the build kept no executor for the feed")
+	if len(runtime.Options.Feeds) != 1 {
+		t.Errorf("the build ran %v, want the one feed", runtime.Options.Feeds)
 	}
+}
+
+// countingExecutor is the local executor, and it keeps the command of
+// every process it starts.
+type countingExecutor struct {
+	*bash.Local
+	mu   sync.Mutex
+	argv [][]string
+}
+
+// Name is the executor's name, as the settings name it.
+func (c *countingExecutor) Name() string { return "counting" }
+
+// Start keeps the command and starts it locally.
+func (c *countingExecutor) Start(ctx context.Context, command exec.Command, out io.Writer) (exec.Process, error) {
+	c.mu.Lock()
+	c.argv = append(c.argv, command.Argv)
+	c.mu.Unlock()
+	return c.Local.Start(ctx, command, out)
+}
+
+// started is the command of every process the executor started.
+func (c *countingExecutor) started() [][]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][]string(nil), c.argv...)
 }
 
 // TestAFeedCannotReachAScrubbedVariable covers the environment: the
