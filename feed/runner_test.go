@@ -137,8 +137,12 @@ func TestALineThatIsNotAMessageFailsTheAttempt(t *testing.T) {
 			if !strings.Contains(err.Error(), "not a feed message") {
 				t.Errorf("the attempt failed with %q, want it to name the line", err)
 			}
-			if n := got.len(); n != 1 {
-				t.Errorf("the attempt emitted %d inputs, want the one before the failure", n)
+			// The fixture prints a good line after the bad one: the
+			// attempt ended at the failure, so that line is discarded.
+			inputs := got.all()
+			want := input{text: "the message before the failure"}
+			if len(inputs) != 1 || inputs[0] != want {
+				t.Errorf("the attempt emitted %+v, want only %+v", inputs, want)
 			}
 		})
 	}
@@ -206,6 +210,31 @@ func TestACommandThatExitsWithAnErrorFailsTheAttempt(t *testing.T) {
 			}
 			if n := got.len(); n != 0 {
 				t.Errorf("the attempt emitted %d inputs for a command that printed none", n)
+			}
+		})
+	}
+}
+
+// TestAPartialLineAtCancelIsDropped covers the end of a stopped
+// attempt: a line the command left unterminated is not a message, so a
+// cancelled attempt delivers nothing.
+func TestAPartialLineAtCancelIsDropped(t *testing.T) {
+	for _, c := range executorCases(t) {
+		t.Run(c.name, func(t *testing.T) {
+			log := &logLines{}
+			got, cancel, done := start(t, c, feed.Spec{Name: "partial", Command: []string{script(t, "partial")}}, log.logger())
+			defer cancel()
+			// The diagnostic says the unterminated bytes are written,
+			// so the cancel comes after them rather than before.
+			waitFor(t, "the partial line to be written", func() bool {
+				return strings.Contains(log.text(), "the partial line is out")
+			})
+			cancel()
+			if err := result(t, done); !errors.Is(err, context.Canceled) {
+				t.Errorf("the cancelled attempt returned %v, want context.Canceled", err)
+			}
+			if inputs := got.all(); len(inputs) != 0 {
+				t.Errorf("the cancelled attempt emitted %+v, want nothing from a partial line", inputs)
 			}
 		})
 	}

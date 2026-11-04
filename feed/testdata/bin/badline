@@ -1,5 +1,7 @@
 #!/bin/sh
-# A fixture feed: a message, then a line that is not one.
+# A fixture feed: a message, a line that is not one, and a message after
+# it that the runner must not deliver.
 printf '{"text": "the message before the failure"}\n'
 printf 'this is not a message\n'
+printf '{"text": "the message after the failure"}\n'
 sleep 60
