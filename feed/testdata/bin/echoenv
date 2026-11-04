@@ -1,3 +1,4 @@
 #!/bin/sh
-# A fixture feed: it emits the values of the variables it was given.
-printf '{"text": "%s and %s"}\n' "$FIXTURE_ECHO" "$FIXTURE_REFERENCE"
+# A fixture feed: it emits the values of the variables it was given, and
+# of one it was not.
+printf '{"text": "%s and %s and [%s]"}\n' "$FIXTURE_ECHO" "$FIXTURE_REFERENCE" "$FIXTURE_UNDECLARED"

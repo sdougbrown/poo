@@ -70,6 +70,12 @@ func Runner(spec Spec, ex exec.Executor, env func(string) (string, bool)) Run {
 		if err != nil {
 			return fmt.Errorf("feed %q: %w", spec.Name, err)
 		}
+		if resolved == nil {
+			// A nil environment means "the executor's own" to the
+			// executors, and a feed is the session's command, not the
+			// host's: an empty one says the manifest declared nothing.
+			resolved = []string{}
+		}
 		// The runner cancels its own context as well as the session's:
 		// a protocol failure has to stop the command, and the executor
 		// stops it when the context ends.

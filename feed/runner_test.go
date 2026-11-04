@@ -3,6 +3,7 @@ package feed_test
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/cli-registry"
+	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/feed"
 )
 
@@ -256,11 +258,12 @@ func TestAnEnvironmentReferenceThatDoesNotResolveFailsBeforeTheCommand(t *testin
 }
 
 // TestTheManifestEnvironmentReachesTheCommand covers what a feed's
-// process sees: the manifest's literal, and a reference the session's
-// environment resolves.
+// process sees: the manifest's literal, a reference the session's
+// environment resolves, and nothing the manifest did not declare.
 func TestTheManifestEnvironmentReachesTheCommand(t *testing.T) {
 	for _, c := range executorCases(t) {
 		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("FIXTURE_UNDECLARED", "a variable the feed did not declare")
 			spec := feed.Spec{
 				Name:    "echoenv",
 				Command: []string{script(t, "echoenv")},
@@ -281,8 +284,9 @@ func TestTheManifestEnvironmentReachesTheCommand(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the attempt failed: %v", err)
 			}
-			if len(texts) != 1 || texts[0] != "the literal and the reference" {
-				t.Errorf("the command read %v, want the literal and the resolved reference", texts)
+			want := "the literal and the reference and []"
+			if len(texts) != 1 || texts[0] != want {
+				t.Errorf("the command read %v, want %q", texts, want)
 			}
 		})
 	}
@@ -307,5 +311,53 @@ func TestAnInputTheSessionRefusesEndsTheAttempt(t *testing.T) {
 				t.Errorf("the attempt returned %v, want the session's refusal", err)
 			}
 		})
+	}
+}
+
+// recordingExecutor keeps the command it was asked to run, so a test can
+// read what the runner handed the executor.
+type recordingExecutor struct {
+	mu      sync.Mutex
+	command exec.Command
+}
+
+// Name is the executor's name.
+func (r *recordingExecutor) Name() string { return "recording" }
+
+// Start keeps the command and returns a process that has already
+// finished.
+func (r *recordingExecutor) Start(_ context.Context, command exec.Command, _ io.Writer) (exec.Process, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.command = command
+	return finished{}, nil
+}
+
+// finished is a process that has already exited.
+type finished struct{}
+
+// Wait reports a clean exit.
+func (finished) Wait() (int, error) { return 0, nil }
+
+// Kill does nothing: the process has ended.
+func (finished) Kill() {}
+
+// Stopped reports that the process exited on its own.
+func (finished) Stopped() bool { return false }
+
+// TestAFeedWithNoEnvironmentIsGivenAnEmptyOne covers the executor
+// contract: a nil environment means the command inherits the executor's
+// own, so a feed whose environment resolves to nothing is handed an
+// empty one rather than the host's.
+func TestAFeedWithNoEnvironmentIsGivenAnEmptyOne(t *testing.T) {
+	recorder := &recordingExecutor{}
+	run := feed.Runner(feed.Spec{Name: "quiet", Command: []string{"/bin/true"}}, recorder, envLookup())
+	if err := run(context.Background(), t.TempDir(), func(string, string) error { return nil }, silent()); err != nil {
+		t.Fatalf("the attempt failed: %v", err)
+	}
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if recorder.command.Env == nil {
+		t.Error("the command was handed a nil environment, which inherits the executor's own")
 	}
 }
