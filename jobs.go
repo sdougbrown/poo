@@ -313,10 +313,7 @@ func (s *Session) Jobs() []JobInfo {
 			Status:    JobRunning,
 		})
 	}
-	for _, f := range s.feedOrder {
-		if !f.listed() {
-			continue
-		}
+	for _, f := range s.listedFeedsLocked() {
 		listed[string(f.origin)] = true
 		out = append(out, JobInfo{
 			JobID:     string(f.origin),
@@ -1826,10 +1823,7 @@ func (s *Session) jobSummaries() []jobSummary {
 			ElapsedMS: time.Since(job.startedAt).Milliseconds(),
 		})
 	}
-	for _, f := range s.feedOrder {
-		if !f.listed() {
-			continue
-		}
+	for _, f := range s.listedFeedsLocked() {
 		// A live feed is listed under its origin, so a held input of it
 		// must not repeat the id: the feed's own row wins.
 		listed[string(f.origin)] = true

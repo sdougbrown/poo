@@ -515,6 +515,20 @@ func (s *Session) cancelFeed(name string) error {
 	return nil
 }
 
+// listedFeedsLocked returns the feeds the job lists show, in start
+// order: the ones still running or waiting to restart.
+//
+// The caller holds the session's lock.
+func (s *Session) listedFeedsLocked() []*feedState {
+	var out []*feedState
+	for _, f := range s.feedOrder {
+		if f.listed() {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // feedNameOf returns the feed a listed id names.
 //
 // A feed is listed under its origin, so a cancel names it the way the
