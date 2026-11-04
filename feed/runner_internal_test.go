@@ -55,6 +55,39 @@ func (r *records) logged() (int, int) {
 	return bytes, notices
 }
 
+// lines returns the stderr lines the sink holds, in order.
+func (r *records) lines() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var lines []string
+	for _, record := range r.held {
+		record.Attrs(func(attr slog.Attr) bool {
+			if attr.Key == "line" {
+				lines = append(lines, attr.Value.String())
+			}
+			return true
+		})
+	}
+	return lines
+}
+
+// TestTheStderrTailIsLogged covers the end of a diagnostic: a command
+// that ends a line without a newline still has that line in the attempt's
+// log, so the last thing it said is not lost.
+func TestTheStderrTailIsLogged(t *testing.T) {
+	sink := &records{}
+	writer := newStderrLog(slog.New(sink), 64)
+	const tail = "the last diagnostic"
+	if _, err := writer.Write([]byte(tail)); err != nil {
+		t.Fatalf("the writer failed: %v", err)
+	}
+	writer.finish()
+	lines := sink.lines()
+	if len(lines) != 1 || lines[0] != tail {
+		t.Errorf("the log holds %q, want the unterminated line %q", lines, tail)
+	}
+}
+
 // TestTheLineLimitIsOnCompleteLines covers the boundary: a complete
 // line of exactly the limit is a message, and one byte more fails the
 // attempt before the line is decoded.
