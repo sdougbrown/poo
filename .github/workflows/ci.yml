@@ -82,11 +82,11 @@ jobs:
       - name: Check the sandbox
         run: |
           if ! bwrap --unshare-all --ro-bind / / -- /bin/true; then
-            echo "::warning::bubblewrap cannot create a sandbox here; the required config and cli-registry sandbox tests will fail"
+            echo "::warning::bubblewrap cannot create a sandbox here; the required config, cli-registry and feed sandbox tests will fail"
           fi
 
       - name: Executors
-        run: go test -race -v ./config/ ./tool/cliregistry/ ./exec/bwrap/ ./internal/bashverify/ ./tool/bash/
+        run: go test -race -v ./config/ ./tool/cliregistry/ ./exec/bwrap/ ./internal/bashverify/ ./tool/bash/ ./feed/
 
       - name: Conformance in the sandbox
         env:
