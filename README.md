@@ -107,6 +107,14 @@ registered command through the session's executor. Above 30 entries, with
 a decision model configured, the profile also offers `find_tool` to search
 the catalog. The code is in `poo/cli` and `poo/tool/cliregistry`.
 
+**Feeds.** When the settings name feed manifests in `feeds.paths`, the
+session runs a long-lived command beside itself and delivers the messages
+it prints as input. A feed is listed as `feed:<name>` and stopped with
+`cancel_job`. Its manifest names the command, the environment, the restart
+policy and whether it may wake an idle session. The code is in `poo/feed`;
+[docs/build-your-own-binary.md](docs/build-your-own-binary.md#feeds) has
+the manifest and the protocol.
+
 **Your own binary.** A consumer links only the packages it wants, hands
 its tools, profiles and executors to `server.New`, and serves the result
 with `wire.Serve`. What it leaves out is not in the binary.
@@ -124,6 +132,7 @@ closure gate.
 | `poo/pootest` | Exported test helpers: a scripted transport, an in-memory sink, a stub decider, a scripted compactor |
 | `poo/tool/*` | Opt-in tools: `read`, `edit`, `grep`, `bash`, `cliregistry` |
 | `poo/cli` | The cli registry's catalog: the manifests a session may call |
+| `poo/feed` | The feed manifests a session runs: the loader, the environment, and the runner over a command's stdout |
 | `poo/exec` | The executor contract a binary fills: a command, its environment, and where it runs |
 | `poo/protect` | The protected-path matcher: the paths a tool must not touch |
 | `poo/server` | The `wire.Factory` a `serve` command is built from |

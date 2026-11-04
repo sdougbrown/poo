@@ -198,6 +198,86 @@ To see what a binary actually links, ask the toolchain:
 mise exec -- go list -deps ./cmd/my-poo | grep 'poo/tool'
 ```
 
+## Feeds
+
+A feed is a long-lived source beside a session: a process whose stdout is
+messages. The session starts every feed its settings name, delivers what
+the feed prints as input, and stops it when the session closes.
+
+A manifest names the feeds, and it is JSON, YAML or TOML. `feeds.paths`
+lists the files and directories the session loads, and every feed under
+them is active:
+
+```json
+{
+  "version": 1,
+  "feeds": {
+    "inbox": {
+      "description": "Messages from the team's queue.",
+      "command": ["my-cli", "inbox"],
+      "env": {"QUEUE_URL": "env:QUEUE_URL", "QUEUE_MODE": "batch"},
+      "restart": true,
+      "on_idle": "wake"
+    }
+  }
+}
+```
+
+`version` is 1. A name is lowercase letters, digits, `-` and `_`, and it
+names the feed everywhere its records go: its origin is `feed:<name>`.
+`command` is the argv and is required. `description` is what the jobs
+prompt says about the feed. A bad version, a name outside the pattern, an
+empty command, an `on_idle` that is neither `wake` nor `hold`, an unknown
+field or one name in two manifests fails the session, and the failure
+names the file and the feed.
+
+`feeds.paths` is a settings entry beside `cli_registry.paths`, and a
+relative path resolves against the session's working directory. A binary
+that links no executor runs no feed, and it announces no
+`capabilities.feeds`.
+
+**Environment.** A feed's command gets the cli registry's benign names and
+the manifest's `env` entries, and nothing else: a name the session scrubs
+with `tools.env.scrub` never reaches it. An entry is a literal, or
+`env:NAME`, which reads the session's scrubbed environment. A reference
+that does not resolve fails the attempt, and the command does not start.
+
+**Stdout.** One JSON object per line:
+
+```
+{"text": "the message", "from": "alice"}
+```
+
+`text` is required and is not empty. `from` names the sender and may be
+left out. A field the object does not name is ignored, and a blank line is
+skipped. A line is at most 1 MiB. The first line that is not such an
+object, a longer line, or an input the session refuses is the attempt's
+failure: the command is stopped, what it says afterwards is discarded, and
+it is reaped anyway. The command's stderr goes to the session's log, never
+to the model and never into an input.
+
+**Restart.** A feed with `restart` runs again after its command exits or
+fails. The next attempt waits 1s, and each failure doubles the wait to
+60s; an attempt that ran 60s or longer starts the wait over. A cancel and
+a close win over a pending restart.
+
+**The idle policy.** `on_idle` decides only whether a feed's input may
+start a run by itself. `wake` lets an idle session wake for it, `hold`
+queues it until a run is going, and a feed without `on_idle` inherits
+`jobs.on_idle`. A run that is woken or prompted takes every queued input,
+held ones included.
+
+**The model reads a feed's input as outside input.** The message is
+`[feed <name> · from "<from>": <text>]`, or `[feed <name>: <text>]` without
+a sender. It is not the user's turn, and it is untrusted like a tool
+result. The records are `feed.started` and `feed.ended`;
+[docs/session-log-v0.md](session-log-v0.md) lists them.
+
+**Jobs.** A running feed is listed by `jobs` and by `session/get` as
+`feed:<name>` with the tool `feed`. `cancel_job feed:<name>` stops it until
+the session closes, and a session that loads again starts every configured
+feed.
+
 ## The conformance recipe
 
 The suite is black box. It starts the binary and drives it over stdin and
@@ -225,7 +305,8 @@ be one the handshake offers.
 
 A flow that needs a tool the binary does not report is skipped, and the
 reason is logged. The bash-scripting flows need `bash`, and the typed
-result needs the session to offer `finish`. `Run` returns a `Report` of
+result needs the session to offer `finish`. The feeds flow needs the
+handshake to announce `capabilities.feeds`. `Run` returns a `Report` of
 the flows that ran and the ones that skipped, so a full binary can assert
 that nothing skipped.
 
