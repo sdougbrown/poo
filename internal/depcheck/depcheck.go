@@ -21,6 +21,8 @@
 //     registry
 //   - the cli package may import the standard library, the prompt package
 //     and the packages outside the module that hold a cli registry
+//   - the feed package may import the standard library and the packages
+//     outside the module that hold a cli registry
 //   - the server package may import the packages it composes: the core,
 //     the settings, the profiles, the executors, the permission policy,
 //     the sessions, the catalogs, the feeds and the wire
@@ -105,6 +107,7 @@ func (c Checker) rules() []rule {
 		{path: m + "/protect"},
 		{path: m + "/internal/caps"},
 		{path: m + "/cli", allowed: []string{m + "/prompt"}, external: true},
+		{path: m + "/feed", external: true},
 		{
 			path: m + "/server",
 			allowed: []string{

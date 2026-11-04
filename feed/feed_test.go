@@ -91,8 +91,8 @@ func TestAnEmptySetIsNilSafe(t *testing.T) {
 	}
 }
 
-// TestSpecsAreACopy covers the read: a caller may reorder the list
-// without touching the set.
+// TestSpecsAreACopy covers the read: a caller may reorder the list or
+// change a spec's command without touching the set.
 func TestSpecsAreACopy(t *testing.T) {
 	set, err := feed.Load(writeManifest(t, theBrokerFeeds()))
 	if err != nil {
@@ -102,6 +102,12 @@ func TestSpecsAreACopy(t *testing.T) {
 	specs[0], specs[1] = specs[1], specs[0]
 	if set.Specs()[0].Name != "avenor-broker" {
 		t.Error("reordering a Specs list reordered the set")
+	}
+	specs[0].Command[0] = "changed"
+	for _, spec := range set.Specs() {
+		if spec.Command[0] == "changed" {
+			t.Error("changing a spec's command changed the set")
+		}
 	}
 }
 
@@ -151,6 +157,20 @@ func TestAMissingReferenceNamesTheVariable(t *testing.T) {
 	}
 }
 
+// TestABareEnvReferenceIsMissing covers `env:` with no name: it is a
+// reference to no variable, not the empty literal.
+func TestABareEnvReferenceIsMissing(t *testing.T) {
+	set, err := feed.Load(writeManifest(t, map[string]any{
+		"broker": map[string]any{"command": []string{"true"}, "env": map[string]string{"TOKEN": "env:"}},
+	}))
+	if err != nil {
+		t.Fatalf("loading the manifests: %v", err)
+	}
+	if _, err := set.Specs()[0].ResolveEnv(func(string) (string, bool) { return "set", true }); err == nil {
+		t.Fatal("a bare env: reference resolved")
+	}
+}
+
 // TestALoadRefusesBrokenManifests covers the validation: a manifest that
 // does not hold fails the load, and the failure names the file and the
 // feed.
@@ -166,14 +186,29 @@ func TestALoadRefusesBrokenManifests(t *testing.T) {
 			feeds: map[string]any{
 				"broker": map[string]any{"command": []string{"true"}, "restart_at": 5},
 			},
-			want: []string{"unknown field", "restart_at"},
+			want: []string{"broker", "unknown field", "restart_at"},
 		},
 		{
 			name: "invalid on_idle",
 			feeds: map[string]any{
 				"broker": map[string]any{"command": []string{"true"}, "on_idle": "sleep"},
 			},
-			want: []string{"on_idle", `"sleep"`},
+			want: []string{"broker", "on_idle", `"sleep"`},
+		},
+		{
+			name:  "invalid name",
+			feeds: map[string]any{"Broker": map[string]any{"command": []string{"true"}}},
+			want:  []string{"Broker", "name"},
+		},
+		{
+			name:  "empty command",
+			feeds: map[string]any{"broker": map[string]any{"command": []string{}}},
+			want:  []string{"broker", "command"},
+		},
+		{
+			name:  "no command",
+			feeds: map[string]any{"broker": map[string]any{"description": "no command"}},
+			want:  []string{"broker", "command"},
 		},
 	}
 	for _, tt := range tests {

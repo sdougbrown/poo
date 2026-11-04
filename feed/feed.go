@@ -128,13 +128,19 @@ func (s *Set) Len() int {
 
 // Specs returns the loaded feeds, in name order.
 //
-// The list is a copy, so a caller may reorder it. The env bindings are
-// the set's own and are not to be changed.
+// The list and each spec's command and env are copies, so a caller may
+// change them without changing the set.
 func (s *Set) Specs() []Spec {
-	if s == nil {
+	if s == nil || len(s.specs) == 0 {
 		return nil
 	}
-	return append([]Spec(nil), s.specs...)
+	out := make([]Spec, len(s.specs))
+	for i, spec := range s.specs {
+		spec.Command = append([]string(nil), spec.Command...)
+		spec.Env = append([]cliregistry.EnvBinding(nil), spec.Env...)
+		out[i] = spec
+	}
+	return out
 }
 
 // envelope is the manifest's top-level shape, decoded with unknown
