@@ -58,7 +58,8 @@ const (
 // The overrides a command line makes.
 //
 // The precedence is the profile, then the settings file, then these:
-// the last one that says something wins.
+// the last one that says something wins, except manifest paths add to
+// the settings' paths.
 type Overrides struct {
 	// Profile is the name of the profile the session is built from.
 	Profile string
@@ -77,6 +78,33 @@ type Overrides struct {
 	// AppendSystemPrompt is the text appended to the prompt's base
 	// section.
 	AppendSystemPrompt string
+	// FeedsPaths are additional feed manifest paths.
+	FeedsPaths []string
+	// CLIRegistryPaths are additional cli registry manifest paths.
+	CLIRegistryPaths []string
+}
+
+// EnvOverrides adds the manifest paths the environment names after the
+// caller's paths.
+//
+// POO_FEEDS_PATH and POO_CLI_REGISTRY_PATH are path lists. The returned
+// overrides hold fresh path slices, so appending to them never writes
+// into the caller's.
+func EnvOverrides(o Overrides) Overrides {
+	paths := func(existing []string, name string) []string {
+		result := append([]string{}, existing...)
+		if value, ok := os.LookupEnv(name); ok {
+			for _, path := range filepath.SplitList(value) {
+				if path != "" {
+					result = append(result, path)
+				}
+			}
+		}
+		return result
+	}
+	o.FeedsPaths = paths(o.FeedsPaths, "POO_FEEDS_PATH")
+	o.CLIRegistryPaths = paths(o.CLIRegistryPaths, "POO_CLI_REGISTRY_PATH")
+	return o
 }
 
 // BuildOptions are what a build needs.
@@ -200,8 +228,10 @@ type Runtime struct {
 //
 // The copy is the effective configuration a command runs with: the
 // profile, the permission actions, the session directory and mode, and
-// the prompt changes the flags name. The maps and lists are shared, and
-// only the fields an override names are replaced.
+// the prompt changes the flags name. The manifest paths are the
+// settings' paths followed by the overrides', in fresh lists. The other
+// maps and lists are shared, and only the fields an override names are
+// replaced.
 func WithOverrides(settings *Settings, overrides Overrides) *Settings {
 	if settings == nil {
 		return nil
@@ -231,6 +261,12 @@ func WithOverrides(settings *Settings, overrides Overrides) *Settings {
 	}
 	if overrides.AppendSystemPrompt != "" {
 		effective.SystemPrompt.Append = overrides.AppendSystemPrompt
+	}
+	if len(overrides.FeedsPaths) > 0 {
+		effective.Feeds.Paths = append(append([]string(nil), settings.Feeds.Paths...), overrides.FeedsPaths...)
+	}
+	if len(overrides.CLIRegistryPaths) > 0 {
+		effective.CLIRegistry.Paths = append(append([]string(nil), settings.CLIRegistry.Paths...), overrides.CLIRegistryPaths...)
 	}
 	return &effective
 }
@@ -284,7 +320,7 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
 	}
-	if err := runtime.resolveFeeds(workingDir); err != nil {
+	if err := runtime.resolveFeeds(opts, workingDir); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolveModels(opts); err != nil {
@@ -297,7 +333,7 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveTools(opts, workingDir); err != nil {
 		return nil, err
 	}
-	if err := runtime.resolveFeedRuns(); err != nil {
+	if err := runtime.resolveFeedRuns(opts); err != nil {
 		return nil, err
 	}
 	if err := runtime.resolvePolicy(opts, workingDir); err != nil {
@@ -394,18 +430,19 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	return nil
 }
 
-// resolveRegistry loads the cli registries the settings name.
+// resolveRegistry loads the cli registries the settings and overrides name.
 //
 // A path is resolved against the working directory, and every manifest
 // reachable from the paths is one catalog. The catalog is loaded here,
 // once: the commands a session may call are the ones its registry holds
 // when the session is built, and a session does not reload one.
 func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
-	paths := r.Settings.CLIRegistry.Paths
-	if len(paths) == 0 {
+	if len(r.Settings.CLIRegistry.Paths) == 0 && len(opts.Overrides.CLIRegistryPaths) == 0 {
 		return nil
 	}
-	catalog, err := cli.Load(againstDir(paths, workingDir)...)
+	paths := againstDir(r.Settings.CLIRegistry.Paths, workingDir)
+	paths = append(paths, againstDir(opts.Overrides.CLIRegistryPaths, workingDir)...)
+	catalog, err := cli.Load(paths...)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
@@ -431,18 +468,19 @@ func againstDir(paths []string, dir string) []string {
 	return resolved
 }
 
-// resolveFeeds loads the feed manifests the settings name.
+// resolveFeeds loads the feed manifests the settings and overrides name.
 //
 // A relative path is resolved against the working directory, and every
 // manifest reachable from the paths joins one set. The set is loaded
 // once, when the session is built; a session never reloads it. Nothing
 // starts a feed here.
-func (r *Runtime) resolveFeeds(workingDir string) error {
-	paths := r.Settings.Feeds.Paths
-	if len(paths) == 0 {
+func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
+	if len(r.Settings.Feeds.Paths) == 0 && len(opts.Overrides.FeedsPaths) == 0 {
 		return nil
 	}
-	set, err := feed.Load(againstDir(paths, workingDir)...)
+	paths := againstDir(r.Settings.Feeds.Paths, workingDir)
+	paths = append(paths, againstDir(opts.Overrides.FeedsPaths, workingDir)...)
+	set, err := feed.Load(paths...)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
@@ -506,10 +544,14 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	names := registryToolNames(r.findTool())
 	for _, name := range names {
 		if !linksTool(opts, name) {
+			source := "the settings"
+			if len(opts.Overrides.CLIRegistryPaths) > 0 {
+				source = "the settings or POO_CLI_REGISTRY_PATH / --cli-registry-path"
+			}
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "cli_registry.paths",
-				Message: fmt.Sprintf("the settings name a cli registry, and this binary does not link the %q tool", name),
+				Message: fmt.Sprintf("%s name a cli registry, and this binary does not link the %q tool", source, name),
 			}
 		}
 	}
@@ -778,6 +820,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Names:       append([]string(nil), settings.Tools.Env.Scrub...),
 		Passthrough: append([]string(nil), settings.Tools.Env.Passthrough...),
 	}
+	scrub.Names = append(scrub.Names, "POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH")
 	if r.Catalog != nil {
 		scrub.Names = append(scrub.Names, r.Catalog.CredentialEnvNames()...)
 	}
@@ -811,18 +854,25 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	// must be able to resolve the executor's name whatever profile runs:
 	// a typo is a settings failure, not a failure to discover later.
 	if linksTool(opts, ToolBash) || r.needsExecutor() {
+		feedSource := ""
+		if r.Feeds.Len() > 0 {
+			feedSource = "the settings name a feed, and "
+			if len(opts.Overrides.FeedsPaths) > 0 {
+				feedSource = "the settings or POO_FEEDS_PATH / --feeds-path name a feed, and "
+			}
+		}
 		if opts.Executors == nil {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "tools.bash.executor",
-				Message: "this binary links no executor",
+				Message: feedSource + "this binary links no executor",
 			}
 		}
 		if !opts.Executors.Has(executorName) {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "tools.bash.executor",
-				Message: fmt.Sprintf("this binary links no executor named %q", executorName),
+				Message: fmt.Sprintf("%sthis binary links no executor named %q", feedSource, executorName),
 			}
 		}
 	}
@@ -874,15 +924,20 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 //
 // The feeds are the session's options, so a new session and a restored
 // one run them alike.
-func (r *Runtime) resolveFeedRuns() error {
+func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
 	if r.Feeds.Len() == 0 {
 		return nil
 	}
 	if r.executor == nil {
+		source := "the settings"
+		if len(opts.Overrides.FeedsPaths) > 0 {
+			source = "the settings or POO_FEEDS_PATH / --feeds-path"
+		}
+		message := source + " name a feed, and this binary has no executor to run a feed's command"
 		return &Error{
 			Code:    CodeUnsupported,
 			Field:   "feeds.paths",
-			Message: "this binary has no executor to run a feed's command",
+			Message: message,
 		}
 	}
 	lookup := exec.Lookup(r.Env)

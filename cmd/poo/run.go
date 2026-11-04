@@ -109,7 +109,7 @@ func runRun(args []string) int {
 	overrides.PermissionFallback = o.permissionFallback
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
-		Overrides:      overrides,
+		Overrides:      config.EnvOverrides(overrides),
 		WorkingDir:     workDir,
 		DefaultProfile: defaultProfile,
 		Tools:          linkedTools(),

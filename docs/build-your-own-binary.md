@@ -62,7 +62,12 @@ not is never asked, and every ask falls back; the session's create and
 load results say so in their `warnings`, so a consumer learns the
 capability it is missing with the first session it opens.
 
-`server.Options.Overrides` carries what a command line changed.
+`server.Options.Overrides` carries what a command line changed. A custom
+binary can set `FeedsPaths` and `CLIRegistryPaths` there to add manifests.
+`server.New` also adds the environment paths; leave the variables unset to
+use only the paths supplied by the binary and settings. A binary that calls
+`config.Build` directly must call `config.EnvOverrides` itself to add the
+environment paths. `poo run` does this automatically.
 `SessionTools` changes every runtime the factory builds, before a session
 is created from it. The typed result's `finish` tool is added that way,
 because the settings opt into it and no profile names it.
@@ -231,11 +236,19 @@ empty command, an `on_idle` that is neither `wake` nor `hold`, an unknown
 field or one name in two manifests fails the build, so the binary does not
 start, and the failure names the file and the feed.
 
-`feeds.paths` is a settings entry beside `cli_registry.paths`, and a
-relative path resolves against the binary's working directory, the one it
-is built in, not a session's. A binary
-that links no executor runs no feed, and it announces no
-`capabilities.feeds`.
+`feeds.paths` is a settings entry beside `cli_registry.paths`. For
+binaries built on `server.New` and for `poo run` and `prompt`,
+`POO_FEEDS_PATH` and `POO_CLI_REGISTRY_PATH` add paths to those settings
+respectively. Each is a path list separated by the operating system's
+path-list separator. The `poo run`, `serve` and `prompt` commands also
+accept repeatable `--feeds-path` and `--cli-registry-path` flags. Override
+paths add to the settings' paths. Every path is discovered and the files
+are sorted; path order affects only which missing path is reported first.
+A relative path resolves against the binary's working directory, the one
+it is built in, not a session's. A feed path from settings, a flag or the
+environment makes a binary that links no executor fail to build, with an
+error naming the source. The variables are scrubbed from commands a session
+runs.
 
 **Environment.** A feed's command gets the cli registry's benign names and
 the manifest's `env` entries, and nothing else: a name the session scrubs
@@ -250,7 +263,8 @@ that does not resolve fails the attempt, and the command does not start.
 ```
 
 `text` is required and is not empty. `from` names the sender and may be
-left out. A field the object does not name is ignored, and a blank line is
+left out. The optional `id` field is reserved; poo ignores it today. A field
+the object does not name is ignored, and a blank line is
 skipped. A line is at most 1 MiB. The first line that is not such an
 object, a longer line, or an input the session refuses is the attempt's
 failure: the command is stopped, what it says afterwards is discarded, and

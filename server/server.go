@@ -72,7 +72,7 @@ func New(opts Options) (*Server, error) {
 	client := &lateClient{}
 	build := config.BuildOptions{
 		Settings:       opts.Settings,
-		Overrides:      opts.Overrides,
+		Overrides:      config.EnvOverrides(opts.Overrides),
 		WorkingDir:     opts.WorkingDir,
 		DefaultProfile: opts.DefaultProfile,
 		Tools:          opts.Tools,
@@ -90,11 +90,12 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	effective := config.WithOverrides(opts.Settings, build.Overrides)
 	s := &Server{
 		runtime:   runtime,
 		build:     build,
 		settings:  opts.Settings,
-		effective: config.WithOverrides(opts.Settings, opts.Overrides),
+		effective: effective,
 		workDir:   opts.WorkingDir,
 		client:    client,
 		runtimes:  map[string]*config.Runtime{},

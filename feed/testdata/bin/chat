@@ -1,5 +1,5 @@
 #!/bin/sh
 # A fixture feed: it emits two messages, then waits to be stopped.
-printf '{"text": "the first message", "from": "alice"}\n'
+printf '{"text": "the first message", "from": "alice", "id": "message-1"}\n'
 printf '{"text": "the second message"}\n'
 sleep 60

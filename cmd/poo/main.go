@@ -32,6 +32,8 @@ Shared flags:
   --session-dir <dir>          The directory the session files live in
   --ephemeral                  Run without writing a session
   --profile <name>             The profile to run under: base, code or search
+  --feeds-path <path>          Additional feed manifest path (repeatable)
+  --cli-registry-path <path>   Additional cli registry manifest path (repeatable)
 
 Run flags:
   --endpoint <url>       The model's endpoint, e.g. http://localhost:4000/v1
