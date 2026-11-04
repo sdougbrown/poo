@@ -74,14 +74,7 @@ const handoffWindow = 16384
 // promptText returns the session's system prompt.
 func (s *suite) promptText(c *client, sessionID string) string {
 	s.t.Helper()
-	raw := c.call(protocol.MethodSessionGet, map[string]any{
-		"session_id": sessionID,
-	}, &protocol.GetResult{})
-	var state protocol.GetResult
-	if err := json.Unmarshal(raw, &state); err != nil {
-		s.t.Fatalf("decoding the session: %v", err)
-	}
-	return state.Prompt.Text
+	return s.sessionState(c, sessionID).Prompt.Text
 }
 
 // jobs covers the flow of a client that runs work in the background:
@@ -639,13 +632,7 @@ func (s *suite) waitForHeldJob(c *client, sessionID string) {
 	s.t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		raw := c.call(protocol.MethodSessionGet, map[string]any{
-			"session_id": sessionID,
-		}, &protocol.GetResult{})
-		var state protocol.GetResult
-		if err := json.Unmarshal(raw, &state); err != nil {
-			s.t.Fatalf("decoding the session: %v", err)
-		}
+		state := s.sessionState(c, sessionID)
 		for _, job := range state.Jobs {
 			if job.Status == "held" {
 				return

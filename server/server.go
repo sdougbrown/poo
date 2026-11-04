@@ -260,8 +260,17 @@ func (f *Server) Capabilities() protocol.Capabilities {
 		Compaction:  runtime.Options.Compactor != nil,
 		Persistence: modes,
 		Jobs:        f.jobs(),
+		Feeds:       f.feeds(),
 	}
 }
+
+// feeds reports whether the binary runs the feeds its settings name.
+//
+// A feed is a command, so a binary that links no executor runs none.
+// Nothing else about a feed is the binary's to leave out: config builds
+// the feeds a settings file names, so the executor is the whole of what
+// makes them reachable.
+func (f *Server) feeds() bool { return f.build.Executors != nil }
 
 // jobs reports whether a tool the binary offers may run in the
 // background.

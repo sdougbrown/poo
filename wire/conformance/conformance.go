@@ -259,6 +259,7 @@ func Run(t *testing.T, target Target) Report {
 	s.flow("handoff", s.handoff)
 	s.flow("kill", s.kill)
 	s.flow("jobs", s.jobs)
+	s.flow("feeds", s.feeds)
 	s.flow("attach and scrollback", s.attachAndHistory)
 	s.flow("resume", s.resume)
 	s.flow("answer before events", s.answerBeforeEvents)
