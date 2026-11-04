@@ -107,6 +107,8 @@ var recordTypes = map[string]func() poo.Record{
 	"turn.interrupted":       func() poo.Record { return &poo.TurnInterruptedRecord{} },
 	"job.started":            func() poo.Record { return &poo.JobStartedRecord{} },
 	"job.ended":              func() poo.Record { return &poo.JobEndedRecord{} },
+	"feed.started":           func() poo.Record { return &poo.FeedStartedRecord{} },
+	"feed.ended":             func() poo.Record { return &poo.FeedEndedRecord{} },
 }
 
 // String returns the codec's format.
