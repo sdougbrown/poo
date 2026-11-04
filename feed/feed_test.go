@@ -176,10 +176,9 @@ func TestABareEnvReferenceIsMissing(t *testing.T) {
 // feed.
 func TestALoadRefusesBrokenManifests(t *testing.T) {
 	tests := []struct {
-		name   string
-		feeds  map[string]any
-		ignore map[string]bool
-		want   []string
+		name  string
+		feeds map[string]any
+		want  []string
 	}{
 		{
 			name: "unknown field on the feed",

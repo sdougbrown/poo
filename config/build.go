@@ -396,14 +396,7 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	resolved := make([]string, 0, len(paths))
-	for _, path := range paths {
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(workingDir, path)
-		}
-		resolved = append(resolved, path)
-	}
-	catalog, err := cli.Load(resolved...)
+	catalog, err := cli.Load(againstDir(paths, workingDir)...)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
@@ -414,6 +407,19 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	}
 	r.Registry = catalog
 	return nil
+}
+
+// againstDir resolves each relative path against dir and keeps each
+// absolute one.
+func againstDir(paths []string, dir string) []string {
+	resolved := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+		resolved = append(resolved, path)
+	}
+	return resolved
 }
 
 // resolveFeeds loads the feed manifests the settings name.
@@ -427,14 +433,7 @@ func (r *Runtime) resolveFeeds(workingDir string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	resolved := make([]string, 0, len(paths))
-	for _, path := range paths {
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(workingDir, path)
-		}
-		resolved = append(resolved, path)
-	}
-	set, err := feed.Load(resolved...)
+	set, err := feed.Load(againstDir(paths, workingDir)...)
 	if err != nil {
 		return &Error{
 			Code:    CodeInvalid,
