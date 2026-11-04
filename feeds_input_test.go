@@ -500,6 +500,56 @@ func TestAMixedWakeNamesTheJobAndTheFeed(t *testing.T) {
 	}
 }
 
+// TestQueueJobResultWithAFeedIDDeliversAFeedInput covers the hand-off a
+// replay makes: a result whose job id is a feed's origin, and that names
+// no origin of its own, is a feed's input. It is rendered as one, and it
+// triggers as one.
+func TestQueueJobResultWithAFeedIDDeliversAFeedInput(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+
+	s.QueueJobResult(poo.JobResult{
+		JobID:   "feed:inbox",
+		Tool:    poo.FeedToolName,
+		Text:    "[feed inbox: the message]",
+		Outcome: poo.OutcomeOK,
+	})
+	waitFor(t, "the woken run to settle", func() bool {
+		return sink.Settled() != nil
+	})
+
+	var started *poo.RunStartedRecord
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.RunStartedRecord); ok {
+			started = r
+		}
+	}
+	if started == nil {
+		t.Fatal("the log holds no run.started record")
+	}
+	if started.Trigger != poo.TriggerFeed {
+		t.Errorf("the run's trigger is %q, want feed", started.Trigger)
+	}
+	if len(started.Feeds) != 1 || started.Feeds[0] != "inbox" {
+		t.Errorf("the run names the feeds %v, want [inbox]", started.Feeds)
+	}
+	if len(started.Jobs) != 0 {
+		t.Errorf("the run names the jobs %v, want none", started.Jobs)
+	}
+	// The text is the feed's, not a job's envelope around it.
+	text, origin, ok := deliveredMessage(sink)
+	if !ok {
+		t.Fatal("the result did not reach the model's view")
+	}
+	if want := "[feed inbox: the message]"; text != want {
+		t.Errorf("the delivered message is %q, want %q", text, want)
+	}
+	if origin != poo.FeedOrigin("inbox") {
+		t.Errorf("the delivered message's origin is %q, want %q", origin, poo.FeedOrigin("inbox"))
+	}
+}
+
 // TestAClosedSessionRefusesAFeedInput covers the refusal: a session that
 // has closed takes no input.
 func TestAClosedSessionRefusesAFeedInput(t *testing.T) {

@@ -791,11 +791,17 @@ func jobOutcomeOf(outcome Outcome) Outcome {
 //
 // A result that carries an InputID is delivered under it, and a feed's
 // result carries its input's id and origin, so a replay hands the
-// session the bytes a restore would.
+// session the bytes a restore would. A result whose job id is a feed's
+// origin, and that names no origin of its own, is a feed's input too:
+// it is rendered and triggered as one.
 func (s *Session) QueueJobResult(result JobResult) {
 	id := result.JobID
 	if result.InputID != "" {
 		id = result.InputID
+	}
+	origin := result.Origin
+	if origin == "" && IsFeedOrigin(Origin(result.JobID)) {
+		origin = Origin(result.JobID)
 	}
 	s.queueJobResult(jobResult{
 		id:      id,
@@ -805,7 +811,7 @@ func (s *Session) QueueJobResult(result JobResult) {
 		outcome: jobOutcomeOf(result.Outcome),
 		text:    result.Text,
 		fatal:   result.Fatal,
-		origin:  result.Origin,
+		origin:  origin,
 	})
 }
 
