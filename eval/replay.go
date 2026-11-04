@@ -153,7 +153,8 @@ type ReplayResult struct {
 	Match bool `json:"match"`
 	// Differences describe where the replay and the recording part.
 	Differences []string `json:"differences,omitempty"`
-	// Jobs are the job results the replay delivered, in order.
+	// Jobs are the results the replay delivered, in order: a job's
+	// result, or a feed's input.
 	Jobs []string `json:"jobs,omitempty"`
 }
 
@@ -302,16 +303,24 @@ func (t *replayNativeTransport) Compact(ctx context.Context, prev poo.Rendered) 
 	return *t.window, nil
 }
 
-// replayJobResults returns the job results a recording holds that never
+// replayJobResults returns the results a recording holds that never
 // reached the model.
 //
 // The results are the core's own: the log is read into the records the
 // core pairs them from, so the replay and a restore agree on what was
-// delivered.
+// delivered. A feed's input is one of them: its acceptance record is the
+// input.queued record, and the delivered record is its fate.
 func replayJobResults(log *Log) []poo.JobResult {
 	records := make([]poo.Record, 0, len(log.Records))
 	for _, r := range log.Records {
 		switch r.Record {
+		case "input.queued":
+			records = append(records, &poo.InputQueuedRecord{
+				RecordMeta: poo.NewRecordMetaFrom("input.queued", poo.Origin(r.Origin)),
+				InputID:    r.InputID,
+				Mode:       poo.InputMode(r.Mode),
+				Text:       r.Text,
+			})
 		case "input.delivered":
 			records = append(records, &poo.InputDeliveredRecord{InputID: r.InputID})
 		case "job.ended":
@@ -493,7 +502,8 @@ type callRecorder struct {
 	calls []CallStep
 	// compactions counts the compactions the replay applied.
 	compactions int
-	// jobs are the job results the replay delivered, in order.
+	// jobs are the results the replay delivered, in order: a job's
+	// result, or a feed's input.
 	jobs []string
 }
 
@@ -511,7 +521,7 @@ func (c *callRecorder) Append(ctx context.Context, rec poo.Record) error {
 		// The compaction reached the store, so the replay applied it.
 		c.compactions++
 	case *poo.MessageRecord:
-		if r.Origin != poo.OriginJob {
+		if r.Origin != poo.OriginJob && !strings.HasPrefix(string(r.Origin), "feed:") {
 			return nil
 		}
 		for _, block := range r.Content {
