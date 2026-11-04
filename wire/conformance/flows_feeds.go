@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -106,6 +107,16 @@ func (s *suite) feedWakesTheSession() {
 		s.t.Fatalf("the woken run names no id: %v", woken.Payload)
 	}
 	s.settled(c, sessionID, runID)
+
+	// The woken run's request carries the feed's text, framed as the
+	// feed's input.
+	requests := c.requests()
+	if len(requests) == 0 {
+		s.t.Fatal("the woken run made no request")
+	}
+	if want := fmt.Sprintf("[feed %s · from %s: %s]", feedWakeName, strconv.Quote(feedSender), feedText); !requestHolds(requests[0], want) {
+		s.t.Errorf("the woken run's request does not carry %q: %v", want, requests[0])
+	}
 
 	// The feed is a job of the session's, under its origin and the feed
 	// tool.
@@ -243,19 +254,6 @@ func payloadNames(payload map[string]any, key string) []string {
 		}
 	}
 	return names
-}
-
-// sessionState returns what session/get says about a session.
-func (s *suite) sessionState(c *client, sessionID string) protocol.GetResult {
-	s.t.Helper()
-	raw := c.call(protocol.MethodSessionGet, map[string]any{
-		"session_id": sessionID,
-	}, &protocol.GetResult{})
-	var state protocol.GetResult
-	if err := json.Unmarshal(raw, &state); err != nil {
-		s.t.Fatalf("decoding the session: %v", err)
-	}
-	return state
 }
 
 // noRun checks that the session started no run within the window.
