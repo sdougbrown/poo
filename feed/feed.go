@@ -6,8 +6,10 @@
 // feed's inputs do when the session is idle.
 //
 // The package loads the manifests the settings name and holds the
-// validated specs. The session owns the lifecycle that starts and stops
-// the processes. The config layer turns a spec into a real process.
+// validated specs. It also holds the runner that starts a feed's
+// process, reads its output as messages, and reaps it before the attempt
+// returns. The session owns the lifecycle that starts and stops attempts,
+// and the config layer wires the runner to the session.
 //
 // A feed's environment follows a registered CLI's rules. An entry is a
 // literal, or an `env:NAME` reference. The host resolves a reference
