@@ -157,3 +157,26 @@ func TestEnvOverridesDoesNotShareCallerSlices(t *testing.T) {
 		t.Fatalf("overrides changed: %+v", first)
 	}
 }
+
+// TestWithOverridesReportsTheMergedManifestPaths covers the effective
+// settings: they hold the settings' manifest paths followed by the
+// overrides', in fresh lists, so the caller's settings stay as they were.
+func TestWithOverridesReportsTheMergedManifestPaths(t *testing.T) {
+	settings := &config.Settings{}
+	settings.Feeds.Paths = make([]string, 1, 4)
+	settings.Feeds.Paths[0] = "settings-feeds"
+	settings.CLIRegistry.Paths = []string{"settings-registry"}
+	effective := config.WithOverrides(settings, config.Overrides{
+		FeedsPaths:       []string{"flag-feeds"},
+		CLIRegistryPaths: []string{"flag-registry"},
+	})
+	if got := fmt.Sprint(effective.Feeds.Paths); got != "[settings-feeds flag-feeds]" {
+		t.Errorf("the effective feed paths are %s", got)
+	}
+	if got := fmt.Sprint(effective.CLIRegistry.Paths); got != "[settings-registry flag-registry]" {
+		t.Errorf("the effective registry paths are %s", got)
+	}
+	if got := fmt.Sprint(settings.Feeds.Paths[:cap(settings.Feeds.Paths)][1]); got != "" {
+		t.Errorf("the merge wrote %q into the settings' spare capacity", got)
+	}
+}

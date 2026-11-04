@@ -228,8 +228,10 @@ type Runtime struct {
 //
 // The copy is the effective configuration a command runs with: the
 // profile, the permission actions, the session directory and mode, and
-// the prompt changes the flags name. The maps and lists are shared, and
-// only the fields an override names are replaced.
+// the prompt changes the flags name. The manifest paths are the
+// settings' paths followed by the overrides', in fresh lists. The other
+// maps and lists are shared, and only the fields an override names are
+// replaced.
 func WithOverrides(settings *Settings, overrides Overrides) *Settings {
 	if settings == nil {
 		return nil
@@ -259,6 +261,12 @@ func WithOverrides(settings *Settings, overrides Overrides) *Settings {
 	}
 	if overrides.AppendSystemPrompt != "" {
 		effective.SystemPrompt.Append = overrides.AppendSystemPrompt
+	}
+	if len(overrides.FeedsPaths) > 0 {
+		effective.Feeds.Paths = append(append([]string(nil), settings.Feeds.Paths...), overrides.FeedsPaths...)
+	}
+	if len(overrides.CLIRegistryPaths) > 0 {
+		effective.CLIRegistry.Paths = append(append([]string(nil), settings.CLIRegistry.Paths...), overrides.CLIRegistryPaths...)
 	}
 	return &effective
 }

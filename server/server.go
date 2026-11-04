@@ -91,8 +91,6 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 	effective := config.WithOverrides(opts.Settings, build.Overrides)
-	effective.Feeds.Paths = append(append([]string(nil), effective.Feeds.Paths...), build.Overrides.FeedsPaths...)
-	effective.CLIRegistry.Paths = append(append([]string(nil), effective.CLIRegistry.Paths...), build.Overrides.CLIRegistryPaths...)
 	s := &Server{
 		runtime:   runtime,
 		build:     build,
