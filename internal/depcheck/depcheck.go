@@ -23,7 +23,7 @@
 //     and the packages outside the module that hold a cli registry
 //   - the server package may import the packages it composes: the core,
 //     the settings, the profiles, the executors, the permission policy,
-//     the sessions, the catalogs and the wire
+//     the sessions, the catalogs, the feeds and the wire
 //   - the exec package may import the standard library only, and the
 //     exec/bwrap package may import the exec package
 //   - the protect package may import the standard library only
@@ -114,6 +114,7 @@ func (c Checker) rules() []rule {
 				m + "/config",
 				m + "/decide",
 				m + "/exec",
+				m + "/feed",
 				m + "/internal/caps",
 				m + "/perm",
 				m + "/perm/decide",

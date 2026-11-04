@@ -44,6 +44,7 @@
     "reasoning.chat": { "isEmpty": "string" },
     "finish.schema_file": { "isEmpty": "string" },
     "cli_registry.paths": { "isEmpty": "array" },
+    "feeds.paths": { "isEmpty": "array" },
     "session.mode": { "isEmpty": "string" },
     "session.dir": { "isEmpty": "string" },
     "session.retention.max_age_days": { "isEmpty": "number" },

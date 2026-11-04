@@ -17,6 +17,7 @@ type SettingsFields struct {
 	ContextNoticeRatio              *float64 "json:\"context.notice_ratio,omitempty\""
 	ContextStrategy                 *string  "json:\"context.strategy,omitempty\""
 	DeciderTimeoutMs                *float64 "json:\"decider.timeout_ms,omitempty\""
+	FeedsPaths                      []string "json:\"feeds.paths,omitempty\""
 	FinishSchemaFile                *string  "json:\"finish.schema_file,omitempty\""
 	JobsMaxRunning                  *float64 "json:\"jobs.max_running,omitempty\""
 	JobsMaxUnattendedWakes          *float64 "json:\"jobs.max_unattended_wakes,omitempty\""
@@ -74,6 +75,7 @@ type SettingsAvailability struct {
 	ContextNoticeRatio              FieldStatus
 	ContextStrategy                 FieldStatus
 	DeciderTimeoutMs                FieldStatus
+	FeedsPaths                      FieldStatus
 	FinishSchemaFile                FieldStatus
 	JobsMaxRunning                  FieldStatus
 	JobsMaxUnattendedWakes          FieldStatus
@@ -155,6 +157,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ContextStrategySatisfied := func() bool { v := f.ContextStrategy; return v != nil && *v != "" }()
 	DeciderTimeoutMsEnabled := true
 	DeciderTimeoutMsSatisfied := f.DeciderTimeoutMs != nil
+	FeedsPathsEnabled := true
+	FeedsPathsSatisfied := len(f.FeedsPaths) > 0
 	FinishSchemaFileEnabled := true
 	FinishSchemaFileSatisfied := func() bool { v := f.FinishSchemaFile; return v != nil && *v != "" }()
 	JobsMaxRunningEnabled := true
@@ -419,6 +423,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				if !(f.DeciderTimeoutMs != nil && *f.DeciderTimeoutMs >= 1) && "decider.timeout_ms must be at least a millisecond" != "" {
 					reasons = append(reasons, "decider.timeout_ms must be at least a millisecond")
 				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		FeedsPaths: FieldStatus{
+			Required:  FeedsPathsEnabled && false,
+			Enabled:   FeedsPathsEnabled,
+			Satisfied: FeedsPathsSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -1496,6 +1522,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return v != nil && *v != ""
 	case "DeciderTimeoutMs":
 		return f.DeciderTimeoutMs != nil
+	case "FeedsPaths":
+		return len(f.FeedsPaths) > 0
 	case "FinishSchemaFile":
 		v := f.FinishSchemaFile
 		return v != nil && *v != ""
@@ -1801,6 +1829,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: decider.timeout_ms must be at least a millisecond")
+	case "FeedsPaths", "feeds.paths":
+		found = true
+		status = avail.FeedsPaths
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "FinishSchemaFile", "finish.schema_file":
 		found = true
 		status = avail.FinishSchemaFile

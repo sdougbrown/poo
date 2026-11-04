@@ -19,6 +19,7 @@ import (
 	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/exec"
+	"github.com/sdougbrown/poo/feed"
 	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/perm"
 	permissive "github.com/sdougbrown/poo/perm/decide"
@@ -142,6 +143,9 @@ type Runtime struct {
 	// Registry is the cli registry the session offers, or nil when the
 	// settings name none.
 	Registry *cli.Catalog
+	// Feeds are the feed manifests the settings name, or nil when the
+	// settings name none.
+	Feeds *feed.Set
 	// deciderModel is the model the session's decider asks, when there
 	// is one.
 	deciderModel poo.ModelInfo
@@ -276,6 +280,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
 	}
+	if err := runtime.resolveFeeds(workingDir); err != nil {
+		return nil, err
+	}
 	if err := runtime.resolveModels(opts); err != nil {
 		return nil, err
 	}
@@ -406,6 +413,38 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 		}
 	}
 	r.Registry = catalog
+	return nil
+}
+
+// resolveFeeds loads the feed manifests the settings name.
+//
+// A path is resolved against the working directory, and every manifest
+// reachable from the paths is one set. The set is loaded here, once:
+// the feeds a session may run are the ones its manifests hold when the
+// session is built, and a session does not reload one. Nothing starts a
+// feed here; the specs are the lifecycle's input.
+func (r *Runtime) resolveFeeds(workingDir string) error {
+	paths := r.Settings.Feeds.Paths
+	if len(paths) == 0 {
+		return nil
+	}
+	resolved := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		resolved = append(resolved, path)
+	}
+	set, err := feed.Load(resolved...)
+	if err != nil {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "feeds.paths",
+			Message: "the feeds do not load",
+			Err:     err,
+		}
+	}
+	r.Feeds = set
 	return nil
 }
 
