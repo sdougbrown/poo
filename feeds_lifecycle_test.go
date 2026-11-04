@@ -80,7 +80,7 @@ func TestAFeedDeliversItsInputs(t *testing.T) {
 	if !ok {
 		t.Fatal("the feed's input did not reach the model's view")
 	}
-	if want := "[feed inbox · from alice: the message]"; text != want {
+	if want := "[feed inbox · from \"alice\": the message]"; text != want {
 		t.Errorf("the delivered message is %q, want %q", text, want)
 	}
 	if origin != poo.FeedOrigin("inbox") {
