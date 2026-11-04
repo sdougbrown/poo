@@ -1857,7 +1857,7 @@ func (s *Session) jobSummaries() []jobSummary {
 			Handle:  item.result.handle,
 			Tool:    item.result.tool,
 			Summary: summary,
-			Status:  "held",
+			Status:  JobHeld,
 		})
 	}
 	return out
