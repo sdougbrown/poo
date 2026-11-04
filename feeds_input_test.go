@@ -424,6 +424,82 @@ func TestTwoPendingFeedInputsFromTheSameFeedSurviveRestore(t *testing.T) {
 	}
 }
 
+// TestAMixedWakeNamesTheJobAndTheFeed covers the wake's two columns: a
+// job's result and a feed's input that join one wake start one run, and
+// the run says so with both of them in the order the model reads them.
+func TestAMixedWakeNamesTheJobAndTheFeed(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
+
+	// The seam: the feed's input joins the job's result in the wake the
+	// job's result reserves, so one wake takes both.
+	queued := make(chan error, 1)
+	restore := s.SetJobRaceHooks(&poo.JobRaceHooks{
+		BeforeWake: func() {
+			queued <- poo.QueueFeedInput(s, "inbox", "", "the message")
+		},
+	})
+	defer restore()
+	s.QueueJobResult(poo.JobResult{
+		JobID:   "j1",
+		Handle:  "r1",
+		Tool:    "job",
+		Text:    "the job's output",
+		Outcome: poo.OutcomeOK,
+	})
+	if err := <-queued; err != nil {
+		t.Fatalf("queueing the feed's input: %v", err)
+	}
+	waitFor(t, "the woken run to settle", func() bool {
+		return sink.Settled() != nil
+	})
+
+	// The job's result decides the trigger, and each column names its
+	// own results.
+	var started *poo.RunStartedRecord
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.RunStartedRecord); ok {
+			started = r
+		}
+	}
+	if started == nil {
+		t.Fatal("the log holds no run.started record")
+	}
+	if started.Trigger != poo.TriggerJob {
+		t.Errorf("the run's trigger is %q, want job", started.Trigger)
+	}
+	if len(started.Jobs) != 1 || started.Jobs[0].JobID != "j1" {
+		t.Errorf("the run names the jobs %v, want [j1]", started.Jobs)
+	}
+	if len(started.Feeds) != 1 || started.Feeds[0] != "inbox" {
+		t.Errorf("the run names the feeds %v, want [inbox]", started.Feeds)
+	}
+
+	// The model read the job's result before the feed's input.
+	jobAt, feedAt := -1, -1
+	for i, m := range sink.messages() {
+		if m.Origin == poo.OriginJob && jobAt < 0 {
+			jobAt = i
+		}
+		if m.Origin == poo.FeedOrigin("inbox") && feedAt < 0 {
+			feedAt = i
+			if want := "[feed inbox: the message]"; m.Content[0].Text != want {
+				t.Errorf("the delivered message is %q, want %q", m.Content[0].Text, want)
+			}
+		}
+	}
+	if jobAt < 0 {
+		t.Fatal("the job's result did not reach the model's view")
+	}
+	if feedAt < 0 {
+		t.Fatal("the feed's input did not reach the model's view")
+	}
+	if jobAt > feedAt {
+		t.Error("the feed's input came before the job's result")
+	}
+}
+
 // TestAClosedSessionRefusesAFeedInput covers the refusal: a session that
 // has closed takes no input.
 func TestAClosedSessionRefusesAFeedInput(t *testing.T) {
