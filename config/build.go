@@ -84,8 +84,12 @@ type Overrides struct {
 	CLIRegistryPaths []string
 }
 
-// EnvOverrides adds manifest paths from the environment after the caller's paths.
-// The returned path slices do not share storage with the caller's slices.
+// EnvOverrides adds the manifest paths the environment names after the
+// caller's paths.
+//
+// POO_FEEDS_PATH and POO_CLI_REGISTRY_PATH are path lists. The returned
+// overrides hold fresh path slices, so appending to them never writes
+// into the caller's.
 func EnvOverrides(o Overrides) Overrides {
 	paths := func(existing []string, name string) []string {
 		result := append([]string{}, existing...)

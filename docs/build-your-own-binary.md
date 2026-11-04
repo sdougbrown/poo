@@ -236,16 +236,16 @@ empty command, an `on_idle` that is neither `wake` nor `hold`, an unknown
 field or one name in two manifests fails the build, so the binary does not
 start, and the failure names the file and the feed.
 
-`feeds.paths` is a settings entry beside `cli_registry.paths`. For binaries
-built on `server.New` and for `poo run`, `POO_FEEDS_PATH` and
-`POO_CLI_REGISTRY_PATH` add paths to those settings respectively. Each is a
-path list separated by the operating system's path-list separator. The `poo
-run`, `serve` and `sessions` commands also accept repeatable `--feeds-path`
-and `--cli-registry-path` flags. Settings paths load first, then flags or
-other override paths, then environment paths. A relative path resolves
-against the binary's working directory, the one it is built in, not a session's. A binary
-that links no executor runs no feed, and it announces no
-`capabilities.feeds`.
+`feeds.paths` is a settings entry beside `cli_registry.paths`. For
+binaries built on `server.New` and for `poo run`, `POO_FEEDS_PATH` and
+`POO_CLI_REGISTRY_PATH` add paths to those settings respectively. Each is
+a path list separated by the operating system's path-list separator. The
+`poo run`, `serve` and `sessions` commands also accept repeatable
+`--feeds-path` and `--cli-registry-path` flags. Settings paths load first,
+then flags or other override paths, then environment paths. A relative
+path resolves against the binary's working directory, the one it is built
+in, not a session's. A binary that links no executor runs no feed, and it
+announces no `capabilities.feeds`.
 
 **Environment.** A feed's command gets the cli registry's benign names and
 the manifest's `env` entries, and nothing else: a name the session scrubs

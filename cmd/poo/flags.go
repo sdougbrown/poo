@@ -13,9 +13,13 @@ import (
 	"github.com/sdougbrown/poo/provider/catalog"
 )
 
+// stringList is a repeatable flag: each use adds one value.
 type stringList []string
 
+// String returns the values, comma separated.
 func (s *stringList) String() string { return strings.Join(*s, ", ") }
+
+// Set adds one value.
 func (s *stringList) Set(value string) error {
 	*s = append(*s, value)
 	return nil
@@ -42,8 +46,11 @@ type sharedFlags struct {
 	// ephemeral runs the command without writing a session.
 	ephemeral bool
 	// profile is the profile the session is built from.
-	profile          string
-	feedsPaths       stringList
+	profile string
+	// feedsPaths are feed manifest paths added to the settings' paths.
+	feedsPaths stringList
+	// cliRegistryPaths are cli registry manifest paths added to the
+	// settings' paths.
 	cliRegistryPaths stringList
 }
 
