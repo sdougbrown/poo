@@ -939,10 +939,9 @@ func feedInputText(feed, from, text string) string {
 // outsideElement renders outside data as one XML element.
 //
 // Outside data is a feed's input or a job's result: a message the model
-// reads but did not ask for. The closing tag is what ends it, so the
-// text escapes only the characters that would be read as markup or end
-// the element, and the attributes escape the characters that would end
-// a value or the start tag.
+// reads but did not ask for. The closing tag ends it, so the text escapes
+// only the characters that read as markup, and an attribute escapes the
+// characters that end its value or spread the start tag across lines.
 func outsideElement(tag string, attrs [][2]string, text string) string {
 	var b strings.Builder
 	b.WriteByte('<')
@@ -962,14 +961,14 @@ func outsideElement(tag string, attrs [][2]string, text string) string {
 	return b.String()
 }
 
-// textEscaper escapes an element's text. `&` and `<` are the characters
-// that would change how the text reads, and nothing else is escaped: a
-// newline, a quote and a `>` arrive as they are.
+// textEscaper escapes an element's text. `&` and `<` start markup, so
+// they become references; a newline, a quote and a `>` arrive as they
+// are.
 var textEscaper = strings.NewReplacer(`&`, `&amp;`, `<`, `&lt;`)
 
-// attributeEscaper escapes an attribute's value. `&`, `<` and the quote
-// would change where the value ends, and a newline or a carriage return
-// would end the start tag, so each becomes a character reference.
+// attributeEscaper escapes an attribute's value. `&` and `<` start
+// markup and the quote ends the value; a newline or a carriage return
+// becomes a character reference, so the start tag stays on one line.
 var attributeEscaper = strings.NewReplacer(
 	`&`, `&amp;`,
 	`<`, `&lt;`,
