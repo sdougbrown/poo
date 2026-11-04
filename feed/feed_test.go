@@ -275,6 +275,10 @@ func TestADirectoryHoldsItsManifestFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "more.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatalf("writing the yaml manifest: %v", err)
 	}
+	toml := "version = 1\n[feeds.git-feedback]\ncommand = [\"git-feedback\", \"wait\"]\n"
+	if err := os.WriteFile(filepath.Join(dir, "review.toml"), []byte(toml), 0o600); err != nil {
+		t.Fatalf("writing the toml manifest: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not a manifest"), 0o600); err != nil {
 		t.Fatalf("writing the notes: %v", err)
 	}
@@ -282,7 +286,7 @@ func TestADirectoryHoldsItsManifestFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the directory: %v", err)
 	}
-	if set.Len() != 2 || set.Specs()[0].Name != "broker" || set.Specs()[1].Name != "ci-watch" {
-		t.Errorf("the directory loaded %+v, want the two feeds", set.Specs())
+	if set.Len() != 3 || set.Specs()[0].Name != "broker" || set.Specs()[1].Name != "ci-watch" || set.Specs()[2].Name != "git-feedback" {
+		t.Errorf("the directory loaded %+v, want the three feeds", set.Specs())
 	}
 }

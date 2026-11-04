@@ -14,6 +14,7 @@
 package feed
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -190,11 +191,13 @@ func readFeed(path, name string, raw json.RawMessage) (Spec, error) {
 	if !namePattern.MatchString(name) {
 		return Spec{}, fmt.Errorf("feed manifest %s: feed name %q is not a valid feed name", path, name)
 	}
+	// The entry is already JSON: Decode normalized the whole file, in
+	// whatever format it was written, and checked it for duplicate keys.
 	var b body
-	// Decode rejects unknown fields and duplicate keys, and names the
-	// file in its failures.
-	if err := manifest.Decode(path, raw, &b); err != nil {
-		return Spec{}, fmt.Errorf("feed %q: %w", name, err)
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&b); err != nil {
+		return Spec{}, fmt.Errorf("feed manifest %s: feed %q: %w", path, name, err)
 	}
 	if len(b.Command) == 0 {
 		return Spec{}, fmt.Errorf("feed manifest %s: feed %q has an empty command", path, name)
