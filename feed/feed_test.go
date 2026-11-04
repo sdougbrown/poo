@@ -92,7 +92,7 @@ func TestAnEmptySetIsNilSafe(t *testing.T) {
 }
 
 // TestSpecsAreACopy covers the read: a caller may reorder the list or
-// change a spec's command without touching the set.
+// change a spec's command or env without touching the set.
 func TestSpecsAreACopy(t *testing.T) {
 	set, err := feed.Load(writeManifest(t, theBrokerFeeds()))
 	if err != nil {
@@ -104,9 +104,15 @@ func TestSpecsAreACopy(t *testing.T) {
 		t.Error("reordering a Specs list reordered the set")
 	}
 	specs[0].Command[0] = "changed"
+	specs[1].Env[0].Value = "changed"
 	for _, spec := range set.Specs() {
 		if spec.Command[0] == "changed" {
 			t.Error("changing a spec's command changed the set")
+		}
+		for _, binding := range spec.Env {
+			if binding.Value == "changed" {
+				t.Error("changing a spec's env changed the set")
+			}
 		}
 	}
 }
@@ -137,6 +143,15 @@ func TestResolveEnvCoversLiteralsReferencesAndBenignNames(t *testing.T) {
 	}
 	if strings.Join(env, "\n") != strings.Join(want, "\n") {
 		t.Errorf("the env is %v, want %v", env, want)
+	}
+
+	// A feed with no env entries still gets the benign names.
+	env, err = set.Specs()[1].ResolveEnv(lookup)
+	if err != nil {
+		t.Fatalf("resolving the env of a feed with none: %v", err)
+	}
+	if strings.Join(env, "\n") != "PATH=value-of-path" {
+		t.Errorf("the env of a feed with none is %v, want only PATH", env)
 	}
 }
 
