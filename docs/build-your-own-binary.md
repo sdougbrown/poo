@@ -228,11 +228,12 @@ names the feed everywhere its records go: its origin is `feed:<name>`.
 `command` is the argv and is required. `description` is what the jobs
 prompt says about the feed. A bad version, a name outside the pattern, an
 empty command, an `on_idle` that is neither `wake` nor `hold`, an unknown
-field or one name in two manifests fails the session, and the failure
-names the file and the feed.
+field or one name in two manifests fails the build, so the binary does not
+start, and the failure names the file and the feed.
 
 `feeds.paths` is a settings entry beside `cli_registry.paths`, and a
-relative path resolves against the session's working directory. A binary
+relative path resolves against the binary's working directory, the one it
+is built in, not a session's. A binary
 that links no executor runs no feed, and it announces no
 `capabilities.feeds`.
 
@@ -257,8 +258,8 @@ it is reaped anyway. The command's stderr goes to the session's log, never
 to the model and never into an input.
 
 **Restart.** A feed with `restart` runs again after its command exits or
-fails. The next attempt waits 1s, and each failure doubles the wait to
-60s; an attempt that ran 60s or longer starts the wait over. A cancel and
+fails. The next attempt waits 1s, and each exit or failure doubles the
+wait to 60s; an attempt that ran 60s or longer starts the wait over. A cancel and
 a close win over a pending restart.
 
 **The idle policy.** `on_idle` decides only whether a feed's input may
