@@ -1035,20 +1035,16 @@ func (s *Session) handleIdleJobResults() {
 	// reservation, and a prompt that arrives now is refused.
 	s.raceHook("wake")
 
-	// Every result that is queued at this moment joins the woken run.
-	// A held result waits for the next client prompt, so it does not
-	// join the wake.
+	// Every result that is queued at this moment joins the woken run,
+	// held ones included: a held result waits for the next run, and this
+	// is it. A held result leaves the queue here, so it is not also
+	// delivered as a held result at the run's start.
 	s.mu.Lock()
 	var results []jobResult
-	kept := s.jobQueue[:0]
 	for _, item := range s.jobQueue {
-		if item.held {
-			kept = append(kept, item)
-			continue
-		}
 		results = append(results, item.result)
 	}
-	s.jobQueue = kept
+	s.jobQueue = nil
 	if len(results) == 0 {
 		s.reserved = false
 		s.mu.Unlock()
