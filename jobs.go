@@ -811,7 +811,7 @@ func (s *Session) QueueJobResult(result JobResult) {
 // FeedToolName is the tool name a feed's input is listed under.
 const FeedToolName = "feed"
 
-// QueueFeedInput queues one feed's input for the model.
+// queueFeedInput queues one feed's input for the model.
 //
 // The model-facing text is rendered here, once, and the acceptance
 // record carries it: the delivery uses the stored text, live and after a
@@ -823,7 +823,11 @@ const FeedToolName = "feed"
 // job's result. An input the session cannot take returns
 // ErrSessionClosed or ErrSessionBroken, and a store that refuses its
 // record returns the store's error: the input is then not queued.
-func (s *Session) QueueFeedInput(feed, from, text string) error {
+//
+// The option that installs a feed is the supported entry: the feed's
+// name is validated, and the model is told what a feed's message is,
+// before an input arrives.
+func (s *Session) queueFeedInput(feed, from, text string) error {
 	origin := FeedOrigin(feed)
 	s.mu.Lock()
 	if s.broken {

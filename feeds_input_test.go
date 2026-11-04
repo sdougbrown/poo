@@ -34,7 +34,7 @@ func TestAFeedInputWakesAnIdleSession(t *testing.T) {
 	sink := &recordingSink{}
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
 
-	if err := s.QueueFeedInput("inbox", "alice", "the message"); err != nil {
+	if err := poo.QueueFeedInput(s, "inbox", "alice", "the message"); err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
 	waitFor(t, "the woken run to settle", func() bool {
@@ -104,7 +104,7 @@ func TestAHeldFeedInputWaitsForTheNextPrompt(t *testing.T) {
 	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
 	s := newTestSession(t, opts)
 
-	if err := s.QueueFeedInput("inbox", "", "the message"); err != nil {
+	if err := poo.QueueFeedInput(s, "inbox", "", "the message"); err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
 	waitFor(t, "the input to be held", func() bool {
@@ -184,14 +184,14 @@ func TestTheWakeLimitHoldsAFeedInput(t *testing.T) {
 	opts.Jobs = poo.JobOptions{MaxUnattendedWakes: 1}
 	s := newTestSession(t, opts)
 
-	if err := s.QueueFeedInput("inbox", "", "the first"); err != nil {
+	if err := poo.QueueFeedInput(s, "inbox", "", "the first"); err != nil {
 		t.Fatalf("queueing the first input: %v", err)
 	}
 	waitFor(t, "the woken run to settle", func() bool {
 		return sink.Settled() != nil
 	})
 	// The second input is past the limit of one unattended wake.
-	if err := s.QueueFeedInput("inbox", "", "the second"); err != nil {
+	if err := poo.QueueFeedInput(s, "inbox", "", "the second"); err != nil {
 		t.Fatalf("queueing the second input: %v", err)
 	}
 	waitFor(t, "the second input to be held", func() bool {
@@ -227,7 +227,7 @@ func TestAFeedInputDuringARunIsDeliveredAtTheTurnEnd(t *testing.T) {
 		t.Fatalf("starting the run: %v", err)
 	}
 	<-tr.at2
-	if err := s.QueueFeedInput("inbox", "", "the message"); err != nil {
+	if err := poo.QueueFeedInput(s, "inbox", "", "the message"); err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
 	waitFor(t, "the input to be queued", func() bool {
@@ -258,7 +258,7 @@ func TestTheRestoreDeliversAnUndeliveredFeedInputOnce(t *testing.T) {
 	liveOpts := testOptions(t, liveTransport, &echoTool{}, liveSink)
 	liveOpts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
 	live := newTestSession(t, liveOpts)
-	if err := live.QueueFeedInput("inbox", "alice", "the message"); err != nil {
+	if err := poo.QueueFeedInput(live, "inbox", "alice", "the message"); err != nil {
 		t.Fatalf("queueing the feed's input: %v", err)
 	}
 	waitFor(t, "the input to be held", func() bool {
@@ -433,7 +433,7 @@ func TestAClosedSessionRefusesAFeedInput(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("closing the session: %v", err)
 	}
-	err := s.QueueFeedInput("inbox", "", "the message")
+	err := poo.QueueFeedInput(s, "inbox", "", "the message")
 	if !errors.Is(err, poo.ErrSessionClosed) {
 		t.Errorf("the closed session returned %v, want ErrSessionClosed", err)
 	}
@@ -483,7 +483,7 @@ func TestACloseRacingAFeedAcceptanceKeepsTheInput(t *testing.T) {
 	// The acceptance is in flight, and it holds its write registration.
 	accepted := make(chan error, 1)
 	go func() {
-		accepted <- s.QueueFeedInput("inbox", "", "the message")
+		accepted <- poo.QueueFeedInput(s, "inbox", "", "the message")
 	}()
 	<-sink.at
 
