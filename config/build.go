@@ -146,9 +146,6 @@ type Runtime struct {
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
-	// FeedSpecs are the feeds the session runs, built from the
-	// manifests, or nil when the settings name none.
-	FeedSpecs []poo.FeedSpec
 	// Executor is the executor the commands run through: the tools
 	// that run one, and the feeds. It is nil when nothing runs a
 	// command.
@@ -914,7 +911,6 @@ func (r *Runtime) resolveFeedRuns() error {
 			},
 		})
 	}
-	r.FeedSpecs = specs
 	r.Options.Feeds = specs
 	return nil
 }

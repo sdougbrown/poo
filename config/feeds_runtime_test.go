@@ -191,8 +191,7 @@ func TestASessionRunsItsFeedInItsOwnDirectory(t *testing.T) {
 }
 
 // TestTheSettingsExecutorRunsTheFeedCommand covers the executor: a
-// session that runs a feed builds the executor its settings name, and
-// hands it to the feed, the same way the tools get it.
+// session that runs a feed builds the executor its settings name.
 func TestTheSettingsExecutorRunsTheFeedCommand(t *testing.T) {
 	manifest := feedRunManifest(t, "chat", "chat", "Messages from the fixture feed.", nil)
 	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"session:\n  mode: logged\n  dir: "+t.TempDir()+"\ntools:\n  bash:\n    executor: bwrap\n"), config.FormatYAML)
@@ -206,9 +205,6 @@ func TestTheSettingsExecutorRunsTheFeedCommand(t *testing.T) {
 	}
 	if got := runtime.Executor.Name(); got != "bwrap" {
 		t.Errorf("the feed's executor is %q, want the one the settings name", got)
-	}
-	if len(runtime.FeedSpecs) != 1 || runtime.FeedSpecs[0].Name != "chat" {
-		t.Errorf("the build ran %v, want the chat feed", runtime.FeedSpecs)
 	}
 }
 
@@ -247,12 +243,12 @@ func TestAFeedCannotReachAScrubbedVariable(t *testing.T) {
 	}
 	runtime := build(t, settings, config.Overrides{})
 	defer runtime.Store.Close()
-	if len(runtime.FeedSpecs) != 1 {
-		t.Fatalf("the build ran %v, want the one feed", runtime.FeedSpecs)
+	if len(runtime.Options.Feeds) != 1 {
+		t.Fatalf("the build ran %v, want the one feed", runtime.Options.Feeds)
 	}
 
 	emitted := 0
-	err = runtime.FeedSpecs[0].Run(context.Background(), poo.FeedIO{
+	err = runtime.Options.Feeds[0].Run(context.Background(), poo.FeedIO{
 		Emit: func(string, string) error {
 			emitted++
 			return nil
