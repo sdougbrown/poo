@@ -56,6 +56,8 @@ type Capabilities struct {
 	Persistence []string `json:"persistence"`
 	// Jobs says the binary can run a tool call in the background.
 	Jobs bool `json:"jobs"`
+	// Feeds says the binary runs the feeds its settings name.
+	Feeds bool `json:"feeds"`
 }
 
 // ToolInfo describes one tool the session offers.
