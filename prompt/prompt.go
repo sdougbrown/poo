@@ -33,6 +33,11 @@ type Env struct {
 	// Tools are the names of the tools linked into the session, in
 	// offer order.
 	Tools []string
+	// Feeds are the feeds the session runs, in declaration order.
+	//
+	// A section that names them tells the model what may arrive beside
+	// the user's turn.
+	Feeds []Feed
 	// Variant is the name of the prompt variant the prompt renders in.
 	//
 	// A section that offers an alternative for that name renders the
@@ -46,6 +51,14 @@ type Env struct {
 // The empty name means the same thing: a section's default text is
 // what the prompt renders when no other variant is named.
 const DefaultVariant = "default"
+
+// Feed is a feed the session runs, as a prompt section names it.
+type Feed struct {
+	// Name is the feed's name.
+	Name string
+	// Description is what the feed is for.
+	Description string
+}
 
 // Sections is the surface a named section list is edited through.
 //

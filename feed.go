@@ -43,6 +43,9 @@ type FeedSpec struct {
 	// Name is the feed's name. It is part of the feed's origin, so it
 	// has the shape of an origin's name: ^[a-z0-9][a-z0-9_-]*$.
 	Name string
+	// Description is what the feed is for. The prompt names it, so the
+	// model knows what may arrive beside the user's turn.
+	Description string
 	// Run runs one attempt.
 	Run FeedRunner
 	// Restart reports that the session starts the next attempt after an
