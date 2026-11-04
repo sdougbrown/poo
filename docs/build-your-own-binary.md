@@ -270,9 +270,11 @@ held ones included.
 
 **The model reads a feed's input as outside input.** The message is
 `[feed <name> · from "<from>": <text>]`, or `[feed <name>: <text>]` without
-a sender. It is not the user's turn, and it is untrusted like a tool
-result. The records are `feed.started` and `feed.ended`;
-[docs/session-log-v0.md](session-log-v0.md) lists them.
+a sender. The sender is quoted, and in the text each `]` becomes `\]` and
+each `\` becomes `\\`, so neither can close the envelope. It is not the
+user's turn, and it is untrusted like a tool result. The records are
+`feed.started` and `feed.ended`; [docs/session-log-v0.md](session-log-v0.md)
+lists them.
 
 **Jobs.** A running feed is listed by `jobs` and by `session/get` as
 `feed:<name>` with the tool `feed`. `cancel_job feed:<name>` stops it until

@@ -926,14 +926,21 @@ func (s *Session) queueFeedInput(feed, from, text string, onIdle OnIdle, admit f
 // feedInputText renders the model-facing text of a feed's input.
 //
 // The text is rendered once, when the input is accepted, and the record
-// carries it: a restore delivers the same bytes. The sender is quoted,
-// so a sender cannot close the envelope and write a second one.
+// carries it: a restore delivers the same bytes. The sender is quoted
+// and the text is escaped, so neither can close the envelope and write
+// a second one.
 func feedInputText(feed, from, text string) string {
+	text = envelopeEscaper.Replace(text)
 	if from == "" {
 		return fmt.Sprintf("[feed %s: %s]", feed, text)
 	}
 	return fmt.Sprintf("[feed %s · from %s: %s]", feed, strconv.Quote(from), text)
 }
+
+// envelopeEscaper escapes the text inside a bracketed envelope. A `]`
+// closes the envelope, so it becomes `\]`; a `\` becomes `\\`, so an
+// escaped `]` stays unambiguous. Other text is left as it is.
+var envelopeEscaper = strings.NewReplacer(`\`, `\\`, `]`, `\]`)
 
 // queueJobResult puts a finished result on the session's job queue and
 // acts on it.
