@@ -148,6 +148,41 @@ func TestALineThatIsNotAMessageFailsTheAttempt(t *testing.T) {
 	}
 }
 
+// TestABlankLineIsSkippedAndATextlessLineFailsTheAttempt covers the two
+// line shapes that are not messages: a blank line separates a feed's
+// messages and is skipped, while an object with no text is the attempt's
+// failure. The fixture prints a message after the blank line and another
+// after the text-less one, so the test sees both what is delivered and
+// what the failure discards.
+func TestABlankLineIsSkippedAndATextlessLineFailsTheAttempt(t *testing.T) {
+	for _, c := range executorCases(t) {
+		t.Run(c.name, func(t *testing.T) {
+			got, cancel, done := start(t, c, feed.Spec{Name: "blanks", Command: []string{script(t, "blanks")}}, silent())
+			defer cancel()
+			err := result(t, done)
+			if err == nil {
+				t.Fatal("the attempt accepted a line with no text")
+			}
+			if !strings.Contains(err.Error(), "no text") {
+				t.Errorf("the attempt failed with %q, want it to name the missing text", err)
+			}
+			inputs := got.all()
+			want := []input{
+				{text: "the message before the blank"},
+				{text: "the message after the blank"},
+			}
+			if len(inputs) != len(want) {
+				t.Fatalf("the attempt emitted %+v, want %+v", inputs, want)
+			}
+			for i := range want {
+				if inputs[i] != want[i] {
+					t.Errorf("the input %d is %+v, want %+v", i, inputs[i], want[i])
+				}
+			}
+		})
+	}
+}
+
 // TestALinePastTheLimitFailsTheAttempt covers the buffer: a line longer
 // than a line may be is a failure, not something the session holds in
 // memory.
