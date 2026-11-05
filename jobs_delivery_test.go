@@ -82,7 +82,12 @@ func TestAJobResultRendersAsOneElement(t *testing.T) {
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	// Release the job only once the run waits for it, so its result is
+	// delivered in this run rather than after the run settles.
 	<-tool.Started()
+	waitFor(t, "the run to wait", func() bool {
+		return s.State() == poo.StateWaiting
+	})
 	tool.Release()
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
