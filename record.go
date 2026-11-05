@@ -188,6 +188,8 @@ type MessageRecord struct {
 	// MessageID is the message's session-monotonic id, e.g. "m7". It is
 	// set on the messages the model produced.
 	MessageID string `json:"message_id,omitempty"`
+	// InputID identifies the input delivered by this message, when present.
+	InputID string `json:"input_id,omitempty"`
 	// Partial reports that the message was cut short.
 	Partial bool `json:"partial,omitempty"`
 	// Cause says why the message was cut short: "interrupt" or

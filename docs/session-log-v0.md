@@ -188,6 +188,7 @@ list the model sees: nothing is trimmed, rewritten or summarised.
 | `role` | string | The message's role: `"system"`, `"user"`, `"assistant"` or `"tool"`. |
 | `content` | array of objects | The message's content blocks. |
 | `message_id` | string | The message's session-monotonic id, e.g. `"m7"`. Absent when the message has none. |
+| `input_id` | string | The input delivered by this message. Absent on other messages and older logs. |
 | `partial` | boolean | `true` when the message was cut short. Absent when it was not. |
 | `cause` | string | Why the message was cut short: `"interrupt"` or `"provider_error"`. Absent unless the message is partial. |
 | `delivery_note` | object | How much of the previous reply the user had seen. Absent when the message carries none. |
@@ -700,7 +701,7 @@ recognise: a later stage adds records and fields, and a consumer that
 fails on an unknown field breaks on a newer log.
 
 A log written by an earlier core is still readable. The fields added
-after the first version are all optional: `message_id`,
+after the first version are all optional: `message_id`, `input_id`,
 `delivery_note` and `trigger` are absent from an older log, and a
 consumer that needs them must treat an absent field as "the log does not
 say".
