@@ -283,8 +283,13 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 		}
 	}
 	for _, input := range pend.Delivered {
+		// A live session stamps an origin only on a feed's delivery.
+		meta := poo.NewRecordMeta("input.delivered")
+		if poo.IsFeedOrigin(input.Origin) {
+			meta = poo.NewRecordMetaFrom("input.delivered", input.Origin)
+		}
 		rec := &poo.InputDeliveredRecord{
-			RecordMeta:  poo.NewRecordMetaFrom("input.delivered", input.Origin),
+			RecordMeta:  meta,
 			SessionID:   pend.SessionID,
 			RunID:       input.RunID,
 			InputID:     input.InputID,
