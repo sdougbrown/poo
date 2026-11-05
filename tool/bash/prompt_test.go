@@ -17,7 +17,7 @@ func TestThePromptSectionIsTheGuidance(t *testing.T) {
 		"fresh shell",
 		"Background processes are killed when the command returns",
 		`"background": true`,
-		`"timeout" in milliseconds, up to 10 minutes`,
+		`"timeout" in milliseconds, up to 10 minutes. A background call runs under the job timeout`,
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("the section does not say %q:\n%s", want, section)

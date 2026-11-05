@@ -141,7 +141,7 @@ func (t *Tool) Spec() poo.ToolSpec {
   "type": "object",
   "properties": {
     "command": {"type": "string", "description": "The command to run with /bin/bash -c."},
-    "timeout": {"type": "integer", "description": "Optional timeout in milliseconds. At most 600000 (10 minutes)."}
+    "timeout": {"type": "integer", "description": "Optional timeout in milliseconds for a foreground call. At most 600000 (10 minutes). A background call runs under the job timeout."}
   },
   "required": ["command"]
 }`),
@@ -157,7 +157,7 @@ func (t *Tool) Spec() poo.ToolSpec {
 type args struct {
 	Command string `json:"command"`
 	// Timeout is the requested timeout in milliseconds. It is a float so
-	// that any JSON number decodes, whatever its form or size.
+	// that any JSON number in float64 range decodes, in any form.
 	Timeout *float64 `json:"timeout"`
 }
 
