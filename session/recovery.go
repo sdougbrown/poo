@@ -352,6 +352,11 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			if r.RunID != "" {
 				state.run(r.RunID)
 			}
+			// A message that names its input is that input's delivery,
+			// even when the delivered record after it was never written.
+			if r.InputID != "" {
+				state.fate[r.InputID] = true
+			}
 			switch r.Role {
 			case poo.RoleAssistant:
 				for _, block := range r.Content {
