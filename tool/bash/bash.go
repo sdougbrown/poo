@@ -24,6 +24,8 @@ import (
 const (
 	// DefaultTimeout is the per-call timeout when none is configured.
 	DefaultTimeout = 120 * time.Second
+	// MaxCallTimeout is the ceiling for a caller-supplied timeout.
+	MaxCallTimeout = 10 * time.Minute
 	// CaptureCap is the size of the buffer the output is captured into.
 	// Beyond it, output is read and discarded.
 	CaptureCap = 1 << 20
@@ -138,7 +140,8 @@ func (t *Tool) Spec() poo.ToolSpec {
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
-    "command": {"type": "string", "description": "The command to run with /bin/bash -c."}
+    "command": {"type": "string", "description": "The command to run with /bin/bash -c."},
+    "timeout": {"type": "number", "description": "Optional timeout in milliseconds for a foreground call. At most 600000 (10 minutes), and never past the configured bash timeout when one is set. A background call runs under the job timeout."}
   },
   "required": ["command"]
 }`),
@@ -153,11 +156,17 @@ func (t *Tool) Spec() poo.ToolSpec {
 // args are the tool's arguments.
 type args struct {
 	Command string `json:"command"`
+	// Timeout is the requested timeout in milliseconds. It is a float so
+	// that any JSON number in float64 range decodes, in any form.
+	Timeout *float64 `json:"timeout"`
 }
 
 // prepared is a validated bash call.
 type prepared struct {
 	command string
+	// timeout is the bound the call asked for, already clamped to
+	// MaxCallTimeout. Zero means the call asked for none.
+	timeout time.Duration
 }
 
 // Summary describes the call for a human reader.
@@ -185,7 +194,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	if strings.TrimSpace(a.Command) == "" {
 		return nil, poo.InvalidArgsf("bash: command must not be empty")
 	}
-	return &prepared{command: a.Command}, nil
+	return &prepared{command: a.Command, timeout: requestedTimeout(a.Timeout)}, nil
 }
 
 // decodeStrict decodes one JSON value and nothing else.
@@ -209,6 +218,46 @@ func decodeStrict(raw json.RawMessage, into any) error {
 	return nil
 }
 
+// requestedTimeout turns a call's `timeout`, in milliseconds, into the
+// bound it asks for. A value past MaxCallTimeout is clamped rather than
+// refused, so a call never fails over its size. Zero, below zero, or no
+// value means the call asked for none.
+func requestedTimeout(ms *float64) time.Duration {
+	if ms == nil || *ms <= 0 {
+		return 0
+	}
+	if *ms >= float64(MaxCallTimeout.Milliseconds()) {
+		return MaxCallTimeout
+	}
+	return time.Duration(*ms * float64(time.Millisecond))
+}
+
+// resolveTimeout chooses the bound a call runs under.
+//
+// The configured timeout, from the settings or the tool, is the operator's
+// bound: it is the default, and a call's own timeout may shorten it but
+// never pass it. With nothing configured, a call may ask for up to
+// MaxCallTimeout, and DefaultTimeout applies when it asks for none.
+func resolveTimeout(requested time.Duration, settings int, tool time.Duration) time.Duration {
+	configured := time.Duration(0)
+	switch {
+	case settings > 0:
+		configured = time.Duration(settings) * time.Second
+	case tool > 0:
+		configured = tool
+	}
+	if configured > 0 {
+		if requested > 0 && requested < configured {
+			return requested
+		}
+		return configured
+	}
+	if requested > 0 {
+		return requested
+	}
+	return DefaultTimeout
+}
+
 // Call runs the command.
 func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
 	p, ok := in.(*prepared)
@@ -216,13 +265,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		return poo.ToolResult{}, errors.New("bash: prepared value is not a bash call")
 	}
 
-	timeout := t.Timeout
-	if timeout <= 0 {
-		timeout = DefaultTimeout
-	}
-	if s := env.Settings.BashTimeoutS; s > 0 {
-		timeout = time.Duration(s) * time.Second
-	}
+	timeout := resolveTimeout(p.timeout, env.Settings.BashTimeoutS, t.Timeout)
 
 	cap := t.ObservationCap
 	if cap <= 0 {
