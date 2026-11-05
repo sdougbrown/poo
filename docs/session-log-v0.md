@@ -30,8 +30,10 @@ carries it, for every tool call without one, a denied
 with the reason `interrupted` for every run that never settled, a
 `job.ended` with the outcome `interrupted` for every job that never
 ended, a `feed.ended` with the outcome `interrupted` for every feed
-attempt that never ended, and an `input.dropped` with the reason
-`interrupted` for every input that never reached the model. The recovery
+attempt that never ended, an `input.delivered` for every input whose
+`message` names it in `input_id` but has no `input.delivered` after it, and
+an `input.dropped` with the reason `interrupted` for every input that
+never reached the model. The recovery
 appends only what is missing, so loading a session twice writes nothing
 twice.
 
@@ -70,7 +72,7 @@ A record that someone produced also carries an `origin`:
 | `usage` | Once per provider request. |
 | `provider.attempt` | Once per attempt of a request that failed. |
 | `input.queued` | Once per input the session accepts. |
-| `input.delivered` | Once per input that reaches the model. |
+| `input.delivered` | Once per input that reaches the model. It follows the `message` that delivers the input, and that message names the input in `input_id`. |
 | `input.dropped` | Once per input that never reaches the model. |
 | `input.held` | Once per round of job results that were held instead of delivered. |
 | `job.started` | Once per background job, when it is accepted. |
@@ -188,6 +190,7 @@ list the model sees: nothing is trimmed, rewritten or summarised.
 | `role` | string | The message's role: `"system"`, `"user"`, `"assistant"` or `"tool"`. |
 | `content` | array of objects | The message's content blocks. |
 | `message_id` | string | The message's session-monotonic id, e.g. `"m7"`. Absent when the message has none. |
+| `input_id` | string | The input delivered by this message. Absent on other messages and older logs. |
 | `partial` | boolean | `true` when the message was cut short. Absent when it was not. |
 | `cause` | string | Why the message was cut short: `"interrupt"` or `"provider_error"`. Absent unless the message is partial. |
 | `delivery_note` | object | How much of the previous reply the user had seen. Absent when the message carries none. |
@@ -700,7 +703,7 @@ recognise: a later stage adds records and fields, and a consumer that
 fails on an unknown field breaks on a newer log.
 
 A log written by an earlier core is still readable. The fields added
-after the first version are all optional: `message_id`,
+after the first version are all optional: `message_id`, `input_id`,
 `delivery_note` and `trigger` are absent from an older log, and a
 consumer that needs them must treat an absent field as "the log does not
 say".

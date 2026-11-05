@@ -323,6 +323,10 @@ func replayJobResults(log *Log) []poo.JobResult {
 			})
 		case "input.delivered":
 			records = append(records, &poo.InputDeliveredRecord{InputID: r.InputID})
+		case "message":
+			if r.InputID != "" {
+				records = append(records, &poo.MessageRecord{InputID: r.InputID})
+			}
 		case "job.ended":
 			records = append(records, &poo.JobEndedRecord{
 				JobID:   r.JobID,

@@ -422,6 +422,11 @@ func pendingJobResults(records []Record) []jobResult {
 	fated := map[string]bool{}
 	for _, rec := range records {
 		switch r := rec.(type) {
+		case *MessageRecord:
+			if r.InputID != "" {
+				delivered[r.InputID] = true
+				fated[r.InputID] = true
+			}
 		case *InputDeliveredRecord:
 			delivered[r.InputID] = true
 			fated[r.InputID] = true
