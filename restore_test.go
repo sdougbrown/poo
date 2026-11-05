@@ -356,15 +356,29 @@ func TestTheRestoreHoldsTheSteeringAndTheCompactions(t *testing.T) {
 		{text: "done"},
 	})
 	sink := &recordingSink{}
-	opts := testOptions(t, tr, &echoTool{}, sink)
+	tool := &echoTool{}
+	hold := newNoteHold(tool)
+	// The held call still answers with the echo tool's text, so the check
+	// below that compaction replaced the first turn has something to find.
+	held := tool.call
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		result, err := held(ctx)
+		result.Text = "echoed"
+		return result, err
+	}
+	opts := testOptions(t, tr, tool, sink)
 	opts.Compactor = compactor
 	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	// The tool call holds the run open, so the steer reaches a running
+	// run rather than one that already settled.
+	hold.wait(t)
 	if _, err := s.Send("also do this", poo.Steer); err != nil {
 		t.Fatalf("sending the steer: %v", err)
 	}
+	hold.finish()
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
