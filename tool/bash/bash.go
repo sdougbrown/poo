@@ -141,7 +141,7 @@ func (t *Tool) Spec() poo.ToolSpec {
   "type": "object",
   "properties": {
     "command": {"type": "string", "description": "The command to run with /bin/bash -c."},
-    "timeout": {"type": "integer", "description": "Optional timeout in milliseconds for a foreground call. At most 600000 (10 minutes). A background call runs under the job timeout."}
+    "timeout": {"type": "number", "description": "Optional timeout in milliseconds for a foreground call. At most 600000 (10 minutes), and never past the configured bash timeout when one is set. A background call runs under the job timeout."}
   },
   "required": ["command"]
 }`),
@@ -164,8 +164,9 @@ type args struct {
 // prepared is a validated bash call.
 type prepared struct {
 	command string
-	// timeout is the requested timeout in milliseconds.
-	timeout *float64
+	// timeout is the bound the call asked for, already clamped to
+	// MaxCallTimeout. Zero means the call asked for none.
+	timeout time.Duration
 }
 
 // Summary describes the call for a human reader.
@@ -193,7 +194,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	if strings.TrimSpace(a.Command) == "" {
 		return nil, poo.InvalidArgsf("bash: command must not be empty")
 	}
-	return &prepared{command: a.Command, timeout: a.Timeout}, nil
+	return &prepared{command: a.Command, timeout: requestedTimeout(a.Timeout)}, nil
 }
 
 // decodeStrict decodes one JSON value and nothing else.
@@ -217,19 +218,42 @@ func decodeStrict(raw json.RawMessage, into any) error {
 	return nil
 }
 
-// resolveTimeout chooses the caller's bound or the configured fallback.
-func resolveTimeout(call *float64, settings int, tool time.Duration) time.Duration {
-	if call != nil && *call > 0 {
-		if *call >= float64(MaxCallTimeout.Milliseconds()) {
-			return MaxCallTimeout
+// requestedTimeout turns a call's `timeout`, in milliseconds, into the
+// bound it asks for. A value past MaxCallTimeout is clamped rather than
+// refused, so a call never fails over its size. Zero, below zero, or no
+// value means the call asked for none.
+func requestedTimeout(ms *float64) time.Duration {
+	if ms == nil || *ms <= 0 {
+		return 0
+	}
+	if *ms >= float64(MaxCallTimeout.Milliseconds()) {
+		return MaxCallTimeout
+	}
+	return time.Duration(*ms * float64(time.Millisecond))
+}
+
+// resolveTimeout chooses the bound a call runs under.
+//
+// The configured timeout, from the settings or the tool, is the operator's
+// bound: it is the default, and a call's own timeout may shorten it but
+// never pass it. With nothing configured, a call may ask for up to
+// MaxCallTimeout, and DefaultTimeout applies when it asks for none.
+func resolveTimeout(requested time.Duration, settings int, tool time.Duration) time.Duration {
+	configured := time.Duration(0)
+	switch {
+	case settings > 0:
+		configured = time.Duration(settings) * time.Second
+	case tool > 0:
+		configured = tool
+	}
+	if configured > 0 {
+		if requested > 0 && requested < configured {
+			return requested
 		}
-		return time.Duration(*call * float64(time.Millisecond))
+		return configured
 	}
-	if settings > 0 {
-		return time.Duration(settings) * time.Second
-	}
-	if tool > 0 {
-		return tool
+	if requested > 0 {
+		return requested
 	}
 	return DefaultTimeout
 }

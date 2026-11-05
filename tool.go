@@ -98,7 +98,8 @@ type ToolEnv struct {
 
 // ToolSettings holds the tunable knobs a tool reads.
 type ToolSettings struct {
-	// BashTimeoutS is the per-call timeout for the bash tool.
+	// BashTimeoutS is the bash tool's timeout for a call, and the ceiling
+	// on a call's own `timeout`.
 	BashTimeoutS int
 	// ObservationCapChars is the cap on the observation shown to the model.
 	ObservationCapChars int
