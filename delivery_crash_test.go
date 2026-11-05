@@ -88,7 +88,7 @@ func TestCompactedDeliveryDoesNotRequeue(t *testing.T) {
 }
 
 func TestLegacyMessageWithoutInputIDStillRequeues(t *testing.T) {
-	records := []poo.Record{header("s1"), &poo.JobEndedRecord{RecordMeta: poo.NewRecordMeta("job.ended"), InputID: "s1-ji1", Text: "old"}, &poo.MessageRecord{RecordMeta: poo.NewRecordMeta("message"), Role: poo.RoleUser, Content: poo.NewTextMessage(poo.RoleUser, "old").Content}}
+	records := []poo.Record{header("s1"), &poo.JobEndedRecord{RecordMeta: poo.NewRecordMeta("job.ended"), InputID: "s1-ji1", Text: "legacy-delivery-token"}, &poo.MessageRecord{RecordMeta: poo.NewRecordMeta("message"), Role: poo.RoleUser, Content: poo.NewTextMessage(poo.RoleUser, "legacy-delivery-token").Content}}
 	tr := scripted([]fakeResponse{{text: "ok"}})
 	opts := restoreOptions(t, tr, &recordingSink{})
 	opts.Jobs = poo.JobOptions{OnIdle: poo.OnIdleHold}
@@ -103,7 +103,7 @@ func TestLegacyMessageWithoutInputIDStillRequeues(t *testing.T) {
 	runSession(t, s, "next")
 	count := 0
 	for _, m := range tr.Requests()[0].Messages {
-		count += strings.Count(m.Text(), "old")
+		count += strings.Count(m.Text(), "legacy-delivery-token")
 	}
 	if count != 2 {
 		t.Fatalf("legacy input appeared %d times, want 2", count)

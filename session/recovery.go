@@ -43,11 +43,14 @@ type Pending struct {
 	// Inputs are the inputs that were queued and never delivered or
 	// dropped, in the order they were queued.
 	Inputs []PendingInput
+	// Delivered are the inputs whose message reached the log without the
+	// delivered record that follows it, in the order of their messages.
+	Delivered []PendingInput
 }
 
 // IsEmpty reports whether there is nothing to resolve.
 func (p *Pending) IsEmpty() bool {
-	return p == nil || (len(p.Runs) == 0 && len(p.Jobs) == 0 && len(p.Feeds) == 0 && len(p.Inputs) == 0)
+	return p == nil || (len(p.Runs) == 0 && len(p.Jobs) == 0 && len(p.Feeds) == 0 && len(p.Inputs) == 0 && len(p.Delivered) == 0)
 }
 
 // PendingRun is a run that started and never settled.
@@ -132,6 +135,9 @@ type PendingInput struct {
 	RunID string
 	// Mode is how the input was accepted.
 	Mode poo.InputMode
+	// Origin is the origin of the message that delivered the input. It is
+	// set only on a delivery the recovery completes.
+	Origin poo.Origin
 }
 
 // RecoveryPolicy resolves a session's pending operations.
@@ -276,6 +282,19 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 			return err
 		}
 	}
+	for _, input := range pend.Delivered {
+		rec := &poo.InputDeliveredRecord{
+			RecordMeta:  poo.NewRecordMetaFrom("input.delivered", input.Origin),
+			SessionID:   pend.SessionID,
+			RunID:       input.RunID,
+			InputID:     input.InputID,
+			Mode:        input.Mode,
+			DeliveredAt: at,
+		}
+		if err := sink.Append(ctx, rec); err != nil {
+			return err
+		}
+	}
 	for _, input := range pend.Inputs {
 		rec := &poo.InputDroppedRecord{
 			RecordMeta: poo.NewRecordMeta("input.dropped"),
@@ -318,6 +337,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		answered:   map[string]bool{},
 		inputs:     map[string]poo.InputQueuedRecord{},
 		fate:       map[string]bool{},
+		messaged:   map[string]bool{},
 		callIDs:    poo.CallIDs(recs),
 		feedStarts: map[string][]int{},
 	}
@@ -354,8 +374,9 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			}
 			// A message that names its input is that input's delivery,
 			// even when the delivered record after it was never written.
-			if r.InputID != "" {
-				state.fate[r.InputID] = true
+			if r.InputID != "" && !state.messaged[r.InputID] {
+				state.messaged[r.InputID] = true
+				state.delivering = append(state.delivering, *r)
 			}
 			switch r.Role {
 			case poo.RoleAssistant:
@@ -501,7 +522,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 		})
 	}
 	for _, inputID := range state.inputOrder {
-		if state.fate[inputID] {
+		if state.fate[inputID] || state.messaged[inputID] {
 			continue
 		}
 		input := state.inputs[inputID]
@@ -515,6 +536,22 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			InputID: input.InputID,
 			RunID:   input.RunID,
 			Mode:    input.Mode,
+		})
+	}
+	for _, msg := range state.delivering {
+		if state.fate[msg.InputID] {
+			continue
+		}
+		// A job result is the only input with no queued record.
+		mode := poo.InputModeJob
+		if queued, ok := state.inputs[msg.InputID]; ok {
+			mode = queued.Mode
+		}
+		pend.Delivered = append(pend.Delivered, PendingInput{
+			InputID: msg.InputID,
+			RunID:   msg.RunID,
+			Mode:    mode,
+			Origin:  msg.Origin,
 		})
 	}
 	return pend
@@ -561,8 +598,13 @@ type pendingState struct {
 	inputs map[string]poo.InputQueuedRecord
 	// inputOrder is the order the inputs were queued in.
 	inputOrder []string
-	// fate are the inputs that were delivered or dropped.
+	// fate are the inputs that have a delivered or dropped record.
 	fate map[string]bool
+	// messaged are the inputs a message names as delivered.
+	messaged map[string]bool
+	// delivering are the messages that name an input, in record order,
+	// one per input.
+	delivering []poo.MessageRecord
 	// callIDs are the provider's ids of the calls, by handle.
 	callIDs map[string]string
 }

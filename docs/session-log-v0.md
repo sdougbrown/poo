@@ -30,8 +30,10 @@ carries it, for every tool call without one, a denied
 with the reason `interrupted` for every run that never settled, a
 `job.ended` with the outcome `interrupted` for every job that never
 ended, a `feed.ended` with the outcome `interrupted` for every feed
-attempt that never ended, and an `input.dropped` with the reason
-`interrupted` for every input that never reached the model. The recovery
+attempt that never ended, an `input.delivered` for every input whose
+`message` names it in `input_id` but has no `input.delivered` after it, and
+an `input.dropped` with the reason `interrupted` for every input that
+never reached the model. The recovery
 appends only what is missing, so loading a session twice writes nothing
 twice.
 
@@ -70,7 +72,7 @@ A record that someone produced also carries an `origin`:
 | `usage` | Once per provider request. |
 | `provider.attempt` | Once per attempt of a request that failed. |
 | `input.queued` | Once per input the session accepts. |
-| `input.delivered` | Once per input that reaches the model. |
+| `input.delivered` | Once per input that reaches the model. It follows the `message` that delivers the input, and that message names the input in `input_id`. |
 | `input.dropped` | Once per input that never reaches the model. |
 | `input.held` | Once per round of job results that were held instead of delivered. |
 | `job.started` | Once per background job, when it is accepted. |
