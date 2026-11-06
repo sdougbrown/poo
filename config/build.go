@@ -89,12 +89,12 @@ type Overrides struct {
 	CredentialEnvNames []string
 }
 
-// EnvOverrides adds the manifest paths the environment names after the
-// caller's paths.
+// EnvOverrides adds what the environment names after the caller's own values.
 //
-// POO_FEEDS_PATH and POO_CLI_REGISTRY_PATH are path lists. The returned
-// overrides hold fresh path slices, so appending to them never writes
-// into the caller's.
+// POO_FEEDS_PATH and POO_CLI_REGISTRY_PATH are path lists, and
+// POO_CREDENTIAL_ENV is a list of environment names a launcher declares for
+// poo's own subsystems. The returned overrides hold fresh slices, so appending
+// to them never writes into the caller's.
 func EnvOverrides(o Overrides) Overrides {
 	paths := func(existing []string, name string) []string {
 		result := append([]string{}, existing...)
@@ -218,7 +218,10 @@ type Runtime struct {
 	SessionMode string
 	// Build names the binary that owns the sessions.
 	Build poo.BuildInfo
-	// Env is the environment the tools' commands get.
+	// Env is the base a tool's child environment is built from, not that
+	// environment: each tool scrubs it with the rules it was built with, so a
+	// launcher's credential can stay here for the feed and a cli entry's
+	// bindings while a model-invoked child never sees it.
 	Env []string
 	// CredentialEnvNames are the environment names a launcher declared for
 	// poo's own subsystems. They are absent from the environment a
@@ -845,8 +848,8 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Names:       append([]string(nil), scrub.Names...),
 		Passthrough: append([]string(nil), scrub.Passthrough...),
 	}
-	credentialScrub.Names = append(credentialScrub.Names, opts.Overrides.CredentialEnvNames...)
 	r.CredentialEnvNames = append([]string(nil), opts.Overrides.CredentialEnvNames...)
+	credentialScrub.Names = append(credentialScrub.Names, r.CredentialEnvNames...)
 
 	executorName := DefaultExecutor
 	if settings.Tools.Bash.Executor != nil {
