@@ -1121,6 +1121,14 @@ func (s *Session) writeDeliveryFate(run *runState, rec Record) error {
 	return nil
 }
 
+// runSettledLocked reports that the run has been sealed or committed, so
+// a delivery that finishes now must not mutate its view.
+//
+// The caller holds the session's lock.
+func runSettledLocked(run *runState) bool {
+	return run.sealed || run.committed
+}
+
 // finishDelivery appends a delivered message and releases the input's
 // in-flight claim.
 //
@@ -1135,7 +1143,7 @@ func (s *Session) finishDelivery(run *runState, input queuedInput, msg Message) 
 		if run.delivering[i].id != input.id {
 			continue
 		}
-		if run.sealed || run.committed {
+		if runSettledLocked(run) {
 			// The seal left the claim to the delivery because the
 			// write outlived its wait. The message is in the log; a
 			// settled run is not mutated, and a load reads the message.

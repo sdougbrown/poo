@@ -16,14 +16,23 @@ import (
 // context, so a flush context that the settle write starved fails.
 type slowSettleFlushSink struct {
 	*recordingSink
-	mu      sync.Mutex
-	flushed bool
+	settleMargin time.Duration
+	flushDelay   time.Duration
+	flushOnce    sync.Once
+	mu           sync.Mutex
+	flushed      bool
 }
 
-// Append delays the settle record.
+// Append holds the settle record until the last part of its own write
+// budget. The cleanup context that the old code shared with the flush is
+// left with only settleMargin, while the fresh flush budget is full.
 func (s *slowSettleFlushSink) Append(ctx context.Context, rec poo.Record) error {
 	if rec.Meta().Record == "run.settled" {
-		time.Sleep(450 * time.Millisecond)
+		if deadline, ok := ctx.Deadline(); ok {
+			if wait := time.Until(deadline) - s.settleMargin; wait > 0 {
+				time.Sleep(wait)
+			}
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -36,7 +45,7 @@ func (s *slowSettleFlushSink) Flush(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	time.Sleep(80 * time.Millisecond)
+	s.flushOnce.Do(func() { time.Sleep(s.flushDelay) })
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -58,10 +67,14 @@ func (s *slowSettleFlushSink) flushSucceeded() bool {
 // settle must get a fresh budget instead of the leftovers of a shared
 // cleanup deadline.
 func TestASlowSettleDoesNotStarveTheFlush(t *testing.T) {
-	sink := &slowSettleFlushSink{recordingSink: &recordingSink{}}
+	sink := &slowSettleFlushSink{
+		recordingSink: &recordingSink{},
+		settleMargin:  200 * time.Millisecond,
+		flushDelay:    300 * time.Millisecond,
+	}
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink))
-	poo.SetRecordWriteBudget(s, 500*time.Millisecond)
+	poo.SetRecordWriteBudget(s, 600*time.Millisecond)
 
 	res := runSession(t, s, "start")
 	if res.Reason != poo.ReasonEndTurn {

@@ -275,25 +275,32 @@ func TestABufferingSinkIsFlushedAtTheStallAndAtClose(t *testing.T) {
 	assertRestoredOnce(t, sink.Committed(), "the buffered token")
 }
 
-// slowDeliverySink makes the message and fate writes take a deliberate
-// part of their separate record budgets. It checks its context after the
-// delay, as a sink that honours the write's budget does.
-type slowDeliverySink struct {
+// gatedDeliverySink holds the delivery message and then the fate write
+// until the test releases each. It checks its context after the release,
+// as a sink that honours the write's budget does.
+type gatedDeliverySink struct {
 	*recordingSink
-	messageDelay   time.Duration
-	fateDelay      time.Duration
 	messageEntered chan struct{}
+	messageRelease chan struct{}
+	fateEntered    chan struct{}
+	fateRelease    chan struct{}
 	messageOnce    sync.Once
+	fateOnce       sync.Once
 }
 
-// Append delays the delivery's message and fate writes.
-func (s *slowDeliverySink) Append(ctx context.Context, rec poo.Record) error {
+// Append gates the delivery message, then the fate write.
+func (s *gatedDeliverySink) Append(ctx context.Context, rec poo.Record) error {
 	if m, ok := rec.(*poo.MessageRecord); ok && m.InputID != "" {
-		s.messageOnce.Do(func() { close(s.messageEntered) })
-		time.Sleep(s.messageDelay)
+		s.messageOnce.Do(func() {
+			close(s.messageEntered)
+			<-s.messageRelease
+		})
 	}
 	if rec.Meta().Record == "input.delivered" {
-		time.Sleep(s.fateDelay)
+		s.fateOnce.Do(func() {
+			close(s.fateEntered)
+			<-s.fateRelease
+		})
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -303,22 +310,24 @@ func (s *slowDeliverySink) Append(ctx context.Context, rec poo.Record) error {
 
 // TestASlowDeliveryWithinItsRecordBudgetsIsNotStalled covers the healthy
 // slow delivery: the message and the fate each finish inside their own
-// record budget, but the second one is still in flight when the seal's
-// first record budget expires. The bounded delivery grace lets both
-// finish, so the input is delivered and the store is not broken.
+// record budget, but the fate is still in flight when the seal's first
+// record budget expires. The bounded delivery grace lets both finish, so
+// the input is delivered and the store is not broken.
 func TestASlowDeliveryWithinItsRecordBudgetsIsNotStalled(t *testing.T) {
-	sink := &slowDeliverySink{
+	const budget = 800 * time.Millisecond
+	sink := &gatedDeliverySink{
 		recordingSink:  &recordingSink{},
-		messageDelay:   120 * time.Millisecond,
-		fateDelay:      100 * time.Millisecond,
 		messageEntered: make(chan struct{}),
+		messageRelease: make(chan struct{}),
+		fateEntered:    make(chan struct{}),
+		fateRelease:    make(chan struct{}),
 	}
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
 		{text: "the answer"},
 	})
 	s, _ := waitingJobSession(t, tr, deliveryTestOptions(t, sink))
-	poo.SetRecordWriteBudget(s, 200*time.Millisecond)
+	poo.SetRecordWriteBudget(s, budget)
 
 	sent := make(chan string, 1)
 	go func() {
@@ -339,7 +348,20 @@ func TestASlowDeliveryWithinItsRecordBudgetsIsNotStalled(t *testing.T) {
 		s.Cancel("probe")
 		close(cancelled)
 	}()
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// The message finishes halfway through its own budget. The fate then
+	// starts and is held past the seal's first deadline but well inside
+	// its own budget and the delivery grace.
+	time.Sleep(budget / 2)
+	close(sink.messageRelease)
+	select {
+	case <-sink.fateEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the fate write never reached the sink")
+	}
+	time.Sleep(3 * budget / 4)
+	close(sink.fateRelease)
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer waitCancel()
 	res, err := s.Wait(waitCtx)
 	if err != nil {

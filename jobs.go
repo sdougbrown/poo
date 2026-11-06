@@ -1322,7 +1322,7 @@ func (s *Session) failJobDelivery(run *runState, item jobQueueItem, err error) {
 func (s *Session) finishJobDelivery(run *runState, item jobQueueItem, msg Message) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.sealed || run.committed {
+	if runSettledLocked(run) {
 		s.removeJobDeliveryLocked(run, item)
 		return false
 	}
