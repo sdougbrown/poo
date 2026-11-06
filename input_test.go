@@ -21,10 +21,8 @@ import (
 // TestASteerIsDeliveredAtTheNextTurnEnd covers the steer: the message
 // reaches the model at the turn end, and the turn's work is untouched.
 func TestASteerIsDeliveredAtTheNextTurnEnd(t *testing.T) {
-	// The tool holds the first turn's batch open until Send has accepted
-	// the steer. Only a steer accepted before a turn end is delivered at
-	// that turn end: one accepted after it belongs to the turn after,
-	// which is correct behavior and a different number of turns.
+	// Hold the first turn open until the steer is accepted, so the test
+	// observes delivery at that turn's end.
 	started := make(chan struct{})
 	finished := make(chan struct{})
 	tool := &echoTool{result: "echoed"}
