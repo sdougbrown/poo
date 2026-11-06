@@ -1300,7 +1300,7 @@ func (s *Session) failJobDelivery(run *runState, item jobQueueItem, err error) {
 	// A failure that arrives after the seal requeues a result the
 	// finalization no longer owns: the session has to act on it now,
 	// because the finalization's own pass has already run.
-	sealed := run.sealed || run.committed
+	sealed := runSettledLocked(run)
 	s.mu.Unlock()
 	if !errors.Is(err, errDeliveryAbandoned) {
 		s.noteStoreError(run, err)
