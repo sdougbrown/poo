@@ -374,6 +374,67 @@ func TestASlowDeliveryWithinItsRecordBudgetsIsNotStalled(t *testing.T) {
 	}
 }
 
+// TestACancelledRunListsStoreErrorLosingOnce covers the losing list when
+// a store-error candidate is already present before the commit point and
+// the settle write fails afterwards. The cancelled reason wins, and
+// store_error is listed once, not once per failure.
+func TestACancelledRunListsStoreErrorLosingOnce(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	tool := &echoTool{result: "ignored"}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		close(started)
+		<-release
+		close(done)
+		return poo.ToolResult{Text: "the late tool result"}, nil
+	}
+	sink := &failingSink{failRecord: "tool.result"}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer"},
+	})
+	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	poo.SetRecordWriteBudget(s, 50*time.Millisecond)
+
+	if _, err := s.Prompt(context.Background(), "start the tool"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tool never started")
+	}
+
+	cancelled := make(chan struct{})
+	go func() {
+		s.Cancel("probe")
+		close(cancelled)
+	}()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer waitCancel()
+	res, err := s.Wait(waitCtx)
+	if err != nil {
+		t.Fatalf("the run did not settle: %v", err)
+	}
+	<-cancelled
+	close(release)
+	<-done
+
+	if res.Reason != poo.ReasonCancelled {
+		t.Fatalf("the run settled %q, want cancelled", res.Reason)
+	}
+	storeErrors := 0
+	for _, losing := range res.Detail.Losing {
+		if losing == string(poo.ReasonStoreError) {
+			storeErrors++
+		}
+	}
+	if storeErrors != 1 {
+		t.Errorf("the losing list is %v, want store_error exactly once", res.Detail.Losing)
+	}
+}
+
 // TestASlowToolDoesNotBreakTheStoreForAQueuedInput covers the reachable
 // shape of the shared-deadline concern: a started synchronous call can
 // consume the seal's wait, but a client input sent during it is queued,

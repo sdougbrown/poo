@@ -445,6 +445,9 @@ func TestARefusedDeliveredRecordDoesNotUndoTheDelivery(t *testing.T) {
 	if got := deliveredIDs(sink.recordingSink); len(got) != 0 {
 		t.Errorf("the log holds delivered inputs %v, want none: the store refused the record", got)
 	}
+	if got := deliveryEventIDs(s); len(got) != 1 || got[0] != id {
+		t.Errorf("the session reported %v delivered, want [%s] once", got, id)
+	}
 	msgs := deliveryMessages(sink.recordingSink)
 	if len(msgs) != 1 || msgs[0].InputID != id {
 		t.Fatalf("the log's delivery messages are %+v, want one for %s", msgs, id)

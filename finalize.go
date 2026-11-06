@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 )
@@ -152,7 +153,12 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	}
 
 	// Step 7: the outcome records are written with a context of their
-	// own, because the run's context has ended.
+	// own, because the run's context has ended. s.write gives the settle
+	// its own record budget; the context passed in only supplies a
+	// cancellation, which the write strips. The flush gets a fresh budget
+	// after the settle, so a slow settle cannot starve it. The flush is
+	// attempted even when the store stalled: a buffering sink can still
+	// push the records it accepted before the stall.
 	settle := &RunSettledRecord{RecordMeta: NewRecordMeta("run.settled"),
 		RunID:     run.id,
 		Reason:    reason,
@@ -160,16 +166,12 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 		Turns:     turns,
 		SettledAt: nowRFC3339(),
 	}
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), s.recordBudget())
-	defer cleanupCancel()
-	storeErr := s.write(cleanupCtx, settle)
-	// The flush is attempted even when the store stalled: a sink that
-	// buffers records can still push the records it accepted before the
-	// stall. The wait is bounded, so a serialized sink cannot hold the
-	// finalization up.
-	if err := s.flushBounded(cleanupCtx); err != nil && storeErr == nil {
+	storeErr := s.write(context.Background(), settle)
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), s.recordBudget())
+	if err := s.flushBounded(flushCtx); err != nil && storeErr == nil {
 		storeErr = err
 	}
+	flushCancel()
 	if storeErr != nil {
 		// The store refused the settle record or the flush after it, so
 		// the run's outcome may not exist. The session is broken, and
@@ -180,16 +182,12 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 		s.markBroken()
 		if reason == ReasonCancelled {
 			// A cancelled run keeps its reason, and the store failure is
-			// a losing candidate. A store failure already in the list is
-			// not listed twice.
-			listed := false
-			for _, losing := range detail.Losing {
-				if losing == string(ReasonStoreError) {
-					listed = true
-					break
-				}
-			}
-			if !listed {
+			// a losing candidate. commitLocked dedups candidates by
+			// reason and source; every store-error candidate uses source
+			// "store", so a store_error already in the losing list is
+			// this same loser. Adding the settle failure again would
+			// repeat the reason.
+			if !slices.Contains(detail.Losing, string(ReasonStoreError)) {
 				detail.Losing = append(detail.Losing, string(ReasonStoreError))
 			}
 		} else if reason != ReasonStoreError {
@@ -1075,22 +1073,27 @@ func (s *Session) messagesByIDLocked(id string) (Message, bool) {
 	return msg, ok
 }
 
-// flushBounded flushes the sink and waits at most for ctx. A flush
-// still in flight at the bound is a stalled store; the caller decides
-// whether that is the run's store error or the close's stall.
+// errFlushStalled reports that a flush outlived its bound. A close wraps
+// it with ErrCloseStalled; a run reports it as a store error.
+var errFlushStalled = errors.New("poo: the flush is still in flight")
+
+// flushBounded flushes the sink and waits at most for ctx.
+//
+// The flush runs on its own and is not tracked or cancelled: a sink that
+// ignores ctx can keep the goroutine blocked after the caller's bound.
+// The finalization and Close both call this, so a sink must tolerate a
+// second Flush while the first is still in flight.
 func (s *Session) flushBounded(ctx context.Context) error {
 	if s.opts.Sink == nil {
 		return nil
 	}
-	// The flush runs on its own, because a store that did not finish a
-	// write can hold the flush behind it.
 	flushed := make(chan error, 1)
 	go func() { flushed <- s.opts.Sink.Flush(ctx) }()
 	select {
 	case err := <-flushed:
 		return err
 	case <-ctx.Done():
-		return fmt.Errorf("poo: the flush is still in flight: %w", ErrCloseStalled)
+		return errFlushStalled
 	}
 }
 
@@ -1135,6 +1138,9 @@ func (s *Session) Close() error {
 	if s.opts.Sink != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), s.recordBudget())
 		if err := s.flushBounded(ctx); err != nil {
+			if errors.Is(err, errFlushStalled) {
+				err = fmt.Errorf("poo: closing the session: %w: %w", ErrCloseStalled, err)
+			}
 			errs = append(errs, err)
 		}
 		cancel()

@@ -1094,6 +1094,12 @@ func (s *Session) writeDeliveryBy(ctx context.Context, run *runState, rec Record
 // A close that fenced the writer, or a seal that already took the claim,
 // leaves the record unwritten. That does not change the input's fate:
 // the message names it, and a load writes the missing delivered record.
+//
+// The refusal classification is appendRecord's: a fenced write is an
+// abandoned record (appendRecord returns nil for it), and a sealed write
+// is mapped to the delivery's abandoned sentinel. Neither undoes the
+// delivery; finish still runs once, so the delivered event is emitted
+// once and recovery writes the missing fate.
 func (s *Session) writeDeliveryFate(run *runState, rec Record) error {
 	if s.opts.Sink == nil {
 		return nil
@@ -1106,18 +1112,11 @@ func (s *Session) writeDeliveryFate(run *runState, rec Record) error {
 		return errDeliveryAbandoned
 	}
 	defer release()
-	if err := s.appendToSink(ctx, rec, nil); err != nil {
-		if errors.Is(err, errWriteFenced) {
+	if err := s.appendRecord(ctx, rec, run, nil); err != nil {
+		if errors.Is(err, errCallRecordSealed) {
 			return errDeliveryAbandoned
 		}
-		if errors.Is(context.Cause(ctx), errCallRecordSealed) || s.sealedRun(run) {
-			return errDeliveryAbandoned
-		}
-		// The message already landed, so the input is delivered even
-		// though its fate record is not. The store refused a write, and
-		// the session breaks like it does for every refused record.
-		s.markBroken()
-		return fmt.Errorf("poo: writing %s: %w", rec.Meta().Record, err)
+		return err
 	}
 	return nil
 }
