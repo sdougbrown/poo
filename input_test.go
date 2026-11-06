@@ -23,17 +23,8 @@ import (
 func TestASteerIsDeliveredAtTheNextTurnEnd(t *testing.T) {
 	// Hold the first turn open until the steer is accepted, so the test
 	// observes delivery at that turn's end.
-	started := make(chan struct{})
-	finished := make(chan struct{})
 	tool := &echoTool{result: "echoed"}
-	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
-		close(started)
-		select {
-		case <-finished:
-		case <-ctx.Done():
-		}
-		return poo.ToolResult{Text: "done"}, nil
-	}
+	hold := newNoteHold(tool)
 
 	tr := scripted([]fakeResponse{
 		{
@@ -51,11 +42,11 @@ func TestASteerIsDeliveredAtTheNextTurnEnd(t *testing.T) {
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	<-started
+	hold.wait(t)
 	if _, err := s.Send("also do this", poo.Steer); err != nil {
 		t.Fatalf("sending the steer: %v", err)
 	}
-	close(finished)
+	hold.finish()
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
