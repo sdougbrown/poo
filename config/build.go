@@ -82,6 +82,11 @@ type Overrides struct {
 	FeedsPaths []string
 	// CLIRegistryPaths are additional cli registry manifest paths.
 	CLIRegistryPaths []string
+	// CredentialEnvNames are environment names a launcher provisions for
+	// poo's own subsystems. They stay in the session environment, which the
+	// feed and a cli entry's bindings read, and are removed from the
+	// environment a model-invoked tool subprocess receives.
+	CredentialEnvNames []string
 }
 
 // EnvOverrides adds the manifest paths the environment names after the
@@ -104,6 +109,14 @@ func EnvOverrides(o Overrides) Overrides {
 	}
 	o.FeedsPaths = paths(o.FeedsPaths, "POO_FEEDS_PATH")
 	o.CLIRegistryPaths = paths(o.CLIRegistryPaths, "POO_CLI_REGISTRY_PATH")
+	o.CredentialEnvNames = append([]string{}, o.CredentialEnvNames...)
+	if value, ok := os.LookupEnv("POO_CREDENTIAL_ENV"); ok {
+		for _, name := range filepath.SplitList(value) {
+			if name != "" {
+				o.CredentialEnvNames = append(o.CredentialEnvNames, name)
+			}
+		}
+	}
 	return o
 }
 
@@ -214,6 +227,11 @@ type Runtime struct {
 	Build poo.BuildInfo
 	// Env is the environment the tools' commands get.
 	Env []string
+	// CredentialEnvNames are the environment names a launcher declared for
+	// poo's own subsystems. They are absent from the environment a
+	// model-invoked tool subprocess gets, and present in Env for the feed and
+	// a cli entry's bindings.
+	CredentialEnvNames []string
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths []string
 	// toolNames are the names of the tools the session offers, in
@@ -820,11 +838,20 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Names:       append([]string(nil), settings.Tools.Env.Scrub...),
 		Passthrough: append([]string(nil), settings.Tools.Env.Passthrough...),
 	}
-	scrub.Names = append(scrub.Names, "POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH")
+	scrub.Names = append(scrub.Names, "POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH", "POO_CREDENTIAL_ENV")
 	if r.Catalog != nil {
 		scrub.Names = append(scrub.Names, r.Catalog.CredentialEnvNames()...)
 	}
 	r.Env = exec.ScrubEnv(os.Environ(), scrub)
+	// A launcher's credentials are different: poo's own subsystems need them,
+	// and a model-invoked subprocess must not see them. They stay in Env and
+	// join the list the tools' children are scrubbed with.
+	credentialScrub := exec.Scrub{
+		Names:       append([]string(nil), scrub.Names...),
+		Passthrough: append([]string(nil), scrub.Passthrough...),
+	}
+	credentialScrub.Names = append(credentialScrub.Names, opts.Overrides.CredentialEnvNames...)
+	r.CredentialEnvNames = append([]string(nil), opts.Overrides.CredentialEnvNames...)
 
 	executorName := DefaultExecutor
 	if settings.Tools.Bash.Executor != nil {
@@ -877,7 +904,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		}
 	}
 
-	toolOptions := ToolOptions{Scrub: scrub, ProtectedPaths: protected, Registry: r.Registry, Search: r.findTool()}
+	toolOptions := ToolOptions{Scrub: credentialScrub, ProtectedPaths: protected, Registry: r.Registry, Search: r.findTool()}
 	if r.needsExecutor() {
 		executor, err := opts.Executors.New(executorName, exec.Options{
 			Masker: protected,
