@@ -21,6 +21,22 @@ import (
 // TestASteerIsDeliveredAtTheNextTurnEnd covers the steer: the message
 // reaches the model at the turn end, and the turn's work is untouched.
 func TestASteerIsDeliveredAtTheNextTurnEnd(t *testing.T) {
+	// The tool holds the first turn's batch open until Send has accepted
+	// the steer. Only a steer accepted before a turn end is delivered at
+	// that turn end: one accepted after it belongs to the turn after,
+	// which is correct behavior and a different number of turns.
+	started := make(chan struct{})
+	finished := make(chan struct{})
+	tool := &echoTool{result: "echoed"}
+	tool.call = func(ctx context.Context) (poo.ToolResult, error) {
+		close(started)
+		select {
+		case <-finished:
+		case <-ctx.Done():
+		}
+		return poo.ToolResult{Text: "done"}, nil
+	}
+
 	tr := scripted([]fakeResponse{
 		{
 			calls: []poo.ToolCall{{
@@ -32,15 +48,16 @@ func TestASteerIsDeliveredAtTheNextTurnEnd(t *testing.T) {
 		{text: "the second answer"},
 	})
 	sink := &recordingSink{}
-	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, sink))
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	<-started
 	if _, err := s.Send("also do this", poo.Steer); err != nil {
 		t.Fatalf("sending the steer: %v", err)
 	}
+	close(finished)
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
