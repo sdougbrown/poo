@@ -559,27 +559,31 @@ func TestACallThatExitsBeforeTheDeadlineIsNotATimeout(t *testing.T) {
 	}
 }
 
-// TestPrepareAcceptsAndIgnoresDescription keeps a Claude-style call from
-// costing a retry: models trained on Claude Code's bash tool volunteer a
-// description, and the strict decoder refused it as invalid_args. The
-// description changes nothing — the command still runs and still keys the call.
-func TestPrepareAcceptsAndIgnoresDescription(t *testing.T) {
+// TestADescriptionLeavesThePermissionKeyAlone covers identity and the summary:
+// a rule, a decision model and a human reader see the command and never the
+// description. The sibling timeout test pins the same three surfaces, so a
+// refactor of one cannot quietly start carrying the optional field.
+func TestADescriptionLeavesThePermissionKeyAlone(t *testing.T) {
 	tool := bash.New()
-	for _, raw := range []string{
-		`{"command":"ls","description":"list the directory"}`,
-		`{"command":"ls","description":""}`,
-	} {
-		prepared, err := tool.Prepare(json.RawMessage(raw), poo.PrepareEnv{})
-		if err != nil {
-			t.Fatalf("Prepare rejected %s: %v", raw, err)
-		}
-		keyer, ok := prepared.(poo.CanonicalKeyer)
-		if !ok {
-			t.Fatalf("prepared call has no canonical key")
-		}
-		key := keyer.CanonicalKey()
-		if !strings.Contains(string(key), `"command":"ls"`) || strings.Contains(string(key), "description") {
-			t.Fatalf("canonical key = %s, want the command alone", key)
-		}
+	plain, err := tool.Prepare([]byte(`{"command":"ls"}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	described, err := tool.Prepare([]byte(`{"command":"ls","description":"list the directory"}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("Prepare rejected a description: %v", err)
+	}
+	if a, b := plain.(poo.CanonicalKeyer).CanonicalKey(), described.(poo.CanonicalKeyer).CanonicalKey(); string(a) != string(b) {
+		t.Errorf("the description changed the canonical key: %s vs %s", a, b)
+	}
+	if a, b := plain.(poo.EvidenceArgumenter).EvidenceArguments(), described.(poo.EvidenceArgumenter).EvidenceArguments(); string(a) != string(b) {
+		t.Errorf("the description changed the evidence: %s vs %s", a, b)
+	}
+	if described.Summary() != plain.Summary() {
+		t.Errorf("the description changed the summary: %q", described.Summary())
+	}
+	// An empty description is the same call.
+	if _, err := tool.Prepare([]byte(`{"command":"ls","description":""}`), poo.PrepareEnv{}); err != nil {
+		t.Fatalf("Prepare rejected an empty description: %v", err)
 	}
 }
