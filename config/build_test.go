@@ -2,9 +2,11 @@ package config_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -637,5 +639,78 @@ func TestANilBashFactoryIsNotLinked(t *testing.T) {
 	}
 	if failure.Code != config.CodeUnsupported || failure.Field != "tools.bash.executor" {
 		t.Errorf("the failure is %+v, want unsupported on tools.bash.executor", failure)
+	}
+}
+
+// TestADeclaredCredentialStaysInTheSessionEnv covers the half a launcher's
+// credential must reach: poo's own subsystems resolve against the session
+// environment, so the variable stays there. The model-invoked side is
+// TestTheDeclaredCredentialIsNotInAModelTool.
+func TestADeclaredCredentialStaysInTheSessionEnv(t *testing.T) {
+	t.Setenv("POO_TEST_CREDENTIAL", "launched-by-the-parent")
+	t.Setenv("POO_CREDENTIAL_ENV", "POO_TEST_CREDENTIAL")
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.EnvOverrides(config.Overrides{}))
+
+	if !slices.Contains(runtime.DeclaredCredentialEnvNames, "POO_TEST_CREDENTIAL") {
+		t.Fatalf("declared names = %v, want POO_TEST_CREDENTIAL", runtime.DeclaredCredentialEnvNames)
+	}
+	// The session environment keeps it: the feed and a cli entry's bindings
+	// resolve against this.
+	found := false
+	for _, entry := range runtime.Env {
+		if entry == "POO_TEST_CREDENTIAL=launched-by-the-parent" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the session environment lost the credential poo's own subsystems need")
+	}
+	// The declaration names credentials; it is not one itself, and the session
+	// environment does not need it.
+	for _, entry := range runtime.Env {
+		if strings.HasPrefix(entry, "POO_CREDENTIAL_ENV=") {
+			t.Errorf("the session environment holds the declaration itself: %s", entry)
+		}
+	}
+}
+
+// TestTheDeclaredCredentialIsNotInAModelTool is the other half of the rule: the
+// session environment keeps a launcher's credential for poo's own subsystems,
+// and the child a model-invoked tool runs in does not have it.
+func TestTheDeclaredCredentialIsNotInAModelTool(t *testing.T) {
+	t.Setenv("POO_TEST_CREDENTIAL", "launched-by-the-parent")
+	t.Setenv("POO_CREDENTIAL_ENV", "POO_TEST_CREDENTIAL")
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.EnvOverrides(config.Overrides{}))
+	tool, ok := runtime.Options.Tools[config.ToolBash]
+	if !ok {
+		t.Fatalf("the session offers %v", runtime.Options.ToolOrder)
+	}
+	prepared, err := tool.Prepare(json.RawMessage(`{"command":"printenv POO_TEST_CREDENTIAL || echo ABSENT"}`), poo.PrepareEnv{
+		WorkingDir: runtime.Options.WorkingDir,
+	})
+	if err != nil {
+		t.Fatalf("preparing the call: %v", err)
+	}
+	res, err := tool.Call(context.Background(), prepared, poo.ToolEnv{
+		PrepareEnv: poo.PrepareEnv{WorkingDir: runtime.Options.WorkingDir},
+		Env:        runtime.Options.Env,
+		Settings:   runtime.Options.Settings,
+	})
+	if err != nil {
+		t.Fatalf("running bash: %v", err)
+	}
+	if strings.Contains(res.Text, "launched-by-the-parent") {
+		t.Fatalf("a model-invoked tool saw the credential: %s", res.Text)
+	}
+	if !strings.Contains(res.Text, "ABSENT") {
+		t.Fatalf("the probe did not report absence: %s", res.Text)
 	}
 }

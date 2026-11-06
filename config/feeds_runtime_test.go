@@ -344,3 +344,52 @@ func TestAFeedOnlyProfileOffersTheJobTools(t *testing.T) {
 		t.Errorf("the profile offers %v, want jobs and cancel_job", runtime.Profile.Tools)
 	}
 }
+
+// TestAFeedReachesADeclaredCredential is the other half of the launcher's
+// credential contract: the session environment keeps the variable precisely
+// because the feed resolves its bindings against it, so a manifest that names
+// the credential must get its value.
+func TestAFeedReachesADeclaredCredential(t *testing.T) {
+	t.Setenv("POO_TEST_CREDENTIAL", "launched-by-the-parent")
+	t.Setenv("POO_CREDENTIAL_ENV", "POO_TEST_CREDENTIAL")
+	manifest := feedRunManifest(t, "echoenv", "echoenv", "The fixture's environment.", map[string]string{
+		"FIXTURE_ECHO": "env:POO_TEST_CREDENTIAL",
+	})
+	settings, err := config.Parse([]byte(theFeedsSettings(manifest)+"session:\n  dir: "+t.TempDir()+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.EnvOverrides(config.Overrides{}))
+	defer runtime.Store.Close()
+	if len(runtime.Options.Feeds) != 1 {
+		t.Fatalf("the build ran %v, want the one feed", runtime.Options.Feeds)
+	}
+	// Clear the live process environment after the build captured it, so only
+	// the session environment can supply the value. A feed that read the
+	// process environment instead would see nothing.
+	t.Setenv("POO_TEST_CREDENTIAL", "")
+
+	// A generous bound: the deadline only stops a feed that never finishes, and
+	// a spawn on a loaded machine must not be mistaken for a missing credential.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var emitted []string
+	// The fixture prints once and exits, so the runner's own supervision of a
+	// finished command is not what this test is about.
+	err = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
+		Emit: func(_, text string) error {
+			emitted = append(emitted, text)
+			return nil
+		},
+		Log: slog.New(slog.DiscardHandler),
+	})
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the feed failed: %v", err)
+	}
+	if len(emitted) == 0 {
+		t.Fatalf("the feed emitted nothing (err: %v)", err)
+	}
+	if !strings.Contains(strings.Join(emitted, "\n"), "launched-by-the-parent") {
+		t.Errorf("the feed did not get the declared credential: %v", emitted)
+	}
+}
