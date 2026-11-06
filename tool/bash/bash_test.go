@@ -558,3 +558,32 @@ func TestACallThatExitsBeforeTheDeadlineIsNotATimeout(t *testing.T) {
 		t.Errorf("the observation lost the command's output: %q", output)
 	}
 }
+
+// TestADescriptionLeavesThePermissionKeyAlone covers identity and the summary:
+// a rule, a decision model and a human reader see the command and never the
+// description. The sibling timeout test pins the same three surfaces, so a
+// refactor of one cannot quietly start carrying the optional field.
+func TestADescriptionLeavesThePermissionKeyAlone(t *testing.T) {
+	tool := bash.New()
+	plain, err := tool.Prepare([]byte(`{"command":"ls"}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	described, err := tool.Prepare([]byte(`{"command":"ls","description":"list the directory"}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("Prepare rejected a description: %v", err)
+	}
+	if a, b := plain.(poo.CanonicalKeyer).CanonicalKey(), described.(poo.CanonicalKeyer).CanonicalKey(); string(a) != string(b) {
+		t.Errorf("the description changed the canonical key: %s vs %s", a, b)
+	}
+	if a, b := plain.(poo.EvidenceArgumenter).EvidenceArguments(), described.(poo.EvidenceArgumenter).EvidenceArguments(); string(a) != string(b) {
+		t.Errorf("the description changed the evidence: %s vs %s", a, b)
+	}
+	if described.Summary() != plain.Summary() {
+		t.Errorf("the description changed the summary: %q", described.Summary())
+	}
+	// An empty description is the same call.
+	if _, err := tool.Prepare([]byte(`{"command":"ls","description":""}`), poo.PrepareEnv{}); err != nil {
+		t.Fatalf("Prepare rejected an empty description: %v", err)
+	}
+}
