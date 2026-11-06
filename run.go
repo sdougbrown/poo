@@ -913,16 +913,25 @@ func (s *Session) drainInputs(run *runState, includeFollowUp bool) bool {
 // input follows: the message record, then the input.delivered record,
 // then the history append, the delivery's finish, and the delivery
 // event. The records come before the history append, so a delivery the
-// finalization abandons must not mutate the view. A feed's message is
-// the only one whose delivery carries an origin: the delivery record and
-// the event then say where the input came from.
+// finalization abandons must not mutate the view.
 //
-// The two delivery families differ in what a failed write does to the
-// input: the caller's fail hook handles the record writes' errors (the
-// client input is dropped and reported; a job result goes back on the
-// queue), and done releases the family's own claim.
-func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID string, mode InputMode, note *DeliveryNote, fail func(error), done func()) bool {
-	if err := s.writeDelivery(run.ctx, run, &MessageRecord{
+// The message record is the delivery's commit point. Once it is in the
+// log the input has reached the model, and the delivered record only
+// states that; a refusal of the delivered record breaks the session but
+// does not undo the delivery, and recovery writes the missing fate from
+// the message. Only the message record's failure is a delivery that
+// never happened: the caller's fail hook drops a client input or puts a
+// job result back on the queue.
+//
+// finish appends the message to the view and releases the family's own
+// claim in one step, and reports whether the claim was still the
+// delivery's. A seal that already took the claim has settled the run, so
+// the view is not mutated and no delivery event follows it.
+//
+// A feed's message is the only one whose delivery carries an origin: the
+// delivery record and the event then say where the input came from.
+func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID string, mode InputMode, note *DeliveryNote, fail func(error), finish func(Message) bool) bool {
+	if err := s.writeDeliveryInFlight(run.ctx, run, &MessageRecord{
 		RecordMeta:   NewRecordMetaFrom("message", msg.Origin),
 		RunID:        run.id,
 		Role:         msg.Role,
@@ -937,19 +946,22 @@ func (s *Session) deliverMessageRecords(run *runState, msg Message, inputID stri
 	if IsFeedOrigin(msg.Origin) {
 		meta = NewRecordMetaFrom("input.delivered", msg.Origin)
 	}
-	if err := s.writeDelivery(run.ctx, run, &InputDeliveredRecord{
+	if err := s.writeDeliveryFate(run, &InputDeliveredRecord{
 		RecordMeta:  meta,
 		SessionID:   s.opts.SessionID,
 		RunID:       run.id,
 		InputID:     inputID,
 		Mode:        mode,
 		DeliveredAt: nowRFC3339(),
-	}); err != nil {
-		fail(err)
-		return false
+	}); err != nil && !errors.Is(err, errDeliveryAbandoned) {
+		// The message landed, so the input is delivered: the refusal is
+		// the store's failure, not the input's. The candidate is added
+		// before the claim is released, so the finalization sees it.
+		s.noteStoreError(run, err)
 	}
-	s.appendMessages(msg)
-	done()
+	if !finish(msg) {
+		return true
+	}
 	payload := map[string]any{
 		"run_id":   run.id,
 		"input_id": inputID,
@@ -989,8 +1001,8 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 			s.noteStoreError(run, err)
 		}
 	}
-	return s.deliverMessageRecords(run, msg, input.id, input.mode, note, fail, func() {
-		s.finishDelivery(run, input)
+	return s.deliverMessageRecords(run, msg, input.id, input.mode, note, fail, func(msg Message) bool {
+		return s.finishDelivery(run, input, msg)
 	})
 }
 
@@ -998,13 +1010,32 @@ func (s *Session) deliverInput(run *runState, input queuedInput) bool {
 // because the run settled before the write finished.
 var errDeliveryAbandoned = errors.New("poo: the delivery was abandoned")
 
-// writeDelivery writes a record for an input's delivery.
+// writeDelivery writes a delivery-family record whose started write does
+// not survive the run's cancellation: a job's acceptance record, and the
+// direct test path.
 //
-// Unlike write, a cancellation from the run's finalization abandons the
-// write instead of breaking the session: the delivery is in-flight work
-// that finalization step 3 may abandon. A write the close has fenced is
-// abandoned for the same reason.
+// Unlike write, a write that has not started when the finalization begins
+// is abandoned instead of breaking the session: the delivery is in-flight
+// work that finalization step 3 may abandon. A write the close has fenced
+// is abandoned for the same reason. A delivery whose message does not
+// land never happened, so the caller's fail hook drops or requeues the
+// input.
 func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) error {
+	return s.writeDeliveryBy(ctx, run, rec, false)
+}
+
+// writeDeliveryInFlight writes a record whose write may already have
+// started when the finalization begins: a delivery's message. It gets its
+// own record budget, so it can finish before the seal and keep its real
+// result. A write that has not started is still abandoned by the
+// finalization check.
+func (s *Session) writeDeliveryInFlight(ctx context.Context, run *runState, rec Record) error {
+	return s.writeDeliveryBy(ctx, run, rec, true)
+}
+
+// writeDeliveryBy is the shared delivery write. inFlight selects whether
+// a write that is already running survives the run's cancellation.
+func (s *Session) writeDeliveryBy(ctx context.Context, run *runState, rec Record, inFlight bool) error {
 	if s.opts.Sink == nil {
 		return nil
 	}
@@ -1025,14 +1056,18 @@ func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) 
 	if !ok {
 		return errDeliveryAbandoned
 	}
-	wctx, cancel := context.WithTimeout(ctx, s.recordBudget())
+	writeCtx := ctx
+	if inFlight {
+		writeCtx = context.WithoutCancel(ctx)
+	}
+	wctx, cancel := context.WithTimeout(writeCtx, s.recordBudget())
 	defer cancel()
 	if err := s.appendToSink(wctx, rec, gate); err != nil {
 		if errors.Is(err, errWriteFenced) {
 			return errDeliveryAbandoned
 		}
 		s.mu.Lock()
-		abandoned := run.committed || run.finalizing || ctx.Err() != nil
+		abandoned := run.committed || run.finalizing || (!inFlight && ctx.Err() != nil)
 		s.mu.Unlock()
 		if abandoned {
 			return errDeliveryAbandoned
@@ -1046,17 +1081,81 @@ func (s *Session) writeDelivery(ctx context.Context, run *runState, rec Record) 
 	return nil
 }
 
-// finishDelivery releases a delivered input's in-flight claim.
-func (s *Session) finishDelivery(run *runState, input queuedInput) {
+// writeDeliveryFate writes the delivered record that follows a message
+// that already landed.
+//
+// The message is the delivery's commit point, so the write is not
+// abandoned by the run's cancellation. It still claims its write against
+// the seal, like every record that must not follow run.settled: the
+// finalization waits for it, and cancels it at the seal. A sink that
+// honors the write's context therefore refuses a fate write the seal
+// ends, and the message's own record is the fate the load completes.
+//
+// A close that fenced the writer, or a seal that already took the claim,
+// leaves the record unwritten. That does not change the input's fate:
+// the message names it, and a load writes the missing delivered record.
+//
+// The refusal classification is appendRecord's: a fenced write is an
+// abandoned record (appendRecord returns nil for it), and a sealed write
+// is mapped to the delivery's abandoned sentinel. Neither undoes the
+// delivery; finish still runs once, so the delivered event is emitted
+// once and recovery writes the missing fate.
+func (s *Session) writeDeliveryFate(run *runState, rec Record) error {
+	if s.opts.Sink == nil {
+		return nil
+	}
+	// beginRunWrite registers the write against the seal, so the seal
+	// waits for it and cancels it when it stops waiting. A run that is
+	// already sealed takes no more records.
+	ctx, release, ok := s.beginRunWrite(run)
+	if !ok {
+		return errDeliveryAbandoned
+	}
+	defer release()
+	if err := s.appendRecord(ctx, rec, run, nil); err != nil {
+		if errors.Is(err, errCallRecordSealed) {
+			return errDeliveryAbandoned
+		}
+		return err
+	}
+	return nil
+}
+
+// runSettledLocked reports that the run has been sealed or committed, so
+// a delivery that finishes now must not mutate its view.
+//
+// The caller holds the session's lock.
+func runSettledLocked(run *runState) bool {
+	return run.sealed || run.committed
+}
+
+// finishDelivery appends a delivered message and releases the input's
+// in-flight claim.
+//
+// The append and the release are one step under the lock, so the
+// finalization either sees the message in the view before it takes the
+// claim, or takes the claim and leaves the settled run's view alone. It
+// reports whether the claim was still the delivery's.
+func (s *Session) finishDelivery(run *runState, input queuedInput, msg Message) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range run.delivering {
-		if run.delivering[i].id == input.id {
-			run.delivering = append(run.delivering[:i], run.delivering[i+1:]...)
-			break
+		if run.delivering[i].id != input.id {
+			continue
 		}
+		if runSettledLocked(run) {
+			// The seal left the claim to the delivery because the
+			// write outlived its wait. The message is in the log; a
+			// settled run is not mutated, and a load reads the message.
+			run.delivering = append(run.delivering[:i], run.delivering[i+1:]...)
+			return false
+		}
+		s.appendMessagesLocked(msg)
+		run.delivering = append(run.delivering[:i], run.delivering[i+1:]...)
+		s.signalWorkLocked(run)
+		return true
 	}
-	s.signalWorkLocked(run)
+	return false
 }
 
 // abandonDelivery moves an in-flight delivery to the inputs the

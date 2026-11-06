@@ -54,7 +54,12 @@ type RecordSink interface {
 	// Append writes one record. It returns an error when the record could
 	// not be stored.
 	Append(ctx context.Context, rec Record) error
-	// Flush pushes buffered records out.
+	// Flush pushes buffered records out. The session calls it after a
+	// run's records and at close, in a goroutine it stops waiting for at
+	// its bound. It cannot cancel a Flush that ignores ctx; an
+	// implementation must honour ctx and be safe to call concurrently
+	// with Append and with another Flush. A buffering sink must make the
+	// records it accepted recoverable there.
 	Flush(ctx context.Context) error
 }
 

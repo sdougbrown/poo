@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 )
@@ -96,17 +97,27 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	// cancelled run.
 	run.cancel(errFinalizing)
 
-	// Steps 3 to 3.5: wait for the in-flight work, bounded at five
-	// seconds, and seal the run. The work that finishes before the seal
-	// keeps its real result; the work that is still running is
-	// abandoned.
+	// Steps 3 to 3.5: wait for the in-flight work, bounded at the
+	// record-write budget, with one further budget when a delivery is in
+	// flight so both of its records can finish within their separate
+	// budgets. The work that finishes before the seal keeps its real
+	// result; the work that is still running is abandoned.
 	//
-	// The seal takes ownership of every claim that is still outstanding.
-	// The calls it takes get their record and their terminal result, the
-	// inputs it takes are reported as undelivered, and no other goroutine
-	// adds a record for the run after this point.
-	issued, sealed := s.sealRun(run)
+	// The seal takes ownership of every claim that is still outstanding,
+	// except a delivery that outlived the wait: its message may still
+	// land, so it is not reported dropped. The calls the seal takes get
+	// their record and their terminal result, and no other goroutine adds
+	// a record for the run after this point.
+	issued, sealed, stalled := s.sealRun(run)
 	undelivered = append(undelivered, sealed...)
+	if stalled {
+		// A delivery write outlived the bounded wait. The store is
+		// stalled: break the session, so every record the finalization
+		// still owes is refused locally instead of serializing behind
+		// the stalled write. The delivery's own writer resolves after
+		// the seal, and the records that did land let a load settle it.
+		s.markBroken()
+	}
 	s.sealRaceHook("seal")
 
 	// Step 4 and 5: every ask the run left unanswered is resolved as
@@ -142,7 +153,12 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 	}
 
 	// Step 7: the outcome records are written with a context of their
-	// own, because the run's context has ended.
+	// own, because the run's context has ended. s.write gives the settle
+	// its own record budget; the context passed in only supplies a
+	// cancellation, which the write strips. The flush gets a fresh budget
+	// after the settle, so a slow settle cannot starve it. The flush is
+	// attempted even when the store stalled: a buffering sink can still
+	// push the records it accepted before the stall.
 	settle := &RunSettledRecord{RecordMeta: NewRecordMeta("run.settled"),
 		RunID:     run.id,
 		Reason:    reason,
@@ -150,14 +166,12 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 		Turns:     turns,
 		SettledAt: nowRFC3339(),
 	}
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), s.recordBudget())
-	defer cleanupCancel()
-	storeErr := s.write(cleanupCtx, settle)
-	if s.opts.Sink != nil {
-		if err := s.opts.Sink.Flush(cleanupCtx); err != nil && storeErr == nil {
-			storeErr = err
-		}
+	storeErr := s.write(context.Background(), settle)
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), s.recordBudget())
+	if err := s.flushBounded(flushCtx); err != nil && storeErr == nil {
+		storeErr = err
 	}
+	flushCancel()
 	if storeErr != nil {
 		// The store refused the settle record or the flush after it, so
 		// the run's outcome may not exist. The session is broken, and
@@ -167,8 +181,16 @@ func (s *Session) finalizeRun(run *runState, resumable bool) (Result, bool) {
 		// already the winner is not also its own loser.
 		s.markBroken()
 		if reason == ReasonCancelled {
-			detail.Losing = append(detail.Losing, string(ReasonStoreError))
-		} else {
+			// A cancelled run keeps its reason, and the store failure is
+			// a losing candidate. commitLocked dedups candidates by
+			// reason and source; every store-error candidate uses source
+			// "store", so a store_error already in the losing list is
+			// this same loser. Adding the settle failure again would
+			// repeat the reason.
+			if !slices.Contains(detail.Losing, string(ReasonStoreError)) {
+				detail.Losing = append(detail.Losing, string(ReasonStoreError))
+			}
+		} else if reason != ReasonStoreError {
 			reason = ReasonStoreError
 			detail.Source = "store"
 			detail.Text = storeErr.Error()
@@ -438,8 +460,10 @@ func (s *Session) commitLocked(run *runState) (Reason, SettleDetail) {
 }
 
 // sealRun waits for the in-flight work, bounded at the record-write
-// budget, and then seals the run and takes ownership of every claim that
-// was made but not finished.
+// budget, with one further record budget when a delivery is in flight so
+// the delivery's two records can finish within their separate budgets.
+// It then seals the run and takes ownership of every claim that was made
+// but not finished.
 //
 // The wait and the seal are one step under the lock: a claim that wins
 // the race is counted as in-flight work before the seal looks, and one
@@ -450,27 +474,61 @@ func (s *Session) commitLocked(run *runState) (Reason, SettleDetail) {
 // arrives afterwards is refused instead of slipping past the commit
 // point. The returned calls are the finalization's to settle: each one
 // gets the record its caller had not written and its terminal result.
-// The returned inputs are the ones whose acceptance or delivery was
-// still in flight; they never reached the model, so the finalization
-// reports them with the run's reason.
-func (s *Session) sealRun(run *runState) ([]*issuedCall, []UndeliveredInput) {
+// The returned inputs are the ones whose acceptance was still in
+// flight; they never reached the model, so the finalization reports them
+// with the run's reason. A delivery that outlives its two record budgets
+// is left with its writer and reported stalled: its message may still
+// land, so it is not a known drop.
+func (s *Session) sealRun(run *runState) (issued []*issuedCall, undelivered []UndeliveredInput, stalled bool) {
 	deadline := time.After(s.recordBudget())
+	// A delivery has two records, each with its own record budget. The
+	// message starts before the seal can begin; the fate may start after
+	// it. One further record budget covers the fate, so a delivery that
+	// is within both budgets is not a stall. This is bounded: the seal
+	// waits at most two record budgets when a delivery is in flight.
+	var grace <-chan time.Time
 	for {
 		s.mu.Lock()
 		if s.inFlightLocked(run) == 0 {
-			issued, undelivered := s.sealLocked(run)
+			issued, undelivered := s.sealLocked(run, false)
 			s.mu.Unlock()
-			return issued, undelivered
+			return issued, undelivered, false
 		}
+		delivery := len(run.delivering) > 0 || len(run.deliveringJobs) > 0
 		done := run.workDone
 		s.mu.Unlock()
+		if grace != nil {
+			select {
+			case <-done:
+				continue
+			case <-grace:
+				s.mu.Lock()
+				// The delivery's own budgets ran out, or its writer
+				// never entered them. It may still land, so it is not a
+				// known drop: leave the claim with the writer and report
+				// the store stalled.
+				stalled := len(run.delivering) > 0 || len(run.deliveringJobs) > 0
+				issued, undelivered := s.sealLocked(run, stalled)
+				s.mu.Unlock()
+				return issued, undelivered, stalled
+			}
+		}
 		select {
 		case <-done:
 		case <-deadline:
+			if delivery {
+				// Delivery claims are taken before finalizing is set,
+				// and not while a synchronous call runs. The message
+				// started before the seal; the fate gets its own record
+				// budget after it. Give the delivery that one bounded
+				// grace before declaring the store stalled.
+				grace = time.After(s.recordBudget())
+				continue
+			}
 			s.mu.Lock()
-			issued, undelivered := s.sealLocked(run)
+			issued, undelivered := s.sealLocked(run, false)
 			s.mu.Unlock()
-			return issued, undelivered
+			return issued, undelivered, false
 		}
 	}
 }
@@ -502,8 +560,13 @@ func (s *Session) inFlightLocked(run *runState) int {
 // sealLocked seals the run and takes ownership of every claim that was
 // made but not finished.
 //
+// A stalled seal leaves run.delivering with its writers: a delivery write
+// that outlived the wait may still land, so its input is not added to the
+// returned undelivered list. The writer resolves it after the seal without
+// mutating the settled run.
+//
 // The caller holds the session's lock, and the caller releases it.
-func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) {
+func (s *Session) sealLocked(run *runState, stalled bool) ([]*issuedCall, []UndeliveredInput) {
 	run.sealed = true
 	// A request that already resolved keeps its answer: the seal only
 	// ends the ones still pending.
@@ -543,8 +606,10 @@ func (s *Session) sealLocked(run *runState) ([]*issuedCall, []UndeliveredInput) 
 	run.abandonedInputs = nil
 	pending = append(pending, run.accepting...)
 	run.accepting = nil
-	pending = append(pending, run.delivering...)
-	run.delivering = nil
+	if !stalled {
+		pending = append(pending, run.delivering...)
+		run.delivering = nil
+	}
 	for _, input := range pending {
 		s.removeQueuedInputLocked(input)
 	}
@@ -1008,6 +1073,30 @@ func (s *Session) messagesByIDLocked(id string) (Message, bool) {
 	return msg, ok
 }
 
+// errFlushStalled reports that a flush outlived its bound. A close wraps
+// it with ErrCloseStalled; a run reports it as a store error.
+var errFlushStalled = errors.New("poo: the flush is still in flight")
+
+// flushBounded flushes the sink and waits at most for ctx.
+//
+// The flush runs on its own and is not tracked or cancelled: a sink that
+// ignores ctx can keep the goroutine blocked after the caller's bound.
+// The finalization and Close both call this, so a sink must tolerate a
+// second Flush while the first is still in flight.
+func (s *Session) flushBounded(ctx context.Context) error {
+	if s.opts.Sink == nil {
+		return nil
+	}
+	flushed := make(chan error, 1)
+	go func() { flushed <- s.opts.Sink.Flush(ctx) }()
+	select {
+	case err := <-flushed:
+		return err
+	case <-ctx.Done():
+		return errFlushStalled
+	}
+}
+
 // Close ends the session.
 //
 // An active run is cancelled, the feeds and the jobs are stopped, the
@@ -1048,7 +1137,10 @@ func (s *Session) Close() error {
 	s.events.stop()
 	if s.opts.Sink != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), s.recordBudget())
-		if err := s.opts.Sink.Flush(ctx); err != nil {
+		if err := s.flushBounded(ctx); err != nil {
+			if errors.Is(err, errFlushStalled) {
+				err = fmt.Errorf("poo: closing the session: %w: %w", ErrCloseStalled, err)
+			}
 			errs = append(errs, err)
 		}
 		cancel()

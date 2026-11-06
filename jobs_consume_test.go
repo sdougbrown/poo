@@ -261,7 +261,11 @@ func TestWaitJobsWaitsForTheRunningJobs(t *testing.T) {
 // queued result cannot wake a run, so the wait reports the break instead
 // of waiting for a wake that cannot happen.
 func TestWaitJobsEndsWhenTheSessionIsBroken(t *testing.T) {
-	sink := &failingSink{failRecord: "input.delivered"}
+	// The sixth message is the one the result's delivery writes. The
+	// first five are the system prompt's, the prompt's, the model's
+	// reply, the tool's started result, and the model's waiting reply;
+	// failAfter 5 accepts those five and refuses the sixth.
+	sink := &failingSink{failRecord: "message", failAfter: 5}
 	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", true)}},
@@ -272,8 +276,8 @@ func TestWaitJobsEndsWhenTheSessionIsBroken(t *testing.T) {
 		t.Fatalf("starting the run: %v", err)
 	}
 	// The job is held until the run waits for it, so its result reaches
-	// the run's delivery: the input.delivered write is the one the sink
-	// refuses, and it breaks the session.
+	// the run's delivery: the message write is the one the sink refuses,
+	// the result goes back on the queue, and the session breaks.
 	<-tool.Started()
 	waitFor(t, "the run to wait", func() bool {
 		return s.State() == poo.StateWaiting

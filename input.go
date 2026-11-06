@@ -45,8 +45,8 @@ var (
 	// ErrSessionClosed means the session is closing or closed.
 	ErrSessionClosed = errors.New("poo: the session is closed")
 	// ErrCloseStalled means the close's wait for the record writes that
-	// were in flight ran out. The close says which records it was still
-	// waiting for, and continues its teardown without them.
+	// were in flight, or for the flush it started, ran out. The close says
+	// what it was still waiting for, and continues its teardown without it.
 	ErrCloseStalled = errors.New("poo: the close stalled on a record write")
 )
 

@@ -1707,11 +1707,12 @@ func TestSendQueuedWriteFailureRefusesAndSettles(t *testing.T) {
 	}
 }
 
-// TestFailedInputDeliveryIsDropped covers the plan's rule: every
+// TestAFailedDeliveryMessageIsDropped covers the plan's rule: every
 // accepted input ends as exactly one of delivered or dropped. A delivery
-// whose write fails is dropped and reported, not silently lost.
-func TestFailedInputDeliveryIsDropped(t *testing.T) {
-	sink := &failingSink{failRecord: "input.delivered"}
+// whose message record fails never reached the model, so it is dropped
+// and reported, not silently lost.
+func TestAFailedDeliveryMessageIsDropped(t *testing.T) {
+	sink := &refusingSteerSink{recordingSink: &recordingSink{}}
 	tool := pootest.NewJobTool("job", poo.BackgroundNever)
 	tr := scripted([]fakeResponse{
 		{calls: []poo.ToolCall{jobCall("one", false)}},
@@ -1743,9 +1744,12 @@ func TestFailedInputDeliveryIsDropped(t *testing.T) {
 			dropped++
 		}
 	}
-	if delivered+dropped != 1 || len(res.Detail.UndeliveredInput) != 1 {
-		t.Fatalf("accepted %s: reason=%s delivered=%d dropped=%d undelivered=%v; want one terminal disposition",
-			id, res.Reason, delivered, dropped, res.Detail.UndeliveredInput)
+	if delivered != 0 || dropped != 1 {
+		t.Fatalf("accepted %s: reason=%s delivered=%d dropped=%d, want the input dropped",
+			id, res.Reason, delivered, dropped)
+	}
+	if len(res.Detail.UndeliveredInput) != 1 {
+		t.Fatalf("the settle detail lists %+v, want the dropped input", res.Detail.UndeliveredInput)
 	}
 }
 

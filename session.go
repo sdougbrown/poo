@@ -1075,6 +1075,13 @@ func (s *Session) budgetLocked() ContextBudget {
 func (s *Session) appendMessages(msgs ...Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.appendMessagesLocked(msgs...)
+}
+
+// appendMessagesLocked adds messages to the model's history.
+//
+// The caller holds the session's lock.
+func (s *Session) appendMessagesLocked(msgs ...Message) {
 	s.history = append(s.history, msgs...)
 }
 
