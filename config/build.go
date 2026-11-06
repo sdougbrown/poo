@@ -109,14 +109,7 @@ func EnvOverrides(o Overrides) Overrides {
 	}
 	o.FeedsPaths = paths(o.FeedsPaths, "POO_FEEDS_PATH")
 	o.CLIRegistryPaths = paths(o.CLIRegistryPaths, "POO_CLI_REGISTRY_PATH")
-	o.CredentialEnvNames = append([]string{}, o.CredentialEnvNames...)
-	if value, ok := os.LookupEnv("POO_CREDENTIAL_ENV"); ok {
-		for _, name := range filepath.SplitList(value) {
-			if name != "" {
-				o.CredentialEnvNames = append(o.CredentialEnvNames, name)
-			}
-		}
-	}
+	o.CredentialEnvNames = paths(o.CredentialEnvNames, "POO_CREDENTIAL_ENV")
 	return o
 }
 
@@ -819,8 +812,10 @@ func modalities(names []string) []poo.Modality {
 // — bash and the registered CLIs — run it through the executor the
 // settings name, with the sandbox's options and the protected paths the
 // settings name. The child environment is the session's own, less the
-// names the settings scrub and the names the endpoints' credentials are
-// read from.
+// names the settings scrub, the names the endpoints' credentials are read
+// from, and the names a launcher declared for its own subsystems
+// (Overrides.CredentialEnvNames), which stay in the session environment
+// because the feed and a cli entry's bindings resolve against it.
 func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	settings := r.Settings
 	protected, err := protect.Compile(settings.Tools.ProtectedPaths)

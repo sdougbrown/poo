@@ -642,10 +642,11 @@ func TestANilBashFactoryIsNotLinked(t *testing.T) {
 	}
 }
 
-// TestADeclaredCredentialReachesTheFeedButNotTheModel is the two-scope rule: a
-// launcher provisions a credential for poo's own subsystems, so the session
-// environment keeps it, and a model-invoked tool subprocess must not see it.
-func TestADeclaredCredentialReachesTheFeedButNotTheModel(t *testing.T) {
+// TestADeclaredCredentialStaysInTheSessionEnv covers the half a launcher's
+// credential must reach: poo's own subsystems resolve against the session
+// environment, so the variable stays there. The model-invoked side is
+// TestTheDeclaredCredentialIsNotInAModelTool.
+func TestADeclaredCredentialStaysInTheSessionEnv(t *testing.T) {
 	t.Setenv("POO_TEST_CREDENTIAL", "launched-by-the-parent")
 	t.Setenv("POO_CREDENTIAL_ENV", "POO_TEST_CREDENTIAL")
 	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
@@ -667,6 +668,13 @@ func TestADeclaredCredentialReachesTheFeedButNotTheModel(t *testing.T) {
 	}
 	if !found {
 		t.Error("the session environment lost the credential poo's own subsystems need")
+	}
+	// The declaration names credentials; it is not one itself, and the session
+	// environment does not need it.
+	for _, entry := range runtime.Env {
+		if strings.HasPrefix(entry, "POO_CREDENTIAL_ENV=") {
+			t.Errorf("the session environment holds the declaration itself: %s", entry)
+		}
 	}
 }
 
