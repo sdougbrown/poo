@@ -77,6 +77,25 @@ killed without a teardown therefore leaves no sandbox behind. The
 `local` executor has no such tie, so a command it runs outlives a killed
 poo.
 
+## Launcher credentials
+
+A launcher can set `POO_CREDENTIAL_ENV` to the names of credentials poo's
+feeds or registered CLIs need. Separate names with the operating system's
+path-list separator (`:` on Linux and macOS). The variable lists names,
+not their values; the launcher supplies the values separately.
+
+The session environment keeps these values, so a feed or a registered CLI
+can receive one through an explicit manifest `env:NAME` binding. A `bash`
+command does not inherit the declared names in its environment. A registered
+CLI that receives a credential can still use or disclose it, so trust its
+manifest and command.
+
+This differs from `tools.env.scrub`, which removes names from the session
+environment too. A feed or CLI binding cannot resolve a name removed there
+or excluded by `tools.env.passthrough`. Environment scrubbing is not process
+isolation: with the `local` executor, a command can read poo's environment
+through procfs as described below.
+
 ## Registered CLIs
 
 A `call_cli` call is one of the operator's registered CLIs, and it runs
@@ -94,6 +113,8 @@ sandbox's binds and the protected paths it masks.
   `env:NAME` reference resolved against the scrubbed environment. A name
   the scrub removed, or a `tools.env.passthrough` list left out, is a
   reference the call cannot honour, and it fails naming the variable.
+  A manifest can explicitly pass a credential declared through
+  `POO_CREDENTIAL_ENV` using an `env:NAME` binding.
 - **Its arguments** were checked against the manifest's schema before the
   process started, so a malformed call never runs. The same check, in the
   library, refuses a value that begins with a dash when the manifest
