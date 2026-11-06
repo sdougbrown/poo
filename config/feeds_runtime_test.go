@@ -369,20 +369,25 @@ func TestAFeedReachesADeclaredCredential(t *testing.T) {
 	// process environment instead would see nothing.
 	t.Setenv("POO_TEST_CREDENTIAL", "")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// A generous bound: the deadline only stops a feed that never finishes, and
+	// a spawn on a loaded machine must not be mistaken for a missing credential.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var emitted []string
 	// The fixture prints once and exits, so the runner's own supervision of a
 	// finished command is not what this test is about.
-	_ = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
+	err = runtime.Options.Feeds[0].Run(ctx, poo.FeedIO{
 		Emit: func(_, text string) error {
 			emitted = append(emitted, text)
 			return nil
 		},
 		Log: slog.New(slog.DiscardHandler),
 	})
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the feed failed: %v", err)
+	}
 	if len(emitted) == 0 {
-		t.Fatal("the feed emitted nothing")
+		t.Fatalf("the feed emitted nothing (err: %v)", err)
 	}
 	if !strings.Contains(strings.Join(emitted, "\n"), "launched-by-the-parent") {
 		t.Errorf("the feed did not get the declared credential: %v", emitted)

@@ -655,8 +655,8 @@ func TestADeclaredCredentialStaysInTheSessionEnv(t *testing.T) {
 	}
 	runtime := build(t, settings, config.EnvOverrides(config.Overrides{}))
 
-	if !slices.Contains(runtime.CredentialEnvNames, "POO_TEST_CREDENTIAL") {
-		t.Fatalf("declared names = %v, want POO_TEST_CREDENTIAL", runtime.CredentialEnvNames)
+	if !slices.Contains(runtime.DeclaredCredentialEnvNames, "POO_TEST_CREDENTIAL") {
+		t.Fatalf("declared names = %v, want POO_TEST_CREDENTIAL", runtime.DeclaredCredentialEnvNames)
 	}
 	// The session environment keeps it: the feed and a cli entry's bindings
 	// resolve against this.

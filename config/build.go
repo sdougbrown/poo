@@ -223,11 +223,12 @@ type Runtime struct {
 	// launcher's credential can stay here for the feed and a cli entry's
 	// bindings while a model-invoked child never sees it.
 	Env []string
-	// CredentialEnvNames are the environment names a launcher declared for
-	// poo's own subsystems. They are absent from the environment a
-	// model-invoked tool subprocess gets, and present in Env for the feed and
-	// a cli entry's bindings.
-	CredentialEnvNames []string
+	// DeclaredCredentialEnvNames are the environment names a launcher declared
+	// for poo's own subsystems. They are the opposite of the endpoint
+	// credentials above: those are removed from Env itself, while these stay
+	// in Env so the feed and a cli entry's bindings can resolve them, and are
+	// removed only from the environment a model-invoked tool receives.
+	DeclaredCredentialEnvNames []string
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths []string
 	// toolNames are the names of the tools the session offers, in
@@ -848,8 +849,11 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Names:       append([]string(nil), scrub.Names...),
 		Passthrough: append([]string(nil), scrub.Passthrough...),
 	}
-	r.CredentialEnvNames = append([]string(nil), opts.Overrides.CredentialEnvNames...)
-	credentialScrub.Names = append(credentialScrub.Names, r.CredentialEnvNames...)
+	// The settings scrub and the endpoint credentials are gone from Env as
+	// well; these are not, so the names are recorded under a name that says so
+	// and scrubbed only from the tools' children.
+	r.DeclaredCredentialEnvNames = append([]string(nil), opts.Overrides.CredentialEnvNames...)
+	credentialScrub.Names = append(credentialScrub.Names, r.DeclaredCredentialEnvNames...)
 
 	executorName := DefaultExecutor
 	if settings.Tools.Bash.Executor != nil {
