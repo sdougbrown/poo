@@ -141,7 +141,8 @@ func (t *Tool) Spec() poo.ToolSpec {
   "type": "object",
   "properties": {
     "command": {"type": "string", "description": "The command to run with /bin/bash -c."},
-    "timeout": {"type": "number", "description": "Optional timeout in milliseconds for a foreground call. At most 600000 (10 minutes), and never past the configured bash timeout when one is set. A background call runs under the job timeout."}
+    "timeout": {"type": "number", "description": "Optional timeout in milliseconds for a foreground call. At most 600000 (10 minutes), and never past the configured bash timeout when one is set. A background call runs under the job timeout."},
+    "description": {"type": "string", "description": "Optional summary of what the command does. Accepted and ignored: the command is what runs and what a permission rule matches."}
   },
   "required": ["command"]
 }`),
@@ -159,6 +160,10 @@ type args struct {
 	// Timeout is the requested timeout in milliseconds. It is a float so
 	// that any JSON number in float64 range decodes, in any form.
 	Timeout *float64 `json:"timeout"`
+	// Description is a summary the model may volunteer, as Claude Code's
+	// bash tool does. It is accepted and ignored: the command is what runs,
+	// what CanonicalKey carries, and what permission rules match.
+	Description string `json:"description"`
 }
 
 // prepared is a validated bash call.

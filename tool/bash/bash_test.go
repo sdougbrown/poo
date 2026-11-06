@@ -558,3 +558,28 @@ func TestACallThatExitsBeforeTheDeadlineIsNotATimeout(t *testing.T) {
 		t.Errorf("the observation lost the command's output: %q", output)
 	}
 }
+
+// TestPrepareAcceptsAndIgnoresDescription keeps a Claude-style call from
+// costing a retry: models trained on Claude Code's bash tool volunteer a
+// description, and the strict decoder refused it as invalid_args. The
+// description changes nothing — the command still runs and still keys the call.
+func TestPrepareAcceptsAndIgnoresDescription(t *testing.T) {
+	tool := bash.New()
+	for _, raw := range []string{
+		`{"command":"ls","description":"list the directory"}`,
+		`{"command":"ls","description":""}`,
+	} {
+		prepared, err := tool.Prepare(json.RawMessage(raw), poo.PrepareEnv{})
+		if err != nil {
+			t.Fatalf("Prepare rejected %s: %v", raw, err)
+		}
+		keyer, ok := prepared.(poo.CanonicalKeyer)
+		if !ok {
+			t.Fatalf("prepared call has no canonical key")
+		}
+		key := keyer.CanonicalKey()
+		if !strings.Contains(string(key), `"command":"ls"`) || strings.Contains(string(key), "description") {
+			t.Fatalf("canonical key = %s, want the command alone", key)
+		}
+	}
+}
