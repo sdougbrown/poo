@@ -37,6 +37,21 @@ never reached the model. The recovery
 appends only what is missing, so loading a session twice writes nothing
 twice.
 
+A delivery write that outlives the finalization's wait is a stalled
+store. The finalization gives a delivery's message and fate their own
+record budgets before that decision, so a delivery within both budgets
+is not a stall; the wait remains bounded at two record budgets. When the
+store does stall, the session breaks, the store failure is the run's
+reason (or a losing candidate when the run was cancelled), and the
+input's fate is left to the records that land and to a load, which
+applies the two rules above.
+
+The finalization and the close each attempt a bounded flush. A store
+that is still stalled at the bound is reported by the close's
+`ErrCloseStalled`; records it has not stored or flushed cannot be
+recovered, so a load applies the rules above only to what the store
+holds.
+
 The first record is always `session.created`, and it carries
 `"format": "poo-session-v0"`. A consumer that does not recognise the format
 should stop rather than guess.
@@ -335,6 +350,11 @@ fate is in the records.
 ## `input.delivered`
 
 An input that reached the model.
+
+The `message` that delivers the input is the delivery's commit point:
+once that record is in the log the input has reached the model, and a
+store that refuses this record does not undo the delivery. The load
+writes the missing record from the message.
 
 | Field | Type | Meaning |
 |---|---|---|

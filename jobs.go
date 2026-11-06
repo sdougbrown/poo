@@ -1275,8 +1275,8 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 	}
 	if !s.deliverMessageRecords(run, msg, result.id, mode, nil, func(err error) {
 		s.failJobDelivery(run, item, err)
-	}, func() {
-		s.finishJobDelivery(run, item)
+	}, func(msg Message) bool {
+		return s.finishJobDelivery(run, item, msg)
 	}) {
 		return false
 	}
@@ -1297,18 +1297,41 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 func (s *Session) failJobDelivery(run *runState, item jobQueueItem, err error) {
 	s.mu.Lock()
 	s.abandonJobDeliveryLocked(run, item)
+	// A failure that arrives after the seal requeues a result the
+	// finalization no longer owns: the session has to act on it now,
+	// because the finalization's own pass has already run.
+	sealed := run.sealed || run.committed
 	s.mu.Unlock()
 	if !errors.Is(err, errDeliveryAbandoned) {
 		s.noteStoreError(run, err)
 	}
+	if sealed {
+		s.actOnQueuedJobResults()
+	}
 }
 
-// finishJobDelivery releases a delivered result's in-flight claim.
-func (s *Session) finishJobDelivery(run *runState, item jobQueueItem) {
+// finishJobDelivery appends a delivered result's message and releases
+// its in-flight claim.
+//
+// The append and the release are one step under the lock, so the
+// finalization either sees the message in the view before it seals the
+// run, or the message lands after the run settled. A message that lands
+// after the settlement is in the log, so a load reads it, but the
+// settled run's view and events are not mutated. It reports whether the
+// message reached the view.
+func (s *Session) finishJobDelivery(run *runState, item jobQueueItem, msg Message) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.removeJobDeliveryLocked(run, item)
+	if run.sealed || run.committed {
+		s.removeJobDeliveryLocked(run, item)
+		return false
+	}
+	if !s.removeJobDeliveryLocked(run, item) {
+		return false
+	}
+	s.appendMessagesLocked(msg)
 	s.signalWorkLocked(run)
+	return true
 }
 
 // abandonJobDeliveryLocked puts an in-flight result back at the front of
@@ -1321,16 +1344,18 @@ func (s *Session) abandonJobDeliveryLocked(run *runState, item jobQueueItem) {
 	s.signalWorkLocked(run)
 }
 
-// removeJobDeliveryLocked drops a result's in-flight claim.
+// removeJobDeliveryLocked drops a result's in-flight claim and reports
+// whether it was still there.
 //
 // The caller holds the session's lock.
-func (s *Session) removeJobDeliveryLocked(run *runState, item jobQueueItem) {
+func (s *Session) removeJobDeliveryLocked(run *runState, item jobQueueItem) bool {
 	for i := range run.deliveringJobs {
 		if run.deliveringJobs[i].result.id == item.result.id {
 			run.deliveringJobs = append(run.deliveringJobs[:i], run.deliveringJobs[i+1:]...)
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // jobResultText renders the text the model reads for a job result.

@@ -54,7 +54,10 @@ type RecordSink interface {
 	// Append writes one record. It returns an error when the record could
 	// not be stored.
 	Append(ctx context.Context, rec Record) error
-	// Flush pushes buffered records out.
+	// Flush pushes buffered records out. The session calls it after a
+	// run's records and at close; a sink that buffers must make the
+	// records it accepted recoverable there. A flush that outlives the
+	// caller's bound is reported, not waited for forever.
 	Flush(ctx context.Context) error
 }
 

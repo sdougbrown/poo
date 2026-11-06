@@ -93,7 +93,7 @@ func testPermissionSealHandoff(t *testing.T, storeFirst bool) {
 	}()
 	<-sink.entered
 	s.mu.Lock()
-	s.sealLocked(run)
+	s.sealLocked(run, false)
 	s.mu.Unlock()
 	close(sink.release)
 	// Cleanup may acquire the writer before its original caller resumes.
