@@ -643,6 +643,7 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 				Handle:     call.handle,
 				CallID:     call.id,
 				Tool:       call.tool,
+				Summary:    call.summary,
 				Arguments:  recordArgs(call.arguments),
 			}); err != nil && !errors.Is(err, errCallRecordSealed) {
 				s.noteStoreError(run, err)

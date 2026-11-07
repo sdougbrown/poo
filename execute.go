@@ -217,8 +217,9 @@ func (s *Session) beginTurn(run *runState, turn int, plans []callPlan) {
 		}
 		for _, p := range plans {
 			s.turns[i].Calls = append(s.turns[i].Calls, ToolCallSummary{
-				Handle: p.handle,
-				Tool:   p.call.Name,
+				Handle:  p.handle,
+				Tool:    p.call.Name,
+				Summary: p.summary,
 			})
 		}
 		return
@@ -377,7 +378,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// the finalization to settle. It is not marked started until the
 	// record is written. A call claimed after the finalization has
 	// sealed the run is the finalization's.
-	if !s.issueCall(run, turn, handle, call) {
+	if !s.issueCall(run, turn, handle, call, plan.summary) {
 		return
 	}
 
@@ -409,6 +410,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			Handle:     handle,
 			CallID:     call.CallID,
 			Tool:       call.Name,
+			Summary:    callRecord.summary,
 			Arguments:  recordArgs(call.Arguments),
 			Mode:       m,
 		}); err != nil {
@@ -426,11 +428,15 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		}
 		return true
 	}
-	s.events.emit(EventToolCall, map[string]any{
+	payload := map[string]any{
 		"run_id": run.id,
 		"handle": handle,
 		"tool":   call.Name,
-	})
+	}
+	if plan.summary != "" {
+		payload["summary"] = plan.summary
+	}
+	s.events.emit(EventToolCall, payload)
 
 	// An incomplete call in a truncated response is skipped: the model
 	// was cut off before it could finish the call.
@@ -977,6 +983,7 @@ func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 			turn:       turn,
 			globalTurn: run.globalTurn,
 			arguments:  p.call.Arguments,
+			summary:    p.summary,
 		}
 		s.resultMeta[p.handle] = resultMeta{
 			tool:   p.call.Name,
@@ -995,7 +1002,7 @@ func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 // claim is made against the seal: it reports false when the run is
 // sealed, because the finalization owns every call that is still
 // outstanding.
-func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCall) bool {
+func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCall, summary string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if run.sealed {
@@ -1014,6 +1021,7 @@ func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCal
 		turn:       turn,
 		globalTurn: run.globalTurn,
 		arguments:  call.Arguments,
+		summary:    summary,
 	}
 	s.resultMeta[handle] = resultMeta{
 		tool:   call.Name,

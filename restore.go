@@ -719,7 +719,7 @@ func (s *Session) rememberCall(r *ToolCallRecord, sessionTurn map[turnKey]int) {
 			return
 		}
 	}
-	calls := append(append([]ToolCallSummary(nil), summary.Calls...), ToolCallSummary{Handle: r.Handle, Tool: r.Tool})
+	calls := append(append([]ToolCallSummary(nil), summary.Calls...), ToolCallSummary{Handle: r.Handle, Tool: r.Tool, Summary: r.Summary})
 	summary.Calls = calls
 	s.turns[st-1] = summary
 }

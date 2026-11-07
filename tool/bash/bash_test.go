@@ -559,11 +559,12 @@ func TestACallThatExitsBeforeTheDeadlineIsNotATimeout(t *testing.T) {
 	}
 }
 
-// TestADescriptionLeavesThePermissionKeyAlone covers identity and the summary:
-// a rule, a decision model and a human reader see the command and never the
-// description. The sibling timeout test pins the same three surfaces, so a
-// refactor of one cannot quietly start carrying the optional field.
-func TestADescriptionLeavesThePermissionKeyAlone(t *testing.T) {
+// TestADescriptionIsTheSummaryAndNeverThePermissionAsk covers the split: a
+// description is the human-facing summary the events and the transcript show,
+// while the permission ask keeps the command. The canonical key and the
+// evidence are the command alone, so a rule and a decision model never match
+// or read the description.
+func TestADescriptionIsTheSummaryAndNeverThePermissionAsk(t *testing.T) {
 	tool := bash.New()
 	plain, err := tool.Prepare([]byte(`{"command":"ls"}`), poo.PrepareEnv{})
 	if err != nil {
@@ -573,17 +574,35 @@ func TestADescriptionLeavesThePermissionKeyAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare rejected a description: %v", err)
 	}
-	if a, b := plain.(poo.CanonicalKeyer).CanonicalKey(), described.(poo.CanonicalKeyer).CanonicalKey(); string(a) != string(b) {
-		t.Errorf("the description changed the canonical key: %s vs %s", a, b)
-	}
-	if a, b := plain.(poo.EvidenceArgumenter).EvidenceArguments(), described.(poo.EvidenceArgumenter).EvidenceArguments(); string(a) != string(b) {
-		t.Errorf("the description changed the evidence: %s vs %s", a, b)
-	}
-	if described.Summary() != plain.Summary() {
-		t.Errorf("the description changed the summary: %q", described.Summary())
-	}
-	// An empty description is the same call.
-	if _, err := tool.Prepare([]byte(`{"command":"ls","description":""}`), poo.PrepareEnv{}); err != nil {
+	empty, err := tool.Prepare([]byte(`{"command":"ls","description":""}`), poo.PrepareEnv{})
+	if err != nil {
 		t.Fatalf("Prepare rejected an empty description: %v", err)
+	}
+	blank, err := tool.Prepare([]byte(`{"command":"ls","description":"   "}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("Prepare rejected a blank description: %v", err)
+	}
+	for _, p := range []poo.Prepared{described, empty, blank} {
+		if a, b := plain.(poo.CanonicalKeyer).CanonicalKey(), p.(poo.CanonicalKeyer).CanonicalKey(); string(a) != string(b) {
+			t.Errorf("the description changed the canonical key: %s vs %s", a, b)
+		}
+		if a, b := plain.(poo.EvidenceArgumenter).EvidenceArguments(), p.(poo.EvidenceArgumenter).EvidenceArguments(); string(a) != string(b) {
+			t.Errorf("the description changed the evidence: %s vs %s", a, b)
+		}
+	}
+	if got := described.Summary(); got != "list the directory" {
+		t.Errorf("the summary is %q, want the description", got)
+	}
+	for name, p := range map[string]poo.Prepared{"missing": plain, "empty": empty, "blank": blank} {
+		if got := p.Summary(); got != "ls" {
+			t.Errorf("a %s description made the summary %q, want the command", name, got)
+		}
+	}
+	asked, ok := described.(poo.AskSummaryer)
+	if !ok {
+		t.Fatal("the described call does not say what a permission ask shows")
+	}
+	if got := asked.AskSummary(); got != "ls" {
+		t.Errorf("the permission ask would show %q, want the command", got)
 	}
 }

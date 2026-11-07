@@ -26,7 +26,7 @@ type PermissionAsk struct {
 	AskID string
 	// Tool is the name of the tool the model called.
 	Tool string
-	// Summary describes the call.
+	// Summary describes the call, as the ask shows it.
 	Summary string
 	// Class is the tool's class.
 	Class ToolKind

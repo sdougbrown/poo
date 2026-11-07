@@ -142,7 +142,7 @@ func (t *Tool) Spec() poo.ToolSpec {
   "properties": {
     "command": {"type": "string", "description": "The command to run with /bin/bash -c."},
     "timeout": {"type": "number", "description": "Optional timeout in milliseconds for a foreground call. At most 600000 (10 minutes), and never past the configured bash timeout when one is set. A background call runs under the job timeout."},
-    "description": {"type": "string", "description": "Optional summary of what the command does. Accepted and ignored: the command is what runs and what a permission rule matches."}
+    "description": {"type": "string", "description": "Optional summary of what the command does. The event stream and the transcript show it; a permission ask still shows the command."}
   },
   "required": ["command"]
 }`),
@@ -161,21 +161,41 @@ type args struct {
 	// that any JSON number in float64 range decodes, in any form.
 	Timeout *float64 `json:"timeout"`
 	// Description is a summary the model may volunteer, as Claude Code's
-	// bash tool does. It is accepted and ignored: the command is what runs,
-	// what CanonicalKey carries, and what permission rules match.
+	// bash tool does. The summary the event stream and the transcript
+	// show is the description when it says something, and the command
+	// otherwise. It never reaches the canonical key, the evidence or a
+	// permission ask: the command alone is what runs and what a rule
+	// matches.
 	Description string `json:"description"`
 }
 
 // prepared is a validated bash call.
 type prepared struct {
 	command string
+	// description is the model's summary of the call, when it supplied
+	// one.
+	description string
 	// timeout is the bound the call asked for, already clamped to
 	// MaxCallTimeout. Zero means the call asked for none.
 	timeout time.Duration
 }
 
 // Summary describes the call for a human reader.
-func (p *prepared) Summary() string { return p.command }
+//
+// The model's description is the better line when it supplied one; an
+// absent, empty or blank description falls back to the command.
+func (p *prepared) Summary() string {
+	if strings.TrimSpace(p.description) != "" {
+		return p.description
+	}
+	return p.command
+}
+
+// AskSummary describes the call for a permission ask.
+//
+// The description is model-authored, so a permission decision never
+// reads it: the ask shows the command the model asked to run.
+func (p *prepared) AskSummary() string { return p.command }
 
 // CanonicalKey returns the call's prepared input.
 func (p *prepared) CanonicalKey() json.RawMessage {
@@ -199,7 +219,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	if strings.TrimSpace(a.Command) == "" {
 		return nil, poo.InvalidArgsf("bash: command must not be empty")
 	}
-	return &prepared{command: a.Command, timeout: requestedTimeout(a.Timeout)}, nil
+	return &prepared{command: a.Command, description: a.Description, timeout: requestedTimeout(a.Timeout)}, nil
 }
 
 // decodeStrict decodes one JSON value and nothing else.

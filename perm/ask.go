@@ -26,7 +26,7 @@ type Ask struct {
 	AskID string `json:"ask_id"`
 	// Tool is the name of the tool the model called.
 	Tool string `json:"tool"`
-	// Summary describes the call.
+	// Summary describes the call, as the ask shows it.
 	Summary string `json:"summary"`
 	// Class is the tool's class: "read_only" or "side_effecting".
 	Class poo.ToolKind `json:"class"`

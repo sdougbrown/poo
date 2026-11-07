@@ -11,6 +11,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/tool/bash"
 )
 
 // The restore: a session rebuilt from the records of an earlier one.
@@ -158,6 +159,70 @@ func TestTheRestoreRebuildsTheHistory(t *testing.T) {
 	}
 	if restored.Messages == 0 {
 		t.Errorf("the restore reported no messages")
+	}
+}
+
+// TestTheRestoreKeepsTheCallsSummary checks that a restored turn keeps the
+// tool call summary the records hold, as the after-turn hook reads it.
+func TestTheRestoreKeepsTheCallsSummary(t *testing.T) {
+	const description = "list the working directory"
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "bash", Arguments: []byte(`{"command":"true","description":` + jsonQuote(description) + `}`)}}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	opts := poo.Options{
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{"bash": bash.New()},
+		ToolOrder:  []string{"bash"},
+		Sink:       sink,
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
+	}
+	s := newTestSession(t, opts)
+	runSession(t, s, "hello")
+
+	recorded := firstCallRecord(t, sink.Records())
+	if recorded.Summary != description {
+		t.Fatalf("the recorded call's summary is %q, want %q", recorded.Summary, description)
+	}
+
+	created := header("s1")
+	created.Tools = []poo.ToolInfo{{Name: "bash", Class: poo.ClassSideEffecting, Background: poo.BackgroundAllowed}}
+	records := append([]poo.Record{created}, sink.allRecords()...)
+
+	// The restore invokes no hook, so a later turn is where a hook reads
+	// the rebuilt turn summary.
+	turns := &turnCapture{}
+	restoreOpts := restoreOptions(t, scripted([]fakeResponse{{text: "again"}}), &recordingSink{})
+	restoreOpts.Tools = map[string]poo.Tool{"bash": bash.New()}
+	restoreOpts.ToolOrder = []string{"bash"}
+	restoreOpts.Profiles = []poo.Profile{{Name: "code", Tools: []poo.ToolInfo{{Name: "bash", Class: poo.ClassSideEffecting}}}}
+	restoreOpts.AfterTurn = []poo.AfterTurnHook{turns}
+	session, _, err := poo.Restore(restoreOpts, records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	runSession(t, session, "more")
+
+	found := false
+	for _, snapshot := range turns.captured() {
+		for _, turn := range snapshot {
+			for _, call := range turn.Calls {
+				if call.Handle != recorded.Handle {
+					continue
+				}
+				found = true
+				if call.Summary != recorded.Summary {
+					t.Errorf("the restored turn summary is %q, want the recorded %q", call.Summary, recorded.Summary)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the restored turn holds no call for %s", recorded.Handle)
 	}
 }
 

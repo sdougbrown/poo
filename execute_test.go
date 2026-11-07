@@ -238,6 +238,11 @@ func TestALateDispatchWritesNoRecordAfterTheSettle(t *testing.T) {
 	if got := sink.count("tool.result"); got != 1 {
 		t.Errorf("the log holds %d tool.result records, want 1", got)
 	}
+	// The finalization wrote the record, and it kept the plan's summary,
+	// so the transcript does not diverge from the live turn summary.
+	if call := firstCallRecord(t, sink.Records()); call.Summary != `{"text":"one"}` {
+		t.Errorf("the sealed call's record summary is %q, want the plan's summary", call.Summary)
+	}
 	if got := len(tool.Calls()); got != 0 {
 		t.Errorf("the tool ran %d time(s) after the run settled, want 0", got)
 	}
@@ -347,5 +352,10 @@ func TestSkippedCallRecordsPrecedeTheSettle(t *testing.T) {
 	}
 	if got := sink.count("tool.call"); got != 2 {
 		t.Errorf("the log holds %d tool.call records, want 2", got)
+	}
+	// The seal wrote the skipped call's record, and it kept the plan's
+	// summary, so the transcript does not diverge from the turn summary.
+	if call := callRecordFor(t, sink.Records(), "r2"); call.Summary != `{"text":"two"}` {
+		t.Errorf("the sealed call's record summary is %q, want the plan's summary", call.Summary)
 	}
 }
