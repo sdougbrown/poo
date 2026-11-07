@@ -395,13 +395,22 @@ func TestADroppedInputsNoteIsDroppedWithIt(t *testing.T) {
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
-	s := newTestSession(t, testOptions(t, tr, tool, sink))
+	// The reply's id is assigned at its first delta, and the delta event
+	// carries that id. Waiting for the event is waiting for the
+	// assignment, so the note's reference is known when it is sent.
+	assigned := &eventObserver{event: poo.EventMessageDelta, seen: make(chan struct{})}
+	opts := testOptions(t, tr, tool, sink)
+	opts.Observers = []poo.Observer{assigned}
+
+	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	<-tr.streaming
-	// The message the note names is the one that was streaming, and its
-	// id was assigned at the first delta.
+	select {
+	case <-assigned.seen:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the streaming reply's first delta was never emitted")
+	}
 	if _, err := s.Send("and this", poo.Steer, poo.WithDelivered("m1", 3)); err != nil {
 		t.Fatalf("sending the steer: %v", err)
 	}
