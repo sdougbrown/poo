@@ -408,6 +408,11 @@ type issuedCall struct {
 	// write the call's record when the call was claimed before its
 	// record was written.
 	arguments json.RawMessage
+	// summary is the call's human-facing summary, when its preparation
+	// produced one. The record writers read it here, so a record the
+	// skip path or the finalization writes carries the same summary the
+	// live turn summary does.
+	summary string
 	// recorded reports that the tool.call record is written or owned for
 	// writing.
 	recorded bool

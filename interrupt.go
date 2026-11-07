@@ -151,6 +151,7 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 			Handle:     handle,
 			CallID:     call.CallID,
 			Tool:       call.Name,
+			Summary:    callRecord.summary,
 			Arguments:  recordArgs(call.Arguments),
 		})
 		s.finishCallWrite(run, callRecord)

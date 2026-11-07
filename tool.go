@@ -109,7 +109,11 @@ type ToolSettings struct {
 
 // Prepared is a validated tool call, ready to run.
 type Prepared interface {
-	// Summary is a short human-facing description of the call.
+	// Summary is a short human-facing description of the call, as the
+	// event stream and the transcript show it.
+	//
+	// A permission ask must not rest on a model-authored description, so
+	// a tool may name what its ask shows instead: see AskSummaryer.
 	Summary() string
 }
 
@@ -136,6 +140,19 @@ type EvidenceArgumenter interface {
 	// EvidenceArguments returns the arguments a decision model may see,
 	// as a JSON object.
 	EvidenceArguments() json.RawMessage
+}
+
+// AskSummaryer is implemented by a prepared call whose permission ask
+// must show something other than its summary.
+//
+// The summary is a human-facing line the model may write, and it is what
+// the event stream and the transcript show. A permission decision must
+// not rest on the model's own description of a call it has not run, so a
+// tool whose summary comes from its arguments names the call itself here.
+// A tool that does not implement it asks with its summary.
+type AskSummaryer interface {
+	// AskSummary returns the call's permission-ask text.
+	AskSummary() string
 }
 
 // Tool is a tool the model can call.

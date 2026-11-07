@@ -56,6 +56,8 @@ type HistoryItem struct {
 	Handle string `json:"handle,omitempty"`
 	// Tool is the tool the item is about.
 	Tool string `json:"tool,omitempty"`
+	// Summary is the call's human-facing summary, for a tool call.
+	Summary string `json:"summary,omitempty"`
 	// Outcome is the tool result's outcome.
 	Outcome Outcome `json:"outcome,omitempty"`
 	// Decision is the permission answer's decision.
@@ -141,6 +143,7 @@ func historyItems(records []Record) []HistoryItem {
 			item.Turn = r.Turn
 			item.Handle = r.Handle
 			item.Tool = r.Tool
+			item.Summary = r.Summary
 			item.Text = string(r.Arguments)
 		case *ToolResultRecord:
 			item.Type = HistoryToolResult

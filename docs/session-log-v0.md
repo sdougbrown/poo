@@ -278,6 +278,7 @@ a log shows what the model asked for even when the tool never finished.
 | `turn` | integer | The turn the call belongs to. |
 | `handle` | string | The call's handle within the turn, e.g. `"r1"`. |
 | `tool` | string | The tool the model called. |
+| `summary` | string | The call's human-facing summary, as the `tool.call` event shows it. A bash call shows the model's `description`, or the command when it supplied none. **Absent** when the tool has no summary, and on a log written before the field existed. |
 | `arguments` | object or string | The full arguments, in the same shape as a `tool_call` content block. The reserved `background` argument is kept here, even though the core removes it before the tool sees it. |
 | `mode` | string | How the call ran: `"sync"` in the turn, or `"job"` in the background. Absent when the log was written before the field existed. |
 
@@ -587,7 +588,7 @@ waiting, before any asker has answered.
 | `run_id` | string | The run that is waiting. |
 | `ask_id` | string | The ask's identifier. A client answers by it. |
 | `tool` | string | The name of the tool the model called. |
-| `summary` | string | What the call does. **Absent** when the tool has no summary. |
+| `summary` | string | What the call does, as the permission ask shows it. A bash call shows the command, never the model's `description`. **Absent** when the tool has no summary. |
 | `class` | string | The tool's class: `"read_only"` or `"side_effecting"`. **Absent** when the tool names none. |
 | `reason` | string | Why the call is being asked about: `"policy"` or `"doom_loop"`. **Absent** when there is none. |
 | `repeat_count` | object | The doom loop's counts, for a doom-loop ask: `exact` and `near`. **Absent** for a policy ask. |

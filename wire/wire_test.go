@@ -1161,6 +1161,43 @@ func TestHistoryPagesBackwards(t *testing.T) {
 	}
 }
 
+// The history carries the call's summary, which is what a transcript shows.
+func TestTheHistoryCarriesAToolCallsSummary(t *testing.T) {
+	factory := newTestFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(
+			pootest.Turn{Calls: []pootest.Call{{Name: "test", Arguments: json.RawMessage(`{}`)}}},
+			pootest.Turn{Text: "done", Finish: "stop"},
+		)
+	})
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+		t.Fatalf("the prompt was refused: %v", rerr)
+	}
+	h.event("run.settled")
+
+	result, rerr := h.call(protocol.MethodSessionHistory, protocol.HistoryParams{SessionID: sessionID})
+	if rerr != nil {
+		t.Fatalf("the history was refused: %v", rerr)
+	}
+	var page protocol.HistoryResult
+	if err := json.Unmarshal(result, &page); err != nil {
+		t.Fatalf("decoding the history: %v", err)
+	}
+	for _, item := range page.Items {
+		if item.Type != "tool_call" {
+			continue
+		}
+		if item.Summary != "the test tool" {
+			t.Errorf("the tool call's summary is %q, want the tool's summary", item.Summary)
+		}
+		return
+	}
+	t.Fatal("the history holds no tool call")
+}
+
 // The session's state is reported.
 func TestSessionGetReportsTheState(t *testing.T) {
 	factory := newTestFactory(t, func() poo.ChatTransport { return pootest.NewTransport() })

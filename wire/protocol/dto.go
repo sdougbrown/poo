@@ -340,6 +340,8 @@ type HistoryItem struct {
 	Handle string `json:"handle,omitempty"`
 	// Tool is the tool the item is about.
 	Tool string `json:"tool,omitempty"`
+	// Summary is the call's human-facing summary, for a tool call.
+	Summary string `json:"summary,omitempty"`
 	// Outcome is the tool result's outcome.
 	Outcome string `json:"outcome,omitempty"`
 	// Decision is the permission answer's decision.
@@ -586,7 +588,7 @@ type AskParams struct {
 	AskID string `json:"ask_id"`
 	// Tool is the name of the tool the model called.
 	Tool string `json:"tool"`
-	// Summary describes the call.
+	// Summary describes the call, as the permission ask shows it.
 	Summary string `json:"summary"`
 	// Class is the tool's class: "read_only" or "side_effecting".
 	Class string `json:"class"`

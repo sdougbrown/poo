@@ -541,13 +541,20 @@ func (p *Policy) nextAskID() string {
 	return fmt.Sprintf("a%d", p.asks)
 }
 
-// summaryOf returns the call's summary.
+// summaryOf returns the call's summary for a permission ask.
+//
+// The summary a transcript shows may be the model's own description of a
+// call it has not run. A permission decision must not rest on that, so a
+// tool that says what its ask shows names the call itself.
 //
 // A call with no prepared value has no summary: the core never asks
 // the policy about such a call, but the policy does not assume it.
 func summaryOf(info poo.ToolCallInfo) string {
 	if info.Prepared == nil {
 		return ""
+	}
+	if asker, ok := info.Prepared.(poo.AskSummaryer); ok {
+		return asker.AskSummary()
 	}
 	return info.Prepared.Summary()
 }

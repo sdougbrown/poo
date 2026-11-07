@@ -294,6 +294,7 @@ func (s *server) sessionHistory(raw json.RawMessage) (any, *protocol.Error) {
 			Text:     item.Text,
 			Handle:   item.Handle,
 			Tool:     item.Tool,
+			Summary:  item.Summary,
 			Outcome:  string(item.Outcome),
 			Decision: item.Decision,
 			Reason:   string(item.Reason),

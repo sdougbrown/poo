@@ -231,6 +231,11 @@ type ToolCallRecord struct {
 	CallID string `json:"call_id,omitempty"`
 	// Tool is the name of the tool the model called.
 	Tool string `json:"tool"`
+	// Summary is the call's human-facing summary, as the event stream
+	// shows it. It is absent when the call has none, and on a log written
+	// before the field existed. A permission ask records the command
+	// instead: the summary may be the model's own description.
+	Summary string `json:"summary,omitempty"`
 	// Arguments are the raw arguments the model sent. They are a JSON
 	// object when the model sent valid JSON, and a JSON string holding the
 	// raw text when it did not.
