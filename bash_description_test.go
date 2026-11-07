@@ -53,11 +53,8 @@ func (c *turnCapture) captured() [][]poo.TurnSummary {
 	return append([][]poo.TurnSummary(nil), c.turns...)
 }
 
-// TestABashDescriptionIsTheEventAndTranscriptSummaryNotTheAsk covers the
-// model's own words about a command it has not run: the event stream and the
-// transcript may show them, and a permission ask must not. The description
-// here downplays what the command does, which is exactly the misleading case
-// a permission decision must not rest on.
+// TestABashDescriptionIsTheEventAndTranscriptSummaryNotTheAsk checks that a
+// misleading description reaches the transcript but not the permission ask.
 func TestABashDescriptionIsTheEventAndTranscriptSummaryNotTheAsk(t *testing.T) {
 	const command = `printf 'wrote' > victim.txt`
 	const description = "list the working directory"
@@ -207,9 +204,8 @@ func callRecordFor(t *testing.T, records []poo.Record, handle string) *poo.ToolC
 	return nil
 }
 
-// TestAnInterruptKeepsASkippedCallsSummary covers the batch's skip path: a
-// call that never starts still gets a record whose summary is the plan's
-// summary, so the record, the history and the live turn summary agree.
+// TestAnInterruptKeepsASkippedCallsSummary checks that a skipped call's
+// record, history and live turn summary agree.
 func TestAnInterruptKeepsASkippedCallsSummary(t *testing.T) {
 	const first = `sleep 30`
 	const second = `printf second`

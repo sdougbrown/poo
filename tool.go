@@ -145,10 +145,9 @@ type EvidenceArgumenter interface {
 // AskSummaryer is implemented by a prepared call whose permission ask
 // must show something other than its summary.
 //
-// The summary is a human-facing line the model may write, and it is what
-// the event stream and the transcript show. A permission decision must
-// not rest on the model's own description of a call it has not run, so a
-// tool whose summary comes from its arguments names the call itself here.
+// The event stream and transcript show the summary, which the model may write.
+// Permission decisions need the call itself, not the model's description.
+// A tool whose summary comes from its arguments names the call here.
 // A tool that does not implement it asks with its summary.
 type AskSummaryer interface {
 	// AskSummary returns the call's permission-ask text.
