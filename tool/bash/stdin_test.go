@@ -21,9 +21,7 @@ import (
 // carries it.
 func stdinPtr(s string) *string { return &s }
 
-// runLocal starts a command on the local executor and returns its exit code,
-// the wait error and what it wrote.
-func runLocal(t *testing.T, c pooexec.Command) (int, error, string) {
+func runLocal(t *testing.T, c pooexec.Command) (int, string, error) {
 	t.Helper()
 	var out bytes.Buffer
 	proc, err := bash.NewLocal().Start(context.Background(), c, &out)
@@ -31,13 +29,13 @@ func runLocal(t *testing.T, c pooexec.Command) (int, error, string) {
 		t.Fatalf("starting the command: %v", err)
 	}
 	code, waitErr := proc.Wait()
-	return code, waitErr, out.String()
+	return code, out.String(), waitErr
 }
 
 // TestLocalNilStdinIsTheNullDevice covers the absent input: a command with no
 // bound stdin reads the null device, not an open pipe.
 func TestLocalNilStdinIsTheNullDevice(t *testing.T) {
-	code, err, out := runLocal(t, pooexec.Command{
+	code, out, err := runLocal(t, pooexec.Command{
 		Argv: []string{"/bin/sh", "-c", "readlink /proc/self/fd/0"},
 	})
 	if err != nil || code != 0 {
@@ -51,7 +49,7 @@ func TestLocalNilStdinIsTheNullDevice(t *testing.T) {
 // TestLocalEmptyStdinIsAnOpenPipe covers present-but-empty input: the command
 // gets a pipe that reaches EOF at once, not the null device.
 func TestLocalEmptyStdinIsAnOpenPipe(t *testing.T) {
-	code, err, out := runLocal(t, pooexec.Command{
+	code, out, err := runLocal(t, pooexec.Command{
 		Argv:  []string{"/bin/sh", "-c", "readlink /proc/self/fd/0"},
 		Stdin: stdinPtr(""),
 	})
@@ -77,7 +75,7 @@ func TestLocalDeliversStdinExactly(t *testing.T) {
 		{"large", large},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			code, err, out := runLocal(t, pooexec.Command{
+			code, out, err := runLocal(t, pooexec.Command{
 				Argv:  []string{"/bin/cat"},
 				Stdin: stdinPtr(tc.input),
 			})

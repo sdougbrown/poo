@@ -14,9 +14,7 @@ import (
 	"github.com/sdougbrown/poo/exec/bwrap"
 )
 
-// runSandboxStdin starts a command in a sandbox and returns its exit code,
-// the wait error and what it wrote.
-func runSandboxStdin(t *testing.T, executor *bwrap.Executor, c exec.Command) (int, error, string) {
+func runSandboxStdin(t *testing.T, executor *bwrap.Executor, c exec.Command) (int, string, error) {
 	t.Helper()
 	var out bytes.Buffer
 	proc, err := executor.Start(context.Background(), c, &out)
@@ -24,14 +22,14 @@ func runSandboxStdin(t *testing.T, executor *bwrap.Executor, c exec.Command) (in
 		t.Fatalf("starting the sandboxed command: %v", err)
 	}
 	code, waitErr := proc.Wait()
-	return code, waitErr, out.String()
+	return code, out.String(), waitErr
 }
 
 // TestSandboxNilStdinIsTheNullDevice covers absent input in the sandbox: the
 // command reads the null device, not an open pipe.
 func TestSandboxNilStdinIsTheNullDevice(t *testing.T) {
 	executor := newExecutor(t, bwrap.Options{})
-	code, err, out := runSandboxStdin(t, executor, exec.Command{
+	code, out, err := runSandboxStdin(t, executor, exec.Command{
 		Argv: []string{"/bin/sh", "-c", "readlink /proc/self/fd/0"},
 		Dir:  t.TempDir(),
 	})
@@ -48,7 +46,7 @@ func TestSandboxNilStdinIsTheNullDevice(t *testing.T) {
 func TestSandboxEmptyStdinIsAnOpenPipe(t *testing.T) {
 	executor := newExecutor(t, bwrap.Options{})
 	empty := ""
-	code, err, out := runSandboxStdin(t, executor, exec.Command{
+	code, out, err := runSandboxStdin(t, executor, exec.Command{
 		Argv:  []string{"/bin/sh", "-c", "readlink /proc/self/fd/0"},
 		Dir:   t.TempDir(),
 		Stdin: &empty,
@@ -76,7 +74,7 @@ func TestSandboxDeliversStdinExactly(t *testing.T) {
 		{"large", large},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			code, err, out := runSandboxStdin(t, executor, exec.Command{
+			code, out, err := runSandboxStdin(t, executor, exec.Command{
 				Argv:  []string{"/bin/cat"},
 				Dir:   t.TempDir(),
 				Stdin: &tc.input,
@@ -98,7 +96,7 @@ func TestSandboxReportsStdinTheCommandDidNotRead(t *testing.T) {
 	executor := newExecutor(t, bwrap.Options{})
 	input := strings.Repeat("secret", 1<<18)
 	start := time.Now()
-	code, err, _ := runSandboxStdin(t, executor, exec.Command{
+	code, _, err := runSandboxStdin(t, executor, exec.Command{
 		Argv:  []string{"/bin/sh", "-c", "exit 0"},
 		Dir:   t.TempDir(),
 		Stdin: &input,
@@ -124,7 +122,7 @@ func TestSandboxReportsStdinTheCommandDidNotRead(t *testing.T) {
 func TestSandboxReportsIncompleteStdinAlongsideAFailedChild(t *testing.T) {
 	executor := newExecutor(t, bwrap.Options{})
 	input := strings.Repeat("secret", 1<<18)
-	code, err, _ := runSandboxStdin(t, executor, exec.Command{
+	code, _, err := runSandboxStdin(t, executor, exec.Command{
 		Argv:  []string{"/bin/sh", "-c", "exit 3"},
 		Dir:   t.TempDir(),
 		Stdin: &input,
