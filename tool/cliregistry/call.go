@@ -252,12 +252,13 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		Argv:   p.plan.Argv,
 		Dir:    dir,
 		Env:    environ,
+		Stdin:  p.plan.Stdin,
 		Stderr: stderr,
 	}, stdout)
 	if err != nil {
 		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, err)
 	}
-	code, _ := proc.Wait()
+	code, waitErr := proc.Wait()
 
 	out := registry.Output{
 		Stdout:    []byte(stdout.String()),
@@ -280,6 +281,9 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	res, err := p.plan.Finish(out)
 	if err != nil {
 		return failed(err, cap)
+	}
+	if errors.Is(waitErr, exec.ErrStdinIncomplete) {
+		return poo.ToolResult{}, fmt.Errorf("%s: %s: %w", CallToolName, p.name, exec.ErrStdinIncomplete)
 	}
 	returncode := res.ExitCode
 	text, structured := bash.Envelope(bash.Observation{
