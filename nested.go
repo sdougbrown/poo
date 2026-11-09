@@ -3,7 +3,6 @@ package poo
 import (
 	"context"
 	"fmt"
-	"unicode/utf8"
 )
 
 // The nested tool-call seam.
@@ -81,17 +80,11 @@ func (s *Session) nestedRecordText(text string) (string, int) {
 	if limit <= 0 {
 		limit = defaultNestedTextCapChars
 	}
-	total := utf8.RuneCountInString(text)
-	if total <= limit {
-		return text, 0
+	head, elided := cutRuneHead(text, limit)
+	if elided == 0 {
+		return head, 0
 	}
-	i := 0
-	for n := 0; n < limit; n++ {
-		_, size := utf8.DecodeRuneInString(text[i:])
-		i += size
-	}
-	elided := total - limit
-	return text[:i] + fmt.Sprintf(NestedElisionNote, elided), elided
+	return head + fmt.Sprintf(NestedElisionNote, elided), elided
 }
 
 // nestedCaller is the NestedCaller a turn's tool calls carry.
