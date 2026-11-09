@@ -34,6 +34,13 @@ func TestTheAskSummaryIsCutToTheCap(t *testing.T) {
 	if got := summaryOf(poo.ToolCallInfo{Prepared: capPrepared{summary: big}}); got != want {
 		t.Errorf("the plain summary is %d characters, want the capped text", len(got))
 	}
+	// A summary of exactly the cap comes back unchanged: the boundary
+	// is inclusive, and a cut of the exact length would carry a note
+	// that leaves out nothing.
+	exact := strings.Repeat("a", poo.SummaryCapChars)
+	if got := summaryOf(poo.ToolCallInfo{Prepared: capPrepared{summary: exact}}); got != exact {
+		t.Errorf("the exact-cap summary was cut to %d characters, want it unchanged", len(got))
+	}
 	if got := summaryOf(poo.ToolCallInfo{Prepared: capPrepared{summary: "short"}}); got != "short" {
 		t.Errorf("the short summary is %q, want it unchanged", got)
 	}
