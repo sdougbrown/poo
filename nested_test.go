@@ -502,99 +502,145 @@ func TestTheConsumerHooksSeeNestedCalls(t *testing.T) {
 	}
 }
 
-// gate is a rendezvous two calls meet at.
+// rendezvous is where the two calls of a parallel batch meet.
 //
-// A call arrives, reports the most calls that were ever inside at once,
-// and leaves. A batch whose calls run one after another never reaches
-// two.
-type gate struct {
-	mu   sync.Mutex
-	in   int
-	peak int
+// A call announces that it is inside, then waits for the other call to
+// announce itself. A batch that ran its calls one after another never
+// gets the second announcement, and the wait is bounded so the test
+// fails instead of hanging.
+type rendezvous struct {
+	mu sync.Mutex
+	// arrived counts the calls that have entered the tool.
+	arrived int
+	// once closes met when the second call arrives.
+	once sync.Once
+	// met is closed once both calls are inside.
+	met chan struct{}
 }
 
-func (g *gate) arrive() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.in++
-	if g.in > g.peak {
-		g.peak = g.in
+// newRendezvous returns a rendezvous no call has reached yet.
+func newRendezvous() *rendezvous {
+	return &rendezvous{met: make(chan struct{})}
+}
+
+// meet announces the call and waits for the other call to arrive.
+func (r *rendezvous) meet(context.Context) (poo.ToolResult, error) {
+	r.mu.Lock()
+	r.arrived++
+	together := r.arrived >= 2
+	r.mu.Unlock()
+	if together {
+		r.once.Do(func() { close(r.met) })
+	}
+	select {
+	case <-r.met:
+		return poo.ToolResult{Text: "met"}, nil
+	case <-time.After(5 * time.Second):
+		return poo.ToolResult{Text: "alone"}, nil
 	}
 }
 
-func (g *gate) leave() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.in--
+// order says whether a batch ran its calls one after another.
+//
+// The first call marks the end of its run, and the second reports
+// whether it started after that mark. A batch that ran its calls at the
+// same time starts the second call while the first one runs.
+type order struct {
+	mu sync.Mutex
+	// finished is set when the first call's tool returns.
+	finished bool
+	// overlapped is set when the second call starts before that.
+	overlapped bool
 }
 
-// peakIn returns the most calls that were inside at once.
-func (g *gate) peakIn() int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.peak
+// first returns the first call's tool, which marks its run as finished.
+func (o *order) first() func(context.Context) (poo.ToolResult, error) {
+	return func(context.Context) (poo.ToolResult, error) {
+		o.mu.Lock()
+		o.finished = true
+		o.mu.Unlock()
+		return poo.ToolResult{Text: "first"}, nil
+	}
+}
+
+// second returns the second call's tool, which reports whether the first
+// call was still running when it started.
+func (o *order) second() func(context.Context) (poo.ToolResult, error) {
+	return func(context.Context) (poo.ToolResult, error) {
+		o.mu.Lock()
+		o.overlapped = !o.finished
+		o.mu.Unlock()
+		return poo.ToolResult{Text: "second"}, nil
+	}
+}
+
+// overlappedTheFirst reports whether the second call started before the
+// first one finished.
+func (o *order) overlappedTheFirst() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.overlapped
 }
 
 // TestANestedBatchIsScheduledLikeTheModels covers the scheduling rule:
 // a batch runs in parallel only when every call in it is read-only, so a
 // side-effecting call never overlaps another.
 func TestANestedBatchIsScheduledLikeTheModels(t *testing.T) {
-	const wait = 200 * time.Millisecond
-	// meet waits for a second call, and reports whether one came: a
-	// sequential batch never has two calls inside at once, so the wait
-	// is bounded and the answer is no.
-	meet := func(g *gate) func(context.Context) (poo.ToolResult, error) {
-		return func(ctx context.Context) (poo.ToolResult, error) {
-			g.arrive()
-			defer g.leave()
-			deadline := time.Now().Add(wait)
-			for time.Now().Before(deadline) {
-				if g.peakIn() >= 2 {
-					return poo.ToolResult{Text: "met"}, nil
-				}
-				time.Sleep(time.Millisecond)
-			}
-			return poo.ToolResult{Text: "alone"}, nil
-		}
-	}
-	for _, tc := range []struct {
-		name    string
-		other   poo.ToolKind
-		wantMet bool
-	}{
-		{name: "read-only batch", other: poo.ClassReadOnly, wantMet: true},
-		{name: "side-effecting batch", other: poo.ClassSideEffecting, wantMet: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			g := &gate{}
-			reader := &namedTool{echoTool: echoTool{call: meet(g)}, name: "reader"}
-			walker := &namedTool{echoTool: echoTool{call: meet(g), class: tc.other}, name: "walker"}
-			nest := &nestedTool{script: []string{`reader {"text":"one"}`, `walker {"text":"two"}`}}
-			sink := &recordingSink{}
-			s := nestedSession(t, nest,
-				map[string]poo.Tool{"reader": reader, "walker": walker}, sink)
-			runSession(t, s, "hello")
+	t.Run("read-only batch", func(t *testing.T) {
+		// Both calls of a read-only batch run at once, so each one
+		// meets the other inside its tool.
+		r := newRendezvous()
+		reader := &namedTool{echoTool: echoTool{call: r.meet}, name: "reader"}
+		walker := &namedTool{echoTool: echoTool{call: r.meet}, name: "walker"}
+		nest := &nestedTool{script: []string{`reader {"text":"one"}`, `walker {"text":"two"}`}}
+		sink := &recordingSink{}
+		s := nestedSession(t, nest,
+			map[string]poo.Tool{"reader": reader, "walker": walker}, sink)
+		runSession(t, s, "hello")
 
-			results, err := nest.returned()
-			if err != nil {
-				t.Fatalf("the seam returned an error for a batch it started: %v", err)
+		results, err := nest.returned()
+		if err != nil {
+			t.Fatalf("the seam returned an error for a batch it started: %v", err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("the seam returned %d results, want 2", len(results))
+		}
+		for _, res := range results {
+			if !strings.Contains(res.Text, "met") {
+				t.Errorf("the %s call's result is %q, want it to have met the other call", res.Tool, res.Text)
 			}
-			if len(results) != 2 {
-				t.Fatalf("the seam returned %d results, want 2", len(results))
-			}
-			for _, res := range results {
-				met := strings.Contains(res.Text, "met")
-				if met != tc.wantMet {
-					t.Errorf("the %s call's result is %q, want met=%v", res.Tool, res.Text, tc.wantMet)
-				}
-			}
-			// The tool ran both calls, whatever the answer: the batch
-			// runs to completion.
-			if got := len(reader.Calls()) + len(walker.Calls()); got != 2 {
-				t.Errorf("the batch ran %d calls, want 2", got)
-			}
-		})
-	}
+		}
+		if got := len(reader.Calls()) + len(walker.Calls()); got != 2 {
+			t.Errorf("the batch ran %d calls, want 2", got)
+		}
+	})
+
+	t.Run("side-effecting batch", func(t *testing.T) {
+		// One side-effecting call makes the batch sequential: the
+		// second call starts after the first one has finished.
+		o := &order{}
+		reader := &namedTool{echoTool: echoTool{call: o.first()}, name: "reader"}
+		walker := &namedTool{echoTool: echoTool{call: o.second(), class: poo.ClassSideEffecting}, name: "walker"}
+		nest := &nestedTool{script: []string{`reader {"text":"one"}`, `walker {"text":"two"}`}}
+		sink := &recordingSink{}
+		s := nestedSession(t, nest,
+			map[string]poo.Tool{"reader": reader, "walker": walker}, sink)
+		runSession(t, s, "hello")
+
+		results, err := nest.returned()
+		if err != nil {
+			t.Fatalf("the seam returned an error for a batch it started: %v", err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("the seam returned %d results, want 2", len(results))
+		}
+		if o.overlappedTheFirst() {
+			t.Error("the second call started before the first finished, so the batch ran its calls at the same time")
+		}
+		if got := len(reader.Calls()) + len(walker.Calls()); got != 2 {
+			t.Errorf("the batch ran %d calls, want 2", got)
+		}
+	})
 }
 
 // resultCapture reports whether the view answered with a handle's
@@ -839,17 +885,16 @@ func TestASkippedNestedCallIsData(t *testing.T) {
 		t.Fatalf("the seam returned %d results, want 2", len(results))
 	}
 	second := results[1]
-	if second.Outcome != poo.OutcomeSkipped && second.Outcome != poo.OutcomeCancelled {
-		t.Errorf("the skipped call's result is %q, want skipped or cancelled", second.Outcome)
+	if second.Outcome != poo.OutcomeSkipped {
+		t.Errorf("the second call's result is %q, want skipped", second.Outcome)
 	}
 	if !second.IsError {
 		t.Errorf("the skipped call's result is %q, want an error", second.Outcome)
 	}
-	t.Logf("the second nested call's outcome is %q", second.Outcome)
 	// A call that never started never reached its tool: a skipped call
 	// that ran would be the seam starting work the run had stopped.
-	if second.Outcome == poo.OutcomeSkipped && len(walker.Calls()) != 0 {
-		t.Errorf("the walker ran %d times for a skipped call, want 0", len(walker.Calls()))
+	if got := len(walker.Calls()); got != 0 {
+		t.Errorf("the walker ran %d times for a skipped call, want 0", got)
 	}
 
 	// The record the log wrote for the skipped call, when it wrote one,
