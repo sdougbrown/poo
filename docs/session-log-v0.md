@@ -288,7 +288,7 @@ model never saw the call, and the log's contract — the messages in the
 log are the same list the model sees — keeps holding. It goes back to
 the tool that made the call instead, after the same before-tool and
 after-tool hooks a model-made call goes through. The recovery's message
-rule leaves a call with no provider id out of the history, so a torn
+rule leaves a call that names a `parent` out of the history, so a torn
 tail's nested calls are closed without polluting it either.
 
 ## `tool.result`

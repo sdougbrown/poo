@@ -77,10 +77,15 @@ type PendingCall struct {
 	Handle string
 	// Tool is the name of the tool the model called.
 	Tool string
-	// CallID is the provider's id of the call. It is empty when the
-	// records pair the call with no message: the model never saw the
-	// call, and no result refers to it.
+	// CallID is the provider's id of the call: the id the call's record
+	// holds, or the one the message block carrying the call gives. It is
+	// empty when neither pairs the call with an id, and then no result
+	// message refers to it.
 	CallID string
+	// Nested reports that the call is one a running tool made: its
+	// record names a parent call. The model never saw such a call, so
+	// the recovery answers it with a result and never with a message.
+	Nested bool
 	// MissingResult reports that the call has no result record.
 	MissingResult bool
 	// MissingMessage reports that the call has no result message.
@@ -211,7 +216,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 			// The result goes into the model's view, so the call the
 			// model made is answered. A call the model never saw has
 			// no message to carry the result.
-			if call.CallID == "" || !call.MissingMessage {
+			if call.Nested || !call.MissingMessage {
 				continue
 			}
 			msg := poo.ToolResultMessage(call.CallID, call.Tool, text, isError)
@@ -365,6 +370,7 @@ func pendingOf(id string, recs []poo.Record) *Pending {
 			call.Handle = r.Handle
 			call.Tool = r.Tool
 			call.CallID = id
+			call.Nested = r.Parent != ""
 			call.Recorded = true
 		case *poo.ToolResultRecord:
 			state.run(r.RunID)

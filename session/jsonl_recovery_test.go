@@ -527,24 +527,26 @@ func TestTheRecoveryKeepsTheFileWhole(t *testing.T) {
 // torn tail: a nested tool.call with no result is recovered with an
 // interrupted result, and no message record — the model never saw the
 // call, so nothing of it enters the history.
+//
+// The parent is what says the model never saw the call, not the absence
+// of a provider id: a nested call whose record carries an id is closed
+// without a message too.
 func TestANestedCallWithoutAResultIsRecovered(t *testing.T) {
 	dir, store := newTestStore(t)
 	ctx := context.Background()
 
-	nested := &poo.ToolCallRecord{
-		RecordMeta: poo.NewRecordMeta("tool.call"),
-		RunID:      "r1",
-		Turn:       1,
-		Handle:     "r5",
-		Tool:       "read",
-		Mode:       poo.CallModeNested,
-		Parent:     "r2",
+	nested := func(handle, callID string) *poo.ToolCallRecord {
+		rec := toolCallWithID("r1", 1, handle, "read", callID)
+		rec.Mode = poo.CallModeNested
+		rec.Parent = "r2"
+		return rec
 	}
 	writeSession(t, dir, "s1",
 		createdRecord("s1"),
 		runStarted("r1"),
 		toolCall("r1", 1, "r2", "codemode"),
-		nested,
+		nested("r5", ""),
+		nested("r6", "call_nested_2"),
 	)
 
 	loaded, err := store.Load(ctx, "s1")
@@ -552,28 +554,29 @@ func TestANestedCallWithoutAResultIsRecovered(t *testing.T) {
 		t.Fatalf("loading the session: %v", err)
 	}
 
-	var result *poo.ToolResultRecord
+	results := map[string]*poo.ToolResultRecord{}
 	messages := 0
 	for _, rec := range loaded.Records {
 		switch r := rec.(type) {
 		case *poo.ToolResultRecord:
-			if r.Handle == "r5" {
-				result = r
-			}
+			results[r.Handle] = r
 		case *poo.MessageRecord:
 			messages++
 		}
 	}
-	if result == nil {
-		t.Fatal("the nested call has no recovered result")
+	for _, handle := range []string{"r5", "r6"} {
+		result := results[handle]
+		if result == nil {
+			t.Fatalf("the nested call %s has no recovered result", handle)
+		}
+		if result.Outcome != poo.OutcomeInterrupted {
+			t.Errorf("the recovered outcome of %s is %q, want interrupted", handle, result.Outcome)
+		}
 	}
-	if result.Outcome != poo.OutcomeInterrupted {
-		t.Errorf("the recovered outcome is %q, want interrupted", result.Outcome)
-	}
-	// No message at all: neither call carries a provider id, so the
-	// recovery writes none — the nested call in particular must never
-	// get one, or the model's history would hold a result it never saw.
+	// No message at all: the model never saw either nested call, so
+	// neither gets a result message — the parent keeps them out of the
+	// history, with or without a provider id.
 	if messages != 0 {
-		t.Errorf("the recovered log holds %d messages, want 0 (the recovery writes none for the nested call)", messages)
+		t.Errorf("the recovered log holds %d messages, want 0 (the recovery writes none for a nested call)", messages)
 	}
 }
