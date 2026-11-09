@@ -179,7 +179,7 @@ func TestARefusalWinsOverAResult(t *testing.T) {
 	}
 }
 
-// TestThePolicySlotIsNotSubjectToTheHookDeadline covers the rule:: the policy slot is exempt from the hook deadline, so a slot
+// TestThePolicySlotIsNotSubjectToTheHookDeadline covers the rule: the policy slot is exempt from the hook deadline, so a slot
 // that takes longer than the deadline still answers and the call runs.
 func TestThePolicySlotIsNotSubjectToTheHookDeadline(t *testing.T) {
 	policy := &slowPolicy{delay: 150 * time.Millisecond}

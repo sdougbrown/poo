@@ -108,7 +108,7 @@ func TestTheUnmatchedActionAppliesToSideEffectingCalls(t *testing.T) {
 	}
 }
 
-// TestTheUnmatchedActionAndTheFallbackAreIndependent covers the rule:: the unmatched action says what happens when the policy asks,
+// TestTheUnmatchedActionAndTheFallbackAreIndependent covers the rule: the unmatched action says what happens when the policy asks,
 // and the fallback says what happens when the chain has no answer. The
 // two are separate.
 func TestTheUnmatchedActionAndTheFallbackAreIndependent(t *testing.T) {
@@ -280,7 +280,7 @@ func TestAMalformedPolicyIsAConstructionError(t *testing.T) {
 	}
 }
 
-// TestAnEmptyPolicyPassesWithoutSideEffectingTools covers the rule:: a build with no side-effecting tools passes with an empty
+// TestAnEmptyPolicyPassesWithoutSideEffectingTools covers the rule: a build with no side-effecting tools passes with an empty
 // policy.
 func TestAnEmptyPolicyPassesWithoutSideEffectingTools(t *testing.T) {
 	policy, err := perm.New(perm.Options{})

@@ -106,7 +106,7 @@ func TestABackgroundCallReturnsStarted(t *testing.T) {
 	}
 }
 
-// TestTheBackgroundArgumentIsStrippedBeforePrepare covers the rule:: the core removes the reserved argument before the tool's own
+// TestTheBackgroundArgumentIsStrippedBeforePrepare covers the rule: the core removes the reserved argument before the tool's own
 // decoder sees it.
 func TestTheBackgroundArgumentIsStrippedBeforePrepare(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -146,7 +146,7 @@ func TestTheBackgroundArgumentIsStrippedBeforePrepare(t *testing.T) {
 	}
 }
 
-// TestANonBooleanBackgroundArgumentIsRecoverable covers the rule:: a background argument that is not a boolean is a recoverable
+// TestANonBooleanBackgroundArgumentIsRecoverable covers the rule: a background argument that is not a boolean is a recoverable
 // error, and the run carries on.
 func TestANonBooleanBackgroundArgumentIsRecoverable(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -191,7 +191,7 @@ func TestANonBooleanBackgroundArgumentIsRecoverable(t *testing.T) {
 	}
 }
 
-// TestASchemaThatDefinesBackgroundFailsRegistration covers the rule:: the reserved name cannot be taken by a tool.
+// TestASchemaThatDefinesBackgroundFailsRegistration covers the rule: the reserved name cannot be taken by a tool.
 func TestASchemaThatDefinesBackgroundFailsRegistration(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
@@ -249,7 +249,7 @@ func TestBackgroundAlwaysMakesEveryCallAJob(t *testing.T) {
 	}
 }
 
-// TestTheAllowedToolIsOfferedTheBackgroundProperty covers the rule:: a tool that says allowed is offered the reserved argument.
+// TestTheAllowedToolIsOfferedTheBackgroundProperty covers the rule: a tool that says allowed is offered the reserved argument.
 func TestTheAllowedToolIsOfferedTheBackgroundProperty(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}

@@ -101,7 +101,7 @@ func TestAnObserverErrorDoesNotSettleTheRun(t *testing.T) {
 	})
 }
 
-// TestTwoStalledObserversGetCoalescedDroppedRecords covers the rule:: the events an observer missed are reported in a coalesced
+// TestTwoStalledObserversGetCoalescedDroppedRecords covers the rule: the events an observer missed are reported in a coalesced
 // record, the record is never delivered to an observer, and the number
 // of records stays bounded.
 func TestTwoStalledObserversGetCoalescedDroppedRecords(t *testing.T) {

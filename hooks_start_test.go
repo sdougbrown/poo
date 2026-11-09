@@ -84,7 +84,7 @@ func (h *recordingStartHook) Histories() []int {
 	return append([]int(nil), h.histories...)
 }
 
-// TestTheSessionStartHookAppendsAndEditsThePrompt covers the rule:: a session-start hook may append to the history and change the
+// TestTheSessionStartHookAppendsAndEditsThePrompt covers the rule: a session-start hook may append to the history and change the
 // system prompt, and the change is in the prompt the run sends.
 func TestTheSessionStartHookAppendsAndEditsThePrompt(t *testing.T) {
 	hook := &recordingStartHook{decision: poo.StartDecision{
@@ -157,7 +157,7 @@ func TestTheBeforeRunHookAppendsAndEditsThePrompt(t *testing.T) {
 	}
 }
 
-// TestTheSessionStartHooksEditIsInEveryRunsPrompt covers the rule:: a change the session start made is still there in the next
+// TestTheSessionStartHooksEditIsInEveryRunsPrompt covers the rule: a change the session start made is still there in the next
 // run's prompt.
 func TestTheSessionStartHooksEditIsInEveryRunsPrompt(t *testing.T) {
 	hook := &recordingStartHook{decision: poo.StartDecision{
@@ -181,7 +181,7 @@ func TestTheSessionStartHooksEditIsInEveryRunsPrompt(t *testing.T) {
 	}
 }
 
-// TestTheBeforeRunHookSeesTheJobsThatWokeTheRun covers the rule:: a woken run's before-run hook is told what woke it, and the
+// TestTheBeforeRunHookSeesTheJobsThatWokeTheRun covers the rule: a woken run's before-run hook is told what woke it, and the
 // job results are already in the history.
 func TestTheBeforeRunHookSeesTheJobsThatWokeTheRun(t *testing.T) {
 	hook := &recordingStartHook{}

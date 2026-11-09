@@ -109,7 +109,7 @@ func TestAJobResultRendersAsOneElement(t *testing.T) {
 	}
 }
 
-// TestTheBeforeSettleHookRunsOnceAtTheRealSettle covers the rule:: the settle hooks do not run when the run enters the waiting
+// TestTheBeforeSettleHookRunsOnceAtTheRealSettle covers the rule: the settle hooks do not run when the run enters the waiting
 // state, because the run is not ending.
 func TestTheBeforeSettleHookRunsOnceAtTheRealSettle(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -215,7 +215,7 @@ func TestAnInterruptWhileWaitingIsDeliveredAtOnce(t *testing.T) {
 	}
 }
 
-// TestAFollowUpWhileWaitingWaitsForTheRealSettle covers the rule:: a follow-up is delivered only at a real settle, so a queued
+// TestAFollowUpWhileWaitingWaitsForTheRealSettle covers the rule: a follow-up is delivered only at a real settle, so a queued
 // follow-up does not keep the run from waiting.
 func TestAFollowUpWhileWaitingWaitsForTheRealSettle(t *testing.T) {
 	tr := scripted([]fakeResponse{

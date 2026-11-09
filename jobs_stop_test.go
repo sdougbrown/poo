@@ -259,7 +259,7 @@ func TestMaxRunningRefusesTheExtraCall(t *testing.T) {
 	}
 }
 
-// TestAJobThatFailsFatallySettlesTheReceivingRun covers the rule:: a job error that wraps ErrFatal is delivered like any result
+// TestAJobThatFailsFatallySettlesTheReceivingRun covers the rule: a job error that wraps ErrFatal is delivered like any result
 // and adds the tool_fatal candidate to the receiving run.
 func TestAJobThatFailsFatallySettlesTheReceivingRun(t *testing.T) {
 	tr := scripted([]fakeResponse{

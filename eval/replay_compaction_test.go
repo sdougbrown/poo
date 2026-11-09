@@ -39,7 +39,7 @@ func TestTheReplayAppliesTheRecordedCompaction(t *testing.T) {
 	}
 }
 
-// TestTheReplayWithoutACompactionRunsUncompacted covers the rule:: a recording with no compaction replays without one.
+// TestTheReplayWithoutACompactionRunsUncompacted covers the rule: a recording with no compaction replays without one.
 func TestTheReplayWithoutACompactionRunsUncompacted(t *testing.T) {
 	path := writeLog(t,
 		`{"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s","context_limit":32768}`,

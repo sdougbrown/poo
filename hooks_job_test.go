@@ -14,7 +14,7 @@ import (
 // the session's own context. There may be no active run then: the run
 // that started the job may have settled long ago.
 
-// TestTheJobChainRunsOnceAtCompletionWithNoActiveRun covers the rule:: the chain runs at the completion, under the session's context,
+// TestTheJobChainRunsOnceAtCompletionWithNoActiveRun covers the rule: the chain runs at the completion, under the session's context,
 // and the hook is told which job it runs for and which run started it.
 func TestTheJobChainRunsOnceAtCompletionWithNoActiveRun(t *testing.T) {
 	hook := &recordingAfterTool{decision: poo.Keep()}
@@ -70,7 +70,7 @@ func TestTheJobChainRunsOnceAtCompletionWithNoActiveRun(t *testing.T) {
 	}
 }
 
-// TestTheJobsRedactionKeepsTheSecretOutOfTheStore covers the rule:: only the chain's result is recorded and emitted, so a held
+// TestTheJobsRedactionKeepsTheSecretOutOfTheStore covers the rule: only the chain's result is recorded and emitted, so a held
 // result never leaks what a hook would have redacted.
 func TestTheJobsRedactionKeepsTheSecretOutOfTheStore(t *testing.T) {
 	const secret = "s3cr3t-token"

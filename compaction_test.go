@@ -531,7 +531,7 @@ func afterTurns(n int) func(poo.View, poo.ContextBudget) bool {
 	}
 }
 
-// TestTheReplacementIsAppliedAndTheOriginalsAreKept covers the rule:: the view changes, and the store keeps every original record.
+// TestTheReplacementIsAppliedAndTheOriginalsAreKept covers the rule: the view changes, and the store keeps every original record.
 func TestTheReplacementIsAppliedAndTheOriginalsAreKept(t *testing.T) {
 	compactor := &compactionCompactor{
 		should: afterTurns(1),
@@ -738,7 +738,7 @@ func TestACutOverARemovedTurnIsRejected(t *testing.T) {
 	}
 }
 
-// TestTheRewriteReplacesTheResultAndKeepsThePairing covers the rule:: a rewrite changes the content of a tool result, the call and
+// TestTheRewriteReplacesTheResultAndKeepsThePairing covers the rule: a rewrite changes the content of a tool result, the call and
 // the result stay paired, and the handle and the compacted marker are
 // there.
 func TestTheRewriteReplacesTheResultAndKeepsThePairing(t *testing.T) {
@@ -1171,7 +1171,7 @@ func TestTheCompactionRecordCarriesTheCutAndTheReplacement(t *testing.T) {
 	}
 }
 
-// TestTheHandlesNumberTheResultsAndGrowAcrossRuns covers the rule:: every tool result starts with its handle line, and the number
+// TestTheHandlesNumberTheResultsAndGrowAcrossRuns covers the rule: every tool result starts with its handle line, and the number
 // grows across the runs of a session.
 func TestTheHandlesNumberTheResultsAndGrowAcrossRuns(t *testing.T) {
 	tr := scripted([]fakeResponse{

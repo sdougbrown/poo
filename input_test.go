@@ -303,7 +303,7 @@ func TestAnInterruptSkipsTheUnstartedCalls(t *testing.T) {
 	}
 }
 
-// TestAnInterruptDuringTheHooksDiscardsTheirDecision covers the rule:: the hook's decision is discarded, and that is not a hook error.
+// TestAnInterruptDuringTheHooksDiscardsTheirDecision covers the rule: the hook's decision is discarded, and that is not a hook error.
 func TestAnInterruptDuringTheHooksDiscardsTheirDecision(t *testing.T) {
 	// The hook blocks until the test releases it, and the interrupt
 	// arrives while it waits.
@@ -606,7 +606,7 @@ func (o *eventObserver) Observe(ev poo.Event) error {
 	return nil
 }
 
-// TestAFollowUpQueuedWhenTheRunIsCancelledIsDropped covers the rule:: a follow-up that never reaches the model is dropped and
+// TestAFollowUpQueuedWhenTheRunIsCancelledIsDropped covers the rule: a follow-up that never reaches the model is dropped and
 // reported.
 func TestAFollowUpQueuedWhenTheRunIsCancelledIsDropped(t *testing.T) {
 	tr := newStallingTransport()
@@ -641,7 +641,7 @@ func TestAFollowUpQueuedWhenTheRunIsCancelledIsDropped(t *testing.T) {
 	}
 }
 
-// TestASteerDuringBeforeSettleAbandonsTheFinalize covers the rule:: a steer that arrives during the settle hooks abandons the
+// TestASteerDuringBeforeSettleAbandonsTheFinalize covers the rule: a steer that arrives during the settle hooks abandons the
 // finalization, and the AfterTurn hooks are not re-run.
 func TestASteerDuringBeforeSettleAbandonsTheFinalize(t *testing.T) {
 	hookStarted := make(chan struct{})
@@ -829,7 +829,7 @@ func TestASteerBeforeAnAfterTurnStopIsDropped(t *testing.T) {
 	}
 }
 
-// TestTheFinalizeIsNotAbandonedWhenACancelIsPending covers the rule:: a finalization with a cancel candidate is never abandoned, even
+// TestTheFinalizeIsNotAbandonedWhenACancelIsPending covers the rule: a finalization with a cancel candidate is never abandoned, even
 // when the queue is not empty.
 func TestTheFinalizeIsNotAbandonedWhenACancelIsPending(t *testing.T) {
 	tr := newStallingTransport()
@@ -1253,7 +1253,7 @@ func (r *partialCallReader) Next() (poo.StreamItem, error) {
 // Close releases the reader.
 func (r *partialCallReader) Close() error { return nil }
 
-// TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd covers the rule:: a follow-up is delivered only when the run would settle
+// TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd covers the rule: a follow-up is delivered only when the run would settle
 // naturally, so a turn end that continues the run leaves it queued.
 func TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd(t *testing.T) {
 	tr := scripted([]fakeResponse{

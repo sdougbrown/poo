@@ -34,9 +34,9 @@ func brokenStreamServer(t *testing.T) *httptest.Server {
 // provider_error, its tool calls are not executed, and the run settles
 // provider_error".
 //
-// The settle reason and "no executed calls" are there. The message is
-// not recorded: readResponse hands the partial response back, and the
-// loop drops it on the settle path.
+// The run settles provider_error, the tool calls in the broken stream
+// never execute, and the partial assistant message is recorded with
+// partial: true and cause: provider_error.
 func TestThePartialAssistantMessageAfterADeltaIsRecorded(t *testing.T) {
 	srv := brokenStreamServer(t)
 	tr := openai.New(openai.Options{

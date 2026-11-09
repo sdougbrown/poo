@@ -93,7 +93,7 @@ func longScript() *pootest.Transport {
 	)
 }
 
-// TestTheForkSendsTheMainPrefixPlusTheInstruction covers the rule:: the fork is byte-identical to the last main request, apart
+// TestTheForkSendsTheMainPrefixPlusTheInstruction covers the rule: the fork is byte-identical to the last main request, apart
 // from the instruction it appends.
 func TestTheForkSendsTheMainPrefixPlusTheInstruction(t *testing.T) {
 	tr := script()

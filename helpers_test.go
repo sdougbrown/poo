@@ -414,9 +414,6 @@ func (r *heldToolCallReader) Next() (poo.StreamItem, error) {
 
 func (*heldToolCallReader) Close() error { return nil }
 
-// The stage-4 fix pass's tool: it can block until its context ends and
-// return the partial output it had.
-
 // holdPrepared is a prepared call for holdTool.
 type holdPrepared struct{ text string }
 

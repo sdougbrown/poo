@@ -418,7 +418,7 @@ func TestAPromptChangeThatDoesNotRenderIsRefused(t *testing.T) {
 	}
 }
 
-// TestASystemPromptRecordCarriesTheRenderedPrompt covers the rule:: every rendered prompt that differs from the previous one is
+// TestASystemPromptRecordCarriesTheRenderedPrompt covers the rule: every rendered prompt that differs from the previous one is
 // written whole, with its hash and variant.
 func TestASystemPromptRecordCarriesTheRenderedPrompt(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "one"}, {text: "two"}})

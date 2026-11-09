@@ -217,7 +217,7 @@ func TestATruncatedTurnWithNoCompleteCallReachesBeforeSettle(t *testing.T) {
 	}
 }
 
-// TestABatchCompletesBeforeHasToolCallStopsTheRun covers the rule:: the whole batch runs, and then the stop condition is asked.
+// TestABatchCompletesBeforeHasToolCallStopsTheRun covers the rule: the whole batch runs, and then the stop condition is asked.
 func TestABatchCompletesBeforeHasToolCallStopsTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
@@ -731,7 +731,7 @@ func TestTheMaxDurationBudgetSettlesTheRun(t *testing.T) {
 	}
 }
 
-// TestTheMaxDurationBudgetFiringMidToolSettlesTheRun covers the rule:: the budget goes through finalize, so the settle record is
+// TestTheMaxDurationBudgetFiringMidToolSettlesTheRun covers the rule: the budget goes through finalize, so the settle record is
 // written and the tool gets a result.
 func TestTheMaxDurationBudgetFiringMidToolSettlesTheRun(t *testing.T) {
 	started := make(chan struct{})
@@ -819,7 +819,7 @@ func TestTheGateChecksTheBudgetOnEveryPath(t *testing.T) {
 	}
 }
 
-// TestASessionWithoutACompactorNeverEntersCompacting covers the rule:: the compacting state is reachable only with a compactor.
+// TestASessionWithoutACompactorNeverEntersCompacting covers the rule: the compacting state is reachable only with a compactor.
 func TestASessionWithoutACompactorNeverEntersCompacting(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}

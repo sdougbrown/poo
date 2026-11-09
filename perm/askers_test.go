@@ -187,7 +187,7 @@ func TestACancelWhileAnAskIsPendingDenies(t *testing.T) {
 	}
 }
 
-// TestTheUnmatchedAskWithNoAskersFallsBackToAllow covers the rule:: the unmatched action and the fallback are independent, so an ask
+// TestTheUnmatchedAskWithNoAskersFallsBackToAllow covers the rule: the unmatched action and the fallback are independent, so an ask
 // with no asker falls back to the fallback's decision.
 func TestTheUnmatchedAskWithNoAskersFallsBackToAllow(t *testing.T) {
 	policy, err := perm.New(perm.Options{

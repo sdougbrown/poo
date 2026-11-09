@@ -16,7 +16,7 @@ import (
 // idle, the unattended-wake limit, a mixed batch, and the failures a
 // job's end can have.
 
-// TestTwoResultsFinishingWhileIdleStartOneWokenRun covers the rule:: two results that finish while the session is idle start one
+// TestTwoResultsFinishingWhileIdleStartOneWokenRun covers the rule: two results that finish while the session is idle start one
 // woken run that carries both.
 func TestTwoResultsFinishingWhileIdleStartOneWokenRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -342,7 +342,7 @@ func TestASinkFailureOnTheJobEndBreaksTheSession(t *testing.T) {
 	_ = firstRunID
 }
 
-// TestTheHeldResultIsDeliveredBeforeTheNextPrompt covers the rule:: a held result is delivered at the start of the next run, before
+// TestTheHeldResultIsDeliveredBeforeTheNextPrompt covers the rule: a held result is delivered at the start of the next run, before
 // the prompt's text.
 func TestTheHeldResultIsDeliveredBeforeTheNextPrompt(t *testing.T) {
 	tr := scripted([]fakeResponse{
