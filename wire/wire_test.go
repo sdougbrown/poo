@@ -683,6 +683,10 @@ func TestInspectPagesTheEvents(t *testing.T) {
 		t.Fatalf("the prompt was refused: %v", rerr)
 	}
 	h.event("run.settled")
+	// The settled event reaches the client before the run retires: the
+	// state flips to settled later, in wakeWaiters. Wait for the state
+	// before reading it back.
+	h.awaitState(t, sessionID, "settled")
 
 	result, rerr := h.call(protocol.MethodRunInspect, protocol.InspectParams{SessionID: sessionID})
 	if rerr != nil {
