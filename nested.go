@@ -214,6 +214,14 @@ func (n *nestedCaller) Call(ctx context.Context, parent, tool string, raw json.R
 		"parent": parent,
 	})
 
+	// The call is marked started only once its tool is about to run.
+	// The claim is made against the seal, so nothing starts after the
+	// commit point: a run that settled while the record was in flight
+	// owns the call, and this goroutine starts no effect.
+	if !s.startCall(run, handle) {
+		return NestedResult{}, fmt.Errorf("%w: the nested call did not start", errRunWindingDown)
+	}
+
 	// A refusal is data: the script sees the denial and decides what to
 	// do, and the run carries on.
 	if decision.Denied {
