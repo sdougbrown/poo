@@ -954,8 +954,12 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		Hooks:       out.decisions,
 	}
 	if out.original != nil {
+		originalText := out.original.Text
+		if parent != "" {
+			originalText, _ = s.nestedRecordText(originalText)
+		}
 		rec.Original = &ToolResultData{
-			Text:       out.original.Text,
+			Text:       originalText,
 			Structured: out.original.Structured,
 			IsError:    out.original.IsError,
 		}

@@ -1234,3 +1234,28 @@ func checkCutText(t *testing.T, what, text string, elided int, whole string, lim
 		t.Errorf("%s and its elided count (%d) do not add up to the result", what, elided)
 	}
 }
+
+// TestANestedResultsReplacedOriginalIsCut covers a hook that replaces a
+// nested result: the record keeps the original the tool produced, cut
+// like the result's own text.
+func TestANestedResultsReplacedOriginalIsCut(t *testing.T) {
+	long := strings.Repeat("y", 5000)
+	nest := &nestedTool{script: []string{`big {}`}}
+	sink := &recordingSink{}
+	s := nestedSession(t, nest, map[string]poo.Tool{"big": &bigTool{text: long}}, sink,
+		func(o *poo.Options) { o.Settings.ObservationCapChars = 1000 },
+		poo.WithAfterTool(&rewriteNested{tool: "big", text: "replaced"}),
+	)
+	runSession(t, s, "hello")
+
+	var rec *poo.ToolResultRecord
+	for _, r := range sink.allRecords() {
+		if r, ok := r.(*poo.ToolResultRecord); ok && r.Tool == "big" {
+			rec = r
+		}
+	}
+	if rec == nil || rec.Original == nil {
+		t.Fatal("no record of the replaced nested result's original")
+	}
+	checkCutText(t, "the replaced original", rec.Original.Text, 5000-1000, long, 1000)
+}

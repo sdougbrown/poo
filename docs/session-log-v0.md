@@ -297,9 +297,13 @@ caps, since its output never reaches the model directly. The tool that
 made the call reads the whole result. The record's `text` and the
 `tool.result` event's `text` are held to the session's observation cap,
 with the rest counted in `elided_chars`. A cut `text` ends with a line
-that says how many more characters went to the calling tool. The record's `structured`
-payload is kept whole, so a nested bash call's full output is in the
-log once.
+that says how many more characters went to the calling tool. A hook's
+replaced original is cut the same way.
+
+The record's `structured` payload is kept whole. A tool whose payload
+holds its output, such as bash or `call_cli`, has its full output in
+the log once. A tool with no payload, such as read or grep, has only
+the cut text.
 
 ## `tool.result`
 
