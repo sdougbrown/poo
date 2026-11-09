@@ -765,7 +765,11 @@ func TestTwoInterruptsCoalesceIntoOneAbort(t *testing.T) {
 // TestACancelDuringAnInterruptWins covers the plan's rule: a cancel
 // beats an interrupt, and the interrupt's message is dropped.
 func TestACancelDuringAnInterruptWins(t *testing.T) {
+	// The hold pins the run at the stream after the abort: the cancel's
+	// finalization then takes the accepted interrupt off the queue and
+	// drops it, instead of racing the interrupted turn's own drain.
 	tr := newStallingTransport()
+	tr.hold = make(chan struct{})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 
@@ -782,6 +786,7 @@ func TestACancelDuringAnInterruptWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
+	close(tr.hold)
 	if res.Reason != poo.ReasonCancelled {
 		t.Errorf("the run settled %q, want cancelled", res.Reason)
 	}
