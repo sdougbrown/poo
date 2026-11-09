@@ -63,8 +63,9 @@ const NestedElisionNote = "\n… %d more characters went to the calling tool"
 //
 // The caller reads the whole result, which can be NestedOutputCapChars
 // long. The event goes to every consumer of the stream and is kept for
-// an inspect. A resume reads the record back whole. So both hold the
-// text to the session's observation cap, and the record's structured
+// an inspect. The record goes to the log, and a resume loads the whole
+// log, though the restore skips nested records. So both hold the text
+// to the session's observation cap, and the record's structured
 // payload stays whole.
 func (s *Session) nestedRecordText(text string) (string, int) {
 	limit := s.opts.Settings.ObservationCapChars

@@ -300,10 +300,12 @@ with the rest counted in `elided_chars`. A cut `text` ends with a line
 that says how many more characters went to the calling tool. A hook's
 replaced original is cut the same way.
 
-The record's `structured` payload is kept whole. A tool whose payload
-holds its output, such as bash or `call_cli`, has its full output in
-the log once. A tool with no payload, such as read or grep, has only
-the cut text.
+The record's `structured` payload is kept whole, so a tool whose
+payload holds its output has that output in the log once. Bash's
+capture always fits under the nested cap. `call_cli`'s stdout and
+stderr share the cap, so two streams that pass it together are kept
+as their heads and tails. A tool with no payload, such as read or
+grep, has only the cut text.
 
 ## `tool.result`
 
