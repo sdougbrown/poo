@@ -65,6 +65,29 @@ func run(t *testing.T, script string, nested poo.NestedCaller, limits codemode.L
 	})
 }
 
+// TestAScriptLoopsAtTheTopLevel covers the shape a model writes: a loop
+// and a branch at the top level that reassign a global between calls.
+func TestAScriptLoopsAtTheTopLevel(t *testing.T) {
+	nested := &fakeNested{}
+	res, err := run(t, `
+count = 0
+for path in ["a.txt", "b.txt", "c.txt"]:
+    r = call("read", {"path": path})
+    if not r["is_error"]:
+        count += 1
+exit(count)
+`, nested, codemode.Limits{})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if string(res.Value) != "3" {
+		t.Errorf("the script returned %s, want 3", res.Value)
+	}
+	if res.Calls != 3 {
+		t.Errorf("the script made %d calls, want 3", res.Calls)
+	}
+}
+
 // TestAScriptCallsTools covers the headline: the script's calls go
 // through the seam with JSON arguments, and the result comes back as
 // data.
@@ -207,7 +230,7 @@ exit()
 }
 
 // TestTheStepBudgetStopsALoop covers the exec-steps cap: a script that
-// loops forever is stopped, and the run fails.
+// loops past its budget is stopped, and the run fails.
 func TestTheStepBudgetStopsALoop(t *testing.T) {
 	_, err := run(t, `
 while True:
@@ -215,6 +238,12 @@ while True:
 `, &fakeNested{}, codemode.Limits{ExecSteps: 1000})
 	if err == nil {
 		t.Fatal("the infinite loop ran to completion")
+	}
+	if !strings.Contains(err.Error(), "too many steps") {
+		t.Fatalf("the loop stopped for another reason: %v", err)
+	}
+	if !strings.Contains(err.Error(), "too many steps") {
+		t.Fatalf("the loop stopped for another reason: %v", err)
 	}
 }
 
