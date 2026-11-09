@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/sdougbrown/poo"
+	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
@@ -9,6 +10,7 @@ import (
 	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
+	"github.com/sdougbrown/poo/tool/codemode"
 	"github.com/sdougbrown/poo/tool/edit"
 	"github.com/sdougbrown/poo/tool/finish"
 	"github.com/sdougbrown/poo/tool/grep"
@@ -77,6 +79,9 @@ func linkedTools() map[string]config.ToolFactory {
 		"read": func(config.ToolOptions) poo.Tool { return read.New() },
 		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+		"codemode": func(config.ToolOptions) poo.Tool {
+			return codemode.New(codemodestarlark.New())
+		},
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},

@@ -44,3 +44,23 @@ func relative(fraction float64, contextLimit, max int, charsPerToken float64) in
 	}
 	return cap
 }
+
+// RunePrefix returns the longest prefix of s that is at most n
+// characters.
+//
+// A cap counted in characters is not a byte count: cutting at n bytes
+// would cut a multi-byte character in half, and would cut text that fits
+// the cap. The cut lands on the character boundary instead.
+func RunePrefix(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	count := 0
+	for i := range s {
+		if count == n {
+			return s[:i]
+		}
+		count++
+	}
+	return s
+}

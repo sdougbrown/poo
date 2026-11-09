@@ -36,7 +36,7 @@ var promptText string
 func Profile() profile.Profile {
 	return profile.Profile{
 		Name:      Name,
-		Tools:     []string{"bash", "read", "grep", "edit"},
+		Tools:     []string{"bash", "read", "grep", "edit", "codemode"},
 		Unmatched: "allow",
 		Prompt:    promptText,
 	}

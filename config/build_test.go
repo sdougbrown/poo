@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/codemode"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/perm"
@@ -21,10 +22,18 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
+	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
 	"github.com/sdougbrown/poo/tool/edit"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
 )
+
+// stubEngine is an engine that never runs, for the wiring tests.
+type stubEngine struct{}
+
+func (stubEngine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.RunResult, error) {
+	return codemode.RunResult{}, nil
+}
 
 // theTools are the tools a binary links.
 func theTools() map[string]config.ToolFactory {
@@ -32,9 +41,10 @@ func theTools() map[string]config.ToolFactory {
 		"bash": func(opts config.ToolOptions) poo.Tool {
 			return bash.New(bash.WithExecutor(opts.Executor), bash.WithScrub(opts.Scrub))
 		},
-		"read": func(config.ToolOptions) poo.Tool { return read.New() },
-		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
-		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+		"read":     func(config.ToolOptions) poo.Tool { return read.New() },
+		"grep":     func(config.ToolOptions) poo.Tool { return grep.New() },
+		"edit":     func(config.ToolOptions) poo.Tool { return edit.New() },
+		"codemode": func(config.ToolOptions) poo.Tool { return toolcodemode.New(stubEngine{}) },
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},
@@ -115,7 +125,7 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	if runtime.Profile.Name != "code" {
 		t.Errorf("the profile is %q, want code", runtime.Profile.Name)
 	}
-	want := []string{"bash", "read", "grep", "edit"}
+	want := []string{"bash", "read", "grep", "edit", "codemode"}
 	if len(runtime.Options.ToolOrder) != len(want) {
 		t.Fatalf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
@@ -139,6 +149,39 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	// The profiles the binary offers are the ones it links.
 	if len(runtime.Profiles) != 2 {
 		t.Errorf("the build offers %d profiles, want 2", len(runtime.Profiles))
+	}
+}
+
+// TestTheCodemodeSettingsReachTheSession covers the mapping: every
+// tools.codemode field lands on the session's settings, which the tool
+// passes the engine as a run's limits.
+func TestTheCodemodeSettingsReachTheSession(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+tools:
+  codemode:
+    timeout_s: 17
+    script_max_bytes: 2048
+    output_cap_chars: 4096
+    exec_steps: 250000
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	got := runtime.Options.Settings
+	for _, field := range []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"timeout_s", got.CodemodeTimeoutS, 17},
+		{"script_max_bytes", got.CodemodeScriptMaxBytes, 2048},
+		{"output_cap_chars", got.CodemodeOutputCapChars, 4096},
+		{"exec_steps", got.CodemodeExecSteps, 250000},
+	} {
+		if field.got != field.want {
+			t.Errorf("tools.codemode.%s reached the session as %d, want %d", field.name, field.got, field.want)
+		}
 	}
 }
 
@@ -780,7 +823,7 @@ func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	want := []string{"read", "grep", "edit"}
+	want := []string{"read", "grep", "edit", "codemode"}
 	if !slices.Equal(runtime.Options.ToolOrder, want) {
 		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}

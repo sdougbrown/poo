@@ -110,6 +110,16 @@ type ToolSettings struct {
 	ObservationCapChars int
 	// ReadOutputCapChars is the cap on the read tool's output.
 	ReadOutputCapChars int
+	// CodemodeTimeoutS is a codemode script run's wall-clock limit, in
+	// seconds.
+	CodemodeTimeoutS int
+	// CodemodeScriptMaxBytes is the longest script a run accepts.
+	CodemodeScriptMaxBytes int
+	// CodemodeOutputCapChars is the most printed text a codemode run
+	// keeps.
+	CodemodeOutputCapChars int
+	// CodemodeExecSteps is the engine's execution budget.
+	CodemodeExecSteps int
 }
 
 // NestedCall is one call a tool asks the seam to make.

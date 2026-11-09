@@ -42,7 +42,7 @@ func TestAPromptThatFailsWithTheAddedToolTakesTheConfigExit(t *testing.T) {
 		Executors:      executorRegistry(),
 		Askers:         []string{"decide"},
 		PromptFS: fstest.MapFS{
-			"base.md": {Data: []byte("{{if gt (len .Tools) 4}}{{index .Tools 99}}{{end}}the base\n")},
+			"base.md": {Data: []byte("{{if gt (len .Tools) 5}}{{index .Tools 99}}{{end}}the base\n")},
 		},
 		Build: poo.BuildInfo{Name: "poo", Version: version},
 	})

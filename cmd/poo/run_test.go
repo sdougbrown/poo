@@ -584,7 +584,7 @@ func TestTheCommandDefaultsToHandoff(t *testing.T) {
 		"run",
 		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
-		"--context-limit", "31000",
+		"--context-limit", "32000",
 		"--working-dir", dir,
 		"--log", logPath,
 		strings.Repeat("x", 100000),
