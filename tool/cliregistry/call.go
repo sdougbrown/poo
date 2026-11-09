@@ -278,6 +278,7 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 		}
 	}
 
+	// A failed CLI's exit and diagnostics take precedence over an incomplete write.
 	res, err := p.plan.Finish(out)
 	if err != nil {
 		return failed(err, cap)
