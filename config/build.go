@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -436,12 +437,18 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	if err := r.addRegistryTools(opts); err != nil {
 		return err
 	}
+	// The disabled list is the operator's, so it comes off what the profile
+	// and the registry offered before the core adds its own tools: the job
+	// tools follow the tools that are left.
+	if err := r.disableTools(opts); err != nil {
+		return err
+	}
 	// The core adds the job tools on its own whenever a linked tool may
 	// run in the background or the session runs feeds, and the profile
 	// offers them with it.
 	feeds := r.Feeds.Len() > 0
 	r.Profile.Tools = withJobTools(r.Profile.Tools, feeds)
-	r.Profiles = resolveProfiles(opts, r.Registry != nil, r.findTool(), feeds)
+	r.Profiles = resolveProfiles(opts, r.Registry != nil, r.findTool(), feeds, r.Settings.Tools.Disabled)
 	return nil
 }
 
@@ -652,12 +659,63 @@ func withJobTools(tools []poo.ToolInfo, feeds bool) []poo.ToolInfo {
 		poo.ToolInfo{Name: profile.CancelJobToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
 }
 
+// disableTools removes the tools the settings disable.
+//
+// A disabled name the profile does not offer removes nothing: the setting
+// is a preference over whatever profile the session runs under, so a list
+// that disables a tool one profile lacks still builds under it. The names
+// the setting cannot have are the binary's own: a tool the binary does not
+// link cannot be offered or removed, and the tools the core adds by itself
+// are not the profile's to give up.
+func (r *Runtime) disableTools(opts BuildOptions) error {
+	disabled := r.Settings.Tools.Disabled
+	if len(disabled) == 0 {
+		return nil
+	}
+	for _, name := range disabled {
+		switch name {
+		case profile.JobsToolName, profile.CancelJobToolName, poo.FinishToolName:
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.disabled",
+				Message: fmt.Sprintf("the settings disable the %q tool, and the core adds that tool by itself", name),
+			}
+		}
+		if !linksTool(opts, name) {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.disabled",
+				Message: fmt.Sprintf("the settings disable the %q tool, and this binary does not link it", name),
+			}
+		}
+	}
+	r.toolNames = withoutToolNames(r.toolNames, disabled)
+	r.Profile.Tools = withoutDisabled(r.Profile.Tools, disabled)
+	return nil
+}
+
+// withoutToolNames returns the names a session still builds a tool for.
+func withoutToolNames(names, disabled []string) []string {
+	return slices.DeleteFunc(names, func(name string) bool {
+		return slices.Contains(disabled, name)
+	})
+}
+
+// withoutDisabled returns the tools a session still offers.
+func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
+	return slices.DeleteFunc(tools, func(tool poo.ToolInfo) bool {
+		return slices.Contains(disabled, tool.Name)
+	})
+}
+
 // resolveProfiles resolves every profile the binary links.
 //
 // A profile that names a tool the binary does not link offers the
 // tools it has: the profile cannot be run with the others, and a
-// profile that cannot be run is not one the binary offers.
-func resolveProfiles(opts BuildOptions, registry, find, feeds bool) []poo.Profile {
+// profile that cannot be run is not one the binary offers. The
+// disabled tools are gone here as well, so the profile the client is
+// told about is the profile the session runs.
+func resolveProfiles(opts BuildOptions, registry, find, feeds bool, disabled []string) []poo.Profile {
 	var out []poo.Profile
 	for _, definition := range opts.Profiles {
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
@@ -677,6 +735,7 @@ func resolveProfiles(opts BuildOptions, registry, find, feeds bool) []poo.Profil
 				}
 			}
 		}
+		resolved.Tools = withoutDisabled(resolved.Tools, disabled)
 		resolved.Tools = withJobTools(resolved.Tools, feeds)
 		out = append(out, resolved)
 	}

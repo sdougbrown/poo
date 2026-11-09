@@ -33,6 +33,7 @@
     "tools.env.scrub": { "isEmpty": "array" },
     "tools.env.passthrough": { "isEmpty": "array" },
     "tools.protected_paths": { "isEmpty": "array" },
+    "tools.disabled": { "isEmpty": "array" },
     "limits.max_tokens_per_run": { "isEmpty": "number" },
     "limits.max_duration_s": { "isEmpty": "number" },
     "limits.max_turns": { "isEmpty": "number" },

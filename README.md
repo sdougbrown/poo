@@ -38,6 +38,12 @@ with `--profile`; the default is `code`.
 A settings file that names `finish.schema_file` also gets the typed
 `finish` tool.
 
+**Disabled tools.** `tools.disabled` names the tools to leave out of
+whatever profile the session runs under, so one settings file can keep a
+tool off every profile. A name the profile does not offer does nothing; a
+name the binary does not link, or one of the core's own `jobs`,
+`cancel_job` and `finish`, is an error.
+
 **Exit codes.** The exit code says why a run ended:
 
 | Code | Reason |

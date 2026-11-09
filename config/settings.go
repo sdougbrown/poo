@@ -223,6 +223,11 @@ type Tools struct {
 	// ProtectedPaths are the globs of the paths the tools must not
 	// touch.
 	ProtectedPaths []string `json:"protected_paths,omitempty"`
+	// Disabled are the names of the tools the session does not offer,
+	// whatever profile it runs under. A name the profile does not offer
+	// is ignored; a name the binary does not link, or one the core adds
+	// by itself, is an error.
+	Disabled []string `json:"disabled,omitempty"`
 }
 
 // Bash are the bash tool's settings.
