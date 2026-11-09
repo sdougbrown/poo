@@ -293,6 +293,59 @@ func TestNestedPrepareFailureIsData(t *testing.T) {
 	}
 }
 
+// TestAnInterruptMidScriptSettlesEachNestedCallOnce covers the
+// finalization's ownership: a run interrupted while a nested call is in
+// flight settles it exactly once, and nothing enters the history.
+func TestAnInterruptMidScriptSettlesEachNestedCallOnce(t *testing.T) {
+	blocker := &namedTool{echoTool: echoTool{
+		call: func(ctx context.Context) (poo.ToolResult, error) {
+			<-ctx.Done()
+			return poo.ToolResult{Text: "the partial output"}, ctx.Err()
+		},
+	}, name: "blocker"}
+	nest := &nestedTool{script: []string{`blocker {}`}}
+	sink := &recordingSink{}
+	s := nestedSession(t, nest, map[string]poo.Tool{"blocker": blocker}, sink)
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	// The nested call is in flight when the interrupt lands.
+	waitFor(t, "the nested call to start", func() bool {
+		for _, ev := range s.Events() {
+			if ev.Name == poo.EventToolCall && ev.Payload["nested"] == true {
+				return true
+			}
+		}
+		return false
+	})
+	if _, err := s.Send("stop", poo.Interrupt); err != nil {
+		t.Fatalf("sending the interrupt: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	results := map[string]int{}
+	outcomes := map[string]poo.Outcome{}
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolResultRecord); ok {
+			results[r.Handle]++
+			outcomes[r.Handle] = r.Outcome
+		}
+	}
+	if got := results["r2"]; got != 1 {
+		t.Errorf("the nested call's result landed %d times, want 1", got)
+	}
+	switch outcomes["r2"] {
+	case poo.OutcomeCancelled, poo.OutcomeInterrupted:
+	default:
+		t.Errorf("the nested call's outcome is %q, want cancelled or interrupted", outcomes["r2"])
+	}
+	if got := results["r1"]; got != 1 {
+		t.Errorf("the nest call's own result landed %d times, want 1", got)
+	}
+}
+
 // TestTheNestedSeamIsTheTurnsAlone covers the seam's availability: the
 // turn's tool has it, and a call of an unknown tool through it is an
 // error, not a recorded call.

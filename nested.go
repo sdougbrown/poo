@@ -17,11 +17,12 @@ import (
 // its result is recorded without entering the model's history, because
 // the model never saw the call.
 //
-// The records keep the full audit: a nested call writes tool.call (mode
-// "nested", with the parent's handle) and tool.result like any other
-// call, so a torn tail is recovered the same way, and the recovery's
-// message rule already leaves a call with no provider id out of the
-// model's history.
+// A nested call is tracked by the run's claim machinery like a
+// model-made call is: the finalization waits for its record writes, and
+// it owns the result of a nested call that is still outstanding when
+// the run settles. The one difference is the result's destination: the
+// record is written, but nothing is appended to the history and no
+// message record is written.
 
 // nestedCaller is the NestedCaller a turn's tool calls carry.
 //
@@ -48,6 +49,15 @@ func (n *nestedCaller) Call(ctx context.Context, parent, tool string, raw json.R
 	if err := ctx.Err(); err != nil {
 		return NestedResult{}, fmt.Errorf("the nested call did not start: %w", err)
 	}
+
+	// The nested call runs under both the caller's context and the run's
+	// activity context: whichever ends first cancels it.
+	callCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.activityContext(run), cancel)
+	defer func() {
+		stop()
+		cancel()
+	}()
 
 	// The calls the run machinery owns are out of a script's reach: the
 	// finish tool would settle the run out from under the script, and
@@ -113,8 +123,9 @@ func (n *nestedCaller) Call(ctx context.Context, parent, tool string, raw json.R
 	s.repeatOrder = append(s.repeatOrder, handle)
 	// The permission handle is what ResetRepeats keys on while the
 	// policy is in the ask. Concurrent nested calls overwrite each
-	// other's, so a reset may miss a concurrent ask's counters; the
-	// counters themselves are exact either way.
+	// other's slot, so the display names whichever ask was set last and
+	// a reset may miss a concurrent ask's counters; the counters
+	// themselves are exact either way.
 	run.permissionHandle, run.permissionTool = handle, tool
 	s.mu.Unlock()
 
@@ -131,10 +142,15 @@ func (n *nestedCaller) Call(ctx context.Context, parent, tool string, raw json.R
 			RepeatCount:     counts.exact,
 			NearRepeatCount: counts.near,
 		}
-		decision, policyErr = s.callPolicy(s.activityContext(run), run, policy, n.turn, info)
+		decision, policyErr = s.callPolicy(callCtx, run, policy, n.turn, info)
 	}
+	// Only the call that still owns the slot clears it: a call that
+	// finished while another one is in the ask must not take the other
+	// one's ask off the run.
 	s.mu.Lock()
-	run.permissionHandle, run.permissionTool = "", ""
+	if run.permissionHandle == handle {
+		run.permissionHandle, run.permissionTool = "", ""
+	}
 	s.mu.Unlock()
 
 	if policyErr != nil {
@@ -154,13 +170,49 @@ func (n *nestedCaller) Call(ctx context.Context, parent, tool string, raw json.R
 		return NestedResult{}, fmt.Errorf("%w: the nested call was interrupted", errInterrupted)
 	}
 
-	// The call is recorded before it runs, like a model-made call. The
-	// seal is checked against the record: a run that settled while the
-	// script was working stops writing, and the recovery closes the
-	// unwritten tail.
-	if err := n.writeCallRecord(parent, handle, tool, args); err != nil {
-		return NestedResult{}, err
+	// The call is registered with the claim machinery, so the
+	// finalization waits for its record write and owns its result when
+	// the run settles while it is still outstanding.
+	summary := ""
+	if prepared != nil {
+		summary = prepared.Summary()
 	}
+	if !s.issueCall(run, n.turn, handle, ToolCall{Name: tool, Arguments: args}, summary) {
+		return NestedResult{}, fmt.Errorf("%w: the nested call did not start", errRunWindingDown)
+	}
+
+	// The call's record is claimed against the seal and written before
+	// the tool runs, like a model-made call's.
+	callRecord, ok := s.reserveCallRecord(run, handle)
+	if !ok {
+		return NestedResult{}, fmt.Errorf("%w: the nested call did not start", errRunWindingDown)
+	}
+	writeErr := s.writeCallRecord(run, callRecord, &ToolCallRecord{
+		RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
+		RunID:      run.id,
+		Turn:       n.turn,
+		Handle:     handle,
+		Tool:       tool,
+		Summary:    summary,
+		Arguments:  recordArgs(args),
+		Mode:       CallModeNested,
+		Parent:     parent,
+	})
+	s.finishCallWrite(run, callRecord)
+	if writeErr != nil {
+		if errors.Is(writeErr, errCallRecordSealed) {
+			return NestedResult{}, fmt.Errorf("%w: the nested call did not start", errRunWindingDown)
+		}
+		s.noteStoreError(run, writeErr)
+		return NestedResult{}, fmt.Errorf("the nested call's record: %w", writeErr)
+	}
+	s.events.emit(EventToolCall, map[string]any{
+		"run_id": run.id,
+		"handle": handle,
+		"tool":   tool,
+		"nested": true,
+		"parent": parent,
+	})
 
 	// A refusal is data: the script sees the denial and decides what to
 	// do, and the run carries on.
@@ -175,17 +227,12 @@ func (n *nestedCaller) Call(ctx context.Context, parent, tool string, raw json.R
 	// A call that failed its validation never runs: the failure is
 	// recoverable data to the script, like it is to the model.
 	if prepareErr != nil {
-		text := "the nested call was not prepared"
-		if prepareErr != nil {
-			text = prepareErr.Error()
-		}
-		return n.recordNestedResult(handle, tool, ToolResult{Text: text, IsError: true}, OutcomeError), nil
+		return n.recordNestedResult(handle, tool, ToolResult{Text: prepareErr.Error(), IsError: true}, OutcomeError), nil
 	}
 
 	// The nested call's own tool sees no nested caller: the nesting is
 	// one call deep.
 	env := s.toolEnvFor(run.id, handle)
-	callCtx := s.activityContext(run)
 	result, err := t.Call(callCtx, prepared, env)
 
 	outcome := OutcomeOK
@@ -226,62 +273,24 @@ func (n *nestedCaller) Call(ctx context.Context, parent, tool string, raw json.R
 	return n.recordNestedResult(handle, tool, result, outcome), nil
 }
 
-// writeCallRecord writes a nested call's tool.call record.
+// recordNestedResult records a nested call's result and returns the
+// result the caller sees.
 //
-// The record carries the mode and the parent's handle, and it is
-// written with the model's origin: the call is the session's work, not
-// the model's, but the origin names the record's producer family and
-// the tool call records are all the model's calls to the consumers.
-func (n *nestedCaller) writeCallRecord(parent, handle, tool string, args json.RawMessage) error {
-	s := n.session
-	s.mu.Lock()
-	sealed := n.run.sealed || n.run.committed
-	s.mu.Unlock()
-	if sealed {
-		return fmt.Errorf("%w: the nested call's record was not written", errRunWindingDown)
-	}
-	rec := &ToolCallRecord{
-		RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
-		RunID:      n.run.id,
-		Turn:       n.turn,
-		Handle:     handle,
-		Tool:       tool,
-		Arguments:  recordArgs(args),
-		Mode:       CallModeNested,
-		Parent:     parent,
-	}
-	if err := s.write(n.run.ctx, rec); err != nil {
-		s.noteStoreError(n.run, err)
-		return fmt.Errorf("the nested call's record: %w", err)
-	}
-	s.events.emit(EventToolCall, map[string]any{
-		"run_id":  n.run.id,
-		"handle":  handle,
-		"tool":    tool,
-		"nested":  true,
-		"parent":  parent,
-	})
-	return nil
-}
-
-// recordNestedResult writes a nested call's tool.result record and
-// returns the result the caller sees.
-//
-// The record is written, but the result is not appended to the model's
-// history and no message record is written: the model never saw the
-// call, and the log's contract — the messages in the log are the same
-// list the model sees — stays intact.
+// The result is claimed, so the finalization never gives the call a
+// second one, and a call the finalization already settled is left to
+// it. The record is written, but the result is not appended to the
+// model's history and no message record is written: the model never saw
+// the call, and the log's contract — the messages in the log are the
+// same list the model sees — stays intact.
 func (n *nestedCaller) recordNestedResult(handle, tool string, result ToolResult, outcome Outcome) NestedResult {
 	s := n.session
-	text := modelFacingText(handle, tool, result.Text)
-
-	s.mu.Lock()
-	sealed := n.run.sealed || n.run.committed
-	s.mu.Unlock()
-	if !sealed {
+	run := n.run
+	won, tracked := s.claimResult(run, handle)
+	if won {
+		text := modelFacingText(handle, tool, result.Text)
 		rec := &ToolResultRecord{
 			RecordMeta: NewRecordMetaFrom("tool.result", OriginTool),
-			RunID:      n.run.id,
+			RunID:      run.id,
 			Turn:       n.turn,
 			Handle:     handle,
 			Tool:       tool,
@@ -290,23 +299,30 @@ func (n *nestedCaller) recordNestedResult(handle, tool string, result ToolResult
 			Text:       text,
 			Structured: result.Structured,
 		}
-		if err := s.write(n.run.ctx, rec); err != nil {
-			s.noteStoreError(n.run, err)
+		if err := s.write(run.ctx, rec); err != nil {
+			s.noteStoreError(run, err)
 		}
 		s.events.emit(EventToolResult, map[string]any{
-			"run_id":  n.run.id,
+			"run_id":  run.id,
 			"handle":  handle,
 			"tool":    tool,
 			"outcome": string(outcome),
 			"text":    text,
 			"nested":  true,
 		})
+		if tracked {
+			s.finishResultWrite(run)
+		}
+		result.Text = text
 	}
+	// The caller sees the outcome it computed, whatever owns the
+	// record: a run that settled while the script was working still
+	// lets the script finish with the data it has.
 	return NestedResult{
 		Handle:     handle,
 		Tool:       tool,
 		Outcome:    outcome,
-		Text:       text,
+		Text:       result.Text,
 		Structured: result.Structured,
 		IsError:    result.IsError,
 	}
