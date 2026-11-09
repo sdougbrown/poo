@@ -53,11 +53,14 @@ The script's language is Starlark, a deterministic dialect of Python.
 It has no files, network or clocks, and modules never load. What it
 has:
 
-- `call(name, args)` runs one tool call and returns its result: a dict
-  with `handle`, `tool`, `outcome`, `text`, `is_error` and
-  `structured_json`.
-- `gather([("read", {...}), ("grep", {...})])` runs calls at the same
-  time and returns their results in order.
+- `call(name, args)` runs one tool call and returns a dict with
+  `handle`, `tool`, `outcome`, `text`, `is_error` and `structured`.
+  `text` starts with the handle line, `[r1 · read]`, followed by the
+  tool's own text. `structured` is the call's JSON payload as a string,
+  or `None`.
+- `gather([("read", {...}), ("grep", {...})])` makes the calls in one
+  batch and returns their results in list order. Calls that only read
+  run at the same time; the rest run in order.
 - `print(x)` keeps a line for the result you will see.
 - `exit(value)` ends the script with a value; the value comes back as
   JSON. A script without `exit` returns nothing but its printed lines.
