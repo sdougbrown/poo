@@ -292,9 +292,9 @@ func TestNestedCallsShareThePermissionEngine(t *testing.T) {
 	}
 }
 
-// TestNestedCallsCountTowardTheDoomLoop covers the counting: the same
-// nested call repeated past the threshold is refused inside one script,
-// and none of it reaches the model.
+// TestNestedCallsCountTowardTheDoomLoop covers the counting: with the
+// threshold at three, the third and fourth of four identical nested
+// calls are refused inside one script, and none of it reaches the model.
 func TestNestedCallsCountTowardTheDoomLoop(t *testing.T) {
 	nest := &nestedTool{script: []string{
 		`reader {"text":"one"}`,
@@ -314,8 +314,8 @@ func TestNestedCallsCountTowardTheDoomLoop(t *testing.T) {
 			denied++
 		}
 	}
-	if denied < 1 {
-		t.Error("the doom loop never fired on the nested calls")
+	if denied != 2 {
+		t.Errorf("the log holds %d denied results, want 2 (the third and fourth calls)", denied)
 	}
 }
 
@@ -796,6 +796,71 @@ func TestANestedCallSettledWithTheRunLeavesNoHistory(t *testing.T) {
 			if strings.Contains(block.Text, nestedHandle+" ·") {
 				t.Errorf("the next request carries the nested call's result: %q", block.Text)
 			}
+		}
+	}
+}
+
+// TestASkippedNestedCallIsData covers the script's view of a nested call
+// that never ran: the first call of a side-effecting batch blocks until
+// the run is cancelled, and the second call does not start.
+func TestASkippedNestedCallIsData(t *testing.T) {
+	entered := make(chan struct{})
+	blocker := &namedTool{echoTool: echoTool{
+		class: poo.ClassSideEffecting,
+		call: func(ctx context.Context) (poo.ToolResult, error) {
+			close(entered)
+			<-ctx.Done()
+			return poo.ToolResult{Text: "the partial output"}, ctx.Err()
+		},
+	}, name: "blocker"}
+	walker := &namedTool{echoTool: echoTool{result: "walked", class: poo.ClassSideEffecting}, name: "walker"}
+	nest := &nestedTool{script: []string{`blocker {}`, `walker {}`}}
+	sink := &recordingSink{}
+	s := nestedSession(t, nest,
+		map[string]poo.Tool{"blocker": blocker, "walker": walker}, sink)
+	if _, err := s.Prompt(context.Background(), "hello"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the nested call never started")
+	}
+	s.Cancel("cancel:test")
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	results, err := nest.returned()
+	if err != nil {
+		t.Fatalf("the seam returned an error for a batch it started: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("the seam returned %d results, want 2", len(results))
+	}
+	second := results[1]
+	if second.Outcome != poo.OutcomeSkipped && second.Outcome != poo.OutcomeCancelled {
+		t.Errorf("the skipped call's result is %q, want skipped or cancelled", second.Outcome)
+	}
+	if !second.IsError {
+		t.Errorf("the skipped call's result is %q, want an error", second.Outcome)
+	}
+	t.Logf("the second nested call's outcome is %q", second.Outcome)
+	// A call that never started never reached its tool: a skipped call
+	// that ran would be the seam starting work the run had stopped.
+	if second.Outcome == poo.OutcomeSkipped && len(walker.Calls()) != 0 {
+		t.Errorf("the walker ran %d times for a skipped call, want 0", len(walker.Calls()))
+	}
+
+	// The record the log wrote for the skipped call, when it wrote one,
+	// says which call made it.
+	for _, rec := range sink.allRecords() {
+		call, ok := rec.(*poo.ToolCallRecord)
+		if !ok || call.Handle != second.Handle {
+			continue
+		}
+		if call.Parent != "r1" {
+			t.Errorf("the skipped call's record names the parent %q, want r1", call.Parent)
 		}
 	}
 }
