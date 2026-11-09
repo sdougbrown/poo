@@ -104,7 +104,7 @@ func TestTheNativeModePromptIsTheContract(t *testing.T) {
 	if strings.Contains(prompt, "Tools:") {
 		t.Errorf("the native-mode prompt describes the tools:\n%s", prompt)
 	}
-	// The sections render in the plan's order.
+	// The sections render in the order.
 	order := []string{
 		"Keep going until the task is done.",
 		"You are a coding agent.",

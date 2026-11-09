@@ -219,7 +219,7 @@ func TestARangePastTheEndOfTheFileIsEmpty(t *testing.T) {
 }
 
 func TestTheOutputCapIsContextRelative(t *testing.T) {
-	// The plan: min(70000, floor(0.10 × context_limit × 3.5)).
+	// The bound: min(70000, floor(0.10 × context_limit × 3.5)).
 	if got := read.OutputCap(32768); got != 11468 {
 		t.Errorf("OutputCap(32768) is %d, want 11468", got)
 	}

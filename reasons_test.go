@@ -257,7 +257,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 			} else if c.want != poo.ReasonStoreError {
 				t.Fatal("the log holds no settle record")
 			}
-			// The exit code follows the plan's table.
+			// The exit code follows the table.
 			if got := poo.ExitCode(res.Reason); got < 0 {
 				t.Errorf("the exit code is %d, want a plan code", got)
 			}
@@ -282,7 +282,7 @@ func (t *fatalTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) 
 	return poo.ToolResult{}, poo.Fatalf("the working directory is gone")
 }
 
-// TestTheInputEventsAreEmitted covers the plan's event list: the input
+// TestTheInputEventsAreEmitted covers the event list: the input
 // records have their events.
 func TestTheInputEventsAreEmitted(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -329,7 +329,7 @@ func TestTheInputEventsAreEmitted(t *testing.T) {
 	}
 }
 
-// TestTheRunAndTurnEventsAreEmitted covers the plan's event list for
+// TestTheRunAndTurnEventsAreEmitted covers the event list for
 // the run and the turn.
 func TestTheRunAndTurnEventsAreEmitted(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -367,7 +367,7 @@ func TestTheRunAndTurnEventsAreEmitted(t *testing.T) {
 	}
 }
 
-// TestTheUsageEventIsEmitted covers the plan's event list for the
+// TestTheUsageEventIsEmitted covers the event list for the
 // accounting.
 func TestTheUsageEventIsEmitted(t *testing.T) {
 	tr := scripted([]fakeResponse{{
@@ -390,7 +390,7 @@ func TestTheUsageEventIsEmitted(t *testing.T) {
 	}
 }
 
-// TestTheMessageDeltasReachTheClient covers the plan's streaming event:
+// TestTheMessageDeltasReachTheClient covers the streaming event:
 // every text and thinking delta is emitted with the message id assigned
 // at the first delta, so a client can name a reply that is still
 // streaming.

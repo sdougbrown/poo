@@ -58,7 +58,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// TestABackgroundCallReturnsStarted covers the plan's rule: a call with
+// TestABackgroundCallReturnsStarted covers the rule: a call with
 // background true returns at once with a started outcome, and the turn
 // carries on.
 func TestABackgroundCallReturnsStarted(t *testing.T) {
@@ -106,8 +106,7 @@ func TestABackgroundCallReturnsStarted(t *testing.T) {
 	}
 }
 
-// TestTheBackgroundArgumentIsStrippedBeforePrepare covers the plan's
-// rule: the core removes the reserved argument before the tool's own
+// TestTheBackgroundArgumentIsStrippedBeforePrepare covers the rule: the core removes the reserved argument before the tool's own
 // decoder sees it.
 func TestTheBackgroundArgumentIsStrippedBeforePrepare(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -147,8 +146,7 @@ func TestTheBackgroundArgumentIsStrippedBeforePrepare(t *testing.T) {
 	}
 }
 
-// TestANonBooleanBackgroundArgumentIsRecoverable covers the plan's
-// rule: a background argument that is not a boolean is a recoverable
+// TestANonBooleanBackgroundArgumentIsRecoverable covers the rule: a background argument that is not a boolean is a recoverable
 // error, and the run carries on.
 func TestANonBooleanBackgroundArgumentIsRecoverable(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -193,8 +191,7 @@ func TestANonBooleanBackgroundArgumentIsRecoverable(t *testing.T) {
 	}
 }
 
-// TestASchemaThatDefinesBackgroundFailsRegistration covers the plan's
-// rule: the reserved name cannot be taken by a tool.
+// TestASchemaThatDefinesBackgroundFailsRegistration covers the rule: the reserved name cannot be taken by a tool.
 func TestASchemaThatDefinesBackgroundFailsRegistration(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
@@ -210,7 +207,7 @@ func TestASchemaThatDefinesBackgroundFailsRegistration(t *testing.T) {
 	}
 }
 
-// TestBackgroundAlwaysMakesEveryCallAJob covers the plan's rule: a tool
+// TestBackgroundAlwaysMakesEveryCallAJob covers the rule: a tool
 // that says always makes every call a job, and it is offered no
 // background argument.
 func TestBackgroundAlwaysMakesEveryCallAJob(t *testing.T) {
@@ -252,8 +249,7 @@ func TestBackgroundAlwaysMakesEveryCallAJob(t *testing.T) {
 	}
 }
 
-// TestTheAllowedToolIsOfferedTheBackgroundProperty covers the plan's
-// rule: a tool that says allowed is offered the reserved argument.
+// TestTheAllowedToolIsOfferedTheBackgroundProperty covers the rule: a tool that says allowed is offered the reserved argument.
 func TestTheAllowedToolIsOfferedTheBackgroundProperty(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
@@ -282,7 +278,7 @@ func TestTheAllowedToolIsOfferedTheBackgroundProperty(t *testing.T) {
 	}
 }
 
-// TestTheJobToolsAreRegistered covers the plan's rule: a session with a
+// TestTheJobToolsAreRegistered covers the rule: a session with a
 // job-capable tool offers the model the jobs and cancel_job tools.
 func TestTheJobToolsAreRegistered(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
@@ -313,7 +309,7 @@ func TestTheJobToolsAreRegistered(t *testing.T) {
 	}
 }
 
-// TestASessionWithoutAJobToolHasNoJobTools covers the plan's rule: the
+// TestASessionWithoutAJobToolHasNoJobTools covers the rule: the
 // job tools are registered only when a tool may run in the background.
 func TestASessionWithoutAJobToolHasNoJobTools(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
@@ -363,7 +359,7 @@ func (t *backgroundSchemaTool) Call(ctx context.Context, in poo.Prepared, env po
 	return poo.ToolResult{Text: "done"}, nil
 }
 
-// TestTheJobsToolContributesItsPromptSection covers the plan's rule: the
+// TestTheJobsToolContributesItsPromptSection covers the rule: the
 // jobs prompt section tells the model about the background jobs.
 func TestTheJobsToolContributesItsPromptSection(t *testing.T) {
 	tool := &poo.JobTool{}
@@ -442,7 +438,7 @@ func (t *ownBackgroundTool) Call(ctx context.Context, in poo.Prepared, env poo.T
 	return poo.ToolResult{Text: "ok"}, nil
 }
 
-// TestANeverToolKeepsItsOwnBackgroundArgument covers the plan's rule:
+// TestANeverToolKeepsItsOwnBackgroundArgument covers the rule:
 // the reserved argument is stripped only for a tool that may become a
 // job. A never-background tool may define its own background property.
 func TestANeverToolKeepsItsOwnBackgroundArgument(t *testing.T) {
@@ -472,7 +468,7 @@ func TestANeverToolKeepsItsOwnBackgroundArgument(t *testing.T) {
 	}
 }
 
-// TestANullBackgroundArgumentIsRefused covers the plan's rule: the
+// TestANullBackgroundArgumentIsRefused covers the rule: the
 // reserved argument is a boolean. Null is not a boolean, so the call is
 // a recoverable argument error and the tool never runs.
 func TestANullBackgroundArgumentIsRefused(t *testing.T) {
@@ -552,7 +548,7 @@ func (s *unlaunchedJobSink) Append(ctx context.Context, rec poo.Record) error {
 	return s.recordingSink.Append(ctx, rec)
 }
 
-// TestAnUnlaunchedJobCompletesThroughTheQueue covers the plan's jobs
+// TestAnUnlaunchedJobCompletesThroughTheQueue covers the jobs
 // rule: every accepted job completes with a job.ended that names the
 // input its result is delivered under. A job the run settles before
 // launching is cancelled and its result is queued like any other, so the
@@ -775,4 +771,94 @@ func TestAPanickingJobEndsWithAFatalError(t *testing.T) {
 	if ended != 1 {
 		t.Errorf("the log holds %d job.ended records, want 1", ended)
 	}
+}
+
+// The close owns a job completion chain that outlives its teardown
+// deadline.
+
+// jobCompletionHook blocks the job's completion chain until it is
+// released or its context ends.
+type jobCompletionHook struct{ entered, release chan struct{} }
+
+func (h *jobCompletionHook) AfterTool(ctx poo.HookContext, info poo.ToolCallInfo, r poo.ToolResult) (poo.ResultDecision, error) {
+	close(h.entered)
+	select {
+	case <-h.release:
+	case <-ctx.Done():
+		return poo.ResultDecision{}, ctx.Err()
+	}
+	return poo.Keep(), nil
+}
+
+// TestCloseFinishesJobHookBeforeReturning covers the rule that Close
+// owns a completion chain that outlives its teardown deadline.
+func TestCloseFinishesJobHookBeforeReturning(t *testing.T) {
+	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
+	tool.SetResult("output")
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{CallID: "jcall", Name: "job", Arguments: []byte(`{}`)}}}})
+	sink := &recordingSink{}
+	h := &jobCompletionHook{entered: make(chan struct{}), release: make(chan struct{})}
+	opts := testOptions(t, tr, nil, sink)
+	opts.Tools = map[string]poo.Tool{"job": tool}
+	opts.ToolOrder = []string{"job"}
+	opts.MaxTurns = 1
+	opts.AfterTool = []poo.AfterToolHook{h}
+	s := newTestSession(t, opts)
+	poo.SetRecordWriteBudget(s, 30*time.Millisecond)
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatal(err)
+	}
+	<-tool.Started()
+	tool.ReleaseAll()
+	<-h.entered
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before := sink.count("job.ended")
+	close(h.release)
+	waitFor(t, "late job.ended", func() bool { return sink.count("job.ended") == 1 })
+	if before != 1 {
+		t.Fatal("Close returned and flushed with job.ended=0; releasing completion hook writes job.ended after Close")
+	}
+}
+
+// TestAnInterruptedBeforeToolStartsNoJob covers the rule: a job
+// is admitted only after an authorization that finished. An interrupt
+// that arrives while the chain runs leaves the call unapproved.
+func TestAnInterruptedBeforeToolStartsNoJob(t *testing.T) {
+	entered := make(chan struct{})
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{jobCall("one", true)}}, {text: "done"}})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
+	opts := jobOptions(t, tr, tool, sink)
+	opts.MaxTurns = 1
+	opts.BeforeTool = []poo.BeforeToolHook{&interruptingBeforeTool{entered: entered}}
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-entered
+	if _, err := s.Send("instead", poo.Interrupt); err != nil {
+		t.Fatalf("interrupting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if n := sink.count("job.started"); n != 0 {
+		t.Errorf("an interrupted, unapproved call started %d background job(s)", n)
+	}
+}
+
+// interruptingBeforeTool waits for its context to end.
+type interruptingBeforeTool struct{ entered chan struct{} }
+
+// BeforeTool waits for the interrupt and allows the call.
+func (h *interruptingBeforeTool) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	close(h.entered)
+	<-ctx.Done()
+	return poo.Allow(), nil
 }

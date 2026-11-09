@@ -84,8 +84,7 @@ func (h *recordingStartHook) Histories() []int {
 	return append([]int(nil), h.histories...)
 }
 
-// TestTheSessionStartHookAppendsAndEditsThePrompt covers the plan's
-// rule: a session-start hook may append to the history and change the
+// TestTheSessionStartHookAppendsAndEditsThePrompt covers the rule: a session-start hook may append to the history and change the
 // system prompt, and the change is in the prompt the run sends.
 func TestTheSessionStartHookAppendsAndEditsThePrompt(t *testing.T) {
 	hook := &recordingStartHook{decision: poo.StartDecision{
@@ -126,7 +125,7 @@ func TestTheSessionStartHookAppendsAndEditsThePrompt(t *testing.T) {
 	}
 }
 
-// TestTheBeforeRunHookAppendsAndEditsThePrompt covers the plan's rule:
+// TestTheBeforeRunHookAppendsAndEditsThePrompt covers the rule:
 // a before-run hook may append to the history and change the system
 // prompt of the run it fires in.
 func TestTheBeforeRunHookAppendsAndEditsThePrompt(t *testing.T) {
@@ -158,8 +157,7 @@ func TestTheBeforeRunHookAppendsAndEditsThePrompt(t *testing.T) {
 	}
 }
 
-// TestTheSessionStartHooksEditIsInEveryRunsPrompt covers the plan's
-// rule: a change the session start made is still there in the next
+// TestTheSessionStartHooksEditIsInEveryRunsPrompt covers the rule: a change the session start made is still there in the next
 // run's prompt.
 func TestTheSessionStartHooksEditIsInEveryRunsPrompt(t *testing.T) {
 	hook := &recordingStartHook{decision: poo.StartDecision{
@@ -183,8 +181,7 @@ func TestTheSessionStartHooksEditIsInEveryRunsPrompt(t *testing.T) {
 	}
 }
 
-// TestTheBeforeRunHookSeesTheJobsThatWokeTheRun covers the plan's
-// rule: a woken run's before-run hook is told what woke it, and the
+// TestTheBeforeRunHookSeesTheJobsThatWokeTheRun covers the rule: a woken run's before-run hook is told what woke it, and the
 // job results are already in the history.
 func TestTheBeforeRunHookSeesTheJobsThatWokeTheRun(t *testing.T) {
 	hook := &recordingStartHook{}
@@ -266,7 +263,7 @@ func TestTheBeforeRunHookSeesTheJobsThatWokeTheRun(t *testing.T) {
 }
 
 // TestTheSessionStartHookThatMissesItsDeadlineFailsTheConstruction
-// covers the plan's rule: a session start that misses its deadline
+// covers the rule: a session start that misses its deadline
 // leaves no session behind.
 func TestTheSessionStartHookThatMissesItsDeadlineFailsTheConstruction(t *testing.T) {
 	hook := &recordingStartHook{wait: make(chan struct{})}
@@ -286,7 +283,7 @@ func TestTheSessionStartHookThatMissesItsDeadlineFailsTheConstruction(t *testing
 	close(hook.wait)
 }
 
-// TestTheBeforeRunHookThatFailsSettlesTheRun covers the plan's rule: a
+// TestTheBeforeRunHookThatFailsSettlesTheRun covers the rule: a
 // hook that fails settles the run with hook_error.
 func TestTheBeforeRunHookThatFailsSettlesTheRun(t *testing.T) {
 	hook := &recordingStartHook{err: errors.New("the hook is broken")}

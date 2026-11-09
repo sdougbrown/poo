@@ -9,7 +9,7 @@ import (
 
 // The text tool-call formats.
 //
-// The plan: Hermes, Qwen XML, Mistral and bare JSON all parse into the
+// Hermes, Qwen XML, Mistral and bare JSON all parse into the
 // same tool call, and a call that cannot be parsed is a visible
 // recoverable error.
 
@@ -83,7 +83,7 @@ func TestTheMistralArgumentsMayBeAString(t *testing.T) {
 	}
 }
 
-// TestEveryFormatIsRead covers the plan's list: Hermes, Qwen XML,
+// TestEveryFormatIsRead covers the list: Hermes, Qwen XML,
 // Mistral and bare JSON all parse into the same call.
 func TestEveryFormatIsRead(t *testing.T) {
 	cases := []struct {
@@ -118,7 +118,7 @@ func TestTheFormatNamesTheShapeTheModelWrites(t *testing.T) {
 	}
 }
 
-// TestAMalformedCallIsAVisibleError covers the plan's rule: text that
+// TestAMalformedCallIsAVisibleError covers the rule: text that
 // looks like a tool call but does not parse is not dropped. It stays in
 // the prose, and the failure is reported.
 func TestAMalformedCallIsAVisibleError(t *testing.T) {
@@ -144,7 +144,7 @@ func TestAMalformedCallIsAVisibleError(t *testing.T) {
 		t.Fatal("the parser reported no failure")
 	}
 	if !strings.HasPrefix(failure.Message, "your tool call could not be parsed: ") {
-		t.Errorf("the failure reads %q, want the plan's wording", failure.Message)
+		t.Errorf("the failure reads %q, want the wording", failure.Message)
 	}
 	if !failure.Recoverable {
 		t.Error("the failure is not marked recoverable")

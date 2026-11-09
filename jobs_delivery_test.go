@@ -16,7 +16,7 @@ import (
 // next turn end, a waiting run takes it at once, and an idle session
 // wakes with it or holds it.
 
-// TestTheRunWaitsForItsJobAndThenDelivers covers the plan's main row:
+// TestTheRunWaitsForItsJobAndThenDelivers covers the main row:
 // a background call returns started, the model stops, the run waits, the
 // job finishes, the result is delivered, the model replies, and the run
 // settles end_turn.
@@ -109,8 +109,7 @@ func TestAJobResultRendersAsOneElement(t *testing.T) {
 	}
 }
 
-// TestTheBeforeSettleHookRunsOnceAtTheRealSettle covers the plan's
-// rule: the settle hooks do not run when the run enters the waiting
+// TestTheBeforeSettleHookRunsOnceAtTheRealSettle covers the rule: the settle hooks do not run when the run enters the waiting
 // state, because the run is not ending.
 func TestTheBeforeSettleHookRunsOnceAtTheRealSettle(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -146,7 +145,7 @@ func TestTheBeforeSettleHookRunsOnceAtTheRealSettle(t *testing.T) {
 	}
 }
 
-// TestASteerWhileWaitingIsDeliveredAtOnce covers the plan's rule: a
+// TestASteerWhileWaitingIsDeliveredAtOnce covers the rule: a
 // steer that arrives while the run waits is delivered at once, and the
 // job keeps running.
 func TestASteerWhileWaitingIsDeliveredAtOnce(t *testing.T) {
@@ -184,7 +183,7 @@ func TestASteerWhileWaitingIsDeliveredAtOnce(t *testing.T) {
 	}
 }
 
-// TestAnInterruptWhileWaitingIsDeliveredAtOnce covers the plan's rule:
+// TestAnInterruptWhileWaitingIsDeliveredAtOnce covers the rule:
 // an interrupt that arrives while the run waits is delivered at once,
 // because there is nothing to abort.
 func TestAnInterruptWhileWaitingIsDeliveredAtOnce(t *testing.T) {
@@ -216,8 +215,7 @@ func TestAnInterruptWhileWaitingIsDeliveredAtOnce(t *testing.T) {
 	}
 }
 
-// TestAFollowUpWhileWaitingWaitsForTheRealSettle covers the plan's
-// rule: a follow-up is delivered only at a real settle, so a queued
+// TestAFollowUpWhileWaitingWaitsForTheRealSettle covers the rule: a follow-up is delivered only at a real settle, so a queued
 // follow-up does not keep the run from waiting.
 func TestAFollowUpWhileWaitingWaitsForTheRealSettle(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -254,8 +252,7 @@ func TestAFollowUpWhileWaitingWaitsForTheRealSettle(t *testing.T) {
 	}
 }
 
-// TestACancelWithARunningJobSettlesTheRunAndListsTheJob covers the
-// plan's rule: a cancel stops the run, the job keeps running, and the
+// TestACancelWithARunningJobSettlesTheRunAndListsTheJob covers the rule: a cancel stops the run, the job keeps running, and the
 // settle detail lists the job.
 func TestACancelWithARunningJobSettlesTheRunAndListsTheJob(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -292,7 +289,7 @@ func TestACancelWithARunningJobSettlesTheRunAndListsTheJob(t *testing.T) {
 	})
 }
 
-// TestTheJobResultWakesTheSession covers the plan's rule: a result that
+// TestTheJobResultWakesTheSession covers the rule: a result that
 // arrives while the session is idle wakes it with a new run.
 func TestTheJobResultWakesTheSession(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -316,7 +313,7 @@ func TestTheJobResultWakesTheSession(t *testing.T) {
 	}
 }
 
-// TestACancelledRunsJobResultWakesTheSession covers the plan's rule: a
+// TestACancelledRunsJobResultWakesTheSession covers the rule: a
 // job keeps running after the run is cancelled, and its later result
 // wakes the session.
 func TestACancelledRunsJobResultWakesTheSession(t *testing.T) {
@@ -375,7 +372,7 @@ func TestACancelledRunsJobResultWakesTheSession(t *testing.T) {
 	}
 }
 
-// TestOnIdleHoldEmitsInputHeld covers the plan's rule: a session that
+// TestOnIdleHoldEmitsInputHeld covers the rule: a session that
 // holds its results says so with an input.held event, and the results
 // are delivered before the next prompt's text.
 func TestOnIdleHoldEmitsInputHeld(t *testing.T) {
@@ -413,7 +410,7 @@ func TestOnIdleHoldEmitsInputHeld(t *testing.T) {
 	}
 }
 
-// TestTheUnattendedWakeLimitHoldsTheThirdWake covers the plan's rule:
+// TestTheUnattendedWakeLimitHoldsTheThirdWake covers the rule:
 // the wake limit caps the woken runs that follow one another with no
 // client input.
 func TestTheUnattendedWakeLimitHoldsTheThirdWake(t *testing.T) {
@@ -475,8 +472,7 @@ func (h *countingBeforeSettle) Calls() int {
 	return h.calls
 }
 
-// TestAnInterruptDuringExecutingStopsTheCallAndNotTheJob covers the
-// plan's rule: an interrupt during executing stops the synchronous
+// TestAnInterruptDuringExecutingStopsTheCallAndNotTheJob covers the rule: an interrupt during executing stops the synchronous
 // call, and the job keeps running.
 func TestAnInterruptDuringExecutingStopsTheCallAndNotTheJob(t *testing.T) {
 	started := make(chan struct{})
@@ -534,8 +530,7 @@ func TestAnInterruptDuringExecutingStopsTheCallAndNotTheJob(t *testing.T) {
 	})
 }
 
-// TestOnIdleHoldDoesNotSuppressAWaitingDelivery covers the plan's
-// delivery table: a result arriving while the run waits is delivered at
+// TestOnIdleHoldDoesNotSuppressAWaitingDelivery covers the delivery table: a result arriving while the run waits is delivered at
 // once, whatever on_idle says. on_idle is the idle row only.
 func TestOnIdleHoldDoesNotSuppressAWaitingDelivery(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -601,7 +596,7 @@ func (b *openRunHoldTransport) Fork(ctx context.Context, prev poo.Rendered, appe
 	return b.inner.Fork(ctx, prev, appended, maxTokens)
 }
 
-// TestOnIdleHoldDeliversToAnOpenRun covers the plan's delivery table: a
+// TestOnIdleHoldDeliversToAnOpenRun covers the delivery table: a
 // result that finishes while a run is open is delivered at the turn end,
 // even when on_idle is hold.
 func TestOnIdleHoldDeliversToAnOpenRun(t *testing.T) {

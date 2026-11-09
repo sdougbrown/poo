@@ -223,3 +223,26 @@ func TestTheVariantChangesBetweenTheRuns(t *testing.T) {
 		t.Errorf("the second prompt does not carry the default base: %q", got)
 	}
 }
+
+// promptOverrideHook overrides the tools section in BeforeRun.
+type promptOverrideHook struct{}
+
+func (*promptOverrideHook) BeforeRun(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error) {
+	return poo.StartDecision{SystemPrompt: func(s prompt.Sections) {
+		s.Set("tools.echo", "consumer override")
+	}}, nil
+}
+
+// TestHookSetWinsOverAVariant covers the rule that a later layer's Set
+// overrides the effective section whatever variant the prompt renders in.
+func TestHookSetWinsOverAVariant(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := variantOptions(t, tr, &variantTool{})
+	opts.BeforeRun = []poo.BeforeRunHook{&promptOverrideHook{}}
+	s := newTestSession(t, opts, poo.WithPromptVariant("small-local"))
+	runSession(t, s, "start")
+	got := systemPromptOf(t, tr.Requests()[0])
+	if !strings.Contains(got, "consumer override") {
+		t.Fatalf("later BeforeRun Set ignored by tool variant: %q", got)
+	}
+}

@@ -8,8 +8,7 @@ import (
 	"github.com/sdougbrown/poo/pootest"
 )
 
-// TestReviewAnInterruptResolvesTheAskAsInterrupted covers the plan's
-// interrupt row: pending permission asks resolve as deny with provenance
+// TestReviewAnInterruptResolvesTheAskAsInterrupted covers the interrupt row: pending permission asks resolve as deny with provenance
 // "interrupted". An interrupt ends the activity, not the run.
 func TestReviewAnInterruptResolvesTheAskAsInterrupted(t *testing.T) {
 	asker := &waitingAsker{asked: make(chan struct{})}

@@ -74,7 +74,7 @@ func TestASteerIsDeliveredAtTheNextTurnEnd(t *testing.T) {
 	}
 }
 
-// TestTheSteerWaitsForTheBatchToFinish covers the plan's rule: a steer
+// TestTheSteerWaitsForTheBatchToFinish covers the rule: a steer
 // does not touch the work that is running.
 func TestTheSteerWaitsForTheBatchToFinish(t *testing.T) {
 	started := make(chan struct{})
@@ -303,8 +303,7 @@ func TestAnInterruptSkipsTheUnstartedCalls(t *testing.T) {
 	}
 }
 
-// TestAnInterruptDuringTheHooksDiscardsTheirDecision covers the plan's
-// rule: the hook's decision is discarded, and that is not a hook error.
+// TestAnInterruptDuringTheHooksDiscardsTheirDecision covers the rule: the hook's decision is discarded, and that is not a hook error.
 func TestAnInterruptDuringTheHooksDiscardsTheirDecision(t *testing.T) {
 	// The hook blocks until the test releases it, and the interrupt
 	// arrives while it waits.
@@ -341,8 +340,7 @@ func TestAnInterruptDuringTheHooksDiscardsTheirDecision(t *testing.T) {
 	}
 }
 
-// TestAnInterruptDuringBeforeSettleEmitsNoSecondTurnEnd covers the
-// plan's rule: the turn's end is emitted once, even when the settle
+// TestAnInterruptDuringBeforeSettleEmitsNoSecondTurnEnd covers the rule: the turn's end is emitted once, even when the settle
 // hooks are interrupted.
 func TestAnInterruptDuringBeforeSettleEmitsNoSecondTurnEnd(t *testing.T) {
 	hookStarted := make(chan struct{})
@@ -608,8 +606,7 @@ func (o *eventObserver) Observe(ev poo.Event) error {
 	return nil
 }
 
-// TestAFollowUpQueuedWhenTheRunIsCancelledIsDropped covers the plan's
-// rule: a follow-up that never reaches the model is dropped and
+// TestAFollowUpQueuedWhenTheRunIsCancelledIsDropped covers the rule: a follow-up that never reaches the model is dropped and
 // reported.
 func TestAFollowUpQueuedWhenTheRunIsCancelledIsDropped(t *testing.T) {
 	tr := newStallingTransport()
@@ -644,8 +641,7 @@ func TestAFollowUpQueuedWhenTheRunIsCancelledIsDropped(t *testing.T) {
 	}
 }
 
-// TestASteerDuringBeforeSettleAbandonsTheFinalize covers the plan's
-// rule: a steer that arrives during the settle hooks abandons the
+// TestASteerDuringBeforeSettleAbandonsTheFinalize covers the rule: a steer that arrives during the settle hooks abandons the
 // finalization, and the AfterTurn hooks are not re-run.
 func TestASteerDuringBeforeSettleAbandonsTheFinalize(t *testing.T) {
 	hookStarted := make(chan struct{})
@@ -698,7 +694,7 @@ func TestASteerDuringBeforeSettleAbandonsTheFinalize(t *testing.T) {
 	}
 }
 
-// TestAMessageWhileIdleIsRefused covers the plan's rule: a message for a
+// TestAMessageWhileIdleIsRefused covers the rule: a message for a
 // session with no run is refused.
 func TestAMessageWhileIdleIsRefused(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
@@ -714,7 +710,7 @@ func TestAMessageWhileIdleIsRefused(t *testing.T) {
 	}
 }
 
-// TestTwoInterruptsCoalesceIntoOneAbort covers the plan's rule: several
+// TestTwoInterruptsCoalesceIntoOneAbort covers the rule: several
 // interrupts that arrive during one abort coalesce into one, and all
 // their messages are delivered.
 func TestTwoInterruptsCoalesceIntoOneAbort(t *testing.T) {
@@ -762,7 +758,7 @@ func TestTwoInterruptsCoalesceIntoOneAbort(t *testing.T) {
 	}
 }
 
-// TestACancelDuringAnInterruptWins covers the plan's rule: a cancel
+// TestACancelDuringAnInterruptWins covers the rule: a cancel
 // beats an interrupt, and the interrupt's message is dropped.
 func TestACancelDuringAnInterruptWins(t *testing.T) {
 	// The hold pins the run at the stream after the abort: the cancel's
@@ -796,7 +792,7 @@ func TestACancelDuringAnInterruptWins(t *testing.T) {
 	}
 }
 
-// TestASteerBeforeAnAfterTurnStopIsDropped covers the plan's rule: a
+// TestASteerBeforeAnAfterTurnStopIsDropped covers the rule: a
 // steer that arrives just before an AfterTurn stop is dropped and
 // reported with the run's reason.
 func TestASteerBeforeAnAfterTurnStopIsDropped(t *testing.T) {
@@ -833,8 +829,7 @@ func TestASteerBeforeAnAfterTurnStopIsDropped(t *testing.T) {
 	}
 }
 
-// TestTheFinalizeIsNotAbandonedWhenACancelIsPending covers the plan's
-// rule: a finalization with a cancel candidate is never abandoned, even
+// TestTheFinalizeIsNotAbandonedWhenACancelIsPending covers the rule: a finalization with a cancel candidate is never abandoned, even
 // when the queue is not empty.
 func TestTheFinalizeIsNotAbandonedWhenACancelIsPending(t *testing.T) {
 	tr := newStallingTransport()
@@ -863,8 +858,7 @@ func TestTheFinalizeIsNotAbandonedWhenACancelIsPending(t *testing.T) {
 	}
 }
 
-// TestEveryAcceptedInputEndsAsDeliveredOrDropped covers the plan's
-// promise: an accepted input is never lost.
+// TestEveryAcceptedInputEndsAsDeliveredOrDropped covers the promise: an accepted input is never lost.
 func TestEveryAcceptedInputEndsAsDeliveredOrDropped(t *testing.T) {
 	tr := newStallingTransport()
 	sink := &recordingSink{}
@@ -1039,7 +1033,7 @@ func (r *stallingReader) Next() (poo.StreamItem, error) {
 // Close releases the reader.
 func (r *stallingReader) Close() error { return nil }
 
-// TestAMessageWhileSettlingIsRefused covers the plan's rule: a message
+// TestAMessageWhileSettlingIsRefused covers the rule: a message
 // for a run that is settling is refused, because the outcome is already
 // fixed.
 func TestAMessageWhileSettlingIsRefused(t *testing.T) {
@@ -1109,7 +1103,7 @@ func (s *blockingSink) Append(ctx context.Context, rec poo.Record) error {
 // Flush does nothing.
 func (s *blockingSink) Flush(ctx context.Context) error { return nil }
 
-// TestTheInterruptMessageIsDeliveredNext covers the plan's rule: the
+// TestTheInterruptMessageIsDeliveredNext covers the rule: the
 // interrupt's own message reaches the model at the turn end.
 func TestTheInterruptMessageIsDeliveredNext(t *testing.T) {
 	tr := newStallingTransport()
@@ -1139,7 +1133,7 @@ func TestTheInterruptMessageIsDeliveredNext(t *testing.T) {
 	}
 }
 
-// TestThePartialMessageKeepsTheToolCallsVisible covers the plan's rule:
+// TestThePartialMessageKeepsTheToolCallsVisible covers the rule:
 // the calls in a partial response are not run, and the model sees that.
 func TestThePartialMessageKeepsTheToolCallsVisible(t *testing.T) {
 	tr := newPartialTransport()
@@ -1259,8 +1253,7 @@ func (r *partialCallReader) Next() (poo.StreamItem, error) {
 // Close releases the reader.
 func (r *partialCallReader) Close() error { return nil }
 
-// TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd covers the plan's
-// rule: a follow-up is delivered only when the run would settle
+// TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd covers the rule: a follow-up is delivered only when the run would settle
 // naturally, so a turn end that continues the run leaves it queued.
 func TestAFollowUpWaitsForTheNaturalStopNotTheTurnEnd(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -1335,7 +1328,7 @@ func resumedRun(t *testing.T, tool *echoTool, maxDuration time.Duration) (*poo.S
 	return s, sink
 }
 
-// TestAResumedRunKeepsItsDurationBudget covers the plan's MaxDuration:
+// TestAResumedRunKeepsItsDurationBudget covers the MaxDuration:
 // the timer settles a stuck run, also one that resumed after an
 // abandoned finalization.
 func TestAResumedRunKeepsItsDurationBudget(t *testing.T) {
@@ -1382,8 +1375,7 @@ func TestAPanicInAResumedRunStillSettles(t *testing.T) {
 	}
 }
 
-// TestAnInterruptDuringTheBatchRecordsTheReplyOnce covers the plan's
-// rule that partial is for a reply that was not recorded: an interrupt
+// TestAnInterruptDuringTheBatchRecordsTheReplyOnce covers the rule: that partial is for a reply that was not recorded: an interrupt
 // in the executing state leaves the one complete assistant message.
 func TestAnInterruptDuringTheBatchRecordsTheReplyOnce(t *testing.T) {
 	started := make(chan struct{})
@@ -1548,7 +1540,7 @@ func (s *cancellingDeliverySink) Append(ctx context.Context, rec poo.Record) err
 	return s.recordingSink.Append(ctx, rec)
 }
 
-// TestADeliveryDuringASecondFinalizeIsDropped covers the plan's rule
+// TestADeliveryDuringASecondFinalizeIsDropped covers the rule
 // that an input which a resumed drain cannot record is reported as
 // input.dropped: a cancel that commits while the drain is writing must
 // not leave the input delivered, and the input is never silently lost.
@@ -1624,7 +1616,7 @@ func (s *refusingSteerSink) Append(ctx context.Context, rec poo.Record) error {
 	return s.recordingSink.Append(ctx, rec)
 }
 
-// TestADrainStopsWhenADeliveryWriteFails covers the plan's rule that
+// TestADrainStopsWhenADeliveryWriteFails covers the rule that
 // accepted input is never silently lost: once a delivery's write fails,
 // the failed input and the rest of the drain are reported in the settle
 // detail.
@@ -1675,7 +1667,7 @@ func TestADrainStopsWhenADeliveryWriteFails(t *testing.T) {
 	}
 }
 
-// TestSendQueuedWriteFailureRefusesAndSettles covers the plan's rule: a
+// TestSendQueuedWriteFailureRefusesAndSettles covers the rule: a
 // message is recorded before Send returns, and a store failure is a
 // store_error candidate for the active run, not a stuck queue entry.
 func TestSendQueuedWriteFailureRefusesAndSettles(t *testing.T) {
@@ -1712,7 +1704,7 @@ func TestSendQueuedWriteFailureRefusesAndSettles(t *testing.T) {
 	}
 }
 
-// TestAFailedDeliveryMessageIsDropped covers the plan's rule: every
+// TestAFailedDeliveryMessageIsDropped covers the rule: every
 // accepted input ends as exactly one of delivered or dropped. A delivery
 // whose message record fails never reached the model, so it is dropped
 // and reported, not silently lost.
@@ -1758,7 +1750,7 @@ func TestAFailedDeliveryMessageIsDropped(t *testing.T) {
 	}
 }
 
-// TestAnInterruptedSyncCallKeepsItsPartialOutput covers the plan's rule:
+// TestAnInterruptedSyncCallKeepsItsPartialOutput covers the rule:
 // a synchronous call an interrupt stops keeps the partial output the
 // tool returned, with the note saying why it ended.
 func TestAnInterruptedSyncCallKeepsItsPartialOutput(t *testing.T) {
@@ -1857,8 +1849,7 @@ func (s *blockingQueuedSink) Append(ctx context.Context, rec poo.Record) error {
 	return s.recordingSink.Append(ctx, rec)
 }
 
-// TestASteerAcceptedDuringAFinalizeIsReportedAsUndelivered covers the
-// plan's rule that an accepted input is never silently lost: a steer
+// TestASteerAcceptedDuringAFinalizeIsReportedAsUndelivered covers the rule that an accepted input is never silently lost: a steer
 // whose acceptance record is in flight when the run seals is taken out
 // of the queue, and the settle detail lists it as undelivered.
 func TestASteerAcceptedDuringAFinalizeIsReportedAsUndelivered(t *testing.T) {

@@ -1,6 +1,7 @@
 package poo_test
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -10,7 +11,7 @@ import (
 	"github.com/sdougbrown/poo/pootest"
 )
 
-// The before-tool arbitration is the plan's: the policy slot runs
+// The before-tool arbitration: the policy slot runs
 // first, a refusal wins over everything, and the first result in
 // registration order becomes the call's result. The hooks after that
 // result still run, and only to look for a refusal.
@@ -87,7 +88,7 @@ func (h *slowPolicy) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo
 	return poo.Allow(), nil
 }
 
-// TestThePolicySlotRunsFirst covers the plan's order: the policy slot is
+// TestThePolicySlotRunsFirst covers the order: the policy slot is
 // asked before the consumer's own hooks, and its refusal ends the
 // evaluation.
 func TestThePolicySlotRunsFirst(t *testing.T) {
@@ -125,7 +126,7 @@ func TestThePolicySlotRunsFirst(t *testing.T) {
 	}
 }
 
-// TestTheFirstResultBecomesTheCallsResult covers the plan's rule: the
+// TestTheFirstResultBecomesTheCallsResult covers the rule: the
 // first result in registration order becomes the call's result, and the
 // hooks after it still run.
 func TestTheFirstResultBecomesTheCallsResult(t *testing.T) {
@@ -154,7 +155,7 @@ func TestTheFirstResultBecomesTheCallsResult(t *testing.T) {
 	}
 }
 
-// TestARefusalWinsOverAResult covers the plan's rule: a refusal stops
+// TestARefusalWinsOverAResult covers the rule: a refusal stops
 // the evaluation, even when an earlier hook answered the call.
 func TestARefusalWinsOverAResult(t *testing.T) {
 	first := &recordingBeforeTool{name: "first", decision: poo.ShortCircuit(poo.ToolResult{Text: "the answer"})}
@@ -178,8 +179,7 @@ func TestARefusalWinsOverAResult(t *testing.T) {
 	}
 }
 
-// TestThePolicySlotIsNotSubjectToTheHookDeadline covers the plan's
-// rule: the policy slot is exempt from the hook deadline, so a slot
+// TestThePolicySlotIsNotSubjectToTheHookDeadline covers the rule: the policy slot is exempt from the hook deadline, so a slot
 // that takes longer than the deadline still answers and the call runs.
 func TestThePolicySlotIsNotSubjectToTheHookDeadline(t *testing.T) {
 	policy := &slowPolicy{delay: 150 * time.Millisecond}
@@ -227,7 +227,7 @@ func TestThePolicySlotsResultIsIgnored(t *testing.T) {
 	}
 }
 
-// TestAHookThatMissesItsDeadlineSettlesTheRun covers the plan's rule:
+// TestAHookThatMissesItsDeadlineSettlesTheRun covers the rule:
 // an executable hook that misses its deadline settles the run with
 // hook_error.
 func TestAHookThatMissesItsDeadlineSettlesTheRun(t *testing.T) {
@@ -278,4 +278,107 @@ func lastToolResult(t *testing.T, tr *pootest.Transport) string {
 	}
 	t.Fatalf("the last request holds no tool result: %+v", messages)
 	return ""
+}
+
+// blockingBeforeTool blocks the chain until the test releases it.
+type blockingBeforeTool struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+// BeforeTool waits for the release and allows the call.
+func (h *blockingBeforeTool) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	select {
+	case <-h.entered:
+	default:
+		close(h.entered)
+	}
+	<-h.release
+	return poo.Allow(), nil
+}
+
+// shortCircuitHook answers the call itself.
+type shortCircuitHook struct{ text string }
+
+// BeforeTool returns the synthetic result.
+func (h *shortCircuitHook) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	return poo.ShortCircuit(poo.ToolResult{Text: h.text}), nil
+}
+
+// TestAnInterruptDuringTheBeforeToolChainKeepsTheFirstResult covers the rule: the first result in registration order is the call's
+// result, and an interrupt that arrives while the chain runs stops the
+// call instead of starting it.
+func TestAnInterruptDuringTheBeforeToolChainKeepsTheFirstResult(t *testing.T) {
+	const synthetic = "the synthetic result"
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{backgroundCall("quick", "one")}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	tool := newHoldTool("quick", "the tool ran")
+	opts := oneToolOptions(t, tr, tool, sink)
+	blocker := &blockingBeforeTool{entered: make(chan struct{}), release: make(chan struct{})}
+	opts.BeforeTool = []poo.BeforeToolHook{&shortCircuitHook{text: synthetic}, blocker}
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "go"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	select {
+	case <-blocker.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the before-tool chain never ran")
+	}
+	if _, err := s.Send("stop", poo.Interrupt); err != nil {
+		t.Fatalf("interrupting the run: %v", err)
+	}
+	close(blocker.release)
+	waitFor(t, "the run to settle", func() bool { return sink.Settled() != nil })
+
+	if got := tool.Calls(); got != 0 {
+		t.Errorf("the tool was called %d time(s) after an interrupt, want 0", got)
+	}
+	rec := toolResultRecord(t, sink)
+	if want := poo.HandleLine("r1", "quick") + "\n" + synthetic; rec.Text != want {
+		t.Errorf("the call's result is %q, want the first hook's %q", rec.Text, want)
+	}
+}
+
+// interruptedPolicy waits for the policy's context to end and then
+// returns its cancellation as the policy's error.
+type interruptedPolicy struct{ entered chan struct{} }
+
+// BeforeTool waits for the interrupt.
+func (h *interruptedPolicy) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	close(h.entered)
+	<-ctx.Done()
+	return poo.ToolDecision{}, ctx.Err()
+}
+
+// TestAPolicyThatFailsOnInterruptDoesNotSettleHookError covers the rule: an interrupted policy decision is discarded and the call
+// is refused. Its cancellation is not a hook failure.
+func TestAPolicyThatFailsOnInterruptDoesNotSettleHookError(t *testing.T) {
+	entered := make(chan struct{})
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "done"},
+	})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Policy = &interruptedPolicy{entered: entered}
+	s := newTestSession(t, opts)
+
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-entered
+	if _, err := s.Send("instead", poo.Interrupt); err != nil {
+		t.Fatalf("interrupting the run: %v", err)
+	}
+	got, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if got.Reason != poo.ReasonEndTurn {
+		t.Errorf("the interrupt settled %s (%s), want end_turn", got.Reason, got.Detail.Text)
+	}
 }

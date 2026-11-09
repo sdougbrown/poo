@@ -245,7 +245,7 @@ func sampleArguments(t *testing.T, schema json.RawMessage) any {
 }
 
 // TestTheAdvertisedArgumentsAreCallable covers the tool's advertised
-// schema: the plan's call is finish({result: <object>}), so a caller that
+// schema: the call is finish({result: <object>}), so a caller that
 // follows the advertised schema must pass Prepare.
 func TestTheAdvertisedArgumentsAreCallable(t *testing.T) {
 	consumer := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)

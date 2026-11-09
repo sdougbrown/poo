@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -12,7 +13,7 @@ import (
 // not change the history the model sees, and the next read must see the
 // original.
 
-// TestTheViewReturnsDeepCopies covers the plan's rule: the view hands
+// TestTheViewReturnsDeepCopies covers the rule: the view hands
 // out copies, and the nested content and tool payloads are deep-copied on
 // access.
 func TestTheViewReturnsDeepCopies(t *testing.T) {
@@ -151,7 +152,7 @@ func (h *resultPeekHook) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error
 	return poo.TurnDecision{}, nil
 }
 
-// TestTheViewCarriesTheToolResult covers the plan's rule: a hook that
+// TestTheViewCarriesTheToolResult covers the rule: a hook that
 // asks the view for a tool result gets the result the call produced.
 func TestTheViewCarriesTheToolResult(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -197,5 +198,37 @@ func TestTheViewReturnsTurnSummariesAsCopies(t *testing.T) {
 	}
 	if len(again[0].Calls) != 1 || again[0].Calls[0].Handle != "r1" {
 		t.Errorf("the turn's calls are %+v, want one call r1", again[0].Calls)
+	}
+}
+
+// TestTheViewOrderMatchesTheRequestOrder covers the rule: the view
+// a hook reads is the model's history in the order the request sends it.
+func TestTheViewOrderMatchesTheRequestOrder(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "done"}, {text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	var mu sync.Mutex
+	var histories [][]poo.Message
+	opts.AfterTurn = []poo.AfterTurnHook{afterTurnFunc(func(ctx poo.HookContext) (poo.TurnDecision, error) {
+		mu.Lock()
+		histories = append(histories, ctx.HistoryView.Messages())
+		mu.Unlock()
+		return poo.TurnDecision{}, nil
+	})}
+	s := newTestSession(t, opts)
+	runSession(t, s, "one")
+	runSession(t, s, "two")
+
+	mu.Lock()
+	view := histories[1]
+	mu.Unlock()
+	req := tr.Requests()[1].Messages
+	if len(view) < len(req) {
+		t.Fatalf("the view holds %d messages, the request %d", len(view), len(req))
+	}
+	view = view[:len(req)]
+	for i := range req {
+		if req[i].Role != view[i].Role || req[i].Text() != view[i].Text() {
+			t.Fatalf("the view and request differ at %d: view=%s:%q request=%s:%q", i, view[i].Role, view[i].Text(), req[i].Role, req[i].Text())
+		}
 	}
 }

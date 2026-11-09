@@ -314,3 +314,61 @@ func TestTheListShowsTheSessions(t *testing.T) {
 		t.Errorf("the session's last activity is %s, want %s", first.LastActivity, pruneNow.Add(-time.Hour))
 	}
 }
+
+// TestTheCountRuleBreaksTiesTheSameWay covers the count rule's tie: two
+// sessions with the same last activity keep the same one on every run.
+func TestTheCountRuleBreaksTiesTheSameWay(t *testing.T) {
+	dir, store := newTestStore(t)
+	at := pruneNow.Add(-time.Hour)
+	sessionAt(t, dir, "a", at)
+	sessionAt(t, dir, "b", at)
+	result, err := store.Prune(context.Background(), Policy{Keep: 1, Now: pruneNow})
+	if err != nil {
+		t.Fatalf("pruning: %v", err)
+	}
+	if len(result.Deleted) != 1 || result.Deleted[0].ID != "b" {
+		t.Fatalf("the prune deleted %v, want the session b", result.Deleted)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.jsonl")); err != nil {
+		t.Errorf("the kept session is gone: %v", err)
+	}
+}
+
+// TestAStaleTemporaryFileIsRemovedUnderItsOwnLock covers a session id
+// that ends in ".tmp": the stale file's lock is the session's, not a
+// truncated id's.
+func TestAStaleTemporaryFileIsRemovedUnderItsOwnLock(t *testing.T) {
+	dir, store := newTestStore(t)
+	sessionAt(t, dir, "foo", pruneNow.Add(-time.Hour))
+	sessionAt(t, dir, "foo.tmp", pruneNow.Add(-time.Hour))
+	tmp := filepath.Join(dir, "foo.tmp.jsonl.tmp")
+	if err := os.WriteFile(tmp, []byte("a stale construction"), 0o600); err != nil {
+		t.Fatalf("writing the stale file: %v", err)
+	}
+	old := pruneNow.Add(-2 * StaleTmpAge)
+	if err := os.Chtimes(tmp, old, old); err != nil {
+		t.Fatalf("aging the stale file: %v", err)
+	}
+	// The other session's lock is held: the removal must not need it.
+	lock, err := Acquire(LockPath(dir, "foo"))
+	if err != nil {
+		t.Fatalf("acquiring foo's lock: %v", err)
+	}
+	defer lock.Release()
+	result, err := store.Prune(context.Background(), Policy{MaxAge: 24 * time.Hour, Now: pruneNow})
+	if err != nil {
+		t.Fatalf("pruning: %v", err)
+	}
+	found := false
+	for _, removed := range result.Removed {
+		if removed == tmp {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the prune removed %v, want the stale file %s", result.Removed, tmp)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("the stale file is still there: %v", err)
+	}
+}

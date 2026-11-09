@@ -12,7 +12,7 @@ import (
 
 // The request.
 //
-// The plan: the request carries the output ceiling, the sampling
+// The request carries the output ceiling, the sampling
 // parameters, the reasoning parameter and the tools. The ceiling is
 // always computed, the tools are always in a stable order, and a model
 // that takes no temperature never gets one.
@@ -103,7 +103,7 @@ func TestTheSamplingOverridesReachTheBody(t *testing.T) {
 	}
 }
 
-// TestAFixedTemperatureModelNeverGetsOne covers the plan's rule: a
+// TestAFixedTemperatureModelNeverGetsOne covers the rule: a
 // model that takes no temperature never gets one, whatever the
 // settings ask for.
 func TestAFixedTemperatureModelNeverGetsOne(t *testing.T) {
@@ -129,7 +129,7 @@ func TestAFixedTemperatureModelNeverGetsOne(t *testing.T) {
 	}
 }
 
-// TestTheReasoningParameterFollowsTheMode covers the plan's mapping: an
+// TestTheReasoningParameterFollowsTheMode covers the mapping: an
 // effort is an effort level, a budget is a number of thinking tokens,
 // and a toggle is on or off.
 func TestTheReasoningParameterFollowsTheMode(t *testing.T) {
@@ -216,7 +216,7 @@ func TestTheReasoningParameterFollowsTheMode(t *testing.T) {
 	}
 }
 
-// TestAModelThatCannotThinkIsAskedNotTo covers the plan's rule: a model
+// TestAModelThatCannotThinkIsAskedNotTo covers the rule: a model
 // whose reasoning cannot be controlled takes no parameter, and a
 // setting that asks it to think is a configuration error.
 func TestAModelThatCannotThinkIsAskedNotTo(t *testing.T) {
@@ -263,7 +263,7 @@ func TestAModelThatCannotThinkIsAskedNotToSendAnything(t *testing.T) {
 	}
 }
 
-// TestAToggleModelIsSwitchedOff covers the plan's rule: a toggle
+// TestAToggleModelIsSwitchedOff covers the rule: a toggle
 // model that is asked not to think is switched off explicitly, because
 // its template thinks by default.
 func TestAToggleModelIsSwitchedOff(t *testing.T) {
@@ -293,8 +293,7 @@ func TestAToggleModelIsSwitchedOff(t *testing.T) {
 	}
 }
 
-// TestAModelWithoutAReasoningControlRefusesTheSetting covers the
-// plan's rule: the descriptor holds the rule, and a model that names no
+// TestAModelWithoutAReasoningControlRefusesTheSetting covers the rule: the descriptor holds the rule, and a model that names no
 // reasoning control is asked for none. A setting that asks it to think
 // is a configuration error, and the request never goes out.
 func TestAModelWithoutAReasoningControlRefusesTheSetting(t *testing.T) {
@@ -315,7 +314,7 @@ func TestAModelWithoutAReasoningControlRefusesTheSetting(t *testing.T) {
 	}
 }
 
-// TestTheToolsAreSentInAStableOrder covers the plan's rule: the tool
+// TestTheToolsAreSentInAStableOrder covers the rule: the tool
 // list is serialized in a stable order, so two sessions that registered
 // the same tools in different orders send the same array.
 func TestTheToolsAreSentInAStableOrder(t *testing.T) {

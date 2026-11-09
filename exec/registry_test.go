@@ -40,7 +40,7 @@ func TestTheRegistryBuildsTheExecutorItHolds(t *testing.T) {
 	}
 }
 
-// TestAnUnknownExecutorIsATypedError covers the plan's build option: a
+// TestAnUnknownExecutorIsATypedError covers the build option: a
 // name the binary does not link is a configuration error, and never a
 // fallback to another executor.
 func TestAnUnknownExecutorIsATypedError(t *testing.T) {

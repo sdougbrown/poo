@@ -175,7 +175,7 @@ func TestTheMessageIdsAreSafeForConcurrentUse(t *testing.T) {
 	if len(seen) != workers*perWorker {
 		t.Errorf("the counter handed out %d ids, want %d", len(seen), workers*perWorker)
 	}
-	// The ids are the ones the plan names, and they run from one to the
+	// The ids run from one to the
 	// number of ids handed out.
 	for i := 1; i <= workers*perWorker; i++ {
 		if _, ok := seen[fmt.Sprintf("m%d", i)]; !ok {

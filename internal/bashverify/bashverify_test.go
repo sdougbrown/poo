@@ -1,7 +1,7 @@
-// Package bashverify runs the plan's bash verify list against every
+// Package bashverify runs the bash verify list against every
 // executor the build links.
 //
-// The list is the plan's: the shell features, the timeouts, the
+// The list: the shell features, the timeouts, the
 // process teardown, the environment scrubbing and the observation. Every
 // executor has to pass all of it, so the same list runs against the
 // local executor and against the sandboxed one.
@@ -108,7 +108,7 @@ func output(t *testing.T, res poo.ToolResult) string {
 	return text
 }
 
-// TestTheShellFeatures covers the plan's shell features: pipes,
+// TestTheShellFeatures covers the shell features: pipes,
 // redirects, heredocs, chaining and failure exit codes.
 func TestTheShellFeatures(t *testing.T) {
 	for _, c := range executorCases(t) {
@@ -146,7 +146,7 @@ func TestTheShellFeatures(t *testing.T) {
 	}
 }
 
-// TestATimeoutReturnsThePartialOutput covers the plan's timeout: the
+// TestATimeoutReturnsThePartialOutput covers the timeout: the
 // call returns what the command produced before the timeout, and the
 // model is told that it failed.
 func TestATimeoutReturnsThePartialOutput(t *testing.T) {
@@ -177,8 +177,7 @@ func TestATimeoutReturnsThePartialOutput(t *testing.T) {
 	}
 }
 
-// TestADescendantHoldingStdoutDoesNotHangTheCall covers the plan's
-// bounded wait: a descendant that holds the output open after the
+// TestADescendantHoldingStdoutDoesNotHangTheCall covers the bounded wait: a descendant that holds the output open after the
 // shell exits does not keep the call waiting.
 func TestADescendantHoldingStdoutDoesNotHangTheCall(t *testing.T) {
 	for _, c := range executorCases(t) {
@@ -202,7 +201,7 @@ func TestADescendantHoldingStdoutDoesNotHangTheCall(t *testing.T) {
 	}
 }
 
-// TestARunawayProducerDoesNotBlockTheCall covers the plan's capture
+// TestARunawayProducerDoesNotBlockTheCall covers the capture
 // cap: a producer that writes far more than the cap does not block on
 // a full pipe.
 func TestARunawayProducerDoesNotBlockTheCall(t *testing.T) {
@@ -230,7 +229,7 @@ func TestARunawayProducerDoesNotBlockTheCall(t *testing.T) {
 	}
 }
 
-// TestNothingOutlivesTheCall covers the plan's normal exit: the call
+// TestNothingOutlivesTheCall covers the normal exit: the call
 // returns at once, and the process the command left behind is gone.
 func TestNothingOutlivesTheCall(t *testing.T) {
 	for _, c := range executorCases(t) {
@@ -266,7 +265,7 @@ const sleepCommand = "readlink /proc/self/ns/pid > ns.txt; sleep 300 & echo $! >
 // for the process, so the job lasts until it is stopped.
 const jobCommand = sleepCommand + "; wait"
 
-// TestTheEnvironmentIsScrubbed covers the plan's environment rules: the
+// TestTheEnvironmentIsScrubbed covers the environment rules: the
 // variables an endpoint's key is read from are gone, a scrubbed glob
 // removes the names it matches, and a passthrough limits the
 // environment to the names on it.
@@ -320,7 +319,7 @@ func TestTheEnvironmentIsScrubbed(t *testing.T) {
 	}
 }
 
-// TestTheOutputIsElided covers the plan's observation: an output over
+// TestTheOutputIsElided covers the observation: an output over
 // the cap becomes a head and a tail, and the count of the dropped
 // middle is reported.
 func TestTheOutputIsElided(t *testing.T) {
@@ -349,7 +348,7 @@ func TestTheOutputIsElided(t *testing.T) {
 	}
 }
 
-// TestTheShellIsFreshForEveryCall covers the plan's stateless shell: a
+// TestTheShellIsFreshForEveryCall covers the stateless shell: a
 // change one call makes is gone by the next one.
 func TestTheShellIsFreshForEveryCall(t *testing.T) {
 	for _, c := range executorCases(t) {
@@ -366,7 +365,7 @@ func TestTheShellIsFreshForEveryCall(t *testing.T) {
 	}
 }
 
-// TestPrepareRejectsUnknownFields covers the plan's strict decoding: a
+// TestPrepareRejectsUnknownFields covers the strict decoding: a
 // field the tool does not know is a validation error.
 func TestPrepareRejectsUnknownFields(t *testing.T) {
 	for _, c := range executorCases(t) {
@@ -386,7 +385,7 @@ func TestPrepareRejectsUnknownFields(t *testing.T) {
 	}
 }
 
-// TestABackgroundJobIsStoppedByCancelJob covers the plan's job rules:
+// TestABackgroundJobIsStoppedByCancelJob covers the job rules:
 // a background call returns at once, the job's process survives the end
 // of the turn and the cancellation of the run, and cancel_job leaves no
 // descendant behind.
@@ -487,8 +486,7 @@ type hostPrepared struct{}
 
 func (hostPrepared) Summary() string { return "host" }
 
-// TestAScrubbedVariableStaysVisibleToAHostTool covers the plan's
-// credential rule: the scrub is the shell's, and a tool that runs in
+// TestAScrubbedVariableStaysVisibleToAHostTool covers the credential rule: the scrub is the shell's, and a tool that runs in
 // poo's own process still sees the environment the session holds.
 func TestAScrubbedVariableStaysVisibleToAHostTool(t *testing.T) {
 	for _, c := range executorCases(t) {

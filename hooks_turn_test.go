@@ -72,7 +72,7 @@ func (h *recordingTurnHook) Outcomes() [][]poo.Outcome {
 	return append([][]poo.Outcome(nil), h.outcomes...)
 }
 
-// TestTheAfterTurnHookSeesAStartedResult covers the plan's rule: a call
+// TestTheAfterTurnHookSeesAStartedResult covers the rule: a call
 // that became a job is a processed call, and the after-turn hook sees
 // it.
 func TestTheAfterTurnHookSeesAStartedResult(t *testing.T) {
@@ -111,7 +111,7 @@ func TestTheAfterTurnHookSeesAStartedResult(t *testing.T) {
 	}
 }
 
-// TestTheAfterTurnHookSeesAnInterruptedTurn covers the plan's rule: an
+// TestTheAfterTurnHookSeesAnInterruptedTurn covers the rule: an
 // interrupted turn reaches the after-turn hooks with the interrupted
 // flag set.
 func TestTheAfterTurnHookSeesAnInterruptedTurn(t *testing.T) {
@@ -153,7 +153,7 @@ func TestTheAfterTurnHookSeesAnInterruptedTurn(t *testing.T) {
 	}
 }
 
-// TestAHooksRecordNeverFollowsTheSettleRecord covers the plan's rule: a
+// TestAHooksRecordNeverFollowsTheSettleRecord covers the rule: a
 // hook that runs while the finalization is under way cannot add a
 // record after the run settled.
 func TestAHooksRecordNeverFollowsTheSettleRecord(t *testing.T) {
@@ -237,7 +237,7 @@ func (s *hookRecordSink) Append(ctx context.Context, rec poo.Record) error {
 	return s.recordingSink.Append(ctx, rec)
 }
 
-// TestTheAfterTurnHookSeesTheTurnsCalls covers the plan's rule: the
+// TestTheAfterTurnHookSeesTheTurnsCalls covers the rule: the
 // after-turn hook sees the turn that just closed.
 func TestTheAfterTurnHookSeesTheTurnsCalls(t *testing.T) {
 	hook := &recordingTurnHook{}

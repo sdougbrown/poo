@@ -8,7 +8,7 @@ import (
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
-// TestThePromptSectionIsTheGuidance covers the plan's prompt rule: the
+// TestThePromptSectionIsTheGuidance covers the prompt rule: the
 // tool brings its own section, and the section says what the shell is.
 func TestThePromptSectionIsTheGuidance(t *testing.T) {
 	section := bash.New().PromptSection(prompt.Env{})

@@ -92,7 +92,7 @@ func TestSetDefaultKeepsTheAlternatives(t *testing.T) {
 	}
 }
 
-// TestSetOverridesTheAlternatives covers the plan's merge order: a
+// TestSetOverridesTheAlternatives covers the merge order: a
 // later layer's Set wins over the section's alternative.
 func TestSetOverridesTheAlternatives(t *testing.T) {
 	b := prompt.New(variantEnv("small-local"))
@@ -108,7 +108,7 @@ func TestSetOverridesTheAlternatives(t *testing.T) {
 	}
 }
 
-// TestInsertOverridesTheAlternatives covers the plan's merge order for
+// TestInsertOverridesTheAlternatives covers the merge order for
 // a later layer's Insert.
 func TestInsertOverridesTheAlternatives(t *testing.T) {
 	b := prompt.New(variantEnv("small-local"))

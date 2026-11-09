@@ -89,7 +89,7 @@ func TestASteerWithADeliveryNoteCarriesIt(t *testing.T) {
 	}
 }
 
-// TestADeliveryNoteAtTheEndAddsNothing covers the plan's rule: a count
+// TestADeliveryNoteAtTheEndAddsNothing covers the rule: a count
 // at or past the end means the whole reply was presented, and no note
 // is added.
 func TestADeliveryNoteAtTheEndAddsNothing(t *testing.T) {
@@ -131,7 +131,7 @@ func TestADeliveryNoteAtTheEndAddsNothing(t *testing.T) {
 	}
 }
 
-// TestADeliveryNoteOfZeroSaysNothingWasSeen covers the plan's rule: a
+// TestADeliveryNoteOfZeroSaysNothingWasSeen covers the rule: a
 // count of zero has its own wording.
 func TestADeliveryNoteOfZeroSaysNothingWasSeen(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -175,7 +175,7 @@ func TestADeliveryNoteOfZeroSaysNothingWasSeen(t *testing.T) {
 	}
 }
 
-// TestAnUnknownMessageIDIsRefused covers the plan's rule: an unknown id
+// TestAnUnknownMessageIDIsRefused covers the rule: an unknown id
 // is refused, and nothing is queued.
 func TestAnUnknownMessageIDIsRefused(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -250,7 +250,7 @@ func TestANegativeCharacterCountIsRefused(t *testing.T) {
 	}
 }
 
-// TestTheNoteCountsCodePointsOverTheTextBlocks covers the plan's rule:
+// TestTheNoteCountsCodePointsOverTheTextBlocks covers the rule:
 // the count is over the text blocks, and the thinking is left out.
 func TestTheNoteCountsCodePointsOverTheTextBlocks(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -298,7 +298,7 @@ func TestTheNoteCountsCodePointsOverTheTextBlocks(t *testing.T) {
 	}
 }
 
-// TestTheQuoteEscapesTheQuotesAndNewlines covers the plan's rule: the
+// TestTheQuoteEscapesTheQuotesAndNewlines covers the rule: the
 // quoted text cannot break the note's own quoting.
 func TestTheQuoteEscapesTheQuotesAndNewlines(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -388,7 +388,7 @@ func TestADeliveryNoteOnAPrompt(t *testing.T) {
 	}
 }
 
-// TestADroppedInputsNoteIsDroppedWithIt covers the plan's rule: a
+// TestADroppedInputsNoteIsDroppedWithIt covers the rule: a
 // dropped input's note is dropped with it.
 func TestADroppedInputsNoteIsDroppedWithIt(t *testing.T) {
 	tr := newStallingTransport()
@@ -492,7 +492,7 @@ func asInvalidInput(err error, target **poo.ErrInvalidInput) bool {
 	return false
 }
 
-// TestTheDeliveryNoteReachesTheModel covers the plan's rule: the note is
+// TestTheDeliveryNoteReachesTheModel covers the rule: the note is
 // prefixed to the user message, so the next request carries it.
 func TestTheDeliveryNoteReachesTheModel(t *testing.T) {
 	tr := scripted([]fakeResponse{

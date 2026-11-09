@@ -14,7 +14,7 @@ func rawCall(id, name, args string) pootest.Call {
 	return pootest.Call{Name: name, ID: id, Arguments: json.RawMessage(args)}
 }
 
-// TestReviewExactKeyUsesThePreparedValue covers the plan's exact key: the
+// TestReviewExactKeyUsesThePreparedValue covers the exact key: the
 // tool plus its canonical prepared input. Two calls that prepare to the
 // same value share the key, even when the model spells one of them with
 // an explicit default.
@@ -36,7 +36,7 @@ func TestReviewExactKeyUsesThePreparedValue(t *testing.T) {
 	s.run(t)
 
 	// The three calls prepare to the same readPrepared{path:"a.go", offset:0},
-	// so the plan's exact key reaches its threshold on the third call.
+	// so the exact key reaches its threshold on the third call.
 	if tool.Calls() != 2 {
 		t.Errorf("the tool ran %d time(s), want 2: the third call is the same prepared call", tool.Calls())
 	}

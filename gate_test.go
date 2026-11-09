@@ -93,7 +93,7 @@ func TestTheObserverSeesTheEventsInOrder(t *testing.T) {
 	}
 }
 
-// TestTheObserverErrorDoesNotSettleTheRun covers the plan's rule: an
+// TestTheObserverErrorDoesNotSettleTheRun covers the rule: an
 // observer's error never settles a run.
 func TestTheObserverErrorDoesNotSettleTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
@@ -111,7 +111,7 @@ func TestTheObserverErrorDoesNotSettleTheRun(t *testing.T) {
 	}
 }
 
-// TestTheGateRunsOnTheBeforeSettleContinuePath covers the plan's gate:
+// TestTheGateRunsOnTheBeforeSettleContinuePath covers the gate:
 // a BeforeSettle Continue goes through the gate, and the gate's budget
 // check fires on that path.
 func TestTheGateRunsOnTheBeforeSettleContinuePath(t *testing.T) {
@@ -206,8 +206,47 @@ func TestTheGateRunsOnTheStepSixPath(t *testing.T) {
 // TestTheGateRunsOnTheFinalizeInputPath covers the same rule for the
 // input delivered at finalize step 1: the abandoned finalization goes
 // to the gate.
+// holdingCompactor holds the gate at its compaction step the first
+// time it is asked, so the test can queue a steer while the run waits
+// there.
+type holdingCompactor struct {
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+
+	mu    sync.Mutex
+	calls int
+}
+
+// callsOf reports how many times the gate asked for a compaction.
+func (c *holdingCompactor) callsOf() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+// ShouldCompact waits for the release once and then asks for a
+// compaction.
+func (c *holdingCompactor) ShouldCompact(poo.View, poo.ContextBudget) bool {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	c.once.Do(func() { close(c.entered) })
+	<-c.release
+	return true
+}
+
+// Compact returns the scripted compaction.
+func (c *holdingCompactor) Compact(context.Context, poo.View, poo.ForkFunc) (poo.Compaction, error) {
+	return poo.Compaction{Strategy: "test"}, nil
+}
+
 func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
-	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "test"})
+	// The compactor pins the run at the gate, so the steer is queued
+	// while the run is open and the settle cannot beat it. When the gate
+	// resumes, the budget check settles the run and the queued steer
+	// abandons the finalization into the gate.
+	compactor := &holdingCompactor{entered: make(chan struct{}), release: make(chan struct{})}
 	tr := scripted([]fakeResponse{
 		{text: "the first answer"},
 		{text: "the second answer"},
@@ -225,11 +264,13 @@ func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	// The steer is queued while the run is settling naturally, and it
-	// abandons the finalization.
+	<-compactor.entered
+	// The steer is queued while the run waits at the gate; the finalization
+	// that follows abandons for it and the gate takes the run back.
 	if _, err := s.Send("and this", poo.Steer); err != nil {
 		t.Fatalf("sending the steer: %v", err)
 	}
+	close(compactor.release)
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
@@ -237,12 +278,12 @@ func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
 	if res.Reason != poo.ReasonContextExhausted {
 		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
 	}
-	if compactor.Calls() == 0 {
+	if compactor.callsOf() == 0 {
 		t.Error("the compactor was never asked: the abandoned finalization did not go through the gate")
 	}
 }
 
-// TestTheCompactingStateIsCancelledByAnInterrupt covers the plan's rule:
+// TestTheCompactingStateIsCancelledByAnInterrupt covers the rule:
 // an interrupt during the compaction cancels it, and no compaction is
 // applied.
 func TestTheCompactingStateIsCancelledByAnInterrupt(t *testing.T) {
@@ -299,7 +340,7 @@ func TestTheCompactingStateIsCancelledByAnInterrupt(t *testing.T) {
 	}
 }
 
-// TestTheCompactionIsRecorded covers the plan's rule: the compaction is
+// TestTheCompactionIsRecorded covers the rule: the compaction is
 // recorded, so a replay knows what the compactor did.
 func TestTheCompactionIsRecorded(t *testing.T) {
 	compactor := pootest.NewCompactor(true, poo.Compaction{
@@ -393,7 +434,7 @@ func (c *releasingCompactor) Compact(ctx context.Context, view poo.View, fork po
 }
 
 // TestARunWindingDownAfterTheSettleDoesNotMoveTheStateOrRecord covers
-// the plan's rule that a run-owned completion after the commit point
+// the rule that a run-owned completion after the commit point
 // never mutates a settled run: a duration timer settles a run whose gate
 // is inside a compaction, and the compaction's return must not move the
 // state, open a request, or write a record.
@@ -437,8 +478,7 @@ func TestARunWindingDownAfterTheSettleDoesNotMoveTheStateOrRecord(t *testing.T) 
 	}
 }
 
-// TestTheCompactionRecordNamesItsFormAndTokens covers the plan's
-// compaction record: it carries the form of the compaction and the
+// TestTheCompactionRecordNamesItsFormAndTokens covers the compaction record: it carries the form of the compaction and the
 // token estimate before and after it.
 //
 // The view is applied, so the estimate after the compaction is the
@@ -525,7 +565,7 @@ func (c *forkCaptureCompactor) Compact(ctx context.Context, view poo.View, fork 
 	}, nil
 }
 
-// TestACompactorsForkCountsTowardTheRunBudget covers the plan's rule
+// TestACompactorsForkCountsTowardTheRunBudget covers the rule
 // that a fork's usage counts toward MaxRunTokens, not MaxTurns: the
 // fork's usage report lands in the run's token count, and the ceiling
 // fires on accounting that includes it. The ceiling sits just under a

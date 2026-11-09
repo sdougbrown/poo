@@ -11,7 +11,7 @@ import (
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
-// TestSessionCloseLeavesNoDescendant covers the plan's job table: a
+// TestSessionCloseLeavesNoDescendant covers the job table: a
 // session that closes stops the jobs it owns, and nothing survives.
 func TestSessionCloseLeavesNoDescendant(t *testing.T) {
 	for _, c := range executorCases(t) {

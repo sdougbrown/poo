@@ -80,7 +80,7 @@ func (o *stallingObserver) Seen() []poo.Event {
 	return append([]poo.Event(nil), o.events...)
 }
 
-// TestAnObserverErrorDoesNotSettleTheRun covers the plan's rule: an
+// TestAnObserverErrorDoesNotSettleTheRun covers the rule: an
 // observer's error is the observer's problem, and the run settles as it
 // would have.
 func TestAnObserverErrorDoesNotSettleTheRun(t *testing.T) {
@@ -101,8 +101,7 @@ func TestAnObserverErrorDoesNotSettleTheRun(t *testing.T) {
 	})
 }
 
-// TestTwoStalledObserversGetCoalescedDroppedRecords covers the plan's
-// rule: the events an observer missed are reported in a coalesced
+// TestTwoStalledObserversGetCoalescedDroppedRecords covers the rule: the events an observer missed are reported in a coalesced
 // record, the record is never delivered to an observer, and the number
 // of records stays bounded.
 func TestTwoStalledObserversGetCoalescedDroppedRecords(t *testing.T) {

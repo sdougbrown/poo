@@ -113,7 +113,7 @@ func (a *blockingAsker) Budget() time.Duration { return a.budget }
 // Asks returns how many asks the asker was given.
 func (a *blockingAsker) Asks() int { return a.asked }
 
-// TestTheChainSkipsAnUnavailableAsker covers the plan's rule: an
+// TestTheChainSkipsAnUnavailableAsker covers the rule: an
 // unavailable asker is skipped without waiting, and the fallback
 // applies at once.
 func TestTheChainSkipsAnUnavailableAsker(t *testing.T) {
@@ -142,7 +142,7 @@ func TestTheChainSkipsAnUnavailableAsker(t *testing.T) {
 	}
 }
 
-// TestAPerAskerTimeoutMovesOnToTheNextAsker covers the plan's rule: an
+// TestAPerAskerTimeoutMovesOnToTheNextAsker covers the rule: an
 // asker that misses its budget passes the ask on.
 func TestAPerAskerTimeoutMovesOnToTheNextAsker(t *testing.T) {
 	clock := newFakeClock()
@@ -173,7 +173,7 @@ func TestAPerAskerTimeoutMovesOnToTheNextAsker(t *testing.T) {
 	}
 }
 
-// TestALateAnswerIsDropped covers the plan's rule: an answer that
+// TestALateAnswerIsDropped covers the rule: an answer that
 // arrives after the ask is resolved is dropped.
 func TestALateAnswerIsDropped(t *testing.T) {
 	clock := newFakeClock()
@@ -200,7 +200,7 @@ func TestALateAnswerIsDropped(t *testing.T) {
 	}
 }
 
-// TestTheChainDeadlineAppliesTheFallback covers the plan's rule: a chain
+// TestTheChainDeadlineAppliesTheFallback covers the rule: a chain
 // that runs out of time applies the fallback.
 func TestTheChainDeadlineAppliesTheFallback(t *testing.T) {
 	clock := newFakeClock()
@@ -227,7 +227,7 @@ func TestTheChainDeadlineAppliesTheFallback(t *testing.T) {
 	}
 }
 
-// TestTheChainExhaustedAppliesTheDefault covers the plan's rule: a chain
+// TestTheChainExhaustedAppliesTheDefault covers the rule: a chain
 // whose askers all deferred applies the fallback.
 func TestTheChainExhaustedAppliesTheDefault(t *testing.T) {
 	clock := newFakeClock()
@@ -249,7 +249,7 @@ func TestTheChainExhaustedAppliesTheDefault(t *testing.T) {
 	}
 }
 
-// TestTheFallbackCanAllow covers the plan's rule: the fallback is a
+// TestTheFallbackCanAllow covers the rule: the fallback is a
 // decision, and it can allow. A chain with no askers asks nobody, so no
 // timer is started and the answer says no asker was configured.
 func TestTheFallbackCanAllow(t *testing.T) {
@@ -276,7 +276,7 @@ func TestTheFallbackCanAllow(t *testing.T) {
 	}
 }
 
-// TestARunCancelResolvesTheAskAsCancelled covers the plan's rule: a run
+// TestARunCancelResolvesTheAskAsCancelled covers the rule: a run
 // that ends while the ask is pending resolves the ask as cancelled, and
 // a cancellation never allows.
 func TestARunCancelResolvesTheAskAsCancelled(t *testing.T) {

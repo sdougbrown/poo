@@ -46,9 +46,9 @@ func reviewCall(t *testing.T, exec *bwrap.Executor, command, dir string) map[str
 	return obs
 }
 
-// TestAProtectedPathInsideAReadOnlyBindIsMasked covers the plan's rule
+// TestAProtectedPathInsideAReadOnlyBindIsMasked covers the rule
 // that a protected path inside a bound directory is masked. /etc is one
-// of the default read-only binds, and the plan's own example config
+// of the default read-only binds, and the own example config
 // protects /etc/**.
 func TestAProtectedPathInsideAReadOnlyBindIsMasked(t *testing.T) {
 	exec, err := bwrap.New(bwrap.Options{Masker: reviewMasker{paths: []string{"/etc/hostname"}}})

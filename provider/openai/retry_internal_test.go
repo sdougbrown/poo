@@ -10,12 +10,12 @@ import (
 
 // The retry policy, on its own.
 //
-// The plan: three attempts per request, the first try and two retries,
+// Three attempts per request, the first try and two retries,
 // with a backoff of one second and then two. A rate limit is worth
 // another attempt only when the endpoint asked for a wait of thirty
 // seconds or less, and a rejection never is.
 
-// TestTheBackoffIsOneSecondThenTwo covers the plan's backoff.
+// TestTheBackoffIsOneSecondThenTwo covers the backoff.
 func TestTheBackoffIsOneSecondThenTwo(t *testing.T) {
 	policy := defaultRetryPolicy()
 	if policy.attempts != 3 {

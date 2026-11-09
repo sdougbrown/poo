@@ -10,7 +10,7 @@ import (
 // hook's context with errInterrupted, and the hook's decision is
 // discarded rather than turned into a hook error.
 
-// TestTheActivityContextEndsWithErrInterrupted covers the plan's rule:
+// TestTheActivityContextEndsWithErrInterrupted covers the rule:
 // every hook's context comes from the run's activity, and an interrupt
 // ends it with errInterrupted, which is not the finalization's own
 // cancellation.
@@ -31,7 +31,7 @@ func TestTheActivityContextEndsWithErrInterrupted(t *testing.T) {
 	}
 }
 
-// TestAnInterruptedHooksDecisionIsDiscarded covers the plan's rule: the
+// TestAnInterruptedHooksDecisionIsDiscarded covers the rule: the
 // decision of a hook whose context ended is discarded, and that is not
 // a hook error.
 func TestAnInterruptedHooksDecisionIsDiscarded(t *testing.T) {

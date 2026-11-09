@@ -18,7 +18,7 @@ import (
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
-// The plan's bwrap list: what the sandbox contains, what it does not,
+// The bwrap list: what the sandbox contains, what it does not,
 // and what happens when the sandbox cannot be created.
 
 // newExecutor returns a bwrap executor, or skips the test with the
@@ -64,8 +64,7 @@ func call(t *testing.T, exec *bwrap.Executor, command, dir string) string {
 	return text
 }
 
-// TestAFileOutsideTheWorkingDirectoryIsInvisible covers the plan's
-// filesystem: the command sees the system directories and its working
+// TestAFileOutsideTheWorkingDirectoryIsInvisible covers the filesystem: the command sees the system directories and its working
 // directory, and nothing else.
 func TestAFileOutsideTheWorkingDirectoryIsInvisible(t *testing.T) {
 	exec := newExecutor(t, bwrap.Options{})
@@ -89,7 +88,7 @@ func TestAFileOutsideTheWorkingDirectoryIsInvisible(t *testing.T) {
 	}
 }
 
-// TestTheHomeDirectoryIsNotMounted covers the plan's filesystem: $HOME
+// TestTheHomeDirectoryIsNotMounted covers the filesystem: $HOME
 // is absent, or holds only the directories a bind needed, so the
 // operator's files are not the command's.
 func TestTheHomeDirectoryIsNotMounted(t *testing.T) {
@@ -157,7 +156,7 @@ func (m fakeMasker) Expand(root string) ([]string, error) {
 	return m.paths, nil
 }
 
-// TestAProtectedPathReadsAsEmpty covers the plan's protected paths: a
+// TestAProtectedPathReadsAsEmpty covers the protected paths: a
 // path inside the working directory is masked, so the command cannot
 // read it.
 func TestAProtectedPathReadsAsEmpty(t *testing.T) {
@@ -215,7 +214,7 @@ func TestAMaskerFailureStopsTheCommand(t *testing.T) {
 	}
 }
 
-// TestTheNetworkIsCutWhenTheSettingsSaySo covers the plan's network
+// TestTheNetworkIsCutWhenTheSettingsSaySo covers the network
 // rule: the network is shared unless it is cut, and a cut network
 // cannot reach the host's.
 func TestTheNetworkIsCutWhenTheSettingsSaySo(t *testing.T) {
@@ -244,8 +243,7 @@ func TestTheNetworkIsCutWhenTheSettingsSaySo(t *testing.T) {
 	}
 }
 
-// TestASetsidEscapedDescendantDiesWithTheCall covers the plan's
-// isolation limit: the local executor cannot stop a descendant that
+// TestASetsidEscapedDescendantDiesWithTheCall covers the isolation limit: the local executor cannot stop a descendant that
 // left the process group, and the sandbox can, because the namespace
 // ends with the shell.
 func TestASetsidEscapedDescendantDiesWithTheCall(t *testing.T) {
@@ -268,7 +266,7 @@ func TestASetsidEscapedDescendantDiesWithTheCall(t *testing.T) {
 	t.Errorf("the namespace %s still holds %v", ns, processesInNamespace(ns))
 }
 
-// TestTheExecutorIsUnavailableWithoutBubblewrap covers the plan's fail
+// TestTheExecutorIsUnavailableWithoutBubblewrap covers the fail
 // closed rule: a missing binary is an error, never a fallback to the
 // local executor.
 func TestTheExecutorIsUnavailableWithoutBubblewrap(t *testing.T) {
@@ -288,8 +286,7 @@ func TestTheExecutorIsUnavailableWithoutBubblewrap(t *testing.T) {
 	}
 }
 
-// TestTheExecutorIsUnavailableWhenTheNamespacesFail covers the plan's
-// fail closed rule: a host that does not allow the namespaces is an
+// TestTheExecutorIsUnavailableWhenTheNamespacesFail covers the fail closed rule: a host that does not allow the namespaces is an
 // error, never a fallback to the local executor.
 func TestTheExecutorIsUnavailableWhenTheNamespacesFail(t *testing.T) {
 	fake := filepath.Join(t.TempDir(), "bwrap")

@@ -3,8 +3,11 @@ package catalog_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -420,5 +423,162 @@ func TestTheBuildChecksTheRoles(t *testing.T) {
 	}
 	if info.Name != "gemma4" {
 		t.Errorf("the chat model is %q, want gemma4", info.Name)
+	}
+}
+
+// TestTheDiscoveryCacheIsPrivate covers the cache file's modes: the poo
+// directory and the cache hold the endpoints' data for this user only.
+func TestTheDiscoveryCacheIsPrivate(t *testing.T) {
+	srv := vllmFixture(t, "gemma4", 32768)
+	state := t.TempDir()
+
+	c := catalog.New(catalog.Options{
+		StateDir: state,
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"local": {Endpoint: srv.URL},
+			},
+		},
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("refreshing the catalog: %v", err)
+	}
+
+	dir := filepath.Join(state, "poo")
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("the cache directory: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Errorf("the cache directory's mode is %#o, want 0700", got)
+	}
+	info, err = os.Stat(filepath.Join(dir, "discovery.json"))
+	if err != nil {
+		t.Fatalf("the cache file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("the cache file's mode is %#o, want 0600", got)
+	}
+}
+
+// TestAnAnthropicEntryGetsOnlyChatCompletionsControls covers the
+// catalog's Phase A data: the Anthropic entries are reached through Chat
+// Completions, which can send neither a thinking budget nor an explicit
+// cache breakpoint.
+func TestAnAnthropicEntryGetsOnlyChatCompletionsControls(t *testing.T) {
+	c := catalog.New(catalog.Options{Settings: localSettings()})
+	for _, info := range c.List() {
+		if info.ModelID != "claude-sonnet-4-5" {
+			continue
+		}
+		if info.API != poo.APIChatCompletions {
+			t.Errorf("the entry's API is %q, want chat_completions", info.API)
+		}
+		if info.Reasoning.Mode == poo.ReasoningBudget {
+			t.Error("the entry names a thinking budget that Chat Completions cannot send")
+		}
+		if info.PromptCache == poo.CacheExplicit {
+			t.Error("the entry names an explicit cache that Chat Completions cannot place")
+		}
+		return
+	}
+	t.Fatal("the Anthropic entry is not listed")
+}
+
+// vllmFixture starts an endpoint that serves one model id.
+func vllmFixture(t *testing.T, modelID string, maxModelLen int) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]any{
+				{"id": modelID, "object": "model", "max_model_len": maxModelLen},
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestAModelThatTwoEndpointsServeIsListedOnce covers the catalog's
+// note: "A model that two endpoints serve is listed once, under the
+// first endpoint by name."
+//
+// applyDiscovery keys the entry by the model id, so the second endpoint
+// that serves the same id overwrites the first one's entry.
+func TestAModelThatTwoEndpointsServeIsListedOnce(t *testing.T) {
+	first := vllmFixture(t, "shared", 32768)
+	second := vllmFixture(t, "shared", 8192)
+
+	c, err := catalog.Build(context.Background(), catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"aaa": {Endpoint: first.URL},
+				"zzz": {Endpoint: second.URL},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("building the catalog: %v", err)
+	}
+
+	var found int
+	var endpoint string
+	for _, info := range c.List() {
+		if info.ModelID != "shared" {
+			continue
+		}
+		found++
+		endpoint = info.Endpoint
+	}
+	if found != 1 {
+		t.Fatalf("the catalog lists the shared model %d times, want once", found)
+	}
+	if endpoint != first.URL {
+		t.Errorf("the shared model is attributed to %q, want the first endpoint by name %q",
+			endpoint, first.URL)
+	}
+}
+
+// TestDiscoveryKeepsTheSettingsModel covers the same overwrite when
+// one of the two endpoints is the model the settings configured.
+func TestDiscoveryKeepsTheSettingsModel(t *testing.T) {
+	first := vllmFixture(t, "shared", 32768)
+	second := vllmFixture(t, "shared", 8192)
+
+	c, err := catalog.Build(context.Background(), catalog.Options{
+		StateDir: t.TempDir(),
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"aaa": {Endpoint: first.URL},
+				"zzz": {Endpoint: second.URL},
+			},
+			Models: map[string]catalog.ModelSettings{
+				"mine": {Endpoint: "zzz", ModelID: "shared", ContextLimit: 131072},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("building the catalog: %v", err)
+	}
+	info, err := c.Resolve("mine")
+	if err != nil {
+		t.Fatalf("resolving the settings' model: %v", err)
+	}
+	if info.ContextLimit != 131072 {
+		t.Errorf("the settings' window is %d, want 131072", info.ContextLimit)
+	}
+	if info.Endpoint != second.URL {
+		t.Errorf("the settings' model is served by %q, want %q", info.Endpoint, second.URL)
+	}
+	// The other endpoint also serves it, and the model is still listed
+	// once under its own name plus the discovered one: the discovered
+	// entry must not take the name the settings use.
+	if _, err := c.Resolve("shared"); err != nil {
+		t.Logf("the discovered entry is not resolvable: %v", err)
 	}
 }

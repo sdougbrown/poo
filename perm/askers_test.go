@@ -11,10 +11,10 @@ import (
 	"github.com/sdougbrown/poo/pootest"
 )
 
-// The asker chain is the plan's: the askers are asked in order, and the
+// The asker chain: the askers are asked in order, and the
 // fallback decides when the chain has no answer to give.
 
-// TestADenyGivesTheModelAVisibleDeniedResult covers the plan's rule: a
+// TestADenyGivesTheModelAVisibleDeniedResult covers the rule: a
 // refusal is a model-visible denied result.
 func TestADenyGivesTheModelAVisibleDeniedResult(t *testing.T) {
 	asker := &fakeAsker{decision: perm.DecisionDeny, available: true}
@@ -52,7 +52,7 @@ func TestADenyGivesTheModelAVisibleDeniedResult(t *testing.T) {
 	}
 }
 
-// TestWithNoAskersTheFallbackApplies covers the plan's rule: a chain
+// TestWithNoAskersTheFallbackApplies covers the rule: a chain
 // with no askers applies the fallback, and the answer says no asker was
 // configured.
 func TestWithNoAskersTheFallbackApplies(t *testing.T) {
@@ -83,7 +83,7 @@ func TestWithNoAskersTheFallbackApplies(t *testing.T) {
 	}
 }
 
-// TestTheAskIsAnsweredOnce covers the plan's rule: an ask resolves once,
+// TestTheAskIsAnsweredOnce covers the rule: an ask resolves once,
 // and the answer is recorded once.
 func TestTheAskIsAnsweredOnce(t *testing.T) {
 	asker := &fakeAsker{decision: perm.DecisionAllow, available: true}
@@ -145,7 +145,7 @@ func TestTheAskNamesTheCall(t *testing.T) {
 	}
 }
 
-// TestACancelWhileAnAskIsPendingDenies covers the plan's rule: a run
+// TestACancelWhileAnAskIsPendingDenies covers the rule: a run
 // that ends while the ask is pending resolves the ask as cancelled, and
 // a cancellation never allows.
 func TestACancelWhileAnAskIsPendingDenies(t *testing.T) {
@@ -187,8 +187,7 @@ func TestACancelWhileAnAskIsPendingDenies(t *testing.T) {
 	}
 }
 
-// TestTheUnmatchedAskWithNoAskersFallsBackToAllow covers the plan's
-// rule: the unmatched action and the fallback are independent, so an ask
+// TestTheUnmatchedAskWithNoAskersFallsBackToAllow covers the rule: the unmatched action and the fallback are independent, so an ask
 // with no asker falls back to the fallback's decision.
 func TestTheUnmatchedAskWithNoAskersFallsBackToAllow(t *testing.T) {
 	policy, err := perm.New(perm.Options{

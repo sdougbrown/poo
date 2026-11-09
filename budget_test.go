@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
@@ -13,7 +14,7 @@ import (
 // The context budget: the estimator with its calibration, the notice, the
 // hard stop, and the computed max_tokens.
 
-// TestTheNoticeFiresOncePerRun covers the plan's rule: the notice fires
+// TestTheNoticeFiresOncePerRun covers the rule: the notice fires
 // at most once per run.
 func TestTheNoticeFiresOncePerRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -142,7 +143,7 @@ func TestTheNoticeFiresAgainOnceTheUsageDroppedBelowTheRatio(t *testing.T) {
 	}
 }
 
-// TestTheEstimateGrowsWithTheAppendedOutput covers the plan's rule: the
+// TestTheEstimateGrowsWithTheAppendedOutput covers the rule: the
 // estimate grows with what was appended between usage reports.
 func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -178,7 +179,7 @@ func TestTheEstimateGrowsWithTheAppendedOutput(t *testing.T) {
 	}
 }
 
-// TestTheEstimateUsesTheObservedRatio covers the plan's calibration: the
+// TestTheEstimateUsesTheObservedRatio covers the calibration: the
 // first usage report calibrates the characters-per-token ratio.
 func TestTheEstimateUsesTheObservedRatio(t *testing.T) {
 	// The endpoint reports a ratio of 1.0 characters per token, which
@@ -210,8 +211,7 @@ func TestTheEstimateUsesTheObservedRatio(t *testing.T) {
 	}
 }
 
-// TestCrossingTheHardRatioSettlesContextExhausted covers the plan's
-// hard stop: with no compactor, crossing the hard ratio settles the run
+// TestCrossingTheHardRatioSettlesContextExhausted covers the hard stop: with no compactor, crossing the hard ratio settles the run
 // as context_exhausted.
 func TestCrossingTheHardRatioSettlesContextExhausted(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -305,7 +305,7 @@ func TestAProviderContextLengthErrorSettlesContextExhausted(t *testing.T) {
 	}
 }
 
-// TestAMissingContextLimitIsAConstructionError covers the plan's rule.
+// TestAMissingContextLimitIsAConstructionError covers the rule.
 func TestAMissingContextLimitIsAConstructionError(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	_, err := poo.New(poo.Options{Transport: tr})
@@ -318,7 +318,7 @@ func TestAMissingContextLimitIsAConstructionError(t *testing.T) {
 	}
 }
 
-// TestTheMaxTokensIsAlwaysComputed covers the plan's rule: the value is
+// TestTheMaxTokensIsAlwaysComputed covers the rule: the value is
 // never left to the endpoint's default.
 func TestTheMaxTokensIsAlwaysComputed(t *testing.T) {
 	tool := &echoTool{result: "echoed"}
@@ -339,7 +339,7 @@ func TestTheMaxTokensIsAlwaysComputed(t *testing.T) {
 	}
 }
 
-// TestTheRepeatCountsCoverTheExactAndNearKeys covers the plan's repeat
+// TestTheRepeatCountsCoverTheExactAndNearKeys covers the repeat
 // counting: the exact key is the call, and the near key is the call's
 // primary argument.
 func TestTheRepeatCountsCoverTheExactAndNearKeys(t *testing.T) {
@@ -390,7 +390,7 @@ func TestTheRepeatCountsCoverTheExactAndNearKeys(t *testing.T) {
 	}
 }
 
-// TestAPrepareFailureCountsTowardTheNearKey covers the plan's rule: a
+// TestAPrepareFailureCountsTowardTheNearKey covers the rule: a
 // call that failed its validation counts toward the near key.
 func TestAPrepareFailureCountsTowardTheNearKey(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -420,7 +420,7 @@ func TestAPrepareFailureCountsTowardTheNearKey(t *testing.T) {
 	}
 }
 
-// TestTheCalibrationChangesTheOutputRoom covers the plan's calibration:
+// TestTheCalibrationChangesTheOutputRoom covers the calibration:
 // the observed characters-per-token ratio is what the estimate uses
 // after the first usage report.
 //
@@ -462,7 +462,7 @@ func TestTheCalibrationChangesTheOutputRoom(t *testing.T) {
 	}
 }
 
-// TestTheCalibrationIsClamped covers the plan's bounds: the observed
+// TestTheCalibrationIsClamped covers the bounds: the observed
 // ratio is clamped to [2.0, 5.0].
 func TestTheCalibrationIsClamped(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -507,8 +507,7 @@ func TestTheCalibrationIsClamped(t *testing.T) {
 	}
 }
 
-// TestTheEstimateCountsTheReplyTheUsageReportLeftOut covers the plan's
-// rule that between reports the estimate adds everything appended since,
+// TestTheEstimateCountsTheReplyTheUsageReportLeftOut covers the rule: that between reports the estimate adds everything appended since,
 // assistant output included. The usage report counts the request, which
 // does not hold the reply it produced.
 func TestTheEstimateCountsTheReplyTheUsageReportLeftOut(t *testing.T) {
@@ -540,7 +539,7 @@ func TestTheEstimateCountsTheReplyTheUsageReportLeftOut(t *testing.T) {
 	}
 }
 
-// TestACallToAnotherToolDoesNotBreakTheStreak covers the plan's doom
+// TestACallToAnotherToolDoesNotBreakTheStreak covers the doom
 // loop counters: "consecutive" ignores calls to other tools, so a call
 // repeated around an unrelated one keeps counting.
 func TestACallToAnotherToolDoesNotBreakTheStreak(t *testing.T) {
@@ -568,8 +567,7 @@ func TestACallToAnotherToolDoesNotBreakTheStreak(t *testing.T) {
 	}
 }
 
-// TestTheTokenBudgetUsesTheEstimateWithoutProviderUsage covers the
-// plan's rule: MaxRunTokens counts provider-reported or estimated
+// TestTheTokenBudgetUsesTheEstimateWithoutProviderUsage covers the rule: MaxRunTokens counts provider-reported or estimated
 // tokens. A turn whose response reports no usage is counted from the
 // request and response it produced.
 func TestTheTokenBudgetUsesTheEstimateWithoutProviderUsage(t *testing.T) {
@@ -618,5 +616,38 @@ func TestAnInterruptedRequestCountsItsTokens(t *testing.T) {
 	}
 	if res.Turns != 1 || res.Reason != poo.ReasonBudgetExhausted {
 		t.Fatalf("the interrupted run settled %q after %d turn(s), want budget_exhausted after 1", res.Reason, res.Turns)
+	}
+}
+
+// TestMaxDurationCoversTheBeforeRunHook covers the run budget: the
+// wall-clock timer starts when the run is admitted, so a blocked
+// BeforeRun cannot outlive MaxDuration.
+func TestMaxDurationCoversTheBeforeRunHook(t *testing.T) {
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	tr := scripted([]fakeResponse{{text: "done"}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.MaxDuration = 10 * time.Millisecond
+	opts.BeforeRun = []poo.BeforeRunHook{beforeRunFunc(func(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
+		close(entered)
+		select {
+		case <-ctx.Done():
+		case <-release:
+		}
+		return poo.StartDecision{}, nil
+	})}
+	s := newTestSession(t, opts)
+	go func() {
+		defer close(done)
+		_, _ = s.Prompt(context.Background(), "start")
+	}()
+	<-entered
+	time.Sleep(60 * time.Millisecond)
+	settled := sink.Settled() != nil
+	close(release)
+	<-done
+	_, _ = s.Wait(context.Background())
+	if !settled {
+		t.Error("MaxDuration=10ms did not settle a blocked BeforeRun within 60ms")
 	}
 }

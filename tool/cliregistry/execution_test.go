@@ -111,7 +111,7 @@ func TestTheCLIRunsInTheSessionDirectory(t *testing.T) {
 
 // TestTheManifestDirectoryWins covers the other half of the directory
 // rule: a manifest that fixes its working directory runs there, because
-// that is the directory the plan validated.
+// that is the directory the manifest validated.
 func TestTheManifestDirectoryWins(t *testing.T) {
 	dir := t.TempDir()
 	tool := execTool(t, []string{"/bin/pwd"}, map[string]any{
@@ -175,7 +175,7 @@ func TestAScrubbedVariableIsNotResolved(t *testing.T) {
 
 // TestTheCLIRunsUnderBothExecutors covers the two executors: a CLI runs
 // through whichever one the session was built with, with the session's
-// directory, and sees only the environment its plan resolved.
+// directory, and sees only the environment its manifest resolved.
 func TestTheCLIRunsUnderBothExecutors(t *testing.T) {
 	const name = "POO_CLI_BOTH_KEY"
 	t.Setenv(name, "not-a-secret")

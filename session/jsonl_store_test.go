@@ -1,12 +1,14 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 )
@@ -358,5 +360,109 @@ func TestTheStoreTakesTheAuthorityOnASession(t *testing.T) {
 	}
 	if _, err := os.Stat(LockPath(dir, "s1")); err != nil {
 		t.Errorf("the lock file is missing: %v", err)
+	}
+}
+
+// TestAnAppendAfterTheStoreCloseIsRefused covers the store's backstop for
+// the session's write fence: the log closes under the same lock as its
+// appends, before the authority is released, so a write that loses the
+// race with the close is refused and the file is left exactly as it was.
+func TestAnAppendAfterTheStoreCloseIsRefused(t *testing.T) {
+	_, store := newTestStore(t)
+	ctx := context.Background()
+
+	id, err := store.Create(ctx, createdRecord("s1"))
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Append(ctx, runStarted("r1")); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	path := store.path(id)
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the log: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+
+	if err := store.Append(ctx, runStarted("r2")); err == nil {
+		t.Fatal("the append after the close was accepted")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the log after the refused append: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("the log changed after the refused append: %q, want %q", after, before)
+	}
+	if names := recordNames(logRecords(t, path)); len(names) != 2 {
+		t.Errorf("the log holds %v, want the session header and one run", names)
+	}
+}
+
+// TestAnInvalidSessionIDIsRefusedBeforeTheFilesystem covers the id
+// rule: an id that could name a file outside the session directory is
+// refused by every entry point that would join it to a path.
+func TestAnInvalidSessionIDIsRefusedBeforeTheFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer store.Close()
+	for _, id := range []string{"", ".", "..", "../x", "a/b", `a\b`, "a..b"} {
+		if _, err := MetadataOf(dir, id); !errors.Is(err, ErrInvalidSessionID) {
+			t.Errorf("MetadataOf(%q) failed with %v, want ErrInvalidSessionID", id, err)
+		}
+		if _, err := store.Load(context.Background(), id); !errors.Is(err, ErrInvalidSessionID) {
+			t.Errorf("Load(%q) failed with %v, want ErrInvalidSessionID", id, err)
+		}
+		if _, err := store.Pending(context.Background(), id); !errors.Is(err, ErrInvalidSessionID) {
+			t.Errorf("Pending(%q) failed with %v, want ErrInvalidSessionID", id, err)
+		}
+	}
+	if err := ValidateID("sess-1"); err != nil {
+		t.Errorf("a plain id was refused: %v", err)
+	}
+}
+
+// TestTheMemoryRefusesASessionWithNoHeader covers the ephemeral store's
+// check: a header that is nil is refused, not dereferenced.
+func TestTheMemoryRefusesASessionWithNoHeader(t *testing.T) {
+	memory := NewMemory()
+	if _, err := memory.Create(context.Background(), nil); err == nil {
+		t.Fatal("the memory accepted a nil header")
+	}
+}
+
+// TestTheClockReachesARecordsTimestamp covers the store's clock: a
+// record's timestamp is the store's, so last activity is testable.
+func TestTheClockReachesARecordsTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	store, err := NewStore(dir, WithClock(func() time.Time { return at }))
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer store.Close()
+	header := createdRecord("s1")
+	header.CreatedAt = ""
+	if _, err := store.Create(context.Background(), header); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Append(context.Background(), runStarted("r1")); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	summaries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("listing: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("the store lists %d sessions, want 1", len(summaries))
+	}
+	if !summaries[0].LastActivity.Equal(at) {
+		t.Errorf("the session's last activity is %s, want %s", summaries[0].LastActivity, at)
 	}
 }

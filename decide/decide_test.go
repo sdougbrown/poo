@@ -96,10 +96,10 @@ func TestAQuestionIsValidatedBeforeAnythingIsSent(t *testing.T) {
 	}
 }
 
-// TestTheLimitsAreThePlanLimits covers the two limits the plan names: a
+// TestTheQuestionLimits covers the two limits: a
 // choice question has at most twenty-six options and a score question at
 // most ten levels.
-func TestTheLimitsAreThePlanLimits(t *testing.T) {
+func TestTheQuestionLimits(t *testing.T) {
 	if err := decide.ValidateQuestions([]decide.Question{{
 		ID: "q1", Instructions: "which?", Kind: decide.Choice{Options: manyOptions(26)},
 	}}); err != nil {

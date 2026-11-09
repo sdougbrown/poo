@@ -20,7 +20,7 @@ import (
 // this package builds.
 //
 // The suite drives the binary over stdin and stdout, and every flow of
-// the plan's table runs against it: the command links every tool the
+// the table runs against it: the command links every tool the
 // flows script, so nothing skips.
 func TestTheBinarySpeaksTheProtocol(t *testing.T) {
 	executor := os.Getenv("POO_CONFORMANCE_EXECUTOR")
@@ -51,7 +51,7 @@ func TestTheBinarySpeaksTheProtocol(t *testing.T) {
 //
 // The extension announces a capability, adds an optional field to a
 // result and sends an event type the contract does not have. The suite
-// follows the plan's forward-compatibility rule, so it passes with all
+// follows the forward-compatibility rule, so it passes with all
 // three there.
 func TestTheBinaryWithTheExtensionSpeaksTheProtocol(t *testing.T) {
 	binary := buildTheBinary(t, []string{"conformanceext"})

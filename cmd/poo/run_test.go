@@ -567,7 +567,7 @@ func TestTheRunSettlesEndTurnWithZero(t *testing.T) {
 	}
 }
 
-// TestTheCommandDefaultsToHandoff covers the plan's rule: cmd/poo gives
+// TestTheCommandDefaultsToHandoff covers the rule: cmd/poo gives
 // a session the handoff strategy when none is configured.
 func TestTheCommandDefaultsToHandoff(t *testing.T) {
 	main := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"echo hi\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"

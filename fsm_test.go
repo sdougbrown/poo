@@ -31,7 +31,7 @@ func TestTheStateTableCoversEveryState(t *testing.T) {
 			_ = poo.IsLegal(from, to)
 		}
 	}
-	// The states the plan names are all there.
+	// All the states are there.
 	for _, want := range []poo.State{poo.StateIdle, poo.StateRequesting, poo.StateStreaming,
 		poo.StateExecuting, poo.StateCompacting, poo.StateWaiting, poo.StateSettling, poo.StateSettled} {
 		if want == "" {
@@ -217,8 +217,7 @@ func TestATruncatedTurnWithNoCompleteCallReachesBeforeSettle(t *testing.T) {
 	}
 }
 
-// TestABatchCompletesBeforeHasToolCallStopsTheRun covers the plan's
-// rule: the whole batch runs, and then the stop condition is asked.
+// TestABatchCompletesBeforeHasToolCallStopsTheRun covers the rule: the whole batch runs, and then the stop condition is asked.
 func TestABatchCompletesBeforeHasToolCallStopsTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{
@@ -351,8 +350,7 @@ func TestAPlainToolFreeTurnReachesBeforeSettle(t *testing.T) {
 	}
 }
 
-// TestTheContinuationPredicateCoversTheResultKinds covers the plan's
-// continuation predicate: a batch where every call was denied, failed
+// TestTheContinuationPredicateCoversTheResultKinds covers the continuation predicate: a batch where every call was denied, failed
 // Prepare, or got a BeforeTool result still goes to a new request, and
 // that request carries the results.
 func TestTheContinuationPredicateCoversTheResultKinds(t *testing.T) {
@@ -470,7 +468,7 @@ func TestTheBeforeSettleContinueSendsTheRunBackToTheModel(t *testing.T) {
 	}
 }
 
-// TestTheContinuationLimitSettlesTheRun covers the plan's limit: the
+// TestTheContinuationLimitSettlesTheRun covers the limit: the
 // next Continue after the allowed ones settles hook_continue_limit.
 func TestTheContinuationLimitSettlesTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
@@ -654,7 +652,7 @@ func TestAnInvalidFinishResultIsARecoverableError(t *testing.T) {
 	}
 }
 
-// TestTheOtherCallsInTheBatchCompleteFirst covers the plan's rule: the
+// TestTheOtherCallsInTheBatchCompleteFirst covers the rule: the
 // batch completes, and then the run settles.
 func TestTheOtherCallsInTheBatchCompleteFirst(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -733,8 +731,7 @@ func TestTheMaxDurationBudgetSettlesTheRun(t *testing.T) {
 	}
 }
 
-// TestTheMaxDurationBudgetFiringMidToolSettlesTheRun covers the plan's
-// rule: the budget goes through finalize, so the settle record is
+// TestTheMaxDurationBudgetFiringMidToolSettlesTheRun covers the rule: the budget goes through finalize, so the settle record is
 // written and the tool gets a result.
 func TestTheMaxDurationBudgetFiringMidToolSettlesTheRun(t *testing.T) {
 	started := make(chan struct{})
@@ -779,7 +776,7 @@ func TestTheMaxDurationBudgetFiringMidToolSettlesTheRun(t *testing.T) {
 	}
 }
 
-// TestTheGateChecksTheBudgetOnEveryPath covers the plan's gate: the
+// TestTheGateChecksTheBudgetOnEveryPath covers the gate: the
 // budget check fires on every path that goes to a new request.
 //
 // The test uses a scripted compactor and a context window the run
@@ -822,8 +819,7 @@ func TestTheGateChecksTheBudgetOnEveryPath(t *testing.T) {
 	}
 }
 
-// TestASessionWithoutACompactorNeverEntersCompacting covers the plan's
-// rule: the compacting state is reachable only with a compactor.
+// TestASessionWithoutACompactorNeverEntersCompacting covers the rule: the compacting state is reachable only with a compactor.
 func TestASessionWithoutACompactorNeverEntersCompacting(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
@@ -838,7 +834,7 @@ func TestASessionWithoutACompactorNeverEntersCompacting(t *testing.T) {
 	}
 }
 
-// TestAReadOnlyBatchRunsInParallel covers the plan's rule: a batch of
+// TestAReadOnlyBatchRunsInParallel covers the rule: a batch of
 // read-only calls runs at the same time.
 func TestAReadOnlyBatchRunsInParallel(t *testing.T) {
 	// The tool blocks until both calls are running, so a sequential
@@ -1085,7 +1081,7 @@ func TestTheTransitionTableIsClosed(t *testing.T) {
 }
 
 // TestTheTypedOptionsConfigureTheSession covers the options: each one
-// changes what the plan says it changes.
+// changes what its name says it changes.
 func TestTheTypedOptionsConfigureTheSession(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	tool := &echoTool{result: "echoed"}
@@ -1131,7 +1127,7 @@ func TestASessionWithAFinishSchemaNeedsTheTool(t *testing.T) {
 }
 
 // TestATruncatedTurnWhoseCallsAreAllIncompleteReachesBeforeSettle covers
-// the plan's step 6: a call skipped as truncated does not count as
+// the step 6: a call skipped as truncated does not count as
 // processed, so the turn is a natural stop.
 func TestATruncatedTurnWhoseCallsAreAllIncompleteReachesBeforeSettle(t *testing.T) {
 	tr := scripted([]fakeResponse{{
@@ -1159,8 +1155,7 @@ func TestATruncatedTurnWhoseCallsAreAllIncompleteReachesBeforeSettle(t *testing.
 	}
 }
 
-// TestATruncatedCallThatFailsPrepareIsIncomplete covers the plan's
-// definition of a complete call in a truncated response: it must parse
+// TestATruncatedCallThatFailsPrepareIsIncomplete covers the definition of a complete call in a truncated response: it must parse
 // as a JSON object and pass Prepare. A call that parses but fails
 // Prepare is skipped, so the turn is a natural stop.
 func TestATruncatedCallThatFailsPrepareIsIncomplete(t *testing.T) {
@@ -1189,8 +1184,7 @@ func TestATruncatedCallThatFailsPrepareIsIncomplete(t *testing.T) {
 	}
 }
 
-// TestEveryTransitionOfAMultiRunSessionIsInTheTable covers the plan's
-// rule that the table is the FSM: a session that runs twice takes
+// TestEveryTransitionOfAMultiRunSessionIsInTheTable covers the rule: that the table is the FSM: a session that runs twice takes
 // settled -> requesting, and every move it makes is listed.
 func TestEveryTransitionOfAMultiRunSessionIsInTheTable(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -1293,7 +1287,7 @@ func TestARunThatWindsDownAfterTheSettleDoesNotMoveTheState(t *testing.T) {
 	}
 }
 
-// TestHasToolCallIgnoresASkippedCall covers the plan's rule: HasToolCall
+// TestHasToolCallIgnoresASkippedCall covers the rule: HasToolCall
 // matches only a call whose result is not an error. A call skipped as
 // truncated has an error result, so it must not stop the run.
 func TestHasToolCallIgnoresASkippedCall(t *testing.T) {
@@ -1319,7 +1313,7 @@ func TestHasToolCallIgnoresASkippedCall(t *testing.T) {
 	}
 }
 
-// TestASecondRunDoesNotRepeatTheSystemPrompt covers the plan's rule
+// TestASecondRunDoesNotRepeatTheSystemPrompt covers the rule
 // that the system prompt is the first thing the model sees, once: the
 // history persists across a session's runs, and the prompt is appended
 // a single time, so no run's request carries it twice.

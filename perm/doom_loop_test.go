@@ -74,7 +74,7 @@ func TestTheNearKeyTriggersTheDoomLoop(t *testing.T) {
 	}
 }
 
-// TestTheDoomLoopIsAppliedBeforeTheRules covers the plan's order: the
+// TestTheDoomLoopIsAppliedBeforeTheRules covers the order: the
 // loop's action decides, whatever the rules say about the call.
 func TestTheDoomLoopIsAppliedBeforeTheRules(t *testing.T) {
 	policy, err := perm.New(perm.Options{
@@ -101,7 +101,7 @@ func TestTheDoomLoopIsAppliedBeforeTheRules(t *testing.T) {
 	}
 }
 
-// TestTheDoomLoopAllowResetsTheCount covers the plan's rule: an allowed
+// TestTheDoomLoopAllowResetsTheCount covers the rule: an allowed
 // loop starts over, and the next call of the same shape is counted from
 // one.
 func TestTheDoomLoopAllowResetsTheCount(t *testing.T) {
@@ -219,7 +219,7 @@ func TestADoomLoopAskThatIsDeniedIsStillTheLoop(t *testing.T) {
 	}
 }
 
-// TestTheDoomLoopDenialIsVisible covers the plan's rule: the model sees
+// TestTheDoomLoopDenialIsVisible covers the rule: the model sees
 // the outcome of a loop, and nothing is silently skipped.
 func TestTheDoomLoopDenialIsVisible(t *testing.T) {
 	policy, err := perm.New(perm.Options{DoomLoop: perm.DoomLoop{Action: perm.ActionDeny}})

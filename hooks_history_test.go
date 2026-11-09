@@ -46,7 +46,7 @@ func (h *mutatingHook) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) 
 	return poo.TurnDecision{}, nil
 }
 
-// TestMutatingTheViewDoesNotChangeTheHistory covers the plan's rule: the
+// TestMutatingTheViewDoesNotChangeTheHistory covers the rule: the
 // view hands out copies, so a hook that changes what it got back
 // changes nothing.
 func TestMutatingTheViewDoesNotChangeTheHistory(t *testing.T) {

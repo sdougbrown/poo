@@ -91,7 +91,7 @@ func TestTheBuildKeepsAnEmptyChainEmpty(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &fix1AskClient{}
+			client := &askClient{}
 			runtime := askerRuntime(t, tt.askers, client)
 			if got := len(runtime.Askers); got != tt.askers0 {
 				t.Errorf("the chain holds %d asker(s), want %d", got, tt.askers0)
@@ -107,7 +107,7 @@ func TestTheBuildKeepsAnEmptyChainEmpty(t *testing.T) {
 // with no askers resolves to its fallback at once, and a capable wire
 // client is never asked.
 func TestTheEmptyChainDoesNotAskTheWire(t *testing.T) {
-	client := &fix1AskClient{}
+	client := &askClient{}
 	runtime := askerRuntime(t, "  askers: []\n", client)
 	transport, session, elapsed := runWithTheReadCall(t, runtime)
 
@@ -141,7 +141,7 @@ func TestTheEmptyChainDoesNotAskTheWire(t *testing.T) {
 // TestAnAbsentChainAsksTheWire covers the other side: the same session,
 // with the chain absent, asks the client the binary offers.
 func TestAnAbsentChainAsksTheWire(t *testing.T) {
-	client := &fix1AskClient{}
+	client := &askClient{}
 	runtime := askerRuntime(t, "", client)
 	transport, session, _ := runWithTheReadCall(t, runtime)
 
