@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/sdougbrown/poo"
+	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
@@ -14,7 +15,6 @@ import (
 	"github.com/sdougbrown/poo/tool/finish"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
-	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 )
 
 // addFinishTool gives the session the typed-result tool.
