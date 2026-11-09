@@ -180,6 +180,21 @@ use. It must be the name the tool's `Spec` reports. A profile or a
 permission rule that names a tool the binary does not register is a typed
 error. So is a cli registry whose `call_cli` the binary does not link.
 
+Codemode is a tool and an engine. `tool/codemode` is the tool, and
+`poo/codemode/starlark` is the engine that runs the scripts, so the map
+hands the tool the engine the binary links, as `cmd/poo` does:
+
+```go
+"codemode": func(config.ToolOptions) poo.Tool {
+	return codemode.New(starlark.New())
+},
+```
+
+A binary that links no engine offers no codemode tool, and takes its schema
+and its prompt section with it. `tools.disabled` leaves the tool out of
+whatever profile a session runs under instead, so a light-duty project
+drops it from its settings rather than from its binary.
+
 The settings still decode and validate in `config`. `tools.bash.*`, the
 executor name and `cli_registry.paths` are settings, not tools. Nothing in
 `config` imports a tool package, so reading a settings file links none.
