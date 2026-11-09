@@ -960,6 +960,47 @@ func TestANestedBatchDoesNotStartInAWindingDownRun(t *testing.T) {
 	}
 }
 
+// TestANestedBatchDoesNotStartOnACancelledContext covers the seam's
+// refusal for a context that is already gone: the parent call is still
+// running in an active run and asks for its batch under a context that
+// was cancelled before it asked.
+func TestANestedBatchDoesNotStartOnACancelledContext(t *testing.T) {
+	reader := &namedTool{echoTool: echoTool{result: "ok"}, name: "reader"}
+	nest := &nestedTool{script: []string{`reader {"text":"one"}`}}
+	// The run is active, and the batch's own context is already done, so
+	// the seam's check on the caller's context is the only refusal left.
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+	nest.seamCtx = dead
+	sink := &recordingSink{}
+	s := nestedSession(t, nest, map[string]poo.Tool{"reader": reader}, sink)
+	res := runSession(t, s, "hello")
+
+	results, err := nest.returned()
+	if err == nil {
+		t.Fatalf("the seam started a batch on a cancelled context: %v", results)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("the seam's error is %q, want the context's own", err)
+	}
+	if got := len(reader.Calls()); got != 0 {
+		t.Errorf("the reader ran %d times, want 0 (the batch never started)", got)
+	}
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolCallRecord); ok && r.Tool == "reader" {
+			t.Errorf("the log holds a tool.call record for %q, want none", r.Tool)
+		}
+	}
+	// The refusal is the parent call's own result: the run carries on to
+	// its normal end.
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want the natural end of the turn", res.Reason)
+	}
+	if res.Turns != 2 {
+		t.Errorf("the run made %d turns, want 2", res.Turns)
+	}
+}
+
 // TestTheNestedSeamIsTheTurnsAlone covers the seam's availability: the
 // turn's tool has it, and a call of an unknown tool through it is an
 // error, not a recorded call.
