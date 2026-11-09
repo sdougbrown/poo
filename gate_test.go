@@ -206,8 +206,47 @@ func TestTheGateRunsOnTheStepSixPath(t *testing.T) {
 // TestTheGateRunsOnTheFinalizeInputPath covers the same rule for the
 // input delivered at finalize step 1: the abandoned finalization goes
 // to the gate.
+// holdingCompactor holds the gate at its compaction step the first
+// time it is asked, so the test can queue a steer while the run waits
+// there.
+type holdingCompactor struct {
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+
+	mu    sync.Mutex
+	calls int
+}
+
+// callsOf reports how many times the gate asked for a compaction.
+func (c *holdingCompactor) callsOf() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
+}
+
+// ShouldCompact waits for the release once and then asks for a
+// compaction.
+func (c *holdingCompactor) ShouldCompact(poo.View, poo.ContextBudget) bool {
+	c.mu.Lock()
+	c.calls++
+	c.mu.Unlock()
+	c.once.Do(func() { close(c.entered) })
+	<-c.release
+	return true
+}
+
+// Compact returns the scripted compaction.
+func (c *holdingCompactor) Compact(context.Context, poo.View, poo.ForkFunc) (poo.Compaction, error) {
+	return poo.Compaction{Strategy: "test"}, nil
+}
+
 func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
-	compactor := pootest.NewCompactor(true, poo.Compaction{Strategy: "test"})
+	// The compactor pins the run at the gate, so the steer is queued
+	// while the run is open and the settle cannot beat it. When the gate
+	// resumes, the budget check settles the run and the queued steer
+	// abandons the finalization into the gate.
+	compactor := &holdingCompactor{entered: make(chan struct{}), release: make(chan struct{})}
 	tr := scripted([]fakeResponse{
 		{text: "the first answer"},
 		{text: "the second answer"},
@@ -225,11 +264,13 @@ func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	// The steer is queued while the run is settling naturally, and it
-	// abandons the finalization.
+	<-compactor.entered
+	// The steer is queued while the run waits at the gate; the finalization
+	// that follows abandons for it and the gate takes the run back.
 	if _, err := s.Send("and this", poo.Steer); err != nil {
 		t.Fatalf("sending the steer: %v", err)
 	}
+	close(compactor.release)
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
@@ -237,7 +278,7 @@ func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
 	if res.Reason != poo.ReasonContextExhausted {
 		t.Errorf("the run settled %q, want context_exhausted", res.Reason)
 	}
-	if compactor.Calls() == 0 {
+	if compactor.callsOf() == 0 {
 		t.Error("the compactor was never asked: the abandoned finalization did not go through the gate")
 	}
 }
