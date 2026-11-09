@@ -828,14 +828,115 @@ func TestAProfileTheSettingsDisableEveryToolOfIsNotListed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
-	runtime, err := readOnlyBuild(t, settings, nil)
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile()},
+		Executors:      theExecutors(),
+	})
 	if err != nil {
-		t.Fatalf("building the search profile with every tool disabled: %v", err)
+		t.Fatalf("building under the code profile with the search profile's tools disabled: %v", err)
 	}
 	for _, listed := range runtime.Profiles {
 		if listed.Name == search.Name {
 			t.Errorf("the binary offers the emptied %q profile with the tools %v", listed.Name, listed.Tools)
 		}
+	}
+}
+
+// TestAProfileTheSettingsDisableEveryToolOfCannotRun covers the session's
+// half of the same rule: the listing does not offer a profile the settings
+// empty, so selecting that profile is the operator's configuration error
+// rather than a session with no tool at all.
+func TestAProfileTheSettingsDisableEveryToolOfCannotRun(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`tools:
+  disabled: [read, grep]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = readOnlyBuild(t, settings, nil)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the build selected a profile the settings empty: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "tools.disabled" {
+		t.Errorf("the failure is %+v, want unsupported on tools.disabled", failure)
+	}
+	if !strings.Contains(failure.Message, search.Name) {
+		t.Errorf("the message %q does not name the profile", failure.Message)
+	}
+}
+
+// TestADisabledRegistryToolIsNotOffered covers a registry tool the
+// settings disable: call_cli comes back from the registry rather than from
+// the profile, so the disabled list still takes it off the session that
+// builds.
+func TestADisabledRegistryToolIsNotOffered(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(dir)+`tools:
+  disabled: [call_cli]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	if hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session offers %v", runtime.Options.ToolOrder)
+	}
+	if slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == "call_cli" }) {
+		t.Error("the profile still offers the disabled registry tool")
+	}
+	// The profile's own tools are untouched, so the setting removes the
+	// name it lists and nothing else.
+	if !hasTool(runtime.Options.ToolOrder, "bash") {
+		t.Errorf("the session dropped a tool the settings did not disable: %v", runtime.Options.ToolOrder)
+	}
+}
+
+// TestADisabledSideEffectingToolEarnsNoRegistryTool covers the order the
+// registry joins in: a registered CLI can change anything, so it comes
+// with a profile that already offers a side-effecting tool. A profile
+// whose only such tool the settings disable has none left, and earns no
+// call_cli.
+func TestADisabledSideEffectingToolEarnsNoRegistryTool(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(dir)+`tools:
+  disabled: [edit]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	files := profile.Profile{Name: "files", Tools: []string{"edit", "read"}}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), files},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+
+	var listed []string
+	for _, p := range runtime.Profiles {
+		if p.Name != files.Name {
+			continue
+		}
+		for _, tool := range p.Tools {
+			listed = append(listed, tool.Name)
+		}
+	}
+	if len(listed) == 0 {
+		t.Fatalf("the binary does not offer the %q profile", files.Name)
+	}
+	if hasTool(listed, "call_cli") {
+		t.Errorf("the %q profile offers %v, and its only side-effecting tool is disabled", files.Name, listed)
 	}
 }
 

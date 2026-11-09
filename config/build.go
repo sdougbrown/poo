@@ -432,15 +432,26 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[tool]))
 		r.toolNames = append(r.toolNames, tool)
 	}
+	// The disabled list is the operator's, so it comes off the profile
+	// before the registry joins: a profile whose only side-effecting tool
+	// is disabled earns no registry tool, and a disabled registry tool
+	// does not come back.
+	if err := r.disableTools(opts); err != nil {
+		return err
+	}
+	// The profile's named tools are the operator's choice as well, and the
+	// listing does not offer a profile the settings empty, so selecting
+	// one cannot run.
+	if len(chosen.Tools) > 0 && len(r.Profile.Tools) == 0 {
+		return &Error{
+			Code:    CodeUnsupported,
+			Field:   "tools.disabled",
+			Message: fmt.Sprintf("the settings disable every tool the profile %q offers", chosen.Name),
+		}
+	}
 	// The registry is the settings' opt-in: a session whose settings name
 	// a registry offers its CLIs as well.
 	if err := r.addRegistryTools(opts); err != nil {
-		return err
-	}
-	// The disabled list is the operator's, so it comes off what the profile
-	// and the registry offered before the core adds its own tools: the job
-	// tools follow the tools that are left.
-	if err := r.disableTools(opts); err != nil {
 		return err
 	}
 	// The core adds the job tools on its own whenever a linked tool may
@@ -562,7 +573,9 @@ func (r *Runtime) offersRegistry() bool {
 // of them cannot honour the settings: the operator is told which tool is
 // missing, whatever profile the session runs under. The tools themselves
 // join a profile that already offers a side-effecting tool: a registered
-// CLI can change anything, so a read-only profile stays read-only.
+// CLI can change anything, so a read-only profile stays read-only. The
+// disabled tools are already off the profile, so a tool the settings
+// disable does not come back here.
 func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if r.Registry == nil {
 		return nil
@@ -584,7 +597,11 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if !offersSideEffects(r.Profile.Tools) {
 		return nil
 	}
+	disabled := r.Settings.Tools.Disabled
 	for _, name := range names {
+		if slices.Contains(disabled, name) {
+			continue
+		}
 		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[name]))
 		r.toolNames = append(r.toolNames, name)
 	}
@@ -677,6 +694,9 @@ func withJobTools(tools []poo.ToolInfo, feeds bool) []poo.ToolInfo {
 // the setting cannot have are the binary's own: a tool the binary does not
 // link cannot be offered or removed, and the tools the core adds by itself
 // are not the profile's to give up.
+//
+// It runs before the registry joins, so the tools that are left are the
+// ones the registry and the core judge.
 func (r *Runtime) disableTools(opts BuildOptions) error {
 	disabled := r.Settings.Tools.Disabled
 	if len(disabled) == 0 {
@@ -721,10 +741,13 @@ func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
 //
 // A profile that names a tool the binary does not link offers the
 // tools it has: the profile cannot be run with the others, and a
-// profile that cannot be run is not one the binary offers. The
-// disabled tools come off each profile here as well, so the profile
-// the client is told about is the one the session runs, and a profile
-// the settings empty is not one the binary offers either.
+// profile that cannot be run is not one the binary offers.
+//
+// The disabled list and the registry follow the same order here as they
+// do for the session running, so the listing and the session agree: the
+// disabled tools come off a profile before it is judged runnable, a
+// profile the settings empty is not offered, and a profile that has no
+// side-effecting tool left earns no registry tool.
 func (r *Runtime) resolveProfiles(opts BuildOptions) []poo.Profile {
 	registry := r.Registry != nil
 	find := r.findTool()
@@ -739,16 +762,16 @@ func (r *Runtime) resolveProfiles(opts BuildOptions) []poo.Profile {
 			}
 			resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[tool]))
 		}
-		if registry && offersSideEffects(resolved.Tools) {
-			for _, name := range registryToolNames(find) {
-				if linksTool(opts, name) {
-					resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
-				}
-			}
-		}
 		resolved.Tools = withoutDisabled(resolved.Tools, disabled)
 		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
 			continue
+		}
+		if registry && offersSideEffects(resolved.Tools) {
+			for _, name := range registryToolNames(find) {
+				if linksTool(opts, name) && !slices.Contains(disabled, name) {
+					resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
+				}
+			}
 		}
 		resolved.Tools = withJobTools(resolved.Tools, feeds)
 		out = append(out, resolved)

@@ -42,7 +42,9 @@ A settings file that names `finish.schema_file` also gets the typed
 whatever profile the session runs under, so one settings file can keep a
 tool off every profile. A name the profile does not offer does nothing; a
 name the binary does not link, or one of the core's own `jobs`,
-`cancel_job` and `finish`, is an error.
+`cancel_job` and `finish`, is an error. A selected profile left with no
+tool of its own is an error too, and such a profile is not one the binary
+lists.
 
 **Exit codes.** The exit code says why a run ended:
 
