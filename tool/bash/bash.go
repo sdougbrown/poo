@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -26,8 +27,8 @@ const (
 	DefaultTimeout = 120 * time.Second
 	// MaxCallTimeout is the ceiling for a caller-supplied timeout.
 	MaxCallTimeout = 10 * time.Minute
-	// CaptureCap is the size of the buffer the output is captured into.
-	// Beyond it, output is read and discarded.
+	// CaptureCap is the size of the buffer the output is captured into,
+	// in bytes. Beyond it, output is read and discarded.
 	CaptureCap = 1 << 20
 	// KillGrace is how long the process group gets between SIGTERM and
 	// SIGKILL.
@@ -39,6 +40,15 @@ const (
 	// ElisionHint tells the model how to see the elided middle.
 	ElisionHint = "Output too long. Use grep/sed/head/tail to inspect narrower ranges."
 )
+
+// A nested call keeps all the capture holds only while the capture, in
+// bytes, is no larger than the nested cap, in characters. The
+// conversion does not compile when it is larger.
+const _ = uint(poo.NestedOutputCapChars - CaptureCap)
+
+// TruncationHint tells the model how to see output past the capture
+// buffer.
+var TruncationHint = fmt.Sprintf("Output passed the capture limit of %d bytes and the rest was dropped. Redirect it to a file and inspect narrower ranges.", CaptureCap)
 
 // ObservationCap returns the cap on the observation shown to the model.
 //
@@ -89,8 +99,11 @@ const (
 	// EnvelopeTimedOut is the field that holds the timeout flag.
 	EnvelopeTimedOut = "timed_out"
 	// EnvelopeHint is the field that holds the hint about the elided
-	// middle.
+	// middle, or about the dropped end.
 	EnvelopeHint = "hint"
+	// EnvelopeTruncated is the field that says the capture buffer
+	// dropped the end of the output. It is there only when it is true.
+	EnvelopeTruncated = "truncated"
 )
 
 // Tool is the bash tool.
@@ -98,7 +111,8 @@ type Tool struct {
 	// Timeout is the per-call timeout. Zero means DefaultTimeout.
 	Timeout time.Duration
 	// ObservationCap is the cap on the observation. Zero means the cap is
-	// taken from the run's settings.
+	// taken from the run's settings. A nonzero cap applies to a nested
+	// call as well.
 	ObservationCap int
 	// Executor runs the command. Nil means the local executor.
 	Executor exec.Executor
@@ -306,10 +320,11 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 
 	text, structured := Envelope(Observation{
-		ExitCode: res.exitCode,
-		TimedOut: res.timedOut,
-		Output:   res.output,
-		Cap:      cap,
+		ExitCode:  res.exitCode,
+		TimedOut:  res.timedOut,
+		Output:    res.output,
+		Truncated: res.truncated,
+		Cap:       cap,
 	})
 
 	return poo.ToolResult{

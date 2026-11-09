@@ -291,6 +291,22 @@ after-tool hooks a model-made call goes through. The recovery's message
 rule leaves a call that names a `parent` out of the history, so a torn
 tail's nested calls are closed without polluting it either.
 
+A nested call's tool runs under a cap of 1,048,576 characters
+(`poo.NestedOutputCapChars`) and not the session's context-relative
+caps, since its output never reaches the model directly. The tool that
+made the call reads the whole result. The record's `text` and the
+`tool.result` event's `text` are held to the session's observation cap,
+with the rest counted in `elided_chars`. A cut `text` ends with a line
+that says how many more characters went to the calling tool. A hook's
+replaced original is cut the same way.
+
+The record's `structured` payload is kept whole, so a tool whose
+payload holds its output has that output in the log once. Bash's
+capture always fits under the nested cap. `call_cli`'s stdout and
+stderr share the cap, so two streams that pass it together are kept
+as their heads and tails. A tool with no payload, such as read or
+grep, has only the cut text.
+
 ## `tool.result`
 
 The outcome of a tool call.
@@ -302,7 +318,8 @@ The outcome of a tool call.
 | `handle` | string | The call's handle within the turn. |
 | `tool` | string | The tool that ran. |
 | `outcome` | string | `"ok"`, `"error"`, `"denied"`, `"skipped"`, `"cancelled"`, `"interrupted"` or `"started"`. |
-| `text` | string | The model-facing text of the result. |
+| `text` | string | The model-facing text of the result. A nested call's text is held to the session's observation cap. |
+| `elided_chars` | integer | The characters a nested call's `text` left out. Absent when the text is whole. |
 | `structured` | any | The tool's side-channel payload. Absent when the tool has none. |
 | `original` | object | The result the tool produced, when a hook replaced it. Absent when no hook replaced it, and absent for a redacted result: the original of a redacted result never reaches the log. |
 | `redacted` | boolean | `true` when a hook redacted the result. Absent when it did not. |
@@ -765,7 +782,8 @@ The bash tool's payload is the observation the model reads, as JSON:
 | `output_head` | string | The head of the output, when it was elided. |
 | `output_tail` | string | The tail of the output, when it was elided. |
 | `elided_chars` | integer | The characters dropped from the middle. Absent when the output was not elided. |
-| `hint` | string | How to see the elided middle. Absent when the output was not elided. |
+| `truncated` | boolean | True when the output passed the 1 MiB capture and the rest was dropped. Absent otherwise. |
+| `hint` | string | How to see the elided middle, or the dropped end when `truncated` is set. Absent when the output was neither elided nor truncated. |
 
 The observation cap and `elided_chars` are counted in characters, not
 bytes, and a cut never splits a rune. A byte that is not part of a valid

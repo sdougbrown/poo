@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 )
@@ -86,6 +88,8 @@ type nestedTool struct {
 	results []poo.NestedResult
 	// seamErr is the error the seam returned, when it returned one.
 	seamErr error
+	// settings are the settings the tool's own call ran under.
+	settings poo.ToolSettings
 }
 
 func (t *nestedTool) Spec() poo.ToolSpec {
@@ -124,6 +128,7 @@ func (t *nestedTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv)
 	results, err := env.Nested.Call(callCtx, calls)
 	t.mu.Lock()
 	t.nester = env.Nested
+	t.settings = env.Settings
 	t.results, t.seamErr = results, err
 	t.mu.Unlock()
 	if err != nil {
@@ -1016,4 +1021,241 @@ func TestTheNestedSeamIsTheTurnsAlone(t *testing.T) {
 	if _, err := nest.nester.Call(context.Background(), []poo.NestedCall{{Tool: "nope"}}); err == nil {
 		t.Fatal("the nested call of an unknown tool returned no error")
 	}
+}
+
+// capsTool is a tool that keeps the output caps its environment gave it.
+type capsTool struct {
+	mu          sync.Mutex
+	observation int
+	read        int
+}
+
+func (t *capsTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        "caps",
+		Description: "keep the caps",
+		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Class:       poo.ClassReadOnly,
+	}
+}
+
+func (t *capsTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	return capsPrepared{}, nil
+}
+
+func (t *capsTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	t.mu.Lock()
+	t.observation = env.Settings.ObservationCapChars
+	t.read = env.Settings.ReadOutputCapChars
+	t.mu.Unlock()
+	return poo.ToolResult{Text: "ok"}, nil
+}
+
+type capsPrepared struct{}
+
+func (capsPrepared) Summary() string { return "keep the caps" }
+
+// TestANestedCallGetsTheNestedOutputCaps covers the caps a nested call
+// runs under: its output goes to the tool that made the call, not to
+// the model, so it is capped at poo.NestedOutputCapChars and not at the
+// session's context-relative caps.
+func TestANestedCallGetsTheNestedOutputCaps(t *testing.T) {
+	inner := &capsTool{}
+	nest := &nestedTool{script: []string{`caps {}`}}
+	s := nestedSession(t, nest, map[string]poo.Tool{"caps": inner}, &recordingSink{}, func(o *poo.Options) {
+		o.Settings.ObservationCapChars = 1000
+		o.Settings.ReadOutputCapChars = 2000
+	})
+	runSession(t, s, "hello")
+
+	inner.mu.Lock()
+	defer inner.mu.Unlock()
+	if inner.observation != poo.NestedOutputCapChars {
+		t.Errorf("the nested call's observation cap = %d, want %d", inner.observation, poo.NestedOutputCapChars)
+	}
+	if inner.read != poo.NestedOutputCapChars {
+		t.Errorf("the nested call's read cap = %d, want %d", inner.read, poo.NestedOutputCapChars)
+	}
+
+	// The model-made call keeps the session's caps: its result is what
+	// the model reads.
+	nest.mu.Lock()
+	defer nest.mu.Unlock()
+	if got := nest.settings.ObservationCapChars; got != 1000 {
+		t.Errorf("the model-made call's observation cap = %d, want 1000", got)
+	}
+	if got := nest.settings.ReadOutputCapChars; got != 2000 {
+		t.Errorf("the model-made call's read cap = %d, want 2000", got)
+	}
+}
+
+// bigTool is a tool whose result is longer than the session's caps.
+type bigTool struct{ text string }
+
+func (t *bigTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        "big",
+		Description: "return a long result",
+		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Class:       poo.ClassReadOnly,
+	}
+}
+
+func (t *bigTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	return capsPrepared{}, nil
+}
+
+func (t *bigTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	return poo.ToolResult{Text: t.text, Structured: json.RawMessage(`{"long":true}`)}, nil
+}
+
+// TestANestedResultKeepsTheSessionCapOutsideItsCaller covers where a
+// nested result goes: its caller reads it whole, but its tool.result
+// event and the text of its record hold no more than the session's
+// observation cap, so a script's large results cannot flood an event
+// consumer or the log. The record keeps the structured payload whole.
+func TestANestedResultKeepsTheSessionCapOutsideItsCaller(t *testing.T) {
+	long := strings.Repeat("é", 5000)
+	nest := &nestedTool{script: []string{`big {}`}}
+	sink := &recordingSink{}
+	s := nestedSession(t, nest, map[string]poo.Tool{"big": &bigTool{text: long}}, sink, func(o *poo.Options) {
+		o.Settings.ObservationCapChars = 1000
+	})
+	runSession(t, s, "hello")
+
+	results, err := nest.returned()
+	if err != nil || len(results) != 1 {
+		t.Fatalf("the seam returned %d results and %v", len(results), err)
+	}
+	if !strings.Contains(results[0].Text, long) {
+		t.Errorf("the caller got %d characters, want the whole result", utf8.RuneCountInString(results[0].Text))
+	}
+
+	found := false
+	for _, ev := range s.Events() {
+		if ev.Name != poo.EventToolResult || ev.Payload["parent"] == nil {
+			continue
+		}
+		found = true
+		text, _ := ev.Payload["text"].(string)
+		elided, _ := ev.Payload["elided_chars"].(int)
+		checkCutText(t, "the nested result event", text, elided, results[0].Text, 1000)
+	}
+	if !found {
+		t.Fatal("no nested tool.result event")
+	}
+
+	var rec *poo.ToolResultRecord
+	for _, r := range sink.allRecords() {
+		if r, ok := r.(*poo.ToolResultRecord); ok && r.Handle == results[0].Handle {
+			rec = r
+		}
+	}
+	if rec == nil {
+		t.Fatal("no record of the nested result")
+	}
+	checkCutText(t, "the nested result record", rec.Text, rec.ElidedChars, results[0].Text, 1000)
+	if string(rec.Structured) != `{"long":true}` {
+		t.Errorf("the record's structured payload is %s, want it whole", rec.Structured)
+	}
+}
+
+// TestANestedResultWithNoSessionCapKeepsTheDefault covers a session
+// built without an observation cap: a nested result's record holds its
+// text to the largest observation the model ever sees, 30000
+// characters.
+func TestANestedResultWithNoSessionCapKeepsTheDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body int
+		cut  bool
+	}{
+		{"under the default", 29000, false},
+		{"over the default", 31000, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nest := &nestedTool{script: []string{`big {}`}}
+			sink := &recordingSink{}
+			body := strings.Repeat("x", tc.body)
+			s := nestedSession(t, nest, map[string]poo.Tool{"big": &bigTool{text: body}}, sink)
+			runSession(t, s, "hello")
+
+			results, err := nest.returned()
+			if err != nil || len(results) != 1 {
+				t.Fatalf("the seam returned %d results and %v", len(results), err)
+			}
+			if !strings.Contains(results[0].Text, body) {
+				t.Fatal("the caller did not get the whole result")
+			}
+			var rec *poo.ToolResultRecord
+			for _, r := range sink.allRecords() {
+				if r, ok := r.(*poo.ToolResultRecord); ok && r.Handle == results[0].Handle {
+					rec = r
+				}
+			}
+			if rec == nil {
+				t.Fatal("no record of the nested result")
+			}
+			if !tc.cut {
+				if rec.Text != results[0].Text || rec.ElidedChars != 0 {
+					t.Errorf("the record cut a result under the default: %d elided", rec.ElidedChars)
+				}
+				return
+			}
+			checkCutText(t, "the nested result record", rec.Text, rec.ElidedChars, results[0].Text, 30000)
+			if got := utf8.RuneCountInString(strings.TrimSuffix(rec.Text, fmt.Sprintf(poo.NestedElisionNote, rec.ElidedChars))); got != 30000 {
+				t.Errorf("the record keeps %d characters, want 30000", got)
+			}
+		})
+	}
+}
+
+// checkCutText asserts that a nested result's cut text is the result's
+// head, no longer than the cap, followed by the elision note, and that
+// the head and the elided count add up to the whole result.
+func checkCutText(t *testing.T, what, text string, elided int, whole string, limit int) {
+	t.Helper()
+	note := fmt.Sprintf(poo.NestedElisionNote, elided)
+	head, ok := strings.CutSuffix(text, note)
+	if !ok {
+		t.Errorf("%s does not end with the elision note: %q", what, text[max(0, len(text)-80):])
+		return
+	}
+	if n := utf8.RuneCountInString(head); n > limit {
+		t.Errorf("%s keeps %d characters, want at most %d", what, n, limit)
+	}
+	if !utf8.ValidString(head) {
+		t.Errorf("%s split a character", what)
+	}
+	if !strings.HasPrefix(whole, head) {
+		t.Errorf("%s is not the head of the result", what)
+	}
+	if utf8.RuneCountInString(head)+elided != utf8.RuneCountInString(whole) {
+		t.Errorf("%s and its elided count (%d) do not add up to the result", what, elided)
+	}
+}
+
+// TestANestedResultsReplacedOriginalIsCut covers a hook that replaces a
+// nested result: the record keeps the original the tool produced, cut
+// like the result's own text.
+func TestANestedResultsReplacedOriginalIsCut(t *testing.T) {
+	long := strings.Repeat("y", 5000)
+	nest := &nestedTool{script: []string{`big {}`}}
+	sink := &recordingSink{}
+	s := nestedSession(t, nest, map[string]poo.Tool{"big": &bigTool{text: long}}, sink,
+		func(o *poo.Options) { o.Settings.ObservationCapChars = 1000 },
+		poo.WithAfterTool(&rewriteNested{tool: "big", text: "replaced"}),
+	)
+	runSession(t, s, "hello")
+
+	var rec *poo.ToolResultRecord
+	for _, r := range sink.allRecords() {
+		if r, ok := r.(*poo.ToolResultRecord); ok && r.Tool == "big" {
+			rec = r
+		}
+	}
+	if rec == nil || rec.Original == nil {
+		t.Fatal("no record of the replaced nested result's original")
+	}
+	checkCutText(t, "the replaced original", rec.Original.Text, 5000-1000, long, 1000)
 }

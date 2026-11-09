@@ -3,6 +3,7 @@ package poo
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 )
 
 // The nested tool-call seam.
@@ -27,6 +28,62 @@ import (
 // model-made call is: the finalization waits for its record writes, and
 // it owns the result of a nested call that is still outstanding when the
 // run settles.
+
+// NestedOutputCapChars is the cap on a nested call's output, in
+// characters, as its tool reads it from ToolSettings.
+//
+// A nested call's output goes to the tool that made the call, not to
+// the model, so the cap is not relative to the context window. The bash
+// tool's capture buffer holds no more bytes than this, so a nested bash
+// call keeps all it captured.
+const NestedOutputCapChars = 1 << 20
+
+// defaultNestedTextCapChars is the cap on a nested result's recorded
+// text when the session sets no observation cap. It is the largest
+// observation the model ever sees.
+const defaultNestedTextCapChars = 30000
+
+// callParent returns the handle of the call that made the call with
+// the handle, or the empty string for a call the model made.
+func (s *Session) callParent(handle string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resultMeta[handle].parent
+}
+
+// NestedElisionNote is the note that follows the head of a nested
+// result's text when its record and event leave the rest out. The verb
+// takes the number of characters left out.
+const NestedElisionNote = "\n… %d more characters went to the calling tool"
+
+// nestedRecordText returns the head of a nested result's text that its
+// tool.result event and its record carry, and the number of characters
+// it leaves out. A cut text ends with NestedElisionNote, so a reader of
+// the text alone sees that it is not whole.
+//
+// The caller reads the whole result, which can be NestedOutputCapChars
+// long. The event goes to every consumer of the stream and is kept for
+// an inspect. The record goes to the log, and a resume loads the whole
+// log, though the restore skips nested records. So both hold the text
+// to the session's observation cap, and the record's structured
+// payload stays whole.
+func (s *Session) nestedRecordText(text string) (string, int) {
+	limit := s.opts.Settings.ObservationCapChars
+	if limit <= 0 {
+		limit = defaultNestedTextCapChars
+	}
+	total := utf8.RuneCountInString(text)
+	if total <= limit {
+		return text, 0
+	}
+	i := 0
+	for n := 0; n < limit; n++ {
+		_, size := utf8.DecodeRuneInString(text[i:])
+		i += size
+	}
+	elided := total - limit
+	return text[:i] + fmt.Sprintf(NestedElisionNote, elided), elided
+}
 
 // nestedCaller is the NestedCaller a turn's tool calls carry.
 //

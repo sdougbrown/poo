@@ -21,6 +21,9 @@ type result struct {
 	cancelled bool
 	// output is the captured output, truncated to the capture cap.
 	output string
+	// truncated reports that the capture cap dropped the end of the
+	// output.
+	truncated bool
 }
 
 // stopped is the result of a command the context ended before it ran.
@@ -74,7 +77,7 @@ func (t *Tool) run(ctx context.Context, command string, env poo.ToolEnv, timeout
 
 	code, _ := proc.Wait()
 
-	res := result{output: buf.String()}
+	res := result{output: buf.String(), truncated: buf.Truncated()}
 	// A command that was killed has no exit code, and the model has to
 	// see that it failed.
 	if code >= 0 {

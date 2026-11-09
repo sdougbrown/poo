@@ -58,7 +58,8 @@ type Tool struct {
 	// DefaultMaxMatches.
 	MaxMatches int
 	// ObservationCap is the cap on the output, in characters. Zero means
-	// the cap comes from the run's settings.
+	// the cap comes from the run's settings. A nonzero cap applies to a
+	// nested call as well.
 	ObservationCap int
 }
 

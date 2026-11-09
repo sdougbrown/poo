@@ -53,7 +53,7 @@ func OutputCap(contextLimit int) int {
 // Tool is the read tool.
 type Tool struct {
 	// OutputCap is the cap on the output. Zero means the cap is taken from
-	// the run's settings.
+	// the run's settings. A nonzero cap applies to a nested call as well.
 	OutputCap int
 }
 
