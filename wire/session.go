@@ -98,10 +98,10 @@ func (s *session) signal() {
 // eventsAfter returns the events after a sequence number, and the
 // sequence number the next page asks for.
 //
-// The page holds the events that fit the byte budget, and the second
-// return reports that events were left out: the next page asks for the
-// last returned event's sequence number. One oversized event still
-// comes back, so a client paging forward always moves.
+// The page holds the events that fit the byte budget. The second
+// return reports that events were left out; the next page then asks
+// for the last returned event's sequence number. One oversized event
+// still comes back, so a client paging forward always moves.
 //
 // The snapshot is taken under the session's lock, so a client never
 // sees an event twice or misses one that came while it was reading.

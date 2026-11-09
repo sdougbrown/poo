@@ -41,7 +41,7 @@ const NestedOutputCapChars = 1 << 20
 // NestedArgumentMaxBytes is the byte budget for one nested call's
 // arguments.
 //
-// A script builds its arguments with no limit of its own, and the
+// A script builds its arguments with no limit of its own. The
 // arguments reach the event stream — the call's summary, the permission
 // ask — before anything reads them back. The budget keeps one call's
 // arguments far under the wire's output queue line budget.

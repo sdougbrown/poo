@@ -44,9 +44,9 @@ const (
 	// to drain.
 	DefaultDrain = 5 * time.Second
 	// DefaultEventPageBytes is the byte budget for one page of events,
-	// over the events' own JSON. The response wraps the page in an
-	// envelope, and the queue takes the whole line, so the budget keeps
-	// a full page far under the queue's line budget.
+	// over the events' own JSON. The queue takes the whole line, and
+	// the response wraps the page in an envelope. The budget keeps a
+	// full page far under the queue's line budget.
 	DefaultEventPageBytes = 8 << 20
 	// DefaultHistoryPageBytes is the byte budget for one page of
 	// history, over the page's own JSON. The queue takes the whole
