@@ -382,6 +382,31 @@ func (h *harness) initialize() protocol.InitializeResult {
 	return out
 }
 
+// awaitState waits until the session reports a state.
+//
+// The run.settled event reaches the client before the session's state
+// retires to settled, so a test that asserts on the state after the
+// event waits for the state itself.
+func (h *harness) awaitState(t *testing.T, sessionID, want string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, rerr := h.call(protocol.MethodSessionGet, protocol.GetParams{SessionID: sessionID})
+		if rerr != nil {
+			t.Fatalf("the get was refused: %v", rerr)
+		}
+		var got protocol.GetResult
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("decoding the get result: %v", err)
+		}
+		if got.State == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the session did not reach the state %q", want)
+}
+
 // event waits for a notification of a type.
 //
 // The events that already arrived are searched first, so a test may ask
