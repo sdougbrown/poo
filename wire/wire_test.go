@@ -1830,3 +1830,48 @@ func TestThePageBudgetFollowsTheQueueBytes(t *testing.T) {
 		t.Errorf("the run came back in %d pages, want more: the budget cut nothing", pages)
 	}
 }
+
+// TestTheInspectPastTheLastEvent covers the empty page: a page past
+// the last event holds no events, says nothing is left, and points at
+// the last event's sequence number.
+func TestTheInspectPastTheLastEvent(t *testing.T) {
+	factory := newTestFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(pootest.Turn{Text: "hello", Finish: "stop"})
+	})
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+		t.Fatalf("the prompt was refused: %v", rerr)
+	}
+	h.event("run.settled")
+	h.awaitState(t, sessionID, "settled")
+
+	result, rerr := h.call(protocol.MethodRunInspect, protocol.InspectParams{SessionID: sessionID})
+	if rerr != nil {
+		t.Fatalf("the inspect was refused: %v", rerr)
+	}
+	var inspected protocol.InspectResult
+	if err := json.Unmarshal(result, &inspected); err != nil {
+		t.Fatalf("decoding the inspect result: %v", err)
+	}
+	last := inspected.Events[len(inspected.Events)-1].Seq
+
+	result, rerr = h.call(protocol.MethodRunInspect, protocol.InspectParams{SessionID: sessionID, AfterSeq: last + 1000})
+	if rerr != nil {
+		t.Fatalf("the inspect was refused: %v", rerr)
+	}
+	if err := json.Unmarshal(result, &inspected); err != nil {
+		t.Fatalf("decoding the inspect result: %v", err)
+	}
+	if len(inspected.Events) != 0 {
+		t.Errorf("the page holds %d events, want none", len(inspected.Events))
+	}
+	if inspected.HasMore {
+		t.Error("the page says more events exist, want has_more false")
+	}
+	if inspected.NextSeq != last {
+		t.Errorf("next_seq = %d, want the last event's %d", inspected.NextSeq, last)
+	}
+}

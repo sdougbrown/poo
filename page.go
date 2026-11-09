@@ -19,7 +19,8 @@ const PageByteBudget = 8 << 20
 //
 // The last item always stays: a page of one oversized item still comes
 // back, so a client paging backwards always moves. The one byte per
-// item covers the separator the JSON array puts between the items.
+// item covers the separator the JSON array puts between the items. A
+// budget below the last item's own size keeps that item alone.
 func PageWithinByteBudget[T any](items []T, size func(T) int, budget int) ([]T, bool) {
 	bytes := 0
 	for i := len(items) - 1; i >= 0; i-- {
@@ -37,7 +38,8 @@ func PageWithinByteBudget[T any](items []T, size func(T) int, budget int) ([]T, 
 //
 // The first item always stays, so a client paging forward always
 // moves. The one byte per item covers the separator the JSON array
-// puts between the items.
+// puts between the items. A budget below the first item's own size
+// keeps that item alone.
 func PageHeadWithinByteBudget[T any](items []T, size func(T) int, budget int) ([]T, bool) {
 	bytes := 0
 	for i, item := range items {
