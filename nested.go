@@ -48,8 +48,9 @@ type nestedCaller struct {
 //
 // A batch that never starts is an error: the run is winding down, the
 // caller's context is already done, or an entry names a tool a script
-// may not call. Every entry is checked before any of the batch is
-// claimed, so a typo in a fan-out has no effect.
+// may not call or asks for one to run in the background. Every entry is
+// checked before any of the batch is claimed, so a typo in a fan-out has
+// no effect.
 func (n *nestedCaller) Call(ctx context.Context, calls []NestedCall) ([]NestedResult, error) {
 	s := n.session
 	run := n.run
@@ -91,9 +92,9 @@ func (n *nestedCaller) Call(ctx context.Context, calls []NestedCall) ([]NestedRe
 	}()
 	for i := range plans {
 		plans[i].parent = n.parent
-		// A nested call runs in the turn, whatever the script asked
-		// for, and it sees its caller's context.
-		plans[i].background = false
+		// A nested call runs in the turn, and it sees its caller's
+		// context. No plan that reaches this point asked for the
+		// background: validateNestedPlans refuses the request.
 		plans[i].callCtx = callCtx
 	}
 
@@ -122,11 +123,13 @@ func (n *nestedCaller) Call(ctx context.Context, calls []NestedCall) ([]NestedRe
 // The run's own tools are out of a script's reach: the finish tool would
 // settle the run out from under the script, and the job tools are the
 // run's own. The finish tool is recognized by the prepared value as well
-// as by the name, so a consumer that renamed it is covered too.
+// as by the name, so a consumer that renamed it is covered too. A batch
+// that asks for a call in the background is refused as well: a nested
+// call runs in the turn its parent runs in, so the request is refused
+// rather than dropped.
 func (s *Session) validateNestedPlans(plans []callPlan) error {
 	for _, p := range plans {
-		switch p.call.Name {
-		case FinishToolName, JobsToolName, CancelJobToolName:
+		if _, core := coreToolNames[p.call.Name]; core {
 			return InvalidArgsf("the tool %q cannot run as a nested call", p.call.Name)
 		}
 		if _, ok := s.opts.Tools[p.call.Name]; !ok {
@@ -134,6 +137,9 @@ func (s *Session) validateNestedPlans(plans []callPlan) error {
 		}
 		if _, bad := p.prepared.(FinishResult); bad {
 			return InvalidArgsf("the tool %q cannot run as a nested call", p.call.Name)
+		}
+		if p.background {
+			return InvalidArgsf("the tool %q cannot run in the background as a nested call", p.call.Name)
 		}
 	}
 	return nil

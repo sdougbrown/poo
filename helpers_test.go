@@ -183,6 +183,8 @@ type echoTool struct {
 	result string
 	// class is the tool's side-effect class.
 	class poo.ToolKind
+	// background is the tool's background mode.
+	background poo.Background
 	// primaryArg names the tool's primary argument.
 	primaryArg string
 	// prepareErr is the failure Prepare returns, when it is set.
@@ -210,6 +212,7 @@ func (t *echoTool) Spec() poo.ToolSpec {
 		Description: "echo the argument back",
 		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`),
 		Class:       class,
+		Background:  t.background,
 		PrimaryArg:  t.primaryArg,
 	}
 }

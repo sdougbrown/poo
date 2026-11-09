@@ -2,6 +2,18 @@ package poo
 
 import "fmt"
 
+// coreToolNames is the set of tool names the core owns: the job tools
+// it registers below, and the finish tool the consumer links.
+//
+// A nested call may not run any of them: the job tools are the run's own
+// way of reaching its jobs, and the finish tool would settle the run out
+// from under the script that called it.
+var coreToolNames = map[string]struct{}{
+	FinishToolName:    {},
+	JobsToolName:      {},
+	CancelJobToolName: {},
+}
+
 // registerJobTools adds the core's own job tools and checks that every
 // linked tool may be registered.
 //

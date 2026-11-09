@@ -76,6 +76,12 @@ type nestedTool struct {
 	nester poo.NestedCaller
 	// script is the batch the tool makes.
 	script []string
+	// wait, when set, blocks before the batch is made, so a test can
+	// act at a known point of the parent call.
+	wait func(ctx context.Context)
+	// seamCtx, when set, is the context the batch is asked under, in
+	// place of the call's own.
+	seamCtx context.Context
 	// results are the results the seam returned, in batch order.
 	results []poo.NestedResult
 	// seamErr is the error the seam returned, when it returned one.
@@ -99,6 +105,9 @@ func (t *nestedTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv)
 	if env.Nested == nil {
 		return poo.ToolResult{Text: "no nested caller", IsError: true}, nil
 	}
+	if t.wait != nil {
+		t.wait(ctx)
+	}
 	calls := make([]poo.NestedCall, 0, len(t.script))
 	for _, step := range t.script {
 		parts := strings.SplitN(step, " ", 2)
@@ -108,7 +117,11 @@ func (t *nestedTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv)
 		}
 		calls = append(calls, call)
 	}
-	results, err := env.Nested.Call(ctx, calls)
+	callCtx := ctx
+	if t.seamCtx != nil {
+		callCtx = t.seamCtx
+	}
+	results, err := env.Nested.Call(callCtx, calls)
 	t.mu.Lock()
 	t.nester = env.Nested
 	t.results, t.seamErr = results, err
@@ -306,24 +319,67 @@ func TestNestedCallsCountTowardTheDoomLoop(t *testing.T) {
 	}
 }
 
+// renamedFinishTool is the finish tool a consumer renamed: it is not
+// called "finish", and its prepared call carries the typed result that
+// settles the run.
+type renamedFinishTool struct{}
+
+func (renamedFinishTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        "settle",
+		Description: "settle the run with a result",
+		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+	}
+}
+
+func (renamedFinishTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	return renamedFinishPrepared{}, nil
+}
+
+func (renamedFinishTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	return poo.ToolResult{Text: "settled"}, nil
+}
+
+// renamedFinishPrepared is the renamed finish tool's prepared call.
+type renamedFinishPrepared struct{}
+
+func (renamedFinishPrepared) Summary() string { return "settle the run" }
+
+// FinishResult makes the prepared call the finish tool's own, whatever
+// the tool is called.
+func (renamedFinishPrepared) FinishResult() json.RawMessage {
+	return json.RawMessage(`{"ok":true}`)
+}
+
 // TestANestedBatchIsValidatedBeforeItStarts covers the batch's
-// validation: an entry that names a run tool or an unknown tool fails
-// the whole batch before any of it is claimed, so a typo in a fan-out
-// has no effect.
+// validation: an entry that names a run tool, a renamed finish tool, an
+// unknown tool, or a call in the background fails the whole batch before
+// any of it is claimed, so a typo in a fan-out has no effect.
 func TestANestedBatchIsValidatedBeforeItStarts(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		entry string
 		want  string
+		// tools are the extra tools the batch's entry needs.
+		tools map[string]poo.Tool
 	}{
 		{name: "run tool", entry: `finish {}`, want: `"finish" cannot run as a nested call`},
+		{name: "renamed finish tool", entry: `settle {}`, want: `"settle" cannot run as a nested call`,
+			tools: map[string]poo.Tool{"settle": renamedFinishTool{}}},
 		{name: "unknown tool", entry: `typo {"text":"x"}`, want: `unknown tool "typo"`},
+		{name: "background request", entry: `worker {"text":"x","background":true}`,
+			want:  `"worker" cannot run in the background as a nested call`,
+			tools: map[string]poo.Tool{"worker": &namedTool{echoTool: echoTool{background: poo.BackgroundAllowed}, name: "worker"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			nest := &nestedTool{script: []string{`reader {"text":"one"}`, tc.entry}}
 			reader := &namedTool{echoTool: echoTool{result: "ok"}, name: "reader"}
+			tools := map[string]poo.Tool{"reader": reader}
+			for name, tool := range tc.tools {
+				tools[name] = tool
+			}
 			sink := &recordingSink{}
-			s := nestedSession(t, nest, map[string]poo.Tool{"reader": reader}, sink)
+			s := nestedSession(t, nest, tools, sink)
 			runSession(t, s, "hello")
 
 			_, err := nest.returned()
@@ -740,6 +796,56 @@ func TestANestedCallSettledWithTheRunLeavesNoHistory(t *testing.T) {
 			if strings.Contains(block.Text, nestedHandle+" ·") {
 				t.Errorf("the next request carries the nested call's result: %q", block.Text)
 			}
+		}
+	}
+}
+
+// TestANestedBatchDoesNotStartInAWindingDownRun covers the seam's
+// refusal for a run that is already settling: the parent call outlives
+// the run's cancellation and asks for its batch afterwards, and the
+// batch never starts.
+func TestANestedBatchDoesNotStartInAWindingDownRun(t *testing.T) {
+	reader := &namedTool{echoTool: echoTool{result: "ok"}, name: "reader"}
+	entered := make(chan struct{})
+	nest := &nestedTool{script: []string{`reader {"text":"one"}`}}
+	// The run's cancellation ends the parent call's context, and the
+	// finalization begins before it cancels: a call that wakes here
+	// asks the seam for a batch in a run that is winding down. The
+	// batch is asked for under a context of its own, so the run's state
+	// is the only thing that can refuse it.
+	nest.wait = func(ctx context.Context) {
+		close(entered)
+		<-ctx.Done()
+	}
+	nest.seamCtx = context.Background()
+	sink := &recordingSink{}
+	s := nestedSession(t, nest, map[string]poo.Tool{"reader": reader}, sink)
+	if _, err := s.Prompt(context.Background(), "hello"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the nest call never started")
+	}
+	s.Cancel("cancel:test")
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	results, err := nest.returned()
+	if err == nil {
+		t.Fatalf("the seam started a batch in a winding-down run: %v", results)
+	}
+	if !strings.Contains(err.Error(), "winding down") {
+		t.Errorf("the seam's error is %q, want the winding-down refusal", err)
+	}
+	if got := len(reader.Calls()); got != 0 {
+		t.Errorf("the reader ran %d times, want 0 (the batch never started)", got)
+	}
+	for _, rec := range sink.allRecords() {
+		if r, ok := rec.(*poo.ToolCallRecord); ok && r.Tool == "reader" {
+			t.Errorf("the log holds a tool.call record for %q, want none", r.Tool)
 		}
 	}
 }

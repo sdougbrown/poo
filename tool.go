@@ -152,8 +152,9 @@ type NestedCaller interface {
 	// the order of calls. A tool's single call is a batch of one.
 	//
 	// The batch is validated before any of it is claimed: an entry that
-	// names an unknown tool or one of the run's own tools fails the
-	// whole batch, so a typo in a fan-out has no effect.
+	// names an unknown tool, one of the run's own tools, or a call in
+	// the background fails the whole batch, so a typo in a fan-out has
+	// no effect.
 	//
 	// A refused, failed or cancelled nested call is reported as data
 	// in the result, not as an error: the caller decides what its
