@@ -1,10 +1,10 @@
 Codemode runs a short script whose only capability is calling your other
-tools. Use it when one call's result decides the next call, or when a
-job needs many calls: the script's intermediate results stay out of the
-conversation, and only what it prints and returns comes back.
+tools. Use it when one call feeds the next, or when a job needs many
+calls. The script's intermediate results stay out of the conversation;
+only what it prints and returns comes back.
 
-The script's language is Starlark, a small deterministic Python dialect.
-It has no files, network or clocks, and it cannot load modules. What it
+The script's language is Starlark, a deterministic dialect of Python.
+It has no files, network or clocks, and modules never load. What it
 has:
 
 - `call(name, args)` runs one tool call and returns its result: a dict
@@ -16,7 +16,7 @@ has:
 - `exit(value)` ends the script with a value; the value comes back as
   JSON. A script without `exit` returns nothing but its printed lines.
 
-A refused or failed call comes back as data (`outcome` says which), so
-the script can decide what to do. The tools you may call are the ones
-this session offers; calling an unknown one is an error. Keep scripts
-short and single-purpose: one script, one job.
+A call that is refused or fails comes back as data (the `outcome` says
+which), so the script can decide what to do. The tools you can call are
+the ones this session offers; calling an unknown one is an error. Keep
+scripts short, each with a single job.
