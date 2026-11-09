@@ -714,3 +714,283 @@ func TestTheDeclaredCredentialIsNotInAModelTool(t *testing.T) {
 		t.Fatalf("the probe did not report absence: %s", res.Text)
 	}
 }
+
+// TestTheSettingsDisableAProfileTool covers the lever: a disabled tool is
+// gone from the tools the session builds, from the schemas it sends, from
+// the prompt's own section for it and from the profile the client lists.
+func TestTheSettingsDisableAProfileTool(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`tools:
+  disabled: [grep]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	for _, spec := range runtime.ToolSpecs() {
+		if spec.Name == "grep" {
+			t.Error("the session sends the disabled tool's schema")
+		}
+	}
+	// The tools around it are untouched, so the setting removes the name it
+	// lists and nothing else.
+	if _, ok := runtime.Options.Tools["read"]; !ok {
+		t.Errorf("the session dropped a tool the settings did not disable: %v", runtime.Options.ToolOrder)
+	}
+	for _, tool := range runtime.Profile.Tools {
+		if tool.Name == "grep" {
+			t.Error("the profile still offers the disabled tool")
+		}
+	}
+	// The bash tool is still offered, so the core still adds the job tools
+	// the model needs to see and stop a job.
+	for _, name := range []string{profile.JobsToolName, profile.CancelJobToolName} {
+		if !slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
+			t.Errorf("the profile lost the %q tool with a background tool still offered", name)
+		}
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if strings.Contains(text, "Grep:") {
+		t.Error("the prompt still carries the disabled tool's section")
+	}
+	if !strings.Contains(text, "Read:") {
+		t.Error("the prompt lost a section the settings did not disable")
+	}
+	// The profiles the client reads offer what a session running them
+	// offers, so the disabled tool is gone from the listed profile too.
+	for _, listed := range runtime.Profiles {
+		if listed.Name != runtime.Profile.Name {
+			continue
+		}
+		if slices.ContainsFunc(listed.Tools, func(tool poo.ToolInfo) bool { return tool.Name == "grep" }) {
+			t.Error("the listed profile still offers the disabled tool")
+		}
+	}
+}
+
+// TestADisablingABackgroundToolTakesTheJobToolsWithIt covers the tools the
+// core adds for another tool: with bash disabled nothing the session offers
+// may run in the background, so the job tools are not offered either.
+func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`tools:
+  disabled: [bash]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	want := []string{"read", "grep", "edit"}
+	if !slices.Equal(runtime.Options.ToolOrder, want) {
+		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
+	}
+	for _, name := range []string{profile.JobsToolName, profile.CancelJobToolName} {
+		if slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
+			t.Errorf("the profile offers the %q tool with no background tool left", name)
+		}
+	}
+}
+
+// TestADisabledToolTheProfileDoesNotOfferChangesNothing covers the other
+// side of the lever: the list is the operator's, so a name the profile
+// running does not offer builds, and that profile keeps every tool it has.
+func TestADisabledToolTheProfileDoesNotOfferChangesNothing(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`tools:
+  disabled: [bash]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: search.Name,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{search.Profile()},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the search profile with bash disabled: %v", err)
+	}
+	want := []string{"read", "grep"}
+	if !slices.Equal(runtime.Options.ToolOrder, want) {
+		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
+	}
+}
+
+// TestAProfileTheSettingsDisableEveryToolOfIsNotListed covers the listing's
+// runnable rule: a profile the disabled list empties cannot run, so the
+// binary does not offer it.
+func TestAProfileTheSettingsDisableEveryToolOfIsNotListed(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`tools:
+  disabled: [read, grep]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile()},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building under the code profile with the search profile's tools disabled: %v", err)
+	}
+	for _, listed := range runtime.Profiles {
+		if listed.Name == search.Name {
+			t.Errorf("the binary offers the emptied %q profile with the tools %v", listed.Name, listed.Tools)
+		}
+	}
+}
+
+// TestAProfileTheSettingsDisableEveryToolOfCannotRun covers the session's
+// half of the same rule: the listing does not offer a profile the settings
+// empty, so selecting that profile is the operator's configuration error
+// rather than a session with no tool at all.
+func TestAProfileTheSettingsDisableEveryToolOfCannotRun(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`tools:
+  disabled: [read, grep]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = readOnlyBuild(t, settings, nil)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the build selected a profile the settings empty: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "tools.disabled" {
+		t.Errorf("the failure is %+v, want unsupported on tools.disabled", failure)
+	}
+	if !strings.Contains(failure.Message, search.Name) {
+		t.Errorf("the message %q does not name the profile", failure.Message)
+	}
+}
+
+// TestADisabledRegistryToolIsNotOffered covers a registry tool the
+// settings disable: call_cli comes back from the registry rather than from
+// the profile, so the disabled list still takes it off the session that
+// builds.
+func TestADisabledRegistryToolIsNotOffered(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(dir)+`tools:
+  disabled: [call_cli]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+
+	if hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session offers %v", runtime.Options.ToolOrder)
+	}
+	if slices.ContainsFunc(runtime.Profile.Tools, func(tool poo.ToolInfo) bool { return tool.Name == "call_cli" }) {
+		t.Error("the profile still offers the disabled registry tool")
+	}
+	// The profile's own tools are untouched, so the setting removes the
+	// name it lists and nothing else.
+	if !hasTool(runtime.Options.ToolOrder, "bash") {
+		t.Errorf("the session dropped a tool the settings did not disable: %v", runtime.Options.ToolOrder)
+	}
+}
+
+// TestADisabledSideEffectingToolEarnsNoRegistryTool covers the order the
+// registry joins in: a registered CLI can change anything, so it comes
+// with a profile that already offers a side-effecting tool. A profile
+// whose only such tool the settings disable has none left, and earns no
+// call_cli.
+func TestADisabledSideEffectingToolEarnsNoRegistryTool(t *testing.T) {
+	dir := registry(t, "deploy")
+	settings, err := config.Parse([]byte(registrySettings(dir)+`tools:
+  disabled: [edit]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	files := profile.Profile{Name: "files", Tools: []string{"edit", "read"}}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), files},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+
+	var listed []string
+	for _, p := range runtime.Profiles {
+		if p.Name != files.Name {
+			continue
+		}
+		for _, tool := range p.Tools {
+			listed = append(listed, tool.Name)
+		}
+	}
+	if len(listed) == 0 {
+		t.Fatalf("the binary does not offer the %q profile", files.Name)
+	}
+	if hasTool(listed, "call_cli") {
+		t.Errorf("the %q profile offers %v, and its only side-effecting tool is disabled", files.Name, listed)
+	}
+}
+
+// TestTheSettingsRefuseToDisableAToolTheBinaryLacks covers the rule the
+// profile's own tool names follow: a disabled name the binary does not
+// link is a failure, because no profile could ever honour it.
+func TestTheSettingsRefuseToDisableAToolTheBinaryLacks(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`tools:
+  disabled: [wget]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = readOnlyBuild(t, settings, nil)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a binary without wget accepted the disabled name: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "tools.disabled" {
+		t.Errorf("the failure is %+v, want unsupported on tools.disabled", failure)
+	}
+	if !strings.Contains(failure.Message, "wget") {
+		t.Errorf("the message %q does not name the tool", failure.Message)
+	}
+}
+
+// TestTheSettingsRefuseToDisableACoreTool covers the tools that are not the
+// profile's to give up: the core adds them itself, so a list that names one
+// is a failure rather than a setting nothing can remove.
+func TestTheSettingsRefuseToDisableACoreTool(t *testing.T) {
+	for _, name := range config.CoreToolNames {
+		t.Run(name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+"tools:\n  disabled: ["+name+"]\n"), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			_, err = config.Build(config.BuildOptions{
+				Settings:       settings,
+				WorkingDir:     t.TempDir(),
+				DefaultProfile: "code",
+				Tools:          theTools(),
+				Profiles:       theProfiles(),
+				Executors:      theExecutors(),
+			})
+			var failure *config.Error
+			if !errors.As(err, &failure) {
+				t.Fatalf("the build disabled the core's %q tool: %v", name, err)
+			}
+			if failure.Code != config.CodeUnsupported || failure.Field != "tools.disabled" {
+				t.Errorf("the failure is %+v, want unsupported on tools.disabled", failure)
+			}
+			if !strings.Contains(failure.Message, name) {
+				t.Errorf("the message %q does not name the tool", failure.Message)
+			}
+		})
+	}
+}

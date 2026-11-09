@@ -54,6 +54,7 @@ type SettingsFields struct {
 	ToolsBwrapNetwork               *bool    "json:\"tools.bwrap.network,omitempty\""
 	ToolsBwrapRoBinds               []string "json:\"tools.bwrap.ro_binds,omitempty\""
 	ToolsBwrapRwBinds               []string "json:\"tools.bwrap.rw_binds,omitempty\""
+	ToolsDisabled                   []string "json:\"tools.disabled,omitempty\""
 	ToolsEnvPassthrough             []string "json:\"tools.env.passthrough,omitempty\""
 	ToolsEnvScrub                   []string "json:\"tools.env.scrub,omitempty\""
 	ToolsProtectedPaths             []string "json:\"tools.protected_paths,omitempty\""
@@ -112,6 +113,7 @@ type SettingsAvailability struct {
 	ToolsBwrapNetwork               FieldStatus
 	ToolsBwrapRoBinds               FieldStatus
 	ToolsBwrapRwBinds               FieldStatus
+	ToolsDisabled                   FieldStatus
 	ToolsEnvPassthrough             FieldStatus
 	ToolsEnvScrub                   FieldStatus
 	ToolsProtectedPaths             FieldStatus
@@ -231,6 +233,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ToolsBwrapRoBindsSatisfied := len(f.ToolsBwrapRoBinds) > 0
 	ToolsBwrapRwBindsEnabled := true
 	ToolsBwrapRwBindsSatisfied := len(f.ToolsBwrapRwBinds) > 0
+	ToolsDisabledEnabled := true
+	ToolsDisabledSatisfied := len(f.ToolsDisabled) > 0
 	ToolsEnvPassthroughEnabled := true
 	ToolsEnvPassthroughSatisfied := len(f.ToolsEnvPassthrough) > 0
 	ToolsEnvScrubEnabled := true
@@ -1407,6 +1411,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		ToolsDisabled: FieldStatus{
+			Required:  ToolsDisabledEnabled && false,
+			Enabled:   ToolsDisabledEnabled,
+			Satisfied: ToolsDisabledSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		ToolsEnvPassthrough: FieldStatus{
 			Required:  ToolsEnvPassthroughEnabled && false,
 			Enabled:   ToolsEnvPassthroughEnabled,
@@ -1611,6 +1637,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return len(f.ToolsBwrapRoBinds) > 0
 	case "ToolsBwrapRwBinds":
 		return len(f.ToolsBwrapRwBinds) > 0
+	case "ToolsDisabled":
+		return len(f.ToolsDisabled) > 0
 	case "ToolsEnvPassthrough":
 		return len(f.ToolsEnvPassthrough) > 0
 	case "ToolsEnvScrub":
@@ -2075,6 +2103,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "ToolsBwrapRwBinds", "tools.bwrap.rw_binds":
 		found = true
 		status = avail.ToolsBwrapRwBinds
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsDisabled", "tools.disabled":
+		found = true
+		status = avail.ToolsDisabled
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}

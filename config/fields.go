@@ -50,6 +50,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.ToolsEnvScrub = list(s.Tools.Env.Scrub)
 	f.ToolsEnvPassthrough = list(s.Tools.Env.Passthrough)
 	f.ToolsProtectedPaths = list(s.Tools.ProtectedPaths)
+	f.ToolsDisabled = list(s.Tools.Disabled)
 
 	f.LimitsMaxTokensPerRun = number(float64(s.Limits.MaxTokensPerRun))
 	f.LimitsMaxDurationS = number(float64(s.Limits.MaxDurationS))

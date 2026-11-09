@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -431,6 +432,23 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[tool]))
 		r.toolNames = append(r.toolNames, tool)
 	}
+	// The disabled list is the operator's, so it comes off the profile
+	// before the registry joins: a profile whose only side-effecting tool
+	// is disabled earns no registry tool, and a disabled registry tool
+	// does not come back.
+	if err := r.disableTools(opts); err != nil {
+		return err
+	}
+	// The profile's named tools are the operator's choice as well, and the
+	// listing does not offer a profile the settings empty, so selecting
+	// one cannot run.
+	if len(chosen.Tools) > 0 && len(r.Profile.Tools) == 0 {
+		return &Error{
+			Code:    CodeUnsupported,
+			Field:   "tools.disabled",
+			Message: fmt.Sprintf("the settings disable every tool the profile %q offers", chosen.Name),
+		}
+	}
 	// The registry is the settings' opt-in: a session whose settings name
 	// a registry offers its CLIs as well.
 	if err := r.addRegistryTools(opts); err != nil {
@@ -439,10 +457,14 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	// The core adds the job tools on its own whenever a linked tool may
 	// run in the background or the session runs feeds, and the profile
 	// offers them with it.
-	feeds := r.Feeds.Len() > 0
-	r.Profile.Tools = withJobTools(r.Profile.Tools, feeds)
-	r.Profiles = resolveProfiles(opts, r.Registry != nil, r.findTool(), feeds)
+	r.Profile.Tools = withJobTools(r.Profile.Tools, r.hasFeeds())
+	r.Profiles = r.resolveProfiles(opts)
 	return nil
+}
+
+// hasFeeds reports whether the session runs feeds.
+func (r *Runtime) hasFeeds() bool {
+	return r.Feeds.Len() > 0
 }
 
 // resolveRegistry loads the cli registries the settings and overrides name.
@@ -551,7 +573,9 @@ func (r *Runtime) offersRegistry() bool {
 // of them cannot honour the settings: the operator is told which tool is
 // missing, whatever profile the session runs under. The tools themselves
 // join a profile that already offers a side-effecting tool: a registered
-// CLI can change anything, so a read-only profile stays read-only.
+// CLI can change anything, so a read-only profile stays read-only. The
+// disabled tools are already off the profile, so a tool the settings
+// disable does not come back here.
 func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if r.Registry == nil {
 		return nil
@@ -573,7 +597,11 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if !offersSideEffects(r.Profile.Tools) {
 		return nil
 	}
+	disabled := r.Settings.Tools.Disabled
 	for _, name := range names {
+		if slices.Contains(disabled, name) {
+			continue
+		}
 		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[name]))
 		r.toolNames = append(r.toolNames, name)
 	}
@@ -611,7 +639,7 @@ func offersSideEffects(tools []poo.ToolInfo) bool {
 // builds none, and a settings file naming an executor this binary lacks is
 // only an error when something would run in it.
 func (r *Runtime) needsExecutor() bool {
-	if r.Feeds.Len() > 0 {
+	if r.hasFeeds() {
 		return true
 	}
 	for _, name := range r.toolNames {
@@ -631,6 +659,12 @@ func toolInfo(factory ToolFactory) poo.ToolInfo {
 		Background: spec.Background,
 	}
 }
+
+// coreToolNames are the tools the core adds by itself.
+//
+// They are not the profile's to give up, so the settings cannot disable
+// one.
+var coreToolNames = []string{profile.JobsToolName, profile.CancelJobToolName, poo.FinishToolName}
 
 // withJobTools adds the core's job tools to a profile's tools.
 //
@@ -652,12 +686,73 @@ func withJobTools(tools []poo.ToolInfo, feeds bool) []poo.ToolInfo {
 		poo.ToolInfo{Name: profile.CancelJobToolName, Class: poo.ClassReadOnly, Background: poo.BackgroundNever})
 }
 
+// disableTools removes the tools the settings disable.
+//
+// A disabled name the profile does not offer removes nothing: the setting
+// is a preference over whatever profile the session runs under, so a list
+// that disables a tool one profile lacks still builds under it. The names
+// the setting cannot have are the binary's own: a tool the binary does not
+// link cannot be offered or removed, and the tools the core adds by itself
+// are not the profile's to give up.
+//
+// It runs before the registry joins, so the tools that are left are the
+// ones the registry and the core judge.
+func (r *Runtime) disableTools(opts BuildOptions) error {
+	disabled := r.Settings.Tools.Disabled
+	if len(disabled) == 0 {
+		return nil
+	}
+	for _, name := range disabled {
+		if slices.Contains(coreToolNames, name) {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.disabled",
+				Message: fmt.Sprintf("the settings disable the %q tool, and the core adds that tool by itself", name),
+			}
+		}
+		if !linksTool(opts, name) {
+			return &Error{
+				Code:    CodeUnsupported,
+				Field:   "tools.disabled",
+				Message: fmt.Sprintf("the settings disable the %q tool, and this binary does not link it", name),
+			}
+		}
+	}
+	r.toolNames = withoutToolNames(r.toolNames, disabled)
+	r.Profile.Tools = withoutDisabled(r.Profile.Tools, disabled)
+	return nil
+}
+
+// withoutToolNames returns the names a session still builds a tool for.
+func withoutToolNames(names, disabled []string) []string {
+	return slices.DeleteFunc(names, func(name string) bool {
+		return slices.Contains(disabled, name)
+	})
+}
+
+// withoutDisabled returns the tools a session still offers.
+func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
+	return slices.DeleteFunc(tools, func(tool poo.ToolInfo) bool {
+		return slices.Contains(disabled, tool.Name)
+	})
+}
+
 // resolveProfiles resolves every profile the binary links.
 //
 // A profile that names a tool the binary does not link offers the
 // tools it has: the profile cannot be run with the others, and a
 // profile that cannot be run is not one the binary offers.
-func resolveProfiles(opts BuildOptions, registry, find, feeds bool) []poo.Profile {
+//
+// The disabled list and the registry follow the same order here as they
+// do for the session running, so the listing and the session agree: the
+// disabled tools come off a profile before it is judged runnable, a
+// profile the settings empty is not offered, and a profile that has no
+// side-effecting tool left earns no registry tool.
+func (r *Runtime) resolveProfiles(opts BuildOptions) []poo.Profile {
+	registry := r.Registry != nil
+	find := r.findTool()
+	feeds := r.hasFeeds()
+	disabled := r.Settings.Tools.Disabled
 	var out []poo.Profile
 	for _, definition := range opts.Profiles {
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
@@ -667,12 +762,13 @@ func resolveProfiles(opts BuildOptions, registry, find, feeds bool) []poo.Profil
 			}
 			resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[tool]))
 		}
+		resolved.Tools = withoutDisabled(resolved.Tools, disabled)
 		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
 			continue
 		}
 		if registry && offersSideEffects(resolved.Tools) {
 			for _, name := range registryToolNames(find) {
-				if linksTool(opts, name) {
+				if linksTool(opts, name) && !slices.Contains(disabled, name) {
 					resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
 				}
 			}
@@ -884,7 +980,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	// a typo is a settings failure, not a failure to discover later.
 	if linksTool(opts, ToolBash) || r.needsExecutor() {
 		feedSource := ""
-		if r.Feeds.Len() > 0 {
+		if r.hasFeeds() {
 			feedSource = "the settings name a feed, and "
 			if len(opts.Overrides.FeedsPaths) > 0 {
 				feedSource = "the settings or POO_FEEDS_PATH / --feeds-path name a feed, and "
@@ -954,7 +1050,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 // The feeds are the session's options, so a new session and a restored
 // one run them alike.
 func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
-	if r.Feeds.Len() == 0 {
+	if !r.hasFeeds() {
 		return nil
 	}
 	if r.executor == nil {
