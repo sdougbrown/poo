@@ -196,12 +196,17 @@ cli_registry:
 
 func stdinRuntime(t *testing.T, executor string, body map[string]any) *config.Runtime {
 	t.Helper()
+	return stdinRuntimeIn(t, executor, body, t.TempDir())
+}
+
+func stdinRuntimeIn(t *testing.T, executor string, body map[string]any, workingDir string) *config.Runtime {
+	t.Helper()
 	registryDir := registryFile(t, body)
 	settings, err := config.Parse([]byte(stdinExecutorSettings(registryDir, executor)), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
-	return buildIn(t, settings, config.Overrides{}, t.TempDir(), sandboxExecutors())
+	return buildIn(t, settings, config.Overrides{}, workingDir, sandboxExecutors())
 }
 
 var (
@@ -264,12 +269,7 @@ func preparedProbe(t *testing.T, runtime *config.Runtime, args string) poo.Prepa
 
 func callProbe(t *testing.T, runtime *config.Runtime, args string) (poo.ToolResult, error) {
 	t.Helper()
-	return callProbeContext(context.Background(), t, runtime, args)
-}
-
-func callProbeContext(ctx context.Context, t *testing.T, runtime *config.Runtime, args string) (poo.ToolResult, error) {
-	t.Helper()
-	return runtime.Options.Tools[cliregistry.CallToolName].Call(ctx, preparedProbe(t, runtime, args), poo.ToolEnv{
+	return runtime.Options.Tools[cliregistry.CallToolName].Call(context.Background(), preparedProbe(t, runtime, args), poo.ToolEnv{
 		PrepareEnv: poo.PrepareEnv{
 			WorkingDir:     runtime.Options.WorkingDir,
 			ProtectedPaths: runtime.Options.ProtectedPaths,
@@ -428,8 +428,14 @@ func TestFailedCLIReportsItsExitWhenStdinIsIncomplete(t *testing.T) {
 			t.Fatalf("running the CLI: %v", err)
 		}
 		obs := probeObservation(t, res)
-		if !res.IsError || obs[bash.EnvelopeReturncode] != float64(3) || obs[bash.EnvelopeStderr] != "failed" {
-			t.Fatalf("expected the CLI failure: %v", obs)
+		if !res.IsError {
+			t.Fatalf("a failed CLI was not reported as an error: %s", res.Text)
+		}
+		if got, want := obs[bash.EnvelopeReturncode], float64(3); got != want {
+			t.Fatalf("the CLI exited with %v, want %v", got, want)
+		}
+		if got, want := obs[bash.EnvelopeStderr], "failed"; got != want {
+			t.Fatalf("the CLI's stderr is %q, want %q", got, want)
 		}
 	})
 }
@@ -452,25 +458,79 @@ func TestConfiguredSuccessDoesNotHideIncompleteStdin(t *testing.T) {
 
 func TestACancelledRunStopsAStdinBoundCLI(t *testing.T) {
 	forEachExecutor(t, func(t *testing.T, executor string) {
-		body := stdinProbe([]string{"/bin/sh", "-c", `sleep 30`}, map[string]any{"timeout": "10s"})
-		runtime := stdinRuntime(t, executor, body)
+		dir := t.TempDir()
+		marker := filepath.Join(dir, "started")
+		body := stdinProbe(
+			[]string{"/bin/sh", "-c", `/bin/touch "$1"; sleep 60`, "probe", marker},
+			map[string]any{"timeout": "30s"},
+		)
+		runtime := stdinRuntimeIn(t, executor, body, dir)
+		prepared := preparedProbe(t, runtime, probeArgs(t, messageArg(strings.Repeat("x", 1<<20))))
+		tool := runtime.Options.Tools[cliregistry.CallToolName]
+
 		ctx, cancel := context.WithCancel(context.Background())
-		timer := time.AfterFunc(300*time.Millisecond, cancel)
-		defer timer.Stop()
 		defer cancel()
 
-		start := time.Now()
-		res, err := callProbeContext(ctx, t, runtime, probeArgs(t, messageArg(strings.Repeat("x", 1<<20))))
-		if err != nil {
-			t.Fatalf("running the CLI: %v", err)
+		type callResult struct {
+			res poo.ToolResult
+			err error
 		}
-		if elapsed := time.Since(start); elapsed > 8*time.Second {
+		result := make(chan callResult, 1)
+		go func() {
+			res, err := tool.Call(ctx, prepared, poo.ToolEnv{
+				PrepareEnv: poo.PrepareEnv{
+					WorkingDir:     runtime.Options.WorkingDir,
+					ProtectedPaths: runtime.Options.ProtectedPaths,
+				},
+				Env:      runtime.Options.Env,
+				Settings: runtime.Options.Settings,
+			})
+			result <- callResult{res: res, err: err}
+		}()
+
+		stop := func() callResult {
+			cancel()
+			select {
+			case r := <-result:
+				return r
+			case <-time.After(10 * time.Second):
+				t.Fatalf("the cancelled call did not return")
+				return callResult{}
+			}
+		}
+
+		readiness := bwrap.ReadyTimeout + 10*time.Second
+		deadline := time.Now().Add(readiness)
+		for {
+			if _, err := os.Stat(marker); err == nil {
+				break
+			} else if !errors.Is(err, os.ErrNotExist) {
+				stop()
+				t.Fatalf("checking the CLI's readiness marker: %v", err)
+			}
+			if time.Now().After(deadline) {
+				stop()
+				t.Fatalf("the CLI did not signal that it was running within %v", readiness)
+			}
+			select {
+			case r := <-result:
+				t.Fatalf("the CLI returned before it signalled readiness: res=%v err=%v", r.res, r.err)
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+
+		cancelledAt := time.Now()
+		r := stop()
+		if r.err != nil {
+			t.Fatalf("running the CLI: %v", r.err)
+		}
+		if elapsed := time.Since(cancelledAt); elapsed > 8*time.Second {
 			t.Errorf("the cancelled call took %v to return", elapsed)
 		}
-		if !res.IsError {
-			t.Errorf("a cancelled call was not reported as an error: %s", res.Text)
+		if !r.res.IsError {
+			t.Errorf("a cancelled call was not reported as an error: %s", r.res.Text)
 		}
-		obs := probeObservation(t, res)
+		obs := probeObservation(t, r.res)
 		if code := obs[bash.EnvelopeReturncode]; code != nil {
 			t.Errorf("a stopped CLI has exit status %v, want null", code)
 		}
