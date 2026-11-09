@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"errors"
 	"os"
 	"sync"
 )
@@ -63,4 +64,22 @@ func (p *StdinPipe) Abort() {
 		_ = p.reader.Close()
 		p.err = <-p.done
 	})
+}
+
+// JoinStdinIncomplete folds a child wait error and a stdin write error into
+// the error an executor's Wait reports.
+//
+// A stopped command keeps its wait error alone: a cancellation is never
+// reported as an input failure. Any other command joins an incomplete stdin
+// write alongside its own outcome, so a declared-success exit code cannot hide
+// an incomplete write. errors.Is finds ErrStdinIncomplete in the result, and
+// errors.As still finds the child's own error through it.
+func JoinStdinIncomplete(waitErr, stdinErr error, stopped bool) error {
+	if stopped || stdinErr == nil {
+		return waitErr
+	}
+	if waitErr == nil {
+		return ErrStdinIncomplete
+	}
+	return errors.Join(waitErr, ErrStdinIncomplete)
 }

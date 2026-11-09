@@ -889,18 +889,7 @@ func (p *process) Wait() (int, error) {
 		p.closePipes()
 
 		p.mu.Lock()
-		// A stop comes first: a cancelled command is not an input
-		// failure. Any other command reports input it did not take
-		// alongside its own outcome, so a declared-success exit code
-		// cannot hide an incomplete write.
-		if !p.stopped && stdinErr != nil {
-			if err == nil {
-				err = pooexec.ErrStdinIncomplete
-			} else {
-				err = errors.Join(err, pooexec.ErrStdinIncomplete)
-			}
-		}
-		p.err = err
+		p.err = pooexec.JoinStdinIncomplete(err, stdinErr, p.stopped)
 		p.mu.Unlock()
 		close(p.finished)
 	})
