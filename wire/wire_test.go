@@ -1764,18 +1764,43 @@ func TestTheInspectPageHoldsItsByteBudget(t *testing.T) {
 // that lowers the queue's byte budget lowers the page budgets with it,
 // so a page is never a line the queue refuses.
 func TestThePageBudgetFollowsTheQueueBytes(t *testing.T) {
+	const queueBytes = 4096
 	factory := newTestFactory(t, func() poo.ChatTransport {
 		return pootest.NewTransport(pootest.Turn{Text: strings.Repeat("x", 3000), Finish: "stop"})
 	})
-	h := newHarness(t, factory, wire.Bounds{QueueBytes: 4096})
+	h := newHarness(t, factory, wire.Bounds{QueueBytes: queueBytes})
 	h.initialize()
 
 	sessionID := createSession(t, h)
+	// Each prompt waits for its own run.settled: the harness's scan
+	// sees the last run's event, so the wait is on a higher sequence
+	// number. A wait satisfied by an older run stacks events in the
+	// small queue, and the queue can overflow.
+	lastSettled := int64(0)
 	for i := 0; i < 4; i++ {
 		if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 			t.Fatalf("the prompt was refused: %v", rerr)
 		}
-		h.event("run.settled")
+		deadline := time.After(20 * time.Second)
+		for {
+			h.mu.Lock()
+			found := int64(0)
+			for _, evt := range h.all {
+				if evt.Type == "run.settled" && evt.Seq > lastSettled && evt.Seq > found {
+					found = evt.Seq
+				}
+			}
+			h.mu.Unlock()
+			if found > lastSettled {
+				lastSettled = found
+				break
+			}
+			select {
+			case <-h.events:
+			case <-deadline:
+				t.Fatalf("prompt %d sent no new run.settled", i+1)
+			}
+		}
 		h.awaitState(t, sessionID, "settled")
 	}
 
@@ -1818,7 +1843,7 @@ func TestThePageBudgetFollowsTheQueueBytes(t *testing.T) {
 		}
 		// The events are far over the budget, so every page holds one of
 		// them alone: the clamp keeps the page at the queue's half.
-		if bytes-first > 2048 {
+		if bytes-first > queueBytes/2 {
 			t.Errorf("the page carries %d bytes of events past its first, over the queue's half", bytes-first)
 		}
 		if !inspected.HasMore {
