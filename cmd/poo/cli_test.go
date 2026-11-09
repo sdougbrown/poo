@@ -270,11 +270,11 @@ func TestTheNativeModeRunSendsTheToolsNatively(t *testing.T) {
 	}
 
 	tools, _ := endpoint.requests[0]["tools"].([]any)
-	// The code profile offers the bash and the file tools, and the
-	// bash tool may run in the background, so the core registers the
-	// jobs tools beside it.
-	if len(tools) != 6 {
-		t.Errorf("the request held %d tools, want 6", len(tools))
+	// The code profile offers the bash and the file tools plus
+	// codemode, and the bash tool may run in the background, so the
+	// core registers the jobs tools beside it.
+	if len(tools) != 7 {
+		t.Errorf("the request held %d tools, want 7", len(tools))
 	}
 	names := map[string]bool{}
 	for _, tool := range tools {

@@ -9,10 +9,12 @@ import (
 	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
+	"github.com/sdougbrown/poo/tool/codemode"
 	"github.com/sdougbrown/poo/tool/edit"
 	"github.com/sdougbrown/poo/tool/finish"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
+	codemodestarlark "github.com/sdougbrown/poo/codemode/starlark"
 )
 
 // addFinishTool gives the session the typed-result tool.
@@ -77,6 +79,9 @@ func linkedTools() map[string]config.ToolFactory {
 		"read": func(config.ToolOptions) poo.Tool { return read.New() },
 		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+		"codemode": func(config.ToolOptions) poo.Tool {
+			return codemode.New(codemodestarlark.New())
+		},
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},

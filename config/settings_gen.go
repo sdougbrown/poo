@@ -54,6 +54,10 @@ type SettingsFields struct {
 	ToolsBwrapNetwork               *bool    "json:\"tools.bwrap.network,omitempty\""
 	ToolsBwrapRoBinds               []string "json:\"tools.bwrap.ro_binds,omitempty\""
 	ToolsBwrapRwBinds               []string "json:\"tools.bwrap.rw_binds,omitempty\""
+	ToolsCodemodeExecSteps          *float64 "json:\"tools.codemode.exec_steps,omitempty\""
+	ToolsCodemodeOutputCapChars     *float64 "json:\"tools.codemode.output_cap_chars,omitempty\""
+	ToolsCodemodeScriptMaxBytes     *float64 "json:\"tools.codemode.script_max_bytes,omitempty\""
+	ToolsCodemodeTimeoutS           *float64 "json:\"tools.codemode.timeout_s,omitempty\""
 	ToolsDisabled                   []string "json:\"tools.disabled,omitempty\""
 	ToolsEnvPassthrough             []string "json:\"tools.env.passthrough,omitempty\""
 	ToolsEnvScrub                   []string "json:\"tools.env.scrub,omitempty\""
@@ -113,6 +117,10 @@ type SettingsAvailability struct {
 	ToolsBwrapNetwork               FieldStatus
 	ToolsBwrapRoBinds               FieldStatus
 	ToolsBwrapRwBinds               FieldStatus
+	ToolsCodemodeExecSteps          FieldStatus
+	ToolsCodemodeOutputCapChars     FieldStatus
+	ToolsCodemodeScriptMaxBytes     FieldStatus
+	ToolsCodemodeTimeoutS           FieldStatus
 	ToolsDisabled                   FieldStatus
 	ToolsEnvPassthrough             FieldStatus
 	ToolsEnvScrub                   FieldStatus
@@ -233,6 +241,14 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ToolsBwrapRoBindsSatisfied := len(f.ToolsBwrapRoBinds) > 0
 	ToolsBwrapRwBindsEnabled := true
 	ToolsBwrapRwBindsSatisfied := len(f.ToolsBwrapRwBinds) > 0
+	ToolsCodemodeExecStepsEnabled := true
+	ToolsCodemodeExecStepsSatisfied := f.ToolsCodemodeExecSteps != nil
+	ToolsCodemodeOutputCapCharsEnabled := true
+	ToolsCodemodeOutputCapCharsSatisfied := f.ToolsCodemodeOutputCapChars != nil
+	ToolsCodemodeScriptMaxBytesEnabled := true
+	ToolsCodemodeScriptMaxBytesSatisfied := f.ToolsCodemodeScriptMaxBytes != nil
+	ToolsCodemodeTimeoutSEnabled := true
+	ToolsCodemodeTimeoutSSatisfied := f.ToolsCodemodeTimeoutS != nil
 	ToolsDisabledEnabled := true
 	ToolsDisabledSatisfied := len(f.ToolsDisabled) > 0
 	ToolsEnvPassthroughEnabled := true
@@ -1411,6 +1427,94 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		ToolsCodemodeExecSteps: FieldStatus{
+			Required:  ToolsCodemodeExecStepsEnabled && false,
+			Enabled:   ToolsCodemodeExecStepsEnabled,
+			Satisfied: ToolsCodemodeExecStepsSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ToolsCodemodeOutputCapChars: FieldStatus{
+			Required:  ToolsCodemodeOutputCapCharsEnabled && false,
+			Enabled:   ToolsCodemodeOutputCapCharsEnabled,
+			Satisfied: ToolsCodemodeOutputCapCharsSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ToolsCodemodeScriptMaxBytes: FieldStatus{
+			Required:  ToolsCodemodeScriptMaxBytesEnabled && false,
+			Enabled:   ToolsCodemodeScriptMaxBytesEnabled,
+			Satisfied: ToolsCodemodeScriptMaxBytesSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ToolsCodemodeTimeoutS: FieldStatus{
+			Required:  ToolsCodemodeTimeoutSEnabled && false,
+			Enabled:   ToolsCodemodeTimeoutSEnabled,
+			Satisfied: ToolsCodemodeTimeoutSSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		ToolsDisabled: FieldStatus{
 			Required:  ToolsDisabledEnabled && false,
 			Enabled:   ToolsDisabledEnabled,
@@ -1637,6 +1741,14 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return len(f.ToolsBwrapRoBinds) > 0
 	case "ToolsBwrapRwBinds":
 		return len(f.ToolsBwrapRwBinds) > 0
+	case "ToolsCodemodeExecSteps":
+		return f.ToolsCodemodeExecSteps != nil
+	case "ToolsCodemodeOutputCapChars":
+		return f.ToolsCodemodeOutputCapChars != nil
+	case "ToolsCodemodeScriptMaxBytes":
+		return f.ToolsCodemodeScriptMaxBytes != nil
+	case "ToolsCodemodeTimeoutS":
+		return f.ToolsCodemodeTimeoutS != nil
 	case "ToolsDisabled":
 		return len(f.ToolsDisabled) > 0
 	case "ToolsEnvPassthrough":
@@ -2103,6 +2215,30 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "ToolsBwrapRwBinds", "tools.bwrap.rw_binds":
 		found = true
 		status = avail.ToolsBwrapRwBinds
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsCodemodeExecSteps", "tools.codemode.exec_steps":
+		found = true
+		status = avail.ToolsCodemodeExecSteps
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsCodemodeOutputCapChars", "tools.codemode.output_cap_chars":
+		found = true
+		status = avail.ToolsCodemodeOutputCapChars
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsCodemodeScriptMaxBytes", "tools.codemode.script_max_bytes":
+		found = true
+		status = avail.ToolsCodemodeScriptMaxBytes
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsCodemodeTimeoutS", "tools.codemode.timeout_s":
+		found = true
+		status = avail.ToolsCodemodeTimeoutS
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}

@@ -215,6 +215,8 @@ type Handoff struct {
 type Tools struct {
 	// Bash are the bash tool's settings.
 	Bash Bash `json:"bash,omitempty"`
+	// Codemode are the codemode tool's settings.
+	Codemode Codemode `json:"codemode,omitempty"`
 	// Bwrap are the sandbox's settings, used when the executor is the
 	// bubblewrap one.
 	Bwrap Bwrap `json:"bwrap,omitempty"`
@@ -236,6 +238,18 @@ type Bash struct {
 	TimeoutS *int `json:"timeout_s,omitempty"`
 	// Executor is the executor the commands run through.
 	Executor *string `json:"executor,omitempty"`
+}
+
+// Codemode are the codemode tool's settings.
+type Codemode struct {
+	// TimeoutS is a script run's wall-clock limit, in seconds.
+	TimeoutS *int `json:"timeout_s,omitempty"`
+	// ScriptMaxBytes is the longest script a run accepts.
+	ScriptMaxBytes *int `json:"script_max_bytes,omitempty"`
+	// OutputCapChars is the most printed text a run keeps.
+	OutputCapChars *int `json:"output_cap_chars,omitempty"`
+	// ExecSteps is the engine's execution budget.
+	ExecSteps *int `json:"exec_steps,omitempty"`
 }
 
 // Bwrap are the bubblewrap executor's settings.

@@ -32,7 +32,7 @@ with `--profile`; the default is `code`.
 | Profile | Tools |
 |---|---|
 | `base` | none |
-| `code` | `bash`, `read`, `grep`, `edit` |
+| `code` | `bash`, `read`, `grep`, `edit`, `codemode` |
 | `search` | `read`, `grep` |
 
 A settings file that names `finish.schema_file` also gets the typed
@@ -114,6 +114,16 @@ a profile with a side-effecting tool also offers `call_cli`. It runs one
 registered command through the session's executor. Above 30 entries, with
 a decision model configured, the profile also offers `find_tool` to search
 the catalog. The code is in `poo/cli` and `poo/tool/cliregistry`.
+
+**Codemode.** When the binary links the `codemode` tool and an engine,
+the profile offers it beside the others: the model writes one script,
+the script makes the tool calls, and only the script's output and
+return value enter the context. The calls go through the nested-call
+seam, so the permission engine and the doom loop judge every one of
+them, and the session log records each with its parent's handle. The
+first engine is Starlark (`poo/codemode/starlark`); the seam is
+`poo/codemode.Engine`, and a binary that links no engine offers no
+codemode tool. The settings are `tools.codemode.*`.
 
 **Feeds.** When the settings name feed manifests in `feeds.paths`, the
 session runs a long-lived command beside itself and delivers the messages

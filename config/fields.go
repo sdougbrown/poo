@@ -44,6 +44,10 @@ func fieldsOf(s *Settings) SettingsFields {
 
 	f.ToolsBashTimeoutS = count(s.Tools.Bash.TimeoutS)
 	f.ToolsBashExecutor = pointer(s.Tools.Bash.Executor)
+	f.ToolsCodemodeTimeoutS = count(s.Tools.Codemode.TimeoutS)
+	f.ToolsCodemodeScriptMaxBytes = count(s.Tools.Codemode.ScriptMaxBytes)
+	f.ToolsCodemodeOutputCapChars = count(s.Tools.Codemode.OutputCapChars)
+	f.ToolsCodemodeExecSteps = count(s.Tools.Codemode.ExecSteps)
 	f.ToolsBwrapNetwork = flag(s.Tools.Bwrap.Network)
 	f.ToolsBwrapRoBinds = list(s.Tools.Bwrap.ROBinds)
 	f.ToolsBwrapRwBinds = list(s.Tools.Bwrap.RWBinds)

@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/codemode"
 	"github.com/sdougbrown/poo/config"
+	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/perm"
 	"github.com/sdougbrown/poo/profile"
@@ -26,15 +28,25 @@ import (
 	"github.com/sdougbrown/poo/tool/read"
 )
 
+// stubEngine is an engine that never runs, for the wiring tests.
+type stubEngine struct{}
+
+func (stubEngine) Name() string { return "stub" }
+
+func (stubEngine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.RunResult, error) {
+	return codemode.RunResult{}, nil
+}
+
 // theTools are the tools a binary links.
 func theTools() map[string]config.ToolFactory {
 	return map[string]config.ToolFactory{
 		"bash": func(opts config.ToolOptions) poo.Tool {
 			return bash.New(bash.WithExecutor(opts.Executor), bash.WithScrub(opts.Scrub))
 		},
-		"read": func(config.ToolOptions) poo.Tool { return read.New() },
-		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
-		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+		"read":     func(config.ToolOptions) poo.Tool { return read.New() },
+		"grep":     func(config.ToolOptions) poo.Tool { return grep.New() },
+		"edit":     func(config.ToolOptions) poo.Tool { return edit.New() },
+		"codemode": func(config.ToolOptions) poo.Tool { return toolcodemode.New(stubEngine{}) },
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},
@@ -115,7 +127,7 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	if runtime.Profile.Name != "code" {
 		t.Errorf("the profile is %q, want code", runtime.Profile.Name)
 	}
-	want := []string{"bash", "read", "grep", "edit"}
+	want := []string{"bash", "read", "grep", "edit", "codemode"}
 	if len(runtime.Options.ToolOrder) != len(want) {
 		t.Fatalf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
@@ -780,7 +792,7 @@ func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	want := []string{"read", "grep", "edit"}
+	want := []string{"read", "grep", "edit", "codemode"}
 	if !slices.Equal(runtime.Options.ToolOrder, want) {
 		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
