@@ -3,6 +3,7 @@ package poo
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 )
 
 // The nested tool-call seam.
@@ -32,10 +33,38 @@ import (
 // characters, as its tool reads it from ToolSettings.
 //
 // A nested call's output goes to the tool that made the call, not to
-// the model, so the cap is not relative to the context window. It is
-// the bash tool's capture size, so a nested bash call keeps all it
-// captured.
+// the model, so the cap is not relative to the context window. The bash
+// tool's capture buffer holds this many bytes, so a nested bash call
+// keeps all it captured.
 const NestedOutputCapChars = 1 << 20
+
+// defaultEventCapChars is the cap on a nested result's event text when
+// the session sets no observation cap. It is the largest observation the
+// model ever sees.
+const defaultEventCapChars = 30000
+
+// nestedEventText returns the head of a nested result's text that its
+// tool.result event carries, and the number of characters it leaves out.
+//
+// The caller reads the whole result, which can be NestedOutputCapChars
+// long. The event goes to every consumer of the stream and is kept for
+// an inspect, so it is held to the session's observation cap.
+func (s *Session) nestedEventText(text string) (string, int) {
+	limit := s.opts.Settings.ObservationCapChars
+	if limit <= 0 {
+		limit = defaultEventCapChars
+	}
+	total := utf8.RuneCountInString(text)
+	if total <= limit {
+		return text, 0
+	}
+	i := 0
+	for n := 0; n < limit; n++ {
+		_, size := utf8.DecodeRuneInString(text[i:])
+		i += size
+	}
+	return text[:i], total - limit
+}
 
 // nestedCaller is the NestedCaller a turn's tool calls carry.
 //

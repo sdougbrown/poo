@@ -966,14 +966,19 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		Structured: result.Structured,
 		IsError:    result.IsError,
 	}); parent != "" {
-		s.events.emit(EventToolResult, map[string]any{
+		eventText, elided := s.nestedEventText(text)
+		payload := map[string]any{
 			"run_id":  run.id,
 			"handle":  handle,
 			"tool":    tool,
 			"outcome": string(outcome),
-			"text":    text,
+			"text":    eventText,
 			"parent":  parent,
-		})
+		}
+		if elided > 0 {
+			payload["elided_chars"] = elided
+		}
+		s.events.emit(EventToolResult, payload)
 		return
 	}
 

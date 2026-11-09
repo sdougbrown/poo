@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 )
@@ -86,6 +87,8 @@ type nestedTool struct {
 	results []poo.NestedResult
 	// seamErr is the error the seam returned, when it returned one.
 	seamErr error
+	// settings are the settings the tool's own call ran under.
+	settings poo.ToolSettings
 }
 
 func (t *nestedTool) Spec() poo.ToolSpec {
@@ -124,6 +127,7 @@ func (t *nestedTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv)
 	results, err := env.Nested.Call(callCtx, calls)
 	t.mu.Lock()
 	t.nester = env.Nested
+	t.settings = env.Settings
 	t.results, t.seamErr = results, err
 	t.mu.Unlock()
 	if err != nil {
@@ -1070,5 +1074,79 @@ func TestANestedCallGetsTheNestedOutputCaps(t *testing.T) {
 	}
 	if inner.read != poo.NestedOutputCapChars {
 		t.Errorf("the nested call's read cap = %d, want %d", inner.read, poo.NestedOutputCapChars)
+	}
+
+	// The model-made call keeps the session's caps: its result is what
+	// the model reads.
+	nest.mu.Lock()
+	defer nest.mu.Unlock()
+	if got := nest.settings.ObservationCapChars; got != 1000 {
+		t.Errorf("the model-made call's observation cap = %d, want 1000", got)
+	}
+	if got := nest.settings.ReadOutputCapChars; got != 2000 {
+		t.Errorf("the model-made call's read cap = %d, want 2000", got)
+	}
+}
+
+// bigTool is a tool whose result is longer than the session's caps.
+type bigTool struct{ text string }
+
+func (t *bigTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        "big",
+		Description: "return a long result",
+		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Class:       poo.ClassReadOnly,
+	}
+}
+
+func (t *bigTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	return capsPrepared{}, nil
+}
+
+func (t *bigTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	return poo.ToolResult{Text: t.text}, nil
+}
+
+// TestANestedResultEventKeepsTheSessionCap covers the event stream: a
+// nested result reaches its caller whole, but its tool.result event
+// carries no more than the session's observation cap, so a script's
+// large results cannot flood an event consumer.
+func TestANestedResultEventKeepsTheSessionCap(t *testing.T) {
+	long := strings.Repeat("é", 5000)
+	nest := &nestedTool{script: []string{`big {}`}}
+	s := nestedSession(t, nest, map[string]poo.Tool{"big": &bigTool{text: long}}, &recordingSink{}, func(o *poo.Options) {
+		o.Settings.ObservationCapChars = 1000
+	})
+	runSession(t, s, "hello")
+
+	results, err := nest.returned()
+	if err != nil || len(results) != 1 {
+		t.Fatalf("the seam returned %d results and %v", len(results), err)
+	}
+	if !strings.Contains(results[0].Text, long) {
+		t.Errorf("the caller got %d characters, want the whole result", utf8.RuneCountInString(results[0].Text))
+	}
+
+	found := false
+	for _, ev := range s.Events() {
+		if ev.Name != poo.EventToolResult || ev.Payload["parent"] == nil {
+			continue
+		}
+		found = true
+		text, _ := ev.Payload["text"].(string)
+		if n := utf8.RuneCountInString(text); n > 1000 {
+			t.Errorf("the nested result event carries %d characters, want at most 1000", n)
+		}
+		if !utf8.ValidString(text) {
+			t.Error("the nested result event split a character")
+		}
+		elided, _ := ev.Payload["elided_chars"].(int)
+		if elided+utf8.RuneCountInString(text) != utf8.RuneCountInString(results[0].Text) {
+			t.Errorf("the event's text and elided_chars (%d) do not add up to the result", elided)
+		}
+	}
+	if !found {
+		t.Fatal("no nested tool.result event")
 	}
 }
