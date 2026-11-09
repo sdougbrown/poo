@@ -2,8 +2,11 @@ package poo_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
@@ -225,3 +228,83 @@ func TestTheProjectionIsNotTheModelView(t *testing.T) {
 
 // timeNow returns the current time, for the records a test builds.
 func timeNow() time.Time { return time.Now() }
+
+// TestTheProjectionCapsTheCallArguments covers the cap on a call item's
+// text: the item holds the raw arguments, and the arguments can be as
+// long as the script that wrote them, so the projection holds them to
+// the summary cap.
+func TestTheProjectionCapsTheCallArguments(t *testing.T) {
+	args := `{"text":"` + strings.Repeat("a", poo.SummaryCapChars+100) + `"}`
+	rec := &poo.ToolCallRecord{RecordMeta: poo.NewRecordMetaFrom("tool.call", poo.OriginModel), RunID: "run-1", Turn: 1, Handle: "r1", Tool: "echo", Arguments: json.RawMessage(args)}
+	poo.Stamp(rec, 1, timeNow())
+
+	page := poo.ProjectHistory([]poo.Record{rec}, 0, 0)
+	if len(page.Items) != 1 {
+		t.Fatalf("the page holds %d items, want 1", len(page.Items))
+	}
+	item := page.Items[0]
+	// The arguments are ASCII, so the head cuts at the byte.
+	total := utf8.RuneCountInString(args)
+	want := args[:poo.SummaryCapChars] + fmt.Sprintf(poo.SummaryElisionNote, total-poo.SummaryCapChars)
+	if item.Text != want {
+		t.Errorf("the call item's text is %d characters, want the capped arguments", utf8.RuneCountInString(item.Text))
+	}
+}
+
+// TestTheHistoryPageHoldsItsByteBudget covers the page's byte budget:
+// the page keeps the newest entries that fit and says that older ones
+// exist, and a page of one oversized entry still comes back, so a
+// client paging backwards always moves.
+func TestTheHistoryPageHoldsItsByteBudget(t *testing.T) {
+	seq := int64(0)
+	stamp := func(rec poo.Record) poo.Record {
+		seq++
+		poo.Stamp(rec, seq, timeNow())
+		return rec
+	}
+	// The items are big: a dozen of them are over the budget.
+	var records []poo.Record
+	for i := 0; i < 20; i++ {
+		records = append(records, stamp(&poo.ToolResultRecord{
+			RecordMeta: poo.NewRecordMetaFrom("tool.result", poo.OriginTool),
+			RunID:      "run-1", Turn: 1, Handle: fmt.Sprintf("r%d", i), Tool: "echo",
+			Text: strings.Repeat("a", poo.HistoryPageByteBudget/12),
+		}))
+	}
+
+	page := poo.ProjectHistory(records, 0, 0)
+	bytes := 0
+	for _, item := range page.Items {
+		encoded, _ := json.Marshal(item)
+		bytes += len(encoded) + 1
+	}
+	if bytes > poo.HistoryPageByteBudget {
+		t.Errorf("the page holds %d bytes, over the budget", bytes)
+	}
+	if !page.HasMore {
+		t.Error("the page says no older entries exist, want has_more")
+	}
+	if last := page.Items[len(page.Items)-1]; last.Seq != seq {
+		t.Errorf("the page's last item has the seq %d, want the newest record's %d", last.Seq, seq)
+	}
+
+	// The page before the first item holds the entries it dropped.
+	older := poo.ProjectHistory(records, page.Items[0].Seq, 0)
+	if len(older.Items) == 0 {
+		t.Fatal("the older page holds no items")
+	}
+	if last := older.Items[len(older.Items)-1]; last.Seq >= page.Items[0].Seq {
+		t.Errorf("the older page ends at the seq %d, want one before %d", last.Seq, page.Items[0].Seq)
+	}
+
+	// One oversized item still comes back.
+	rec := stamp(&poo.ToolResultRecord{
+		RecordMeta: poo.NewRecordMetaFrom("tool.result", poo.OriginTool),
+		RunID:      "run-1", Turn: 1, Handle: "big", Tool: "echo",
+		Text: strings.Repeat("a", poo.HistoryPageByteBudget*2),
+	})
+	page = poo.ProjectHistory([]poo.Record{rec}, 0, 0)
+	if len(page.Items) != 1 {
+		t.Errorf("the page holds %d items, want the oversized one", len(page.Items))
+	}
+}

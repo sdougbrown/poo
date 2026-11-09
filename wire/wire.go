@@ -43,6 +43,11 @@ const (
 	// DefaultDrain is how long the teardown waits for the output queue
 	// to drain.
 	DefaultDrain = 5 * time.Second
+	// DefaultEventPageBytes is the byte budget for one page of events,
+	// over the events' own JSON. The response wraps the page in an
+	// envelope, and the queue takes the whole line, so the budget keeps
+	// a full page far under the queue's line budget.
+	DefaultEventPageBytes = 8 << 20
 )
 
 // Bounds are the limits the transport enforces.
@@ -63,6 +68,9 @@ type Bounds struct {
 	// Drain is how long the teardown waits for the output queue to
 	// drain. Zero takes the default.
 	Drain time.Duration
+	// EventPageBytes is the byte budget for one page of events. Zero
+	// takes the default.
+	EventPageBytes int
 	// AskBudget is how long a client may take to answer a permission
 	// ask. Zero takes the asker chain's default.
 	AskBudget time.Duration
@@ -81,6 +89,9 @@ func (b Bounds) withDefaults() Bounds {
 	}
 	if b.Drain <= 0 {
 		b.Drain = DefaultDrain
+	}
+	if b.EventPageBytes <= 0 {
+		b.EventPageBytes = DefaultEventPageBytes
 	}
 	if b.AskBudget <= 0 {
 		b.AskBudget = perm.DefaultWireBudget

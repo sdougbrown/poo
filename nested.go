@@ -38,6 +38,15 @@ import (
 // call keeps all it captured.
 const NestedOutputCapChars = 1 << 20
 
+// NestedArgumentMaxBytes is the byte budget for one nested call's
+// arguments.
+//
+// A script builds its arguments with no limit of its own, and the
+// arguments reach the event stream — the call's summary, the permission
+// ask — before anything reads them back. The budget keeps one call's
+// arguments far under the wire's output queue line budget.
+const NestedArgumentMaxBytes = 1 << 20
+
 // defaultNestedTextCapChars is the cap on a nested result's recorded
 // text when the session sets no observation cap. It is the largest
 // observation the model ever sees.
@@ -129,6 +138,9 @@ func (n *nestedCaller) Call(ctx context.Context, calls []NestedCall) ([]NestedRe
 	// no effect of its own.
 	toolCalls := make([]ToolCall, len(calls))
 	for i, call := range calls {
+		if len(call.Arguments) > NestedArgumentMaxBytes {
+			return nil, fmt.Errorf("the call to %q carries %d bytes of arguments, over the %d-byte budget for a nested call", call.Tool, len(call.Arguments), NestedArgumentMaxBytes)
+		}
 		toolCalls[i] = ToolCall{Name: call.Tool, Arguments: call.Arguments}
 	}
 	plans := s.planCalls(run, n.turn, toolCalls, false)

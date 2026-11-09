@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -97,22 +98,41 @@ func (s *session) signal() {
 // eventsAfter returns the events after a sequence number, and the
 // sequence number the next page asks for.
 //
+// The page holds the events that fit the byte budget, and the second
+// return reports that events were left out: the next page asks for the
+// last returned event's sequence number. One oversized event still
+// comes back, so a client paging forward always moves.
+//
 // The snapshot is taken under the session's lock, so a client never
 // sees an event twice or misses one that came while it was reading.
-func (s *session) eventsAfter(after int64) ([]protocol.Event, int64) {
+func (s *session) eventsAfter(after int64, budget int) ([]protocol.Event, int64, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]protocol.Event, 0, len(s.events))
-	var next int64
-	for _, evt := range s.events {
-		if evt.Seq > after {
-			out = append(out, evt)
-		}
-		if evt.Seq > next {
-			next = evt.Seq
+	snapshot := make([]protocol.Event, len(s.events))
+	copy(snapshot, s.events)
+	s.mu.Unlock()
+
+	var last int64
+	for _, evt := range snapshot {
+		if evt.Seq > last {
+			last = evt.Seq
 		}
 	}
-	return out, next
+	next := last
+	out := make([]protocol.Event, 0, len(snapshot))
+	var bytes int
+	for _, evt := range snapshot {
+		if evt.Seq <= after {
+			continue
+		}
+		encoded, _ := json.Marshal(evt)
+		if len(out) > 0 && bytes+len(encoded)+1 > budget {
+			next = out[len(out)-1].Seq
+			return out, next, true
+		}
+		out = append(out, evt)
+		bytes += len(encoded) + 1
+	}
+	return out, next, false
 }
 
 // markClosing marks the session closing.

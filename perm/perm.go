@@ -554,9 +554,9 @@ func summaryOf(info poo.ToolCallInfo) string {
 		return ""
 	}
 	if asker, ok := info.Prepared.(poo.AskSummaryer); ok {
-		return asker.AskSummary()
+		return poo.CapSummary(asker.AskSummary())
 	}
-	return info.Prepared.Summary()
+	return poo.CapSummary(info.Prepared.Summary())
 }
 
 // Askers returns the policy's asker chain.

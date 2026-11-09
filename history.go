@@ -1,6 +1,7 @@
 package poo
 
 import (
+	"encoding/json"
 	"strings"
 )
 
@@ -83,6 +84,12 @@ const (
 	DefaultHistoryLimit = 100
 	// MaxHistoryLimit is the most entries a page may hold.
 	MaxHistoryLimit = 500
+	// HistoryPageByteBudget is the byte budget for one page, over the
+	// page's own JSON. The page is one response line, and the wire's
+	// output queue refuses a line over its budget even when the queue
+	// is empty. The budget keeps a full page far under that line
+	// budget.
+	HistoryPageByteBudget = 8 << 20
 )
 
 // ProjectHistory computes the history projection of a session's
@@ -112,8 +119,32 @@ func ProjectHistory(records []Record, beforeSeq int64, limit int) HistoryPage {
 		page.HasMore = true
 		older = older[len(older)-limit:]
 	}
+	// The byte budget keeps the newest entries that fit, and says that
+	// older ones exist, so a client pages back for what it dropped.
+	var byteCut bool
+	older, byteCut = pageWithinByteBudget(older, HistoryPageByteBudget)
+	if byteCut {
+		page.HasMore = true
+	}
 	page.Items = older
 	return page
+}
+
+// pageWithinByteBudget keeps the newest items whose JSON fits the byte
+// budget, and reports whether it dropped any.
+//
+// The newest item always stays: a page of one oversized item still
+// comes back, so a client paging backwards always moves.
+func pageWithinByteBudget(items []HistoryItem, budget int) ([]HistoryItem, bool) {
+	bytes := 0
+	for i := len(items) - 1; i >= 0; i-- {
+		encoded, _ := json.Marshal(items[i])
+		if bytes > 0 && bytes+len(encoded) > budget {
+			return items[i+1:], true
+		}
+		bytes += len(encoded)
+	}
+	return items, false
 }
 
 // historyItems computes the projection's entries from the records.
@@ -144,7 +175,7 @@ func historyItems(records []Record) []HistoryItem {
 			item.Handle = r.Handle
 			item.Tool = r.Tool
 			item.Summary = r.Summary
-			item.Text = string(r.Arguments)
+			item.Text = CapSummary(string(r.Arguments))
 		case *ToolResultRecord:
 			item.Type = HistoryToolResult
 			item.RunID = r.RunID

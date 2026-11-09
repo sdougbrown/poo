@@ -432,10 +432,11 @@ func (s *server) agentInspect(raw json.RawMessage) (any, *protocol.Error) {
 	if rerr != nil {
 		return nil, rerr
 	}
-	events, next := entry.eventsAfter(params.AfterSeq)
+	events, next, more := entry.eventsAfter(params.AfterSeq, s.bounds.EventPageBytes)
 	result := protocol.InspectResult{
 		Events:  events,
 		NextSeq: next,
+		HasMore: more,
 		State:   string(entry.sess.State()),
 	}
 	if result.Events == nil {

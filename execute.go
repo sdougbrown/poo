@@ -314,7 +314,7 @@ func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated
 			}
 		} else {
 			plan.prepared = prepared
-			plan.summary = prepared.Summary()
+			plan.summary = CapSummary(prepared.Summary())
 		}
 		plans = append(plans, plan)
 	}
