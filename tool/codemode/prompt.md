@@ -15,8 +15,9 @@ For a file, a URL or a command, call the tool that reaches it, such as
   tool's own text. `structured` is the call's JSON payload as a string,
   or `None`.
 - `gather([("read", {...}), ("grep", {...})])` makes the calls in one
-  batch and returns their results in list order. Calls that only read
-  run at the same time; the rest run in order.
+  batch and returns their results in list order. When every call in
+  the batch only reads, the calls run at the same time; otherwise they
+  run in order.
 - `json.decode(text)` and `json.encode(value)` convert between JSON
   text and values, so `json.decode(r["structured"])` reads a payload.
   A bash payload holds the command's stdout in `output`. When the
