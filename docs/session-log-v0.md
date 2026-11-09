@@ -293,8 +293,12 @@ tail's nested calls are closed without polluting it either.
 
 A nested call's tool runs under a cap of 1,048,576 characters
 (`poo.NestedOutputCapChars`) and not the session's context-relative
-caps, since its output never reaches the model directly. Its recorded
-result can be that large.
+caps, since its output never reaches the model directly. The tool that
+made the call reads the whole result. The record's `text` and the
+`tool.result` event's `text` are held to the session's observation cap,
+with the rest counted in `elided_chars`. The record's `structured`
+payload is kept whole, so a nested bash call's full output is in the
+log once.
 
 ## `tool.result`
 
@@ -307,7 +311,8 @@ The outcome of a tool call.
 | `handle` | string | The call's handle within the turn. |
 | `tool` | string | The tool that ran. |
 | `outcome` | string | `"ok"`, `"error"`, `"denied"`, `"skipped"`, `"cancelled"`, `"interrupted"` or `"started"`. |
-| `text` | string | The model-facing text of the result. |
+| `text` | string | The model-facing text of the result. A nested call's text is held to the session's observation cap. |
+| `elided_chars` | integer | The characters a nested call's `text` left out. Absent when the text is whole. |
 | `structured` | any | The tool's side-channel payload. Absent when the tool has none. |
 | `original` | object | The result the tool produced, when a hook replaced it. Absent when no hook replaced it, and absent for a redacted result: the original of a redacted result never reaches the log. |
 | `redacted` | boolean | `true` when a hook redacted the result. Absent when it did not. |

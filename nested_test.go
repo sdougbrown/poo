@@ -1105,17 +1105,19 @@ func (t *bigTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared
 }
 
 func (t *bigTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
-	return poo.ToolResult{Text: t.text}, nil
+	return poo.ToolResult{Text: t.text, Structured: json.RawMessage(`{"long":true}`)}, nil
 }
 
-// TestANestedResultEventKeepsTheSessionCap covers the event stream: a
-// nested result reaches its caller whole, but its tool.result event
-// carries no more than the session's observation cap, so a script's
-// large results cannot flood an event consumer.
-func TestANestedResultEventKeepsTheSessionCap(t *testing.T) {
+// TestANestedResultKeepsTheSessionCapOutsideItsCaller covers where a
+// nested result goes: its caller reads it whole, but its tool.result
+// event and the text of its record hold no more than the session's
+// observation cap, so a script's large results cannot flood an event
+// consumer or the log. The record keeps the structured payload whole.
+func TestANestedResultKeepsTheSessionCapOutsideItsCaller(t *testing.T) {
 	long := strings.Repeat("é", 5000)
 	nest := &nestedTool{script: []string{`big {}`}}
-	s := nestedSession(t, nest, map[string]poo.Tool{"big": &bigTool{text: long}}, &recordingSink{}, func(o *poo.Options) {
+	sink := &recordingSink{}
+	s := nestedSession(t, nest, map[string]poo.Tool{"big": &bigTool{text: long}}, sink, func(o *poo.Options) {
 		o.Settings.ObservationCapChars = 1000
 	})
 	runSession(t, s, "hello")
@@ -1148,5 +1150,24 @@ func TestANestedResultEventKeepsTheSessionCap(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no nested tool.result event")
+	}
+
+	var rec *poo.ToolResultRecord
+	for _, r := range sink.allRecords() {
+		if r, ok := r.(*poo.ToolResultRecord); ok && r.Handle == results[0].Handle {
+			rec = r
+		}
+	}
+	if rec == nil {
+		t.Fatal("no record of the nested result")
+	}
+	if n := utf8.RuneCountInString(rec.Text); n > 1000 {
+		t.Errorf("the nested result record's text holds %d characters, want at most 1000", n)
+	}
+	if rec.ElidedChars+utf8.RuneCountInString(rec.Text) != utf8.RuneCountInString(results[0].Text) {
+		t.Errorf("the record's text and elided_chars (%d) do not add up to the result", rec.ElidedChars)
+	}
+	if string(rec.Structured) != `{"long":true}` {
+		t.Errorf("the record's structured payload is %s, want it whole", rec.Structured)
 	}
 }

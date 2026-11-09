@@ -281,8 +281,13 @@ type ToolResultRecord struct {
 	// IsError reports that the result is a recoverable failure, as the
 	// message the model sees says.
 	IsError bool `json:"is_error,omitempty"`
-	// Text is the model-facing text of the result.
+	// Text is the model-facing text of the result. A nested call's text
+	// is held to the session's observation cap: its caller read the
+	// whole result, and the structured payload keeps it.
 	Text string `json:"text"`
+	// ElidedChars is how many characters a nested call's text left out.
+	// It is absent when the text is whole.
+	ElidedChars int `json:"elided_chars,omitempty"`
 	// Structured is the optional side-channel payload.
 	Structured json.RawMessage `json:"structured,omitempty"`
 	// Original is the result the tool produced, when a hook replaced

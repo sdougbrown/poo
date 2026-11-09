@@ -930,20 +930,25 @@ func (s *Session) beginCallRecordLocked(run *runState, call *issuedCall) {
 // model can name the result later and a strategy can find it.
 func (s *Session) writeResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome, out afterToolOutcome) {
 	text := modelFacingText(handle, tool, result.Text)
+	recordText, elided := text, 0
+	if s.isNestedCall(handle) {
+		recordText, elided = s.nestedRecordText(text)
+	}
 	rec := &ToolResultRecord{
-		RecordMeta: NewRecordMetaFrom("tool.result", OriginTool),
-		RunID:      run.id,
-		Turn:       turn,
-		Handle:     handle,
-		CallID:     callID,
-		Tool:       tool,
-		Outcome:    outcome,
-		IsError:    result.IsError,
-		Text:       text,
-		Structured: result.Structured,
-		Redacted:   out.redacted,
-		RedactedBy: out.redactedBy,
-		Hooks:      out.decisions,
+		RecordMeta:  NewRecordMetaFrom("tool.result", OriginTool),
+		RunID:       run.id,
+		Turn:        turn,
+		Handle:      handle,
+		CallID:      callID,
+		Tool:        tool,
+		Outcome:     outcome,
+		IsError:     result.IsError,
+		Text:        recordText,
+		ElidedChars: elided,
+		Structured:  result.Structured,
+		Redacted:    out.redacted,
+		RedactedBy:  out.redactedBy,
+		Hooks:       out.decisions,
 	}
 	if out.original != nil {
 		rec.Original = &ToolResultData{
@@ -966,7 +971,7 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		Structured: result.Structured,
 		IsError:    result.IsError,
 	}); parent != "" {
-		eventText, elided := s.nestedEventText(text)
+		eventText, elided := s.nestedRecordText(text)
 		payload := map[string]any{
 			"run_id":  run.id,
 			"handle":  handle,

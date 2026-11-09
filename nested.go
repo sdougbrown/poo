@@ -38,21 +38,32 @@ import (
 // keeps all it captured.
 const NestedOutputCapChars = 1 << 20
 
-// defaultEventCapChars is the cap on a nested result's event text when
-// the session sets no observation cap. It is the largest observation the
-// model ever sees.
-const defaultEventCapChars = 30000
+// defaultNestedTextCapChars is the cap on a nested result's recorded
+// text when the session sets no observation cap. It is the largest
+// observation the model ever sees.
+const defaultNestedTextCapChars = 30000
 
-// nestedEventText returns the head of a nested result's text that its
-// tool.result event carries, and the number of characters it leaves out.
+// isNestedCall reports whether the call with the handle was made by a
+// running tool.
+func (s *Session) isNestedCall(handle string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resultMeta[handle].parent != ""
+}
+
+// nestedRecordText returns the head of a nested result's text that its
+// tool.result event and its record carry, and the number of characters
+// it leaves out.
 //
 // The caller reads the whole result, which can be NestedOutputCapChars
 // long. The event goes to every consumer of the stream and is kept for
-// an inspect, so it is held to the session's observation cap.
-func (s *Session) nestedEventText(text string) (string, int) {
+// an inspect. A resume reads the record back whole. So both hold the
+// text to the session's observation cap, and the record's structured
+// payload stays whole.
+func (s *Session) nestedRecordText(text string) (string, int) {
 	limit := s.opts.Settings.ObservationCapChars
 	if limit <= 0 {
-		limit = defaultEventCapChars
+		limit = defaultNestedTextCapChars
 	}
 	total := utf8.RuneCountInString(text)
 	if total <= limit {
