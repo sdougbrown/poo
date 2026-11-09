@@ -100,6 +100,17 @@ const (
 // zero takes the default, and a limit over the maximum takes the
 // maximum.
 func ProjectHistory(records []Record, beforeSeq int64, limit int) HistoryPage {
+	return ProjectHistoryBudget(records, beforeSeq, limit, HistoryPageByteBudget)
+}
+
+// ProjectHistoryBudget computes the projection with a page byte budget.
+//
+// The paging and the limit are ProjectHistory's. A budget of zero or
+// less takes HistoryPageByteBudget.
+func ProjectHistoryBudget(records []Record, beforeSeq int64, limit, budget int) HistoryPage {
+	if budget <= 0 {
+		budget = HistoryPageByteBudget
+	}
 	if limit <= 0 {
 		limit = DefaultHistoryLimit
 	}
@@ -122,7 +133,7 @@ func ProjectHistory(records []Record, beforeSeq int64, limit int) HistoryPage {
 	// The byte budget keeps the newest entries that fit, and says that
 	// older ones exist, so a client pages back for what it dropped.
 	var byteCut bool
-	older, byteCut = pageWithinByteBudget(older, HistoryPageByteBudget)
+	older, byteCut = pageWithinByteBudget(older, budget)
 	if byteCut {
 		page.HasMore = true
 	}

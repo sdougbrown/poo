@@ -48,6 +48,11 @@ const (
 	// envelope, and the queue takes the whole line, so the budget keeps
 	// a full page far under the queue's line budget.
 	DefaultEventPageBytes = 8 << 20
+	// DefaultHistoryPageBytes is the byte budget for one page of
+	// history, over the page's own JSON. The queue takes the whole
+	// line, so the budget keeps a full page far under the queue's line
+	// budget.
+	DefaultHistoryPageBytes = 8 << 20
 )
 
 // Bounds are the limits the transport enforces.
@@ -71,6 +76,9 @@ type Bounds struct {
 	// EventPageBytes is the byte budget for one page of events. Zero
 	// takes the default.
 	EventPageBytes int
+	// HistoryPageBytes is the byte budget for one page of history.
+	// Zero takes the default.
+	HistoryPageBytes int
 	// AskBudget is how long a client may take to answer a permission
 	// ask. Zero takes the asker chain's default.
 	AskBudget time.Duration
@@ -92,6 +100,9 @@ func (b Bounds) withDefaults() Bounds {
 	}
 	if b.EventPageBytes <= 0 {
 		b.EventPageBytes = DefaultEventPageBytes
+	}
+	if b.HistoryPageBytes <= 0 {
+		b.HistoryPageBytes = DefaultHistoryPageBytes
 	}
 	if b.AskBudget <= 0 {
 		b.AskBudget = perm.DefaultWireBudget
@@ -256,6 +267,22 @@ func newServer(opts Options) *server {
 	}
 	s.client = &wireClient{srv: s}
 	return s
+}
+
+// pageBudget returns a page's byte budget, clamped to half the
+// output queue's line budget.
+//
+// A deployment that lowers QueueBytes lowers the page budgets with it:
+// a page is one line the queue takes, and a budget above the queue's
+// own would refuse the page — the failure the budgets exist to prevent.
+// The other half covers the response's envelope and whatever a
+// re-encoding of the page adds.
+func pageBudget(bound, queueBytes int) int {
+	half := queueBytes / 2
+	if bound > half {
+		return half
+	}
+	return bound
 }
 
 // run serves the client until the stream ends or the transport fails.
