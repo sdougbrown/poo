@@ -213,6 +213,9 @@ const (
 	CallModeSync CallMode = "sync"
 	// CallModeJob means the call became a background job.
 	CallModeJob CallMode = "job"
+	// CallModeNested means a running tool made the call, and its
+	// result never reached the model's history.
+	CallModeNested CallMode = "nested"
 )
 
 // ToolCallRecord records a tool call the model made, with its full arguments.
@@ -240,11 +243,15 @@ type ToolCallRecord struct {
 	// object when the model sent valid JSON, and a JSON string holding the
 	// raw text when it did not.
 	Arguments json.RawMessage `json:"arguments"`
-	// Mode says how the call ran: "sync" in the turn, or "job" in the
-	// background. The mode is fixed when the call starts, after the
-	// before-tool hooks have answered; a call that never ran has no
-	// mode.
+	// Mode says how the call ran: "sync" in the turn, "job" in the
+	// background, or "nested" from inside another call. The mode is
+	// fixed when the call starts, after the before-tool hooks have
+	// answered; a call that never ran has no mode.
 	Mode CallMode `json:"mode,omitempty"`
+	// Parent names the call that made this one, when the mode is
+	// "nested". It is the parent call's handle, so a reader of the log
+	// can walk the calls a script made under one of the model's calls.
+	Parent string `json:"parent,omitempty"`
 }
 
 // ToolResultRecord records the outcome of a tool call.

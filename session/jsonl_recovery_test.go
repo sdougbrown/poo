@@ -522,3 +522,58 @@ func TestTheRecoveryKeepsTheFileWhole(t *testing.T) {
 		t.Errorf("the log holds %d records, want 5", len(recs))
 	}
 }
+
+// TestANestedCallWithoutAResultIsRecovered covers the nested seam's
+// torn tail: a nested tool.call with no result is recovered with an
+// interrupted result, and no message record — the model never saw the
+// call, so nothing of it enters the history.
+func TestANestedCallWithoutAResultIsRecovered(t *testing.T) {
+	dir, store := newTestStore(t)
+	ctx := context.Background()
+
+	nested := &poo.ToolCallRecord{
+		RecordMeta: poo.NewRecordMeta("tool.call"),
+		RunID:      "r1",
+		Turn:       1,
+		Handle:     "r5",
+		Tool:       "read",
+		Mode:       poo.CallModeNested,
+		Parent:     "r2",
+	}
+	writeSession(t, dir, "s1",
+		createdRecord("s1"),
+		runStarted("r1"),
+		toolCall("r1", 1, "r2", "codemode"),
+		nested,
+	)
+
+	loaded, err := store.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+
+	var result *poo.ToolResultRecord
+	messages := 0
+	for _, rec := range loaded.Records {
+		switch r := rec.(type) {
+		case *poo.ToolResultRecord:
+			if r.Handle == "r5" {
+				result = r
+			}
+		case *poo.MessageRecord:
+			messages++
+		}
+	}
+	if result == nil {
+		t.Fatal("the nested call has no recovered result")
+	}
+	if result.Outcome != poo.OutcomeInterrupted {
+		t.Errorf("the recovered outcome is %q, want interrupted", result.Outcome)
+	}
+	// No message at all: neither call carries a provider id, so the
+	// recovery writes none — the nested call in particular must never
+	// get one, or the model's history would hold a result it never saw.
+	if messages != 0 {
+		t.Errorf("the recovered log holds %d messages, want 0 (the recovery writes none for the nested call)", messages)
+	}
+}

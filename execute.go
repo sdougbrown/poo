@@ -612,7 +612,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	}
 
 	callCtx := s.activityContext(run)
-	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, handle))
+	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, turn, handle))
 	// The outcome is decided by the core, not by the tool.
 	outcome := OutcomeOK
 	var fatalCandidate *candidate
@@ -741,8 +741,14 @@ func (s *Session) prepareEnv() PrepareEnv {
 }
 
 // toolEnv builds the environment a tool runs in.
-func (s *Session) toolEnv(run *runState, handle string) ToolEnv {
-	return s.toolEnvFor(run.id, handle)
+//
+// The call in the turn gets the nested seam, so a tool that
+// orchestrates others — a script engine, say — can make calls of its
+// own. A nested call never leaves the turn.
+func (s *Session) toolEnv(run *runState, turn int, handle string) ToolEnv {
+	env := s.toolEnvFor(run.id, handle)
+	env.Nested = &nestedCaller{session: s, run: run, turn: turn}
+	return env
 }
 
 // toolEnvFor builds the environment a tool runs in, for a run that may
@@ -750,7 +756,9 @@ func (s *Session) toolEnv(run *runState, handle string) ToolEnv {
 //
 // A job runs under the session, so the run it names may be gone by the
 // time the job runs. The environment still names the run that started
-// it, so a tool can tie its work back to the call.
+// it, so a tool can tie its work back to the call. A job gets no nested
+// caller: the seam belongs to a call in the turn, and a job's nested
+// calls would outlive the result they belong to.
 func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 	return ToolEnv{
 		PrepareEnv: s.prepareEnv(),

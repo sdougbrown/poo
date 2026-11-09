@@ -92,6 +92,11 @@ type ToolEnv struct {
 	Env []string
 	// Decider is the decision model, or nil when there is none.
 	Decider decide.Decider
+	// Nested runs nested tool calls, or nil when this call cannot make
+	// one. Only a call that runs in the turn has it; a background job
+	// does not, and a nested call's own tool does not, so the nesting
+	// is one call deep.
+	Nested NestedCaller
 	// Settings holds the tool's own settings block.
 	Settings ToolSettings
 }
@@ -105,6 +110,42 @@ type ToolSettings struct {
 	ObservationCapChars int
 	// ReadOutputCapChars is the cap on the read tool's output.
 	ReadOutputCapChars int
+}
+
+// NestedResult is what a nested tool call produced.
+type NestedResult struct {
+	// Handle is the nested call's own handle, e.g. "r7".
+	Handle string
+	// Tool is the tool that ran.
+	Tool string
+	// Outcome is the call's outcome, decided by the core.
+	Outcome Outcome
+	// Text is the recorded result text, with the handle line first.
+	Text string
+	// Structured is the optional side-channel payload.
+	Structured json.RawMessage
+	// IsError reports a recoverable failure.
+	IsError bool
+}
+
+// NestedCaller runs a nested tool call from inside a tool's Call.
+//
+// A nested call is a tool call a running tool makes. It is validated
+// like a model-made call, it is judged by the permission engine and the
+// doom loop, and its call and result are recorded with the mode
+// "nested" — but its result never enters the model's history, and its
+// tool's own environment carries no nested caller of its own, so the
+// nesting is one call deep.
+type NestedCaller interface {
+	// Call runs one nested call of the named tool with the raw
+	// arguments. The parent handle names the call that is running.
+	//
+	// A refused, failed or cancelled nested call is reported as data
+	// in the result, not as an error: the caller decides what its
+	// script does with a denial. The error result is for the nested
+	// call that never got to be judged at all — an unknown tool, a
+	// run that is winding down, a run that was interrupted.
+	Call(ctx context.Context, parent, tool string, raw json.RawMessage) (NestedResult, error)
 }
 
 // Prepared is a validated tool call, ready to run.
