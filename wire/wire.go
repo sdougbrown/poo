@@ -43,16 +43,13 @@ const (
 	// DefaultDrain is how long the teardown waits for the output queue
 	// to drain.
 	DefaultDrain = 5 * time.Second
-	// DefaultEventPageBytes is the byte budget for one page of events,
-	// over the events' own JSON. The queue takes the whole line, and
-	// the response wraps the page in an envelope. The budget keeps a
-	// full page far under the queue's line budget.
-	DefaultEventPageBytes = 8 << 20
+	// DefaultEventPageBytes is the byte budget for one page of events.
+	// It shares the core's page budget, so the knob has one definition.
+	DefaultEventPageBytes = poo.PageByteBudget
 	// DefaultHistoryPageBytes is the byte budget for one page of
-	// history, over the page's own JSON. The queue takes the whole
-	// line, so the budget keeps a full page far under the queue's line
-	// budget.
-	DefaultHistoryPageBytes = 8 << 20
+	// history. It shares the core's page budget, so the knob has one
+	// definition.
+	DefaultHistoryPageBytes = poo.PageByteBudget
 )
 
 // Bounds are the limits the transport enforces.

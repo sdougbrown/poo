@@ -268,7 +268,7 @@ func TestTheHistoryPageHoldsItsByteBudget(t *testing.T) {
 		records = append(records, stamp(&poo.ToolResultRecord{
 			RecordMeta: poo.NewRecordMetaFrom("tool.result", poo.OriginTool),
 			RunID:      "run-1", Turn: 1, Handle: fmt.Sprintf("r%d", i), Tool: "echo",
-			Text: strings.Repeat("a", poo.HistoryPageByteBudget/12),
+			Text: strings.Repeat("a", poo.PageByteBudget/12),
 		}))
 	}
 
@@ -278,7 +278,7 @@ func TestTheHistoryPageHoldsItsByteBudget(t *testing.T) {
 		encoded, _ := json.Marshal(item)
 		bytes += len(encoded) + 1
 	}
-	if bytes > poo.HistoryPageByteBudget {
+	if bytes > poo.PageByteBudget {
 		t.Errorf("the page holds %d bytes, over the budget", bytes)
 	}
 	if !page.HasMore {
@@ -301,7 +301,7 @@ func TestTheHistoryPageHoldsItsByteBudget(t *testing.T) {
 	rec := stamp(&poo.ToolResultRecord{
 		RecordMeta: poo.NewRecordMetaFrom("tool.result", poo.OriginTool),
 		RunID:      "run-1", Turn: 1, Handle: "big", Tool: "echo",
-		Text: strings.Repeat("a", poo.HistoryPageByteBudget*2),
+		Text: strings.Repeat("a", poo.PageByteBudget*2),
 	})
 	page = poo.ProjectHistory([]poo.Record{rec}, 0, 0)
 	if len(page.Items) != 1 {

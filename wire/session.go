@@ -112,27 +112,28 @@ func (s *session) eventsAfter(after int64, budget int) ([]protocol.Event, int64,
 	s.mu.Unlock()
 
 	var last int64
+	candidates := make([]protocol.Event, 0, len(snapshot))
 	for _, evt := range snapshot {
 		if evt.Seq > last {
 			last = evt.Seq
 		}
+		if evt.Seq > after {
+			candidates = append(candidates, evt)
+		}
 	}
+	out, cut := poo.PageHeadWithinByteBudget(candidates, sizeOfEvent, budget)
 	next := last
-	out := make([]protocol.Event, 0, len(snapshot))
-	var bytes int
-	for _, evt := range snapshot {
-		if evt.Seq <= after {
-			continue
-		}
-		encoded, _ := json.Marshal(evt)
-		if len(out) > 0 && bytes+len(encoded)+1 > budget {
-			next = out[len(out)-1].Seq
-			return out, next, true
-		}
-		out = append(out, evt)
-		bytes += len(encoded) + 1
+	if cut {
+		next = out[len(out)-1].Seq
 	}
-	return out, next, false
+	return out, next, cut
+}
+
+// sizeOfEvent returns the event's encoded size, as the response line
+// carries it.
+func sizeOfEvent(evt protocol.Event) int {
+	encoded, _ := json.Marshal(evt)
+	return len(encoded)
 }
 
 // markClosing marks the session closing.
