@@ -541,6 +541,111 @@ func TestANestedBatchIsScheduledLikeTheModels(t *testing.T) {
 	}
 }
 
+// resultCapture reports whether the view answered with a handle's
+// result at each turn end.
+type resultCapture struct {
+	// handle is the handle the hook asks about.
+	handle string
+	mu     sync.Mutex
+	// seen holds the answer of each turn end.
+	seen []bool
+}
+
+func (c *resultCapture) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) {
+	_, ok := ctx.HistoryView.Result(c.handle)
+	c.mu.Lock()
+	c.seen = append(c.seen, ok)
+	c.mu.Unlock()
+	return poo.TurnDecision{}, nil
+}
+
+// everSeen reports whether the view ever held the handle's result.
+func (c *resultCapture) everSeen() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, seen := range c.seen {
+		if seen {
+			return true
+		}
+	}
+	return false
+}
+
+// TestTheRestoreLeavesNestedCallsOutOfTheTurns covers the restore's
+// rule for nested calls: a restored turn holds the calls the model made
+// and not the calls a tool made, and the nested results are not among
+// the results the restored view answers with.
+func TestTheRestoreLeavesNestedCallsOutOfTheTurns(t *testing.T) {
+	nest := &nestedTool{script: []string{`reader {"text":"one"}`}}
+	reader := &namedTool{echoTool: echoTool{result: "ok"}, name: "reader"}
+	sink := &recordingSink{}
+	s := nestedSession(t, nest, map[string]poo.Tool{"reader": reader}, sink)
+	runSession(t, s, "hello")
+
+	// The nested call's handle is the one the log names with a parent.
+	var nestedHandle, parentHandle string
+	for _, rec := range sink.allRecords() {
+		call, ok := rec.(*poo.ToolCallRecord)
+		if !ok {
+			continue
+		}
+		if call.Parent != "" {
+			nestedHandle = call.Handle
+			continue
+		}
+		parentHandle = call.Handle
+	}
+	if nestedHandle == "" || parentHandle == "" {
+		t.Fatalf("the log holds no nested call: nested %q, parent %q", nestedHandle, parentHandle)
+	}
+
+	created := header("s1")
+	created.Tools = []poo.ToolInfo{
+		{Name: "nest", Class: poo.ClassSideEffecting, Background: poo.BackgroundNever},
+		{Name: "reader", Class: poo.ClassReadOnly, Background: poo.BackgroundNever},
+	}
+	records := append([]poo.Record{created}, sink.allRecords()...)
+
+	// The restore invokes no hook, so a later turn is where a hook reads
+	// the rebuilt turn summary.
+	turns := &turnCapture{}
+	nestedResult := &resultCapture{handle: nestedHandle}
+	restoreOpts := restoreOptions(t, scripted([]fakeResponse{{text: "again"}}), &recordingSink{})
+	restoreOpts.Tools = map[string]poo.Tool{
+		"nest":   &nestedTool{},
+		"reader": &namedTool{echoTool: echoTool{}, name: "reader"},
+	}
+	restoreOpts.ToolOrder = []string{"nest", "reader"}
+	restoreOpts.Profiles = []poo.Profile{{Name: "code", Tools: created.Tools}}
+	restoreOpts.AfterTurn = []poo.AfterTurnHook{turns, nestedResult}
+	session, _, err := poo.Restore(restoreOpts, records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	runSession(t, session, "more")
+
+	sawParent := false
+	for _, snapshot := range turns.captured() {
+		for _, turn := range snapshot {
+			for _, call := range turn.Calls {
+				if call.Handle == nestedHandle {
+					t.Errorf("the restored turn holds the nested call %s", nestedHandle)
+				}
+				if call.Handle == parentHandle {
+					sawParent = true
+				}
+			}
+		}
+	}
+	if !sawParent {
+		t.Errorf("the restored turn holds no call for %s", parentHandle)
+	}
+	if nestedResult.everSeen() {
+		t.Errorf("the restored view answers with the nested call %s's result", nestedHandle)
+	}
+}
+
 // TestANestedCallSettledWithTheRunLeavesNoHistory covers the settle
 // path: a nested call that is outstanding when the run settles gets its
 // record, but nothing enters the model's history and no message record
