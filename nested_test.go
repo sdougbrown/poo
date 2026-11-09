@@ -1143,6 +1143,9 @@ func TestANestedResultKeepsTheSessionCapOutsideItsCaller(t *testing.T) {
 		if !utf8.ValidString(text) {
 			t.Error("the nested result event split a character")
 		}
+		if !strings.HasPrefix(results[0].Text, text) {
+			t.Error("the nested result event's text is not the head of the result")
+		}
 		elided, _ := ev.Payload["elided_chars"].(int)
 		if elided+utf8.RuneCountInString(text) != utf8.RuneCountInString(results[0].Text) {
 			t.Errorf("the event's text and elided_chars (%d) do not add up to the result", elided)
@@ -1167,7 +1170,53 @@ func TestANestedResultKeepsTheSessionCapOutsideItsCaller(t *testing.T) {
 	if rec.ElidedChars+utf8.RuneCountInString(rec.Text) != utf8.RuneCountInString(results[0].Text) {
 		t.Errorf("the record's text and elided_chars (%d) do not add up to the result", rec.ElidedChars)
 	}
+	if !strings.HasPrefix(results[0].Text, rec.Text) {
+		t.Error("the record's text is not the head of the result")
+	}
 	if string(rec.Structured) != `{"long":true}` {
 		t.Errorf("the record's structured payload is %s, want it whole", rec.Structured)
+	}
+}
+
+// TestANestedResultWithNoSessionCapKeepsTheDefault covers a session
+// built without an observation cap: a nested result's record and event
+// hold its text to the largest observation the model ever sees, 30000
+// characters.
+func TestANestedResultWithNoSessionCapKeepsTheDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body int
+	}{
+		{"under the default", 29000},
+		{"over the default", 31000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nest := &nestedTool{script: []string{`big {}`}}
+			sink := &recordingSink{}
+			s := nestedSession(t, nest, map[string]poo.Tool{"big": &bigTool{text: strings.Repeat("x", tc.body)}}, sink)
+			runSession(t, s, "hello")
+
+			results, err := nest.returned()
+			if err != nil || len(results) != 1 {
+				t.Fatalf("the seam returned %d results and %v", len(results), err)
+			}
+			total := utf8.RuneCountInString(results[0].Text)
+			wantText, wantElided := total, 0
+			if total > 30000 {
+				wantText, wantElided = 30000, total-30000
+			}
+			for _, r := range sink.allRecords() {
+				rec, ok := r.(*poo.ToolResultRecord)
+				if !ok || rec.Handle != results[0].Handle {
+					continue
+				}
+				if got := utf8.RuneCountInString(rec.Text); got != wantText {
+					t.Errorf("the record's text holds %d characters, want %d", got, wantText)
+				}
+				if rec.ElidedChars != wantElided {
+					t.Errorf("the record's elided_chars = %d, want %d", rec.ElidedChars, wantElided)
+				}
+			}
+		})
 	}
 }

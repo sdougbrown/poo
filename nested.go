@@ -34,8 +34,8 @@ import (
 //
 // A nested call's output goes to the tool that made the call, not to
 // the model, so the cap is not relative to the context window. The bash
-// tool's capture buffer holds this many bytes, so a nested bash call
-// keeps all it captured.
+// tool's capture buffer holds no more bytes than this, so a nested bash
+// call keeps all it captured.
 const NestedOutputCapChars = 1 << 20
 
 // defaultNestedTextCapChars is the cap on a nested result's recorded
@@ -43,12 +43,12 @@ const NestedOutputCapChars = 1 << 20
 // observation the model ever sees.
 const defaultNestedTextCapChars = 30000
 
-// isNestedCall reports whether the call with the handle was made by a
-// running tool.
-func (s *Session) isNestedCall(handle string) bool {
+// callParent returns the handle of the call that made the call with
+// the handle, or the empty string for a call the model made.
+func (s *Session) callParent(handle string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.resultMeta[handle].parent != ""
+	return s.resultMeta[handle].parent
 }
 
 // nestedRecordText returns the head of a nested result's text that its

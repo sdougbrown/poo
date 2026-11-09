@@ -930,8 +930,11 @@ func (s *Session) beginCallRecordLocked(run *runState, call *issuedCall) {
 // model can name the result later and a strategy can find it.
 func (s *Session) writeResult(run *runState, turn int, handle, tool, callID string, result ToolResult, outcome Outcome, out afterToolOutcome) {
 	text := modelFacingText(handle, tool, result.Text)
+	// A nested call's record and event hold its text to the session's
+	// cap; the caller reads the whole result.
+	parent := s.callParent(handle)
 	recordText, elided := text, 0
-	if s.isNestedCall(handle) {
+	if parent != "" {
 		recordText, elided = s.nestedRecordText(text)
 	}
 	rec := &ToolResultRecord{
@@ -963,21 +966,21 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 
 	// A nested call's result is the caller's, and it is recorded for the
 	// caller to read back rather than appended to the model's view.
-	if parent := s.storeNestedResult(run, NestedResult{
-		Handle:     handle,
-		Tool:       tool,
-		Outcome:    outcome,
-		Text:       text,
-		Structured: result.Structured,
-		IsError:    result.IsError,
-	}); parent != "" {
-		eventText, elided := s.nestedRecordText(text)
+	if parent != "" {
+		s.storeNestedResult(run, NestedResult{
+			Handle:     handle,
+			Tool:       tool,
+			Outcome:    outcome,
+			Text:       text,
+			Structured: result.Structured,
+			IsError:    result.IsError,
+		})
 		payload := map[string]any{
 			"run_id":  run.id,
 			"handle":  handle,
 			"tool":    tool,
 			"outcome": string(outcome),
-			"text":    eventText,
+			"text":    recordText,
 			"parent":  parent,
 		}
 		if elided > 0 {
@@ -1014,25 +1017,18 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 }
 
 // storeNestedResult records a nested call's result for the tool that
-// made the call, and returns the call's parent handle.
+// made the call.
 //
-// It returns the empty string for a call the model made, and stores
-// nothing then: the model's result goes into the view instead. The
-// result waits under the session's lock until the batch that made the
-// call reads it back, and a result the finalization settled for a call
-// nobody waits for any more is dropped with the run.
-func (s *Session) storeNestedResult(run *runState, result NestedResult) string {
+// The result waits under the session's lock until the batch that made
+// the call reads it back, and a result the finalization settled for a
+// call nobody waits for any more is dropped with the run.
+func (s *Session) storeNestedResult(run *runState, result NestedResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	parent := s.resultMeta[result.Handle].parent
-	if parent == "" {
-		return ""
-	}
 	if run.nestedResults == nil {
 		run.nestedResults = map[string]NestedResult{}
 	}
 	run.nestedResults[result.Handle] = result
-	return parent
 }
 
 // rememberResult records a call's outcome and result in the turn's
