@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -553,5 +555,110 @@ func TestALoadRacingAPrune(t *testing.T) {
 	}
 	if _, err := store.Load(ctx, "s1"); !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("the load returned %v, want no such session", err)
+	}
+}
+
+// TestAListRaceDoesNotRefuseARealLoad is the store-level form of the
+// lock probe: a List over the same directory makes a Load of a free
+// session fail with session_locked.
+func TestAListRaceDoesNotRefuseARealLoad(t *testing.T) {
+	dir, store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+
+	lister, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the listing store: %v", err)
+	}
+	defer lister.Close()
+	loader, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("opening the loading store: %v", err)
+	}
+	defer loader.Close()
+
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for !stop.Load() {
+			if _, err := lister.List(ctx); err != nil {
+				t.Errorf("listing: %v", err)
+				return
+			}
+		}
+	}()
+	refused := 0
+	for i := 0; i < 2000; i++ {
+		loaded, err := loader.Load(ctx, "s1")
+		if err != nil {
+			if errors.Is(err, ErrSessionLocked) {
+				refused++
+				continue
+			}
+			t.Fatalf("loading: %v", err)
+		}
+		if err := loader.Close(); err != nil {
+			t.Fatalf("closing the session: %v", err)
+		}
+		_ = loaded
+	}
+	stop.Store(true)
+	wg.Wait()
+	if refused > 0 {
+		t.Errorf("a free session was refused %d times out of 2000 loads while a List ran", refused)
+	}
+}
+
+// TestTheLockProbeDoesNotRefuseAFreeSession covers the read-only lock
+// probe: Locked takes the exclusive lock to find out whether another
+// process holds it, so a Load or a Prune that runs at the same moment
+// is told the session is locked when nobody owns it.
+func TestTheLockProbeDoesNotRefuseAFreeSession(t *testing.T) {
+	dir, store := newTestStore(t)
+	ctx := context.Background()
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("closing the store: %v", err)
+	}
+	path := LockPath(dir, "s1")
+
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+	var probes atomic.Int64
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for !stop.Load() {
+			if _, err := Locked(path); err == nil {
+				probes.Add(1)
+			}
+		}
+	}()
+
+	refused := 0
+	for i := 0; i < 20000; i++ {
+		a, err := Acquire(path)
+		if err != nil {
+			if errors.Is(err, ErrSessionLocked) {
+				refused++
+				continue
+			}
+			t.Fatalf("acquiring: %v", err)
+		}
+		a.Release()
+	}
+	stop.Store(true)
+	wg.Wait()
+	if refused > 0 {
+		t.Errorf("the free session was refused %d times out of 20000 acquires (%d probes ran)", refused, probes.Load())
 	}
 }

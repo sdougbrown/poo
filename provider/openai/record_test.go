@@ -14,7 +14,7 @@ import (
 
 // The record of a call the model wrote as text.
 //
-// The plan: the calls the transport reads out of the model's own text
+// The calls the transport reads out of the model's own text
 // are flagged "parsed_text" in the record, so a reader can tell them
 // from the calls the endpoint sent.
 

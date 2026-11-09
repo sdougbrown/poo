@@ -255,7 +255,7 @@ func TestTheHistoryTheModelSeesHoldsTheProseOnce(t *testing.T) {
 
 // TestARateLimitCarriesTheWaitItAskedFor covers a rate limit: the
 // endpoint asks the client to wait, and the settle record has to carry
-// the number, because the plan's provider_limit row settles on a
+// the number, because the provider_limit row settles on a
 // Retry-After over thirty seconds.
 func TestARateLimitCarriesTheWaitItAskedFor(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -292,8 +292,7 @@ func TestARateLimitCarriesTheWaitItAskedFor(t *testing.T) {
 
 // TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty covers a
 // Retry-After sent as a date: the wait is fractional, and a wait just
-// over thirty seconds must not be recorded as thirty, which the plan's
-// rule reads as retryable.
+// over thirty seconds must not be recorded as thirty, which the rule reads as retryable.
 func TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", time.Now().Add(45*time.Second).UTC().Format(http.TimeFormat))
@@ -315,7 +314,7 @@ func TestARetryAfterDateOverThirtySecondsIsNotRecordedAsThirty(t *testing.T) {
 }
 
 // TestATruncatedStreamKeepsItsOriginalKind covers a stream that breaks
-// after a delta: the plan reclassifies the failure as an interrupted
+// after a delta: the run reclassifies the failure as an interrupted
 // stream and keeps the kind the failure had in the code, so a reader
 // can tell a broken connection from a broken endpoint.
 func TestATruncatedStreamKeepsItsOriginalKind(t *testing.T) {

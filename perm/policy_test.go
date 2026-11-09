@@ -9,7 +9,7 @@ import (
 	"github.com/sdougbrown/poo/pootest"
 )
 
-// The policy is the plan's: ordered rules, the first match wins, and an
+// The policy: ordered rules, the first match wins, and an
 // unmatched side-effecting call takes the unmatched action. A
 // read-only call no rule matches is allowed.
 
@@ -108,8 +108,7 @@ func TestTheUnmatchedActionAppliesToSideEffectingCalls(t *testing.T) {
 	}
 }
 
-// TestTheUnmatchedActionAndTheFallbackAreIndependent covers the plan's
-// rule: the unmatched action says what happens when the policy asks,
+// TestTheUnmatchedActionAndTheFallbackAreIndependent covers the rule:: the unmatched action says what happens when the policy asks,
 // and the fallback says what happens when the chain has no answer. The
 // two are separate.
 func TestTheUnmatchedActionAndTheFallbackAreIndependent(t *testing.T) {
@@ -174,7 +173,7 @@ func TestThePrefixMatchesTheCommandText(t *testing.T) {
 	}
 }
 
-// TestThePrefixIsLexicalAndNotABoundary covers the plan's own caveat: the
+// TestThePrefixIsLexicalAndNotABoundary covers the own caveat: the
 // prefix compares the command's text, so a compound command matches its
 // first part. The prefix is a heuristic, not a safety boundary.
 func TestThePrefixIsLexicalAndNotABoundary(t *testing.T) {
@@ -221,7 +220,7 @@ func TestACommandThatDoesNotMatchThePrefixIsRefused(t *testing.T) {
 	}
 }
 
-// TestAMalformedPolicyIsAConstructionError covers the plan's rule: a
+// TestAMalformedPolicyIsAConstructionError covers the rule: a
 // malformed policy never reaches a session.
 func TestAMalformedPolicyIsAConstructionError(t *testing.T) {
 	tests := []struct {
@@ -281,8 +280,7 @@ func TestAMalformedPolicyIsAConstructionError(t *testing.T) {
 	}
 }
 
-// TestAnEmptyPolicyPassesWithoutSideEffectingTools covers the plan's
-// rule: a build with no side-effecting tools passes with an empty
+// TestAnEmptyPolicyPassesWithoutSideEffectingTools covers the rule:: a build with no side-effecting tools passes with an empty
 // policy.
 func TestAnEmptyPolicyPassesWithoutSideEffectingTools(t *testing.T) {
 	policy, err := perm.New(perm.Options{})

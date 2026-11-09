@@ -12,7 +12,7 @@ import (
 	"github.com/sdougbrown/poo/provider/openai"
 )
 
-// The live evaluation is the plan's: a gated run against real weights,
+// The live evaluation: a gated run against real weights,
 // apart from the stub tests. It is skipped unless the environment names
 // an endpoint, and a decision model that is unavailable is a failure of
 // the evaluation, never a refusal.

@@ -17,7 +17,7 @@ import (
 // decides. Anything else defers: a decision that could not be made is
 // never an approval.
 
-// TestTheDeciderAllowsAConfidentCall covers the plan's rule: a
+// TestTheDeciderAllowsAConfidentCall covers the rule: a
 // confident approval allows the call.
 func TestTheDeciderAllowsAConfidentCall(t *testing.T) {
 	asker := permissive.New(pootest.NewStubDecider(0.9), permissive.Options{})
@@ -31,7 +31,7 @@ func TestTheDeciderAllowsAConfidentCall(t *testing.T) {
 	}
 }
 
-// TestTheDeciderRefusesAConfidentCall covers the plan's rule: a
+// TestTheDeciderRefusesAConfidentCall covers the rule: a
 // confident refusal denies the call.
 func TestTheDeciderRefusesAConfidentCall(t *testing.T) {
 	asker := permissive.New(pootest.NewStubDecider(0.01), permissive.Options{})
@@ -45,7 +45,7 @@ func TestTheDeciderRefusesAConfidentCall(t *testing.T) {
 	}
 }
 
-// TestTheDeciderDefersAnUncertainCall covers the plan's rule: a model
+// TestTheDeciderDefersAnUncertainCall covers the rule: a model
 // that is not confident defers.
 func TestTheDeciderDefersAnUncertainCall(t *testing.T) {
 	asker := permissive.New(pootest.NewStubDecider(0.5), permissive.Options{})
@@ -59,7 +59,7 @@ func TestTheDeciderDefersAnUncertainCall(t *testing.T) {
 	}
 }
 
-// TestTheDeciderDefersOnAFailure covers the plan's rule: a decider that
+// TestTheDeciderDefersOnAFailure covers the rule: a decider that
 // failed never allows a call.
 func TestTheDeciderDefersOnAFailure(t *testing.T) {
 	decider := pootest.NewStubDecider(0.99)
@@ -75,7 +75,7 @@ func TestTheDeciderDefersOnAFailure(t *testing.T) {
 	}
 }
 
-// TestTheDeciderIsUnavailableWithoutADecider covers the plan's rule: a
+// TestTheDeciderIsUnavailableWithoutADecider covers the rule: a
 // nil decider means the asker is skipped.
 func TestTheDeciderIsUnavailableWithoutADecider(t *testing.T) {
 	asker := permissive.New(nil, permissive.Options{})
@@ -95,7 +95,7 @@ func TestTheDeciderIsUnavailableWithoutADecider(t *testing.T) {
 	}
 }
 
-// TestTheThresholdsAreConfigurable covers the plan's rule: the
+// TestTheThresholdsAreConfigurable covers the rule: the
 // thresholds belong to the caller.
 func TestTheThresholdsAreConfigurable(t *testing.T) {
 	asker := permissive.New(pootest.NewStubDecider(0.6), permissive.Options{
@@ -112,7 +112,7 @@ func TestTheThresholdsAreConfigurable(t *testing.T) {
 	}
 }
 
-// TestTheEvidenceComesFromTheHistory covers the plan's rule: the
+// TestTheEvidenceComesFromTheHistory covers the rule: the
 // evidence is the recent conversation.
 func TestTheEvidenceComesFromTheHistory(t *testing.T) {
 	decider := pootest.NewStubDecider(0.9)
@@ -166,7 +166,7 @@ func TestTheDeciderAsksOneQuestion(t *testing.T) {
 	}
 }
 
-// TestTheBudgetIsTheLatencyBudget covers the plan's rule: the decide
+// TestTheBudgetIsTheLatencyBudget covers the rule: the decide
 // asker has a budget of its own.
 func TestTheBudgetIsTheLatencyBudget(t *testing.T) {
 	asker := permissive.New(pootest.NewStubDecider(0.9), permissive.Options{})
@@ -180,7 +180,7 @@ func TestTheBudgetIsTheLatencyBudget(t *testing.T) {
 	}
 }
 
-// TestAnUncertainDecisionMovesOnToTheNextAsker covers the plan's rule:
+// TestAnUncertainDecisionMovesOnToTheNextAsker covers the rule:
 // the decide asker defers, and the chain moves on.
 func TestAnUncertainDecisionMovesOnToTheNextAsker(t *testing.T) {
 	decider := pootest.NewStubDecider(0.5)
@@ -205,7 +205,7 @@ func TestAnUncertainDecisionMovesOnToTheNextAsker(t *testing.T) {
 	}
 }
 
-// TestAFailedDecisionMovesOnToTheNextAsker covers the plan's rule: a
+// TestAFailedDecisionMovesOnToTheNextAsker covers the rule: a
 // decider that failed never allows a call.
 func TestAFailedDecisionMovesOnToTheNextAsker(t *testing.T) {
 	decider := pootest.NewStubDecider(0.99)

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestTheExecutorIsPassedToTheRun covers the plan's eval isolation: the
+// TestTheExecutorIsPassedToTheRun covers the eval isolation: the
 // run's commands go through the executor the harness names.
 //
 // The executor is a layer under the sandbox: the sandbox wraps the whole

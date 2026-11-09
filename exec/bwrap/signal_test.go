@@ -11,8 +11,7 @@ import (
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
-// TestASignalDeathIsReportedTheSameWayByBothExecutors covers the plan's
-// envelope: returncode is null when the process was killed, whichever
+// TestASignalDeathIsReportedTheSameWayByBothExecutors covers the envelope: returncode is null when the process was killed, whichever
 // executor ran it.
 func TestASignalDeathIsReportedTheSameWayByBothExecutors(t *testing.T) {
 	sandbox, err := newReviewExecutor(t)

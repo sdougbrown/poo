@@ -18,7 +18,7 @@ func TestAProviderErrorShowsItsStatusWhenItHasOne(t *testing.T) {
 	}
 }
 
-// The plan's retry rule: a rate limit is worth another attempt only when
+// The retry rule: a rate limit is worth another attempt only when
 // the endpoint asked for a wait of thirty seconds or less, a server
 // failure and a network failure always are, and a rejection never is.
 

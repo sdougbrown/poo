@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestReplayDeliversAJobResultInAWokenRun covers the plan's replay item:
+// TestReplayDeliversAJobResultInAWokenRun covers the replay item:
 // a job result that reached the model in a woken run is delivered again,
 // so the run the recording woke is the run the replay wakes.
 func TestReplayDeliversAJobResultInAWokenRun(t *testing.T) {

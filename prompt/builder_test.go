@@ -21,7 +21,7 @@ func testEnv(tools ...string) prompt.Env {
 	}
 }
 
-// TestTheSectionsRenderInTheDefaultOrder covers the plan's order: the
+// TestTheSectionsRenderInTheDefaultOrder covers the order: the
 // base, the tools, the catalog, the environment and the project, and
 // then the consumer's own sections in the order they were added.
 func TestTheSectionsRenderInTheDefaultOrder(t *testing.T) {
@@ -39,7 +39,7 @@ func TestTheSectionsRenderInTheDefaultOrder(t *testing.T) {
 	}
 }
 
-// TestTheToolSectionsRenderWhereTheToolsSit covers the plan's order:
+// TestTheToolSectionsRenderWhereTheToolsSit covers the order:
 // the per-tool sections render together, after the base.
 func TestTheToolSectionsRenderWhereTheToolsSit(t *testing.T) {
 	b := prompt.New(testEnv("bash", "read"))
@@ -54,7 +54,7 @@ func TestTheToolSectionsRenderWhereTheToolsSit(t *testing.T) {
 	}
 }
 
-// TestAToolSectionGoesAwayWithTheTool covers the plan's rule: a tool
+// TestAToolSectionGoesAwayWithTheTool covers the rule: a tool
 // that is not linked takes its guidance with it.
 func TestAToolSectionGoesAwayWithTheTool(t *testing.T) {
 	b := prompt.New(testEnv("read"))

@@ -55,7 +55,7 @@ func TestTheProjectPromptFlagAddsTheInstructions(t *testing.T) {
 	if !strings.Contains(prompt, "run the tests before you stop") {
 		t.Errorf("the prompt holds no project instructions: %q", prompt)
 	}
-	// The instructions come after the environment, in the plan's order.
+	// The instructions come after the environment, in the order.
 	if strings.Index(prompt, "run the tests before you stop") < strings.Index(prompt, "You are running as the model") {
 		t.Errorf("the project section comes before the environment: %q", prompt)
 	}

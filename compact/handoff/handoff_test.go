@@ -93,8 +93,7 @@ func longScript() *pootest.Transport {
 	)
 }
 
-// TestTheForkSendsTheMainPrefixPlusTheInstruction covers the plan's
-// rule: the fork is byte-identical to the last main request, apart
+// TestTheForkSendsTheMainPrefixPlusTheInstruction covers the rule:: the fork is byte-identical to the last main request, apart
 // from the instruction it appends.
 func TestTheForkSendsTheMainPrefixPlusTheInstruction(t *testing.T) {
 	tr := script()
@@ -137,7 +136,7 @@ func TestTheForkSendsTheMainPrefixPlusTheInstruction(t *testing.T) {
 	}
 }
 
-// TestTheReplyBecomesTheHandoff covers the plan's rule: the reply's
+// TestTheReplyBecomesTheHandoff covers the rule: the reply's
 // text is the handoff, and a tool call in the reply is ignored.
 func TestTheReplyBecomesTheHandoff(t *testing.T) {
 	tr := script()
@@ -178,7 +177,7 @@ func TestTheReplyBecomesTheHandoff(t *testing.T) {
 	}
 }
 
-// TestAnEmptyReplyContinuesTheRun covers the plan's rule: an empty
+// TestAnEmptyReplyContinuesTheRun covers the rule: an empty
 // reply is a compactor failure, and below the hard limit the run
 // continues and the strategy retries at the next gate.
 func TestAnEmptyReplyContinuesTheRun(t *testing.T) {
@@ -201,7 +200,7 @@ func TestAnEmptyReplyContinuesTheRun(t *testing.T) {
 	}
 }
 
-// TestAnEmptyReplyAtTheHardLimitSettles covers the plan's rule: at or
+// TestAnEmptyReplyAtTheHardLimitSettles covers the rule: at or
 // above the hard limit a compactor that failed settles the run as
 // context_exhausted, and there is no handoff.
 func TestAnEmptyReplyAtTheHardLimitSettles(t *testing.T) {
@@ -242,7 +241,7 @@ func TestAnEmptyReplyAtTheHardLimitSettles(t *testing.T) {
 	}
 }
 
-// TestTheForkIsNotATurnAndItsUsageCounts covers the plan's rule: the
+// TestTheForkIsNotATurnAndItsUsageCounts covers the rule: the
 // fork's usage counts toward the run's token ceiling, and the fork is
 // not a turn.
 func TestTheForkIsNotATurnAndItsUsageCounts(t *testing.T) {
@@ -266,7 +265,7 @@ func TestTheForkIsNotATurnAndItsUsageCounts(t *testing.T) {
 	}
 }
 
-// TestTheStrategyWaitsForARequest covers the plan's rule: the strategy
+// TestTheStrategyWaitsForARequest covers the rule: the strategy
 // acts only after the run has asked the model something.
 func TestTheStrategyWaitsForARequest(t *testing.T) {
 	tr := script()
@@ -286,7 +285,7 @@ func TestTheStrategyWaitsForARequest(t *testing.T) {
 	}
 }
 
-// TestTheForkFailureSettlesAtTheHardLimit covers the plan's rule: a
+// TestTheForkFailureSettlesAtTheHardLimit covers the rule: a
 // fork that failed is a compactor failure.
 func TestTheForkFailureSettlesAtTheHardLimit(t *testing.T) {
 	tr := longScript()
@@ -353,7 +352,7 @@ func (c *forkCompactor) Compact(ctx context.Context, view poo.View, fork poo.For
 	}, nil
 }
 
-// TestTheForkUsageCountsTowardTheRunBudget covers the plan's rule: the
+// TestTheForkUsageCountsTowardTheRunBudget covers the rule: the
 // fork's usage counts toward MaxRunTokens, and the fork is not a turn.
 func TestTheForkUsageCountsTowardTheRunBudget(t *testing.T) {
 	tr := script()

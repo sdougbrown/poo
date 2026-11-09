@@ -501,3 +501,54 @@ type echoPrepared struct {
 
 // Summary describes the call.
 func (p echoPrepared) Summary() string { return p.text }
+
+// TestAStoppedWaitDoesNotClaimARetry covers the attempt record: an
+// attempt is reported as retried only once the wait is over and the
+// next attempt starts. A cancellation during the wait leaves an attempt
+// that says no retry followed it.
+func TestAStoppedWaitDoesNotClaimARetry(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":{"message":"boom"}}`)
+	}))
+	defer srv.Close()
+
+	tr := openai.New(openai.Options{
+		Endpoint: srv.URL,
+		Model:    "m",
+		Backoff:  []time.Duration{time.Second},
+	})
+	var mu sync.Mutex
+	var attempts []poo.Attempt
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	_, _, err := tr.Stream(ctx, poo.ChatRequest{
+		Model:     "m",
+		MaxTokens: 16,
+		OnAttempt: func(a poo.Attempt) {
+			mu.Lock()
+			attempts = append(attempts, a)
+			mu.Unlock()
+		},
+	})
+	if err == nil {
+		t.Fatal("the request succeeded, want the wait to end it")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(attempts) != 1 {
+		t.Fatalf("the request reported %d attempts, want 1", len(attempts))
+	}
+	if attempts[0].Retried {
+		t.Error("the attempt claims a retry that the cancellation stopped")
+	}
+	if attempts[0].Delay != 0 {
+		t.Errorf("the attempt waited %v, want no wait before a retry", attempts[0].Delay)
+	}
+}

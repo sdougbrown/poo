@@ -373,7 +373,7 @@ func TestTheShellIsFreshForEveryCall(t *testing.T) {
 }
 
 func TestObservationCapIsContextRelative(t *testing.T) {
-	// The plan: min(30000, floor(0.06 × context_limit × 3.5)).
+	// The bound: min(30000, floor(0.06 × context_limit × 3.5)).
 	if got := bash.ObservationCap(32768); got != 6881 {
 		t.Errorf("ObservationCap(32768) is %d, want 6881", got)
 	}

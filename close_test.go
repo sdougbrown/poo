@@ -13,6 +13,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/prompt"
 )
 
 // The close's write fence: every record write registers before it calls
@@ -207,7 +208,7 @@ func TestAJobEndedRecordDoesNotFollowTheClose(t *testing.T) {
 func TestAStalledWriteIsNamedAndTheCloseFinishes(t *testing.T) {
 	sink := newFenceSlowSink("input.queued", 4*fenceWriteBudget)
 	sess, err := poo.New(poo.Options{
-		Transport:    fix1StalledTransport{},
+		Transport:    stalledTransport{},
 		Sink:         sink,
 		SessionID:    "s1",
 		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
@@ -254,7 +255,7 @@ func TestAStalledWriteIsNamedAndTheCloseFinishes(t *testing.T) {
 func TestAQueuedInputRecordDoesNotFollowTheClose(t *testing.T) {
 	sink := newFenceSlowSink("input.queued", fenceHold)
 	sess, err := poo.New(poo.Options{
-		Transport:    fix1StalledTransport{},
+		Transport:    stalledTransport{},
 		Sink:         sink,
 		SessionID:    "s1",
 		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
@@ -483,4 +484,361 @@ func TestNoRecordFollowsTheCloseOverRandomClosePoints(t *testing.T) {
 			}
 		}
 	}
+}
+
+// orderedSink records the order of the writes and the flush, so a
+// test can see a record written after the close's flush.
+type orderedSink struct {
+	mu    sync.Mutex
+	order []string
+}
+
+func (s *orderedSink) Append(ctx context.Context, rec poo.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.order = append(s.order, "append:"+rec.Meta().Record)
+	return nil
+}
+
+func (s *orderedSink) Flush(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.order = append(s.order, "flush")
+	return nil
+}
+
+func (s *orderedSink) afterFlush() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := false
+	var out []string
+	for _, entry := range s.order {
+		if entry == "flush" {
+			seen = true
+			continue
+		}
+		if seen {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// stalledTransport waits until its context ends and answers
+// nothing.
+type stalledTransport struct{}
+
+func (stalledTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	<-ctx.Done()
+	return nil, poo.Rendered{}, ctx.Err()
+}
+
+func (stalledTransport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// newFix1Session builds a session whose store records the order of the
+// writes.
+func newFix1Session(t *testing.T, sink poo.RecordSink) *poo.Session {
+	t.Helper()
+	sess, err := poo.New(poo.Options{
+		Transport:    stalledTransport{},
+		Sink:         sink,
+		SessionID:    "s1",
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		SystemPrompt: "the system prompt",
+		WorkingDir:   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	return sess
+}
+
+// TestACloseThatBeatsAPromptReservationWritesNothing covers the
+// admission boundary: a prompt whose reservation the close found is
+// refused before it installs a run, so nothing appends after the
+// close's flush.
+func TestACloseThatBeatsAPromptReservationWritesNothing(t *testing.T) {
+	sink := &orderedSink{}
+	sess := newFix1Session(t, sink)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	restore := sess.SetJobRaceHooks(&poo.JobRaceHooks{
+		BeforeRunStart: func() {
+			close(entered)
+			<-release
+		},
+	})
+	defer restore()
+
+	prompted := make(chan error, 1)
+	go func() {
+		_, err := sess.Prompt(context.Background(), "hi")
+		prompted <- err
+	}()
+
+	<-entered
+	if err := sess.Close(); err != nil {
+		t.Fatalf("the close failed: %v", err)
+	}
+	close(release)
+
+	if err := <-prompted; !errors.Is(err, poo.ErrSessionClosed) {
+		t.Fatalf("the prompt failed with %v, want ErrSessionClosed", err)
+	}
+	if late := sink.afterFlush(); len(late) > 0 {
+		t.Fatalf("the session wrote %v after the close's flush", late)
+	}
+}
+
+// TestAConcurrentCloseAndPromptWriteNothingAfterTheFlush proves the
+// close ordering's fence: a prompt that races the close either loses
+// the race or is finalized by it, so nothing appends after the flush.
+func TestAConcurrentCloseAndPromptWriteNothingAfterTheFlush(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		sink := &orderedSink{}
+		sess := newFix1Session(t, sink)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = sess.Prompt(context.Background(), "hi")
+		}()
+		go func() {
+			defer wg.Done()
+			_ = sess.Close()
+		}()
+		wg.Wait()
+		if late := sink.afterFlush(); len(late) > 0 {
+			t.Fatalf("iteration %d: the session wrote %v after the close's flush", i, late)
+		}
+		if err := sess.Close(); err != nil {
+			t.Fatalf("iteration %d: the second close failed: %v", i, err)
+		}
+	}
+}
+
+// TestCloseRacingAJobCompletionEndsItOnce covers the close with
+// jobs: a close that races a job's completion leaves exactly one
+// job.ended record per job.
+func TestCloseRacingAJobCompletionEndsItOnce(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		tr := scripted([]fakeResponse{
+			{calls: []poo.ToolCall{jobCall("one", true)}},
+			{text: "the answer"},
+		})
+		sink := &recordingSink{}
+		tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+		tool.SetResult("the job's output")
+		sess, err := poo.New(jobOptions(t, tr, tool, sink))
+		if err != nil {
+			t.Fatalf("iteration %d: building the session: %v", i, err)
+		}
+		if _, err := sess.Prompt(context.Background(), "start the job"); err != nil {
+			t.Fatalf("iteration %d: starting the run: %v", i, err)
+		}
+		<-tool.Started()
+		waitFor(t, "the run to wait", func() bool {
+			return sess.State() == poo.StateWaiting
+		})
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			tool.ReleaseAll()
+		}()
+		go func() {
+			defer wg.Done()
+			_ = sess.Close()
+		}()
+		wg.Wait()
+
+		if got := sink.count("job.ended"); got != 1 {
+			t.Fatalf("iteration %d: the log holds %d job.ended record(s), want 1; records: %v", i, got, sink.Names())
+		}
+	}
+}
+
+// sealSink holds a hook's first message write and lets the second
+// one race the run's seal.
+type sealSink struct {
+	recordingSink
+	first        chan struct{}
+	releaseFirst chan struct{}
+	settled      chan struct{}
+	once         sync.Once
+}
+
+// Append holds the first hook message until the test releases it, and
+// the second one until the run settles or its write is ended.
+func (s *sealSink) Append(ctx context.Context, rec poo.Record) error {
+	if m, ok := rec.(*poo.MessageRecord); ok && len(m.Content) > 0 {
+		switch m.Content[0].Text {
+		case "first hook message":
+			close(s.first)
+			select {
+			case <-s.releaseFirst:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		case "second hook message":
+			select {
+			case <-s.settled:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	err := s.recordingSink.Append(ctx, rec)
+	if rec.Meta().Record == "run.settled" {
+		s.once.Do(func() { close(s.settled) })
+	}
+	return err
+}
+
+// TestAClaimedHookWriteIsEndedAtTheSeal covers the seal: a hook
+// write claimed before finalization is waited for, and the seal ends it,
+// so it never lands after run.settled. The history mutation follows only
+// a successful record write.
+func TestAClaimedHookWriteIsEndedAtTheSeal(t *testing.T) {
+	sink := &sealSink{first: make(chan struct{}), releaseFirst: make(chan struct{}), settled: make(chan struct{})}
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.BeforeRun = []poo.BeforeRunHook{beforeRunFunc(func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error) {
+		return poo.StartDecision{Append: []poo.Message{
+			poo.NewTextMessage(poo.RoleUser, "first hook message"),
+			poo.NewTextMessage(poo.RoleUser, "second hook message"),
+		}}, nil
+	})}
+	s := newTestSession(t, opts)
+	poo.SetRecordWriteBudget(s, 80*time.Millisecond)
+	promptDone := make(chan struct{})
+	cancelDone := make(chan struct{})
+	go func() { defer close(promptDone); _, _ = s.Prompt(context.Background(), "start") }()
+	<-sink.first
+	go func() { defer close(cancelDone); s.Cancel("cancel:review") }()
+	waitFor(t, "settling", func() bool { return s.State() == poo.StateSettling })
+	close(sink.releaseFirst)
+	<-promptDone
+	<-cancelDone
+
+	sealed := false
+	for _, rec := range sink.allRecords() {
+		if sealed {
+			if m, ok := rec.(*poo.MessageRecord); ok && len(m.Content) > 0 && m.Content[0].Text == "second hook message" {
+				t.Error("a claimed hook record was appended after run.settled")
+			}
+		}
+		if rec.Meta().Record == "run.settled" {
+			sealed = true
+		}
+	}
+}
+
+// TestStartupWritesNothingAfterTheSeal covers the seal: a
+// cancellation during the prompt render settles the run, and the
+// startup writes nothing else for it.
+//
+// The session renders its prompt when it is built, so the run's render is
+// the one of the prompt a hook edited: the build's render is the first
+// call, and the run's is the second.
+func TestStartupWritesNothingAfterTheSeal(t *testing.T) {
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	sink := &recordingSink{}
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	renders := 0
+	opts.Prompt = []func(*prompt.Builder){func(b *prompt.Builder) {
+		b.SetRender("base", func(prompt.Env) string {
+			renders++
+			if renders < 2 {
+				return ""
+			}
+			close(entered)
+			<-release
+			return ""
+		})
+	}}
+	opts.BeforeRun = []poo.BeforeRunHook{beforeRunFunc(func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error) {
+		return poo.StartDecision{SystemPrompt: func(s prompt.Sections) {
+			s.Append("base", "the hook's edit")
+		}}, nil
+	})}
+	s := newTestSession(t, opts)
+	go func() {
+		defer close(done)
+		_, _ = s.Prompt(context.Background(), "late user prompt")
+	}()
+	<-entered
+	s.Cancel("cancel:review")
+	close(release)
+	<-done
+
+	settled := false
+	for _, name := range sink.Names() {
+		if settled {
+			t.Errorf("record %s appended after run.settled; order=%v", name, sink.Names())
+		}
+		if name == "run.settled" {
+			settled = true
+		}
+	}
+	for _, m := range sink.messages() {
+		if m.Role == poo.RoleUser && len(m.Content) > 0 && m.Content[0].Text == "late user prompt" {
+			t.Error("the late user prompt was recorded after the seal")
+		}
+	}
+}
+
+// TestCloseIsBoundedWithTwoStalledObservers covers the shutdown
+// bound: the 2s deadline is one deadline for the whole wait, so a second
+// stalled observer does not wait for another timeout.
+func TestCloseIsBoundedWithTwoStalledObservers(t *testing.T) {
+	first := &stallingObserver{name: "first", entered: make(chan struct{}), release: make(chan struct{})}
+	second := &stallingObserver{name: "second", entered: make(chan struct{}), release: make(chan struct{})}
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Observers = []poo.Observer{first, second}
+	s := newTestSession(t, opts)
+	runSession(t, s, "start")
+	<-first.entered
+	<-second.entered
+	done := make(chan struct{})
+	go func() { defer close(done); _ = s.Close() }()
+	select {
+	case <-done:
+	case <-time.After(2300 * time.Millisecond):
+		t.Error("Close still blocked after 2.3s with two stalled observers")
+	}
+	close(first.release)
+	close(second.release)
+	<-done
+}
+
+// TestTheObserverDropDiagnosticIsRecordOnly covers the rule: the
+// coalesced overflow diagnostic is written to the record only. It is not
+// an event, so a client never receives it.
+func TestTheObserverDropDiagnosticIsRecordOnly(t *testing.T) {
+	restoreBuffer := poo.SetObserverBuffer(1)
+	defer restoreBuffer()
+	restoreInterval := poo.SetObserverDropInterval(20 * time.Millisecond)
+	defer restoreInterval()
+	observer := &stallingObserver{name: "stalled", entered: make(chan struct{}), release: make(chan struct{})}
+	tr := scripted([]fakeResponse{{text: "done"}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Observers = []poo.Observer{observer}
+	s := newTestSession(t, opts)
+	runSession(t, s, "start")
+	<-observer.entered
+	waitFor(t, "the overflow record", func() bool { return sink.count("observer.dropped") > 0 })
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventObserverDropped {
+			t.Errorf("the overflow diagnostic was emitted as an event: %+v", ev)
+		}
+	}
+	close(observer.release)
 }

@@ -392,7 +392,7 @@ func TestAFinalMessageChunkIsRead(t *testing.T) {
 // TestAStreamThatBreaksAfterItsDeltaKeepsItsKind covers the
 // reclassification: a stream that breaks after a delta cannot be
 // retried, so the failure says so, and the kind it had before stays in
-// the code, where the plan keeps it.
+// the code.
 func TestAStreamThatBreaksAfterItsDeltaKeepsItsKind(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -479,5 +479,40 @@ func TestAStreamThatBreaksBeforeItsDeltaIsNetwork(t *testing.T) {
 	}
 	if pe.Kind != poo.ProviderKindNetwork {
 		t.Errorf("the failure's kind is %q, want network", pe.Kind)
+	}
+}
+
+// TestTextWithAToolCallsFinishIsNotAFailure covers the plan's
+// guard on the empty-tool_calls failure: a response that carries text
+// and ends with finish_reason "tool_calls" is an answer, not a server
+// failure.
+//
+// No shipped test covers this: the text fixtures end with "stop".
+func TestTextWithAToolCallsFinishIsNotAFailure(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"I will run the tests."},"finish_reason":null}]}`) +
+		chunk(`{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`) +
+		done
+	srv := newSSEServer(t, body)
+	tr := openai.New(fastRetry(openai.Options{Endpoint: srv.URL, Model: "m"}))
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	var last error
+	for {
+		_, err := reader.Next()
+		if err != nil {
+			last = err
+			break
+		}
+	}
+	if last != nil && last.Error() != "EOF" {
+		t.Fatalf("the stream failed: %v", last)
+	}
+	if len(srv.requests) != 1 {
+		t.Errorf("the endpoint got %d requests, want 1", len(srv.requests))
 	}
 }

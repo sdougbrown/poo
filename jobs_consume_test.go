@@ -17,7 +17,7 @@ import (
 // when its delivered message is recorded, and a drain that fails leaves
 // the results queued, in order.
 
-// TestAFailedDeliveryLeavesTheResultQueued covers the plan's rule: a
+// TestAFailedDeliveryLeavesTheResultQueued covers the rule: a
 // drain that fails to write leaves the results queued, in order.
 func TestAFailedDeliveryLeavesTheResultQueued(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -50,7 +50,7 @@ func TestAFailedDeliveryLeavesTheResultQueued(t *testing.T) {
 	})
 }
 
-// TestTheJobResultIsDeliveredInCompletionOrder covers the plan's rule:
+// TestTheJobResultIsDeliveredInCompletionOrder covers the rule:
 // the job queue drains in completion order.
 func TestTheJobResultIsDeliveredInCompletionOrder(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -133,7 +133,7 @@ func countJobDeliveries(sink *recordingSink) int {
 	return n
 }
 
-// TestTheJobsToolListsTheHeldJobs covers the plan's rule: the jobs tool
+// TestTheJobsToolListsTheHeldJobs covers the rule: the jobs tool
 // lists the running and the held jobs.
 func TestTheJobsToolListsTheHeldJobs(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -175,7 +175,7 @@ func TestTheJobsToolListsTheHeldJobs(t *testing.T) {
 	}
 }
 
-// TestCancelJobOnAnUnknownJobIsReported covers the plan's rule: a job
+// TestCancelJobOnAnUnknownJobIsReported covers the rule: a job
 // that is unknown or already finished is not a failure of the call.
 func TestCancelJobOnAnUnknownJobIsReported(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -301,7 +301,7 @@ func TestWaitJobsEndsWhenTheSessionIsBroken(t *testing.T) {
 	}
 }
 
-// TestAJobResultDuringCompactingStaysQueued covers the plan's rule: a
+// TestAJobResultDuringCompactingStaysQueued covers the rule: a
 // result that arrives while the view is compacting stays queued, and it
 // is drained at the next turn end.
 func TestAJobResultDuringCompactingStaysQueued(t *testing.T) {
@@ -414,7 +414,7 @@ func TestWaitJobsWaitsForAWokenRun(t *testing.T) {
 	_, _ = s.Wait(context.Background())
 }
 
-// TestWaitRunAnswersForTheClientsRun covers the plan's one-shot output:
+// TestWaitRunAnswersForTheClientsRun covers the one-shot output:
 // the client reads the run it asked for, even when a later woken run is
 // active.
 func TestWaitRunAnswersForTheClientsRun(t *testing.T) {
@@ -457,7 +457,7 @@ func TestWaitRunAnswersForTheClientsRun(t *testing.T) {
 	_, _ = s.Wait(context.Background())
 }
 
-// TestTheJobsToolListsOnlyRunningAndHeldJobs covers the plan's rule: the
+// TestTheJobsToolListsOnlyRunningAndHeldJobs covers the rule: the
 // jobs tool lists the running and the held jobs. A delivered result is
 // neither, and a held result is listed once.
 func TestTheJobsToolListsOnlyRunningAndHeldJobs(t *testing.T) {

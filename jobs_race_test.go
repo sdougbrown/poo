@@ -20,7 +20,7 @@ import (
 // deciding when the boundary is reached. Nothing sleeps.
 
 // TestAJobFinishingBeforeTheWaitingEntrySendsTheRunToTheGate covers
-// the plan's race: a job that finishes between the step 2 drain and
+// the race: a job that finishes between the step 2 drain and
 // the waiting entry sends the run to the gate, not to waiting.
 func TestAJobFinishingBeforeTheWaitingEntrySendsTheRunToTheGate(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -87,7 +87,7 @@ func TestAJobFinishingBeforeTheWaitingEntrySendsTheRunToTheGate(t *testing.T) {
 }
 
 // TestAJobFinishingBeforeTheFinalizeCheckAbandonsTheFinalize covers
-// the plan's race: a job result that arrives before finalize step 1
+// the race: a job result that arrives before finalize step 1
 // abandons a natural-only finalize, like a late steer.
 //
 // The job belongs to an earlier run, so the run that settles is free to
@@ -167,8 +167,7 @@ func TestAJobFinishingBeforeTheFinalizeCheckAbandonsTheFinalize(t *testing.T) {
 	}
 }
 
-// TestAJobFinishingAfterTheCommitWakesAfterTheSettle covers the
-// plan's race: a result that arrives after the commit point stays
+// TestAJobFinishingAfterTheCommitWakesAfterTheSettle covers the race: a result that arrives after the commit point stays
 // queued and wakes the session after the run has settled.
 func TestAJobFinishingAfterTheCommitWakesAfterTheSettle(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -244,7 +243,7 @@ func TestAJobFinishingAfterTheCommitWakesAfterTheSettle(t *testing.T) {
 	})
 }
 
-// TestAJobResultNeverReopensASettlingRun covers the plan's rule: a
+// TestAJobResultNeverReopensASettlingRun covers the rule: a
 // result that arrives while the run settles never reopens it, and a
 // run with a max_turns candidate settles as max_turns.
 func TestAJobResultNeverReopensASettlingRun(t *testing.T) {
@@ -289,7 +288,7 @@ func TestAJobResultNeverReopensASettlingRun(t *testing.T) {
 	}
 }
 
-// TestAWakeRacingAPromptStartsOneRun covers the plan's race: a wake
+// TestAWakeRacingAPromptStartsOneRun covers the race: a wake
 // and a concurrent prompt race for one reservation, and exactly one run
 // starts.
 //
@@ -357,8 +356,7 @@ func TestAWakeRacingAPromptStartsOneRun(t *testing.T) {
 	}
 }
 
-// TestAConcurrentPromptIsRefusedWhileTheSessionIsBusy covers the
-// plan's rule: a second prompt while a run is active is refused with
+// TestAConcurrentPromptIsRefusedWhileTheSessionIsBusy covers the rule: a second prompt while a run is active is refused with
 // busy, and nothing is accepted.
 func TestAConcurrentPromptIsRefusedWhileTheSessionIsBusy(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -391,8 +389,7 @@ func TestAConcurrentPromptIsRefusedWhileTheSessionIsBusy(t *testing.T) {
 	}
 }
 
-// TestConcurrentStartsAtTheLimitAdmitExactlyTheLimit covers the
-// plan's rule: two calls that race for the last slot admit exactly one
+// TestConcurrentStartsAtTheLimitAdmitExactlyTheLimit covers the rule: two calls that race for the last slot admit exactly one
 // of them.
 func TestConcurrentStartsAtTheLimitAdmitExactlyTheLimit(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -440,7 +437,7 @@ func TestConcurrentStartsAtTheLimitAdmitExactlyTheLimit(t *testing.T) {
 	}
 }
 
-// TestABeforeToolDenialStartsNoJob covers the plan's rule: a refused
+// TestABeforeToolDenialStartsNoJob covers the rule: a refused
 // call never becomes a job.
 func TestABeforeToolDenialStartsNoJob(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -469,7 +466,7 @@ func TestABeforeToolDenialStartsNoJob(t *testing.T) {
 	}
 }
 
-// TestABeforeToolResultStartsNoJob covers the plan's rule: a hook that
+// TestABeforeToolResultStartsNoJob covers the rule: a hook that
 // answers the call itself never starts a job.
 func TestABeforeToolResultStartsNoJob(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -498,7 +495,7 @@ func TestABeforeToolResultStartsNoJob(t *testing.T) {
 	}
 }
 
-// TestTheToolCallRecordKeepsTheMode covers the plan's rule: the
+// TestTheToolCallRecordKeepsTheMode covers the rule: the
 // tool.call record keeps the original arguments and says how the call
 // ran.
 func TestTheToolCallRecordKeepsTheMode(t *testing.T) {
@@ -570,7 +567,7 @@ func (h *blockingBeforeToolHook) BeforeTool(ctx poo.HookContext, info poo.ToolCa
 	return poo.Allow(), nil
 }
 
-// TestNoJobStartsAfterTheCommitPoint covers the plan's rule: no new
+// TestNoJobStartsAfterTheCommitPoint covers the rule: no new
 // effect starts after the commit point. A cancel that commits while a
 // before-tool hook runs must not let the call become a job.
 func TestNoJobStartsAfterTheCommitPoint(t *testing.T) {
@@ -658,7 +655,7 @@ func TestNoJobLaunchesAfterTheSettle(t *testing.T) {
 	}
 }
 
-// TestARefusedBackgroundCallIsRecordedSync covers the plan's rule: a
+// TestARefusedBackgroundCallIsRecordedSync covers the rule: a
 // BeforeTool denial or Result never creates a job, so the call's record
 // says sync.
 func TestARefusedBackgroundCallIsRecordedSync(t *testing.T) {

@@ -6,8 +6,7 @@ import (
 	"github.com/sdougbrown/poo/exec"
 )
 
-// TestTheEnvironmentLosesTheScrubbedNames covers the plan's
-// environment rules: the names and the globs are gone, and a
+// TestTheEnvironmentLosesTheScrubbedNames covers the environment rules: the names and the globs are gone, and a
 // passthrough limits the environment to the names on it.
 func TestTheEnvironmentLosesTheScrubbedNames(t *testing.T) {
 	base := []string{
@@ -33,7 +32,7 @@ func TestTheEnvironmentLosesTheScrubbedNames(t *testing.T) {
 	}
 }
 
-// TestAPassthroughLimitsTheEnvironment covers the plan's passthrough:
+// TestAPassthroughLimitsTheEnvironment covers the passthrough:
 // the environment holds exactly the names on it.
 func TestAPassthroughLimitsTheEnvironment(t *testing.T) {
 	base := []string{"POO_TEST_KEEP=kept", "POO_TEST_OTHER=dropped"}

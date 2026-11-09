@@ -11,7 +11,7 @@ import (
 
 // The origin of a tool call.
 //
-// The plan: a call the model wrote as text and a transport read out of
+// A call the model wrote as text and a transport read out of
 // it is flagged "parsed_text", and the flag reaches the record.
 
 // originTransport asks for a tool once and then answers.

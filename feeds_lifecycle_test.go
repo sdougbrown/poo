@@ -271,7 +271,7 @@ func TestACancelDuringTheBackoffStopsTheFeed(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	// The attempt fails once the test's delay is in place: the wait the
-	// cancel interrupts is the seam's, not the plan's.
+	// cancel interrupts belongs to the feed's restart, not to the run.
 	fail := make(chan struct{})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
 		Name:    "inbox",
@@ -759,7 +759,7 @@ func TestTheCloseDuringTheRestartWait(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
 	sink := &recordingSink{}
 	// The attempt fails once the test's delay is in place: the wait the
-	// close cuts short is the seam's, not the plan's.
+	// close cuts short belongs to the feed's restart, not to the run.
 	fail := make(chan struct{})
 	s := newTestSession(t, testOptions(t, tr, &echoTool{}, sink), poo.WithFeeds(poo.FeedSpec{
 		Name:    "inbox",

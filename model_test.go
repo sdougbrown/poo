@@ -104,7 +104,7 @@ func TestEveryBlockTypeIsRepresentable(t *testing.T) {
 }
 
 // TestAMessageCarriesItsIdOriginAndDeliveryNote covers the three fields
-// the plan adds to a message: the session-monotonic id, the origin and
+// the record adds to a message: the session-monotonic id, the origin and
 // the delivery note.
 func TestAMessageCarriesItsIdOriginAndDeliveryNote(t *testing.T) {
 	msg := poo.Message{

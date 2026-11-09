@@ -17,7 +17,7 @@ import (
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
-// stdinPtr returns a pointer to the input, the way a plan that binds input
+// stdinPtr returns a pointer to the input, the way an input binding
 // carries it.
 func stdinPtr(s string) *string { return &s }
 

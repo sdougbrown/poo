@@ -2,6 +2,7 @@ package openai_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -342,4 +343,34 @@ func itoa(n int64) string {
 		b[i] = '-'
 	}
 	return string(b[i:])
+}
+
+// TestATransportTimeoutIsANetworkFailure covers the kind table: a
+// timeout the transport imposed is a network failure, not the run's own
+// cancellation.
+func TestATransportTimeoutIsANetworkFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		time.Sleep(200 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	tr := openai.New(openai.Options{
+		Endpoint: srv.URL,
+		Model:    "m",
+		Timeout:  30 * time.Millisecond,
+	})
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err == nil {
+		t.Fatal("the request succeeded, want the timeout to end it")
+	}
+	var perr *poo.ProviderError
+	if !errors.As(err, &perr) {
+		t.Fatalf("the failure is %T (%v), want a provider error", err, err)
+	}
+	if perr.Kind != poo.ProviderKindNetwork {
+		t.Errorf("the failure's kind is %q, want network", perr.Kind)
+	}
 }

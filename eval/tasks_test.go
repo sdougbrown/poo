@@ -51,9 +51,9 @@ func runCheck(t *testing.T, taskDir, workdir, sessionLog, changed string) int {
 	return 1
 }
 
-// The task set's shape is the plan's: twelve coding fixes, five
+// The task set's shape: twelve coding fixes, five
 // find-and-explain questions, and three long tasks.
-func TestTheTaskSetHasThePlanShape(t *testing.T) {
+func TestTheTaskSetShape(t *testing.T) {
 	root := repoRoot(t)
 	tasks, err := LoadTasks(filepath.Join(root, "evals", "tasks"))
 	if err != nil {

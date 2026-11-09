@@ -16,8 +16,7 @@ import (
 // idle, the unattended-wake limit, a mixed batch, and the failures a
 // job's end can have.
 
-// TestTwoResultsFinishingWhileIdleStartOneWokenRun covers the plan's
-// rule: two results that finish while the session is idle start one
+// TestTwoResultsFinishingWhileIdleStartOneWokenRun covers the rule:: two results that finish while the session is idle start one
 // woken run that carries both.
 func TestTwoResultsFinishingWhileIdleStartOneWokenRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -102,7 +101,7 @@ func TestTwoResultsFinishingWhileIdleStartOneWokenRun(t *testing.T) {
 	}
 }
 
-// TestTheWakeLimitHoldsTheResultsPastTheLimit covers the plan's rule:
+// TestTheWakeLimitHoldsTheResultsPastTheLimit covers the rule:
 // the third unattended wake in a row is held with input.held and the
 // reason wake_limit.
 //
@@ -141,7 +140,7 @@ func TestTheWakeLimitHoldsTheResultsPastTheLimit(t *testing.T) {
 	_ = s
 }
 
-// TestAClientMessageResetsTheWakeCount covers the plan's rule: any
+// TestAClientMessageResetsTheWakeCount covers the rule: any
 // client input resets the count of the unattended wakes.
 func TestAClientMessageResetsTheWakeCount(t *testing.T) {
 	s, sink, tool := wakeLimitSession(t, 1)
@@ -247,8 +246,7 @@ func wakeLimitSession(t *testing.T, limit int) (*poo.Session, *recordingSink, *p
 	return s, sink, tool
 }
 
-// TestAJobThatFailsFatallyWhileIdleWakesARunThatSettles covers the
-// plan's rule: a job that fails fatally while the session is idle
+// TestAJobThatFailsFatallyWhileIdleWakesARunThatSettles covers the rule: a job that fails fatally while the session is idle
 // wakes a run that settles tool_fatal with no request.
 func TestAJobThatFailsFatallyWhileIdleWakesARunThatSettles(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -300,7 +298,7 @@ func TestAJobThatFailsFatallyWhileIdleWakesARunThatSettles(t *testing.T) {
 	}
 }
 
-// TestASinkFailureOnTheJobEndBreaksTheSession covers the plan's rule: a
+// TestASinkFailureOnTheJobEndBreaksTheSession covers the rule: a
 // sink failure while the job's end is written breaks the session, and
 // no wake happens.
 func TestASinkFailureOnTheJobEndBreaksTheSession(t *testing.T) {
@@ -344,8 +342,7 @@ func TestASinkFailureOnTheJobEndBreaksTheSession(t *testing.T) {
 	_ = firstRunID
 }
 
-// TestTheHeldResultIsDeliveredBeforeTheNextPrompt covers the plan's
-// rule: a held result is delivered at the start of the next run, before
+// TestTheHeldResultIsDeliveredBeforeTheNextPrompt covers the rule:: a held result is delivered at the start of the next run, before
 // the prompt's text.
 func TestTheHeldResultIsDeliveredBeforeTheNextPrompt(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -411,7 +408,7 @@ func TestTheHeldResultIsDeliveredBeforeTheNextPrompt(t *testing.T) {
 	_ = firstRunID
 }
 
-// TestTheJobLimitIsPerSession covers the plan's rule: the limit is per
+// TestTheJobLimitIsPerSession covers the rule: the limit is per
 // session, so two runs' jobs share it.
 func TestTheJobLimitIsPerSession(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -464,7 +461,7 @@ func TestTheJobLimitIsPerSession(t *testing.T) {
 	}
 }
 
-// TestAMixedBatchRunsTheJobAndTheCall covers the plan's rule: a batch
+// TestAMixedBatchRunsTheJobAndTheCall covers the rule: a batch
 // with a job and an ordinary call runs both, and the ordinary call does
 // not wait for the job.
 func TestAMixedBatchRunsTheJobAndTheCall(t *testing.T) {
@@ -508,7 +505,7 @@ func TestAMixedBatchRunsTheJobAndTheCall(t *testing.T) {
 	}
 }
 
-// TestTheJobsOptionsMatchTheSettings covers the plan's rule: WithJobs
+// TestTheJobsOptionsMatchTheSettings covers the rule: WithJobs
 // and the jobs settings produce the same behavior.
 func TestTheJobsOptionsMatchTheSettings(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -536,7 +533,7 @@ func TestTheJobsOptionsMatchTheSettings(t *testing.T) {
 	}
 }
 
-// TestAJobEndStoreFailureSettlesAWaitingRun covers the plan's rule: a
+// TestAJobEndStoreFailureSettlesAWaitingRun covers the rule: a
 // sink failure while job.ended is written gives the active run the
 // store_error candidate, so a waiting run settles instead of waiting
 // forever.
@@ -569,7 +566,7 @@ func TestAJobEndStoreFailureSettlesAWaitingRun(t *testing.T) {
 	}
 }
 
-// TestAJobStoreFailureSettlesTheCurrentRun covers the plan's rule: a
+// TestAJobStoreFailureSettlesTheCurrentRun covers the rule: a
 // job record failure terminates whichever uncommitted run is active,
 // even when the job came from an earlier run.
 func TestAJobStoreFailureSettlesTheCurrentRun(t *testing.T) {

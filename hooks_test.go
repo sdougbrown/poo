@@ -8,12 +8,12 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 )
 
-// The hook decisions are the plan's: a before-tool hook allows, denies or
+// The hook decisions: a before-tool hook allows, denies or
 // short-circuits; an after-tool hook keeps, annotates, replaces or
 // redacts; a before-settle hook accepts, continues or stops.
 
 // TestTheToolDecisions covers the before-tool decisions: the zero value
-// allows, and each named decision reads the way the plan says.
+// allows, and each named decision reads the way its name says.
 func TestTheToolDecisions(t *testing.T) {
 	allow := poo.Allow()
 	if !allow.Allowed || allow.Denied {
@@ -117,7 +117,7 @@ func TestTheTurnDecisions(t *testing.T) {
 }
 
 // TestTheHookInterfacesAreThePlanShapes covers the hook points: a value
-// that implements the plan's interface satisfies it.
+// that implements the interface satisfies it.
 func TestTheHookInterfacesAreThePlanShapes(t *testing.T) {
 	var (
 		_ poo.SessionStartHook = sessionStartHook{}
@@ -246,9 +246,8 @@ func (s *fakeSections) Replace(text string) {
 // Names returns the section names.
 func (s *fakeSections) Names() []string { return s.names }
 
-// TestTheEventNamesAreThePlanNames covers the event names: the set the
-// plan names, spelled the way the wire spells them.
-func TestTheEventNamesAreThePlanNames(t *testing.T) {
+// TestTheEventNames covers the event names: the set, spelled the way the wire spells them.
+func TestTheEventNames(t *testing.T) {
 	cases := map[poo.EventName]string{
 		poo.EventRunStarted:      "run.started",
 		poo.EventRunSettled:      "run.settled",

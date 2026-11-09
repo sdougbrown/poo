@@ -96,7 +96,7 @@ func (o *failingOnceObserver) Observe(poo.Event) error {
 // HookName names the observer.
 func (*failingOnceObserver) HookName() string { return "flaky" }
 
-// TestAnObserverErrorIsLoggedOnce covers the plan's observer row: an
+// TestAnObserverErrorIsLoggedOnce covers the observer row: an
 // observer's error is logged with the session, the observer and the
 // event it failed on, and the run carries on.
 func TestAnObserverErrorIsLoggedOnce(t *testing.T) {
@@ -152,7 +152,7 @@ func (s *lateCandidateSink) Append(ctx context.Context, rec poo.Record) error {
 	return s.recordingSink.Append(ctx, rec)
 }
 
-// TestACandidateAfterTheCommitIsLogged covers the plan's rule that a
+// TestACandidateAfterTheCommitIsLogged covers the rule that a
 // candidate arriving after the commit point is logged and ignored.
 func TestACandidateAfterTheCommitIsLogged(t *testing.T) {
 	logger, capture := newCaptureLogger()
@@ -201,7 +201,7 @@ func TestACandidateAfterTheCommitIsLogged(t *testing.T) {
 	}
 }
 
-// TestALateToolResultIsLogged covers the plan's rule that a run-owned
+// TestALateToolResultIsLogged covers the rule that a run-owned
 // completion arriving after the commit point is dropped and logged.
 func TestALateToolResultIsLogged(t *testing.T) {
 	logger, capture := newCaptureLogger()
@@ -271,4 +271,142 @@ func TestANilLoggerIsSafe(t *testing.T) {
 	}
 	// The cleanup closes the session, which also logs through the nil
 	// logger.
+}
+
+// lateAfterTurnHook blocks until it is released or its activity ends.
+type lateAfterTurnHook struct {
+	mu      sync.Mutex
+	runs    int
+	entered chan struct{}
+}
+
+func (h *lateAfterTurnHook) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) {
+	h.mu.Lock()
+	h.runs++
+	first := h.runs == 1
+	h.mu.Unlock()
+	if first {
+		close(h.entered)
+		<-ctx.Done()
+		return poo.TurnDecision{Append: []poo.Message{poo.NewTextMessage(poo.RoleUser, "late")}}, nil
+	}
+	return poo.TurnDecision{}, nil
+}
+
+// TestALateAfterTurnDecisionIsLogged covers the rule that a hook
+// decision that arrives after its activity ended is logged.
+func TestALateAfterTurnDecisionIsLogged(t *testing.T) {
+	logger, capture := newCaptureLogger()
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Logger = logger
+	h := &lateAfterTurnHook{entered: make(chan struct{})}
+	opts.AfterTurn = []poo.AfterTurnHook{h}
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatal(err)
+	}
+	<-h.entered
+	if _, err := s.Send("stop", poo.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the late hook decision", func() bool {
+		return len(capture.find("hook decision after the activity ended")) == 1
+	})
+	got := capture.find("hook decision after the activity ended")
+	if len(got) != 1 {
+		t.Fatalf("the logger holds %d late hook decisions, want 1", len(got))
+	}
+	if got[0].attrs["point"] != "after_turn" {
+		t.Errorf("the late decision names point %v, want after_turn", got[0].attrs["point"])
+	}
+}
+
+// lateResponseTransport serves one response that never finishes.
+type lateResponseTransport struct {
+	poo.ChatTransport
+	started chan struct{}
+}
+
+func (tr *lateResponseTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	return &heldToolCallReader{ctx: ctx, started: tr.started}, poo.Rendered{API: poo.APIChatCompletions}, nil
+}
+
+// TestALateProviderResponseIsLoggedOnce covers the rule: a late
+// provider response is dropped and logged once, never per delta.
+func TestALateProviderResponseIsLoggedOnce(t *testing.T) {
+	logger, capture := newCaptureLogger()
+	tr := &lateResponseTransport{
+		ChatTransport: scripted([]fakeResponse{{text: "done"}}),
+		started:       make(chan struct{}),
+	}
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Logger = logger
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatal(err)
+	}
+	<-tr.started
+	s.Cancel("late:response")
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the late provider response", func() bool {
+		return len(capture.find("provider response after commit point")) == 1
+	})
+	if got := len(capture.find("provider response after commit point")); got != 1 {
+		t.Fatalf("the logger holds %d late provider responses, want 1", got)
+	}
+}
+
+// blockingLogHandler blocks in Handle until it is released.
+type blockingLogHandler struct {
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func (h *blockingLogHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *blockingLogHandler) Handle(context.Context, slog.Record) error {
+	h.once.Do(func() { close(h.entered) })
+	<-h.release
+	return nil
+}
+func (h *blockingLogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *blockingLogHandler) WithGroup(string) slog.Handler      { return h }
+
+// TestLoggerDoesNotBlockClose covers the rule that a blocking slog
+// handler never holds a core control path.
+func TestLoggerDoesNotBlockClose(t *testing.T) {
+	h := &blockingLogHandler{entered: make(chan struct{}), release: make(chan struct{})}
+	tr := scripted([]fakeResponse{{text: "done"}})
+	sink := &lateCandidateSink{recordingSink: &recordingSink{}, entered: make(chan struct{}), release: make(chan struct{})}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Logger = slog.New(h)
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "start"); err != nil {
+		t.Fatal(err)
+	}
+	<-sink.entered
+	closed := make(chan struct{})
+	go func() {
+		s.Close()
+		close(closed)
+	}()
+	<-h.entered
+	close(sink.release)
+	_, _ = s.Wait(context.Background())
+	blocked := false
+	select {
+	case <-closed:
+	case <-time.After(100 * time.Millisecond):
+		blocked = true
+	}
+	close(h.release)
+	<-closed
+	if blocked {
+		t.Fatal("Close blocked on synchronous Logger after run settled (handler released by test)")
+	}
 }

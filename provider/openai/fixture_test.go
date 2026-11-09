@@ -14,7 +14,7 @@ import (
 
 // The recorded streams.
 //
-// The plan: the transport reads the shapes the endpoints send, in the
+// The transport reads the shapes the endpoints send, in the
 // llama.cpp shape and in the vLLM shape, with and without a usage
 // chunk.
 
@@ -104,7 +104,7 @@ func TestTheRecordedStreamsAreRead(t *testing.T) {
 	}
 }
 
-// TestTheTextToolCallFormatsAreParsed covers the plan's rule: every
+// TestTheTextToolCallFormatsAreParsed covers the rule: every
 // format a model writes its calls in parses into the same call, and the
 // call is flagged as one the model wrote as text.
 //

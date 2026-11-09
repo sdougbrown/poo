@@ -11,7 +11,7 @@ import (
 // The load-time warning names the fallback that will apply when the
 // policy can ask and no asker can ever answer.
 
-// TestTheWarningFiresWhenNoAskerCanEverAnswer covers the plan's rule: a
+// TestTheWarningFiresWhenNoAskerCanEverAnswer covers the rule: a
 // policy that can ask, in a build whose chain can never answer, is
 // warned about at load.
 func TestTheWarningFiresWhenNoAskerCanEverAnswer(t *testing.T) {
@@ -108,7 +108,7 @@ func TestTheWarningFiresForADoomLoopSetToAsk(t *testing.T) {
 // its session, why every ask falls back.
 
 // TestTheWireClientWarningFiresForAClientWithoutTheCapability covers
-// the plan's rule: a policy that can ask, a chain that asks the wire,
+// the rule: a policy that can ask, a chain that asks the wire,
 // and a client that did not declare the permission_answers capability
 // are warned about when the session is built. The warning names the
 // cause and the capability that fixes it.
@@ -196,7 +196,7 @@ func TestTheWireClientWarningIsSilentWhenAnotherAskerCanAnswer(t *testing.T) {
 	}
 }
 
-// TestTheWarningFiresForAnAskRule covers the plan's rule: a rule that
+// TestTheWarningFiresForAnAskRule covers the rule: a rule that
 // asks is an ask too.
 func TestTheWarningFiresForAnAskRule(t *testing.T) {
 	policy, err := perm.New(perm.Options{

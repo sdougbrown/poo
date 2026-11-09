@@ -49,7 +49,7 @@ func answeredRecord(t *testing.T, s *session) *poo.PermissionAnsweredRecord {
 	return found
 }
 
-// TestAnAnswerMessageReachesTheDeniedResult covers the plan's rule: an
+// TestAnAnswerMessageReachesTheDeniedResult covers the rule: an
 // answer that carries a message shows the message to the model, and
 // the log keeps it.
 func TestAnAnswerMessageReachesTheDeniedResult(t *testing.T) {

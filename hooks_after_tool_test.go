@@ -1,9 +1,12 @@
 package poo_test
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 )
@@ -92,7 +95,7 @@ func (h *recordingAfterTool) Seen() []poo.ToolResult {
 	return append([]poo.ToolResult(nil), h.seen...)
 }
 
-// TestAnAnnotationKeepsTheOriginalInTheRecord covers the plan's rule:
+// TestAnAnnotationKeepsTheOriginalInTheRecord covers the rule:
 // an annotation changes what the model reads, and the record keeps the
 // original.
 func TestAnAnnotationKeepsTheOriginalInTheRecord(t *testing.T) {
@@ -126,7 +129,7 @@ func TestAnAnnotationKeepsTheOriginalInTheRecord(t *testing.T) {
 	}
 }
 
-// TestAReplacementKeepsTheOriginalInTheRecord covers the plan's rule:
+// TestAReplacementKeepsTheOriginalInTheRecord covers the rule:
 // the model has not seen the result yet, so the record keeps what the
 // tool really said.
 func TestAReplacementKeepsTheOriginalInTheRecord(t *testing.T) {
@@ -160,7 +163,7 @@ func TestAReplacementKeepsTheOriginalInTheRecord(t *testing.T) {
 	}
 }
 
-// TestARedactionNeverWritesTheOriginal covers the plan's rule: the
+// TestARedactionNeverWritesTheOriginal covers the rule: the
 // original of a redacted result never reaches the record, the events or
 // the store.
 func TestARedactionNeverWritesTheOriginal(t *testing.T) {
@@ -203,7 +206,7 @@ func TestARedactionNeverWritesTheOriginal(t *testing.T) {
 	}
 }
 
-// TestTheChainRunsInRegistrationOrder covers the plan's rule: each
+// TestTheChainRunsInRegistrationOrder covers the rule: each
 // replacement gets the previous hook's output.
 func TestTheChainRunsInRegistrationOrder(t *testing.T) {
 	names := &[]string{}
@@ -235,7 +238,7 @@ func TestTheChainRunsInRegistrationOrder(t *testing.T) {
 	}
 }
 
-// TestARedactionWinsOverAReplacement covers the plan's rule: a
+// TestARedactionWinsOverAReplacement covers the rule: a
 // redaction wins over a replacement in the same decision, and the
 // original never reaches the record.
 func TestARedactionWinsOverAReplacement(t *testing.T) {
@@ -300,4 +303,132 @@ func recordsText(sink *recordingSink) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// TestAStoppedSyncCallStillRunsItsAfterToolChain covers the rule:
+// the after-tool chain runs for every call whose tool ran, on a context
+// of its own, so an interrupt or a cancellation does not bypass a
+// redaction.
+func TestAStoppedSyncCallStillRunsItsAfterToolChain(t *testing.T) {
+	const secret = "s3cr3t-in-a-call"
+	for _, mode := range []string{"interrupt", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			tr := scripted([]fakeResponse{
+				{calls: []poo.ToolCall{backgroundCall("slow", "one")}},
+				{text: "done"},
+			})
+			sink := &recordingSink{}
+			tool := newHoldTool("slow", "the output with "+secret)
+			tool.block = true
+			opts := oneToolOptions(t, tr, tool, sink)
+			hook := &recordingAfterTool{decision: poo.Redact(poo.ToolResult{Text: "[the output was redacted]"})}
+			opts.AfterTool = []poo.AfterToolHook{hook}
+			s := newTestSession(t, opts)
+
+			if _, err := s.Prompt(context.Background(), "go"); err != nil {
+				t.Fatalf("starting the run: %v", err)
+			}
+			<-tool.started
+			switch mode {
+			case "interrupt":
+				if _, err := s.Send("stop", poo.Interrupt); err != nil {
+					t.Fatalf("interrupting the run: %v", err)
+				}
+			case "cancel":
+				s.Cancel("cancel:test")
+			}
+			waitFor(t, "the run to settle", func() bool { return sink.Settled() != nil })
+
+			if got := hook.Calls(); got != 1 {
+				t.Errorf("the chain ran %d time(s), want 1 at the call's completion", got)
+			}
+			rec := toolResultRecord(t, sink)
+			if strings.Contains(rec.Text, secret) {
+				t.Errorf("the tool.result record holds the secret: %q", rec.Text)
+			}
+			for _, ev := range s.Events() {
+				if ev.Name != poo.EventToolResult {
+					continue
+				}
+				text, _ := ev.Payload["text"].(string)
+				if strings.Contains(text, secret) {
+					t.Errorf("the tool.result event holds the secret: %q", text)
+				}
+			}
+			if store := sinkJSON(sink, secret); strings.Contains(store, secret) {
+				t.Errorf("the secret reached the store:\n%s", store)
+			}
+		})
+	}
+}
+
+// TestARedactionSurvivesALaterHookFailure covers the rule: any
+// Redact makes the whole chain redacted, so a hook that fails afterwards
+// must not expose text an earlier decision carried.
+func TestARedactionSurvivesALaterHookFailure(t *testing.T) {
+	const secret = "REVIEW_SECRET_4AB"
+	for _, mode := range []string{"error", "timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			tr := scripted([]fakeResponse{
+				{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{}`)}}},
+				{text: "done"},
+			})
+			sink := &recordingSink{}
+			opts := testOptions(t, tr, &echoTool{result: secret}, sink)
+			opts.HookTimeout = 10 * time.Millisecond
+			opts.AfterTool = []poo.AfterToolHook{
+				afterToolFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+					return poo.Replace(result), nil
+				}),
+				afterToolFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+					return poo.Redact(poo.ToolResult{Text: "safe"}), nil
+				}),
+				afterToolFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+					if mode == "timeout" {
+						<-ctx.Done()
+						return poo.Keep(), ctx.Err()
+					}
+					return poo.Keep(), context.Canceled
+				}),
+			}
+			s := newTestSession(t, opts)
+			runSession(t, s, "start")
+			if store := sinkJSON(sink, secret); strings.Contains(store, secret) {
+				t.Errorf("the redacted secret persisted after %s: %s", mode, store)
+			}
+		})
+	}
+}
+
+// TestAFatalErrorsTextIsTheHookProcessedResult covers the rule:
+// only the hook-processed result is recorded or emitted. A fatal tool
+// error keeps its tool_fatal classification, but its published text is
+// the result the chain returned.
+func TestAFatalErrorsTextIsTheHookProcessedResult(t *testing.T) {
+	const secret = "REVIEW_FATAL_SECRET"
+	tool := &echoTool{call: func(context.Context) (poo.ToolResult, error) {
+		return poo.ToolResult{}, poo.Fatalf("failed with token %s", secret)
+	}}
+	sink := &recordingSink{}
+	tr := scripted([]fakeResponse{{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{}`)}}}})
+	opts := testOptions(t, tr, tool, sink)
+	opts.AfterTool = []poo.AfterToolHook{afterToolFunc(func(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+		return poo.Redact(poo.ToolResult{Text: "safe failure", IsError: true}), nil
+	})}
+	s := newTestSession(t, opts)
+	runSession(t, s, "start")
+
+	if store := sinkJSON(sink, secret); strings.Contains(store, secret) {
+		t.Errorf("the fatal error's secret reached the store: %s", store)
+	}
+	events, _ := json.Marshal(s.Events())
+	if strings.Contains(string(events), secret) {
+		t.Error("the fatal error's secret reached the events")
+	}
+	if got := sink.Settled(); got == nil || got.Reason != poo.ReasonToolFatal {
+		t.Fatalf("the run settled %v, want tool_fatal", got)
+	}
+	if got := sink.Settled().Detail.Text; strings.Contains(got, secret) {
+		t.Errorf("the settle detail holds the secret: %q", got)
+	}
 }

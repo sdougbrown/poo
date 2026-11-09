@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -286,8 +287,7 @@ func TestARecoverableToolErrorLeavesTheRunRunning(t *testing.T) {
 	}
 }
 
-// TestAConcurrentCancelAndStoreFailureArbitrateByPrecedence covers the
-// plan's arbitration rule: a cancel beats a store failure, and the
+// TestAConcurrentCancelAndStoreFailureArbitrateByPrecedence covers the arbitration rule: a cancel beats a store failure, and the
 // session is still broken.
 func TestAConcurrentCancelAndStoreFailureArbitrateByPrecedence(t *testing.T) {
 	tr := newStallingTransport()
@@ -314,7 +314,7 @@ func TestAConcurrentCancelAndStoreFailureArbitrateByPrecedence(t *testing.T) {
 	}
 }
 
-// TestAStuckSinkStillLetsTheWaitersWake covers the plan's bound: a sink
+// TestAStuckSinkStillLetsTheWaitersWake covers the bound: a sink
 // that blocks until its context ends does not hang the run.
 func TestAStuckSinkStillLetsTheWaitersWake(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
@@ -338,7 +338,7 @@ func TestAStuckSinkStillLetsTheWaitersWake(t *testing.T) {
 	}
 }
 
-// TestTheConstructionRollsBack covers the plan's construction row: a
+// TestTheConstructionRollsBack covers the construction row: a
 // `SessionStart` error returns `ErrSessionInit`, the observers are
 // stopped, and nothing is written.
 func TestTheConstructionRollsBack(t *testing.T) {
@@ -401,7 +401,7 @@ func TestTheSessionStartHookAppendsToTheHistory(t *testing.T) {
 	}
 }
 
-// TestEveryIssuedCallGetsAResult covers the plan's rule: a call that
+// TestEveryIssuedCallGetsAResult covers the rule: a call that
 // was issued but has no result gets a synthetic one, so the history
 // stays valid for the next run.
 func TestEveryIssuedCallGetsAResult(t *testing.T) {
@@ -445,7 +445,7 @@ func TestEveryIssuedCallGetsAResult(t *testing.T) {
 	}
 }
 
-// TestALateCompletionDoesNotMutateTheSettledRun covers the plan's rule:
+// TestALateCompletionDoesNotMutateTheSettledRun covers the rule:
 // a completion that arrives after the commit point is dropped.
 func TestALateCompletionDoesNotMutateTheSettledRun(t *testing.T) {
 	release := make(chan struct{})
@@ -489,7 +489,7 @@ func TestALateCompletionDoesNotMutateTheSettledRun(t *testing.T) {
 	}
 }
 
-// TestTheBusyFlagClearsAfterTheRun covers the plan's rule: the busy
+// TestTheBusyFlagClearsAfterTheRun covers the rule: the busy
 // flag clears when the run settles, so a new prompt is accepted.
 func TestTheBusyFlagClearsAfterTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -509,7 +509,7 @@ func TestTheBusyFlagClearsAfterTheRun(t *testing.T) {
 	}
 }
 
-// TestClosingTheSessionCancelsTheRun covers the plan's close ordering:
+// TestClosingTheSessionCancelsTheRun covers the close ordering:
 // an active run is cancelled when the session closes.
 func TestClosingTheSessionCancelsTheRun(t *testing.T) {
 	tr := newStallingTransport()
@@ -722,8 +722,7 @@ func TestAFailingFlushAfterTheSettleIsReported(t *testing.T) {
 	}
 }
 
-// TestAHandleNamesOneCallForTheLifeOfTheSession covers the plan's
-// session-monotonic handles: the second turn's call does not reuse the
+// TestAHandleNamesOneCallForTheLifeOfTheSession covers the session-monotonic handles: the second turn's call does not reuse the
 // first turn's handle, and the second run's does not reuse either.
 func TestAHandleNamesOneCallForTheLifeOfTheSession(t *testing.T) {
 	call := poo.ToolCall{CallID: "call", Name: "echo", Arguments: []byte(`{}`)}
@@ -801,7 +800,7 @@ func TestALosingCandidateIsListedOnce(t *testing.T) {
 	}
 }
 
-// TestAFatalToolErrorSkipsTheRestOfTheBatch covers the plan's rule that
+// TestAFatalToolErrorSkipsTheRestOfTheBatch covers the rule that
 // a fatal error ends the batch: the calls after it do not start, and
 // they get a visible skipped result so the history stays valid.
 func TestAFatalToolErrorSkipsTheRestOfTheBatch(t *testing.T) {
@@ -884,7 +883,7 @@ func (t *lateAnswerTransport) Fork(ctx context.Context, prev poo.Rendered, appen
 	return nil, errNoFork
 }
 
-// TestALateResponseAfterTheSettleDoesNotRecord covers the plan's rule
+// TestALateResponseAfterTheSettleDoesNotRecord covers the rule
 // that a run-owned completion arriving after the commit point never
 // mutates a settled run: a provider response that arrives after the
 // settle must not append a message, run a tool, or write a record.
@@ -1008,7 +1007,7 @@ func (t *finalizingContextTransport) Fork(ctx context.Context, prev poo.Rendered
 	return nil, errNoFork
 }
 
-// TestTheFinalizesOwnCancelIsNotACandidate covers the plan's rule that
+// TestTheFinalizesOwnCancelIsNotACandidate covers the rule that
 // finalizing never manufactures a cancelled run: the timer settles a run
 // whose request is cancelled by the finalization itself.
 func TestTheFinalizesOwnCancelIsNotACandidate(t *testing.T) {
@@ -1155,4 +1154,113 @@ func TestARunWithoutReportedUsageSettlesWithoutAUsageTotal(t *testing.T) {
 	if bytes.Contains(b, []byte(`"usage"`)) {
 		t.Errorf("the settle record carries a usage total: %s", b)
 	}
+}
+
+// badBackgroundTool defines the reserved background argument, so its
+// registration fails.
+type badBackgroundTool struct{ echoTool }
+
+// Spec describes the bad tool.
+func (t *badBackgroundTool) Spec() poo.ToolSpec {
+	spec := t.echoTool.Spec()
+	spec.Background = poo.BackgroundAllowed
+	spec.Schema = json.RawMessage(`{"properties":{"background":{"type":"boolean"}}}`)
+	return spec
+}
+
+// reporterGoroutines counts the event bus's reporter goroutines.
+func reporterGoroutines() int {
+	b := make([]byte, 1<<20)
+	n := runtime.Stack(b, true)
+	return strings.Count(string(b[:n]), "(*eventBus).reportDrops(")
+}
+
+// TestAFailedNewLeavesNoReporterGoroutine covers the construction
+// rollback: a New that fails stops everything it started, including the
+// event bus's reporter.
+func TestAFailedNewLeavesNoReporterGoroutine(t *testing.T) {
+	before := reporterGoroutines()
+	tr := scripted([]fakeResponse{{text: "done"}})
+	opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+	opts.Tools["echo"] = &badBackgroundTool{}
+	for i := 0; i < 5; i++ {
+		if _, err := poo.New(opts); err == nil {
+			t.Fatal("the bad tool was accepted")
+		}
+	}
+	runtime.Gosched()
+	if after := reporterGoroutines(); after != before {
+		t.Errorf("a failed New leaked %d reporter goroutine(s)", after-before)
+	}
+}
+
+// TestAHookErrorsSourceNamesTheHook covers the rule: an executable
+// hook's error or deadline settles hook_error and detail.source names the
+// hook.
+func TestAHookErrorsSourceNamesTheHook(t *testing.T) {
+	t.Run("before_tool", func(t *testing.T) {
+		tr := scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+			{text: "done"},
+		})
+		opts := testOptions(t, tr, &echoTool{result: "the effect"}, &recordingSink{})
+		opts.HookTimeout = 20 * time.Millisecond
+		opts.BeforeTool = []poo.BeforeToolHook{&stallingBeforeTool{}}
+		s := newTestSession(t, opts)
+		res := runSession(t, s, "start")
+		if res.Reason != poo.ReasonHookError {
+			t.Fatalf("the run settled %q, want hook_error", res.Reason)
+		}
+		if res.Detail.Source != "before_tool:stallingBeforeTool" {
+			t.Errorf("the settle source is %q, want the hook's name", res.Detail.Source)
+		}
+	})
+	t.Run("after_tool", func(t *testing.T) {
+		tr := scripted([]fakeResponse{
+			{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+			{text: "done"},
+		})
+		opts := testOptions(t, tr, &echoTool{result: "the effect"}, &recordingSink{})
+		opts.AfterTool = []poo.AfterToolHook{afterToolFunc(func(poo.HookContext, poo.ToolCallInfo, poo.ToolResult) (poo.ResultDecision, error) {
+			return poo.Keep(), context.Canceled
+		})}
+		s := newTestSession(t, opts)
+		res := runSession(t, s, "start")
+		if res.Reason != poo.ReasonHookError {
+			t.Fatalf("the run settled %q, want hook_error", res.Reason)
+		}
+		if res.Detail.Source != "after_tool:afterToolFunc" {
+			t.Errorf("the settle source is %q, want the hook's name", res.Detail.Source)
+		}
+	})
+	t.Run("before_settle", func(t *testing.T) {
+		tr := scripted([]fakeResponse{{text: "done"}})
+		opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+		opts.BeforeSettle = []poo.BeforeSettleHook{beforeSettleFunc(func(poo.HookContext, poo.Reason) (poo.SettleDecision, error) {
+			return poo.SettleDecision{}, context.Canceled
+		})}
+		s := newTestSession(t, opts)
+		res := runSession(t, s, "start")
+		if res.Reason != poo.ReasonHookError {
+			t.Fatalf("the run settled %q, want hook_error", res.Reason)
+		}
+		if res.Detail.Source != "before_settle:beforeSettleFunc" {
+			t.Errorf("the settle source is %q, want the hook's name", res.Detail.Source)
+		}
+	})
+	t.Run("before_run", func(t *testing.T) {
+		tr := scripted([]fakeResponse{{text: "done"}})
+		opts := testOptions(t, tr, &echoTool{}, &recordingSink{})
+		opts.BeforeRun = []poo.BeforeRunHook{beforeRunFunc(func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error) {
+			return poo.StartDecision{}, context.Canceled
+		})}
+		s := newTestSession(t, opts)
+		res := runSession(t, s, "start")
+		if res.Reason != poo.ReasonHookError {
+			t.Fatalf("the run settled %q, want hook_error", res.Reason)
+		}
+		if res.Detail.Source != "before_run:beforeRunFunc" {
+			t.Errorf("the settle source is %q, want the hook's name", res.Detail.Source)
+		}
+	})
 }

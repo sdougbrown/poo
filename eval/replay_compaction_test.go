@@ -10,7 +10,7 @@ import (
 // The strategy that made them is never run: the recorded compaction is
 // applied as it was recorded, at the point the recording compacted.
 
-// TestTheReplayAppliesTheRecordedCompaction covers the plan's rule: a
+// TestTheReplayAppliesTheRecordedCompaction covers the rule: a
 // replay applies the recorded compaction, and never runs the strategy
 // that made it.
 func TestTheReplayAppliesTheRecordedCompaction(t *testing.T) {
@@ -39,8 +39,7 @@ func TestTheReplayAppliesTheRecordedCompaction(t *testing.T) {
 	}
 }
 
-// TestTheReplayWithoutACompactionRunsUncompacted covers the plan's
-// rule: a recording with no compaction replays without one.
+// TestTheReplayWithoutACompactionRunsUncompacted covers the rule:: a recording with no compaction replays without one.
 func TestTheReplayWithoutACompactionRunsUncompacted(t *testing.T) {
 	path := writeLog(t,
 		`{"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s","context_limit":32768}`,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 
@@ -351,3 +352,211 @@ func (t *usageTransport) Fork(ctx context.Context, prev poo.Rendered, appended [
 
 // errNoFork is the error the fake transports return for a fork.
 var errNoFork = errors.New("the fake transport has no fork")
+
+// toolCallTurn is a response whose turn asks for one echo call.
+func toolCallTurn() fakeResponse {
+	return fakeResponse{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}}
+}
+
+// summaryCompaction is a compaction that replaces the first turn with a
+// summary message.
+func summaryCompaction() poo.Compaction {
+	return poo.Compaction{Strategy: "summary", Replace: &poo.RangeReplacement{
+		Cut:      poo.TurnRange{First: 1, Last: 1},
+		Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "summary")},
+	}}
+}
+
+// windowCompaction is a compaction that hands back a provider window.
+func windowCompaction() poo.Compaction {
+	return poo.Compaction{Strategy: "native", Window: &poo.ProviderWindow{Items: []poo.ContentBlock{{
+		Kind: poo.ContentProvider,
+		Provider: &poo.ProviderBlock{
+			API:      poo.APIChatCompletions,
+			Type:     "compaction",
+			Required: true,
+			Data:     []byte(`{"fake":true}`),
+		},
+	}}}}
+}
+
+// scriptedCompactor is a compactor whose two decisions the test scripts.
+type scriptedCompactor struct {
+	should  func(poo.View, poo.ContextBudget) bool
+	compact func(context.Context, poo.View, poo.ForkFunc) (poo.Compaction, error)
+}
+
+func (c *scriptedCompactor) ShouldCompact(v poo.View, b poo.ContextBudget) bool {
+	return c.should(v, b)
+}
+
+func (c *scriptedCompactor) Compact(ctx context.Context, v poo.View, f poo.ForkFunc) (poo.Compaction, error) {
+	return c.compact(ctx, v, f)
+}
+
+// heldToolCallReader yields one complete tool call and then waits for the
+// context to end, so a test can hold the turn open.
+type heldToolCallReader struct {
+	ctx     context.Context
+	started chan struct{}
+	sent    bool
+}
+
+func (r *heldToolCallReader) Next() (poo.StreamItem, error) {
+	if !r.sent {
+		r.sent = true
+		return poo.StreamItem{Kind: "tool_call", ToolCall: &poo.ToolCallDelta{Index: 0, ID: "c2", Name: "echo", Arguments: []byte(`{}`), Complete: true}}, nil
+	}
+	close(r.started)
+	<-r.ctx.Done()
+	return poo.StreamItem{}, r.ctx.Err()
+}
+
+func (*heldToolCallReader) Close() error { return nil }
+
+// The stage-4 fix pass's tool: it can block until its context ends and
+// return the partial output it had.
+
+// holdPrepared is a prepared call for holdTool.
+type holdPrepared struct{ text string }
+
+// Summary describes the call.
+func (p holdPrepared) Summary() string { return p.text }
+
+// holdTool is a tool a test can hold open and stop.
+type holdTool struct {
+	name       string
+	partial    string
+	block      bool
+	background poo.Background
+
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+}
+
+// newHoldTool returns a tool that returns its partial output.
+func newHoldTool(name, partial string) *holdTool {
+	return &holdTool{name: name, partial: partial, started: make(chan struct{}, 16)}
+}
+
+// Spec describes the tool.
+func (t *holdTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        t.name,
+		Description: "a tool the test can hold open",
+		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`),
+		Class:       poo.ClassSideEffecting,
+		Background:  t.background,
+	}
+}
+
+// Prepare accepts anything.
+func (t *holdTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	var a struct {
+		Text string `json:"text"`
+	}
+	_ = json.Unmarshal(raw, &a)
+	return holdPrepared{text: a.Text}, nil
+}
+
+// Call records the call and waits when the tool is told to block.
+func (t *holdTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	t.mu.Lock()
+	t.calls++
+	t.mu.Unlock()
+	select {
+	case t.started <- struct{}{}:
+	default:
+	}
+	if t.block {
+		<-ctx.Done()
+	}
+	return poo.ToolResult{Text: t.partial}, nil
+}
+
+// Calls returns how many times the tool ran.
+func (t *holdTool) Calls() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.calls
+}
+
+// oneToolOptions builds the options for a one-tool session.
+func oneToolOptions(t *testing.T, tr poo.ChatTransport, tool poo.Tool, sink poo.RecordSink) poo.Options {
+	t.Helper()
+	return poo.Options{
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{tool.Spec().Name: tool},
+		ToolOrder:  []string{tool.Spec().Name},
+		Sink:       sink,
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
+	}
+}
+
+// backgroundCall is a call of a tool the test can hold open.
+func backgroundCall(name, text string) poo.ToolCall {
+	raw, _ := json.Marshal(map[string]any{"text": text, "background": true})
+	return poo.ToolCall{CallID: "call_" + text, Name: name, Arguments: raw}
+}
+
+// jobEndedRecord returns the job.ended record the sink holds.
+func jobEndedRecord(t *testing.T, sink *recordingSink) *poo.JobEndedRecord {
+	t.Helper()
+	for _, rec := range sink.allRecords() {
+		if ended, ok := rec.(*poo.JobEndedRecord); ok {
+			return ended
+		}
+	}
+	t.Fatal("the store holds no job.ended record")
+	return nil
+}
+
+// sinkJSON renders every record as JSON, so a test can look for a
+// secret anywhere in the store.
+func sinkJSON(sink *recordingSink, needle string) string {
+	var b strings.Builder
+	for _, rec := range sink.allRecords() {
+		raw, err := json.Marshal(rec)
+		if err != nil || !strings.Contains(string(raw), needle) {
+			continue
+		}
+		b.Write(raw)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// afterToolFunc adapts a function to an after-tool hook.
+type afterToolFunc func(poo.HookContext, poo.ToolCallInfo, poo.ToolResult) (poo.ResultDecision, error)
+
+// AfterTool calls the function.
+func (f afterToolFunc) AfterTool(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+	return f(ctx, info, result)
+}
+
+// beforeRunFunc adapts a function to a before-run hook.
+type beforeRunFunc func(poo.HookContext, poo.RunTrigger) (poo.StartDecision, error)
+
+// BeforeRun calls the function.
+func (f beforeRunFunc) BeforeRun(ctx poo.HookContext, trigger poo.RunTrigger) (poo.StartDecision, error) {
+	return f(ctx, trigger)
+}
+
+// afterTurnFunc adapts a function to an after-turn hook.
+type afterTurnFunc func(poo.HookContext) (poo.TurnDecision, error)
+
+// AfterTurn calls the function.
+func (f afterTurnFunc) AfterTurn(ctx poo.HookContext) (poo.TurnDecision, error) {
+	return f(ctx)
+}
+
+// beforeSettleFunc adapts a function to a before-settle hook.
+type beforeSettleFunc func(poo.HookContext, poo.Reason) (poo.SettleDecision, error)
+
+// BeforeSettle calls the function.
+func (f beforeSettleFunc) BeforeSettle(ctx poo.HookContext, candidate poo.Reason) (poo.SettleDecision, error) {
+	return f(ctx, candidate)
+}

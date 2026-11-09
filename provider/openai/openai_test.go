@@ -91,7 +91,7 @@ func textOf(events []poo.StreamItem) string {
 
 // fastRetry shortens the wait between the attempts.
 //
-// A test that fails on purpose does not wait the plan's backoff, and
+// A test that fails on purpose does not wait the backoff, and
 // the test that covers the backoff waits for it on purpose.
 func fastRetry(cfg openai.Options) openai.Options {
 	cfg.Backoff = []time.Duration{time.Millisecond, time.Millisecond}
@@ -873,7 +873,7 @@ func TestTheChunkedArgumentsAreJoined(t *testing.T) {
 	}
 }
 
-// TestTheNativeToolCallWinsOverTheParsedOne covers the plan's rule: the
+// TestTheNativeToolCallWinsOverTheParsedOne covers the rule: the
 // text tool-call parser is a fallback, and a native tool call wins over
 // a call the model wrote as text.
 func TestTheNativeToolCallWinsOverTheParsedOne(t *testing.T) {

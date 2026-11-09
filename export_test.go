@@ -14,7 +14,7 @@ func SetRecordWriteBudget(s *Session, d time.Duration) {
 // SetObserverDropInterval changes how often the overflow records are
 // written, and returns a function that restores the previous interval.
 //
-// The interval is the plan's one second; a test that waits for a
+// The interval is the one second; a test that waits for a
 // coalesced record shortens it.
 func SetObserverDropInterval(d time.Duration) func() {
 	prev := observerDropInterval
@@ -26,7 +26,7 @@ func SetObserverDropInterval(d time.Duration) func() {
 // behind before the bus drops them for that observer, and returns a
 // function that restores the previous buffer.
 //
-// The buffer is the plan's 1024; a test that fills it shortens it.
+// The buffer is the 1024; a test that fills it shortens it.
 func SetObserverBuffer(n int) func() {
 	prev := observerBuffer
 	observerBuffer = n
@@ -78,8 +78,7 @@ func QueueFeedInput(s *Session, feed, from, text string) error {
 }
 
 // SetFeedRestartDelay replaces how long the session's feeds wait before
-// their next attempt, and returns a function that restores the plan's
-// rule.
+// their next attempt, and returns a function that restores the rule.
 //
 // The delay is per session, so a test never races another session's feed
 // supervisor.

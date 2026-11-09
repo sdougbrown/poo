@@ -93,7 +93,7 @@ func TestTheObserverSeesTheEventsInOrder(t *testing.T) {
 	}
 }
 
-// TestTheObserverErrorDoesNotSettleTheRun covers the plan's rule: an
+// TestTheObserverErrorDoesNotSettleTheRun covers the rule: an
 // observer's error never settles a run.
 func TestTheObserverErrorDoesNotSettleTheRun(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "the answer"}})
@@ -111,7 +111,7 @@ func TestTheObserverErrorDoesNotSettleTheRun(t *testing.T) {
 	}
 }
 
-// TestTheGateRunsOnTheBeforeSettleContinuePath covers the plan's gate:
+// TestTheGateRunsOnTheBeforeSettleContinuePath covers the gate:
 // a BeforeSettle Continue goes through the gate, and the gate's budget
 // check fires on that path.
 func TestTheGateRunsOnTheBeforeSettleContinuePath(t *testing.T) {
@@ -242,7 +242,7 @@ func TestTheGateRunsOnTheFinalizeInputPath(t *testing.T) {
 	}
 }
 
-// TestTheCompactingStateIsCancelledByAnInterrupt covers the plan's rule:
+// TestTheCompactingStateIsCancelledByAnInterrupt covers the rule:
 // an interrupt during the compaction cancels it, and no compaction is
 // applied.
 func TestTheCompactingStateIsCancelledByAnInterrupt(t *testing.T) {
@@ -299,7 +299,7 @@ func TestTheCompactingStateIsCancelledByAnInterrupt(t *testing.T) {
 	}
 }
 
-// TestTheCompactionIsRecorded covers the plan's rule: the compaction is
+// TestTheCompactionIsRecorded covers the rule: the compaction is
 // recorded, so a replay knows what the compactor did.
 func TestTheCompactionIsRecorded(t *testing.T) {
 	compactor := pootest.NewCompactor(true, poo.Compaction{
@@ -393,7 +393,7 @@ func (c *releasingCompactor) Compact(ctx context.Context, view poo.View, fork po
 }
 
 // TestARunWindingDownAfterTheSettleDoesNotMoveTheStateOrRecord covers
-// the plan's rule that a run-owned completion after the commit point
+// the rule that a run-owned completion after the commit point
 // never mutates a settled run: a duration timer settles a run whose gate
 // is inside a compaction, and the compaction's return must not move the
 // state, open a request, or write a record.
@@ -437,8 +437,7 @@ func TestARunWindingDownAfterTheSettleDoesNotMoveTheStateOrRecord(t *testing.T) 
 	}
 }
 
-// TestTheCompactionRecordNamesItsFormAndTokens covers the plan's
-// compaction record: it carries the form of the compaction and the
+// TestTheCompactionRecordNamesItsFormAndTokens covers the compaction record: it carries the form of the compaction and the
 // token estimate before and after it.
 //
 // The view is applied, so the estimate after the compaction is the
@@ -525,7 +524,7 @@ func (c *forkCaptureCompactor) Compact(ctx context.Context, view poo.View, fork 
 	}, nil
 }
 
-// TestACompactorsForkCountsTowardTheRunBudget covers the plan's rule
+// TestACompactorsForkCountsTowardTheRunBudget covers the rule
 // that a fork's usage counts toward MaxRunTokens, not MaxTurns: the
 // fork's usage report lands in the run's token count, and the ceiling
 // fires on accounting that includes it. The ceiling sits just under a

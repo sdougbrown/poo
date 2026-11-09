@@ -109,8 +109,7 @@ func (c *plainClient) Asks() []perm.Ask {
 	return append([]perm.Ask(nil), c.asks...)
 }
 
-// TestTheWireAskerNeedsAClientThatDeclaredTheCapability covers the
-// plan's rule: the wire asker is available only when a client is
+// TestTheWireAskerNeedsAClientThatDeclaredTheCapability covers the rule: the wire asker is available only when a client is
 // connected and declared the permission_answers capability.
 func TestTheWireAskerNeedsAClientThatDeclaredTheCapability(t *testing.T) {
 	tests := []struct {
@@ -217,7 +216,7 @@ func TestTheWireAskCarriesTheDoomLoopReasonAndTheRepeatCount(t *testing.T) {
 	}
 }
 
-// TestTheAskFallsBackWithoutACapableClient covers the plan's rule: a
+// TestTheAskFallsBackWithoutACapableClient covers the rule: a
 // client that did not declare the capability is never asked, and the
 // fallback applies at once.
 func TestTheAskFallsBackWithoutACapableClient(t *testing.T) {
@@ -250,7 +249,7 @@ func TestTheAskFallsBackWithoutACapableClient(t *testing.T) {
 	}
 }
 
-// TestTheWireAskerDefersOnAClientError covers the plan's rule: a
+// TestTheWireAskerDefersOnAClientError covers the rule: a
 // client error is a deferral, and the chain moves on.
 func TestTheWireAskerDefersOnAClientError(t *testing.T) {
 	client := &fakeClient{connected: true, answers: true, err: errors.New("the client is gone")}

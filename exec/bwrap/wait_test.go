@@ -46,7 +46,7 @@ func reviewTimeoutCall(t *testing.T, executor *bwrap.Executor, command, dir stri
 }
 
 // TestTheSandboxIsGoneWhenWaitReturns checks the moment the call
-// returns: the plan says Wait returns after everything the command
+// returns: Wait returns after everything the command
 // started has exited.
 func TestTheSandboxIsGoneWhenWaitReturns(t *testing.T) {
 	executor, err := bwrap.New(bwrap.Options{})

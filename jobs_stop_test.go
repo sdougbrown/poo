@@ -62,8 +62,7 @@ func (s *gatedSink) open() {
 	s.opened.Do(func() { close(s.gate) })
 }
 
-// TestCancelJobStopsTheJobAndDeliversItsPartialOutput covers the
-// plan's rule: cancel_job stops the job, and its partial output is
+// TestCancelJobStopsTheJobAndDeliversItsPartialOutput covers the rule: cancel_job stops the job, and its partial output is
 // delivered like any result.
 func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
 	sink := newGatedSink()
@@ -113,7 +112,7 @@ func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
 		t.Errorf("the run settled %q, want end_turn", res.Reason)
 	}
 	// The job is ended, and the write of its terminal record is held, so
-	// the run settled before the record landed. The plan allows that
+	// the run settled before the record landed. That order is legal:
 	// order: a job belongs to the session, not the run, and a result
 	// that arrives after the commit point is delivered after run.settled
 	// by the wake row of the delivery table.
@@ -169,7 +168,7 @@ func TestCancelJobStopsTheJobAndDeliversItsPartialOutput(t *testing.T) {
 	}
 }
 
-// TestTheJobTimeoutStopsTheJob covers the plan's rule: the job timeout
+// TestTheJobTimeoutStopsTheJob covers the rule: the job timeout
 // stops the job, and the outcome is an error with the timeout flag.
 func TestTheJobTimeoutStopsTheJob(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -208,7 +207,7 @@ func TestTheJobTimeoutStopsTheJob(t *testing.T) {
 	}
 }
 
-// TestMaxRunningRefusesTheExtraCall covers the plan's rule: a call over
+// TestMaxRunningRefusesTheExtraCall covers the rule: a call over
 // the limit gets a recoverable error, not a queue.
 func TestMaxRunningRefusesTheExtraCall(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -260,8 +259,7 @@ func TestMaxRunningRefusesTheExtraCall(t *testing.T) {
 	}
 }
 
-// TestAJobThatFailsFatallySettlesTheReceivingRun covers the plan's
-// rule: a job error that wraps ErrFatal is delivered like any result
+// TestAJobThatFailsFatallySettlesTheReceivingRun covers the rule:: a job error that wraps ErrFatal is delivered like any result
 // and adds the tool_fatal candidate to the receiving run.
 func TestAJobThatFailsFatallySettlesTheReceivingRun(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -292,7 +290,7 @@ func TestAJobThatFailsFatallySettlesTheReceivingRun(t *testing.T) {
 	}
 }
 
-// TestARunWithOnlyEarlierJobsSettlesNormally covers the plan's rule: a
+// TestARunWithOnlyEarlierJobsSettlesNormally covers the rule: a
 // job started by an earlier run never holds a run open.
 func TestARunWithOnlyEarlierJobsSettlesNormally(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -330,7 +328,7 @@ func TestARunWithOnlyEarlierJobsSettlesNormally(t *testing.T) {
 	}
 }
 
-// TestTheJobsToolListsTheRunningJobs covers the plan's rule: the model
+// TestTheJobsToolListsTheRunningJobs covers the rule: the model
 // can see the jobs it started.
 func TestTheJobsToolListsTheRunningJobs(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -381,7 +379,7 @@ func TestTheJobsToolListsTheRunningJobs(t *testing.T) {
 	}
 }
 
-// TestTheSessionCloseStopsTheRunningJobs covers the plan's rule: closing
+// TestTheSessionCloseStopsTheRunningJobs covers the rule: closing
 // the session stops the jobs, and each one gets a job.ended record with
 // the cause session_closed.
 func TestTheSessionCloseStopsTheRunningJobs(t *testing.T) {
@@ -422,7 +420,7 @@ func TestTheSessionCloseStopsTheRunningJobs(t *testing.T) {
 	}
 }
 
-// TestAJobResultNeverCarriesADeliveryNote covers the plan's rule: a job
+// TestAJobResultNeverCarriesADeliveryNote covers the rule: a job
 // result never carries a delivery note.
 func TestAJobResultNeverCarriesADeliveryNote(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -452,7 +450,7 @@ func TestAJobResultNeverCarriesADeliveryNote(t *testing.T) {
 	}
 }
 
-// TestTheJobHandleSurvivesTheTurnEnd covers the plan's rule: a job
+// TestTheJobHandleSurvivesTheTurnEnd covers the rule: a job
 // handle survives the turn, and the record names the call it came from.
 func TestTheJobHandleSurvivesTheTurnEnd(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -492,7 +490,7 @@ func TestTheJobHandleSurvivesTheTurnEnd(t *testing.T) {
 	}
 }
 
-// TestTheJobRunsUnderTheSessionContext covers the plan's rule: the job
+// TestTheJobRunsUnderTheSessionContext covers the rule: the job
 // runs under the session, so a cancel of the run does not stop it.
 func TestTheJobRunsUnderTheSessionContext(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -531,8 +529,7 @@ func TestTheJobRunsUnderTheSessionContext(t *testing.T) {
 	}
 }
 
-// TestAJobThatFailsFatallyWhileTheRunWaitsSettlesIt covers the
-// plan's rule: a job that fails fatally while the run is waiting
+// TestAJobThatFailsFatallyWhileTheRunWaitsSettlesIt covers the rule: a job that fails fatally while the run is waiting
 // settles the run tool_fatal with no further request.
 func TestAJobThatFailsFatallyWhileTheRunWaitsSettlesIt(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -576,8 +573,7 @@ func TestAJobThatFailsFatallyWhileTheRunWaitsSettlesIt(t *testing.T) {
 	}
 }
 
-// TestACancelWithASynchronousCallAndAJobSettlesTheRun covers the
-// plan's rule: a cancel stops the synchronous call, the run settles
+// TestACancelWithASynchronousCallAndAJobSettlesTheRun covers the rule: a cancel stops the synchronous call, the run settles
 // cancelled with the running job listed, and the job's later result
 // wakes the session.
 func TestACancelWithASynchronousCallAndAJobSettlesTheRun(t *testing.T) {
@@ -650,7 +646,7 @@ func TestACancelWithASynchronousCallAndAJobSettlesTheRun(t *testing.T) {
 	})
 }
 
-// TestAFinishWithAJobRunningSettlesFinished covers the plan's rule: a
+// TestAFinishWithAJobRunningSettlesFinished covers the rule: a
 // finish call may settle the run while a job is running, and the settle
 // detail lists the job.
 func TestAFinishWithAJobRunningSettlesFinished(t *testing.T) {
@@ -707,7 +703,7 @@ func (t *uncooperativeJobTool) Call(ctx context.Context, p poo.Prepared, e poo.T
 	return poo.ToolResult{Text: "done"}, nil
 }
 
-// TestTheCloseIsBoundedWithTwoUncooperativeJobs covers the plan's close:
+// TestTheCloseIsBoundedWithTwoUncooperativeJobs covers the close:
 // the teardown bound is one deadline for the whole wait, so a second job
 // that ignores its context does not hold the close forever.
 func TestTheCloseIsBoundedWithTwoUncooperativeJobs(t *testing.T) {
@@ -761,7 +757,7 @@ func (t *partialThenNilJobTool) Call(ctx context.Context, p poo.Prepared, e poo.
 	return poo.ToolResult{Text: "the partial output"}, nil
 }
 
-// TestAJobTimeoutBeatsANilError covers the plan's rule: the job's
+// TestAJobTimeoutBeatsANilError covers the rule: the job's
 // context decides a timeout before a nil error can call the job
 // successful.
 func TestAJobTimeoutBeatsANilError(t *testing.T) {
@@ -799,7 +795,7 @@ func TestAJobTimeoutBeatsANilError(t *testing.T) {
 	}
 }
 
-// TestTheCloseKeepsAJobsPartialOutput covers the plan's close: the
+// TestTheCloseKeepsAJobsPartialOutput covers the close: the
 // job.ended the close writes keeps what the job had produced, plus the
 // note that the session closed.
 func TestTheCloseKeepsAJobsPartialOutput(t *testing.T) {

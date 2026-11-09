@@ -215,7 +215,7 @@ func TestAContextLengthErrorSettlesContextExhausted(t *testing.T) {
 }
 
 func TestAFinishReasonOfLengthReachesBeforeSettle(t *testing.T) {
-	// A truncated response is a natural stop, and the plan's
+	// A truncated response is a natural stop, and the
 	// `output_truncated` reason is what it settles as.
 	tr := scripted([]fakeResponse{{
 		text:   "a truncated ans",
@@ -273,7 +273,7 @@ func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
 	// model's own ceiling is 8192 by default. The estimate covers the
 	// history at request time: the raw system message ("the system
 	// prompt") is sent verbatim, the user message is "a short prompt",
-	// and the plan estimates at 3.5 chars per token, so 41*10/35 = 11.
+	// and the estimate counts 3.5 chars per token, so 41*10/35 = 11.
 	estimate := (len("system") + len("the system prompt") + len("user") + len("a short prompt")) * 10 / 35
 	want := 4096 - estimate - 256
 	if mt != want {

@@ -7,7 +7,7 @@ import (
 	"github.com/sdougbrown/poo"
 )
 
-// TestTheCoreRendersABaseSection covers the plan's section table: the
+// TestTheCoreRendersABaseSection covers the section table: the
 // core owns the `base` section, and it is the operating contract the
 // model works under. A session that does not come from cmd/poo has no
 // other place to get one.

@@ -94,7 +94,7 @@ func toolCallEvents(fragments ...[]poo.StreamItem) []poo.StreamItem {
 	return append(out, finishEvents()...)
 }
 
-// TestTwoCallsAtOneIndexAreTwoCalls covers the plan's rule that a
+// TestTwoCallsAtOneIndexAreTwoCalls covers the rule that a
 // provider's index is grouping, not identity: two whole calls that share
 // one index are two calls, each with its own arguments and result.
 func TestTwoCallsAtOneIndexAreTwoCalls(t *testing.T) {
@@ -115,8 +115,7 @@ func TestTwoCallsAtOneIndexAreTwoCalls(t *testing.T) {
 	}
 }
 
-// TestInterleavedFragmentsAtOneIndexRejoinTheirCalls covers the plan's
-// rule that fragments rejoin their call by id, in any order: a fragment
+// TestInterleavedFragmentsAtOneIndexRejoinTheirCalls covers the rule: that fragments rejoin their call by id, in any order: a fragment
 // with an id already seen at its index continues that call, a fragment
 // with a new id starts a new one, and a fragment without an id continues
 // the latest call at the index.
@@ -145,8 +144,7 @@ func TestInterleavedFragmentsAtOneIndexRejoinTheirCalls(t *testing.T) {
 	}
 }
 
-// TestACallAtAHighProviderIndexIsNotOverwrittenBySplitCalls covers the
-// plan's rule that a call's fragments keep their own call, whatever the
+// TestACallAtAHighProviderIndexIsNotOverwrittenBySplitCalls covers the rule that a call's fragments keep their own call, whatever the
 // provider's numbering: a call at a high index survives two whole calls
 // that share a lower index.
 func TestACallAtAHighProviderIndexIsNotOverwrittenBySplitCalls(t *testing.T) {
@@ -172,7 +170,7 @@ func TestACallAtAHighProviderIndexIsNotOverwrittenBySplitCalls(t *testing.T) {
 	}
 }
 
-// TestOnlyTheFirstFragmentCarriesTheID covers the plan's rule that a
+// TestOnlyTheFirstFragmentCarriesTheID covers the rule that a
 // call's id is fixed by its first fragment: the fragments that follow,
 // with no id of their own, extend that call and do not rename it.
 func TestOnlyTheFirstFragmentCarriesTheID(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 
 var ulidShape = regexp.MustCompile(`^[0-7][0-9A-HJKMNP-TV-Z]{25}$`)
 
-// TestRunAndInputIDsAreULIDs covers the plan's Identity section: every
+// TestRunAndInputIDsAreULIDs covers the Identity section: every
 // run has a run_id that is a ULID, and an input id has the same shape.
 func TestRunAndInputIDsAreULIDs(t *testing.T) {
 	tr := scripted([]fakeResponse{

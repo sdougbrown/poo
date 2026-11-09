@@ -8,7 +8,7 @@ import (
 	"github.com/sdougbrown/poo/tool/bash"
 )
 
-// TestTheToolMayRunInTheBackground covers the plan's job rule: the
+// TestTheToolMayRunInTheBackground covers the job rule: the
 // bash tool declares that the model may ask for a background call.
 //
 // The tool's own schema must not define the reserved argument: the core
