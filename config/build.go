@@ -446,10 +446,14 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	// The core adds the job tools on its own whenever a linked tool may
 	// run in the background or the session runs feeds, and the profile
 	// offers them with it.
-	feeds := r.Feeds.Len() > 0
-	r.Profile.Tools = withJobTools(r.Profile.Tools, feeds)
-	r.Profiles = resolveProfiles(opts, r.Registry != nil, r.findTool(), feeds, r.Settings.Tools.Disabled)
+	r.Profile.Tools = withJobTools(r.Profile.Tools, r.hasFeeds())
+	r.Profiles = r.resolveProfiles(opts)
 	return nil
+}
+
+// hasFeeds reports whether the session runs feeds.
+func (r *Runtime) hasFeeds() bool {
+	return r.Feeds.Len() > 0
 }
 
 // resolveRegistry loads the cli registries the settings and overrides name.
@@ -618,7 +622,7 @@ func offersSideEffects(tools []poo.ToolInfo) bool {
 // builds none, and a settings file naming an executor this binary lacks is
 // only an error when something would run in it.
 func (r *Runtime) needsExecutor() bool {
-	if r.Feeds.Len() > 0 {
+	if r.hasFeeds() {
 		return true
 	}
 	for _, name := range r.toolNames {
@@ -638,6 +642,12 @@ func toolInfo(factory ToolFactory) poo.ToolInfo {
 		Background: spec.Background,
 	}
 }
+
+// coreToolNames are the tools the core adds by itself.
+//
+// They are not the profile's to give up, so the settings cannot disable
+// one.
+var coreToolNames = []string{profile.JobsToolName, profile.CancelJobToolName, poo.FinishToolName}
 
 // withJobTools adds the core's job tools to a profile's tools.
 //
@@ -673,8 +683,7 @@ func (r *Runtime) disableTools(opts BuildOptions) error {
 		return nil
 	}
 	for _, name := range disabled {
-		switch name {
-		case profile.JobsToolName, profile.CancelJobToolName, poo.FinishToolName:
+		if slices.Contains(coreToolNames, name) {
 			return &Error{
 				Code:    CodeUnsupported,
 				Field:   "tools.disabled",
@@ -713,9 +722,14 @@ func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
 // A profile that names a tool the binary does not link offers the
 // tools it has: the profile cannot be run with the others, and a
 // profile that cannot be run is not one the binary offers. The
-// disabled tools are gone here as well, so the profile the client is
-// told about is the profile the session runs.
-func resolveProfiles(opts BuildOptions, registry, find, feeds bool, disabled []string) []poo.Profile {
+// disabled tools come off each profile here as well, so the profile
+// the client is told about is the one the session runs, and a profile
+// the settings empty is not one the binary offers either.
+func (r *Runtime) resolveProfiles(opts BuildOptions) []poo.Profile {
+	registry := r.Registry != nil
+	find := r.findTool()
+	feeds := r.hasFeeds()
+	disabled := r.Settings.Tools.Disabled
 	var out []poo.Profile
 	for _, definition := range opts.Profiles {
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
@@ -725,9 +739,6 @@ func resolveProfiles(opts BuildOptions, registry, find, feeds bool, disabled []s
 			}
 			resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[tool]))
 		}
-		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
-			continue
-		}
 		if registry && offersSideEffects(resolved.Tools) {
 			for _, name := range registryToolNames(find) {
 				if linksTool(opts, name) {
@@ -736,6 +747,9 @@ func resolveProfiles(opts BuildOptions, registry, find, feeds bool, disabled []s
 			}
 		}
 		resolved.Tools = withoutDisabled(resolved.Tools, disabled)
+		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
+			continue
+		}
 		resolved.Tools = withJobTools(resolved.Tools, feeds)
 		out = append(out, resolved)
 	}
@@ -943,7 +957,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 	// a typo is a settings failure, not a failure to discover later.
 	if linksTool(opts, ToolBash) || r.needsExecutor() {
 		feedSource := ""
-		if r.Feeds.Len() > 0 {
+		if r.hasFeeds() {
 			feedSource = "the settings name a feed, and "
 			if len(opts.Overrides.FeedsPaths) > 0 {
 				feedSource = "the settings or POO_FEEDS_PATH / --feeds-path name a feed, and "
@@ -1013,7 +1027,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 // The feeds are the session's options, so a new session and a restored
 // one run them alike.
 func (r *Runtime) resolveFeedRuns(opts BuildOptions) error {
-	if r.Feeds.Len() == 0 {
+	if !r.hasFeeds() {
 		return nil
 	}
 	if r.executor == nil {

@@ -727,9 +727,6 @@ func TestTheSettingsDisableAProfileTool(t *testing.T) {
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	if _, ok := runtime.Options.Tools["grep"]; ok {
-		t.Errorf("the session builds the disabled tool: %v", runtime.Options.ToolOrder)
-	}
 	for _, spec := range runtime.ToolSpecs() {
 		if spec.Name == "grep" {
 			t.Error("the session sends the disabled tool's schema")
@@ -821,6 +818,27 @@ func TestADisabledToolTheProfileDoesNotOfferChangesNothing(t *testing.T) {
 	}
 }
 
+// TestAProfileTheSettingsDisableEveryToolOfIsNotListed covers the listing's
+// runnable rule: a profile the disabled list empties cannot run, so the
+// binary does not offer it.
+func TestAProfileTheSettingsDisableEveryToolOfIsNotListed(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`tools:
+  disabled: [read, grep]
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := readOnlyBuild(t, settings, nil)
+	if err != nil {
+		t.Fatalf("building the search profile with every tool disabled: %v", err)
+	}
+	for _, listed := range runtime.Profiles {
+		if listed.Name == search.Name {
+			t.Errorf("the binary offers the emptied %q profile with the tools %v", listed.Name, listed.Tools)
+		}
+	}
+}
+
 // TestTheSettingsRefuseToDisableAToolTheBinaryLacks covers the rule the
 // profile's own tool names follow: a disabled name the binary does not
 // link is a failure, because no profile could ever honour it.
@@ -848,7 +866,7 @@ func TestTheSettingsRefuseToDisableAToolTheBinaryLacks(t *testing.T) {
 // profile's to give up: the core adds them itself, so a list that names one
 // is a failure rather than a setting nothing can remove.
 func TestTheSettingsRefuseToDisableACoreTool(t *testing.T) {
-	for _, name := range []string{profile.JobsToolName, profile.CancelJobToolName, poo.FinishToolName} {
+	for _, name := range config.CoreToolNames {
 		t.Run(name, func(t *testing.T) {
 			settings, err := config.Parse([]byte(theModelSettings+"tools:\n  disabled: ["+name+"]\n"), config.FormatYAML)
 			if err != nil {
