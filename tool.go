@@ -112,6 +112,15 @@ type ToolSettings struct {
 	ReadOutputCapChars int
 }
 
+// NestedCall is one call a tool asks the seam to make.
+type NestedCall struct {
+	// Tool is the tool's name.
+	Tool string
+	// Arguments are the call's raw arguments, as the model would have
+	// written them.
+	Arguments json.RawMessage
+}
+
 // NestedResult is what a nested tool call produced.
 type NestedResult struct {
 	// Handle is the nested call's own handle, e.g. "r7".
@@ -128,24 +137,30 @@ type NestedResult struct {
 	IsError bool
 }
 
-// NestedCaller runs a nested tool call from inside a tool's Call.
+// NestedCaller runs nested tool calls from inside a tool's Call.
 //
-// A nested call is a tool call a running tool makes. It is validated
-// like a model-made call, it is judged by the permission engine and the
-// doom loop, and its call and result are recorded with the mode
-// "nested" — but its result never enters the model's history, and its
-// tool's own environment carries no nested caller of its own, so the
-// nesting is one call deep.
+// A nested call is a tool call a running tool makes. It goes through the
+// same path as a call the model makes: the same validation, the
+// permission engine, the before-tool hooks, the doom loop and the
+// after-tool chain, and a batch is run in parallel only when every call
+// in it is read-only. Its call and result are recorded with the mode
+// "nested" and its parent's handle — but its result never enters the
+// model's history, and its tool's own environment carries no nested
+// caller of its own, so the nesting is one call deep.
 type NestedCaller interface {
-	// Call runs one nested call of the named tool with the raw
-	// arguments. The parent handle names the call that is running.
+	// Call runs a batch of nested calls and returns their results in
+	// the order of calls. A tool's single call is a batch of one.
+	//
+	// The batch is validated before any of it is claimed: an entry that
+	// names an unknown tool or one of the run's own tools fails the
+	// whole batch, so a typo in a fan-out has no effect.
 	//
 	// A refused, failed or cancelled nested call is reported as data
 	// in the result, not as an error: the caller decides what its
-	// script does with a denial. The error result is for the nested
-	// call that never got to be judged at all — an unknown tool, a
-	// run that is winding down, a run that was interrupted.
-	Call(ctx context.Context, parent, tool string, raw json.RawMessage) (NestedResult, error)
+	// script does with a denial. The error result is for the batch that
+	// never started at all — an unknown tool, a run that is winding
+	// down, a run that was interrupted.
+	Call(ctx context.Context, calls []NestedCall) ([]NestedResult, error)
 }
 
 // Prepared is a validated tool call, ready to run.

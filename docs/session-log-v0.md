@@ -82,7 +82,7 @@ A record that someone produced also carries an `origin`:
 | `run.started` | Once per run, when the run begins. |
 | `system_prompt` | Once per run whose prompt differs from the previous one, with the whole prompt. |
 | `message` | Once per message that enters the model's history. |
-| `tool.call` | Once per tool call the model makes, before it runs. A call a running tool made through the nested seam (mode `"nested"`) is recorded here too, with the parent call's handle in `parent`. |
+| `tool.call` | Once per tool call the model makes, before it runs. A call a running tool made through the nested seam is recorded here too, with the parent call's handle in `parent`. |
 | `tool.result` | Once per tool call, after it runs. |
 | `usage` | Once per provider request. |
 | `provider.attempt` | Once per attempt of a request that failed. |
@@ -281,13 +281,15 @@ a log shows what the model asked for even when the tool never finished.
 | `summary` | string | The call's human-facing summary, as the `tool.call` event shows it. A bash call shows the model's `description`, or the command when it supplied none. **Absent** when the tool has no summary, and on a log written before the field existed. |
 | `arguments` | object or string | The full arguments, in the same shape as a `tool_call` content block. The reserved `background` argument is kept here, even though the core removes it before the tool sees it. |
 | `mode` | string | How the call ran: `"sync"` in the turn, `"job"` in the background, or `"nested"` from inside another call. Absent when the log was written before the field existed. |
-| `parent` | string | The handle of the call that made this one, when the mode is `"nested"`. The model-made call a script ran under, so a reader can walk the calls one script made. Absent on the other modes. |
+| `parent` | string | The handle of the call that made this one, for a call a running tool made through the nested seam. The model-made call a script ran under, so a reader can walk the calls one script made. **Absent** on a call the model made. A nested call that never ran carries the parent and no `mode`, like any other call that did not run. |
 
 A nested call's result is recorded but never becomes a `message`: the
 model never saw the call, and the log's contract — the messages in the
-log are the same list the model sees — keeps holding. The recovery's
-message rule leaves a call with no provider id out of the history, so a
-torn tail's nested calls are closed without polluting it either.
+log are the same list the model sees — keeps holding. It goes back to
+the tool that made the call instead, after the same before-tool and
+after-tool hooks a model-made call goes through. The recovery's message
+rule leaves a call with no provider id out of the history, so a torn
+tail's nested calls are closed without polluting it either.
 
 ## `tool.result`
 

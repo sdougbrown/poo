@@ -54,6 +54,14 @@ type callPlan struct {
 	background bool
 	// summary describes the call, for the job's own bookkeeping.
 	summary string
+	// parent is the handle of the call that made this one. It is
+	// non-empty exactly when the call is nested.
+	parent string
+	// callCtx is the context the tool runs under, when it is not the
+	// run's activity context: a nested call runs under its caller's
+	// context as well, so the script's own deadline ends it. It is nil
+	// for a call the model made, whose activity the batch already runs.
+	callCtx context.Context
 	// policy is the model-ordered permission decision for this call.
 	policy    *ToolDecision
 	policyErr error
@@ -61,11 +69,9 @@ type callPlan struct {
 
 // executeBatch runs a turn's tool calls.
 //
-// A batch runs to completion: no stop condition skips the remaining
-// calls. Only a cancellation or a fatal error (through the
-// finalization) and an interrupt end it early. The calls run in parallel only when every one of
-// them belongs to a tool declared ReadOnly; otherwise they run
-// sequentially in model order.
+// It opens the turn's activity, records the calls in the turn's summary
+// and runs the batch. A nested batch skips these steps: its calls belong
+// to the turn the parent call runs in, whose activity is already open.
 //
 // It reports whether any call was processed: a call that got a result
 // other than skipped: truncated.
@@ -102,6 +108,25 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 	s.startActivity(run)
 	defer s.endActivity(run)
 
+	s.runBatch(run, turn, plans)
+	return processed
+}
+
+// runBatch runs the calls of a batch that has its owner and its
+// activity.
+//
+// A batch runs to completion: no stop condition skips the remaining
+// calls. Only a cancellation or a fatal error (through the
+// finalization) and an interrupt end it early. The calls run in parallel
+// only when every one of them belongs to a tool declared ReadOnly;
+// otherwise they run sequentially in model order.
+//
+// The caller has registered the batch and given it its activity:
+// executeBatch opens the turn's activity for a turn's batch, and a
+// nested batch arrives here from the tool that made it, inside the
+// parent call's activity. A nested call is a call of the turn, so the
+// turn's summary stays the model's.
+func (s *Session) runBatch(run *runState, turn int, plans []callPlan) {
 	if s.batchIsParallel(plans) {
 		for i := range plans {
 			if s.runWindingDown(run) || s.interruptPending(run) {
@@ -116,29 +141,28 @@ func (s *Session) executeBatch(run *runState, turn int, calls []ToolCall, trunca
 		// The calls that never started because of an interrupt get a
 		// visible result.
 		if s.interruptPending(run) {
-			s.skipInterruptedCalls(run, turn, callsFromPlans(plans))
+			s.skipPlans(run, turn, plans, SkippedInterruptedText)
 		} else if s.batchStopped(run) {
-			s.skipCalls(run, turn, callsFromPlans(plans), SkippedSettlingText)
+			s.skipPlans(run, turn, plans, SkippedSettlingText)
 		}
-		return processed
+		return
 	}
 	for _, p := range plans {
 		// An interrupt skips the calls that have not started, and the
 		// run continues.
 		if s.interruptPending(run) {
-			s.skipInterruptedCalls(run, turn, callsFromPlans(plans))
-			return processed
+			s.skipPlans(run, turn, plans, SkippedInterruptedText)
+			return
 		}
 		// A fatal error or a cancellation ends the batch: the calls that
 		// have not started do not start.
 		if s.batchStopped(run) {
-			s.skipCalls(run, turn, callsFromPlans(plans), SkippedSettlingText)
-			return processed
+			s.skipPlans(run, turn, plans, SkippedSettlingText)
+			return
 		}
 		s.decideCall(run, turn, &p)
 		s.executeOne(run, turn, p)
 	}
-	return processed
 }
 
 // batchStopped reports that the run holds a candidate that ends the
@@ -193,15 +217,6 @@ func (s *Session) decideCall(run *runState, turn int, p *callPlan) {
 	s.mu.Lock()
 	run.permissionHandle, run.permissionTool = "", ""
 	s.mu.Unlock()
-}
-
-// callsFromPlans returns the calls a plan holds.
-func callsFromPlans(plans []callPlan) []ToolCall {
-	out := make([]ToolCall, 0, len(plans))
-	for _, p := range plans {
-		out = append(out, p.call)
-	}
-	return out
 }
 
 // beginTurn records the turn's calls in the turn's summary.
@@ -378,7 +393,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	// the finalization to settle. It is not marked started until the
 	// record is written. A call claimed after the finalization has
 	// sealed the run is the finalization's.
-	if !s.issueCall(run, turn, handle, call, plan.summary) {
+	if !s.issueCall(run, turn, handle, call, plan.summary, plan.parent) {
 		return
 	}
 
@@ -403,6 +418,11 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		}
 		recorded = true
 		defer s.finishCallWrite(run, callRecord)
+		// A nested call never runs as a job, whatever mode the model's
+		// path would have given it.
+		if m != "" && plan.parent != "" {
+			m = CallModeNested
+		}
 		if err := s.writeCallRecord(run, callRecord, &ToolCallRecord{
 			RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 			RunID:      run.id,
@@ -413,6 +433,7 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 			Summary:    callRecord.summary,
 			Arguments:  recordArgs(call.Arguments),
 			Mode:       m,
+			Parent:     plan.parent,
 		}); err != nil {
 			if errors.Is(err, errCallRecordSealed) {
 				// The finalization stopped waiting for the write and
@@ -435,6 +456,10 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 	}
 	if plan.summary != "" {
 		payload["summary"] = plan.summary
+	}
+	if plan.parent != "" {
+		// The parent's presence is what says the call is nested.
+		payload["parent"] = plan.parent
 	}
 	s.events.emit(EventToolCall, payload)
 
@@ -585,8 +610,9 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 
 	// A call that becomes a job returns at once, and its result
 	// arrives later as an input. An interrupt that arrived after the
-	// authorization refuses the admission.
-	if s.callBecomesJob(call.Name, plan.background) {
+	// authorization refuses the admission. A nested call never becomes
+	// a job: it runs in the turn its parent runs in.
+	if plan.parent == "" && s.callBecomesJob(call.Name, plan.background) {
 		if !record(CallModeJob) {
 			return
 		}
@@ -611,8 +637,14 @@ func (s *Session) executeOne(run *runState, turn int, plan callPlan) {
 		return
 	}
 
+	// The call runs under the run's activity context, so an interrupt
+	// cancels it. A nested call runs under its caller's context too, so
+	// the script's own deadline ends it.
 	callCtx := s.activityContext(run)
-	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, turn, handle))
+	if plan.callCtx != nil {
+		callCtx = plan.callCtx
+	}
+	result, err := tool.Call(callCtx, prepared, s.toolEnv(run, turn, handle, plan))
 	// The outcome is decided by the core, not by the tool.
 	outcome := OutcomeOK
 	var fatalCandidate *candidate
@@ -742,12 +774,14 @@ func (s *Session) prepareEnv() PrepareEnv {
 
 // toolEnv builds the environment a tool runs in.
 //
-// The call in the turn gets the nested seam, so a tool that
+// A call the model made gets the nested seam, so a tool that
 // orchestrates others — a script engine, say — can make calls of its
-// own. A nested call never leaves the turn.
-func (s *Session) toolEnv(run *runState, turn int, handle string) ToolEnv {
+// own. A nested call gets none: the nesting is one call deep.
+func (s *Session) toolEnv(run *runState, turn int, handle string, plan callPlan) ToolEnv {
 	env := s.toolEnvFor(run.id, handle)
-	env.Nested = &nestedCaller{session: s, run: run, turn: turn}
+	if plan.parent == "" {
+		env.Nested = &nestedCaller{session: s, run: run, turn: turn, parent: handle}
+	}
 	return env
 }
 
@@ -871,8 +905,15 @@ func (s *Session) beginCallRecordLocked(run *runState, call *issuedCall) {
 	run.callWrites++
 }
 
-// writeResult writes a call's result record and puts it in the model's
+// writeResult writes a call's result record and puts it in its reader's
 // view.
+//
+// A result the model's call produced goes into the model's view and the
+// turn's summary. A nested call's result goes to the tool that made it
+// instead: the model never saw the call, so nothing is appended to the
+// view and no message record is written, and the log's contract — the
+// messages in the log are the same list the model sees — keeps
+// holding.
 //
 // The caller has claimed the call's result. The chain's outcome
 // carries the original the hooks replaced and the decisions they made:
@@ -908,6 +949,27 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		s.noteStoreError(run, err)
 	}
 
+	// A nested call's result is the caller's, and it is recorded for the
+	// caller to read back rather than appended to the model's view.
+	if parent := s.storeNestedResult(run, NestedResult{
+		Handle:     handle,
+		Tool:       tool,
+		Outcome:    outcome,
+		Text:       text,
+		Structured: result.Structured,
+		IsError:    result.IsError,
+	}); parent != "" {
+		s.events.emit(EventToolResult, map[string]any{
+			"run_id":  run.id,
+			"handle":  handle,
+			"tool":    tool,
+			"outcome": string(outcome),
+			"text":    text,
+			"parent":  parent,
+		})
+		return
+	}
+
 	// The result goes into the model's view and the turn's summary.
 	msg := ToolResultMessage(callID, tool, text, result.IsError)
 	msg.Origin = OriginTool
@@ -932,6 +994,28 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 		"outcome": string(outcome),
 		"text":    text,
 	})
+}
+
+// storeNestedResult records a nested call's result for the tool that
+// made the call, and returns the call's parent handle.
+//
+// It returns the empty string for a call the model made, and stores
+// nothing then: the model's result goes into the view instead. The
+// result waits under the session's lock until the batch that made the
+// call reads it back, and a result the finalization settled for a call
+// nobody waits for any more is dropped with the run.
+func (s *Session) storeNestedResult(run *runState, result NestedResult) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	parent := s.resultMeta[result.Handle].parent
+	if parent == "" {
+		return ""
+	}
+	if run.nestedResults == nil {
+		run.nestedResults = map[string]NestedResult{}
+	}
+	run.nestedResults[result.Handle] = result
+	return parent
 }
 
 // rememberResult records a call's outcome and result in the turn's
@@ -992,11 +1076,13 @@ func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 			globalTurn: run.globalTurn,
 			arguments:  p.call.Arguments,
 			summary:    p.summary,
+			parent:     p.parent,
 		}
 		s.resultMeta[p.handle] = resultMeta{
 			tool:   p.call.Name,
 			callID: p.call.CallID,
 			turn:   run.globalTurn,
+			parent: p.parent,
 		}
 	}
 }
@@ -1006,11 +1092,11 @@ func (s *Session) claimBatch(run *runState, turn int, plans []callPlan) {
 //
 // The batch registers every call it plans, so a call that another claim
 // already owns is not the dispatch's. A call that arrives without its
-// batch's registration is registered here and is the dispatch's. The
-// claim is made against the seal: it reports false when the run is
-// sealed, because the finalization owns every call that is still
-// outstanding.
-func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCall, summary string) bool {
+// batch's registration is registered here and is the dispatch's, with
+// the parent the call was given. The claim is made against the seal: it
+// reports false when the run is sealed, because the finalization owns
+// every call that is still outstanding.
+func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCall, summary, parent string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if run.sealed {
@@ -1030,11 +1116,13 @@ func (s *Session) issueCall(run *runState, turn int, handle string, call ToolCal
 		globalTurn: run.globalTurn,
 		arguments:  call.Arguments,
 		summary:    summary,
+		parent:     parent,
 	}
 	s.resultMeta[handle] = resultMeta{
 		tool:   call.Name,
 		callID: call.CallID,
 		turn:   run.globalTurn,
+		parent: parent,
 	}
 	if run.workDone == nil {
 		run.workDone = make(chan struct{}, 1)

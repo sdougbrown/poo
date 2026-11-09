@@ -7,13 +7,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 )
 
 // The nested tool-call seam: a tool that runs in the turn may make
-// calls of its own through ToolEnv.Nested, and the results are
-// recorded without entering the model's history.
+// calls of its own through ToolEnv.Nested, and the results come back to
+// it without entering the model's history.
 
 // nestPolicy is the deny-by-tool-name policy the nested tests use.
 type nestPolicy struct {
@@ -34,17 +35,51 @@ func (p *nestPolicy) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo
 	return poo.Allow(), nil
 }
 
+// denyNested is a consumer before-tool hook that refuses one tool.
+type denyNested struct {
+	// deny is the tool name every call of which is refused.
+	deny string
+}
+
+func (h *denyNested) BeforeTool(ctx poo.HookContext, info poo.ToolCallInfo) (poo.ToolDecision, error) {
+	if info.Spec.Name == h.deny {
+		return poo.Deny("the hook refused the " + info.Spec.Name + " call"), nil
+	}
+	return poo.Allow(), nil
+}
+
+// rewriteNested is a consumer after-tool hook that replaces one tool's
+// result text.
+type rewriteNested struct {
+	// tool is the tool whose results are replaced.
+	tool string
+	// text is the result text the hook substitutes.
+	text string
+}
+
+func (h *rewriteNested) AfterTool(ctx poo.HookContext, info poo.ToolCallInfo, result poo.ToolResult) (poo.ResultDecision, error) {
+	if info.Spec.Name != h.tool {
+		return poo.Keep(), nil
+	}
+	return poo.Replace(poo.ToolResult{Text: h.text}), nil
+}
+
 // nestedTool is a tool that makes the nested calls a test scripts.
 //
-// script holds "tool arguments-json" lines; the tool runs each through
-// env.Nested in order and reports the outcomes as its own result text.
+// script holds "tool arguments-json" lines; the tool makes one batch of
+// them through env.Nested and reports the outcomes as its own result
+// text. The seam's own results are kept for a test to assert on.
 type nestedTool struct {
 	mu sync.Mutex
 	// nester is the env's nested caller, kept so a test can assert on
 	// the seam itself.
 	nester poo.NestedCaller
-	// sawNested reports whether the tool's env carried a nested caller.
+	// script is the batch the tool makes.
 	script []string
+	// results are the results the seam returned, in batch order.
+	results []poo.NestedResult
+	// seamErr is the error the seam returned, when it returned one.
+	seamErr error
 }
 
 func (t *nestedTool) Spec() poo.ToolSpec {
@@ -61,28 +96,39 @@ func (t *nestedTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepa
 }
 
 func (t *nestedTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
-	t.mu.Lock()
-	t.nester = env.Nested
-	t.mu.Unlock()
 	if env.Nested == nil {
 		return poo.ToolResult{Text: "no nested caller", IsError: true}, nil
 	}
-	var lines []string
+	calls := make([]poo.NestedCall, 0, len(t.script))
 	for _, step := range t.script {
 		parts := strings.SplitN(step, " ", 2)
-		name := parts[0]
-		args := json.RawMessage("{}")
+		call := poo.NestedCall{Tool: parts[0], Arguments: json.RawMessage("{}")}
 		if len(parts) == 2 {
-			args = json.RawMessage(parts[1])
+			call.Arguments = json.RawMessage(parts[1])
 		}
-		res, err := env.Nested.Call(ctx, env.Handle, name, args)
-		if err != nil {
-			lines = append(lines, name+": error: "+err.Error())
-			continue
-		}
-		lines = append(lines, name+": "+string(res.Outcome))
+		calls = append(calls, call)
+	}
+	results, err := env.Nested.Call(ctx, calls)
+	t.mu.Lock()
+	t.nester = env.Nested
+	t.results, t.seamErr = results, err
+	t.mu.Unlock()
+	if err != nil {
+		return poo.ToolResult{Text: "the batch did not start: " + err.Error(), IsError: true}, nil
+	}
+	lines := make([]string, 0, len(results))
+	for _, res := range results {
+		lines = append(lines, res.Tool+": "+string(res.Outcome))
 	}
 	return poo.ToolResult{Text: strings.Join(lines, "\n")}, nil
+}
+
+// returned returns the results the seam gave back, and the error it
+// gave instead.
+func (t *nestedTool) returned() ([]poo.NestedResult, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]poo.NestedResult(nil), t.results...), t.seamErr
 }
 
 type nestPrepared struct{}
@@ -177,6 +223,31 @@ func TestNestedResultsNeverReachTheHistory(t *testing.T) {
 	if toolMessages != 1 {
 		t.Errorf("the log holds %d tool-role messages, want 1 (the nest call's own)", toolMessages)
 	}
+
+	// The events say a call is nested by naming its parent, and not by a
+	// key of its own.
+	seenNested := 0
+	for _, ev := range s.Events() {
+		if _, ok := ev.Payload["nested"]; ok {
+			t.Errorf("the %s event carries a separate nested key", ev.Name)
+		}
+		switch ev.Name {
+		case poo.EventToolCall:
+			if ev.Payload["parent"] == "r1" {
+				seenNested++
+			}
+		case poo.EventToolResult:
+			if ev.Payload["handle"] != "r1" {
+				continue
+			}
+			if _, ok := ev.Payload["parent"]; ok {
+				t.Error("the nest call's own result names a parent")
+			}
+		}
+	}
+	if seenNested != 3 {
+		t.Errorf("the event stream names %d nested tool calls, want 3", seenNested)
+	}
 }
 
 // TestNestedCallsShareThePermissionEngine covers refusals: a denial of
@@ -188,8 +259,9 @@ func TestNestedCallsShareThePermissionEngine(t *testing.T) {
 		`reader {"text":"two"}`,
 	}}
 	reader := &namedTool{echoTool: echoTool{result: "ok"}, name: "reader"}
+	bash := &namedTool{echoTool: echoTool{class: poo.ClassSideEffecting}, name: "bash"}
 	sink := &recordingSink{}
-	s := nestedSession(t, nest, map[string]poo.Tool{"reader": reader, "bash": &namedTool{echoTool: echoTool{}, name: "bash"}}, sink,
+	s := nestedSession(t, nest, map[string]poo.Tool{"reader": reader, "bash": bash}, sink,
 		poo.WithPolicy(&nestPolicy{deny: "bash"}))
 	runSession(t, s, "hello")
 
@@ -234,27 +306,49 @@ func TestNestedCallsCountTowardTheDoomLoop(t *testing.T) {
 	}
 }
 
-// TestNestedCallsExcludeTheRunTools covers the exclusions: finish and
-// the job tools are refused before they are judged, and a nested finish
-// never settles the run.
-func TestNestedCallsExcludeTheRunTools(t *testing.T) {
-	nest := &nestedTool{script: []string{
-		`finish {}`,
-		`jobs {}`,
-		`cancel_job {}`,
-	}}
-	sink := &recordingSink{}
-	s := nestedSession(t, nest, map[string]poo.Tool{
-		"finish":     &echoTool{},
-		"jobs":       &echoTool{},
-		"cancel_job": &echoTool{},
-	}, sink)
-	runSession(t, s, "hello")
+// TestANestedBatchIsValidatedBeforeItStarts covers the batch's
+// validation: an entry that names a run tool or an unknown tool fails
+// the whole batch before any of it is claimed, so a typo in a fan-out
+// has no effect.
+func TestANestedBatchIsValidatedBeforeItStarts(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		entry string
+		want  string
+	}{
+		{name: "run tool", entry: `finish {}`, want: `"finish" cannot run as a nested call`},
+		{name: "unknown tool", entry: `typo {"text":"x"}`, want: `unknown tool "typo"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nest := &nestedTool{script: []string{`reader {"text":"one"}`, tc.entry}}
+			reader := &namedTool{echoTool: echoTool{result: "ok"}, name: "reader"}
+			sink := &recordingSink{}
+			s := nestedSession(t, nest, map[string]poo.Tool{"reader": reader}, sink)
+			runSession(t, s, "hello")
 
-	for _, rec := range sink.allRecords() {
-		if r, ok := rec.(*poo.ToolResultRecord); ok && r.Tool == "finish" && r.Outcome == poo.OutcomeOK {
-			t.Error("a nested finish call ran")
-		}
+			_, err := nest.returned()
+			if err == nil {
+				t.Fatal("the seam returned no error for a batch it may not run")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the seam's error is %q, want it to name %q", err, tc.want)
+			}
+			if got := len(reader.Calls()); got != 0 {
+				t.Errorf("the reader ran %d times, want 0 (the batch never started)", got)
+			}
+			for _, rec := range sink.allRecords() {
+				switch r := rec.(type) {
+				case *poo.ToolCallRecord:
+					if r.Tool != "nest" {
+						t.Errorf("the log holds a tool.call record for %q, want only the nest call", r.Tool)
+					}
+				case *poo.ToolResultRecord:
+					if r.Tool != "nest" {
+						t.Errorf("the log holds a tool.result record for %q, want only the nest call", r.Tool)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -267,7 +361,10 @@ func TestNestedToolSeesNoNestedCaller(t *testing.T) {
 	s := nestedSession(t, nest, map[string]poo.Tool{"inner": inner}, sink)
 	runSession(t, s, "hello")
 
-	if inner.nester != nil {
+	inner.mu.Lock()
+	nerster := inner.nester
+	inner.mu.Unlock()
+	if nerster != nil {
 		t.Error("the nested call's tool saw a nested caller of its own")
 	}
 }
@@ -291,12 +388,164 @@ func TestNestedPrepareFailureIsData(t *testing.T) {
 	if got := len(reader.Calls()); got != 2 {
 		t.Errorf("the reader ran %d times, want 2 (the script continued past the failed call)", got)
 	}
+	results, err := nest.returned()
+	if err != nil {
+		t.Fatalf("the seam returned an error for a batch it started: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("the seam returned %d results, want 3", len(results))
+	}
+	if results[1].Outcome != poo.OutcomeError || !results[1].IsError {
+		t.Errorf("the failed call's result is %q/%v, want an error", results[1].Outcome, results[1].IsError)
+	}
+	if !strings.Contains(results[1].Text, "no such file") {
+		t.Errorf("the failed call's text is %q, want the validation failure", results[1].Text)
+	}
 }
 
-// TestAnInterruptMidScriptSettlesEachNestedCallOnce covers the
-// finalization's ownership: a run interrupted while a nested call is in
-// flight settles it exactly once, and nothing enters the history.
-func TestAnInterruptMidScriptSettlesEachNestedCallOnce(t *testing.T) {
+// TestTheConsumerHooksSeeNestedCalls covers the hooks: a nested call goes
+// through the before-tool and after-tool chains like a model-made call,
+// so a consumer's refusal and a consumer's rewrite both reach the
+// script.
+func TestTheConsumerHooksSeeNestedCalls(t *testing.T) {
+	nest := &nestedTool{script: []string{
+		`reader {"text":"one"}`,
+		`bash {"command":"rm -rf /"}`,
+	}}
+	reader := &namedTool{echoTool: echoTool{result: "the secret"}, name: "reader"}
+	bash := &namedTool{echoTool: echoTool{class: poo.ClassSideEffecting}, name: "bash"}
+	sink := &recordingSink{}
+	s := nestedSession(t, nest,
+		map[string]poo.Tool{"reader": reader, "bash": bash}, sink,
+		poo.WithBeforeTool(&denyNested{deny: "bash"}),
+		poo.WithAfterTool(&rewriteNested{tool: "reader", text: "the redacted text"}),
+	)
+	runSession(t, s, "hello")
+
+	results, err := nest.returned()
+	if err != nil {
+		t.Fatalf("the seam returned an error for a batch it started: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("the seam returned %d results, want 2", len(results))
+	}
+	if !strings.Contains(results[0].Text, "the redacted text") {
+		t.Errorf("the nested result the caller read is %q, want the after-tool hook's text", results[0].Text)
+	}
+	if strings.Contains(results[0].Text, "the secret") {
+		t.Error("the caller read the result text the after-tool hook replaced")
+	}
+	if results[1].Outcome != poo.OutcomeDenied || !results[1].IsError {
+		t.Errorf("the refused call's result is %q/%v, want a denial", results[1].Outcome, results[1].IsError)
+	}
+	if !strings.Contains(results[1].Text, "the hook refused") {
+		t.Errorf("the refused call's text is %q, want the hook's reason", results[1].Text)
+	}
+	if got := len(bash.Calls()); got != 0 {
+		t.Errorf("the refused tool ran %d times, want 0", got)
+	}
+}
+
+// gate is a rendezvous two calls meet at.
+//
+// A call arrives, reports the most calls that were ever inside at once,
+// and leaves. A batch whose calls run one after another never reaches
+// two.
+type gate struct {
+	mu   sync.Mutex
+	in   int
+	peak int
+}
+
+func (g *gate) arrive() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.in++
+	if g.in > g.peak {
+		g.peak = g.in
+	}
+}
+
+func (g *gate) leave() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.in--
+}
+
+// peakIn returns the most calls that were inside at once.
+func (g *gate) peakIn() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.peak
+}
+
+// TestANestedBatchIsScheduledLikeTheModels covers the scheduling rule:
+// a batch runs in parallel only when every call in it is read-only, so a
+// side-effecting call never overlaps another.
+func TestANestedBatchIsScheduledLikeTheModels(t *testing.T) {
+	const wait = 200 * time.Millisecond
+	// meet waits for a second call, and reports whether one came: a
+	// sequential batch never has two calls inside at once, so the wait
+	// is bounded and the answer is no.
+	meet := func(g *gate) func(context.Context) (poo.ToolResult, error) {
+		return func(ctx context.Context) (poo.ToolResult, error) {
+			g.arrive()
+			defer g.leave()
+			deadline := time.Now().Add(wait)
+			for time.Now().Before(deadline) {
+				if g.peakIn() >= 2 {
+					return poo.ToolResult{Text: "met"}, nil
+				}
+				time.Sleep(time.Millisecond)
+			}
+			return poo.ToolResult{Text: "alone"}, nil
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		other   poo.ToolKind
+		wantMet bool
+	}{
+		{name: "read-only batch", other: poo.ClassReadOnly, wantMet: true},
+		{name: "side-effecting batch", other: poo.ClassSideEffecting, wantMet: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &gate{}
+			reader := &namedTool{echoTool: echoTool{call: meet(g)}, name: "reader"}
+			walker := &namedTool{echoTool: echoTool{call: meet(g), class: tc.other}, name: "walker"}
+			nest := &nestedTool{script: []string{`reader {"text":"one"}`, `walker {"text":"two"}`}}
+			sink := &recordingSink{}
+			s := nestedSession(t, nest,
+				map[string]poo.Tool{"reader": reader, "walker": walker}, sink)
+			runSession(t, s, "hello")
+
+			results, err := nest.returned()
+			if err != nil {
+				t.Fatalf("the seam returned an error for a batch it started: %v", err)
+			}
+			if len(results) != 2 {
+				t.Fatalf("the seam returned %d results, want 2", len(results))
+			}
+			for _, res := range results {
+				met := strings.Contains(res.Text, "met")
+				if met != tc.wantMet {
+					t.Errorf("the %s call's result is %q, want met=%v", res.Tool, res.Text, tc.wantMet)
+				}
+			}
+			// The tool ran both calls, whatever the answer: the batch
+			// runs to completion.
+			if got := len(reader.Calls()) + len(walker.Calls()); got != 2 {
+				t.Errorf("the batch ran %d calls, want 2", got)
+			}
+		})
+	}
+}
+
+// TestANestedCallSettledWithTheRunLeavesNoHistory covers the settle
+// path: a nested call that is outstanding when the run settles gets its
+// record, but nothing enters the model's history and no message record
+// is written for it.
+func TestANestedCallSettledWithTheRunLeavesNoHistory(t *testing.T) {
 	blocker := &namedTool{echoTool: echoTool{
 		call: func(ctx context.Context) (poo.ToolResult, error) {
 			<-ctx.Done()
@@ -305,44 +554,88 @@ func TestAnInterruptMidScriptSettlesEachNestedCallOnce(t *testing.T) {
 	}, name: "blocker"}
 	nest := &nestedTool{script: []string{`blocker {}`}}
 	sink := &recordingSink{}
-	s := nestedSession(t, nest, map[string]poo.Tool{"blocker": blocker}, sink)
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "nest", Arguments: json.RawMessage(`{}`)}}},
+		{text: "done"},
+	})
+	opts := poo.Options{
+		Transport:    tr,
+		Tools:        map[string]poo.Tool{"nest": nest, "blocker": blocker},
+		ToolOrder:    []string{"nest", "blocker"},
+		Sink:         sink,
+		SessionID:    "s1",
+		Model:        poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		SystemPrompt: "the system prompt",
+		WorkingDir:   t.TempDir(),
+	}
+	s := newTestSession(t, opts)
 	if _, err := s.Prompt(context.Background(), "start"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	// The nested call is in flight when the interrupt lands.
+	// The nested call is in flight when the run is cancelled.
+	var nestedHandle string
 	waitFor(t, "the nested call to start", func() bool {
 		for _, ev := range s.Events() {
-			if ev.Name == poo.EventToolCall && ev.Payload["nested"] == true {
-				return true
+			if ev.Name != poo.EventToolCall || ev.Payload["parent"] != "r1" {
+				continue
 			}
+			nestedHandle, _ = ev.Payload["handle"].(string)
+			return nestedHandle != ""
 		}
 		return false
 	})
-	if _, err := s.Send("stop", poo.Interrupt); err != nil {
-		t.Fatalf("sending the interrupt: %v", err)
-	}
+	s.Cancel("cancel:test")
 	if _, err := s.Wait(context.Background()); err != nil {
 		t.Fatalf("waiting for the run: %v", err)
 	}
 
+	// The nested call's result is recorded exactly once, for the script
+	// that asked for it.
 	results := map[string]int{}
-	outcomes := map[string]poo.Outcome{}
 	for _, rec := range sink.allRecords() {
 		if r, ok := rec.(*poo.ToolResultRecord); ok {
 			results[r.Handle]++
-			outcomes[r.Handle] = r.Outcome
 		}
 	}
-	if got := results["r2"]; got != 1 {
+	if got := results[nestedHandle]; got != 1 {
 		t.Errorf("the nested call's result landed %d times, want 1", got)
 	}
-	switch outcomes["r2"] {
-	case poo.OutcomeCancelled, poo.OutcomeInterrupted:
-	default:
-		t.Errorf("the nested call's outcome is %q, want cancelled or interrupted", outcomes["r2"])
+	// The log holds no message for the nested call: the model never saw
+	// it, and a message would carry no call id.
+	for _, rec := range sink.allRecords() {
+		msg, ok := rec.(*poo.MessageRecord)
+		if !ok {
+			continue
+		}
+		for _, block := range msg.Content {
+			if block.Kind == poo.ContentToolResult && block.ToolCallID == "" {
+				t.Errorf("the log holds a tool result with no call id: %q", block.Text)
+			}
+		}
 	}
-	if got := results["r1"]; got != 1 {
-		t.Errorf("the nest call's own result landed %d times, want 1", got)
+
+	// The next run's request carries the model's view, and the view
+	// holds no such result either.
+	if _, err := s.Prompt(context.Background(), "again"); err != nil {
+		t.Fatalf("starting the next run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the next run: %v", err)
+	}
+	requests := tr.Requests()
+	last := requests[len(requests)-1]
+	for _, msg := range last.Messages {
+		for _, block := range msg.Content {
+			if block.Kind != poo.ContentToolResult {
+				continue
+			}
+			if block.ToolCallID == "" {
+				t.Errorf("the next request carries a tool result with no call id: %q", block.Text)
+			}
+			if strings.Contains(block.Text, nestedHandle+" ·") {
+				t.Errorf("the next request carries the nested call's result: %q", block.Text)
+			}
+		}
 	}
 }
 
@@ -358,7 +651,7 @@ func TestTheNestedSeamIsTheTurnsAlone(t *testing.T) {
 	if nest.nester == nil {
 		t.Fatal("the turn's tool saw no nested caller")
 	}
-	if _, err := nest.nester.Call(context.Background(), "r1", "nope", json.RawMessage(`{}`)); err == nil {
+	if _, err := nest.nester.Call(context.Background(), []poo.NestedCall{{Tool: "nope"}}); err == nil {
 		t.Fatal("the nested call of an unknown tool returned no error")
 	}
 }
