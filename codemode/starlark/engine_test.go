@@ -131,8 +131,8 @@ exit({"saw": r["text"], "outcome": r["outcome"], "ok": not r["is_error"]})
 }
 
 // TestAScriptSeesTheStructuredPayload covers the payload's shape: the
-// structured result is the JSON text as a string, so the script parses
-// what it needs and the engine makes no second schema round trip.
+// structured result is the JSON text as a string, so the script reads it
+// with json.decode and the engine makes no second schema round trip.
 func TestAScriptSeesTheStructuredPayload(t *testing.T) {
 	res, err := run(t, `
 r = call("read", {"path": "x"})
@@ -147,6 +147,21 @@ exit(r["structured"])
 	}
 	if value != `{"k":1}` {
 		t.Errorf("the script saw structured %q, want the payload's JSON text", value)
+	}
+}
+
+// TestAScriptDecodesTheStructuredPayload covers the decoder: the script
+// turns a result's payload into a value it can read.
+func TestAScriptDecodesTheStructuredPayload(t *testing.T) {
+	res, err := run(t, `
+r = call("read", {"path": "x"})
+exit(json.decode(r["structured"])["k"])
+`, &fakeNested{}, codemode.Limits{})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if string(res.Value) != "1" {
+		t.Errorf("the script returned %s, want the decoded k", res.Value)
 	}
 }
 
@@ -294,9 +309,6 @@ while True:
 `, &fakeNested{}, codemode.Limits{ExecSteps: 1000})
 	if err == nil {
 		t.Fatal("the infinite loop ran to completion")
-	}
-	if !strings.Contains(err.Error(), "too many steps") {
-		t.Fatalf("the loop stopped for another reason: %v", err)
 	}
 	if !strings.Contains(err.Error(), "too many steps") {
 		t.Fatalf("the loop stopped for another reason: %v", err)

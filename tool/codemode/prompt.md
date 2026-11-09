@@ -15,6 +15,8 @@ has:
 - `gather([("read", {...}), ("grep", {...})])` makes the calls in one
   batch and returns their results in list order. Calls that only read
   run at the same time; the rest run in order.
+- `json.decode(text)` and `json.encode(value)` convert between JSON
+  text and values, so `json.decode(r["structured"])` reads a payload.
 - `print(x)` keeps a line for the result you will see.
 - `exit(value)` ends the script with a value; the value comes back as
   JSON. A script without `exit` returns nothing but its printed lines.

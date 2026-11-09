@@ -119,6 +119,9 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 		"call":   starlark.NewBuiltin("call", st.callBuiltin),
 		"gather": starlark.NewBuiltin("gather", st.gatherBuiltin),
 		"exit":   starlark.NewBuiltin("exit", st.exitBuiltin),
+		// The json module is pure and deterministic, so a script can
+		// decode a result's structured payload with json.decode.
+		"json": jsonmod.Module,
 	}
 	// The options are explicit, not syntax.LegacyFileOptions: a script's
 	// powers must not follow the process-global resolver flags a host may
@@ -299,8 +302,8 @@ func marshal(thread *starlark.Thread, value starlark.Value) (json.RawMessage, er
 
 // nestedToStarlark shapes a nested result for the script.
 //
-// The structured payload stays a JSON string: the script parses what it
-// needs, and the engine does not make a second schema round trip.
+// The structured payload stays a JSON string: the script reads it with
+// json.decode, and the engine does not make a second schema round trip.
 func nestedToStarlark(res poo.NestedResult) starlark.Value {
 	dict := starlark.NewDict(6)
 	_ = dict.SetKey(starlark.String("handle"), starlark.String(res.Handle))
