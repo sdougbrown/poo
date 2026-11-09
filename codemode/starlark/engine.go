@@ -81,8 +81,16 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 	thread := &starlark.Thread{
 		Name: "codemode",
 		Print: func(_ *starlark.Thread, msg string) {
+			st.mu.Lock()
+			defer st.mu.Unlock()
 			if st.printed >= limits.OutputCapChars {
 				return
+			}
+			// A single print that crosses the remaining budget is cut
+			// to it, with a note: no one print can flood the result.
+			room := limits.OutputCapChars - st.printed
+			if len(msg) > room {
+				msg = msg[:room] + " …"
 			}
 			st.output = append(st.output, msg)
 			st.printed += len(msg) + 1
