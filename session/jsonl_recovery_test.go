@@ -522,3 +522,61 @@ func TestTheRecoveryKeepsTheFileWhole(t *testing.T) {
 		t.Errorf("the log holds %d records, want 5", len(recs))
 	}
 }
+
+// TestANestedCallWithoutAResultIsRecovered covers the nested seam's
+// torn tail: a nested tool.call with no result is recovered with an
+// interrupted result, and no message record — the model never saw the
+// call, so nothing of it enters the history.
+//
+// The parent is what says the model never saw the call, not the absence
+// of a provider id: a nested call whose record carries an id is closed
+// without a message too.
+func TestANestedCallWithoutAResultIsRecovered(t *testing.T) {
+	dir, store := newTestStore(t)
+	ctx := context.Background()
+
+	nested := func(handle, callID string) *poo.ToolCallRecord {
+		rec := toolCallWithID("r1", 1, handle, "read", callID)
+		rec.Mode = poo.CallModeNested
+		rec.Parent = "r2"
+		return rec
+	}
+	writeSession(t, dir, "s1",
+		createdRecord("s1"),
+		runStarted("r1"),
+		toolCall("r1", 1, "r2", "codemode"),
+		nested("r5", ""),
+		nested("r6", "call_nested_2"),
+	)
+
+	loaded, err := store.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+
+	results := map[string]*poo.ToolResultRecord{}
+	messages := 0
+	for _, rec := range loaded.Records {
+		switch r := rec.(type) {
+		case *poo.ToolResultRecord:
+			results[r.Handle] = r
+		case *poo.MessageRecord:
+			messages++
+		}
+	}
+	for _, handle := range []string{"r5", "r6"} {
+		result := results[handle]
+		if result == nil {
+			t.Fatalf("the nested call %s has no recovered result", handle)
+		}
+		if result.Outcome != poo.OutcomeInterrupted {
+			t.Errorf("the recovered outcome of %s is %q, want interrupted", handle, result.Outcome)
+		}
+	}
+	// No message at all: the model never saw either nested call, so
+	// neither gets a result message — the parent keeps them out of the
+	// history, with or without a provider id.
+	if messages != 0 {
+		t.Errorf("the recovered log holds %d messages, want 0 (the recovery writes none for a nested call)", messages)
+	}
+}

@@ -132,15 +132,28 @@ func (s *Session) skipInterruptedCalls(run *runState, turn int, calls []ToolCall
 // skipCalls records the calls of a batch that never started, with the
 // visible result text given.
 //
+// The calls are the model's, so their handles are the ones the turn's
+// summary holds.
+func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text string) {
+	handles := s.handlesOf(run.globalTurn, len(calls))
+	plans := make([]callPlan, len(calls))
+	for i, call := range calls {
+		plans[i] = callPlan{handle: handles[i], call: call, index: i}
+	}
+	s.skipPlans(run, turn, plans, text)
+}
+
+// skipPlans records the calls of a batch that never started, with the
+// visible result text given.
+//
 // A call that another claim already owns — its own dispatch, or the
 // finalization after the seal — is left alone: it gets its records from
-// that claim.
-func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text string) {
+// that claim. The plans carry the handles and the parents the batch was
+// registered with, so a nested call's records say what it belonged to.
+func (s *Session) skipPlans(run *runState, turn int, plans []callPlan, text string) {
 	s.sealRaceHook("skip")
-	handles := s.handlesOf(run.globalTurn, len(calls))
-	for i, call := range calls {
-		handle := handles[i]
-		callRecord, ok := s.claimSkippedCall(run, turn, handle, call)
+	for _, p := range plans {
+		callRecord, ok := s.claimSkippedCall(run, turn, p.handle, p.call)
 		if !ok {
 			continue
 		}
@@ -148,14 +161,15 @@ func (s *Session) skipCalls(run *runState, turn int, calls []ToolCall, text stri
 			RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 			RunID:      run.id,
 			Turn:       turn,
-			Handle:     handle,
-			CallID:     call.CallID,
-			Tool:       call.Name,
+			Handle:     p.handle,
+			CallID:     p.call.CallID,
+			Tool:       p.call.Name,
 			Summary:    callRecord.summary,
-			Arguments:  recordArgs(call.Arguments),
+			Arguments:  recordArgs(p.call.Arguments),
+			Parent:     p.parent,
 		})
 		s.finishCallWrite(run, callRecord)
-		s.recordResult(run, turn, handle, call.Name, call.CallID, ToolResult{
+		s.recordResult(run, turn, p.handle, p.call.Name, p.call.CallID, ToolResult{
 			Text:    text,
 			IsError: true,
 		}, OutcomeSkipped)

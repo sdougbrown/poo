@@ -524,6 +524,11 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 	// The turn that is being filled: the session's number and the run's
 	// number, and the messages the turn holds.
 	placed := 0
+	// nestedCalls are the handles of the nested calls the records hold.
+	// A nested call's result is not one of the model's, so it is kept
+	// out of the results the view answers with, the way the live
+	// session keeps it out.
+	nestedCalls := map[string]bool{}
 	for _, rec := range records {
 		switch r := rec.(type) {
 		case *MessageRecord:
@@ -543,8 +548,13 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 			}
 			s.rememberMessageResult(r)
 		case *ToolCallRecord:
-			s.rememberCall(r, sessionTurn)
+			if s.rememberCall(r, sessionTurn) {
+				nestedCalls[r.Handle] = true
+			}
 		case *ToolResultRecord:
+			if nestedCalls[r.Handle] {
+				continue
+			}
 			s.rememberRecordedResult(r, sessionTurn)
 		case *CompactionRecord:
 			if err := s.applyRecordedCompaction(r.Compaction); err != nil {
@@ -706,22 +716,30 @@ func (s *Session) placeRemainingTurns(placed int) {
 }
 
 // rememberCall remembers a call the records hold.
-func (s *Session) rememberCall(r *ToolCallRecord, sessionTurn map[turnKey]int) {
+//
+// A nested call is not one of the turn's model-made calls: it does not
+// join the turn's summary, and the result the records hold for it is
+// not one of the model's either. It reports whether the call was nested.
+func (s *Session) rememberCall(r *ToolCallRecord, sessionTurn map[turnKey]int) bool {
+	if r.Parent != "" {
+		return true
+	}
 	st := sessionTurn[turnKey{run: r.RunID, turn: r.Turn}]
 	if st < 1 || st > len(s.turns) {
-		return
+		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	summary := s.turns[st-1]
 	for _, call := range summary.Calls {
 		if call.Handle == r.Handle {
-			return
+			return false
 		}
 	}
 	calls := append(append([]ToolCallSummary(nil), summary.Calls...), ToolCallSummary{Handle: r.Handle, Tool: r.Tool, Summary: r.Summary})
 	summary.Calls = calls
 	s.turns[st-1] = summary
+	return false
 }
 
 // rememberRecordedResult remembers a result the records hold.

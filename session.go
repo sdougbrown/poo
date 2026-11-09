@@ -314,6 +314,12 @@ type runState struct {
 	// gets exactly one result, so a call that finished at the same
 	// moment the run settled does not get a second one.
 	settledCalls map[string]bool
+	// nestedResults are the results of the run's nested calls, waiting
+	// for the tool that made them to read them back, by handle. The
+	// run's result writer is the only writer, and the tool that called
+	// the seam is the only reader: a nested call's result reaches its
+	// caller and never the model.
+	nestedResults map[string]NestedResult
 	// resultWrites counts the claimed results whose records are still
 	// being written. The finalization waits for them as it does for the
 	// pending calls.
@@ -413,6 +419,9 @@ type issuedCall struct {
 	// skip path or the finalization writes carries the same summary the
 	// live turn summary does.
 	summary string
+	// parent is the handle of the call that made this one, for a nested
+	// call. It is empty for a call the model made.
+	parent string
 	// recorded reports that the tool.call record is written or owned for
 	// writing.
 	recorded bool

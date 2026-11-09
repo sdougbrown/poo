@@ -635,7 +635,7 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 		if !call.recorded {
 			// The call was claimed before its record was written, so the
 			// finalization writes it. The call never fixed a mode: it
-			// never ran.
+			// never ran. Its parent says whether it was nested.
 			if err := s.writeCallRecord(run, call, &ToolCallRecord{
 				RecordMeta: NewRecordMetaFrom("tool.call", OriginModel),
 				RunID:      run.id,
@@ -645,6 +645,7 @@ func (s *Session) settleIssuedCalls(run *runState, issued []*issuedCall) {
 				Tool:       call.tool,
 				Summary:    call.summary,
 				Arguments:  recordArgs(call.arguments),
+				Parent:     call.parent,
 			}); err != nil && !errors.Is(err, errCallRecordSealed) {
 				s.noteStoreError(run, err)
 			}

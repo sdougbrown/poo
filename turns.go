@@ -41,6 +41,10 @@ type resultMeta struct {
 	callID string
 	// turn is the session's number for the turn the call was made in.
 	turn int
+	// parent is the handle of the call that made this one, for a nested
+	// call. It is empty for a call the model made, and it is how the
+	// result writer tells a caller's result from the model's.
+	parent string
 }
 
 // openTurn starts a turn and returns its session number.

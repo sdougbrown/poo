@@ -213,9 +213,17 @@ const (
 	CallModeSync CallMode = "sync"
 	// CallModeJob means the call became a background job.
 	CallModeJob CallMode = "job"
+	// CallModeNested means a running tool made the call, and its
+	// result never reached the model's history.
+	CallModeNested CallMode = "nested"
 )
 
-// ToolCallRecord records a tool call the model made, with its full arguments.
+// ToolCallRecord records a tool call, with its full arguments.
+//
+// The call is usually the model's. A nested call — mode "nested", Parent
+// set — is one a running tool made: it carries no CallID, gets no message
+// record, and its tool name and arguments are the ones that tool asked
+// for.
 type ToolCallRecord struct {
 	RecordMeta
 	// RunID identifies the run the call belongs to.
@@ -227,24 +235,31 @@ type ToolCallRecord struct {
 	// CallID is the provider's id of the call. It is the id the model's
 	// message carries and the id the result answers, so a reader pairs a
 	// call with its message and its result by this id, never by the
-	// order the records landed in.
+	// order the records landed in. It is absent on a nested call: the
+	// model never made it, and no message carries it.
 	CallID string `json:"call_id,omitempty"`
-	// Tool is the name of the tool the model called.
+	// Tool is the name of the tool the call names: the one the model
+	// called, or the one a nested call's caller asked for.
 	Tool string `json:"tool"`
 	// Summary is the call's human-facing summary, as the event stream
 	// shows it. It is absent when the call has none, and on a log written
 	// before the field existed. A permission ask records the command
 	// instead: the summary may be the model's own description.
 	Summary string `json:"summary,omitempty"`
-	// Arguments are the raw arguments the model sent. They are a JSON
-	// object when the model sent valid JSON, and a JSON string holding the
-	// raw text when it did not.
+	// Arguments are the raw arguments the call was made with: the ones
+	// the model sent, or the ones a nested call's caller passed. They are
+	// a JSON object when they are valid JSON, and a JSON string holding
+	// the raw text when they are not.
 	Arguments json.RawMessage `json:"arguments"`
-	// Mode says how the call ran: "sync" in the turn, or "job" in the
-	// background. The mode is fixed when the call starts, after the
-	// before-tool hooks have answered; a call that never ran has no
-	// mode.
+	// Mode says how the call ran: "sync" in the turn, "job" in the
+	// background, or "nested" from inside another call. The mode is
+	// fixed when the call starts, after the before-tool hooks have
+	// answered; a call that never ran has no mode.
 	Mode CallMode `json:"mode,omitempty"`
+	// Parent names the call that made this one, when the mode is
+	// "nested". It is the parent call's handle, so a reader of the log
+	// can walk the calls a script made under one of the model's calls.
+	Parent string `json:"parent,omitempty"`
 }
 
 // ToolResultRecord records the outcome of a tool call.

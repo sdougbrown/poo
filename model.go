@@ -29,7 +29,9 @@ type Origin string
 const (
 	// OriginUser is a message from the person driving the session.
 	OriginUser Origin = "user"
-	// OriginModel is a message the model produced.
+	// OriginModel is a message the model produced. A nested call's
+	// tool.call record keeps this origin, and its Mode ("nested") and
+	// Parent mark it as a call a tool made.
 	OriginModel Origin = "model"
 	// OriginTool is a message carrying a tool's result.
 	OriginTool Origin = "tool"
