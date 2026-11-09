@@ -21,8 +21,6 @@ type fakeEngine struct {
 	runs   int
 }
 
-func (e *fakeEngine) Name() string { return "fake" }
-
 func (e *fakeEngine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.RunResult, error) {
 	e.runs++
 	e.opts = opts
@@ -163,23 +161,70 @@ func TestTheToolKeepsWhatAFailedScriptDid(t *testing.T) {
 	}
 }
 
+// TestTheToolReportsACutOutput covers the cut's report: a run whose
+// engine cut or dropped printed output says so, under the lines it kept.
+func TestTheToolReportsACutOutput(t *testing.T) {
+	engine := &fakeEngine{result: codemode.RunResult{Output: []string{"first", "half a line"}, Truncated: true}}
+	tool := toolcodemode.New(engine)
+	res, err := tool.Call(context.Background(), prepare(t, "print('x')"), env(noopNested{}, poo.ToolSettings{}))
+	if err != nil {
+		t.Fatalf("calling: %v", err)
+	}
+	printed := strings.Index(res.Text, "half a line")
+	cut := strings.Index(res.Text, "the printed output was cut at the output cap")
+	if printed < 0 || cut < 0 {
+		t.Fatalf("the result is %q, want the kept lines and the cut reported", res.Text)
+	}
+	if cut < printed {
+		t.Errorf("the result is %q, want the cut reported after the kept lines", res.Text)
+	}
+
+	engine.result = codemode.RunResult{Output: []string{"first", "second"}}
+	res, err = tool.Call(context.Background(), prepare(t, "print('x')"), env(noopNested{}, poo.ToolSettings{}))
+	if err != nil {
+		t.Fatalf("calling: %v", err)
+	}
+	if strings.Contains(res.Text, "cut at the output cap") {
+		t.Errorf("the whole output is reported as cut: %q", res.Text)
+	}
+}
+
 // TestTheToolCapsItsOutput covers the output cap: a script that prints
 // past the budget is cut, with a note, and the cut keeps the text valid.
 func TestTheToolCapsItsOutput(t *testing.T) {
-	engine := &fakeEngine{result: codemode.RunResult{Output: []string{strings.Repeat("日本語", 20)}}}
+	engine := &fakeEngine{result: codemode.RunResult{Output: []string{strings.Repeat("日本語", 100)}}}
 	tool := toolcodemode.New(engine)
 	res, err := tool.Call(context.Background(), prepare(t, "print('x')"), env(noopNested{}, poo.ToolSettings{ObservationCapChars: 100}))
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
-	if len(res.Text) > 200 {
-		t.Errorf("the result is %d chars, want it capped", len(res.Text))
-	}
-	if !strings.Contains(res.Text, "cut at the context budget") {
+	const note = "\n… the script's output was cut at the context budget"
+	if !strings.HasSuffix(res.Text, note) {
 		t.Errorf("the capped result does not say so: %q", res.Text)
+	}
+	if kept := utf8.RuneCountInString(strings.TrimSuffix(res.Text, note)); kept > 100 {
+		t.Errorf("the result keeps %d chars, want it capped at 100", kept)
 	}
 	if !utf8.ValidString(res.Text) {
 		t.Errorf("the capped result is not valid UTF-8: %q", res.Text)
+	}
+}
+
+// TestTheToolCountsItsCapInCharacters covers the cap's unit: output that
+// is 30 characters but 90 bytes under a 60 character cap is kept whole.
+func TestTheToolCountsItsCapInCharacters(t *testing.T) {
+	printed := strings.Repeat("日本語", 10)
+	engine := &fakeEngine{result: codemode.RunResult{Output: []string{printed}}}
+	tool := toolcodemode.New(engine)
+	res, err := tool.Call(context.Background(), prepare(t, "print('x')"), env(noopNested{}, poo.ToolSettings{ObservationCapChars: 60}))
+	if err != nil {
+		t.Fatalf("calling: %v", err)
+	}
+	if strings.Contains(res.Text, "cut at the context budget") {
+		t.Errorf("the result is cut, want the 30 characters kept under the 60 character cap: %q", res.Text)
+	}
+	if !strings.Contains(res.Text, printed) {
+		t.Errorf("the result is %q, want the printed line whole", res.Text)
 	}
 }
 
@@ -193,8 +238,8 @@ func TestTheToolCapsItsOutputWithoutASetting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
-	if len(res.Text) > caps.ObservationMax+100 {
-		t.Errorf("the result is %d chars, want it capped at %d", len(res.Text), caps.ObservationMax)
+	if kept := utf8.RuneCountInString(res.Text); kept > caps.ObservationMax+100 {
+		t.Errorf("the result is %d chars, want it capped at %d", kept, caps.ObservationMax)
 	}
 	if !strings.Contains(res.Text, "cut at the context budget") {
 		t.Errorf("the capped result does not say so: %q", res.Text)

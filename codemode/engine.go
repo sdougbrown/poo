@@ -25,8 +25,6 @@ import (
 // engine enforces the limits, and it reports a script that ran past
 // them as a failed run, not as a partial one.
 type Engine interface {
-	// Name is the engine's name, as settings and diagnostics say it.
-	Name() string
 	// Run executes one script.
 	Run(ctx context.Context, opts RunOptions) (RunResult, error)
 }
@@ -61,6 +59,9 @@ type Limits struct {
 type RunResult struct {
 	// Output is the lines the script printed, in order.
 	Output []string
+	// Truncated is true when the engine cut or dropped printed output at
+	// its cap.
+	Truncated bool
 	// Value is the value the script exited with, as JSON. Nil when the
 	// script exited without a value.
 	Value json.RawMessage

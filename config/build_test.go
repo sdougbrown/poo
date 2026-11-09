@@ -31,8 +31,6 @@ import (
 // stubEngine is an engine that never runs, for the wiring tests.
 type stubEngine struct{}
 
-func (stubEngine) Name() string { return "stub" }
-
 func (stubEngine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.RunResult, error) {
 	return codemode.RunResult{}, nil
 }

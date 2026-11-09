@@ -3,6 +3,7 @@ package starlark_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -179,12 +180,44 @@ print("three")
 	if len(res.Output) != 2 || res.Output[0] != "one 2" || res.Output[1] != "three" {
 		t.Errorf("the output is %q, want the two printed lines", res.Output)
 	}
+	if res.Truncated {
+		t.Error("the run reported a cut, want the whole output kept")
+	}
 }
 
-// TestAPrintCutKeepsTheTextValid covers the print cap: the cut lands on
-// a rune boundary, so what the model reads is valid text.
+// TestThePrintCapSpansPrints covers the cap across prints: the first
+// line takes what it needs, the second gets only the room the first
+// left, and a print after the cap is dropped.
+func TestThePrintCapSpansPrints(t *testing.T) {
+	res, err := run(t, `
+print("0123456789")
+print("abcdefghij")
+print("dropped")
+`, &fakeNested{}, codemode.Limits{OutputCapChars: 20})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if len(res.Output) != 2 {
+		t.Fatalf("the output is %q, want the first line and the cut second", res.Output)
+	}
+	if res.Output[0] != "0123456789" {
+		t.Errorf("the first line is %q, want it kept whole", res.Output[0])
+	}
+	// The first line and its newline take 11 of the 20 characters, so
+	// the second keeps 9 of its 10 and says it was cut.
+	if res.Output[1] != "abcdefghi …" {
+		t.Errorf("the second line is %q, want the 9 characters the cap leaves", res.Output[1])
+	}
+	if !res.Truncated {
+		t.Error("the run did not report the cut")
+	}
+}
+
+// TestAPrintCutKeepsTheTextValid covers the print cap: it counts
+// characters, so the cut keeps the characters the cap leaves and lands
+// on a boundary.
 func TestAPrintCutKeepsTheTextValid(t *testing.T) {
-	res, err := run(t, `print("日本語")`, &fakeNested{}, codemode.Limits{OutputCapChars: 8})
+	res, err := run(t, `print("日本語日本語日本語")`, &fakeNested{}, codemode.Limits{OutputCapChars: 8})
 	if err != nil {
 		t.Fatalf("the run failed: %v", err)
 	}
@@ -196,6 +229,29 @@ func TestAPrintCutKeepsTheTextValid(t *testing.T) {
 	}
 	if !strings.HasSuffix(res.Output[0], "…") {
 		t.Errorf("the capped line does not say it was cut: %q", res.Output[0])
+	}
+	kept := strings.TrimSuffix(res.Output[0], " …")
+	if got := utf8.RuneCountInString(kept); got != 8 {
+		t.Errorf("the capped line keeps %d characters, want the 8 the cap allows: %q", got, res.Output[0])
+	}
+	if !res.Truncated {
+		t.Error("the run did not report the cut")
+	}
+}
+
+// TestAPrintUnderTheCapIsKeptWhole covers the cap's unit: a line of
+// multi-byte characters that fits in characters prints in full, though
+// its bytes are over the cap.
+func TestAPrintUnderTheCapIsKeptWhole(t *testing.T) {
+	res, err := run(t, `print("日本語")`, &fakeNested{}, codemode.Limits{OutputCapChars: 8})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if len(res.Output) != 1 || res.Output[0] != "日本語" {
+		t.Errorf("the output is %q, want the line kept whole", res.Output)
+	}
+	if res.Truncated {
+		t.Error("the run reported a cut, want the line kept whole")
 	}
 }
 
@@ -266,6 +322,47 @@ func TestTheScriptSizeLimit(t *testing.T) {
 	_, err := run(t, long, &fakeNested{}, codemode.Limits{ScriptMaxBytes: 256})
 	if err == nil {
 		t.Fatal("the over-long script ran")
+	}
+}
+
+// TestATimeoutThatOverflowsIsRefused covers a timeout the run cannot
+// hold: the engine scales it to a duration, and one past the duration's
+// range wraps negative and leaves the script with no wall-clock limit.
+func TestATimeoutThatOverflowsIsRefused(t *testing.T) {
+	tooLong := int(math.MaxInt64/int64(time.Second)) + 1
+	_, err := run(t, `exit(1)`, &fakeNested{}, codemode.Limits{TimeoutS: tooLong})
+	if err == nil {
+		t.Fatal("the run took a timeout too large for its duration")
+	}
+	if !strings.Contains(err.Error(), "the codemode limit timeout_s is over") {
+		t.Errorf("the failure is %q, want it to name the oversized timeout", err)
+	}
+}
+
+// TestGatherRefusesAnEntryItCannotRead covers the entries a model gets
+// wrong: each fails the run with a message naming the entry, and none
+// reaches the seam.
+func TestGatherRefusesAnEntryItCannotRead(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{"a bare name", `gather(["read"])`, "gather entry 0 is not a (name, args) pair"},
+		{"a longer tuple", `gather([("read", {}, 1)])`, "gather entry 0 is not a (name, args) pair"},
+		{"a number for a name", `gather([(1, {})])`, "gather entry 0's name is not a string"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			nested := &fakeNested{}
+			if _, err := run(t, c.script, nested, codemode.Limits{}); err == nil {
+				t.Fatal("the gather ran, want the entry refused")
+			} else if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("the failure is %q, want it to name %q", err, c.want)
+			}
+			if len(nested.handed()) != 0 {
+				t.Errorf("the gather handed the seam %v, want nothing", nested.handed())
+			}
+		})
 	}
 }
 

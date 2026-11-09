@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
@@ -119,8 +120,8 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	if cap <= 0 {
 		cap = caps.ObservationMax
 	}
-	if len(text) > cap {
-		text = caps.Prefix(text, cap) + "\n… the script's output was cut at the context budget"
+	if utf8.RuneCountInString(text) > cap {
+		text = caps.RunePrefix(text, cap) + "\n… the script's output was cut at the context budget"
 	}
 	return poo.ToolResult{Text: text, IsError: err != nil}, nil
 }
@@ -145,6 +146,9 @@ func resultText(result codemode.RunResult, err error) string {
 	for _, line := range result.Output {
 		b.WriteString(line)
 		b.WriteByte('\n')
+	}
+	if result.Truncated {
+		b.WriteString("the printed output was cut at the output cap\n")
 	}
 	if result.Value != nil {
 		b.WriteString("returned: ")
