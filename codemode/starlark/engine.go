@@ -245,20 +245,22 @@ func (st *state) gatherBuiltin(thread *starlark.Thread, b *starlark.Builtin, arg
 
 // exitBuiltin ends the script: `exit({"answer": 42})`.
 //
-// The value is the run's return value. The thread is cancelled, which
-// unwinds the script; the run sees the exit flag and treats the stop as
-// the result.
+// The value is the run's return value, and an exit without one leaves
+// the run without a value. The thread is cancelled, which unwinds the
+// script; the run sees the exit flag and treats the stop as the result.
 func (st *state) exitBuiltin(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var value starlark.Value = starlark.None
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "value?", &value); err != nil {
 		return nil, err
 	}
-	raw, err := marshal(thread, value)
-	if err != nil {
-		return nil, err
+	if value != starlark.None {
+		raw, err := marshal(thread, value)
+		if err != nil {
+			return nil, err
+		}
+		st.value = raw
 	}
 	st.exited = true
-	st.value = raw
 	thread.Cancel(exitReason)
 	return starlark.None, nil
 }

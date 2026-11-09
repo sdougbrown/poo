@@ -168,6 +168,24 @@ func TestAScriptWithoutExitReturnsItsPrints(t *testing.T) {
 	}
 }
 
+// TestAnExitWithoutAValueReturnsNothing covers the bare exit: the run
+// stopped where the script said, and it has no value to report.
+func TestAnExitWithoutAValueReturnsNothing(t *testing.T) {
+	res, err := run(t, `
+print("done")
+exit()
+`, &fakeNested{}, codemode.Limits{})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if res.Value != nil {
+		t.Errorf("the exit value is %s, want none", res.Value)
+	}
+	if len(res.Output) != 1 || res.Output[0] != "done" {
+		t.Errorf("the output is %q, want the line the script printed", res.Output)
+	}
+}
+
 // TestTheStepBudgetStopsALoop covers the exec-steps cap: a script that
 // loops forever is stopped, and the run fails.
 func TestTheStepBudgetStopsALoop(t *testing.T) {
