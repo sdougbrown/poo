@@ -288,10 +288,11 @@ func (t *CallTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	}
 	returncode := res.ExitCode
 	text, structured := bash.Envelope(bash.Observation{
-		ExitCode: &returncode,
-		Output:   string(res.Stdout),
-		Stderr:   string(res.Stderr),
-		Cap:      cap,
+		ExitCode:  &returncode,
+		Output:    string(res.Stdout),
+		Stderr:    string(res.Stderr),
+		Cap:       cap,
+		Truncated: res.Truncated,
 	})
 	return poo.ToolResult{Text: text, Structured: structured}, nil
 }
@@ -306,17 +307,19 @@ func stoppedResult(err error, out registry.Output, cap int) (poo.ToolResult, boo
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		text, structured := bash.Envelope(bash.Observation{
-			TimedOut: true,
-			Output:   string(out.Stdout),
-			Stderr:   string(out.Stderr),
-			Cap:      cap,
+			TimedOut:  true,
+			Output:    string(out.Stdout),
+			Stderr:    string(out.Stderr),
+			Cap:       cap,
+			Truncated: out.Truncated,
 		})
 		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, true
 	case errors.Is(err, context.Canceled):
 		text, structured := bash.Envelope(bash.Observation{
-			Output: string(out.Stdout),
-			Stderr: string(out.Stderr),
-			Cap:    cap,
+			Output:    string(out.Stdout),
+			Stderr:    string(out.Stderr),
+			Cap:       cap,
+			Truncated: out.Truncated,
 		})
 		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, true
 	}
@@ -339,10 +342,11 @@ func failed(err error, cap int) (poo.ToolResult, error) {
 			code = &exited.ExitCode
 		}
 		text, structured := bash.Envelope(bash.Observation{
-			ExitCode: code,
-			Output:   string(exited.Stdout),
-			Stderr:   string(exited.Stderr),
-			Cap:      cap,
+			ExitCode:  code,
+			Output:    string(exited.Stdout),
+			Stderr:    string(exited.Stderr),
+			Cap:       cap,
+			Truncated: exited.Truncated,
 		})
 		return poo.ToolResult{Text: text, Structured: structured, IsError: true}, nil
 	}

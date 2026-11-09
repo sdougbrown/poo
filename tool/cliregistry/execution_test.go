@@ -656,3 +656,31 @@ func TestACLIThatExitsBeforeTheDeadlineIsNotATimeout(t *testing.T) {
 		t.Errorf("the observation lost the CLI's output: %q", output)
 	}
 }
+
+// TestACutCaptureSaysSo covers output past the capture buffer: the
+// buffer drops the rest, and the observation says the output is not
+// whole, on a success and on a failed exit alike.
+func TestACutCaptureSaysSo(t *testing.T) {
+	flood := "head -c 2000000 /dev/zero | tr '\\0' a"
+	for _, tc := range []struct {
+		name    string
+		command string
+	}{
+		{"a success", flood},
+		{"a failed exit", flood + "; exit 3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tool := execTool(t, []string{"/bin/sh", "-c", tc.command}, nil)
+			res, err := runCall(t, tool, poo.ToolEnv{
+				Settings: poo.ToolSettings{ObservationCapChars: poo.NestedOutputCapChars},
+			})
+			if err != nil {
+				t.Fatalf("running the CLI: %v", err)
+			}
+			obs := observation(t, res)
+			if truncated, _ := obs[bash.EnvelopeTruncated].(bool); !truncated {
+				t.Errorf("the observation of a cut capture does not say it was cut")
+			}
+		})
+	}
+}
