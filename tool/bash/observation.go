@@ -24,6 +24,9 @@ type Observation struct {
 	// Cap is the cap on the observation, in characters. Zero means
 	// ObservationCapMax.
 	Cap int
+	// Truncated reports that the capture dropped the end of the output,
+	// so Output is not all the command wrote.
+	Truncated bool
 }
 
 // Envelope renders a command's outcome as the observation the model
@@ -37,6 +40,9 @@ type Observation struct {
 //
 //	{"returncode": int|null, "timed_out": false, "output_head": "...",
 //	 "output_tail": "...", "elided_chars": 1234, "hint": "..."}
+//
+// Output past the capture buffer is dropped before the cap applies, and
+// the observation says so with "truncated": true and its own hint.
 //
 // A command whose stderr is captured apart from its stdout carries it in
 // a field of its own, and the two streams share the cap: both stay whole
@@ -90,10 +96,16 @@ func Envelope(o Observation) (string, json.RawMessage) {
 		}
 	}
 	if elided > 0 {
+		fields = append(fields, field{EnvelopeElidedChars, elided})
+	}
+	switch {
+	case o.Truncated:
 		fields = append(fields,
-			field{EnvelopeElidedChars, elided},
-			field{EnvelopeHint, ElisionHint},
+			field{EnvelopeTruncated, true},
+			field{EnvelopeHint, TruncationHint},
 		)
+	case elided > 0:
+		fields = append(fields, field{EnvelopeHint, ElisionHint})
 	}
 
 	structured := map[string]any{}

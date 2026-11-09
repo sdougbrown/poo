@@ -81,3 +81,25 @@ func TestPrepareRejectsTrailingData(t *testing.T) {
 		}
 	}
 }
+
+// TestACutCaptureSaysSo covers output past the capture buffer: the
+// buffer drops the rest, and the observation says the output is not
+// whole, even when what was kept fits under the observation cap.
+func TestACutCaptureSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	tool := &bash.Tool{ObservationCap: poo.NestedOutputCapChars, Timeout: 10 * time.Second}
+	env := poo.ToolEnv{
+		PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+		Env:        os.Environ(),
+	}
+
+	obs := structured(t, call(t, tool, "head -c 2000000 /dev/zero | tr '\\0' a", env))
+	if truncated, _ := obs[bash.EnvelopeTruncated].(bool); !truncated {
+		t.Errorf("the observation of a cut capture does not say it was cut: %v keys", len(obs))
+	}
+
+	obs = structured(t, call(t, tool, "echo whole", env))
+	if _, ok := obs[bash.EnvelopeTruncated]; ok {
+		t.Errorf("the observation of a whole capture says it was cut")
+	}
+}

@@ -38,6 +38,9 @@ const (
 	CharsPerToken = poo.CharsPerToken
 	// ElisionHint tells the model how to see the elided middle.
 	ElisionHint = "Output too long. Use grep/sed/head/tail to inspect narrower ranges."
+	// TruncationHint tells the model how to see output past the capture
+	// buffer.
+	TruncationHint = "Output passed the 1 MiB capture limit and the rest was dropped. Redirect it to a file and inspect narrower ranges."
 )
 
 // ObservationCap returns the cap on the observation shown to the model.
@@ -89,8 +92,11 @@ const (
 	// EnvelopeTimedOut is the field that holds the timeout flag.
 	EnvelopeTimedOut = "timed_out"
 	// EnvelopeHint is the field that holds the hint about the elided
-	// middle.
+	// middle, or about the dropped end.
 	EnvelopeHint = "hint"
+	// EnvelopeTruncated is the field that says the capture buffer
+	// dropped the end of the output. It is there only when it is true.
+	EnvelopeTruncated = "truncated"
 )
 
 // Tool is the bash tool.
@@ -306,10 +312,11 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 
 	text, structured := Envelope(Observation{
-		ExitCode: res.exitCode,
-		TimedOut: res.timedOut,
-		Output:   res.output,
-		Cap:      cap,
+		ExitCode:  res.exitCode,
+		TimedOut:  res.timedOut,
+		Output:    res.output,
+		Truncated: res.truncated,
+		Cap:       cap,
 	})
 
 	return poo.ToolResult{
