@@ -247,8 +247,7 @@ func TestNothingOutlivesTheCall(t *testing.T) {
 			if got := output(t, res); !strings.Contains(got, "done") {
 				t.Errorf("the command did not run: %q", got)
 			}
-			waitFor(t, "the process to die", func() bool { return len(c.survivors(t, dir)) == 0 })
-			if survivors := c.survivors(t, dir); len(survivors) > 0 {
+			if survivors := waitForEmpty(t, "the call's processes to die", func() []string { return c.survivors(t, dir) }); len(survivors) > 0 {
 				t.Errorf("the call left %v behind", survivors)
 			}
 		})
@@ -452,8 +451,7 @@ func TestABackgroundJobIsStoppedByCancelJob(t *testing.T) {
 			if _, err := s.Wait(context.Background()); err != nil {
 				t.Fatalf("waiting for the second run: %v", err)
 			}
-			waitFor(t, "the job's process to die", func() bool { return !c.alive(t, dir) })
-			if survivors := c.survivors(t, dir); len(survivors) > 0 {
+			if survivors := waitForEmpty(t, "the job's processes to die", func() []string { return c.survivors(t, dir) }); len(survivors) > 0 {
 				t.Errorf("the cancelled job left %v behind", survivors)
 			}
 		})
@@ -567,6 +565,26 @@ func resultTexts(sink *pootest.Sink, text string) int {
 		}
 	}
 	return count
+}
+
+// waitForEmpty polls the observation until it comes back empty, and
+// returns the observation it ended on, so the caller's assertion and
+// the wait share one look: a second scan after the wait can catch a
+// process in its last moments of dying, which reads as a leak the
+// teardown did not cause.
+func waitForEmpty(t *testing.T, what string, observe func() []string) []string {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	var seen []string
+	for time.Now().Before(deadline) {
+		seen = observe()
+		if len(seen) == 0 {
+			return seen
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s: still seeing %v", what, seen)
+	return seen
 }
 
 // waitFor polls a condition until it holds.
