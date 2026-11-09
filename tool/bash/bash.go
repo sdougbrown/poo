@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -27,10 +28,8 @@ const (
 	// MaxCallTimeout is the ceiling for a caller-supplied timeout.
 	MaxCallTimeout = 10 * time.Minute
 	// CaptureCap is the size of the buffer the output is captured into,
-	// in bytes. Beyond it, output is read and discarded. It is no larger
-	// than the nested cap in characters, so a nested call keeps all it
-	// captured.
-	CaptureCap = poo.NestedOutputCapChars
+	// in bytes. Beyond it, output is read and discarded.
+	CaptureCap = 1 << 20
 	// KillGrace is how long the process group gets between SIGTERM and
 	// SIGKILL.
 	KillGrace = 2 * time.Second
@@ -40,10 +39,16 @@ const (
 	CharsPerToken = poo.CharsPerToken
 	// ElisionHint tells the model how to see the elided middle.
 	ElisionHint = "Output too long. Use grep/sed/head/tail to inspect narrower ranges."
-	// TruncationHint tells the model how to see output past the capture
-	// buffer.
-	TruncationHint = "Output passed the 1 MiB capture limit and the rest was dropped. Redirect it to a file and inspect narrower ranges."
 )
+
+// A nested call keeps all the capture holds only while the capture, in
+// bytes, is no larger than the nested cap, in characters. The
+// conversion does not compile when it is larger.
+const _ = uint(poo.NestedOutputCapChars - CaptureCap)
+
+// TruncationHint tells the model how to see output past the capture
+// buffer.
+var TruncationHint = fmt.Sprintf("Output passed the capture limit of %d bytes and the rest was dropped. Redirect it to a file and inspect narrower ranges.", CaptureCap)
 
 // ObservationCap returns the cap on the observation shown to the model.
 //
