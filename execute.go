@@ -777,10 +777,17 @@ func (s *Session) prepareEnv() PrepareEnv {
 // A call the model made gets the nested seam, so a tool that
 // orchestrates others — a script engine, say — can make calls of its
 // own. A nested call gets none: the nesting is one call deep.
+//
+// A nested call's output goes to the tool that made it, not to the
+// model, so its caps are NestedOutputCapChars and not the session's
+// context-relative ones. The calling tool caps what it passes on.
 func (s *Session) toolEnv(run *runState, turn int, handle string, plan callPlan) ToolEnv {
 	env := s.toolEnvFor(run.id, handle)
 	if plan.parent == "" {
 		env.Nested = &nestedCaller{session: s, run: run, turn: turn, parent: handle}
+	} else {
+		env.Settings.ObservationCapChars = NestedOutputCapChars
+		env.Settings.ReadOutputCapChars = NestedOutputCapChars
 	}
 	return env
 }

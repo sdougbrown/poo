@@ -1017,3 +1017,58 @@ func TestTheNestedSeamIsTheTurnsAlone(t *testing.T) {
 		t.Fatal("the nested call of an unknown tool returned no error")
 	}
 }
+
+// capsTool is a tool that keeps the output caps its environment gave it.
+type capsTool struct {
+	mu          sync.Mutex
+	observation int
+	read        int
+}
+
+func (t *capsTool) Spec() poo.ToolSpec {
+	return poo.ToolSpec{
+		Name:        "caps",
+		Description: "keep the caps",
+		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Class:       poo.ClassReadOnly,
+	}
+}
+
+func (t *capsTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
+	return capsPrepared{}, nil
+}
+
+func (t *capsTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
+	t.mu.Lock()
+	t.observation = env.Settings.ObservationCapChars
+	t.read = env.Settings.ReadOutputCapChars
+	t.mu.Unlock()
+	return poo.ToolResult{Text: "ok"}, nil
+}
+
+type capsPrepared struct{}
+
+func (capsPrepared) Summary() string { return "keep the caps" }
+
+// TestANestedCallGetsTheNestedOutputCaps covers the caps a nested call
+// runs under: its output goes to the tool that made the call, not to
+// the model, so it is capped at poo.NestedOutputCapChars and not at the
+// session's context-relative caps.
+func TestANestedCallGetsTheNestedOutputCaps(t *testing.T) {
+	inner := &capsTool{}
+	nest := &nestedTool{script: []string{`caps {}`}}
+	s := nestedSession(t, nest, map[string]poo.Tool{"caps": inner}, &recordingSink{}, func(o *poo.Options) {
+		o.Settings.ObservationCapChars = 1000
+		o.Settings.ReadOutputCapChars = 2000
+	})
+	runSession(t, s, "hello")
+
+	inner.mu.Lock()
+	defer inner.mu.Unlock()
+	if inner.observation != poo.NestedOutputCapChars {
+		t.Errorf("the nested call's observation cap = %d, want %d", inner.observation, poo.NestedOutputCapChars)
+	}
+	if inner.read != poo.NestedOutputCapChars {
+		t.Errorf("the nested call's read cap = %d, want %d", inner.read, poo.NestedOutputCapChars)
+	}
+}

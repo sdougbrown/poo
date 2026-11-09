@@ -291,6 +291,11 @@ after-tool hooks a model-made call goes through. The recovery's message
 rule leaves a call that names a `parent` out of the history, so a torn
 tail's nested calls are closed without polluting it either.
 
+A nested call's tool runs under a cap of 1,048,576 characters
+(`poo.NestedOutputCapChars`) and not the session's context-relative
+caps, since its output never reaches the model directly. Its recorded
+result can be that large.
+
 ## `tool.result`
 
 The outcome of a tool call.
@@ -765,7 +770,8 @@ The bash tool's payload is the observation the model reads, as JSON:
 | `output_head` | string | The head of the output, when it was elided. |
 | `output_tail` | string | The tail of the output, when it was elided. |
 | `elided_chars` | integer | The characters dropped from the middle. Absent when the output was not elided. |
-| `hint` | string | How to see the elided middle. Absent when the output was not elided. |
+| `truncated` | boolean | True when the output passed the 1 MiB capture and the rest was dropped. Absent otherwise. |
+| `hint` | string | How to see the elided middle, or the dropped end when `truncated` is set. Absent when the output was neither elided nor truncated. |
 
 The observation cap and `elided_chars` are counted in characters, not
 bytes, and a cut never splits a rune. A byte that is not part of a valid

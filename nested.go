@@ -28,6 +28,15 @@ import (
 // it owns the result of a nested call that is still outstanding when the
 // run settles.
 
+// NestedOutputCapChars is the cap on a nested call's output, in
+// characters, as its tool reads it from ToolSettings.
+//
+// A nested call's output goes to the tool that made the call, not to
+// the model, so the cap is not relative to the context window. It is
+// the bash tool's capture size, so a nested bash call keeps all it
+// captured.
+const NestedOutputCapChars = 1 << 20
+
 // nestedCaller is the NestedCaller a turn's tool calls carry.
 //
 // It holds the run, the turn and the parent call the nested records
