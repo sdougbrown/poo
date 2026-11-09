@@ -1681,17 +1681,97 @@ func TestLoadWithAnInvalidSessionIDIsInvalidParams(t *testing.T) {
 // TestTheInspectPageHoldsItsByteBudget covers the event page's byte
 // budget: a page holds the events that fit and says that more exist,
 // the pages together cover every event in order, and no page carries
-// more than the budget's bytes, so a client paging forward never skips
-// an event and never reads a line the queue refuses.
+// more than the budget's bytes — except the page that holds one event
+// over the budget, which still comes back, so a client paging forward
+// always moves.
 func TestTheInspectPageHoldsItsByteBudget(t *testing.T) {
+	big := strings.Repeat("x", 3000)
 	factory := newTestFactory(t, func() poo.ChatTransport {
-		return pootest.NewTransport(pootest.Turn{Text: "hello", Finish: "stop"})
+		return pootest.NewTransport(pootest.Turn{Text: big, Finish: "stop"})
 	})
 	h := newHarness(t, factory, wire.Bounds{EventPageBytes: 1024})
 	h.initialize()
 
 	sessionID := createSession(t, h)
-	for i := 0; i < 12; i++ {
+	for i := 0; i < 6; i++ {
+		if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+			t.Fatalf("the prompt was refused: %v", rerr)
+		}
+		h.event("run.settled")
+		h.awaitState(t, sessionID, "settled")
+	}
+
+	seen := 0
+	pages := 0
+	oversized := false
+	after := int64(0)
+	for {
+		pages++
+		if pages > 100 {
+			t.Fatal("the pages did not end")
+		}
+		result, rerr := h.call(protocol.MethodRunInspect, protocol.InspectParams{SessionID: sessionID, AfterSeq: after})
+		if rerr != nil {
+			t.Fatalf("the inspect was refused: %v", rerr)
+		}
+		var inspected protocol.InspectResult
+		if err := json.Unmarshal(result, &inspected); err != nil {
+			t.Fatalf("decoding the inspect result: %v", err)
+		}
+		// The event's own data is spread flat into the wire object, so
+		// the size that meets the budget is the raw object's, not a
+		// re-marshaled struct's: Payload does not decode.
+		var raw struct {
+			Events []json.RawMessage `json:"events"`
+		}
+		if err := json.Unmarshal(result, &raw); err != nil {
+			t.Fatalf("decoding the raw inspect result: %v", err)
+		}
+		if len(inspected.Events) == 0 {
+			t.Fatal("the page holds no events")
+		}
+		bytes := 0
+		for i, evt := range inspected.Events {
+			if evt.Seq != int64(seen+1) {
+				t.Fatalf("the page holds the event %d, want %d", evt.Seq, seen+1)
+			}
+			seen++
+			bytes += len(raw.Events[i]) + 1
+		}
+		if bytes > 1024 && len(inspected.Events) != 1 {
+			t.Errorf("the page carries %d bytes of events over the budget, want the oversize alone", bytes)
+		}
+		if len(inspected.Events) == 1 && bytes > 1024 {
+			oversized = true
+		}
+		if inspected.NextSeq != inspected.Events[len(inspected.Events)-1].Seq {
+			t.Errorf("next_seq = %d, want the last event's %d", inspected.NextSeq, inspected.Events[len(inspected.Events)-1].Seq)
+		}
+		if !inspected.HasMore {
+			break
+		}
+		after = inspected.NextSeq
+	}
+	if pages < 3 {
+		t.Errorf("the run came back in %d pages, want more: the budget cut nothing", pages)
+	}
+	if !oversized {
+		t.Error("no page holds one event over the budget, want the oversized event to come back alone")
+	}
+}
+
+// TestThePageBudgetFollowsTheQueueBytes covers the clamp: a deployment
+// that lowers the queue's byte budget lowers the page budgets with it,
+// so a page is never a line the queue refuses.
+func TestThePageBudgetFollowsTheQueueBytes(t *testing.T) {
+	factory := newTestFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(pootest.Turn{Text: strings.Repeat("x", 3000), Finish: "stop"})
+	})
+	h := newHarness(t, factory, wire.Bounds{QueueBytes: 4096})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	for i := 0; i < 4; i++ {
 		if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
 			t.Fatalf("the prompt was refused: %v", rerr)
 		}
@@ -1715,30 +1795,38 @@ func TestTheInspectPageHoldsItsByteBudget(t *testing.T) {
 		if err := json.Unmarshal(result, &inspected); err != nil {
 			t.Fatalf("decoding the inspect result: %v", err)
 		}
+		var raw struct {
+			Events []json.RawMessage `json:"events"`
+		}
+		if err := json.Unmarshal(result, &raw); err != nil {
+			t.Fatalf("decoding the raw inspect result: %v", err)
+		}
 		if len(inspected.Events) == 0 {
 			t.Fatal("the page holds no events")
 		}
 		bytes := 0
-		for _, evt := range inspected.Events {
+		first := 0
+		for i, evt := range inspected.Events {
 			if evt.Seq != int64(seen+1) {
 				t.Fatalf("the page holds the event %d, want %d", evt.Seq, seen+1)
 			}
 			seen++
-			encoded, _ := json.Marshal(evt)
-			bytes += len(encoded) + 1
+			if i == 0 {
+				first = len(raw.Events[i]) + 1
+			}
+			bytes += len(raw.Events[i]) + 1
 		}
-		if bytes > 1024 {
-			t.Errorf("the page carries %d bytes of events, over the budget", bytes)
-		}
-		if inspected.NextSeq != inspected.Events[len(inspected.Events)-1].Seq {
-			t.Errorf("next_seq = %d, want the last event's %d", inspected.NextSeq, inspected.Events[len(inspected.Events)-1].Seq)
+		// The events are far over the budget, so every page holds one of
+		// them alone: the clamp keeps the page at the queue's half.
+		if bytes-first > 2048 {
+			t.Errorf("the page carries %d bytes of events past its first, over the queue's half", bytes-first)
 		}
 		if !inspected.HasMore {
 			break
 		}
 		after = inspected.NextSeq
 	}
-	if pages < 3 {
+	if pages < 2 {
 		t.Errorf("the run came back in %d pages, want more: the budget cut nothing", pages)
 	}
 }
