@@ -63,7 +63,10 @@ type state struct {
 
 // Run executes one script.
 func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.RunResult, error) {
-	limits := withDefaults(opts.Limits)
+	limits, err := resolveLimits(opts.Limits)
+	if err != nil {
+		return codemode.RunResult{}, err
+	}
 	if len(opts.Script) > limits.ScriptMaxBytes {
 		return codemode.RunResult{}, fmt.Errorf("the script is %d bytes, over the %d byte limit", len(opts.Script), limits.ScriptMaxBytes)
 	}
@@ -110,7 +113,7 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 		"gather": starlark.NewBuiltin("gather", st.gatherBuiltin),
 		"exit":   starlark.NewBuiltin("exit", st.exitBuiltin),
 	}
-	_, err := starlark.ExecFileOptions(syntax.LegacyFileOptions(), thread, "script.star", opts.Script, predeclared)
+	_, err = starlark.ExecFileOptions(syntax.LegacyFileOptions(), thread, "script.star", opts.Script, predeclared)
 
 	result := codemode.RunResult{
 		Output: st.output,
@@ -126,8 +129,23 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 	return result, nil
 }
 
-// withDefaults fills the limits the session left at zero.
-func withDefaults(limits codemode.Limits) codemode.Limits {
+// resolveLimits fills the limits the session left at zero and refuses
+// one it got wrong: a negative limit has no meaning, and a negative
+// ExecSteps would wrap to a huge uint64 and switch the step budget off.
+func resolveLimits(limits codemode.Limits) (codemode.Limits, error) {
+	for _, limit := range []struct {
+		name  string
+		value int
+	}{
+		{"timeout_s", limits.TimeoutS},
+		{"script_max_bytes", limits.ScriptMaxBytes},
+		{"output_cap_chars", limits.OutputCapChars},
+		{"exec_steps", limits.ExecSteps},
+	} {
+		if limit.value < 0 {
+			return codemode.Limits{}, fmt.Errorf("the codemode limit %s is negative", limit.name)
+		}
+	}
 	if limits.TimeoutS == 0 {
 		limits.TimeoutS = DefaultTimeoutS
 	}
@@ -140,7 +158,7 @@ func withDefaults(limits codemode.Limits) codemode.Limits {
 	if limits.ExecSteps == 0 {
 		limits.ExecSteps = DefaultExecSteps
 	}
-	return limits
+	return limits, nil
 }
 
 // callBuiltin runs one tool call: `call("read", {"path": "..."})`.

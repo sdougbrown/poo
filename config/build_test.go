@@ -154,6 +154,39 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	}
 }
 
+// TestTheCodemodeSettingsReachTheSession covers the mapping: every
+// tools.codemode field lands on the session's settings, which the tool
+// passes the engine as a run's limits.
+func TestTheCodemodeSettingsReachTheSession(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+tools:
+  codemode:
+    timeout_s: 17
+    script_max_bytes: 2048
+    output_cap_chars: 4096
+    exec_steps: 250000
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	got := runtime.Options.Settings
+	for _, field := range []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"timeout_s", got.CodemodeTimeoutS, 17},
+		{"script_max_bytes", got.CodemodeScriptMaxBytes, 2048},
+		{"output_cap_chars", got.CodemodeOutputCapChars, 4096},
+		{"exec_steps", got.CodemodeExecSteps, 250000},
+	} {
+		if field.got != field.want {
+			t.Errorf("tools.codemode.%s reached the session as %d, want %d", field.name, field.got, field.want)
+		}
+	}
+}
+
 // TestTheBuildTakesTheUnmatchedActionFromTheProfile covers the
 // precedence: the profile's action applies, and the settings change it.
 func TestTheBuildTakesTheUnmatchedActionFromTheProfile(t *testing.T) {

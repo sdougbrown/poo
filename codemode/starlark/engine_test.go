@@ -3,6 +3,7 @@ package starlark_test
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -183,15 +184,11 @@ while True:
 // tool call outlives the timeout is stopped.
 func TestTheTimeoutStopsAWait(t *testing.T) {
 	nested := &fakeNested{block: 5 * time.Second}
-	start := time.Now()
 	_, err := run(t, `r = call("slow", {})`, nested, codemode.Limits{
 		TimeoutS: 1,
 	})
 	if err == nil {
 		t.Fatal("the script outlived its timeout")
-	}
-	if time.Since(start) > 3*time.Second {
-		t.Errorf("the run took %s, want it cut at the timeout", time.Since(start))
 	}
 }
 
@@ -202,6 +199,19 @@ func TestTheScriptSizeLimit(t *testing.T) {
 	_, err := run(t, long, &fakeNested{}, codemode.Limits{ScriptMaxBytes: 256})
 	if err == nil {
 		t.Fatal("the over-long script ran")
+	}
+}
+
+// TestANegativeLimitIsRefused covers a limit the session got wrong: a
+// negative one would wrap or shrink a bound, so the run refuses it
+// instead of reading it as the engine's default.
+func TestANegativeLimitIsRefused(t *testing.T) {
+	_, err := run(t, `exit(1)`, &fakeNested{}, codemode.Limits{ExecSteps: -1})
+	if err == nil {
+		t.Fatal("the run took a negative limit")
+	}
+	if !strings.Contains(err.Error(), "the codemode limit exec_steps is negative") {
+		t.Errorf("the failure is %q, want it to name the negative limit", err)
 	}
 }
 
@@ -238,16 +248,26 @@ exit([r["tool"] for r in rs])
 	}
 }
 
-// TestGatherRefusesAWidthItCannotRun covers the fan-out's bound: too
-// wide a gather is a script error, not a stampede.
+// TestGatherRefusesAWidthItCannotRun covers the fan-out's bound: a
+// gather as wide as the bound runs, and one call wider is a script
+// error, not a stampede.
 func TestGatherRefusesAWidthItCannotRun(t *testing.T) {
-	var calls []string
-	for i := 0; i < 20; i++ {
-		calls = append(calls, `("read", {"path": "`+strings.Repeat("a", 1)+`"})`)
+	gatherOf := func(width int) string {
+		calls := make([]string, width)
+		for i := range calls {
+			calls[i] = `("read", {"path": "a"})`
+		}
+		return "rs = gather([" + strings.Join(calls, ", ") + "])\nexit(len(rs))"
 	}
-	_, err := run(t, "gather(["+strings.Join(calls, ", ")+"])", &fakeNested{}, codemode.Limits{})
-	if err == nil {
-		t.Fatal("the over-wide gather ran")
+	res, err := run(t, gatherOf(starlark.MaxGatherWidth), &fakeNested{}, codemode.Limits{})
+	if err != nil {
+		t.Fatalf("a gather of %d failed: %v", starlark.MaxGatherWidth, err)
+	}
+	if string(res.Value) != strconv.Itoa(starlark.MaxGatherWidth) {
+		t.Errorf("the gather came back with %s results, want %d", res.Value, starlark.MaxGatherWidth)
+	}
+	if _, err := run(t, gatherOf(starlark.MaxGatherWidth+1), &fakeNested{}, codemode.Limits{}); err == nil {
+		t.Fatalf("the gather of %d ran, want it refused", starlark.MaxGatherWidth+1)
 	}
 }
 

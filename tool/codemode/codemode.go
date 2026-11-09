@@ -115,7 +115,11 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		Limits: limits,
 	})
 	text := resultText(result, err)
-	if cap := env.Settings.ObservationCapChars; cap > 0 && len(text) > cap {
+	cap := env.Settings.ObservationCapChars
+	if cap <= 0 {
+		cap = caps.ObservationMax
+	}
+	if len(text) > cap {
 		text = caps.Prefix(text, cap) + "\n… the script's output was cut at the context budget"
 	}
 	return poo.ToolResult{Text: text, IsError: err != nil}, nil

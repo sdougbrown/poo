@@ -283,7 +283,7 @@ func TestTheNativeModeRunSendsTheToolsNatively(t *testing.T) {
 		name, _ := fn["name"].(string)
 		names[name] = true
 	}
-	for _, want := range []string{"bash", "read", "grep", "edit", "jobs", "cancel_job"} {
+	for _, want := range []string{"bash", "read", "grep", "edit", "codemode", "jobs", "cancel_job"} {
 		if !names[want] {
 			t.Errorf("the request does not offer the %q tool", want)
 		}

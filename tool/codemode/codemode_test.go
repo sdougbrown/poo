@@ -9,6 +9,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
+	"github.com/sdougbrown/poo/internal/caps"
 	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
 )
 
@@ -179,6 +180,24 @@ func TestTheToolCapsItsOutput(t *testing.T) {
 	}
 	if !utf8.ValidString(res.Text) {
 		t.Errorf("the capped result is not valid UTF-8: %q", res.Text)
+	}
+}
+
+// TestTheToolCapsItsOutputWithoutASetting covers the fallback: a
+// session that sets no observation budget still caps the script's
+// output, at the bound the sibling tools fall back to.
+func TestTheToolCapsItsOutputWithoutASetting(t *testing.T) {
+	engine := &fakeEngine{result: codemode.RunResult{Output: []string{strings.Repeat("x", 2*caps.ObservationMax)}}}
+	tool := toolcodemode.New(engine)
+	res, err := tool.Call(context.Background(), prepare(t, "print('x')"), env(noopNested{}, poo.ToolSettings{}))
+	if err != nil {
+		t.Fatalf("calling: %v", err)
+	}
+	if len(res.Text) > caps.ObservationMax+100 {
+		t.Errorf("the result is %d chars, want it capped at %d", len(res.Text), caps.ObservationMax)
+	}
+	if !strings.Contains(res.Text, "cut at the context budget") {
+		t.Errorf("the capped result does not say so: %q", res.Text)
 	}
 }
 
