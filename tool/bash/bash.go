@@ -26,9 +26,11 @@ const (
 	DefaultTimeout = 120 * time.Second
 	// MaxCallTimeout is the ceiling for a caller-supplied timeout.
 	MaxCallTimeout = 10 * time.Minute
-	// CaptureCap is the size of the buffer the output is captured into.
-	// Beyond it, output is read and discarded.
-	CaptureCap = 1 << 20
+	// CaptureCap is the size of the buffer the output is captured into,
+	// in bytes. Beyond it, output is read and discarded. It is no larger
+	// than the nested cap in characters, so a nested call keeps all it
+	// captured.
+	CaptureCap = poo.NestedOutputCapChars
 	// KillGrace is how long the process group gets between SIGTERM and
 	// SIGKILL.
 	KillGrace = 2 * time.Second
@@ -104,7 +106,8 @@ type Tool struct {
 	// Timeout is the per-call timeout. Zero means DefaultTimeout.
 	Timeout time.Duration
 	// ObservationCap is the cap on the observation. Zero means the cap is
-	// taken from the run's settings.
+	// taken from the run's settings. A nonzero cap applies to a nested
+	// call as well.
 	ObservationCap int
 	// Executor runs the command. Nil means the local executor.
 	Executor exec.Executor

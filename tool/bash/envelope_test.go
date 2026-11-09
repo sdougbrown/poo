@@ -335,3 +335,38 @@ func baselineJSON(v any) json.RawMessage {
 	}
 	return b
 }
+
+// TestACutCaptureEnvelope covers the truncated flag beside the cap: a
+// cut capture says so whether or not the cap also elided its middle,
+// and its hint is the truncation hint.
+func TestACutCaptureEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output string
+		stderr string
+		elided bool
+	}{
+		{name: "fits", output: "abc"},
+		{name: "elided", output: strings.Repeat("x", 100), elided: true},
+		{name: "with stderr", output: "abc", stderr: "err"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, structured := bash.Envelope(bash.Observation{
+				Output:    tc.output,
+				Stderr:    tc.stderr,
+				Cap:       40,
+				Truncated: true,
+			})
+			obs := observation(t, structured)
+			if truncated, _ := obs[bash.EnvelopeTruncated].(bool); !truncated {
+				t.Errorf("the envelope does not say the capture was cut: %v", obs)
+			}
+			if got := text(obs, bash.EnvelopeHint); got != bash.TruncationHint {
+				t.Errorf("the hint is %q, want the truncation hint", got)
+			}
+			if _, ok := obs[bash.EnvelopeElidedChars]; ok != tc.elided {
+				t.Errorf("elided_chars present = %v, want %v", ok, tc.elided)
+			}
+		})
+	}
+}
