@@ -51,9 +51,15 @@ func (s *Session) callParent(handle string) string {
 	return s.resultMeta[handle].parent
 }
 
+// NestedElisionNote is the note that follows the head of a nested
+// result's text when its record and event leave the rest out. The verb
+// takes the number of characters left out.
+const NestedElisionNote = "\n… %d more characters went to the calling tool"
+
 // nestedRecordText returns the head of a nested result's text that its
 // tool.result event and its record carry, and the number of characters
-// it leaves out.
+// it leaves out. A cut text ends with NestedElisionNote, so a reader of
+// the text alone sees that it is not whole.
 //
 // The caller reads the whole result, which can be NestedOutputCapChars
 // long. The event goes to every consumer of the stream and is kept for
@@ -74,7 +80,8 @@ func (s *Session) nestedRecordText(text string) (string, int) {
 		_, size := utf8.DecodeRuneInString(text[i:])
 		i += size
 	}
-	return text[:i], total - limit
+	elided := total - limit
+	return text[:i] + fmt.Sprintf(NestedElisionNote, elided), elided
 }
 
 // nestedCaller is the NestedCaller a turn's tool calls carry.

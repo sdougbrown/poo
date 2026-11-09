@@ -296,7 +296,8 @@ A nested call's tool runs under a cap of 1,048,576 characters
 caps, since its output never reaches the model directly. The tool that
 made the call reads the whole result. The record's `text` and the
 `tool.result` event's `text` are held to the session's observation cap,
-with the rest counted in `elided_chars`. The record's `structured`
+with the rest counted in `elided_chars`. A cut `text` ends with a line
+that says how many more characters went to the calling tool. The record's `structured`
 payload is kept whole, so a nested bash call's full output is in the
 log once.
 
