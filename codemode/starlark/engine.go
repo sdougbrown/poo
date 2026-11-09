@@ -14,8 +14,9 @@ import (
 	"sync"
 	"time"
 
+	jsonmod "go.starlark.net/lib/json"
 	"go.starlark.net/starlark"
-	"go.starlark.net/starlarkjson"
+	"go.starlark.net/syntax"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
@@ -118,7 +119,7 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 		"gather": starlark.NewBuiltin("gather", st.gatherBuiltin),
 		"exit":   starlark.NewBuiltin("exit", st.exitBuiltin),
 	}
-	_, err := starlark.ExecFile(thread, "script.star", opts.Script, predeclared)
+	_, err := starlark.ExecFileOptions(syntax.LegacyFileOptions(), thread, "script.star", opts.Script, predeclared)
 
 	result := codemode.RunResult{
 		Output: st.output,
@@ -265,7 +266,7 @@ func (st *state) exitBuiltin(thread *starlark.Thread, b *starlark.Builtin, args 
 
 // marshal turns a Starlark value into JSON.
 func marshal(thread *starlark.Thread, value starlark.Value) (json.RawMessage, error) {
-	out, err := starlark.Call(thread, starlarkjson.Module.Members["encode"], starlark.Tuple{value}, nil)
+	out, err := starlark.Call(thread, jsonmod.Module.Members["encode"], starlark.Tuple{value}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("the call's arguments: %w", err)
 	}
