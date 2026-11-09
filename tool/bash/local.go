@@ -15,9 +15,10 @@ import (
 
 // Local is the executor that runs a command in poo's own process space.
 //
-// The command gets a fresh shell, a null stdin and the given
-// environment, and it runs in its own process group. stdout and stderr
-// share one pipe, so the output arrives interleaved.
+// The command gets a fresh shell, the stdin its caller names (the null
+// device when none is named), and the given environment. It runs in its
+// own process group, and stdout and stderr share one pipe, so the output
+// arrives interleaved.
 //
 // Nothing the command starts outlives the call: whatever is still in
 // the process group when the command ends is killed before the call
@@ -39,9 +40,10 @@ func (l *Local) Name() string { return "local" }
 //
 // The output of stdout and stderr goes to out as one stream, unless the
 // command names a writer for stderr: then the two streams are captured
-// apart. The context ends the command: when it is done, the command's
-// process group is torn down. A context that has already ended starts
-// nothing.
+// apart. The command's input, when it names one, is written through a pipe
+// that ends at EOF. The context ends the command: when it is done,
+// the command's process group is torn down. A context that has already
+// ended starts nothing.
 func (l *Local) Start(ctx context.Context, c exec.Command, out io.Writer) (exec.Process, error) {
 	if len(c.Argv) == 0 {
 		return nil, errors.New("bash: the command has no arguments")
@@ -77,6 +79,22 @@ func (l *Local) Start(ctx context.Context, c exec.Command, out io.Writer) (exec.
 		}
 		cmd.Stderr = errW
 	}
+	// The input is written through a pipe of its own, never through
+	// the runtime's copy, which Wait cannot bound.
+	var stdin *exec.StdinPipe
+	if c.Stdin != nil {
+		stdin, err = exec.NewStdinPipe(*c.Stdin)
+		if err != nil {
+			pr.Close()
+			pw.Close()
+			if errW != nil {
+				errPr.Close()
+				errW.Close()
+			}
+			return nil, err
+		}
+		cmd.Stdin = stdin.Reader()
+	}
 
 	if err := cmd.Start(); err != nil {
 		pr.Close()
@@ -85,6 +103,9 @@ func (l *Local) Start(ctx context.Context, c exec.Command, out io.Writer) (exec.
 			errPr.Close()
 			errW.Close()
 		}
+		if stdin != nil {
+			stdin.Abort()
+		}
 		return nil, err
 	}
 	// The parent's copies of the write ends are closed, so a pipe
@@ -92,6 +113,9 @@ func (l *Local) Start(ctx context.Context, c exec.Command, out io.Writer) (exec.
 	pw.Close()
 	if errW != nil {
 		errW.Close()
+	}
+	if stdin != nil {
+		stdin.CloseReader()
 	}
 
 	pgid := cmd.Process.Pid
@@ -121,6 +145,7 @@ func (l *Local) Start(ctx context.Context, c exec.Command, out io.Writer) (exec.
 		pipes:    pipes,
 		waited:   waited,
 		drains:   drains,
+		stdin:    stdin,
 		finished: make(chan struct{}),
 	}
 	go func() {
@@ -144,6 +169,9 @@ type localProcess struct {
 	waited chan error
 	// drains report that a stream has been read to its end.
 	drains []chan struct{}
+	// stdin holds the command's input pipe. Nil leaves it on the
+	// null device.
+	stdin *exec.StdinPipe
 
 	// finished is closed when the wait is over, so the context watcher
 	// stops.
@@ -180,9 +208,17 @@ func (p *localProcess) Wait() (int, error) {
 		p.mu.Lock()
 		p.stopped = p.stopping
 		p.code = exitCode(p.cmd)
-		p.err = err
 		p.exited = true
 		p.mu.Unlock()
+
+		// The command has ended, so input it is still not reading is
+		// not written. Finishing the input first keeps a descendant
+		// that escaped the group and still holds the read end from
+		// holding the call.
+		var stdinErr error
+		if p.stdin != nil {
+			stdinErr = p.stdin.Wait()
+		}
 
 		// Nothing may outlive the call: SIGTERM the group, then
 		// SIGKILL it once the grace period is up.
@@ -201,6 +237,10 @@ func (p *localProcess) Wait() (int, error) {
 			}
 		}
 		p.closePipes()
+
+		p.mu.Lock()
+		p.err = exec.JoinStdinIncomplete(err, stdinErr, p.stopped)
+		p.mu.Unlock()
 		close(p.finished)
 	})
 

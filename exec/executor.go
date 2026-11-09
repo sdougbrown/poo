@@ -12,8 +12,18 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"io"
 )
+
+// ErrStdinIncomplete reports that not all stdin bytes were written to the pipe.
+// A completed write does not prove that the command read the bytes.
+//
+// Wait reports it alongside the command's own wait error. errors.Is finds this
+// error, and errors.As still finds the child's exit error. A command the executor
+// stopped keeps the stop alone, so a cancellation is never reported as an
+// input failure.
+var ErrStdinIncomplete = errors.New("exec: stdin write was incomplete")
 
 // Executor runs the command a tool asks for.
 //
@@ -35,6 +45,11 @@ type Executor interface {
 	// stop the command: the executor keeps reading and discards what
 	// the writer will not take.
 	//
+	// The command's input, when Command names one, is written through
+	// a pipe that ends at EOF. A write that cannot finish is reported
+	// by Wait as ErrStdinIncomplete, alongside the
+	// command's own outcome. A stopped command reports only the stop.
+	//
 	// The context ends the command: when it is done, the executor
 	// stops the command the way Kill does. A context that has already
 	// ended starts nothing: Start returns its error and no process.
@@ -51,6 +66,11 @@ type Command struct {
 	// Env is the command's environment, already scrubbed. A nil
 	// environment means the command inherits the executor's own.
 	Env []string
+	// Stdin is the input written to the command's standard input. Nil
+	// leaves the command reading the null device. A non-nil value,
+	// including the empty string, is written in full before the stream
+	// ends.
+	Stdin *string
 	// Stderr is where the command's error output goes, when the
 	// caller needs the two streams apart. A nil writer keeps them
 	// merged into out, interleaved in the order the command wrote

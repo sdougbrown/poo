@@ -167,7 +167,8 @@ func (e *Executor) Name() string { return Name }
 //
 // The output of stdout and stderr goes to out as one stream, unless the
 // command names a writer for stderr: then the two streams are captured
-// apart. A context that has already ended starts nothing: Start returns
+// apart. The command's input reaches it through a pipe that ends at EOF.
+// A context that has already ended starts nothing: Start returns
 // its error and no sandbox.
 func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) (pooexec.Process, error) {
 	if len(c.Argv) == 0 {
@@ -261,6 +262,28 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 		}
 		cmd.Stderr = errW
 	}
+	// The input is written through a pipe of its own, never through
+	// the runtime's copy, which Wait cannot bound.
+	var stdin *pooexec.StdinPipe
+	if c.Stdin != nil {
+		stdin, err = pooexec.NewStdinPipe(*c.Stdin)
+		if err != nil {
+			pr.Close()
+			pw.Close()
+			if errW != nil {
+				errPr.Close()
+				errW.Close()
+			}
+			statusR.Close()
+			statusW.Close()
+			jsonR.Close()
+			jsonW.Close()
+			parentR.Close()
+			parentW.Close()
+			return nil, err
+		}
+		cmd.Stdin = stdin.Reader()
+	}
 	cmd.ExtraFiles = []*os.File{statusW, jsonW, parentR}
 
 	if err := cmd.Start(); err != nil {
@@ -276,6 +299,9 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 		jsonW.Close()
 		parentR.Close()
 		parentW.Close()
+		if stdin != nil {
+			stdin.Abort()
+		}
 		return nil, err
 	}
 	// The parent's copies of the write ends are closed, so the pipes
@@ -287,6 +313,9 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 	statusW.Close()
 	jsonW.Close()
 	parentR.Close()
+	if stdin != nil {
+		stdin.CloseReader()
+	}
 
 	pipes := []*os.File{pr}
 	writers := []io.Writer{out}
@@ -315,6 +344,7 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 		parentW:    parentW,
 		waited:     waited,
 		drains:     drains,
+		stdin:      stdin,
 		done:       done,
 		finished:   make(chan struct{}),
 		statusDone: make(chan struct{}),
@@ -371,6 +401,9 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			<-p.done
 			p.closePipes()
+			if stdin != nil {
+				stdin.Wait()
+			}
 			close(p.finished)
 			return nil, fmt.Errorf("bwrap: the launcher died before the sandbox passed its startup gate")
 		}
@@ -387,6 +420,9 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-p.done
 		p.closePipes()
+		if stdin != nil {
+			stdin.Wait()
+		}
 		close(p.finished)
 		return nil, fmt.Errorf("bwrap: the sandbox did not pass its startup gate within %s", e.gateTimeout)
 	}
@@ -692,6 +728,9 @@ type process struct {
 	waited  chan error
 	// drains report that a stream has been read to its end.
 	drains []chan struct{}
+	// stdin holds the command's input pipe. Nil leaves it on the
+	// null device.
+	stdin *pooexec.StdinPipe
 	// done is closed when the sandbox's own process has been reaped.
 	done chan struct{}
 	// finished is closed when the wait is over, so the context watcher
@@ -825,9 +864,16 @@ func (p *process) Wait() (int, error) {
 		default:
 			p.code = exitCode(p.cmd)
 		}
-		p.err = err
 		p.exited = true
 		p.mu.Unlock()
+
+		// The command has ended, so input the sandbox is still not
+		// reading is not written. Finishing the input first keeps a
+		// writer that nothing will read from holding the call.
+		var stdinErr error
+		if p.stdin != nil {
+			stdinErr = p.stdin.Wait()
+		}
 
 		// A descendant may still hold a pipe open. The wait is
 		// bounded, so the call cannot hang on it.
@@ -841,6 +887,10 @@ func (p *process) Wait() (int, error) {
 			}
 		}
 		p.closePipes()
+
+		p.mu.Lock()
+		p.err = pooexec.JoinStdinIncomplete(err, stdinErr, p.stopped)
+		p.mu.Unlock()
 		close(p.finished)
 	})
 
