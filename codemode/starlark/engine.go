@@ -113,7 +113,11 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 		"gather": starlark.NewBuiltin("gather", st.gatherBuiltin),
 		"exit":   starlark.NewBuiltin("exit", st.exitBuiltin),
 	}
-	_, err = starlark.ExecFileOptions(syntax.LegacyFileOptions(), thread, "script.star", opts.Script, predeclared)
+	// The options are explicit, not syntax.LegacyFileOptions: a script's
+	// powers must not follow the process-global resolver flags a host may
+	// set. Recursion is off by the zero value, and sets are the one
+	// extension the scripts have.
+	_, err = starlark.ExecFileOptions(&syntax.FileOptions{Set: true}, thread, "script.star", opts.Script, predeclared)
 
 	result := codemode.RunResult{
 		Output: st.output,

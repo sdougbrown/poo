@@ -41,7 +41,7 @@ func (f *fakeNested) Call(ctx context.Context, calls []poo.NestedCall) ([]poo.Ne
 	}
 	results := make([]poo.NestedResult, len(calls))
 	for i, call := range calls {
-		results[i] = poo.NestedResult{Handle: "rX", Tool: call.Tool, Outcome: poo.OutcomeOK, Text: "[rX · " + call.Tool + "]\nthe result"}
+		results[i] = poo.NestedResult{Handle: "rX", Tool: call.Tool, Outcome: poo.OutcomeOK, Text: "[rX · " + call.Tool + "]\nthe result", Structured: json.RawMessage(`{"k":1}`)}
 		if deny != "" && call.Tool == deny {
 			results[i] = poo.NestedResult{Handle: "rX", Tool: call.Tool, Outcome: poo.OutcomeDenied, Text: "[rX · " + call.Tool + "]\nrefused", IsError: true}
 		}
@@ -103,6 +103,26 @@ exit({"saw": r["text"], "outcome": r["outcome"], "ok": not r["is_error"]})
 	}
 	if res.Calls != 1 {
 		t.Errorf("the run counted %d calls, want 1", res.Calls)
+	}
+}
+
+// TestAScriptSeesTheStructuredPayload covers the payload's shape: the
+// structured result is the JSON text as a string, so the script parses
+// what it needs and the engine makes no second schema round trip.
+func TestAScriptSeesTheStructuredPayload(t *testing.T) {
+	res, err := run(t, `
+r = call("read", {"path": "x"})
+exit(r["structured"])
+`, &fakeNested{}, codemode.Limits{})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	var value string
+	if err := json.Unmarshal(res.Value, &value); err != nil {
+		t.Fatalf("the exit value is not a JSON string: %s: %v", res.Value, err)
+	}
+	if value != `{"k":1}` {
+		t.Errorf("the script saw structured %q, want the payload's JSON text", value)
 	}
 }
 
@@ -300,5 +320,22 @@ func TestTheSandboxHasNoPowers(t *testing.T) {
 		if _, err := run(t, script, &fakeNested{}, codemode.Limits{}); err == nil {
 			t.Errorf("the script %q ran, want it refused", script)
 		}
+	}
+}
+
+// TestARecursiveFunctionIsRefused covers the sandbox's recursion rule:
+// a script cannot call itself.
+func TestARecursiveFunctionIsRefused(t *testing.T) {
+	_, err := run(t, `
+def f(n):
+    return 0 if n == 0 else f(n - 1)
+
+exit(f(3))
+`, &fakeNested{}, codemode.Limits{})
+	if err == nil {
+		t.Fatal("the recursive function ran, want it refused")
+	}
+	if !strings.Contains(err.Error(), "called recursively") {
+		t.Errorf("the failure is %q, want it to name the recursion", err)
 	}
 }
