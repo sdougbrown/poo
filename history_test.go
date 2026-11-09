@@ -307,4 +307,24 @@ func TestTheHistoryPageHoldsItsByteBudget(t *testing.T) {
 	if len(page.Items) != 1 {
 		t.Errorf("the page holds %d items, want the oversized one", len(page.Items))
 	}
+	if page.HasMore {
+		t.Error("the page says more items exist, want none")
+	}
+
+	// Items under the budget all come back, with nothing dropped.
+	var small []poo.Record
+	for i := 0; i < 3; i++ {
+		small = append(small, stamp(&poo.ToolResultRecord{
+			RecordMeta: poo.NewRecordMetaFrom("tool.result", poo.OriginTool),
+			RunID:      "run-2", Turn: 1, Handle: fmt.Sprintf("s%d", i), Tool: "echo",
+			Text: strings.Repeat("a", 100),
+		}))
+	}
+	page = poo.ProjectHistory(small, 0, poo.MaxHistoryLimit)
+	if len(page.Items) != 3 {
+		t.Errorf("the page holds %d items, want all 3", len(page.Items))
+	}
+	if page.HasMore {
+		t.Error("the page says older entries exist, want none")
+	}
 }
