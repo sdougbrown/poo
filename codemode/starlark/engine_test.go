@@ -7,51 +7,52 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
 	"github.com/sdougbrown/poo/codemode/starlark"
 )
 
-// fakeNested records the calls a script makes and answers them.
+// fakeNested records the batches a script hands the seam and answers
+// them.
 type fakeNested struct {
-	mu    sync.Mutex
-	calls []nestedCall
+	mu      sync.Mutex
+	batches [][]poo.NestedCall
 	// deny is the tool name whose calls are refused.
 	deny string
-	// block is how long every call takes.
+	// block is how long every batch takes.
 	block time.Duration
 }
 
-type nestedCall struct {
-	parent string
-	tool   string
-	raw    json.RawMessage
-}
-
-func (f *fakeNested) Call(ctx context.Context, parent, tool string, raw json.RawMessage) (poo.NestedResult, error) {
+func (f *fakeNested) Call(ctx context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, nestedCall{parent: parent, tool: tool, raw: raw})
-	deny := f.deny == tool
+	f.batches = append(f.batches, append([]poo.NestedCall(nil), calls...))
+	deny := f.deny
 	block := f.block
 	f.mu.Unlock()
 	if block > 0 {
 		select {
 		case <-time.After(block):
 		case <-ctx.Done():
-			return poo.NestedResult{}, ctx.Err()
+			return nil, ctx.Err()
 		}
 	}
-	if deny {
-		return poo.NestedResult{Handle: "rX", Tool: tool, Outcome: poo.OutcomeDenied, Text: "[rX · " + tool + "]\nrefused", IsError: true}, nil
+	results := make([]poo.NestedResult, len(calls))
+	for i, call := range calls {
+		results[i] = poo.NestedResult{Handle: "rX", Tool: call.Tool, Outcome: poo.OutcomeOK, Text: "[rX · " + call.Tool + "]\nthe result"}
+		if deny != "" && call.Tool == deny {
+			results[i] = poo.NestedResult{Handle: "rX", Tool: call.Tool, Outcome: poo.OutcomeDenied, Text: "[rX · " + call.Tool + "]\nrefused", IsError: true}
+		}
 	}
-	return poo.NestedResult{Handle: "rX", Tool: tool, Outcome: poo.OutcomeOK, Text: "[rX · " + tool + "]\nthe result"}, nil
+	return results, nil
 }
 
-func (f *fakeNested) made() []nestedCall {
+// handed returns the batches the seam received, in order.
+func (f *fakeNested) handed() [][]poo.NestedCall {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]nestedCall(nil), f.calls...)
+	return append([][]poo.NestedCall(nil), f.batches...)
 }
 
 func run(t *testing.T, script string, nested poo.NestedCaller, limits codemode.Limits) (codemode.RunResult, error) {
@@ -59,7 +60,6 @@ func run(t *testing.T, script string, nested poo.NestedCaller, limits codemode.L
 	return starlark.New().Run(context.Background(), codemode.RunOptions{
 		Script: script,
 		Nested: nested,
-		Parent: "r1",
 		Limits: limits,
 	})
 }
@@ -90,15 +90,18 @@ exit({"saw": r["text"], "outcome": r["outcome"], "ok": not r["is_error"]})
 	if value.Outcome != "ok" || !value.OK {
 		t.Errorf("the script saw outcome %q ok %v, want ok true", value.Outcome, value.OK)
 	}
-	made := nested.made()
-	if len(made) != 1 || made[0].tool != "read" {
-		t.Fatalf("the script made %v, want one read call", made)
+	made := nested.handed()
+	if len(made) != 1 {
+		t.Fatalf("the script handed the seam %d batches, want one", len(made))
 	}
-	if made[0].parent != "r1" {
-		t.Errorf("the call's parent is %q, want r1", made[0].parent)
+	if len(made[0]) != 1 || made[0][0].Tool != "read" {
+		t.Fatalf("the script asked for %v, want a batch of one read call", made[0])
 	}
-	if string(made[0].raw) != `{"path":"notes.txt"}` {
-		t.Errorf("the call's arguments are %s, want the marshalled dict", made[0].raw)
+	if string(made[0][0].Arguments) != `{"path":"notes.txt"}` {
+		t.Errorf("the call's arguments are %s, want the marshalled dict", made[0][0].Arguments)
+	}
+	if res.Calls != 1 {
+		t.Errorf("the run counted %d calls, want 1", res.Calls)
 	}
 }
 
@@ -131,6 +134,24 @@ print("three")
 	}
 	if len(res.Output) != 2 || res.Output[0] != "one 2" || res.Output[1] != "three" {
 		t.Errorf("the output is %q, want the two printed lines", res.Output)
+	}
+}
+
+// TestAPrintCutKeepsTheTextValid covers the print cap: the cut lands on
+// a rune boundary, so what the model reads is valid text.
+func TestAPrintCutKeepsTheTextValid(t *testing.T) {
+	res, err := run(t, `print("日本語")`, &fakeNested{}, codemode.Limits{OutputCapChars: 8})
+	if err != nil {
+		t.Fatalf("the run failed: %v", err)
+	}
+	if len(res.Output) != 1 {
+		t.Fatalf("the output is %q, want one line", res.Output)
+	}
+	if !utf8.ValidString(res.Output[0]) {
+		t.Errorf("the capped line is not valid UTF-8: %q", res.Output[0])
+	}
+	if !strings.HasSuffix(res.Output[0], "…") {
+		t.Errorf("the capped line does not say it was cut: %q", res.Output[0])
 	}
 }
 
@@ -184,26 +205,36 @@ func TestTheScriptSizeLimit(t *testing.T) {
 	}
 }
 
-// TestGatherRunsInOrder covers the fan-out: the calls run at the same
-// time and the results come back in the list's order.
-func TestGatherRunsInOrder(t *testing.T) {
-	nested := &fakeNested{block: 200 * time.Millisecond}
-	start := time.Now()
+// TestGatherHandsTheSeamOneBatch covers the fan-out: the whole list is
+// one batch, in the list's order, and the results come back in the same
+// order.
+func TestGatherHandsTheSeamOneBatch(t *testing.T) {
+	nested := &fakeNested{}
 	res, err := run(t, `
-rs = gather([("read", {"path": "a"}), ("read", {"path": "b"})])
-exit([r["outcome"] for r in rs])
+rs = gather([("read", {"path": "a"}), ("read", {"path": "b"}), ("grep", {"pattern": "c"})])
+exit([r["tool"] for r in rs])
 `, nested, codemode.Limits{})
 	if err != nil {
 		t.Fatalf("the run failed: %v", err)
 	}
-	if string(res.Value) != `["ok","ok"]` {
-		t.Errorf("the exit value is %s, want both outcomes in order", res.Value)
+	if string(res.Value) != `["read","read","grep"]` {
+		t.Errorf("the exit value is %s, want the results in the list's order", res.Value)
 	}
-	if time.Since(start) > 400*time.Millisecond {
-		t.Errorf("the gather took %s, want the calls to overlap", time.Since(start))
+	made := nested.handed()
+	if len(made) != 1 {
+		t.Fatalf("the gather handed the seam %d batches, want one", len(made))
 	}
-	if len(nested.made()) != 2 {
-		t.Errorf("the gather made %d calls, want 2", len(nested.made()))
+	want := []string{"read", "read", "grep"}
+	if len(made[0]) != len(want) {
+		t.Fatalf("the batch holds %d calls, want %d", len(made[0]), len(want))
+	}
+	for i, name := range want {
+		if made[0][i].Tool != name {
+			t.Errorf("the batch's call %d is %q, want %q", i, made[0][i].Tool, name)
+		}
+	}
+	if res.Calls != 3 {
+		t.Errorf("the run counted %d calls, want the 3 results it got", res.Calls)
 	}
 }
 

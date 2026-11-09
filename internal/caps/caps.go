@@ -10,6 +10,8 @@
 // every consumer.
 package caps
 
+import "unicode/utf8"
+
 // ObservationMax is the largest observation the model ever sees.
 const ObservationMax = 30000
 
@@ -43,4 +45,23 @@ func relative(fraction float64, contextLimit, max int, charsPerToken float64) in
 		return 0
 	}
 	return cap
+}
+
+// Prefix returns the longest prefix of s that is at most n bytes and
+// ends on a rune boundary.
+//
+// A cap is counted in bytes, so cutting at it can land inside a rune and
+// leave text the model reads as garbage. The cut lands on the rune the
+// cap falls inside instead.
+func Prefix(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	if n < 0 {
+		n = 0
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

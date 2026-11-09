@@ -16,6 +16,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
+	"github.com/sdougbrown/poo/internal/caps"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -91,7 +92,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 // mode "nested" and this call's handle as its parent.
 func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.ToolResult, error) {
 	if env.Nested == nil {
-		return poo.ToolResult{}, poo.Fatalf("the codemode tool runs only in the turn: a background job's script has no tools to call")
+		return poo.ToolResult{Text: noSeamText, IsError: true}, nil
 	}
 	p := in.(*prepared)
 	limits := t.Limits
@@ -111,13 +112,30 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	result, err := t.Engine.Run(ctx, codemode.RunOptions{
 		Script: p.script,
 		Nested: env.Nested,
-		Parent: env.Handle,
 		Limits: limits,
 	})
-	if err != nil {
-		return poo.ToolResult{Text: err.Error(), IsError: true}, nil
+	text := resultText(result, err)
+	if cap := env.Settings.ObservationCapChars; cap > 0 && len(text) > cap {
+		text = caps.Prefix(text, cap) + "\n… the script's output was cut at the context budget"
 	}
+	return poo.ToolResult{Text: text, IsError: err != nil}, nil
+}
 
+// noSeamText is what the model is told when the tool runs without a
+// nested caller.
+//
+// A call the model makes always has one. The seam is missing for a
+// script that calls codemode itself, and for a background job: the
+// nesting is one call deep, and a job runs outside the turn's tools.
+const noSeamText = "codemode runs only as a call the model makes: a nested call or a background job has no tools to call"
+
+// resultText renders what the model sees of a script run: what the
+// script did, then why it stopped, if it failed.
+//
+// A failed run keeps what it did. A script that timed out after an edit
+// tells the model the edit happened, so the model does not issue it
+// again.
+func resultText(result codemode.RunResult, err error) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "the script made %d call(s)\n", result.Calls)
 	for _, line := range result.Output {
@@ -129,11 +147,11 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		b.WriteString(string(result.Value))
 		b.WriteByte('\n')
 	}
-	text := b.String()
-	if cap := env.Settings.ObservationCapChars; cap > 0 && len(text) > cap {
-		text = text[:cap] + "\n… the script's output was cut at the context budget"
+	if err != nil {
+		b.WriteString(err.Error())
+		b.WriteByte('\n')
 	}
-	return poo.ToolResult{Text: strings.TrimRight(text, "\n")}, nil
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // PromptSection renders the tool's own section of the system prompt.

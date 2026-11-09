@@ -35,13 +35,10 @@ type Engine interface {
 type RunOptions struct {
 	// Script is the program text.
 	Script string
-	// Nested makes the tool calls. The engine calls it with the
-	// parent handle it was given, and every call it makes is judged
-	// and recorded by the session.
+	// Nested makes the tool calls. The engine hands it the calls the
+	// script makes, in batches, and every call it makes is judged and
+	// recorded by the session.
 	Nested poo.NestedCaller
-	// Parent is the handle of the call that is running the script.
-	// The nested calls name it as their parent.
-	Parent string
 	// Limits bound the run.
 	Limits Limits
 }

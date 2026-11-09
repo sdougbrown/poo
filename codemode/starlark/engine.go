@@ -3,15 +3,15 @@
 // Starlark is a deterministic Python dialect: no file, network or clock
 // builtins, no recursion, and a step budget the interpreter enforces.
 // A script's only capability is calling tools: the `call` builtin (and
-// its `gather` sibling for fan-out) go through the nested-call seam, so
-// every call the script makes is judged and recorded by the session.
+// its `gather` sibling for a batch of them) go through the nested-call
+// seam, so every call the script makes is judged and recorded by the
+// session.
 package starlark
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	jsonmod "go.starlark.net/lib/json"
@@ -20,6 +20,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
+	"github.com/sdougbrown/poo/internal/caps"
 )
 
 // The engine's own defaults, for the limits a session leaves at zero.
@@ -48,24 +49,16 @@ func (e *Engine) Name() string { return "starlark" }
 // state is what the builtins and the run share.
 //
 // A run's builtins close over the run's state, so two runs share
-// nothing.
+// nothing. Every builtin runs on the interpreter's own goroutine: the
+// seam does the fan-out, so the state needs no lock.
 type state struct {
 	nested  poo.NestedCaller
-	parent  string
 	ctx     context.Context
 	output  []string
 	printed int
-	mu      sync.Mutex
 	calls   int
 	exited  bool
 	value   json.RawMessage
-}
-
-// countCall records one tool call the script made.
-func (st *state) countCall() {
-	st.mu.Lock()
-	st.calls++
-	st.mu.Unlock()
 }
 
 // Run executes one script.
@@ -78,12 +71,10 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 		return codemode.RunResult{}, fmt.Errorf("the script has no way to call tools")
 	}
 
-	st := &state{nested: opts.Nested, parent: opts.Parent}
+	st := &state{nested: opts.Nested}
 	thread := &starlark.Thread{
 		Name: "codemode",
 		Print: func(_ *starlark.Thread, msg string) {
-			st.mu.Lock()
-			defer st.mu.Unlock()
 			if st.printed >= limits.OutputCapChars {
 				return
 			}
@@ -91,7 +82,7 @@ func (e *Engine) Run(ctx context.Context, opts codemode.RunOptions) (codemode.Ru
 			// to it, with a note: no one print can flood the result.
 			room := limits.OutputCapChars - st.printed
 			if len(msg) > room {
-				msg = msg[:room] + " …"
+				msg = caps.Prefix(msg, room) + " …"
 			}
 			st.output = append(st.output, msg)
 			st.printed += len(msg) + 1
@@ -172,20 +163,25 @@ func (st *state) call(thread *starlark.Thread, name string, value starlark.Value
 	if err != nil {
 		return nil, err
 	}
-	res, err := st.nested.Call(st.ctx, st.parent, name, raw)
+	results, err := st.nested.Call(st.ctx, []poo.NestedCall{{Tool: name, Arguments: raw}})
 	if err != nil {
 		return nil, err
 	}
-	st.countCall()
-	return nestedToStarlark(res), nil
+	if len(results) != 1 {
+		return nil, fmt.Errorf("the %s call came back with %d results", name, len(results))
+	}
+	st.calls++
+	return nestedToStarlark(results[0]), nil
 }
 
 // gatherBuiltin fans out: `gather([("read", {...}), ("grep", {...})])`.
 //
-// The calls run at the same time, and the results come back in the
-// order the list names them. The arguments are marshalled before the
-// fan-out, on the interpreter's own goroutine: a Starlark thread is
-// not safe for concurrent use, so nothing after this point touches it.
+// The whole list is one batch, and the results come back in the order
+// the list names them. The seam decides how the batch runs: the calls
+// that only read run at the same time, and the rest run in order. The
+// arguments are marshalled before the batch starts, on the
+// interpreter's own goroutine: a Starlark thread is not safe for
+// concurrent use, so nothing after this point touches it.
 func (st *state) gatherBuiltin(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var list *starlark.List
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "calls", &list); err != nil {
@@ -197,11 +193,7 @@ func (st *state) gatherBuiltin(thread *starlark.Thread, b *starlark.Builtin, arg
 	if list.Len() > MaxGatherWidth {
 		return nil, fmt.Errorf("gather takes at most %d calls, got %d", MaxGatherWidth, list.Len())
 	}
-	type request struct {
-		tool string
-		raw  json.RawMessage
-	}
-	requests := make([]request, list.Len())
+	calls := make([]poo.NestedCall, list.Len())
 	for i := 0; i < list.Len(); i++ {
 		entry := list.Index(i)
 		tuple, ok := entry.(starlark.Tuple)
@@ -216,30 +208,19 @@ func (st *state) gatherBuiltin(thread *starlark.Thread, b *starlark.Builtin, arg
 		if err != nil {
 			return nil, fmt.Errorf("gather entry %d: %w", i, err)
 		}
-		requests[i] = request{tool: name, raw: raw}
+		calls[i] = poo.NestedCall{Tool: name, Arguments: raw}
 	}
-	type outcome struct {
-		value poo.NestedResult
-		err   error
+	results, err := st.nested.Call(st.ctx, calls)
+	if err != nil {
+		return nil, fmt.Errorf("gather: %w", err)
 	}
-	outcomes := make([]outcome, len(requests))
-	var wg sync.WaitGroup
-	for i, req := range requests {
-		wg.Add(1)
-		go func(i int, req request) {
-			defer wg.Done()
-			res, err := st.nested.Call(st.ctx, st.parent, req.tool, req.raw)
-			outcomes[i] = outcome{value: res, err: err}
-		}(i, req)
+	if len(results) != len(calls) {
+		return nil, fmt.Errorf("gather asked for %d calls and came back with %d results", len(calls), len(results))
 	}
-	wg.Wait()
-	values := make([]starlark.Value, len(outcomes))
-	for i, out := range outcomes {
-		if out.err != nil {
-			return nil, fmt.Errorf("gather entry %d: %w", i, out.err)
-		}
-		st.countCall()
-		values[i] = nestedToStarlark(out.value)
+	st.calls += len(results)
+	values := make([]starlark.Value, len(results))
+	for i, res := range results {
+		values[i] = nestedToStarlark(res)
 	}
 	return starlark.NewList(values), nil
 }

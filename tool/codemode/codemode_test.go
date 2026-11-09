@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
@@ -31,8 +32,8 @@ func (e *fakeEngine) Run(ctx context.Context, opts codemode.RunOptions) (codemod
 // never uses it.
 type noopNested struct{}
 
-func (noopNested) Call(ctx context.Context, parent, tool string, raw json.RawMessage) (poo.NestedResult, error) {
-	return poo.NestedResult{}, nil
+func (noopNested) Call(ctx context.Context, calls []poo.NestedCall) ([]poo.NestedResult, error) {
+	return make([]poo.NestedResult, len(calls)), nil
 }
 
 // env builds the environment a call runs in, with the nested seam.
@@ -45,9 +46,23 @@ func env(nested poo.NestedCaller, settings poo.ToolSettings) poo.ToolEnv {
 	}
 }
 
+// prepare validates a script for a call.
+func prepare(t *testing.T, script string) poo.Prepared {
+	t.Helper()
+	raw, err := json.Marshal(map[string]string{"script": script})
+	if err != nil {
+		t.Fatalf("marshalling the arguments: %v", err)
+	}
+	prepared, err := toolcodemode.New(&fakeEngine{}).Prepare(raw, poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("preparing: %v", err)
+	}
+	return prepared
+}
+
 // TestTheToolRunsTheScriptOnItsEngine covers the wiring: the tool hands
-// the engine the script, the seam and the parent handle, and shapes the
-// result the model sees.
+// the engine the script and the seam, and shapes the result the model
+// sees.
 func TestTheToolRunsTheScriptOnItsEngine(t *testing.T) {
 	engine := &fakeEngine{result: codemode.RunResult{
 		Output: []string{"line one", "line two"},
@@ -55,11 +70,7 @@ func TestTheToolRunsTheScriptOnItsEngine(t *testing.T) {
 		Calls:  3,
 	}}
 	tool := toolcodemode.New(engine)
-	prepared, err := tool.Prepare(json.RawMessage(`{"script":"print('hi')"}`), poo.PrepareEnv{})
-	if err != nil {
-		t.Fatalf("preparing: %v", err)
-	}
-	res, err := tool.Call(context.Background(), prepared, env(noopNested{}, poo.ToolSettings{}))
+	res, err := tool.Call(context.Background(), prepare(t, "print('hi')"), env(noopNested{}, poo.ToolSettings{}))
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
@@ -74,9 +85,6 @@ func TestTheToolRunsTheScriptOnItsEngine(t *testing.T) {
 	if engine.opts.Script != "print('hi')" {
 		t.Errorf("the engine got the script %q", engine.opts.Script)
 	}
-	if engine.opts.Parent != "r7" {
-		t.Errorf("the engine got the parent %q, want r7", engine.opts.Parent)
-	}
 	if engine.opts.Nested == nil {
 		t.Error("the engine got no nested caller")
 	}
@@ -87,7 +95,7 @@ func TestTheToolRunsTheScriptOnItsEngine(t *testing.T) {
 func TestTheToolLimitsComeFromTheSettings(t *testing.T) {
 	engine := &fakeEngine{}
 	tool := toolcodemode.New(engine)
-	prepared, _ := tool.Prepare(json.RawMessage(`{"script":"x=1"}`), poo.PrepareEnv{})
+	prepared := prepare(t, "x=1")
 	settings := poo.ToolSettings{CodemodeTimeoutS: 30, CodemodeScriptMaxBytes: 1000, CodemodeOutputCapChars: 500, CodemodeExecSteps: 999}
 	if _, err := tool.Call(context.Background(), prepared, env(noopNested{}, settings)); err != nil {
 		t.Fatalf("calling: %v", err)
@@ -108,39 +116,58 @@ func TestTheToolLimitsComeFromTheSettings(t *testing.T) {
 	}
 }
 
-// TestTheToolNeedsTheSeam covers the job path: a background job's
-// environment has no nested caller, so a script there is a fatal error.
-func TestTheToolNeedsTheSeam(t *testing.T) {
+// TestTheToolWithoutTheSeamIsARecoverableError covers the nesting
+// depth: a script that calls codemode gets an error result it can look
+// at, not a failure that ends the run.
+func TestTheToolWithoutTheSeamIsARecoverableError(t *testing.T) {
 	tool := toolcodemode.New(&fakeEngine{})
-	prepared, _ := tool.Prepare(json.RawMessage(`{"script":"x=1"}`), poo.PrepareEnv{})
-	_, err := tool.Call(context.Background(), prepared, poo.ToolEnv{Handle: "r7"})
-	if err == nil {
-		t.Fatal("the call ran without the seam")
+	res, err := tool.Call(context.Background(), prepare(t, "x=1"), poo.ToolEnv{Handle: "r7"})
+	if err != nil {
+		t.Fatalf("the call failed: %v", err)
+	}
+	if !res.IsError {
+		t.Error("the call without a seam is not an error result")
+	}
+	if res.Text != "codemode runs only as a call the model makes: a nested call or a background job has no tools to call" {
+		t.Errorf("the result is %q, want the depth-limit message", res.Text)
 	}
 }
 
-// TestTheToolReportsAnEngineFailure covers the engine's failures: the
-// script that failed is a recoverable error to the model.
-func TestTheToolReportsAnEngineFailure(t *testing.T) {
-	engine := &fakeEngine{err: context.DeadlineExceeded}
+// TestTheToolKeepsWhatAFailedScriptDid covers the failed script: the
+// result still says what the script did, so a script that timed out
+// after an edit tells the model the edit happened.
+func TestTheToolKeepsWhatAFailedScriptDid(t *testing.T) {
+	engine := &fakeEngine{
+		result: codemode.RunResult{Output: []string{"edited notes.txt"}, Calls: 2},
+		err:    context.DeadlineExceeded,
+	}
 	tool := toolcodemode.New(engine)
-	prepared, _ := tool.Prepare(json.RawMessage(`{"script":"while True:\n    pass"}`), poo.PrepareEnv{})
-	res, err := tool.Call(context.Background(), prepared, env(noopNested{}, poo.ToolSettings{}))
+	res, err := tool.Call(context.Background(), prepare(t, "while True:\n    pass"), env(noopNested{}, poo.ToolSettings{}))
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
 	if !res.IsError {
 		t.Error("the failed run is not an error result")
 	}
+	count := strings.Index(res.Text, "2 call(s)")
+	printed := strings.Index(res.Text, "edited notes.txt")
+	failure := strings.Index(res.Text, context.DeadlineExceeded.Error())
+	for name, at := range map[string]int{"the call count": count, "the printed line": printed, "the failure": failure} {
+		if at < 0 {
+			t.Fatalf("the result is %q, want it to name %s", res.Text, name)
+		}
+	}
+	if !(count < printed && printed < failure) {
+		t.Errorf("the result is %q, want the count, then the printed lines, then the failure", res.Text)
+	}
 }
 
 // TestTheToolCapsItsOutput covers the output cap: a script that prints
-// past the budget is cut, with a note.
+// past the budget is cut, with a note, and the cut keeps the text valid.
 func TestTheToolCapsItsOutput(t *testing.T) {
-	engine := &fakeEngine{result: codemode.RunResult{Output: []string{strings.Repeat("x", 200)}}}
+	engine := &fakeEngine{result: codemode.RunResult{Output: []string{strings.Repeat("日本語", 20)}}}
 	tool := toolcodemode.New(engine)
-	prepared, _ := tool.Prepare(json.RawMessage(`{"script":"print('x')"} `), poo.PrepareEnv{})
-	res, err := tool.Call(context.Background(), prepared, env(noopNested{}, poo.ToolSettings{ObservationCapChars: 100}))
+	res, err := tool.Call(context.Background(), prepare(t, "print('x')"), env(noopNested{}, poo.ToolSettings{ObservationCapChars: 100}))
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
@@ -149,6 +176,9 @@ func TestTheToolCapsItsOutput(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "cut at the context budget") {
 		t.Errorf("the capped result does not say so: %q", res.Text)
+	}
+	if !utf8.ValidString(res.Text) {
+		t.Errorf("the capped result is not valid UTF-8: %q", res.Text)
 	}
 }
 
