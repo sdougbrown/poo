@@ -2,9 +2,9 @@ package bash
 
 import (
 	"encoding/json"
-	"strings"
 
 	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/internal/envelope"
 )
 
 // Observation is one command's outcome, as a tool reports it.
@@ -63,8 +63,8 @@ func Envelope(o Observation) (string, json.RawMessage) {
 		code = *o.ExitCode
 	}
 	fields := []field{
-		{EnvelopeReturncode, code},
-		{EnvelopeTimedOut, o.TimedOut},
+		{Key: EnvelopeReturncode, Value: code},
+		{Key: EnvelopeTimedOut, Value: o.TimedOut},
 	}
 
 	// The two streams share the cap, so one command's observation keeps
@@ -74,46 +74,42 @@ func Envelope(o Observation) (string, json.RawMessage) {
 	elided := 0
 	outChars := caps.RuneCount(o.Output)
 	if outChars <= outCap {
-		fields = append(fields, field{EnvelopeOutput, o.Output})
+		fields = append(fields, field{Key: EnvelopeOutput, Value: o.Output})
 	} else {
 		head, tail := caps.SplitRunes(o.Output, outCap/2)
 		fields = append(fields,
-			field{EnvelopeOutputHead, head},
-			field{EnvelopeOutputTail, tail},
+			field{Key: EnvelopeOutputHead, Value: head},
+			field{Key: EnvelopeOutputTail, Value: tail},
 		)
 		elided += outChars - 2*(outCap/2)
 	}
 	if o.Stderr != "" {
 		errChars := caps.RuneCount(o.Stderr)
 		if errChars <= errCap {
-			fields = append(fields, field{EnvelopeStderr, o.Stderr})
+			fields = append(fields, field{Key: EnvelopeStderr, Value: o.Stderr})
 		} else {
 			head, tail := caps.SplitRunes(o.Stderr, errCap/2)
 			fields = append(fields,
-				field{EnvelopeStderrHead, head},
-				field{EnvelopeStderrTail, tail},
+				field{Key: EnvelopeStderrHead, Value: head},
+				field{Key: EnvelopeStderrTail, Value: tail},
 			)
 			elided += errChars - 2*(errCap/2)
 		}
 	}
 	if elided > 0 {
-		fields = append(fields, field{EnvelopeElidedChars, elided})
+		fields = append(fields, field{Key: EnvelopeElidedChars, Value: elided})
 	}
 	switch {
 	case o.Truncated:
 		fields = append(fields,
-			field{EnvelopeTruncated, true},
-			field{EnvelopeHint, TruncationHint},
+			field{Key: EnvelopeTruncated, Value: true},
+			field{Key: EnvelopeHint, Value: TruncationHint},
 		)
 	case elided > 0:
-		fields = append(fields, field{EnvelopeHint, ElisionHint})
+		fields = append(fields, field{Key: EnvelopeHint, Value: ElisionHint})
 	}
 
-	structured := map[string]any{}
-	for _, f := range fields {
-		structured[f.key] = f.value
-	}
-	return render(fields), mustJSON(structured)
+	return render(fields), mustJSON(fields)
 }
 
 // streamCaps divides the cap between the two streams.
@@ -141,39 +137,13 @@ func streamCaps(output, stderr string, cap int) (int, int) {
 }
 
 // field is one entry of the observation envelope.
-type field struct {
-	key   string
-	value any
-}
+type field = envelope.Field
 
 // render formats the observation the model reads.
 //
 // The fields keep the order the plan names them in, and the result is
 // valid JSON, so the model can read it either way.
-func render(fields []field) string {
-	var b strings.Builder
-	b.WriteString("{")
-	for i, f := range fields {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		// The field vocabulary is a string and the values are string,
-		// int, bool or nil, so neither marshal can fail.
-		key, _ := json.Marshal(f.key)
-		value, _ := json.Marshal(f.value)
-		b.Write(key)
-		b.WriteString(": ")
-		b.Write(value)
-	}
-	b.WriteString("}")
-	return b.String()
-}
+var render = envelope.Render
 
 // mustJSON encodes a value, falling back to an empty object.
-func mustJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return json.RawMessage("{}")
-	}
-	return b
-}
+var mustJSON = envelope.Structured

@@ -94,10 +94,10 @@ func TestAFetchReturnsTheBodyAndTheHeader(t *testing.T) {
 		fmt.Sprintf(`{"url": %q}`, server.URL))
 
 	for _, want := range []string{
-		"status: 200",
-		"final_url: " + server.URL,
-		"content_type: text/plain; charset=utf-8",
-		"size: 5",
+		`"status": 200`,
+		`"final_url": "` + server.URL + `",`,
+		`"content_type": "text/plain; charset=utf-8"`,
+		`"size": 5`,
 		"hello",
 	} {
 		if !strings.Contains(result.Text, want) {
@@ -131,8 +131,10 @@ func TestAnHTMLPageComesBackAsMarkdownUnlessRaw(t *testing.T) {
 
 	raw := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
 		fmt.Sprintf(`{"url": %q, "format": "raw"}`, server.URL))
-	if !strings.Contains(raw.Text, "<h1>Title</h1>") {
-		t.Errorf("the raw fetch kept the HTML: %q", raw.Text)
+	// The envelope's text is JSON, so the raw HTML arrives escaped; the
+	// structured payload carries it as the server sent it.
+	if got := structuredOf(t, raw)["body"]; got != "<html><body><h1>Title</h1><p>Hello</p></body></html>" {
+		t.Errorf("the raw fetch's body is %q, want the HTML as it came", got)
 	}
 }
 
@@ -152,7 +154,7 @@ func TestARedirectNamesWhereTheBodyCameFrom(t *testing.T) {
 	tool := New()
 	result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
 		fmt.Sprintf(`{"url": %q}`, server.URL))
-	if !strings.Contains(result.Text, "final_url: "+target.URL) {
+	if !strings.Contains(result.Text, `"final_url": "`+target.URL+`"`) {
 		t.Errorf("the result is %q, want the final_url %q", result.Text, target.URL)
 	}
 	if !strings.Contains(result.Text, "arrived") {
@@ -174,7 +176,7 @@ func TestABodyPastTheDownloadLimitIsCutAndSaysSo(t *testing.T) {
 		FetchAllowPrivateHosts: true,
 		FetchMaxBytes:          40,
 	}, fmt.Sprintf(`{"url": %q}`, server.URL))
-	if !strings.Contains(result.Text, "truncated: true") {
+	if !strings.Contains(result.Text, `"truncated": true`) {
 		t.Errorf("the result is %q, want the truncation in the header", result.Text)
 	}
 	structured := structuredOf(t, result)
@@ -212,7 +214,7 @@ func TestABodyPastTheCapKeepsItsHeadAndTail(t *testing.T) {
 	if !strings.HasPrefix(head, "aaaaaaaaaa") || !strings.HasSuffix(tail, "cccccccccc") {
 		t.Errorf("the head is %q and the tail is %q, want the body's ends", head, tail)
 	}
-	if !strings.Contains(result.Text, "elided_chars: ") {
+	if !strings.Contains(result.Text, `"elided_chars": `) {
 		t.Errorf("the result is %q, want the elided count in the header", result.Text)
 	}
 }
@@ -251,7 +253,7 @@ func TestABinaryBodyComesBackAsMetadata(t *testing.T) {
 	if result.IsError {
 		t.Errorf("the result is an error, want the metadata as data: %v", result)
 	}
-	if !strings.Contains(result.Text, "content_type: image/png") {
+	if !strings.Contains(result.Text, `"content_type": "image/png"`) {
 		t.Errorf("the result is %q, want the content type in the header", result.Text)
 	}
 	if strings.Contains(result.Text, "PNG") || strings.Contains(result.Text, "not really") {
@@ -425,8 +427,8 @@ func TestAJSONBodyComesBackWhole(t *testing.T) {
 	tool := New()
 	result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
 		fmt.Sprintf(`{"url": %q}`, server.URL))
-	if !strings.Contains(result.Text, `"answer": 42`) {
-		t.Errorf("the result is %q, want the JSON body", result.Text)
+	if got := structuredOf(t, result)["body"]; got != `{"answer": 42}` {
+		t.Errorf("the JSON body is %q, want the body as it came", got)
 	}
 }
 

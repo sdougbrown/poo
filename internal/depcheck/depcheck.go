@@ -136,12 +136,12 @@ func (c Checker) rules() []rule {
 		},
 		{
 			path:     m + "/tool/cliregistry",
-			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/prompt", m + "/tool/bash"},
+			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/internal/envelope", m + "/prompt", m + "/tool/bash"},
 			external: true,
 		},
 		{
 			path:     m + "/tool/fetch",
-			allowed:  []string{m, m + "/internal/caps", m + "/internal/urlnorm", m + "/prompt"},
+			allowed:  []string{m, m + "/internal/caps", m + "/internal/envelope", m + "/internal/urlnorm", m + "/prompt"},
 			external: true,
 		},
 	}

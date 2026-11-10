@@ -251,7 +251,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 		}
 	}
 
-	text, structured := envelope(observation, env.Settings.ObservationCapChars)
+	text, structured := render(observation, env.Settings.ObservationCapChars)
 	return poo.ToolResult{Text: text, Structured: structured}, nil
 }
 

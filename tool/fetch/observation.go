@@ -5,10 +5,9 @@ package fetch
 
 import (
 	"encoding/json"
-	"strconv"
-	"strings"
 
 	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/internal/envelope"
 )
 
 // Observation is one fetch's outcome, as the tool reports it.
@@ -29,8 +28,8 @@ type Observation struct {
 }
 
 // The fields the result carries. A field the call does not fill stays
-// out of the result. The text and the structured payload share the one
-// list, so a field is added once and both readers see it.
+// out of the result, and the text and the structured payload share the
+// one list: a field is added once, and both readers see it.
 const (
 	// FieldStatus is the response's status code.
 	FieldStatus = "status"
@@ -57,26 +56,24 @@ const (
 // ElisionHint is the hint a capped body carries.
 const ElisionHint = "the body was longer than the cap: its head and tail are shown, and the middle is gone"
 
-// envelope renders one fetch's outcome as the result text the model
+// render renders one fetch's outcome as the result text the model
 // reads, and as the structured payload beside it.
 //
-// The text is a header of fields, then the body. The structured
-// payload is the same fields as JSON, derived from the one list, so
-// the two readers never diverge. The header is always whole; the cap
-// bounds the body only. A body the cap cannot hold is elided the way
-// the bash observation is. Its head and its tail each keep half the
-// cap, and elided_chars says what the middle held. The cap and
-// elided_chars are counted in characters, not bytes, and a cut never
-// splits a rune.
-func envelope(o Observation, capChars int) (string, json.RawMessage) {
-	fields := []field{
+// Both come from the one list of fields, and both are valid JSON, the
+// bash observation's shape. The header is always whole; the cap bounds
+// the body only. A body the cap cannot hold is elided the way the bash
+// observation is. Its head and its tail each keep half the cap, and
+// elided_chars says what the middle held. The cap and elided_chars are
+// counted in characters, not bytes, and a cut never splits a rune.
+func render(o Observation, capChars int) (string, json.RawMessage) {
+	fields := []envelope.Field{
 		{FieldStatus, o.Status},
 		{FieldFinalURL, o.FinalURL},
 		{FieldContentType, o.ContentType},
 		{FieldSize, o.Size},
 	}
 	if o.Truncated {
-		fields = append(fields, field{FieldTruncated, true})
+		fields = append(fields, envelope.Field{FieldTruncated, true})
 	}
 
 	cap := capChars
@@ -89,63 +86,19 @@ func envelope(o Observation, capChars int) (string, json.RawMessage) {
 		// A body the tool withheld — a response that was not text — has
 		// no field of its own: the metadata is the result.
 	case bodyChars <= cap:
-		fields = append(fields, field{FieldBody, o.Body})
+		fields = append(fields, envelope.Field{FieldBody, o.Body})
 	default:
 		head, tail := caps.SplitRunes(o.Body, cap/2)
 		elided := bodyChars - 2*(cap/2)
 		fields = append(fields,
-			field{FieldBodyHead, head},
-			field{FieldBodyTail, tail},
-			field{FieldElidedChars, elided},
-			field{FieldHint, ElisionHint},
+			envelope.Field{FieldBodyHead, head},
+			envelope.Field{FieldBodyTail, tail},
+			envelope.Field{FieldElidedChars, elided},
+			envelope.Field{FieldHint, ElisionHint},
 		)
 	}
 
-	structured := map[string]any{}
-	for _, f := range fields {
-		structured[f.key] = f.value
-	}
-
-	var b strings.Builder
-	for _, f := range fields {
-		b.WriteString(f.key)
-		b.WriteString(": ")
-		b.WriteString(text(f.value))
-		b.WriteString("\n")
-	}
-	raw, err := json.Marshal(structured)
-	if err != nil {
-		raw = json.RawMessage("{}")
-	}
-	return b.String(), raw
-}
-
-// field is one entry of the result: a key, and the value the text and
-// the structured payload share.
-type field struct {
-	key   string
-	value any
-}
-
-// text renders a field's value for the header. The values are strings,
-// integers or booleans, so the print is the JSON spelling without the
-// quotes a marshal would add.
-func text(value any) string {
-	switch v := value.(type) {
-	case string:
-		return v
-	case int:
-		return strconv.Itoa(v)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case bool:
-		if v {
-			return "true"
-		}
-		return "false"
-	default:
-		return ""
-	}
+	return envelope.Render(fields), envelope.Structured(fields)
 }
 
 // DefaultMaxChars is the cap a call runs at when the session names
