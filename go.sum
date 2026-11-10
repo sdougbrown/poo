@@ -10,6 +10,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/sdougbrown/cli-registry v0.3.0 h1:wQL9PxC9GNDSqCouE/BlpmlzoUr0hgX1d/kgRZVcqRE=
 github.com/sdougbrown/cli-registry v0.3.0/go.mod h1:940fkUMIzh1pgY3nzKfWiyM2RChY9IlU4qhTIjrAiK8=
+github.com/sdougbrown/cli-registry v0.4.0 h1:YD2nBRmj9MWvkcXg7h6nRZ2p2D3Vi8gbDE8biLzYGCM=
+github.com/sdougbrown/cli-registry v0.4.0/go.mod h1:940fkUMIzh1pgY3nzKfWiyM2RChY9IlU4qhTIjrAiK8=
 github.com/sebdah/goldie/v2 v2.8.0 h1:dZb9wR8q5++oplmEiJT+U/5KyotVD+HNGCAc5gNr8rc=
 github.com/sebdah/goldie/v2 v2.8.0/go.mod h1:oZ9fp0+se1eapSRjfYbsV/0Hqhbuu3bJVvKI/NNtssI=
 github.com/sergi/go-diff v1.4.0 h1:n/SP9D5ad1fORl+llWyN+D6qoUETXNZARKjyY2/KVCw=
