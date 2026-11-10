@@ -28,3 +28,36 @@ func TestCanonicalKeepsTheQueryAndTheFragment(t *testing.T) {
 		t.Errorf("the canonical form is %q, want %q for the same URL respelled", same, canonical)
 	}
 }
+
+// TestACanonicalPathIsCleanedOfItsDotSegments covers the path: the
+// server normalizes dot segments, so the comparison does too, and a
+// protected path spelled with a detour still matches its rule.
+func TestACanonicalPathIsCleanedOfItsDotSegments(t *testing.T) {
+	canonical, ok := Canonical("https://internal.example.com/x/../secret")
+	if !ok {
+		t.Fatal("the URL did not canonicalize")
+	}
+	want := "https://internal.example.com/secret"
+	if canonical != want {
+		t.Errorf("the canonical form is %q, want %q", canonical, want)
+	}
+	if !WithinHost(canonical, "https://internal.example.com/secret") {
+		t.Errorf("the detoured path does not match the prefix for %q, want it within the host's path", want)
+	}
+}
+
+// TestCanonicalRefusesWhatIsNotAURL covers the guard clause: a value
+// that is not an absolute http(s) URL is reported so, and the caller
+// compares lexically instead.
+func TestCanonicalRefusesWhatIsNotAURL(t *testing.T) {
+	for _, value := range []string{
+		"ftp://example.com/file",
+		"example.com/page",
+		"//example.com/page",
+		"https:///page",
+	} {
+		if canonical, ok := Canonical(value); ok {
+			t.Errorf("Canonical(%q) is %q, want it refused", value, canonical)
+		}
+	}
+}

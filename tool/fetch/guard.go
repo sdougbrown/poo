@@ -10,24 +10,25 @@ import (
 	"net"
 )
 
-// allowedClass reports whether an address is fetchable.
+// allowedClass reports whether an address is fetchable, and whether a
+// refusal of it names the setting that lifts it.
 //
 // Link-local is never fetchable: the cloud metadata service lives
 // there, and a page that reads it is reading credentials. The
 // reserved networks are never fetchable either. Loopback and the
 // private ranges are fetchable when the settings allow private
 // hosts, since they are the operator's own network.
-func allowedClass(ip net.IP, allowPrivate bool) bool {
+func allowedClass(ip net.IP, allowPrivate bool) (bool, bool) {
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
-		return false
+		return false, false
 	}
 	if isReservedNetwork(ip) {
-		return false
+		return false, false
 	}
 	if !allowPrivate && (ip.IsLoopback() || ip.IsPrivate()) {
-		return false
+		return false, true
 	}
-	return true
+	return true, false
 }
 
 // isReservedNetwork reports whether the address is in a range the
@@ -66,8 +67,8 @@ func checkHost(ctx context.Context, host string, allowPrivate bool) error {
 		return err
 	}
 	for _, ip := range ips {
-		if !allowedClass(ip, allowPrivate) {
-			return &refusedError{address: ip.String()}
+		if allowed, liftable := allowedClass(ip, allowPrivate); !allowed {
+			return &refusedError{address: ip.String(), liftable: liftable}
 		}
 	}
 	return nil
@@ -127,8 +128,8 @@ func guardedDial(dialer *net.Dialer, allowPrivate bool) func(ctx context.Context
 		}
 		var lastErr error
 		for _, ip := range ips {
-			if !allowedClass(ip, allowPrivate) {
-				return nil, &refusedError{address: ip.String()}
+			if allowed, liftable := allowedClass(ip, allowPrivate); !allowed {
+				return nil, &refusedError{address: ip.String(), liftable: liftable}
 			}
 		}
 		for _, ip := range ips {
@@ -146,13 +147,19 @@ func guardedDial(dialer *net.Dialer, allowPrivate bool) func(ctx context.Context
 // proxy for it, so the dial of the proxy's own address is exempt.
 type proxiedKey struct{}
 
-// refusedError is the error a refused address fails with. It names the
-// address and the setting that lifts the refusal, so a model whose
-// target is legitimate can correct the settings and carry on.
+// refusedError is the error a refused address fails with. It names
+// the address, and the way out when there is one: the loopback and
+// private refusals name the setting that lifts them, and the link-local
+// and reserved refusals say the address is never fetchable, so an
+// operator does not chase a setting that cannot help.
 type refusedError struct {
-	address string
+	address  string
+	liftable bool
 }
 
 func (e *refusedError) Error() string {
-	return "fetch: " + e.address + " is a loopback or private address, and tools.fetch.allow_private_hosts is false"
+	if e.liftable {
+		return "fetch: " + e.address + " is a loopback or private address, and tools.fetch.allow_private_hosts is false"
+	}
+	return "fetch: " + e.address + " is a link-local or reserved address, and the fetch refuses it whatever the settings say"
 }

@@ -34,8 +34,9 @@ The command runs in a bubblewrap sandbox with:
 - **The fetch tool is not a command**, and the sandbox does not see
   it: the fetch runs in poo's own process, over the host's network,
   whatever `tools.bwrap.network` says. What bounds it is the tool's
-  own guard, which refuses loopback, private and link-local addresses
-  unless `tools.fetch.allow_private_hosts` says otherwise. A session
+  own guard: loopback and private addresses are refused unless
+  `tools.fetch.allow_private_hosts` says otherwise, and link-local and
+  the reserved ranges are refused whatever the settings say. A session
   that must not reach the network disables the tool
   (`tools.disabled: [fetch]`).
 

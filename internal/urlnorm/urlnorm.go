@@ -8,13 +8,17 @@ package urlnorm
 
 import (
 	"net/url"
+	"path"
 	"strings"
 )
 
 // Canonical returns the canonical form of an absolute http(s) URL. The
 // scheme and the host are case-folded, a trailing dot on the host is
-// removed, and the scheme's default port is removed. A value that is
-// not one is reported so, and the caller compares lexically instead.
+// removed, the scheme's default port is removed, and the path is
+// cleaned of its dot segments: the server normalizes them, so a rule
+// that spells one path must not be evaded by a URL that spells it
+// another way. A value that is not an absolute http(s) URL is reported
+// so, and the caller compares lexically instead.
 func Canonical(value string) (string, bool) {
 	parsed, err := url.Parse(value)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
@@ -24,7 +28,11 @@ func Canonical(value string) (string, bool) {
 	if port := parsed.Port(); port != "" && port != defaultPort(parsed.Scheme) {
 		host = host + ":" + port
 	}
-	canonical := parsed.Scheme + "://" + host + parsed.Path
+	cleaned := parsed.Path
+	if cleaned != "" {
+		cleaned = path.Clean(cleaned)
+	}
+	canonical := parsed.Scheme + "://" + host + cleaned
 	if parsed.RawQuery != "" {
 		canonical += "?" + parsed.RawQuery
 	}
