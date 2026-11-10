@@ -363,6 +363,7 @@ func (renamedFinishPrepared) FinishResult() json.RawMessage {
 // unknown tool, or a call in the background fails the whole batch before
 // any of it is claimed, so a typo in a fan-out has no effect.
 func TestANestedBatchIsValidatedBeforeItStarts(t *testing.T) {
+	big := `reader {"text":"` + strings.Repeat("a", poo.NestedArgumentMaxBytes+1) + `"}`
 	for _, tc := range []struct {
 		name  string
 		entry string
@@ -371,6 +372,7 @@ func TestANestedBatchIsValidatedBeforeItStarts(t *testing.T) {
 		tools map[string]poo.Tool
 	}{
 		{name: "run tool", entry: `finish {}`, want: `"finish" cannot run as a nested call`},
+		{name: "oversized arguments", entry: big, want: "budget for a nested call"},
 		{name: "renamed finish tool", entry: `settle {}`, want: `"settle" cannot run as a nested call`,
 			tools: map[string]poo.Tool{"settle": renamedFinishTool{}}},
 		{name: "unknown tool", entry: `typo {"text":"x"}`, want: `unknown tool "typo"`},

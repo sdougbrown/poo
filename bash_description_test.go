@@ -3,9 +3,12 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/perm"
@@ -329,5 +332,133 @@ func TestAToolCallEventOmitsAnAbsentSummary(t *testing.T) {
 	call := firstCallRecord(t, sink.Records())
 	if call.Summary != "" {
 		t.Errorf("the record's summary is %q, want it absent", call.Summary)
+	}
+}
+
+// TestASummaryOverTheCapIsCut covers the summary cap: a call whose
+// summary is over the cap — a bash command, a script's arguments — puts
+// the capped text in its ask, its event, its record and the history, so
+// one line's payload stays far under the wire's output queue line
+// budget.
+func TestASummaryOverTheCapIsCut(t *testing.T) {
+	command := strings.Repeat("a", poo.SummaryCapChars+100)
+
+	asker := &askCapture{}
+	policy, err := perm.New(perm.Options{Askers: []perm.Asker{asker}})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "bash", Arguments: []byte(`{"command":` + jsonQuote(command) + `}`)}}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	opts := poo.Options{
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{"bash": bash.New()},
+		ToolOrder:  []string{"bash"},
+		Sink:       sink,
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
+	}
+	s := newTestSession(t, opts, poo.WithPolicy(policy))
+	if res := runSession(t, s, "start"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+
+	// The cut keeps the head and ends with the note, wherever the
+	// summary goes. The command is ASCII, so the head cuts at the byte.
+	over := utf8.RuneCountInString(command) - poo.SummaryCapChars
+	want := command[:poo.SummaryCapChars] + fmt.Sprintf(poo.SummaryElisionNote, over)
+
+	// The permission ask shows the command, cut to the cap: the ask
+	// reaches the client as one line, before the call runs.
+	asks := asker.captured()
+	if len(asks) != 1 {
+		t.Fatalf("the policy asked %d time(s), want 1", len(asks))
+	}
+	if asks[0].Summary != want {
+		t.Errorf("the ask's summary is %d characters, want the capped command", utf8.RuneCountInString(asks[0].Summary))
+	}
+
+	// The event stream carries the call's summary, cut to the cap.
+	var event poo.Event
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventToolCall {
+			event = ev
+			break
+		}
+	}
+	if event.Name != poo.EventToolCall {
+		t.Fatal("the run emitted no tool.call event")
+	}
+	if got, _ := event.Payload["summary"].(string); got != want {
+		t.Errorf("the event's summary is %d characters, want the capped command", utf8.RuneCountInString(got))
+	}
+
+	// The transcript is the log and the history projection: the record
+	// shows the capped summary, and the call item's arguments are
+	// capped too.
+	call := firstCallRecord(t, sink.Records())
+	if call.Summary != want {
+		t.Errorf("the call record's summary is %d characters, want the capped command", utf8.RuneCountInString(call.Summary))
+	}
+	found := false
+	page := poo.ProjectHistory(sink.Records(), 0, 0)
+	for _, item := range page.Items {
+		if item.Type != poo.HistoryToolCall {
+			continue
+		}
+		found = true
+		args := string(call.Arguments)
+		total := utf8.RuneCountInString(args)
+		argNote := fmt.Sprintf(poo.SummaryElisionNote, total-poo.SummaryCapChars)
+		if item.Text != args[:poo.SummaryCapChars]+argNote {
+			t.Errorf("the history's call text is %d characters, want the capped arguments", utf8.RuneCountInString(item.Text))
+		}
+	}
+	if !found {
+		t.Fatal("the history holds no tool_call item")
+	}
+}
+
+// TestASummaryCutLandsOnARuneBoundary covers the cap's cut on
+// multi-byte text: the head holds whole runes and the note counts the
+// omitted runes, so a cut summary never carries half a character.
+func TestASummaryCutLandsOnARuneBoundary(t *testing.T) {
+	command := strings.Repeat("河", poo.SummaryCapChars+100)
+
+	asker := &askCapture{}
+	policy, err := perm.New(perm.Options{Askers: []perm.Asker{asker}})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "bash", Arguments: []byte(`{"command":` + jsonQuote(command) + `}`)}}},
+		{text: "done"},
+	})
+	sink := &recordingSink{}
+	opts := poo.Options{
+		Transport:  tr,
+		Tools:      map[string]poo.Tool{"bash": bash.New()},
+		ToolOrder:  []string{"bash"},
+		Sink:       sink,
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: t.TempDir(),
+	}
+	s := newTestSession(t, opts, poo.WithPolicy(policy))
+	runSession(t, s, "start")
+
+	var summary string
+	for _, ev := range s.Events() {
+		if ev.Name == poo.EventToolCall {
+			summary, _ = ev.Payload["summary"].(string)
+		}
+	}
+	want := command[:poo.SummaryCapChars*len("河")] + fmt.Sprintf(poo.SummaryElisionNote, 100)
+	if summary != want {
+		t.Errorf("the event's summary cut %d characters, want the cut on the rune boundary", utf8.RuneCountInString(summary))
 	}
 }

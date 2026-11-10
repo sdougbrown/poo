@@ -1,6 +1,7 @@
 package poo
 
 import (
+	"encoding/json"
 	"strings"
 )
 
@@ -93,6 +94,17 @@ const (
 // zero takes the default, and a limit over the maximum takes the
 // maximum.
 func ProjectHistory(records []Record, beforeSeq int64, limit int) HistoryPage {
+	return ProjectHistoryBudget(records, beforeSeq, limit, PageByteBudget)
+}
+
+// ProjectHistoryBudget computes the projection with a page byte budget.
+//
+// The paging and the limit are ProjectHistory's. A budget of zero or
+// less takes PageByteBudget.
+func ProjectHistoryBudget(records []Record, beforeSeq int64, limit, budget int) HistoryPage {
+	if budget <= 0 {
+		budget = PageByteBudget
+	}
 	if limit <= 0 {
 		limit = DefaultHistoryLimit
 	}
@@ -112,8 +124,22 @@ func ProjectHistory(records []Record, beforeSeq int64, limit int) HistoryPage {
 		page.HasMore = true
 		older = older[len(older)-limit:]
 	}
+	// The byte budget keeps the newest entries that fit, and says that
+	// older ones exist, so a client pages back for what it dropped.
+	var byteCut bool
+	older, byteCut = PageWithinByteBudget(older, sizeOfItem, budget)
+	if byteCut {
+		page.HasMore = true
+	}
 	page.Items = older
 	return page
+}
+
+// sizeOfItem returns the item's encoded size, as the page's JSON
+// carries it.
+func sizeOfItem(item HistoryItem) int {
+	encoded, _ := json.Marshal(item)
+	return len(encoded)
 }
 
 // historyItems computes the projection's entries from the records.
@@ -144,7 +170,7 @@ func historyItems(records []Record) []HistoryItem {
 			item.Handle = r.Handle
 			item.Tool = r.Tool
 			item.Summary = r.Summary
-			item.Text = string(r.Arguments)
+			item.Text = CapSummary(string(r.Arguments))
 		case *ToolResultRecord:
 			item.Type = HistoryToolResult
 			item.RunID = r.RunID

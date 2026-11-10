@@ -510,6 +510,9 @@ type InspectResult struct {
 	Events []Event `json:"events"`
 	// NextSeq is the sequence number the next page asks for.
 	NextSeq int64 `json:"next_seq"`
+	// HasMore says that events after the page's last one exist, so the
+	// next page asks for next_seq.
+	HasMore bool `json:"has_more"`
 	// State is where the session is in the loop.
 	State string `json:"state"`
 	// Settled is the outcome of the run the client waited for.

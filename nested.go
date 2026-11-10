@@ -3,7 +3,6 @@ package poo
 import (
 	"context"
 	"fmt"
-	"unicode/utf8"
 )
 
 // The nested tool-call seam.
@@ -37,6 +36,15 @@ import (
 // tool's capture buffer holds no more bytes than this, so a nested bash
 // call keeps all it captured.
 const NestedOutputCapChars = 1 << 20
+
+// NestedArgumentMaxBytes is the byte budget for one nested call's
+// arguments.
+//
+// A script builds its arguments with no limit of its own. The
+// arguments reach the event stream — the call's summary, the permission
+// ask — before anything reads them back. The budget keeps one call's
+// arguments far under the wire's output queue line budget.
+const NestedArgumentMaxBytes = 1 << 20
 
 // defaultNestedTextCapChars is the cap on a nested result's recorded
 // text when the session sets no observation cap. It is the largest
@@ -72,17 +80,11 @@ func (s *Session) nestedRecordText(text string) (string, int) {
 	if limit <= 0 {
 		limit = defaultNestedTextCapChars
 	}
-	total := utf8.RuneCountInString(text)
-	if total <= limit {
-		return text, 0
+	head, elided := cutRuneHead(text, limit)
+	if elided == 0 {
+		return head, 0
 	}
-	i := 0
-	for n := 0; n < limit; n++ {
-		_, size := utf8.DecodeRuneInString(text[i:])
-		i += size
-	}
-	elided := total - limit
-	return text[:i] + fmt.Sprintf(NestedElisionNote, elided), elided
+	return head + fmt.Sprintf(NestedElisionNote, elided), elided
 }
 
 // nestedCaller is the NestedCaller a turn's tool calls carry.
@@ -129,6 +131,9 @@ func (n *nestedCaller) Call(ctx context.Context, calls []NestedCall) ([]NestedRe
 	// no effect of its own.
 	toolCalls := make([]ToolCall, len(calls))
 	for i, call := range calls {
+		if len(call.Arguments) > NestedArgumentMaxBytes {
+			return nil, fmt.Errorf("the call to %q carries %d bytes of arguments, over the %d-byte budget for a nested call", call.Tool, len(call.Arguments), NestedArgumentMaxBytes)
+		}
 		toolCalls[i] = ToolCall{Name: call.Tool, Arguments: call.Arguments}
 	}
 	plans := s.planCalls(run, n.turn, toolCalls, false)

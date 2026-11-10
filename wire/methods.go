@@ -282,7 +282,7 @@ func (s *server) sessionHistory(raw json.RawMessage) (any, *protocol.Error) {
 	if entry.info != nil && entry.info.Records != nil {
 		records = entry.info.Records()
 	}
-	page := poo.ProjectHistory(records, params.BeforeSeq, params.Limit)
+	page := poo.ProjectHistoryBudget(records, params.BeforeSeq, params.Limit, pageBudget(s.bounds.HistoryPageBytes, s.bounds.QueueBytes))
 	items := make([]protocol.HistoryItem, 0, len(page.Items))
 	for _, item := range page.Items {
 		items = append(items, protocol.HistoryItem{
@@ -432,10 +432,11 @@ func (s *server) agentInspect(raw json.RawMessage) (any, *protocol.Error) {
 	if rerr != nil {
 		return nil, rerr
 	}
-	events, next := entry.eventsAfter(params.AfterSeq)
+	events, next, more := entry.eventsAfter(params.AfterSeq, pageBudget(s.bounds.EventPageBytes, s.bounds.QueueBytes))
 	result := protocol.InspectResult{
 		Events:  events,
 		NextSeq: next,
+		HasMore: more,
 		State:   string(entry.sess.State()),
 	}
 	if result.Events == nil {
