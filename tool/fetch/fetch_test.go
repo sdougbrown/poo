@@ -3,7 +3,9 @@ package fetch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -332,6 +334,7 @@ func TestARedirectChainPastTheLimitFails(t *testing.T) {
 // TestAReservedNetworkIsRefused covers the ranges no setting lifts:
 // 0.0.0.0/8 routes to loopback on Linux, so an address like 0.1.2.3
 // reaches a service on localhost even with private hosts allowed.
+// The deprecated site-local IPv6 range is refused with them.
 func TestAReservedNetworkIsRefused(t *testing.T) {
 	tool := New()
 	for _, url := range []string{
@@ -339,6 +342,7 @@ func TestAReservedNetworkIsRefused(t *testing.T) {
 		"http://100.64.0.1/",
 		"http://198.18.0.1/",
 		"http://169.254.169.254/latest/meta-data/",
+		"http://[fec0::1]/",
 	} {
 		result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
 			fmt.Sprintf(`{"url": %q}`, url))
@@ -346,6 +350,130 @@ func TestAReservedNetworkIsRefused(t *testing.T) {
 			t.Errorf("the fetch of %s succeeded, want the range refused", url)
 		}
 	}
+}
+
+// TestAJSONBodyComesBackWhole covers the JSON family: an application
+// json response is text the model reads, and its body comes back.
+func TestAJSONBodyComesBackWhole(t *testing.T) {
+	server := fixtureServer(t, fixtureAnswer{
+		Status:      http.StatusOK,
+		ContentType: "application/json",
+		Body:        `{"answer": 42}`,
+	})
+	tool := New()
+	result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
+		fmt.Sprintf(`{"url": %q}`, server.URL))
+	if !strings.Contains(result.Text, `"answer": 42`) {
+		t.Errorf("the result is %q, want the JSON body", result.Text)
+	}
+}
+
+// TestABodyWithNoContentTypeIsTextWhenItsBytesAre covers the response
+// that named no type: the bytes decide, and a valid UTF-8 body comes
+// back.
+func TestABodyWithNoContentTypeIsTextWhenItsBytesAre(t *testing.T) {
+	server := fixtureServer(t, fixtureAnswer{
+		Status: http.StatusOK,
+		Body:   "plain words, no header",
+	})
+	tool := New()
+	result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
+		fmt.Sprintf(`{"url": %q}`, server.URL))
+	if !strings.Contains(result.Text, "plain words, no header") {
+		t.Errorf("the result is %q, want the untyped body", result.Text)
+	}
+}
+
+// TestABadCharsetFailsTheCallAsData covers the conversion's refusal:
+// a charset the page named and the reader does not know is an error
+// the model reads, not a body of mojibake.
+func TestABadCharsetFailsTheCallAsData(t *testing.T) {
+	server := fixtureServer(t, fixtureAnswer{
+		Status:      http.StatusOK,
+		ContentType: "text/html; charset=not-a-charset",
+		Body:        "<p>words</p>",
+	})
+	tool := New()
+	result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
+		fmt.Sprintf(`{"url": %q}`, server.URL))
+	if !result.IsError {
+		t.Errorf("the result is %v, want the conversion refused", result)
+	}
+	if !strings.Contains(result.Text, "not-a-charset") {
+		t.Errorf("the result is %q, want it to name the charset", result.Text)
+	}
+}
+
+// TestAMultiHomedHostIsRefusedOnOneBadRecord covers the fail-closed
+// rule for a name with several addresses: one refused record refuses
+// the host, so a domain with a private record cannot ride a public
+// one past the guard.
+func TestAMultiHomedHostIsRefusedOnOneBadRecord(t *testing.T) {
+	restore := resolve
+	resolve = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		return []net.IPAddr{
+			{IP: net.ParseIP("203.0.113.10")},
+			{IP: net.ParseIP("10.0.0.7")},
+		}, nil
+	}
+	defer func() { resolve = restore }()
+
+	tool := New()
+	result := fetchCall(t, tool, poo.ToolSettings{}, `{"url": "http://multi.example.com/"}`)
+	if !result.IsError {
+		t.Errorf("the result is %v, want the host refused on its private record", result)
+	}
+}
+
+// TestAResolverFailureFailsClosed covers the resolver seam: a name the
+// resolver cannot answer has no address to approve, and the fetch
+// fails instead of dialing the name unguarded.
+func TestAResolverFailureFailsClosed(t *testing.T) {
+	restore := resolve
+	resolve = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		return nil, fmt.Errorf("the resolver is down")
+	}
+	defer func() { resolve = restore }()
+
+	tool := New()
+	result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
+		`{"url": "http://unreachable.example.com/"}`)
+	if !result.IsError {
+		t.Errorf("the result is %v, want the resolution failure as the error", result)
+	}
+	if !strings.Contains(result.Text, "resolving") {
+		t.Errorf("the result is %q, want it to name the resolution", result.Text)
+	}
+}
+
+// TestADialThroughAProxiedContextIsExempt covers the proxy exemption:
+// a request whose context marks the proxy dials the proxy's private
+// address without a refusal, while an unmarked request is refused —
+// the proxy is the operator's infrastructure, and the target's host
+// keeps its own check.
+func TestADialThroughAProxiedContextIsExempt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("through the proxy"))
+	}))
+	defer server.Close()
+	dialer := &net.Dialer{Timeout: time.Second}
+
+	guarded := guardedDial(dialer, false)
+	host, port, err := net.SplitHostPort(server.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("splitting the address: %v", err)
+	}
+	_, err = guarded(context.Background(), "tcp", net.JoinHostPort(host, port))
+	var refused *refusedError
+	if !errors.As(err, &refused) {
+		t.Errorf("the unmarked dial is %v, want the loopback refused", err)
+	}
+
+	markedConn, err := guarded(context.WithValue(context.Background(), proxiedKey{}, true), "tcp", net.JoinHostPort(host, port))
+	if err != nil {
+		t.Fatalf("the marked dial failed: %v", err)
+	}
+	markedConn.Close()
 }
 
 // TestARuleMatchesTheURL covers the permission shape the tool exists

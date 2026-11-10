@@ -35,12 +35,9 @@ func Canonical(value string) (string, bool) {
 }
 
 // WithinHost reports whether the canonical value is at or under the
-// canonical prefix's host: the same host, or a subdomain of it.
-//
-// A lexical prefix comparison has no boundary at the host's edge, so a
-// prefix for one host matches an attacker's adjacent one. The host
-// comparison here is the boundary; the path stays lexical, the way the
-// rule's own documentation says.
+// canonical prefix: the same scheme, the same host or a subdomain of
+// it. A cleartext http URL is never within an https prefix, and the
+// other way around.
 func WithinHost(value, prefix string) bool {
 	parsedValue, err := url.Parse(value)
 	if err != nil {
@@ -48,6 +45,9 @@ func WithinHost(value, prefix string) bool {
 	}
 	parsedPrefix, err := url.Parse(prefix)
 	if err != nil {
+		return false
+	}
+	if parsedValue.Scheme != parsedPrefix.Scheme {
 		return false
 	}
 	valueHost, prefixHost := parsedValue.Host, parsedPrefix.Host

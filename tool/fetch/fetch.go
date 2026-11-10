@@ -193,16 +193,22 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
+	// The request's own host is checked as well as the dial. A proxy
+	// configured in the environment makes the dial the proxy's address,
+	// and the target's host then goes unchecked there. When the
+	// environment names a proxy for this request, the context marks it,
+	// and the dial of the proxy's own address is exempt: the proxy is
+	// the operator's infrastructure, and the target's host is checked
+	// here and at every redirect.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.parsed.String(), nil)
 	if err != nil {
 		return poo.ToolResult{Text: fmt.Sprintf("fetch: %v", err), IsError: true}, nil
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
-
-	// The request's own host is checked as well as the dial. A proxy
-	// configured in the environment makes the dial the proxy's address,
-	// and the target's host then goes unchecked there.
+	if proxy, proxyErr := http.ProxyFromEnvironment(req); proxyErr == nil && proxy != nil {
+		req = req.WithContext(context.WithValue(ctx, proxiedKey{}, true))
+	}
 	if err := checkHost(ctx, p.parsed.Hostname(), env.Settings.FetchAllowPrivateHosts); err != nil {
 		return poo.ToolResult{Text: err.Error(), IsError: true}, nil
 	}
@@ -253,7 +259,8 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 // call does not name one. An HTML page converts to Markdown, and
 // anything else comes back as it came.
 func defaultFormat(contentType string) string {
-	if mediaType(contentType) == "text/html" {
+	switch mediaType(contentType) {
+	case "text/html", "application/xhtml+xml":
 		return FormatMarkdown
 	}
 	return FormatRaw

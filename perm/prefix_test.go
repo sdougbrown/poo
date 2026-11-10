@@ -37,8 +37,9 @@ func TestAPrefixMatchesTheHostSpelledTheWaysURLsAre(t *testing.T) {
 }
 
 // TestAPrefixWithoutASlashStaysInsideTheHost covers the no-slash
-// prefix: it matches the host's own paths, and nothing past the
-// host's edge — the adjacent host an attacker registers matches
+// prefix: it matches the host's own paths and its subdomains, and
+// nothing past the host's edge or on the other scheme — the adjacent
+// host an attacker registers, and the cleartext downgrade, match
 // nothing.
 func TestAPrefixWithoutASlashStaysInsideTheHost(t *testing.T) {
 	rule := Rule{Tool: "fetch", CommandPrefix: "https://internal.example.com", Action: ActionDeny}
@@ -46,19 +47,21 @@ func TestAPrefixWithoutASlashStaysInsideTheHost(t *testing.T) {
 	for _, url := range []string{
 		"https://internal.example.com/",
 		"https://internal.example.com/index.html",
+		"https://sub.internal.example.com/index.html",
 	} {
 		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
 		if !rule.matchesCommand(info) {
-			t.Errorf("the prefix does not match %s, want the host's own paths", url)
+			t.Errorf("the prefix does not match %s, want the host and its subdomains", url)
 		}
 	}
 	for _, url := range []string{
 		"https://internal.example.com.evil.com/index.html",
 		"https://internal.example.com:8443/index.html",
+		"http://internal.example.com/index.html",
 	} {
 		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
 		if rule.matchesCommand(info) {
-			t.Errorf("the prefix matches %s, want the host's edge to hold", url)
+			t.Errorf("the prefix matches %s, want the host's edge and the scheme to hold", url)
 		}
 	}
 }

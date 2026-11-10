@@ -33,23 +33,24 @@ func allowedClass(ip net.IP, allowPrivate bool) bool {
 // isReservedNetwork reports whether the address is in a range the
 // fetch refuses whatever the settings say.
 func isReservedNetwork(ip net.IP) bool {
-	ip4 := ip.To4()
-	if ip4 == nil {
+	if ip4 := ip.To4(); ip4 != nil {
+		switch {
+		case ip4[0] == 0:
+			// 0.0.0.0/8: this network. Linux routes the block to loopback,
+			// so an address like 0.1.2.3 reaches a service on localhost.
+			return true
+		case ip4[0] == 100 && ip4[1]&0xc0 == 64:
+			// 100.64.0.0/10: the shared address space (CGNAT).
+			return true
+		case ip4[0] == 198 && ip4[1]&0xfe == 18:
+			// 198.18.0.0/15: the benchmarking range.
+			return true
+		}
 		return false
 	}
-	switch {
-	case ip4[0] == 0:
-		// 0.0.0.0/8: this network. Linux routes the block to loopback,
-		// so an address like 0.1.2.3 reaches a service on localhost.
-		return true
-	case ip4[0] == 100 && ip4[1]&0xc0 == 64:
-		// 100.64.0.0/10: the shared address space (CGNAT).
-		return true
-	case ip4[0] == 198 && ip4[1]&0xfe == 18:
-		// 198.18.0.0/15: the benchmarking range.
-		return true
-	}
-	return false
+	// fec0::/10: the deprecated site-local range. A host that still
+	// answers on one is as private as the ranges the settings gate.
+	return len(ip) == 16 && ip[0] == 0xfe && ip[1]&0xc0 == 0x80
 }
 
 // checkHost resolves a host and refuses it when none of its addresses
@@ -72,6 +73,11 @@ func checkHost(ctx context.Context, host string, allowPrivate bool) error {
 	return nil
 }
 
+// resolve is the host's resolver, a seam the tests point at a fake.
+var resolve = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return net.DefaultResolver.LookupIPAddr(ctx, host)
+}
+
 // addresses resolves a host to its addresses, taking an IP literal at
 // its word. A literal needs no resolver, and the resolver could not
 // answer for it anyway.
@@ -79,7 +85,7 @@ func addresses(ctx context.Context, host string) ([]net.IP, error) {
 	if ip := net.ParseIP(host); ip != nil {
 		return []net.IP{ip}, nil
 	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	ips, err := resolve(ctx, host)
 	if err != nil {
 		return nil, fmt.Errorf("fetch: resolving %q: %w", host, err)
 	}
@@ -97,6 +103,11 @@ func addresses(ctx context.Context, host string) ([]net.IP, error) {
 // address the check approved: a dial of the name resolves it a second
 // time. A name whose answers change between the check and the dial
 // has the guard approve one address and reach another.
+//
+// A request the environment sends through a proxy marks its context,
+// and the dial of the proxy's own address is exempt: the proxy is the
+// operator's infrastructure, and the target's host is checked before
+// the fetch and at every redirect.
 func guardedDial(dialer *net.Dialer, allowPrivate bool) func(ctx context.Context, network, address string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
@@ -110,6 +121,9 @@ func guardedDial(dialer *net.Dialer, allowPrivate bool) func(ctx context.Context
 			// the guard just refused to trust. The failure is the
 			// call's.
 			return nil, err
+		}
+		if ctx.Value(proxiedKey{}) != nil {
+			allowPrivate = true
 		}
 		var lastErr error
 		for _, ip := range ips {
@@ -127,6 +141,10 @@ func guardedDial(dialer *net.Dialer, allowPrivate bool) func(ctx context.Context
 		return nil, lastErr
 	}
 }
+
+// proxiedKey marks a request's context when the environment names a
+// proxy for it, so the dial of the proxy's own address is exempt.
+type proxiedKey struct{}
 
 // refusedError is the error a refused address fails with. It names the
 // address and the setting that lifts the refusal, so a model whose

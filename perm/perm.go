@@ -394,9 +394,9 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 //
 // A value that is an absolute http(s) URL, against a prefix that names
 // a scheme, compares in the URL's canonical form. The comparison stays
-// inside the prefix's host, or its subdomains. The same host spelled
-// the ways a URL can be spelled matches one prefix, and an adjacent
-// host matches nothing.
+// within the prefix's scheme and host, or its subdomains. The same
+// host spelled the ways a URL can be spelled matches one prefix, and
+// an adjacent host, or the other scheme, matches nothing.
 func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	name := info.Spec.PrimaryArg
 	if name == "" {
