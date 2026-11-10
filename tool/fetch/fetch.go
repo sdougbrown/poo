@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -56,6 +57,14 @@ type Tool struct {
 	// a check refuses the private network addresses the settings do
 	// not allow.
 	Client *http.Client
+
+	// strictClient and permissiveClient are the default clients, built
+	// once at the posture the settings name and kept for the pool they
+	// hold.
+	strictClient     *http.Client
+	permissiveClient *http.Client
+	strict           sync.Once
+	permissive       sync.Once
 }
 
 // New returns a fetch tool.
@@ -181,6 +190,13 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
 
+	// The request's own host is checked as well as the dial: a proxy
+	// configured in the environment makes the dial the proxy's address,
+	// so the target's host would go unchecked there.
+	if err := checkHost(ctx, p.parsed.Hostname(), env.Settings.FetchAllowPrivateHosts); err != nil {
+		return poo.ToolResult{Text: err.Error(), IsError: true}, nil
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return poo.ToolResult{Text: fmt.Sprintf("fetch: %v", err), IsError: true}, nil
@@ -276,15 +292,32 @@ func decodeStrict(raw json.RawMessage, into any) error {
 
 // client returns the HTTP client the call fetches with.
 //
-// A tool built with its own client gets it. The default client's
-// transport checks every dial against the private ranges the settings
-// allow or refuse, so a URL that names loopback, link-local or a
-// private network fails before a connection is made — a redirect to
-// one included, since the check runs per dial, not per URL.
+// A tool built with its own client gets it. The default clients are
+// built once per posture and kept, so a session's fetches share
+// connections: a fresh transport per call would drop the pool and
+// leave its idle connections to the garbage collector.
+//
+// The transport dials a checked address, so a URL that names loopback,
+// link-local or a private network fails before a connection is made —
+// a redirect to one included. The client's redirect check repeats the
+// request's own host check at every hop, because a proxy configured in
+// the environment makes the dial the proxy's address, and the target's
+// host would go unchecked there.
 func (t *Tool) client(allowPrivate bool) *http.Client {
 	if t.Client != nil {
 		return t.Client
 	}
+	if allowPrivate {
+		t.permissive.Do(func() { t.permissiveClient = t.build(true) })
+		return t.permissiveClient
+	}
+	t.strict.Do(func() { t.strictClient = t.build(false) })
+	return t.strictClient
+}
+
+// build returns a client with the guard at the posture the settings
+// name.
+func (t *Tool) build(allowPrivate bool) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
@@ -298,6 +331,9 @@ func (t *Tool) client(allowPrivate bool) *http.Client {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= MaxRedirects {
 				return fmt.Errorf("fetch: %s", RedirectError)
+			}
+			if err := checkHost(req.Context(), req.URL.Hostname(), allowPrivate); err != nil {
+				return err
 			}
 			return nil
 		},

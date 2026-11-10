@@ -26,29 +26,79 @@ func allowedClass(ip net.IP, allowPrivate bool) bool {
 	return true
 }
 
-// guardedDial wraps a dialer so every address it dials is checked.
+// checkHost resolves a host and refuses it when none of its addresses
+// is fetchable.
 //
-// The check runs per address and not per URL: a name with several
-// records is checked record by record, and a redirect to a refused
-// address is refused too, since a redirect dials as well.
+// The transport's guard checks what it dials, but a proxy configured
+// in the environment makes the dial the proxy's address, so the
+// target's host would go unchecked. The request's own host is checked
+// here instead, before the fetch and at every redirect.
+func checkHost(ctx context.Context, host string, allowPrivate bool) error {
+	ips, err := addresses(ctx, host)
+	if err != nil {
+		return err
+	}
+	for _, ip := range ips {
+		if !allowedClass(ip, allowPrivate) {
+			return &refusedError{address: ip.String()}
+		}
+	}
+	return nil
+}
+
+// addresses resolves a host to its addresses, taking an IP literal at
+// its word: a literal needs no resolver, and the resolver could not
+// answer for it anyway.
+func addresses(ctx context.Context, host string) ([]net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IP{ip}, nil
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("fetch: resolving %q: %w", host, err)
+	}
+	resolved := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		resolved = append(resolved, ip.IP)
+	}
+	return resolved, nil
+}
+
+// guardedDial wraps a dialer so every address it dials is checked, and
+// dials a validated address rather than the name.
+//
+// The check runs per address and not per URL, and the dial goes to an
+// address the check approved: a dial of the name would resolve it a
+// second time, and a name whose answers change between the check and
+// the dial would have the guard approve one address and reach another.
 func guardedDial(dialer *net.Dialer, allowPrivate bool) func(ctx context.Context, network, address string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, fmt.Errorf("fetch: the address %q is malformed: %w", address, err)
 		}
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		ips, err := addresses(ctx, host)
 		if err != nil {
-			// A name the resolver cannot turn into addresses is not
-			// the guard's business: the dial reports it.
-			return dialer.DialContext(ctx, network, address)
+			// A name that resolves to nothing has no address to
+			// approve, and dialing the name would trust the resolver
+			// the guard just refused to trust. The failure is the
+			// call's.
+			return nil, err
 		}
+		var lastErr error
 		for _, ip := range ips {
-			if !allowedClass(ip.IP, allowPrivate) {
-				return nil, &refusedError{address: ip.IP.String()}
+			if !allowedClass(ip, allowPrivate) {
+				return nil, &refusedError{address: ip.String()}
 			}
 		}
-		return dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
+		for _, ip := range ips {
+			conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			if dialErr == nil {
+				return conn, nil
+			}
+			lastErr = dialErr
+		}
+		return nil, lastErr
 	}
 }
 

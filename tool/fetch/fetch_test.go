@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -261,15 +262,44 @@ func TestABinaryBodyComesBackAsMetadata(t *testing.T) {
 
 // TestARefusedAddressFailsBeforeItDials covers the guard: a URL that
 // names loopback is refused, and the refusal names the setting that
-// lifts it. The fetch dials nothing.
+// lifts it. The server's handler counts the requests it saw, so the
+// test tells a refusal before the dial from a refusal after it.
 func TestARefusedAddressFailsBeforeItDials(t *testing.T) {
+	var dials int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&dials, 1)
+	}))
+	defer server.Close()
 	tool := New()
-	result := fetchCall(t, tool, poo.ToolSettings{}, `{"url": "http://127.0.0.1:1/x"}`)
+	result := fetchCall(t, tool, poo.ToolSettings{}, fmt.Sprintf(`{"url": %q}`, server.URL))
 	if !result.IsError {
 		t.Errorf("the result is %v, want a refusal", result)
 	}
 	if !strings.Contains(result.Text, "allow_private_hosts") {
 		t.Errorf("the refusal is %q, want it to name the setting", result.Text)
+	}
+	if atomic.LoadInt32(&dials) != 0 {
+		t.Errorf("the server saw %d requests, want none: the refusal came after the dial", dials)
+	}
+}
+
+// TestARedirectToARefusedAddressIsRefused covers the redirect hop: the
+// request's own host is checked at every redirect, so a page cannot
+// send the fetch to an address the first URL could not name. The
+// target is link-local, which no setting allows.
+func TestARedirectToARefusedAddressIsRefused(t *testing.T) {
+	server := fixtureServer(t, fixtureAnswer{
+		Status:   http.StatusFound,
+		Location: "http://169.254.169.254/latest/meta-data/",
+	})
+	tool := New()
+	result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
+		fmt.Sprintf(`{"url": %q}`, server.URL))
+	if !result.IsError {
+		t.Errorf("the result is %v, want the redirect refused", result)
+	}
+	if !strings.Contains(result.Text, "169.254") {
+		t.Errorf("the result is %q, want it to name the refused address", result.Text)
 	}
 }
 

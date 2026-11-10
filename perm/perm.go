@@ -13,6 +13,7 @@ package perm
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -387,19 +388,62 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 //
 // The comparison is lexical: the leading whitespace is trimmed and the
 // rest is compared as text. A compound command matches its first part,
-// so the prefix is a heuristic and not a safety boundary.
+// so the prefix is a heuristic and not a safety boundary. A tool with
+// no primary argument has nothing a prefix could match, so its rule
+// matches nothing.
+//
+// A value that is an absolute http(s) URL, against a prefix that names
+// a scheme, compares in the URL's canonical form: the scheme and the
+// host case-folded, a trailing dot on the host removed, and the
+// scheme's default port removed. The same host spelled the ways a URL
+// can be spelled matches one prefix.
 func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	name := info.Spec.PrimaryArg
 	if name == "" {
-		// A bash rule matches the bash tool's command whatever the
-		// tool's own spec says.
-		name = "command"
+		return false
 	}
 	value, ok := stringField(info.Arguments, name)
 	if !ok {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimLeftFunc(value, unicode.IsSpace), r.CommandPrefix)
+	value = strings.TrimLeftFunc(value, unicode.IsSpace)
+	if canonical, ok := canonicalURL(value); ok {
+		if prefix, ok := canonicalURL(r.CommandPrefix); ok {
+			return strings.HasPrefix(canonical, prefix)
+		}
+	}
+	return strings.HasPrefix(value, r.CommandPrefix)
+}
+
+// canonicalURL returns the canonical form of an absolute http(s) URL.
+// A value that is not one is reported so, and the comparison stays
+// lexical.
+func canonicalURL(value string) (string, bool) {
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", false
+	}
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	if port := parsed.Port(); port != "" && port != defaultPort(parsed.Scheme) {
+		host = host + ":" + port
+	}
+	canonical := parsed.Scheme + "://" + host + parsed.Path
+	if parsed.RawQuery != "" {
+		canonical += "?" + parsed.RawQuery
+	}
+	if parsed.Fragment != "" {
+		canonical += "#" + parsed.Fragment
+	}
+	return canonical, true
+}
+
+// defaultPort is the port a scheme implies, and the one a canonical
+// URL leaves out.
+func defaultPort(scheme string) string {
+	if scheme == "https" {
+		return "443"
+	}
+	return "80"
 }
 
 // stringField returns the raw value of a top-level string argument.

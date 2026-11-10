@@ -218,6 +218,60 @@ tools:
 	}
 }
 
+// TestAPrefixRuleNeedsAToolWithAPrimaryArgument covers the build check:
+// a fetch rule matches by URL, and a prefix on a tool with no primary
+// argument matches nothing, so the build refuses it before it can
+// pretend to deny.
+func TestAPrefixRuleNeedsAToolWithAPrimaryArgument(t *testing.T) {
+	// A prefix on a tool with a primary argument is the rule fetch's
+	// URL matching rides on.
+	settings, err := config.Parse([]byte(theModelSettings+`permission:
+  rules:
+    - tool: fetch
+      command_prefix: https://docs.example.com/
+      action: deny
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	build(t, settings, config.Overrides{})
+
+	// A prefix on a tool with nothing to match matches nothing, so the
+	// build refuses it before it can pretend to deny.
+	settings, err = config.Parse([]byte(theModelSettings+`permission:
+  rules:
+    - tool: jobs
+      command_prefix: anything
+      action: deny
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	buildErr := buildExpectError(t, settings, config.Overrides{})
+	if !strings.Contains(buildErr.Error(), "no primary argument") {
+		t.Errorf("the failure is %v, want it to name the missing argument", buildErr)
+	}
+}
+
+// buildExpectError builds a runtime the settings refuse, and returns
+// the failure.
+func buildExpectError(t *testing.T, settings *config.Settings, overrides config.Overrides) error {
+	t.Helper()
+	_, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		Overrides:      overrides,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatalf("the build succeeded, want a refusal")
+	}
+	return err
+}
+
 // TestTheBuildTakesTheUnmatchedActionFromTheProfile covers the
 // precedence: the profile's action applies, and the settings change it.
 func TestTheBuildTakesTheUnmatchedActionFromTheProfile(t *testing.T) {

@@ -88,3 +88,36 @@ func TestRuneCountAgreesWithTheSplit(t *testing.T) {
 		t.Errorf("a split at the full count lost text: %q", head)
 	}
 }
+
+// TestTheSplitDoesNotCopyTheText covers the split's cost: a large
+// output is walked, not copied into a rune slice. The bash observation
+// and the fetch envelope elide on every call, so the walk is the hot
+// path both share.
+func TestTheSplitDoesNotCopyTheText(t *testing.T) {
+	text := strings.Repeat("€", 350_000)
+	allocs := testing.AllocsPerRun(10, func() {
+		head, tail := SplitRunes(text, 15_000)
+		if len(head) == 0 || len(tail) == 0 {
+			t.Fatal("the split produced an empty half")
+		}
+	})
+	// A walk costs no allocation; a copying implementation would build a
+	// full rune slice of a 1.4 MB string on every call. A small constant
+	// bound still catches that while tolerating incidental allocations.
+	if allocs > 2 {
+		t.Errorf("the split allocated %v times, want a constant number", allocs)
+	}
+}
+
+// BenchmarkSplitRunes covers the split's cost on a large output: the
+// elision runs on every byte the command printed.
+func BenchmarkSplitRunes(b *testing.B) {
+	text := strings.Repeat("€", 350_000)
+	b.ReportAllocs()
+	for b.Loop() {
+		head, tail := SplitRunes(text, 15_000)
+		if len(head) == 0 || len(tail) == 0 {
+			b.Fatal("the split produced an empty half")
+		}
+	}
+}

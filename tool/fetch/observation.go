@@ -133,5 +133,6 @@ type field struct {
 }
 
 // DefaultMaxChars is the cap a call runs at when the session names
-// none. It matches the largest observation the model ever sees.
-const DefaultMaxChars = 30000
+// none: the largest observation the model ever sees, the same bound
+// every tool's cap falls back to.
+const DefaultMaxChars = caps.ObservationMax

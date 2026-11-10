@@ -31,6 +31,13 @@ The command runs in a bubblewrap sandbox with:
   (`tools.bwrap.network: false`). The network is the host's, and with
   it the resolver's directory (`/run/systemd/resolve`) is mounted
   read-only, because `/etc/resolv.conf` is often a link into it.
+- **The fetch tool is not a command**, and the sandbox does not see
+  it: the fetch runs in poo's own process, over the host's network,
+  whatever `tools.bwrap.network` says. What bounds it is the tool's
+  own guard, which refuses loopback, private and link-local addresses
+  unless `tools.fetch.allow_private_hosts` says otherwise. A session
+  that must not reach the network disables the tool
+  (`tools.disabled: [fetch]`).
 
 `$HOME` is not mounted. The operator's files are not the command's,
 unless a bind names them.
