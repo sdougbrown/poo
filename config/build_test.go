@@ -24,6 +24,7 @@ import (
 	"github.com/sdougbrown/poo/tool/cliregistry"
 	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
 	"github.com/sdougbrown/poo/tool/edit"
+	fetchtool "github.com/sdougbrown/poo/tool/fetch"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
 )
@@ -45,6 +46,7 @@ func theTools() map[string]config.ToolFactory {
 		"grep":     func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit":     func(config.ToolOptions) poo.Tool { return edit.New() },
 		"codemode": func(config.ToolOptions) poo.Tool { return toolcodemode.New(stubEngine{}) },
+		"fetch":    func(config.ToolOptions) poo.Tool { return fetchtool.New() },
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},
@@ -125,7 +127,7 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	if runtime.Profile.Name != "code" {
 		t.Errorf("the profile is %q, want code", runtime.Profile.Name)
 	}
-	want := []string{"bash", "read", "grep", "edit", "codemode"}
+	want := []string{"bash", "read", "grep", "edit", "fetch", "codemode"}
 	if len(runtime.Options.ToolOrder) != len(want) {
 		t.Fatalf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
@@ -183,6 +185,91 @@ tools:
 			t.Errorf("tools.codemode.%s reached the session as %d, want %d", field.name, field.got, field.want)
 		}
 	}
+}
+
+// TestTheFetchSettingsReachTheSession covers the mapping: every
+// tools.fetch field lands on the session's settings, which the tool
+// reads per call.
+func TestTheFetchSettingsReachTheSession(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+tools:
+  fetch:
+    timeout_s: 12
+    max_bytes: 1048576
+    user_agent: probe/1.0
+    allow_private_hosts: true
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	got := runtime.Options.Settings
+	if got.FetchTimeoutS != 12 {
+		t.Errorf("tools.fetch.timeout_s reached the session as %d, want 12", got.FetchTimeoutS)
+	}
+	if got.FetchMaxBytes != 1048576 {
+		t.Errorf("tools.fetch.max_bytes reached the session as %d, want 1048576", got.FetchMaxBytes)
+	}
+	if got.FetchUserAgent != "probe/1.0" {
+		t.Errorf("tools.fetch.user_agent reached the session as %q, want probe/1.0", got.FetchUserAgent)
+	}
+	if !got.FetchAllowPrivateHosts {
+		t.Errorf("tools.fetch.allow_private_hosts reached the session as false, want true")
+	}
+}
+
+// TestAPrefixRuleNeedsAToolWithAPrimaryArgument covers the build check:
+// a fetch rule matches by URL, and a prefix on a tool with no primary
+// argument matches nothing, so the build refuses it before it can
+// pretend to deny.
+func TestAPrefixRuleNeedsAToolWithAPrimaryArgument(t *testing.T) {
+	// A prefix on a tool with a primary argument is the rule fetch's
+	// URL matching rides on.
+	settings, err := config.Parse([]byte(theModelSettings+`permission:
+  rules:
+    - tool: fetch
+      command_prefix: https://docs.example.com/
+      action: deny
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	build(t, settings, config.Overrides{})
+
+	// A prefix on a tool with nothing to match matches nothing, so the
+	// build refuses it before it can pretend to deny.
+	settings, err = config.Parse([]byte(theModelSettings+`permission:
+  rules:
+    - tool: jobs
+      command_prefix: anything
+      action: deny
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	buildErr := buildExpectError(t, settings, config.Overrides{})
+	if !strings.Contains(buildErr.Error(), "no primary argument") {
+		t.Errorf("the failure is %v, want it to name the missing argument", buildErr)
+	}
+}
+
+// buildExpectError builds a runtime the settings refuse, and returns
+// the failure.
+func buildExpectError(t *testing.T, settings *config.Settings, overrides config.Overrides) error {
+	t.Helper()
+	_, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		Overrides:      overrides,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatalf("the build succeeded, want a refusal")
+	}
+	return err
 }
 
 // TestTheBuildTakesTheUnmatchedActionFromTheProfile covers the
@@ -823,7 +910,7 @@ func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	want := []string{"read", "grep", "edit", "codemode"}
+	want := []string{"read", "grep", "edit", "fetch", "codemode"}
 	if !slices.Equal(runtime.Options.ToolOrder, want) {
 		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}

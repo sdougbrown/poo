@@ -10,6 +10,8 @@
 // every consumer.
 package caps
 
+import "unicode/utf8"
+
 // ObservationMax is the largest observation the model ever sees.
 const ObservationMax = 30000
 
@@ -63,4 +65,47 @@ func RunePrefix(s string, n int) string {
 		count++
 	}
 	return s
+}
+
+// RuneCount returns the number of characters in s.
+//
+// A byte that does not form a valid rune counts as one character, the
+// way the cut counts it, so a count and the cut it feeds agree.
+func RuneCount(s string) int {
+	return utf8.RuneCountInString(s)
+}
+
+// SplitRunes cuts a string into its head and its tail, each within a
+// character budget, without splitting a rune.
+//
+// The text is walked rather than copied: the head is found by ranging
+// over the string, and the tail by walking back over its last
+// characters, so a large output costs no rune slice of its own.
+func SplitRunes(s string, half int) (string, string) {
+	if half <= 0 {
+		return "", ""
+	}
+	if utf8.RuneCountInString(s) <= half {
+		return s, ""
+	}
+	return RunePrefix(s, half), RuneSuffix(s, half)
+}
+
+// RuneSuffix returns the last n characters of a string.
+func RuneSuffix(s string, n int) string {
+	// The end of the string is found by walking back over its
+	// characters, so a rune is never cut in half.
+	// A byte that is not part of a valid rune counts as one character,
+	// as it does for utf8.RuneCountInString and RunePrefix.
+	end := len(s)
+	count := 0
+	for end > 0 {
+		_, size := utf8.DecodeLastRuneInString(s[:end])
+		end -= size
+		count++
+		if count == n {
+			break
+		}
+	}
+	return s[end:]
 }

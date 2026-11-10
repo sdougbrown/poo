@@ -125,6 +125,24 @@ tools:
   #       - "/etc/shadow"
   protected_paths: []
 
+  # The fetch tool reads the network. The code profile offers it; an
+  # operator who wants the model off the network names it in
+  # tools.disabled. Its settings:
+  fetch:
+    # How long one fetch waits, in seconds.
+    timeout_s: 30
+    # The largest body one fetch reads.
+    max_bytes: 4194304
+    # The user agent a fetch sends. Empty means a generic one that
+    # carries nothing about the user.
+    user_agent: ""
+    # The fetch of a loopback or private address is refused unless
+    # this is true. A link-local address (the cloud metadata service
+    # lives there) and the reserved ranges are refused either way.
+    allow_private_hosts: false
+  # A model that must not reach the network disables the tool here:
+  # disabled: [fetch]
+
 # The registered command-line tools. A path is a manifest file, a
 # directory of manifests, or several of them, resolved against the
 # working directory. Every manifest is loaded when the session is built,

@@ -101,7 +101,7 @@ func (c Checker) rules() []rule {
 		{path: m + "/wire", allowed: []string{m, m + "/perm", m + "/session", m + "/wire/protocol"}},
 		{path: m + "/wire/conformance", allowed: []string{m + "/wire/protocol"}},
 		{path: m + "/provider/catalog", allowed: []string{m}},
-		{path: m + "/perm", allowed: []string{m}},
+		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
 		{path: m + "/exec"},
@@ -136,7 +136,12 @@ func (c Checker) rules() []rule {
 		},
 		{
 			path:     m + "/tool/cliregistry",
-			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/prompt", m + "/tool/bash"},
+			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/internal/envelope", m + "/prompt", m + "/tool/bash"},
+			external: true,
+		},
+		{
+			path:     m + "/tool/fetch",
+			allowed:  []string{m, m + "/internal/caps", m + "/internal/envelope", m + "/internal/urlnorm", m + "/prompt"},
 			external: true,
 		},
 	}

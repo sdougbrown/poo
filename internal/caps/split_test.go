@@ -1,4 +1,4 @@
-package bash
+package caps
 
 import (
 	"strings"
@@ -23,7 +23,7 @@ func TestTheSplitKeepsBothHalvesWhole(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			head, tail := splitRunes(c.text, c.half)
+			head, tail := SplitRunes(c.text, c.half)
 			if c.half <= 0 {
 				if head != "" || tail != "" {
 					t.Errorf("the split is %q/%q, want two empty halves", head, tail)
@@ -61,12 +61,42 @@ func wantSplit(s string, half int) (string, string) {
 	return string(runes[:half]), string(runes[len(runes)-half:])
 }
 
+// TestTheSplitCountsInvalidBytesAsCharacters covers text that is not
+// valid UTF-8: each stray byte counts as one character, so the tail stays
+// within its budget and never repeats the head.
+func TestTheSplitCountsInvalidBytesAsCharacters(t *testing.T) {
+	text := "ab" + strings.Repeat("\xff", 20) + "cd"
+	head, tail := SplitRunes(text, 4)
+	if head != "ab\xff\xff" {
+		t.Errorf("the head is %q, want %q", head, "ab\xff\xff")
+	}
+	if tail != "\xff\xffcd" {
+		t.Errorf("the tail is %q, want %q", tail, "\xff\xffcd")
+	}
+}
+
+// TestRuneCountAgreesWithTheSplit covers the count the callers size a
+// cap with: it counts a stray byte as one character, so a body that fits
+// the count fits the cut the count feeds.
+func TestRuneCountAgreesWithTheSplit(t *testing.T) {
+	text := "ab" + strings.Repeat("\xff", 20) + "cd"
+	if got, want := RuneCount(text), 24; got != want {
+		t.Errorf("RuneCount is %d, want %d", got, want)
+	}
+	head, _ := SplitRunes(text, RuneCount(text))
+	if head != text {
+		t.Errorf("a split at the full count lost text: %q", head)
+	}
+}
+
 // TestTheSplitDoesNotCopyTheText covers the split's cost: a large
-// output is walked, not copied into a rune slice.
+// output is walked, not copied into a rune slice. The bash observation
+// and the fetch envelope elide on every call, so the walk is the hot
+// path both share.
 func TestTheSplitDoesNotCopyTheText(t *testing.T) {
 	text := strings.Repeat("€", 350_000)
 	allocs := testing.AllocsPerRun(10, func() {
-		head, tail := splitRunes(text, 15_000)
+		head, tail := SplitRunes(text, 15_000)
 		if len(head) == 0 || len(tail) == 0 {
 			t.Fatal("the split produced an empty half")
 		}
@@ -85,23 +115,9 @@ func BenchmarkSplitRunes(b *testing.B) {
 	text := strings.Repeat("€", 350_000)
 	b.ReportAllocs()
 	for b.Loop() {
-		head, tail := splitRunes(text, 15_000)
+		head, tail := SplitRunes(text, 15_000)
 		if len(head) == 0 || len(tail) == 0 {
 			b.Fatal("the split produced an empty half")
 		}
-	}
-}
-
-// TestTheSplitCountsInvalidBytesAsCharacters covers output that is not
-// valid UTF-8: each stray byte counts as one character, so the tail stays
-// within its budget and never repeats the head.
-func TestTheSplitCountsInvalidBytesAsCharacters(t *testing.T) {
-	text := "ab" + strings.Repeat("\xff", 20) + "cd"
-	head, tail := splitRunes(text, 4)
-	if head != "ab\xff\xff" {
-		t.Errorf("the head is %q, want %q", head, "ab\xff\xff")
-	}
-	if tail != "\xff\xffcd" {
-		t.Errorf("the tail is %q, want %q", tail, "\xff\xffcd")
 	}
 }

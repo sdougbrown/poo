@@ -34,7 +34,7 @@ import (
 //     compare a field with a constant, never with another field. The
 //     rule is checked by hand.
 //   - a permission rule matches exactly one of a tool and a class, and
-//     a command prefix belongs to a bash rule. A rule is an object in
+//     a command prefix names the tool it matches. A rule is an object in
 //     a list, not a leaf, so the rules are checked by hand.
 //   - the roles are the ones the settings know. The roles are a map,
 //     not a leaf, so the rule is checked by hand.
@@ -145,9 +145,9 @@ func (s *Settings) checkRoles() error {
 // checkRules checks the permission rules.
 //
 // A rule matches on the tool's name or on the tool's class, never on
-// both, and a command prefix belongs to a bash rule: a prefix on
-// another rule would never match, and a rule that matches nothing is
-// a rule the operator thinks is doing something.
+// both, and a command prefix names the tool it matches: a prefix on a
+// class rule would have no argument to match, and a rule that matches
+// nothing is a rule the operator thinks is doing something.
 func (s *Settings) checkRules() error {
 	for i, rule := range s.Permission.Rules {
 		where := fmt.Sprintf("permission.rules[%d]", i)
@@ -176,11 +176,11 @@ func (s *Settings) checkRules() error {
 				}
 			}
 		}
-		if rule.CommandPrefix != "" && rule.Tool != "bash" {
+		if rule.CommandPrefix != "" && rule.Tool == "" {
 			return &Error{
 				Code:    CodeInvalid,
 				Field:   where + ".command_prefix",
-				Message: "a command prefix is only valid for a bash rule",
+				Message: "a command prefix is only valid on a rule that names a tool",
 			}
 		}
 		switch rule.Action {

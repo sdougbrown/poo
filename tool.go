@@ -120,6 +120,16 @@ type ToolSettings struct {
 	CodemodeOutputCapChars int
 	// CodemodeExecSteps is the engine's execution budget.
 	CodemodeExecSteps int
+	// FetchTimeoutS is the fetch tool's timeout for a call, in seconds.
+	FetchTimeoutS int
+	// FetchMaxBytes is the largest body one fetch reads.
+	FetchMaxBytes int
+	// FetchUserAgent is the user agent a fetch sends. Empty means the
+	// tool's own generic agent.
+	FetchUserAgent string
+	// FetchAllowPrivateHosts lifts the fetch tool's refusal of the
+	// loopback, link-local and private addresses.
+	FetchAllowPrivateHosts bool
 }
 
 // NestedCall is one call a tool asks the seam to make.

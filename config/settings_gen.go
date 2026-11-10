@@ -61,6 +61,10 @@ type SettingsFields struct {
 	ToolsDisabled                   []string "json:\"tools.disabled,omitempty\""
 	ToolsEnvPassthrough             []string "json:\"tools.env.passthrough,omitempty\""
 	ToolsEnvScrub                   []string "json:\"tools.env.scrub,omitempty\""
+	ToolsFetchAllowPrivateHosts     *bool    "json:\"tools.fetch.allow_private_hosts,omitempty\""
+	ToolsFetchMaxBytes              *float64 "json:\"tools.fetch.max_bytes,omitempty\""
+	ToolsFetchTimeoutS              *float64 "json:\"tools.fetch.timeout_s,omitempty\""
+	ToolsFetchUserAgent             *string  "json:\"tools.fetch.user_agent,omitempty\""
 	ToolsProtectedPaths             []string "json:\"tools.protected_paths,omitempty\""
 	Version                         *float64 "json:\"version,omitempty\""
 }
@@ -124,6 +128,10 @@ type SettingsAvailability struct {
 	ToolsDisabled                   FieldStatus
 	ToolsEnvPassthrough             FieldStatus
 	ToolsEnvScrub                   FieldStatus
+	ToolsFetchAllowPrivateHosts     FieldStatus
+	ToolsFetchMaxBytes              FieldStatus
+	ToolsFetchTimeoutS              FieldStatus
+	ToolsFetchUserAgent             FieldStatus
 	ToolsProtectedPaths             FieldStatus
 	Version                         FieldStatus
 }
@@ -255,6 +263,14 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ToolsEnvPassthroughSatisfied := len(f.ToolsEnvPassthrough) > 0
 	ToolsEnvScrubEnabled := true
 	ToolsEnvScrubSatisfied := len(f.ToolsEnvScrub) > 0
+	ToolsFetchAllowPrivateHostsEnabled := true
+	ToolsFetchAllowPrivateHostsSatisfied := f.ToolsFetchAllowPrivateHosts != nil
+	ToolsFetchMaxBytesEnabled := true
+	ToolsFetchMaxBytesSatisfied := f.ToolsFetchMaxBytes != nil
+	ToolsFetchTimeoutSEnabled := true
+	ToolsFetchTimeoutSSatisfied := f.ToolsFetchTimeoutS != nil
+	ToolsFetchUserAgentEnabled := true
+	ToolsFetchUserAgentSatisfied := func() bool { v := f.ToolsFetchUserAgent; return v != nil && *v != "" }()
 	ToolsProtectedPathsEnabled := true
 	ToolsProtectedPathsSatisfied := len(f.ToolsProtectedPaths) > 0
 	VersionEnabled := true
@@ -1581,6 +1597,94 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		ToolsFetchAllowPrivateHosts: FieldStatus{
+			Required:  ToolsFetchAllowPrivateHostsEnabled && false,
+			Enabled:   ToolsFetchAllowPrivateHostsEnabled,
+			Satisfied: ToolsFetchAllowPrivateHostsSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ToolsFetchMaxBytes: FieldStatus{
+			Required:  ToolsFetchMaxBytesEnabled && false,
+			Enabled:   ToolsFetchMaxBytesEnabled,
+			Satisfied: ToolsFetchMaxBytesSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ToolsFetchTimeoutS: FieldStatus{
+			Required:  ToolsFetchTimeoutSEnabled && false,
+			Enabled:   ToolsFetchTimeoutSEnabled,
+			Satisfied: ToolsFetchTimeoutSSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ToolsFetchUserAgent: FieldStatus{
+			Required:  ToolsFetchUserAgentEnabled && false,
+			Enabled:   ToolsFetchUserAgentEnabled,
+			Satisfied: ToolsFetchUserAgentSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		ToolsProtectedPaths: FieldStatus{
 			Required:  ToolsProtectedPathsEnabled && false,
 			Enabled:   ToolsProtectedPathsEnabled,
@@ -1755,6 +1859,15 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return len(f.ToolsEnvPassthrough) > 0
 	case "ToolsEnvScrub":
 		return len(f.ToolsEnvScrub) > 0
+	case "ToolsFetchAllowPrivateHosts":
+		return f.ToolsFetchAllowPrivateHosts != nil
+	case "ToolsFetchMaxBytes":
+		return f.ToolsFetchMaxBytes != nil
+	case "ToolsFetchTimeoutS":
+		return f.ToolsFetchTimeoutS != nil
+	case "ToolsFetchUserAgent":
+		v := f.ToolsFetchUserAgent
+		return v != nil && *v != ""
 	case "ToolsProtectedPaths":
 		return len(f.ToolsProtectedPaths) > 0
 	case "Version":
@@ -2257,6 +2370,30 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "ToolsEnvScrub", "tools.env.scrub":
 		found = true
 		status = avail.ToolsEnvScrub
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsFetchAllowPrivateHosts", "tools.fetch.allow_private_hosts":
+		found = true
+		status = avail.ToolsFetchAllowPrivateHosts
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsFetchMaxBytes", "tools.fetch.max_bytes":
+		found = true
+		status = avail.ToolsFetchMaxBytes
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsFetchTimeoutS", "tools.fetch.timeout_s":
+		found = true
+		status = avail.ToolsFetchTimeoutS
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsFetchUserAgent", "tools.fetch.user_agent":
+		found = true
+		status = avail.ToolsFetchUserAgent
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}

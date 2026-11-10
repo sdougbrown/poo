@@ -6,7 +6,7 @@
 //
 // The policy is a before-tool hook. The core installs it with
 // poo.WithPolicy, and it runs before every other before-tool hook. It
-// only ever allows or denies a call: an ask happens inside the policy,
+// only ever allows or denies a call. An ask happens inside the policy,
 // and the policy blocks on the asker chain until the ask is answered.
 package perm
 
@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/urlnorm"
 )
 
 // Action is what a rule, a setting or a fallback says to do with a
@@ -74,18 +75,20 @@ const (
 
 // Rule is one policy rule.
 //
-// A rule matches on the tool's name or on its class, and a bash rule
-// may match on the command's prefix.
+// A rule matches on the tool's name or on its class, and a rule that
+// names a tool may match on a prefix of the call's primary argument.
 type Rule struct {
 	// Tool is the name of the tool the rule matches, exactly.
 	Tool string
 	// Class is the class of the tools the rule matches.
 	Class poo.ToolKind
-	// CommandPrefix matches the raw command of a bash call.
+	// CommandPrefix matches the prefix of the call's primary argument:
+	// the command of a bash call, or the argument the tool names —
+	// the fetch tool's URL, for one.
 	//
-	// The prefix is a lexical heuristic and not a safety boundary: it
-	// compares the command's text, so "git status && rm -rf x" matches
-	// the prefix "git status".
+	// The prefix is a lexical heuristic and not a safety boundary. It
+	// compares the text, so "git status && rm -rf x" matches the
+	// prefix "git status".
 	CommandPrefix string
 	// Action is what the rule says to do with a matching call.
 	Action Action
@@ -108,6 +111,12 @@ type DoomLoop struct {
 type Options struct {
 	// Rules are the policy's rules, in order. The first match wins.
 	Rules []Rule
+	// PrimaryArgs are the tools' primary arguments, by tool name. A
+	// policy built with them validates a prefix rule against the map
+	// at construction, beside the matcher that reads it at match time;
+	// a policy built without them skips that check, for a consumer
+	// that owns its own tool knowledge.
+	PrimaryArgs map[string]string
 	// Unmatched is the action for a side-effecting call no rule
 	// matches. It defaults to DefaultUnmatched.
 	Unmatched Action
@@ -163,8 +172,8 @@ var _ poo.PolicyHook = (*Policy)(nil)
 // New builds a policy.
 //
 // A malformed policy is a construction error: a rule with no matcher or
-// with two, an unknown action, a command prefix on a rule that is not a
-// bash rule, or a fallback that is not a decision.
+// with two, an unknown action, a command prefix on a rule that names no
+// tool, or a fallback that is not a decision.
 func New(opts Options) (*Policy, error) {
 	unmatched := opts.Unmatched
 	if unmatched == "" {
@@ -187,6 +196,9 @@ func New(opts Options) (*Policy, error) {
 	for i, rule := range opts.Rules {
 		if err := checkRule(i, rule); err != nil {
 			return nil, err
+		}
+		if rule.CommandPrefix != "" && opts.PrimaryArgs != nil && opts.PrimaryArgs[rule.Tool] == "" {
+			return nil, fmt.Errorf("perm: rule %d matches %q by prefix, and the tool has no primary argument a prefix could match", i, rule.Tool)
 		}
 	}
 	timeout := opts.ChainTimeout
@@ -225,8 +237,8 @@ func checkRule(index int, rule Rule) error {
 			return fmt.Errorf("perm: %s matches the unknown class %q", where, rule.Class)
 		}
 	}
-	if rule.CommandPrefix != "" && rule.Tool != "bash" {
-		return fmt.Errorf("perm: %s has a command prefix, which is only valid for a bash rule", where)
+	if rule.CommandPrefix != "" && rule.Tool == "" {
+		return fmt.Errorf("perm: %s has a command prefix, which needs a named tool: the prefix matches the call's primary argument", where)
 	}
 	return checkAction(where+"'s action", rule.Action, ActionAllow, ActionAsk, ActionDeny)
 }
@@ -380,25 +392,36 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 	return r.Class != "" && r.Class == info.Spec.Class
 }
 
-// matchesCommand reports whether the call's command starts with the
-// rule's prefix.
+// matchesCommand reports whether the call's primary argument starts
+// with the rule's prefix.
 //
-// The comparison is lexical: the command's leading whitespace is
-// trimmed and the rest is compared as text. A compound command matches
-// its first part, so the prefix is a heuristic and not a safety
-// boundary.
+// The comparison is lexical. The leading whitespace is trimmed and the
+// rest is compared as text. A compound command matches its first part,
+// so the prefix is a heuristic and not a safety boundary. A tool with
+// no primary argument has nothing a prefix could match, so its rule
+// matches nothing.
+//
+// A value that is an absolute http(s) URL, against a prefix that names
+// a scheme, compares in the URL's canonical form. The comparison stays
+// within the prefix's scheme and host, or its subdomains. The same
+// host spelled the ways a URL can be spelled matches one prefix, and
+// an adjacent host, or the other scheme, matches nothing.
 func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	name := info.Spec.PrimaryArg
 	if name == "" {
-		// A bash rule matches the bash tool's command whatever the
-		// tool's own spec says.
-		name = "command"
+		return false
 	}
 	value, ok := stringField(info.Arguments, name)
 	if !ok {
 		return false
 	}
-	return strings.HasPrefix(strings.TrimLeftFunc(value, unicode.IsSpace), r.CommandPrefix)
+	value = strings.TrimLeftFunc(value, unicode.IsSpace)
+	if canonical, ok := urlnorm.Canonical(value); ok {
+		if prefix, ok := urlnorm.Canonical(r.CommandPrefix); ok {
+			return urlnorm.WithinHost(canonical, prefix)
+		}
+	}
+	return strings.HasPrefix(value, r.CommandPrefix)
 }
 
 // stringField returns the raw value of a top-level string argument.

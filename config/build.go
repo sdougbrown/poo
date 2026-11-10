@@ -869,6 +869,24 @@ func linkedTool(opts BuildOptions, name string) bool {
 	return linksTool(opts, name)
 }
 
+// primaryArgOf returns the named tool's primary argument, the one a
+// rule's prefix matches.
+//
+// A tool the profile offered is already built, and its spec answers. A
+// linked one the profile did not offer is built for its spec alone:
+// the factories are constructors, and the tool is dropped at once. The
+// job tools the core adds have no factory and no primary argument.
+func primaryArgOf(opts BuildOptions, tools map[string]poo.Tool, name string) string {
+	if tool, ok := tools[name]; ok {
+		return tool.Spec().PrimaryArg
+	}
+	factory, ok := opts.Tools[name]
+	if !ok {
+		return ""
+	}
+	return factory(ToolOptions{}).Spec().PrimaryArg
+}
+
 // isChatRole reports whether a failure is about the chat role.
 //
 // The chat model is the one a session cannot run without, so its
@@ -1132,6 +1150,10 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 				Message: fmt.Sprintf("the rule matches the tool %q, and this binary does not link it", rule.Tool),
 			}
 		}
+		// A prefix matches the tool's primary argument, and a tool
+		// without one matches nothing: a deny the operator meant would
+		// never fire. The policy validates that beside its matcher, from
+		// the primary arguments resolved below.
 		rules = append(rules, perm.Rule{
 			Tool:          rule.Tool,
 			Class:         poo.ToolKind(rule.Class),
@@ -1168,6 +1190,15 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		chainTimeout = time.Duration(*settings.Permission.ChainTimeoutS) * time.Second
 	}
 
+	// The primary arguments the prefix rules need are resolved once, so
+	// the policy validates a rule beside the matcher that reads it.
+	primaryArgs := map[string]string{}
+	for _, rule := range settings.Permission.Rules {
+		if rule.CommandPrefix != "" && rule.Tool != "" {
+			primaryArgs[rule.Tool] = primaryArgOf(opts, r.Options.Tools, rule.Tool)
+		}
+	}
+
 	askers, err := r.resolveAskers(opts, settings.Permission)
 	if err != nil {
 		return err
@@ -1175,6 +1206,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 
 	policy, err := perm.New(perm.Options{
 		Rules:        rules,
+		PrimaryArgs:  primaryArgs,
 		Unmatched:    unmatched,
 		Fallback:     fallback,
 		DoomLoop:     doomLoop,
@@ -1369,6 +1401,18 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	}
 	if settings.Tools.Codemode.ExecSteps != nil {
 		r.Options.Settings.CodemodeExecSteps = *settings.Tools.Codemode.ExecSteps
+	}
+	if settings.Tools.Fetch.TimeoutS != nil {
+		r.Options.Settings.FetchTimeoutS = *settings.Tools.Fetch.TimeoutS
+	}
+	if settings.Tools.Fetch.MaxBytes != nil {
+		r.Options.Settings.FetchMaxBytes = *settings.Tools.Fetch.MaxBytes
+	}
+	if settings.Tools.Fetch.UserAgent != nil {
+		r.Options.Settings.FetchUserAgent = *settings.Tools.Fetch.UserAgent
+	}
+	if settings.Tools.Fetch.AllowPrivateHosts != nil {
+		r.Options.Settings.FetchAllowPrivateHosts = *settings.Tools.Fetch.AllowPrivateHosts
 	}
 	r.Options.Settings.ObservationCapChars = caps.Observation(model.ContextLimit, poo.CharsPerToken)
 	r.Options.Settings.ReadOutputCapChars = caps.ReadOutput(model.ContextLimit, poo.CharsPerToken)
