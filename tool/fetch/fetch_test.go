@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -302,6 +303,67 @@ func TestARedirectToARefusedAddressIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(result.Text, "169.254") {
 		t.Errorf("the result is %q, want it to name the refused address", result.Text)
+	}
+}
+
+// TestTheUserAgentFollowsTheSettings covers the user agent: a custom
+// setting is the header the server sees, and a session without one
+// sends the tool's generic agent.
+func TestTheUserAgentFollowsTheSettings(t *testing.T) {
+	var seen []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("User-Agent"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+	tool := New()
+
+	fetchCall(t, tool, poo.ToolSettings{
+		FetchAllowPrivateHosts: true,
+		FetchUserAgent:         "probe/1.0",
+	}, fmt.Sprintf(`{"url": %q}`, server.URL))
+	fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
+		fmt.Sprintf(`{"url": %q}`, server.URL))
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("the server saw %d requests, want 2", len(seen))
+	}
+	if seen[0] != "probe/1.0" {
+		t.Errorf("the first fetch sent %q, want the custom agent", seen[0])
+	}
+	if seen[1] != DefaultUserAgent {
+		t.Errorf("the second fetch sent %q, want the generic agent", seen[1])
+	}
+}
+
+// TestADoomLoopKeyMergesRespellingsButNotQueries covers the key the
+// doom loop counts by: one host respelled is one call, and two URLs
+// that differ in the query are two.
+func TestADoomLoopKeyMergesRespellingsButNotQueries(t *testing.T) {
+	tool := New()
+	first, err := tool.Prepare([]byte(`{"url": "https://Example.com/search?q=1"}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	respelled, err := tool.Prepare([]byte(`{"url": "https://example.com:443/search?q=1"}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	otherQuery, err := tool.Prepare([]byte(`{"url": "https://example.com/search?q=2"}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if string(first.(poo.CanonicalKeyer).CanonicalKey()) != string(respelled.(poo.CanonicalKeyer).CanonicalKey()) {
+		t.Errorf("the respelled URL has a different key: %s vs %s", first.(poo.CanonicalKeyer).CanonicalKey(), respelled.(poo.CanonicalKeyer).CanonicalKey())
+	}
+	if string(first.(poo.CanonicalKeyer).CanonicalKey()) == string(otherQuery.(poo.CanonicalKeyer).CanonicalKey()) {
+		t.Errorf("two queries share one key: %s", first.(poo.CanonicalKeyer).CanonicalKey())
 	}
 }
 

@@ -111,6 +111,12 @@ type DoomLoop struct {
 type Options struct {
 	// Rules are the policy's rules, in order. The first match wins.
 	Rules []Rule
+	// PrimaryArgs are the tools' primary arguments, by tool name. A
+	// policy built with them validates a prefix rule against the map
+	// at construction, beside the matcher that reads it at match time;
+	// a policy built without them skips that check, for a consumer
+	// that owns its own tool knowledge.
+	PrimaryArgs map[string]string
 	// Unmatched is the action for a side-effecting call no rule
 	// matches. It defaults to DefaultUnmatched.
 	Unmatched Action
@@ -190,6 +196,9 @@ func New(opts Options) (*Policy, error) {
 	for i, rule := range opts.Rules {
 		if err := checkRule(i, rule); err != nil {
 			return nil, err
+		}
+		if rule.CommandPrefix != "" && opts.PrimaryArgs != nil && opts.PrimaryArgs[rule.Tool] == "" {
+			return nil, fmt.Errorf("perm: rule %d matches %q by prefix, and the tool has no primary argument a prefix could match", i, rule.Tool)
 		}
 	}
 	timeout := opts.ChainTimeout

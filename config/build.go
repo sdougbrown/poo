@@ -1152,14 +1152,8 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		}
 		// A prefix matches the tool's primary argument, and a tool
 		// without one matches nothing: a deny the operator meant would
-		// never fire, so the settings are the failure, not the silence.
-		if rule.CommandPrefix != "" && primaryArgOf(opts, r.Options.Tools, rule.Tool) == "" {
-			return &Error{
-				Code:    CodeUnsupported,
-				Field:   "permission.rules",
-				Message: fmt.Sprintf("the rule matches %q by prefix, and the tool has no primary argument a prefix could match", rule.Tool),
-			}
-		}
+		// never fire. The policy validates that beside its matcher, from
+		// the primary arguments resolved below.
 		rules = append(rules, perm.Rule{
 			Tool:          rule.Tool,
 			Class:         poo.ToolKind(rule.Class),
@@ -1196,6 +1190,15 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		chainTimeout = time.Duration(*settings.Permission.ChainTimeoutS) * time.Second
 	}
 
+	// The primary arguments the prefix rules need are resolved once, so
+	// the policy validates a rule beside the matcher that reads it.
+	primaryArgs := map[string]string{}
+	for _, rule := range settings.Permission.Rules {
+		if rule.CommandPrefix != "" && rule.Tool != "" {
+			primaryArgs[rule.Tool] = primaryArgOf(opts, r.Options.Tools, rule.Tool)
+		}
+	}
+
 	askers, err := r.resolveAskers(opts, settings.Permission)
 	if err != nil {
 		return err
@@ -1203,6 +1206,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 
 	policy, err := perm.New(perm.Options{
 		Rules:        rules,
+		PrimaryArgs:  primaryArgs,
 		Unmatched:    unmatched,
 		Fallback:     fallback,
 		DoomLoop:     doomLoop,
