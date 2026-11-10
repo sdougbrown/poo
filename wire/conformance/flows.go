@@ -686,7 +686,7 @@ func (s *suite) followUpMessage() {
 func (s *suite) typedResult() {
 	s.t.Helper()
 	schema := filepath.Join(s.dir, "result.schema.json")
-	if err := os.WriteFile(schema, []byte(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`), 0o600); err != nil {
+	if err := os.WriteFile(schema, []byte(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`), 0o600); err != nil {
 		s.t.Fatalf("writing the schema: %v", err)
 	}
 	extra := map[string]any{

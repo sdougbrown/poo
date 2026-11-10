@@ -264,11 +264,3 @@ func TestTheModeOfTheFileIsKept(t *testing.T) {
 		t.Errorf("the mode is %v, want 0755", info.Mode().Perm())
 	}
 }
-
-// TestAnUnknownArgumentIsRefused covers the arguments that are not the
-// tool's.
-func TestAnUnknownArgumentIsRefused(t *testing.T) {
-	if _, err := edit.New().Prepare(json.RawMessage(`{"path":"a.txt","old":"x","new":"y","extra":1}`), poo.PrepareEnv{}); err == nil {
-		t.Error("the unknown argument was accepted")
-	}
-}

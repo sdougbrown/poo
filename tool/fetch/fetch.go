@@ -139,9 +139,9 @@ func (p *prepared) EvidenceArguments() json.RawMessage { return p.CanonicalKey()
 
 // Prepare validates the arguments. It has no side effects.
 //
-// The structural checks — unknown fields, the format's enum, the
-// required url — are the schema's; the domain checks stay here, since
-// a URL that parses is not one the fetch can make.
+// The structural checks are the schema's: unknown fields, the format's
+// enum, and the required url. The domain checks stay here, since a URL
+// that parses is not one the fetch can make.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args
 	if len(raw) > 0 {

@@ -1,9 +1,9 @@
 // The compiled argument schemas of the session's tools, and the check
 // that holds a model's call to them.
 //
-// A tool's spec carries its argument schema for the model; here the
+// A tool's spec carries its argument schema for the model. Here the
 // same schema is the enforced contract. The authority is the closed
-// vocabulary the cli-registry manifests already answer to, so the
+// vocabulary the cli-registry manifests already answer to. The
 // built-in tools and the registered ones are judged by one set of
 // rules.
 package poo
@@ -29,9 +29,9 @@ type argSchemas struct {
 // compileArgSchemas compiles every tool's input schema.
 //
 // A tool with no schema opts out. A schema that does not compile is a
-// registration failure: the vocabulary is closed on purpose, so a tool
-// that reaches past it is a tool bug, and the failure names the
-// keyword the tool used.
+// registration failure. The vocabulary is closed on purpose, so a tool
+// that reaches past it is a tool bug. The failure names the keyword
+// the tool used.
 func compileArgSchemas(tools map[string]Tool) (*argSchemas, error) {
 	compiled := &argSchemas{schemas: map[string]*schema.ValueSchema{}}
 	for name, tool := range tools {
@@ -59,8 +59,8 @@ func compileArgSchemas(tools map[string]Tool) (*argSchemas, error) {
 // validate holds one call's arguments to its tool's compiled schema.
 //
 // The failures are the model's to correct, so they come back the way a
-// tool's own Prepare refuses: invalid arguments, with the issues as the
-// text. A tool that never registered a schema validates nothing.
+// tool's own Prepare refuses: invalid arguments, with the issues as
+// the text. A tool that never registered a schema validates nothing.
 func (a *argSchemas) validate(name string, raw json.RawMessage) error {
 	if a == nil {
 		return nil

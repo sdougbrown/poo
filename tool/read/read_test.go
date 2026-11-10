@@ -178,7 +178,6 @@ func TestAMissingFileIsARecoverableError(t *testing.T) {
 func TestPrepareRejectsBadArguments(t *testing.T) {
 	tool := read.New()
 	for _, raw := range []string{
-		`{"path":"a.txt","extra":1}`,
 		`{"path":""}`,
 		`{"path":"a.txt","offset":-1}`,
 		`{"path":"a.txt","limit":-1}`,
