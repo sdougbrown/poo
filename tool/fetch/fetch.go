@@ -206,8 +206,14 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
-	if err := checkHost(ctx, p.parsed.Hostname(), env.Settings.FetchAllowPrivateHosts); err != nil {
-		return poo.ToolResult{Text: err.Error(), IsError: true}, nil
+	// The request's own host is checked when the environment names a
+	// proxy: the dial then goes to the proxy's address, and the
+	// target's host would go unchecked there. Without a proxy the dial
+	// guard is the check, and the host resolves once, not twice.
+	if len(proxyHosts()) > 0 {
+		if err := checkHost(ctx, p.parsed.Hostname(), env.Settings.FetchAllowPrivateHosts); err != nil {
+			return poo.ToolResult{Text: err.Error(), IsError: true}, nil
+		}
 	}
 
 	resp, err := client.Do(req)
@@ -333,16 +339,20 @@ func (t *Tool) client(allowPrivate bool) *http.Client {
 // name.
 //
 // The transport dials a checked address, so a URL that names loopback,
-// link-local or a private network fails before a connection is made.
-// A redirect to one is included. The dial of a proxy the environment
-// names is exempt — the proxy is the operator's infrastructure — and
-// the exemption is the proxy's own host, so a redirect that leaves the
-// proxy behind dials its own host, and the guard applies there.
+// link-local or a private network fails before a connection is made,
+// and a redirect to one is included. The dial of a proxy the
+// environment names is exempt — the proxy is the operator's
+// infrastructure — and the exemption is the proxy's own host, so a
+// redirect that leaves the proxy behind dials its own host, and the
+// guard applies there. The redirect target's host is checked when a
+// proxy makes the dial the proxy's; without one the dial guard is the
+// check.
 func (t *Tool) build(allowPrivate bool) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	proxies := proxyHosts()
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           guardedDial(dialer, allowPrivate, proxyHosts()),
+		DialContext:           guardedDial(dialer, allowPrivate, proxies),
 		ForceAttemptHTTP2:     true,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
@@ -353,8 +363,10 @@ func (t *Tool) build(allowPrivate bool) *http.Client {
 			if len(via) >= MaxRedirects {
 				return fmt.Errorf("fetch: %s", RedirectError)
 			}
-			if err := checkHost(req.Context(), req.URL.Hostname(), allowPrivate); err != nil {
-				return err
+			if len(proxies) > 0 {
+				if err := checkHost(req.Context(), req.URL.Hostname(), allowPrivate); err != nil {
+					return err
+				}
 			}
 			return nil
 		},

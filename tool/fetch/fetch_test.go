@@ -586,6 +586,22 @@ func TestKeepBodyDecidesByTheType(t *testing.T) {
 	}
 }
 
+// TestAPrivateAddressRefusalNamesTheSetting covers the RFC1918 half
+// of the guard: a fetch of a private literal with the default settings
+// is refused, and the refusal names the setting that lifts it — the
+// branch a regression of IsPrivate would silently drop, since a dial
+// failure alone would still be an error.
+func TestAPrivateAddressRefusalNamesTheSetting(t *testing.T) {
+	tool := New()
+	result := fetchCall(t, tool, poo.ToolSettings{}, `{"url": "http://10.0.0.7:8080/"}`)
+	if !result.IsError {
+		t.Errorf("the result is %v, want the private address refused", result)
+	}
+	if !strings.Contains(result.Text, "allow_private_hosts") {
+		t.Errorf("the refusal is %q, want it to name the setting", result.Text)
+	}
+}
+
 // TestARuleMatchesTheURL covers the permission shape the tool exists
 // for: a rule matches a fetch by the URL it names, so an operator can
 // refuse a prefix and let the rest ride on the read-only class.
@@ -635,6 +651,7 @@ func TestPrepareRefusesWhatItCannotFetch(t *testing.T) {
 		`{"url": "https://example.com/", "format": "html"}`,
 		`{"url": "", "format": "raw"}`,
 		`{"url": "https://example.com/", "deep": true}`,
+		`{"url": "https://a/"} {"url": "https://b/"}`,
 	} {
 		if _, err := tool.Prepare([]byte(arguments), poo.PrepareEnv{}); err == nil {
 			t.Errorf("prepare %s succeeded, want a failure the model corrects", arguments)
