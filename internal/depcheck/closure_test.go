@@ -22,7 +22,7 @@ func TestAReadOnlyBinaryLinksNoToolItDidNotLink(t *testing.T) {
 
 	deps := listDeps(t, root, "./wire/conformance/testdata/readonly")
 
-	for _, excluded := range []string{"tool/bash", "tool/edit", "tool/cliregistry", "tool/codemode", "codemode/starlark", "exec/bwrap"} {
+	for _, excluded := range []string{"tool/bash", "tool/edit", "tool/cliregistry", "tool/codemode", "tool/fetch", "codemode/starlark", "exec/bwrap"} {
 		if slices.Contains(deps, modulePath+"/"+excluded) {
 			t.Errorf("the read-only binary links %s", modulePath+"/"+excluded)
 		}

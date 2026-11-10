@@ -1370,6 +1370,18 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	if settings.Tools.Codemode.ExecSteps != nil {
 		r.Options.Settings.CodemodeExecSteps = *settings.Tools.Codemode.ExecSteps
 	}
+	if settings.Tools.Fetch.TimeoutS != nil {
+		r.Options.Settings.FetchTimeoutS = *settings.Tools.Fetch.TimeoutS
+	}
+	if settings.Tools.Fetch.MaxBytes != nil {
+		r.Options.Settings.FetchMaxBytes = *settings.Tools.Fetch.MaxBytes
+	}
+	if settings.Tools.Fetch.UserAgent != nil {
+		r.Options.Settings.FetchUserAgent = *settings.Tools.Fetch.UserAgent
+	}
+	if settings.Tools.Fetch.AllowPrivateHosts != nil {
+		r.Options.Settings.FetchAllowPrivateHosts = *settings.Tools.Fetch.AllowPrivateHosts
+	}
 	r.Options.Settings.ObservationCapChars = caps.Observation(model.ContextLimit, poo.CharsPerToken)
 	r.Options.Settings.ReadOutputCapChars = caps.ReadOutput(model.ContextLimit, poo.CharsPerToken)
 

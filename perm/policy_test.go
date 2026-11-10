@@ -248,10 +248,6 @@ func TestAMalformedPolicyIsAConstructionError(t *testing.T) {
 			opts: perm.Options{Fallback: perm.ActionAsk},
 		},
 		{
-			name: "a command prefix on a rule that is not a bash rule",
-			opts: perm.Options{Rules: []perm.Rule{{Tool: "read", CommandPrefix: "git", Action: perm.ActionAllow}}},
-		},
-		{
 			name: "a command prefix on a class rule",
 			opts: perm.Options{Rules: []perm.Rule{{Class: poo.ClassSideEffecting, CommandPrefix: "git", Action: perm.ActionAllow}}},
 		},

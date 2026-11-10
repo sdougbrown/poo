@@ -3,7 +3,8 @@ package bash
 import (
 	"encoding/json"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/sdougbrown/poo/internal/caps"
 )
 
 // Observation is one command's outcome, as a tool reports it.
@@ -71,11 +72,11 @@ func Envelope(o Observation) (string, json.RawMessage) {
 	outCap, errCap := streamCaps(o.Output, o.Stderr, cap)
 
 	elided := 0
-	outChars := utf8.RuneCountInString(o.Output)
+	outChars := caps.RuneCount(o.Output)
 	if outChars <= outCap {
 		fields = append(fields, field{EnvelopeOutput, o.Output})
 	} else {
-		head, tail := splitRunes(o.Output, outCap/2)
+		head, tail := caps.SplitRunes(o.Output, outCap/2)
 		fields = append(fields,
 			field{EnvelopeOutputHead, head},
 			field{EnvelopeOutputTail, tail},
@@ -83,11 +84,11 @@ func Envelope(o Observation) (string, json.RawMessage) {
 		elided += outChars - 2*(outCap/2)
 	}
 	if o.Stderr != "" {
-		errChars := utf8.RuneCountInString(o.Stderr)
+		errChars := caps.RuneCount(o.Stderr)
 		if errChars <= errCap {
 			fields = append(fields, field{EnvelopeStderr, o.Stderr})
 		} else {
-			head, tail := splitRunes(o.Stderr, errCap/2)
+			head, tail := caps.SplitRunes(o.Stderr, errCap/2)
 			fields = append(fields,
 				field{EnvelopeStderrHead, head},
 				field{EnvelopeStderrTail, tail},
@@ -121,8 +122,8 @@ func Envelope(o Observation) (string, json.RawMessage) {
 // they fit together; when they do not, the short one keeps what it
 // needs, up to half the cap, and the long one takes the rest.
 func streamCaps(output, stderr string, cap int) (int, int) {
-	outChars := utf8.RuneCountInString(output)
-	errChars := utf8.RuneCountInString(stderr)
+	outChars := caps.RuneCount(output)
+	errChars := caps.RuneCount(stderr)
 	if output == "" || stderr == "" || outChars+errChars <= cap {
 		return cap, cap
 	}
@@ -166,53 +167,6 @@ func render(fields []field) string {
 	}
 	b.WriteString("}")
 	return b.String()
-}
-
-// splitRunes cuts a string into its head and its tail, each within a
-// character budget, without splitting a rune.
-//
-// The text is walked rather than copied: the head is found by ranging
-// over the string, and the tail by walking back over its last
-// characters, so a large output costs no rune slice of its own.
-func splitRunes(s string, half int) (string, string) {
-	if half <= 0 {
-		return "", ""
-	}
-	if utf8.RuneCountInString(s) <= half {
-		return s, ""
-	}
-	return headRunes(s, half), tailRunes(s, half)
-}
-
-// headRunes returns the first n characters of a string.
-func headRunes(s string, n int) string {
-	count := 0
-	for i := range s {
-		if count == n {
-			return s[:i]
-		}
-		count++
-	}
-	return s
-}
-
-// tailRunes returns the last n characters of a string.
-func tailRunes(s string, n int) string {
-	// The end of the string is found by walking back over its
-	// characters, so a rune is never cut in half.
-	// A byte that is not part of a valid rune counts as one character,
-	// as it does for utf8.RuneCountInString and for the head.
-	end := len(s)
-	count := 0
-	for end > 0 {
-		_, size := utf8.DecodeLastRuneInString(s[:end])
-		end -= size
-		count++
-		if count == n {
-			break
-		}
-	}
-	return s[end:]
 }
 
 // mustJSON encodes a value, falling back to an empty object.

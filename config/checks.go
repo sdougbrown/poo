@@ -176,11 +176,11 @@ func (s *Settings) checkRules() error {
 				}
 			}
 		}
-		if rule.CommandPrefix != "" && rule.Tool != "bash" {
+		if rule.CommandPrefix != "" && rule.Tool == "" {
 			return &Error{
 				Code:    CodeInvalid,
 				Field:   where + ".command_prefix",
-				Message: "a command prefix is only valid for a bash rule",
+				Message: "a command prefix is only valid on a rule that names a tool",
 			}
 		}
 		switch rule.Action {

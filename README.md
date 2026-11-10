@@ -148,7 +148,7 @@ closure gate.
 | `poo/decide` | Decision-model types: questions, answers, the decider, the recording wrapper |
 | `poo/prompt` | The system prompt's vocabulary: named sections, the alternatives they offer, and the environment they read |
 | `poo/pootest` | Exported test helpers: a scripted transport, an in-memory sink, a stub decider, a scripted compactor |
-| `poo/tool/*` | Opt-in tools: `read`, `edit`, `grep`, `bash`, `cliregistry` |
+| `poo/tool/*` | Opt-in tools: `read`, `edit`, `grep`, `bash`, `cliregistry`, `codemode`, `fetch` |
 | `poo/cli` | The cli registry's catalog: the manifests a session may call |
 | `poo/feed` | The feed manifests a session runs: the loader, the environment, and the runner over a command's stdout |
 | `poo/exec` | The executor contract a binary fills: a command, its environment, and where it runs |

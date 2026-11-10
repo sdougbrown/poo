@@ -12,6 +12,7 @@ import (
 	"github.com/sdougbrown/poo/tool/cliregistry"
 	"github.com/sdougbrown/poo/tool/codemode"
 	"github.com/sdougbrown/poo/tool/edit"
+	"github.com/sdougbrown/poo/tool/fetch"
 	"github.com/sdougbrown/poo/tool/finish"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
@@ -81,6 +82,9 @@ func linkedTools() map[string]config.ToolFactory {
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
 		"codemode": func(config.ToolOptions) poo.Tool {
 			return codemode.New(codemodestarlark.New())
+		},
+		"fetch": func(config.ToolOptions) poo.Tool {
+			return fetch.New()
 		},
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)

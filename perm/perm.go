@@ -74,18 +74,20 @@ const (
 
 // Rule is one policy rule.
 //
-// A rule matches on the tool's name or on its class, and a bash rule
-// may match on the command's prefix.
+// A rule matches on the tool's name or on its class, and a rule that
+// names a tool may match on a prefix of the call's primary argument.
 type Rule struct {
 	// Tool is the name of the tool the rule matches, exactly.
 	Tool string
 	// Class is the class of the tools the rule matches.
 	Class poo.ToolKind
-	// CommandPrefix matches the raw command of a bash call.
+	// CommandPrefix matches the prefix of the call's primary argument:
+	// the command of a bash call, or the argument the tool names —
+	// the fetch tool's URL, for one.
 	//
 	// The prefix is a lexical heuristic and not a safety boundary: it
-	// compares the command's text, so "git status && rm -rf x" matches
-	// the prefix "git status".
+	// compares the text, so "git status && rm -rf x" matches the
+	// prefix "git status".
 	CommandPrefix string
 	// Action is what the rule says to do with a matching call.
 	Action Action
@@ -163,8 +165,8 @@ var _ poo.PolicyHook = (*Policy)(nil)
 // New builds a policy.
 //
 // A malformed policy is a construction error: a rule with no matcher or
-// with two, an unknown action, a command prefix on a rule that is not a
-// bash rule, or a fallback that is not a decision.
+// with two, an unknown action, a command prefix on a rule that names no
+// tool, or a fallback that is not a decision.
 func New(opts Options) (*Policy, error) {
 	unmatched := opts.Unmatched
 	if unmatched == "" {
@@ -225,8 +227,8 @@ func checkRule(index int, rule Rule) error {
 			return fmt.Errorf("perm: %s matches the unknown class %q", where, rule.Class)
 		}
 	}
-	if rule.CommandPrefix != "" && rule.Tool != "bash" {
-		return fmt.Errorf("perm: %s has a command prefix, which is only valid for a bash rule", where)
+	if rule.CommandPrefix != "" && rule.Tool == "" {
+		return fmt.Errorf("perm: %s has a command prefix, which needs a named tool: the prefix matches the call's primary argument", where)
 	}
 	return checkAction(where+"'s action", rule.Action, ActionAllow, ActionAsk, ActionDeny)
 }
@@ -380,13 +382,12 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 	return r.Class != "" && r.Class == info.Spec.Class
 }
 
-// matchesCommand reports whether the call's command starts with the
-// rule's prefix.
+// matchesCommand reports whether the call's primary argument starts
+// with the rule's prefix.
 //
-// The comparison is lexical: the command's leading whitespace is
-// trimmed and the rest is compared as text. A compound command matches
-// its first part, so the prefix is a heuristic and not a safety
-// boundary.
+// The comparison is lexical: the leading whitespace is trimmed and the
+// rest is compared as text. A compound command matches its first part,
+// so the prefix is a heuristic and not a safety boundary.
 func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	name := info.Spec.PrimaryArg
 	if name == "" {

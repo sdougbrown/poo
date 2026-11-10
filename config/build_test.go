@@ -185,6 +185,37 @@ tools:
 	}
 }
 
+// TestTheFetchSettingsReachTheSession covers the mapping: every
+// tools.fetch field lands on the session's settings, which the tool
+// reads per call.
+func TestTheFetchSettingsReachTheSession(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+tools:
+  fetch:
+    timeout_s: 12
+    max_bytes: 1048576
+    user_agent: probe/1.0
+    allow_private_hosts: true
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	got := runtime.Options.Settings
+	if got.FetchTimeoutS != 12 {
+		t.Errorf("tools.fetch.timeout_s reached the session as %d, want 12", got.FetchTimeoutS)
+	}
+	if got.FetchMaxBytes != 1048576 {
+		t.Errorf("tools.fetch.max_bytes reached the session as %d, want 1048576", got.FetchMaxBytes)
+	}
+	if got.FetchUserAgent != "probe/1.0" {
+		t.Errorf("tools.fetch.user_agent reached the session as %q, want probe/1.0", got.FetchUserAgent)
+	}
+	if !got.FetchAllowPrivateHosts {
+		t.Errorf("tools.fetch.allow_private_hosts reached the session as false, want true")
+	}
+}
+
 // TestTheBuildTakesTheUnmatchedActionFromTheProfile covers the
 // precedence: the profile's action applies, and the settings change it.
 func TestTheBuildTakesTheUnmatchedActionFromTheProfile(t *testing.T) {

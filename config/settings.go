@@ -217,6 +217,8 @@ type Tools struct {
 	Bash Bash `json:"bash,omitempty"`
 	// Codemode are the codemode tool's settings.
 	Codemode Codemode `json:"codemode,omitempty"`
+	// Fetch are the fetch tool's settings.
+	Fetch Fetch `json:"fetch,omitempty"`
 	// Bwrap are the sandbox's settings, used when the executor is the
 	// bubblewrap one.
 	Bwrap Bwrap `json:"bwrap,omitempty"`
@@ -250,6 +252,20 @@ type Codemode struct {
 	OutputCapChars *int `json:"output_cap_chars,omitempty"`
 	// ExecSteps is the engine's execution budget.
 	ExecSteps *int `json:"exec_steps,omitempty"`
+}
+
+// Fetch are the fetch tool's settings.
+type Fetch struct {
+	// TimeoutS is how long one fetch waits, in seconds.
+	TimeoutS *int `json:"timeout_s,omitempty"`
+	// MaxBytes is the largest body one fetch reads.
+	MaxBytes *int `json:"max_bytes,omitempty"`
+	// UserAgent is the user agent a fetch sends. Empty means the
+	// tool's own generic agent.
+	UserAgent *string `json:"user_agent,omitempty"`
+	// AllowPrivateHosts lifts the refusal of the loopback, link-local
+	// and private addresses.
+	AllowPrivateHosts *bool `json:"allow_private_hosts,omitempty"`
 }
 
 // Bwrap are the bubblewrap executor's settings.
