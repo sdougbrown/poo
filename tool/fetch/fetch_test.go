@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -517,34 +518,72 @@ func TestAResolverFailureFailsClosed(t *testing.T) {
 	}
 }
 
-// TestADialThroughAProxiedContextIsExempt covers the proxy exemption:
-// a request whose context marks the proxy dials the proxy's private
-// address without a refusal, while an unmarked request is refused —
-// the proxy is the operator's infrastructure, and the target's host
-// keeps its own check.
-func TestADialThroughAProxiedContextIsExempt(t *testing.T) {
+// TestADialOfAProxyHostIsExempt covers the proxy exemption: the dial
+// of a host the environment names as its proxy is exempt, while the
+// dial of anything else is guarded. The exemption is the host string,
+// so a redirect that leaves the proxy behind dials its own host, and
+// the guard applies there.
+func TestADialOfAProxyHostIsExempt(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("through the proxy"))
 	}))
 	defer server.Close()
 	dialer := &net.Dialer{Timeout: time.Second}
-
-	guarded := guardedDial(dialer, false)
 	host, port, err := net.SplitHostPort(server.Listener.Addr().String())
 	if err != nil {
 		t.Fatalf("splitting the address: %v", err)
 	}
-	_, err = guarded(context.Background(), "tcp", net.JoinHostPort(host, port))
-	var refused *refusedError
-	if !errors.As(err, &refused) {
-		t.Errorf("the unmarked dial is %v, want the loopback refused", err)
-	}
 
-	markedConn, err := guarded(context.WithValue(context.Background(), proxiedKey{}, true), "tcp", net.JoinHostPort(host, port))
-	if err != nil {
-		t.Fatalf("the marked dial failed: %v", err)
+	guarded := guardedDial(dialer, false, []string{host})
+	conn, dialErr := guarded(context.Background(), "tcp", net.JoinHostPort(host, port))
+	if dialErr != nil {
+		t.Fatalf("the proxy's dial failed: %v", dialErr)
 	}
-	markedConn.Close()
+	conn.Close()
+
+	guarded = guardedDial(dialer, false, []string{"proxy.operator.example"})
+	_, dialErr = guarded(context.Background(), "tcp", net.JoinHostPort(host, port))
+	var refused *refusedError
+	if !errors.As(dialErr, &refused) {
+		t.Errorf("the dial of a host that is no proxy is %v, want the loopback refused", dialErr)
+	}
+}
+
+// TestTheEnvironmentNamesTheProxyHost covers the seam the exemption
+// reads: the proxy host is the one the environment's proxy URL carries.
+func TestTheEnvironmentNamesTheProxyHost(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://proxy.operator.example:3128")
+	t.Setenv("HTTPS_PROXY", "http://proxy.operator.example:3128")
+	hosts := proxyHosts()
+	if !slices.Contains(hosts, "proxy.operator.example") {
+		t.Errorf("the proxy hosts are %v, want the environment's own", hosts)
+	}
+}
+
+// TestKeepBodyDecidesByTheType covers the body-keeping rule directly:
+// the typed families are kept, a type the rule does not know is kept
+// when its bytes are text, and a binary is withheld. The
+// no-Content-Type branch cannot be reached over HTTP — a Go server
+// sniffs one in — so the unit is the test.
+func TestKeepBodyDecidesByTheType(t *testing.T) {
+	cases := []struct {
+		contentType string
+		body        string
+		want        bool
+	}{
+		{"text/html; charset=utf-8", "<p>x</p>", true},
+		{"application/json", `{"a": 1}`, true},
+		{"application/xhtml+xml", "<p>x</p>", true},
+		{"application/vnd.api+json", `{"a": 1}`, true},
+		{"", "plain words", true},
+		{"application/octet-stream", "plain words", true},
+		{"image/png", "\x89PNG\r\n\x1a\nnot really", false},
+	}
+	for _, c := range cases {
+		if got := keepBody(c.contentType, []byte(c.body)); got != c.want {
+			t.Errorf("keepBody(%q) is %v, want %v", c.contentType, got, c.want)
+		}
+	}
 }
 
 // TestARuleMatchesTheURL covers the permission shape the tool exists

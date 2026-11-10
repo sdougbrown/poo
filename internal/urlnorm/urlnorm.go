@@ -9,6 +9,7 @@ package urlnorm
 import (
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -25,8 +26,13 @@ func Canonical(value string) (string, bool) {
 		return "", false
 	}
 	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
-	if port := parsed.Port(); port != "" && port != defaultPort(parsed.Scheme) {
-		host = host + ":" + port
+	if port := parsed.Port(); port != "" {
+		// The port is compared the way the dialer reads it: a spelling
+		// with leading zeros names the same port, and a rule that
+		// spells the port without them matches it.
+		if n, err := strconv.Atoi(port); err == nil && strconv.Itoa(n) != defaultPort(parsed.Scheme) {
+			host = host + ":" + strconv.Itoa(n)
+		}
 	}
 	cleaned := parsed.Path
 	if cleaned != "" {

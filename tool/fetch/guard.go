@@ -1,6 +1,6 @@
 // The dial guard refuses the network addresses a fetch must not
 // reach: loopback, link-local (the cloud metadata service lives
-// there) and the private ranges. The refusal is the default, and the
+// there) and the reserved ranges. The refusal is the default, and the
 // settings' allow_private_hosts lifts it.
 package fetch
 
@@ -8,6 +8,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
+	"os"
+	"slices"
 )
 
 // allowedClass reports whether an address is fetchable, and whether a
@@ -58,8 +61,8 @@ func isReservedNetwork(ip net.IP) bool {
 // is fetchable.
 //
 // The transport's guard checks what it dials, but a proxy configured
-// in the environment makes the dial the proxy's address. The target's
-// host then goes unchecked. The request's own host is checked
+// in the environment makes the dial the proxy's address, so the
+// target's host would go unchecked. The request's own host is checked
 // here instead, before the fetch and at every redirect.
 func checkHost(ctx context.Context, host string, allowPrivate bool) error {
 	ips, err := addresses(ctx, host)
@@ -105,47 +108,64 @@ func addresses(ctx context.Context, host string) ([]net.IP, error) {
 // time. A name whose answers change between the check and the dial
 // has the guard approve one address and reach another.
 //
-// A request the environment sends through a proxy marks its context,
-// and the dial of the proxy's own address is exempt: the proxy is the
-// operator's infrastructure, and the target's host is checked before
-// the fetch and at every redirect.
-func guardedDial(dialer *net.Dialer, allowPrivate bool) func(ctx context.Context, network, address string) (net.Conn, error) {
+// The dial of a proxy the environment names is exempt, whatever the
+// scheme the request came in on: the proxy is the operator's
+// infrastructure, and the target's host is checked before the fetch
+// and at every redirect. The exemption is the proxy's own host string,
+// so a redirect that leaves the proxy behind dials its own host, and
+// the guard applies there.
+func guardedDial(dialer *net.Dialer, allowPrivate bool, proxyHosts []string) func(ctx context.Context, network, address string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, fmt.Errorf("fetch: the address %q is malformed: %w", address, err)
 		}
-		ips, err := addresses(ctx, host)
-		if err != nil {
-			// A name that resolves to nothing has no address to
-			// approve, and dialing the name would trust the resolver
-			// the guard just refused to trust. The failure is the
-			// call's.
-			return nil, err
-		}
-		if ctx.Value(proxiedKey{}) != nil {
-			allowPrivate = true
-		}
-		var lastErr error
-		for _, ip := range ips {
-			if allowed, liftable := allowedClass(ip, allowPrivate); !allowed {
-				return nil, &refusedError{address: ip.String(), liftable: liftable}
+		if !slices.Contains(proxyHosts, host) {
+			ips, err := addresses(ctx, host)
+			if err != nil {
+				// A name that resolves to nothing has no address to
+				// approve, and dialing the name would trust the resolver
+				// the guard just refused to trust. The failure is the
+				// call's.
+				return nil, err
 			}
-		}
-		for _, ip := range ips {
-			conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-			if dialErr == nil {
-				return conn, nil
+			var lastErr error
+			for _, ip := range ips {
+				if allowed, liftable := allowedClass(ip, allowPrivate); !allowed {
+					return nil, &refusedError{address: ip.String(), liftable: liftable}
+				}
 			}
-			lastErr = dialErr
+			for _, ip := range ips {
+				conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				if dialErr == nil {
+					return conn, nil
+				}
+				lastErr = dialErr
+			}
+			return nil, lastErr
 		}
-		return nil, lastErr
+		return dialer.DialContext(ctx, network, address)
 	}
 }
 
-// proxiedKey marks a request's context when the environment names a
-// proxy for it, so the dial of the proxy's own address is exempt.
-type proxiedKey struct{}
+// proxyHosts returns the hosts the environment's proxies live on, by
+// the name each proxy URL carries. The one list covers both schemes:
+// a scheme's own proxy is on it, and a shared proxy appears once.
+func proxyHosts() []string {
+	var hosts []string
+	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+		raw := os.Getenv(name)
+		if raw == "" {
+			continue
+		}
+		parsed, err := url.Parse(raw)
+		if err != nil || parsed.Hostname() == "" {
+			continue
+		}
+		hosts = append(hosts, parsed.Hostname())
+	}
+	return hosts
+}
 
 // refusedError is the error a refused address fails with. It names
 // the address, and the way out when there is one: the loopback and

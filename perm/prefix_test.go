@@ -48,6 +48,7 @@ func TestAPrefixWithoutASlashStaysInsideTheHost(t *testing.T) {
 		"https://internal.example.com/",
 		"https://internal.example.com/index.html",
 		"https://sub.internal.example.com/index.html",
+		"https://internal.example.com:0443/index.html",
 	} {
 		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
 		if !rule.matchesCommand(info) {

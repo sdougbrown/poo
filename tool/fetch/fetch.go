@@ -206,9 +206,6 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
-	if proxy, proxyErr := http.ProxyFromEnvironment(req); proxyErr == nil && proxy != nil {
-		req = req.WithContext(context.WithValue(ctx, proxiedKey{}, true))
-	}
 	if err := checkHost(ctx, p.parsed.Hostname(), env.Settings.FetchAllowPrivateHosts); err != nil {
 		return poo.ToolResult{Text: err.Error(), IsError: true}, nil
 	}
@@ -334,11 +331,18 @@ func (t *Tool) client(allowPrivate bool) *http.Client {
 
 // build returns a client with the guard at the posture the settings
 // name.
+//
+// The transport dials a checked address, so a URL that names loopback,
+// link-local or a private network fails before a connection is made.
+// A redirect to one is included. The dial of a proxy the environment
+// names is exempt — the proxy is the operator's infrastructure — and
+// the exemption is the proxy's own host, so a redirect that leaves the
+// proxy behind dials its own host, and the guard applies there.
 func (t *Tool) build(allowPrivate bool) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           guardedDial(dialer, allowPrivate),
+		DialContext:           guardedDial(dialer, allowPrivate, proxyHosts()),
 		ForceAttemptHTTP2:     true,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
