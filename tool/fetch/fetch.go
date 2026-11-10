@@ -190,9 +190,9 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "*/*")
 
-	// The request's own host is checked as well as the dial: a proxy
+	// The request's own host is checked as well as the dial. A proxy
 	// configured in the environment makes the dial the proxy's address,
-	// so the target's host would go unchecked there.
+	// and the target's host then goes unchecked there.
 	if err := checkHost(ctx, p.parsed.Hostname(), env.Settings.FetchAllowPrivateHosts); err != nil {
 		return poo.ToolResult{Text: err.Error(), IsError: true}, nil
 	}
@@ -220,9 +220,9 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	if format == "" {
 		format = defaultFormat(observation.ContentType)
 	}
-	// A body that is not text has no format worth applying, and the
-	// tool returns its metadata alone, so a binary download does not
-	// flood the context.
+	// A body that is not text has no format worth applying. The tool
+	// returns its metadata alone, so a binary download does not flood
+	// the context.
 	if keepBody(observation.ContentType, body) {
 		if format == FormatMarkdown {
 			markdown, convErr := convert(body, observation.ContentType)
@@ -240,7 +240,7 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 }
 
 // defaultFormat picks the format a response comes back in when the
-// call does not name one: an HTML page converts to Markdown, and
+// call does not name one. An HTML page converts to Markdown, and
 // anything else comes back as it came.
 func defaultFormat(contentType string) string {
 	if mediaType(contentType) == "text/html" {
@@ -294,15 +294,15 @@ func decodeStrict(raw json.RawMessage, into any) error {
 //
 // A tool built with its own client gets it. The default clients are
 // built once per posture and kept, so a session's fetches share
-// connections: a fresh transport per call would drop the pool and
+// connections. A fresh transport per call would drop the pool and
 // leave its idle connections to the garbage collector.
 //
 // The transport dials a checked address, so a URL that names loopback,
-// link-local or a private network fails before a connection is made —
-// a redirect to one included. The client's redirect check repeats the
-// request's own host check at every hop, because a proxy configured in
-// the environment makes the dial the proxy's address, and the target's
-// host would go unchecked there.
+// link-local or a private network fails before a connection is made.
+// A redirect to one is included. The client's redirect check repeats
+// the request's own host check at every hop. The reason is the proxy:
+// an environment proxy makes the dial the proxy's address, and the
+// target's host goes unchecked there without the check.
 func (t *Tool) client(allowPrivate bool) *http.Client {
 	if t.Client != nil {
 		return t.Client

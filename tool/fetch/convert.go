@@ -15,7 +15,7 @@ import (
 // convert renders an HTML body as Markdown.
 //
 // The content type names the charset the body was sent in, and the
-// conversion reads the body as that: a page that says iso-8859-1 and
+// conversion reads the body as that. A page that says iso-8859-1 and
 // means it keeps its letters.
 func convert(body []byte, contentType string) (string, error) {
 	var input io.Reader = bytes.NewReader(body)

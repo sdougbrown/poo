@@ -30,8 +30,8 @@ func allowedClass(ip net.IP, allowPrivate bool) bool {
 // is fetchable.
 //
 // The transport's guard checks what it dials, but a proxy configured
-// in the environment makes the dial the proxy's address, so the
-// target's host would go unchecked. The request's own host is checked
+// in the environment makes the dial the proxy's address. The target's
+// host then goes unchecked. The request's own host is checked
 // here instead, before the fetch and at every redirect.
 func checkHost(ctx context.Context, host string, allowPrivate bool) error {
 	ips, err := addresses(ctx, host)
@@ -47,7 +47,7 @@ func checkHost(ctx context.Context, host string, allowPrivate bool) error {
 }
 
 // addresses resolves a host to its addresses, taking an IP literal at
-// its word: a literal needs no resolver, and the resolver could not
+// its word. A literal needs no resolver, and the resolver could not
 // answer for it anyway.
 func addresses(ctx context.Context, host string) ([]net.IP, error) {
 	if ip := net.ParseIP(host); ip != nil {
@@ -67,10 +67,10 @@ func addresses(ctx context.Context, host string) ([]net.IP, error) {
 // guardedDial wraps a dialer so every address it dials is checked, and
 // dials a validated address rather than the name.
 //
-// The check runs per address and not per URL, and the dial goes to an
-// address the check approved: a dial of the name would resolve it a
-// second time, and a name whose answers change between the check and
-// the dial would have the guard approve one address and reach another.
+// The check runs per address and not per URL. The dial goes to an
+// address the check approved: a dial of the name resolves it a second
+// time. A name whose answers change between the check and the dial
+// has the guard approve one address and reach another.
 func guardedDial(dialer *net.Dialer, allowPrivate bool) func(ctx context.Context, network, address string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)

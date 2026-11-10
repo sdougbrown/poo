@@ -6,7 +6,7 @@
 //
 // The policy is a before-tool hook. The core installs it with
 // poo.WithPolicy, and it runs before every other before-tool hook. It
-// only ever allows or denies a call: an ask happens inside the policy,
+// only ever allows or denies a call. An ask happens inside the policy,
 // and the policy blocks on the asker chain until the ask is answered.
 package perm
 
@@ -86,7 +86,7 @@ type Rule struct {
 	// the command of a bash call, or the argument the tool names —
 	// the fetch tool's URL, for one.
 	//
-	// The prefix is a lexical heuristic and not a safety boundary: it
+	// The prefix is a lexical heuristic and not a safety boundary. It
 	// compares the text, so "git status && rm -rf x" matches the
 	// prefix "git status".
 	CommandPrefix string
@@ -386,17 +386,17 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 // matchesCommand reports whether the call's primary argument starts
 // with the rule's prefix.
 //
-// The comparison is lexical: the leading whitespace is trimmed and the
+// The comparison is lexical. The leading whitespace is trimmed and the
 // rest is compared as text. A compound command matches its first part,
 // so the prefix is a heuristic and not a safety boundary. A tool with
 // no primary argument has nothing a prefix could match, so its rule
 // matches nothing.
 //
 // A value that is an absolute http(s) URL, against a prefix that names
-// a scheme, compares in the URL's canonical form: the scheme and the
-// host case-folded, a trailing dot on the host removed, and the
-// scheme's default port removed. The same host spelled the ways a URL
-// can be spelled matches one prefix.
+// a scheme, compares in the URL's canonical form. The scheme and the
+// host are case-folded, a trailing dot on the host is removed, and the
+// scheme's default port is removed. The same host spelled the ways a
+// URL can be spelled matches one prefix.
 func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	name := info.Spec.PrimaryArg
 	if name == "" {

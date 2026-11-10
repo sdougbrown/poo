@@ -1,5 +1,5 @@
 // The observation is one fetch's outcome, as the tool reports it, in
-// the envelope the bash tool's result set: the model reads the text,
+// the envelope the bash tool's result set. The model reads the text,
 // and a consumer reads the structured payload beside it.
 package fetch
 
@@ -62,9 +62,10 @@ const ElisionHint = "the body was longer than the cap: its head and tail are sho
 // The text is a header of fields, then the body; the structured payload
 // holds the same fields as JSON. The header is always whole; the cap
 // bounds the body only. A body the cap cannot hold is elided the way
-// the bash observation is: its head and its tail, each half the cap,
-// and elided_chars says what the middle held. The cap and elided_chars
-// are counted in characters, not bytes, and a cut never splits a rune.
+// the bash observation is. Its head and its tail each keep half the
+// cap, and elided_chars says what the middle held. The cap and
+// elided_chars are counted in characters, not bytes, and a cut never
+// splits a rune.
 func envelope(o Observation, capChars int) (string, json.RawMessage) {
 	fields := []field{
 		{FieldStatus, strconv.Itoa(o.Status)},
@@ -133,6 +134,6 @@ type field struct {
 }
 
 // DefaultMaxChars is the cap a call runs at when the session names
-// none: the largest observation the model ever sees, the same bound
-// every tool's cap falls back to.
+// none. It is the largest observation the model ever sees, the same
+// bound every tool's cap falls back to.
 const DefaultMaxChars = caps.ObservationMax
