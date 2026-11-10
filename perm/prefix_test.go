@@ -36,6 +36,33 @@ func TestAPrefixMatchesTheHostSpelledTheWaysURLsAre(t *testing.T) {
 	}
 }
 
+// TestAPrefixWithoutASlashStaysInsideTheHost covers the no-slash
+// prefix: it matches the host's own paths, and nothing past the
+// host's edge — the adjacent host an attacker registers matches
+// nothing.
+func TestAPrefixWithoutASlashStaysInsideTheHost(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "https://internal.example.com", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, url := range []string{
+		"https://internal.example.com/",
+		"https://internal.example.com/index.html",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if !rule.matchesCommand(info) {
+			t.Errorf("the prefix does not match %s, want the host's own paths", url)
+		}
+	}
+	for _, url := range []string{
+		"https://internal.example.com.evil.com/index.html",
+		"https://internal.example.com:8443/index.html",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if rule.matchesCommand(info) {
+			t.Errorf("the prefix matches %s, want the host's edge to hold", url)
+		}
+	}
+}
+
 // TestAPrefixStaysLexicalForNonURLs covers the rules over a command or
 // a path: no canonicalization, the text compares as it is.
 func TestAPrefixStaysLexicalForNonURLs(t *testing.T) {

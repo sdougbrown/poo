@@ -29,7 +29,8 @@ type Observation struct {
 }
 
 // The fields the result carries. A field the call does not fill stays
-// out of the result.
+// out of the result. The text and the structured payload share the one
+// list, so a field is added once and both readers see it.
 const (
 	// FieldStatus is the response's status code.
 	FieldStatus = "status"
@@ -59,8 +60,9 @@ const ElisionHint = "the body was longer than the cap: its head and tail are sho
 // envelope renders one fetch's outcome as the result text the model
 // reads, and as the structured payload beside it.
 //
-// The text is a header of fields, then the body; the structured payload
-// holds the same fields as JSON. The header is always whole; the cap
+// The text is a header of fields, then the body. The structured
+// payload is the same fields as JSON, derived from the one list, so
+// the two readers never diverge. The header is always whole; the cap
 // bounds the body only. A body the cap cannot hold is elided the way
 // the bash observation is. Its head and its tail each keep half the
 // cap, and elided_chars says what the middle held. The cap and
@@ -68,23 +70,13 @@ const ElisionHint = "the body was longer than the cap: its head and tail are sho
 // splits a rune.
 func envelope(o Observation, capChars int) (string, json.RawMessage) {
 	fields := []field{
-		{FieldStatus, strconv.Itoa(o.Status)},
+		{FieldStatus, o.Status},
 		{FieldFinalURL, o.FinalURL},
 		{FieldContentType, o.ContentType},
-		{FieldSize, strconv.FormatInt(o.Size, 10)},
+		{FieldSize, o.Size},
 	}
 	if o.Truncated {
-		fields = append(fields, field{FieldTruncated, "true"})
-	}
-
-	structured := map[string]any{
-		FieldStatus:      o.Status,
-		FieldFinalURL:    o.FinalURL,
-		FieldContentType: o.ContentType,
-		FieldSize:        o.Size,
-	}
-	if o.Truncated {
-		structured[FieldTruncated] = true
+		fields = append(fields, field{FieldTruncated, true})
 	}
 
 	cap := capChars
@@ -98,26 +90,27 @@ func envelope(o Observation, capChars int) (string, json.RawMessage) {
 		// no field of its own: the metadata is the result.
 	case bodyChars <= cap:
 		fields = append(fields, field{FieldBody, o.Body})
-		structured[FieldBody] = o.Body
 	default:
 		head, tail := caps.SplitRunes(o.Body, cap/2)
+		elided := bodyChars - 2*(cap/2)
 		fields = append(fields,
 			field{FieldBodyHead, head},
 			field{FieldBodyTail, tail},
+			field{FieldElidedChars, elided},
+			field{FieldHint, ElisionHint},
 		)
-		elided := bodyChars - 2*(cap/2)
-		fields = append(fields, field{FieldElidedChars, strconv.Itoa(elided)})
-		structured[FieldBodyHead] = head
-		structured[FieldBodyTail] = tail
-		structured[FieldElidedChars] = elided
-		structured[FieldHint] = ElisionHint
+	}
+
+	structured := map[string]any{}
+	for _, f := range fields {
+		structured[f.key] = f.value
 	}
 
 	var b strings.Builder
 	for _, f := range fields {
 		b.WriteString(f.key)
 		b.WriteString(": ")
-		b.WriteString(f.value)
+		b.WriteString(text(f.value))
 		b.WriteString("\n")
 	}
 	raw, err := json.Marshal(structured)
@@ -127,10 +120,32 @@ func envelope(o Observation, capChars int) (string, json.RawMessage) {
 	return b.String(), raw
 }
 
-// field is one entry of the result's header.
+// field is one entry of the result: a key, and the value the text and
+// the structured payload share.
 type field struct {
 	key   string
-	value string
+	value any
+}
+
+// text renders a field's value for the header. The values are strings,
+// integers or booleans, so the print is the JSON spelling without the
+// quotes a marshal would add.
+func text(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	default:
+		return ""
+	}
 }
 
 // DefaultMaxChars is the cap a call runs at when the session names

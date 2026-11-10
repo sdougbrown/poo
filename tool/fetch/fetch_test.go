@@ -251,7 +251,7 @@ func TestABinaryBodyComesBackAsMetadata(t *testing.T) {
 	if !strings.Contains(result.Text, "content_type: image/png") {
 		t.Errorf("the result is %q, want the content type in the header", result.Text)
 	}
-	if strings.Contains(result.Text, "PNG") && strings.Contains(result.Text, "not really") {
+	if strings.Contains(result.Text, "PNG") || strings.Contains(result.Text, "not really") {
 		t.Errorf("the result is %q, want the body withheld", result.Text)
 	}
 	structured := structuredOf(t, result)
@@ -300,6 +300,51 @@ func TestARedirectToARefusedAddressIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(result.Text, "169.254") {
 		t.Errorf("the result is %q, want it to name the refused address", result.Text)
+	}
+}
+
+// TestARedirectChainPastTheLimitFails covers the redirect cap: a
+// chain one hop past MaxRedirects fails naming the redirects, instead
+// of riding on the client's own larger default.
+func TestARedirectChainPastTheLimitFails(t *testing.T) {
+	var server *httptest.Server
+	var hops int32
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&hops, 1) > MaxRedirects {
+			w.Write([]byte("arrived"))
+			return
+		}
+		w.Header().Set("Location", server.URL)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+	tool := New()
+	result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
+		fmt.Sprintf(`{"url": %q}`, server.URL))
+	if !result.IsError {
+		t.Errorf("the result is %v, want the chain refused", result)
+	}
+	if !strings.Contains(result.Text, RedirectError) {
+		t.Errorf("the result is %q, want it to name the redirects", result.Text)
+	}
+}
+
+// TestAReservedNetworkIsRefused covers the ranges no setting lifts:
+// 0.0.0.0/8 routes to loopback on Linux, so an address like 0.1.2.3
+// reaches a service on localhost even with private hosts allowed.
+func TestAReservedNetworkIsRefused(t *testing.T) {
+	tool := New()
+	for _, url := range []string{
+		"http://0.1.2.3:8080/",
+		"http://100.64.0.1/",
+		"http://198.18.0.1/",
+		"http://169.254.169.254/latest/meta-data/",
+	} {
+		result := fetchCall(t, tool, poo.ToolSettings{FetchAllowPrivateHosts: true},
+			fmt.Sprintf(`{"url": %q}`, url))
+		if !result.IsError {
+			t.Errorf("the fetch of %s succeeded, want the range refused", url)
+		}
 	}
 }
 

@@ -157,7 +157,9 @@ type Rule struct {
 	// Class is the class of the tools the rule matches: read_only or
 	// side_effecting.
 	Class string `json:"class,omitempty"`
-	// CommandPrefix matches the raw command of a bash call.
+	// CommandPrefix matches the prefix of the call's primary argument:
+	// the command of a bash call, or the argument the tool names —
+	// the fetch tool's URL, for one.
 	CommandPrefix string `json:"command_prefix,omitempty"`
 	// Action is what the rule does with a matching call.
 	Action string `json:"action"`

@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/internal/urlnorm"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -116,11 +117,20 @@ func (p *prepared) Summary() string {
 }
 
 // CanonicalKey returns the call's prepared input.
+//
+// The URL is the canonical form, so one host spelled the ways a URL
+// can be spelled counts once toward the doom loop: the rule matcher
+// reads the same form, and the two consumers of a URL's spelling
+// agree.
 func (p *prepared) CanonicalKey() json.RawMessage {
+	url := p.raw
+	if canonical, ok := urlnorm.Canonical(p.raw); ok {
+		url = canonical
+	}
 	key, _ := json.Marshal(struct {
 		URL    string `json:"url"`
 		Format string `json:"format,omitempty"`
-	}{p.raw, p.format})
+	}{url, p.format})
 	return key
 }
 

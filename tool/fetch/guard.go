@@ -13,17 +13,43 @@ import (
 // allowedClass reports whether an address is fetchable.
 //
 // Link-local is never fetchable: the cloud metadata service lives
-// there, and a page that reads it is reading credentials. Loopback
-// and the private ranges are fetchable when the settings allow
-// private hosts, since they are the operator's own network.
+// there, and a page that reads it is reading credentials. The
+// reserved networks are never fetchable either. Loopback and the
+// private ranges are fetchable when the settings allow private
+// hosts, since they are the operator's own network.
 func allowedClass(ip net.IP, allowPrivate bool) bool {
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return false
+	}
+	if isReservedNetwork(ip) {
 		return false
 	}
 	if !allowPrivate && (ip.IsLoopback() || ip.IsPrivate()) {
 		return false
 	}
 	return true
+}
+
+// isReservedNetwork reports whether the address is in a range the
+// fetch refuses whatever the settings say.
+func isReservedNetwork(ip net.IP) bool {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	switch {
+	case ip4[0] == 0:
+		// 0.0.0.0/8: this network. Linux routes the block to loopback,
+		// so an address like 0.1.2.3 reaches a service on localhost.
+		return true
+	case ip4[0] == 100 && ip4[1]&0xc0 == 64:
+		// 100.64.0.0/10: the shared address space (CGNAT).
+		return true
+	case ip4[0] == 198 && ip4[1]&0xfe == 18:
+		// 198.18.0.0/15: the benchmarking range.
+		return true
+	}
+	return false
 }
 
 // checkHost resolves a host and refuses it when none of its addresses
