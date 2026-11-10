@@ -73,7 +73,7 @@ func (t *Tool) Spec() poo.ToolSpec {
     "limit": {"type": "integer", "description": "How many lines to show."}
   },
   "required": ["path"]
-}`),
+,"additionalProperties":false}`),
 		Class:      poo.ClassReadOnly,
 		PrimaryArg: "path",
 	}
@@ -125,8 +125,10 @@ func (p *prepared) EvidenceArguments() json.RawMessage {
 // Prepare validates the arguments.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args
-	if err := decodeStrict(raw, &a); err != nil {
-		return nil, poo.InvalidArgsf("read: %v", err)
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, poo.InvalidArgsf("read: %v", err)
+		}
 	}
 	if strings.TrimSpace(a.Path) == "" {
 		return nil, poo.InvalidArgsf("read: path must not be empty")
@@ -171,27 +173,6 @@ func absolutePath(path, workingDir string) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Join(workingDir, path)
-}
-
-// decodeStrict decodes one JSON value and nothing else.
-//
-// A second value, or anything after the first, is a malformed call: the
-// model sent more than it meant to, and taking the first object would
-// silently run the wrong thing.
-func decodeStrict(raw json.RawMessage, into any) error {
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(into); err != nil {
-		return err
-	}
-	var extra json.RawMessage
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("the arguments hold more than one JSON value")
-		}
-		return err
-	}
-	return nil
 }
 
 // Call reads the file.

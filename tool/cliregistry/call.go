@@ -68,10 +68,10 @@ func (t *CallTool) Spec() poo.ToolSpec {
   "type": "object",
   "properties": {
     "name": {"type": "string", "description": "The registered tool's name."},
-    "args": {"type": "object", "description": "The tool's arguments, as its schema describes them."}
+    "args": {"type": "object", "additionalProperties": true, "description": "The tool's arguments, as its schema describes them."}
   },
   "required": ["name"]
-}`),
+,"additionalProperties":false}`),
 		Class:      poo.ClassSideEffecting,
 		PrimaryArg: "name",
 	}

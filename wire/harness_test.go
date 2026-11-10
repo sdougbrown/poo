@@ -837,7 +837,7 @@ func (testTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "test",
 		Description: "a tool the tests call",
-		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		Class:       poo.ClassSideEffecting,
 	}
 }

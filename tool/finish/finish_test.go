@@ -16,7 +16,7 @@ import (
 // TestTheToolDescribesItself covers the tool's description: the model
 // is told what the tool is for, and the schema is the consumer's.
 func TestTheToolDescribesItself(t *testing.T) {
-	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)
 	tool, err := finish.New(schema)
 	if err != nil {
 		t.Fatalf("building the tool: %v", err)
@@ -43,7 +43,7 @@ func TestTheToolDescribesItself(t *testing.T) {
 // TestAValidResultIsAccepted covers the happy path: the result passes
 // the schema, and the prepared call carries it.
 func TestAValidResultIsAccepted(t *testing.T) {
-	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)
 	tool, err := finish.New(schema)
 	if err != nil {
 		t.Fatalf("building the tool: %v", err)
@@ -68,7 +68,7 @@ func TestAValidResultIsAccepted(t *testing.T) {
 // TestAMissingRequiredFieldIsARecoverableError covers the schema's
 // required list.
 func TestAMissingRequiredFieldIsARecoverableError(t *testing.T) {
-	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)
 	tool, err := finish.New(schema)
 	if err != nil {
 		t.Fatalf("building the tool: %v", err)
@@ -85,7 +85,7 @@ func TestAMissingRequiredFieldIsARecoverableError(t *testing.T) {
 
 // TestAWrongTypeIsARecoverableError covers the schema's type.
 func TestAWrongTypeIsARecoverableError(t *testing.T) {
-	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}}}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"additionalProperties":false}`)
 	tool, err := finish.New(schema)
 	if err != nil {
 		t.Fatalf("building the tool: %v", err)
@@ -112,7 +112,7 @@ func TestAnUnknownFieldIsARecoverableError(t *testing.T) {
 
 // TestAnEnumIsChecked covers the schema's enum.
 func TestAnEnumIsChecked(t *testing.T) {
-	schema := json.RawMessage(`{"type":"object","properties":{"status":{"type":"string","enum":["ok","failed"]}}}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"status":{"type":"string","enum":["ok","failed"]}},"additionalProperties":false}`)
 	tool, err := finish.New(schema)
 	if err != nil {
 		t.Fatalf("building the tool: %v", err)
@@ -127,7 +127,7 @@ func TestAnEnumIsChecked(t *testing.T) {
 
 // TestAnItemsSchemaIsChecked covers the schema's items.
 func TestAnItemsSchemaIsChecked(t *testing.T) {
-	schema := json.RawMessage(`{"type":"object","properties":{"files":{"type":"array","items":{"type":"string"}}}}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"files":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}`)
 	tool, err := finish.New(schema)
 	if err != nil {
 		t.Fatalf("building the tool: %v", err)
@@ -278,7 +278,7 @@ func TestTheAdvertisedArgumentsAreCallable(t *testing.T) {
 // TestAnEnumComparesJSONTypes covers the enum: a string "1" is not the
 // numeric value 1.
 func TestAnEnumComparesJSONTypes(t *testing.T) {
-	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"enum":[1]}}}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"answer":{"enum":[1]}},"additionalProperties":false}`)
 	tool, err := finish.New(schema)
 	if err != nil {
 		t.Fatalf("building the tool: %v", err)

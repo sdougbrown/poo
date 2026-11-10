@@ -53,7 +53,7 @@ func (t *Tool) Spec() poo.ToolSpec {
     "script": {"type": "string", "description": "The script. It can call(name, args), gather([(name, args), ...]), print(x) and exit(value)."}
   },
   "required": ["script"]
-}`),
+,"additionalProperties":false}`),
 		Class:      poo.ClassSideEffecting,
 		PrimaryArg: "script",
 	}

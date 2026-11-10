@@ -159,7 +159,7 @@ func (t *Tool) Spec() poo.ToolSpec {
     "description": {"type": "string", "description": "Optional summary of what the command does. The event stream and the transcript show it; a permission ask still shows the command."}
   },
   "required": ["command"]
-}`),
+,"additionalProperties":false}`),
 		Class:      poo.ClassSideEffecting,
 		PrimaryArg: "command",
 		// A command may be long, and the model may know it is long

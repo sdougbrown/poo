@@ -98,7 +98,7 @@ func (t *nestedTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "nest",
 		Description: "make nested calls",
-		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		Class:       poo.ClassSideEffecting,
 	}
 }
@@ -335,7 +335,7 @@ func (renamedFinishTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "settle",
 		Description: "settle the run with a result",
-		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	}
 }
 
@@ -1038,7 +1038,7 @@ func (t *capsTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "caps",
 		Description: "keep the caps",
-		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		Class:       poo.ClassReadOnly,
 	}
 }
@@ -1100,7 +1100,7 @@ func (t *bigTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "big",
 		Description: "return a long result",
-		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		Class:       poo.ClassReadOnly,
 	}
 }

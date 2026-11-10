@@ -93,7 +93,7 @@ type rule struct {
 func (c Checker) rules() []rule {
 	m := c.ModulePath
 	return []rule{
-		{path: m, allowed: []string{m + "/prompt", m + "/decide"}},
+		{path: m, allowed: []string{m + "/prompt", m + "/decide", "github.com/sdougbrown/cli-registry/schema"}},
 		{path: m + "/prompt"},
 		{path: m + "/prompt/agentsmd"},
 		{path: m + "/decide"},

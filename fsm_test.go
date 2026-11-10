@@ -581,7 +581,7 @@ func TestTheFinishToolSettlesTheRunWithItsResult(t *testing.T) {
 		{text: "finished"},
 	})
 	tool := &echoTool{result: "echoed"}
-	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Tools["finish"] = finisher
@@ -620,7 +620,7 @@ func TestAnInvalidFinishResultIsARecoverableError(t *testing.T) {
 	})
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
-	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)
 
 	opts := testOptions(t, tr, tool, sink)
 	opts.Tools["finish"] = finisher
@@ -665,7 +665,7 @@ func TestTheOtherCallsInTheBatchCompleteFirst(t *testing.T) {
 		{text: "finished"},
 	})
 	tool := &echoTool{result: "echoed"}
-	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)
 
 	opts := testOptions(t, tr, tool, &recordingSink{})
 	opts.Tools["finish"] = finisher

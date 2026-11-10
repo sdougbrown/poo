@@ -964,7 +964,7 @@ func TestTheToolSchemaIsSentAsTheParameters(t *testing.T) {
 		Tools: []poo.ToolSpec{{
 			Name:        "read",
 			Description: "read a file",
-			Schema:      json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`),
+			Schema:      json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"additionalProperties":false}`),
 		}},
 	})
 	if err != nil {

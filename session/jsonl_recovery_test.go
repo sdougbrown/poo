@@ -656,7 +656,7 @@ func (echoTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "echo",
 		Description: "the crash sweep's echo",
-		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`),
 		Class:       poo.ClassReadOnly,
 	}
 }
@@ -1196,7 +1196,7 @@ func (bashTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "bash",
 		Description: "the fixture tool",
-		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		Class:       poo.ClassSideEffecting,
 	}
 }

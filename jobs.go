@@ -2052,7 +2052,7 @@ func (t *JobTool) Spec() ToolSpec {
     "job": {"type": "string", "description": "The job's identifier, for example \"j3\"."}
   },
   "required": ["job"]
-}`),
+,"additionalProperties":false}`),
 			Class: ClassReadOnly,
 		}
 	default:
@@ -2062,7 +2062,7 @@ func (t *JobTool) Spec() ToolSpec {
 			Schema: json.RawMessage(`{
   "type": "object",
   "properties": {}
-}`),
+,"additionalProperties":false}`),
 			Class: ClassReadOnly,
 		}
 	}
@@ -2074,8 +2074,10 @@ func (t *JobTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepared, error)
 		var a struct {
 			JobID string `json:"job"`
 		}
-		if err := decodeStrictJSON(raw, &a); err != nil {
-			return nil, InvalidArgsf("%s: %v", t.name, err)
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &a); err != nil {
+				return nil, InvalidArgsf("%s: %v", t.name, err)
+			}
 		}
 		if a.JobID == "" {
 			return nil, InvalidArgsf("%s: the job is required", t.name)
@@ -2125,21 +2127,6 @@ type jobPrepared struct {
 
 // Summary describes the call.
 func (p *jobPrepared) Summary() string { return p.job }
-
-// decodeStrictJSON decodes one JSON value and nothing else.
-func decodeStrictJSON(raw json.RawMessage, into any) error {
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(into); err != nil {
-		return err
-	}
-	// One value means one value: bytes after it, even valid JSON, are
-	// not arguments the caller wrote.
-	if dec.More() {
-		return errors.New("poo: trailing data after the JSON value")
-	}
-	return nil
-}
 
 // jobPayload renders the job results a woken run carries, for the
 // run.started event.

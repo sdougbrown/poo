@@ -151,7 +151,8 @@ func (t *JobTool) Spec() poo.ToolSpec {
   "type": "object",
   "properties": {
     "text": {"type": "string"}
-  }
+  },
+  "additionalProperties": false
 }`),
 		Class:      poo.ClassSideEffecting,
 		PrimaryArg: "text",

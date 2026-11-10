@@ -209,7 +209,7 @@ func TestTheOneShotPrintsTheLastRunsAnswer(t *testing.T) {
 // with a typed result: the finish result the run settled with is what
 // stdout gets, ahead of the last assistant message.
 func TestTheOneShotPrintsTheFinishResult(t *testing.T) {
-	tool, err := finish.New(json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`))
+	tool, err := finish.New(json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`))
 	if err != nil {
 		t.Fatal(err)
 	}

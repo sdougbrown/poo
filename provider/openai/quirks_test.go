@@ -93,7 +93,7 @@ func TestTheToolSchemasAreSimplified(t *testing.T) {
 		Tools: []poo.ToolSpec{{
 			Name:        "read",
 			Description: "read a file",
-			Schema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"the path"}},` +
+			Schema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"the path"},"additionalProperties":false},` +
 				`"required":["path"],"additionalProperties":false,"$schema":"https://json-schema.org/draft/2020-12/schema"}`),
 		}},
 	})

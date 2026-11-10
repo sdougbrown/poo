@@ -8,7 +8,6 @@
 package fetch
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -82,7 +81,8 @@ func (t *Tool) Spec() poo.ToolSpec {
     "url": {"type": "string", "description": "The URL to fetch."},
     "format": {"type": "string", "enum": ["raw", "markdown"], "description": "raw returns the body as it came; markdown converts an HTML page to Markdown. The default is markdown for an HTML response and raw for anything else."}
   },
-  "required": ["url"]
+  "required": ["url"],
+  "additionalProperties": false
 }`),
 		Class:      poo.ClassReadOnly,
 		PrimaryArg: "url",
@@ -138,10 +138,16 @@ func (p *prepared) CanonicalKey() json.RawMessage {
 func (p *prepared) EvidenceArguments() json.RawMessage { return p.CanonicalKey() }
 
 // Prepare validates the arguments. It has no side effects.
+//
+// The structural checks — unknown fields, the format's enum, the
+// required url — are the schema's; the domain checks stay here, since
+// a URL that parses is not one the fetch can make.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args
-	if err := decodeStrict(raw, &a); err != nil {
-		return nil, poo.InvalidArgsf("fetch: %v", err)
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, poo.InvalidArgsf("fetch: %v", err)
+		}
 	}
 	if strings.TrimSpace(a.URL) == "" {
 		return nil, poo.InvalidArgsf("fetch: url is empty")
@@ -156,11 +162,6 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 		return nil, poo.InvalidArgsf("fetch: the url %q has no scheme", a.URL)
 	default:
 		return nil, poo.InvalidArgsf("fetch: the url %q is not http or https", a.URL)
-	}
-	switch a.Format {
-	case "", FormatRaw, FormatMarkdown:
-	default:
-		return nil, poo.InvalidArgsf("fetch: format must be %s or %s, not %q", FormatRaw, FormatMarkdown, a.Format)
 	}
 	return &prepared{raw: a.URL, parsed: parsed, format: a.Format}, nil
 }
@@ -295,19 +296,6 @@ func mediaType(contentType string) string {
 		return ""
 	}
 	return media
-}
-
-// decodeStrict decodes one JSON value and nothing else.
-func decodeStrict(raw json.RawMessage, into any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(into); err != nil {
-		return err
-	}
-	if decoder.More() {
-		return fmt.Errorf("the arguments hold more than one value")
-	}
-	return nil
 }
 
 // client returns the HTTP client the call fetches with.

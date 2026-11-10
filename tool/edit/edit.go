@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +47,7 @@ func (t *Tool) Spec() poo.ToolSpec {
     "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of exactly one."}
   },
   "required": ["path", "old", "new"]
-}`),
+,"additionalProperties":false}`),
 		Class:      poo.ClassSideEffecting,
 		PrimaryArg: "path",
 	}
@@ -106,8 +105,10 @@ func (p *prepared) EvidenceArguments() json.RawMessage {
 // Prepare validates the arguments.
 func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, error) {
 	var a args
-	if err := decodeStrict(raw, &a); err != nil {
-		return nil, poo.InvalidArgsf("edit: %v", err)
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, poo.InvalidArgsf("edit: %v", err)
+		}
 	}
 	if strings.TrimSpace(a.Path) == "" {
 		return nil, poo.InvalidArgsf("edit: path must not be empty")
@@ -132,27 +133,6 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 		new:        a.New,
 		replaceAll: a.ReplaceAll,
 	}, nil
-}
-
-// decodeStrict decodes one JSON value and nothing else.
-//
-// A second value, or anything after the first, is a malformed call: the
-// model sent more than it meant to, and taking the first object would
-// silently run the wrong thing.
-func decodeStrict(raw json.RawMessage, into any) error {
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(into); err != nil {
-		return err
-	}
-	var extra json.RawMessage
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("the arguments hold more than one JSON value")
-		}
-		return err
-	}
-	return nil
 }
 
 // Call makes the change.

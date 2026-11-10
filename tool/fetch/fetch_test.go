@@ -640,17 +640,17 @@ func TestARuleMatchesTheURL(t *testing.T) {
 	}
 }
 
-// TestPrepareRefusesWhatItCannotFetch covers the validation: a URL
-// without a scheme, a scheme that is not HTTP(S), and an unknown
-// format are failures the model corrects, and nothing runs.
+// TestPrepareRefusesWhatItCannotFetch covers the domain validation: a
+// URL without a scheme, a scheme that is not HTTP(S), and an empty url
+// are failures the model corrects, and nothing runs. The structural
+// refusals — an unknown field, an unknown format — are the schema's,
+// and the core's own tests cover them.
 func TestPrepareRefusesWhatItCannotFetch(t *testing.T) {
 	tool := New()
 	for _, arguments := range []string{
 		`{"url": "ftp://example.com/file"}`,
 		`{"url": "example.com/page"}`,
-		`{"url": "https://example.com/", "format": "html"}`,
 		`{"url": "", "format": "raw"}`,
-		`{"url": "https://example.com/", "deep": true}`,
 		`{"url": "https://a/"} {"url": "https://b/"}`,
 	} {
 		if _, err := tool.Prepare([]byte(arguments), poo.PrepareEnv{}); err == nil {

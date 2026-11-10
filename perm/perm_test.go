@@ -31,7 +31,7 @@ func (t *readTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "read",
 		Description: "read a range of lines from a file",
-		Schema:      json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer"}}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer"}},"additionalProperties":false}`),
 		Class:       poo.ClassReadOnly,
 		PrimaryArg:  "path",
 	}
@@ -101,7 +101,7 @@ func (t *bashTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "bash",
 		Description: "run a shell command",
-		Schema:      json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}},"additionalProperties":false}`),
 		Class:       poo.ClassSideEffecting,
 		PrimaryArg:  "command",
 	}

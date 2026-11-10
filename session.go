@@ -114,6 +114,10 @@ type Session struct {
 	// wait for them without polling.
 	gatesDone chan struct{}
 
+	// argSchemas holds the compiled input schemas of the session's
+	// tools, compiled once at registration and read on every call.
+	argSchemas *argSchemas
+
 	// steerQueue holds the steer and interrupt messages, in arrival
 	// order.
 	steerQueue []queuedInput
