@@ -1,7 +1,8 @@
 // Package code holds the code profile.
 //
 // The code profile is the profile a coding session runs under: bash is
-// the primary tool, and the file tools are the conveniences around it.
+// the primary tool, the file tools are the conveniences around it, and
+// fetch reads the network.
 //
 // The profile allows every side-effecting call no rule covers. That is
 // the mini-swe-agent stance: the isolation is the operator's job, and
@@ -36,7 +37,7 @@ var promptText string
 func Profile() profile.Profile {
 	return profile.Profile{
 		Name:      Name,
-		Tools:     []string{"bash", "read", "grep", "edit", "codemode"},
+		Tools:     []string{"bash", "read", "grep", "edit", "fetch", "codemode"},
 		Unmatched: "allow",
 		Prompt:    promptText,
 	}

@@ -125,8 +125,9 @@ tools:
   #       - "/etc/shadow"
   protected_paths: []
 
-  # The fetch tool is disabled by default: a profile that names it
-  # offers it, and the shipped profiles name none. Its settings:
+  # The fetch tool reads the network. The code profile offers it; an
+  # operator who wants the model off the network names it in
+  # tools.disabled. Its settings:
   fetch:
     # How long one fetch waits, in seconds.
     timeout_s: 30
@@ -139,6 +140,8 @@ tools:
     # this is true. A link-local address is refused either way: the
     # cloud metadata service lives there.
     allow_private_hosts: false
+  # A model that must not reach the network disables the tool here:
+  # disabled: [fetch]
 
 # The registered command-line tools. A path is a manifest file, a
 # directory of manifests, or several of them, resolved against the

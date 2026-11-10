@@ -24,6 +24,7 @@ import (
 	"github.com/sdougbrown/poo/tool/cliregistry"
 	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
 	"github.com/sdougbrown/poo/tool/edit"
+	fetchtool "github.com/sdougbrown/poo/tool/fetch"
 	"github.com/sdougbrown/poo/tool/grep"
 	"github.com/sdougbrown/poo/tool/read"
 )
@@ -45,6 +46,7 @@ func theTools() map[string]config.ToolFactory {
 		"grep":     func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit":     func(config.ToolOptions) poo.Tool { return edit.New() },
 		"codemode": func(config.ToolOptions) poo.Tool { return toolcodemode.New(stubEngine{}) },
+		"fetch":    func(config.ToolOptions) poo.Tool { return fetchtool.New() },
 		"call_cli": func(opts config.ToolOptions) poo.Tool {
 			return cliregistry.NewCall(opts.Registry).WithSearch(opts.Search).WithExecutor(opts.Executor)
 		},
@@ -125,7 +127,7 @@ func TestTheBuildPicksTheProfileAndItsTools(t *testing.T) {
 	if runtime.Profile.Name != "code" {
 		t.Errorf("the profile is %q, want code", runtime.Profile.Name)
 	}
-	want := []string{"bash", "read", "grep", "edit", "codemode"}
+	want := []string{"bash", "read", "grep", "edit", "fetch", "codemode"}
 	if len(runtime.Options.ToolOrder) != len(want) {
 		t.Fatalf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
@@ -854,7 +856,7 @@ func TestADisablingABackgroundToolTakesTheJobToolsWithIt(t *testing.T) {
 	}
 	runtime := build(t, settings, config.Overrides{})
 
-	want := []string{"read", "grep", "edit", "codemode"}
+	want := []string{"read", "grep", "edit", "fetch", "codemode"}
 	if !slices.Equal(runtime.Options.ToolOrder, want) {
 		t.Errorf("the tools are %v, want %v", runtime.Options.ToolOrder, want)
 	}
