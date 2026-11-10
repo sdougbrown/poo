@@ -361,11 +361,18 @@ func TestADoomLoopKeyMergesRespellingsButNotQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
+	otherFormat, err := tool.Prepare([]byte(`{"url": "https://example.com/search?q=1", "format": "raw"}`), poo.PrepareEnv{})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
 	if string(first.(poo.CanonicalKeyer).CanonicalKey()) != string(respelled.(poo.CanonicalKeyer).CanonicalKey()) {
 		t.Errorf("the respelled URL has a different key: %s vs %s", first.(poo.CanonicalKeyer).CanonicalKey(), respelled.(poo.CanonicalKeyer).CanonicalKey())
 	}
 	if string(first.(poo.CanonicalKeyer).CanonicalKey()) == string(otherQuery.(poo.CanonicalKeyer).CanonicalKey()) {
 		t.Errorf("two queries share one key: %s", first.(poo.CanonicalKeyer).CanonicalKey())
+	}
+	if string(first.(poo.CanonicalKeyer).CanonicalKey()) == string(otherFormat.(poo.CanonicalKeyer).CanonicalKey()) {
+		t.Errorf("two formats share one key: %s", first.(poo.CanonicalKeyer).CanonicalKey())
 	}
 }
 
