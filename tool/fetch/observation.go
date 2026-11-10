@@ -67,13 +67,13 @@ const ElisionHint = "the body was longer than the cap: its head and tail are sho
 // counted in characters, not bytes, and a cut never splits a rune.
 func render(o Observation, capChars int) (string, json.RawMessage) {
 	fields := []envelope.Field{
-		{FieldStatus, o.Status},
-		{FieldFinalURL, o.FinalURL},
-		{FieldContentType, o.ContentType},
-		{FieldSize, o.Size},
+		{Key: FieldStatus, Value: o.Status},
+		{Key: FieldFinalURL, Value: o.FinalURL},
+		{Key: FieldContentType, Value: o.ContentType},
+		{Key: FieldSize, Value: o.Size},
 	}
 	if o.Truncated {
-		fields = append(fields, envelope.Field{FieldTruncated, true})
+		fields = append(fields, envelope.Field{Key: FieldTruncated, Value: true})
 	}
 
 	cap := capChars
@@ -86,15 +86,15 @@ func render(o Observation, capChars int) (string, json.RawMessage) {
 		// A body the tool withheld — a response that was not text — has
 		// no field of its own: the metadata is the result.
 	case bodyChars <= cap:
-		fields = append(fields, envelope.Field{FieldBody, o.Body})
+		fields = append(fields, envelope.Field{Key: FieldBody, Value: o.Body})
 	default:
 		head, tail := caps.SplitRunes(o.Body, cap/2)
 		elided := bodyChars - 2*(cap/2)
 		fields = append(fields,
-			envelope.Field{FieldBodyHead, head},
-			envelope.Field{FieldBodyTail, tail},
-			envelope.Field{FieldElidedChars, elided},
-			envelope.Field{FieldHint, ElisionHint},
+			envelope.Field{Key: FieldBodyHead, Value: head},
+			envelope.Field{Key: FieldBodyTail, Value: tail},
+			envelope.Field{Key: FieldElidedChars, Value: elided},
+			envelope.Field{Key: FieldHint, Value: ElisionHint},
 		)
 	}
 
