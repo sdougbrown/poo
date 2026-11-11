@@ -150,6 +150,48 @@ func TestAHostnamePrefixRefusesUserinfo(t *testing.T) {
 	}
 }
 
+// TestAShortSchemelessPrefixNamesAHost pins the grammar's edge: a
+// schemeless prefix that used to match URL values lexically — "http"
+// was a string prefix of every absolute http(s) URL — now names the
+// host it spells, and an ordinary URL matches nothing under it.
+func TestAShortSchemelessPrefixNamesAHost(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "http", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, url := range []string{
+		"https://example.com/page",
+		"http://example.com/page",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if rule.matchesCommand(info) {
+			t.Errorf("the prefix \"http\" matches %s, want only the host it names", url)
+		}
+	}
+}
+
+// TestAPrefixWithASchemeKeepsItsScheme covers the refusal branch: a
+// prefix that names a scheme the canonical form does not take is
+// refused, so no http(s) URL canonicalizes against it. The prefix
+// keeps the lexical comparison, which an absolute http(s) URL never
+// satisfies; a value that is itself an ftp URL matches it as text,
+// the way any non-http(s) value does.
+func TestAPrefixWithASchemeKeepsItsScheme(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "ftp://example.com", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, url := range []string{
+		"https://example.com/page",
+		"http://example.com/page",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if rule.matchesCommand(info) {
+			t.Errorf("the ftp prefix matches %s, want a refused prefix to match no absolute http(s) URL", url)
+		}
+	}
+	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "ftp://example.com/file"}`)}
+	if !rule.matchesCommand(info) {
+		t.Errorf("the ftp prefix does not match the ftp URL, want the lexical fallback")
+	}
+}
+
 // TestAPrefixStaysLexicalForNonURLs covers the rules over a command or
 // a path: no canonicalization, the text compares as it is. A hostname
 // prefix keeps the lexical fallback for a value that is no URL.
