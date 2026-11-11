@@ -130,7 +130,7 @@ func runSessionsPrune(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo sessions prune: --keep must not be negative\n")
 		return 2
 	}
-	settings, err := o.settings()
+	settings, err := o.settings("")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo sessions prune: %v\n", err)
 		return 2
@@ -175,7 +175,7 @@ func runSessionsPrune(args []string) int {
 
 // openStore opens the store the sessions live in.
 func (o *sessionsOptions) openStore() (*session.FileStore, error) {
-	settings, err := o.settings()
+	settings, err := o.settings("")
 	if err != nil {
 		return nil, err
 	}

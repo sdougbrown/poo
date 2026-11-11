@@ -99,6 +99,10 @@ type machine struct {
 	// catalog holds the models models/list reported, by name: the
 	// listing and the statusline read it instead of calling again.
 	catalog map[string]protocol.ModelInfo
+	// runID is the run the session is working on, empty when idle.
+	// The cancel names it: the wire refuses a run/cancel that does
+	// not say what to stop.
+	runID string
 }
 
 // input reads the lines a person types. A terminal gets the readline
@@ -174,8 +178,8 @@ func (m *machine) run() int {
 		if line == "" {
 			continue
 		}
-		code, quit := m.command(line, input)
-		if quit {
+		code, done := m.command(line, input)
+		if done {
 			return code
 		}
 	}
@@ -357,11 +361,10 @@ anything else    a prompt for the session`)
 		return 0, false
 	default:
 		if err := m.runPrompt(line, input); err != nil {
+			m.r.failure(err.Error())
 			if isShutdown(err) {
-				m.r.failure(err.Error())
 				return 1, true
 			}
-			m.r.failure(err.Error())
 		}
 		return 0, false
 	}
@@ -381,6 +384,8 @@ func (m *machine) runPrompt(text string, input input) error {
 
 	m.running.Store(true)
 	defer m.running.Store(false)
+	defer func() { m.runID = "" }()
+	m.runID = res.RunID
 	streams := newStreamView(m.out)
 	state := &runState{}
 	for {
@@ -416,7 +421,13 @@ func (m *machine) catalogNames() []string {
 // cancelRun asks the active run to stop. A run that is not there is
 // no failure: the ask raced with the settle.
 func (m *machine) cancelRun() {
-	_ = m.conn.call(protocol.MethodRunCancel, protocol.CancelParams{SessionID: m.sessionID}, nil)
+	if m.runID == "" {
+		return
+	}
+	_ = m.conn.call(protocol.MethodRunCancel, protocol.CancelParams{
+		SessionID: m.sessionID,
+		RunID:     m.runID,
+	}, nil)
 }
 
 // event renders one event. The bool says the run settled.

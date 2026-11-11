@@ -205,7 +205,6 @@ func (c *conn) call(method string, params, result any) error {
 	}
 }
 
-// answer replies to the server's permission ask.
 func (c *conn) answer(req askRequest, decision protocol.AskResult) error {
 	payload, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
@@ -220,5 +219,3 @@ func (c *conn) answer(req askRequest, decision protocol.AskResult) error {
 	_, err = c.w.Write(append(payload, '\n'))
 	return err
 }
-
-// answer replies to the server's permission ask.

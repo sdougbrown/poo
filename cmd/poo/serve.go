@@ -84,7 +84,12 @@ func runServe(args []string) int {
 		return 2
 	}
 
-	settings, err := o.settings()
+	workDir, err := workingDirectory(o.workingDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
+		return 2
+	}
+	settings, err := o.settings(workDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
 		return 2
@@ -93,11 +98,6 @@ func runServe(args []string) int {
 	if o.executor != "" {
 		executor := o.executor
 		settings.Tools.Bash.Executor = &executor
-	}
-	workDir, err := workingDirectory(o.workingDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-		return 2
 	}
 	overrides, err := o.overrides()
 	if err != nil {

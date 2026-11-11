@@ -27,8 +27,8 @@ type fakeServer struct {
 	prompts []string
 	// closed says the client closed the session.
 	closed bool
-	// cancels count the run/cancel calls the client sent.
-	cancels int
+	// cancels are the run ids the client's cancels named, in order.
+	cancels []string
 	// refusePrompt makes run/prompt refuse, for the refusal tests.
 	refusePrompt bool
 	// warnings are the session warnings create reports.
@@ -126,8 +126,10 @@ func (s *fakeServer) line(line []byte) {
 		s.reply(req.ID, map[string]any{"run_id": "r1"})
 		go s.run()
 	case protocol.MethodRunCancel:
+		var params protocol.CancelParams
+		json.Unmarshal(req.Params, &params)
 		s.mu.Lock()
-		s.cancels++
+		s.cancels = append(s.cancels, params.RunID)
 		s.mu.Unlock()
 		s.reply(req.ID, map[string]any{})
 	case protocol.MethodSessionClose:
