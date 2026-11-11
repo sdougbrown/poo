@@ -49,10 +49,10 @@ type piModel struct {
 	} `json:"compat"`
 }
 
-// piAPI maps the wire API pi names to the API poo speaks. An empty
-// mapping means chat completions, poo's default.
+// piAPI maps the wire API names pi uses beyond the default to the API
+// poo speaks. The default — pi's "openai-completions" — needs no
+// mapping: an empty API says chat completions.
 var piAPI = map[string]poo.API{
-	"openai-completions": poo.APIChatCompletions,
 	"openai-responses":   poo.APIResponses,
 	"anthropic-messages": poo.APIAnthropicMessages,
 }
@@ -89,6 +89,9 @@ func importPiModels(settings *Settings) error {
 	var file piModelsFile
 	if err := json.Unmarshal(data, &file); err != nil {
 		return fmt.Errorf("config: %s: %w", expanded, err)
+	}
+	if len(file.Providers) == 0 {
+		return fmt.Errorf("config: %s holds no providers", expanded)
 	}
 
 	providers := make([]string, 0, len(file.Providers))

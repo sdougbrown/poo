@@ -42,6 +42,31 @@ func TestTheStatuslineLeavesOutWhatItDoesNotKnow(t *testing.T) {
 
 // TestThePromptReadsBehindTheStatusline covers the prompt: the status
 // is the line above, and the mark is the line the typing goes to.
+// TestAWindowSwitchClearsTheWindowItDoesNotKnow covers a move to a
+// model whose window the catalog does not know: the line drops the
+// old window instead of keeping the last model's.
+func TestAWindowSwitchClearsTheWindowItDoesNotKnow(t *testing.T) {
+	s := &status{dir: "/tmp", model: "gemma4"}
+	s.setWindow(262144)
+	s.setUsage(12300, 262144)
+
+	s.model = "mystery"
+	s.setWindow(0)
+
+	line := s.line()
+	if strings.Contains(line, "/262.1k") {
+		t.Errorf("the statusline keeps the last model's window:\n%s", line)
+	}
+	if !strings.Contains(line, "ctx 12.3k") {
+		t.Errorf("the context fill went missing:\n%s", line)
+	}
+
+	s.setWindow(4096)
+	if !strings.Contains(s.line(), "ctx 12.3k/4.1k") {
+		t.Errorf("the statusline misses the new window:\n%s", s.line())
+	}
+}
+
 func TestThePromptReadsBehindTheStatusline(t *testing.T) {
 	s := &status{dir: "/home/me/Code/poo", model: "gemma4"}
 	prompt := s.prompt()

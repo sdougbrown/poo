@@ -266,7 +266,7 @@ func (m *machine) start() error {
 	for _, model := range catalog.Models {
 		m.catalog[model.Name] = model
 		if model.Name == session.Models.Chat {
-			m.status.setUsage(-1, model.ContextLimit)
+			m.status.setWindow(model.ContextLimit)
 		}
 	}
 	return nil
@@ -396,7 +396,7 @@ func (m *machine) switchModel(name string) {
 	}
 	m.status.model = res.Models.Chat
 	if info, ok := m.catalog[res.Models.Chat]; ok {
-		m.status.setUsage(-1, info.ContextLimit)
+		m.status.setWindow(info.ContextLimit)
 	}
 	m.r.notice("model → %s", res.Models.Chat)
 }

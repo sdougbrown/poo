@@ -270,10 +270,10 @@ func TestAModelSwitchToAnUnknownNameIsRefused(t *testing.T) {
 	if !strings.Contains(out, "✗") {
 		t.Errorf("the transcript shows no refusal:\n%s", out)
 	}
-	// The refusal is the server's to word: the catalog has no such
-	// model. A failure line that renders anything else — or nothing —
-	// is the failure this test watches for.
-	if !strings.Contains(out, "not in the catalog") {
+	// The refusal is the server's to word: the session's model is
+	// unknown. A failure line that renders anything else — or nothing
+	// — is the failure this test watches for.
+	if !strings.Contains(out, "the session's model is unknown") {
 		t.Errorf("the refusal does not name the catalog miss:\n%s", out)
 	}
 	server.mu.Lock()

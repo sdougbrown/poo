@@ -115,3 +115,10 @@ func (s *status) setUsage(inputTokens, contextLimit int) {
 		s.contextLimit = contextLimit
 	}
 }
+
+// setWindow records the context window of the model the session now
+// runs. A limit of zero says the catalog does not know the window,
+// and the line drops it rather than keeping the last model's.
+func (s *status) setWindow(contextLimit int) {
+	s.contextLimit = contextLimit
+}
