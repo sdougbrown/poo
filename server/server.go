@@ -602,18 +602,17 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 // Settings returns the effective settings, with the credentials
 // redacted.
 //
-// The settings name the environment variables the keys come from and
-// never the keys themselves, so the document is the settings as they
-// are.
+// The keys never leave the process: an endpoint's key comes from the
+// environment it names or from the settings themselves, and the
+// document carries neither — a base URL is redacted too, because one
+// may carry credentials of its own.
 func (f *Server) Settings(ctx context.Context) (map[string]any, error) {
 	settings := f.effective
-	// The settings name environment variables, never keys. A base URL
-	// may carry credentials all the same, and the document is what the
-	// client reads.
 	redacted := *settings
 	redacted.Endpoints = make(map[string]config.Endpoint, len(settings.Endpoints))
 	for name, endpoint := range settings.Endpoints {
 		endpoint.Endpoint = session.LoggedEndpoint(endpoint.Endpoint)
+		endpoint.APIKey = ""
 		redacted.Endpoints[name] = endpoint
 	}
 	encoded, err := json.Marshal(&redacted)
