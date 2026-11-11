@@ -131,7 +131,7 @@ func importPiModels(settings *Settings) error {
 			if model.Reasoning && model.Compat.SupportsReasoningEffort {
 				entry.Reasoning = &poo.ReasoningControl{
 					Mode:  poo.ReasoningEffort,
-					Param: "reasoning_effort",
+					Param: poo.ReasoningPathEffort,
 				}
 			}
 			if settings.Models == nil {
