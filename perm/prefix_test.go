@@ -67,14 +67,154 @@ func TestAPrefixWithoutASlashStaysInsideTheHost(t *testing.T) {
 	}
 }
 
+// TestAHostnamePrefixCoversBothSchemes covers the schemeless prefix: a
+// prefix that names no scheme is a hostname rule. The call's own URL
+// decides the scheme, so one hostname covers the cleartext and the
+// secure URL. The host's spellings and its subdomains match either
+// way. An adjacent host and a non-http scheme match nothing.
+func TestAHostnamePrefixCoversBothSchemes(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "internal.example.com", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	matching := []string{
+		"https://internal.example.com/page",
+		"http://internal.example.com/page",
+		"https://internal.example.com./page",
+		"HTTPS://INTERNAL.EXAMPLE.COM/page",
+		"https://internal.example.com:0443/page",
+		"https://sub.internal.example.com/page",
+		"http://sub.internal.example.com:0080/page",
+	}
+	for _, url := range matching {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if !rule.matchesCommand(info) {
+			t.Errorf("the hostname prefix does not match %s, want the host under either scheme", url)
+		}
+	}
+	for _, url := range []string{
+		"https://internal.example.com.evil.com/page",
+		"https://other.example.com/page",
+		"ftp://internal.example.com/page",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if rule.matchesCommand(info) {
+			t.Errorf("the hostname prefix matches %s, want the adjacent host and the foreign scheme to hold out", url)
+		}
+	}
+}
+
+// TestAHostnamePrefixCarriesItsPathAndPort covers the schemeless
+// prefix's authority: a path on the hostname stays inside it, and an
+// explicit port holds. The rules are the ones an explicit-scheme
+// prefix answers to, under the call's scheme.
+func TestAHostnamePrefixCarriesItsPathAndPort(t *testing.T) {
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	path := Rule{Tool: "fetch", CommandPrefix: "internal.example.com/secret", Action: ActionDeny}
+	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/secret/page"}`)}
+	if !path.matchesCommand(info) {
+		t.Errorf("the hostname-and-path prefix does not match the path under it")
+	}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "http://internal.example.com/secret/page"}`)}
+	if !path.matchesCommand(info) {
+		t.Errorf("the hostname-and-path prefix does not match the path under the other scheme")
+	}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/"}`)}
+	if path.matchesCommand(info) {
+		t.Errorf("the hostname-and-path prefix matches a path above it")
+	}
+	port := Rule{Tool: "fetch", CommandPrefix: "internal.example.com:8443", Action: ActionDeny}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com:8443/page"}`)}
+	if !port.matchesCommand(info) {
+		t.Errorf("the hostname-and-port prefix does not match its port")
+	}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/page"}`)}
+	if port.matchesCommand(info) {
+		t.Errorf("the hostname-and-port prefix matches the default port")
+	}
+}
+
+// TestAHostnamePrefixRefusesUserinfo covers the authority's grammar: a
+// hostname rule names a host. A prefix whose authority carries
+// userinfo names nothing a URL rule can mean. It matches nothing,
+// rather than widening to the bare host behind the userinfo.
+func TestAHostnamePrefixRefusesUserinfo(t *testing.T) {
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	schemeless := Rule{Tool: "fetch", CommandPrefix: "attacker@internal.example.com", Action: ActionDeny}
+	for _, url := range []string{
+		"https://internal.example.com/page",
+		"https://attacker@internal.example.com/page",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if schemeless.matchesCommand(info) {
+			t.Errorf("the userinfo prefix matches %s, want a rule that names no host to match nothing", url)
+		}
+	}
+	explicit := Rule{Tool: "fetch", CommandPrefix: "https://attacker@internal.example.com", Action: ActionDeny}
+	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/page"}`)}
+	if explicit.matchesCommand(info) {
+		t.Errorf("the explicit userinfo prefix matches the bare host, want no canonical widening")
+	}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://attacker@internal.example.com/page"}`)}
+	if !explicit.matchesCommand(info) {
+		t.Errorf("the explicit userinfo prefix does not match its own spelling, want the lexical fallback")
+	}
+}
+
+// TestAShortSchemelessPrefixNamesAHost pins the grammar's edge: a
+// schemeless prefix that used to match URL values lexically now names
+// the host it spells. "http" was a string prefix of every absolute
+// http(s) URL; an ordinary URL matches nothing under the rule.
+func TestAShortSchemelessPrefixNamesAHost(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "http", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, url := range []string{
+		"https://example.com/page",
+		"http://example.com/page",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if rule.matchesCommand(info) {
+			t.Errorf("the prefix \"http\" matches %s, want only the host it names", url)
+		}
+	}
+}
+
+// TestAPrefixWithASchemeKeepsItsScheme covers the refusal branch: a
+// prefix that names a scheme the canonical form does not take is
+// refused. No http(s) URL canonicalizes against it. The prefix keeps
+// the lexical comparison, which an absolute http(s) URL never
+// satisfies. A value that is itself an ftp URL matches as text, the
+// way any non-http(s) value does.
+func TestAPrefixWithASchemeKeepsItsScheme(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "ftp://example.com", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, url := range []string{
+		"https://example.com/page",
+		"http://example.com/page",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if rule.matchesCommand(info) {
+			t.Errorf("the ftp prefix matches %s, want a refused prefix to match no absolute http(s) URL", url)
+		}
+	}
+	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "ftp://example.com/file"}`)}
+	if !rule.matchesCommand(info) {
+		t.Errorf("the ftp prefix does not match the ftp URL, want the lexical fallback")
+	}
+}
+
 // TestAPrefixStaysLexicalForNonURLs covers the rules over a command or
-// a path: no canonicalization, the text compares as it is.
+// a path: no canonicalization, the text compares as it is. A hostname
+// prefix keeps the lexical fallback for a value that is no URL.
 func TestAPrefixStaysLexicalForNonURLs(t *testing.T) {
 	rule := Rule{Tool: "bash", CommandPrefix: "git status", Action: ActionDeny}
 	spec := poo.ToolSpec{Name: "bash", PrimaryArg: "command"}
 	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"command": "git status && make test"}`)}
 	if !rule.matchesCommand(info) {
 		t.Errorf("the prefix does not match the command, want the lexical match")
+	}
+	host := Rule{Tool: "bash", CommandPrefix: "example.com", Action: ActionDeny}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"command": "example.com/build && report"}`)}
+	if !host.matchesCommand(info) {
+		t.Errorf("the hostname prefix does not match a non-URL value, want the lexical fallback")
 	}
 }
 
@@ -86,5 +226,78 @@ func TestAPrefixOnAToolWithNoPrimaryArgumentMatchesNothing(t *testing.T) {
 	info := poo.ToolCallInfo{Spec: poo.ToolSpec{Name: "jobs"}, Arguments: []byte(`{}`)}
 	if rule.matchesCommand(info) {
 		t.Errorf("the prefix matched a tool with no primary argument")
+	}
+}
+
+// TestAPathPrefixHoldsTheSegmentBoundary covers the path's edge: a
+// prefix path continues only at a segment boundary. The same path
+// matches, and a path under it matches. A path that merely extends
+// the text — "api-internal" past "api" — matches nothing, in either
+// spelling of the prefix.
+func TestAPathPrefixHoldsTheSegmentBoundary(t *testing.T) {
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, prefix := range []string{"internal.example.com/api", "https://internal.example.com/api"} {
+		rule := Rule{Tool: "fetch", CommandPrefix: prefix, Action: ActionDeny}
+		for _, url := range []string{
+			"https://internal.example.com/api",
+			"https://internal.example.com/api/page",
+			"https://internal.example.com/api/v2/records",
+		} {
+			info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+			if !rule.matchesCommand(info) {
+				t.Errorf("the prefix %q does not match %s, want the path and its segments", prefix, url)
+			}
+		}
+		for _, url := range []string{
+			"https://internal.example.com/api-internal",
+			"https://internal.example.com/apifoo",
+			"https://sub.internal.example.com/public",
+		} {
+			info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+			if rule.matchesCommand(info) {
+				t.Errorf("the prefix %q matches %s, want the segment boundary to hold on the host and its subdomains", prefix, url)
+			}
+		}
+		for _, url := range []string{
+			"https://sub.internal.example.com/api",
+			"https://sub.internal.example.com/api/page",
+		} {
+			info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+			if !rule.matchesCommand(info) {
+				t.Errorf("the prefix %q does not match %s, want the path on the subdomain too", prefix, url)
+			}
+		}
+	}
+}
+
+// TestARootPathPrefixMatchesTheBareHostSpelling covers the root: a
+// prefix that names no path, or only the root, matches the host
+// spelled with a path and spelled with none. The two spellings are one
+// resource, so a deny rule holds against both.
+func TestARootPathPrefixMatchesTheBareHostSpelling(t *testing.T) {
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, prefix := range []string{"internal.example.com", "https://internal.example.com/"} {
+		rule := Rule{Tool: "fetch", CommandPrefix: prefix, Action: ActionDeny}
+		for _, url := range []string{
+			"https://internal.example.com",
+			"https://internal.example.com/page",
+		} {
+			info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+			if !rule.matchesCommand(info) {
+				t.Errorf("the prefix %q does not match %s, want the root and its paths", prefix, url)
+			}
+		}
+	}
+}
+
+// TestAnAtInAQueryIsNotUserinfo covers the authority's edge: an @ past
+// the query mark is a query, not userinfo. A prefix carrying one is
+// not refused, and it matches its host.
+func TestAnAtInAQueryIsNotUserinfo(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "https://internal.example.com?token=a@b", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/page"}`)}
+	if !rule.matchesCommand(info) {
+		t.Errorf("the query-@ prefix does not match its host, want the query to be no userinfo")
 	}
 }

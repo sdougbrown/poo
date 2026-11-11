@@ -236,3 +236,86 @@ func TestTheWireClientWarningFiresBesideAnAskerThatCannotAnswer(t *testing.T) {
 		t.Errorf("the session warned %q, want the capability named: the other asker never answers", warning)
 	}
 }
+
+// TestTheConstructionWarningJoinsTheChainWarning covers the join: a
+// policy that can ask, with no asker that can answer, and a prefix
+// rule the grammar refuses. The warning names both.
+func TestTheConstructionWarningJoinsTheChainWarning(t *testing.T) {
+	askers := []perm.Asker{perm.NewWireAsker(nil, 0)}
+	policy, err := perm.New(perm.Options{
+		Rules:       []perm.Rule{{Tool: "fetch", CommandPrefix: "attacker@internal.example.com", Action: perm.ActionDeny}},
+		PrimaryArgs: map[string]string{"fetch": "url"},
+		Unmatched:   perm.ActionAsk,
+		Askers:      askers,
+	})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+
+	warning := perm.Warning(policy, policy.Askers())
+
+	if !strings.Contains(warning, "fetch") || !strings.Contains(warning, "falls back") {
+		t.Errorf("the warning is %q, want both the refused rule and the fallback named", warning)
+	}
+}
+
+// TestARefusedPrefixWarnsAtConstruction covers the rule: a prefix
+// rule whose prefix the URL grammar refuses is warned about at load.
+// The refused spellings are userinfo in the authority and a scheme
+// outside http and https. The warning matters because the rule matches
+// nothing against the URLs the operator meant.
+func TestARefusedPrefixWarnsAtConstruction(t *testing.T) {
+	for _, prefix := range []string{
+		"attacker@internal.example.com",
+		"htps://internal.example.com",
+		"ftp://example.com",
+		"https://attacker@internal.example.com",
+		"//internal.example.com",
+	} {
+		policy, err := perm.New(perm.Options{
+			Rules:       []perm.Rule{{Tool: "fetch", CommandPrefix: prefix, Action: perm.ActionDeny}},
+			PrimaryArgs: map[string]string{"fetch": "url"},
+			Unmatched:   perm.ActionAllow,
+		})
+		if err != nil {
+			t.Fatalf("building the policy with the prefix %q: %v", prefix, err)
+		}
+
+		warning := perm.Warning(policy, policy.Askers())
+
+		if warning == "" {
+			t.Errorf("the prefix %q printed no warning, want one: the grammar refuses it", prefix)
+		}
+		if !strings.Contains(warning, "fetch") {
+			t.Errorf("the warning is %q, want it to name the tool", warning)
+		}
+	}
+}
+
+// TestAPlainPrefixDoesNotWarn covers the rule's edge. A prefix the
+// grammar accepts is not warned about, and neither is one that spells
+// no URL at all. A command, a path, and a text that is no absolute URL
+// all stay silent.
+func TestAPlainPrefixDoesNotWarn(t *testing.T) {
+	for _, prefix := range []string{
+		"https://internal.example.com",
+		"internal.example.com",
+		"internal.example.com/secret",
+		"git status",
+		"run tests!",
+		"scp file user@remote:/path",
+	} {
+		policy, err := perm.New(perm.Options{
+			Rules:       []perm.Rule{{Tool: "fetch", CommandPrefix: prefix, Action: perm.ActionDeny}},
+			PrimaryArgs: map[string]string{"fetch": "url"},
+			Unmatched:   perm.ActionAllow,
+		})
+		if err != nil {
+			t.Fatalf("building the policy with the prefix %q: %v", prefix, err)
+		}
+
+		if warning := perm.Warning(policy, policy.Askers()); warning != "" {
+			t.Errorf("the prefix %q warned %q, want silence: the grammar accepts it or it spells no URL", prefix, warning)
+		}
+	}
+}

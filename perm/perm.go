@@ -86,9 +86,14 @@ type Rule struct {
 	// the command of a bash call, or the argument the tool names —
 	// the fetch tool's URL, for one.
 	//
-	// The prefix is a lexical heuristic and not a safety boundary. It
-	// compares the text, so "git status && rm -rf x" matches the
-	// prefix "git status".
+	// The prefix is a heuristic and not a safety boundary. A value
+	// that is no absolute http(s) URL compares lexically: "git status
+	// && rm -rf x" matches the prefix "git status". A URL compares in
+	// its canonical form, under the prefix's scheme when it names one.
+	// A prefix that names no scheme is a hostname rule. The call's own
+	// URL decides the scheme, so one hostname covers its http and https
+	// URLs alike. The host's spellings and its subdomains are judged
+	// the way an explicit-scheme prefix is judged.
 	CommandPrefix string
 	// Action is what the rule says to do with a matching call.
 	Action Action
@@ -156,6 +161,9 @@ type Policy struct { // rules are the policy's rules, in order.
 	doomLoopActionSet bool
 	// chain is the asker chain.
 	chain *chain
+	// warnings are the construction-time notes the policy carries: a
+	// prefix rule whose prefix the URL grammar refuses.
+	warnings []string
 	// workingDir is the directory the run works in.
 	workingDir string
 	// mu guards the ask counter.
@@ -193,12 +201,19 @@ func New(opts Options) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
+	var warnings []string
 	for i, rule := range opts.Rules {
 		if err := checkRule(i, rule); err != nil {
 			return nil, err
 		}
-		if rule.CommandPrefix != "" && opts.PrimaryArgs != nil && opts.PrimaryArgs[rule.Tool] == "" {
+		if rule.CommandPrefix == "" || opts.PrimaryArgs == nil {
+			continue
+		}
+		if opts.PrimaryArgs[rule.Tool] == "" {
 			return nil, fmt.Errorf("perm: rule %d matches %q by prefix, and the tool has no primary argument a prefix could match", i, rule.Tool)
+		}
+		if refusedPrefix(rule.CommandPrefix) {
+			warnings = append(warnings, fmt.Sprintf("the rule %d's prefix for %q spells a URL the prefix grammar refuses; it matches only values that compare as text", i, rule.Tool))
 		}
 	}
 	timeout := opts.ChainTimeout
@@ -210,6 +225,7 @@ func New(opts Options) (*Policy, error) {
 		unmatched:  unmatched,
 		doomLoop:   doomLoop,
 		workingDir: opts.WorkingDir,
+		warnings:   warnings,
 
 		doomLoopActionSet: opts.DoomLoop.Action != "",
 		chain: &chain{
@@ -401,11 +417,17 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 // no primary argument has nothing a prefix could match, so its rule
 // matches nothing.
 //
-// A value that is an absolute http(s) URL, against a prefix that names
-// a scheme, compares in the URL's canonical form. The comparison stays
-// within the prefix's scheme and host, or its subdomains. The same
-// host spelled the ways a URL can be spelled matches one prefix, and
-// an adjacent host, or the other scheme, matches nothing.
+// A value that is an absolute http(s) URL compares in the URL's
+// canonical form, and the prefix is judged by one grammar:
+// urlnorm.CanonicalPrefix. The comparison stays within the prefix's
+// host, or its subdomains. The prefix's scheme holds when it names
+// one; the call's scheme decides when it does not. The same host
+// spelled the ways a URL can be spelled matches one prefix, and an
+// adjacent host, or the other scheme, matches nothing. The query and
+// the fragment take no part in the comparison. A prefix whose
+// grammar the canonical form refuses — a foreign scheme, userinfo in
+// its authority — matches nothing canonically. The lexical comparison
+// below decides instead.
 func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	name := info.Spec.PrimaryArg
 	if name == "" {
@@ -417,7 +439,7 @@ func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	}
 	value = strings.TrimLeftFunc(value, unicode.IsSpace)
 	if canonical, ok := urlnorm.Canonical(value); ok {
-		if prefix, ok := urlnorm.Canonical(r.CommandPrefix); ok {
+		if prefix, ok := urlnorm.CanonicalPrefix(canonical, r.CommandPrefix); ok {
 			return urlnorm.WithinHost(canonical, prefix)
 		}
 	}
@@ -615,18 +637,51 @@ func (p *Policy) canAsk() bool {
 // Warning returns the warning a config load prints, or an empty string
 // when there is nothing to warn about.
 //
-// The warning fires when the policy can ask (see canAsk) and no asker in
-// the chain can ever answer one: every ask then falls back to the
-// policy's fallback decision, and the warning names it.
+// The warning carries the policy's construction-time notes: a prefix
+// rule whose prefix the URL grammar refuses. Such a rule matches only
+// values that compare as text. It also fires when the policy can ask
+// (see canAsk) and no asker in the chain can ever answer one: every
+// ask then falls back to the policy's fallback decision, and the
+// warning names it.
 func Warning(policy *Policy, askers []Asker) string {
-	if policy == nil || !policy.canAsk() {
+	if policy == nil {
 		return ""
 	}
-	if anyCanAnswer(askers) {
-		return ""
+	messages := append([]string(nil), policy.warnings...)
+	if policy.canAsk() && !anyCanAnswer(askers) {
+		messages = append(messages, fmt.Sprintf("the permission policy can ask, but no asker in the chain can ever answer; every ask falls back to %q",
+			policy.chain.fallback))
 	}
-	return fmt.Sprintf("the permission policy can ask, but no asker in the chain can ever answer; every ask falls back to %q",
-		policy.chain.fallback)
+	return strings.Join(messages, "; ")
+}
+
+// refusedPrefix reports whether the URL grammar refuses the prefix.
+// The grammar refuses an authority that carries userinfo, a scheme
+// outside http and https, and a URL the canonical form cannot take. A
+// prefix that spells no URL at all — a command, a path — is not
+// refused; it compares as text.
+func refusedPrefix(prefix string) bool {
+	_, rest, hasScheme := strings.Cut(prefix, "://")
+	if !hasScheme && strings.ContainsFunc(prefix, unicode.IsSpace) {
+		// Text that carries whitespace spells no URL: a command or a
+		// sentence compares as text, whatever it contains.
+		return false
+	}
+	authority := prefix
+	if hasScheme {
+		authority = rest
+	}
+	// The authority ends at the first slash, question mark, or hash.
+	// Past one of those, an @ is a path, a query, or a fragment — not
+	// userinfo.
+	authority, _, _ = strings.Cut(authority, "/")
+	authority, _, _ = strings.Cut(authority, "?")
+	authority, _, _ = strings.Cut(authority, "#")
+	if strings.Contains(authority, "@") {
+		return true
+	}
+	_, ok := urlnorm.CanonicalPrefix("https://example.com/", prefix)
+	return !ok
 }
 
 // anyCanAnswer reports whether any asker in the chain may answer an

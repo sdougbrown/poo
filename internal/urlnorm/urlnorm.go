@@ -48,10 +48,53 @@ func Canonical(value string) (string, bool) {
 	return canonical, true
 }
 
+// CanonicalPrefix returns the canonical form of a rule's prefix under
+// the scheme of the canonical value it will be matched against.
+//
+// A prefix that names no scheme of its own is a hostname rule. The
+// call's own URL decides the scheme, so one hostname covers both.
+//
+// A prefix that names a scheme of its own canonicalizes as itself,
+// and its scheme must hold. A cleartext URL never matches an https
+// prefix, or the other way around. A scheme the canonical form does
+// not take is refused, and so is a prefix whose authority carries
+// userinfo. A hostname rule names a host; userinfo names nothing a
+// URL rule can mean. A refused prefix matches nothing canonically,
+// and the caller keeps the lexical comparison. That never widens the
+// rule past what the operator typed.
+func CanonicalPrefix(canonical, prefix string) (string, bool) {
+	scheme, _, ok := strings.Cut(canonical, "://")
+	if !ok || (scheme != "http" && scheme != "https") {
+		return "", false
+	}
+	authority := prefix
+	if _, rest, found := strings.Cut(prefix, "://"); found {
+		authority = rest
+	}
+	// The authority ends at the first slash, question mark, or hash.
+	// Past one of those, an @ is a path, a query, or a fragment — not
+	// userinfo.
+	authority, _, _ = strings.Cut(authority, "/")
+	authority, _, _ = strings.Cut(authority, "?")
+	authority, _, _ = strings.Cut(authority, "#")
+	if strings.Contains(authority, "@") {
+		return "", false
+	}
+	if strings.Contains(prefix, "://") {
+		return Canonical(prefix)
+	}
+	return Canonical(scheme + "://" + prefix)
+}
+
 // WithinHost reports whether the canonical value is at or under the
 // canonical prefix: the same scheme, the same host or a subdomain of
-// it. A cleartext http URL is never within an https prefix, and the
-// other way around.
+// it. A path on the prefix holds its segment boundary: /api matches
+// /api and /api/v2, and never /api-internal. The boundary holds on
+// the host and its subdomains alike. A path that names no segment is
+// the whole host: the scheme-plus-host spelling and the root path are
+// one resource. A cleartext http URL is never within an https prefix,
+// and the other way around. The query and the fragment take no part
+// in the comparison: the prefix speaks to the host and its path.
 func WithinHost(value, prefix string) bool {
 	parsedValue, err := url.Parse(value)
 	if err != nil {
@@ -66,9 +109,24 @@ func WithinHost(value, prefix string) bool {
 	}
 	valueHost, prefixHost := parsedValue.Host, parsedPrefix.Host
 	if valueHost == prefixHost {
-		return strings.HasPrefix(parsedValue.Path, parsedPrefix.Path)
+		return pathWithin(parsedValue.Path, parsedPrefix.Path)
 	}
-	return strings.HasSuffix(valueHost, "."+prefixHost)
+	return strings.HasSuffix(valueHost, "."+prefixHost) && pathWithin(parsedValue.Path, parsedPrefix.Path)
+}
+
+// pathWithin reports whether the value's path sits at or under the
+// prefix path: the same path, or a continuation at a segment boundary.
+// A prefix that names no path, or only the root, covers every path on
+// the host. The value's empty path is the bare-host spelling of the
+// root, so it joins them.
+func pathWithin(valuePath, prefixPath string) bool {
+	if valuePath == "" {
+		valuePath = "/"
+	}
+	if prefixPath == "" || prefixPath == "/" {
+		return strings.HasPrefix(valuePath, "/")
+	}
+	return valuePath == prefixPath || strings.HasPrefix(valuePath, prefixPath+"/")
 }
 
 // defaultPort is the port a scheme implies, and the one a canonical
