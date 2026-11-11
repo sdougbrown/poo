@@ -1854,18 +1854,26 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 
 // apiKey returns the key the settings' endpoint for a model names.
 //
-// The key is read from the environment variable the settings name, and
-// from nowhere else: a settings file never carries a key.
+// The endpoint's credential is the environment variable the settings
+// name, when it holds a key, and the key the settings carry when it
+// does not: a variable is the better neighbor, and a literal is what a
+// models file written for another tool imports as. An endpoint that
+// names neither sends no key.
 func (r *Runtime) apiKey(model string) string {
 	settings, ok := r.Settings.Models[model]
 	if !ok {
 		return ""
 	}
 	endpoint, ok := r.Settings.Endpoints[settings.Endpoint]
-	if !ok || endpoint.APIKeyEnv == "" {
+	if !ok {
 		return ""
 	}
-	return os.Getenv(endpoint.APIKeyEnv)
+	if endpoint.APIKeyEnv != "" {
+		if key := os.Getenv(endpoint.APIKeyEnv); key != "" {
+			return key
+		}
+	}
+	return endpoint.APIKey
 }
 
 // expandHome expands the leading ~ of a path.
