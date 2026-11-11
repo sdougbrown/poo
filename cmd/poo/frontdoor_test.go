@@ -9,63 +9,63 @@ import (
 	"github.com/sdougbrown/poo/config"
 )
 
-// TestTheDoorFollowsTheSettings covers the door a bare invocation
+// TestTheUIFollowsTheSettings covers the ui a bare invocation
 // launches: the settings' name wins, and the binary's default covers
 // everything else.
-func TestTheDoorFollowsTheSettings(t *testing.T) {
+func TestTheUIFollowsTheSettings(t *testing.T) {
 	settings := &config.Settings{Version: 1}
-	name, err := pickDoor(settings, defaultDoor, doors)
+	name, err := pickUI(settings, defaultUI, uis)
 	if err != nil {
-		t.Fatalf("the default door was refused: %v", err)
+		t.Fatalf("the default ui was refused: %v", err)
 	}
 	if name != "repl" {
-		t.Errorf("the default door is %q, want repl", name)
+		t.Errorf("the default ui is %q, want repl", name)
 	}
 
-	settings.Door = "repl"
-	if name, _ := pickDoor(settings, defaultDoor, doors); name != "repl" {
-		t.Errorf("the settings' door is %q, want repl", name)
+	settings.UI = "repl"
+	if name, _ := pickUI(settings, defaultUI, uis); name != "repl" {
+		t.Errorf("the settings' ui is %q, want repl", name)
 	}
 }
 
-// TestAnUnknownDoorIsRefused covers a settings file that names a door
+// TestAnUnknownUIIsRefused covers a settings file that names an interface
 // the binary does not link: the refusal lists what it offers.
-func TestAnUnknownDoorIsRefused(t *testing.T) {
-	settings := &config.Settings{Version: 1, Door: "tui"}
-	_, err := pickDoor(settings, defaultDoor, doors)
+func TestAnUnknownUIIsRefused(t *testing.T) {
+	settings := &config.Settings{Version: 1, UI: "tui"}
+	_, err := pickUI(settings, defaultUI, uis)
 	if err == nil {
-		t.Fatal("an unknown door was picked")
+		t.Fatal("an unknown ui was picked")
 	}
 	if !strings.Contains(err.Error(), "repl") {
 		t.Errorf("the refusal does not name what the binary offers: %v", err)
 	}
 }
 
-// TestTheDoorReadsTheSettingsTheCommandResolves covers the bare
+// TestTheUIReadsTheSettingsTheCommandResolves covers the bare
 // invocation's settings resolution: the project's file decides the
-// door, an environment file that is not there is a refusal, and a
+// interface, an environment file that is not there is a refusal, and a
 // settings file that fails to load is one too.
-func TestTheDoorReadsTheSettingsTheCommandResolves(t *testing.T) {
+func TestTheUIReadsTheSettingsTheCommandResolves(t *testing.T) {
 	project := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(project, ".poo"), 0o755); err != nil {
 		t.Fatalf("writing the project directory: %v", err)
 	}
 	settings := filepath.Join(project, ".poo", "settings.json")
-	if err := os.WriteFile(settings, []byte(`{"version":1,"door":"tui"}`), 0o644); err != nil {
+	if err := os.WriteFile(settings, []byte(`{"version":1,"ui":"tui"}`), 0o644); err != nil {
 		t.Fatalf("writing the settings: %v", err)
 	}
 	t.Chdir(project)
 	t.Setenv("POO_SETTINGS", "")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(project, "no-config"))
 
-	if code := runDoor(); code != 2 {
-		t.Errorf("an unknown door exited %d, want 2", code)
+	if code := runUI(); code != 2 {
+		t.Errorf("an unknown ui exited %d, want 2", code)
 	}
 
 	missing := filepath.Join(project, "missing.json")
 	t.Setenv("POO_SETTINGS", missing)
 	t.Chdir(project)
-	if code := runDoor(); code != 2 {
+	if code := runUI(); code != 2 {
 		t.Errorf("a missing environment file exited %d, want 2", code)
 	}
 
@@ -74,7 +74,7 @@ func TestTheDoorReadsTheSettingsTheCommandResolves(t *testing.T) {
 		t.Fatalf("writing the settings: %v", err)
 	}
 	t.Setenv("POO_SETTINGS", broken)
-	if code := runDoor(); code != 2 {
+	if code := runUI(); code != 2 {
 		t.Errorf("a bad settings file exited %d, want 2", code)
 	}
 }

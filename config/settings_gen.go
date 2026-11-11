@@ -17,7 +17,6 @@ type SettingsFields struct {
 	ContextNoticeRatio              *float64 "json:\"context.notice_ratio,omitempty\""
 	ContextStrategy                 *string  "json:\"context.strategy,omitempty\""
 	DeciderTimeoutMs                *float64 "json:\"decider.timeout_ms,omitempty\""
-	Door                            *string  "json:\"door,omitempty\""
 	FeedsPaths                      []string "json:\"feeds.paths,omitempty\""
 	FinishSchemaFile                *string  "json:\"finish.schema_file,omitempty\""
 	JobsMaxRunning                  *float64 "json:\"jobs.max_running,omitempty\""
@@ -67,6 +66,7 @@ type SettingsFields struct {
 	ToolsFetchTimeoutS              *float64 "json:\"tools.fetch.timeout_s,omitempty\""
 	ToolsFetchUserAgent             *string  "json:\"tools.fetch.user_agent,omitempty\""
 	ToolsProtectedPaths             []string "json:\"tools.protected_paths,omitempty\""
+	Ui                              *string  "json:\"ui,omitempty\""
 	Version                         *float64 "json:\"version,omitempty\""
 }
 
@@ -85,7 +85,6 @@ type SettingsAvailability struct {
 	ContextNoticeRatio              FieldStatus
 	ContextStrategy                 FieldStatus
 	DeciderTimeoutMs                FieldStatus
-	Door                            FieldStatus
 	FeedsPaths                      FieldStatus
 	FinishSchemaFile                FieldStatus
 	JobsMaxRunning                  FieldStatus
@@ -135,6 +134,7 @@ type SettingsAvailability struct {
 	ToolsFetchTimeoutS              FieldStatus
 	ToolsFetchUserAgent             FieldStatus
 	ToolsProtectedPaths             FieldStatus
+	Ui                              FieldStatus
 	Version                         FieldStatus
 }
 
@@ -177,8 +177,6 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ContextStrategySatisfied := func() bool { v := f.ContextStrategy; return v != nil && *v != "" }()
 	DeciderTimeoutMsEnabled := true
 	DeciderTimeoutMsSatisfied := f.DeciderTimeoutMs != nil
-	DoorEnabled := true
-	DoorSatisfied := func() bool { v := f.Door; return v != nil && *v != "" }()
 	FeedsPathsEnabled := true
 	FeedsPathsSatisfied := len(f.FeedsPaths) > 0
 	FinishSchemaFileEnabled := true
@@ -277,6 +275,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ToolsFetchUserAgentSatisfied := func() bool { v := f.ToolsFetchUserAgent; return v != nil && *v != "" }()
 	ToolsProtectedPathsEnabled := true
 	ToolsProtectedPathsSatisfied := len(f.ToolsProtectedPaths) > 0
+	UiEnabled := true
+	UiSatisfied := func() bool { v := f.Ui; return v != nil && *v != "" }()
 	VersionEnabled := true
 	VersionSatisfied := f.Version != nil
 
@@ -463,28 +463,6 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				if !(f.DeciderTimeoutMs != nil && *f.DeciderTimeoutMs >= 1) && "decider.timeout_ms must be at least a millisecond" != "" {
 					reasons = append(reasons, "decider.timeout_ms must be at least a millisecond")
 				}
-				if reasons == nil {
-					reasons = []string{}
-				}
-				return reasons
-			}(),
-			Valid: nil,
-			Error: "",
-		},
-		Door: FieldStatus{
-			Required:  DoorEnabled && false,
-			Enabled:   DoorEnabled,
-			Satisfied: DoorSatisfied,
-			Fair:      true,
-			Reason: func() *string {
-				var reasons []string
-				if len(reasons) == 0 {
-					return nil
-				}
-				return &reasons[0]
-			}(),
-			Reasons: func() []string {
-				var reasons []string
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -1733,6 +1711,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		Ui: FieldStatus{
+			Required:  UiEnabled && false,
+			Enabled:   UiEnabled,
+			Satisfied: UiSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		Version: FieldStatus{
 			Required:  VersionEnabled && true,
 			Enabled:   VersionEnabled,
@@ -1782,9 +1782,6 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return v != nil && *v != ""
 	case "DeciderTimeoutMs":
 		return f.DeciderTimeoutMs != nil
-	case "Door":
-		v := f.Door
-		return v != nil && *v != ""
 	case "FeedsPaths":
 		return len(f.FeedsPaths) > 0
 	case "FinishSchemaFile":
@@ -1899,6 +1896,9 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return v != nil && *v != ""
 	case "ToolsProtectedPaths":
 		return len(f.ToolsProtectedPaths) > 0
+	case "Ui":
+		v := f.Ui
+		return v != nil && *v != ""
 	case "Version":
 		return f.Version != nil
 	default:
@@ -2111,12 +2111,6 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: decider.timeout_ms must be at least a millisecond")
-	case "Door", "door":
-		found = true
-		status = avail.Door
-		if status.Reason != nil {
-			explanations = append(explanations, "* "+*status.Reason)
-		}
 	case "FeedsPaths", "feeds.paths":
 		found = true
 		status = avail.FeedsPaths
@@ -2435,6 +2429,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "ToolsProtectedPaths", "tools.protected_paths":
 		found = true
 		status = avail.ToolsProtectedPaths
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "Ui", "ui":
+		found = true
+		status = avail.Ui
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
