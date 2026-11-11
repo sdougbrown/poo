@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/sdougbrown/poo"
 )
@@ -49,6 +51,20 @@ type piModel struct {
 	} `json:"compat"`
 }
 
+// piCredential is one provider's credential in an auth.json shaped like
+// pi's.
+type piCredential struct {
+	// Type is how the credential authenticates: a key pi stores, or
+	// an OAuth token poo cannot use.
+	Type string `json:"type"`
+	// Key is the credential's key, for an api credential.
+	Key string `json:"key"`
+}
+
+// piAuthFile is the name an auth.json shaped like pi's goes by, beside
+// the models file.
+const piAuthFile = "auth.json"
+
 // piAPI maps the wire API names pi uses beyond the default to the API
 // poo speaks. The default — pi's "openai-completions" — needs no
 // mapping: an empty API says chat completions.
@@ -73,6 +89,14 @@ var piModalities = map[string]bool{
 // never a takeover. A provider whose api poo does not speak, or a
 // model whose inputs poo does not read, is an error: a file that
 // half-imports is worse than one that refuses.
+//
+// An imported provider whose apiKey the models file leaves empty takes
+// the key pi keeps for it in the auth.json beside the models file: a
+// models file written for pi names the provider, and pi keeps the
+// key out of the file. A file that is not there holds no keys, since
+// an operator may keep them elsewhere; a file that does not parse is
+// an error, because the operator pointed poo at a directory whose
+// credentials poo cannot read.
 func importPiModels(settings *Settings) error {
 	path := settings.PIModelsFile
 	if path == "" {
@@ -94,6 +118,18 @@ func importPiModels(settings *Settings) error {
 		return fmt.Errorf("config: %s holds no providers", expanded)
 	}
 
+	// pi's auth.json is read once, and only when a provider that is
+	// imported has no key of its own. A provider the settings
+	// already hold needs no key from it, and a models file that
+	// carries its keys needs nothing either.
+	var keys map[string]piCredential
+	if piAuthNeeded(settings, file.Providers) {
+		keys, err = readPiAuth(filepath.Join(filepath.Dir(expanded), piAuthFile))
+		if err != nil {
+			return err
+		}
+	}
+
 	providers := make([]string, 0, len(file.Providers))
 	for name := range file.Providers {
 		providers = append(providers, name)
@@ -109,9 +145,13 @@ func importPiModels(settings *Settings) error {
 			if settings.Endpoints == nil {
 				settings.Endpoints = map[string]Endpoint{}
 			}
+			key := definition.APIKey
+			if key == "" {
+				key = piStoredKey(keys[provider])
+			}
 			settings.Endpoints[provider] = Endpoint{
 				Endpoint: definition.BaseURL,
-				APIKey:   definition.APIKey,
+				APIKey:   key,
 			}
 		}
 		for _, model := range definition.Models {
@@ -144,6 +184,55 @@ func importPiModels(settings *Settings) error {
 		}
 	}
 	return nil
+}
+
+// piAuthNeeded says whether an import asks pi's auth.json for a key: a
+// provider the settings do not already hold, whose apiKey the models
+// file leaves empty.
+func piAuthNeeded(settings *Settings, providers map[string]piProvider) bool {
+	for name, definition := range providers {
+		if _, held := settings.Endpoints[name]; held {
+			continue
+		}
+		if definition.APIKey == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// readPiAuth reads pi's auth.json: credentials by provider name. A file
+// that is not there is a file without credentials, not a failure.
+func readPiAuth(path string) (map[string]piCredential, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("config: reading %s: %w", path, err)
+	}
+	var credentials map[string]piCredential
+	if err := json.Unmarshal(data, &credentials); err != nil {
+		return nil, fmt.Errorf("config: %s: %w", path, err)
+	}
+	return credentials, nil
+}
+
+// piStoredKey returns the key a credential holds, when poo can use it.
+//
+// pi stores a key under the api_key type, and a file that says api
+// says the same thing. An OAuth credential authenticates in ways poo
+// does not speak: it imports as no key at all.
+func piStoredKey(credential piCredential) string {
+	if credential.Type != "api_key" && credential.Type != "api" {
+		return ""
+	}
+	// A key written as !command is pi's to run: poo does not run a
+	// command to get a key, so the provider imports without one.
+	if strings.HasPrefix(credential.Key, "!") {
+		return ""
+	}
+	return credential.Key
 }
 
 // piWireAPI maps a provider's api name. A provider that names an API
