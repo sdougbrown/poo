@@ -28,19 +28,13 @@ var uis = map[string]func(args []string) int{
 // settings name — or, without them, the binary's default — runs with
 // the settings file, so the session it opens reads what it read.
 func runUI() int {
-	path, err := config.FindSettings("", "")
+	path, settings, err := resolveSettings("")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
 		return 2
 	}
-	settings := &config.Settings{Version: 1}
 	var args []string
 	if path != "" {
-		settings, err = config.Load(path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "poo: %v\n", err)
-			return 2
-		}
 		args = []string{"--settings", path}
 	}
 	name, err := pickUI(settings, defaultUI, uis)
