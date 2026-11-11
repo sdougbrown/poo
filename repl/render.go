@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 )
 
@@ -185,11 +184,4 @@ func shortTokens(n int) string {
 	default:
 		return "?"
 	}
-}
-
-// truncateANSI cuts a rendered string to width cells, keeping the
-// colors. The statusline uses it to stay inside the terminal even when
-// a segment's value is long.
-func truncateANSI(s string, width int) string {
-	return ansi.Truncate(s, width, "…")
 }
