@@ -42,8 +42,6 @@ type conn struct {
 	asks chan askRequest
 	// done is closed when the reader returns.
 	done chan struct{}
-
-	closeOnce sync.Once
 }
 
 // askRequest is one permission ask from the server.
