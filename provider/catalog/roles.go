@@ -56,14 +56,16 @@ func (c Credential) EnvNames() []string {
 	return []string{c.Env}
 }
 
-// Key returns the endpoint's key.
-//
-// An env source reads the variable, and a static source returns the
-// value the settings carry. The value is never logged.
+// Key returns the endpoint's key: the environment variable when it
+// holds one, the value the settings carry when it does not, and nothing
+// when the credential names neither. The value is never logged.
 func (c Credential) Key() string {
 	switch c.Source {
 	case CredentialEnv:
-		return os.Getenv(c.Env)
+		if key := os.Getenv(c.Env); key != "" {
+			return key
+		}
+		return c.Value
 	case CredentialStatic:
 		return c.Value
 	}
