@@ -104,7 +104,6 @@ type machine struct {
 	// not say what to stop.
 	runID string
 }
-}
 
 // input reads the lines a person types. A terminal gets the readline
 // editor with its vi mode; anything else gets plain lines, so a pipe
@@ -373,16 +372,6 @@ anything else    a prompt for the session`)
 		}
 	}
 	return 0, false
-}
-
-// catalogNames returns the catalog's model names, in name order.
-func (m *machine) catalogNames() []string {
-	names := make([]string, 0, len(m.catalog))
-	for name := range m.catalog {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // switchModel points the session's chat role at another model the
