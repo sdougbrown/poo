@@ -467,7 +467,7 @@ func (h *hostEnvTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "host",
 		Description: "A tool that runs in poo's own process.",
-		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		Class:       poo.ClassReadOnly,
 	}
 }

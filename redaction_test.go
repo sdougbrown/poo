@@ -30,7 +30,7 @@ func (t *secretTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "echo",
 		Description: "a tool that leaks a secret",
-		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`),
 		Class:       poo.ClassReadOnly,
 	}
 }

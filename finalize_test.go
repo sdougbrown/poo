@@ -1164,7 +1164,7 @@ type badBackgroundTool struct{ echoTool }
 func (t *badBackgroundTool) Spec() poo.ToolSpec {
 	spec := t.echoTool.Spec()
 	spec.Background = poo.BackgroundAllowed
-	spec.Schema = json.RawMessage(`{"properties":{"background":{"type":"boolean"}}}`)
+	spec.Schema = json.RawMessage(`{"properties":{"background":{"type":"boolean"}},"additionalProperties":false}`)
 	return spec
 }
 

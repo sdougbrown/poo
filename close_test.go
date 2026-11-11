@@ -352,7 +352,7 @@ func (*fenceReadTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "read",
 		Description: "reads a file",
-		Schema:      json.RawMessage(`{"type": "object"}`),
+		Schema:      json.RawMessage(`{"type": "object", "additionalProperties": false}`),
 		Class:       poo.ClassReadOnly,
 	}
 }

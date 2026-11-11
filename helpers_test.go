@@ -211,7 +211,7 @@ func (t *echoTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "echo",
 		Description: "echo the argument back",
-		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`),
 		Class:       class,
 		Background:  t.background,
 		PrimaryArg:  t.primaryArg,
@@ -442,7 +442,7 @@ func (t *holdTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        t.name,
 		Description: "a tool the test can hold open",
-		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`),
 		Class:       poo.ClassSideEffecting,
 		Background:  t.background,
 	}

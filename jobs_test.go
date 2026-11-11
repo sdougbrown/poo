@@ -343,7 +343,7 @@ func (t *backgroundSchemaTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "job",
 		Description: "a tool that takes the reserved argument",
-		Schema:      json.RawMessage(`{"type":"object","properties":{"background":{"type":"boolean"}}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{"background":{"type":"boolean"}},"additionalProperties":false}`),
 		Class:       poo.ClassSideEffecting,
 		Background:  poo.BackgroundAllowed,
 	}
@@ -416,7 +416,7 @@ type ownBackgroundTool struct {
 func (t *ownBackgroundTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:   "own",
-		Schema: json.RawMessage(`{"type":"object","properties":{"background":{"type":"boolean"}}}`),
+		Schema: json.RawMessage(`{"type":"object","properties":{"background":{"type":"boolean"}},"additionalProperties":false}`),
 		Class:  poo.ClassReadOnly,
 	}
 }
@@ -696,7 +696,7 @@ func (t *panicTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "explode",
 		Description: "explode",
-		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`),
 		Class:       poo.ClassSideEffecting,
 		Background:  poo.BackgroundAlways,
 	}

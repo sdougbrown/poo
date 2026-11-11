@@ -108,7 +108,7 @@ func (t *blockingTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "blocker",
 		Description: "a tool that blocks until the test releases it",
-		Schema:      json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 		Class:       poo.ClassSideEffecting,
 	}
 }

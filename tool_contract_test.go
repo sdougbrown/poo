@@ -70,7 +70,7 @@ type specNamedTool struct {
 func (t *specNamedTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:   t.name,
-		Schema: json.RawMessage(`{"type":"object","properties":{}}`),
+		Schema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	}
 }
 

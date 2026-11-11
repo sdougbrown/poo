@@ -664,7 +664,7 @@ func TestAFinishWithAJobRunningSettlesFinished(t *testing.T) {
 	sink := &recordingSink{}
 	jobTool := pootest.NewJobTool("job", poo.BackgroundAllowed)
 	jobTool.SetResult("the job's output")
-	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`)
+	finisher := newFinishTool(t, `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)
 
 	opts := poo.Options{
 		Transport: tr,

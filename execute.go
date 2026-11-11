@@ -303,6 +303,15 @@ func (s *Session) planCalls(run *runState, turn int, calls []ToolCall, truncated
 			}
 		}
 		plan.background = asked
+		if err := s.argSchemas.validate(call.Name, stripped); err != nil {
+			plan.invalid = true
+			plan.prepareErr = err
+			if truncated {
+				plan.complete = false
+			}
+			plans = append(plans, plan)
+			continue
+		}
 		prepared, err := tool.Prepare(stripped, s.prepareEnv())
 		if err != nil {
 			plan.invalid = true

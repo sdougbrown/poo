@@ -63,7 +63,7 @@ func (t *FindTool) Spec() poo.ToolSpec {
     "intent": {"type": "string", "description": "What you want to do, in your own words."}
   },
   "required": ["intent"]
-}`),
+,"additionalProperties":false}`),
 		Class: poo.ClassReadOnly,
 	}
 }

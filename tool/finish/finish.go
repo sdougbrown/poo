@@ -52,7 +52,7 @@ func New(schema json.RawMessage) (*Tool, error) {
 func (t *Tool) Spec() poo.ToolSpec {
 	result := t.schema
 	if result == nil {
-		result = map[string]any{"type": "object"}
+		result = map[string]any{"type": "object", "additionalProperties": false}
 	}
 	schema := map[string]any{
 		"type":                 "object",

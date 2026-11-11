@@ -289,7 +289,7 @@ func TestTheForkDiffersOnlyInTheMessagesAndTheCeiling(t *testing.T) {
 		Tools: []poo.ToolSpec{{
 			Name:        "echo",
 			Description: "echo",
-			Schema:      []byte(`{"type":"object","properties":{"text":{"type":"string"}}}`),
+			Schema:      []byte(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`),
 		}},
 	}
 	_, rendered, err := tr.Stream(context.Background(), req)

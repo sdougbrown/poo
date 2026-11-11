@@ -62,6 +62,16 @@ func (s *Session) registerJobTools() error {
 	s.opts.Tools[JobsToolName] = &JobTool{session: s, name: JobsToolName}
 	s.opts.Tools[CancelJobToolName] = &JobTool{session: s, name: CancelJobToolName}
 	s.opts.ToolOrder = append(s.opts.ToolOrder, JobsToolName, CancelJobToolName)
+
+	// The tool schemas compile once, at registration. A schema that
+	// does not compile is a tool bug, and the construction fails
+	// naming it. The compiled schemas hold every call to the contract
+	// the model was given.
+	schemas, err := compileArgSchemas(s.opts.Tools)
+	if err != nil {
+		return err
+	}
+	s.argSchemas = schemas
 	return nil
 }
 

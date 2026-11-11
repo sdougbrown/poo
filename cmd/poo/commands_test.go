@@ -229,7 +229,7 @@ func captureStdout(t *testing.T, fn func()) string {
 func TestTheFinishResultStaysOnStdout(t *testing.T) {
 	dir := t.TempDir()
 	schemaPath := filepath.Join(dir, "result.schema.json")
-	schema := `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`
+	schema := `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`
 	if err := os.WriteFile(schemaPath, []byte(schema), 0o644); err != nil {
 		t.Fatalf("writing the schema: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestTheFinishResultStaysOnStdout(t *testing.T) {
 func TestTheFinishResultStaysOnStdoutAfterAWokenReply(t *testing.T) {
 	dir := t.TempDir()
 	schemaPath := filepath.Join(dir, "result.schema.json")
-	schema := `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}`
+	schema := `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`
 	if err := os.WriteFile(schemaPath, []byte(schema), 0o644); err != nil {
 		t.Fatalf("writing the schema: %v", err)
 	}

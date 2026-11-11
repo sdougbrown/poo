@@ -170,7 +170,7 @@ func TestTheHandshakeReportsTheSettingsProfiles(t *testing.T) {
 func TestTheServeOffersTheTypedResultTool(t *testing.T) {
 	dir := t.TempDir()
 	schema := filepath.Join(dir, "result.schema.json")
-	if err := os.WriteFile(schema, []byte(`{"type":"object"}`), 0o600); err != nil {
+	if err := os.WriteFile(schema, []byte(`{"type":"object","additionalProperties":false}`), 0o600); err != nil {
 		t.Fatalf("writing the schema: %v", err)
 	}
 	settings := filepath.Join(dir, "settings.json")

@@ -195,7 +195,7 @@ func (t *deciderTool) Spec() poo.ToolSpec {
 	return poo.ToolSpec{
 		Name:        "echo",
 		Description: "echo the argument back",
-		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`),
+		Schema:      json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"additionalProperties":false}`),
 		Class:       poo.ClassReadOnly,
 	}
 }
