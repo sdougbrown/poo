@@ -11,6 +11,7 @@ package repl
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -125,11 +126,14 @@ func termIsTerminal(f any) bool {
 // run starts the server, opens the session and loops until the person
 // quits or the server goes away.
 func (m *machine) run() int {
+	// The shutdown runs even when the start failed part way: a
+	// handshake that failed with the server still alive leaves the
+	// session and the pipes for it to close.
+	defer m.shutdown()
 	if err := m.start(); err != nil {
 		m.r.failure(err.Error())
 		return 1
 	}
-	defer m.shutdown()
 
 	input := m.newInput()
 	defer input.close()
@@ -398,8 +402,11 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState, strea
 		}
 		m.r.toolResult(tool, outcome, text, elided)
 	case "usage":
-		if n, ok := evt.Payload["input_tokens"].(float64); ok {
-			m.status.setUsage(int(n), 0)
+		if raw, err := json.Marshal(evt.Payload); err == nil {
+			var usage protocol.UsageEvent
+			if json.Unmarshal(raw, &usage) == nil {
+				m.status.setUsage(usage.InputTokens, 0)
+			}
 		}
 	case "turn.ended":
 		state.turns++
@@ -418,23 +425,19 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState, strea
 }
 
 // settledUsage reads the token accounting out of a settle event's
-// detail.
+// detail: the payload is re-encoded and read through the protocol's own
+// shape, so a field the contract renames is a compile error here, not a
+// statusline that silently reads zero.
 func settledUsage(payload map[string]any) (input, output int) {
-	detail, ok := payload["detail"].(map[string]any)
-	if !ok {
+	raw, err := json.Marshal(payload["detail"])
+	if err != nil {
 		return 0, 0
 	}
-	usage, ok := detail["usage"].(map[string]any)
-	if !ok {
+	var detail protocol.SettleDetail
+	if json.Unmarshal(raw, &detail) != nil || detail.Usage == nil {
 		return 0, 0
 	}
-	if n, ok := usage["input_tokens"].(float64); ok {
-		input = int(n)
-	}
-	if n, ok := usage["output_tokens"].(float64); ok {
-		output = int(n)
-	}
-	return input, output
+	return detail.Usage.InputTokens, detail.Usage.OutputTokens
 }
 
 // answerAsk renders a permission ask and reads the decision.
