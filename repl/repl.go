@@ -578,6 +578,7 @@ func (m *machine) command(line string, input input) (int, bool) {
 		m.r.notice(`/quit            leave the repl
 /less            read the transcript again in less
 /model           name the session's models
+/model <name>    switch the chat model
 Esc              stop the running turn
 /help            this list
 anything else    a prompt for the session`)
@@ -599,15 +600,55 @@ anything else    a prompt for the session`)
 	case "/cancel":
 		m.cancelRun(m.activeRun())
 		return 0, false
-	default:
-		if err := m.startRun(line); err != nil {
-			m.r.failure(err.Error())
-			if isShutdown(err) {
-				return 1, true
-			}
-		}
+	}
+	if name, ok := strings.CutPrefix(line, "/model "); ok {
+		m.switchModel(strings.TrimSpace(name))
 		return 0, false
 	}
+	if err := m.startRun(line); err != nil {
+		m.r.failure(err.Error())
+		if isShutdown(err) {
+			return 1, true
+		}
+	}
+	return 0, false
+}
+
+// catalogNames returns the catalog's model names, in name order.
+func (m *machine) catalogNames() []string {
+	names := make([]string, 0, len(m.catalog))
+	for name := range m.catalog {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// switchModel points the session's chat role at another model the
+// catalog holds, and takes the new model's window for the statusline.
+//
+// The switch is the wire's own: session/configure changes the models
+// between runs, and the answer names what the session talks to now.
+// A name the catalog does not hold is the server's to refuse.
+func (m *machine) switchModel(name string) {
+	if name == "" {
+		m.r.failure("which model? /model lists them")
+		return
+	}
+	var res protocol.ConfigureResult
+	err := m.conn.call(protocol.MethodSessionConfigure, protocol.ConfigureParams{
+		SessionID: m.sessionID,
+		Models:    &protocol.ModelRoles{Chat: name},
+	}, &res)
+	if err != nil {
+		m.r.failure(err.Error())
+		return
+	}
+	m.status.model = res.Models.Chat
+	if info, ok := m.catalog[res.Models.Chat]; ok {
+		m.status.setContextLimit(info.ContextLimit)
+	}
+	m.r.notice("model → %s", res.Models.Chat)
 }
 
 // startRun sends one prompt and reports the run it started. The events
@@ -645,16 +686,6 @@ func (m *machine) endRun(input input) (int, bool) {
 		return 0, true
 	}
 	return 0, false
-}
-
-// catalogNames returns the catalog's model names, in name order.
-func (m *machine) catalogNames() []string {
-	names := make([]string, 0, len(m.catalog))
-	for name := range m.catalog {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // activeRun is the run the session is on, empty when idle.

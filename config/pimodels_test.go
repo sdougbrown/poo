@@ -1,0 +1,142 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/sdougbrown/poo"
+)
+
+// writePIModels writes a models file in pi's format and returns its
+// path.
+func writePIModels(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "models.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	return path
+}
+
+// TestASettingsFileImportsPIModels covers the import: every provider
+// becomes an endpoint, every model a model named provider/id, and
+// pi's fields map to the settings' own.
+func TestASettingsFileImportsPIModels(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"api": "openai-completions",
+				"apiKey": "dummy",
+				"models": [
+					{
+						"id": "qwen",
+						"input": ["text", "image"],
+						"contextWindow": 196608,
+						"maxTokens": 81920,
+						"reasoning": true,
+						"compat": {"supportsReasoningEffort": true}
+					}
+				]
+			}
+		}
+	}`)
+	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+
+	endpoint, ok := settings.Endpoints["home"]
+	if !ok || endpoint.Endpoint != "http://grace:4000/v1" || endpoint.APIKey != "dummy" {
+		t.Errorf("the provider imported as %+v", endpoint)
+	}
+	model, ok := settings.Models["home/qwen"]
+	if !ok {
+		t.Fatalf("the model imported under no name; the models are %v", settings.Models)
+	}
+	if model.ModelID != "qwen" || model.Endpoint != "home" {
+		t.Errorf("the model imported as %+v", model)
+	}
+	if model.ContextLimit != 196608 || model.MaxOutput != 81920 {
+		t.Errorf("the model's limits imported as %d/%d", model.ContextLimit, model.MaxOutput)
+	}
+	if len(model.Inputs) != 2 || model.Inputs[0] != "text" || model.Inputs[1] != "image" {
+		t.Errorf("the model's inputs imported as %v", model.Inputs)
+	}
+	if model.Reasoning == nil || model.Reasoning.Mode != poo.ReasoningEffort || model.Reasoning.Param != "reasoning_effort" {
+		t.Errorf("the model's reasoning imported as %+v", model.Reasoning)
+	}
+}
+
+// TestTheSettingsOwnEntriesWinOverAnImport covers the collision rule:
+// a model the settings configure is the one that survives.
+func TestTheSettingsOwnEntriesWinOverAnImport(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen", "contextWindow": 196608}]
+			}
+		}
+	}`)
+	settings, err := Parse([]byte(`{
+		"version":1,
+		"pi_models_file":"`+modelsFile+`",
+		"endpoints":{"home":{"endpoint":"http://mine:4000/v1"}},
+		"models":{"home/qwen":{"endpoint":"home","model_id":"qwen","context_limit":1000}}
+	}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	if settings.Endpoints["home"].Endpoint != "http://mine:4000/v1" {
+		t.Errorf("the import took the endpoint: %+v", settings.Endpoints["home"])
+	}
+	if settings.Models["home/qwen"].ContextLimit != 1000 {
+		t.Errorf("the import took the model: %+v", settings.Models["home/qwen"])
+	}
+}
+
+// TestAnUnknownPIAPPIsARefusal covers a provider poo cannot speak to:
+// the import refuses rather than importing halfway.
+func TestAnUnknownPIAPPIsARefusal(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"odd": {
+				"baseUrl": "http://odd:4000/v1",
+				"api": "smoke-signals",
+				"models": [{"id": "qwen"}]
+			}
+		}
+	}`)
+	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err == nil || !strings.Contains(err.Error(), "smoke-signals") {
+		t.Errorf("an unknown api loaded: %v", err)
+	}
+}
+
+// TestAnUnknownPIInputIsARefusal covers a modality poo cannot read.
+func TestAnUnknownPIInputIsARefusal(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen", "input": ["smell"]}]
+			}
+		}
+	}`)
+	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err == nil || !strings.Contains(err.Error(), "smell") {
+		t.Errorf("an unknown input loaded: %v", err)
+	}
+}
+
+// TestAMissingPIModelsFileIsARefusal covers a file that is not there:
+// the settings name it, so a missing file is the settings' failure.
+func TestAMissingPIModelsFileIsARefusal(t *testing.T) {
+	_, err := Parse([]byte(`{"version":1,"pi_models_file":"/tmp/no-such-models.json"}`), FormatJSON)
+	if err == nil || !strings.Contains(err.Error(), "no-such-models") {
+		t.Errorf("a missing models file loaded: %v", err)
+	}
+}
