@@ -86,9 +86,14 @@ type Rule struct {
 	// the command of a bash call, or the argument the tool names —
 	// the fetch tool's URL, for one.
 	//
-	// The prefix is a lexical heuristic and not a safety boundary. It
-	// compares the text, so "git status && rm -rf x" matches the
-	// prefix "git status".
+	// The prefix is a heuristic and not a safety boundary. A value
+	// that is no absolute http(s) URL compares lexically: "git status
+	// && rm -rf x" matches the prefix "git status". A URL compares in
+	// its canonical form, under the prefix's scheme when it names one.
+	// A prefix that names no scheme is a hostname rule. The call's own
+	// URL decides the scheme, so one hostname covers its http and https
+	// URLs alike. The host's spellings and its subdomains are judged
+	// the way an explicit-scheme prefix is judged.
 	CommandPrefix string
 	// Action is what the rule says to do with a matching call.
 	Action Action
