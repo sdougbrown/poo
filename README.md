@@ -48,8 +48,10 @@ pair an endpoint with a model id, and `roles` assign a model to a
 role. `pi_models_file` points at a models file in pi's format —
 providers with `baseUrl`, `api` and `apiKey`, each with its models —
 and imports them under names of the form `provider/id`; the
-settings' own entries win on a name collision. A `roles.chat` that
-names an imported model runs it like any other.
+settings' own entries win on a name collision. A provider whose
+models file carries no `apiKey` takes the key from pi's `auth.json`
+beside that file. A `roles.chat` that names an imported model runs it
+like any other.
 
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as

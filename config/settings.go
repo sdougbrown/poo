@@ -67,14 +67,18 @@ type Settings struct {
 	// PIModelsFile is a models file in pi's format: providers with
 	// their models, imported under names of the form provider/id.
 	// The settings' own endpoints and models win on a name collision.
+	// A provider whose apiKey the file leaves empty takes the key out
+	// of pi's auth.json beside the models file, when that file holds
+	// an api credential for the provider.
 	PIModelsFile string `json:"pi_models_file,omitempty"`
 }
 
 // Endpoint is one endpoint in the settings.
 //
-// The credential is read from the environment: the settings name the
-// variable that holds it, and the variable is the only place a key
-// comes from.
+// The credential is the environment variable the settings name, when
+// that holds a key, and the key the settings carry when it does not:
+// a variable is the better neighbor, and a literal is what a models
+// file written for another tool imports as.
 type Endpoint struct {
 	// Endpoint is the model's endpoint.
 	Endpoint string `json:"endpoint"`

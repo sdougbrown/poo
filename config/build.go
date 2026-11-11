@@ -1775,8 +1775,8 @@ func (r *Runtime) DeciderModel() (poo.ModelInfo, error) {
 // Transport returns the transport for a model.
 //
 // The transport talks to the endpoint the model is served by, with the
-// key the settings' endpoint names. A key is read from the
-// environment and from nowhere else.
+// key the settings' endpoint names: the environment variable it names
+// when that holds one, and the key the settings carry otherwise.
 func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	apiKey := r.apiKey(model.Name)
 	transport := openai.New(openai.Options{
