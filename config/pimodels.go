@@ -118,23 +118,17 @@ func importPiModels(settings *Settings) error {
 		return fmt.Errorf("config: %s holds no providers", expanded)
 	}
 
-	// pi's auth.json is read once, and only when a provider that is
-	// imported has no key of its own. A provider the settings
-	// already hold needs no key from it, and a models file that
-	// carries its keys needs nothing either.
-	var keys map[string]piCredential
-	if piAuthNeeded(settings, file.Providers) {
-		keys, err = readPiAuth(filepath.Join(filepath.Dir(expanded), piAuthFile))
-		if err != nil {
-			return err
-		}
-	}
-
 	providers := make([]string, 0, len(file.Providers))
 	for name := range file.Providers {
 		providers = append(providers, name)
 	}
 	sort.Strings(providers)
+
+	// The auth file beside the models file is read once, on the first
+	// provider whose key the models file leaves empty and that the
+	// settings do not already hold — the same pass that fills the key,
+	// so the rule for when a key is needed lives in one place.
+	var keys map[string]piCredential
 	for _, provider := range providers {
 		definition := file.Providers[provider]
 		api, err := piWireAPI(provider, definition.API)
@@ -147,6 +141,12 @@ func importPiModels(settings *Settings) error {
 			}
 			key := definition.APIKey
 			if key == "" {
+				if keys == nil {
+					keys, err = readPiAuth(filepath.Join(filepath.Dir(expanded), piAuthFile))
+					if err != nil {
+						return err
+					}
+				}
 				key = piStoredKey(keys[provider])
 			}
 			settings.Endpoints[provider] = Endpoint{
@@ -184,21 +184,6 @@ func importPiModels(settings *Settings) error {
 		}
 	}
 	return nil
-}
-
-// piAuthNeeded says whether an import asks pi's auth.json for a key: a
-// provider the settings do not already hold, whose apiKey the models
-// file leaves empty.
-func piAuthNeeded(settings *Settings, providers map[string]piProvider) bool {
-	for name, definition := range providers {
-		if _, held := settings.Endpoints[name]; held {
-			continue
-		}
-		if definition.APIKey == "" {
-			return true
-		}
-	}
-	return false
 }
 
 // readPiAuth reads pi's auth.json: credentials by provider name. A file

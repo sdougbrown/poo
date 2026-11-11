@@ -1225,9 +1225,6 @@ func TestThePolicyGetsTheResolvedWorkingDirectory(t *testing.T) {
 	}
 }
 
-// theCredentialSettings is a settings document with one model in it,
-// and the endpoint's credential lines left to the test.
-
 // TestTheCatalogSettingsCarryTheModelFields covers the translation the
 // catalog builds from: a settings model's endpoint, id, api, window,
 // output limit and reasoning control arrive in the catalog's settings
