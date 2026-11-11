@@ -100,6 +100,18 @@ func TestReasoningFieldsMapTheSettingOntoTheRequest(t *testing.T) {
 			want:    []poo.ReasoningField{{Path: poo.ReasoningPathToggle, Value: false}},
 		},
 		{
+			name:    "a toggle model that declares levels takes them",
+			model:   poo.ModelInfo{Name: "gemma4", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningToggle}, ReasoningLevels: []string{"off", "on"}},
+			setting: "on",
+			want:    []poo.ReasoningField{{Path: poo.ReasoningPathToggle, Value: true}},
+		},
+		{
+			name:    "a declared off on a toggle model asks for the explicit off",
+			model:   poo.ModelInfo{Name: "gemma4", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningToggle}, ReasoningLevels: []string{"off", "on"}},
+			setting: "off",
+			want:    []poo.ReasoningField{{Path: poo.ReasoningPathToggle, Value: false}},
+		},
+		{
 			name:    "an effort model takes the level",
 			model:   poo.ModelInfo{Name: "gpt-5", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}},
 			setting: "high",
