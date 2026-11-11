@@ -16,22 +16,23 @@ import (
 // startRepl starts the repl against a fresh fake server. The script
 // reads the input the person types and returns what the repl printed.
 func startRepl(t *testing.T, input string) (string, *fakeServer) {
-	return startReplServer(t, input, &fakeServer{t: t})
-}
-
-// startReplServer starts the repl against a server the test prepared.
-func startReplServer(t *testing.T, input string, server *fakeServer) (string, *fakeServer) {
-	t.Helper()
 	return startReplAs(t, input, nil)
 }
 
-// startReplAs starts the repl against a fake server the test set up: the
-// session's model, and the reasoning level it starts at.
-func startReplAs(t *testing.T, input string, setup func(*fakeServer)) (string, *fakeServer) {
+// startReplServer starts the repl against a fake server the test
+// prepared: its fields — refusals, warnings, levels — are the script.
+func startReplServer(t *testing.T, input string, server *fakeServer) (string, *fakeServer) {
 	t.Helper()
-	server := &fakeServer{t: t}
-	if setup != nil {
-		setup(server)
+	return startReplAs(t, input, server)
+}
+
+// startReplAs starts the repl against a fake server: the test's, when
+// one was prepared, or a fresh one. The session's model, and the
+// reasoning level it starts at, come from the server's answers.
+func startReplAs(t *testing.T, input string, server *fakeServer) (string, *fakeServer) {
+	t.Helper()
+	if server == nil {
+		server = &fakeServer{t: t}
 	}
 	stdin, stdout := pipeUp(t, server)
 
@@ -393,7 +394,7 @@ func TestAModelSwitchTakesTheLevelTheWireReports(t *testing.T) {
 // TestTheStatuslineNamesTheLevelTheSessionOpenedAt covers the read-back:
 // a session that runs at a level says so before anything is typed.
 func TestTheStatuslineNamesTheLevelTheSessionOpenedAt(t *testing.T) {
-	out, _ := startReplAs(t, "/quit\n", func(s *fakeServer) { s.level = "high" })
+	out, _ := startReplAs(t, "/quit\n", &fakeServer{t: t, level: "high"})
 
 	if !strings.Contains(out, "🧠 high") {
 		t.Errorf("the statusline names no level:\n%s", out)
