@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -139,10 +140,10 @@ func TestAnUnknownCommandIsAPromptNotAFailure(t *testing.T) {
 	}
 }
 
-// TestACancelKeepsTheSession covers /cancel with nothing to cancel:
-// the call goes out, its refusal is the repl's to ignore, and the
+// TestACancelWithNothingRunningSendsNothing covers /cancel at an idle
+// prompt: there is no run to stop, so no call goes out, and the
 // session stays open.
-func TestACancelKeepsTheSession(t *testing.T) {
+func TestACancelWithNothingRunningSendsNothing(t *testing.T) {
 	out, server := startRepl(t, "/cancel\n/quit\n")
 
 	if strings.Contains(out, "✗") {
@@ -150,11 +151,43 @@ func TestACancelKeepsTheSession(t *testing.T) {
 	}
 	server.mu.Lock()
 	defer server.mu.Unlock()
-	if server.cancels != 1 {
-		t.Errorf("the server got %d cancel calls, want 1", server.cancels)
+	if len(server.cancels) != 0 {
+		t.Errorf("the server got the cancels %v, want none", server.cancels)
 	}
 	if !server.closed {
 		t.Error("the repl left the session open")
+	}
+}
+
+// TestACancelNamesTheRunItStops covers the wire shape the cancel rides
+// on: run/cancel names the run, because the server refuses a cancel
+// that does not say what to stop.
+func TestACancelNamesTheRunItStops(t *testing.T) {
+	server := &fakeServer{t: t}
+	stdin, stdout := pipeUp(t, server)
+	conn := startConn(stdout, stdin)
+	m := &machine{conn: conn, sessionID: "s1", runID: "r1", r: newRenderer(&bytes.Buffer{})}
+
+	m.cancelRun()
+
+	deadline := time.After(5 * time.Second)
+	for {
+		server.mu.Lock()
+		n := len(server.cancels)
+		server.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the cancel never reached the server")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if server.cancels[0] != "r1" {
+		t.Errorf("the cancel named %q, want r1", server.cancels[0])
 	}
 }
 

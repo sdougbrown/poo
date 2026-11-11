@@ -39,7 +39,7 @@ func runModels(args []string) int {
 		return 2
 	}
 
-	settings, err := o.settings()
+	settings, err := o.settings("")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo models: %v\n", err)
 		return 2

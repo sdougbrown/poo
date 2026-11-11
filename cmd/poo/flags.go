@@ -77,17 +77,18 @@ func (f *sharedFlags) register(fs *flag.FlagSet) {
 // --settings file, the environment's file, the project's, the user's;
 // a command that finds none runs on the defaults, and the flags
 // change them.
-func (f *sharedFlags) settings() (*config.Settings, error) {
-	_, settings, err := resolveSettings(f.settingsFile)
+func (f *sharedFlags) settings(workingDir string) (*config.Settings, error) {
+	_, settings, err := resolveSettings(f.settingsFile, workingDir)
 	return settings, err
 }
 
 // resolveSettings finds and loads the settings a command runs under:
-// the explicit file a flag or the environment names, then discovery,
-// then the defaults. The path comes back with the settings, for the
-// commands that hand it to a child.
-func resolveSettings(explicit string) (string, *config.Settings, error) {
-	path, err := config.FindSettings(explicit, "")
+// the explicit file a flag or the environment names, then discovery
+// walking up from the working directory, then the defaults. The path
+// comes back with the settings, for the commands that hand it to a
+// child.
+func resolveSettings(explicit, workingDir string) (string, *config.Settings, error) {
+	path, err := config.FindSettings(explicit, workingDir)
 	if err != nil {
 		return "", nil, err
 	}
