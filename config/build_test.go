@@ -1224,3 +1224,43 @@ func TestACredentialIsTheEnvironmentThenTheKey(t *testing.T) {
 		})
 	}
 }
+
+// TestTheCatalogSettingsCarryTheModelFields covers the translation the
+// catalog builds from: a settings model's endpoint, id, api, window,
+// output limit and reasoning control arrive in the catalog's settings
+// whole, because an import that parses cleanly and a catalog that drops
+// the fields would meet in the middle and lose them.
+func TestTheCatalogSettingsCarryTheModelFields(t *testing.T) {
+	settings := &config.Settings{
+		Version: 1,
+		Endpoints: map[string]config.Endpoint{
+			"test": {Endpoint: "http://localhost:4000/v1", APIKey: "literal-key-123"},
+		},
+		Models: map[string]config.Model{
+			"test-model": {
+				Endpoint:     "test",
+				ModelID:      "test-model",
+				API:          "chat_completions",
+				Inputs:       []string{"text"},
+				ContextLimit: 32768,
+				MaxOutput:    8192,
+				Reasoning:    &poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort},
+			},
+		},
+	}
+	catalog := settings.CatalogSettings()
+	endpoint := catalog.Endpoints["test"]
+	if endpoint.APIKey != "literal-key-123" || endpoint.APIKeyEnv != "" {
+		t.Errorf("the endpoint imported as %+v", endpoint)
+	}
+	model := catalog.Models["test-model"]
+	if model.ModelID != "test-model" || model.ContextLimit != 32768 || model.MaxOutput != 8192 {
+		t.Errorf("the model's fields imported as %+v", model)
+	}
+	if len(model.Inputs) != 1 || model.Inputs[0] != poo.ModalityText {
+		t.Errorf("the model's inputs imported as %v", model.Inputs)
+	}
+	if model.Reasoning == nil || model.Reasoning.Param != poo.ReasoningPathEffort {
+		t.Errorf("the model's reasoning imported as %+v", model.Reasoning)
+	}
+}
