@@ -65,8 +65,10 @@ type Settings struct {
 	// without the named interface shows its usage.
 	UI string `json:"ui,omitempty"`
 	// PIModelsFile is a models file in pi's format: providers with
-	// their models, imported under names of the form provider/id.
-	// The settings' own endpoints and models win on a name collision.
+	// their models, imported under names of the form provider/id. The
+	// compatibility is the file shapes alone — the file is wherever
+	// the operator keeps it, and poo reads no pi installation. The
+	// settings' own endpoints and models win on a name collision.
 	PIModelsFile string `json:"pi_models_file,omitempty"`
 }
 
