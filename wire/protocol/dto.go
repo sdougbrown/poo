@@ -410,6 +410,23 @@ type MessageResult struct {
 	InputID string `json:"input_id"`
 }
 
+// UsageEvent is the payload of the usage event: the token accounting
+// of one provider request.
+type UsageEvent struct {
+	// RunID identifies the run the request belongs to.
+	RunID string `json:"run_id"`
+	// Turn is the run's turn the request belongs to.
+	Turn int `json:"turn"`
+	// Request is the run's request number.
+	Request int `json:"request"`
+	// InputTokens is the request's prompt-token count.
+	InputTokens int `json:"input_tokens"`
+	// OutputTokens is the request's completion-token count.
+	OutputTokens int `json:"output_tokens"`
+	// CacheReadTokens is the number of prompt tokens served from cache.
+	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
+}
+
 // InspectWait asks the server to wait for something.
 type InspectWait struct {
 	// Until is what to wait for. It is "settled".
@@ -575,6 +592,40 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		out["at"] = e.At
 	}
 	return json.Marshal(out)
+}
+
+// UnmarshalJSON reads an event marshaled by MarshalJSON.
+//
+// The known fields are read out and everything else is the event's own
+// data, so the two directions of the flat encoding live here, beside
+// each other: a key one side renames, the other refuses or follows, and
+// a client that decodes with this method never drifts from the shape
+// the server sent.
+func (e *Event) UnmarshalJSON(data []byte) error {
+	var flat map[string]json.RawMessage
+	if err := json.Unmarshal(data, &flat); err != nil {
+		return err
+	}
+	read := func(key string, dst any) {
+		if v, ok := flat[key]; ok {
+			if err := json.Unmarshal(v, dst); err != nil {
+				return
+			}
+			delete(flat, key)
+		}
+	}
+	read("session_id", &e.SessionID)
+	read("seq", &e.Seq)
+	read("type", &e.Type)
+	read("at", &e.At)
+	e.Payload = map[string]any{}
+	for key, v := range flat {
+		var value any
+		if err := json.Unmarshal(v, &value); err == nil {
+			e.Payload[key] = value
+		}
+	}
+	return nil
 }
 
 // AskParams are the params of a permission ask.

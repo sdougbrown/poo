@@ -152,11 +152,21 @@ func TestAConnFailsWhenTheServerLeaves(t *testing.T) {
 }
 
 // TestAnEventKeepsItsUnknownFields covers the forward-compatibility
-// rule: a field the client does not know stays in the payload, so a
-// later server's events still read.
+// rule, through the protocol's own decoder: a field the client does not
+// know stays in the payload, so a later server's events still read, and
+// the decode never drifts from the encode it mirrors.
 func TestAnEventKeepsItsUnknownFields(t *testing.T) {
-	evt, err := unmarshalEvent([]byte(`{"session_id":"s1","seq":2,"type":"run.settled","fresh_field":42}`))
+	marshaled, err := json.Marshal(protocol.Event{
+		SessionID: "s1",
+		Seq:       2,
+		Type:      "run.settled",
+		Payload:   map[string]any{"fresh_field": 42},
+	})
 	if err != nil {
+		t.Fatalf("the event did not encode: %v", err)
+	}
+	var evt protocol.Event
+	if err := json.Unmarshal(marshaled, &evt); err != nil {
 		t.Fatalf("the event did not decode: %v", err)
 	}
 	if evt.Payload["fresh_field"] != float64(42) {
