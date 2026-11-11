@@ -184,6 +184,18 @@ func TestARefusedPromptFailsTheLineNotTheSession(t *testing.T) {
 	}
 }
 
+// TestALessWithoutAPagerFailsTheLineNotTheSession covers /less with no
+// less on the path: the failure is a line in the transcript, and the
+// session goes on.
+func TestALessWithoutAPagerFailsTheLineNotTheSession(t *testing.T) {
+	t.Setenv("PATH", "")
+	out, _ := startRepl(t, "/less\n/quit\n")
+
+	if !strings.Contains(out, "✗") {
+		t.Errorf("the missing pager read no failure:\n%s", out)
+	}
+}
+
 // TestARefusedCallReadsInTheTranscript covers the server's refusals:
 // a method the server refused is a line in the transcript, and the
 // repl keeps going.

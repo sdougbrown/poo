@@ -62,11 +62,18 @@ func TestTheUIReadsTheSettingsTheCommandResolves(t *testing.T) {
 		t.Errorf("an unknown ui exited %d, want 2", code)
 	}
 
+	// The refusal names the missing environment file: a run that
+	// fell through to the project's settings would refuse with the
+	// door's name instead.
 	missing := filepath.Join(project, "missing.json")
 	t.Setenv("POO_SETTINGS", missing)
 	t.Chdir(project)
-	if code := runUI(); code != 2 {
+	code, stderr := runCLI(t)
+	if code != 2 {
 		t.Errorf("a missing environment file exited %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "missing.json") {
+		t.Errorf("the refusal does not name the missing environment file: %q", stderr)
 	}
 
 	broken := filepath.Join(project, "broken.json")

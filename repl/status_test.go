@@ -80,13 +80,39 @@ func TestTheBranchReadsFromARepository(t *testing.T) {
 	}
 }
 
+// TestTheBranchReadsAtADetachedHead covers the fallback: a head with
+// no symbolic ref names its commit.
+func TestTheBranchReadsAtADetachedHead(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit",
+		"--allow-empty", "-m", "one")
+	runGit(t, dir, "checkout", "--detach", "HEAD")
+	branch, ok := gitBranch(dir)
+	if !ok {
+		t.Fatal("a detached head named no branch")
+	}
+	// The branch is the commit the head points at, short form.
+	short := strings.TrimSpace(runGitOut(t, dir, "rev-parse", "--short", "HEAD"))
+	if branch != short {
+		t.Errorf("the detached head named %q, want %q", branch, short)
+	}
+}
+
 // runGit runs one git command in dir.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
+	runGitOut(t, dir, args...)
+}
+
+// runGitOut runs one git command in dir and returns its output.
+func runGitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
+	out, err := cmd.Output()
+	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
 	}
+	return string(out)
 }
