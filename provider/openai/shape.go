@@ -52,6 +52,7 @@ func zeroModelInfo(info poo.ModelInfo) bool {
 		info.PrefixCache == nil &&
 		info.Tools == poo.ToolCalling{} &&
 		info.Reasoning == poo.ReasoningControl{} &&
+		len(info.ReasoningLevels) == 0 &&
 		info.Temperature == "" &&
 		info.PromptCache == "" &&
 		info.PromptVariant == "" &&
@@ -59,11 +60,16 @@ func zeroModelInfo(info poo.ModelInfo) bool {
 		len(info.Source) == 0
 }
 
-// reasoningSetting returns the reasoning setting the request uses.
+// reasoningSetting returns the reasoning setting a request uses.
 //
-// The configured setting wins, and the model info's reasoning control
-// decides how it is spelled.
-func (t *Transport) reasoningSetting() string {
+// The request's own level wins: it is the session's, and a session that
+// changed it between the runs means it. A request that carries none falls
+// back to the transport's configuration, and the model info's reasoning
+// control decides how the setting is spelled.
+func (t *Transport) reasoningSetting(req poo.ChatRequest) string {
+	if req.Reasoning != "" {
+		return req.Reasoning
+	}
 	if t.cfg.Reasoning != "" {
 		return t.cfg.Reasoning
 	}
@@ -78,8 +84,8 @@ func (t *Transport) reasoningSetting() string {
 //
 // A setting the model cannot honour is a configuration error, and the
 // request never goes out.
-func (t *Transport) shapeReasoning(info poo.ModelInfo, shape *requestShape) error {
-	fields, err := info.ReasoningFields(t.reasoningSetting())
+func (t *Transport) shapeReasoning(req poo.ChatRequest, info poo.ModelInfo, shape *requestShape) error {
+	fields, err := info.ReasoningFields(t.reasoningSetting(req))
 	if err != nil {
 		return configErrorf("%s", reasonError(err))
 	}
@@ -190,7 +196,7 @@ func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings)
 		request: &out,
 		params:  out.Params,
 	}
-	if err := t.shapeReasoning(settings.info, shape); err != nil {
+	if err := t.shapeReasoning(req, settings.info, shape); err != nil {
 		return nil, err
 	}
 	t.shapeSampling(settings.info, shape)

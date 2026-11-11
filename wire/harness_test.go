@@ -726,22 +726,29 @@ func (f *testFactory) Load(ctx context.Context, params protocol.LoadParams, env 
 }
 
 // Configure applies a configuration change to a session.
-func (f *testFactory) Configure(ctx context.Context, sess *poo.Session, params protocol.ConfigureParams) (protocol.ModelRoles, error) {
+func (f *testFactory) Configure(ctx context.Context, sess *poo.Session, params protocol.ConfigureParams) (protocol.ConfigureResult, error) {
 	if params.Models != nil && params.Models.Chat != "" && params.Models.Chat != "test-model" {
-		return protocol.ModelRoles{}, poo.ErrUnknownModel
+		return protocol.ConfigureResult{}, poo.ErrUnknownModel
 	}
-	return f.Roles(), nil
+	if params.Reasoning != "" {
+		if err := sess.SetReasoning(params.Reasoning); err != nil {
+			return protocol.ConfigureResult{}, err
+		}
+	}
+	return protocol.ConfigureResult{Models: f.Roles(), Reasoning: sess.ReasoningLevel()}, nil
 }
 
 // Models returns the effective model catalog.
 func (f *testFactory) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo, error) {
+	model := f.model()
 	return []protocol.ModelInfo{{
-		Name:         "test-model",
-		ModelID:      "test-model",
-		API:          string(poo.APIChatCompletions),
-		Ops:          []string{string(poo.OpChat)},
-		ContextLimit: 8192,
-		ToolsMode:    "native",
+		Name:            "test-model",
+		ModelID:         "test-model",
+		API:             string(poo.APIChatCompletions),
+		Ops:             []string{string(poo.OpChat)},
+		ContextLimit:    8192,
+		ToolsMode:       "native",
+		ReasoningLevels: model.ReasoningLevels,
 	}}, nil
 }
 
@@ -782,6 +789,10 @@ func (f *testFactory) model() poo.ModelInfo {
 		Ops:          []poo.Op{poo.OpChat},
 		ContextLimit: 8192,
 		Tools:        poo.ToolCalling{Mode: poo.ToolsNative},
+		// The model thinks when it is asked to, at the levels its endpoint
+		// knows: a wire test cycles them the way a client does.
+		Reasoning:       poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort},
+		ReasoningLevels: []string{"off", "low", "high"},
 	}
 }
 

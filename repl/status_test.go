@@ -8,13 +8,14 @@ import (
 )
 
 // TestTheStatuslineNamesWhatTheSessionKnows covers the line: the
-// folder, the branch, the model and the context's fill.
+// folder, the branch, the model, the reasoning level and the context's
+// fill.
 func TestTheStatuslineNamesWhatTheSessionKnows(t *testing.T) {
-	s := &status{dir: "/home/me/Code/poo", branch: "main", model: "gemma4"}
+	s := &status{dir: "/home/me/Code/poo", branch: "main", model: "gemma4", level: "low"}
 	s.setUsage(12300, 262144)
 
 	line := s.line()
-	for _, want := range []string{"⌂ poo", "⎇ main", "gemma4", "ctx 12.3k/262.1k"} {
+	for _, want := range []string{"⌂ poo", "⎇ main", "gemma4", "🧠 low", "ctx 12.3k/262.1k"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the statusline lacks %q:\n%s", want, line)
 		}
@@ -31,6 +32,9 @@ func TestTheStatuslineLeavesOutWhatItDoesNotKnow(t *testing.T) {
 	line := s.line()
 	if strings.Contains(line, "⎇") {
 		t.Errorf("the statusline names a branch it does not know:\n%s", line)
+	}
+	if strings.Contains(line, "🧠") {
+		t.Errorf("the statusline names a reasoning level the session does not run at:\n%s", line)
 	}
 	if !strings.Contains(line, "ctx 500") {
 		t.Errorf("the context fill is missing:\n%s", line)

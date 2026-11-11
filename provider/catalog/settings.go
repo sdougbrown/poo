@@ -56,6 +56,10 @@ type ModelSettings struct {
 	MaxOutput int
 	// Reasoning is how the model's reasoning is controlled.
 	Reasoning *poo.ReasoningControl
+	// ReasoningLevels are the reasoning levels the model accepts, lowest
+	// first. A model that names none is set by its reasoning control
+	// alone.
+	ReasoningLevels []string
 	// Temperature is whether the model accepts a temperature.
 	Temperature poo.TempMode
 	// PrefixCache reports whether the endpoint caches prompt prefixes.
@@ -75,20 +79,21 @@ type ModelSettings struct {
 // discovery layers keep it.
 func (m ModelSettings) layer(name, endpointURL string, sampling poo.Sampling) poo.ModelInfo {
 	info := poo.ModelInfo{
-		Name:          name,
-		Endpoint:      endpointURL,
-		ModelID:       m.ModelID,
-		API:           m.API,
-		Ops:           m.Ops,
-		Inputs:        m.Inputs,
-		ContextLimit:  m.ContextLimit,
-		MaxOutput:     m.MaxOutput,
-		PrefixCache:   m.PrefixCache,
-		Temperature:   m.Temperature,
-		PromptCache:   m.PromptCache,
-		PromptVariant: m.PromptVariant,
-		Quirks:        m.Quirks,
-		Sampling:      sampling,
+		Name:            name,
+		Endpoint:        endpointURL,
+		ModelID:         m.ModelID,
+		API:             m.API,
+		Ops:             m.Ops,
+		Inputs:          m.Inputs,
+		ContextLimit:    m.ContextLimit,
+		MaxOutput:       m.MaxOutput,
+		PrefixCache:     m.PrefixCache,
+		Temperature:     m.Temperature,
+		PromptCache:     m.PromptCache,
+		PromptVariant:   m.PromptVariant,
+		Quirks:          m.Quirks,
+		Sampling:        sampling,
+		ReasoningLevels: m.ReasoningLevels,
 	}
 	if m.ToolsMode != "" {
 		info.Tools.Mode = m.ToolsMode

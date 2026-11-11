@@ -31,22 +31,23 @@ import (
 // match them up, and the fields that hold a group of values name their
 // parts: "sampling.temperature", "tools.mode" and "reasoning.mode".
 const (
-	fieldName          = "name"
-	fieldEndpoint      = "endpoint"
-	fieldModelID       = "model_id"
-	fieldAPI           = "api"
-	fieldOps           = "ops"
-	fieldInputs        = "inputs"
-	fieldContextLimit  = "context_limit"
-	fieldMaxOutput     = "max_output"
-	fieldSampling      = "sampling"
-	fieldPrefixCache   = "prefix_cache"
-	fieldTools         = "tools"
-	fieldReasoning     = "reasoning"
-	fieldTemperature   = "temperature"
-	fieldPromptCache   = "prompt_cache"
-	fieldPromptVariant = "prompt_variant"
-	fieldQuirks        = "quirks"
+	fieldName            = "name"
+	fieldEndpoint        = "endpoint"
+	fieldModelID         = "model_id"
+	fieldAPI             = "api"
+	fieldOps             = "ops"
+	fieldInputs          = "inputs"
+	fieldContextLimit    = "context_limit"
+	fieldMaxOutput       = "max_output"
+	fieldSampling        = "sampling"
+	fieldPrefixCache     = "prefix_cache"
+	fieldTools           = "tools"
+	fieldReasoning       = "reasoning"
+	fieldReasoningLevels = "reasoning.levels"
+	fieldTemperature     = "temperature"
+	fieldPromptCache     = "prompt_cache"
+	fieldPromptVariant   = "prompt_variant"
+	fieldQuirks          = "quirks"
 )
 
 // The layers the catalog merges, in order.
@@ -328,6 +329,7 @@ func (c *Catalog) Explain(name string) (poo.ModelInfo, []Explanation, error) {
 		{Field: "tools.parallel", Value: btoa(boolp(info.Tools.Parallel)), Layer: source["tools.parallel"]},
 		{Field: "reasoning.mode", Value: string(info.Reasoning.Mode), Layer: source["reasoning.mode"]},
 		{Field: "reasoning.param", Value: info.Reasoning.Param, Layer: source["reasoning.param"]},
+		{Field: fieldReasoningLevels, Value: joinStrings(info.ReasoningLevels), Layer: source[fieldReasoningLevels]},
 		{Field: fieldTemperature, Value: string(info.Temperature), Layer: source[fieldTemperature]},
 		{Field: fieldPromptCache, Value: string(info.PromptCache), Layer: source[fieldPromptCache]},
 		{Field: fieldPromptVariant, Value: info.PromptVariant, Layer: source[fieldPromptVariant]},
@@ -540,6 +542,10 @@ func applyLayer(dst *poo.ModelInfo, source map[string]string, layer string, src 
 	if src.Reasoning.Param != "" {
 		dst.Reasoning.Param = src.Reasoning.Param
 		source["reasoning.param"] = layer
+	}
+	if len(src.ReasoningLevels) > 0 {
+		dst.ReasoningLevels = src.ReasoningLevels
+		source[fieldReasoningLevels] = layer
 	}
 	if src.Temperature != "" {
 		dst.Temperature = src.Temperature

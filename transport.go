@@ -28,6 +28,14 @@ type ChatRequest struct {
 	// MaxTokens is the output-token limit for this request. It is always
 	// computed by the caller, never left to the endpoint default.
 	MaxTokens int
+	// Reasoning is the reasoning level this request asks the model to run
+	// at: one of the named levels, or a token budget. Empty leaves the
+	// transport's own configuration in charge.
+	//
+	// The level is the session's, not the model's, so it travels with the
+	// request: the same model serves a session that thinks and a session
+	// that does not.
+	Reasoning string
 	// OnAttempt is called for every attempt that failed, so the caller
 	// can write the attempt to its record.
 	//
