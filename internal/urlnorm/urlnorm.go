@@ -54,10 +54,16 @@ func Canonical(value string) (string, bool) {
 // the host under either scheme, and the call's own URL decides which
 // one. A prefix that names a scheme is refused — its own scheme must
 // hold, so the caller keeps the lexical comparison rather than
-// stretching the prefix past the scheme it names.
+// stretching the prefix past the scheme it names. A prefix whose
+// authority carries userinfo is refused too: a hostname rule names a
+// host, and userinfo names nothing a URL rule can mean, so the prefix
+// matches nothing rather than widening to the bare host.
 func CanonicalPrefix(canonical, prefix string) (string, bool) {
 	scheme, _, ok := strings.Cut(canonical, "://")
 	if !ok || (scheme != "http" && scheme != "https") || strings.Contains(prefix, "://") {
+		return "", false
+	}
+	if authority, _, _ := strings.Cut(prefix, "/"); strings.Contains(authority, "@") {
 		return "", false
 	}
 	return Canonical(scheme + "://" + prefix)

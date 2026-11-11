@@ -132,6 +132,24 @@ func TestAHostnamePrefixCarriesItsPathAndPort(t *testing.T) {
 	}
 }
 
+// TestAHostnamePrefixRefusesUserinfo covers the authority's grammar: a
+// hostname rule names a host, so a prefix whose authority carries
+// userinfo names nothing a URL rule can mean, and it matches nothing
+// rather than widening to the bare host behind the userinfo.
+func TestAHostnamePrefixRefusesUserinfo(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "attacker@internal.example.com", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, url := range []string{
+		"https://internal.example.com/page",
+		"https://attacker@internal.example.com/page",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if rule.matchesCommand(info) {
+			t.Errorf("the userinfo prefix matches %s, want a rule that names no host to match nothing", url)
+		}
+	}
+}
+
 // TestAPrefixStaysLexicalForNonURLs covers the rules over a command or
 // a path: no canonicalization, the text compares as it is. A hostname
 // prefix keeps the lexical fallback for a value that is no URL.
