@@ -1,11 +1,13 @@
 package repl
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 )
 
@@ -38,21 +40,46 @@ type renderer struct {
 	// that is not a terminal, where markdown renders as plain text.
 	tr *glamour.TermRenderer
 	// transcript mirrors what was written, ANSI included.
-	transcript strings.Builder
+	transcript bytes.Buffer
 	// wrap is the width the markdown wraps at.
 	wrap int
+	// width is the terminal's own width in columns: the width the
+	// streamed text is laid out at. It is zero for a writer that is
+	// not a terminal, which streams nothing.
+	width int
+	// block is the message the deltas are streaming right now.
+	block streamBlock
+}
+
+// streamBlock is the raw text one message printed as it arrived, and
+// the place in the transcript where the rendered message goes.
+type streamBlock struct {
+	// raw is the text printed so far. The line count the erase needs
+	// comes from it, because a terminal wraps what it prints.
+	raw strings.Builder
+	// mark is the transcript's length before the raw text landed in
+	// it: where the rendered message goes.
+	mark int
+	// hint says the writing hint stands on the terminal, in the place
+	// the text will.
+	hint bool
 }
 
 // newRenderer builds the renderer for out.
 //
 // A terminal gets the auto style, which picks the palette from the
-// terminal's own background; anything else gets plain text, so a test
-// or a pipe reads the same words without the escapes.
+// terminal's own background, and the width it lays text out at;
+// anything else gets plain text, so a test or a pipe reads the same
+// words without the escapes, and streams nothing.
 func newRenderer(out io.Writer) *renderer {
 	r := &renderer{out: out, wrap: 80}
 	if termIsTerminal(out) {
 		if f, ok := out.(interface{ Fd() uintptr }); ok {
+			// A terminal that will not say how wide it is keeps the
+			// width the markdown is wrapped at.
+			r.width = r.wrap + 2
 			if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 4 {
+				r.width = w
 				r.wrap = w - 2
 			}
 		}
@@ -71,6 +98,102 @@ func newRenderer(out io.Writer) *renderer {
 func (r *renderer) write(s string) {
 	r.transcript.WriteString(s)
 	fmt.Fprint(r.out, s)
+}
+
+// streams reports whether text goes to the terminal as it arrives.
+// Only a terminal streams: a pipe takes the rendered message when it
+// completes, so its bytes stay the same from run to run.
+func (r *renderer) streams() bool {
+	return r.width > 0
+}
+
+// hint shows the dim line that the model is writing, in the place the
+// streamed text will take.
+//
+// It stands until the message's first text arrives. A message whose
+// text has started needs no hint, and a pipe shows none at all.
+func (r *renderer) hint() {
+	if !r.streams() || r.block.hint || r.block.raw.Len() > 0 {
+		return
+	}
+	fmt.Fprint(r.out, ansiDim+"… writing"+ansiReset)
+	r.block.hint = true
+}
+
+// takeHint takes the writing hint back off the terminal.
+func (r *renderer) takeHint() {
+	if r.block.hint {
+		fmt.Fprint(r.out, "\r"+ansi.EraseLine(0))
+		r.block.hint = false
+	}
+}
+
+// streamText prints a text delta to the terminal as it arrives, raw,
+// and keeps the copy the transcript holds until the message renders.
+//
+// The text is not markdown yet: a stream that is still arriving can end
+// mid-word or mid-fence, so rendering waits for the whole message.
+func (r *renderer) streamText(text string) {
+	if !r.streams() || text == "" {
+		return
+	}
+	if r.block.raw.Len() == 0 {
+		// The block starts here, on the line the hint stood on.
+		r.takeHint()
+		r.block.mark = r.transcript.Len()
+	}
+	r.block.raw.WriteString(text)
+	r.write(text)
+}
+
+// erase takes back what the stream put on the terminal - the raw text,
+// or the hint that stood in for it - and leaves the cursor where the
+// block began, with everything below it cleared.
+//
+// Nothing above the block is touched: the block starts right after the
+// last thing printed, and the cursor move is counted from the lines the
+// terminal wrapped it over. The raw text leaves the transcript with it,
+// so the rendered message takes its place rather than joining it.
+func (r *renderer) erase() {
+	r.takeHint()
+	if r.block.raw.Len() == 0 {
+		return
+	}
+	lines := wrappedLines(r.block.raw.String(), r.width)
+	// Back to the block's first column, up to its first line - the
+	// cursor is in the last one - and clear from there down.
+	var seq strings.Builder
+	seq.WriteString("\r")
+	if lines > 1 {
+		seq.WriteString(ansi.CursorUp(lines - 1))
+	}
+	seq.WriteString(ansi.EraseDisplay(0))
+	fmt.Fprint(r.out, seq.String())
+	r.transcript.Truncate(r.block.mark)
+	r.block.raw.Reset()
+}
+
+// wrappedLines counts the terminal lines a raw text fills when it is
+// printed at width columns.
+//
+// A line that fills the width exactly counts once, not twice: the
+// terminal keeps the cursor on its last cell until the next character
+// arrives, and the erase counts from the cursor. An empty line counts
+// once, the one the cursor sits on, and that includes the empty last
+// line a trailing newline leaves behind.
+func wrappedLines(text string, width int) int {
+	if width <= 0 {
+		return 1
+	}
+	lines := 0
+	for _, line := range strings.Split(text, "\n") {
+		n := (ansi.StringWidth(line) + width - 1) / width
+		if n < 1 {
+			n = 1
+		}
+		lines += n
+	}
+	return lines
 }
 
 // userPrompt echoes the prompt the session runs.

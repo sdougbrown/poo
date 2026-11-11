@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -175,5 +176,32 @@ func TestAnAskTheClientCannotTakeIsDenied(t *testing.T) {
 	ask := <-conn.asks
 	if ask.ask.Tool != "bash" || string(ask.id) != `"a0"` {
 		t.Errorf("the first ask read back as %+v", ask)
+	}
+}
+
+// TestTheReaderClosesTheEndsOfTheWire covers a server that goes away
+// while a run is streaming: the event and ask channels close, so the run
+// waiting on them returns instead of waiting for what will never come.
+func TestTheReaderClosesTheEndsOfTheWire(t *testing.T) {
+	h := newWireHarness(t)
+	conn := startConn(h.stdout, h.stdin)
+	h.stdout.Close()
+	go h.drain()
+
+	select {
+	case _, ok := <-conn.events:
+		if ok {
+			t.Error("the event channel carried an event after the server left")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event channel stayed open after the server left")
+	}
+	select {
+	case _, ok := <-conn.asks:
+		if ok {
+			t.Error("the ask channel carried a request after the server left")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the ask channel stayed open after the server left")
 	}
 }

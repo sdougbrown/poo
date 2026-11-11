@@ -42,6 +42,10 @@ type fakeServer struct {
 	chat string
 	// level is the reasoning level the session runs at.
 	level string
+	// script is the run the server plays for a prompt. A test sets it
+	// before pipeUp; a nil script plays run, the script the shared
+	// cases read.
+	script func(*fakeServer)
 
 	in *bufio.Reader
 	// w writes to the client.
@@ -189,8 +193,15 @@ func (s *fakeServer) line(line []byte) {
 			s.fail(req.ID, "busy", "the session is busy")
 			return
 		}
+		// The run the server plays is the test's own when it named one,
+		// and the shared script otherwise. It reads script before the
+		// goroutine starts, which the test's write precedes.
+		script := s.script
+		if script == nil {
+			script = (*fakeServer).run
+		}
 		s.reply(req.ID, map[string]any{"run_id": "r1"})
-		go s.run()
+		go script(s)
 	case protocol.MethodRunCancel:
 		var params protocol.CancelParams
 		json.Unmarshal(req.Params, &params)
@@ -270,6 +281,14 @@ func (s *fakeServer) run() {
 			"usage": map[string]any{"input_tokens": 12300, "output_tokens": 1100},
 		},
 	})
+}
+
+// hangUp drops the client's end of the wire, the way a server that died
+// would.
+func (s *fakeServer) hangUp() {
+	if closer, ok := s.w.(io.Closer); ok {
+		closer.Close()
+	}
 }
 
 // waitDecision blocks until the client answers the ask, or gives up

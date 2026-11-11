@@ -583,21 +583,28 @@ func (m *machine) runPrompt(text string, input input) error {
 	defer m.running.Store(false)
 	defer func() { m.runID = "" }()
 	m.runID = res.RunID
-	streams := newStreamView(m.out)
 	state := &runState{}
+	// The streamed text comes off the terminal on every way out of this
+	// loop, the failures included: a run that dies mid-message still
+	// leaves the rendered message in its place, not half a block.
+	defer state.flush(m.r)
 	for {
 		select {
 		case evt, ok := <-m.conn.events:
 			if !ok {
 				return errServerClosed
 			}
-			if done := m.event(evt, res.RunID, state, streams); done {
+			if done := m.event(evt, res.RunID, state); done {
 				return nil
 			}
 		case req, ok := <-m.conn.asks:
 			if !ok {
 				return errServerClosed
 			}
+			// The reply the run had streaming is done as far as the
+			// person can see: it renders above the question, and the
+			// deltas that follow start a block of their own.
+			state.flush(m.r)
 			if err := m.answerAsk(req, input); err != nil {
 				return err
 			}
@@ -628,16 +635,24 @@ func (m *machine) cancelRun() {
 }
 
 // event renders one event. The bool says the run settled.
-func (m *machine) event(evt protocol.Event, runID string, state *runState, streams *streamView) bool {
+func (m *machine) event(evt protocol.Event, runID string, state *runState) bool {
 	switch evt.Type {
 	case "message.delta":
 		id, _ := evt.Payload["message_id"].(string)
 		kind, _ := evt.Payload["kind"].(string)
 		text, _ := evt.Payload["text"].(string)
 		state.delta(id, kind, text)
-		streams.tick()
+		// The reply streams as it arrives. Thinking does not: it buffers
+		// and renders dimmed with the message it belongs to.
+		if kind == "text" {
+			m.r.streamText(text)
+		} else {
+			m.r.hint()
+		}
 	case "tool.call":
-		streams.stop()
+		// The message the call interrupts is done as far as the deltas
+		// go: it renders, and the call decorates the transcript below
+		// it.
 		state.flush(m.r)
 		tool, _ := evt.Payload["tool"].(string)
 		summary, _ := evt.Payload["summary"].(string)
@@ -662,7 +677,6 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState, strea
 		state.turns++
 	case "run.settled":
 		if id, _ := evt.Payload["run_id"].(string); id == runID {
-			streams.stop()
 			state.flush(m.r)
 			reason, _ := evt.Payload["reason"].(string)
 			input, output := settledUsage(evt.Payload)
@@ -766,46 +780,19 @@ func (s *runState) delta(id, kind, text string) {
 
 // flush renders the messages the deltas finished with, oldest first,
 // and empties the buffers.
+//
+// The raw text the stream printed comes off the terminal first, here,
+// because this is the flush every end of a run passes through: a tool
+// call, a question, a settle, or a failure out of the drain loop. The
+// rendered message lands where the raw text was, in the transcript too.
 func (s *runState) flush(r *renderer) {
+	r.erase()
 	for _, m := range s.messages {
 		r.thinking(m.thinking.String())
 		r.message(m.text.String())
 	}
 	s.messages = nil
 	s.byID = nil
-}
-
-// streamView is the one-line hint that the model is writing. A
-// terminal gets a dim line that the first render takes back; a pipe
-// gets nothing.
-type streamView struct {
-	out   io.Writer
-	live  bool
-	shown bool
-}
-
-// newStreamView builds the hint for out.
-func newStreamView(out io.Writer) *streamView {
-	if termIsTerminal(out) {
-		return &streamView{out: out, live: true}
-	}
-	return &streamView{out: out}
-}
-
-// tick shows the hint, once per run.
-func (s *streamView) tick() {
-	if s.live && !s.shown {
-		fmt.Fprint(s.out, ansiDim+"… writing"+ansiReset)
-		s.shown = true
-	}
-}
-
-// stop takes the hint back.
-func (s *streamView) stop() {
-	if s.shown {
-		fmt.Fprint(s.out, "\r\033[K")
-		s.shown = false
-	}
 }
 
 // The errors the run loop reports to the caller.
