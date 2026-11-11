@@ -13,6 +13,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	var f SettingsFields
 
 	f.Version = number(float64(s.Version))
+	f.FrontDoor = text(s.FrontDoor)
 	f.Profile = text(s.Profile)
 
 	f.RolesChat = text(s.Roles["chat"])

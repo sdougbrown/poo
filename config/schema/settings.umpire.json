@@ -2,6 +2,7 @@
   "version": 1,
   "fields": {
     "version": { "required": true, "isEmpty": "number" },
+    "front_door": { "isEmpty": "string" },
     "profile": { "isEmpty": "string" },
     "roles.chat": { "isEmpty": "string" },
     "roles.decider": { "isEmpty": "string" },
