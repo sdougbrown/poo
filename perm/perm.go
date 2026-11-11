@@ -161,6 +161,9 @@ type Policy struct { // rules are the policy's rules, in order.
 	doomLoopActionSet bool
 	// chain is the asker chain.
 	chain *chain
+	// warnings are the construction-time notes the policy carries: a
+	// prefix rule whose prefix the URL grammar refuses.
+	warnings []string
 	// workingDir is the directory the run works in.
 	workingDir string
 	// mu guards the ask counter.
@@ -206,6 +209,15 @@ func New(opts Options) (*Policy, error) {
 			return nil, fmt.Errorf("perm: rule %d matches %q by prefix, and the tool has no primary argument a prefix could match", i, rule.Tool)
 		}
 	}
+	var warnings []string
+	for i, rule := range opts.Rules {
+		if rule.CommandPrefix == "" || opts.PrimaryArgs == nil || opts.PrimaryArgs[rule.Tool] == "" {
+			continue
+		}
+		if refusedPrefix(rule.CommandPrefix) {
+			warnings = append(warnings, fmt.Sprintf("the rule %d's prefix for %q spells a URL the prefix grammar refuses; it matches only values that compare as text", i, rule.Tool))
+		}
+	}
 	timeout := opts.ChainTimeout
 	if timeout <= 0 {
 		timeout = DefaultChainTimeout
@@ -215,6 +227,7 @@ func New(opts Options) (*Policy, error) {
 		unmatched:  unmatched,
 		doomLoop:   doomLoop,
 		workingDir: opts.WorkingDir,
+		warnings:   warnings,
 
 		doomLoopActionSet: opts.DoomLoop.Action != "",
 		chain: &chain{
@@ -625,18 +638,41 @@ func (p *Policy) canAsk() bool {
 // Warning returns the warning a config load prints, or an empty string
 // when there is nothing to warn about.
 //
-// The warning fires when the policy can ask (see canAsk) and no asker in
-// the chain can ever answer one: every ask then falls back to the
-// policy's fallback decision, and the warning names it.
+// The warning carries the policy's construction-time notes: a prefix
+// rule whose prefix the URL grammar refuses. Such a rule matches only
+// values that compare as text. It also fires when the policy can ask
+// (see canAsk) and no asker in the chain can ever answer one: every
+// ask then falls back to the policy's fallback decision, and the
+// warning names it.
 func Warning(policy *Policy, askers []Asker) string {
-	if policy == nil || !policy.canAsk() {
+	if policy == nil {
 		return ""
 	}
-	if anyCanAnswer(askers) {
-		return ""
+	messages := append([]string(nil), policy.warnings...)
+	if policy.canAsk() && !anyCanAnswer(askers) {
+		messages = append(messages, fmt.Sprintf("the permission policy can ask, but no asker in the chain can ever answer; every ask falls back to %q",
+			policy.chain.fallback))
 	}
-	return fmt.Sprintf("the permission policy can ask, but no asker in the chain can ever answer; every ask falls back to %q",
-		policy.chain.fallback)
+	return strings.Join(messages, "; ")
+}
+
+// refusedPrefix reports whether the URL grammar refuses the prefix.
+// The grammar refuses an authority that carries userinfo, a scheme
+// outside http and https, and a URL the canonical form cannot take. A
+// prefix that spells no URL at all — a command, a path — is not
+// refused; it compares as text.
+func refusedPrefix(prefix string) bool {
+	_, rest, hasScheme := strings.Cut(prefix, "://")
+	authority := prefix
+	if hasScheme {
+		authority = rest
+	}
+	authority, _, _ = strings.Cut(authority, "/")
+	if !hasScheme && !strings.Contains(authority, "@") {
+		return false
+	}
+	_, ok := urlnorm.CanonicalPrefix("https://example.com/", prefix)
+	return !ok
 }
 
 // anyCanAnswer reports whether any asker in the chain may answer an

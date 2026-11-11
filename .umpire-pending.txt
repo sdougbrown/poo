@@ -1,0 +1,6 @@
+pending_request:
+  comment_id: 6786432640
+  comment_url: https://github.com/sdougbrown/poo/pull/136#issuecomment-6786432640
+  head: 53b23e74a7aeddbf4d84997ac116fdb499460d11
+  bot: umpire-bot
+  requested_at: 2026-11-11 (post-principles fold, after CI green on this head)
