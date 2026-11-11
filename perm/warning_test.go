@@ -237,6 +237,28 @@ func TestTheWireClientWarningFiresBesideAnAskerThatCannotAnswer(t *testing.T) {
 	}
 }
 
+// TestTheConstructionWarningJoinsTheChainWarning covers the join: a
+// policy that can ask, with no asker that can answer, and a prefix
+// rule the grammar refuses. The warning names both.
+func TestTheConstructionWarningJoinsTheChainWarning(t *testing.T) {
+	askers := []perm.Asker{perm.NewWireAsker(nil, 0)}
+	policy, err := perm.New(perm.Options{
+		Rules:       []perm.Rule{{Tool: "fetch", CommandPrefix: "attacker@internal.example.com", Action: perm.ActionDeny}},
+		PrimaryArgs: map[string]string{"fetch": "url"},
+		Unmatched:   perm.ActionAsk,
+		Askers:      askers,
+	})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+
+	warning := perm.Warning(policy, policy.Askers())
+
+	if !strings.Contains(warning, "fetch") || !strings.Contains(warning, "falls back") {
+		t.Errorf("the warning is %q, want both the refused rule and the fallback named", warning)
+	}
+}
+
 // TestARefusedPrefixWarnsAtConstruction covers the rule: a prefix
 // rule whose prefix the URL grammar refuses is warned about at load.
 // The refused spellings are userinfo in the authority and a scheme
@@ -280,6 +302,7 @@ func TestAPlainPrefixDoesNotWarn(t *testing.T) {
 		"internal.example.com/secret",
 		"git status",
 		"run tests!",
+		"scp file user@remote:/path",
 	} {
 		policy, err := perm.New(perm.Options{
 			Rules:       []perm.Rule{{Tool: "fetch", CommandPrefix: prefix, Action: perm.ActionDeny}},

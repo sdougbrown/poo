@@ -1,5 +1,5 @@
 pending_request:
-  comment_id: 6787020117
-  head: 9e04def (full: 9e04def4423930d7831b2f139939249a998032c3)
+  comment_id: 6787229928
+  head: 8dd9fa44035171e94e2999ef09ca6aa623965b4c
   bot: umpire-bot
-  requested_at: after the load-time warning commit; CI green on this head
+  requested_at: after the segment-boundary fix; CI pending on this head

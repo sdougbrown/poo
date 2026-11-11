@@ -71,7 +71,12 @@ func CanonicalPrefix(canonical, prefix string) (string, bool) {
 	if _, rest, found := strings.Cut(prefix, "://"); found {
 		authority = rest
 	}
+	// The authority ends at the first slash, question mark, or hash.
+	// Past one of those, an @ is a path, a query, or a fragment — not
+	// userinfo.
 	authority, _, _ = strings.Cut(authority, "/")
+	authority, _, _ = strings.Cut(authority, "?")
+	authority, _, _ = strings.Cut(authority, "#")
 	if strings.Contains(authority, "@") {
 		return "", false
 	}
@@ -84,8 +89,11 @@ func CanonicalPrefix(canonical, prefix string) (string, bool) {
 // WithinHost reports whether the canonical value is at or under the
 // canonical prefix: the same scheme, the same host or a subdomain of
 // it. A path on the prefix holds its segment boundary: /api matches
-// /api and /api/v2, and never /api-internal. A cleartext http URL is
-// never within an https prefix, and the other way around.
+// /api and /api/v2, and never /api-internal. The boundary holds on
+// the host and its subdomains alike. A path that names no segment is
+// the whole host: the scheme-plus-host spelling and the root path are
+// one resource. A cleartext http URL is never within an https prefix,
+// and the other way around.
 func WithinHost(value, prefix string) bool {
 	parsedValue, err := url.Parse(value)
 	if err != nil {
@@ -100,14 +108,24 @@ func WithinHost(value, prefix string) bool {
 	}
 	valueHost, prefixHost := parsedValue.Host, parsedPrefix.Host
 	if valueHost == prefixHost {
-		// A prefix that names no path, or only the root, covers every
-		// path on the host, the way an empty comparison always has.
-		if parsedPrefix.Path == "" || parsedPrefix.Path == "/" {
-			return strings.HasPrefix(parsedValue.Path, parsedPrefix.Path)
-		}
-		return parsedValue.Path == parsedPrefix.Path || strings.HasPrefix(parsedValue.Path, parsedPrefix.Path+"/")
+		return pathWithin(parsedValue.Path, parsedPrefix.Path)
 	}
-	return strings.HasSuffix(valueHost, "."+prefixHost)
+	return strings.HasSuffix(valueHost, "."+prefixHost) && pathWithin(parsedValue.Path, parsedPrefix.Path)
+}
+
+// pathWithin reports whether the value's path sits at or under the
+// prefix path: the same path, or a continuation at a segment boundary.
+// A prefix that names no path, or only the root, covers every path on
+// the host. The value's empty path is the bare-host spelling of the
+// root, so it joins them.
+func pathWithin(valuePath, prefixPath string) bool {
+	if valuePath == "" {
+		valuePath = "/"
+	}
+	if prefixPath == "" || prefixPath == "/" {
+		return strings.HasPrefix(valuePath, "/")
+	}
+	return valuePath == prefixPath || strings.HasPrefix(valuePath, prefixPath+"/")
 }
 
 // defaultPort is the port a scheme implies, and the one a canonical

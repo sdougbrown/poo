@@ -201,18 +201,16 @@ func New(opts Options) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
+	var warnings []string
 	for i, rule := range opts.Rules {
 		if err := checkRule(i, rule); err != nil {
 			return nil, err
 		}
-		if rule.CommandPrefix != "" && opts.PrimaryArgs != nil && opts.PrimaryArgs[rule.Tool] == "" {
-			return nil, fmt.Errorf("perm: rule %d matches %q by prefix, and the tool has no primary argument a prefix could match", i, rule.Tool)
-		}
-	}
-	var warnings []string
-	for i, rule := range opts.Rules {
-		if rule.CommandPrefix == "" || opts.PrimaryArgs == nil || opts.PrimaryArgs[rule.Tool] == "" {
+		if rule.CommandPrefix == "" || opts.PrimaryArgs == nil {
 			continue
+		}
+		if opts.PrimaryArgs[rule.Tool] == "" {
+			return nil, fmt.Errorf("perm: rule %d matches %q by prefix, and the tool has no primary argument a prefix could match", i, rule.Tool)
 		}
 		if refusedPrefix(rule.CommandPrefix) {
 			warnings = append(warnings, fmt.Sprintf("the rule %d's prefix for %q spells a URL the prefix grammar refuses; it matches only values that compare as text", i, rule.Tool))
@@ -663,11 +661,23 @@ func Warning(policy *Policy, askers []Asker) string {
 // refused; it compares as text.
 func refusedPrefix(prefix string) bool {
 	_, rest, hasScheme := strings.Cut(prefix, "://")
+	if !hasScheme {
+		// Text that carries whitespace spells no URL: a command or a
+		// sentence compares as text, whatever it contains.
+		if strings.ContainsFunc(prefix, unicode.IsSpace) {
+			return false
+		}
+	}
 	authority := prefix
 	if hasScheme {
 		authority = rest
 	}
+	// The authority ends at the first slash, question mark, or hash.
+	// Past one of those, an @ is a path, a query, or a fragment — not
+	// userinfo.
 	authority, _, _ = strings.Cut(authority, "/")
+	authority, _, _ = strings.Cut(authority, "?")
+	authority, _, _ = strings.Cut(authority, "#")
 	if !hasScheme && !strings.Contains(authority, "@") {
 		return false
 	}

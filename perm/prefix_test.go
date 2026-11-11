@@ -68,10 +68,10 @@ func TestAPrefixWithoutASlashStaysInsideTheHost(t *testing.T) {
 }
 
 // TestAHostnamePrefixCoversBothSchemes covers the schemeless prefix: a
-// prefix that names no scheme is a hostname rule, and the call's own
-// URL decides the scheme — one hostname covers the cleartext and the
-// secure URL, with the host's spellings and its subdomains matching
-// either way. An adjacent host and a non-http scheme match nothing.
+// prefix that names no scheme is a hostname rule. The call's own URL
+// decides the scheme, so one hostname covers the cleartext and the
+// secure URL. The host's spellings and its subdomains match either
+// way. An adjacent host and a non-http scheme match nothing.
 func TestAHostnamePrefixCoversBothSchemes(t *testing.T) {
 	rule := Rule{Tool: "fetch", CommandPrefix: "internal.example.com", Action: ActionDeny}
 	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
@@ -104,8 +104,8 @@ func TestAHostnamePrefixCoversBothSchemes(t *testing.T) {
 
 // TestAHostnamePrefixCarriesItsPathAndPort covers the schemeless
 // prefix's authority: a path on the hostname stays inside it, and an
-// explicit port holds — the same rules an explicit-scheme prefix
-// answers to, under the call's scheme.
+// explicit port holds. The rules are the ones an explicit-scheme
+// prefix answers to, under the call's scheme.
 func TestAHostnamePrefixCarriesItsPathAndPort(t *testing.T) {
 	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
 	path := Rule{Tool: "fetch", CommandPrefix: "internal.example.com/secret", Action: ActionDeny}
@@ -133,8 +133,8 @@ func TestAHostnamePrefixCarriesItsPathAndPort(t *testing.T) {
 }
 
 // TestAHostnamePrefixRefusesUserinfo covers the authority's grammar: a
-// hostname rule names a host, so a prefix whose authority carries
-// userinfo names nothing a URL rule can mean, and it matches nothing
+// hostname rule names a host. A prefix whose authority carries
+// userinfo names nothing a URL rule can mean. It matches nothing,
 // rather than widening to the bare host behind the userinfo.
 func TestAHostnamePrefixRefusesUserinfo(t *testing.T) {
 	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
@@ -160,9 +160,9 @@ func TestAHostnamePrefixRefusesUserinfo(t *testing.T) {
 }
 
 // TestAShortSchemelessPrefixNamesAHost pins the grammar's edge: a
-// schemeless prefix that used to match URL values lexically — "http"
-// was a string prefix of every absolute http(s) URL — now names the
-// host it spells, and an ordinary URL matches nothing under it.
+// schemeless prefix that used to match URL values lexically now names
+// the host it spells. "http" was a string prefix of every absolute
+// http(s) URL; an ordinary URL matches nothing under the rule.
 func TestAShortSchemelessPrefixNamesAHost(t *testing.T) {
 	rule := Rule{Tool: "fetch", CommandPrefix: "http", Action: ActionDeny}
 	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
@@ -179,10 +179,10 @@ func TestAShortSchemelessPrefixNamesAHost(t *testing.T) {
 
 // TestAPrefixWithASchemeKeepsItsScheme covers the refusal branch: a
 // prefix that names a scheme the canonical form does not take is
-// refused, so no http(s) URL canonicalizes against it. The prefix
-// keeps the lexical comparison, which an absolute http(s) URL never
-// satisfies; a value that is itself an ftp URL matches it as text,
-// the way any non-http(s) value does.
+// refused. No http(s) URL canonicalizes against it. The prefix keeps
+// the lexical comparison, which an absolute http(s) URL never
+// satisfies. A value that is itself an ftp URL matches as text, the
+// way any non-http(s) value does.
 func TestAPrefixWithASchemeKeepsItsScheme(t *testing.T) {
 	rule := Rule{Tool: "fetch", CommandPrefix: "ftp://example.com", Action: ActionDeny}
 	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
@@ -231,8 +231,8 @@ func TestAPrefixOnAToolWithNoPrimaryArgumentMatchesNothing(t *testing.T) {
 
 // TestAPathPrefixHoldsTheSegmentBoundary covers the path's edge: a
 // prefix path continues only at a segment boundary. The same path
-// matches, a path under it matches, and a path that merely extends the
-// text — "api-internal" past "api" — matches nothing, in either
+// matches, and a path under it matches. A path that merely extends
+// the text — "api-internal" past "api" — matches nothing, in either
 // spelling of the prefix.
 func TestAPathPrefixHoldsTheSegmentBoundary(t *testing.T) {
 	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
@@ -251,11 +251,53 @@ func TestAPathPrefixHoldsTheSegmentBoundary(t *testing.T) {
 		for _, url := range []string{
 			"https://internal.example.com/api-internal",
 			"https://internal.example.com/apifoo",
+			"https://sub.internal.example.com/public",
 		} {
 			info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
 			if rule.matchesCommand(info) {
-				t.Errorf("the prefix %q matches %s, want the segment boundary to hold", prefix, url)
+				t.Errorf("the prefix %q matches %s, want the segment boundary to hold on the host and its subdomains", prefix, url)
 			}
 		}
+		for _, url := range []string{
+			"https://sub.internal.example.com/api",
+			"https://sub.internal.example.com/api/page",
+		} {
+			info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+			if !rule.matchesCommand(info) {
+				t.Errorf("the prefix %q does not match %s, want the path on the subdomain too", prefix, url)
+			}
+		}
+	}
+}
+
+// TestARootPathPrefixMatchesTheBareHostSpelling covers the root: a
+// prefix that names no path, or only the root, matches the host
+// spelled with a path and spelled with none. The two spellings are one
+// resource, so a deny rule holds against both.
+func TestARootPathPrefixMatchesTheBareHostSpelling(t *testing.T) {
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, prefix := range []string{"internal.example.com", "https://internal.example.com/"} {
+		rule := Rule{Tool: "fetch", CommandPrefix: prefix, Action: ActionDeny}
+		for _, url := range []string{
+			"https://internal.example.com",
+			"https://internal.example.com/page",
+		} {
+			info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+			if !rule.matchesCommand(info) {
+				t.Errorf("the prefix %q does not match %s, want the root and its paths", prefix, url)
+			}
+		}
+	}
+}
+
+// TestAnAtInAQueryIsNotUserinfo covers the authority's edge: an @ past
+// the query mark is a query, not userinfo. A prefix carrying one is
+// not refused, and it matches its host.
+func TestAnAtInAQueryIsNotUserinfo(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "https://internal.example.com?token=a@b", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/page"}`)}
+	if !rule.matchesCommand(info) {
+		t.Errorf("the query-@ prefix does not match its host, want the query to be no userinfo")
 	}
 }
