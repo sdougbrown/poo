@@ -798,6 +798,7 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			APIKey:    endpoint.APIKey,
 		}
 	}
+
 	for name, model := range s.Models {
 		settings.Models[name] = catalog.ModelSettings{
 			Endpoint:     model.Endpoint,

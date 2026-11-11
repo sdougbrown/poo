@@ -300,6 +300,11 @@ func TestTheCredentialsAreEnvOrStatic(t *testing.T) {
 		APIKey:   "not-a-real-key",
 	}
 	settings.Endpoints["open"] = catalog.EndpointSettings{Endpoint: "http://localhost:6000/v1"}
+	settings.Endpoints["both"] = catalog.EndpointSettings{
+		Endpoint:  "http://localhost:7000/v1",
+		APIKeyEnv: "BOTH_KEY",
+		APIKey:    "the-literal",
+	}
 	c := catalog.New(catalog.Options{Settings: settings})
 	endpoints := c.Endpoints()
 	if got := endpoints["grace"].Credential.Source; got != catalog.CredentialEnv {
@@ -314,9 +319,15 @@ func TestTheCredentialsAreEnvOrStatic(t *testing.T) {
 	if got := endpoints["open"].Credential.Source; got != catalog.CredentialNone {
 		t.Errorf("the credential source is %q, want none", got)
 	}
+	if got := endpoints["both"].Credential.Env; got != "BOTH_KEY" {
+		t.Errorf("the both credential reads %q, want BOTH_KEY", got)
+	}
+	if got := endpoints["both"].Credential.Value; got != "the-literal" {
+		t.Errorf("the both credential carries %q, want the literal", got)
+	}
 	names := c.CredentialEnvNames()
-	if !slices.Contains(names, "GRACE_KEY") {
-		t.Errorf("the credential names are %v, want them to hold GRACE_KEY", names)
+	if !slices.Contains(names, "GRACE_KEY") || !slices.Contains(names, "BOTH_KEY") {
+		t.Errorf("the credential names are %v, want them to hold GRACE_KEY and BOTH_KEY", names)
 	}
 	if slices.Contains(names, "not-a-real-key") {
 		t.Errorf("the credential names are %v, want no static value among them", names)
