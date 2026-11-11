@@ -140,3 +140,36 @@ func TestAMissingPIModelsFileIsARefusal(t *testing.T) {
 		t.Errorf("a missing models file loaded: %v", err)
 	}
 }
+
+// TestAnImportWithoutTheEffortCompatStaysDefault covers the condition's
+// other side: a model that reasons but whose compat note does not name
+// the effort support imports with the model's own reasoning control —
+// a regression to `reasoning` alone would fabricate one.
+func TestAnImportWithoutTheEffortCompatStaysDefault(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen", "reasoning": true}]
+			}
+		}
+	}`)
+	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	if settings.Models["home/qwen"].Reasoning != nil {
+		t.Errorf("the model imported with a reasoning control it never asked for: %+v", settings.Models["home/qwen"].Reasoning)
+	}
+}
+
+// TestABrokenModelsFileIsARefusal covers a models file that is not JSON:
+// the import refuses it, instead of loading an empty import with no
+// signal.
+func TestABrokenModelsFileIsARefusal(t *testing.T) {
+	modelsFile := writePIModels(t, `{"providers": {`)
+	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err == nil {
+		t.Error("a broken models file loaded")
+	}
+}
