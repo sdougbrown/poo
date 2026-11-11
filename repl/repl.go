@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -44,10 +45,11 @@ type Options struct {
 	// HistoryFile holds the input history between sessions. An empty
 	// name keeps no history.
 	HistoryFile string
-	// In, Out and Err default to the process's own.
+	// In and Out default to the process's own. Everything the person
+	// reads goes to Out; failures render there too, like the rest of
+	// the transcript.
 	In  io.Reader
 	Out io.Writer
-	Err io.Writer
 	// StartServer starts the poo server. It returns the server's
 	// input, its output, and the wait for its exit. The default runs
 	// this binary with the ServerArgs; tests put their own server
@@ -64,10 +66,6 @@ func Run(opts Options) int {
 	if out == nil {
 		out = os.Stdout
 	}
-	errw := opts.Err
-	if errw == nil {
-		errw = os.Stderr
-	}
 	in := opts.In
 	if in == nil {
 		in = os.Stdin
@@ -77,7 +75,6 @@ func Run(opts Options) int {
 	m := &machine{
 		opts:   opts,
 		out:    out,
-		errw:   errw,
 		in:     in,
 		r:      r,
 		status: newStatus(opts.WorkingDir),
@@ -90,7 +87,6 @@ func Run(opts Options) int {
 type machine struct {
 	opts   Options
 	out    io.Writer
-	errw   io.Writer
 	in     io.Reader
 	r      *renderer
 	status *status
@@ -100,6 +96,9 @@ type machine struct {
 	wait        func() error
 	serverStdin io.WriteCloser
 	running     atomic.Bool
+	// catalog holds the models models/list reported, by name: the
+	// listing and the statusline read it instead of calling again.
+	catalog map[string]protocol.ModelInfo
 }
 
 // input reads the lines a person types. A terminal gets the readline
@@ -138,6 +137,7 @@ func (m *machine) run() int {
 	input := m.newInput()
 	defer input.close()
 
+	quit := make(chan struct{})
 	interrupts := make(chan os.Signal, 1)
 	signal.Notify(interrupts, os.Interrupt)
 	defer signal.Stop(interrupts)
@@ -145,6 +145,12 @@ func (m *machine) run() int {
 		for range interrupts {
 			if m.running.Load() {
 				m.cancelRun()
+			} else {
+				// An idle Ctrl-C ends the session, the way every
+				// interactive tool quits: the exit code is the
+				// one a signal termination carries.
+				close(quit)
+				return
 			}
 		}
 	}()
@@ -152,8 +158,13 @@ func (m *machine) run() int {
 	m.greet()
 	for {
 		input.prompt(m.status.prompt())
-		line, err := input.read()
+		line, err := readLine(input, quit)
 		if err != nil {
+			if errors.Is(err, errInterrupted) {
+				// The idle Ctrl-C: a clean end, with the code a
+				// signal termination carries.
+				return 130
+			}
 			if !errors.Is(err, io.EOF) && !errors.Is(err, readline.ErrInterrupt) {
 				m.r.failure(err.Error())
 			}
@@ -167,6 +178,32 @@ func (m *machine) run() int {
 		if quit {
 			return code
 		}
+	}
+}
+
+// errInterrupted is the end an idle Ctrl-C brings.
+var errInterrupted = errors.New("interrupted")
+
+// readLine reads one line, or ends the session when the interrupt
+// channel closes: an idle Ctrl-C quits, whatever the line editor was
+// doing. The reader goroutine that loses the race is left to the
+// editor's own close, and its result is never read.
+func readLine(input input, quit <-chan struct{}) (string, error) {
+	type read struct {
+		line string
+		err  error
+	}
+	done := make(chan read, 1)
+	go func() {
+		line, err := input.read()
+		done <- read{line, err}
+	}()
+	select {
+	case r := <-done:
+		return r.line, r.err
+	case <-quit:
+		input.close()
+		return "", errInterrupted
 	}
 }
 
@@ -214,16 +251,18 @@ func (m *machine) start() error {
 		m.r.warning(warning)
 	}
 
-	// The window comes from the catalog: the model's entry names the
-	// context limit the statusline shows the fill against.
-	var catalog struct {
-		Models []protocol.ModelInfo `json:"models"`
+	// The catalog names every model the session may switch to, and
+	// the chat model's entry carries the window the statusline shows
+	// the fill against.
+	var catalog protocol.ModelsResult
+	if err := m.conn.call(protocol.MethodModelsList, protocol.ModelsParams{}, &catalog); err != nil {
+		return err
 	}
-	if err := m.conn.call(protocol.MethodModelsList, struct{}{}, &catalog); err == nil {
-		for _, model := range catalog.Models {
-			if model.Name == session.Models.Chat {
-				m.status.setUsage(-1, model.ContextLimit)
-			}
+	m.catalog = map[string]protocol.ModelInfo{}
+	for _, model := range catalog.Models {
+		m.catalog[model.Name] = model
+		if model.Name == session.Models.Chat {
+			m.status.setUsage(-1, model.ContextLimit)
 		}
 	}
 	return nil
@@ -264,7 +303,7 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 
 // newInput builds the line reader for the session.
 func (m *machine) newInput() input {
-	if _, ok := m.in.(interface{ Fd() uintptr }); ok && termIsTerminal(m.in) {
+	if termIsTerminal(m.in) {
 		rl, err := readline.NewEx(&readline.Config{
 			Prompt:      promptMark,
 			HistoryFile: m.opts.HistoryFile,
@@ -305,19 +344,12 @@ anything else    a prompt for the session`)
 		}
 		return 0, false
 	case "/model", "/models":
-		var catalog struct {
-			Models []protocol.ModelInfo `json:"models"`
-		}
-		if err := m.conn.call(protocol.MethodModelsList, struct{}{}, &catalog); err != nil {
-			m.r.failure(err.Error())
-			return 0, false
-		}
-		for _, model := range catalog.Models {
-			name := model.Name
+		for _, name := range m.catalogNames() {
+			shown := name
 			if name == m.status.model {
-				name += " ←"
+				shown += " ←"
 			}
-			m.r.notice("%s · %s", name, model.ModelID)
+			m.r.notice("%s · %s", shown, m.catalog[name].ModelID)
 		}
 		return 0, false
 	case "/cancel":
@@ -369,6 +401,16 @@ func (m *machine) runPrompt(text string, input input) error {
 			}
 		}
 	}
+}
+
+// catalogNames returns the catalog's model names, in name order.
+func (m *machine) catalogNames() []string {
+	names := make([]string, 0, len(m.catalog))
+	for name := range m.catalog {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // cancelRun asks the active run to stop. A run that is not there is
@@ -536,7 +578,7 @@ type streamView struct {
 
 // newStreamView builds the hint for out.
 func newStreamView(out io.Writer) *streamView {
-	if f, ok := out.(interface{ Fd() uintptr }); ok && termIsTerminal(f) {
+	if termIsTerminal(out) {
 		return &streamView{out: out, live: true}
 	}
 	return &streamView{out: out}
