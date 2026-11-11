@@ -67,14 +67,85 @@ func TestAPrefixWithoutASlashStaysInsideTheHost(t *testing.T) {
 	}
 }
 
+// TestAHostnamePrefixCoversBothSchemes covers the schemeless prefix: a
+// prefix that names no scheme is a hostname rule, and the call's own
+// URL decides the scheme — one hostname covers the cleartext and the
+// secure URL, with the host's spellings and its subdomains matching
+// either way. An adjacent host and a non-http scheme match nothing.
+func TestAHostnamePrefixCoversBothSchemes(t *testing.T) {
+	rule := Rule{Tool: "fetch", CommandPrefix: "internal.example.com", Action: ActionDeny}
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	matching := []string{
+		"https://internal.example.com/page",
+		"http://internal.example.com/page",
+		"https://internal.example.com./page",
+		"HTTPS://INTERNAL.EXAMPLE.COM/page",
+		"https://internal.example.com:0443/page",
+		"https://sub.internal.example.com/page",
+		"http://sub.internal.example.com:0080/page",
+	}
+	for _, url := range matching {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if !rule.matchesCommand(info) {
+			t.Errorf("the hostname prefix does not match %s, want the host under either scheme", url)
+		}
+	}
+	for _, url := range []string{
+		"https://internal.example.com.evil.com/page",
+		"https://other.example.com/page",
+		"ftp://internal.example.com/page",
+	} {
+		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+		if rule.matchesCommand(info) {
+			t.Errorf("the hostname prefix matches %s, want the adjacent host and the foreign scheme to hold out", url)
+		}
+	}
+}
+
+// TestAHostnamePrefixCarriesItsPathAndPort covers the schemeless
+// prefix's authority: a path on the hostname stays inside it, and an
+// explicit port holds — the same rules an explicit-scheme prefix
+// answers to, under the call's scheme.
+func TestAHostnamePrefixCarriesItsPathAndPort(t *testing.T) {
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	path := Rule{Tool: "fetch", CommandPrefix: "internal.example.com/secret", Action: ActionDeny}
+	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/secret/page"}`)}
+	if !path.matchesCommand(info) {
+		t.Errorf("the hostname-and-path prefix does not match the path under it")
+	}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "http://internal.example.com/secret/page"}`)}
+	if !path.matchesCommand(info) {
+		t.Errorf("the hostname-and-path prefix does not match the path under the other scheme")
+	}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/"}`)}
+	if path.matchesCommand(info) {
+		t.Errorf("the hostname-and-path prefix matches a path above it")
+	}
+	port := Rule{Tool: "fetch", CommandPrefix: "internal.example.com:8443", Action: ActionDeny}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com:8443/page"}`)}
+	if !port.matchesCommand(info) {
+		t.Errorf("the hostname-and-port prefix does not match its port")
+	}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/page"}`)}
+	if port.matchesCommand(info) {
+		t.Errorf("the hostname-and-port prefix matches the default port")
+	}
+}
+
 // TestAPrefixStaysLexicalForNonURLs covers the rules over a command or
-// a path: no canonicalization, the text compares as it is.
+// a path: no canonicalization, the text compares as it is. A hostname
+// prefix keeps the lexical fallback for a value that is no URL.
 func TestAPrefixStaysLexicalForNonURLs(t *testing.T) {
 	rule := Rule{Tool: "bash", CommandPrefix: "git status", Action: ActionDeny}
 	spec := poo.ToolSpec{Name: "bash", PrimaryArg: "command"}
 	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"command": "git status && make test"}`)}
 	if !rule.matchesCommand(info) {
 		t.Errorf("the prefix does not match the command, want the lexical match")
+	}
+	host := Rule{Tool: "bash", CommandPrefix: "example.com", Action: ActionDeny}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"command": "example.com/build && report"}`)}
+	if !host.matchesCommand(info) {
+		t.Errorf("the hostname prefix does not match a non-URL value, want the lexical fallback")
 	}
 }
 

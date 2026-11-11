@@ -48,6 +48,21 @@ func Canonical(value string) (string, bool) {
 	return canonical, true
 }
 
+// CanonicalPrefix returns the canonical form of a rule's prefix under
+// the scheme of the canonical value it will be matched against. A
+// prefix that names no scheme of its own is a hostname rule: it covers
+// the host under either scheme, and the call's own URL decides which
+// one. A prefix that names a scheme is refused — its own scheme must
+// hold, so the caller keeps the lexical comparison rather than
+// stretching the prefix past the scheme it names.
+func CanonicalPrefix(canonical, prefix string) (string, bool) {
+	scheme, _, ok := strings.Cut(canonical, "://")
+	if !ok || (scheme != "http" && scheme != "https") || strings.Contains(prefix, "://") {
+		return "", false
+	}
+	return Canonical(scheme + "://" + prefix)
+}
+
 // WithinHost reports whether the canonical value is at or under the
 // canonical prefix: the same scheme, the same host or a subdomain of
 // it. A cleartext http URL is never within an https prefix, and the
