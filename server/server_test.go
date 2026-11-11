@@ -649,3 +649,27 @@ func theAnsweredLine(t *testing.T, dir, sessionID string) string {
 	t.Fatal("the log holds no answered record")
 	return ""
 }
+
+// TestTheSettingsDocCarriesNoKeys covers the redaction: the settings
+// document a wire client reads holds no endpoint key — neither the
+// environment variable's value nor a literal the settings or an import
+// carry — and the URLs stay redacted too.
+func TestTheSettingsDocCarriesNoKeys(t *testing.T) {
+	document := servedSettings(t, "search", `{"chat": "chat-model"}`)
+	grace := document.Endpoints["grace"]
+	grace.APIKey = "literal-key-123"
+	document.Endpoints["grace"] = grace
+	srv := newServer(t, document)
+
+	doc, err := srv.Settings(context.Background())
+	if err != nil {
+		t.Fatalf("the settings document failed: %v", err)
+	}
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("encoding the settings: %v", err)
+	}
+	if strings.Contains(string(encoded), "literal-key-123") || strings.Contains(string(encoded), "secret") {
+		t.Errorf("the settings document carries a key:\n%s", encoded)
+	}
+}
