@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/sdougbrown/poo"
 )
@@ -59,18 +58,6 @@ func (c Credential) EnvNames() []string {
 // Key returns the endpoint's key: the environment variable when it
 // holds one, the value the settings carry when it does not, and nothing
 // when the credential names neither. The value is never logged.
-func (c Credential) Key() string {
-	switch c.Source {
-	case CredentialEnv:
-		if key := os.Getenv(c.Env); key != "" {
-			return key
-		}
-		return c.Value
-	case CredentialStatic:
-		return c.Value
-	}
-	return ""
-}
 
 // Endpoint is a service that serves models.
 type Endpoint struct {

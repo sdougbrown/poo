@@ -40,6 +40,13 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 						"compat": {"supportsReasoningEffort": true}
 					}
 				]
+			},
+			"away": {
+				"baseUrl": "http://away:4000/v1",
+				"api": "openai-responses",
+				"models": [
+					{"id": "spark", "input": ["text"], "contextWindow": 4096}
+				]
 			}
 		}
 	}`)
@@ -67,6 +74,16 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 	}
 	if model.Reasoning == nil || model.Reasoning.Mode != poo.ReasoningEffort || model.Reasoning.Param != "reasoning_effort" {
 		t.Errorf("the model's reasoning imported as %+v", model.Reasoning)
+	}
+	if model.API != "" {
+		t.Errorf("the default wire API imported as %q, want the empty default", model.API)
+	}
+	away, ok := settings.Models["away/spark"]
+	if !ok {
+		t.Fatalf("the responses model imported under no name; the models are %v", settings.Models)
+	}
+	if away.API != string(poo.APIResponses) {
+		t.Errorf("the responses model speaks %q, want %q", away.API, poo.APIResponses)
 	}
 }
 
@@ -171,5 +188,19 @@ func TestABrokenModelsFileIsARefusal(t *testing.T) {
 	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err == nil {
 		t.Error("a broken models file loaded")
+	}
+}
+
+// TestAModelsFileWithoutProvidersIsARefusal covers a models file that
+// parses but holds no providers: the run refuses rather than proceed
+// with zero imported models in silence.
+func TestAModelsFileWithoutProvidersIsARefusal(t *testing.T) {
+	modelsFile := writePIModels(t, `{"providers": {}}`)
+	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err == nil {
+		t.Error("a models file without providers loaded")
+	}
+	if err != nil && !strings.Contains(err.Error(), "holds no providers") {
+		t.Errorf("the refusal was %v, want it to name the empty file", err)
 	}
 }
