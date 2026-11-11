@@ -795,6 +795,7 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 		settings.Endpoints[name] = catalog.EndpointSettings{
 			Endpoint:  endpoint.Endpoint,
 			APIKeyEnv: endpoint.APIKeyEnv,
+			APIKey:    endpoint.APIKey,
 		}
 	}
 	for name, model := range s.Models {
@@ -806,6 +807,8 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			Ops:          ops(model.Ops),
 			Inputs:       modalities(model.Inputs),
 			ContextLimit: model.ContextLimit,
+			MaxOutput:    model.MaxOutput,
+			Reasoning:    model.Reasoning,
 		}
 	}
 	for role, model := range s.Roles {
