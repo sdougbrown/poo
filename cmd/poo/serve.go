@@ -69,6 +69,12 @@ func runServe(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	// A positional argument is a mistyped invocation: the flags say
+	// what the session runs, and nothing else does.
+	if len(fs.Args()) != 0 {
+		fmt.Fprintf(os.Stderr, "poo serve: unexpected argument %q\n", fs.Args()[0])
+		return 2
+	}
 	if err := o.checkUnmatched(); err != nil {
 		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
 		return 2

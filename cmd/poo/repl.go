@@ -36,6 +36,13 @@ func runRepl(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	// The same refusal as serve's: the flags say what the session
+	// runs, and the raw arguments pass through to the server, so a
+	// stray word would be its confusion, not the repl's.
+	if len(fs.Args()) != 0 {
+		fmt.Fprintf(os.Stderr, "poo repl: unexpected argument %q\n", fs.Args()[0])
+		return 2
+	}
 	if err := o.checkUnmatched(); err != nil {
 		fmt.Fprintf(os.Stderr, "poo repl: %v\n", err)
 		return 2

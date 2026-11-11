@@ -116,3 +116,24 @@ func TestACommandReadsTheProjectSettings(t *testing.T) {
 		t.Errorf("the refusal does not name the discovered file's key: %q", stderr)
 	}
 }
+
+// TestAStandaloneArgumentIsRefused covers the mistyped invocation: a
+// word where a flag belongs is a refusal, not a session on the
+// defaults with the word ignored.
+func TestAStandaloneArgumentIsRefused(t *testing.T) {
+	code, stderr := runCLI(t, "serve", "garbage", "--ephemeral")
+	if code != 2 {
+		t.Errorf("poo serve exited %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "unexpected argument") {
+		t.Errorf("the refusal does not name the argument: %q", stderr)
+	}
+
+	code, stderr = runCLI(t, "repl", "garbage")
+	if code != 2 {
+		t.Errorf("poo repl exited %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "unexpected argument") {
+		t.Errorf("the refusal does not name the argument: %q", stderr)
+	}
+}
