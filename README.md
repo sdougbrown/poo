@@ -28,9 +28,18 @@ poo run --endpoint http://localhost:4000/v1 --model-id gemma4 \
 
 **The front door.** A bare `poo` launches the interface the binary
 links as its front door — the repl. The settings pick another one:
-set `front_door` in the file the `POO_SETTINGS` environment variable
-names. A binary with no door linked, or a name it does not offer,
-shows the usage instead.
+set `door` in the settings file the command resolves — the `--settings`
+file, the `POO_SETTINGS` environment variable's, the project's
+`.poo/settings.json` (found by walking up), or the user's
+`~/.config/poo/settings.json`. A binary with no door linked, or a
+name it does not offer, shows the usage instead.
+
+**Settings discovery.** Every command resolves its settings file the
+same way: the explicit `--settings` file, then the file the
+`POO_SETTINGS` environment variable names, then the project's
+`.poo/settings.json` walking up from the current directory, then the
+user's `~/.config/poo/settings.json`. A command that finds none runs
+on the defaults, and the flags change them.
 
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as
