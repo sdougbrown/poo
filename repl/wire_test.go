@@ -150,3 +150,30 @@ func TestAConnFailsWhenTheServerLeaves(t *testing.T) {
 		t.Error("the call succeeded after the server left")
 	}
 }
+
+// TestAnAskTheClientCannotTakeIsDenied covers the ask's failure mode: a
+// client that is not taking asks answers the server with a denial,
+// because the server blocks on the answer and a dropped ask would hang
+// the session.
+func TestAnAskTheClientCannotTakeIsDenied(t *testing.T) {
+	h := newWireHarness(t)
+	conn := startConn(h.stdout, h.stdin)
+	// The harness takes lines the conn writes; the ask feed fills the
+	// channel past its buffer, and the overflow is answered denied.
+	go func() {
+		for i := 0; i < 9; i++ {
+			h.feed(`{"jsonrpc":"2.0","id":"a` + string(rune('0'+i)) + `","method":"permission/ask","params":{"session_id":"s1","tool":"bash"}}`)
+		}
+	}()
+
+	// The channel holds eight; the ninth overflows and is denied.
+	line := strings.TrimSpace(h.taken())
+	if !strings.Contains(line, "deny") || !strings.Contains(line, `"id":"a8"`) {
+		t.Errorf("the overflowed ask was not denied: %s", line)
+	}
+	// The first eight are still waiting to be read.
+	ask := <-conn.asks
+	if ask.ask.Tool != "bash" || string(ask.id) != `"a0"` {
+		t.Errorf("the first ask read back as %+v", ask)
+	}
+}
