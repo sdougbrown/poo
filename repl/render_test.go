@@ -57,6 +57,12 @@ func TestTheToolDecorationTruncatesLongResults(t *testing.T) {
 	if !strings.Contains(rendered, "+12 more lines") {
 		t.Errorf("the tool result does not say what it cut:\n%s", rendered)
 	}
+	// A short body with the server's own elision count reads the same
+	// way: the lines the server cut count toward the total.
+	r.toolResult("bash", "ok", "one line\n", 4)
+	if !strings.Contains(out.String(), "+4 more lines") {
+		t.Errorf("the elided count does not read:\n%s", out.String())
+	}
 }
 
 // TestAFailedResultReadsAsAFailure covers a result that is not ok: it
