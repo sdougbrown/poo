@@ -51,8 +51,9 @@ and imports them under names of the form `provider/id`; the
 settings' own entries win on a name collision. A provider whose
 models file carries no `apiKey` takes the key from an `auth.json`
 beside that file, in the same shape pi keeps its credentials. The
-compatibility is the file shapes alone: poo reads only the files the
-settings name, and never a pi installation's own directory. A
+compatibility is the file shapes alone: poo reads the models file the
+settings name, the credential file beside it, and never a pi
+installation's own directory. A
 `roles.chat` that names an imported model runs it like any other.
 
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo

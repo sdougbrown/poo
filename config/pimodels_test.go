@@ -219,23 +219,83 @@ func TestAModelsFileWithoutProvidersIsARefusal(t *testing.T) {
 // pi's auth.json beside it. pi writes the type as api_key; a file that
 // says api says the same thing.
 func TestAProviderWithoutAKeyTakesPiAuthsKey(t *testing.T) {
-	for _, spelling := range []string{"api_key", "api"} {
-		t.Run(spelling, func(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen"}]
+			}
+		}
+	}`)
+	writePIAuth(t, modelsFile, `{"home": {"type": "api_key", "key": "test-key-123"}}`)
+	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	if key := settings.Endpoints["home"].APIKey; key != "test-key-123" {
+		t.Errorf("the provider imported with the key %q", key)
+	}
+}
+
+// TestAnAuthKeyInTheEnvironmentNamesTheEnvironment covers a credential
+// whose key names the environment with pi's $ spelling: the endpoint
+// imports holding the environment variable, not the spelling itself.
+func TestAnAuthKeyInTheEnvironmentNamesTheEnvironment(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen"}]
+			}
+		}
+	}`)
+	writePIAuth(t, modelsFile, `{"home": {"type": "api_key", "key": "$HOME_KEY"}}`)
+	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	endpoint := settings.Endpoints["home"]
+	if endpoint.APIKeyEnv != "HOME_KEY" || endpoint.APIKey != "" {
+		t.Errorf("the provider imported with env %q and key %q, want HOME_KEY and none", endpoint.APIKeyEnv, endpoint.APIKey)
+	}
+}
+
+// TestAModelsFileKeyFollowsTheSameRules covers a models file that
+// carries its own key in pi's spellings: a $NAME names the
+// environment, a !command is a key poo does not run, and a literal
+// imports as itself.
+func TestAModelsFileKeyFollowsTheSameRules(t *testing.T) {
+	for test, key := range map[string]string{
+		"environment": "$AWAY_KEY",
+		"command":     "!pass show poo",
+		"literal":     "file-key-456",
+	} {
+		t.Run(test, func(t *testing.T) {
 			modelsFile := writePIModels(t, `{
 				"providers": {
-					"home": {
-						"baseUrl": "http://grace:4000/v1",
-						"models": [{"id": "qwen"}]
+					"away": {
+						"baseUrl": "http://away:4000/v1",
+						"apiKey": "`+key+`",
+						"models": [{"id": "spark"}]
 					}
 				}
 			}`)
-			writePIAuth(t, modelsFile, `{"home": {"type": "`+spelling+`", "key": "test-key-123"}}`)
 			settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
 			if err != nil {
 				t.Fatalf("the settings did not load: %v", err)
 			}
-			if key := settings.Endpoints["home"].APIKey; key != "test-key-123" {
-				t.Errorf("the provider imported with the key %q", key)
+			endpoint := settings.Endpoints["away"]
+			var env, literal string
+			switch test {
+			case "environment":
+				env, literal = "AWAY_KEY", ""
+			case "command":
+				env, literal = "", ""
+			case "literal":
+				env, literal = "", "file-key-456"
+			}
+			if endpoint.APIKeyEnv != env || endpoint.APIKey != literal {
+				t.Errorf("the %s key imported as env %q and key %q", test, endpoint.APIKeyEnv, endpoint.APIKey)
 			}
 		})
 	}

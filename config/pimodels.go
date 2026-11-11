@@ -139,19 +139,24 @@ func importPiModels(settings *Settings) error {
 			if settings.Endpoints == nil {
 				settings.Endpoints = map[string]Endpoint{}
 			}
-			key := definition.APIKey
-			if key == "" {
+			env, key := keyFromValue(definition.APIKey)
+			if env == "" && key == "" {
 				if keys == nil {
 					keys, err = readPiAuth(filepath.Join(filepath.Dir(expanded), piAuthFile))
 					if err != nil {
 						return err
 					}
 				}
-				key = piStoredKey(keys[provider])
+				authEnv, authKey := piStoredKey(keys[provider])
+				if authEnv != "" {
+					env = authEnv
+				}
+				key = authKey
 			}
 			settings.Endpoints[provider] = Endpoint{
-				Endpoint: definition.BaseURL,
-				APIKey:   key,
+				Endpoint:  definition.BaseURL,
+				APIKeyEnv: env,
+				APIKey:    key,
 			}
 		}
 		for _, model := range definition.Models {
@@ -208,16 +213,28 @@ func readPiAuth(path string) (map[string]piCredential, error) {
 // pi stores a key under the api_key type, and a file that says api
 // says the same thing. An OAuth credential authenticates in ways poo
 // does not speak: it imports as no key at all.
-func piStoredKey(credential piCredential) string {
-	if credential.Type != "api_key" && credential.Type != "api" {
-		return ""
+// keyFromValue reads one key value as the settings hold keys: an
+// environment name and a literal, either empty. A key pi would run a
+// command for is a key poo does not run, and a $NAME names the
+// environment variable to read at run time.
+func keyFromValue(value string) (string, string) {
+	switch {
+	case value == "", strings.HasPrefix(value, "!"):
+		return "", ""
+	case strings.HasPrefix(value, "$"):
+		return value[1:], ""
 	}
-	// A key written as !command is pi's to run: poo does not run a
-	// command to get a key, so the provider imports without one.
-	if strings.HasPrefix(credential.Key, "!") {
-		return ""
+	return "", value
+}
+
+// piStoredKey reads one auth-file credential as the settings hold
+// keys. Only the api_key credential carries a key poo can use; an
+// OAuth token imports without one.
+func piStoredKey(credential piCredential) (string, string) {
+	if credential.Type != "api_key" {
+		return "", ""
 	}
-	return credential.Key
+	return keyFromValue(credential.Key)
 }
 
 // piWireAPI maps a provider's api name. A provider that names an API
