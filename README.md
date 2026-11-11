@@ -26,6 +26,22 @@ poo run --endpoint http://localhost:4000/v1 --model-id gemma4 \
   "List the Go packages in this repository."
 ```
 
+**The front door.** A bare `poo` launches the interface the binary
+links as its front door — the repl. The settings pick another one:
+set `front_door` in the file the `POO_SETTINGS` environment variable
+names. A binary with no door linked, or a name it does not offer,
+shows the usage instead.
+
+**The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
+serve` with them, and renders the session in the terminal: replies as
+markdown with highlighted code blocks, tool calls and results as
+decorated blocks, and a statusline over the input with the folder,
+the git branch, the model and the context's fill. Input reads with vi
+keys at a terminal, `/less` shows the transcript again through `less
+-R`, and a permission ask reads its decision from the same input. The
+repl holds no run loop of its own: it is a wire client, and the
+server runs the session.
+
 **Profiles.** The profile decides which tools a session offers. Pick one
 with `--profile`; the default is `code`.
 

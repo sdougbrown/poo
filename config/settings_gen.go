@@ -19,6 +19,7 @@ type SettingsFields struct {
 	DeciderTimeoutMs                *float64 "json:\"decider.timeout_ms,omitempty\""
 	FeedsPaths                      []string "json:\"feeds.paths,omitempty\""
 	FinishSchemaFile                *string  "json:\"finish.schema_file,omitempty\""
+	FrontDoor                       *string  "json:\"front_door,omitempty\""
 	JobsMaxRunning                  *float64 "json:\"jobs.max_running,omitempty\""
 	JobsMaxUnattendedWakes          *float64 "json:\"jobs.max_unattended_wakes,omitempty\""
 	JobsOnIdle                      *string  "json:\"jobs.on_idle,omitempty\""
@@ -86,6 +87,7 @@ type SettingsAvailability struct {
 	DeciderTimeoutMs                FieldStatus
 	FeedsPaths                      FieldStatus
 	FinishSchemaFile                FieldStatus
+	FrontDoor                       FieldStatus
 	JobsMaxRunning                  FieldStatus
 	JobsMaxUnattendedWakes          FieldStatus
 	JobsOnIdle                      FieldStatus
@@ -179,6 +181,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	FeedsPathsSatisfied := len(f.FeedsPaths) > 0
 	FinishSchemaFileEnabled := true
 	FinishSchemaFileSatisfied := func() bool { v := f.FinishSchemaFile; return v != nil && *v != "" }()
+	FrontDoorEnabled := true
+	FrontDoorSatisfied := func() bool { v := f.FrontDoor; return v != nil && *v != "" }()
 	JobsMaxRunningEnabled := true
 	JobsMaxRunningSatisfied := f.JobsMaxRunning != nil
 	JobsMaxUnattendedWakesEnabled := true
@@ -493,6 +497,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  FinishSchemaFileEnabled && false,
 			Enabled:   FinishSchemaFileEnabled,
 			Satisfied: FinishSchemaFileSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		FrontDoor: FieldStatus{
+			Required:  FrontDoorEnabled && false,
+			Enabled:   FrontDoorEnabled,
+			Satisfied: FrontDoorSatisfied,
 			Fair:      true,
 			Reason: func() *string {
 				var reasons []string
@@ -1761,6 +1787,9 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "FinishSchemaFile":
 		v := f.FinishSchemaFile
 		return v != nil && *v != ""
+	case "FrontDoor":
+		v := f.FrontDoor
+		return v != nil && *v != ""
 	case "JobsMaxRunning":
 		return f.JobsMaxRunning != nil
 	case "JobsMaxUnattendedWakes":
@@ -2091,6 +2120,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "FinishSchemaFile", "finish.schema_file":
 		found = true
 		status = avail.FinishSchemaFile
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "FrontDoor", "front_door":
+		found = true
+		status = avail.FrontDoor
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}

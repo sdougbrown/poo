@@ -16,8 +16,10 @@ import (
 const usage = `poo runs a session against an OpenAI-compatible endpoint.
 
 Usage:
+  poo                        Launch the binary's front door (the repl, or front_door in the settings)
   poo run [flags] "prompt"
-  poo -p "prompt" [flags]      poo run, with the run's flags before or after the prompt (also --print)
+  poo -p "prompt" [flags]    poo run, with the run's flags before or after the prompt (also --print)
+  poo repl [flags]           An interactive session in the terminal (vi keys, markdown rendering)
   poo serve [flags]
   poo models [--json] [--explain <name>]
   poo prompt [flags]
@@ -55,6 +57,11 @@ Run flags:
 Serve:
   poo serve runs the wire protocol on stdin and stdout. It takes the
   same endpoint flags as poo run, plus --session-dir and --ephemeral.
+
+The front door:
+  A bare poo launches the interface the binary links as its front
+  door. The settings pick another one: set front_door in the file the
+  POO_SETTINGS environment variable names.
 `
 
 func main() {
@@ -64,14 +71,15 @@ func main() {
 // run dispatches the command and returns the process exit code.
 func run(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, usage)
-		return 2
+		return runFrontDoor()
 	}
 	switch args[0] {
 	case "run":
 		return runRun(args[1:])
 	case "-p", "--print":
 		return runPrint(args[1:])
+	case "repl":
+		return runRepl(args[1:])
 	case "serve":
 		return runServe(args[1:])
 	case "models":
