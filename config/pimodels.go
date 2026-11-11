@@ -124,10 +124,14 @@ func importPiModels(settings *Settings) error {
 	}
 	sort.Strings(providers)
 
-	// The auth file beside the models file is read once, on the first
+	// The auth file beside the models file is read once — on the first
 	// provider whose key the models file leaves empty and that the
-	// settings do not already hold — the same pass that fills the key,
-	// so the rule for when a key is needed lives in one place.
+	// settings do not already hold, in the same pass that fills the
+	// key, so the rule for when a key is needed lives in one place.
+	// The flag, not a nil map, is the once-sentinel: a file that is
+	// not there reads as no keys, and a sentinel on the map would
+	// re-read the file for every keyless provider after it.
+	authRead := false
 	var keys map[string]piCredential
 	for _, provider := range providers {
 		definition := file.Providers[provider]
@@ -141,11 +145,12 @@ func importPiModels(settings *Settings) error {
 			}
 			env, key := keyFromValue(definition.APIKey)
 			if env == "" && key == "" {
-				if keys == nil {
+				if !authRead {
 					keys, err = readPiAuth(filepath.Join(filepath.Dir(expanded), piAuthFile))
 					if err != nil {
 						return err
 					}
+					authRead = true
 				}
 				authEnv, authKey := piStoredKey(keys[provider])
 				if authEnv != "" {
