@@ -31,6 +31,8 @@ type fakeServer struct {
 	cancels int
 	// refusePrompt makes run/prompt refuse, for the refusal tests.
 	refusePrompt bool
+	// warnings are the session warnings create reports.
+	warnings []string
 
 	in *bufio.Reader
 	// w writes to the client.
@@ -95,12 +97,16 @@ func (s *fakeServer) line(line []byte) {
 		s.mu.Lock()
 		s.closed = false
 		s.mu.Unlock()
-		s.reply(req.ID, map[string]any{
+		response := map[string]any{
 			"session_id": "s1",
 			"mode":       "logged",
 			"tools":      []any{},
 			"models":     map[string]any{"chat": "gemma4"},
-		})
+		}
+		if len(s.warnings) > 0 {
+			response["warnings"] = s.warnings
+		}
+		s.reply(req.ID, response)
 	case protocol.MethodModelsList:
 		s.reply(req.ID, map[string]any{
 			"models": []map[string]any{
