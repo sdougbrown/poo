@@ -83,8 +83,9 @@ func CanonicalPrefix(canonical, prefix string) (string, bool) {
 
 // WithinHost reports whether the canonical value is at or under the
 // canonical prefix: the same scheme, the same host or a subdomain of
-// it. A cleartext http URL is never within an https prefix, and the
-// other way around.
+// it. A path on the prefix holds its segment boundary: /api matches
+// /api and /api/v2, and never /api-internal. A cleartext http URL is
+// never within an https prefix, and the other way around.
 func WithinHost(value, prefix string) bool {
 	parsedValue, err := url.Parse(value)
 	if err != nil {
@@ -99,7 +100,12 @@ func WithinHost(value, prefix string) bool {
 	}
 	valueHost, prefixHost := parsedValue.Host, parsedPrefix.Host
 	if valueHost == prefixHost {
-		return strings.HasPrefix(parsedValue.Path, parsedPrefix.Path)
+		// A prefix that names no path, or only the root, covers every
+		// path on the host, the way an empty comparison always has.
+		if parsedPrefix.Path == "" || parsedPrefix.Path == "/" {
+			return strings.HasPrefix(parsedValue.Path, parsedPrefix.Path)
+		}
+		return parsedValue.Path == parsedPrefix.Path || strings.HasPrefix(parsedValue.Path, parsedPrefix.Path+"/")
 	}
 	return strings.HasSuffix(valueHost, "."+prefixHost)
 }

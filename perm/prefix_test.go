@@ -228,3 +228,34 @@ func TestAPrefixOnAToolWithNoPrimaryArgumentMatchesNothing(t *testing.T) {
 		t.Errorf("the prefix matched a tool with no primary argument")
 	}
 }
+
+// TestAPathPrefixHoldsTheSegmentBoundary covers the path's edge: a
+// prefix path continues only at a segment boundary. The same path
+// matches, a path under it matches, and a path that merely extends the
+// text — "api-internal" past "api" — matches nothing, in either
+// spelling of the prefix.
+func TestAPathPrefixHoldsTheSegmentBoundary(t *testing.T) {
+	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	for _, prefix := range []string{"internal.example.com/api", "https://internal.example.com/api"} {
+		rule := Rule{Tool: "fetch", CommandPrefix: prefix, Action: ActionDeny}
+		for _, url := range []string{
+			"https://internal.example.com/api",
+			"https://internal.example.com/api/page",
+			"https://internal.example.com/api/v2/records",
+		} {
+			info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+			if !rule.matchesCommand(info) {
+				t.Errorf("the prefix %q does not match %s, want the path and its segments", prefix, url)
+			}
+		}
+		for _, url := range []string{
+			"https://internal.example.com/api-internal",
+			"https://internal.example.com/apifoo",
+		} {
+			info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
+			if rule.matchesCommand(info) {
+				t.Errorf("the prefix %q matches %s, want the segment boundary to hold", prefix, url)
+			}
+		}
+	}
+}
