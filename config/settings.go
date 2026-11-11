@@ -159,11 +159,10 @@ type Rule struct {
 	Class string `json:"class,omitempty"`
 	// CommandPrefix matches the prefix of the call's primary argument:
 	// the command of a bash call, or the argument the tool names —
-	// the fetch tool's URL, for one. A prefix on a URL that names no
-	// scheme is a hostname rule: it covers the host under either
-	// scheme, so "internal.example.com" holds for its http and its
-	// https URLs alike, while a prefix with a scheme keeps holding the
-	// scheme it names.
+	// the fetch tool's URL, for one. A URL prefix that names no scheme
+	// is a hostname rule: the call's scheme decides, so one hostname
+	// holds for its http and https URLs alike. A prefix with a scheme
+	// keeps holding the scheme it names.
 	CommandPrefix string `json:"command_prefix,omitempty"`
 	// Action is what the rule does with a matching call.
 	Action string `json:"action"`

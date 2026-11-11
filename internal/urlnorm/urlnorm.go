@@ -49,15 +49,19 @@ func Canonical(value string) (string, bool) {
 }
 
 // CanonicalPrefix returns the canonical form of a rule's prefix under
-// the scheme of the canonical value it will be matched against. A
-// prefix that names no scheme of its own is a hostname rule: it covers
-// the host under either scheme, and the call's own URL decides which
-// one. A prefix that names a scheme is refused — its own scheme must
-// hold, so the caller keeps the lexical comparison rather than
-// stretching the prefix past the scheme it names. A prefix whose
-// authority carries userinfo is refused too: a hostname rule names a
-// host, and userinfo names nothing a URL rule can mean, so the prefix
-// matches nothing rather than widening to the bare host.
+// the scheme of the canonical value it will be matched against.
+//
+// A prefix that names no scheme of its own is a hostname rule. The
+// call's own URL decides the scheme, so one hostname covers both.
+//
+// A prefix that names a scheme is refused: its own scheme must hold.
+// The caller keeps the lexical comparison instead of stretching the
+// prefix past the scheme it names.
+//
+// A prefix whose authority carries userinfo is refused too. A
+// hostname rule names a host; userinfo names nothing a URL rule can
+// mean. The prefix matches nothing rather than widening to the bare
+// host.
 func CanonicalPrefix(canonical, prefix string) (string, bool) {
 	scheme, _, ok := strings.Cut(canonical, "://")
 	if !ok || (scheme != "http" && scheme != "https") || strings.Contains(prefix, "://") {
