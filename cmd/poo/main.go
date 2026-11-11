@@ -16,7 +16,7 @@ import (
 const usage = `poo runs a session against an OpenAI-compatible endpoint.
 
 Usage:
-  poo                        Launch the binary's front door (the repl, or door in the settings)
+  poo                        Launch the binary's front door (the repl, or ui in the settings)
   poo run [flags] "prompt"
   poo -p "prompt" [flags]    poo run, with the run's flags before or after the prompt (also --print)
   poo repl [flags]           An interactive session in the terminal (vi keys, markdown rendering)
@@ -67,7 +67,7 @@ Serve:
 
 The front door:
   A bare poo launches the interface the binary links as its front
-  door. The settings pick another one: set door in the settings file
+  door. The settings pick another one: set ui in the settings file
   the command resolves.
 `
 
@@ -78,7 +78,7 @@ func main() {
 // run dispatches the command and returns the process exit code.
 func run(args []string) int {
 	if len(args) == 0 {
-		return runDoor()
+		return runUI()
 	}
 	switch args[0] {
 	case "run":
