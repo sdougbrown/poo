@@ -238,3 +238,44 @@ func TestARefusedCallReadsInTheTranscript(t *testing.T) {
 		t.Errorf("the catalog did not read back:\n%s", out)
 	}
 }
+
+// TestAModelSwitchTakesTheNewModelAndItsWindow covers `/model <name>`:
+// the session's chat role moves on the wire, and the statusline names
+// the new model and its window.
+func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
+	// The run after the switch gives the statusline a token count to
+	// fill the new window against.
+	out, server := startRepl(t, "/model qwen\nsay hi\n/quit\n")
+
+	if !strings.Contains(out, "model → qwen") {
+		t.Errorf("the transcript shows no switch:\n%s", out)
+	}
+	if !strings.Contains(out, "ctx 12.3k/131.1k") {
+		t.Errorf("the statusline does not fill the new model's window:\n%s", out)
+	}
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 1 || server.switches[0] != "qwen" {
+		t.Errorf("the server got the switches %v, want one to qwen", server.switches)
+	}
+}
+
+// TestAModelSwitchToAnUnknownNameIsRefused covers a switch the catalog
+// cannot resolve: the refusal reads in the transcript, and the session
+// keeps the model it had.
+func TestAModelSwitchToAnUnknownNameIsRefused(t *testing.T) {
+	out, server := startRepl(t, "/model nope\n/quit\n")
+
+	if !strings.Contains(out, "✗") {
+		t.Errorf("the transcript shows no refusal:\n%s", out)
+	}
+	if !strings.Contains(out, "gemma4") {
+		t.Errorf("the statusline no longer names the session's model:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 0 {
+		t.Errorf("the server took the switch %v", server.switches)
+	}
+}

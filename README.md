@@ -41,14 +41,26 @@ same way: the explicit `--settings` file, then the file the
 user's `~/.config/poo/settings.json`. A command that finds none runs
 on the defaults, and the flags change them.
 
+**Models.** The settings define the models: `endpoints` name the
+servers (with `api_key_env` for the credential's environment
+variable, or `api_key` for a key written in the settings), `models`
+pair an endpoint with a model id, and `roles` assign a model to a
+role. `pi_models_file` points at a models file in pi's format —
+providers with `baseUrl`, `api` and `apiKey`, each with its models —
+and imports them under names of the form `provider/id`; the
+settings' own entries win on a name collision. A `roles.chat` that
+names an imported model runs it like any other.
+
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as
 markdown with highlighted code blocks, tool calls and results as
 decorated blocks, and a statusline over the input with the folder,
 the git branch, the model and the context's fill. Input reads with vi
 keys at a terminal, `/less` shows the transcript again through `less
--R`, and a permission ask reads its decision from the same input. The
-repl holds no run loop of its own: it is a wire client, and the
+-R`, and a permission ask reads its decision from the same input.
+`/model` names the models the session may run, `/model <name>`
+switches the chat model between runs, and the statusline follows.
+The repl holds no run loop of its own: it is a wire client, and the
 server runs the session.
 
 The repl is its own Go module (`repl/go.mod`), so a binary that links

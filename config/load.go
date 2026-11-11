@@ -80,6 +80,12 @@ func Parse(data []byte, format Format) (*Settings, error) {
 		return nil, decodeError(err)
 	}
 	settings.Permission.askersNamed = namesAskers(normalized)
+	// A models file in pi's format fills the endpoints and models the
+	// settings do not already hold, so the catalog resolves those
+	// models the way it resolves the settings' own.
+	if err := importPiModels(&settings); err != nil {
+		return nil, err
+	}
 	if err := settings.Check(); err != nil {
 		return nil, err
 	}
