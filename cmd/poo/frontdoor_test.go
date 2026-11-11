@@ -87,3 +87,32 @@ func TestTheReplRefusesItsFlagsBeforeTheServerStarts(t *testing.T) {
 		t.Errorf("an unknown flag exited %d, want 2", code)
 	}
 }
+
+// TestACommandReadsTheProjectSettings covers the discovery wiring every
+// non-door command shares: a project settings file a command's directory
+// holds is the settings the command runs under, without --settings or
+// the environment naming it.
+func TestACommandReadsTheProjectSettings(t *testing.T) {
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".poo"), 0o755); err != nil {
+		t.Fatalf("writing the project directory: %v", err)
+	}
+	// A key the settings do not have is the observable: the command
+	// that loaded the discovered file refuses it, and a command that
+	// never found it runs on the defaults.
+	if err := os.WriteFile(filepath.Join(project, ".poo", "settings.json"),
+		[]byte(`{"version":1,"no_such_key":true}`), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	t.Chdir(project)
+	t.Setenv("POO_SETTINGS", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(project, "no-config"))
+
+	code, stderr := runCLI(t, "models")
+	if code != 2 {
+		t.Errorf("the command exited %d, want 2 for the discovered settings' refusal", code)
+	}
+	if !strings.Contains(stderr, "no_such_key") {
+		t.Errorf("the refusal does not name the discovered file's key: %q", stderr)
+	}
+}

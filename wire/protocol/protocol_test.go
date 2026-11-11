@@ -100,3 +100,32 @@ func TestEventMarshalsItsPayload(t *testing.T) {
 		t.Errorf("the run id = %v, want r1", fields["run_id"])
 	}
 }
+
+// TestAnEventRoundTrips covers the event's two directions: the decode
+// reads the encode, known fields to their fields and the rest to the
+// payload, so a client decoding with the contract never drifts from the
+// shape the server sent.
+func TestAnEventRoundTrips(t *testing.T) {
+	event := protocol.Event{
+		SessionID: "s1",
+		Seq:       2,
+		Type:      "run.settled",
+		At:        "2026-11-11T00:00:00Z",
+		Payload:   map[string]any{"run_id": "r1", "fresh_field": 42},
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("the event did not encode: %v", err)
+	}
+	var back protocol.Event
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("the event did not decode: %v", err)
+	}
+	if back.SessionID != event.SessionID || back.Seq != event.Seq ||
+		back.Type != event.Type || back.At != event.At {
+		t.Errorf("the known fields read back as %+v", back)
+	}
+	if back.Payload["run_id"] != "r1" || back.Payload["fresh_field"] != float64(42) {
+		t.Errorf("the payload read back as %+v", back.Payload)
+	}
+}

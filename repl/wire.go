@@ -88,6 +88,13 @@ func (c *conn) read(r io.Reader) {
 	}
 	c.pending = map[int]chan rpcResult{}
 	c.mu.Unlock()
+	// The ends close with the server that held them: the run waiting
+	// on events, and the ask the client was about to answer, read a
+	// closed channel instead of waiting for what will never come.
+	// Nothing writes them from here on — the demux above is their only
+	// writer, and it has returned.
+	close(c.events)
+	close(c.asks)
 	close(c.done)
 }
 
@@ -108,8 +115,8 @@ func (c *conn) line(line []byte) {
 	hasID := len(msg.ID) > 0 && string(msg.ID) != "null"
 	switch {
 	case msg.Method == protocol.MethodEvent && !hasID:
-		evt, err := unmarshalEvent(msg.Params)
-		if err != nil {
+		var evt protocol.Event
+		if err := json.Unmarshal(msg.Params, &evt); err != nil {
 			return
 		}
 		select {
@@ -214,32 +221,4 @@ func (c *conn) answer(req askRequest, decision protocol.AskResult) error {
 	return err
 }
 
-// unmarshalEvent reads an event notification's params.
-//
-// The event's own data is spread into the object, so the fields the
-// client knows are read out and the rest is the payload.
-func unmarshalEvent(raw json.RawMessage) (protocol.Event, error) {
-	var flat map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &flat); err != nil {
-		return protocol.Event{}, err
-	}
-	var evt protocol.Event
-	read := func(key string, dst any) {
-		if v, ok := flat[key]; ok {
-			_ = json.Unmarshal(v, dst)
-			delete(flat, key)
-		}
-	}
-	read("session_id", &evt.SessionID)
-	read("seq", &evt.Seq)
-	read("type", &evt.Type)
-	read("at", &evt.At)
-	evt.Payload = map[string]any{}
-	for key, v := range flat {
-		var value any
-		if err := json.Unmarshal(v, &value); err == nil {
-			evt.Payload[key] = value
-		}
-	}
-	return evt, nil
-}
+// answer replies to the server's permission ask.

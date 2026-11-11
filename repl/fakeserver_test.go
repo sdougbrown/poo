@@ -27,6 +27,10 @@ type fakeServer struct {
 	prompts []string
 	// closed says the client closed the session.
 	closed bool
+	// cancels count the run/cancel calls the client sent.
+	cancels int
+	// refusePrompt makes run/prompt refuse, for the refusal tests.
+	refusePrompt bool
 
 	in *bufio.Reader
 	// w writes to the client.
@@ -109,8 +113,17 @@ func (s *fakeServer) line(line []byte) {
 		s.mu.Lock()
 		s.prompts = append(s.prompts, params.Text)
 		s.mu.Unlock()
+		if s.refusePrompt {
+			s.fail(req.ID, "busy", "the session is busy")
+			return
+		}
 		s.reply(req.ID, map[string]any{"run_id": "r1"})
 		go s.run()
+	case protocol.MethodRunCancel:
+		s.mu.Lock()
+		s.cancels++
+		s.mu.Unlock()
+		s.reply(req.ID, map[string]any{})
 	case protocol.MethodSessionClose:
 		s.mu.Lock()
 		s.closed = true
