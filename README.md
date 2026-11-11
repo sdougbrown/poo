@@ -28,11 +28,11 @@ poo run --endpoint http://localhost:4000/v1 --model-id gemma4 \
 
 **The front door.** A bare `poo` launches the interface the binary
 links as its front door — the repl. The settings pick another one:
-set `door` in the settings file the command resolves — the `--settings`
+set `ui` in the settings file the command resolves — the `--settings`
 file, the `POO_SETTINGS` environment variable's, the project's
 `.poo/settings.json` (found by walking up), or the user's
-`~/.config/poo/settings.json`. A binary with no door linked, or a
-name it does not offer, shows the usage instead.
+`~/.config/poo/settings.json`. A binary with none linked, or a name
+it does not offer, shows the usage instead.
 
 **Settings discovery.** Every command resolves its settings file the
 same way: the explicit `--settings` file, then the file the
@@ -50,6 +50,12 @@ keys at a terminal, `/less` shows the transcript again through `less
 -R`, and a permission ask reads its decision from the same input. The
 repl holds no run loop of its own: it is a wire client, and the
 server runs the session.
+
+The repl is its own Go module (`repl/go.mod`), so a binary that links
+the poo core carries none of its dependencies: a module that does not
+import `github.com/sdougbrown/poo/repl` downloads no markdown or
+terminal packages for it. Within this repository, the root module
+reaches it through a `replace` to `./repl`.
 
 **Profiles.** The profile decides which tools a session offers. Pick one
 with `--profile`; the default is `code`.
