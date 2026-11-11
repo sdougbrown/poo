@@ -230,3 +230,23 @@ func TestTheSessionRefusesAReasoningLevelWhileARunIsActive(t *testing.T) {
 		t.Errorf("the refused level left the session at %q, want no level", got)
 	}
 }
+
+// TestAReasoningSettingOnASpentSessionIsRefused covers the guards a
+// closed and a broken session make before a level is set: neither
+// accepts a level, whatever the level is.
+func TestAReasoningSettingOnASpentSessionIsRefused(t *testing.T) {
+	tr := scripted([]fakeResponse{{text: "one"}})
+	s := newTestSession(t, poo.Options{
+		Transport:  tr,
+		Sink:       &recordingSink{},
+		SessionID:  "s1",
+		Model:      thinkingModel("m"),
+		WorkingDir: t.TempDir(),
+	})
+	if err := s.Close(); err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if err := s.SetReasoning("high"); !errors.Is(err, poo.ErrSessionClosed) {
+		t.Errorf("a closed session took the level %v, want ErrSessionClosed", err)
+	}
+}

@@ -269,6 +269,9 @@ type GetResult struct {
 	Jobs []JobInfo `json:"jobs"`
 	// Prompt is the session's system prompt.
 	Prompt PromptStateInfo `json:"prompt"`
+	// Reasoning is the reasoning level the session's requests send,
+	// empty when it sends none.
+	Reasoning string `json:"reasoning,omitempty"`
 	// Broken says the session's store failed and the session cannot be
 	// used any more.
 	Broken bool `json:"broken"`

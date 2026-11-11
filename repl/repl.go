@@ -278,11 +278,12 @@ func (m *machine) start() error {
 		}
 	}
 
-	// A configure that changes nothing reads back what the session
-	// runs at, the reasoning level among it, so the statusline names
-	// the level a session opened with.
-	var current protocol.ConfigureResult
-	if err := m.conn.call(protocol.MethodSessionConfigure, protocol.ConfigureParams{SessionID: m.sessionID}, &current); err != nil {
+	// The session's state names the reasoning level it runs at, so
+	// the statusline names the level a session opened with. The read
+	// is the protocol's own read, not a configure that changes
+	// nothing.
+	var current protocol.GetResult
+	if err := m.conn.call(protocol.MethodSessionGet, protocol.GetParams{SessionID: m.sessionID}, &current); err != nil {
 		return err
 	}
 	m.status.level = current.Reasoning

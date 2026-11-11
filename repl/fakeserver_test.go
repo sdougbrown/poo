@@ -119,6 +119,16 @@ func (s *fakeServer) line(line []byte) {
 			response["warnings"] = s.warnings
 		}
 		s.reply(req.ID, response)
+	case protocol.MethodSessionGet:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.reply(req.ID, map[string]any{
+			"state":     "idle",
+			"jobs":      []any{},
+			"prompt":    map[string]any{},
+			"reasoning": s.level,
+			"broken":    false,
+		})
 	case protocol.MethodModelsList:
 		s.reply(req.ID, map[string]any{
 			"models": []map[string]any{

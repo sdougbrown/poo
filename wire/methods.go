@@ -208,10 +208,11 @@ func (s *server) sessionGet(raw json.RawMessage) (any, *protocol.Error) {
 		return nil, rerr
 	}
 	result := protocol.GetResult{
-		State:  string(entry.sess.State()),
-		Jobs:   jobsOf(entry.sess),
-		Prompt: promptOf(entry.sess),
-		Broken: entry.sess.Broken(),
+		State:     string(entry.sess.State()),
+		Jobs:      jobsOf(entry.sess),
+		Prompt:    promptOf(entry.sess),
+		Reasoning: entry.sess.ReasoningLevel(),
+		Broken:    entry.sess.Broken(),
 	}
 	if runID := entry.sess.ActiveRunID(); runID != "" {
 		result.RunID = runID
