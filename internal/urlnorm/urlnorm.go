@@ -93,7 +93,8 @@ func CanonicalPrefix(canonical, prefix string) (string, bool) {
 // the host and its subdomains alike. A path that names no segment is
 // the whole host: the scheme-plus-host spelling and the root path are
 // one resource. A cleartext http URL is never within an https prefix,
-// and the other way around.
+// and the other way around. The query and the fragment take no part
+// in the comparison: the prefix speaks to the host and its path.
 func WithinHost(value, prefix string) bool {
 	parsedValue, err := url.Parse(value)
 	if err != nil {

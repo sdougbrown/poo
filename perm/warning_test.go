@@ -270,6 +270,7 @@ func TestARefusedPrefixWarnsAtConstruction(t *testing.T) {
 		"htps://internal.example.com",
 		"ftp://example.com",
 		"https://attacker@internal.example.com",
+		"//internal.example.com",
 	} {
 		policy, err := perm.New(perm.Options{
 			Rules:       []perm.Rule{{Tool: "fetch", CommandPrefix: prefix, Action: perm.ActionDeny}},

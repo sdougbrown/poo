@@ -423,7 +423,8 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 // host, or its subdomains. The prefix's scheme holds when it names
 // one; the call's scheme decides when it does not. The same host
 // spelled the ways a URL can be spelled matches one prefix, and an
-// adjacent host, or the other scheme, matches nothing. A prefix whose
+// adjacent host, or the other scheme, matches nothing. The query and
+// the fragment take no part in the comparison. A prefix whose
 // grammar the canonical form refuses — a foreign scheme, userinfo in
 // its authority — matches nothing canonically. The lexical comparison
 // below decides instead.
@@ -661,12 +662,10 @@ func Warning(policy *Policy, askers []Asker) string {
 // refused; it compares as text.
 func refusedPrefix(prefix string) bool {
 	_, rest, hasScheme := strings.Cut(prefix, "://")
-	if !hasScheme {
+	if !hasScheme && strings.ContainsFunc(prefix, unicode.IsSpace) {
 		// Text that carries whitespace spells no URL: a command or a
 		// sentence compares as text, whatever it contains.
-		if strings.ContainsFunc(prefix, unicode.IsSpace) {
-			return false
-		}
+		return false
 	}
 	authority := prefix
 	if hasScheme {
@@ -678,8 +677,8 @@ func refusedPrefix(prefix string) bool {
 	authority, _, _ = strings.Cut(authority, "/")
 	authority, _, _ = strings.Cut(authority, "?")
 	authority, _, _ = strings.Cut(authority, "#")
-	if !hasScheme && !strings.Contains(authority, "@") {
-		return false
+	if strings.Contains(authority, "@") {
+		return true
 	}
 	_, ok := urlnorm.CanonicalPrefix("https://example.com/", prefix)
 	return !ok
