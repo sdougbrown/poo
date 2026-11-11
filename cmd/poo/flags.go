@@ -73,18 +73,19 @@ func (f *sharedFlags) register(fs *flag.FlagSet) {
 
 // settings reads the settings file and returns the settings.
 //
-// A command that needs no settings runs without one: the settings are
-// the defaults, and the flags change them.
+// The file is found the way every command finds it: an explicit
+// --settings file, the environment's file, the project's, the user's;
+// a command that finds none runs on the defaults, and the flags
+// change them.
 func (f *sharedFlags) settings() (*config.Settings, error) {
-	settings := &config.Settings{Version: 1}
-	if f.settingsFile == "" {
-		return settings, nil
-	}
-	loaded, err := config.Load(f.settingsFile)
+	path, err := config.FindSettings(f.settingsFile, "")
 	if err != nil {
 		return nil, err
 	}
-	return loaded, nil
+	if path == "" {
+		return &config.Settings{Version: 1}, nil
+	}
+	return config.Load(path)
 }
 
 // overrides returns the overrides the flags make.

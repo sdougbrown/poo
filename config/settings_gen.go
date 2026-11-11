@@ -17,9 +17,9 @@ type SettingsFields struct {
 	ContextNoticeRatio              *float64 "json:\"context.notice_ratio,omitempty\""
 	ContextStrategy                 *string  "json:\"context.strategy,omitempty\""
 	DeciderTimeoutMs                *float64 "json:\"decider.timeout_ms,omitempty\""
+	Door                            *string  "json:\"door,omitempty\""
 	FeedsPaths                      []string "json:\"feeds.paths,omitempty\""
 	FinishSchemaFile                *string  "json:\"finish.schema_file,omitempty\""
-	FrontDoor                       *string  "json:\"front_door,omitempty\""
 	JobsMaxRunning                  *float64 "json:\"jobs.max_running,omitempty\""
 	JobsMaxUnattendedWakes          *float64 "json:\"jobs.max_unattended_wakes,omitempty\""
 	JobsOnIdle                      *string  "json:\"jobs.on_idle,omitempty\""
@@ -85,9 +85,9 @@ type SettingsAvailability struct {
 	ContextNoticeRatio              FieldStatus
 	ContextStrategy                 FieldStatus
 	DeciderTimeoutMs                FieldStatus
+	Door                            FieldStatus
 	FeedsPaths                      FieldStatus
 	FinishSchemaFile                FieldStatus
-	FrontDoor                       FieldStatus
 	JobsMaxRunning                  FieldStatus
 	JobsMaxUnattendedWakes          FieldStatus
 	JobsOnIdle                      FieldStatus
@@ -177,12 +177,12 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ContextStrategySatisfied := func() bool { v := f.ContextStrategy; return v != nil && *v != "" }()
 	DeciderTimeoutMsEnabled := true
 	DeciderTimeoutMsSatisfied := f.DeciderTimeoutMs != nil
+	DoorEnabled := true
+	DoorSatisfied := func() bool { v := f.Door; return v != nil && *v != "" }()
 	FeedsPathsEnabled := true
 	FeedsPathsSatisfied := len(f.FeedsPaths) > 0
 	FinishSchemaFileEnabled := true
 	FinishSchemaFileSatisfied := func() bool { v := f.FinishSchemaFile; return v != nil && *v != "" }()
-	FrontDoorEnabled := true
-	FrontDoorSatisfied := func() bool { v := f.FrontDoor; return v != nil && *v != "" }()
 	JobsMaxRunningEnabled := true
 	JobsMaxRunningSatisfied := f.JobsMaxRunning != nil
 	JobsMaxUnattendedWakesEnabled := true
@@ -471,6 +471,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		Door: FieldStatus{
+			Required:  DoorEnabled && false,
+			Enabled:   DoorEnabled,
+			Satisfied: DoorSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		FeedsPaths: FieldStatus{
 			Required:  FeedsPathsEnabled && false,
 			Enabled:   FeedsPathsEnabled,
@@ -497,28 +519,6 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  FinishSchemaFileEnabled && false,
 			Enabled:   FinishSchemaFileEnabled,
 			Satisfied: FinishSchemaFileSatisfied,
-			Fair:      true,
-			Reason: func() *string {
-				var reasons []string
-				if len(reasons) == 0 {
-					return nil
-				}
-				return &reasons[0]
-			}(),
-			Reasons: func() []string {
-				var reasons []string
-				if reasons == nil {
-					reasons = []string{}
-				}
-				return reasons
-			}(),
-			Valid: nil,
-			Error: "",
-		},
-		FrontDoor: FieldStatus{
-			Required:  FrontDoorEnabled && false,
-			Enabled:   FrontDoorEnabled,
-			Satisfied: FrontDoorSatisfied,
 			Fair:      true,
 			Reason: func() *string {
 				var reasons []string
@@ -1782,13 +1782,13 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return v != nil && *v != ""
 	case "DeciderTimeoutMs":
 		return f.DeciderTimeoutMs != nil
+	case "Door":
+		v := f.Door
+		return v != nil && *v != ""
 	case "FeedsPaths":
 		return len(f.FeedsPaths) > 0
 	case "FinishSchemaFile":
 		v := f.FinishSchemaFile
-		return v != nil && *v != ""
-	case "FrontDoor":
-		v := f.FrontDoor
 		return v != nil && *v != ""
 	case "JobsMaxRunning":
 		return f.JobsMaxRunning != nil
@@ -2111,6 +2111,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: decider.timeout_ms must be at least a millisecond")
+	case "Door", "door":
+		found = true
+		status = avail.Door
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "FeedsPaths", "feeds.paths":
 		found = true
 		status = avail.FeedsPaths
@@ -2120,12 +2126,6 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "FinishSchemaFile", "finish.schema_file":
 		found = true
 		status = avail.FinishSchemaFile
-		if status.Reason != nil {
-			explanations = append(explanations, "* "+*status.Reason)
-		}
-	case "FrontDoor", "front_door":
-		found = true
-		status = avail.FrontDoor
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
