@@ -133,6 +133,13 @@ func (c *conn) line(line []byte) {
 		select {
 		case c.asks <- askRequest{id: msg.ID, ask: ask}:
 		default:
+			// The client is not taking asks, and the server blocks on
+			// the answer: a dropped ask is a session that hangs. The
+			// refusal frees it — the call the ask was about runs
+			// denied, and the tool result says so.
+			c.answer(askRequest{id: msg.ID}, protocol.AskResult{
+				Decision: protocol.DecisionDeny,
+			})
 		}
 	case hasID:
 		var id int
