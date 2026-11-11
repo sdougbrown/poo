@@ -132,7 +132,7 @@ func (s *fakeServer) line(line []byte) {
 		var params protocol.ConfigureParams
 		json.Unmarshal(req.Params, &params)
 		if params.Models == nil || (params.Models.Chat != "gemma4" && params.Models.Chat != "qwen") {
-			s.fail(req.ID, "unknown_model", "the model \"chat\" assigned to the \"chat\" role is not in the catalog")
+			s.fail(req.ID, "unknown_model", "poo: the session's model is unknown")
 			return
 		}
 		s.mu.Lock()

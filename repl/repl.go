@@ -644,7 +644,7 @@ func (m *machine) switchModel(name string) {
 	}
 	m.status.model = res.Models.Chat
 	if info, ok := m.catalog[res.Models.Chat]; ok {
-		m.status.setUsage(-1, info.ContextLimit)
+		m.status.setContextLimit(info.ContextLimit)
 	}
 	m.r.notice("model → %s", res.Models.Chat)
 }
