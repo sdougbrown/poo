@@ -1,5 +1,0 @@
-pending_request:
-  comment_id: 6787499933
-  head: 28f9664a1454caa956f6e07b9a8d900f84b641a6
-  bot: umpire-bot
-  requested_at: after round-4 fixes (segment boundary on subdomains, whitespace exemption, query-@, path normalization, folded loop, join test); CI pending
