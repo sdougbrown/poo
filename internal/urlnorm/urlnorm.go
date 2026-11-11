@@ -54,21 +54,29 @@ func Canonical(value string) (string, bool) {
 // A prefix that names no scheme of its own is a hostname rule. The
 // call's own URL decides the scheme, so one hostname covers both.
 //
-// A prefix that names a scheme is refused: its own scheme must hold.
-// The caller keeps the lexical comparison instead of stretching the
-// prefix past the scheme it names.
-//
-// A prefix whose authority carries userinfo is refused too. A
-// hostname rule names a host; userinfo names nothing a URL rule can
-// mean. The prefix matches nothing rather than widening to the bare
-// host.
+// A prefix that names a scheme of its own canonicalizes as itself,
+// and its scheme must hold. A cleartext URL never matches an https
+// prefix, or the other way around. A scheme the canonical form does
+// not take is refused, and so is a prefix whose authority carries
+// userinfo. A hostname rule names a host; userinfo names nothing a
+// URL rule can mean. A refused prefix matches nothing canonically,
+// and the caller keeps the lexical comparison. That never widens the
+// rule past what the operator typed.
 func CanonicalPrefix(canonical, prefix string) (string, bool) {
 	scheme, _, ok := strings.Cut(canonical, "://")
-	if !ok || (scheme != "http" && scheme != "https") || strings.Contains(prefix, "://") {
+	if !ok || (scheme != "http" && scheme != "https") {
 		return "", false
 	}
-	if authority, _, _ := strings.Cut(prefix, "/"); strings.Contains(authority, "@") {
+	authority := prefix
+	if _, rest, found := strings.Cut(prefix, "://"); found {
+		authority = rest
+	}
+	authority, _, _ = strings.Cut(authority, "/")
+	if strings.Contains(authority, "@") {
 		return "", false
+	}
+	if strings.Contains(prefix, "://") {
+		return Canonical(prefix)
 	}
 	return Canonical(scheme + "://" + prefix)
 }

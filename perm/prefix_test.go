@@ -137,16 +137,25 @@ func TestAHostnamePrefixCarriesItsPathAndPort(t *testing.T) {
 // userinfo names nothing a URL rule can mean, and it matches nothing
 // rather than widening to the bare host behind the userinfo.
 func TestAHostnamePrefixRefusesUserinfo(t *testing.T) {
-	rule := Rule{Tool: "fetch", CommandPrefix: "attacker@internal.example.com", Action: ActionDeny}
 	spec := poo.ToolSpec{Name: "fetch", PrimaryArg: "url"}
+	schemeless := Rule{Tool: "fetch", CommandPrefix: "attacker@internal.example.com", Action: ActionDeny}
 	for _, url := range []string{
 		"https://internal.example.com/page",
 		"https://attacker@internal.example.com/page",
 	} {
 		info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "` + url + `"}`)}
-		if rule.matchesCommand(info) {
+		if schemeless.matchesCommand(info) {
 			t.Errorf("the userinfo prefix matches %s, want a rule that names no host to match nothing", url)
 		}
+	}
+	explicit := Rule{Tool: "fetch", CommandPrefix: "https://attacker@internal.example.com", Action: ActionDeny}
+	info := poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://internal.example.com/page"}`)}
+	if explicit.matchesCommand(info) {
+		t.Errorf("the explicit userinfo prefix matches the bare host, want no canonical widening")
+	}
+	info = poo.ToolCallInfo{Spec: spec, Arguments: []byte(`{"url": "https://attacker@internal.example.com/page"}`)}
+	if !explicit.matchesCommand(info) {
+		t.Errorf("the explicit userinfo prefix does not match its own spelling, want the lexical fallback")
 	}
 }
 

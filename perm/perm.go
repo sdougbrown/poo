@@ -406,18 +406,16 @@ func (r Rule) matchesTool(info poo.ToolCallInfo) bool {
 // no primary argument has nothing a prefix could match, so its rule
 // matches nothing.
 //
-// A value that is an absolute http(s) URL, against a prefix that names
-// a scheme, compares in the URL's canonical form. The comparison stays
-// within the prefix's scheme and host, or its subdomains. The same
-// host spelled the ways a URL can be spelled matches one prefix, and
-// an adjacent host, or the other scheme, matches nothing.
-//
-// A prefix that names no scheme is a hostname rule: it covers the host
-// under either scheme, and the call's own URL decides which one. The
-// host's spellings, its subdomains, and any path or port on the prefix
-// are judged the same way an explicit-scheme prefix is. A prefix that
-// names a scheme keeps holding it, so the cleartext downgrade under an
-// https prefix matches nothing.
+// A value that is an absolute http(s) URL compares in the URL's
+// canonical form, and the prefix is judged by one grammar:
+// urlnorm.CanonicalPrefix. The comparison stays within the prefix's
+// host, or its subdomains. The prefix's scheme holds when it names
+// one; the call's scheme decides when it does not. The same host
+// spelled the ways a URL can be spelled matches one prefix, and an
+// adjacent host, or the other scheme, matches nothing. A prefix whose
+// grammar the canonical form refuses — a foreign scheme, userinfo in
+// its authority — matches nothing canonically. The lexical comparison
+// below decides instead.
 func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	name := info.Spec.PrimaryArg
 	if name == "" {
@@ -429,9 +427,6 @@ func (r Rule) matchesCommand(info poo.ToolCallInfo) bool {
 	}
 	value = strings.TrimLeftFunc(value, unicode.IsSpace)
 	if canonical, ok := urlnorm.Canonical(value); ok {
-		if prefix, ok := urlnorm.Canonical(r.CommandPrefix); ok {
-			return urlnorm.WithinHost(canonical, prefix)
-		}
 		if prefix, ok := urlnorm.CanonicalPrefix(canonical, r.CommandPrefix); ok {
 			return urlnorm.WithinHost(canonical, prefix)
 		}
