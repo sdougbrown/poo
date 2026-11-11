@@ -3,10 +3,13 @@ package repl
 import (
 	"bytes"
 	"io"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/chzyer/readline"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
@@ -19,6 +22,17 @@ func startRepl(t *testing.T, input string) (string, *fakeServer) {
 // startReplServer starts the repl against a server the test prepared.
 func startReplServer(t *testing.T, input string, server *fakeServer) (string, *fakeServer) {
 	t.Helper()
+	return startReplAs(t, input, nil)
+}
+
+// startReplAs starts the repl against a fake server the test set up: the
+// session's model, and the reasoning level it starts at.
+func startReplAs(t *testing.T, input string, setup func(*fakeServer)) (string, *fakeServer) {
+	t.Helper()
+	server := &fakeServer{t: t}
+	if setup != nil {
+		setup(server)
+	}
 	stdin, stdout := pipeUp(t, server)
 
 	var out bytes.Buffer
@@ -117,7 +131,7 @@ func TestAnUnknownAnswerDeniesTheAsk(t *testing.T) {
 func TestTheCommandsDoWhatTheirHelpSays(t *testing.T) {
 	out, _ := startRepl(t, "/help\n/quit\n")
 
-	for _, want := range []string{"/quit", "/less", "/model", "/cancel", "/help"} {
+	for _, want := range []string{"/quit", "/less", "/model", "/thinking", "/cancel", "/help"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the help lacks %q:\n%s", want, out)
 		}
@@ -281,4 +295,252 @@ func TestAModelSwitchToAnUnknownNameIsRefused(t *testing.T) {
 	if len(server.switches) != 0 {
 		t.Errorf("the server took the switch %v", server.switches)
 	}
+}
+
+// TestTheThinkingCommandCyclesTheModelSLevels covers `/thinking` with no
+// level: it climbs the chat model's own levels in their order, the first
+// one when the session runs at none, and the statusline names the level it
+// reached.
+func TestTheThinkingCommandCyclesTheModelSLevels(t *testing.T) {
+	out, server := startRepl(t, "/thinking\n/thinking\n/thinking\n/quit\n")
+
+	for _, want := range []string{"thinking → off", "thinking → low", "thinking → high"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the transcript lacks %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "🧠 high") {
+		t.Errorf("the statusline names no level:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if got := strings.Join(server.levels, ","); got != "off,low,high" {
+		t.Errorf("the server got the levels %q, want off,low,high", got)
+	}
+}
+
+// TestTheThinkingCycleWrapsAtTheEndOfTheList covers the last level: the
+// next one is the first again.
+func TestTheThinkingCycleWrapsAtTheEndOfTheList(t *testing.T) {
+	out, _ := startRepl(t, "/thinking high\n/thinking\n/quit\n")
+
+	if !strings.Contains(out, "thinking → high") {
+		t.Errorf("the named level did not take:\n%s", out)
+	}
+	if !strings.Contains(out, "thinking → off") {
+		t.Errorf("the cycle did not wrap:\n%s", out)
+	}
+}
+
+// TestANamedThinkingLevelIsSet covers `/thinking <level>`: the level goes
+// to the server as it was named, and the statusline shows what the session
+// runs at.
+func TestANamedThinkingLevelIsSet(t *testing.T) {
+	out, server := startRepl(t, "/thinking High\n/quit\n")
+
+	if !strings.Contains(out, "thinking → high") {
+		t.Errorf("the transcript shows no level:\n%s", out)
+	}
+	if !strings.Contains(out, "🧠 high") {
+		t.Errorf("the statusline names no level:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.levels) != 1 || server.levels[0] != "high" {
+		t.Errorf("the server got the levels %v, want one \"high\"", server.levels)
+	}
+}
+
+// TestAThinkingLevelTheModelDoesNotTakeIsRefused covers the server's
+// refusal: the level stays where it was, and the message names the levels
+// the model does take.
+func TestAThinkingLevelTheModelDoesNotTakeIsRefused(t *testing.T) {
+	out, server := startRepl(t, "/thinking medium\n/quit\n")
+
+	if !strings.Contains(out, "✗") {
+		t.Errorf("the transcript shows no refusal:\n%s", out)
+	}
+	if !strings.Contains(out, "off, low, high") {
+		t.Errorf("the refusal does not name the model's levels:\n%s", out)
+	}
+	if strings.Contains(out, "🧠") {
+		t.Errorf("the statusline names a level the session does not run at:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.levels) != 0 {
+		t.Errorf("the server took the level %v", server.levels)
+	}
+}
+
+// TestAModelSwitchTakesTheLevelTheWireReports covers the level across a
+// switch: a level the new model does not take is gone, and the transcript
+// says where the session runs now.
+func TestAModelSwitchTakesTheLevelTheWireReports(t *testing.T) {
+	out, _ := startRepl(t, "/thinking high\n/model qwen\n/quit\n")
+
+	if !strings.Contains(out, "model → qwen") {
+		t.Errorf("the transcript shows no switch:\n%s", out)
+	}
+	if !strings.Contains(out, "thinking → off") {
+		t.Errorf("the switch did not report the level it left the session at:\n%s", out)
+	}
+	if !strings.Contains(out, "🧠 off") {
+		t.Errorf("the statusline names no level after the switch:\n%s", out)
+	}
+}
+
+// TestTheStatuslineNamesTheLevelTheSessionOpenedAt covers the read-back:
+// a session that runs at a level says so before anything is typed.
+func TestTheStatuslineNamesTheLevelTheSessionOpenedAt(t *testing.T) {
+	out, _ := startReplAs(t, "/quit\n", func(s *fakeServer) { s.level = "high" })
+
+	if !strings.Contains(out, "🧠 high") {
+		t.Errorf("the statusline names no level:\n%s", out)
+	}
+}
+
+// TestTheBacktabFilterCyclesTheLevel covers the key binding: the editor
+// hands Shift+Tab to the filter one rune at a time, and the run that
+// completes it moves the level while the others pass through.
+func TestTheBacktabFilterCyclesTheLevel(t *testing.T) {
+	server := &fakeServer{t: t}
+	stdin, stdout := pipeUp(t, server)
+	m := &machine{
+		out:       io.Discard,
+		r:         newRenderer(io.Discard),
+		conn:      startConn(stdout, stdin),
+		sessionID: "s1",
+		status:    newStatus(""),
+		catalog: map[string]protocol.ModelInfo{
+			"gemma4": {Name: "gemma4", ReasoningLevels: []string{"off", "low", "high"}},
+		},
+	}
+	m.status.model = "gemma4"
+	tab := &backtab{m: m}
+
+	// A rune that is not the sequence passes through and starts over.
+	if r, process := tab.filter('a'); r != 'a' || !process {
+		t.Errorf("the filter ate the rune %q (process %v)", r, process)
+	}
+	// The ESC is the vim mode's own key, and it passes on.
+	if r, process := tab.filter(readline.CharEsc); r != readline.CharEsc || !process {
+		t.Errorf("the filter ate the ESC (process %v)", process)
+	}
+	// The '[' and the 'Z' are the sequence, and neither reaches the vim
+	// handler.
+	if _, process := tab.filter(readline.CharEscapeEx); process {
+		t.Error("the filter passed the '[' of a Shift+Tab on")
+	}
+	if _, process := tab.filter('Z'); process {
+		t.Error("the filter passed the 'Z' of a Shift+Tab on")
+	}
+	if m.status.level != "off" {
+		t.Errorf("the cycle left the level at %q, want off", m.status.level)
+	}
+
+	// The sequence completes once: the next rune is a key again.
+	if r, process := tab.filter('b'); r != 'b' || !process {
+		t.Errorf("the rune after the cycle was eaten (process %v)", process)
+	}
+}
+
+// TestTheShiftTabBindingReachesTheCycle covers the binding end to end: a
+// terminal sends Shift+Tab as ESC, '[', 'Z', the editor reads the three and
+// hands them to the filter, and the filter cycles the level. The editor's
+// own escape decoding is what must not see them, so the test drives the
+// real editor over a pipe.
+func TestTheShiftTabBindingReachesTheCycle(t *testing.T) {
+	server := &fakeServer{t: t}
+	in, out := pipeUp(t, server)
+	// The editor writes the statusline from its own goroutine, so the test
+	// reads the screen through the same lock it writes behind.
+	screen := &syncBuffer{}
+	m := &machine{
+		out:       screen,
+		r:         newRenderer(screen),
+		conn:      startConn(out, in),
+		sessionID: "s1",
+		status:    newStatus(""),
+		catalog: map[string]protocol.ModelInfo{
+			"gemma4": {Name: "gemma4", ReasoningLevels: []string{"off", "low", "high"}},
+		},
+	}
+	m.status.model = "gemma4"
+	tab := &backtab{m: m}
+
+	stdin, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("opening the pipe: %v", err)
+	}
+	cfg := m.lineConfig(tab)
+	cfg.Stdin = stdin
+	cfg.Stdout = screen
+	cfg.FuncIsTerminal = func() bool { return true }
+	cfg.FuncMakeRaw = func() error { return nil }
+	cfg.FuncExitRaw = func() error { return nil }
+	rl, err := readline.NewEx(cfg)
+	if err != nil {
+		t.Fatalf("starting the editor: %v", err)
+	}
+	tab.rl = rl
+	// The editor's read loop is released by the end of the pipe, which is
+	// why the writer closes before the editor does.
+	defer rl.Close()
+	defer writer.Close()
+
+	go func() {
+		writer.Write([]byte("\x1b[Z\r"))
+	}()
+	// The line is read in the test's own goroutine, so a sequence the
+	// editor never hands over fails the test instead of hanging it.
+	type result struct {
+		line string
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		line, err := rl.Readline()
+		done <- result{line, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("reading the line: %v", got.err)
+		}
+		if got.line != "" {
+			t.Errorf("the line is %q, want the sequence to leave no text", got.line)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the editor did not return a line")
+	}
+	if m.status.level != "off" {
+		t.Errorf("the level is %q, want off", m.status.level)
+	}
+	// The prompt was set again, so the statusline the next line is read
+	// behind names the level the cycle reached.
+	if !strings.Contains(screen.String(), "🧠 off") {
+		t.Errorf("the statusline names no level:\n%s", screen.String())
+	}
+}
+
+// syncBuffer is a buffer two goroutines share: the editor writes it from
+// its read loop, and the test reads what it wrote.
+type syncBuffer struct {
+	// mu guards the buffer.
+	mu sync.Mutex
+	// buf holds the bytes.
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

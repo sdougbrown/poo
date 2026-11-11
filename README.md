@@ -57,11 +57,15 @@ like any other.
 serve` with them, and renders the session in the terminal: replies as
 markdown with highlighted code blocks, tool calls and results as
 decorated blocks, and a statusline over the input with the folder,
-the git branch, the model and the context's fill. Input reads with vi
-keys at a terminal, `/less` shows the transcript again through `less
--R`, and a permission ask reads its decision from the same input.
+the git branch, the model, the reasoning level and the context's
+fill. Input reads with vi keys at a terminal, `/less` shows the
+transcript again through `less -R`, and a permission ask reads its
+decision from the same input.
 `/model` names the models the session may run, `/model <name>`
 switches the chat model between runs, and the statusline follows.
+`/thinking` climbs the chat model's reasoning levels, and
+`/thinking <level>` names one; Shift+Tab does the same while the
+prompt is read.
 The repl holds no run loop of its own: it is a wire client, and the
 server runs the session.
 

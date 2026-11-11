@@ -45,6 +45,11 @@ type piModel struct {
 	MaxTokens int `json:"maxTokens"`
 	// Reasoning says the model reasons.
 	Reasoning bool `json:"reasoning"`
+	// ThinkingLevelMap maps a level name to the value the provider takes
+	// for it, or to null when the provider does not take that level: the
+	// keys are pi's levels, off, minimal, low, medium, high, xhigh and
+	// max.
+	ThinkingLevelMap map[string]json.RawMessage `json:"thinkingLevelMap"`
 	// Compat carries the provider's compatibility notes.
 	Compat struct {
 		SupportsReasoningEffort bool `json:"supportsReasoningEffort"`
@@ -77,6 +82,43 @@ var piAPI = map[string]poo.API{
 var piModalities = map[string]bool{
 	"text":  true,
 	"image": true,
+}
+
+// piReasoningLevels is pi's canonical level order, lowest first.
+//
+// It is the order an imported model's levels take, so the levels climb the
+// way pi's own cycle does.
+var piReasoningLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// piEffortLevels are the levels a reasoning model is imported with when
+// pi's file says nothing more about them.
+var piEffortLevels = []string{"off", "low", "medium", "high"}
+
+// piThinkingLevels turns a model's thinkingLevelMap into the levels it
+// accepts.
+//
+// A level the map gives no value is a level the provider does not take, so
+// only the keys with a value are levels. A model with no map is the effort
+// default, and a map that leaves no level takes none.
+func piThinkingLevels(levels map[string]json.RawMessage) []string {
+	if len(levels) == 0 {
+		return append([]string(nil), piEffortLevels...)
+	}
+	out := make([]string, 0, len(levels))
+	for _, level := range piReasoningLevels {
+		value, ok := levels[level]
+		if !ok || isJSONNull(value) {
+			continue
+		}
+		out = append(out, level)
+	}
+	return out
+}
+
+// isJSONNull reports that a models file's value is null: the level the key
+// names is one the provider does not take.
+func isJSONNull(value json.RawMessage) bool {
+	return len(value) == 0 || string(value) == "null"
 }
 
 // importPiModels reads the settings' pi models file and fills the
@@ -172,6 +214,7 @@ func importPiModels(settings *Settings) error {
 					Mode:  poo.ReasoningEffort,
 					Param: poo.ReasoningPathEffort,
 				}
+				entry.ReasoningLevels = piThinkingLevels(model.ThinkingLevelMap)
 			}
 			if settings.Models == nil {
 				settings.Models = map[string]Model{}

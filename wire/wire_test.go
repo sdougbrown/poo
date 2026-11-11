@@ -1900,3 +1900,57 @@ func TestTheInspectPastTheLastEvent(t *testing.T) {
 		t.Errorf("next_seq = %d, want the last event's %d", inspected.NextSeq, last)
 	}
 }
+
+// TestConfigureTakesAReasoningLevel covers session/configure's reasoning
+// level over the wire: the result echoes the level the session runs at, and
+// the next request carries it.
+func TestConfigureTakesAReasoningLevel(t *testing.T) {
+	transport := pootest.NewTransport(pootest.Turn{Text: "hello", Finish: "stop"})
+	factory := newTestFactory(t, func() poo.ChatTransport { return transport })
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	raw, rerr := h.call(protocol.MethodSessionConfigure, protocol.ConfigureParams{
+		SessionID: sessionID,
+		Reasoning: "high",
+	})
+	if rerr != nil {
+		t.Fatalf("the configure was refused: %v", rerr)
+	}
+	var configured protocol.ConfigureResult
+	if err := json.Unmarshal(raw, &configured); err != nil {
+		t.Fatalf("decoding the configure result: %v", err)
+	}
+	if configured.Reasoning != "high" {
+		t.Errorf("the configure result names the level %q, want high", configured.Reasoning)
+	}
+
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+		t.Fatalf("the prompt was refused: %v", rerr)
+	}
+	h.event("run.settled")
+	requests := transport.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("the transport got %d requests, want one", len(requests))
+	}
+	if requests[0].Reasoning != "high" {
+		t.Errorf("the request carries the level %q, want high", requests[0].Reasoning)
+	}
+
+	// A level the model does not take is the client's mistake, and the
+	// refusal names the levels it does take.
+	_, rerr = h.call(protocol.MethodSessionConfigure, protocol.ConfigureParams{
+		SessionID: sessionID,
+		Reasoning: "medium",
+	})
+	if rerr == nil {
+		t.Fatal("the configure took a level the model does not take")
+	}
+	if rerr.Data == nil || rerr.Data.Code != protocol.DataInvalidParams {
+		t.Errorf("the data code = %q, want %q", dataCode(rerr), protocol.DataInvalidParams)
+	}
+	if !strings.Contains(rerr.Message, "off, low, high") {
+		t.Errorf("the refusal is %q, want it to name the model's levels", rerr.Message)
+	}
+}

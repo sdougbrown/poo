@@ -30,6 +30,14 @@ import (
 // promptMark is the mark the repl reads its lines behind.
 const promptMark = "💩❯ "
 
+// namedLevels are the reasoning levels poo knows, lowest first.
+//
+// A model that announces no levels of its own is climbed through these, in
+// this order: the server checks each one against the model's reasoning
+// control, so a level it cannot take comes back as a refusal. The list
+// mirrors poo's own ReasoningLevelNames, which is the server's copy.
+var namedLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+
 // Options are the repl's settings.
 type Options struct {
 	// ServerArgs are the argv the repl starts the server with. The
@@ -257,7 +265,7 @@ func (m *machine) start() error {
 
 	// The catalog names every model the session may switch to, and
 	// the chat model's entry carries the window the statusline shows
-	// the fill against.
+	// the fill against and the reasoning levels /thinking cycles.
 	var catalog protocol.ModelsResult
 	if err := m.conn.call(protocol.MethodModelsList, protocol.ModelsParams{}, &catalog); err != nil {
 		return err
@@ -269,6 +277,15 @@ func (m *machine) start() error {
 			m.status.setUsage(-1, model.ContextLimit)
 		}
 	}
+
+	// A configure that changes nothing reads back what the session
+	// runs at, the reasoning level among it, so the statusline names
+	// the level a session opened with.
+	var current protocol.ConfigureResult
+	if err := m.conn.call(protocol.MethodSessionConfigure, protocol.ConfigureParams{SessionID: m.sessionID}, &current); err != nil {
+		return err
+	}
+	m.status.level = current.Reasoning
 	return nil
 }
 
@@ -308,19 +325,92 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 // newInput builds the line reader for the session.
 func (m *machine) newInput() input {
 	if termIsTerminal(m.in) {
-		rl, err := readline.NewEx(&readline.Config{
-			Prompt:      promptMark,
-			HistoryFile: m.opts.HistoryFile,
-			VimMode:     true,
-			Stdout:      m.out,
-		})
+		tab := &backtab{m: m}
+		rl, err := readline.NewEx(m.lineConfig(tab))
 		if err == nil {
+			tab.rl = rl
 			return &readlineInput{rl: rl}
 		}
 		// A readline that would not start falls through to plain
 		// lines: the conversation works without the editor.
 	}
 	return &plainInput{scanner: bufio.NewScanner(m.in), write: m.r.write}
+}
+
+// lineConfig is the editor's configuration: a readline in vi mode, with
+// Shift+Tab bound to the reasoning cycle.
+func (m *machine) lineConfig(tab *backtab) *readline.Config {
+	return &readline.Config{
+		Prompt:      promptMark,
+		HistoryFile: m.opts.HistoryFile,
+		VimMode:     true,
+		Stdout:      m.out,
+		// The Shift+Tab sequence reaches the filter one rune at a time;
+		// see backtab.
+		FuncFilterInputRune: tab.filter,
+	}
+}
+
+// backtab binds Shift+Tab to the reasoning cycle, the way pi cycles its
+// thinking level.
+//
+// A terminal sends Shift+Tab as ESC, '[', 'Z', and readline's escape
+// decoder reads that kind of sequence itself: a key it does not know is
+// dropped, so the filter never sees it. The vim mode, which this repl
+// reads in, forwards the ESC as a bare rune instead of looking ahead, so
+// the three runes do reach the filter, one call each. This is the state
+// that recognizes them.
+//
+// The ESC passes on, because it is the key that leaves the insert mode,
+// and the '[' is held until the 'Z' decides. Holding it costs nothing: the
+// ESC has just put readline in the normal mode, where a lone '[' only
+// rings the bell. A run that completes is the cycle, and both of its
+// runes are swallowed, so the vim handler never sees them.
+//
+// The cycle is a wire call, and it runs while the prompt is being read:
+// the session has no run going then, so the server has nothing else to
+// answer.
+type backtab struct {
+	// m is the machine whose reasoning level the cycle moves.
+	m *machine
+	// rl is the editor the statusline is set on, once it is built.
+	rl *readline.Instance
+	// stage is how much of the sequence has arrived: 1 after the ESC, 2
+	// after the '['.
+	stage int
+}
+
+// filter sees every rune the editor reads, before the vim handler does.
+func (b *backtab) filter(r rune) (rune, bool) {
+	switch {
+	case r == readline.CharEsc:
+		b.stage = 1
+		return r, true
+	case b.stage == 1 && r == readline.CharEscapeEx:
+		b.stage = 2
+		return r, false
+	case b.stage == 2 && r == 'Z':
+		b.stage = 0
+		b.cycle()
+		return r, false
+	}
+	b.stage = 0
+	return r, true
+}
+
+// cycle moves the session to its next level and sets the prompt again, so
+// the statusline shows the level the next line is read at.
+//
+// A refused level is a line of the transcript, and the prompt is taken back
+// first because the editor has already painted it.
+func (b *backtab) cycle() {
+	if err := b.m.setThinking(b.m.nextThinkingLevel()); err != nil {
+		fmt.Fprint(b.m.out, "\r\033[K")
+		b.m.r.failure(err.Error())
+	}
+	if b.rl != nil {
+		b.rl.SetPrompt(b.m.status.prompt())
+	}
 }
 
 // greet says the session is open.
@@ -339,6 +429,9 @@ func (m *machine) command(line string, input input) (int, bool) {
 /less            read the transcript again in less
 /model           name the session's models
 /model <name>    switch the chat model
+/thinking        cycle the reasoning level (Shift+Tab)
+/thinking <lvl>  set the reasoning level: off, minimal, low, medium, high,
+                 xhigh or a token budget
 /cancel          stop the running turn
 /help            this list
 anything else    a prompt for the session`)
@@ -360,9 +453,16 @@ anything else    a prompt for the session`)
 	case "/cancel":
 		m.cancelRun()
 		return 0, false
+	case "/thinking":
+		m.thinking("")
+		return 0, false
 	}
 	if name, ok := strings.CutPrefix(line, "/model "); ok {
 		m.switchModel(strings.TrimSpace(name))
+		return 0, false
+	}
+	if level, ok := strings.CutPrefix(line, "/thinking "); ok {
+		m.thinking(strings.TrimSpace(level))
 		return 0, false
 	}
 	if err := m.runPrompt(line, input); err != nil {
@@ -399,6 +499,71 @@ func (m *machine) switchModel(name string) {
 		m.status.setUsage(-1, info.ContextLimit)
 	}
 	m.r.notice("model → %s", res.Models.Chat)
+	// The level is the new model's to take, so the wire says where the
+	// session runs now: a model that cannot take the level it had takes
+	// the session to another one, and the repl says so.
+	if res.Reasoning != m.status.level {
+		m.r.notice("thinking → %s", levelName(res.Reasoning))
+	}
+	m.status.level = res.Reasoning
+}
+
+// thinking sets the session's reasoning level, or takes the next one when
+// no level is named.
+//
+// The level is the wire's to check: the server refuses one the chat model
+// does not take, and the refusal names the levels it does.
+func (m *machine) thinking(level string) {
+	if level == "" {
+		level = m.nextThinkingLevel()
+	}
+	if err := m.setThinking(level); err != nil {
+		m.r.failure(err.Error())
+		return
+	}
+	m.r.notice("thinking → %s", levelName(m.status.level))
+}
+
+// nextThinkingLevel returns the level after the session's, wrapping at the
+// end of the list.
+//
+// The order is the model's own, lowest first. A model that names no levels
+// is climbed through the ones poo knows, which the server checks one by
+// one; a level the session is not at starts the climb from the bottom.
+func (m *machine) nextThinkingLevel() string {
+	levels := namedLevels
+	if info, ok := m.catalog[m.status.model]; ok && len(info.ReasoningLevels) > 0 {
+		levels = info.ReasoningLevels
+	}
+	for i, level := range levels {
+		if strings.EqualFold(level, m.status.level) {
+			return levels[(i+1)%len(levels)]
+		}
+	}
+	return levels[0]
+}
+
+// setThinking sets the session's reasoning level on the wire and takes the
+// level the session says it runs at.
+func (m *machine) setThinking(level string) error {
+	var res protocol.ConfigureResult
+	if err := m.conn.call(protocol.MethodSessionConfigure, protocol.ConfigureParams{
+		SessionID: m.sessionID,
+		Reasoning: level,
+	}, &res); err != nil {
+		return err
+	}
+	m.status.level = res.Reasoning
+	return nil
+}
+
+// levelName names a reasoning level the way the transcript says it, where
+// an empty level is a session that sends no reasoning setting.
+func levelName(level string) string {
+	if level == "" {
+		return "none"
+	}
+	return level
 }
 
 // runPrompt sends one prompt and renders the run's events until the

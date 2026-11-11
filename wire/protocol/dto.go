@@ -115,6 +115,10 @@ type ModelInfo struct {
 	MaxOutput int `json:"max_output,omitempty"`
 	// ToolsMode is how the model makes tool calls.
 	ToolsMode string `json:"tools_mode,omitempty"`
+	// ReasoningLevels are the reasoning levels the model accepts, lowest
+	// first, e.g. off, minimal, low, medium, high, xhigh. A model that
+	// names none is set by its reasoning control alone.
+	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
 }
 
 // PromptOverrides are the system prompt changes a client asks for.
@@ -278,12 +282,22 @@ type ConfigureParams struct {
 	PromptOverrides *PromptOverrides `json:"prompt_overrides,omitempty"`
 	// Models changes the models the session talks to.
 	Models *ModelRoles `json:"models,omitempty"`
+	// Reasoning is the chat model's reasoning level: off, minimal, low,
+	// medium, high, xhigh, or a token budget such as "4096". Empty leaves
+	// the level the session runs at unchanged.
+	//
+	// The level takes effect at the next run. A level the chat model does
+	// not take is refused, and the refusal names the levels it does.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // ConfigureResult is the result of session/configure.
 type ConfigureResult struct {
 	// Models are the models the session talks to now.
 	Models ModelRoles `json:"models"`
+	// Reasoning is the level the session runs at now. It is empty when the
+	// session sends no reasoning setting.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // ModelsParams are the params of models/list.

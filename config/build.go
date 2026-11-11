@@ -800,15 +800,16 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 	}
 	for name, model := range s.Models {
 		settings.Models[name] = catalog.ModelSettings{
-			Endpoint:     model.Endpoint,
-			ModelID:      model.ModelID,
-			API:          poo.API(model.API),
-			ToolsMode:    model.ToolsMode,
-			Ops:          ops(model.Ops),
-			Inputs:       modalities(model.Inputs),
-			ContextLimit: model.ContextLimit,
-			MaxOutput:    model.MaxOutput,
-			Reasoning:    model.Reasoning,
+			Endpoint:        model.Endpoint,
+			ModelID:         model.ModelID,
+			API:             poo.API(model.API),
+			ToolsMode:       model.ToolsMode,
+			Ops:             ops(model.Ops),
+			Inputs:          modalities(model.Inputs),
+			ContextLimit:    model.ContextLimit,
+			MaxOutput:       model.MaxOutput,
+			Reasoning:       model.Reasoning,
+			ReasoningLevels: model.ReasoningLevels,
 		}
 	}
 	for role, model := range s.Roles {

@@ -154,8 +154,8 @@ type Factory interface {
 	// Load opens a recorded session.
 	Load(ctx context.Context, params protocol.LoadParams, env FactoryEnv) (*poo.Session, *Info, error)
 	// Configure applies a configuration change to a session between
-	// its runs.
-	Configure(ctx context.Context, sess *poo.Session, params protocol.ConfigureParams) (protocol.ModelRoles, error)
+	// its runs, and says what the session runs at once it is applied.
+	Configure(ctx context.Context, sess *poo.Session, params protocol.ConfigureParams) (protocol.ConfigureResult, error)
 	// Models returns the effective model catalog.
 	Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo, error)
 	// Settings returns the effective settings, with the credentials

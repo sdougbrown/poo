@@ -16,6 +16,9 @@ type status struct {
 	branch string
 	// model is the name the session's chat model answers to.
 	model string
+	// level is the reasoning level the session runs at. It is empty when
+	// the session sends no reasoning setting.
+	level string
 	// contextLimit is the model's context window in tokens. Zero says
 	// the repl does not know it.
 	contextLimit int
@@ -68,6 +71,9 @@ func (s *status) line() string {
 	}
 	if s.model != "" {
 		segments = append(segments, ansiCyan+s.model+ansiReset)
+	}
+	if s.level != "" {
+		segments = append(segments, "🧠 "+s.level)
 	}
 	if s.inputTokens > 0 {
 		ctx := shortTokens(s.inputTokens)

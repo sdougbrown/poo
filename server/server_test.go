@@ -673,3 +673,133 @@ func TestTheSettingsDocCarriesNoKeys(t *testing.T) {
 		t.Errorf("the settings document carries a key:\n%s", encoded)
 	}
 }
+
+// reasonedSettings returns the settings a reasoning test is built from:
+// a chat model that takes three levels, a model that takes two it does not
+// share, and a model that controls no reasoning.
+func reasonedSettings(t *testing.T) *config.Settings {
+	t.Helper()
+	document := `{
+  "version": 1,
+  "profile": "` + search.Name + `",
+  "session": {"mode": "logged"},
+  "endpoints": {"grace": {"endpoint": "http://grace:4000/v1"}},
+  "models": {
+    "chat-model": {"endpoint": "grace", "model_id": "chat-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "context_limit": 32768,
+      "reasoning": {"mode": "effort", "param": "reasoning_effort"}, "reasoning_levels": ["off", "low", "high"]},
+    "sharp-model": {"endpoint": "grace", "model_id": "sharp-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "context_limit": 32768,
+      "reasoning": {"mode": "effort", "param": "reasoning_effort"}, "reasoning_levels": ["off", "medium"]},
+    "plain-model": {"endpoint": "grace", "model_id": "plain-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "context_limit": 32768}
+  },
+  "roles": {"chat": "chat-model"}
+}`
+	settings, err := config.Parse([]byte(document), config.FormatJSON)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	return settings
+}
+
+// TestConfigureTakesTheReasoningLevel covers session/configure's reasoning
+// level: the result says what the session runs at, a level the chat model
+// does not take is refused with the levels it does, and a switch takes the
+// level back to one the new model takes.
+func TestConfigureTakesTheReasoningLevel(t *testing.T) {
+	ctx := context.Background()
+	srv := newServer(t, reasonedSettings(t))
+	sess, info, err := srv.Create(ctx, protocol.CreateParams{
+		Mode:       "logged",
+		SessionDir: t.TempDir(),
+	}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("closing the session: %v", err)
+		}
+		if err := info.Release(); err != nil {
+			t.Errorf("releasing the store: %v", err)
+		}
+	}()
+
+	// A level the chat model takes is the level the session runs at.
+	configured, err := srv.Configure(ctx, sess, protocol.ConfigureParams{Reasoning: "high"})
+	if err != nil {
+		t.Fatalf("setting the level: %v", err)
+	}
+	if configured.Reasoning != "high" {
+		t.Errorf("the configure result names the level %q, want high", configured.Reasoning)
+	}
+
+	// A level it does not take is a refusal that names the ones it does.
+	_, err = srv.Configure(ctx, sess, protocol.ConfigureParams{Reasoning: "minimal"})
+	if err == nil {
+		t.Fatal("the configure took a level the model does not take")
+	}
+	if !strings.Contains(err.Error(), "off, low, high") {
+		t.Errorf("the refusal is %q, want it to name the model's levels", err)
+	}
+	if got := sess.ReasoningLevel(); got != "high" {
+		t.Errorf("the refused level left the session at %q, want high", got)
+	}
+
+	// The switch takes the level back, because the new model has no high.
+	configured, err = srv.Configure(ctx, sess, protocol.ConfigureParams{
+		Models: &protocol.ModelRoles{Chat: "sharp-model"},
+	})
+	if err != nil {
+		t.Fatalf("switching the model: %v", err)
+	}
+	if configured.Models.Chat != "sharp-model" {
+		t.Errorf("the configure result names the model %q, want sharp-model", configured.Models.Chat)
+	}
+	if configured.Reasoning != "off" {
+		t.Errorf("the switch left the session at the level %q, want off", configured.Reasoning)
+	}
+
+	// And the level is now the new model's to check.
+	_, err = srv.Configure(ctx, sess, protocol.ConfigureParams{Reasoning: "high"})
+	if err == nil {
+		t.Fatal("the new model took the old model's level")
+	}
+	if !strings.Contains(err.Error(), "off, medium") {
+		t.Errorf("the refusal is %q, want it to name the new model's levels", err)
+	}
+
+	// A model that controls no reasoning takes no level but off.
+	configured, err = srv.Configure(ctx, sess, protocol.ConfigureParams{
+		Models:    &protocol.ModelRoles{Chat: "plain-model"},
+		Reasoning: "off",
+	})
+	if err != nil {
+		t.Fatalf("switching to the plain model: %v", err)
+	}
+	if configured.Reasoning != "off" {
+		t.Errorf("the plain model runs at the level %q, want off", configured.Reasoning)
+	}
+	if _, err := srv.Configure(ctx, sess, protocol.ConfigureParams{Reasoning: "low"}); err == nil {
+		t.Error("the plain model took a level, want a refusal")
+	}
+}
+
+// TestTheCatalogAnnouncesTheReasoningLevels covers the catalog the wire
+// reports: a model's levels are what a client cycles through, and a model
+// that declares none reports none.
+func TestTheCatalogAnnouncesTheReasoningLevels(t *testing.T) {
+	srv := newServer(t, reasonedSettings(t))
+	models, err := srv.Models(context.Background(), false)
+	if err != nil {
+		t.Fatalf("reading the catalog: %v", err)
+	}
+	byName := map[string]protocol.ModelInfo{}
+	for _, model := range models {
+		byName[model.Name] = model
+	}
+	if got := strings.Join(byName["chat-model"].ReasoningLevels, ","); got != "off,low,high" {
+		t.Errorf("the catalog announces the levels %q for chat-model, want off,low,high", got)
+	}
+	if got := byName["plain-model"].ReasoningLevels; len(got) != 0 {
+		t.Errorf("the catalog announces the levels %v for a model that declares none", got)
+	}
+}
