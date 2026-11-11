@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -192,6 +193,18 @@ func TestReasoningFieldsRejectAnImpossibleSetting(t *testing.T) {
 }
 
 func TestParseReasoning(t *testing.T) {
+	for _, name := range poo.ReasoningLevelNames {
+		if name == "off" {
+			continue
+		}
+		setting, err := poo.ParseReasoning(strings.ToUpper(name))
+		if err != nil {
+			t.Fatalf("the setting %q: %v", name, err)
+		}
+		if setting.Effort != name || setting.Off {
+			t.Errorf("the setting is %+v, want the %q effort", setting, name)
+		}
+	}
 	setting, err := poo.ParseReasoning("Medium")
 	if err != nil {
 		t.Fatalf("the setting: %v", err)

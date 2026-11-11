@@ -258,9 +258,9 @@ func readPiAuth(path string) (map[string]piCredential, error) {
 
 // piStoredKey returns the key a credential holds, when poo can use it.
 //
-// pi stores a key under the api_key type, and a file that says api
-// says the same thing. An OAuth credential authenticates in ways poo
-// does not speak: it imports as no key at all.
+// pi stores a key under the api_key type. An OAuth credential
+// authenticates in ways poo does not speak: it imports as no key at
+// all.
 // keyFromValue reads one key value as the settings hold keys: an
 // environment name and a literal, either empty. A key pi would run a
 // command for is a key poo does not run, and a $NAME names the

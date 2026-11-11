@@ -391,6 +391,21 @@ func TestAModelSwitchTakesTheLevelTheWireReports(t *testing.T) {
 	}
 }
 
+// TestAModelSwitchFallsBackToTheLevelTheModelTakes covers a move to a
+// model that cannot be told off: the level the session ran at is one
+// the new model does not take, and the session lands at the lowest
+// level the model declares.
+func TestAModelSwitchFallsBackToTheLevelTheModelTakes(t *testing.T) {
+	out, _ := startRepl(t, "/thinking off\n/model mystery\n/quit\n")
+
+	if !strings.Contains(out, "model → mystery") {
+		t.Errorf("the transcript shows no switch:\n%s", out)
+	}
+	if !strings.Contains(out, "thinking → low") {
+		t.Errorf("the switch did not fall back to the lowest declared level:\n%s", out)
+	}
+}
+
 // TestTheStatuslineNamesTheLevelTheSessionOpenedAt covers the read-back:
 // a session that runs at a level says so before anything is typed.
 func TestTheStatuslineNamesTheLevelTheSessionOpenedAt(t *testing.T) {
@@ -398,6 +413,32 @@ func TestTheStatuslineNamesTheLevelTheSessionOpenedAt(t *testing.T) {
 
 	if !strings.Contains(out, "🧠 high") {
 		t.Errorf("the statusline names no level:\n%s", out)
+	}
+}
+
+// TestTheLevellessModelClimbsTheProtocolLevels covers a model that
+// declares no levels: the cycle falls back to the protocol's canonical
+// order, and wraps from the most thinking back to off.
+func TestTheLevellessModelClimbsTheProtocolLevels(t *testing.T) {
+	m := &machine{
+		r:      newRenderer(io.Discard),
+		status: newStatus(""),
+		catalog: map[string]protocol.ModelInfo{
+			"plain": {Name: "plain"},
+		},
+	}
+	m.status.model = "plain"
+
+	if got := m.nextThinkingLevel(); got != "off" {
+		t.Errorf("the first level is %q, want off", got)
+	}
+	m.status.level = "off"
+	if got := m.nextThinkingLevel(); got != "minimal" {
+		t.Errorf("the level after off is %q, want minimal", got)
+	}
+	m.status.level = "xhigh"
+	if got := m.nextThinkingLevel(); got != "off" {
+		t.Errorf("the level after xhigh is %q, want off", got)
 	}
 }
 
@@ -427,6 +468,14 @@ func TestTheBacktabFilterCyclesTheLevel(t *testing.T) {
 	// The ESC is the vim mode's own key, and it passes on.
 	if r, process := tab.filter(readline.CharEsc); r != readline.CharEsc || !process {
 		t.Errorf("the filter ate the ESC (process %v)", process)
+	}
+	// An escape that starts no sequence aborts: the next rune is a key
+	// again, and the sequence still works after it.
+	if r, process := tab.filter('x'); r != 'x' || !process {
+		t.Errorf("the rune after an aborted escape was eaten (process %v)", process)
+	}
+	if r, process := tab.filter(readline.CharEsc); r != readline.CharEsc || !process {
+		t.Errorf("the filter ate the ESC of the retried sequence (process %v)", process)
 	}
 	// The '[' and the 'Z' are the sequence, and neither reaches the vim
 	// handler.

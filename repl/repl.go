@@ -32,11 +32,11 @@ const promptMark = "💩❯ "
 
 // namedLevels are the reasoning levels poo knows, lowest first.
 //
-// A model that announces no levels of its own is climbed through these, in
-// this order: the server checks each one against the model's reasoning
-// control, so a level it cannot take comes back as a refusal. The list
-// mirrors poo's own ReasoningLevelNames, which is the server's copy.
-var namedLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+// A model that announces no levels of its own is climbed through the
+// protocol's canonical levels, in this order: the server checks each
+// one against the model's reasoning control, so a level it cannot take
+// comes back as a refusal.
+var namedLevels = protocol.ReasoningLevelNames
 
 // Options are the repl's settings.
 type Options struct {

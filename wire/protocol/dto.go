@@ -693,3 +693,11 @@ const (
 	// DecisionDeny refuses the call.
 	DecisionDeny = "deny"
 )
+
+// ReasoningLevelNames are the named reasoning levels the session's
+// reasoning control takes, lowest first. A level is one of these, or a
+// token budget: a positive number of tokens the model may think
+// within. The order is the order a model's own levels climb, so a
+// client that cycles through them goes from the least thinking to the
+// most.
+var ReasoningLevelNames = []string{"off", "minimal", "low", "medium", "high", "xhigh"}

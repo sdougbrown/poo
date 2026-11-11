@@ -280,10 +280,18 @@ func (m ModelInfo) CheckReasoning(level string) error {
 	if mode == "" {
 		mode = ReasoningNone
 	}
-	if mode != ReasoningNone || parsed.Off {
-		return nil
+	if mode == ReasoningNone {
+		if parsed.Off {
+			return nil
+		}
+		return m.reasoningError(setting, "the model does not control its reasoning")
 	}
-	return m.reasoningError(setting, "the model does not control its reasoning")
+	// The check is the run's own rule: the fields the run would send
+	// are built here, so a level the model cannot take — a budget for
+	// an effort model, an effort name for a budget one — is refused
+	// by the same validation that refuses it at run time.
+	_, err = m.ReasoningFields(setting)
+	return err
 }
 
 // reasoningError reports a reasoning setting the model cannot honour.

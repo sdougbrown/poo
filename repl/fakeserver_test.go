@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -122,9 +123,12 @@ func (s *fakeServer) line(line []byte) {
 		s.reply(req.ID, map[string]any{
 			"models": []map[string]any{
 				// gemma4 takes three levels, and qwen takes two it does
-				// not share: a switch is where the two disagree.
+				// not share: a switch is where the two disagree. mystery
+				// cannot be told off: a switch to it is where the level's
+				// fallback shows.
 				{"name": "gemma4", "model_id": "gemma4", "context_limit": 262144, "reasoning_levels": []string{"off", "low", "high"}},
 				{"name": "qwen", "model_id": "qwen", "context_limit": 131072, "reasoning_levels": []string{"off", "medium"}},
+				{"name": "mystery", "model_id": "mystery", "context_limit": 8192, "reasoning_levels": []string{"low", "high"}},
 			},
 		})
 	case protocol.MethodSessionConfigure:
@@ -139,11 +143,15 @@ func (s *fakeServer) line(line []byte) {
 			}
 			s.chat = params.Models.Chat
 			s.switches = append(s.switches, params.Models.Chat)
-			// The server the repl talks to takes the level back when the
-			// new model cannot take it: the fake answers the same way, so a
-			// switch is seen as it happens.
+			// The server the repl talks to takes the level back to one the
+			// new model can run: off when the model declares it, its lowest
+			// declared level when it cannot be told off.
 			if !s.acceptsLocked(s.level) {
+				levels := fakeLevels[s.chat]
 				s.level = "off"
+				if len(levels) > 0 && !slices.Contains(levels, "off") {
+					s.level = levels[0]
+				}
 			}
 		}
 		if params.Reasoning != "" {
@@ -192,8 +200,9 @@ func (s *fakeServer) line(line []byte) {
 
 // fakeLevels are the reasoning levels the fake's models take, by name.
 var fakeLevels = map[string][]string{
-	"gemma4": {"off", "low", "high"},
-	"qwen":   {"off", "medium"},
+	"gemma4":  {"off", "low", "high"},
+	"qwen":    {"off", "medium"},
+	"mystery": {"low", "high"},
 }
 
 // acceptsLocked reports whether the session's model takes a level.
