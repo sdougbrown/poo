@@ -50,9 +50,11 @@ type renderer struct {
 // or a pipe reads the same words without the escapes.
 func newRenderer(out io.Writer) *renderer {
 	r := &renderer{out: out, wrap: 80}
-	if f, ok := out.(interface{ Fd() uintptr }); ok && term.IsTerminal(int(f.Fd())) {
-		if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 4 {
-			r.wrap = w - 2
+	if termIsTerminal(out) {
+		if f, ok := out.(interface{ Fd() uintptr }); ok {
+			if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 4 {
+				r.wrap = w - 2
+			}
 		}
 		tr, err := glamour.NewTermRenderer(
 			glamour.WithAutoStyle(),

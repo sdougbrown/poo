@@ -78,14 +78,24 @@ func (f *sharedFlags) register(fs *flag.FlagSet) {
 // a command that finds none runs on the defaults, and the flags
 // change them.
 func (f *sharedFlags) settings() (*config.Settings, error) {
-	path, err := config.FindSettings(f.settingsFile, "")
+	_, settings, err := resolveSettings(f.settingsFile)
+	return settings, err
+}
+
+// resolveSettings finds and loads the settings a command runs under:
+// the explicit file a flag or the environment names, then discovery,
+// then the defaults. The path comes back with the settings, for the
+// commands that hand it to a child.
+func resolveSettings(explicit string) (string, *config.Settings, error) {
+	path, err := config.FindSettings(explicit, "")
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	if path == "" {
-		return &config.Settings{Version: 1}, nil
+		return "", &config.Settings{Version: 1}, nil
 	}
-	return config.Load(path)
+	settings, err := config.Load(path)
+	return path, settings, err
 }
 
 // overrides returns the overrides the flags make.

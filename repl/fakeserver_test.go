@@ -176,12 +176,19 @@ func (s *fakeServer) run() {
 	})
 }
 
-// waitDecision blocks until the client answers the ask.
+// waitDecision blocks until the client answers the ask, or gives up
+// after a wait no test could need: a goroutine that spins forever is a
+// leaked one, and the test that wanted the decision fails on its own
+// assertions anyway.
 func (s *fakeServer) waitDecision(askID json.RawMessage) {
-	// The answer arrives on the server's input; the reading goroutine
-	// dispatches it here through the channel the reply loop shares.
-	// The simple shape: poll the recorded decisions.
+	deadline := time.After(10 * time.Second)
 	for {
+		select {
+		case <-deadline:
+			s.t.Error("the ask waited 10s with no decision")
+			return
+		default:
+		}
 		s.mu.Lock()
 		n := len(s.decisions)
 		s.mu.Unlock()
