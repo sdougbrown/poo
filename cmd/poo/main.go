@@ -16,7 +16,7 @@ import (
 const usage = `poo runs a session against an OpenAI-compatible endpoint.
 
 Usage:
-  poo                        Launch the binary's front door (the repl, or front_door in the settings)
+  poo                        Launch the binary's front door (the repl, or door in the settings)
   poo run [flags] "prompt"
   poo -p "prompt" [flags]    poo run, with the run's flags before or after the prompt (also --print)
   poo repl [flags]           An interactive session in the terminal (vi keys, markdown rendering)
@@ -36,6 +36,13 @@ Shared flags:
   --profile <name>             The profile to run under: base, code or search
   --feeds-path <path>          Additional feed manifest path (repeatable)
   --cli-registry-path <path>   Additional cli registry manifest path (repeatable)
+
+Settings discovery:
+  Without --settings, the settings are found at the file the
+  POO_SETTINGS environment variable names, then the project's
+  .poo/settings.json (walking up from the current directory), then
+  the user's ~/.config/poo/settings.json. A command that finds none
+  runs on the defaults.
 
 Run flags:
   --endpoint <url>       The model's endpoint, e.g. http://localhost:4000/v1
@@ -60,8 +67,8 @@ Serve:
 
 The front door:
   A bare poo launches the interface the binary links as its front
-  door. The settings pick another one: set front_door in the file the
-  POO_SETTINGS environment variable names.
+  door. The settings pick another one: set door in the settings file
+  the command resolves.
 `
 
 func main() {
@@ -71,7 +78,7 @@ func main() {
 // run dispatches the command and returns the process exit code.
 func run(args []string) int {
 	if len(args) == 0 {
-		return runFrontDoor()
+		return runDoor()
 	}
 	switch args[0] {
 	case "run":
