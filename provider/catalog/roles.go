@@ -38,9 +38,6 @@ type Credential struct {
 	// Env names the environment variable that holds the key, for an env
 	// source.
 	Env string
-	// Value is the key itself for a static source, and the fallback an
-	// env source carries for when its variable holds none.
-	Value string
 }
 
 // EnvNames returns the names of the environment variables the credential

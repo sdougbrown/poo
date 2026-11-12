@@ -28,14 +28,9 @@ func (s *Settings) applyModelsFile(file piimport.File) {
 				continue
 			}
 			entry := Model{
-				Endpoint: name,
-				ModelID:  model.ID,
-				API:      provider.API,
-				// The endpoint a models file names speaks chat
-				// completions, and nothing else fills a model's ops for a
-				// name the curated families do not know: without it a
-				// roles.chat naming this model fails at build.
-				Ops:          []string{string(poo.OpChat)},
+				Endpoint:     name,
+				ModelID:      model.ID,
+				API:          provider.API,
 				Inputs:       model.Inputs,
 				ContextLimit: model.ContextWindow,
 				MaxOutput:    model.MaxTokens,

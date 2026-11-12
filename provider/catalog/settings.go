@@ -109,9 +109,9 @@ func (e EndpointSettings) endpoint(name string) Endpoint {
 	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint}
 	switch {
 	case e.APIKeyEnv != "":
-		endpoint.Credential = Credential{Source: CredentialEnv, Env: e.APIKeyEnv, Value: e.APIKey}
+		endpoint.Credential = Credential{Source: CredentialEnv, Env: e.APIKeyEnv}
 	case e.APIKey != "":
-		endpoint.Credential = Credential{Source: CredentialStatic, Value: e.APIKey}
+		endpoint.Credential = Credential{Source: CredentialStatic}
 	default:
 		endpoint.Credential = Credential{Source: CredentialNone}
 	}
