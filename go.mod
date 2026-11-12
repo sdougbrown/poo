@@ -7,6 +7,8 @@ require gopkg.in/yaml.v3 v3.0.1
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/charmbracelet/glamour v1.0.0
+	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/chubin/vt10x v0.0.0-20231112153020-ef4f56837bf1
 	github.com/chzyer/readline v1.5.1
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/sdougbrown/cli-registry v0.4.0
@@ -22,7 +24,6 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
-	github.com/charmbracelet/x/ansi v0.11.9 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250327172914-2fdc97757edf // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect

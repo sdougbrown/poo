@@ -124,10 +124,8 @@ type machine struct {
 	// eof says the input ended: the session ends once the run that
 	// was streaming settles.
 	eof bool
-	// state and streams render the run the session is on, nil when
-	// nothing streams.
-	state   *runState
-	streams *streamView
+	// state renders the run the session is on, nil when idle.
+	state *runState
 	// esc carries the run an Escape asked to stop.
 	esc chan string
 	// escGen counts the keys the filter delivered: an escape is a key
@@ -219,6 +217,7 @@ func (m *machine) run() int {
 	stop := make(chan struct{})
 	defer close(stop)
 	go m.readLines(input, stop)
+	defer m.flushPending()
 
 	for {
 		// The read stays live while a run streams: Escape and Ctrl-C
@@ -235,21 +234,16 @@ func (m *machine) run() int {
 			if !ok {
 				return m.gone()
 			}
-			if m.state == nil {
-				// Nothing of the session's own streams: a job's or a
-				// feed's event is not the conversation.
-				continue
-			}
-			if m.event(evt, m.state, m.streams) {
-				if code, done := m.endRun(input); done {
-					return code
-				}
+			if code, done := m.handleEvent(evt, input); done {
+				return code
 			}
 		case req, ok := <-m.conn.asks:
 			if !ok {
 				return m.gone()
 			}
-			m.openAsk(req, input)
+			if code, done := m.handleAsk(req, input); done {
+				return code
+			}
 		case runID := <-m.esc:
 			m.cancelRun(runID)
 		case res := <-m.lines:
@@ -410,7 +404,7 @@ func (m *machine) filterRune(r rune) (rune, bool) {
 	}
 	// The rest of the key goes too, so an arrow leaves no text behind.
 	if r >= 0x20 && r <= 0x7e {
-		if r >= 0x40 {
+		if isFinalByte(r) {
 			m.escState = escIdle
 		}
 		return r, false
@@ -542,11 +536,27 @@ func (m *machine) newInput() input {
 				return term.IsTerminal(fd) && termIsTerminal(m.out)
 			}
 		}
+		if f, ok := m.out.(interface{ Fd() uintptr }); ok {
+			// The editor's erase arithmetic wraps at the width of the
+			// terminal the prompt is drawn on, not the process's stdout.
+			outFD := int(f.Fd())
+			cfg.FuncGetWidth = func() int {
+				if w, _, err := term.GetSize(outFD); err == nil {
+					return w
+				}
+				return -1
+			}
+			// The streamed rows wrap at the editor's width, so they read
+			// it from the same place, live: a resize mid-block stops the
+			// painting and the render lays the message out again.
+			m.r.liveWidth = cfg.FuncGetWidth
+		}
 		rl, err := readline.NewEx(cfg)
 		if err == nil {
 			editor.rl = rl
 			tab.rl = rl
 			m.r.sink = rl.Stdout()
+			m.r.editor = true
 			return editor
 		}
 		// A readline that would not start falls through to plain
@@ -842,19 +852,16 @@ func (m *machine) startRun(text string) error {
 	m.runID = res.RunID
 	m.runIDMu.Unlock()
 	m.state = &runState{}
-	m.streams = newStreamView(m.r.sink, m.r.term)
 	return nil
 }
 
-// endRun closes the run a settle ended: an ask it left open goes with
-// it, and the editor gets its prompt back.
+// endRun closes the settled run and restores the prompt.
 func (m *machine) endRun(input input) (int, bool) {
 	m.runIDMu.Lock()
 	m.runID = ""
 	m.runIDMu.Unlock()
-	m.state, m.streams = nil, nil
+	m.state = nil
 	if m.ask != nil {
-		// An ask for a run that settled is a question about nothing.
 		m.ask = nil
 	}
 	input.prompt(m.prompt())
@@ -895,16 +902,24 @@ func (m *machine) cancelRun(runID string) {
 }
 
 // event renders one event. The bool says the run settled.
-func (m *machine) event(evt protocol.Event, state *runState, streams *streamView) bool {
+func (m *machine) event(evt protocol.Event, runID string, state *runState) bool {
 	switch evt.Type {
 	case "message.delta":
 		id, _ := evt.Payload["message_id"].(string)
 		kind, _ := evt.Payload["kind"].(string)
 		text, _ := evt.Payload["text"].(string)
 		state.delta(id, kind, text)
-		streams.tick()
+		// The reply streams as it arrives. Thinking does not: it buffers
+		// and renders dimmed with the message it belongs to.
+		if kind == "text" {
+			m.r.streamText(text)
+		} else {
+			m.r.hint()
+		}
 	case "tool.call":
-		streams.stop()
+		// The message the call interrupts is done as far as the deltas
+		// go: it renders, and the call decorates the transcript below
+		// it.
 		state.flush(m.r)
 		tool, _ := evt.Payload["tool"].(string)
 		summary, _ := evt.Payload["summary"].(string)
@@ -928,8 +943,7 @@ func (m *machine) event(evt protocol.Event, state *runState, streams *streamView
 	case "turn.ended":
 		state.turns++
 	case "run.settled":
-		if id, _ := evt.Payload["run_id"].(string); id != "" && id == m.activeRun() {
-			streams.stop()
+		if id, _ := evt.Payload["run_id"].(string); id != "" && id == runID {
 			state.flush(m.r)
 			reason, _ := evt.Payload["reason"].(string)
 			input, output := settledUsage(evt.Payload)
@@ -955,6 +969,58 @@ func settledUsage(payload map[string]any) (input, output int) {
 		return 0, 0
 	}
 	return detail.Usage.InputTokens, detail.Usage.OutputTokens
+}
+
+// flushPending renders what the deltas had buffered when the session
+// ends, so a run cut off mid-message still leaves its reply: the loop's
+// ways out — a quit, a lost server, a failed read — all pass here.
+func (m *machine) flushPending() {
+	if m.state != nil {
+		m.state.flush(m.r)
+	}
+}
+
+// handleEvent renders one event of the session's run, and reports when
+// the run it belongs to ends the session. The main loop and the ask's
+// drain both step through events here, so a change to dispatch or to
+// endRun's contract lands in one place.
+func (m *machine) handleEvent(evt protocol.Event, input input) (int, bool) {
+	if m.state == nil {
+		// Nothing of the session's own streams: a job's or a feed's
+		// event is not the conversation.
+		return 0, false
+	}
+	if m.event(evt, m.activeRun(), m.state) {
+		return m.endRun(input)
+	}
+	return 0, false
+}
+
+// handleAsk takes one permission ask. The reader hands events and
+// asks to separate channels, so the main loop's select takes them in
+// whatever order it finds ready: an ask can come up while the deltas
+// that reached the connection before it are still queued. Those drain
+// here first — the reply so far renders whole, above the question,
+// never split by it, and a settle among them ends the run the usual
+// way.
+func (m *machine) handleAsk(req askRequest, input input) (int, bool) {
+	for {
+		select {
+		case evt, ok := <-m.conn.events:
+			if !ok {
+				return m.gone(), true
+			}
+			if code, done := m.handleEvent(evt, input); done {
+				return code, true
+			}
+		default:
+			if m.state != nil {
+				m.state.flush(m.r)
+			}
+			m.openAsk(req, input)
+			return 0, false
+		}
+	}
 }
 
 // openAsk shows a permission ask. The prompt it shows is the line the
@@ -1039,52 +1105,27 @@ func (s *runState) delta(id, kind, text string) {
 		s.messages = append(s.messages, m)
 	}
 	switch kind {
-	case "thinking":
-		m.thinking.WriteString(text)
-	default:
+	case "text":
 		m.text.WriteString(text)
+	default:
+		// An unknown kind buffers with the thinking: it does not join
+		// the reply's body, and the dispatch the deltas stream by
+		// agrees — text streams, everything else buffers and hints.
+		m.thinking.WriteString(text)
 	}
 }
 
 // flush renders the messages the deltas finished with, oldest first,
 // and empties the buffers.
 func (s *runState) flush(r *renderer) {
+	var rendered strings.Builder
 	for _, m := range s.messages {
-		r.thinking(m.thinking.String())
-		r.message(m.text.String())
+		rendered.WriteString(r.thinkingText(m.thinking.String()))
+		rendered.WriteString(r.markdown(m.text.String()))
 	}
+	r.replace(rendered.String())
 	s.messages = nil
 	s.byID = nil
-}
-
-// streamView is the one-line hint that the model is writing. A
-// terminal gets a dim line that the first render takes back; a pipe
-// gets nothing.
-type streamView struct {
-	out   io.Writer
-	live  bool
-	shown bool
-}
-
-// newStreamView builds the hint for out. live says out is a terminal.
-func newStreamView(out io.Writer, live bool) *streamView {
-	return &streamView{out: out, live: live}
-}
-
-// tick shows the hint, once per run.
-func (s *streamView) tick() {
-	if s.live && !s.shown {
-		fmt.Fprint(s.out, ansiDim+"… writing"+ansiReset)
-		s.shown = true
-	}
-}
-
-// stop takes the hint back.
-func (s *streamView) stop() {
-	if s.shown {
-		fmt.Fprint(s.out, "\r\033[K")
-		s.shown = false
-	}
 }
 
 // The errors the run loop reports to the caller.
