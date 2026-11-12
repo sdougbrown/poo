@@ -591,9 +591,9 @@ func (r *Runtime) offersRegistry() bool {
 // profile earns the catalog. The tools themselves join the profile for the
 // entries the manifests' availability rules leave available: a registry that
 // declares no condition joins a profile that already offers a side-effecting
-// tool, and one that declares them is narrowed entry by entry. The disabled
-// tools are already off the profile, so a tool the settings disable does not
-// come back here.
+// tool, and one that declares them is narrowed entry by entry. A tool the
+// profile already names is not offered twice. The disabled tools are already
+// off the profile, so a tool the settings disable does not come back here.
 func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if r.Registry == nil {
 		return nil
@@ -627,9 +627,12 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 		if slices.Contains(disabled, name) {
 			continue
 		}
+		r.registryOffered = true
+		if slices.Contains(r.toolNames, name) {
+			continue
+		}
 		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[name]))
 		r.toolNames = append(r.toolNames, name)
-		r.registryOffered = true
 	}
 	return nil
 }
@@ -816,9 +819,13 @@ func (r *Runtime) resolveProfiles(opts BuildOptions) ([]poo.Profile, error) {
 		}
 		if offered != nil {
 			for _, name := range registryToolNames(r.findToolFor(offered.Len())) {
-				if linksTool(opts, name) && !slices.Contains(disabled, name) {
-					resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
+				if !linksTool(opts, name) || slices.Contains(disabled, name) {
+					continue
 				}
+				if slices.ContainsFunc(resolved.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
+					continue
+				}
+				resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
 			}
 		}
 		resolved.Tools = withJobTools(resolved.Tools, feeds)

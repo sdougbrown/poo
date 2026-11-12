@@ -712,6 +712,71 @@ func TestARegistryThatGatesNothingStaysClosedToAReadOnlyProfile(t *testing.T) {
 	}
 }
 
+// TestAProfileThatNamesCallCLIIsOfferedTheCatalogOnce covers the overlap: a
+// profile that names the registry's own tool already offers it, so joining the
+// catalog to that profile must not offer the tool a second time. The session and
+// the listing both say call_cli once, and the catalog is still offered.
+func TestAProfileThatNamesCallCLIIsOfferedTheCatalogOnce(t *testing.T) {
+	dir := registry(t, "deploy", "logs")
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: files\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	files := profile.Profile{Name: "files", Tools: []string{"read", "call_cli"}, Unmatched: "allow"}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: files.Name,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile(), files},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime for a profile that names call_cli: %v", err)
+	}
+
+	if got := countTool(runtime.Options.ToolOrder, cliregistry.CallToolName); got != 1 {
+		t.Errorf("the session offers call_cli %d times in %v, want once", got, runtime.Options.ToolOrder)
+	}
+	var names []string
+	for _, tool := range runtime.Profile.Tools {
+		names = append(names, tool.Name)
+	}
+	if got := countTool(names, cliregistry.CallToolName); got != 1 {
+		t.Errorf("the profile offers call_cli %d times in %v, want once", got, names)
+	}
+
+	// The listing says the same thing the session does.
+	for _, listed := range runtime.Profiles {
+		if listed.Name != files.Name {
+			continue
+		}
+		listedNames := make([]string, 0, len(listed.Tools))
+		for _, tool := range listed.Tools {
+			listedNames = append(listedNames, tool.Name)
+		}
+		if got := countTool(listedNames, cliregistry.CallToolName); got != 1 {
+			t.Errorf("the listing offers call_cli %d times in %v, want once", got, listedNames)
+		}
+	}
+
+	// A profile that names the tool itself still earns the catalog it reads.
+	if text := poo.PromptBuilder(runtime.Options).Render(); !strings.Contains(text, "deploy: The deploy command") {
+		t.Errorf("the prompt of a profile that names call_cli lists no catalog: %q", text)
+	}
+}
+
+// countTool counts the occurrences of a tool name.
+func countTool(names []string, name string) int {
+	count := 0
+	for _, listed := range names {
+		if listed == name {
+			count++
+		}
+	}
+	return count
+}
+
 // TestARegistryThatDeclaresAConditionPooCannotSupplyIsRefused covers the
 // contract: poo supplies the profile fact and nothing else, so a manifest that
 // reads another condition fails the build naming it, rather than judging an
