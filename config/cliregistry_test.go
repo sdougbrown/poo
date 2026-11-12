@@ -49,32 +49,71 @@ roles:
   decider: test-model
 `
 
-// registry writes a registry with the named entries and returns its
-// directory. The commands are the registry's own business: no case calls
-// one.
-func registry(t *testing.T, names ...string) string {
-	t.Helper()
-	dir := t.TempDir()
-	tools := map[string]any{}
-	for _, name := range names {
-		tools[name] = map[string]any{
-			"description": "The " + name + " command",
-			"command":     []string{"true"},
-			"inputSchema": map[string]any{
-				"type":                 "object",
-				"properties":           map[string]any{},
-				"additionalProperties": false,
-			},
-		}
+// registryEntry is one registered CLI. The commands are the registry's own
+// business: no case calls one.
+func registryEntry(description string) map[string]any {
+	return map[string]any{
+		"description": description,
+		"command":     []string{"true"},
+		"inputSchema": map[string]any{
+			"type":                 "object",
+			"properties":           map[string]any{},
+			"additionalProperties": false,
+		},
 	}
-	body, err := json.Marshal(map[string]any{"version": 1, "tools": tools})
+}
+
+// writeRegistryDoc writes a registry document and returns its directory.
+func writeRegistryDoc(t *testing.T, doc map[string]any) string {
+	t.Helper()
+	body, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatalf("encoding the registry: %v", err)
 	}
+	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "registry.json"), body, 0o600); err != nil {
 		t.Fatalf("writing the registry: %v", err)
 	}
 	return dir
+}
+
+// registry writes a registry with the named entries and returns its
+// directory.
+func registry(t *testing.T, names ...string) string {
+	t.Helper()
+	tools := map[string]any{}
+	for _, name := range names {
+		tools[name] = registryEntry("The " + name + " command")
+	}
+	return writeRegistryDoc(t, map[string]any{"version": 1, "tools": tools})
+}
+
+// gatedRegistry writes a registry of one entry that reads and one the rules
+// gate on the profile condition poo supplies itself.
+func gatedRegistry(t *testing.T, conditions map[string]any) string {
+	t.Helper()
+	return writeRegistryDoc(t, map[string]any{
+		"version": 1,
+		"tools": map[string]any{
+			"pr-view": registryEntry("Read a pull request"),
+			"pr-edit": registryEntry("Edit a pull request"),
+		},
+		"availability": map[string]any{
+			"conditions": conditions,
+			"rules": []any{map[string]any{
+				"type": "enabledWhen", "field": "pr-edit",
+				"when":   map[string]any{"op": "cond", "condition": "profile_side_effecting"},
+				"reason": "the profile is read-only",
+			}},
+		},
+	})
+}
+
+// profileCondition is the condition set poo supplies on its own.
+func profileCondition() map[string]any {
+	return map[string]any{
+		"profile_side_effecting": map[string]any{"type": "boolean"},
+	}
 }
 
 // hasTool reports whether a tool order holds a name.
@@ -534,5 +573,122 @@ func TestAPromptDirectoriesCatalogFollowsTheSession(t *testing.T) {
 	}
 	if strings.Contains(text, "Registered CLIs:") {
 		t.Errorf("the read-only session's prompt carries the embedded catalog: %q", text)
+	}
+}
+
+// gatedBuild builds a session whose settings name the gated registry, with the
+// profiles a real binary links.
+func gatedBuild(t *testing.T, dir, profileName string) (*config.Runtime, error) {
+	t.Helper()
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: "+profileName+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	return config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: profileName,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile()},
+		Executors:      theExecutors(),
+	})
+}
+
+// TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave covers the per-entry
+// rule: a profile with no side-effecting tool earns the registry when the
+// manifests declare conditions, and the catalog it offers holds the entries
+// the rules leave. A profile that can already change things is offered every
+// entry the rules leave for it.
+func TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave(t *testing.T) {
+	dir := gatedRegistry(t, profileCondition())
+
+	runtime, err := gatedBuild(t, dir, search.Name)
+	if err != nil {
+		t.Fatalf("building the read-only runtime: %v", err)
+	}
+	if runtime.Registry == nil {
+		t.Fatal("the read-only build loaded no registry")
+	}
+	if got := strings.Join(runtime.Registry.Names(), ","); got != "pr-view" {
+		t.Errorf("the read-only session offers %q, want pr-view alone", got)
+	}
+	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the read-only session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	if _, ok := runtime.Registry.Lookup("pr-edit"); ok {
+		t.Error("the read-only session can still name the gated entry")
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "pr-view") {
+		t.Errorf("the prompt %q does not list the entry the rules leave", text)
+	}
+	if strings.Contains(text, "pr-edit") {
+		t.Errorf("the prompt %q lists the entry the rules withhold", text)
+	}
+
+	// The listing the binary offers says what the session does: the same
+	// profile earns the same tool there.
+	for _, listed := range runtime.Profiles {
+		if listed.Name != search.Name {
+			continue
+		}
+		var names []string
+		for _, tool := range listed.Tools {
+			names = append(names, tool.Name)
+		}
+		if !hasTool(names, cliregistry.CallToolName) {
+			t.Errorf("the listing offers the %q profile %v, and its session offers call_cli", listed.Name, names)
+		}
+	}
+
+	// A profile that can change things gets every entry the rules leave.
+	runtime, err = gatedBuild(t, dir, code.Name)
+	if err != nil {
+		t.Fatalf("building the read-write runtime: %v", err)
+	}
+	if got := strings.Join(runtime.Registry.Names(), ","); got != "pr-edit,pr-view" {
+		t.Errorf("the read-write session offers %q, want both entries", got)
+	}
+}
+
+// TestARegistryThatGatesNothingStaysClosedToAReadOnlyProfile covers the
+// registry whose manifests declare no conditions: a registered CLI can change
+// anything, so a profile with no side-effecting tool is offered none of them.
+func TestARegistryThatGatesNothingStaysClosedToAReadOnlyProfile(t *testing.T) {
+	dir := registry(t, "deploy")
+	runtime, err := gatedBuild(t, dir, search.Name)
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the read-only session offers %v", runtime.Options.ToolOrder)
+	}
+	if runtime.Registry == nil || runtime.Registry.Len() != 1 {
+		t.Fatalf("the build loaded %v, want the one entry", runtime.Registry)
+	}
+}
+
+// TestARegistryThatDeclaresAConditionPooCannotSupplyIsRefused covers the
+// contract: poo supplies the profile fact and nothing else, so a manifest that
+// reads another condition fails the build naming it, rather than judging an
+// entry against a value nobody supplied.
+func TestARegistryThatDeclaresAConditionPooCannotSupplyIsRefused(t *testing.T) {
+	conditions := profileCondition()
+	conditions["messaging_enabled"] = map[string]any{"type": "boolean"}
+	dir := gatedRegistry(t, conditions)
+
+	_, err := gatedBuild(t, dir, code.Name)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the build of a registry with an unsupplied condition is %v, want a settings failure", err)
+	}
+	if failure.Field != "cli_registry.paths" {
+		t.Errorf("the failure names the field %q, want cli_registry.paths", failure.Field)
+	}
+	if !strings.Contains(failure.Message, "messaging_enabled") {
+		t.Errorf("the message %q does not name the condition", failure.Message)
+	}
+	if !strings.Contains(failure.Message, config.ProfileSideEffectingCondition) {
+		t.Errorf("the message %q does not name the condition poo supplies", failure.Message)
 	}
 }

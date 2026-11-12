@@ -143,6 +143,54 @@ func (c *Catalog) Names() []string {
 	return names
 }
 
+// AvailabilityInputs returns the conditions the manifests declare, by name and
+// declared type.
+//
+// The consumer supplies one value per condition at load time, and a manifest
+// that declares none returns an empty map: every entry is available.
+func (c *Catalog) AvailabilityInputs() map[string]string {
+	if c == nil {
+		return map[string]string{}
+	}
+	return c.registry.AvailabilityInputs()
+}
+
+// Availability reports which entries the manifests' rules leave available for
+// the supplied conditions, each with the reason the rules give when they do
+// not.
+//
+// A missing condition is an error, never a default: offering a tool the
+// operator's rules withhold is worse than refusing to build.
+func (c *Catalog) Availability(inputs map[string]any) (map[string]cliregistry.ToolAvailability, error) {
+	if c == nil {
+		return map[string]cliregistry.ToolAvailability{}, nil
+	}
+	return c.registry.Availability(inputs)
+}
+
+// Filter returns the catalog with the unavailable entries removed.
+//
+// The registry, and so the entry schemas, are shared with the catalog it came
+// from: the filter decides what is offered, never what an entry means.
+func (c *Catalog) Filter(inputs map[string]any) (*Catalog, error) {
+	if c == nil {
+		return nil, nil
+	}
+	availability, err := c.registry.Availability(inputs)
+	if err != nil {
+		return nil, err
+	}
+	out := &Catalog{registry: c.registry, tools: map[string]cliregistry.Tool{}}
+	for _, entry := range c.entries {
+		if !availability[entry.Name].Available {
+			continue
+		}
+		out.entries = append(out.entries, entry)
+		out.tools[entry.Name] = c.tools[entry.Name]
+	}
+	return out, nil
+}
+
 // NamesHint says how a model finds a name it does not know.
 //
 // A short catalog is worth listing in the failure, so the model can

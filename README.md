@@ -164,6 +164,13 @@ registered command through the session's executor. Above 30 entries, with
 a decision model configured, the profile also offers `find_tool` to search
 the catalog. The code is in `poo/cli` and `poo/tool/cliregistry`.
 
+A manifest can gate entries with an `availability` block. poo supplies the
+condition `profile_side_effecting`, and the entries the rules leave are the
+ones the profile offers: a profile with no side-effecting tool earns the
+registry once the manifests declare conditions, and gets only the entries
+that remain available. A manifest that reads another condition fails the
+build naming it, because poo has no value for it.
+
 **Codemode.** When the binary links the `codemode` tool and an engine,
 the profile offers it beside the others: the model writes one script,
 the script makes the tool calls, and only the script's output and
