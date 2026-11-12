@@ -22,7 +22,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/chzyer/readline"
@@ -313,8 +312,11 @@ func (m *machine) line(res lineResult, input input) (int, bool) {
 	case text == "":
 		return 0, false
 	case m.activeRun() != "":
-		// A run takes one key, the Escape that stops it: a line
-		// submitted while it works is not the next prompt.
+		// A run takes one prompt at a time, so a line submitted while
+		// it works is not the next one — but it is not dropped in
+		// silence either: the transcript says what was typed and which
+		// key stops the turn.
+		m.r.notice("the run is working — Esc stops it; %q was not sent", text)
 		return 0, false
 	default:
 		return m.command(text, input)
@@ -487,7 +489,7 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 		args = []string{"serve"}
 	}
 	cmd := exec.Command(exe, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	ownProcessGroup(cmd)
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

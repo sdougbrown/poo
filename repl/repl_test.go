@@ -225,6 +225,8 @@ func TestAnAskShowsEveryLineOfItsSummary(t *testing.T) {
 	server := &fakeServer{t: t, askSummary: "echo first\necho second"}
 	out, typeLine, code := startTypedRepl(t, server)
 	typeLine("run this\n")
+	// Both lines of the summary reach the transcript, not just the last.
+	waitFor(t, out, "echo first")
 	waitFor(t, out, "echo second")
 	typeLine("y\n")
 	waitFor(t, out, "→ allow")
@@ -375,5 +377,29 @@ func TestALessWithoutAPagerFailsTheLineNotTheSession(t *testing.T) {
 
 	if !strings.Contains(out, "✗") {
 		t.Errorf("the missing pager read no failure:\n%s", out)
+	}
+}
+
+// TestALineTypedDuringARunIsNotLostSilently covers the Enter pressed
+// while a turn works: the line is not sent as the next prompt, and the
+// transcript says so — with the text and the key that stops the turn —
+// instead of discarding it.
+func TestALineTypedDuringARunIsNotLostSilently(t *testing.T) {
+	var out bytes.Buffer
+	m := &machine{r: newRenderer(&out), status: newStatus("")}
+	m.runIDMu.Lock()
+	m.runID = "r1"
+	m.runIDMu.Unlock()
+	in := &plainInput{write: func(string) {}}
+
+	if code, done := m.line(lineResult{line: "a second thought"}, in); done {
+		t.Fatalf("the line ended the session (code %d)", code)
+	}
+	drawn := out.String()
+	if !strings.Contains(drawn, "a second thought") {
+		t.Errorf("the typed line is not on screen:\n%s", drawn)
+	}
+	if !strings.Contains(drawn, "Esc stops it") {
+		t.Errorf("nothing says which key stops the turn:\n%s", drawn)
 	}
 }
