@@ -182,9 +182,12 @@ func firstLine(s string) string {
 
 // shortTokens renders a token count the statusline's way: thousands
 // get one decimal, everything else stays whole.
+//
+// A count that would round to 1000.0k reads as a whole megabyte
+// instead: the unit follows the number the reader sees.
 func shortTokens(n int) string {
 	switch {
-	case n >= 1_000_000:
+	case n >= 999_950:
 		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
 	case n >= 1_000:
 		return fmt.Sprintf("%.1fk", float64(n)/1_000)

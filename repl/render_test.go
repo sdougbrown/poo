@@ -115,8 +115,13 @@ func TestShortTokensReadsTheStatuslineWay(t *testing.T) {
 		{999, "999"},
 		{1000, "1.0k"},
 		{12300, "12.3k"},
+		// The unit follows the number as it is written: 999_949 is
+		// still 999.9k, and one token more rounds to a whole megabyte.
+		{999_949, "999.9k"},
+		{999_950, "1.0M"},
 		{1_000_000, "1.0M"},
 		{1_234_567, "1.2M"},
+		{-1, "?"},
 	} {
 		if got := shortTokens(tc.n); got != tc.want {
 			t.Errorf("shortTokens(%d) = %q, want %q", tc.n, got, tc.want)
