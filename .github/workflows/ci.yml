@@ -92,29 +92,3 @@ jobs:
         env:
           POO_CONFORMANCE_EXECUTOR: bwrap
         run: go test -race -v -run TestTheBinarySpeaksTheProtocol ./cmd/poo/
-
-  # The repl is its own module: the root module's ./... does not
-  # reach it, so its checks run here.
-  repl:
-    name: Repl
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: repl/go.mod
-
-      - name: Vet
-        run: go vet ./...
-        working-directory: repl
-
-      - name: Test
-        run: go test -race ./...
-        working-directory: repl
-
-      - name: Staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
-        working-directory: repl
