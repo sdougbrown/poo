@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/chzyer/readline"
+
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/wire/protocol"
 	"golang.org/x/term"
 )
@@ -128,6 +130,9 @@ type machine struct {
 	// nothing streams.
 	state   *runState
 	streams *streamView
+	// thinkingNotice says what to type when the model has no level cycle
+	// to climb. It is empty when the model has one.
+	thinkingNotice string
 	// esc carries the run an Escape asked to stop.
 	esc chan string
 	// escGen counts the keys the filter delivered: an escape is a key
@@ -644,7 +649,11 @@ func (b *backtab) filter(r rune) (rune, bool) {
 // A refused level is a line of the transcript, and the prompt is taken back
 // first because the editor has already painted it.
 func (b *backtab) cycle() {
-	if err := b.m.setThinking(b.m.nextThinkingLevel()); err != nil {
+	level, ok := b.m.nextThinkingLevel()
+	if !ok {
+		fmt.Fprint(b.m.out, "\r\033[K")
+		b.m.r.notice("%s", b.m.thinkingNotice)
+	} else if err := b.m.setThinking(level); err != nil {
 		fmt.Fprint(b.m.out, "\r\033[K")
 		b.m.r.failure(err.Error())
 	}
@@ -755,7 +764,12 @@ func (m *machine) switchModel(name string) {
 // does not take, and the refusal names the levels it does.
 func (m *machine) thinking(level string) {
 	if level == "" {
-		level = m.nextThinkingLevel()
+		next, ok := m.nextThinkingLevel()
+		if !ok {
+			m.r.notice("%s", m.thinkingNotice)
+			return
+		}
+		level = next
 	}
 	if err := m.setThinking(level); err != nil {
 		m.r.failure(err.Error())
@@ -765,22 +779,33 @@ func (m *machine) thinking(level string) {
 }
 
 // nextThinkingLevel returns the level after the session's, wrapping at the
-// end of the list.
+// end of the list, and whether the model has a list at all.
 //
 // The order is the model's own, lowest first. A model that names no levels
-// is climbed through the ones poo knows, which the server checks one by
-// one; a level the session is not at starts the climb from the bottom.
-func (m *machine) nextThinkingLevel() string {
+// is climbed through the ones poo knows when its reasoning takes named
+// levels; a model controlled by a token budget, or by nothing, has no list
+// to climb, and the second result is false so the caller can say what to
+// type instead of proposing a level the server refuses on every press.
+func (m *machine) nextThinkingLevel() (string, bool) {
 	levels := namedLevels
-	if info, ok := m.catalog[m.status.model]; ok && len(info.ReasoningLevels) > 0 {
-		levels = info.ReasoningLevels
+	if info, ok := m.catalog[m.status.model]; ok {
+		switch {
+		case len(info.ReasoningLevels) > 0:
+			levels = info.ReasoningLevels
+		case info.ReasoningMode == string(poo.ReasoningBudget):
+			m.thinkingNotice = "the model takes a token budget: /thinking <tokens>"
+			return "", false
+		case info.ReasoningMode == string(poo.ReasoningNone):
+			m.thinkingNotice = "the model does not control its reasoning"
+			return "", false
+		}
 	}
 	for i, level := range levels {
 		if strings.EqualFold(level, m.status.level) {
-			return levels[(i+1)%len(levels)]
+			return levels[(i+1)%len(levels)], true
 		}
 	}
-	return levels[0]
+	return levels[0], true
 }
 
 // setThinking sets the session's reasoning level on the wire and takes the

@@ -119,6 +119,11 @@ type ModelInfo struct {
 	// first, e.g. off, minimal, low, medium, high, xhigh. A model that
 	// names none is set by its reasoning control alone.
 	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
+	// ReasoningMode is how the model's reasoning is controlled: none,
+	// toggle, effort or budget. A client that offers a level cycle needs
+	// it to know whether a model without declared levels has anything to
+	// climb.
+	ReasoningMode string `json:"reasoning_mode,omitempty"`
 }
 
 // PromptOverrides are the system prompt changes a client asks for.
