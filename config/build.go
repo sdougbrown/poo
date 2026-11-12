@@ -314,7 +314,8 @@ type ToolOptions struct {
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths *protect.Set
 	// Registry is the cli registry the registry's tools call. It is nil
-	// when the settings name no registry.
+	// when the settings name no registry, and when the session's profile
+	// earns none of the catalog the manifests loaded.
 	Registry *cli.Catalog
 	// Search reports that the session searches the catalog instead of
 	// listing it, so call_cli points an unknown name at the search.
@@ -504,7 +505,7 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	}
 	r.Registry = catalog
 	r.loaded = catalog
-	return nil
+	return checkRegistryConditions(catalog.AvailabilityInputs())
 }
 
 // againstDir resolves each relative path against dir and keeps each

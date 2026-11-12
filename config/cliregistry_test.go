@@ -1075,6 +1075,38 @@ func TestARegistryThatDeclaresAConditionPooCannotSupplyIsRefused(t *testing.T) {
 	}
 }
 
+// TestAConditionPooCannotSupplyIsRefusedWhateverTheProfile covers where the
+// check runs: the declared set belongs to the manifests, so a build whose
+// profiles offer no tools still refuses a condition poo cannot supply.
+func TestAConditionPooCannotSupplyIsRefusedWhateverTheProfile(t *testing.T) {
+	conditions := profileCondition()
+	conditions["messaging_enabled"] = map[string]any{"type": "boolean"}
+	dir := gatedRegistry(t, conditions)
+
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: base\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: base.Name,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile()},
+		Executors:      theExecutors(),
+	})
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a build whose profile offers no tools accepted an unsupplied condition: %v", err)
+	}
+	if failure.Field != "cli_registry.paths" {
+		t.Errorf("the failure names the field %q, want cli_registry.paths", failure.Field)
+	}
+	if !strings.Contains(failure.Message, "messaging_enabled") {
+		t.Errorf("the message %q does not name the condition", failure.Message)
+	}
+}
+
 // TestARegistryThatDeclaresTheConditionAsAnotherTypeIsRefused covers the type
 // half of the same contract: poo supplies a boolean, so a manifest declaring the
 // condition as anything else would judge entries against a value it never

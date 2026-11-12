@@ -43,9 +43,7 @@ func (r *Runtime) offeredCatalog() *cli.Catalog {
 // the manifests declare conditions, the rules decide entry by entry, which is
 // how a read-only profile is offered the entries that only read.
 //
-// A profile that offers no tools at all earns none of it: the catalog's tools
-// are the profile's, and a profile with nothing is not one to hand a command
-// runner.
+// A profile that offers no tools earns none of it.
 func (r *Runtime) offeredRegistry(tools []poo.ToolInfo) (*cli.Catalog, error) {
 	if r.loaded == nil || len(tools) == 0 {
 		return nil, nil
@@ -56,15 +54,12 @@ func (r *Runtime) offeredRegistry(tools []poo.ToolInfo) (*cli.Catalog, error) {
 		return nil, nil
 	}
 	inputs := map[string]any{ProfileSideEffectingCondition: sideEffecting}
-	if err := checkRegistryConditions(declared); err != nil {
-		return nil, err
-	}
 	offered, err := r.loaded.Filter(inputs)
 	if err != nil {
 		return nil, &Error{
 			Code:    CodeInvalid,
 			Field:   "cli_registry.paths",
-			Message: "the registry's availability rules reject the session",
+			Message: "the registry's availability rules reject the profile",
 			Err:     err,
 		}
 	}
@@ -78,9 +73,9 @@ func (r *Runtime) offeredRegistry(tools []poo.ToolInfo) (*cli.Catalog, error) {
 // cannot supply, and a supplied condition declared as something other than the
 // type poo sends.
 //
-// The conditions are checked against the whole declared set rather than against
-// one profile's value: what poo can supply is a property of poo, and the answer
-// does not change per profile.
+// It runs once, when the registry loads: the declared set is a property of the
+// manifests, not of the profile being judged, so a manifest poo cannot supply
+// fails every build that loads it, whatever profiles the binary offers.
 func checkRegistryConditions(declared map[string]string) error {
 	var unsupplied []string
 	for name := range declared {
