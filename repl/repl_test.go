@@ -418,6 +418,18 @@ func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
 	if !strings.Contains(out, "ctx 12.3k/131.1k") {
 		t.Errorf("the statusline does not fill the new model's window:\n%s", out)
 	}
+	// The statusline is written again once the switch lands, and that
+	// write names the new model beside the new window: a switch that
+	// kept the old name would render gemma4 over qwen's window.
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "ctx 12.3k/131.1k") && strings.Contains(line, "qwen") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no statusline names qwen beside its window:\n%s", out)
+	}
 
 	server.mu.Lock()
 	defer server.mu.Unlock()
