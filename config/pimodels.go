@@ -49,14 +49,6 @@ type piModel struct {
 	} `json:"compat"`
 }
 
-// piAPI maps the wire API names pi uses beyond the default to the API
-// poo speaks. The default — pi's "openai-completions" — needs no
-// mapping: an empty API says chat completions.
-var piAPI = map[string]poo.API{
-	"openai-responses":   poo.APIResponses,
-	"anthropic-messages": poo.APIAnthropicMessages,
-}
-
 // piModalities are the input modalities pi names that poo reads. A
 // modality outside the map is a refusal.
 var piModalities = map[string]bool{
@@ -152,9 +144,6 @@ func importPiModels(settings *Settings) error {
 func piWireAPI(provider, api string) (string, error) {
 	if api == "" || api == "openai-completions" {
 		return "", nil
-	}
-	if mapped, ok := piAPI[api]; ok {
-		return string(mapped), nil
 	}
 	return "", fmt.Errorf("config: the provider %s speaks %q, which poo does not know", provider, api)
 }

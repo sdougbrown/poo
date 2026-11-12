@@ -43,7 +43,7 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 			},
 			"away": {
 				"baseUrl": "http://away:4000/v1",
-				"api": "openai-responses",
+				"api": "openai-completions",
 				"models": [
 					{"id": "spark", "input": ["text"], "contextWindow": 4096}
 				]
@@ -80,10 +80,10 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 	}
 	away, ok := settings.Models["away/spark"]
 	if !ok {
-		t.Fatalf("the responses model imported under no name; the models are %v", settings.Models)
+		t.Fatalf("the remote model imported under no name; the models are %v", settings.Models)
 	}
-	if away.API != string(poo.APIResponses) {
-		t.Errorf("the responses model speaks %q, want %q", away.API, poo.APIResponses)
+	if away.API != "" {
+		t.Errorf("the remote model's API is %q, want the default", away.API)
 	}
 }
 
@@ -112,6 +112,18 @@ func TestTheSettingsOwnEntriesWinOverAnImport(t *testing.T) {
 	}
 	if settings.Models["home/qwen"].ContextLimit != 1000 {
 		t.Errorf("the import took the model: %+v", settings.Models["home/qwen"])
+	}
+}
+
+func TestPIImportRefusesUnsupportedAPIs(t *testing.T) {
+	for _, api := range []string{"openai-responses", "anthropic-messages"} {
+		t.Run(api, func(t *testing.T) {
+			modelsFile := writePIModels(t, `{"providers":{"remote":{"api":"`+api+`","baseUrl":"https://example.com","models":[{"id":"model"}]}}}`)
+			_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+			if err == nil || !strings.Contains(err.Error(), api) {
+				t.Fatalf("unsupported API %q was not refused: %v", api, err)
+			}
+		})
 	}
 }
 
