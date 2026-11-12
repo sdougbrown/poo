@@ -113,7 +113,9 @@ func TestShortTokensReadsTheStatuslineWay(t *testing.T) {
 	}{
 		{0, "0"},
 		{999, "999"},
+		{1000, "1.0k"},
 		{12300, "12.3k"},
+		{1_000_000, "1.0M"},
 		{1_234_567, "1.2M"},
 	} {
 		if got := shortTokens(tc.n); got != tc.want {
