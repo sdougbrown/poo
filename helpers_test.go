@@ -53,6 +53,39 @@ func scripted(responses []fakeResponse) *pootest.Transport {
 	return pootest.NewTransport(turns...)
 }
 
+// gatedTransport holds its first request until the test lets it go, so a
+// steer can be queued while the turn it steers is still running. A fast
+// scripted turn otherwise settles before the test's Send lands.
+type gatedTransport struct {
+	*pootest.Transport
+	// entered closes when the first request is inside the transport.
+	entered chan struct{}
+	// release lets that request through.
+	release chan struct{}
+	once    sync.Once
+}
+
+func newGatedTransport(t *testing.T, turns ...pootest.Turn) *gatedTransport {
+	t.Helper()
+	return &gatedTransport{
+		Transport: pootest.NewTransport(turns...),
+		entered:   make(chan struct{}),
+		release:   make(chan struct{}),
+	}
+}
+
+func (g *gatedTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
+	first := false
+	g.once.Do(func() {
+		first = true
+		close(g.entered)
+	})
+	if first {
+		<-g.release
+	}
+	return g.Transport.Stream(ctx, req)
+}
+
 // turn converts a response into the scripted transport's turn.
 func (r fakeResponse) turn() pootest.Turn {
 	t := pootest.Turn{
