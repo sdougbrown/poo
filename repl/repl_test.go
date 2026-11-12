@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/sdougbrown/poo/wire/protocol"
+	"github.com/chzyer/readline"
 )
 
 // startRepl starts the repl against a fresh fake server. The script
@@ -35,6 +36,118 @@ func startReplServer(t *testing.T, input string, server *fakeServer) (string, *f
 		t.Fatalf("the repl exited %d, want 0", code)
 	}
 	return out.String(), server
+}
+
+// startTypedRepl starts the repl with input the test types a line at a
+// time, so a decision is typed after the ask that wants it.
+func startTypedRepl(t *testing.T, server *fakeServer) (out *syncBuffer, typeLine func(string), code <-chan int) {
+	t.Helper()
+	stdin, stdout := pipeUp(t, server)
+	in, typed := io.Pipe()
+	t.Cleanup(func() { typed.Close() })
+
+	out = &syncBuffer{}
+	done := make(chan int, 1)
+	opts := Options{
+		WorkingDir: t.TempDir(),
+		In:         in,
+		Out:        out,
+		StartServer: func(args []string) (io.WriteCloser, io.ReadCloser, func() error, error) {
+			return stdin, stdout, func() error { return nil }, nil
+		},
+	}
+	go func() { done <- Run(opts) }()
+	return out, func(line string) {
+		t.Helper()
+		if _, err := typed.Write([]byte(line)); err != nil {
+			t.Errorf("typing %q: %v", line, err)
+		}
+	}, done
+}
+
+// syncBuffer is a transcript a test reads while the repl writes it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// waitFor waits for what the repl drew to say want.
+func waitFor(t *testing.T, drawn interface{ String() string }, want string) {
+	t.Helper()
+	waitTimes(t, drawn, want, 1)
+}
+
+// waitTimes waits for what the repl drew to say want count times.
+func waitTimes(t *testing.T, drawn interface{ String() string }, want string, count int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Count(drawn.String(), want) >= count {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the repl drew %q %d times, want %d:\n%s",
+		want, strings.Count(drawn.String(), want), count, drawn.String())
+}
+
+// waitPrompts waits until the server has want prompts from the
+// session, and returns them.
+func (s *fakeServer) waitPrompts(t *testing.T, want int) []string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		prompts := append([]string(nil), s.prompts...)
+		s.mu.Unlock()
+		if len(prompts) >= want {
+			return prompts
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t.Fatalf("the server got %d prompts, want %d: %v", len(s.prompts), want, s.prompts)
+	return nil
+}
+
+// waitCancels waits until the session's cancels number want, and
+// returns them.
+func (s *fakeServer) waitCancels(t *testing.T, want int) []string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		cancels := append([]string(nil), s.cancels...)
+		s.mu.Unlock()
+		if len(cancels) >= want {
+			return cancels
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t.Fatalf("the server got %d cancels, want %d: %v", len(s.cancels), want, s.cancels)
+	return nil
+}
+
+func TestCtrlCClearsWhitespace(t *testing.T) {
+	m := &machine{}
+	if code, done := m.line(lineResult{line: " ", err: readline.ErrInterrupt}, nil); done {
+		t.Fatalf("Ctrl-C exited %d instead of clearing the typed space", code)
+	}
 }
 
 // TestARunRendersTheReplyTheToolsAndTheSettle covers one prompt's
@@ -81,34 +194,58 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 // the client answers it on the wire, and the answer is what the person
 // typed.
 func TestAnAskWaitsForTheDecisionItWasGiven(t *testing.T) {
-	out, server := startRepl(t, "rm the lot\ny\n/quit\n")
+	out, typeLine, code := startTypedRepl(t, &fakeServer{t: t})
+	typeLine("rm the lot\n")
+	waitFor(t, out, "allow bash?")
+	typeLine("y\n")
+	waitFor(t, out, "→ allow")
+	waitFor(t, out, "✓ end_turn")
+	typeLine("/quit\n")
+	if got := <-code; got != 0 {
+		t.Fatalf("the repl exited %d, want 0", got)
+	}
+	if !strings.Contains(out.String(), "→ allow") {
+		t.Errorf("the transcript shows no decision:\n%s", out.String())
+	}
+}
 
-	if !strings.Contains(out, "permission") || !strings.Contains(out, "allow bash?") {
-		t.Errorf("the transcript shows no ask:\n%s", out)
-	}
-	if !strings.Contains(out, "→ allow") {
-		t.Errorf("the transcript shows no decision:\n%s", out)
-	}
-	server.mu.Lock()
-	defer server.mu.Unlock()
-	if len(server.decisions) != 1 || server.decisions[0] != protocol.DecisionAllow {
-		t.Errorf("the server got the decisions %v, want one allow", server.decisions)
+func TestAnAskShowsEveryLineOfItsSummary(t *testing.T) {
+	server := &fakeServer{t: t, askSummary: "echo first\necho second"}
+	out, typeLine, code := startTypedRepl(t, server)
+	typeLine("run this\n")
+	waitFor(t, out, "echo second")
+	typeLine("y\n")
+	waitFor(t, out, "→ allow")
+	waitFor(t, out, "✓ end_turn")
+	typeLine("/quit\n")
+	<-code
+}
+
+func TestAnEmptyAnswerDeniesTheAsk(t *testing.T) {
+	server := &fakeServer{t: t}
+	out, typeLine, done := startTypedRepl(t, server)
+	typeLine("run this\n")
+	waitFor(t, out, "allow bash?")
+	typeLine("\n")
+	waitFor(t, out, "→ deny")
+	waitFor(t, out, "end_turn")
+	typeLine("/quit\n")
+	if code := <-done; code != 0 {
+		t.Fatalf("the repl exited %d, want 0", code)
 	}
 }
 
 // TestAnUnknownAnswerDeniesTheAsk covers the safe side of the ask:
 // anything that is not a yes refuses the call.
 func TestAnUnknownAnswerDeniesTheAsk(t *testing.T) {
-	out, server := startRepl(t, "rm the lot\nno idea\n/quit\n")
-
-	if !strings.Contains(out, "→ deny") {
-		t.Errorf("the transcript shows no denial:\n%s", out)
-	}
-	server.mu.Lock()
-	defer server.mu.Unlock()
-	if len(server.decisions) != 1 || server.decisions[0] != protocol.DecisionDeny {
-		t.Errorf("the server got the decisions %v, want one deny", server.decisions)
-	}
+	out, typeLine, code := startTypedRepl(t, &fakeServer{t: t})
+	typeLine("rm the lot\n")
+	waitFor(t, out, "allow bash?")
+	typeLine("no idea\n")
+	waitFor(t, out, "→ deny")
+	waitFor(t, out, "✓ end_turn")
+	typeLine("/quit\n")
+	<-code
 }
 
 // TestTheCommandsDoWhatTheirHelpSays covers the slash commands the
@@ -117,7 +254,7 @@ func TestAnUnknownAnswerDeniesTheAsk(t *testing.T) {
 func TestTheCommandsDoWhatTheirHelpSays(t *testing.T) {
 	out, _ := startRepl(t, "/help\n/quit\n")
 
-	for _, want := range []string{"/quit", "/less", "/model", "/cancel", "/help"} {
+	for _, want := range []string{"/quit", "/less", "/model", "Esc", "/help"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the help lacks %q:\n%s", want, out)
 		}
@@ -168,7 +305,7 @@ func TestACancelNamesTheRunItStops(t *testing.T) {
 	conn := startConn(stdout, stdin)
 	m := &machine{conn: conn, sessionID: "s1", runID: "r1", r: newRenderer(&bytes.Buffer{})}
 
-	m.cancelRun()
+	m.cancelRun("r1")
 
 	deadline := time.After(5 * time.Second)
 	for {

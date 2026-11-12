@@ -20,7 +20,10 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"syscall"
+	"time"
 
 	"github.com/chzyer/readline"
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -95,21 +98,63 @@ type machine struct {
 	sessionID   string
 	wait        func() error
 	serverStdin io.WriteCloser
-	running     atomic.Bool
 	// catalog holds the models models/list reported, by name: the
 	// listing and the statusline read it instead of calling again.
 	catalog map[string]protocol.ModelInfo
+
+	// gate asks the reader for the next line, and lines carries what
+	// it read. One goroutine owns the input for the whole session:
+	// the editor refuses a second reader, and the Escape that stops a
+	// run has to arrive while the run streams.
+	gate  chan struct{}
+	lines chan lineResult
+	// reading says a read is in flight. Only the main loop sets it.
+	reading bool
+	// ask is the permission ask that waits for an answer, nil when
+	// none does.
+	ask *askRequest
+	// eof says the input ended: the session ends once the run that
+	// was streaming settles.
+	eof bool
+	// state and streams render the run the session is on, nil when
+	// nothing streams.
+	state   *runState
+	streams *streamView
+	// esc carries the run an Escape asked to stop.
+	esc chan string
+	// escGen counts the keys the filter delivered: an escape is a key
+	// of its own only when no key follows it inside escWindow.
+	escGen atomic.Int64
+	// escState is where the escape the filter is holding has got to.
+	// The filter is the only writer, on the reader's goroutine.
+	escState escState
 	// runID is the run the session is working on, empty when idle.
 	// The cancel names it: the wire refuses a run/cancel that does
 	// not say what to stop.
-	runID string
+	runIDMu sync.Mutex
+	runID   string
 }
+
+// lineResult is one read from the input.
+type lineResult struct {
+	line string
+	err  error
+}
+
+// escWindow is how long an escape byte waits for the rest of its
+// sequence before the repl reads it as Escape pressed on its own. A
+// terminal sends a whole arrow key in one write, so the wait only has
+// to cover the reader's own scheduling.
+const escWindow = 40 * time.Millisecond
 
 // input reads the lines a person types. A terminal gets the readline
 // editor with its vi mode; anything else gets plain lines, so a pipe
 // or a test drives the repl too.
+//
+// Only read runs on the reader's goroutine; prompt and close are the
+// main loop's.
 type input interface {
-	// prompt sets the prompt the next line reads behind.
+	// prompt shows the prompt, here and for the next read.
 	prompt(p string)
 	// read reads one line. An end of input is io.EOF.
 	read() (string, error)
@@ -140,6 +185,9 @@ func (m *machine) run() int {
 
 	input := m.newInput()
 	defer input.close()
+	m.gate = make(chan struct{})
+	m.lines = make(chan lineResult)
+	m.esc = make(chan string, 1)
 
 	quit := make(chan struct{})
 	interrupts := make(chan os.Signal, 1)
@@ -147,8 +195,8 @@ func (m *machine) run() int {
 	defer signal.Stop(interrupts)
 	go func() {
 		for range interrupts {
-			if m.running.Load() {
-				m.cancelRun()
+			if runID := m.activeRun(); runID != "" {
+				m.cancelRun(runID)
 			} else {
 				// An idle Ctrl-C ends the session, the way every
 				// interactive tool quits: the exit code is the
@@ -160,55 +208,204 @@ func (m *machine) run() int {
 	}()
 
 	m.greet()
+	stop := make(chan struct{})
+	defer close(stop)
+	go m.readLines(input, stop)
+
 	for {
-		input.prompt(m.status.prompt())
-		line, err := readLine(input, quit)
-		if err != nil {
-			if errors.Is(err, errInterrupted) {
-				// The idle Ctrl-C: a clean end, with the code a
-				// signal termination carries.
-				return 130
-			}
-			if !errors.Is(err, io.EOF) && !errors.Is(err, readline.ErrInterrupt) {
-				m.r.failure(err.Error())
-			}
-			return 0
+		// The read stays live while a run streams: Escape and Ctrl-C
+		// are keys, and a key needs a reader.
+		var open chan struct{}
+		if !m.reading && !m.eof {
+			input.prompt(m.prompt())
+			open = m.gate
 		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		code, done := m.command(line, input)
-		if done {
-			return code
+		select {
+		case open <- struct{}{}:
+			m.reading = true
+		case evt, ok := <-m.conn.events:
+			if !ok {
+				return m.gone()
+			}
+			if m.state == nil {
+				// Nothing of the session's own streams: a job's or a
+				// feed's event is not the conversation.
+				continue
+			}
+			if m.event(evt, m.state, m.streams) {
+				if code, done := m.endRun(input); done {
+					return code
+				}
+			}
+		case req, ok := <-m.conn.asks:
+			if !ok {
+				return m.gone()
+			}
+			m.openAsk(req, input)
+		case runID := <-m.esc:
+			m.cancelRun(runID)
+		case res := <-m.lines:
+			m.reading = false
+			if code, done := m.line(res, input); done {
+				return code
+			}
+		case <-quit:
+			return 130
 		}
 	}
 }
 
-// errInterrupted is the end an idle Ctrl-C brings.
-var errInterrupted = errors.New("interrupted")
+// readLines owns the input: one read at a time, behind the prompt the
+// main loop set. It ends when the session does.
+func (m *machine) readLines(input input, stop <-chan struct{}) {
+	for {
+		select {
+		case <-m.gate:
+			line, err := input.read()
+			select {
+			case m.lines <- lineResult{line: line, err: err}:
+			case <-stop:
+				return
+			}
+			if err != nil && !errors.Is(err, readline.ErrInterrupt) {
+				return
+			}
+		case <-stop:
+			return
+		}
+	}
+}
 
-// readLine reads one line, or ends the session when the interrupt
-// channel closes: an idle Ctrl-C quits, whatever the line editor was
-// doing. The reader goroutine that loses the race is left to the
-// editor's own close, and its result is never read.
-func readLine(input input, quit <-chan struct{}) (string, error) {
-	type read struct {
-		line string
-		err  error
+// line handles one read: an interrupt, the end of the input, the
+// answer to an ask, a line submitted while a run works, or a command.
+func (m *machine) line(res lineResult, input input) (int, bool) {
+	switch {
+	case errors.Is(res.err, readline.ErrInterrupt):
+		// The editor has already cleared the line it held, so the
+		// interrupt cleared what was typed. An interrupt with nothing
+		// to clear is the person leaving.
+		if res.line == "" {
+			return 130, true
+		}
+		return 0, false
+	case res.err != nil:
+		if !errors.Is(res.err, io.EOF) {
+			m.r.failure(res.err.Error())
+			return 0, true
+		}
+		// An input that ended is the session's end, but a run that
+		// streams still has events worth reading: the end waits for
+		// the settle.
+		m.eof = true
+		if m.ask != nil {
+			m.answer("", input)
+		}
+		if m.activeRun() != "" {
+			return 0, false
+		}
+		return 0, true
 	}
-	done := make(chan read, 1)
-	go func() {
-		line, err := input.read()
-		done <- read{line, err}
-	}()
-	select {
-	case r := <-done:
-		return r.line, r.err
-	case <-quit:
-		input.close()
-		return "", errInterrupted
+	text := strings.TrimSpace(res.line)
+	switch {
+	case m.ask != nil:
+		m.answer(text, input)
+		return 0, false
+	case text == "":
+		return 0, false
+	case m.activeRun() != "":
+		// A run takes one key, the Escape that stops it: a line
+		// submitted while it works is not the next prompt.
+		return 0, false
+	default:
+		return m.command(text, input)
 	}
+}
+
+// prompt is the prompt the next read sits behind: the ask's when a
+// decision waits, the statusline's otherwise.
+func (m *machine) prompt() string {
+	if m.ask != nil {
+		return askPrompt(m.ask.ask)
+	}
+	return m.status.prompt()
+}
+
+// askPrompt is the line a permission decision is typed behind.
+func askPrompt(ask protocol.AskParams) string {
+	return ansiYellow + "  allow " + ask.Tool + "? [y/N] " + ansiReset
+}
+
+// gone is the exit code a lost server carries.
+func (m *machine) gone() int {
+	if m.conn != nil && m.conn.err != nil {
+		m.r.failure(m.conn.err.Error())
+	} else {
+		m.r.failure(errServerClosed.Error())
+	}
+	return 1
+}
+
+// escState is where the escape the filter is holding has got to. The
+// escape byte begins every arrow, Home, Delete and function key, so a
+// run cannot act on it until it knows what followed.
+type escState int
+
+const (
+	// escIdle holds no escape.
+	escIdle escState = iota
+	// escOpen holds an escape that has not said what it is yet.
+	escOpen
+	// escSequence holds the escape of a key that has more bytes.
+	escSequence
+)
+
+// filterRune reads the escape byte before the editor does, and only
+// while a run works: there Escape stops the run, and nothing else the
+// run needs. Idle, every key is the editor's.
+func (m *machine) filterRune(r rune) (rune, bool) {
+	runID := m.activeRun()
+	if runID == "" {
+		m.escState = escIdle
+		return r, true
+	}
+	switch {
+	case r == readline.CharEsc:
+		// The escape is a key of its own unless the rest of an arrow,
+		// Home or function key follows it, and the window tells which.
+		m.escState = escOpen
+		seen := m.escGen.Add(1)
+		time.AfterFunc(escWindow, func() {
+			if m.escGen.Load() != seen {
+				return
+			}
+			select {
+			case m.esc <- runID:
+			default:
+			}
+		})
+		return r, false
+	case m.escState == escIdle:
+		return r, true
+	}
+	// Something followed the escape after all: it was a prefix.
+	m.escGen.Add(1)
+	if m.escState == escOpen {
+		if r == '[' || r == 'O' {
+			m.escState = escSequence
+			return r, false
+		}
+		m.escState = escIdle
+		return r, true
+	}
+	// The rest of the key goes too, so an arrow leaves no text behind.
+	if r >= 0x20 && r <= 0x7e {
+		if r >= 0x40 {
+			m.escState = escIdle
+		}
+		return r, false
+	}
+	m.escState = escIdle
+	return r, true
 }
 
 // start starts the server, does the handshake, opens the session and
@@ -290,6 +487,7 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 		args = []string{"serve"}
 	}
 	cmd := exec.Command(exe, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -308,19 +506,59 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 // newInput builds the line reader for the session.
 func (m *machine) newInput() input {
 	if termIsTerminal(m.in) {
-		rl, err := readline.NewEx(&readline.Config{
+		editor := &readlineInput{}
+		cfg := &readline.Config{
 			Prompt:      promptMark,
 			HistoryFile: m.opts.HistoryFile,
 			VimMode:     true,
 			Stdout:      m.out,
-		})
+			// The filter is where Escape is read: it has to stop a
+			// run before the editor takes the key.
+			FuncFilterInputRune: m.filterRune,
+		}
+		if rc, ok := m.in.(io.ReadCloser); ok {
+			cfg.Stdin = rc
+		}
+		if f, ok := m.in.(interface{ Fd() uintptr }); ok {
+			fd := int(f.Fd())
+			cfg.FuncMakeRaw, cfg.FuncExitRaw = rawMode(fd)
+			// The editor decides whether to draw from the terminal it
+			// holds, which is the input's, not the process's stdin.
+			cfg.FuncIsTerminal = func() bool {
+				return term.IsTerminal(fd) && termIsTerminal(m.out)
+			}
+		}
+		rl, err := readline.NewEx(cfg)
 		if err == nil {
-			return &readlineInput{rl: rl}
+			editor.rl = rl
+			// The transcript goes through the editor's own writer, so
+			// the prompt is redrawn under every line it prints.
+			m.r.sink = rl.Stdout()
+			return editor
 		}
 		// A readline that would not start falls through to plain
 		// lines: the conversation works without the editor.
 	}
 	return &plainInput{scanner: bufio.NewScanner(m.in), write: m.r.write}
+}
+
+// rawMode puts the terminal behind fd into raw mode and back. The
+// editor assumes its terminal is the process's own stdin, which is only
+// true when the repl's input is.
+func rawMode(fd int) (enter, exit func() error) {
+	var state *term.State
+	enter = func() error {
+		var err error
+		state, err = term.MakeRaw(fd)
+		return err
+	}
+	exit = func() error {
+		if state == nil {
+			return nil
+		}
+		return term.Restore(fd, state)
+	}
+	return enter, exit
 }
 
 // greet says the session is open.
@@ -338,7 +576,7 @@ func (m *machine) command(line string, input input) (int, bool) {
 		m.r.notice(`/quit            leave the repl
 /less            read the transcript again in less
 /model           name the session's models
-/cancel          stop the running turn
+Esc              stop the running turn
 /help            this list
 anything else    a prompt for the session`)
 		return 0, false
@@ -357,10 +595,10 @@ anything else    a prompt for the session`)
 		}
 		return 0, false
 	case "/cancel":
-		m.cancelRun()
+		m.cancelRun(m.activeRun())
 		return 0, false
 	default:
-		if err := m.runPrompt(line, input); err != nil {
+		if err := m.startRun(line); err != nil {
 			m.r.failure(err.Error())
 			if isShutdown(err) {
 				return 1, true
@@ -370,9 +608,9 @@ anything else    a prompt for the session`)
 	}
 }
 
-// runPrompt sends one prompt and renders the run's events until the
-// run settles.
-func (m *machine) runPrompt(text string, input input) error {
+// startRun sends one prompt and reports the run it started. The events
+// come to the main loop, which renders them until the settle.
+func (m *machine) startRun(text string) error {
 	m.r.userPrompt(text)
 	var res protocol.PromptResult
 	if err := m.conn.call(protocol.MethodRunPrompt, protocol.PromptParams{
@@ -381,31 +619,30 @@ func (m *machine) runPrompt(text string, input input) error {
 	}, &res); err != nil {
 		return err
 	}
-
-	m.running.Store(true)
-	defer m.running.Store(false)
-	defer func() { m.runID = "" }()
+	m.runIDMu.Lock()
 	m.runID = res.RunID
-	streams := newStreamView(m.out)
-	state := &runState{}
-	for {
-		select {
-		case evt, ok := <-m.conn.events:
-			if !ok {
-				return errServerClosed
-			}
-			if done := m.event(evt, res.RunID, state, streams); done {
-				return nil
-			}
-		case req, ok := <-m.conn.asks:
-			if !ok {
-				return errServerClosed
-			}
-			if err := m.answerAsk(req, input); err != nil {
-				return err
-			}
-		}
+	m.runIDMu.Unlock()
+	m.state = &runState{}
+	m.streams = newStreamView(m.r.sink, m.r.term)
+	return nil
+}
+
+// endRun closes the run a settle ended: an ask it left open goes with
+// it, and the editor gets its prompt back.
+func (m *machine) endRun(input input) (int, bool) {
+	m.runIDMu.Lock()
+	m.runID = ""
+	m.runIDMu.Unlock()
+	m.state, m.streams = nil, nil
+	if m.ask != nil {
+		// An ask for a run that settled is a question about nothing.
+		m.ask = nil
 	}
+	input.prompt(m.prompt())
+	if m.eof {
+		return 0, true
+	}
+	return 0, false
 }
 
 // catalogNames returns the catalog's model names, in name order.
@@ -418,20 +655,28 @@ func (m *machine) catalogNames() []string {
 	return names
 }
 
-// cancelRun asks the active run to stop. A run that is not there is
-// no failure: the ask raced with the settle.
-func (m *machine) cancelRun() {
-	if m.runID == "" {
+// activeRun is the run the session is on, empty when idle.
+func (m *machine) activeRun() string {
+	m.runIDMu.Lock()
+	defer m.runIDMu.Unlock()
+	return m.runID
+}
+
+// cancelRun asks the named run to stop. A run that is gone is no
+// failure: the cancel raced with the settle, and the name keeps it from
+// stopping the run that replaced it.
+func (m *machine) cancelRun(runID string) {
+	if runID == "" || m.activeRun() != runID {
 		return
 	}
 	_ = m.conn.call(protocol.MethodRunCancel, protocol.CancelParams{
 		SessionID: m.sessionID,
-		RunID:     m.runID,
+		RunID:     runID,
 	}, nil)
 }
 
 // event renders one event. The bool says the run settled.
-func (m *machine) event(evt protocol.Event, runID string, state *runState, streams *streamView) bool {
+func (m *machine) event(evt protocol.Event, state *runState, streams *streamView) bool {
 	switch evt.Type {
 	case "message.delta":
 		id, _ := evt.Payload["message_id"].(string)
@@ -464,7 +709,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState, strea
 	case "turn.ended":
 		state.turns++
 	case "run.settled":
-		if id, _ := evt.Payload["run_id"].(string); id == runID {
+		if id, _ := evt.Payload["run_id"].(string); id != "" && id == m.activeRun() {
 			streams.stop()
 			state.flush(m.r)
 			reason, _ := evt.Payload["reason"].(string)
@@ -493,26 +738,41 @@ func settledUsage(payload map[string]any) (input, output int) {
 	return detail.Usage.InputTokens, detail.Usage.OutputTokens
 }
 
-// answerAsk renders a permission ask and reads the decision.
-//
-// The run waits while the ask is open, so nothing else streams past
-// the question. An end of input, an interrupt or an unknown answer
-// denies: the safe side of a mistake is the refused call.
-func (m *machine) answerAsk(req askRequest, input input) error {
-	ask := req.ask
-	m.r.write(ansiYellow + "⚙ permission · " + ask.Tool + ansiReset + "\n")
-	if ask.Summary != "" {
-		m.r.write(ansiDim + firstLine(ask.Summary) + ansiReset + "\n")
+// openAsk shows a permission ask. The prompt it shows is the line the
+// answer is typed behind, so the y or n reaches the session the same
+// way every other line does.
+func (m *machine) openAsk(req askRequest, input input) {
+	m.ask = &req
+	m.r.write(ansiYellow + "⚙ permission · " + req.ask.Tool + ansiReset + "\n")
+	if req.ask.Summary != "" {
+		m.r.write(ansiDim + req.ask.Summary + ansiReset + "\n")
 	}
-	input.prompt(ansiYellow + "  allow " + ask.Tool + "? [y/N] " + ansiReset)
-	line, _ := input.read()
+	if m.eof {
+		// No input is left to answer with, and the refused call is
+		// the safe side.
+		m.answer("", input)
+		return
+	}
+	input.prompt(m.prompt())
+}
+
+// answer sends the decision for the open ask.
+//
+// An unknown answer denies the call: the safe side of a mistake is the
+// refused one.
+func (m *machine) answer(text string, input input) {
+	req := m.ask
+	m.ask = nil
 	decision := protocol.AskResult{Decision: protocol.DecisionDeny}
-	switch strings.ToLower(strings.TrimSpace(line)) {
+	switch strings.ToLower(text) {
 	case "y", "yes":
 		decision.Decision = protocol.DecisionAllow
 	}
 	m.r.write(ansiDim + "→ " + decision.Decision + ansiReset + "\n")
-	return m.conn.answer(req, decision)
+	if err := m.conn.answer(*req, decision); err != nil {
+		m.r.failure(err.Error())
+	}
+	input.prompt(m.prompt())
 }
 
 // shutdown closes the session, closes the server's input so its read
@@ -587,12 +847,9 @@ type streamView struct {
 	shown bool
 }
 
-// newStreamView builds the hint for out.
-func newStreamView(out io.Writer) *streamView {
-	if termIsTerminal(out) {
-		return &streamView{out: out, live: true}
-	}
-	return &streamView{out: out}
+// newStreamView builds the hint for out. live says out is a terminal.
+func newStreamView(out io.Writer, live bool) *streamView {
+	return &streamView{out: out, live: live}
 }
 
 // tick shows the hint, once per run.
@@ -628,24 +885,27 @@ type readlineInput struct {
 
 func (i *readlineInput) prompt(p string) {
 	i.rl.SetPrompt(p)
+	i.rl.Refresh()
 }
 
 func (i *readlineInput) read() (string, error) {
 	line, err := i.rl.Readline()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSuffix(line, "\n"), nil
+	return strings.TrimSuffix(line, "\n"), err
 }
 
 func (i *readlineInput) close() {
-	i.rl.Close()
+	// The editor's own Close waits on a read it cannot interrupt: its
+	// stdin wrapper closes the fill pipe and leaves the read below it
+	// parked. The terminal goes back and the history is saved; the
+	// editor's goroutines end with the process.
+	_ = i.rl.Terminal.ExitRawMode()
+	i.rl.Operation.Close()
 }
 
 // plainInput reads lines without an editor.
 //
-// The prompts it reads behind go through the renderer, so they land
-// in the transcript the pager shows again.
+// The prompts go through the renderer, so they land in the transcript
+// the pager shows again.
 type plainInput struct {
 	scanner *bufio.Scanner
 	write   func(string)
@@ -653,14 +913,14 @@ type plainInput struct {
 }
 
 func (i *plainInput) prompt(p string) {
+	if p == i.shown || p == "" {
+		return
+	}
 	i.shown = p
+	i.write(p)
 }
 
 func (i *plainInput) read() (string, error) {
-	if i.shown != "" {
-		i.write(i.shown)
-		i.shown = ""
-	}
 	if !i.scanner.Scan() {
 		return "", io.EOF
 	}

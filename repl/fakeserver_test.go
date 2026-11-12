@@ -31,6 +31,13 @@ type fakeServer struct {
 	cancels []string
 	// refusePrompt makes run/prompt refuse, for the refusal tests.
 	refusePrompt bool
+	askSummary   string
+	// holdRun keeps the run open until the client cancels it, so a
+	// test has a run to stop.
+	holdRun bool
+	// askWhen holds the ask back until the test closes it, so the
+	// test can type ahead of the ask.
+	askWhen chan struct{}
 	// warnings are the session warnings create reports.
 	warnings []string
 
@@ -157,16 +164,34 @@ func (s *fakeServer) run() {
 	})
 	s.event("turn.ended", map[string]any{"run_id": "r1", "turn": 1})
 	s.event("turn.started", map[string]any{"run_id": "r1", "turn": 2})
+	if s.holdRun {
+		// The run waits for a cancel of its own: an earlier run's
+		// cancel is not an answer.
+		s.waitCancel(s.cancelCount() + 1)
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "cancelled", "turns": 1})
+		return
+	}
 	s.event("tool.call", map[string]any{
 		"run_id": "r1", "handle": "h1", "tool": "bash", "summary": "ls -la",
 	})
 	// The ask goes out as a request, and the run waits for it.
+	if s.askWhen != nil {
+		select {
+		case <-s.askWhen:
+		case <-time.After(10 * time.Second):
+			return
+		}
+	}
+	summary := s.askSummary
+	if summary == "" {
+		summary = "ls -la"
+	}
 	askID := s.request(protocol.MethodPermissionAsk, protocol.AskParams{
 		SessionID: "s1",
 		RunID:     "r1",
 		AskID:     "a1",
 		Tool:      "bash",
-		Summary:   "ls -la",
+		Summary:   summary,
 		Class:     "side_effecting",
 		Reason:    "policy",
 	})
@@ -182,6 +207,26 @@ func (s *fakeServer) run() {
 			"usage": map[string]any{"input_tokens": 12300, "output_tokens": 1100},
 		},
 	})
+}
+
+// cancelCount is how many cancels the client has sent.
+func (s *fakeServer) cancelCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.cancels)
+}
+
+// waitCancel waits for want cancels. A run nobody cancels ends the wait
+// quietly: the test that wanted it fails on its own assertions, and a
+// late t.Error would land after the test.
+func (s *fakeServer) waitCancel(want int) {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.cancelCount() >= want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // waitDecision blocks until the client answers the ask, or gives up

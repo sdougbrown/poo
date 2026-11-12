@@ -34,6 +34,12 @@ const maxResultLines = 8
 type renderer struct {
 	// out is the terminal the transcript goes to.
 	out io.Writer
+	// sink is where the transcript's lines go: out, or the editor's own
+	// writer while the editor holds out, so the prompt is redrawn under
+	// each line instead of being overwritten by it.
+	sink io.Writer
+	// term says out is a terminal.
+	term bool
 	// tr renders markdown for the terminal. It is nil for a writer
 	// that is not a terminal, where markdown renders as plain text.
 	tr *glamour.TermRenderer
@@ -49,8 +55,9 @@ type renderer struct {
 // terminal's own background; anything else gets plain text, so a test
 // or a pipe reads the same words without the escapes.
 func newRenderer(out io.Writer) *renderer {
-	r := &renderer{out: out, wrap: 80}
-	if termIsTerminal(out) {
+	r := &renderer{out: out, sink: out, wrap: 80}
+	r.term = termIsTerminal(out)
+	if r.term {
 		if f, ok := out.(interface{ Fd() uintptr }); ok {
 			if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 4 {
 				r.wrap = w - 2
@@ -70,7 +77,7 @@ func newRenderer(out io.Writer) *renderer {
 // write appends a chunk to the transcript and the terminal.
 func (r *renderer) write(s string) {
 	r.transcript.WriteString(s)
-	fmt.Fprint(r.out, s)
+	fmt.Fprint(r.sink, s)
 }
 
 // userPrompt echoes the prompt the session runs.

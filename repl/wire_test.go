@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -82,6 +83,24 @@ func TestTheDemuxSendsEachKindWhereItBelongs(t *testing.T) {
 	ask := <-conn.asks
 	if ask.ask.Tool != "bash" || string(ask.id) != `"a1"` {
 		t.Errorf("the ask read back as %+v", ask)
+	}
+}
+
+func TestAnEventOverflowEndsTheConnection(t *testing.T) {
+	h := newWireHarness(t)
+	conn := startConn(h.stdout, h.stdin)
+	go func() {
+		for i := 0; i <= cap(conn.events); i++ {
+			h.feed(`{"jsonrpc":"2.0","method":"event","params":{"session_id":"s1","type":"message.delta"}}`)
+		}
+	}()
+	select {
+	case <-conn.done:
+		if conn.err == nil || !strings.Contains(conn.err.Error(), "overflow") {
+			t.Fatalf("the connection did not report the overflow: %v", conn.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the connection kept running after losing an event")
 	}
 }
 

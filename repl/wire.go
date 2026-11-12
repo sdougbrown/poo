@@ -42,6 +42,7 @@ type conn struct {
 	asks chan askRequest
 	// done is closed when the reader returns.
 	done chan struct{}
+	err  error
 }
 
 // askRequest is one permission ask from the server.
@@ -77,10 +78,16 @@ func startConn(stdout io.Reader, stdin io.Writer) *conn {
 
 // read reads the server's lines and demuxes them.
 func (c *conn) read(r io.Reader) {
+	if closer, ok := r.(io.Closer); ok {
+		defer closer.Close()
+	}
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
-		c.line(scanner.Bytes())
+		if !c.line(scanner.Bytes()) {
+			c.err = fmt.Errorf("%w: event queue overflow", errServerClosed)
+			break
+		}
 	}
 	c.mu.Lock()
 	for _, ch := range c.pending {
@@ -99,7 +106,7 @@ func (c *conn) read(r io.Reader) {
 }
 
 // line demuxes one line from the server.
-func (c *conn) line(line []byte) {
+func (c *conn) line(line []byte) bool {
 	var msg struct {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
@@ -108,7 +115,7 @@ func (c *conn) line(line []byte) {
 		Params json.RawMessage `json:"params"`
 	}
 	if err := json.Unmarshal(line, &msg); err != nil {
-		return
+		return true
 	}
 	// An id the server sent is present when it is neither absent nor
 	// null: JSON-RPC's notification shape.
@@ -117,18 +124,17 @@ func (c *conn) line(line []byte) {
 	case msg.Method == protocol.MethodEvent && !hasID:
 		var evt protocol.Event
 		if err := json.Unmarshal(msg.Params, &evt); err != nil {
-			return
+			return true
 		}
 		select {
 		case c.events <- evt:
 		default:
-			// The client stopped reading: the drop is the same
-			// overflow the server's queue would report.
+			return false
 		}
 	case msg.Method == protocol.MethodPermissionAsk && hasID:
 		var ask protocol.AskParams
 		if err := json.Unmarshal(msg.Params, &ask); err != nil {
-			return
+			return true
 		}
 		select {
 		case c.asks <- askRequest{id: msg.ID, ask: ask}:
@@ -144,7 +150,7 @@ func (c *conn) line(line []byte) {
 	case hasID:
 		var id int
 		if err := json.Unmarshal(msg.ID, &id); err != nil {
-			return
+			return true
 		}
 		c.mu.Lock()
 		ch := c.pending[id]
@@ -154,6 +160,7 @@ func (c *conn) line(line []byte) {
 			ch <- rpcResult{raw: msg.Result, err: msg.Error}
 		}
 	}
+	return true
 }
 
 // call sends a request and waits for its answer.

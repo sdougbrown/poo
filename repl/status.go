@@ -82,14 +82,12 @@ func (s *status) line() string {
 	return ansiDim + strings.Join(segments, " │ ") + ansiReset
 }
 
-// prompt renders the statusline and the input mark the repl reads its
-// lines behind. It is a readline prompt: the first line holds the
-// status, the second holds the mark.
+// prompt renders the status and input mark on one readline line.
 func (s *status) prompt() string {
 	if line := s.line(); line != "" {
-		return line + "\n💩❯ "
+		return line + " " + promptMark
 	}
-	return "💩❯ "
+	return promptMark
 }
 
 // folderName returns the directory a statusline names: the folder's
