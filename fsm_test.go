@@ -544,22 +544,23 @@ func TestMaxTurnsBeatsAnAfterTurnStop(t *testing.T) {
 	}
 }
 
-// TestACancelBeatsEveryOtherCandidate covers the precedence: a cancel
-// wins over a failure.
-func TestACancelBeatsEveryOtherCandidate(t *testing.T) {
+// TestACancelSettlesAHeldTurnCancelled covers a cancel that reaches a
+// run while its turn is still in flight: the run settles cancelled
+// rather than waiting for the turn to finish.
+//
+// Only one candidate is present at the commit, so this does not pin the
+// reason precedence — the plan table test does. It pins that the cancel
+// is taken at all, which is what the unheld version raced away from.
+func TestACancelSettlesAHeldTurnCancelled(t *testing.T) {
 	tr := newGatedTransport(t, fakeResponse{text: "the answer"}.turn())
 	tool := &echoTool{result: "echoed"}
-	hook := &stoppingAfterTurn{}
 
-	opts := testOptions(t, tr, tool, &recordingSink{})
-	opts.AfterTurn = []poo.AfterTurnHook{hook}
-
-	s := newTestSession(t, opts)
+	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	// The cancel has to beat a live run: the transport holds the turn
-	// until it is issued, so a fast settle cannot win the race.
+	// The transport holds the turn, so the cancel cannot arrive after a
+	// settle that was already chosen.
 	<-tr.entered
 	s.Cancel("cancel:test")
 	close(tr.release)
