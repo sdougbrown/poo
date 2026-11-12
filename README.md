@@ -51,11 +51,11 @@ keys at a terminal, `/less` shows the transcript again through `less
 repl holds no run loop of its own: it is a wire client, and the
 server runs the session.
 
-The repl is its own Go module (`repl/go.mod`), so a binary that links
-the poo core carries none of its dependencies: a module that does not
-import `github.com/sdougbrown/poo/repl` downloads no markdown or
-terminal packages for it. Within this repository, the root module
-reaches it through a `replace` to `./repl`.
+The repl is a package of the root module, and `go test ./...` at the
+root covers it with the rest of the tree. Its dependencies — markdown
+rendering and terminal input — are imported only by the repl package,
+so a binary that links the poo core without the repl carries none of
+them: Go links only the packages a binary imports.
 
 **Profiles.** The profile decides which tools a session offers. Pick one
 with `--profile`; the default is `code`.
