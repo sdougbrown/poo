@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/sdougbrown/poo"
 )
@@ -31,8 +33,10 @@ type Provider struct {
 	// API is the wire API the provider speaks, as poo names it: empty
 	// is the default.
 	API string
-	// APIKey is the key the file itself carries, when it carries one
-	// poo can use.
+	// APIKeyEnv names the environment variable that holds the key,
+	// when the file or the auth beside it names one.
+	APIKeyEnv string
+	// APIKey is the key itself, when poo can send it.
 	APIKey string
 	// Models are the models the provider serves.
 	Models []Model
@@ -111,6 +115,12 @@ func Read(path string) (File, error) {
 	}
 	sort.Strings(names)
 
+	// The auth file beside the models file is read once, on the first
+	// provider the models file leaves no usable key for: a file that is
+	// not there reads as no keys, and the flag — not a nil map — keeps
+	// it from being read again for every keyless provider after it.
+	authRead := false
+	var keys map[string]credential
 	out := File{Providers: make(map[string]Provider, len(names))}
 	for _, name := range names {
 		definition := file.Providers[name]
@@ -127,10 +137,26 @@ func Read(path string) (File, error) {
 		if err != nil {
 			return File{}, err
 		}
+		env, key := keyFromValue(definition.APIKey)
+		if env == "" && key == "" {
+			if !authRead {
+				keys, err = readAuth(filepath.Join(filepath.Dir(path), authFile))
+				if err != nil {
+					return File{}, err
+				}
+				authRead = true
+			}
+			authEnv, authKey := storedKey(keys[name])
+			if authEnv != "" {
+				env = authEnv
+			}
+			key = authKey
+		}
 		provider := Provider{
-			BaseURL: definition.BaseURL,
-			API:     api,
-			APIKey:  definition.APIKey,
+			BaseURL:   definition.BaseURL,
+			API:       api,
+			APIKeyEnv: env,
+			APIKey:    key,
 		}
 		for _, model := range definition.Models {
 			if model.ID == "" {
@@ -170,4 +196,57 @@ func inputs(provider, id string, names []string) ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// credential is one provider's entry in pi's auth.json.
+type credential struct {
+	// Type is how the credential authenticates.
+	Type string `json:"type"`
+	// Key is the api key, for the api_key type.
+	Key string `json:"key"`
+}
+
+// authFile is the name pi's credentials file goes by, beside the
+// models file.
+const authFile = "auth.json"
+
+// readAuth reads pi's auth.json: credentials by provider name. A file
+// that is not there is a file without credentials, not a failure.
+func readAuth(path string) (map[string]credential, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	var credentials map[string]credential
+	if err := json.Unmarshal(data, &credentials); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return credentials, nil
+}
+
+// keyFromValue reads one key value as the settings hold keys: an
+// environment name and a literal, either empty. A key pi would run a
+// command for is a key poo does not run, and a $NAME names the
+// environment variable to read at run time.
+func keyFromValue(value string) (string, string) {
+	switch {
+	case value == "", strings.HasPrefix(value, "!"):
+		return "", ""
+	case strings.HasPrefix(value, "$"):
+		return value[1:], ""
+	}
+	return "", value
+}
+
+// storedKey reads one auth-file credential as the settings hold keys.
+// Only the api_key credential carries a key poo can use; an OAuth token
+// imports without one.
+func storedKey(entry credential) (string, string) {
+	if entry.Type != "api_key" {
+		return "", ""
+	}
+	return keyFromValue(entry.Key)
 }
