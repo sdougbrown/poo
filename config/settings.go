@@ -74,9 +74,9 @@ type Settings struct {
 
 // Endpoint is one endpoint in the settings.
 //
-// The credential is read from the environment: the settings name the
-// variable that holds it, and the variable is the only place a key
-// comes from.
+// The credential is read from the environment first: the settings name
+// the variable that holds it, and the literal the endpoint carries is
+// the fallback when that variable holds nothing.
 type Endpoint struct {
 	// Endpoint is the model's endpoint.
 	Endpoint string `json:"endpoint"`
