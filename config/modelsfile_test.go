@@ -303,3 +303,36 @@ func TestAModelsFileThatCannotRunIsARefusal(t *testing.T) {
 		})
 	}
 }
+
+// TestAnImportedModelJoinsASettingsEndpoint covers the partial collision:
+// the settings name the endpoint and the models file fills in its models.
+// A provider-level skip would drop them in exactly the case the import
+// exists for.
+func TestAnImportedModelJoinsASettingsEndpoint(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen"}]
+			}
+		}
+	}`)
+	settings, err := Parse([]byte(`{
+		"version":1,
+		"pi_models_file":"`+modelsFile+`",
+		"endpoints":{"home":{"endpoint":"http://mine:4000/v1"}}
+	}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	model, ok := settings.Models["home/qwen"]
+	if !ok {
+		t.Fatalf("the settings' endpoint cost the file its models: %v", settings.Models)
+	}
+	if model.Endpoint != "home" {
+		t.Errorf("the imported model points at %q, want the settings' home endpoint", model.Endpoint)
+	}
+	if settings.Endpoints["home"].Endpoint != "http://mine:4000/v1" {
+		t.Errorf("the import took the settings' endpoint: %+v", settings.Endpoints["home"])
+	}
+}
