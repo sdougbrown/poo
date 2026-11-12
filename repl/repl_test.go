@@ -413,6 +413,36 @@ func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
 	}
 }
 
+// TestAModelSwitchTheCatalogCannotDescribe covers a switch the server
+// accepts for a model the client's catalog does not hold: the session
+// moves, and the statusline keeps the window it had rather than
+// inventing one.
+func TestAModelSwitchTheCatalogCannotDescribe(t *testing.T) {
+	out, typeLine, code := startTypedRepl(t, &fakeServer{t: t})
+	typeLine("say hi\n")
+	waitFor(t, out, "allow bash?")
+	typeLine("y\n")
+	waitFor(t, out, "end_turn")
+	typeLine("/model hidden\n")
+	waitFor(t, out, "model → hidden")
+	typeLine("/quit\n")
+	<-code
+
+	plain := ansi.Strip(out.String())
+	// The window the run filled stays: there is no entry to read a new
+	// one from, and the old model's must not be presented as the new
+	// model's guess.
+	found := false
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, "│ hidden") && strings.Contains(line, "262.1k") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no statusline names hidden beside the window it kept:\n%s", plain)
+	}
+}
+
 // TestAModelSwitchToAnUnknownNameIsRefused covers a switch the catalog
 // cannot resolve: the refusal reads in the transcript, and the session
 // keeps the model it had.
