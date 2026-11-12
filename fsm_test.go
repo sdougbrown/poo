@@ -547,7 +547,7 @@ func TestMaxTurnsBeatsAnAfterTurnStop(t *testing.T) {
 // TestACancelBeatsEveryOtherCandidate covers the precedence: a cancel
 // wins over a failure.
 func TestACancelBeatsEveryOtherCandidate(t *testing.T) {
-	tr := scripted([]fakeResponse{{text: "the answer"}})
+	tr := newGatedTransport(t, fakeResponse{text: "the answer"}.turn())
 	tool := &echoTool{result: "echoed"}
 	hook := &stoppingAfterTurn{}
 
@@ -558,7 +558,11 @@ func TestACancelBeatsEveryOtherCandidate(t *testing.T) {
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
+	// The cancel has to beat a live run: the transport holds the turn
+	// until it is issued, so a fast settle cannot win the race.
+	<-tr.entered
 	s.Cancel("cancel:test")
+	close(tr.release)
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
