@@ -1014,3 +1014,22 @@ func TestAModelWithoutALevelCycleSaysWhatToType(t *testing.T) {
 		})
 	}
 }
+
+// TestANumberThatNamesAModelSwitchesToIt covers the fallthrough: a bare
+// number with no list to read is still a catalog name when the catalog
+// holds one by that name, so a model called "2" stays reachable.
+func TestANumberThatNamesAModelSwitchesToIt(t *testing.T) {
+	server := &fakeServer{t: t, chat: "gemma4", models: []fakeModel{
+		{name: "gemma4", modelID: "gemma4", window: 262144, levels: []string{"off"}},
+		{name: "2", modelID: "2", window: 8192, levels: []string{"off"}},
+	}}
+	out, server := startReplServer(t, "/model 2\n/quit\n", server)
+	if !strings.Contains(out, "model → 2") {
+		t.Errorf("the numeric name did not switch:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 1 || server.switches[0] != "2" {
+		t.Errorf("the server got the switches %v, want one to \"2\"", server.switches)
+	}
+}
