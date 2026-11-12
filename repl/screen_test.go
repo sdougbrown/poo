@@ -335,3 +335,33 @@ func TestTheFlushKeepsTheScreenWhenTheBlockOutgrowsIt(t *testing.T) {
 		}
 	}
 }
+
+// TestAResizeMidBlockStopsThePainting covers the width the rows are
+// counted at: a terminal that changes width while a block streams keeps
+// its old rows on the screen, the painting stops, and the render
+// replaces them at the new width instead of climbing to the wrong row.
+func TestAResizeMidBlockStopsThePainting(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	width := 40
+	r.liveWidth = func() int { return width }
+	r.userPrompt("go")
+	r.streamText("words that wrap over more than one row at forty columns wide")
+
+	// The terminal narrows; the next delta must not paint at the old
+	// width.
+	width = 20
+	before := scr.text()
+	r.streamText(" and more words arrive after the resize")
+	if got := scr.text(); got != before {
+		t.Errorf("the stream kept painting after the resize:\n%s", got)
+	}
+
+	r.replace(r.markdown("done"))
+	drawn := scr.text()
+	if got := countOf(t, scr, "done"); got != 1 {
+		t.Errorf("the render shows %d time(s), want 1:\n%s", got, drawn)
+	}
+	if rowOf(t, scr, strings.TrimRight(promptMark, " ")) < 0 {
+		t.Errorf("the prompt was lost after the resize:\n%s", drawn)
+	}
+}

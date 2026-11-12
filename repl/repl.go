@@ -238,15 +238,8 @@ func (m *machine) run() int {
 			if !ok {
 				return m.gone()
 			}
-			if m.state == nil {
-				// Nothing of the session's own streams: a job's or a
-				// feed's event is not the conversation.
-				continue
-			}
-			if m.event(evt, m.activeRun(), m.state) {
-				if code, done := m.endRun(input); done {
-					return code
-				}
+			if code, done := m.handleEvent(evt, input); done {
+				return code
 			}
 		case req, ok := <-m.conn.asks:
 			if !ok {
@@ -415,7 +408,7 @@ func (m *machine) filterRune(r rune) (rune, bool) {
 	}
 	// The rest of the key goes too, so an arrow leaves no text behind.
 	if r >= 0x20 && r <= 0x7e {
-		if r >= 0x40 {
+		if isFinalByte(r) {
 			m.escState = escIdle
 		}
 		return r, false
@@ -557,6 +550,10 @@ func (m *machine) newInput() input {
 				}
 				return -1
 			}
+			// The streamed rows wrap at the editor's width, so they read
+			// it from the same place, live: a resize mid-block stops the
+			// painting and the render lays the message out again.
+			m.r.liveWidth = cfg.FuncGetWidth
 		}
 		rl, err := readline.NewEx(cfg)
 		if err == nil {
@@ -978,6 +975,22 @@ func settledUsage(payload map[string]any) (input, output int) {
 	return detail.Usage.InputTokens, detail.Usage.OutputTokens
 }
 
+// handleEvent renders one event of the session's run, and reports when
+// the run it belongs to ends the session. The main loop and the ask's
+// drain both step through events here, so a change to dispatch or to
+// endRun's contract lands in one place.
+func (m *machine) handleEvent(evt protocol.Event, input input) (int, bool) {
+	if m.state == nil {
+		// Nothing of the session's own streams: a job's or a feed's
+		// event is not the conversation.
+		return 0, false
+	}
+	if m.event(evt, m.activeRun(), m.state) {
+		return m.endRun(input)
+	}
+	return 0, false
+}
+
 // handleAsk takes one permission ask. The reader hands events and
 // asks to separate channels, so the main loop's select takes them in
 // whatever order it finds ready: an ask can come up while the deltas
@@ -992,15 +1005,8 @@ func (m *machine) handleAsk(req askRequest, input input) (int, bool) {
 			if !ok {
 				return m.gone(), true
 			}
-			if m.state == nil {
-				// Nothing of the session's own streams: a job's or a
-				// feed's event is not the conversation.
-				continue
-			}
-			if m.event(evt, m.activeRun(), m.state) {
-				if code, done := m.endRun(input); done {
-					return code, true
-				}
+			if code, done := m.handleEvent(evt, input); done {
+				return code, true
 			}
 		default:
 			if m.state != nil {
@@ -1110,7 +1116,7 @@ func (s *runState) flush(r *renderer) {
 	var rendered strings.Builder
 	for _, m := range s.messages {
 		rendered.WriteString(r.thinkingText(m.thinking.String()))
-		rendered.WriteString(r.messageText(m.text.String()))
+		rendered.WriteString(r.markdown(m.text.String()))
 	}
 	r.replace(rendered.String())
 	s.messages = nil
