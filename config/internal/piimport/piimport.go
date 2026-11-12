@@ -57,6 +57,8 @@ type Model struct {
 	// SupportsReasoningEffort says the provider spells reasoning as an
 	// effort level.
 	SupportsReasoningEffort bool
+	// Levels are the reasoning levels the model declares, lowest first.
+	Levels []string
 }
 
 // piFile is a models file written for pi: providers, each with the
@@ -84,7 +86,12 @@ type piModel struct {
 	ContextWindow int      `json:"contextWindow"`
 	MaxTokens     int      `json:"maxTokens"`
 	Reasoning     bool     `json:"reasoning"`
-	Compat        struct {
+	// ThinkingLevelMap maps a level name to the value the provider takes
+	// for it, or to null when the provider does not take that level: the
+	// keys are pi's levels, off, minimal, low, medium, high, xhigh and
+	// max.
+	ThinkingLevelMap map[string]json.RawMessage `json:"thinkingLevelMap"`
+	Compat           struct {
 		SupportsReasoningEffort bool `json:"supportsReasoningEffort"`
 	} `json:"compat"`
 }
@@ -166,14 +173,18 @@ func Read(path string) (File, error) {
 			if err != nil {
 				return File{}, err
 			}
-			provider.Models = append(provider.Models, Model{
+			entry := Model{
 				ID:                      model.ID,
 				Inputs:                  inputs,
 				ContextWindow:           model.ContextWindow,
 				MaxTokens:               model.MaxTokens,
 				Reasoning:               model.Reasoning,
 				SupportsReasoningEffort: model.Compat.SupportsReasoningEffort,
-			})
+			}
+			if entry.Reasoning && entry.SupportsReasoningEffort {
+				entry.Levels = thinkingLevels(model.ThinkingLevelMap)
+			}
+			provider.Models = append(provider.Models, entry)
 		}
 		out.Providers[name] = provider
 	}
@@ -249,4 +260,45 @@ func storedKey(entry credential) (string, string) {
 		return "", ""
 	}
 	return keyFromValue(entry.Key)
+}
+
+// reasoningLevels is pi's canonical level order, lowest first: the
+// order an imported model's levels take, so they climb the way pi's own
+// cycle does.
+var reasoningLevels = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// effortLevels are the levels a reasoning model is imported with when
+// pi's file says nothing more about them.
+//
+// The set is pi's own effort default, not poo's wider named vocabulary:
+// a model that declares no map has told poo nothing about minimal or
+// xhigh, and claiming them would send a level the provider never
+// accepted. A map is how a model declares more.
+var effortLevels = []string{"off", "low", "medium", "high"}
+
+// thinkingLevels turns a model's thinkingLevelMap into the levels it
+// accepts.
+//
+// A level the map gives no value is a level the provider does not take,
+// so only the keys with a value are levels. A model with no map is the
+// effort default, and a map that leaves no level takes none.
+func thinkingLevels(levels map[string]json.RawMessage) []string {
+	if len(levels) == 0 {
+		return append([]string(nil), effortLevels...)
+	}
+	out := make([]string, 0, len(levels))
+	for _, level := range reasoningLevels {
+		value, ok := levels[level]
+		if !ok || isNull(value) {
+			continue
+		}
+		out = append(out, level)
+	}
+	return out
+}
+
+// isNull reports that a models file's value is null: the level the key
+// names is one the provider does not take.
+func isNull(value json.RawMessage) bool {
+	return len(value) == 0 || string(value) == "null"
 }

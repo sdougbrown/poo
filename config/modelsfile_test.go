@@ -132,6 +132,59 @@ func TestPIImportRefusesUnsupportedAPIs(t *testing.T) {
 	}
 }
 
+// TestAThinkingLevelMapBecomesTheModelSLevels covers pi's level map: the
+// keys with a value are the levels the model takes, in pi's own order, and
+// a key whose value is null is a level the provider does not have.
+func TestAThinkingLevelMapBecomesTheModelSLevels(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [
+					{
+						"id": "qwen",
+						"reasoning": true,
+						"compat": {"supportsReasoningEffort": true},
+						"thinkingLevelMap": {"off": null, "minimal": "minimal", "low": "low", "high": "high", "xhigh": null, "max": "max"}
+					},
+					{
+						"id": "plain",
+						"reasoning": true,
+						"compat": {"supportsReasoningEffort": true}
+					},
+					{
+						"id": "none",
+						"reasoning": true,
+						"thinkingLevelMap": {"off": null, "minimal": null, "low": null, "medium": null, "high": null, "xhigh": null}
+					}
+				]
+			}
+		}
+	}`)
+	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+
+	// The order is pi's, and the null off is not a level the model takes.
+	mapped := settings.Models["home/qwen"].ReasoningLevels
+	want := []string{"minimal", "low", "high", "max"}
+	if strings.Join(mapped, ",") != strings.Join(want, ",") {
+		t.Errorf("the thinkingLevelMap imported as %v, want %v", mapped, want)
+	}
+	// A reasoning model with no map is the effort default.
+	plain := settings.Models["home/plain"].ReasoningLevels
+	want = []string{"off", "low", "medium", "high"}
+	if strings.Join(plain, ",") != strings.Join(want, ",") {
+		t.Errorf("the model without a map imported as %v, want %v", plain, want)
+	}
+	// A map that is all nulls takes none of pi's levels: the model
+	// declares nothing rather than inheriting the default.
+	if got := settings.Models["home/none"].ReasoningLevels; len(got) != 0 {
+		t.Errorf("the all-null map imported as %v, want no levels", got)
+	}
+}
+
 // TestAnUnknownPIAPPIsARefusal covers a provider poo cannot speak to:
 // the import refuses rather than importing halfway.
 func TestAnUnknownPIAPPIsARefusal(t *testing.T) {

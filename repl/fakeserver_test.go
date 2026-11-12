@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,8 @@ type fakeServer struct {
 	prompts []string
 	// switches are the model names the client configured, in order.
 	switches []string
+	// levels are the reasoning levels the client configured, in order.
+	levels []string
 	// closed says the client closed the session.
 	closed bool
 	// cancels are the run ids the client's cancels named, in order.
@@ -47,6 +50,10 @@ type fakeServer struct {
 	askWhen chan struct{}
 	// warnings are the session warnings create reports.
 	warnings []string
+	// chat is the model the session talks to.
+	chat string
+	// level is the reasoning level the session runs at.
+	level string
 
 	in *bufio.Reader
 	// w writes to the client.
@@ -63,6 +70,9 @@ func pipeUp(t *testing.T, server *fakeServer) (stdin io.WriteCloser, stdout io.R
 	clientRead, serverWrite := io.Pipe()
 	server.in = bufio.NewReader(serverRead)
 	server.w = serverWrite
+	if server.chat == "" {
+		server.chat = "gemma4"
+	}
 	go server.serve()
 	t.Cleanup(func() {
 		serverWrite.Close()
@@ -121,27 +131,65 @@ func (s *fakeServer) line(line []byte) {
 			response["warnings"] = s.warnings
 		}
 		s.reply(req.ID, response)
+	case protocol.MethodSessionGet:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.reply(req.ID, map[string]any{
+			"state":     "idle",
+			"jobs":      []any{},
+			"prompt":    map[string]any{},
+			"reasoning": s.level,
+			"broken":    false,
+		})
 	case protocol.MethodModelsList:
 		s.reply(req.ID, map[string]any{
 			"models": []map[string]any{
-				{"name": "gemma4", "model_id": "gemma4", "context_limit": 262144},
-				{"name": "qwen", "model_id": "qwen", "context_limit": 131072},
+				// gemma4 takes three levels, and qwen takes two it does
+				// not share: a switch is where the two disagree. mystery
+				// cannot be told off: a switch to it is where the level's
+				// fallback shows.
+				{"name": "gemma4", "model_id": "gemma4", "context_limit": 262144, "reasoning_levels": []string{"off", "low", "high"}},
+				{"name": "qwen", "model_id": "qwen", "context_limit": 131072, "reasoning_levels": []string{"off", "medium"}},
+				{"name": "mystery", "model_id": "mystery", "context_limit": 8192, "reasoning_levels": []string{"low", "high"}},
 			},
 		})
 	case protocol.MethodSessionConfigure:
 		var params protocol.ConfigureParams
 		json.Unmarshal(req.Params, &params)
-		// hidden is a model the server accepts but the catalog above does
-		// not list: a switch to it succeeds with no entry to read.
-		if params.Models == nil || (params.Models.Chat != "gemma4" && params.Models.Chat != "qwen" && params.Models.Chat != "hidden") {
-			s.fail(req.ID, "unknown_model", "poo: the session's model is unknown")
-			return
-		}
 		s.mu.Lock()
-		s.switches = append(s.switches, params.Models.Chat)
-		s.mu.Unlock()
+		defer s.mu.Unlock()
+		if params.Models != nil && params.Models.Chat != "" {
+			if _, ok := fakeLevels[params.Models.Chat]; !ok {
+				s.fail(req.ID, "unknown_model", "poo: the session's model is unknown")
+				return
+			}
+			s.chat = params.Models.Chat
+			s.switches = append(s.switches, params.Models.Chat)
+			// The server the repl talks to takes the level back to one the
+			// new model can run: off when the model declares it, its lowest
+			// declared level when it cannot be told off.
+			if !s.acceptsLocked(s.level) {
+				levels := fakeLevels[s.chat]
+				s.level = "off"
+				if len(levels) > 0 && !slices.Contains(levels, "off") {
+					s.level = levels[0]
+				}
+			}
+		}
+		if params.Reasoning != "" {
+			// The session lowercases the level, and the result says what it
+			// runs at, so a client that typed High reads high back.
+			level := strings.ToLower(strings.TrimSpace(params.Reasoning))
+			if !s.acceptsLocked(level) {
+				s.fail(req.ID, "invalid_params", "the model \""+s.chat+"\" takes the levels "+strings.Join(fakeLevels[s.chat], ", "))
+				return
+			}
+			s.level = level
+			s.levels = append(s.levels, level)
+		}
 		s.reply(req.ID, map[string]any{
-			"models": map[string]any{"chat": params.Models.Chat},
+			"models":    map[string]any{"chat": s.chat},
+			"reasoning": s.level,
 		})
 	case protocol.MethodRunPrompt:
 		var params protocol.PromptParams
@@ -170,6 +218,31 @@ func (s *fakeServer) line(line []byte) {
 	default:
 		s.fail(req.ID, "no_method", "there is no method "+req.Method)
 	}
+}
+
+// fakeLevels are the reasoning levels the fake's models take, by name.
+var fakeLevels = map[string][]string{
+	"gemma4":  {"off", "low", "high"},
+	"qwen":    {"off", "medium"},
+	"mystery": {"low", "high"},
+	// hidden is a model the server accepts but the catalog it lists
+	// does not carry: a switch to it has no entry to read.
+	"hidden": {},
+}
+
+// acceptsLocked reports whether the session's model takes a level.
+//
+// The caller holds the server's lock.
+func (s *fakeServer) acceptsLocked(level string) bool {
+	if level == "" {
+		return true
+	}
+	for _, accepted := range fakeLevels[s.chat] {
+		if accepted == level {
+			return true
+		}
+	}
+	return false
 }
 
 // run plays the scripted run: a reply that streams, a tool call whose

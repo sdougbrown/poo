@@ -115,6 +115,10 @@ type ModelInfo struct {
 	MaxOutput int `json:"max_output,omitempty"`
 	// ToolsMode is how the model makes tool calls.
 	ToolsMode string `json:"tools_mode,omitempty"`
+	// ReasoningLevels are the reasoning levels the model accepts, lowest
+	// first, e.g. off, minimal, low, medium, high, xhigh. A model that
+	// names none is set by its reasoning control alone.
+	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
 }
 
 // PromptOverrides are the system prompt changes a client asks for.
@@ -265,6 +269,9 @@ type GetResult struct {
 	Jobs []JobInfo `json:"jobs"`
 	// Prompt is the session's system prompt.
 	Prompt PromptStateInfo `json:"prompt"`
+	// Reasoning is the reasoning level the session's requests send,
+	// empty when it sends none.
+	Reasoning string `json:"reasoning,omitempty"`
 	// Broken says the session's store failed and the session cannot be
 	// used any more.
 	Broken bool `json:"broken"`
@@ -278,12 +285,22 @@ type ConfigureParams struct {
 	PromptOverrides *PromptOverrides `json:"prompt_overrides,omitempty"`
 	// Models changes the models the session talks to.
 	Models *ModelRoles `json:"models,omitempty"`
+	// Reasoning is the chat model's reasoning level: off, minimal, low,
+	// medium, high, xhigh, or a token budget such as "4096". Empty leaves
+	// the level the session runs at unchanged.
+	//
+	// The level takes effect at the next run. A level the chat model does
+	// not take is refused, and the refusal names the levels it does.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // ConfigureResult is the result of session/configure.
 type ConfigureResult struct {
 	// Models are the models the session talks to now.
 	Models ModelRoles `json:"models"`
+	// Reasoning is the level the session runs at now. It is empty when the
+	// session sends no reasoning setting.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 // ModelsParams are the params of models/list.
@@ -679,3 +696,11 @@ const (
 	// DecisionDeny refuses the call.
 	DecisionDeny = "deny"
 )
+
+// ReasoningLevelNames are the named reasoning levels the session's
+// reasoning control takes, lowest first. A level is one of these, or a
+// token budget: a positive number of tokens the model may think
+// within. The order is the order a model's own levels climb, so a
+// client that cycles through them goes from the least thinking to the
+// most.
+var ReasoningLevelNames = []string{"off", "minimal", "low", "medium", "high", "xhigh"}
