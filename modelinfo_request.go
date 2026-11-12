@@ -275,7 +275,14 @@ func (m ModelInfo) CheckReasoning(level string) error {
 			}
 		}
 		if _, err := m.ReasoningFields(setting); err != nil {
-			return err
+			// The control cannot carry this name. The refusal names the
+			// levels the model declares — that is the contract here — and
+			// says why the control cannot send one of them.
+			return &ConfigError{
+				Field: "reasoning.chat",
+				Message: fmt.Sprintf("%q is not a reasoning level %s can send: it takes %s, and its control sends a token budget rather than a level",
+					level, modelLabel(m), strings.Join(levels, ", ")),
+			}
 		}
 		return nil
 	}

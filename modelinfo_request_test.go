@@ -275,6 +275,8 @@ func TestCheckReasoningRefusesWhatTheModelCannotTake(t *testing.T) {
 	declaredBudget := poo.ModelInfo{Name: "declared-budget", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningBudget}, ReasoningLevels: []string{"off", "high"}}
 	if err := declaredBudget.CheckReasoning("high"); err == nil {
 		t.Error("a budget model took a declared effort name")
+	} else if !strings.Contains(err.Error(), "off, high") {
+		t.Errorf("the refusal is %q, want it to name the model's levels", err)
 	}
 	if err := declaredBudget.CheckReasoning("2048"); err == nil {
 		t.Error("a budget model that declares levels took a raw budget")
