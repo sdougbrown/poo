@@ -131,7 +131,9 @@ func (s *fakeServer) line(line []byte) {
 	case protocol.MethodSessionConfigure:
 		var params protocol.ConfigureParams
 		json.Unmarshal(req.Params, &params)
-		if params.Models == nil || (params.Models.Chat != "gemma4" && params.Models.Chat != "qwen") {
+		// hidden is a model the server accepts but the catalog above does
+		// not list: a switch to it succeeds with no entry to read.
+		if params.Models == nil || (params.Models.Chat != "gemma4" && params.Models.Chat != "qwen" && params.Models.Chat != "hidden") {
 			s.fail(req.ID, "unknown_model", "poo: the session's model is unknown")
 			return
 		}

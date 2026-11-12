@@ -1235,6 +1235,7 @@ func TestTheCatalogSettingsCarryTheModelFields(t *testing.T) {
 		Version: 1,
 		Endpoints: map[string]config.Endpoint{
 			"test": {Endpoint: "http://localhost:4000/v1", APIKey: "literal-key-123"},
+			"env":  {Endpoint: "http://localhost:4000/v1", APIKeyEnv: "SOME_VAR"},
 		},
 		Models: map[string]config.Model{
 			"test-model": {
@@ -1252,6 +1253,11 @@ func TestTheCatalogSettingsCarryTheModelFields(t *testing.T) {
 	endpoint := catalog.Endpoints["test"]
 	if endpoint.APIKey != "literal-key-123" || endpoint.APIKeyEnv != "" {
 		t.Errorf("the endpoint imported as %+v", endpoint)
+	}
+	// The variable a key is read from is carried too: the transport reads
+	// it by name.
+	if got := catalog.Endpoints["env"].APIKeyEnv; got != "SOME_VAR" {
+		t.Errorf("the endpoint's variable imported as %q, want SOME_VAR", got)
 	}
 	model := catalog.Models["test-model"]
 	if model.ModelID != "test-model" || model.ContextLimit != 32768 || model.MaxOutput != 8192 {
