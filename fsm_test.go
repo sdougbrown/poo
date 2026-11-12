@@ -276,21 +276,23 @@ func TestHasToolCallIgnoresErroredResults(t *testing.T) {
 // algorithm's step 6: a turn that appended something goes to the gate
 // again.
 func TestAToolFreeTurnWithSteeringContinues(t *testing.T) {
-	tr := scripted([]fakeResponse{
-		{text: "the first answer"},
-		{text: "the second answer"},
-	})
+	tr := newGatedTransport(t,
+		fakeResponse{text: "the first answer"}.turn(),
+		fakeResponse{text: "the second answer"}.turn(),
+	)
 	tool := &echoTool{result: "echoed"}
 
 	s := newTestSession(t, testOptions(t, tr, tool, &recordingSink{}))
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	// The steer is sent while the first turn is running. The turn end
-	// drains it, and the run goes to the gate again.
+	// The steer is sent while the first turn is running: the transport
+	// holds the turn until it is queued, so the run cannot settle first.
+	<-tr.entered
 	if _, err := s.Send("actually, do this instead", poo.Steer); err != nil {
 		t.Fatalf("sending the steer: %v", err)
 	}
+	close(tr.release)
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
