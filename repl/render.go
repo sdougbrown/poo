@@ -121,8 +121,9 @@ func newRenderer(out io.Writer) *renderer {
 	if r.term {
 		if f, ok := out.(interface{ Fd() uintptr }); ok {
 			// A terminal that will not say how wide it is keeps the
-			// width the markdown is wrapped at.
-			r.width = r.wrap + 2
+			// width the markdown is wrapped at, so the streamed rows and
+			// the render they are replaced by break in the same place.
+			r.width = r.wrap
 			if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 4 {
 				r.width = w
 				r.wrap = w - 2
@@ -309,8 +310,19 @@ func stripStream(text string) (clean, pending string) {
 	if completeEscape(text[i:]) {
 		return ansi.Strip(text), ""
 	}
+	if tail := text[i:]; len(tail) > maxPending {
+		// An escape that never ends is not a sequence the terminal is
+		// meant to obey: the held bytes go rather than growing without
+		// a bound, since a server controls the deltas.
+		return ansi.Strip(text[:i]), ""
+	}
 	return ansi.Strip(text[:i]), text[i:]
 }
+
+// maxPending is the most bytes an unfinished escape sequence may hold
+// back. A real sequence is a few bytes; anything longer is data the
+// stream is not going to be told to obey.
+const maxPending = 64
 
 // completeEscape says whether the text from its ESC holds a sequence
 // the terminal has all of: a CSI with its final byte, an OSC with its

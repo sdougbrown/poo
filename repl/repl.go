@@ -218,11 +218,7 @@ func (m *machine) run() int {
 	stop := make(chan struct{})
 	defer close(stop)
 	go m.readLines(input, stop)
-	defer func() {
-		if m.state != nil {
-			m.state.flush(m.r)
-		}
-	}()
+	defer m.flushPending()
 
 	for {
 		// The read stays live while a run streams: Escape and Ctrl-C
@@ -971,6 +967,15 @@ func settledUsage(payload map[string]any) (input, output int) {
 		return 0, 0
 	}
 	return detail.Usage.InputTokens, detail.Usage.OutputTokens
+}
+
+// flushPending renders what the deltas had buffered when the session
+// ends, so a run cut off mid-message still leaves its reply: the loop's
+// ways out — a quit, a lost server, a failed read — all pass here.
+func (m *machine) flushPending() {
+	if m.state != nil {
+		m.state.flush(m.r)
+	}
 }
 
 // handleEvent renders one event of the session's run, and reports when

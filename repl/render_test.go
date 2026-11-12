@@ -165,3 +165,59 @@ func TestAStreamedSequenceNeverReachesTheTerminal(t *testing.T) {
 		t.Errorf("the data did not print around the split:\n%q", out.String())
 	}
 }
+
+// TestASplitOSCStaysData covers the OSC branch of the sequence check: a
+// sequence cut before its terminator is held, and the delta that
+// completes it strips the whole sequence whether it ends with BEL or ST.
+func TestASplitOSCStaysData(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	r.userPrompt("say hi")
+
+	// Cut before the BEL: the head is held, not printed.
+	r.streamText("keep \x1b]0;window title")
+	if strings.Contains(out.String(), "window title") {
+		t.Errorf("the unfinished sequence printed:\n%q", out.String())
+	}
+	r.streamText("\x07tail")
+	if strings.Contains(out.String(), "window title") {
+		t.Errorf("the completed sequence reached the terminal:\n%q", out.String())
+	}
+	if !strings.Contains(out.String(), "keep tail") {
+		t.Errorf("the data around the sequence did not print:\n%q", out.String())
+	}
+
+	// The same with the ST terminator, cut between the ESC and the
+	// backslash.
+	out.Reset()
+	r.replace("")
+	r.streamText("keep \x1b]0;title\x1b")
+	if strings.Contains(out.String(), "title") {
+		t.Errorf("the unfinished ST sequence printed:\n%q", out.String())
+	}
+	r.streamText("\\tail")
+	if strings.Contains(out.String(), "title") {
+		t.Errorf("the ST sequence reached the terminal:\n%q", out.String())
+	}
+	if !strings.Contains(out.String(), "keep tail") {
+		t.Errorf("the data around the ST sequence did not print:\n%q", out.String())
+	}
+}
+
+// TestAnEndlessEscapeIsDropped covers the bound on the held tail: a
+// delta stream is under the server's control, so an escape that never
+// terminates must not grow the buffer for the life of the run.
+func TestAnEndlessEscapeIsDropped(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	r.userPrompt("say hi")
+
+	r.streamText("before \x1b]" + strings.Repeat("x", maxPending*4))
+	if n := len(r.pending); n > maxPending {
+		t.Fatalf("the held tail is %d bytes, want at most %d", n, maxPending)
+	}
+	r.streamText("after")
+	if !strings.Contains(out.String(), "after") {
+		t.Errorf("the stream stopped after the endless escape:\n%q", out.String())
+	}
+}

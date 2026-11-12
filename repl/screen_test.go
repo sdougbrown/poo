@@ -365,3 +365,19 @@ func TestAResizeMidBlockStopsThePainting(t *testing.T) {
 		t.Errorf("the prompt was lost after the resize:\n%s", drawn)
 	}
 }
+
+// TestAWidthThatCannotBeReadKeepsStreaming covers the size query that
+// fails: the terminal still streams, at the width the markdown wraps
+// at, instead of the stream quietly turning itself off.
+func TestAWidthThatCannotBeReadKeepsStreaming(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.liveWidth = func() int { return -1 }
+	r.userPrompt("go")
+	r.streamText("still streaming")
+	if rowOf(t, scr, "still streaming") < 0 {
+		t.Fatalf("the stream stopped when the width could not be read:\n%s", scr.text())
+	}
+	if r.width != 40 {
+		t.Errorf("the width became %d, want it left at 40", r.width)
+	}
+}
