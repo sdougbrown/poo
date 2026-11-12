@@ -220,6 +220,8 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 // the client answers it on the wire, and the answer is what the person
 // typed.
 func TestAnAskWaitsForTheDecisionItWasGiven(t *testing.T) {
+	// The server answers the switch with a name its catalog does not
+	// carry, the way a normalising server would.
 	out, typeLine, code := startTypedRepl(t, &fakeServer{t: t})
 	typeLine("rm the lot\n")
 	waitFor(t, out, "allow bash?")
@@ -266,6 +268,8 @@ func TestAnEmptyAnswerDeniesTheAsk(t *testing.T) {
 // TestAnUnknownAnswerDeniesTheAsk covers the safe side of the ask:
 // anything that is not a yes refuses the call.
 func TestAnUnknownAnswerDeniesTheAsk(t *testing.T) {
+	// The server answers the switch with a name its catalog does not
+	// carry, the way a normalising server would.
 	out, typeLine, code := startTypedRepl(t, &fakeServer{t: t})
 	typeLine("rm the lot\n")
 	waitFor(t, out, "allow bash?")
@@ -457,12 +461,14 @@ func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
 // moves, and the statusline keeps the window it had rather than
 // inventing one.
 func TestAModelSwitchTheCatalogCannotDescribe(t *testing.T) {
-	out, typeLine, code := startTypedRepl(t, &fakeServer{t: t})
+	// The server answers the switch with a name its catalog does not
+	// carry, the way a normalising server would.
+	out, typeLine, code := startTypedRepl(t, &fakeServer{t: t, replyAs: "hidden"})
 	typeLine("say hi\n")
 	waitFor(t, out, "allow bash?")
 	typeLine("y\n")
 	waitFor(t, out, "end_turn")
-	typeLine("/model hidden\n")
+	typeLine("/model qwen\n")
 	waitFor(t, out, "model → hidden")
 	typeLine("/quit\n")
 	<-code
@@ -501,16 +507,204 @@ func TestAModelSwitchToAnUnknownNameIsRefused(t *testing.T) {
 	if !strings.Contains(plain, "│ gemma4") {
 		t.Errorf("the statusline lost the model the session kept:\n%s", plain)
 	}
-	// The refusal is the server's to word: the session's model is
-	// unknown. A failure line that renders anything else — or nothing
-	// — is the failure this test watches for.
-	if !strings.Contains(out, "the session's model is unknown") {
+	// The refusal is the matcher's to word: no catalog entry matches
+	// the fragment. A failure line that renders anything else — or
+	// nothing — is the failure this test watches for.
+	if !strings.Contains(out, "no model matches \"nope\"") {
 		t.Errorf("the refusal does not name the catalog miss:\n%s", out)
 	}
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	if len(server.switches) != 0 {
 		t.Errorf("the server took the switch %v", server.switches)
+	}
+}
+
+// TestAFragmentThatMatchesOneModelSwitchesToIt covers the short form:
+// a name nobody types in full is a fragment, and the one model it matches
+// is the switch.
+func TestAFragmentThatMatchesOneModelSwitchesToIt(t *testing.T) {
+	// The run after the switch gives the statusline a token count to
+	// fill the new model's window against.
+	out, server := startRepl(t, "/model qwe\nsay hi\n/quit\n")
+
+	if !strings.Contains(out, "model → qwen") {
+		t.Errorf("the fragment did not switch:\n%s", out)
+	}
+	if !strings.Contains(out, "ctx 12.3k/131.1k") {
+		t.Errorf("the statusline does not fill the new model's window:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 1 || server.switches[0] != "qwen" {
+		t.Errorf("the server got the switches %v, want one to qwen", server.switches)
+	}
+}
+
+// gemmaFleet is a catalog whose names share the fragment "gemma": the
+// session's own model and one it does not run.
+func gemmaFleet(t *testing.T) *fakeServer {
+	return &fakeServer{
+		t: t,
+		models: []fakeModel{
+			{name: "gemma4", modelID: "gemma4", window: 262144, levels: []string{"off", "low", "high"}},
+			{name: "gemma-3-27b", modelID: "google/gemma-3-27b", window: 131072, levels: []string{"off"}},
+		},
+	}
+}
+
+// TestAFragmentThatMatchesSeveralListsThemRanked covers the other side:
+// the matches read as a numbered list, best first, the session's own model
+// marked, and the session does not switch until a number picks one.
+func TestAFragmentThatMatchesSeveralListsThemRanked(t *testing.T) {
+	out, server := startReplServer(t, "/model gemma\n/quit\n", gemmaFleet(t))
+
+	for _, want := range []string{
+		"1. gemma-3-27b · google/gemma-3-27b",
+		"2. gemma4 ← · gemma4",
+		"/model <number> picks one of these",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the transcript lacks %q:\n%s", want, out)
+		}
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 0 {
+		t.Errorf("a listing switched the model: %v", server.switches)
+	}
+}
+
+// TestANumberPicksFromTheRankedList covers the pick: the number names a
+// model off the list, and the session takes that model and its window.
+func TestANumberPicksFromTheRankedList(t *testing.T) {
+	out, server := startReplServer(t, "/model gemma\n/model 1\nsay hi\n/quit\n", gemmaFleet(t))
+
+	if !strings.Contains(out, "model → gemma-3-27b") {
+		t.Errorf("the numbered pick switched nothing:\n%s", out)
+	}
+	if !strings.Contains(out, "ctx 12.3k/131.1k") {
+		t.Errorf("the statusline does not fill the picked model's window:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 1 || server.switches[0] != "gemma-3-27b" {
+		t.Errorf("the server got the switches %v, want one to gemma-3-27b", server.switches)
+	}
+}
+
+// TestTheCatalogListIsNumberedAndPickable covers `/model` bare: the
+// catalog reads numbered in name order, and a number takes the model off
+// that list.
+func TestTheCatalogListIsNumberedAndPickable(t *testing.T) {
+	out, server := startRepl(t, "/model\n/model 3\n/quit\n")
+
+	for _, want := range []string{
+		"1. gemma4 ← · gemma4",
+		"2. mystery · mystery",
+		"3. qwen · qwen",
+		"model → qwen",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the transcript lacks %q:\n%s", want, out)
+		}
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 1 || server.switches[0] != "qwen" {
+		t.Errorf("the server got the switches %v, want one to qwen", server.switches)
+	}
+}
+
+// TestANumberWithNoListSaysWhereTheListIs covers a pick before anything
+// was listed: the repl says so and switches nothing.
+func TestANumberWithNoListSaysWhereTheListIs(t *testing.T) {
+	out, server := startRepl(t, "/model 2\n/quit\n")
+
+	if !strings.Contains(out, "✗") || !strings.Contains(out, "there is no /model list to pick 2 from") {
+		t.Errorf("the transcript does not say there is no list:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 0 {
+		t.Errorf("the server took the switch %v", server.switches)
+	}
+}
+
+// TestANumberTheListCannotHoldSaysSo covers the marks that name no
+// model: a number past the end of the list, and the digit that no list
+// numbers from.
+func TestANumberTheListCannotHoldSaysSo(t *testing.T) {
+	out, server := startRepl(t, "/model\n/model 9\n/model 0\n/quit\n")
+
+	// Both marks name no model of the three the list holds: 9 is past
+	// its end, and 0 is no mark at all.
+	const refusal = "✗ the last /model list has 3 model(s) — /model <number> takes 1-3"
+	if n := strings.Count(out, refusal); n != 2 {
+		t.Errorf("the transcript says %q %d time(s), want 2:\n%s", refusal, n, out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 0 {
+		t.Errorf("the server took the switch %v", server.switches)
+	}
+}
+
+// TestAFailedSearchDropsTheListItReplaced covers the stale list: a
+// search that matches nothing clears the listing it was going to
+// replace, so a number after it has nothing to pick from.
+func TestAFailedSearchDropsTheListItReplaced(t *testing.T) {
+	out, server := startRepl(t, "/model\n/model zzzz\n/model 1\n/quit\n")
+
+	if !strings.Contains(out, "no model matches") {
+		t.Fatalf("the search did not fail:\n%s", out)
+	}
+	if !strings.Contains(out, "there is no /model list to pick 1 from") {
+		t.Errorf("the stale list still answered the pick:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 0 {
+		t.Errorf("the server took the switch %v", server.switches)
+	}
+}
+
+// TestAFragmentNoNameHoldsListsNothing covers the empty answer: the repl
+// says nothing matches rather than offering the whole catalog.
+func TestAFragmentNoNameHoldsListsNothing(t *testing.T) {
+	out, _ := startRepl(t, "/model zzz\n/quit\n")
+
+	if !strings.Contains(out, "✗") || !strings.Contains(out, "no model matches") {
+		t.Errorf("the transcript does not say nothing matched:\n%s", out)
+	}
+	if strings.Contains(out, "qwen") {
+		t.Errorf("a fragment that matched nothing listed the catalog:\n%s", out)
+	}
+}
+
+// TestAnExactNameSwitchesWithoutAList covers the names scripts and muscle
+// memory use: a fragment that names a catalog entry is the switch, even
+// when other entries hold it as a fragment too.
+func TestAnExactNameSwitchesWithoutAList(t *testing.T) {
+	out, server := startReplServer(t, "/model qwen\n/quit\n", &fakeServer{
+		t: t,
+		models: []fakeModel{
+			{name: "gemma4", modelID: "gemma4", window: 262144, levels: []string{"off", "low", "high"}},
+			{name: "qwen", modelID: "qwen", window: 131072, levels: []string{"off", "medium"}},
+			{name: "qwen-coder", modelID: "qwen-coder", window: 131072, levels: []string{"off"}},
+		},
+	})
+
+	if !strings.Contains(out, "model → qwen") {
+		t.Errorf("the exact name did not switch:\n%s", out)
+	}
+	if strings.Contains(out, "picks one of these") {
+		t.Errorf("the exact name listed candidates instead of switching:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 1 || server.switches[0] != "qwen" {
+		t.Errorf("the server got the switches %v, want one to qwen", server.switches)
 	}
 }
 
@@ -805,8 +999,8 @@ func TestAModelWithoutALevelCycleSaysWhatToType(t *testing.T) {
 		{"nothing", "none", "does not control its reasoning"},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
-			server := &fakeServer{t: t, extraModels: []map[string]any{{
-				"name": tc.model, "model_id": tc.model, "context_limit": 8192, "reasoning_mode": tc.mode,
+			server := &fakeServer{t: t, models: []fakeModel{{
+				name: tc.model, modelID: tc.model, window: 8192, mode: tc.mode,
 			}}}
 			out, server := startReplServer(t, "/model "+tc.model+"\n/thinking\n/quit\n", server)
 			if !strings.Contains(out, tc.want) {
@@ -818,5 +1012,48 @@ func TestAModelWithoutALevelCycleSaysWhatToType(t *testing.T) {
 				t.Errorf("the repl sent the levels %v, want none", server.levels)
 			}
 		})
+	}
+}
+
+// TestANumberThatNamesAModelSwitchesToIt covers the fallthrough: a bare
+// number with no list to read is still a catalog name when the catalog
+// holds one by that name, so a model called "2" stays reachable.
+func TestANumberThatNamesAModelSwitchesToIt(t *testing.T) {
+	server := &fakeServer{t: t, chat: "gemma4", models: []fakeModel{
+		{name: "gemma4", modelID: "gemma4", window: 262144, levels: []string{"off"}},
+		{name: "2", modelID: "2", window: 8192, levels: []string{"off"}},
+	}}
+	out, server := startReplServer(t, "/model 2\n/quit\n", server)
+	if !strings.Contains(out, "model → 2") {
+		t.Errorf("the numeric name did not switch:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 1 || server.switches[0] != "2" {
+		t.Errorf("the server got the switches %v, want one to \"2\"", server.switches)
+	}
+}
+
+// TestAnOutOfRangeNumberThatNamesAModelSwitches covers the number that
+// is past a listing the session is holding and is also a catalog name:
+// the list cannot hold it, so the name wins and the switch happens.
+func TestAnOutOfRangeNumberThatNamesAModelSwitches(t *testing.T) {
+	server := &fakeServer{t: t, chat: "gemma4", models: []fakeModel{
+		{name: "gemma4", modelID: "gemma4", window: 262144, levels: []string{"off"}},
+		{name: "gemma-mini", modelID: "gemma-mini", window: 131072, levels: []string{"off"}},
+		{name: "3", modelID: "3", window: 8192, levels: []string{"off"}},
+	}}
+	// "gemma" matches two models, so it lists them; the number 3 is past
+	// that two-model list and is read as the catalog name it is.
+	out, server := startReplServer(t, "/model gemma\n/model 3\n/quit\n", server)
+	for _, want := range []string{". gemma-mini", ". gemma4", "picks one of these", "model → 3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the transcript lacks %q:\n%s", want, out)
+		}
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if got := server.switches; len(got) == 0 || got[len(got)-1] != "3" {
+		t.Errorf("the server got the switches %v, want the last to be \"3\"", got)
 	}
 }

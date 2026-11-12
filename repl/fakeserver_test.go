@@ -34,9 +34,6 @@ type fakeServer struct {
 	closed bool
 	// cancels are the run ids the client's cancels named, in order.
 	cancels []string
-	// extraModels are catalog entries the shared three do not carry, for
-	// a test about a model whose reasoning control differs.
-	extraModels []map[string]any
 	// refusePrompt makes run/prompt refuse, for the refusal tests.
 	refusePrompt bool
 	askSummary   string
@@ -57,6 +54,14 @@ type fakeServer struct {
 	chat string
 	// level is the reasoning level the session runs at.
 	level string
+	// models is the catalog the server lists. A test sets it before
+	// pipeUp to put more names in front of the client; a nil catalog is
+	// the shared one, fakeModels.
+	models []fakeModel
+	// replyAs answers a switch with this model name instead of the one
+	// asked for, the way a server that normalises or aliases a name
+	// would: the client's catalog may hold no entry for the answer.
+	replyAs string
 	// script is the run the server plays for a prompt. A test sets it
 	// before pipeUp; a nil script plays run, the script the shared
 	// cases read.
@@ -127,12 +132,13 @@ func (s *fakeServer) line(line []byte) {
 	case protocol.MethodSessionCreate:
 		s.mu.Lock()
 		s.closed = false
+		chat := s.chat
 		s.mu.Unlock()
 		response := map[string]any{
 			"session_id": "s1",
 			"mode":       "logged",
 			"tools":      []any{},
-			"models":     map[string]any{"chat": "gemma4"},
+			"models":     map[string]any{"chat": chat},
 		}
 		if len(s.warnings) > 0 {
 			response["warnings"] = s.warnings
@@ -149,16 +155,16 @@ func (s *fakeServer) line(line []byte) {
 			"broken":    false,
 		})
 	case protocol.MethodModelsList:
-		models := []map[string]any{
-			// gemma4 takes three levels, and qwen takes two it does
-			// not share: a switch is where the two disagree. mystery
-			// cannot be told off: a switch to it is where the level's
-			// fallback shows.
-			{"name": "gemma4", "model_id": "gemma4", "context_limit": 262144, "reasoning_levels": []string{"off", "low", "high"}},
-			{"name": "qwen", "model_id": "qwen", "context_limit": 131072, "reasoning_levels": []string{"off", "medium"}},
-			{"name": "mystery", "model_id": "mystery", "context_limit": 8192, "reasoning_levels": []string{"low", "high"}},
+		models := make([]map[string]any, 0, len(s.catalog()))
+		for _, model := range s.catalog() {
+			models = append(models, map[string]any{
+				"name":             model.name,
+				"model_id":         model.modelID,
+				"context_limit":    model.window,
+				"reasoning_levels": model.levels,
+				"reasoning_mode":   model.mode,
+			})
 		}
-		models = append(models, s.extraModels...)
 		s.reply(req.ID, map[string]any{"models": models})
 	case protocol.MethodSessionConfigure:
 		var params protocol.ConfigureParams
@@ -166,8 +172,7 @@ func (s *fakeServer) line(line []byte) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if params.Models != nil && params.Models.Chat != "" {
-			levels, ok := s.catalogLevels(params.Models.Chat)
-			if !ok {
+			if _, ok := s.modelLevels(params.Models.Chat); !ok {
 				s.fail(req.ID, "unknown_model", "poo: the session's model is unknown")
 				return
 			}
@@ -176,6 +181,7 @@ func (s *fakeServer) line(line []byte) {
 			// The server the repl talks to takes the level back to one the
 			// new model can run: off when the model declares it, its lowest
 			// declared level when it cannot be told off.
+			levels, _ := s.modelLevels(s.chat)
 			if !s.acceptsLocked(s.level) {
 				s.level = "off"
 				if len(levels) > 0 && !slices.Contains(levels, "off") {
@@ -188,15 +194,19 @@ func (s *fakeServer) line(line []byte) {
 			// runs at, so a client that typed High reads high back.
 			level := strings.ToLower(strings.TrimSpace(params.Reasoning))
 			if !s.acceptsLocked(level) {
-				accepted, _ := s.catalogLevels(s.chat)
-				s.fail(req.ID, "invalid_params", "the model \""+s.chat+"\" takes the levels "+strings.Join(accepted, ", "))
+				levels, _ := s.modelLevels(s.chat)
+				s.fail(req.ID, "invalid_params", "the model \""+s.chat+"\" takes the levels "+strings.Join(levels, ", "))
 				return
 			}
 			s.level = level
 			s.levels = append(s.levels, level)
 		}
+		chat := s.chat
+		if s.replyAs != "" {
+			chat = s.replyAs
+		}
 		s.reply(req.ID, map[string]any{
-			"models":    map[string]any{"chat": s.chat},
+			"models":    map[string]any{"chat": chat},
 			"reasoning": s.level,
 		})
 	case protocol.MethodRunPrompt:
@@ -235,28 +245,47 @@ func (s *fakeServer) line(line []byte) {
 	}
 }
 
-// fakeLevels are the reasoning levels the fake's models take, by name.
-var fakeLevels = map[string][]string{
-	"gemma4":  {"off", "low", "high"},
-	"qwen":    {"off", "medium"},
-	"mystery": {"low", "high"},
-	// hidden is a model the server accepts but the catalog it lists
-	// does not carry: a switch to it has no entry to read.
-	"hidden": {},
+// fakeModel is one entry of the catalog the fake server lists.
+type fakeModel struct {
+	// name is the name the client switches by.
+	name string
+	// modelID is the name the provider answers to.
+	modelID string
+	// window is the model's context limit in tokens.
+	window int
+	// levels are the reasoning levels the model takes, lowest first.
+	levels []string
+	// mode is how the model's reasoning is controlled, empty when the
+	// model takes named levels.
+	mode string
 }
 
-// catalogLevels returns the levels the named model takes, and whether
-// the catalog holds it: the shared three, plus any entry a test added.
-func (s *fakeServer) catalogLevels(name string) ([]string, bool) {
-	if levels, ok := fakeLevels[name]; ok {
-		return levels, true
+// fakeModels is the catalog the shared cases read: gemma4 takes three
+// levels, and qwen takes two it does not share, so a switch is where the
+// two disagree.
+var fakeModels = []fakeModel{
+	{name: "gemma4", modelID: "gemma4", window: 262144, levels: []string{"off", "low", "high"}},
+	{name: "qwen", modelID: "qwen", window: 131072, levels: []string{"off", "medium"}},
+	{name: "mystery", modelID: "mystery", window: 8192, levels: []string{"low", "high"}},
+}
+
+// catalog returns the models the server lists.
+func (s *fakeServer) catalog() []fakeModel {
+	if s.models != nil {
+		return s.models
 	}
-	for _, model := range s.extraModels {
-		if model["name"] != name {
-			continue
+	return fakeModels
+}
+
+// modelLevels returns the levels the named model takes.
+//
+// The caller holds the server's lock, or is the only goroutine reading the
+// catalog, which a test is before pipeUp.
+func (s *fakeServer) modelLevels(name string) ([]string, bool) {
+	for _, model := range s.catalog() {
+		if model.name == name {
+			return model.levels, true
 		}
-		levels, _ := model["reasoning_levels"].([]string)
-		return levels, true
 	}
 	return nil, false
 }
@@ -268,9 +297,9 @@ func (s *fakeServer) acceptsLocked(level string) bool {
 	if level == "" {
 		return true
 	}
-	accepted, _ := s.catalogLevels(s.chat)
-	for _, candidate := range accepted {
-		if candidate == level {
+	levels, _ := s.modelLevels(s.chat)
+	for _, accepted := range levels {
+		if accepted == level {
 			return true
 		}
 	}
