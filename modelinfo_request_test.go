@@ -269,14 +269,19 @@ func TestCheckReasoningRefusesWhatTheModelCannotTake(t *testing.T) {
 		t.Errorf("a budget model refused its own budget: %v", err)
 	}
 
-	// A budget model that declares levels takes one of them, and still
-	// refuses a raw budget: the declared list is the whole answer.
+	// A budget model that declares a named level is contradictory: the
+	// name is in its list, but its control can only send a budget. The
+	// check has to refuse it here, or the run refuses it later.
 	declaredBudget := poo.ModelInfo{Name: "declared-budget", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningBudget}, ReasoningLevels: []string{"off", "high"}}
-	if err := declaredBudget.CheckReasoning("high"); err != nil {
-		t.Errorf("a budget model refused a level it declares: %v", err)
+	if err := declaredBudget.CheckReasoning("high"); err == nil {
+		t.Error("a budget model took a declared effort name")
 	}
 	if err := declaredBudget.CheckReasoning("2048"); err == nil {
 		t.Error("a budget model that declares levels took a raw budget")
+	}
+	// off is the one level every control can send.
+	if err := declaredBudget.CheckReasoning("off"); err != nil {
+		t.Errorf("a budget model refused off: %v", err)
 	}
 
 	levels := poo.ModelInfo{Name: "gemma4", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}, ReasoningLevels: []string{"off", "low"}}

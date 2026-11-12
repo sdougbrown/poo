@@ -528,12 +528,6 @@ func (m *machine) newInput() input {
 		editor := &readlineInput{}
 		tab := &backtab{m: m}
 		cfg := m.lineConfig(tab)
-		cfg.FuncFilterInputRune = func(r rune) (rune, bool) {
-			if m.activeRun() != "" {
-				return m.filterRune(r)
-			}
-			return tab.filter(r)
-		}
 		if rc, ok := m.in.(io.ReadCloser); ok {
 			cfg.Stdin = rc
 		}
@@ -578,17 +572,23 @@ func rawMode(fd int) (enter, exit func() error) {
 	return enter, exit
 }
 
-// lineConfig is the editor's configuration: a readline in vi mode, with
-// Shift+Tab bound to the reasoning cycle.
+// lineConfig is the editor's configuration: a readline in vi mode, whose
+// key filter dispatches between the running turn's Escape and the
+// prompt's Shift+Tab.
 func (m *machine) lineConfig(tab *backtab) *readline.Config {
 	return &readline.Config{
 		Prompt:      promptMark,
 		HistoryFile: m.opts.HistoryFile,
 		VimMode:     true,
 		Stdout:      m.out,
-		// The Shift+Tab sequence reaches the filter one rune at a time;
-		// see backtab.
-		FuncFilterInputRune: tab.filter,
+		// A run in flight reads Escape as "stop the turn"; the prompt
+		// reads the Shift+Tab sequence, one rune at a time; see backtab.
+		FuncFilterInputRune: func(r rune) (rune, bool) {
+			if m.activeRun() != "" {
+				return m.filterRune(r)
+			}
+			return tab.filter(r)
+		},
 	}
 }
 
