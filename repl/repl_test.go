@@ -650,6 +650,25 @@ func TestANumberTheListCannotHoldSaysSo(t *testing.T) {
 	}
 }
 
+// TestAFailedSearchDropsTheListItReplaced covers the stale list: a
+// search that matches nothing clears the listing it was going to
+// replace, so a number after it has nothing to pick from.
+func TestAFailedSearchDropsTheListItReplaced(t *testing.T) {
+	out, server := startRepl(t, "/model\n/model zzzz\n/model 1\n/quit\n")
+
+	if !strings.Contains(out, "no model matches") {
+		t.Fatalf("the search did not fail:\n%s", out)
+	}
+	if !strings.Contains(out, "there is no /model list to pick 1 from") {
+		t.Errorf("the stale list still answered the pick:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 0 {
+		t.Errorf("the server took the switch %v", server.switches)
+	}
+}
+
 // TestAFragmentNoNameHoldsListsNothing covers the empty answer: the repl
 // says nothing matches rather than offering the whole catalog.
 func TestAFragmentNoNameHoldsListsNothing(t *testing.T) {
