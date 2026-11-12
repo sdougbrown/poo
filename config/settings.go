@@ -60,6 +60,10 @@ type Settings struct {
 	Feeds Feeds `json:"feeds,omitempty"`
 	// Session are the session's settings.
 	Session Session `json:"session,omitempty"`
+	// UI is the name of the interface a bare invocation of the
+	// binary launches. The name is one the binary links; a binary
+	// without the named door shows its usage.
+	UI string `json:"ui,omitempty"`
 }
 
 // Endpoint is one endpoint in the settings.

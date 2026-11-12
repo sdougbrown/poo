@@ -26,6 +26,38 @@ poo run --endpoint http://localhost:4000/v1 --model-id gemma4 \
   "List the Go packages in this repository."
 ```
 
+**The front door.** A bare `poo` launches the interface the binary
+links as its front door — the repl. The settings pick another one:
+set `ui` in the settings file the command resolves — the `--settings`
+file, the `POO_SETTINGS` environment variable's, the project's
+`.poo/settings.json` (found by walking up), or the user's
+`~/.config/poo/settings.json`. A binary with none linked, or a name
+it does not offer, shows the usage instead.
+
+**Settings discovery.** Every command resolves its settings file the
+same way: the explicit `--settings` file, then the file the
+`POO_SETTINGS` environment variable names, then the project's
+`.poo/settings.json` walking up from the current directory, then the
+user's `~/.config/poo/settings.json`. A command that finds none runs
+on the defaults, and the flags change them.
+
+**The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
+serve` with them, and renders the session in the terminal: replies as
+markdown with highlighted code blocks, tool calls and results as
+decorated blocks, and a statusline with the folder, git branch, model,
+and context fill. Input reads with vi keys at a terminal. Press Esc to
+stop a turn; Ctrl-C clears typed input or exits when the prompt is empty.
+`/less` shows the transcript through `less -R`, and permission asks use
+`y/n`. The
+repl holds no run loop of its own: it is a wire client, and the
+server runs the session.
+
+The repl is a package of the root module, and `go test ./...` at the
+root covers it with the rest of the tree. Its dependencies — markdown
+rendering and terminal input — are imported only by the repl package,
+so a binary that links the poo core without the repl carries none of
+them: Go links only the packages a binary imports.
+
 **Profiles.** The profile decides which tools a session offers. Pick one
 with `--profile`; the default is `code`.
 

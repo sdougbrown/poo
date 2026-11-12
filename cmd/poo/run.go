@@ -82,17 +82,20 @@ func runRun(args []string) int {
 		return 2
 	}
 
-	settings, err := o.settings()
+	// The working directory comes first: the settings are discovered
+	// from it, so a run pointed at a project reads that project's
+	// settings.
+	workDir, err := o.workingDirectory()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
+		return 2
+	}
+	settings, err := o.settings(workDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 2
 	}
 	if err := o.apply(settings); err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 2
-	}
-	workDir, err := o.workingDirectory()
-	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 2
 	}
