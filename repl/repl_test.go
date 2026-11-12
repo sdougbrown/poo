@@ -1035,24 +1035,24 @@ func TestANumberThatNamesAModelSwitchesToIt(t *testing.T) {
 }
 
 // TestAnOutOfRangeNumberThatNamesAModelSwitches covers the number that
-// is both past the last listing and a catalog name: the listing cannot
-// hold it, so the name wins and the switch happens.
+// is past a listing the session is holding and is also a catalog name:
+// the list cannot hold it, so the name wins and the switch happens.
 func TestAnOutOfRangeNumberThatNamesAModelSwitches(t *testing.T) {
 	server := &fakeServer{t: t, chat: "gemma4", models: []fakeModel{
 		{name: "gemma4", modelID: "gemma4", window: 262144, levels: []string{"off"}},
-		{name: "qwen", modelID: "qwen", window: 131072, levels: []string{"off"}},
+		{name: "gemma-mini", modelID: "gemma-mini", window: 131072, levels: []string{"off"}},
 		{name: "3", modelID: "3", window: 8192, levels: []string{"off"}},
 	}}
-	// "gemma" lists one model, so the number 3 is past that list's end
-	// and is read as the catalog name it is.
+	// "gemma" matches two models, so it lists them; the number 3 is past
+	// that two-model list and is read as the catalog name it is.
 	out, server := startReplServer(t, "/model gemma\n/model 3\n/quit\n", server)
-	if !strings.Contains(out, "model → 3") {
-		t.Errorf("the out-of-range number did not switch by name:\n%s", out)
+	for _, want := range []string{". gemma-mini", ". gemma4", "picks one of these", "model → 3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the transcript lacks %q:\n%s", want, out)
+		}
 	}
 	server.mu.Lock()
 	defer server.mu.Unlock()
-	// The session's own model is configured at start; the switch to the
-	// numeric name is the last one.
 	if got := server.switches; len(got) == 0 || got[len(got)-1] != "3" {
 		t.Errorf("the server got the switches %v, want the last to be \"3\"", got)
 	}
