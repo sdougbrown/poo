@@ -14,13 +14,14 @@ func TestAFragmentRankstheNamesItHolds(t *testing.T) {
 	}
 }
 
-// TestARunOfCharactersRanksAboveAScatter covers the run: a name whose
-// matched characters sit next to each other beats one that only has them
-// in order.
-func TestARunOfCharactersRanksAboveAScatter(t *testing.T) {
-	// "gma" opens gmax's run and scatters across gemma4's.
-	got := rankModels([]string{"gemma4", "gmax"}, "gma", "")
-	if want := []string{"gmax", "gemma4"}; !sameNames(got, want) {
+// TestARunDecidesBetweenTwoSubstringMatches covers the run as the
+// deciding points: both names hold the fragment whole and both open it
+// at the same boundary, so only the adjacency of the matched characters
+// separates them. Without the run's points the two would tie and the
+// name order would put "aab" first.
+func TestARunDecidesBetweenTwoSubstringMatches(t *testing.T) {
+	got := rankModels([]string{"aab", "abx"}, "ab", "")
+	if want := []string{"abx", "aab"}; !sameNames(got, want) {
 		t.Errorf("the fragment ranked %v, want %v", got, want)
 	}
 }
