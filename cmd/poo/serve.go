@@ -54,33 +54,45 @@ func (o *serveOptions) register(fs *flag.FlagSet) {
 	fs.StringVar(&o.executor, "executor", "", "The executor the bash tool runs commands through")
 }
 
+// parseServeFlags parses the serve flag set for the named command,
+// which is the flag set's name and the prefix of its errors. The bool
+// says the flags parsed and passed the checks the server's two front
+// doors share.
+func parseServeFlags(name, usage string, args []string) (serveOptions, bool) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+
+	var o serveOptions
+	o.register(fs)
+	if err := fs.Parse(args); err != nil {
+		return o, false
+	}
+	// A positional argument is a mistyped invocation: the flags say
+	// what the session runs, and nothing else does.
+	if len(fs.Args()) != 0 {
+		fmt.Fprintf(os.Stderr, "%s: unexpected argument %q\n", name, fs.Args()[0])
+		return o, false
+	}
+	if err := o.checkUnmatched(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		return o, false
+	}
+	if err := o.endpointFlags.validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		return o, false
+	}
+	return o, true
+}
+
 // runServe executes `poo serve`.
 //
 // The server reads the client's requests from stdin and writes its
 // answers to stdout. It returns the process exit code: zero after a
 // clean teardown, and one after a transport failure.
 func runServe(args []string) int {
-	fs := flag.NewFlagSet("poo serve", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, serveUsage) }
-
-	var o serveOptions
-	o.register(fs)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	// A positional argument is a mistyped invocation: the flags say
-	// what the session runs, and nothing else does.
-	if len(fs.Args()) != 0 {
-		fmt.Fprintf(os.Stderr, "poo serve: unexpected argument %q\n", fs.Args()[0])
-		return 2
-	}
-	if err := o.checkUnmatched(); err != nil {
-		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-		return 2
-	}
-	if err := o.endpointFlags.validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
+	o, ok := parseServeFlags("poo serve", serveUsage, args)
+	if !ok {
 		return 2
 	}
 
