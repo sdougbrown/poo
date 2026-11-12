@@ -408,12 +408,30 @@ func TestATerminalWithoutEditorRendersOnce(t *testing.T) {
 	}
 }
 
-// TestAServerThatDiesMidMessageStillRendersTheReply covers the defer
-// around the session's loop: the message the deltas had buffered is
-// rendered on the way out, even when the server is the reason the
-// session ends. The writer is a pipe, so the flush is the only thing
-// that can put the reply there.
-func TestAServerThatDiesMidMessageStillRendersTheReply(t *testing.T) {
+// TestASessionThatEndsMidMessageRendersTheReply covers the flush on the
+// way out: a reply the deltas had buffered is rendered when the session
+// ends, so a run cut off mid-message leaves its words on the terminal.
+func TestASessionThatEndsMidMessageRendersTheReply(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	m := &machine{r: r, status: newStatus("")}
+	m.state = &runState{}
+	m.state.delta("m1", "text", "Half a sentence")
+
+	m.flushPending()
+
+	if n := strings.Count(r.transcriptText(), "Half a sentence"); n != 1 {
+		t.Fatalf("the buffered reply reads %d time(s) in the transcript, want 1:\n%s", n, r.transcriptText())
+	}
+	if row := out.String(); !strings.Contains(row, "Half a sentence") {
+		t.Errorf("the flush drew nothing:\n%q", row)
+	}
+}
+
+// TestAServerThatDiesMidMessageEndsTheSession covers the loop's exit on
+// a lost server: the session ends with the failure code rather than
+// waiting on a wire nothing will answer.
+func TestAServerThatDiesMidMessageEndsTheSession(t *testing.T) {
 	server := &fakeServer{t: t}
 	server.script = func(s *fakeServer) {
 		s.event("message.delta", map[string]any{
@@ -422,19 +440,15 @@ func TestAServerThatDiesMidMessageStillRendersTheReply(t *testing.T) {
 		s.hangUp()
 	}
 	stdin, stdout := pipeUp(t, server)
-	var out bytes.Buffer
 	code := Run(Options{
 		WorkingDir: t.TempDir(),
 		In:         strings.NewReader("go on\n"),
-		Out:        &out,
+		Out:        &bytes.Buffer{},
 		StartServer: func(args []string) (io.WriteCloser, io.ReadCloser, func() error, error) {
 			return stdin, stdout, func() error { return nil }, nil
 		},
 	})
 	if code != 1 {
 		t.Fatalf("the repl exited %d, want 1 after the server went away", code)
-	}
-	if n := strings.Count(out.String(), "Half a sentence"); n != 1 {
-		t.Fatalf("the buffered reply reads %d time(s) in the output, want 1:\n%q", n, out.String())
 	}
 }
