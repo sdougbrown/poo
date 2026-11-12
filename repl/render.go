@@ -265,38 +265,37 @@ func (r *renderer) stalledNow() bool {
 // hardRows splits a text the way the block paints it: rows of at most
 // width columns, each newline ending a row, the last row left open.
 func hardRows(text string, width int) []string {
-	var rows []string
-	var cur strings.Builder
-	curW := 0
-	for _, ln := range strings.Split(text, "\n") {
-		for _, r := range ln {
-			if r == '\t' {
-				spaces := 8 - curW%8
-				for range spaces {
-					if curW == width {
-						rows = append(rows, cur.String())
-						cur.Reset()
-						curW = 0
-					}
-					cur.WriteByte(' ')
-					curW++
-				}
-				continue
-			}
-			w := ansi.StringWidth(string(r))
-			if curW > 0 && curW+w > width {
-				rows = append(rows, cur.String())
-				cur.Reset()
-				curW = 0
-			}
-			cur.WriteRune(r)
-			curW += w
-		}
-		rows = append(rows, cur.String())
-		cur.Reset()
-		curW = 0
+	if width <= 0 {
+		return []string{text}
 	}
-	return rows
+	// Hardwrap measures grapheme clusters, which is what the terminal
+	// lays out; counting runes would wrap a family emoji early.
+	return strings.Split(ansi.Hardwrap(expandTabs(text), width, true), "\n")
+}
+
+// expandTabs puts the spaces a terminal's tab stops would, counting from
+// the start of the tab's own line.
+func expandTabs(text string) string {
+	if !strings.ContainsRune(text, '\t') {
+		return text
+	}
+	var b strings.Builder
+	col := 0
+	for _, r := range text {
+		switch r {
+		case '\n':
+			b.WriteRune(r)
+			col = 0
+		case '\t':
+			n := 8 - col%8
+			b.WriteString(strings.Repeat(" ", n))
+			col += n
+		default:
+			b.WriteRune(r)
+			col += ansi.StringWidth(string(r))
+		}
+	}
+	return b.String()
 }
 
 // stripStream removes the escape sequences a delta carries and holds

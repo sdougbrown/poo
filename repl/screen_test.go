@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -13,6 +14,22 @@ import (
 // went past. The emulator stands in for the terminal; a thin writer
 // stands in for the line editor, redrawing the prompt and the draft the
 // way readline's Refresh does around every write.
+
+// aStreamingRenderer builds the renderer a terminal session gets: the
+// markdown a test reads plain, the width the stream lays out at, and the
+// editor's writer as the sink. The three test harnesses share it so a
+// field added to the streaming shape is set in one place.
+func aStreamingRenderer(t *testing.T, out, sink io.Writer, width int) *renderer {
+	t.Helper()
+	tr, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("notty"),
+		glamour.WithWordWrap(width-2),
+	)
+	if err != nil {
+		t.Fatalf("building the markdown renderer: %v", err)
+	}
+	return &renderer{out: out, sink: sink, tr: tr, wrap: width - 2, width: width, editor: true}
+}
 
 // screenHarness is the editor around an emulator: every write the
 // renderer sends is wrapped in the erase of the prompt's own row and
@@ -59,15 +76,7 @@ func aScreen(t *testing.T, width int) (*screenHarness, *renderer) {
 	t.Helper()
 	vt := vt10x.New(vt10x.WithSize(width, 24))
 	scr := &screenHarness{vt: vt}
-	tr, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("notty"),
-		glamour.WithWordWrap(width-2),
-	)
-	if err != nil {
-		t.Fatalf("building the markdown renderer: %v", err)
-	}
-	r := &renderer{out: vt, sink: scr, tr: tr, wrap: width - 2, width: width, editor: true}
-	return scr, r
+	return scr, aStreamingRenderer(t, vt, scr, width)
 }
 
 // screen is what the row helpers read: either harness's view of the
@@ -251,15 +260,7 @@ func aQuietScreen(t *testing.T, width int) (*quietHarness, *renderer) {
 	t.Helper()
 	vt := vt10x.New(vt10x.WithSize(width, 24))
 	scr := &quietHarness{vt: vt}
-	tr, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("notty"),
-		glamour.WithWordWrap(width-2),
-	)
-	if err != nil {
-		t.Fatalf("building the markdown renderer: %v", err)
-	}
-	r := &renderer{out: vt, sink: scr, tr: tr, wrap: width - 2, width: width, editor: true}
-	return scr, r
+	return scr, aStreamingRenderer(t, vt, scr, width)
 }
 
 // TestTheStreamStartsAtColumnZero covers the start of the block: the

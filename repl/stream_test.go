@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -21,14 +20,7 @@ import (
 // render without the palette the auto style picks.
 func aTerminal(t *testing.T, out io.Writer, width int) *renderer {
 	t.Helper()
-	tr, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("notty"),
-		glamour.WithWordWrap(width-2),
-	)
-	if err != nil {
-		t.Fatalf("building the markdown renderer: %v", err)
-	}
-	return &renderer{out: out, sink: out, tr: tr, wrap: width - 2, width: width, editor: true}
+	return aStreamingRenderer(t, out, out, width)
 }
 
 // deltaEvent is one message delta, the way the server sends it.
@@ -104,6 +96,9 @@ func TestTheStreamHardWrapsAtTheWidth(t *testing.T) {
 		{"nothing at all", "", 10, []string{""}},
 		{"wide runes that fill the width", "日本語", 6, []string{"日本語"}},
 		{"wide runes that wrap", "日本語", 5, []string{"日本", "語"}},
+		// A family emoji is one grapheme cluster two cells wide; counting
+		// its runes would wrap it early.
+		{"a family emoji", "👨‍👩", 4, []string{"👨‍👩"}},
 	} {
 		if got := hardRows(tc.text, tc.width); strings.Join(got, "|") != strings.Join(tc.rows, "|") {
 			t.Errorf("%s: hardRows(%q, %d) = %q, want %q", tc.name, tc.text, tc.width, got, tc.rows)
@@ -382,14 +377,10 @@ func TestAnAskAfterTheSettleEndsTheRunAndStillOpens(t *testing.T) {
 // once at the flush — the raw text is never on the terminal to erase.
 func TestATerminalWithoutEditorRendersOnce(t *testing.T) {
 	var out bytes.Buffer
-	tr, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("notty"),
-		glamour.WithWordWrap(38),
-	)
-	if err != nil {
-		t.Fatalf("building the markdown renderer: %v", err)
-	}
-	r := &renderer{out: &out, sink: &out, tr: tr, wrap: 38, width: 40}
+	// The editor is what a terminal session has; this renderer is built
+	// without one, so it renders at the flush like a pipe.
+	r := aTerminal(t, &out, 40)
+	r.editor = false
 
 	r.userPrompt("say hello")
 	r.streamText("Hello, ")
@@ -450,5 +441,21 @@ func TestAServerThatDiesMidMessageEndsTheSession(t *testing.T) {
 	})
 	if code != 1 {
 		t.Fatalf("the repl exited %d, want 1 after the server went away", code)
+	}
+}
+
+// TestAnAskWhoseWireDiesEndsTheSession covers the drain loop's closed
+// channel: a server that goes away while a permission ask is open ends
+// the session with the failure code instead of blocking on a channel
+// nothing will write again.
+func TestAnAskWhoseWireDiesEndsTheSession(t *testing.T) {
+	m := &machine{r: newRenderer(&bytes.Buffer{}), status: newStatus("")}
+	m.conn = &conn{events: make(chan protocol.Event), asks: make(chan askRequest)}
+	close(m.conn.events)
+	in := &plainInput{write: func(string) {}}
+
+	code, done := m.handleAsk(askRequest{ask: protocol.AskParams{Tool: "bash"}}, in)
+	if !done || code != 1 {
+		t.Fatalf("the closed wire gave (%d, %v), want (1, true)", code, done)
 	}
 }
