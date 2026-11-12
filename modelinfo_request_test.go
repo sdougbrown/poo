@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -99,6 +100,18 @@ func TestReasoningFieldsMapTheSettingOntoTheRequest(t *testing.T) {
 			want:    []poo.ReasoningField{{Path: poo.ReasoningPathToggle, Value: false}},
 		},
 		{
+			name:    "a toggle model that declares levels takes them",
+			model:   poo.ModelInfo{Name: "gemma4", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningToggle}, ReasoningLevels: []string{"off", "on"}},
+			setting: "on",
+			want:    []poo.ReasoningField{{Path: poo.ReasoningPathToggle, Value: true}},
+		},
+		{
+			name:    "a declared off on a toggle model asks for the explicit off",
+			model:   poo.ModelInfo{Name: "gemma4", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningToggle}, ReasoningLevels: []string{"off", "on"}},
+			setting: "off",
+			want:    []poo.ReasoningField{{Path: poo.ReasoningPathToggle, Value: false}},
+		},
+		{
 			name:    "an effort model takes the level",
 			model:   poo.ModelInfo{Name: "gpt-5", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}},
 			setting: "high",
@@ -192,6 +205,18 @@ func TestReasoningFieldsRejectAnImpossibleSetting(t *testing.T) {
 }
 
 func TestParseReasoning(t *testing.T) {
+	for _, name := range poo.ReasoningLevelNames {
+		if name == "off" {
+			continue
+		}
+		setting, err := poo.ParseReasoning(strings.ToUpper(name))
+		if err != nil {
+			t.Fatalf("the setting %q: %v", name, err)
+		}
+		if setting.Effort != name || setting.Off {
+			t.Errorf("the setting is %+v, want the %q effort", setting, name)
+		}
+	}
 	setting, err := poo.ParseReasoning("Medium")
 	if err != nil {
 		t.Fatalf("the setting: %v", err)
@@ -213,3 +238,68 @@ func TestParseReasoning(t *testing.T) {
 
 // ptr returns a pointer to a float64.
 func ptr(f float64) *float64 { return &f }
+
+// TestCheckReasoningRefusesWhatTheModelCannotTake covers the check a
+// client runs before it commits a level: an effort model refuses a
+// token budget, a budget model refuses an effort name, and a string
+// that is neither a level nor a budget is refused outright.
+func TestCheckReasoningRefusesWhatTheModelCannotTake(t *testing.T) {
+	effort := poo.ModelInfo{Name: "gpt-5", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}}
+	if err := effort.CheckReasoning("2048"); err == nil {
+		t.Error("an effort model took a token budget")
+	} else if !strings.Contains(err.Error(), "effort level") {
+		t.Errorf("the refusal does not name the mismatch: %v", err)
+	}
+	if err := effort.CheckReasoning("high"); err != nil {
+		t.Errorf("an effort model refused its own level: %v", err)
+	}
+	// A model with no declared levels still refuses a setting that is
+	// neither a level nor a budget: the parse comes first.
+	if err := effort.CheckReasoning("gibberish"); err == nil {
+		t.Error("an effort model took a gibberish setting")
+	}
+
+	budget := poo.ModelInfo{Name: "claude", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningBudget}}
+	if err := budget.CheckReasoning("high"); err == nil {
+		t.Error("a budget model took an effort name")
+	} else if !strings.Contains(err.Error(), "token budget") {
+		t.Errorf("the refusal does not name the mismatch: %v", err)
+	}
+	if err := budget.CheckReasoning("2048"); err != nil {
+		t.Errorf("a budget model refused its own budget: %v", err)
+	}
+
+	// A budget model that declares a named level is contradictory: the
+	// name is in its list, but its control can only send a budget. The
+	// check has to refuse it here, or the run refuses it later.
+	declaredBudget := poo.ModelInfo{Name: "declared-budget", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningBudget}, ReasoningLevels: []string{"off", "high"}}
+	if err := declaredBudget.CheckReasoning("high"); err == nil {
+		t.Error("a budget model took a declared effort name")
+	} else if !strings.Contains(err.Error(), "off, high") {
+		t.Errorf("the refusal is %q, want it to name the model's levels", err)
+	}
+	if err := declaredBudget.CheckReasoning("2048"); err == nil {
+		t.Error("a budget model that declares levels took a raw budget")
+	}
+	// off is the one level every control can send.
+	if err := declaredBudget.CheckReasoning("off"); err != nil {
+		t.Errorf("a budget model refused off: %v", err)
+	}
+
+	levels := poo.ModelInfo{Name: "gemma4", Reasoning: poo.ReasoningControl{Mode: poo.ReasoningEffort}, ReasoningLevels: []string{"off", "low"}}
+	if err := levels.CheckReasoning("2048"); err == nil {
+		t.Error("a model that declares levels took a budget")
+	}
+	// A word that is neither a level nor a budget is refused before
+	// the model's own kind is consulted.
+	if err := levels.CheckReasoning("gibberish"); err == nil {
+		t.Error("a gibberish setting was accepted")
+	}
+	plain := poo.ModelInfo{Name: "plain"}
+	if err := plain.CheckReasoning("gibberish"); err == nil {
+		t.Error("a model without reasoning took a level")
+	}
+	if err := plain.CheckReasoning("off"); err != nil {
+		t.Errorf("a model without reasoning refused off: %v", err)
+	}
+}

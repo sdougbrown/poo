@@ -114,6 +114,23 @@ func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int)
 	return term, code
 }
 
+func TestShiftTabCyclesThinkingAtThePrompt(t *testing.T) {
+	server := &fakeServer{t: t}
+	term, code := startTerminalRepl(t, server)
+	waitFor(t, term, promptMark)
+	term.press("\x1b[Z")
+	waitFor(t, term, "🧠 off")
+	term.press("\x03")
+	select {
+	case got := <-code:
+		if got != 130 {
+			t.Fatalf("the repl exited %d, want 130", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the repl did not quit")
+	}
+}
+
 // TestEscapeStopsTheRunAndTheSessionGoesOn covers Escape over a real
 // terminal: the run it stops settles cancelled, the server stays up,
 // and the next prompt runs.

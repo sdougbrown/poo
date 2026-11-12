@@ -522,53 +522,83 @@ func (f *Server) runtimeForLoad(meta session.Metadata) (*config.Runtime, error) 
 
 // Configure applies a configuration change to a session.
 //
-// The prompt overrides are the settings' own prompt changes, and the
-// models are the ones the settings offer. A model the settings do not
-// name is refused.
-func (f *Server) Configure(ctx context.Context, sess *poo.Session, params protocol.ConfigureParams) (protocol.ModelRoles, error) {
+// The prompt overrides are the settings' own prompt changes, the models
+// are the ones the settings offer, and the reasoning level is one the
+// session's chat model takes. A model the settings do not name is refused,
+// and so is a level the model does not take.
+//
+// The models come first: a switch may move the session to a model whose
+// levels differ, and the level is checked against the model the session
+// talks to once the switch is done. A level the new model does not take is
+// reset by the switch itself, so the result says what the session runs
+// at.
+func (f *Server) Configure(ctx context.Context, sess *poo.Session, params protocol.ConfigureParams) (protocol.ConfigureResult, error) {
 	runtime, err := f.runtimeFor("", "")
 	if err != nil {
-		return protocol.ModelRoles{}, err
+		return protocol.ConfigureResult{}, err
 	}
 	roles := rolesOf(sess, runtime)
 	if params.PromptOverrides != nil {
 		edits, err := runtime.ApplyPromptOverrides(promptOverrides(params.PromptOverrides))
 		if err != nil {
-			return protocol.ModelRoles{}, err
+			return protocol.ConfigureResult{}, err
 		}
 		if err := sess.SetPrompt(edits...); err != nil {
-			return protocol.ModelRoles{}, err
+			return protocol.ConfigureResult{}, err
 		}
 	}
 	if params.Models != nil && params.Models.Chat != "" {
 		model, ok := runtime.Models[params.Models.Chat]
 		if !ok {
-			return protocol.ModelRoles{}, poo.ErrUnknownModel
+			return protocol.ConfigureResult{}, poo.ErrUnknownModel
 		}
 		transport, err := runtime.Transport(model)
 		if err != nil {
-			return protocol.ModelRoles{}, err
+			return protocol.ConfigureResult{}, err
 		}
 		changed, err := sess.SetModel(model, transport)
 		if err != nil {
-			return protocol.ModelRoles{}, err
+			return protocol.ConfigureResult{}, err
 		}
 		roles.Chat = changed.To
 	}
 	if params.Models != nil && params.Models.Decider != "" {
 		if _, ok := f.settings.Models[params.Models.Decider]; !ok {
-			return protocol.ModelRoles{}, poo.ErrUnknownModel
+			return protocol.ConfigureResult{}, poo.ErrUnknownModel
 		}
 		model, decider, err := runtime.DeciderFor(params.Models.Decider)
 		if err != nil {
-			return protocol.ModelRoles{}, err
+			return protocol.ConfigureResult{}, err
 		}
 		if err := sess.SetDecider(model, decider); err != nil {
-			return protocol.ModelRoles{}, err
+			return protocol.ConfigureResult{}, err
 		}
 		roles.Decider = model.Name
 	}
-	return roles, nil
+	// An empty level is "leave it alone" on the wire, so a session that
+	// has taken a level cannot be returned to its never-set state; off
+	// is the level that behaves the same at the transport.
+	if params.Reasoning != "" {
+		if err := sess.SetReasoning(params.Reasoning); err != nil {
+			return protocol.ConfigureResult{}, err
+		}
+	}
+	return protocol.ConfigureResult{Models: roles, Reasoning: sess.ReasoningLevel()}, nil
+}
+
+// reasoningMode maps a model's reasoning control onto the wire's name
+// for it. The core's zero mode is the one that cannot be moved.
+func reasoningMode(mode poo.ReasoningMode) string {
+	switch mode {
+	case poo.ReasoningEffort:
+		return protocol.ReasoningModeEffort
+	case poo.ReasoningBudget:
+		return protocol.ReasoningModeBudget
+	case poo.ReasoningToggle:
+		return protocol.ReasoningModeToggle
+	default:
+		return protocol.ReasoningModeNone
+	}
 }
 
 // Models returns the effective model catalog.
@@ -585,15 +615,21 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 	models := runtime.Catalog.List()
 	out := make([]protocol.ModelInfo, 0, len(models))
 	for _, model := range models {
+		// A model that says nothing about its reasoning control is one
+		// that cannot move: the catalog says so rather than leaving a
+		// client to read the empty string either way.
+		mode := reasoningMode(model.Reasoning.Mode)
 		out = append(out, protocol.ModelInfo{
-			Name:         model.Name,
-			ModelID:      model.ModelID,
-			API:          string(model.API),
-			Ops:          opNames(model.Ops),
-			Inputs:       modalityNames(model.Inputs),
-			ContextLimit: model.ContextLimit,
-			MaxOutput:    model.MaxOutput,
-			ToolsMode:    string(model.Tools.Mode),
+			Name:            model.Name,
+			ModelID:         model.ModelID,
+			API:             string(model.API),
+			Ops:             opNames(model.Ops),
+			Inputs:          modalityNames(model.Inputs),
+			ContextLimit:    model.ContextLimit,
+			MaxOutput:       model.MaxOutput,
+			ToolsMode:       string(model.Tools.Mode),
+			ReasoningLevels: model.ReasoningLevels,
+			ReasoningMode:   mode,
 		})
 	}
 	return out, nil

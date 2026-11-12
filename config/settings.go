@@ -117,6 +117,10 @@ type Model struct {
 	MaxOutput int `json:"max_output,omitempty"`
 	// Reasoning is how the model's reasoning is controlled.
 	Reasoning *poo.ReasoningControl `json:"reasoning,omitempty"`
+	// ReasoningLevels are the reasoning levels the model accepts, lowest
+	// first, e.g. off, minimal, low, medium, high, xhigh. A model that
+	// names none is set by its reasoning control alone.
+	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
 }
 
 // Decider are the decider's settings.

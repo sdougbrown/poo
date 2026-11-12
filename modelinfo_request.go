@@ -76,6 +76,15 @@ func (m ModelInfo) EffectiveSampling(override Sampling) Sampling {
 	return out
 }
 
+// ReasoningLevelNames are the named reasoning levels poo understands,
+// lowest first.
+//
+// A level is one of these, or a token budget: a positive number of tokens
+// the model may think within. The order is the order a model's own levels
+// climb, so a client that cycles through them goes from the least
+// thinking to the most.
+var ReasoningLevelNames = []string{"off", "minimal", "low", "medium", "high", "xhigh"}
+
 // ReasoningSetting is the settings' reasoning value.
 //
 // The setting is off, an effort level or a token budget. The zero value
@@ -91,20 +100,28 @@ type ReasoningSetting struct {
 
 // ParseReasoning parses a reasoning setting.
 //
-// The setting is off, an effort level or a token budget. An empty value
+// The setting is one of the named levels, or a token budget. An empty value
 // is off, and a value that is none of those is a configuration error.
 func ParseReasoning(value string) (ReasoningSetting, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "off":
+	setting := strings.ToLower(strings.TrimSpace(value))
+	if setting == "" {
 		return ReasoningSetting{Off: true}, nil
-	case "low", "medium", "high":
-		return ReasoningSetting{Effort: strings.ToLower(strings.TrimSpace(value))}, nil
 	}
-	budget, err := strconv.Atoi(strings.TrimSpace(value))
+	for _, level := range ReasoningLevelNames {
+		if setting != level {
+			continue
+		}
+		if level == "off" {
+			return ReasoningSetting{Off: true}, nil
+		}
+		return ReasoningSetting{Effort: level}, nil
+	}
+	budget, err := strconv.Atoi(setting)
 	if err != nil || budget <= 0 {
 		return ReasoningSetting{}, &ConfigError{
-			Field:   "reasoning.chat",
-			Message: fmt.Sprintf("%q is not a reasoning setting: use off, low, medium, high or a token budget", value),
+			Field: "reasoning.chat",
+			Message: fmt.Sprintf("%q is not a reasoning setting: use %s or a token budget",
+				value, strings.Join(ReasoningLevelNames, ", ")),
 		}
 	}
 	return ReasoningSetting{Budget: budget}, nil
@@ -126,16 +143,41 @@ type ReasoningField struct {
 //
 // The mapping is:
 //
-//	setting       none            toggle                     effort                    budget
-//	off           no field        enable_thinking=false      no field                  no field
-//	low|med|high  config error    enable_thinking=true       reasoning_effort=<level>  config error
-//	<budget>      config error    enable_thinking=true       config error              budget=<n>
+//	setting        none            toggle                     effort                    budget
+//	off            no field        enable_thinking=false      no field                  no field
+//	named level    config error    enable_thinking=true       reasoning_effort=<level>  config error
+//	<budget>       config error    enable_thinking=true       config error              budget=<n>
 //
-// A model whose reasoning cannot be controlled rejects every setting but
-// off: the setting asks for something the model cannot do. An effort
-// model and a budget model each take their own kind of setting, and a
-// setting of the other kind is a configuration error as well.
+// The named levels are ReasoningLevelNames, and a level the model declares
+// is one the model takes: a model whose endpoint knows a level poo does not
+// name, such as pi's max, is sent that level by name. A model whose reasoning
+// cannot be controlled rejects every setting but off: the setting asks for
+// something the model cannot do. An effort model and a budget model each take
+// their own kind of setting, and a setting of the other kind is a
+// configuration error as well.
 func (m ModelInfo) ReasoningFields(setting string) ([]ReasoningField, error) {
+	if level, ok := m.declaredLevel(setting); ok {
+		switch m.Reasoning.Mode {
+		case ReasoningEffort:
+			if level == "off" {
+				return nil, nil
+			}
+			return []ReasoningField{{
+				Path:  m.reasoningPath(ReasoningPathEffort),
+				Value: level,
+			}}, nil
+		case ReasoningToggle:
+			return []ReasoningField{{
+				Path:  m.reasoningPath(ReasoningPathToggle),
+				Value: level != "off",
+			}}, nil
+		}
+		// A model that controls no reasoning sends nothing, and a budget
+		// model takes no level by name.
+		if m.Reasoning.Mode == "" || m.Reasoning.Mode == ReasoningNone {
+			return nil, nil
+		}
+	}
 	parsed, err := ParseReasoning(setting)
 	if err != nil {
 		return nil, err
@@ -184,12 +226,86 @@ func (m ModelInfo) ReasoningFields(setting string) ([]ReasoningField, error) {
 	}
 }
 
+// declaredLevel returns the setting's level when it names one of the levels
+// the model declares, lowercased.
+//
+// A model that declares no levels has nothing to say here, and the setting
+// is parsed the way poo names levels.
+func (m ModelInfo) declaredLevel(setting string) (string, bool) {
+	want := strings.ToLower(strings.TrimSpace(setting))
+	for _, level := range m.ReasoningLevels {
+		if strings.ToLower(strings.TrimSpace(level)) == want {
+			return want, true
+		}
+	}
+	return "", false
+}
+
 // reasoningPath returns the path the model's reasoning control uses.
 func (m ModelInfo) reasoningPath(fallback string) string {
 	if m.Reasoning.Param != "" {
 		return m.Reasoning.Param
 	}
 	return fallback
+}
+
+// CheckReasoning reports whether the model can run at a reasoning level.
+//
+// The level is one of ReasoningLevelNames or a token budget. A model that
+// declares its own levels takes one of those and no other: a model whose
+// endpoint knows xhigh may not know minimal, and a level outside the list
+// is refused rather than sent and ignored. A model that declares none is
+// checked by its reasoning control, which says what kind of level it
+// takes, and a model that controls no reasoning takes no level but off.
+//
+// The refusal is a configuration error, and it names the levels the model
+// does take, so a client can offer them.
+func (m ModelInfo) CheckReasoning(level string) error {
+	setting := strings.ToLower(strings.TrimSpace(level))
+	// A declared level is the model's own list, and it still has to be
+	// one the model's control can send: a budget model that declares a
+	// name would pass a check that stopped here and then be refused when
+	// the run builds its fields.
+	if levels := m.ReasoningLevels; len(levels) > 0 {
+		if _, ok := m.declaredLevel(setting); !ok {
+			return &ConfigError{
+				Field: "reasoning.chat",
+				Message: fmt.Sprintf("%q is not a reasoning level for %s: it takes %s",
+					level, modelLabel(m), strings.Join(levels, ", ")),
+			}
+		}
+		if _, err := m.ReasoningFields(setting); err != nil {
+			// The control cannot carry this name. The refusal names the
+			// levels the model declares — that is the contract here — and
+			// says why the control cannot send one of them.
+			return &ConfigError{
+				Field: "reasoning.chat",
+				Message: fmt.Sprintf("%q is not a reasoning level %s can send: it takes %s, and its control sends a token budget rather than a level",
+					level, modelLabel(m), strings.Join(levels, ", ")),
+			}
+		}
+		return nil
+	}
+	parsed, err := ParseReasoning(setting)
+	if err != nil {
+		return err
+	}
+	mode := m.Reasoning.Mode
+	if mode == "" {
+		mode = ReasoningNone
+	}
+	if mode == ReasoningNone {
+		if parsed.Off {
+			return nil
+		}
+		return m.reasoningError(setting, "the model does not control its reasoning")
+	}
+	// The check is the run's own rule: the fields the run would send
+	// are built here, so a level the model cannot take — a budget for
+	// an effort model, an effort name for a budget one — is refused
+	// by the same validation that refuses it at run time.
+	_, err = m.ReasoningFields(setting)
+	return err
 }
 
 // reasoningError reports a reasoning setting the model cannot honour.

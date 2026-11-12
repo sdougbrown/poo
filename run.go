@@ -1235,6 +1235,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	// switch between runs cannot reach a request half way.
 	s.mu.Lock()
 	model := s.opts.Model
+	reasoning := s.opts.ReasoningEffort
 	messages := s.modelMessagesLocked()
 	tools := s.toolSpecs()
 	requestChars := s.historyCharsLocked()
@@ -1252,6 +1253,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 		Messages:  messages,
 		Tools:     tools,
 		MaxTokens: maxTokens,
+		Reasoning: reasoning,
 		OnAttempt: func(a Attempt) { s.reportAttempt(run, turn, a) },
 	})
 	if err != nil {
