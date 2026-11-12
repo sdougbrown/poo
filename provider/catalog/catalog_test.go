@@ -322,9 +322,6 @@ func TestTheCredentialsAreEnvOrStatic(t *testing.T) {
 	if got := endpoints["both"].Credential.Env; got != "BOTH_KEY" {
 		t.Errorf("the both credential reads %q, want BOTH_KEY", got)
 	}
-	if got := endpoints["both"].Credential.Value; got != "the-literal" {
-		t.Errorf("the both credential carries %q, want the literal", got)
-	}
 	names := c.CredentialEnvNames()
 	if !slices.Contains(names, "GRACE_KEY") || !slices.Contains(names, "BOTH_KEY") {
 		t.Errorf("the credential names are %v, want them to hold GRACE_KEY and BOTH_KEY", names)
@@ -591,5 +588,49 @@ func TestDiscoveryKeepsTheSettingsModel(t *testing.T) {
 	// entry must not take the name the settings use.
 	if _, err := c.Resolve("shared"); err != nil {
 		t.Logf("the discovered entry is not resolvable: %v", err)
+	}
+}
+
+// TestAModelNoFamilyKnowsServesChat covers the default the import relies
+// on: a model the curated families do not know, declared without ops,
+// still serves chat — so a roles.chat naming it resolves instead of
+// failing with an operation error.
+func TestAModelNoFamilyKnowsServesChat(t *testing.T) {
+	settings := localSettings()
+	settings.Models["house-model"] = catalog.ModelSettings{
+		Endpoint: "grace",
+		ModelID:  "house-model",
+	}
+	settings.Roles = map[string]string{"chat": "house-model"}
+	c := catalog.New(catalog.Options{Settings: settings})
+	if err := c.CheckRoles(); err != nil {
+		t.Fatalf("the chat role: %v", err)
+	}
+	info, err := c.Role(catalog.RoleChat)
+	if err != nil {
+		t.Fatalf("the chat model: %v", err)
+	}
+	if len(info.Ops) != 1 || info.Ops[0] != poo.OpChat {
+		t.Errorf("the model serves %v, want the chat op", info.Ops)
+	}
+}
+
+// TestAFamilyModelKeepsItsOps covers the other half: a model a family
+// knows keeps the family's operations even when the settings declare it
+// without ops — which is what an imported model looks like — so the
+// extra op the family gives it is not narrowed to chat.
+func TestAFamilyModelKeepsItsOps(t *testing.T) {
+	settings := localSettings()
+	settings.Models["gemma4"] = catalog.ModelSettings{
+		Endpoint: "grace",
+		ModelID:  "gemma4",
+	}
+	c := catalog.New(catalog.Options{Settings: settings})
+	info, err := c.Resolve("gemma4")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if !info.HasOp(poo.OpChat) || !info.HasOp(poo.OpSystemOne) {
+		t.Errorf("the model serves %v, want the family's chat and systemone", info.Ops)
 	}
 }

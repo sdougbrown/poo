@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/chzyer/readline"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -446,6 +447,16 @@ func TestAModelSwitchToAnUnknownNameIsRefused(t *testing.T) {
 
 	if !strings.Contains(out, "✗") {
 		t.Errorf("the transcript shows no refusal:\n%s", out)
+	}
+	// The statusline still names the model the wire session kept: a
+	// refusal that clobbered the client's copy would print the name it
+	// never switched to.
+	plain := ansi.Strip(out)
+	if strings.Contains(plain, "│ nope") {
+		t.Errorf("the refused switch took the statusline's model:\n%s", plain)
+	}
+	if !strings.Contains(plain, "│ gemma4") {
+		t.Errorf("the statusline lost the model the session kept:\n%s", plain)
 	}
 	// The refusal is the server's to word: the session's model is
 	// unknown. A failure line that renders anything else — or nothing

@@ -92,9 +92,9 @@ func Parse(data []byte, format Format) (*Settings, error) {
 		}
 		file, err := piimport.Read(path)
 		if err != nil {
-			// The reader names the file it read; Load adds the settings
-			// file that pointed at it, and a prefix here would double it.
-			return nil, err
+			// The reader names the file it read; the settings field that
+			// named it is what a caller branches on.
+			return nil, &Error{Code: CodeInvalid, Field: "pi_models_file", Err: err}
 		}
 		settings.applyModelsFile(file)
 	}

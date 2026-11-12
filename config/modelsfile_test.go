@@ -75,11 +75,10 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 	if model.Reasoning == nil || model.Reasoning.Mode != poo.ReasoningEffort || model.Reasoning.Param != "reasoning_effort" {
 		t.Errorf("the model's reasoning imported as %+v", model.Reasoning)
 	}
-	// The endpoint a models file names speaks chat, and nothing else
-	// fills a model's ops for an id the curated families do not know:
-	// without it, a roles.chat naming this model fails at build.
-	if len(model.Ops) != 1 || model.Ops[0] != string(poo.OpChat) {
-		t.Errorf("the model's ops imported as %v, want the chat op", model.Ops)
+	// The import leaves ops unset: the catalog gives a model no family
+	// knows the chat op, so an import cannot clobber a family's ops.
+	if len(model.Ops) != 0 {
+		t.Errorf("the model's ops imported as %v, want them left to the catalog", model.Ops)
 	}
 	if model.API != "" {
 		t.Errorf("the default wire API imported as %q, want the empty default", model.API)
