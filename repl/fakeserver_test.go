@@ -25,6 +25,8 @@ type fakeServer struct {
 	decisions []string
 	// prompts are the prompts the client sent.
 	prompts []string
+	// switches are the model names the client configured, in order.
+	switches []string
 	// closed says the client closed the session.
 	closed bool
 	// cancels are the run ids the client's cancels named, in order.
@@ -123,7 +125,23 @@ func (s *fakeServer) line(line []byte) {
 		s.reply(req.ID, map[string]any{
 			"models": []map[string]any{
 				{"name": "gemma4", "model_id": "gemma4", "context_limit": 262144},
+				{"name": "qwen", "model_id": "qwen", "context_limit": 131072},
 			},
+		})
+	case protocol.MethodSessionConfigure:
+		var params protocol.ConfigureParams
+		json.Unmarshal(req.Params, &params)
+		// hidden is a model the server accepts but the catalog above does
+		// not list: a switch to it succeeds with no entry to read.
+		if params.Models == nil || (params.Models.Chat != "gemma4" && params.Models.Chat != "qwen" && params.Models.Chat != "hidden") {
+			s.fail(req.ID, "unknown_model", "poo: the session's model is unknown")
+			return
+		}
+		s.mu.Lock()
+		s.switches = append(s.switches, params.Models.Chat)
+		s.mu.Unlock()
+		s.reply(req.ID, map[string]any{
+			"models": map[string]any{"chat": params.Models.Chat},
 		})
 	case protocol.MethodRunPrompt:
 		var params protocol.PromptParams

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1172,5 +1173,100 @@ func TestThePolicyGetsTheResolvedWorkingDirectory(t *testing.T) {
 	}
 	if client.asks[0].WorkingDir != want {
 		t.Errorf("the ask's working directory is %q, want the resolved %q", client.asks[0].WorkingDir, want)
+	}
+}
+
+// theCredentialSettings is a settings document with one model in it,
+// and the endpoint's credential lines left to the test.
+const theCredentialSettings = `
+version: 1
+endpoints:
+  test:
+    endpoint: http://localhost:4000/v1
+%smodels:
+  test-model:
+    endpoint: test
+    model_id: test-model
+    api: chat_completions
+    tools_mode: native
+    ops: [chat]
+    context_limit: 32768
+roles:
+  chat: test-model
+`
+
+// TestACredentialIsTheEnvironmentThenTheKey covers where a model's key
+// comes from: the environment variable the endpoint names, the key the
+// endpoint carries when that variable holds none, and no key when the
+// endpoint names neither.
+func TestACredentialIsTheEnvironmentThenTheKey(t *testing.T) {
+	const both = "    api_key_env: POO_TEST_KEY\n    api_key: literal-key-123\n"
+	cases := map[string]struct {
+		credential string
+		env        string
+		want       string
+	}{
+		"the environment": {both, "env-key-456", "env-key-456"},
+		"the key":         {both, "", "literal-key-123"},
+		"neither":         {"", "env-key-456", ""},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("POO_TEST_KEY", test.env)
+			settings, err := config.Parse([]byte(fmt.Sprintf(theCredentialSettings, test.credential)), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			runtime := build(t, settings, config.Overrides{})
+			if key := runtime.ModelAPIKey("test-model"); key != test.want {
+				t.Errorf("the model resolved to the key %q", key)
+			}
+		})
+	}
+}
+
+// TestTheCatalogSettingsCarryTheModelFields covers the translation the
+// catalog builds from: a settings model's endpoint, id, api, window,
+// output limit and reasoning control arrive in the catalog's settings
+// whole, because an import that parses cleanly and a catalog that drops
+// the fields would meet in the middle and lose them.
+func TestTheCatalogSettingsCarryTheModelFields(t *testing.T) {
+	settings := &config.Settings{
+		Version: 1,
+		Endpoints: map[string]config.Endpoint{
+			"test": {Endpoint: "http://localhost:4000/v1", APIKey: "literal-key-123"},
+			"env":  {Endpoint: "http://localhost:4000/v1", APIKeyEnv: "SOME_VAR"},
+		},
+		Models: map[string]config.Model{
+			"test-model": {
+				Endpoint:     "test",
+				ModelID:      "test-model",
+				API:          "chat_completions",
+				Inputs:       []string{"text"},
+				ContextLimit: 32768,
+				MaxOutput:    8192,
+				Reasoning:    &poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort},
+			},
+		},
+	}
+	catalog := settings.CatalogSettings()
+	endpoint := catalog.Endpoints["test"]
+	if endpoint.APIKey != "literal-key-123" || endpoint.APIKeyEnv != "" {
+		t.Errorf("the endpoint imported as %+v", endpoint)
+	}
+	// The variable a key is read from is carried too: the transport reads
+	// it by name.
+	if got := catalog.Endpoints["env"].APIKeyEnv; got != "SOME_VAR" {
+		t.Errorf("the endpoint's variable imported as %q, want SOME_VAR", got)
+	}
+	model := catalog.Models["test-model"]
+	if model.ModelID != "test-model" || model.ContextLimit != 32768 || model.MaxOutput != 8192 {
+		t.Errorf("the model's fields imported as %+v", model)
+	}
+	if len(model.Inputs) != 1 || model.Inputs[0] != poo.ModalityText {
+		t.Errorf("the model's inputs imported as %v", model.Inputs)
+	}
+	if model.Reasoning == nil || model.Reasoning.Mode != poo.ReasoningEffort || model.Reasoning.Param != poo.ReasoningPathEffort {
+		t.Errorf("the model's reasoning imported as %+v", model.Reasoning)
 	}
 }

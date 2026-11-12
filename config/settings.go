@@ -62,20 +62,30 @@ type Settings struct {
 	Session Session `json:"session,omitempty"`
 	// UI is the name of the interface a bare invocation of the
 	// binary launches. The name is one the binary links; a binary
-	// without the named door shows its usage.
+	// without the named interface shows its usage.
 	UI string `json:"ui,omitempty"`
+	// PIModelsFile is a models file in pi's format: providers with
+	// their models, imported under names of the form provider/id. The
+	// compatibility is the file shapes alone — the file is wherever
+	// the operator keeps it, and poo reads no pi installation. The
+	// settings' own endpoints and models win on a name collision.
+	PIModelsFile string `json:"pi_models_file,omitempty"`
 }
 
 // Endpoint is one endpoint in the settings.
 //
-// The credential is read from the environment: the settings name the
-// variable that holds it, and the variable is the only place a key
-// comes from.
+// The credential is read from the environment first: the settings name
+// the variable that holds it, and the literal the endpoint carries is
+// the fallback when that variable holds nothing.
 type Endpoint struct {
 	// Endpoint is the model's endpoint.
 	Endpoint string `json:"endpoint"`
 	// APIKeyEnv names the environment variable holding the key.
 	APIKeyEnv string `json:"api_key_env,omitempty"`
+	// APIKey is a key written in the settings themselves. An
+	// environment variable is the better neighbor; the literal is
+	// what a models file written for another tool imports as.
+	APIKey string `json:"api_key,omitempty"`
 }
 
 // Model is one model in the settings.
@@ -99,6 +109,10 @@ type Model struct {
 	Inputs []string `json:"inputs,omitempty"`
 	// ContextLimit is the model's context window.
 	ContextLimit int `json:"context_limit,omitempty"`
+	// MaxOutput is the most tokens the model writes in one response.
+	MaxOutput int `json:"max_output,omitempty"`
+	// Reasoning is how the model's reasoning is controlled.
+	Reasoning *poo.ReasoningControl `json:"reasoning,omitempty"`
 }
 
 // Decider are the decider's settings.

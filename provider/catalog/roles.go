@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/sdougbrown/poo"
 )
@@ -39,8 +38,6 @@ type Credential struct {
 	// Env names the environment variable that holds the key, for an env
 	// source.
 	Env string
-	// Value is the key itself, for a static source.
-	Value string
 }
 
 // EnvNames returns the names of the environment variables the credential
@@ -54,20 +51,6 @@ func (c Credential) EnvNames() []string {
 		return nil
 	}
 	return []string{c.Env}
-}
-
-// Key returns the endpoint's key.
-//
-// An env source reads the variable, and a static source returns the
-// value the settings carry. The value is never logged.
-func (c Credential) Key() string {
-	switch c.Source {
-	case CredentialEnv:
-		return os.Getenv(c.Env)
-	case CredentialStatic:
-		return c.Value
-	}
-	return ""
 }
 
 // Endpoint is a service that serves models.

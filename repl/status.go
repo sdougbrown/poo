@@ -110,8 +110,9 @@ func (s *status) setTokens(inputTokens int) {
 	}
 }
 
-// setContextLimit records the window the model fills. A model whose
-// window the catalog does not know keeps the line without one.
+// setContextLimit records the window the model the session runs fills.
+// A limit of zero says the catalog does not know the window, and the
+// line drops it rather than keeping the last model's.
 func (s *status) setContextLimit(contextLimit int) {
 	s.contextLimit = contextLimit
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/chzyer/readline"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -401,5 +402,101 @@ func TestALineTypedDuringARunIsNotLostSilently(t *testing.T) {
 	}
 	if !strings.Contains(drawn, "Esc stops it") {
 		t.Errorf("nothing says which key stops the turn:\n%s", drawn)
+	}
+}
+
+// TestAModelSwitchTakesTheNewModelAndItsWindow covers `/model <name>`:
+// the session's chat role moves on the wire, and the statusline names
+// the new model and its window.
+func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
+	// The run after the switch gives the statusline a token count to
+	// fill the new window against.
+	out, server := startRepl(t, "/model qwen\nsay hi\n/quit\n")
+
+	if !strings.Contains(out, "model → qwen") {
+		t.Errorf("the transcript shows no switch:\n%s", out)
+	}
+	if !strings.Contains(out, "ctx 12.3k/131.1k") {
+		t.Errorf("the statusline does not fill the new model's window:\n%s", out)
+	}
+	// The statusline is written again once the switch lands, and that
+	// write names the new model beside the new window: a switch that
+	// kept the old name would render gemma4 over qwen's window.
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "ctx 12.3k/131.1k") && strings.Contains(line, "qwen") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no statusline names qwen beside its window:\n%s", out)
+	}
+
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 1 || server.switches[0] != "qwen" {
+		t.Errorf("the server got the switches %v, want one to qwen", server.switches)
+	}
+}
+
+// TestAModelSwitchTheCatalogCannotDescribe covers a switch the server
+// accepts for a model the client's catalog does not hold: the session
+// moves, and the statusline keeps the window it had rather than
+// inventing one.
+func TestAModelSwitchTheCatalogCannotDescribe(t *testing.T) {
+	out, typeLine, code := startTypedRepl(t, &fakeServer{t: t})
+	typeLine("say hi\n")
+	waitFor(t, out, "allow bash?")
+	typeLine("y\n")
+	waitFor(t, out, "end_turn")
+	typeLine("/model hidden\n")
+	waitFor(t, out, "model → hidden")
+	typeLine("/quit\n")
+	<-code
+
+	plain := ansi.Strip(out.String())
+	// The window the run filled stays: there is no entry to read a new
+	// one from, and the old model's must not be presented as the new
+	// model's guess.
+	found := false
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, "│ hidden") && strings.Contains(line, "262.1k") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no statusline names hidden beside the window it kept:\n%s", plain)
+	}
+}
+
+// TestAModelSwitchToAnUnknownNameIsRefused covers a switch the catalog
+// cannot resolve: the refusal reads in the transcript, and the session
+// keeps the model it had.
+func TestAModelSwitchToAnUnknownNameIsRefused(t *testing.T) {
+	out, server := startRepl(t, "/model nope\n/quit\n")
+
+	if !strings.Contains(out, "✗") {
+		t.Errorf("the transcript shows no refusal:\n%s", out)
+	}
+	// The statusline still names the model the wire session kept: a
+	// refusal that clobbered the client's copy would print the name it
+	// never switched to.
+	plain := ansi.Strip(out)
+	if strings.Contains(plain, "│ nope") {
+		t.Errorf("the refused switch took the statusline's model:\n%s", plain)
+	}
+	if !strings.Contains(plain, "│ gemma4") {
+		t.Errorf("the statusline lost the model the session kept:\n%s", plain)
+	}
+	// The refusal is the server's to word: the session's model is
+	// unknown. A failure line that renders anything else — or nothing
+	// — is the failure this test watches for.
+	if !strings.Contains(out, "the session's model is unknown") {
+		t.Errorf("the refusal does not name the catalog miss:\n%s", out)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.switches) != 0 {
+		t.Errorf("the server took the switch %v", server.switches)
 	}
 }

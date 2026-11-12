@@ -101,16 +101,17 @@ func (m ModelSettings) layer(name, endpointURL string, sampling poo.Sampling) po
 
 // endpoint turns the settings' endpoint into an endpoint.
 //
-// The credential source is the environment or a static value: the
-// settings name the variable that holds the key, or they carry the key
-// themselves. An endpoint that names neither needs no key.
+// The credential reads the variable the settings name, and falls back
+// to the key they carry when that variable holds none — the one rule
+// the transport resolves by too. An endpoint that names neither needs
+// no key.
 func (e EndpointSettings) endpoint(name string) Endpoint {
 	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint}
 	switch {
 	case e.APIKeyEnv != "":
 		endpoint.Credential = Credential{Source: CredentialEnv, Env: e.APIKeyEnv}
 	case e.APIKey != "":
-		endpoint.Credential = Credential{Source: CredentialStatic, Value: e.APIKey}
+		endpoint.Credential = Credential{Source: CredentialStatic}
 	default:
 		endpoint.Credential = Credential{Source: CredentialNone}
 	}

@@ -12,6 +12,8 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
+
+	"github.com/sdougbrown/poo/config/internal/piimport"
 )
 
 // Format is a settings file's format.
@@ -80,6 +82,22 @@ func Parse(data []byte, format Format) (*Settings, error) {
 		return nil, decodeError(err)
 	}
 	settings.Permission.askersNamed = namesAskers(normalized)
+	// A models file in pi's format fills the endpoints and models the
+	// settings do not already hold, so the catalog resolves those
+	// models the way it resolves the settings' own.
+	if settings.PIModelsFile != "" {
+		path, err := expandHome(settings.PIModelsFile)
+		if err != nil {
+			return nil, err
+		}
+		file, err := piimport.Read(path)
+		if err != nil {
+			// The reader names the file it read; the settings field that
+			// named it is what a caller branches on.
+			return nil, &Error{Code: CodeInvalid, Field: "pi_models_file", Err: err}
+		}
+		settings.applyModelsFile(file)
+	}
 	if err := settings.Check(); err != nil {
 		return nil, err
 	}

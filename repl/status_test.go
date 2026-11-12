@@ -41,6 +41,31 @@ func TestTheStatuslineLeavesOutWhatItDoesNotKnow(t *testing.T) {
 	}
 }
 
+// TestAWindowSwitchClearsTheWindowItDoesNotKnow covers a move to a
+// model whose window the catalog does not know: the line drops the
+// old window instead of keeping the last model's.
+func TestAWindowSwitchClearsTheWindowItDoesNotKnow(t *testing.T) {
+	s := &status{dir: "/tmp", model: "gemma4"}
+	s.setContextLimit(262144)
+	s.setTokens(12300)
+
+	s.model = "mystery"
+	s.setContextLimit(0)
+
+	line := s.line()
+	if strings.Contains(line, "/262.1k") {
+		t.Errorf("the statusline keeps the last model's window:\n%s", line)
+	}
+	if !strings.Contains(line, "ctx 12.3k") {
+		t.Errorf("the context fill went missing:\n%s", line)
+	}
+
+	s.setContextLimit(4096)
+	if !strings.Contains(s.line(), "ctx 12.3k/4.1k") {
+		t.Errorf("the statusline misses the new window:\n%s", s.line())
+	}
+}
+
 // TestThePromptReadsBehindTheStatusline keeps the readline prompt on one
 // line, so editing does not redraw the status on every keystroke.
 func TestThePromptReadsBehindTheStatusline(t *testing.T) {

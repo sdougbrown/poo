@@ -117,6 +117,9 @@ func (c Checker) rules() []rule {
 				m + "/cli",
 				m + "/compact/handoff",
 				m + "/config",
+				// The settings package's models-file reader: one foreign
+				// format translated into the core vocabulary.
+				m + "/config/internal/piimport",
 				m + "/decide",
 				m + "/exec",
 				m + "/feed",

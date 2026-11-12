@@ -460,6 +460,14 @@ func (c *Catalog) merge(e *entry) (poo.ModelInfo, map[string]string) {
 		out.Name = e.name
 		source[fieldName] = LayerDefault
 	}
+	if len(out.Ops) == 0 {
+		// A model no layer gives ops to is a chat model: the endpoints
+		// poo speaks are chat-completions, and a role naming it has to
+		// resolve. A model a family knows keeps the family's ops, since
+		// only a layer that set them reaches here.
+		out.Ops = []poo.Op{poo.OpChat}
+		source[fieldOps] = LayerDefault
+	}
 	out.Source = source
 	return out, source
 }

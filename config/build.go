@@ -795,8 +795,10 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 		settings.Endpoints[name] = catalog.EndpointSettings{
 			Endpoint:  endpoint.Endpoint,
 			APIKeyEnv: endpoint.APIKeyEnv,
+			APIKey:    endpoint.APIKey,
 		}
 	}
+
 	for name, model := range s.Models {
 		settings.Models[name] = catalog.ModelSettings{
 			Endpoint:     model.Endpoint,
@@ -806,6 +808,8 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			Ops:          ops(model.Ops),
 			Inputs:       modalities(model.Inputs),
 			ContextLimit: model.ContextLimit,
+			MaxOutput:    model.MaxOutput,
+			Reasoning:    model.Reasoning,
 		}
 	}
 	for role, model := range s.Roles {
@@ -1772,8 +1776,9 @@ func (r *Runtime) DeciderModel() (poo.ModelInfo, error) {
 // Transport returns the transport for a model.
 //
 // The transport talks to the endpoint the model is served by, with the
-// key the settings' endpoint names. A key is read from the
-// environment and from nowhere else.
+// key the settings' endpoint names. The key is the endpoint's
+// environment variable when the environment holds it, else the literal
+// the settings carry.
 func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	apiKey := r.apiKey(model.Name)
 	transport := openai.New(openai.Options{
@@ -1851,18 +1856,26 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 
 // apiKey returns the key the settings' endpoint for a model names.
 //
-// The key is read from the environment variable the settings name, and
-// from nowhere else: a settings file never carries a key.
+// The endpoint's credential is the environment variable the settings
+// name, when it holds a key, and the key the settings carry when it
+// does not: a variable is the better neighbor, and a literal is what a
+// models file written for another tool imports as. An endpoint that
+// names neither sends no key.
 func (r *Runtime) apiKey(model string) string {
 	settings, ok := r.Settings.Models[model]
 	if !ok {
 		return ""
 	}
 	endpoint, ok := r.Settings.Endpoints[settings.Endpoint]
-	if !ok || endpoint.APIKeyEnv == "" {
+	if !ok {
 		return ""
 	}
-	return os.Getenv(endpoint.APIKeyEnv)
+	if endpoint.APIKeyEnv != "" {
+		if key := os.Getenv(endpoint.APIKeyEnv); key != "" {
+			return key
+		}
+	}
+	return endpoint.APIKey
 }
 
 // expandHome expands the leading ~ of a path.
