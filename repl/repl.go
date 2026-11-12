@@ -581,7 +581,7 @@ Esc              stop the running turn
 anything else    a prompt for the session`)
 		return 0, false
 	case "/less":
-		if err := m.r.page(); err != nil {
+		if err := m.r.page(m.in); err != nil {
 			m.r.failure(err.Error())
 		}
 		return 0, false

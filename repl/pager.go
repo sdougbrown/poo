@@ -2,6 +2,7 @@ package repl
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 )
@@ -11,8 +12,10 @@ import (
 // does nothing: the conversation stays where it is.
 //
 // The pager takes the terminal over between prompts, the way an
-// editor would; the repl waits for it to leave.
-func (r *renderer) page() error {
+// editor would; the repl waits for it to leave. Its stdio is the
+// repl's own, so an embedded or redirected session pages where it
+// reads and writes, not at the process's terminal.
+func (r *renderer) page(in io.Reader) error {
 	text := r.transcriptText()
 	if text == "" {
 		return nil
@@ -33,8 +36,8 @@ func (r *renderer) page() error {
 	f.Close()
 
 	cmd := exec.Command(less, "-R", f.Name())
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdin = in
+	cmd.Stdout = r.out
+	cmd.Stderr = r.out
 	return cmd.Run()
 }

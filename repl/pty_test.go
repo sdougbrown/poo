@@ -233,3 +233,31 @@ func TestAPermissionAskTakesTheAnswerTypedBehindIt(t *testing.T) {
 		t.Errorf("the server got the decisions %v, want one allow", server.decisions)
 	}
 }
+
+// TestAForeignSettleDoesNotEndTheRun covers the guard on the settle:
+// a settle naming a run that is not the session's is ignored, so the
+// run stays live and Escape still has it to stop.
+func TestAForeignSettleDoesNotEndTheRun(t *testing.T) {
+	server := &fakeServer{t: t, holdRun: true, staleSettle: true, staleSettled: make(chan struct{})}
+	term, code := startTerminalRepl(t, server)
+
+	term.press("work\n")
+	server.waitPrompts(t, 1)
+	<-server.staleSettled
+	// The stale settle has gone out; the run it named is not this
+	// one, so the client still holds a run for Escape to stop.
+	term.press("\x1b")
+	if got := server.waitCancels(t, 1); got[0] != "r1" {
+		t.Fatalf("the cancel named %q, want the live run r1", got[0])
+	}
+	waitFor(t, term, "✓ cancelled")
+	term.press("/quit\n")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d, want 0", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl never left; it drew:\n%s", term.String())
+	}
+}
