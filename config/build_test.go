@@ -1260,7 +1260,7 @@ func TestTheCatalogSettingsCarryTheModelFields(t *testing.T) {
 	if len(model.Inputs) != 1 || model.Inputs[0] != poo.ModalityText {
 		t.Errorf("the model's inputs imported as %v", model.Inputs)
 	}
-	if model.Reasoning == nil || model.Reasoning.Param != poo.ReasoningPathEffort {
+	if model.Reasoning == nil || model.Reasoning.Mode != poo.ReasoningEffort || model.Reasoning.Param != poo.ReasoningPathEffort {
 		t.Errorf("the model's reasoning imported as %+v", model.Reasoning)
 	}
 }
