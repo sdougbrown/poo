@@ -48,7 +48,6 @@ func TestAWindowSwitchClearsTheWindowItDoesNotKnow(t *testing.T) {
 	s := &status{dir: "/tmp", model: "gemma4"}
 	s.setContextLimit(262144)
 	s.setTokens(12300)
-	s.setContextLimit(262144)
 
 	s.model = "mystery"
 	s.setContextLimit(0)
