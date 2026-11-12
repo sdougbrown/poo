@@ -160,7 +160,7 @@ func (s *fakeServer) waitCancels(t *testing.T, want int) []string {
 
 func TestUsageUpdatesTheStatus(t *testing.T) {
 	m := &machine{status: &status{contextLimit: 262144}}
-	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"input_tokens": 12300}}, &runState{}, &streamView{})
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"input_tokens": 12300}}, "r1", &runState{})
 	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
 		t.Fatalf("the prompt lacks the run's usage: %s", prompt)
 	}

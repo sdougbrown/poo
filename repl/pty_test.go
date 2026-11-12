@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/sdougbrown/poo/wire/protocol"
 )
 
 // The pty ioctls a terminal pair needs. Linux's syscall package names
@@ -114,6 +116,101 @@ func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int)
 	return term, code
 }
 
+func TestStreamingPreservesDraftBetweenDeltas(t *testing.T) {
+	first := make(chan struct{})
+	finish := make(chan struct{})
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.mu.Lock()
+		n := len(s.prompts)
+		s.mu.Unlock()
+		if n > 1 {
+			s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+			return
+		}
+		<-first
+		s.event("message.delta", map[string]any{"run_id": "r1", "message_id": "m1", "kind": "text", "text": "First chunk "})
+		<-finish
+		s.event("message.delta", map[string]any{"run_id": "r1", "message_id": "m1", "kind": "text", "text": "and second.\n"})
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+	}
+	term, code := startTerminalRepl(t, server)
+	term.press("work\n")
+	server.waitPrompts(t, 1)
+	term.press("draft")
+	close(first)
+	waitFor(t, term, "First chunk")
+	term.press(" more")
+	close(finish)
+	waitFor(t, term, "✓ end_turn")
+	term.press("\n")
+	if prompts := server.waitPrompts(t, 2); prompts[1] != "draft more" {
+		t.Fatalf("the next prompt was %q, want the draft intact", prompts[1])
+	}
+	term.press("\x03")
+	select {
+	case <-code:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the repl did not exit")
+	}
+}
+
+func TestStreamingBeforePermissionAsk(t *testing.T) {
+	ask := make(chan struct{})
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("message.delta", map[string]any{"run_id": "r1", "message_id": "m1", "kind": "text", "text": "Let me look. "})
+		<-ask
+		id := s.request(protocol.MethodPermissionAsk, protocol.AskParams{SessionID: "s1", RunID: "r1", AskID: "a1", Tool: "bash", Summary: "ls -la"})
+		s.waitDecision(id)
+		s.event("message.delta", map[string]any{"run_id": "r1", "message_id": "m1", "kind": "text", "text": "All done."})
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+	}
+	term, code := startTerminalRepl(t, server)
+	term.press("look\n")
+	waitFor(t, term, "Let me look.")
+	close(ask)
+	waitFor(t, term, "allow bash?")
+	term.press("y\n")
+	waitFor(t, term, "All done.")
+	waitFor(t, term, "✓ end_turn")
+	term.press("/quit\n")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the repl did not quit")
+	}
+	out := term.String()
+	if !(strings.Index(out, "Let me look.") < strings.Index(out, "permission") && strings.Index(out, "permission") < strings.Index(out, "All done.")) {
+		t.Fatalf("the reply and ask are out of order: %q", out)
+	}
+}
+
+func TestStreamingSurvivesServerDisconnect(t *testing.T) {
+	disconnect := make(chan struct{})
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("message.delta", map[string]any{"run_id": "r1", "message_id": "m1", "kind": "text", "text": "Half a sentence"})
+		<-disconnect
+		s.hangUp()
+	}
+	term, code := startTerminalRepl(t, server)
+	term.press("go on\n")
+	waitFor(t, term, "Half a sentence")
+	close(disconnect)
+	select {
+	case got := <-code:
+		if got != 1 {
+			t.Fatalf("the repl exited %d, want 1", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the repl did not exit after disconnect")
+	}
+}
+
 func TestShiftTabCyclesThinkingAtThePrompt(t *testing.T) {
 	server := &fakeServer{t: t}
 	term, code := startTerminalRepl(t, server)
@@ -139,9 +236,7 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	term, code := startTerminalRepl(t, server)
 
 	term.press("work\n")
-	// The hint is drawn by the first event, which the repl only reads
-	// once it knows the run it belongs to.
-	waitTimes(t, term, "… writing", 1)
+	waitTimes(t, term, "world.", 1)
 	term.press("\x1b")
 	server.waitCancels(t, 1)
 	waitFor(t, term, "✓ cancelled")
@@ -150,7 +245,7 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	if prompts := server.waitPrompts(t, 2); prompts[1] != "next" {
 		t.Fatalf("the session got %v, want \"next\" after the cancel", prompts)
 	}
-	waitTimes(t, term, "… writing", 2)
+	waitTimes(t, term, "world.", 3)
 	term.press("\x1b")
 	server.waitCancels(t, 2)
 	waitTimes(t, term, "✓ cancelled", 2)
@@ -174,7 +269,7 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	term, _ := startTerminalRepl(t, server)
 
 	term.press("work\n")
-	waitTimes(t, term, "… writing", 1)
+	waitTimes(t, term, "world.", 1)
 	term.press("\x1b[A")
 	time.Sleep(4 * escWindow)
 

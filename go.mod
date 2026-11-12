@@ -7,6 +7,7 @@ require gopkg.in/yaml.v3 v3.0.1
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/charmbracelet/glamour v1.0.0
+	github.com/chubin/vt10x v0.0.0-20231112153020-ef4f56837bf1
 	github.com/chzyer/readline v1.5.1
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/sdougbrown/cli-registry v0.4.0
