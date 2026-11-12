@@ -166,7 +166,7 @@
       "type": "check",
       "field": "reasoning.chat",
       "op": "matches",
-      "pattern": "^(off|minimal|low|medium|high|xhigh|[0-9]+)$",
+      "pattern": "^(off|minimal|low|medium|high|xhigh|([1-9][0-9]*))$",
       "reason": "reasoning.chat must be off, minimal, low, medium, high, xhigh or a budget in tokens"
     },
     {

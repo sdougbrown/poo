@@ -1229,6 +1229,25 @@ func TestSessionGetReportsTheState(t *testing.T) {
 	if got.Prompt.Text == "" {
 		t.Error("the prompt holds no text")
 	}
+	// The statusline reads the level off this call: a configure that the
+	// get does not reflect is a session the client cannot describe.
+	if _, rerr := h.call(protocol.MethodSessionConfigure, protocol.ConfigureParams{
+		SessionID: sessionID,
+		Reasoning: "low",
+	}); rerr != nil {
+		t.Fatalf("configuring the level: %v", rerr)
+	}
+	result, rerr = h.call(protocol.MethodSessionGet, protocol.GetParams{SessionID: sessionID})
+	if rerr != nil {
+		t.Fatalf("the second get was refused: %v", rerr)
+	}
+	got = protocol.GetResult{}
+	if err := json.Unmarshal(result, &got); err != nil {
+		t.Fatalf("decoding the second result: %v", err)
+	}
+	if got.Reasoning != "low" {
+		t.Errorf("the session reports the level %q, want low", got.Reasoning)
+	}
 }
 
 // settleOf returns the source and the reason of the run that settled

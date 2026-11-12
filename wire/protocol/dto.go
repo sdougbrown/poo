@@ -97,6 +97,18 @@ type ModelRoles struct {
 	Decider string `json:"decider,omitempty"`
 }
 
+// The reasoning modes a model's catalog entry reports.
+const (
+	// ReasoningModeNone means the model's reasoning cannot be moved.
+	ReasoningModeNone = "none"
+	// ReasoningModeToggle turns reasoning on or off.
+	ReasoningModeToggle = "toggle"
+	// ReasoningModeEffort sets a reasoning effort level.
+	ReasoningModeEffort = "effort"
+	// ReasoningModeBudget sets a reasoning token budget.
+	ReasoningModeBudget = "budget"
+)
+
 // ModelInfo describes one model in the catalog.
 type ModelInfo struct {
 	// Name is the name the settings and the wire use for the model.

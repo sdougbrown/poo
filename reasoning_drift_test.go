@@ -5,7 +5,6 @@ import (
 	"os"
 	"regexp"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -70,7 +69,13 @@ func TestTheSettingsSchemaTakesTheCoreLevels(t *testing.T) {
 			t.Errorf("the schema's pattern accepts %q, which the core does not know", name)
 		}
 	}
-	if !strings.Contains(re.String(), "[0-9]+") {
-		t.Errorf("the schema's pattern takes no token budget: %s", re.String())
+	// The budget arm takes positive numbers only: ParseReasoning refuses a
+	// zero budget, and a pattern that accepted it would load a setting the
+	// session then rejects.
+	if !re.MatchString("4096") {
+		t.Errorf("the schema's pattern refuses a token budget: %s", re.String())
+	}
+	if re.MatchString("0") {
+		t.Errorf("the schema's pattern takes a zero budget: %s", re.String())
 	}
 }
