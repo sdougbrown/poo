@@ -317,6 +317,66 @@ func TestThinkingBuffersWhileTheTextStreams(t *testing.T) {
 	}
 }
 
+// TestAnAskRendersTheDeltasThatArrivedBeforeIt covers the ask that
+// races the deltas: the reader hands events and asks to the main loop
+// in whatever order the select finds ready, so the ask's own handler
+// drains the events that reached the connection first. The reply so
+// far renders whole, above the question — never split by it.
+func TestAnAskRendersTheDeltasThatArrivedBeforeIt(t *testing.T) {
+	var out bytes.Buffer
+	m := &machine{r: newRenderer(&out), status: newStatus("")}
+	m.conn = &conn{events: make(chan protocol.Event, 8), asks: make(chan askRequest, 8)}
+	m.runIDMu.Lock()
+	m.runID = "r1"
+	m.runIDMu.Unlock()
+	m.state = &runState{}
+	m.conn.events <- deltaEvent("m1", "text", "Hello, ")
+	m.conn.events <- deltaEvent("m1", "text", "world.")
+	in := &plainInput{write: func(string) {}}
+
+	if code, done := m.handleAsk(askRequest{ask: protocol.AskParams{SessionID: "s1", RunID: "r1", AskID: "a1", Tool: "bash"}}, in); done {
+		t.Fatalf("the ask ended the session (code %d)", code)
+	}
+	tr := m.r.transcriptText()
+	whole := strings.Index(tr, "Hello, world.")
+	asked := strings.Index(tr, "permission")
+	if whole < 0 || asked < 0 || whole > asked {
+		t.Fatalf("the ask did not render the deltas before it:\n%s", tr)
+	}
+}
+
+// TestAnAskAfterTheSettleEndsTheRunAndStillOpens covers an ask that
+// follows its run's settle: the drained settle ends the run the usual
+// way, and the ask still opens behind its prompt.
+func TestAnAskAfterTheSettleEndsTheRunAndStillOpens(t *testing.T) {
+	var out bytes.Buffer
+	m := &machine{r: newRenderer(&out), status: newStatus("")}
+	m.conn = &conn{events: make(chan protocol.Event, 8), asks: make(chan askRequest, 8)}
+	m.runIDMu.Lock()
+	m.runID = "r1"
+	m.runIDMu.Unlock()
+	m.state = &runState{}
+	m.conn.events <- deltaEvent("m1", "text", "Hello, ")
+	m.conn.events <- eventOf("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+	in := &plainInput{write: func(string) {}}
+
+	if _, done := m.handleAsk(askRequest{ask: protocol.AskParams{SessionID: "s1", RunID: "r1", AskID: "a1", Tool: "bash"}}, in); done {
+		t.Fatalf("the ask ended the session")
+	}
+	if m.activeRun() != "" || m.state != nil {
+		t.Fatalf("the settled run did not end: run %q, state %v", m.activeRun(), m.state)
+	}
+	if m.ask == nil {
+		t.Fatalf("the ask did not open")
+	}
+	tr := m.r.transcriptText()
+	settled := strings.Index(tr, "end_turn")
+	asked := strings.Index(tr, "permission")
+	if settled < 0 || asked < 0 || settled > asked {
+		t.Fatalf("the ask landed over the settled run:\n%s", tr)
+	}
+}
+
 // TestATerminalWithoutEditorRendersOnce covers the fallback: a terminal
 // the editor could not take streams nothing, and the message renders
 // once at the flush — the raw text is never on the terminal to erase.
