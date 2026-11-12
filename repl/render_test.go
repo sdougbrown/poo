@@ -128,3 +128,40 @@ func TestShortTokensReadsTheStatuslineWay(t *testing.T) {
 		}
 	}
 }
+
+// TestAStreamedSequenceNeverReachesTheTerminal covers the sanitizing:
+// a delta that carries an escape sequence — an OSC that would rewrite
+// the clipboard, a cursor that draws where the repl draws — prints as
+// data, and a sequence split across deltas is stripped when its tail
+// lands.
+func TestAStreamedSequenceNeverReachesTheTerminal(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	r.userPrompt("say hi")
+
+	r.streamText("\x1b]52;c;" + "QUJD" + "\x07clipboard" + "\x1b[2Jcleared")
+	out.Reset()
+	r.streamText("safe" + "\x1b[2J" + "text")
+	if strings.Contains(out.String(), "\x1b[2J") {
+		t.Errorf("the terminal was told to erase:\n%q", out.String())
+	}
+	if !strings.Contains(out.String(), "safetext") {
+		t.Errorf("the data did not print:\n%q", out.String())
+	}
+
+	// A sequence split across deltas: the head is held pending, and
+	// the tail strips the whole sequence when it lands.
+	out.Reset()
+	r.replace("")
+	r.streamText("half \x1b[3")
+	if strings.Contains(out.String(), "\x1b[3") {
+		t.Errorf("the pending head leaked:\n%q", out.String())
+	}
+	r.streamText("1mrest")
+	if strings.Contains(out.String(), "\x1b[31m") {
+		t.Errorf("the split sequence reached the terminal:\n%q", out.String())
+	}
+	if !strings.Contains(out.String(), "half rest") {
+		t.Errorf("the data did not print around the split:\n%q", out.String())
+	}
+}
