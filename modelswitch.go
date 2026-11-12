@@ -135,6 +135,9 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 	info.API = api
 	info.ContextLimit = limit
 	s.opts.Model = info
+	// The level the session runs at is the new model's to take: a level
+	// it refuses would be a configuration error on every request.
+	s.resetReasoningLocked()
 	s.promptVariant = info.PromptVariant
 	s.promptBuilder = s.promptBuilder.WithEnv(env)
 	s.promptText = promptText

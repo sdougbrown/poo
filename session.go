@@ -541,6 +541,10 @@ type Options struct {
 	ToolsMode string
 	// ReasoningEffort is the reasoning_effort the run sends, empty when
 	// it sends none.
+	//
+	// It is the level the session starts at: SetReasoning changes it
+	// between the runs, and a model switch takes it back to a level the
+	// new model takes.
 	ReasoningEffort string
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths []string

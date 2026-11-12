@@ -208,10 +208,11 @@ func (s *server) sessionGet(raw json.RawMessage) (any, *protocol.Error) {
 		return nil, rerr
 	}
 	result := protocol.GetResult{
-		State:  string(entry.sess.State()),
-		Jobs:   jobsOf(entry.sess),
-		Prompt: promptOf(entry.sess),
-		Broken: entry.sess.Broken(),
+		State:     string(entry.sess.State()),
+		Jobs:      jobsOf(entry.sess),
+		Prompt:    promptOf(entry.sess),
+		Reasoning: entry.sess.ReasoningLevel(),
+		Broken:    entry.sess.Broken(),
 	}
 	if runID := entry.sess.ActiveRunID(); runID != "" {
 		result.RunID = runID
@@ -235,11 +236,11 @@ func (s *server) sessionConfigure(raw json.RawMessage) (any, *protocol.Error) {
 		return nil, protocol.Errorf(protocol.CodeServerError, protocol.DataBusy,
 			"the session %q is running", entry.id)
 	}
-	models, err := s.factory.Configure(context.Background(), entry.sess, params)
+	configured, err := s.factory.Configure(context.Background(), entry.sess, params)
 	if err != nil {
 		return nil, failure(err)
 	}
-	return protocol.ConfigureResult{Models: models}, nil
+	return configured, nil
 }
 
 // sessionClose closes a session.

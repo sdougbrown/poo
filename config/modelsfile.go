@@ -41,6 +41,7 @@ func (s *Settings) applyModelsFile(file piimport.File) {
 					Mode:  poo.ReasoningEffort,
 					Param: poo.ReasoningPathEffort,
 				}
+				entry.ReasoningLevels = model.Levels
 			}
 			if s.Models == nil {
 				s.Models = map[string]Model{}

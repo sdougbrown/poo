@@ -60,11 +60,13 @@ installation's own directory. A
 serve` with them, and renders the session in the terminal: replies as
 markdown with highlighted code blocks, tool calls and results as
 decorated blocks, and a statusline with the folder, git branch, model,
-and context fill. Input reads with vi keys at a terminal. Press Esc to
-stop a turn; Ctrl-C clears typed input or exits when the prompt is empty.
-`/less` shows the transcript through `less -R`, and permission asks use
-`y/n`. `/model` lists models, and `/model <name>` switches the chat model
-between runs. The repl is a wire client, and the
+reasoning level, and context fill. Input reads with vi keys at a terminal.
+Press Esc to stop a turn; Ctrl-C clears typed input or exits when the
+prompt is empty. `/less` shows the transcript through `less -R`, and
+permission asks use `y/n`. `/model` lists models, and `/model <name>`
+switches the chat model between runs. `/thinking` or Shift+Tab cycles
+reasoning levels; `/thinking <level>` selects one. The repl is a wire
+client, and the
 server runs the session.
 
 The repl is a package of the root module, and `go test ./...` at the

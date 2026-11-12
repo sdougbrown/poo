@@ -263,6 +263,62 @@ func TestAModelThatCannotThinkIsAskedNotToSendAnything(t *testing.T) {
 	}
 }
 
+// TestTheRequestSReasoningLevelWins covers the override: the level travels
+// with the request, so one transport serves a session that thinks and a
+// session that does not, and a level the model declares is sent as the
+// model spells it, max included.
+func TestTheRequestSReasoningLevelWins(t *testing.T) {
+	cases := []struct {
+		name    string
+		setting string
+		request string
+		want    any
+	}{
+		{
+			name:    "the request's level wins over the configured one",
+			setting: "low",
+			request: "high",
+			want:    "high",
+		},
+		{
+			name:    "a request without a level keeps the configured one",
+			setting: "low",
+			want:    "low",
+		},
+		{
+			name:    "a level the model declares is sent as it is",
+			setting: "low",
+			request: "max",
+			want:    "max",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
+			tr := openai.New(openai.Options{
+				Endpoint: srv.URL,
+				Model:    "m",
+				ModelInfo: poo.ModelInfo{
+					Reasoning:       poo.ReasoningControl{Mode: poo.ReasoningEffort},
+					ReasoningLevels: []string{"off", "low", "high", "max"},
+				},
+				Reasoning: c.setting,
+			})
+
+			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16, Reasoning: c.request})
+			if err != nil {
+				t.Fatalf("starting the request: %v", err)
+			}
+			defer reader.Close()
+			read(t, reader)
+
+			if got := srv.requests[0]["reasoning_effort"]; got != c.want {
+				t.Errorf("the request's reasoning_effort is %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 // TestAToggleModelIsSwitchedOff covers the rule: a toggle
 // model that is asked not to think is switched off explicitly, because
 // its template thinks by default.

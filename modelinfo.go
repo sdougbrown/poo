@@ -33,6 +33,10 @@ type ModelInfo struct {
 	Tools ToolCalling `json:"tools,omitempty"`
 	// Reasoning is how the model's reasoning is controlled.
 	Reasoning ReasoningControl `json:"reasoning,omitempty"`
+	// ReasoningLevels are the reasoning levels the model accepts, lowest
+	// first. A model that declares none is set by its reasoning control
+	// alone, and a level it takes is checked against the control.
+	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
 	// Temperature is whether the model accepts a temperature.
 	Temperature TempMode `json:"temperature,omitempty"`
 	// PromptCache is how the model's prompt cache is used.
