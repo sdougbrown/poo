@@ -176,6 +176,28 @@ func TestAMissingPIModelsFileIsARefusal(t *testing.T) {
 	}
 }
 
+// TestAModelThatDoesNotReasonTakesNoControl covers the condition's
+// false half: `compat.supportsReasoningEffort` alone does not make a
+// model reason, so a model whose `reasoning` is false imports with no
+// reasoning control at all.
+func TestAModelThatDoesNotReasonTakesNoControl(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "plain", "reasoning": false, "compat": {"supportsReasoningEffort": true}}]
+			}
+		}
+	}`)
+	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	if got := settings.Models["home/plain"].Reasoning; got != nil {
+		t.Errorf("a model that does not reason imported with the control %+v", got)
+	}
+}
+
 // TestAnImportWithoutTheEffortCompatStaysDefault covers the condition's
 // other side: a model that reasons but whose compat note does not name
 // the effort support imports with the model's own reasoning control —
