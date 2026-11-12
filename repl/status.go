@@ -103,13 +103,15 @@ func folderName(dir string) string {
 	return dir
 }
 
-// setUsage records what the last request cost, with the window the
-// model fills. A run that reports nothing changes nothing.
-func (s *status) setUsage(inputTokens, contextLimit int) {
+// setTokens records what the last request cost.
+func (s *status) setTokens(inputTokens int) {
 	if inputTokens >= 0 {
 		s.inputTokens = inputTokens
 	}
-	if contextLimit > 0 {
-		s.contextLimit = contextLimit
-	}
+}
+
+// setContextLimit records the window the model fills. A model whose
+// window the catalog does not know keeps the line without one.
+func (s *status) setContextLimit(contextLimit int) {
+	s.contextLimit = contextLimit
 }

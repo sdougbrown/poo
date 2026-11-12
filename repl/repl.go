@@ -463,7 +463,7 @@ func (m *machine) start() error {
 	for _, model := range catalog.Models {
 		m.catalog[model.Name] = model
 		if model.Name == session.Models.Chat {
-			m.status.setUsage(-1, model.ContextLimit)
+			m.status.setContextLimit(model.ContextLimit)
 		}
 	}
 	return nil
@@ -703,7 +703,7 @@ func (m *machine) event(evt protocol.Event, state *runState, streams *streamView
 		if raw, err := json.Marshal(evt.Payload); err == nil {
 			var usage protocol.UsageEvent
 			if json.Unmarshal(raw, &usage) == nil {
-				m.status.setUsage(usage.InputTokens, 0)
+				m.status.setTokens(usage.InputTokens)
 			}
 		}
 	case "turn.ended":
@@ -715,7 +715,7 @@ func (m *machine) event(evt protocol.Event, state *runState, streams *streamView
 			reason, _ := evt.Payload["reason"].(string)
 			input, output := settledUsage(evt.Payload)
 			m.r.settle(reason, state.turns, input, output)
-			m.status.setUsage(input, 0)
+			m.status.setTokens(input)
 			return true
 		}
 	}

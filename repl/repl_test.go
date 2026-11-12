@@ -176,6 +176,9 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 		"file two",
 		"end_turn",
 		"2 turn(s)",
+		// The settle's output side, from the fake's 1100 output tokens:
+		// a regression in decoding them would print "0 out".
+		"1.1k out",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the transcript lacks %q:\n%s", want, out)

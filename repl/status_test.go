@@ -11,7 +11,8 @@ import (
 // folder, the branch, the model and the context's fill.
 func TestTheStatuslineNamesWhatTheSessionKnows(t *testing.T) {
 	s := &status{dir: "/home/me/Code/poo", branch: "main", model: "gemma4"}
-	s.setUsage(12300, 262144)
+	s.setTokens(12300)
+	s.setContextLimit(262144)
 
 	line := s.line()
 	for _, want := range []string{"⌂ poo", "⎇ main", "gemma4", "ctx 12.3k/262.1k"} {
@@ -26,7 +27,7 @@ func TestTheStatuslineNamesWhatTheSessionKnows(t *testing.T) {
 // window shows the fill alone.
 func TestTheStatuslineLeavesOutWhatItDoesNotKnow(t *testing.T) {
 	s := &status{dir: "/tmp"}
-	s.setUsage(500, 0)
+	s.setTokens(500)
 
 	line := s.line()
 	if strings.Contains(line, "⎇") {
