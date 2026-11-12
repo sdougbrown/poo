@@ -676,6 +676,16 @@ func (m *machine) endRun(input input) (int, bool) {
 	return 0, false
 }
 
+// catalogNames returns the catalog's model names, in name order.
+func (m *machine) catalogNames() []string {
+	names := make([]string, 0, len(m.catalog))
+	for name := range m.catalog {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // activeRun is the run the session is on, empty when idle.
 func (m *machine) activeRun() string {
 	m.runIDMu.Lock()
