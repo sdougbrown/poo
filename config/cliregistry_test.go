@@ -663,8 +663,52 @@ func TestARegistryThatGatesNothingStaysClosedToAReadOnlyProfile(t *testing.T) {
 	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
 		t.Errorf("the read-only session offers %v", runtime.Options.ToolOrder)
 	}
+	// The build still holds the catalog the settings named, and neither the
+	// prompt nor a tool reads it: the profile earns none.
 	if runtime.Registry == nil || runtime.Registry.Len() != 1 {
-		t.Fatalf("the build loaded %v, want the one entry", runtime.Registry)
+		t.Fatalf("the read-only build holds %v, want the one entry", runtime.Registry)
+	}
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "deploy") {
+		t.Errorf("the read-only session's prompt lists the entry: %q", text)
+	}
+
+	// The same holds for a profile that names a registry tool itself: the
+	// tools are the profile's, and the catalog they read is still none. Here
+	// the rules leave nothing for a profile that can change things.
+	dir = writeRegistryDoc(t, map[string]any{
+		"version": 1,
+		"tools":   map[string]any{"deploy": registryEntry("The deploy command")},
+		"availability": map[string]any{
+			"conditions": profileCondition(),
+			"rules": []any{map[string]any{
+				"type": "enabledWhen", "field": "deploy",
+				"when": map[string]any{
+					"op": "not",
+					"expr": map[string]any{
+						"op": "cond", "condition": "profile_side_effecting",
+					},
+				},
+			}},
+		},
+	})
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: files\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	files := profile.Profile{Name: "files", Tools: []string{"read", "call_cli"}, Unmatched: "allow"}
+	runtime, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: files.Name,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile(), files},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime for a profile that names call_cli: %v", err)
+	}
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "deploy") {
+		t.Errorf("the prompt of a profile that names call_cli lists the entry: %q", text)
 	}
 }
 

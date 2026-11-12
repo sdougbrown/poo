@@ -175,15 +175,19 @@ type Runtime struct {
 	Store *session.FileStore
 	// Catalog is the model catalog the roles are resolved in.
 	Catalog *catalog.Catalog
-	// Registry is the cli registry the settings name, or nil when they name
-	// none. Availability narrows it to the entries the session's profile
-	// offers. A profile that earns no catalog leaves it as the manifests
-	// loaded it, and the session offers none of its tools.
+	// Registry is the cli registry the settings name, or nil when they name none.
+	// Availability narrows it to the entries the profile may call. A profile that
+	// earns no catalog leaves it as the manifests loaded it, and no tool or
+	// prompt section reads it.
 	Registry *cli.Catalog
 	// loaded is the registry as the manifests loaded it, before availability
 	// narrows what a profile offers. The profiles the binary lists are judged
 	// against it, each under its own profile fact.
 	loaded *cli.Catalog
+	// registryOffered reports whether the session offers tools over the
+	// catalog. A binary may link them, and a profile may name them, without the
+	// session offering any.
+	registryOffered bool
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
@@ -576,12 +580,7 @@ func (r *Runtime) findToolFor(count int) bool {
 // search what it lists: a tool left out of the build takes its guidance
 // with it.
 func (r *Runtime) offersRegistry() bool {
-	for _, name := range r.toolNames {
-		if name == cli.CallToolName || name == cli.FindToolName {
-			return true
-		}
-	}
-	return false
+	return r.registryOffered
 }
 
 // addRegistryTools offers the registry's tools to the session.
@@ -599,19 +598,10 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if r.Registry == nil {
 		return nil
 	}
-	names := registryToolNames(r.findTool())
-	for _, name := range names {
-		if !linksTool(opts, name) {
-			source := "the settings"
-			if len(opts.Overrides.CLIRegistryPaths) > 0 {
-				source = "the settings or POO_CLI_REGISTRY_PATH / --cli-registry-path"
-			}
-			return &Error{
-				Code:    CodeUnsupported,
-				Field:   "cli_registry.paths",
-				Message: fmt.Sprintf("%s name a cli registry, and this binary does not link the %q tool", source, name),
-			}
-		}
+	// The catalog cannot be called without at least this tool, so the binary
+	// must link it whatever the profile earns.
+	if err := r.requireRegistryTools(opts, registryToolNames(false)); err != nil {
+		return err
 	}
 	offered, err := r.offeredRegistry(r.Profile.Tools)
 	if err != nil {
@@ -622,9 +612,16 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	}
 	// The session's catalog is what its rules leave available, so the prompt
 	// lists, and the call tool reaches, only the entries this profile may use.
-	// A search over a narrowed catalog is decided on the narrowed count.
+	// A search over a narrowed catalog is decided on the narrowed count, so the
+	// search tool is required only once the rules have left enough to search.
 	r.Registry = offered
-	names = registryToolNames(r.findTool())
+	find := r.findTool()
+	names := registryToolNames(find)
+	if find {
+		if err := r.requireRegistryTools(opts, names); err != nil {
+			return err
+		}
+	}
 	disabled := r.Settings.Tools.Disabled
 	for _, name := range names {
 		if slices.Contains(disabled, name) {
@@ -632,6 +629,27 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 		}
 		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[name]))
 		r.toolNames = append(r.toolNames, name)
+		r.registryOffered = true
+	}
+	return nil
+}
+
+// requireRegistryTools reports a linked tool the settings' registry needs and
+// the binary does not link.
+func (r *Runtime) requireRegistryTools(opts BuildOptions, names []string) error {
+	for _, name := range names {
+		if linksTool(opts, name) {
+			continue
+		}
+		source := "the settings"
+		if len(opts.Overrides.CLIRegistryPaths) > 0 {
+			source = "the settings or POO_CLI_REGISTRY_PATH / --cli-registry-path"
+		}
+		return &Error{
+			Code:    CodeUnsupported,
+			Field:   "cli_registry.paths",
+			Message: fmt.Sprintf("%s name a cli registry, and this binary does not link the %q tool", source, name),
+		}
 	}
 	return nil
 }
@@ -1055,7 +1073,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		}
 	}
 
-	toolOptions := ToolOptions{Scrub: credentialScrub, ProtectedPaths: protected, Registry: r.Registry, Search: r.findTool()}
+	toolOptions := ToolOptions{Scrub: credentialScrub, ProtectedPaths: protected, Registry: r.offeredCatalog(), Search: r.findTool()}
 	if r.needsExecutor() {
 		executor, err := opts.Executors.New(executorName, exec.Options{
 			Masker: protected,
@@ -1611,10 +1629,14 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 	}
 	sources[prompt.ToolSection(profile.JobsToolName)] = nil
 	sources[prompt.ToolSection(profile.CancelJobToolName)] = nil
-	if r.Registry != nil {
+	_, linksCall := opts.Tools[cli.CallToolName]
+	if r.Registry != nil || linksCall {
 		sources[prompt.ToolSection(cli.CallToolName)] = nil
 		sources[prompt.ToolSection(cli.FindToolName)] = nil
-		sources[cli.SectionName] = r.Registry.Template(r.findTool()).Data()
+		// A binary that links the tools still knows the section, so a prompt
+		// directory that carries it loads. A session offering no catalog
+		// renders it empty, and it is removed once the directory has applied.
+		sources[cli.SectionName] = r.offeredCatalog().Template(r.findTool()).Data()
 	}
 	return sources
 }

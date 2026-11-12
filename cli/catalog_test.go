@@ -142,3 +142,17 @@ func TestFilterKeepsTheEntriesTheRulesLeave(t *testing.T) {
 		t.Error("filtering without the declared condition was allowed")
 	}
 }
+
+func TestANilCatalogRendersAnEmptySection(t *testing.T) {
+	// A session that offers no catalog still knows the section, so a prompt
+	// directory that carries one loads.
+	var catalog *cli.Catalog
+	if entries := catalog.Entries(); len(entries) != 0 {
+		t.Errorf("a nil catalog holds %d entries", len(entries))
+	}
+	// Rendering is the point: a nil catalog must not panic, and its section
+	// carries no entry line.
+	if text := catalog.Section(false); strings.Contains(text, "name: ") {
+		t.Errorf("a nil catalog's section lists an entry: %q", text)
+	}
+}

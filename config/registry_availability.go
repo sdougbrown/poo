@@ -18,6 +18,16 @@ import (
 // because a value poo does not have is not one poo can invent.
 const ProfileSideEffectingCondition = "profile_side_effecting"
 
+// offeredCatalog returns the catalog the session's tools read, or nil when the
+// profile earns none. The tools are built from this, never from Registry, so a
+// profile that names a registry tool itself reads no entry the rules withhold.
+func (r *Runtime) offeredCatalog() *cli.Catalog {
+	if !r.registryOffered {
+		return nil
+	}
+	return r.Registry
+}
+
 // offeredRegistry returns the registry entries a profile offering tools may
 // see, or nil when it may see none.
 //

@@ -258,7 +258,7 @@ func (c *Catalog) Template(search bool) *prompt.Template {
 			Count:   c.Len(),
 			Call:    CallToolName,
 			Find:    FindToolName,
-			Entries: c.entries,
+			Entries: c.Entries(),
 		}
 	})
 }
