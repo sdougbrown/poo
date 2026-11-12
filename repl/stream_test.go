@@ -205,7 +205,7 @@ func TestAPipeStreamsNothing(t *testing.T) {
 		t.Errorf("a pipe's transcript reads %q, want nothing", got)
 	}
 
-	r.message("Hello, world.")
+	r.write(r.markdown("Hello, world."))
 	if got := out.String(); !strings.Contains(got, "Hello, world.") {
 		t.Errorf("the message did not render at the flush: %q", got)
 	}
@@ -405,5 +405,36 @@ func TestATerminalWithoutEditorRendersOnce(t *testing.T) {
 	}
 	if got := r.transcriptText(); got != want {
 		t.Errorf("the transcript reads %q, want %q", got, want)
+	}
+}
+
+// TestAServerThatDiesMidMessageStillRendersTheReply covers the defer
+// around the session's loop: the message the deltas had buffered is
+// rendered on the way out, even when the server is the reason the
+// session ends. The writer is a pipe, so the flush is the only thing
+// that can put the reply there.
+func TestAServerThatDiesMidMessageStillRendersTheReply(t *testing.T) {
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "Half a sentence",
+		})
+		s.hangUp()
+	}
+	stdin, stdout := pipeUp(t, server)
+	var out bytes.Buffer
+	code := Run(Options{
+		WorkingDir: t.TempDir(),
+		In:         strings.NewReader("go on\n"),
+		Out:        &out,
+		StartServer: func(args []string) (io.WriteCloser, io.ReadCloser, func() error, error) {
+			return stdin, stdout, func() error { return nil }, nil
+		},
+	})
+	if code != 1 {
+		t.Fatalf("the repl exited %d, want 1 after the server went away", code)
+	}
+	if n := strings.Count(out.String(), "Half a sentence"); n != 1 {
+		t.Fatalf("the buffered reply reads %d time(s) in the output, want 1:\n%q", n, out.String())
 	}
 }

@@ -11,7 +11,7 @@ import (
 func TestAMessageRendersItsMarkdown(t *testing.T) {
 	var out bytes.Buffer
 	r := newRenderer(&out)
-	r.message("# Heading\n\nA paragraph with `code`.\n\n```go\nfunc main() {}\n```\n")
+	r.write(r.markdown("# Heading\n\nA paragraph with `code`.\n\n```go\nfunc main() {}\n```\n"))
 
 	rendered := out.String()
 	for _, want := range []string{"Heading", "paragraph", "func main()"} {
@@ -27,7 +27,7 @@ func TestAMessageRendersItsMarkdown(t *testing.T) {
 func TestAMessageRendersPlainWithoutATerminal(t *testing.T) {
 	var out bytes.Buffer
 	r := newRenderer(&out)
-	r.message("# Heading\n\nBody text.\n")
+	r.write(r.markdown("# Heading\n\nBody text.\n"))
 
 	rendered := out.String()
 	if strings.Contains(rendered, "\x1b[") {

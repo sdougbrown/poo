@@ -65,6 +65,10 @@ type renderer struct {
 	// erase their own row: streamed text shares that row, so it goes
 	// out sealed rather than plain.
 	editor bool
+	// liveWidth reads the terminal's width now, when the renderer has a
+	// reader for it: the streamed rows and the editor's prompt must
+	// wrap at the same width.
+	liveWidth func() int
 	// block is the message the deltas are streaming right now.
 	block streamBlock
 }
@@ -72,6 +76,13 @@ type renderer struct {
 // streamBlock is the raw text one message printed as it arrived, and
 // the place in the transcript where the rendered message goes.
 type streamBlock struct {
+	// started says the block has text: the transcript's mark is set
+	// and the hint, if one stood, is gone.
+	started bool
+	// stalled says the terminal changed width while the block was
+	// streaming. The rows already painted wrap at the old width, so
+	// painting stops until the render replaces them at the new one.
+	stalled bool
 	// committed is the rows the block has sealed above the prompt's
 	// row: full rows the terminal will not erase, because each ends in
 	// its own newline.
@@ -192,9 +203,13 @@ func (r *renderer) streamText(text string) {
 	if !r.streams() || text == "" {
 		return
 	}
-	if r.block.tail == "" && r.block.committed == 0 {
+	if !r.block.started {
 		r.takeHint()
+		r.block.started = true
 		r.block.mark = r.transcript.Len()
+	}
+	if r.stalledNow() {
+		r.block.stalled = true
 	}
 	clean, pending := stripStream(r.pending + text)
 	r.pending = pending
@@ -202,6 +217,11 @@ func (r *renderer) streamText(text string) {
 		return
 	}
 	r.transcript.WriteString(clean)
+	if r.block.stalled {
+		// The rows on the terminal wrap at the old width; the render
+		// at the flush clears them and lays the message out again.
+		return
+	}
 	rows := hardRows(r.block.tail+clean, r.width)
 	committed, tail := rows[:len(rows)-1], rows[len(rows)-1]
 	var seq strings.Builder
@@ -224,6 +244,21 @@ func (r *renderer) streamText(text string) {
 	fmt.Fprint(r.sink, seq.String())
 	r.block.committed += len(committed)
 	r.block.tail = tail
+}
+
+// stalledNow reports that the terminal's width has changed under a
+// block that is painting: the rows it committed wrap at the old width,
+// and counting them at the new one would climb to the wrong row.
+func (r *renderer) stalledNow() bool {
+	if r.liveWidth == nil {
+		return false
+	}
+	width := r.liveWidth()
+	if width <= 0 || width == r.width {
+		return false
+	}
+	r.width = width
+	return true
 }
 
 // hardRows splits a text the way the block paints it: rows of at most
@@ -286,11 +321,19 @@ func completeEscape(tail string) bool {
 	}
 	switch tail[1] {
 	case '[':
-		return strings.IndexFunc(tail[2:], func(b rune) bool { return b >= 0x40 && b <= 0x7e }) >= 0
+		return strings.IndexFunc(tail[2:], isFinalByte) >= 0
 	case ']':
 		return strings.IndexByte(tail[2:], 0x07) >= 0 || strings.Contains(tail[2:], "\x1b\\")
 	}
 	return true
+}
+
+// isFinalByte reports that b ends a control sequence: the range ECMA-48
+// gives the final byte. The editor's key filter reads the same range, so
+// a sequence it swallows and one the stream strips agree on where the
+// sequence ends.
+func isFinalByte(b rune) bool {
+	return b >= 0x40 && b <= 0x7e
 }
 
 // replace takes the streamed block off the terminal and puts the
@@ -300,7 +343,7 @@ func completeEscape(tail string) bool {
 // the rendered message alone.
 func (r *renderer) replace(content string) {
 	r.pending = ""
-	if !r.streams() || (r.block.tail == "" && r.block.committed == 0) {
+	if !r.streams() || !r.block.started {
 		r.takeHint()
 		if content != "" {
 			r.write(content)
@@ -329,16 +372,6 @@ func (r *renderer) replace(content string) {
 // userPrompt echoes the prompt the session runs.
 func (r *renderer) userPrompt(text string) {
 	r.write(ansiBold + "❯ " + text + ansiReset + "\n")
-}
-
-// message renders a complete reply as markdown.
-func (r *renderer) message(text string) {
-	r.write(r.messageText(text))
-}
-
-// messageText renders one markdown source for the terminal.
-func (r *renderer) messageText(text string) string {
-	return r.markdown(text)
 }
 
 // markdown renders one markdown source for the terminal.
