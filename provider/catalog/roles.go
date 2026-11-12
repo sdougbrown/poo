@@ -55,10 +55,6 @@ func (c Credential) EnvNames() []string {
 	return []string{c.Env}
 }
 
-// Key returns the endpoint's key: the environment variable when it
-// holds one, the value the settings carry when it does not, and nothing
-// when the credential names neither. The value is never logged.
-
 // Endpoint is a service that serves models.
 type Endpoint struct {
 	// Name is the endpoint's name: the settings' key, or a hosted

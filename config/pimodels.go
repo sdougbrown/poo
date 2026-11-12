@@ -52,8 +52,8 @@ type piModel struct {
 // piModalities are the input modalities pi names that poo reads. A
 // modality outside the map is a refusal.
 var piModalities = map[string]bool{
-	"text":  true,
-	"image": true,
+	string(poo.ModalityText):  true,
+	string(poo.ModalityImage): true,
 }
 
 // importPiModels reads the settings' pi models file and fills the
