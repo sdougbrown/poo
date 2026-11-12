@@ -689,7 +689,11 @@ func reasonedSettings(t *testing.T) *config.Settings {
       "reasoning": {"mode": "effort", "param": "reasoning_effort"}, "reasoning_levels": ["off", "low", "high"]},
     "sharp-model": {"endpoint": "grace", "model_id": "sharp-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "context_limit": 32768,
       "reasoning": {"mode": "effort", "param": "reasoning_effort"}, "reasoning_levels": ["off", "medium"]},
-    "plain-model": {"endpoint": "grace", "model_id": "plain-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "context_limit": 32768}
+    "plain-model": {"endpoint": "grace", "model_id": "plain-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "context_limit": 32768},
+    "budget-model": {"endpoint": "grace", "model_id": "budget-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "context_limit": 32768,
+      "reasoning": {"mode": "budget", "param": "budget_tokens"}},
+    "toggle-model": {"endpoint": "grace", "model_id": "toggle-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "context_limit": 32768,
+      "reasoning": {"mode": "toggle", "param": "enable_thinking"}}
   },
   "roles": {"chat": "chat-model"}
 }`
@@ -834,5 +838,13 @@ func TestTheCatalogAnnouncesTheReasoningLevels(t *testing.T) {
 	}
 	if got := byName["plain-model"].ReasoningMode; got != string(poo.ReasoningNone) {
 		t.Errorf("the catalog announces the mode %q for a model that controls nothing, want none", got)
+	}
+	// Every control a client can act on is announced as itself: a budget
+	// model reported as none would tell the repl to say the wrong thing.
+	if got := byName["budget-model"].ReasoningMode; got != string(poo.ReasoningBudget) {
+		t.Errorf("the catalog announces the mode %q for a budget model, want budget", got)
+	}
+	if got := byName["toggle-model"].ReasoningMode; got != string(poo.ReasoningToggle) {
+		t.Errorf("the catalog announces the mode %q for a toggle model, want toggle", got)
 	}
 }
