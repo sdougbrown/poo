@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,28 +26,8 @@ transcript renders as markdown. Type /help once it is up.
 // flag set says what both sides run. The parse and the validation run
 // here too, so a bad flag is refused before the server starts.
 func runRepl(args []string) int {
-	fs := flag.NewFlagSet("poo repl", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, replUsage) }
-
-	var o serveOptions
-	o.register(fs)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	// The same refusal as serve's: the flags say what the session
-	// runs, and the raw arguments pass through to the server, so a
-	// stray word would be its confusion, not the repl's.
-	if len(fs.Args()) != 0 {
-		fmt.Fprintf(os.Stderr, "poo repl: unexpected argument %q\n", fs.Args()[0])
-		return 2
-	}
-	if err := o.checkUnmatched(); err != nil {
-		fmt.Fprintf(os.Stderr, "poo repl: %v\n", err)
-		return 2
-	}
-	if err := o.endpointFlags.validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "poo repl: %v\n", err)
+	o, ok := parseServeFlags("poo repl", replUsage, args)
+	if !ok {
 		return 2
 	}
 
