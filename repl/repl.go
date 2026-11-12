@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -139,6 +140,10 @@ type machine struct {
 	// not say what to stop.
 	runIDMu sync.Mutex
 	runID   string
+	// lastMatches holds the models the last listing offered, in the
+	// order it numbered them: a bare number picks out of it. It is the
+	// only state a pick keeps, and a listing replaces it whole.
+	lastMatches []string
 }
 
 // lineResult is one read from the input.
@@ -684,8 +689,10 @@ func (m *machine) command(line string, input input) (int, bool) {
 	case "/help", "/h", "?":
 		m.r.notice(`/quit            leave the repl
 /less            read the transcript again in less
-/model           name the session's models
-/model <name>    switch the chat model
+/model           list the session's models, numbered
+/model <text>    switch to the model the text matches: one match switches,
+                 several list ranked and numbered
+/model <number>  switch to a number of the last list
 /thinking        cycle the reasoning level (Shift+Tab)
 /thinking <lvl>  set the reasoning level: off, minimal, low, medium, high,
                  xhigh or a token budget
@@ -699,13 +706,7 @@ anything else    a prompt for the session`)
 		}
 		return 0, false
 	case "/model", "/models":
-		for _, name := range m.catalogNames() {
-			shown := name
-			if name == m.status.model {
-				shown += " ←"
-			}
-			m.r.notice("%s · %s", shown, m.catalog[name].ModelID)
-		}
+		m.listModels(m.catalogNames(), "/model <text> filters this list, /model <number> picks from it")
 		return 0, false
 	case "/cancel":
 		m.cancelRun(m.activeRun())
@@ -731,17 +732,92 @@ anything else    a prompt for the session`)
 	return 0, false
 }
 
-// switchModel points the session's chat role at another model the
-// catalog holds, and takes the new model's window for the statusline.
+// switchModel moves the session's chat role to the model a person named.
+//
+// The name is what they remember, not what the catalog says: an exact
+// name switches as it always has, and anything else is a fragment that
+// matches the catalog. One match is the switch, several are a list to
+// pick from, and a bare number takes a number off the last list.
+func (m *machine) switchModel(fragment string) {
+	if fragment == "" {
+		m.r.failure("which model? /model lists them")
+		return
+	}
+	// A bare number picks from the last listing. A catalog that holds a
+	// model by that number keeps it reachable by name.
+	if n, ok := pickIndex(fragment); ok {
+		if n >= 1 && n <= len(m.lastMatches) {
+			m.configureModel(m.lastMatches[n-1])
+			return
+		}
+		if _, named := m.catalog[fragment]; !named {
+			m.failureNoPick(n)
+			return
+		}
+	}
+	if _, ok := m.catalog[fragment]; ok {
+		m.configureModel(fragment)
+		return
+	}
+	matches := rankModels(m.catalogNames(), fragment, m.status.model)
+	switch len(matches) {
+	case 0:
+		m.lastMatches = nil
+		m.r.failure(fmt.Sprintf("no model matches %q — /model lists them", fragment))
+	case 1:
+		m.configureModel(matches[0])
+	default:
+		m.listModels(matches, "/model <number> picks one of these")
+	}
+}
+
+// pickIndex reads a listing's mark: all its digits, or no number at all.
+func pickIndex(s string) (int, bool) {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// failureNoPick says why a bare number picked nothing.
+func (m *machine) failureNoPick(n int) {
+	if len(m.lastMatches) == 0 {
+		m.r.failure(fmt.Sprintf("there is no /model list to pick %d from — /model <text> searches the catalog", n))
+		return
+	}
+	m.r.failure(fmt.Sprintf("the last /model list has %d model(s) — /model <number> takes 1-%d",
+		len(m.lastMatches), len(m.lastMatches)))
+}
+
+// listModels writes models as a numbered list, marks the one the session
+// runs at, says how to pick out of it, and keeps it for the number.
+func (m *machine) listModels(names []string, hint string) {
+	m.lastMatches = names
+	for i, name := range names {
+		shown := name
+		if name == m.status.model {
+			shown += " ←"
+		}
+		m.r.notice("%d. %s · %s", i+1, shown, m.catalog[name].ModelID)
+	}
+	if hint != "" {
+		m.r.notice("%s", hint)
+	}
+}
+
+// configureModel points the session's chat role at a model the catalog
+// holds, and takes the new model's window for the statusline.
 //
 // The switch is the wire's own: session/configure changes the models
 // between runs, and the answer names what the session talks to now.
 // A name the catalog does not hold is the server's to refuse.
-func (m *machine) switchModel(name string) {
-	if name == "" {
-		m.r.failure("which model? /model lists them")
-		return
-	}
+func (m *machine) configureModel(name string) {
 	var res protocol.ConfigureResult
 	err := m.conn.call(protocol.MethodSessionConfigure, protocol.ConfigureParams{
 		SessionID: m.sessionID,
