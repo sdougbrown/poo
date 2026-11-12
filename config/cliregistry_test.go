@@ -757,11 +757,12 @@ func TestASearchIsRequiredOnlyOverAWholeCatalog(t *testing.T) {
 	}
 }
 
-// buildGated builds a runtime over the registry at dir, with the tools the
-// binary links and the decider a search would ask.
-func buildGated(t *testing.T, dir, profileName string, tools map[string]config.ToolFactory) (*config.Runtime, error) {
+// buildGatedDoc builds a runtime from the settings document doc, which carries
+// the model, over the registry at dir, with the tools the binary links and the
+// decider a search would ask.
+func buildGatedDoc(t *testing.T, doc, dir, profileName string, tools map[string]config.ToolFactory) (*config.Runtime, error) {
 	t.Helper()
-	settings, err := config.Parse([]byte(withDecider+"cli_registry:\n  paths: [\""+dir+"\"]\nprofile: "+profileName+"\n"), config.FormatYAML)
+	settings, err := config.Parse([]byte(doc+"cli_registry:\n  paths: [\""+dir+"\"]\nprofile: "+profileName+"\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
@@ -773,6 +774,49 @@ func buildGated(t *testing.T, dir, profileName string, tools map[string]config.T
 		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile()},
 		Executors:      theExecutors(),
 	})
+}
+
+// buildGated builds a runtime over the registry at dir, with the tools the
+// binary links and the decider a search would ask.
+func buildGated(t *testing.T, dir, profileName string, tools map[string]config.ToolFactory) (*config.Runtime, error) {
+	t.Helper()
+	return buildGatedDoc(t, withDecider, dir, profileName, tools)
+}
+
+// TestADisabledSearchLeavesTheCatalogListed covers the operator's disabled
+// list: a session that turns find_tool off over a long catalog lists the
+// catalog whole, and never points the model at a search it does not offer.
+func TestADisabledSearchLeavesTheCatalogListed(t *testing.T) {
+	runtime, err := buildGatedDoc(t, withDecider+"tools:\n  disabled: [find_tool]\n", thresholdRegistry(t, 40, 0), code.Name, theTools())
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if hasTool(runtime.Options.ToolOrder, "find_tool") {
+		t.Errorf("the session offers a search the settings disable: %v", runtime.Options.ToolOrder)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "Call one with call_cli") {
+		t.Errorf("the catalog is not listed for a session that cannot search: %q", text)
+	}
+	if strings.Contains(text, "too many to list") {
+		t.Errorf("the prompt names a search the session does not offer: %q", text)
+	}
+
+	// The call tool's hint follows the same fact as the prompt.
+	call := runtime.Options.Tools[cliregistry.CallToolName]
+	if call == nil {
+		t.Fatal("the session has no call_cli tool")
+	}
+	_, err = call.Prepare(json.RawMessage(`{"name":"nope"}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("an unknown name prepared a call")
+	}
+	if strings.Contains(err.Error(), "search it") {
+		t.Errorf("the hint points at a search the session does not offer: %q", err)
+	}
+	if !strings.Contains(err.Error(), "call one the prompt lists") {
+		t.Errorf("the hint %q does not point at the listed catalog", err)
+	}
 }
 
 // callOnlyTools are the tools a binary links when it offers the catalog but no

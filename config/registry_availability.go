@@ -18,6 +18,12 @@ import (
 // because a value poo does not have is not one poo can invent.
 const ProfileSideEffectingCondition = "profile_side_effecting"
 
+// conditionBoolean is the declared type poo supplies for that condition: the
+// library's condition vocabulary spells a boolean "boolean", and poo supplies
+// nothing else. A manifest that declares the condition as any other type would
+// judge entries against a value poo never sends.
+const conditionBoolean = "boolean"
+
 // offeredCatalog returns the catalog the session's tools read, or nil when the
 // profile earns none. The tools are built from this, never from Registry, so a
 // profile that names a registry tool itself reads no entry the rules withhold.
@@ -83,7 +89,7 @@ func checkRegistryConditions(declared map[string]string) error {
 		}
 	}
 	if len(unsupplied) == 0 {
-		if typ, ok := declared[ProfileSideEffectingCondition]; ok && typ != "boolean" {
+		if typ, ok := declared[ProfileSideEffectingCondition]; ok && typ != conditionBoolean {
 			return &Error{
 				Code:  CodeUnsupported,
 				Field: "cli_registry.paths",

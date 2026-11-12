@@ -574,6 +574,16 @@ func (r *Runtime) findToolFor(count int) bool {
 	return count > cli.FindThreshold && r.deciderErr == nil && r.decider != nil
 }
 
+// offersSearch reports whether the session offers the search over the catalog.
+//
+// The count decides whether a search is worth offering, and the operator's
+// disabled list decides whether the session has one: a session that turned
+// find_tool off lists the catalog its prompt shows, and points the model at
+// nothing it cannot call.
+func (r *Runtime) offersSearch() bool {
+	return slices.Contains(r.toolNames, cli.FindToolName)
+}
+
 // offersRegistry reports whether the session offers the registry's tools.
 //
 // The catalog is a section of the prompt only when the model can call or
@@ -1080,7 +1090,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		}
 	}
 
-	toolOptions := ToolOptions{Scrub: credentialScrub, ProtectedPaths: protected, Registry: r.offeredCatalog(), Search: r.findTool()}
+	toolOptions := ToolOptions{Scrub: credentialScrub, ProtectedPaths: protected, Registry: r.offeredCatalog(), Search: r.offersSearch()}
 	if r.needsExecutor() {
 		executor, err := opts.Executors.New(executorName, exec.Options{
 			Masker: protected,
@@ -1517,7 +1527,7 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	// an operator who writes one keeps it.
 	var catalogTemplate *prompt.Template
 	if r.Registry != nil && r.offersRegistry() {
-		catalogTemplate = r.Registry.Template(r.findTool())
+		catalogTemplate = r.Registry.Template(r.offersSearch())
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			b.SetTemplate(cli.SectionName, catalogTemplate)
 		})
@@ -1643,7 +1653,7 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 		// A binary that links the tools still knows the section, so a prompt
 		// directory that carries it loads. A session offering no catalog
 		// renders it empty, and it is removed once the directory has applied.
-		sources[cli.SectionName] = r.offeredCatalog().Template(r.findTool()).Data()
+		sources[cli.SectionName] = r.offeredCatalog().Template(r.offersSearch()).Data()
 	}
 	return sources
 }

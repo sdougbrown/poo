@@ -181,9 +181,15 @@ func TestANilCatalogRendersAnEmptySection(t *testing.T) {
 	if entries := catalog.Entries(); len(entries) != 0 {
 		t.Errorf("a nil catalog holds %d entries", len(entries))
 	}
-	// Rendering is the point: a nil catalog must not panic, and its section
-	// carries no entry line.
-	if text := catalog.Section(false); strings.Contains(text, "name: ") {
-		t.Errorf("a nil catalog's section lists an entry: %q", text)
+	// Rendering is the point: a nil catalog must not panic, and its section is
+	// the list form, not a search over entries it does not have.
+	text := catalog.Section(false)
+	for _, want := range []string{"Registered CLIs:", "Call one with call_cli"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("a nil catalog's section does not carry %q: %q", want, text)
+		}
+	}
+	if strings.Contains(text, "too many to list") {
+		t.Errorf("a nil catalog's section asks for a search: %q", text)
 	}
 }
