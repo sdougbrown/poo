@@ -26,7 +26,6 @@ import (
 
 	"github.com/chzyer/readline"
 
-	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/wire/protocol"
 	"golang.org/x/term"
 )
@@ -129,9 +128,6 @@ type machine struct {
 	// nothing streams.
 	state   *runState
 	streams *streamView
-	// thinkingNotice says what to type when the model has no level cycle
-	// to climb. It is empty when the model has one.
-	thinkingNotice string
 	// esc carries the run an Escape asked to stop.
 	esc chan string
 	// escGen counts the keys the filter delivered: an escape is a key
@@ -651,10 +647,10 @@ func (b *backtab) filter(r rune) (rune, bool) {
 // A refused level is a line of the transcript, and the prompt is taken back
 // first because the editor has already painted it.
 func (b *backtab) cycle() {
-	level, ok := b.m.nextThinkingLevel()
+	level, ok, notice := b.m.nextThinkingLevel()
 	if !ok {
 		fmt.Fprint(b.m.out, "\r\033[K")
-		b.m.r.notice("%s", b.m.thinkingNotice)
+		b.m.r.notice("%s", notice)
 	} else if err := b.m.setThinking(level); err != nil {
 		fmt.Fprint(b.m.out, "\r\033[K")
 		b.m.r.failure(err.Error())
@@ -766,9 +762,9 @@ func (m *machine) switchModel(name string) {
 // does not take, and the refusal names the levels it does.
 func (m *machine) thinking(level string) {
 	if level == "" {
-		next, ok := m.nextThinkingLevel()
+		next, ok, notice := m.nextThinkingLevel()
 		if !ok {
-			m.r.notice("%s", m.thinkingNotice)
+			m.r.notice("%s", notice)
 			return
 		}
 		level = next
@@ -786,28 +782,26 @@ func (m *machine) thinking(level string) {
 // The order is the model's own, lowest first. A model that names no levels
 // is climbed through the ones poo knows when its reasoning takes named
 // levels; a model controlled by a token budget, or by nothing, has no list
-// to climb, and the second result is false so the caller can say what to
-// type instead of proposing a level the server refuses on every press.
-func (m *machine) nextThinkingLevel() (string, bool) {
+// to climb, and the second result is false with a notice saying what to
+// type, rather than a level the server refuses on every press.
+func (m *machine) nextThinkingLevel() (level string, ok bool, notice string) {
 	levels := namedLevels
 	if info, ok := m.catalog[m.status.model]; ok {
 		switch {
 		case len(info.ReasoningLevels) > 0:
 			levels = info.ReasoningLevels
-		case info.ReasoningMode == string(poo.ReasoningBudget):
-			m.thinkingNotice = "the model takes a token budget: /thinking <tokens>"
-			return "", false
-		case info.ReasoningMode == string(poo.ReasoningNone):
-			m.thinkingNotice = "the model does not control its reasoning"
-			return "", false
+		case info.ReasoningMode == protocol.ReasoningModeBudget:
+			return "", false, "the model takes a token budget: /thinking <tokens>"
+		case info.ReasoningMode == protocol.ReasoningModeNone:
+			return "", false, "the model does not control its reasoning"
 		}
 	}
 	for i, level := range levels {
 		if strings.EqualFold(level, m.status.level) {
-			return levels[(i+1)%len(levels)], true
+			return levels[(i+1)%len(levels)], true, ""
 		}
 	}
-	return levels[0], true
+	return levels[0], true, ""
 }
 
 // setThinking sets the session's reasoning level on the wire and takes the

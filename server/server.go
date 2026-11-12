@@ -586,6 +586,21 @@ func (f *Server) Configure(ctx context.Context, sess *poo.Session, params protoc
 	return protocol.ConfigureResult{Models: roles, Reasoning: sess.ReasoningLevel()}, nil
 }
 
+// reasoningMode maps a model's reasoning control onto the wire's name
+// for it. The core's zero mode is the one that cannot be moved.
+func reasoningMode(mode poo.ReasoningMode) string {
+	switch mode {
+	case poo.ReasoningEffort:
+		return protocol.ReasoningModeEffort
+	case poo.ReasoningBudget:
+		return protocol.ReasoningModeBudget
+	case poo.ReasoningToggle:
+		return protocol.ReasoningModeToggle
+	default:
+		return protocol.ReasoningModeNone
+	}
+}
+
 // Models returns the effective model catalog.
 func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo, error) {
 	runtime, err := f.runtimeFor("", "")
@@ -603,10 +618,7 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 		// A model that says nothing about its reasoning control is one
 		// that cannot move: the catalog says so rather than leaving a
 		// client to read the empty string either way.
-		mode := model.Reasoning.Mode
-		if mode == "" {
-			mode = poo.ReasoningNone
-		}
+		mode := reasoningMode(model.Reasoning.Mode)
 		out = append(out, protocol.ModelInfo{
 			Name:            model.Name,
 			ModelID:         model.ModelID,
@@ -617,7 +629,7 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 			MaxOutput:       model.MaxOutput,
 			ToolsMode:       string(model.Tools.Mode),
 			ReasoningLevels: model.ReasoningLevels,
-			ReasoningMode:   string(mode),
+			ReasoningMode:   mode,
 		})
 	}
 	return out, nil

@@ -86,6 +86,13 @@ func TestAReasoningLevelTheModelDoesNotTakeIsRefused(t *testing.T) {
 	if !strings.Contains(err.Error(), "off, low, high") {
 		t.Errorf("the refusal is %q, want it to name the model's levels", err)
 	}
+	// The refusal a client sees is the session API's, not the settings'
+	// configuration error: SetReasoning re-maps it, and a regression that
+	// stopped doing so would leak a ConfigError to callers.
+	var invalid *poo.ErrInvalidInput
+	if !errors.As(err, &invalid) {
+		t.Errorf("the refusal is %T, want an ErrInvalidInput", err)
+	}
 	if got := s.ReasoningLevel(); got != "low" {
 		t.Errorf("the refused level left the session at %q, want low", got)
 	}

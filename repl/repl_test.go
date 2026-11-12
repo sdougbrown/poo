@@ -645,15 +645,15 @@ func TestTheLevellessModelClimbsTheProtocolLevels(t *testing.T) {
 	}
 	m.status.model = "plain"
 
-	if got, ok := m.nextThinkingLevel(); !ok || got != "off" {
+	if got, ok, _ := m.nextThinkingLevel(); !ok || got != "off" {
 		t.Errorf("the first level is %q (ok %v), want off", got, ok)
 	}
 	m.status.level = "off"
-	if got, ok := m.nextThinkingLevel(); !ok || got != "minimal" {
+	if got, ok, _ := m.nextThinkingLevel(); !ok || got != "minimal" {
 		t.Errorf("the level after off is %q (ok %v), want minimal", got, ok)
 	}
 	m.status.level = "xhigh"
-	if got, ok := m.nextThinkingLevel(); !ok || got != "off" {
+	if got, ok, _ := m.nextThinkingLevel(); !ok || got != "off" {
 		t.Errorf("the level after xhigh is %q (ok %v), want off", got, ok)
 	}
 }
