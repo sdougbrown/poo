@@ -576,6 +576,49 @@ func TestAPromptDirectoriesCatalogFollowsTheSession(t *testing.T) {
 	}
 }
 
+// TestAPromptDirectoriesCatalogLoadsWithoutARegistry covers the binary that
+// links the registry's tools and runs a session whose settings name no
+// registry: the catalog section is one the binary knows, so a directory
+// carrying catalog.md loads, and the session offers none of it, so the section
+// renders nothing.
+func TestAPromptDirectoriesCatalogLoadsWithoutARegistry(t *testing.T) {
+	prompts := fstest.MapFS{
+		"catalog.md": {Data: []byte("Call {{.Call}} with the registered CLIs.\n")},
+	}
+	buildPrompt := func(t *testing.T, tools map[string]config.ToolFactory, profileName string, profiles []profile.Profile) (*config.Runtime, error) {
+		t.Helper()
+		settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+		if err != nil {
+			t.Fatalf("decoding the settings: %v", err)
+		}
+		return config.Build(config.BuildOptions{
+			Settings:       settings,
+			WorkingDir:     t.TempDir(),
+			DefaultProfile: profileName,
+			Tools:          tools,
+			Profiles:       profiles,
+			Executors:      theExecutors(),
+			PromptFS:       prompts,
+		})
+	}
+	profiles := []profile.Profile{base.Profile(), code.Profile(), search.Profile()}
+
+	runtime, err := buildPrompt(t, theTools(), "code", profiles)
+	if err != nil {
+		t.Fatalf("a binary that links call_cli could not load catalog.md for a session naming no registry: %v", err)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if strings.Contains(text, "Call call_cli") || strings.Contains(text, "Registered CLIs:") {
+		t.Errorf("a session that offers no catalog renders one: %q", text)
+	}
+
+	// The section belongs to the binaries that link the tools: one that does
+	// not still has no catalog for a directory to replace.
+	if _, err := buildPrompt(t, readOnlyTools(), search.Name, []profile.Profile{search.Profile()}); err == nil || !strings.Contains(err.Error(), "unknown section") {
+		t.Errorf("a binary that links no call_cli accepted catalog.md: %v", err)
+	}
+}
+
 // gatedBuild builds a session whose settings name the gated registry, with the
 // profiles a real binary links.
 func gatedBuild(t *testing.T, dir, profileName string) (*config.Runtime, error) {
@@ -592,6 +635,78 @@ func gatedBuild(t *testing.T, dir, profileName string) (*config.Runtime, error) 
 		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile()},
 		Executors:      theExecutors(),
 	})
+}
+
+// thresholdRegistry writes a registry of entries entries, the first gated of
+// which the profile condition gates: a read-only profile is left with the rest.
+func thresholdRegistry(t *testing.T, entries, gated int) string {
+	t.Helper()
+	tools := map[string]any{}
+	rules := make([]any, 0, gated)
+	for i := 0; i < entries; i++ {
+		name := fmt.Sprintf("entry-%03d", i)
+		tools[name] = registryEntry("The " + name + " command")
+		if i >= gated {
+			continue
+		}
+		rules = append(rules, map[string]any{
+			"type": "enabledWhen", "field": name,
+			"when":   map[string]any{"op": "cond", "condition": "profile_side_effecting"},
+			"reason": "the profile is read-only",
+		})
+	}
+	return writeRegistryDoc(t, map[string]any{
+		"version": 1,
+		"tools":   tools,
+		"availability": map[string]any{
+			"conditions": profileCondition(),
+			"rules":      rules,
+		},
+	})
+}
+
+// TestAReadOnlyProfileSearchesOnlyWhatItsRulesLeave covers the search over a
+// narrowed catalog: the rules leave a read-only profile fewer entries than the
+// threshold, so the session lists them and offers no search, however many
+// entries the manifests loaded.
+func TestAReadOnlyProfileSearchesOnlyWhatItsRulesLeave(t *testing.T) {
+	dir := thresholdRegistry(t, 40, 35)
+	settings, err := config.Parse([]byte(withDecider+"cli_registry:\n  paths: [\""+dir+"\"]\nprofile: search\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: search.Name,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile()},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the read-only runtime: %v", err)
+	}
+	// The session has the decider a search would ask, so the count the
+	// session searches is the only thing keeping the search off.
+	if runtime.Options.Decider == nil {
+		t.Fatal("the case has no decider, so it proves nothing about the threshold")
+	}
+	if runtime.Registry == nil || runtime.Registry.Len() != 5 {
+		t.Fatalf("the read-only session offers %v, want the five entries the rules leave", runtime.Registry)
+	}
+	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the read-only session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, "find_tool") {
+		t.Errorf("the session searches a catalog narrowed to five entries: %v", runtime.Options.ToolOrder)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "entry-035: The entry-035 command") {
+		t.Errorf("the prompt does not list the entries the rules leave: %q", text)
+	}
+	if strings.Contains(text, "entry-000:") {
+		t.Errorf("the prompt lists an entry the rules withhold: %q", text)
+	}
 }
 
 // TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave covers the per-entry
@@ -628,17 +743,22 @@ func TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave(t *testing.T) {
 
 	// The listing the binary offers says what the session does: the same
 	// profile earns the same tool there.
-	for _, listed := range runtime.Profiles {
-		if listed.Name != search.Name {
-			continue
+	var listed *poo.Profile
+	for i := range runtime.Profiles {
+		if runtime.Profiles[i].Name == search.Name {
+			listed = &runtime.Profiles[i]
+			break
 		}
-		var names []string
-		for _, tool := range listed.Tools {
-			names = append(names, tool.Name)
-		}
-		if !hasTool(names, cliregistry.CallToolName) {
-			t.Errorf("the listing offers the %q profile %v, and its session offers call_cli", listed.Name, names)
-		}
+	}
+	if listed == nil {
+		t.Fatalf("the listing offers %v, and not the %q profile", runtime.Profiles, search.Name)
+	}
+	var names []string
+	for _, tool := range listed.Tools {
+		names = append(names, tool.Name)
+	}
+	if !hasTool(names, cliregistry.CallToolName) {
+		t.Errorf("the listing offers the %q profile %v, and its session offers call_cli", listed.Name, names)
 	}
 
 	// A profile that can change things gets every entry the rules leave.
