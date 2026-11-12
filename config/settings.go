@@ -69,6 +69,10 @@ type Settings struct {
 	// compatibility is the file shapes alone — the file is wherever
 	// the operator keeps it, and poo reads no pi installation. The
 	// settings' own endpoints and models win on a name collision.
+	// A provider whose apiKey the file leaves no usable key for takes
+	// the key out of the auth.json beside the models file, in the same
+	// shape pi keeps its credentials, when that file holds an api
+	// credential for the provider.
 	PIModelsFile string `json:"pi_models_file,omitempty"`
 }
 

@@ -18,8 +18,9 @@ func (s *Settings) applyModelsFile(file piimport.File) {
 				s.Endpoints = map[string]Endpoint{}
 			}
 			s.Endpoints[name] = Endpoint{
-				Endpoint: provider.BaseURL,
-				APIKey:   provider.APIKey,
+				Endpoint:  provider.BaseURL,
+				APIKeyEnv: provider.APIKeyEnv,
+				APIKey:    provider.APIKey,
 			}
 		}
 		for _, model := range provider.Models {

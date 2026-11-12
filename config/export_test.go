@@ -5,5 +5,6 @@ package config
 var CoreToolNames = coreToolNames
 
 // ModelAPIKey is the key the runtime sends for a model, for the tests
-// that read the credential path.
+// that check which credential an endpoint resolves to.
+
 func (r *Runtime) ModelAPIKey(model string) string { return r.apiKey(model) }

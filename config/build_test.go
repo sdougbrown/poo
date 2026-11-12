@@ -338,6 +338,55 @@ func TestTheBuildScrubsTheCredentials(t *testing.T) {
 	}
 }
 
+// theCredentialSettings is a settings document with one model in it,
+// and the endpoint's credential lines left to the test.
+const theCredentialSettings = `
+version: 1
+endpoints:
+  test:
+    endpoint: http://localhost:4000/v1
+%smodels:
+  test-model:
+    endpoint: test
+    model_id: test-model
+    api: chat_completions
+    tools_mode: native
+    ops: [chat]
+    context_limit: 32768
+roles:
+  chat: test-model
+`
+
+// TestACredentialIsTheEnvironmentThenTheKey covers where a model's key
+// comes from: the environment variable the endpoint names, the key the
+// endpoint carries when that variable holds none, and no key when the
+// endpoint names neither.
+func TestACredentialIsTheEnvironmentThenTheKey(t *testing.T) {
+	const both = "    api_key_env: POO_TEST_KEY\n    api_key: literal-key-123\n"
+	cases := map[string]struct {
+		credential string
+		env        string
+		want       string
+	}{
+		"the environment": {both, "env-key-456", "env-key-456"},
+		"the key":         {both, "", "literal-key-123"},
+		"neither":         {"", "env-key-456", ""},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("POO_TEST_KEY", test.env)
+			settings, err := config.Parse([]byte(fmt.Sprintf(theCredentialSettings, test.credential)), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			runtime := build(t, settings, config.Overrides{})
+			if key := runtime.ModelAPIKey("test-model"); key != test.want {
+				t.Errorf("the model resolved to the key %q", key)
+			}
+		})
+	}
+}
+
 // TestTheBuildRefusesAToolTheBinaryLacks covers the rule: a settings
 // file cannot enable a tool the binary does not link.
 func TestTheBuildRefusesAToolTheBinaryLacks(t *testing.T) {
@@ -1173,55 +1222,6 @@ func TestThePolicyGetsTheResolvedWorkingDirectory(t *testing.T) {
 	}
 	if client.asks[0].WorkingDir != want {
 		t.Errorf("the ask's working directory is %q, want the resolved %q", client.asks[0].WorkingDir, want)
-	}
-}
-
-// theCredentialSettings is a settings document with one model in it,
-// and the endpoint's credential lines left to the test.
-const theCredentialSettings = `
-version: 1
-endpoints:
-  test:
-    endpoint: http://localhost:4000/v1
-%smodels:
-  test-model:
-    endpoint: test
-    model_id: test-model
-    api: chat_completions
-    tools_mode: native
-    ops: [chat]
-    context_limit: 32768
-roles:
-  chat: test-model
-`
-
-// TestACredentialIsTheEnvironmentThenTheKey covers where a model's key
-// comes from: the environment variable the endpoint names, the key the
-// endpoint carries when that variable holds none, and no key when the
-// endpoint names neither.
-func TestACredentialIsTheEnvironmentThenTheKey(t *testing.T) {
-	const both = "    api_key_env: POO_TEST_KEY\n    api_key: literal-key-123\n"
-	cases := map[string]struct {
-		credential string
-		env        string
-		want       string
-	}{
-		"the environment": {both, "env-key-456", "env-key-456"},
-		"the key":         {both, "", "literal-key-123"},
-		"neither":         {"", "env-key-456", ""},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("POO_TEST_KEY", test.env)
-			settings, err := config.Parse([]byte(fmt.Sprintf(theCredentialSettings, test.credential)), config.FormatYAML)
-			if err != nil {
-				t.Fatalf("decoding the settings: %v", err)
-			}
-			runtime := build(t, settings, config.Overrides{})
-			if key := runtime.ModelAPIKey("test-model"); key != test.want {
-				t.Errorf("the model resolved to the key %q", key)
-			}
-		})
 	}
 }
 
