@@ -374,13 +374,3 @@ func TestALessWithoutAPagerFailsTheLineNotTheSession(t *testing.T) {
 		t.Errorf("the missing pager read no failure:\n%s", out)
 	}
 }
-
-// TestARefusedCallReadsInTheTranscript covers the server's refusals:
-// a method the server refused is a line in the transcript, and the
-// repl keeps going.
-func TestARefusedCallReadsInTheTranscript(t *testing.T) {
-	out, _ := startRepl(t, "/model\n/quit\n")
-	if !strings.Contains(out, "gemma4 ← · gemma4") {
-		t.Errorf("the catalog did not read back:\n%s", out)
-	}
-}

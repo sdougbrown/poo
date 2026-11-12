@@ -89,6 +89,11 @@ func (c *conn) read(r io.Reader) {
 			break
 		}
 	}
+	// A read that failed is the local side of the wire, not the server
+	// closing it: the failure says which, and the session exits on it.
+	if err := scanner.Err(); err != nil && c.err == nil {
+		c.err = fmt.Errorf("repl: reading the server: %w", err)
+	}
 	c.mu.Lock()
 	for _, ch := range c.pending {
 		close(ch)
@@ -215,7 +220,7 @@ func (c *conn) call(method string, params, result any) error {
 		c.mu.Unlock()
 		return fmt.Errorf("repl: %s: timed out", method)
 	case <-c.done:
-		return fmt.Errorf("repl: %s: the server closed the connection", method)
+		return fmt.Errorf("repl: %s: %w", method, errServerClosed)
 	}
 }
 

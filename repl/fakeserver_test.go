@@ -35,6 +35,11 @@ type fakeServer struct {
 	// holdRun keeps the run open until the client cancels it, so a
 	// test has a run to stop.
 	holdRun bool
+	// staleSettle sends a settle for a run that is not the session's
+	// before the real one, so a test can watch the guard that ignores
+	// it. staleSettled closes once it has gone out.
+	staleSettle  bool
+	staleSettled chan struct{}
 	// askWhen holds the ask back until the test closes it, so the
 	// test can type ahead of the ask.
 	askWhen chan struct{}
@@ -164,6 +169,12 @@ func (s *fakeServer) run() {
 	})
 	s.event("turn.ended", map[string]any{"run_id": "r1", "turn": 1})
 	s.event("turn.started", map[string]any{"run_id": "r1", "turn": 2})
+	if s.staleSettle {
+		s.event("run.settled", map[string]any{"run_id": "r0", "reason": "cancelled", "turns": 1})
+		if s.staleSettled != nil {
+			close(s.staleSettled)
+		}
+	}
 	if s.holdRun {
 		// The run waits for a cancel of its own: an earlier run's
 		// cancel is not an answer.
