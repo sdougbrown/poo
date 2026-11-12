@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -72,22 +73,36 @@ func TestTheSearchCatalogTrimsTrailingNewlines(t *testing.T) {
 // gate on a boolean condition, and loads it.
 func loadGatedCatalog(t *testing.T) *cli.Catalog {
 	t.Helper()
-	entry := func(description string) map[string]any {
+	entry := func(description string, schema map[string]any) map[string]any {
 		return map[string]any{
 			"description": description,
 			"command":     []string{"true"},
-			"inputSchema": map[string]any{
-				"type":                 "object",
-				"properties":           map[string]any{},
-				"additionalProperties": false,
-			},
+			"inputSchema": schema,
 		}
+	}
+	empty := map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{},
+		"additionalProperties": false,
+	}
+	// The read entry takes an argument, so a plan through the filter can be
+	// refused by the entry's own schema rather than by the catalog's list.
+	needsPath := map[string]any{
+		"description": "Read something",
+		"command":     []string{"true"},
+		"inputSchema": map[string]any{
+			"type":                 "object",
+			"properties":           map[string]any{"path": map[string]any{"type": "string"}},
+			"required":             []any{"path"},
+			"additionalProperties": false,
+		},
+		"bindings": []any{map[string]any{"property": "path", "style": "positional"}},
 	}
 	body, err := json.Marshal(map[string]any{
 		"version": 1,
 		"tools": map[string]any{
-			"read":  entry("Read something"),
-			"write": entry("Write something"),
+			"read":  needsPath,
+			"write": entry("Write something", empty),
 		},
 		"availability": map[string]any{
 			"conditions": map[string]any{"writable": map[string]any{"type": "boolean"}},
@@ -133,8 +148,24 @@ func TestFilterKeepsTheEntriesTheRulesLeave(t *testing.T) {
 	if _, err := kept.Plan("write", map[string]any{}); err == nil {
 		t.Error("the filtered catalog planned an entry it dropped")
 	}
-	if _, err := kept.Plan("read", map[string]any{}); err != nil {
+	if _, err := kept.Plan("read", map[string]any{"path": "x"}); err != nil {
 		t.Errorf("planning a kept entry: %v", err)
+	}
+	// A kept entry keeps the schema it was loaded with, so a plan still
+	// refuses the arguments its own manifest forbids.
+	if _, err := kept.Plan("read", map[string]any{}); err == nil {
+		t.Error("the filtered catalog planned a kept entry without its required argument")
+	}
+	keptEntry, ok := kept.Lookup("read")
+	if !ok {
+		t.Fatal("the filtered catalog lost a kept entry's lookup")
+	}
+	loadedEntry, ok := catalog.Lookup("read")
+	if !ok {
+		t.Fatal("the loaded catalog lost the read entry")
+	}
+	if !reflect.DeepEqual(keptEntry.Schema, loadedEntry.Schema) {
+		t.Errorf("the filtered catalog changed the entry's schema: %v", keptEntry.Schema)
 	}
 
 	// A condition the consumer does not supply is an error, never a default.

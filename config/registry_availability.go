@@ -36,8 +36,12 @@ func (r *Runtime) offeredCatalog() *cli.Catalog {
 // can change anything, so a registry that gates nothing offers everything. Once
 // the manifests declare conditions, the rules decide entry by entry, which is
 // how a read-only profile is offered the entries that only read.
+//
+// A profile that offers no tools at all earns none of it: the catalog's tools
+// are the profile's, and a profile with nothing is not one to hand a command
+// runner.
 func (r *Runtime) offeredRegistry(tools []poo.ToolInfo) (*cli.Catalog, error) {
-	if r.loaded == nil {
+	if r.loaded == nil || len(tools) == 0 {
 		return nil, nil
 	}
 	declared := r.loaded.AvailabilityInputs()
@@ -65,7 +69,8 @@ func (r *Runtime) offeredRegistry(tools []poo.ToolInfo) (*cli.Catalog, error) {
 }
 
 // checkRegistryConditions reports the conditions the manifests declare and poo
-// cannot supply.
+// cannot supply, and a supplied condition declared as something other than the
+// type poo sends.
 //
 // The conditions are checked against the whole declared set rather than against
 // one profile's value: what poo can supply is a property of poo, and the answer
@@ -78,6 +83,16 @@ func checkRegistryConditions(declared map[string]string) error {
 		}
 	}
 	if len(unsupplied) == 0 {
+		if typ, ok := declared[ProfileSideEffectingCondition]; ok && typ != "boolean" {
+			return &Error{
+				Code:  CodeUnsupported,
+				Field: "cli_registry.paths",
+				Message: fmt.Sprintf(
+					"the registry declares the availability condition %s as %q, and poo supplies a boolean",
+					ProfileSideEffectingCondition, typ,
+				),
+			}
+		}
 		return nil
 	}
 	sort.Strings(unsupplied)
