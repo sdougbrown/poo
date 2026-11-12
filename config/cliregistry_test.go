@@ -617,6 +617,13 @@ func TestAPromptDirectoriesCatalogLoadsWithoutARegistry(t *testing.T) {
 	if _, err := buildPrompt(t, readOnlyTools(), search.Name, []profile.Profile{search.Profile()}); err == nil || !strings.Contains(err.Error(), "unknown section") {
 		t.Errorf("a binary that links no call_cli accepted catalog.md: %v", err)
 	}
+	// A nil factory is how a binary declares a tool it does not link, so the
+	// section stays unknown to it too.
+	nilCall := theTools()
+	nilCall[cliregistry.CallToolName] = nil
+	if _, err := buildPrompt(t, nilCall, "code", profiles); err == nil || !strings.Contains(err.Error(), "unknown section") {
+		t.Errorf("a binary whose call_cli factory is nil accepted catalog.md: %v", err)
+	}
 }
 
 // gatedBuild builds a session whose settings name the gated registry, with the

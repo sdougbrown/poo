@@ -1646,7 +1646,7 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 	}
 	sources[prompt.ToolSection(profile.JobsToolName)] = nil
 	sources[prompt.ToolSection(profile.CancelJobToolName)] = nil
-	_, linksCall := opts.Tools[cli.CallToolName]
+	linksCall := linksTool(opts, cli.CallToolName)
 	if r.Registry != nil || linksCall {
 		sources[prompt.ToolSection(cli.CallToolName)] = nil
 		sources[prompt.ToolSection(cli.FindToolName)] = nil
