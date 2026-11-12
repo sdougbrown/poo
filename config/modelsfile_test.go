@@ -216,3 +216,62 @@ func TestAModelsFileWithoutProvidersIsARefusal(t *testing.T) {
 		t.Errorf("the refusal was %v, want it to name the empty file", err)
 	}
 }
+
+// TestAModelsFileUnderHomeLoads covers the path the settings may name
+// with a ~: the expansion happens where the settings load, so a
+// pi_models_file of ~/models.json reads the operator's home directory.
+func TestAModelsFileUnderHomeLoads(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "models.json")
+	if err := os.WriteFile(path, []byte(`{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen"}]
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"~/models.json"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("a models file under ~ did not load: %v", err)
+	}
+	if _, ok := settings.Models["home/qwen"]; !ok {
+		t.Errorf("the import did not take the model: %+v", settings.Models)
+	}
+}
+
+// TestAModelsFileThatCannotRunIsARefusal covers the empty fields: a
+// provider with no baseUrl and a model with no id would import into
+// settings that cannot build a transport, so the file is refused where
+// it is read rather than failing later with nothing to point at.
+func TestAModelsFileThatCannotRunIsARefusal(t *testing.T) {
+	cases := map[string]struct {
+		file string
+		want string
+	}{
+		"no base url": {
+			file: `{"providers": {"home": {"models": [{"id": "qwen"}]}}}`,
+			want: "names no baseUrl",
+		},
+		"no model id": {
+			file: `{"providers": {"home": {"baseUrl": "http://grace:4000/v1", "models": [{"id": ""}]}}}`,
+			want: "names a model with no id",
+		},
+		"no models": {
+			file: `{"providers": {"home": {"baseUrl": "http://grace:4000/v1"}}}`,
+			want: "serves no models",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			modelsFile := writePIModels(t, tc.file)
+			_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("the refusal was %v, want it to say %q", err, tc.want)
+			}
+		})
+	}
+}

@@ -114,6 +114,15 @@ func Read(path string) (File, error) {
 	out := File{Providers: make(map[string]Provider, len(names))}
 	for _, name := range names {
 		definition := file.Providers[name]
+		// An endpoint with no URL, or a model with no id, imports into
+		// something that cannot run: it fails later, when its transport
+		// is built, with nothing left to say where it came from.
+		if definition.BaseURL == "" {
+			return File{}, fmt.Errorf("the provider %s names no baseUrl", name)
+		}
+		if len(definition.Models) == 0 {
+			return File{}, fmt.Errorf("the provider %s serves no models", name)
+		}
 		api, err := wireAPI(name, definition.API)
 		if err != nil {
 			return File{}, err
@@ -124,6 +133,9 @@ func Read(path string) (File, error) {
 			APIKey:  definition.APIKey,
 		}
 		for _, model := range definition.Models {
+			if model.ID == "" {
+				return File{}, fmt.Errorf("the provider %s names a model with no id", name)
+			}
 			inputs, err := inputs(name, model.ID, model.Input)
 			if err != nil {
 				return File{}, err
