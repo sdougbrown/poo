@@ -253,10 +253,9 @@ func (m *machine) run() int {
 			if !ok {
 				return m.gone()
 			}
-			if m.state != nil {
-				m.state.flush(m.r)
+			if code, done := m.handleAsk(req, input); done {
+				return code
 			}
-			m.openAsk(req, input)
 		case runID := <-m.esc:
 			m.cancelRun(runID)
 		case res := <-m.lines:
@@ -975,6 +974,40 @@ func settledUsage(payload map[string]any) (input, output int) {
 		return 0, 0
 	}
 	return detail.Usage.InputTokens, detail.Usage.OutputTokens
+}
+
+// handleAsk takes one permission ask. The reader hands events and
+// asks to separate channels, so the main loop's select takes them in
+// whatever order it finds ready: an ask can come up while the deltas
+// that reached the connection before it are still queued. Those drain
+// here first — the reply so far renders whole, above the question,
+// never split by it, and a settle among them ends the run the usual
+// way.
+func (m *machine) handleAsk(req askRequest, input input) (int, bool) {
+	for {
+		select {
+		case evt, ok := <-m.conn.events:
+			if !ok {
+				return m.gone(), true
+			}
+			if m.state == nil {
+				// Nothing of the session's own streams: a job's or a
+				// feed's event is not the conversation.
+				continue
+			}
+			if m.event(evt, m.activeRun(), m.state) {
+				if code, done := m.endRun(input); done {
+					return code, true
+				}
+			}
+		default:
+			if m.state != nil {
+				m.state.flush(m.r)
+			}
+			m.openAsk(req, input)
+			return 0, false
+		}
+	}
 }
 
 // openAsk shows a permission ask. The prompt it shows is the line the
