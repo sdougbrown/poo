@@ -64,10 +64,10 @@ func TestTheSettingsSchemaTakesTheCoreLevels(t *testing.T) {
 			t.Errorf("the schema's pattern refuses the wire level %q", level)
 		}
 	}
-	for _, name := range []string{"minimal", "low", "medium", "high", "xhigh"} {
-		if !slices.Contains(ReasoningLevelNames, name) {
-			t.Errorf("the schema's pattern accepts %q, which the core does not know", name)
-		}
+	// The pattern has to refuse what the core refuses, not just accept
+	// what it accepts: a word that is neither a level nor a budget.
+	if re.MatchString("bogus") {
+		t.Errorf("the schema's pattern accepts %q, which the core does not know", "bogus")
 	}
 	// The budget arm takes positive numbers only: ParseReasoning refuses a
 	// zero budget, and a pattern that accepted it would load a setting the

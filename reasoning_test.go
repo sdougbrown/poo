@@ -134,6 +134,12 @@ func TestASwitchTakesTheLevelBack(t *testing.T) {
 	shallow.Reasoning = poo.ReasoningControl{Mode: poo.ReasoningEffort, Param: poo.ReasoningPathEffort}
 	shallow.ReasoningLevels = []string{"off", "medium"}
 
+	// budgetOnly controls its reasoning with a token budget and declares
+	// no levels: a named level is not something it can be sent, so a
+	// switch to it has to take the level back.
+	budgetOnly := chatModel("budget-only", 32768)
+	budgetOnly.Reasoning = poo.ReasoningControl{Mode: poo.ReasoningBudget, Param: poo.ReasoningPathBudget}
+
 	plain := chatModel("plain", 32768)
 
 	cases := []struct {
@@ -145,6 +151,10 @@ func TestASwitchTakesTheLevelBack(t *testing.T) {
 		{name: "a model that takes off", to: shallow, level: "high", want: "off"},
 		{name: "a model that cannot be told off", to: narrow, level: "low", want: "medium"},
 		{name: "a model that controls no reasoning", to: plain, level: "high", want: ""},
+		// A model with a control but no declared levels refuses the
+		// name the session carried: every request after the switch would
+		// be a configuration error if the level were left behind.
+		{name: "a budget model that declares no levels", to: budgetOnly, level: "high", want: "off"},
 		{name: "a level the new model takes stays", to: thinkingModel("other"), level: "low", want: "low"},
 	}
 	for _, test := range cases {
