@@ -645,16 +645,16 @@ func TestTheLevellessModelClimbsTheProtocolLevels(t *testing.T) {
 	}
 	m.status.model = "plain"
 
-	if got := m.nextThinkingLevel(); got != "off" {
-		t.Errorf("the first level is %q, want off", got)
+	if got, ok := m.nextThinkingLevel(); !ok || got != "off" {
+		t.Errorf("the first level is %q (ok %v), want off", got, ok)
 	}
 	m.status.level = "off"
-	if got := m.nextThinkingLevel(); got != "minimal" {
-		t.Errorf("the level after off is %q, want minimal", got)
+	if got, ok := m.nextThinkingLevel(); !ok || got != "minimal" {
+		t.Errorf("the level after off is %q (ok %v), want minimal", got, ok)
 	}
 	m.status.level = "xhigh"
-	if got := m.nextThinkingLevel(); got != "off" {
-		t.Errorf("the level after xhigh is %q, want off", got)
+	if got, ok := m.nextThinkingLevel(); !ok || got != "off" {
+		t.Errorf("the level after xhigh is %q (ok %v), want off", got, ok)
 	}
 }
 
@@ -787,5 +787,36 @@ func TestTheShiftTabBindingReachesTheCycle(t *testing.T) {
 	// behind names the level the cycle reached.
 	if !strings.Contains(screen.String(), "🧠 off") {
 		t.Errorf("the statusline names no level:\n%s", screen.String())
+	}
+}
+
+// TestAModelWithoutALevelCycleSaysWhatToType covers the models a level
+// cycle cannot climb: one whose reasoning is a token budget, and one
+// whose reasoning cannot be moved. The repl says what to type instead of
+// proposing a level the server refuses on every press, and sends no
+// configure at all.
+func TestAModelWithoutALevelCycleSaysWhatToType(t *testing.T) {
+	for _, tc := range []struct {
+		model string
+		mode  string
+		want  string
+	}{
+		{"budgeter", "budget", "/thinking <tokens>"},
+		{"nothing", "none", "does not control its reasoning"},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			server := &fakeServer{t: t, extraModels: []map[string]any{{
+				"name": tc.model, "model_id": tc.model, "context_limit": 8192, "reasoning_mode": tc.mode,
+			}}}
+			out, server := startReplServer(t, "/model "+tc.model+"\n/thinking\n/quit\n", server)
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("the transcript lacks %q:\n%s", tc.want, out)
+			}
+			server.mu.Lock()
+			defer server.mu.Unlock()
+			if len(server.levels) != 0 {
+				t.Errorf("the repl sent the levels %v, want none", server.levels)
+			}
+		})
 	}
 }

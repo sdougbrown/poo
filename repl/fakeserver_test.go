@@ -34,6 +34,9 @@ type fakeServer struct {
 	closed bool
 	// cancels are the run ids the client's cancels named, in order.
 	cancels []string
+	// extraModels are catalog entries the shared three do not carry, for
+	// a test about a model whose reasoning control differs.
+	extraModels []map[string]any
 	// refusePrompt makes run/prompt refuse, for the refusal tests.
 	refusePrompt bool
 	askSummary   string
@@ -142,24 +145,25 @@ func (s *fakeServer) line(line []byte) {
 			"broken":    false,
 		})
 	case protocol.MethodModelsList:
-		s.reply(req.ID, map[string]any{
-			"models": []map[string]any{
-				// gemma4 takes three levels, and qwen takes two it does
-				// not share: a switch is where the two disagree. mystery
-				// cannot be told off: a switch to it is where the level's
-				// fallback shows.
-				{"name": "gemma4", "model_id": "gemma4", "context_limit": 262144, "reasoning_levels": []string{"off", "low", "high"}},
-				{"name": "qwen", "model_id": "qwen", "context_limit": 131072, "reasoning_levels": []string{"off", "medium"}},
-				{"name": "mystery", "model_id": "mystery", "context_limit": 8192, "reasoning_levels": []string{"low", "high"}},
-			},
-		})
+		models := []map[string]any{
+			// gemma4 takes three levels, and qwen takes two it does
+			// not share: a switch is where the two disagree. mystery
+			// cannot be told off: a switch to it is where the level's
+			// fallback shows.
+			{"name": "gemma4", "model_id": "gemma4", "context_limit": 262144, "reasoning_levels": []string{"off", "low", "high"}},
+			{"name": "qwen", "model_id": "qwen", "context_limit": 131072, "reasoning_levels": []string{"off", "medium"}},
+			{"name": "mystery", "model_id": "mystery", "context_limit": 8192, "reasoning_levels": []string{"low", "high"}},
+		}
+		models = append(models, s.extraModels...)
+		s.reply(req.ID, map[string]any{"models": models})
 	case protocol.MethodSessionConfigure:
 		var params protocol.ConfigureParams
 		json.Unmarshal(req.Params, &params)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if params.Models != nil && params.Models.Chat != "" {
-			if _, ok := fakeLevels[params.Models.Chat]; !ok {
+			levels, ok := s.catalogLevels(params.Models.Chat)
+			if !ok {
 				s.fail(req.ID, "unknown_model", "poo: the session's model is unknown")
 				return
 			}
@@ -169,7 +173,6 @@ func (s *fakeServer) line(line []byte) {
 			// new model can run: off when the model declares it, its lowest
 			// declared level when it cannot be told off.
 			if !s.acceptsLocked(s.level) {
-				levels := fakeLevels[s.chat]
 				s.level = "off"
 				if len(levels) > 0 && !slices.Contains(levels, "off") {
 					s.level = levels[0]
@@ -181,7 +184,8 @@ func (s *fakeServer) line(line []byte) {
 			// runs at, so a client that typed High reads high back.
 			level := strings.ToLower(strings.TrimSpace(params.Reasoning))
 			if !s.acceptsLocked(level) {
-				s.fail(req.ID, "invalid_params", "the model \""+s.chat+"\" takes the levels "+strings.Join(fakeLevels[s.chat], ", "))
+				accepted, _ := s.catalogLevels(s.chat)
+				s.fail(req.ID, "invalid_params", "the model \""+s.chat+"\" takes the levels "+strings.Join(accepted, ", "))
 				return
 			}
 			s.level = level
@@ -230,6 +234,22 @@ var fakeLevels = map[string][]string{
 	"hidden": {},
 }
 
+// catalogLevels returns the levels the named model takes, and whether
+// the catalog holds it: the shared three, plus any entry a test added.
+func (s *fakeServer) catalogLevels(name string) ([]string, bool) {
+	if levels, ok := fakeLevels[name]; ok {
+		return levels, true
+	}
+	for _, model := range s.extraModels {
+		if model["name"] != name {
+			continue
+		}
+		levels, _ := model["reasoning_levels"].([]string)
+		return levels, true
+	}
+	return nil, false
+}
+
 // acceptsLocked reports whether the session's model takes a level.
 //
 // The caller holds the server's lock.
@@ -237,8 +257,9 @@ func (s *fakeServer) acceptsLocked(level string) bool {
 	if level == "" {
 		return true
 	}
-	for _, accepted := range fakeLevels[s.chat] {
-		if accepted == level {
+	accepted, _ := s.catalogLevels(s.chat)
+	for _, candidate := range accepted {
+		if candidate == level {
 			return true
 		}
 	}

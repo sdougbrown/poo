@@ -827,4 +827,12 @@ func TestTheCatalogAnnouncesTheReasoningLevels(t *testing.T) {
 	if got := byName["plain-model"].ReasoningLevels; len(got) != 0 {
 		t.Errorf("the catalog announces the levels %v for a model that declares none", got)
 	}
+	// The mode is what a client reads to know whether a model without
+	// declared levels has anything to cycle: a budget model does not.
+	if got := byName["chat-model"].ReasoningMode; got != string(poo.ReasoningEffort) {
+		t.Errorf("the catalog announces the mode %q for chat-model, want effort", got)
+	}
+	if got := byName["plain-model"].ReasoningMode; got != string(poo.ReasoningNone) {
+		t.Errorf("the catalog announces the mode %q for a model that controls nothing, want none", got)
+	}
 }

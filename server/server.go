@@ -600,6 +600,13 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 	models := runtime.Catalog.List()
 	out := make([]protocol.ModelInfo, 0, len(models))
 	for _, model := range models {
+		// A model that says nothing about its reasoning control is one
+		// that cannot move: the catalog says so rather than leaving a
+		// client to read the empty string either way.
+		mode := model.Reasoning.Mode
+		if mode == "" {
+			mode = poo.ReasoningNone
+		}
 		out = append(out, protocol.ModelInfo{
 			Name:            model.Name,
 			ModelID:         model.ModelID,
@@ -610,6 +617,7 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 			MaxOutput:       model.MaxOutput,
 			ToolsMode:       string(model.Tools.Mode),
 			ReasoningLevels: model.ReasoningLevels,
+			ReasoningMode:   string(mode),
 		})
 	}
 	return out, nil
