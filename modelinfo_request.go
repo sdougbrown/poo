@@ -262,15 +262,22 @@ func (m ModelInfo) reasoningPath(fallback string) string {
 // does take, so a client can offer them.
 func (m ModelInfo) CheckReasoning(level string) error {
 	setting := strings.ToLower(strings.TrimSpace(level))
-	if _, ok := m.declaredLevel(setting); ok {
-		return nil
-	}
+	// A declared level is the model's own list, and it still has to be
+	// one the model's control can send: a budget model that declares a
+	// name would pass a check that stopped here and then be refused when
+	// the run builds its fields.
 	if levels := m.ReasoningLevels; len(levels) > 0 {
-		return &ConfigError{
-			Field: "reasoning.chat",
-			Message: fmt.Sprintf("%q is not a reasoning level for %s: it takes %s",
-				level, modelLabel(m), strings.Join(levels, ", ")),
+		if _, ok := m.declaredLevel(setting); !ok {
+			return &ConfigError{
+				Field: "reasoning.chat",
+				Message: fmt.Sprintf("%q is not a reasoning level for %s: it takes %s",
+					level, modelLabel(m), strings.Join(levels, ", ")),
+			}
 		}
+		if _, err := m.ReasoningFields(setting); err != nil {
+			return err
+		}
+		return nil
 	}
 	parsed, err := ParseReasoning(setting)
 	if err != nil {
