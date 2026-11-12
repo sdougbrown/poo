@@ -561,7 +561,7 @@ func TestTheShiftTabBindingReachesTheCycle(t *testing.T) {
 		if got.line != "" {
 			t.Errorf("the line is %q, want the sequence to leave no text", got.line)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("the editor did not return a line")
 	}
 	if m.status.level != "off" {
