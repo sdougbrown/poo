@@ -40,13 +40,13 @@ func TestTheStatuslineLeavesOutWhatItDoesNotKnow(t *testing.T) {
 	}
 }
 
-// TestThePromptReadsBehindTheStatusline covers the prompt: the status
-// is the line above, and the mark is the line the typing goes to.
+// TestThePromptReadsBehindTheStatusline keeps the readline prompt on one
+// line, so editing does not redraw the status on every keystroke.
 func TestThePromptReadsBehindTheStatusline(t *testing.T) {
 	s := &status{dir: "/home/me/Code/poo", model: "gemma4"}
 	prompt := s.prompt()
-	if !strings.HasSuffix(prompt, "\n💩❯ ") {
-		t.Errorf("the prompt does not end at the mark: %q", prompt)
+	if strings.Contains(prompt, "\n") || !strings.HasSuffix(prompt, promptMark) {
+		t.Errorf("the prompt must fit on one line: %q", prompt)
 	}
 	if !strings.Contains(prompt, "poo") {
 		t.Errorf("the prompt carries no status: %q", prompt)

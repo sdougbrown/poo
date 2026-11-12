@@ -44,10 +44,11 @@ on the defaults, and the flags change them.
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as
 markdown with highlighted code blocks, tool calls and results as
-decorated blocks, and a statusline over the input with the folder,
-the git branch, the model and the context's fill. Input reads with vi
-keys at a terminal, `/less` shows the transcript again through `less
--R`, and a permission ask reads its decision from the same input. The
+decorated blocks, and a statusline with the folder, git branch, model,
+and context fill. Input reads with vi keys at a terminal. Press Esc to
+stop a turn; Ctrl-C clears typed input or exits when the prompt is empty.
+`/less` shows the transcript through `less -R`, and permission asks use
+`y/n`. The
 repl holds no run loop of its own: it is a wire client, and the
 server runs the session.
 
