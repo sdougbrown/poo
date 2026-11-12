@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chzyer/readline"
+	"github.com/sdougbrown/poo/wire/protocol"
 )
 
 // startRepl starts the repl against a fresh fake server. The script
@@ -141,6 +142,14 @@ func (s *fakeServer) waitCancels(t *testing.T, want int) []string {
 	defer s.mu.Unlock()
 	t.Fatalf("the server got %d cancels, want %d: %v", len(s.cancels), want, s.cancels)
 	return nil
+}
+
+func TestUsageUpdatesTheStatus(t *testing.T) {
+	m := &machine{status: &status{contextLimit: 262144}}
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"input_tokens": 12300}}, &runState{}, &streamView{})
+	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
+		t.Fatalf("the prompt lacks the run's usage: %s", prompt)
+	}
 }
 
 func TestCtrlCClearsWhitespace(t *testing.T) {
