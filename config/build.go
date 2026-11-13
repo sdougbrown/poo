@@ -589,7 +589,7 @@ func (r *Runtime) modelReadsImages() bool {
 	if err != nil {
 		return false
 	}
-	return slices.Contains(model.Inputs, poo.ModalityImage)
+	return model.ReadsImages()
 }
 
 // offersSearch reports whether the session offers the search over the catalog.

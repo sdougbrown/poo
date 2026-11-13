@@ -810,9 +810,14 @@ func (s *Session) toolEnv(run *runState, turn int, handle string, plan callPlan)
 // caller: the seam belongs to a call in the turn, and a job's nested
 // calls would outlive the result they belong to.
 func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
+	// The model is swapped under the session's lock while a background job
+	// may be starting a call, so the snapshot is taken under it too.
+	s.mu.Lock()
+	model := s.opts.Model
+	s.mu.Unlock()
 	return ToolEnv{
 		PrepareEnv: s.prepareEnv(),
-		Model:      s.opts.Model,
+		Model:      model,
 		SessionID:  s.opts.SessionID,
 		RunID:      runID,
 		Handle:     handle,

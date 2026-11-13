@@ -14,7 +14,6 @@ import (
 	_ "image/png"
 	"log/slog"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1071,7 +1070,7 @@ func (s *Session) modelMessagesLocked() []Message {
 	// omission is on the switch record; an image's is not, because the
 	// model's own inputs say why it was left out.
 	messages = stripForeignBlocks(messages, s.opts.Model.API)
-	messages = stripUnreadableImages(messages, s.opts.Model.Inputs)
+	messages = stripUnreadableImages(messages, s.opts.Model)
 	return CloneMessages(messages)
 }
 
@@ -1081,8 +1080,8 @@ func (s *Session) modelMessagesLocked() []Message {
 // A model swapped in mid-session need not read them, and neither does a
 // session restored under one. The history keeps the pictures, so a switch
 // back sends them again.
-func stripUnreadableImages(messages []Message, inputs []Modality) []Message {
-	if slices.Contains(inputs, ModalityImage) {
+func stripUnreadableImages(messages []Message, model ModelInfo) []Message {
+	if model.ReadsImages() {
 		return messages
 	}
 	out := make([]Message, 0, len(messages))

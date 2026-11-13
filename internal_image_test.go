@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"sync"
 	"testing"
 )
 
@@ -75,11 +76,11 @@ func TestAModelThatCannotReadImagesIsSentNone(t *testing.T) {
 	messages := []Message{ToolResultMessage("c1", "read", "read: shot.png", false,
 		[]Image{{MediaType: "image/png", Data: []byte{1}}})}
 
-	kept := stripUnreadableImages(messages, []Modality{ModalityText, ModalityImage})
+	kept := stripUnreadableImages(messages, ModelInfo{Inputs: []Modality{ModalityText, ModalityImage}})
 	if len(kept[0].Content) != 2 {
 		t.Fatalf("a model that reads images lost the picture: %+v", kept[0].Content)
 	}
-	stripped := stripUnreadableImages(messages, []Modality{ModalityText})
+	stripped := stripUnreadableImages(messages, ModelInfo{Inputs: []Modality{ModalityText}})
 	if len(stripped[0].Content) != 1 {
 		t.Fatalf("a model that reads text kept %d blocks, want the result alone", len(stripped[0].Content))
 	}
@@ -106,4 +107,41 @@ func TestAnImageOfAnUnknownTypeIsLeftOut(t *testing.T) {
 	if msg.Content[1].MediaType != "image/png" {
 		t.Errorf("the kept picture is %q, want image/png", msg.Content[1].MediaType)
 	}
+}
+
+// TestAModelSwitchRacesTheCallEnvironment covers the snapshot: a background
+// job builds its environment while a switch may be writing the model, so the
+// read is taken under the same lock. Run under -race, an unsynchronized read
+// fails here.
+func TestAModelSwitchRacesTheCallEnvironment(t *testing.T) {
+	s, err := New(Options{
+		SessionID: "s1",
+		Transport: stubTransport{},
+		Model:     ModelInfo{Name: "m", ModelID: "m", Endpoint: "test", API: APIChatCompletions, Ops: []Op{OpChat}, ContextLimit: 8192},
+	})
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			_ = s.toolEnvFor("r1", "r1")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			_, _ = s.SetModel(ModelInfo{
+				Name:   "m2",
+				API:    APIChatCompletions,
+				Ops:    []Op{OpChat},
+				Inputs: []Modality{ModalityText, ModalityImage},
+			})
+		}
+	}()
+	wg.Wait()
 }

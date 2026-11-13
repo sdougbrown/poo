@@ -14,7 +14,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -204,7 +203,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 // that names no model.
 func (t *Tool) readsImages(env poo.ToolEnv) bool {
 	if env.Model.Inputs != nil {
-		return slices.Contains(env.Model.Inputs, poo.ModalityImage)
+		return env.Model.ReadsImages()
 	}
 	return t.images
 }

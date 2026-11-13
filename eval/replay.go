@@ -335,6 +335,7 @@ func replayJobResults(log *Log) []poo.JobResult {
 				Outcome: poo.Outcome(r.Outcome),
 				InputID: r.InputID,
 				Text:    r.Text,
+				Images:  r.Images,
 				Fatal:   r.Fatal,
 			})
 		}
