@@ -9,8 +9,15 @@ permissions:
   contents: read
 
 jobs:
+  # A tag can point at a commit CI never saw, so the release gate is the
+  # same workflow CI runs, not a second copy of it.
+  checks:
+    name: Checks
+    uses: ./.github/workflows/checks.yml
+
   release:
     name: Release
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,56 +32,11 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install bubblewrap
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
-          # The sandbox needs unprivileged user namespaces. Ubuntu 24.04
-          # restricts them for unprivileged binaries, and the knob is
-          # absent on the kernels that do not.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-
-      # A tag ships only a state CI would pass: the same checks as ci.yml,
-      # because a tag can point at a commit CI never saw.
-      - name: Vet
-        run: go vet ./...
-
-      - name: Format
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "These files are not gofmt'd:" >&2
-            echo "$unformatted" >&2
-            exit 1
-          fi
-
-      - name: Prompt lint
-        run: ./scripts/lint-prompts.sh
-
-      - name: Test
-        run: go test -race ./...
-
-      - name: Conformance
-        run: go test -race -run TestTheBinary ./cmd/poo/
-
-      - name: Conformance in the sandbox
-        env:
-          POO_CONFORMANCE_EXECUTOR: bwrap
-        run: go test -race -run TestTheBinarySpeaksTheProtocol ./cmd/poo/
-
-      - name: Staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
-
-      - name: Build every release target
-        run: |
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
-            echo "building ${target}"
-            GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build ./...
-          done
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
+          distribution: goreleaser
+          version: '~> v2'
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
