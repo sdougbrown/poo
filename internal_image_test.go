@@ -91,3 +91,19 @@ func TestAModelThatCannotReadImagesIsSentNone(t *testing.T) {
 		t.Error("stripping mutated the history")
 	}
 }
+
+// TestAnImageOfAnUnknownTypeIsLeftOut covers the allowlist: a block whose
+// media type no provider accepts is not carried, so a mislabelled picture
+// cannot fail every request the history holds.
+func TestAnImageOfAnUnknownTypeIsLeftOut(t *testing.T) {
+	msg := ToolResultMessage("c1", "read", "read: x.bmp", false, []Image{
+		{MediaType: "image/bmp", Data: []byte{1}},
+		{MediaType: "image/png", Data: []byte{2}},
+	})
+	if len(msg.Content) != 2 {
+		t.Fatalf("the message holds %d blocks, want the result and one picture", len(msg.Content))
+	}
+	if msg.Content[1].MediaType != "image/png" {
+		t.Errorf("the kept picture is %q, want image/png", msg.Content[1].MediaType)
+	}
+}

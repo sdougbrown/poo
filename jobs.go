@@ -129,6 +129,9 @@ type JobEndedRecord struct {
 	InputID string `json:"input_id"`
 	// Text is the result the model reads.
 	Text string `json:"text"`
+	// Images are the pictures the result carries, so a held result is still
+	// a picture after a restart.
+	Images []Image `json:"images,omitempty"`
 	// Fatal reports that the job failed with an error that wraps
 	// ErrFatal. A run that receives the result settles tool_fatal.
 	Fatal bool `json:"fatal,omitempty"`
@@ -686,6 +689,7 @@ func (s *Session) jobEnded(job *jobState, inputID string, outcome Outcome, cause
 		Fatal:      fatal,
 		InputID:    inputID,
 		Text:       text,
+		Images:     out.result.Images,
 		Redacted:   out.redacted,
 		RedactedBy: out.redactedBy,
 		Hooks:      out.decisions,
@@ -770,7 +774,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 		runID:   runID,
 		outcome: jobOutcome,
 		text:    text,
-		images:  out.result.Images,
+		images:  cloneImages(out.result.Images),
 		fatal:   fatal,
 	})
 }
@@ -832,7 +836,7 @@ func (s *Session) QueueJobResult(result JobResult) {
 		tool:    result.Tool,
 		outcome: jobOutcomeOf(result.Outcome),
 		text:    result.Text,
-		images:  result.Images,
+		images:  cloneImages(result.Images),
 		fatal:   result.Fatal,
 		origin:  result.Origin,
 	})
@@ -1452,6 +1456,7 @@ func publicJobResults(results []jobResult) []JobResult {
 			Handle:  r.handle,
 			Tool:    r.tool,
 			Text:    r.text,
+			Images:  r.images,
 			Outcome: jobOutcomeToCallOutcome(r.outcome),
 			Fatal:   r.fatal,
 		})

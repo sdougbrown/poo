@@ -273,13 +273,29 @@ func ToolResultMessage(id, name, text string, isError bool, images []Image) Mess
 	}
 }
 
+// imageMediaTypes are the media types a block may carry: the four providers
+// accept, which are the four the read tool recognises.
+var imageMediaTypes = map[string]bool{
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/gif":  true,
+	"image/webp": true,
+}
+
 // imageBlocks renders images as content blocks, in order.
+//
+// An image whose media type no provider accepts is left out: a data URL the
+// provider refuses would fail every request the history carries, and a tool
+// that mislabels a picture is not a reason to stop a run.
 func imageBlocks(images []Image) []ContentBlock {
 	if len(images) == 0 {
 		return nil
 	}
 	blocks := make([]ContentBlock, 0, len(images))
 	for _, image := range images {
+		if !imageMediaTypes[image.MediaType] {
+			continue
+		}
 		blocks = append(blocks, ContentBlock{
 			Kind:      ContentImage,
 			MediaType: image.MediaType,
@@ -287,6 +303,21 @@ func imageBlocks(images []Image) []ContentBlock {
 		})
 	}
 	return blocks
+}
+
+// cloneImages returns a copy that owns its bytes.
+func cloneImages(images []Image) []Image {
+	if images == nil {
+		return nil
+	}
+	out := make([]Image, len(images))
+	for i, image := range images {
+		out[i] = image
+		if image.Data != nil {
+			out[i].Data = append([]byte(nil), image.Data...)
+		}
+	}
+	return out
 }
 
 // ToolCall is a request from the model to run a tool.

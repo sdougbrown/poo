@@ -340,6 +340,9 @@ func (s *Session) rewriteViewLocked(rewrites []ToolResultRewrite) (compactionVie
 		rw := rewrites[i]
 		result := s.results[rw.Handle]
 		result.Text = rw.Content
+		// The message dropped the picture, so the result the view reads
+		// must not keep it.
+		result.Images = nil
 		results[rw.Handle] = result
 	}
 	return compactionView{

@@ -254,3 +254,47 @@ func lastJobEnd(sink *recordingSink) *poo.JobEndedRecord {
 	}
 	return last
 }
+
+// TestARestoredHeldResultKeepsItsImage covers the restart: a held result's
+// picture is on the record, so a restored session still delivers a picture
+// rather than text that names one.
+func TestARestoredHeldResultKeepsItsImage(t *testing.T) {
+	image := poo.Image{MediaType: "image/png", Data: []byte{1, 2, 3, 4}}
+	records := []poo.Record{
+		jobHeader("s1"),
+		&poo.JobEndedRecord{
+			RecordMeta: poo.NewRecordMeta("job.ended"),
+			SessionID:  "s1",
+			JobID:      "j1",
+			Handle:     "r1",
+			Tool:       "job",
+			RunID:      "r1",
+			Outcome:    poo.OutcomeOK,
+			InputID:    "s1-ji1",
+			Text:       "read: shot.png (image, 4 bytes)",
+			Images:     []poo.Image{image},
+			EndedAt:    "2026-01-01T00:00:01Z",
+		},
+	}
+	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	opts := jobOptions(t, tr, tool, &recordingSink{})
+	session, restored, err := poo.Restore(opts, records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+
+	if len(restored.Jobs) != 1 {
+		t.Fatalf("the restored session lists %d results, want one", len(restored.Jobs))
+	}
+	if len(restored.Jobs[0].Images) != 1 {
+		t.Fatalf("the restored result carries %d images, want one", len(restored.Jobs[0].Images))
+	}
+	if restored.Jobs[0].Images[0].MediaType != image.MediaType {
+		t.Errorf("the restored image is %q, want %q", restored.Jobs[0].Images[0].MediaType, image.MediaType)
+	}
+	if string(restored.Jobs[0].Images[0].Data) != string(image.Data) {
+		t.Errorf("the restored bytes are %v, want %v", restored.Jobs[0].Images[0].Data, image.Data)
+	}
+}

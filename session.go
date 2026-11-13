@@ -1067,8 +1067,9 @@ func (s *Session) modelMessagesLocked() []Message {
 		messages = append(messages, msg)
 	}
 	// What the current model cannot read is left out of the request: the
-	// history keeps it, and a switch that brought a narrower model
-	// recorded the omission.
+	// history keeps it, so a switch back sends it again. A provider block's
+	// omission is on the switch record; an image's is not, because the
+	// model's own inputs say why it was left out.
 	messages = stripForeignBlocks(messages, s.opts.Model.API)
 	messages = stripUnreadableImages(messages, s.opts.Model.Inputs)
 	return CloneMessages(messages)
