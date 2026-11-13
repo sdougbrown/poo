@@ -58,6 +58,28 @@ jobs:
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
+  cross:
+    name: Cross-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # A release ships linux and darwin builds, so every target the
+      # goreleaser config names compiles here. A Linux-only syscall in a
+      # shared file would otherwise surface only at tag time.
+      - name: Build every release target
+        run: |
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            echo "building ${target}"
+            GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 go build ./...
+          done
+
   executors:
     name: Executors (bubblewrap)
     runs-on: ubuntu-latest
