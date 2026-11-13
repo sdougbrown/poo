@@ -45,3 +45,6 @@ evals/runs/
 
 # The poo binary, built at the repo root by `go build ./cmd/poo`
 /poo
+
+# GoReleaser output
+/dist/
