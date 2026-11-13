@@ -12,8 +12,6 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
-
-	"github.com/sdougbrown/poo/config/internal/piimport"
 )
 
 // Format is a settings file's format.
@@ -48,12 +46,16 @@ func FormatFor(path string) Format {
 //
 // The file's name says its format. A file that does not decode, or
 // that holds a key the settings do not have, is a failure.
+//
+// The file's own directory answers for its relative paths: a models_file
+// resolves against it, and a models.json beside the settings file is imported
+// when the settings name none.
 func Load(path string) (*Settings, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: reading %s: %w", path, err)
 	}
-	settings, err := Parse(data, FormatFor(path))
+	settings, err := parse(data, FormatFor(path), filepath.Dir(path))
 	if err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
 	}
@@ -64,7 +66,21 @@ func Load(path string) (*Settings, error) {
 //
 // The document is normalized to JSON and decoded strictly: an unknown
 // key is an error, and so is a key of the wrong shape.
+//
+// A document held in memory has no directory of its own, so a relative
+// models_file resolves against the working directory, and no models file is
+// discovered beside it. Load is the reader that knows where the file came
+// from.
 func Parse(data []byte, format Format) (*Settings, error) {
+	return parse(data, format, "")
+}
+
+// parse decodes and checks one document.
+//
+// dir is the directory the document was read from, and empty for a document
+// that was not read from a file: a models file beside it is imported when the
+// settings name none, so a document with no directory discovers nothing.
+func parse(data []byte, format Format, dir string) (*Settings, error) {
 	normalized, err := Normalize(data, format)
 	if err != nil {
 		return nil, err
@@ -75,6 +91,9 @@ func Parse(data []byte, format Format) (*Settings, error) {
 	// The base_url key on an endpoint was renamed to endpoint; a
 	// settings file that predates the rename still loads.
 	normalized = aliasEndpointKey(normalized, "base_url", "endpoint")
+	// The pi_models_file key was renamed to models_file: the file's shape is
+	// pi's, and the setting's name is poo's.
+	normalized = aliasKey(normalized, "pi_models_file", "models_file")
 	var settings Settings
 	decoder := json.NewDecoder(bytes.NewReader(normalized))
 	decoder.DisallowUnknownFields()
@@ -82,21 +101,8 @@ func Parse(data []byte, format Format) (*Settings, error) {
 		return nil, decodeError(err)
 	}
 	settings.Permission.askersNamed = namesAskers(normalized)
-	// A models file in pi's format fills the endpoints and models the
-	// settings do not already hold, so the catalog resolves those
-	// models the way it resolves the settings' own.
-	if settings.PIModelsFile != "" {
-		path, err := expandHome(settings.PIModelsFile)
-		if err != nil {
-			return nil, err
-		}
-		file, err := piimport.Read(path)
-		if err != nil {
-			// The reader names the file it read; the settings field that
-			// named it is what a caller branches on.
-			return nil, &Error{Code: CodeInvalid, Field: "pi_models_file", Err: err}
-		}
-		settings.applyModelsFile(file)
+	if err := settings.importModelsFile(dir); err != nil {
+		return nil, err
 	}
 	if err := settings.Check(); err != nil {
 		return nil, err

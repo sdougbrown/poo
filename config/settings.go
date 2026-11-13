@@ -64,16 +64,18 @@ type Settings struct {
 	// binary launches. The name is one the binary links; a binary
 	// without the named interface shows its usage.
 	UI string `json:"ui,omitempty"`
-	// PIModelsFile is a models file in pi's format: providers with
-	// their models, imported under names of the form provider/id. The
-	// compatibility is the file shapes alone — the file is wherever
-	// the operator keeps it, and poo reads no pi installation. The
-	// settings' own endpoints and models win on a name collision.
-	// A provider whose apiKey the file leaves no usable key for takes
-	// the key out of the auth.json beside the models file, in the same
-	// shape pi keeps its credentials, when that file holds an api
-	// credential for the provider.
-	PIModelsFile string `json:"pi_models_file,omitempty"`
+	// ModelsFile names a models file — providers, each with its models —
+	// that the settings import under names of the form provider/id. The
+	// file's shape is the one pi writes, and that shape is the whole
+	// compatibility: poo reads the file the settings name, and no pi
+	// installation. The settings' own endpoints and models win on a name
+	// collision. A provider whose apiKey the file leaves no usable key for
+	// takes the key out of the auth.json beside that file, when the file
+	// holds an api credential for the provider.
+	//
+	// A relative path resolves against the settings file's own directory. With
+	// none named, a models.json beside the settings file is imported.
+	ModelsFile string `json:"models_file,omitempty"`
 }
 
 // Endpoint is one endpoint in the settings.

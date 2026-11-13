@@ -14,7 +14,7 @@ func fieldsOf(s *Settings) SettingsFields {
 
 	f.Version = number(float64(s.Version))
 	f.Ui = text(s.UI)
-	f.PiModelsFile = text(s.PIModelsFile)
+	f.ModelsFile = text(s.ModelsFile)
 	f.Profile = text(s.Profile)
 
 	f.RolesChat = text(s.Roles["chat"])

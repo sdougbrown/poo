@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,7 +51,7 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 			}
 		}
 	}`)
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestTheSettingsOwnEntriesWinOverAnImport(t *testing.T) {
 	}`)
 	settings, err := Parse([]byte(`{
 		"version":1,
-		"pi_models_file":"`+modelsFile+`",
+		"models_file":"`+modelsFile+`",
 		"endpoints":{"home":{"endpoint":"http://mine:4000/v1"}},
 		"models":{"home/qwen":{"endpoint":"home","model_id":"qwen","context_limit":1000}}
 	}`), FormatJSON)
@@ -124,7 +125,7 @@ func TestPIImportRefusesUnsupportedAPIs(t *testing.T) {
 	for _, api := range []string{"openai-responses", "anthropic-messages"} {
 		t.Run(api, func(t *testing.T) {
 			modelsFile := writePIModels(t, `{"providers":{"remote":{"api":"`+api+`","baseUrl":"https://example.com","models":[{"id":"model"}]}}}`)
-			_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+			_, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 			if err == nil || !strings.Contains(err.Error(), api) {
 				t.Fatalf("unsupported API %q was not refused: %v", api, err)
 			}
@@ -161,7 +162,7 @@ func TestAThinkingLevelMapBecomesTheModelSLevels(t *testing.T) {
 			}
 		}
 	}`)
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestAnUnknownPIAPPIsARefusal(t *testing.T) {
 			}
 		}
 	}`)
-	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	_, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err == nil || !strings.Contains(err.Error(), "smoke-signals") {
 		t.Errorf("an unknown api loaded: %v", err)
 	}
@@ -213,16 +214,16 @@ func TestAnUnknownPIInputIsARefusal(t *testing.T) {
 			}
 		}
 	}`)
-	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	_, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err == nil || !strings.Contains(err.Error(), "smell") {
 		t.Errorf("an unknown input loaded: %v", err)
 	}
 }
 
-// TestAMissingPIModelsFileIsARefusal covers a file that is not there:
+// TestAMissingModelsFileIsARefusal covers a file that is not there:
 // the settings name it, so a missing file is the settings' failure.
-func TestAMissingPIModelsFileIsARefusal(t *testing.T) {
-	_, err := Parse([]byte(`{"version":1,"pi_models_file":"/tmp/no-such-models.json"}`), FormatJSON)
+func TestAMissingModelsFileIsARefusal(t *testing.T) {
+	_, err := Parse([]byte(`{"version":1,"models_file":"/tmp/no-such-models.json"}`), FormatJSON)
 	if err == nil || !strings.Contains(err.Error(), "no-such-models") {
 		t.Errorf("a missing models file loaded: %v", err)
 	}
@@ -241,7 +242,7 @@ func TestAModelThatDoesNotReasonTakesNoControl(t *testing.T) {
 			}
 		}
 	}`)
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
@@ -263,7 +264,7 @@ func TestAnImportWithoutTheEffortCompatStaysDefault(t *testing.T) {
 			}
 		}
 	}`)
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
@@ -277,7 +278,7 @@ func TestAnImportWithoutTheEffortCompatStaysDefault(t *testing.T) {
 // signal.
 func TestABrokenModelsFileIsARefusal(t *testing.T) {
 	modelsFile := writePIModels(t, `{"providers": {`)
-	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	_, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err == nil {
 		t.Error("a broken models file loaded")
 	}
@@ -288,7 +289,7 @@ func TestABrokenModelsFileIsARefusal(t *testing.T) {
 // with zero imported models in silence.
 func TestAModelsFileWithoutProvidersIsARefusal(t *testing.T) {
 	modelsFile := writePIModels(t, `{"providers": {}}`)
-	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	_, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err == nil {
 		t.Error("a models file without providers loaded")
 	}
@@ -299,7 +300,7 @@ func TestAModelsFileWithoutProvidersIsARefusal(t *testing.T) {
 
 // TestAModelsFileUnderHomeLoads covers the path the settings may name
 // with a ~: the expansion happens where the settings load, so a
-// pi_models_file of ~/models.json reads the operator's home directory.
+// models_file of ~/models.json reads the operator's home directory.
 func TestAModelsFileUnderHomeLoads(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -314,7 +315,7 @@ func TestAModelsFileUnderHomeLoads(t *testing.T) {
 	}`), 0o644); err != nil {
 		t.Fatalf("writing the models file: %v", err)
 	}
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"~/models.json"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"~/models.json"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("a models file under ~ did not load: %v", err)
 	}
@@ -348,7 +349,7 @@ func TestAModelsFileThatCannotRunIsARefusal(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			modelsFile := writePIModels(t, tc.file)
-			_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+			_, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("the refusal was %v, want it to say %q", err, tc.want)
 			}
@@ -371,7 +372,7 @@ func TestAnImportedModelJoinsASettingsEndpoint(t *testing.T) {
 	}`)
 	settings, err := Parse([]byte(`{
 		"version":1,
-		"pi_models_file":"`+modelsFile+`",
+		"models_file":"`+modelsFile+`",
 		"endpoints":{"home":{"endpoint":"http://mine:4000/v1"}}
 	}`), FormatJSON)
 	if err != nil {
@@ -412,7 +413,7 @@ func TestAProviderWithoutAKeyTakesPiAuthsKey(t *testing.T) {
 		}
 	}`)
 	writePIAuth(t, modelsFile, `{"home": {"type": "api_key", "key": "test-key-123"}}`)
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
@@ -434,7 +435,7 @@ func TestAnAuthKeyInTheEnvironmentNamesTheEnvironment(t *testing.T) {
 		}
 	}`)
 	writePIAuth(t, modelsFile, `{"home": {"type": "api_key", "key": "$HOME_KEY"}}`)
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
@@ -464,7 +465,7 @@ func TestAModelsFileKeyFollowsTheSameRules(t *testing.T) {
 					}
 				}
 			}`)
-			settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+			settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 			if err != nil {
 				t.Fatalf("the settings did not load: %v", err)
 			}
@@ -501,7 +502,7 @@ func TestACommandAPIKeyFallsThroughToPIAuth(t *testing.T) {
 		}
 	}`)
 	writePIAuth(t, modelsFile, `{"away": {"type": "api_key", "key": "auth-key-123"}}`)
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
@@ -524,7 +525,7 @@ func TestTheModelsFilesKeyWinsOverPIAuth(t *testing.T) {
 		}
 	}`)
 	writePIAuth(t, modelsFile, `{"home": {"type": "api_key", "key": "test-key-123"}}`)
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
@@ -548,7 +549,7 @@ func TestTheSettingsOwnEndpointWinsOverPIAuth(t *testing.T) {
 	writePIAuth(t, modelsFile, `{"home": {"type": "api_key", "key": "test-key-123"}}`)
 	settings, err := Parse([]byte(`{
 		"version":1,
-		"pi_models_file":"`+modelsFile+`",
+		"models_file":"`+modelsFile+`",
 		"endpoints":{"home":{"endpoint":"http://mine:4000/v1","api_key":"settings-key-789"}}
 	}`), FormatJSON)
 	if err != nil {
@@ -581,7 +582,7 @@ func TestACredentialPooCannotUseIsSkipped(t *testing.T) {
 				}
 			}`)
 			writePIAuth(t, modelsFile, auth)
-			settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+			settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 			if err != nil {
 				t.Fatalf("the settings did not load: %v", err)
 			}
@@ -606,7 +607,7 @@ func TestAMissingPIAuthFileIsFine(t *testing.T) {
 			}
 		}
 	}`)
-	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
@@ -628,8 +629,185 @@ func TestABrokenPIAuthFileIsARefusal(t *testing.T) {
 		}
 	}`)
 	writePIAuth(t, modelsFile, `{"home": {`)
-	_, err := Parse([]byte(`{"version":1,"pi_models_file":"`+modelsFile+`"}`), FormatJSON)
+	_, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
 	if err == nil || !strings.Contains(err.Error(), "auth.json") {
 		t.Errorf("a broken auth file loaded: %v", err)
+	}
+}
+
+// writeModelsFile writes a models file into dir under the name the discovery
+// reads, and returns its path.
+func writeModelsFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	body := `{"providers":{"home":{"baseUrl":"http://localhost:4000/v1","api":"openai-completions",` +
+		`"models":[{"id":"gemma4","contextWindow":131072}]}}}`
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	return path
+}
+
+// writeSettingsWith writes a settings document into dir and returns its path.
+func writeSettingsWith(t *testing.T, dir, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, SettingsFileName)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	return path
+}
+
+// TestAModelsFileBesideTheSettingsIsImported covers the discovery: a
+// models.json next to the settings file is read when the settings name none.
+func TestAModelsFileBesideTheSettingsIsImported(t *testing.T) {
+	dir := t.TempDir()
+	writeModelsFile(t, dir, ModelsFileName)
+	path := writeSettingsWith(t, dir, `{"version":1}`)
+
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	if _, ok := settings.Models["home/gemma4"]; !ok {
+		t.Errorf("the settings hold %v, and not the discovered provider's model", settings.Models)
+	}
+}
+
+// TestANamedModelsFileWinsOverTheOneBeside covers the order: a models_file the
+// settings name is the one read, and the discovered name is not.
+func TestANamedModelsFileWinsOverTheOneBeside(t *testing.T) {
+	dir := t.TempDir()
+	writeModelsFile(t, dir, ModelsFileName)
+	named := filepath.Join(t.TempDir(), "chosen.json")
+	if err := os.WriteFile(named, []byte(`{"providers":{"chosen":{"baseUrl":"http://example.test/v1","api":"openai-completions","models":[{"id":"m","contextWindow":8192}]}}}`), 0o644); err != nil {
+		t.Fatalf("writing the named models file: %v", err)
+	}
+	path := writeSettingsWith(t, dir, `{"version":1,"models_file":"`+named+`"}`)
+
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	if _, ok := settings.Models["chosen/m"]; !ok {
+		t.Errorf("the settings hold %v, and not the named file's model", settings.Models)
+	}
+	if _, ok := settings.Models["home/gemma4"]; ok {
+		t.Error("the discovered models file was read as well as the named one")
+	}
+}
+
+// TestARelativeModelsFileResolvesAgainstTheSettings covers the directory: a
+// relative path is read from beside the settings file, not from the working
+// directory.
+func TestARelativeModelsFileResolvesAgainstTheSettings(t *testing.T) {
+	dir := t.TempDir()
+	models := writeModelsFile(t, dir, "shared.json")
+	path := writeSettingsWith(t, dir, `{"version":1,"models_file":"shared.json"}`)
+
+	t.Chdir(t.TempDir())
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings from %s: %v", models, err)
+	}
+	if _, ok := settings.Models["home/gemma4"]; !ok {
+		t.Errorf("the settings hold %v, and not the relative file's model", settings.Models)
+	}
+}
+
+// TestThePIModelsFileKeyStillLoads covers the rename: a settings file written
+// before it still imports its models file, and a failure names the new key.
+func TestThePIModelsFileKeyStillLoads(t *testing.T) {
+	dir := t.TempDir()
+	models := writeModelsFile(t, dir, "shared.json")
+	settings, err := Parse([]byte(`{"version":1,"pi_models_file":"`+models+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("a settings file with the old key was refused: %v", err)
+	}
+	if _, ok := settings.Models["home/gemma4"]; !ok {
+		t.Errorf("the old key imported %v", settings.Models)
+	}
+
+	_, err = Parse([]byte(`{"version":1,"models_file":"/tmp/no-such-models.json"}`), FormatJSON)
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a missing models file is %v, want a settings failure", err)
+	}
+	if failure.Field != "models_file" {
+		t.Errorf("the failure names the field %q, want models_file", failure.Field)
+	}
+}
+
+// TestASettingsFileWithNoModelsFileIsUnchanged covers the absence: a settings
+// file with no models file beside it and none named reads as it always did.
+func TestASettingsFileWithNoModelsFileIsUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	path := writeSettingsWith(t, dir, `{"version":1,"roles":{"chat":"m"}}`)
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	if len(settings.Models) != 0 || len(settings.Endpoints) != 0 {
+		t.Errorf("the settings gained %v and %v", settings.Models, settings.Endpoints)
+	}
+}
+
+// TestParseDiscoversNoModelsFile covers the other reader's contract: a
+// document held in memory has no directory, so nothing is imported beside it.
+func TestParseDiscoversNoModelsFile(t *testing.T) {
+	dir := t.TempDir()
+	writeModelsFile(t, dir, ModelsFileName)
+	t.Chdir(dir)
+
+	settings, err := Parse([]byte(`{"version":1}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("parsing the settings: %v", err)
+	}
+	if len(settings.Models) != 0 || len(settings.Endpoints) != 0 {
+		t.Errorf("Parse imported %v and %v, and it discovers nothing", settings.Models, settings.Endpoints)
+	}
+}
+
+// TestAMissingRelativeModelsFileIsARefusal covers the named file's promise: a
+// relative name that is not there refuses, and the sibling is not read in its
+// place.
+func TestAMissingRelativeModelsFileIsARefusal(t *testing.T) {
+	dir := t.TempDir()
+	writeModelsFile(t, dir, ModelsFileName)
+	path := writeSettingsWith(t, dir, `{"version":1,"models_file":"missing.json"}`)
+
+	_, err := Load(path)
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a missing named models file loaded: %v", err)
+	}
+	if failure.Field != "models_file" {
+		t.Errorf("the failure names the field %q, want models_file", failure.Field)
+	}
+}
+
+// TestADiscoveredModelsFileThatDoesNotReadNamesTheFile covers the failure's
+// subject: the settings named no file, so the failure names the file beside
+// them rather than a setting that is unset.
+func TestADiscoveredModelsFileThatDoesNotReadNamesTheFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ModelsFileName), []byte(`{"providers":{}}`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	path := writeSettingsWith(t, dir, `{"version":1}`)
+
+	_, err := Load(path)
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a discovered models file that does not read loaded: %v", err)
+	}
+	if failure.Field != "" {
+		t.Errorf("the failure names the field %q, and the settings named no models file", failure.Field)
+	}
+	if !strings.Contains(failure.Message, "beside the settings") {
+		t.Errorf("the message %q does not say where the file was found", failure.Message)
+	}
+	if !strings.Contains(failure.Error(), ModelsFileName) {
+		t.Errorf("the failure %q does not name the file", failure.Error())
 	}
 }
