@@ -2,6 +2,8 @@ package poo
 
 import (
 	"bytes"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
@@ -144,4 +146,36 @@ func TestAModelSwitchRacesTheCallEnvironment(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+// TestAnOversizedHeaderIsChargedTheCap covers the clamp: a header may name
+// any size, and a declared one is not a reason to bill the window for it. The
+// header is real, so the decoder reads it; the pixels it names are not.
+func TestAnOversizedHeaderIsChargedTheCap(t *testing.T) {
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], 20000)
+	binary.BigEndian.PutUint32(ihdr[4:], 20000)
+	ihdr[8] = 8
+	ihdr[9] = 2
+	chunk := func(kind string, data []byte) []byte {
+		out := binary.BigEndian.AppendUint32(nil, uint32(len(data)))
+		out = append(out, kind...)
+		out = append(out, data...)
+		return binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(append([]byte(kind), data...)))
+	}
+	head := append([]byte("\x89PNG\r\n\x1a\n"), chunk("IHDR", ihdr)...)
+	head = append(head, chunk("IEND", nil)...)
+	config, _, err := image.DecodeConfig(bytes.NewReader(head))
+	if err != nil {
+		t.Fatalf("the header did not decode: %v", err)
+	}
+	if got := config.Width * config.Height; got <= imageMaxPixels {
+		t.Fatalf("the header names %d pixels, want more than the %d cap", got, imageMaxPixels)
+	}
+
+	pixels := float64(imageMaxPixels)
+	want := int(pixels / imagePixelsPerToken * CharsPerToken)
+	if got := imageChars(head); got != want {
+		t.Errorf("an image of declared %d pixels costs %d chars, want the cap's %d", config.Width*config.Height, got, want)
+	}
 }

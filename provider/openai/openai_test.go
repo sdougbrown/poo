@@ -567,7 +567,7 @@ func TestAToolResultImageBecomesAUserMessage(t *testing.T) {
 	}
 }
 
-func TestACompactedToolResultStillBecomesAToolMessage(t *testing.T) {
+func TestAToolResultWithoutImagesAddsNoMessage(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
