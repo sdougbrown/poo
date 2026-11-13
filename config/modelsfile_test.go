@@ -751,3 +751,37 @@ func TestASettingsFileWithNoModelsFileIsUnchanged(t *testing.T) {
 		t.Errorf("the settings gained %v and %v", settings.Models, settings.Endpoints)
 	}
 }
+
+// TestParseDiscoversNoModelsFile covers the other reader's contract: a
+// document held in memory has no directory, so nothing is imported beside it.
+func TestParseDiscoversNoModelsFile(t *testing.T) {
+	dir := t.TempDir()
+	writeModelsFile(t, dir, ModelsFileName)
+	t.Chdir(dir)
+
+	settings, err := Parse([]byte(`{"version":1}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("parsing the settings: %v", err)
+	}
+	if len(settings.Models) != 0 || len(settings.Endpoints) != 0 {
+		t.Errorf("Parse imported %v and %v, and it discovers nothing", settings.Models, settings.Endpoints)
+	}
+}
+
+// TestAMissingRelativeModelsFileIsARefusal covers the named file's promise: a
+// relative name that is not there refuses, and the sibling is not read in its
+// place.
+func TestAMissingRelativeModelsFileIsARefusal(t *testing.T) {
+	dir := t.TempDir()
+	writeModelsFile(t, dir, ModelsFileName)
+	path := writeSettingsWith(t, dir, `{"version":1,"models_file":"missing.json"}`)
+
+	_, err := Load(path)
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a missing named models file loaded: %v", err)
+	}
+	if failure.Field != "models_file" {
+		t.Errorf("the failure names the field %q, want models_file", failure.Field)
+	}
+}

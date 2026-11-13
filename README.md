@@ -47,19 +47,28 @@ read through the first name it holds. A command that finds none runs
 on the defaults, and the flags change them.
 `examples/code.settings.yaml` is the file to start from.
 
-**A models file.** `models_file` names a models file — providers with
-`baseUrl`, `api` and `apiKey`, each with its models — and imports them
+**A models file.** `models_file` names a models file: providers with
+`baseUrl`, `api` and `apiKey`, each with its models. It imports them
 under names of the form `provider/id`. The file's shape is the one pi
-writes, and that shape is the whole compatibility: poo reads the file
+writes, and that shape is the whole compatibility. poo reads the file
 the settings name, the credential file beside it, and never a pi
-installation's own directory. A relative path resolves against the
-settings file's own directory, and with no `models_file` named, a
-`models.json` beside the settings file is imported — so
-`~/.config/poo/settings.yaml` and `~/.config/poo/models.json` set up
-providers without the settings naming the file. The settings' own
-entries win on a name collision, and a provider whose models file
-carries no `apiKey` takes the key from an `auth.json` beside that
-file, in the same shape pi keeps its credentials.
+installation's own directory.
+
+A relative path resolves against the settings file's own directory.
+With no `models_file` named, a `models.json` beside the settings file
+is imported, so `~/.config/poo/settings.yaml` and
+`~/.config/poo/models.json` set up providers without the settings
+naming the file. The settings' own entries win on a name collision.
+
+A provider whose models file carries no `apiKey` takes the key from an
+`auth.json` beside that file, in the same shape pi keeps its
+credentials. A discovered `models.json` that does not read fails the
+load, as a settings file that does not decode does. A file the
+operator put there is never skipped in silence.
+
+`models_file` is the one setting whose relative path answers to the
+settings file's directory. `cli_registry.paths` and `feeds.paths`
+answer to the working directory.
 
 **Models.** The settings define the models: `endpoints` name the
 servers (with `api_key_env` for the credential's environment
