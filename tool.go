@@ -90,6 +90,12 @@ type ToolEnv struct {
 	JobID string
 	// Env is the scrubbed child environment for a subprocess tool.
 	Env []string
+	// Model is the model the run is speaking to, when the caller knows it.
+	//
+	// A session that has not switched models fills it in; the zero value
+	// means the caller does not know, and a tool falls back to what it was
+	// built with.
+	Model ModelInfo
 	// Decider is the decision model, or nil when there is none.
 	Decider decide.Decider
 	// Nested runs nested tool calls, or nil when this call cannot make

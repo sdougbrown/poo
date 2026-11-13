@@ -213,3 +213,62 @@ func TestACancelledImageReadStops(t *testing.T) {
 		t.Errorf("the cancellation is not an error: %q", res.Text)
 	}
 }
+
+// TestTheRunsModelDecidesAtCallTime covers the switch: a session that changed
+// models answers for the model it has now, not the one the tool was built for.
+func TestTheRunsModelDecidesAtCallTime(t *testing.T) {
+	dir := t.TempDir()
+	pngFile(t, dir, "shot.png")
+
+	callWith := func(t *testing.T, tool *read.Tool, inputs []poo.Modality) poo.ToolResult {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{"path": "shot.png"})
+		if err != nil {
+			t.Fatalf("marshalling args: %v", err)
+		}
+		prepared, err := tool.Prepare(raw, poo.PrepareEnv{WorkingDir: dir})
+		if err != nil {
+			t.Fatalf("preparing: %v", err)
+		}
+		res, err := tool.Call(context.Background(), prepared, poo.ToolEnv{
+			PrepareEnv: poo.PrepareEnv{WorkingDir: dir},
+			Model:      poo.ModelInfo{Inputs: inputs},
+		})
+		if err != nil {
+			t.Fatalf("calling: %v", err)
+		}
+		return res
+	}
+
+	// Built for a text-only model, run for one that reads images.
+	res := callWith(t, read.New(), []poo.Modality{poo.ModalityText, poo.ModalityImage})
+	if len(res.Images) != 1 {
+		t.Errorf("a model that reads images was given %d: %s", len(res.Images), res.Text)
+	}
+
+	// Built for a model that reads images, run for one that does not.
+	res = callWith(t, read.New(read.WithImages(true)), []poo.Modality{poo.ModalityText})
+	if len(res.Images) != 0 {
+		t.Error("a text-only model was given an image")
+	}
+	if !strings.Contains(res.Text, "does not accept image input") {
+		t.Errorf("the refusal is %q, want it to name the reason", res.Text)
+	}
+
+	// A caller that names no model falls back to what the tool was built for.
+	res = callWith(t, read.New(read.WithImages(true)), nil)
+	if len(res.Images) != 1 {
+		t.Errorf("a caller with no model lost the tool's own answer: %s", res.Text)
+	}
+}
+
+// TestEverySniffedTypeIsOneABlockCarries covers the coupling: a type the
+// sniffer produces is a type the block layer accepts, so a new magic cannot
+// be dropped on the way out.
+func TestEverySniffedTypeIsOneABlockCarries(t *testing.T) {
+	for _, media := range []string{"image/png", "image/jpeg", "image/gif", "image/webp"} {
+		if !poo.IsImageMediaType(media) {
+			t.Errorf("the sniffer produces %q, and a block would drop it", media)
+		}
+	}
+}

@@ -812,6 +812,7 @@ func (s *Session) toolEnv(run *runState, turn int, handle string, plan callPlan)
 func (s *Session) toolEnvFor(runID, handle string) ToolEnv {
 	return ToolEnv{
 		PrepareEnv: s.prepareEnv(),
+		Model:      s.opts.Model,
 		SessionID:  s.opts.SessionID,
 		RunID:      runID,
 		Handle:     handle,

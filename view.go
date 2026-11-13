@@ -104,14 +104,6 @@ func copyResult(r ToolResult) ToolResult {
 	if r.Structured != nil {
 		out.Structured = append([]byte(nil), r.Structured...)
 	}
-	if r.Images != nil {
-		out.Images = make([]Image, len(r.Images))
-		for i, image := range r.Images {
-			out.Images[i] = image
-			if image.Data != nil {
-				out.Images[i].Data = append([]byte(nil), image.Data...)
-			}
-		}
-	}
+	out.Images = cloneImages(r.Images)
 	return out
 }

@@ -2,6 +2,7 @@ package poo_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -63,5 +64,25 @@ func TestAModelThatReadsImagesIsSentOne(t *testing.T) {
 	}
 	if !sent {
 		t.Error("a model that reads images was sent none")
+	}
+}
+
+// TestACallSeesTheRunsModel covers the seam the read tool gates on: the
+// environment a tool runs in names the model the run speaks to, so a session
+// that switched models answers for the one it has now.
+func TestACallSeesTheRunsModel(t *testing.T) {
+	tool := &echoTool{result: "ok"}
+	tr := scripted([]fakeResponse{toolCallTurn(), {text: "done"}})
+	opts := testOptions(t, tr, tool, &recordingSink{})
+	opts.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
+	s := newTestSession(t, opts)
+	runSession(t, s, "start")
+
+	envs := tool.Envs()
+	if len(envs) == 0 {
+		t.Fatal("the tool ran with no environment")
+	}
+	if !slices.Contains(envs[0].Model.Inputs, poo.ModalityImage) {
+		t.Errorf("the call's model inputs are %v, want the image modality", envs[0].Model.Inputs)
 	}
 }

@@ -282,6 +282,15 @@ var imageMediaTypes = map[string]bool{
 	"image/webp": true,
 }
 
+// IsImageMediaType reports whether an image's media type is one a provider
+// accepts.
+//
+// It is the one list of them: a tool that sniffs a picture's type checks it
+// here, so a type that is not accepted cannot be produced and quietly dropped.
+func IsImageMediaType(mediaType string) bool {
+	return imageMediaTypes[mediaType]
+}
+
 // imageBlocks renders images as content blocks, in order.
 //
 // An image whose media type no provider accepts is left out: a data URL the
@@ -293,7 +302,7 @@ func imageBlocks(images []Image) []ContentBlock {
 	}
 	blocks := make([]ContentBlock, 0, len(images))
 	for _, image := range images {
-		if !imageMediaTypes[image.MediaType] {
+		if !IsImageMediaType(image.MediaType) {
 			continue
 		}
 		blocks = append(blocks, ContentBlock{

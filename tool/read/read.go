@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -196,6 +197,18 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 
 // absolutePath returns the path a call works on.
 //
+// readsImages reports whether the model this call runs for reads images.
+//
+// The run's model decides it, so a session that switched models answers for
+// the model it has now; the tool's own answer is the fallback for a caller
+// that names no model.
+func (t *Tool) readsImages(env poo.ToolEnv) bool {
+	if env.Model.Inputs != nil {
+		return slices.Contains(env.Model.Inputs, poo.ModalityImage)
+	}
+	return t.images
+}
+
 // imageMediaType reports the media type of the image the head of a file
 // starts with, and whether it is one. The four types are the ones providers
 // accept.
@@ -257,8 +270,8 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 	// An image carries NUL bytes, so it is recognised before the binary
 	// refusal, and the whole file is returned as the picture it is.
-	if media, ok := imageMediaType(sniff[:n]); ok {
-		if !t.images {
+	if media, ok := imageMediaType(sniff[:n]); ok && poo.IsImageMediaType(media) {
+		if !t.readsImages(env) {
 			return poo.ToolResult{
 				Text: fmt.Sprintf("read: %s is an image (%s, %d bytes); this model does not accept image input", path, media, info.Size()),
 			}, nil
