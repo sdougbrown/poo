@@ -84,6 +84,28 @@ func writeSettingsFile(t *testing.T, dir, name, body string) string {
 	return path
 }
 
+// tempUserConfigDir isolates the user's config directory for a test and
+// returns it.
+//
+// The platform reads XDG_CONFIG_HOME on Linux and its own place on darwin and
+// windows, so a test that assumed the variable would touch the developer's real
+// config directory there. The test is skipped when the directory the platform
+// reports is not the one this helper made.
+func tempUserConfigDir(t *testing.T) string {
+	t.Helper()
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv(EnvSettings, "")
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Skipf("the user config directory is not resolvable here: %v", err)
+	}
+	if !strings.HasPrefix(dir, config) {
+		t.Skipf("this platform's user config directory ignores XDG_CONFIG_HOME: %s", dir)
+	}
+	return config
+}
+
 // TestTheProjectSearchStopsWhereItStarted covers the walk's start:
 // an empty working directory walks up from the current directory.
 func TestTheProjectSearchStopsWhereItStarted(t *testing.T) {
@@ -105,15 +127,8 @@ func TestTheProjectSearchStopsWhereItStarted(t *testing.T) {
 // command that finds neither runs on the defaults.
 func TestTheUserSettingsAreTheLastResort(t *testing.T) {
 	empty := t.TempDir()
-	config := t.TempDir()
-	user := filepath.Join(config, "poo", SettingsFileName)
-	if err := os.MkdirAll(filepath.Dir(user), 0o755); err != nil {
-		t.Fatalf("writing the config directory: %v", err)
-	}
-	if err := os.WriteFile(user, []byte(`{"version":1}`), 0o644); err != nil {
-		t.Fatalf("writing the settings: %v", err)
-	}
-	t.Setenv("XDG_CONFIG_HOME", config)
+	config := tempUserConfigDir(t)
+	user := writeSettingsFile(t, filepath.Join(config, "poo"), SettingsFileName, `{"version":1}`)
 
 	found, err := FindSettings("", empty)
 	if err != nil {
@@ -146,6 +161,7 @@ func TestADiscoveredSettingsFileIsReadInItsOwnFormat(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(EnvSettings, "")
 			root := t.TempDir()
 			path := writeSettingsFile(t, filepath.Join(root, ProjectDirName), tt.name, tt.body)
 
@@ -170,17 +186,81 @@ func TestADiscoveredSettingsFileIsReadInItsOwnFormat(t *testing.T) {
 // TestTheFirstSettingsNameWins covers a directory holding several: the names
 // are tried in order, so a JSON file shadows a YAML one beside it.
 func TestTheFirstSettingsNameWins(t *testing.T) {
+	tests := []struct {
+		name  string
+		files []string
+		want  string
+	}{
+		{
+			name:  "all four names",
+			files: []string{SettingsFileName, "settings.yaml", "settings.yml", "settings.toml"},
+			want:  SettingsFileName,
+		},
+		{
+			name:  "yaml before yml and toml",
+			files: []string{"settings.toml", "settings.yml", "settings.yaml"},
+			want:  "settings.yaml",
+		},
+		{
+			name:  "yml before toml",
+			files: []string{"settings.toml", "settings.yml"},
+			want:  "settings.yml",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(EnvSettings, "")
+			root := t.TempDir()
+			dir := filepath.Join(root, ProjectDirName)
+			for _, name := range tt.files {
+				writeSettingsFile(t, dir, name, `{"version":1}`)
+			}
+
+			found, err := FindSettings("", root)
+			if err != nil {
+				t.Fatalf("the file was refused: %v", err)
+			}
+			want := filepath.Join(dir, tt.want)
+			if found != want {
+				t.Errorf("the directory resolved to %q, want %q", found, want)
+			}
+		})
+	}
+}
+
+// TestTheEnvironmentFileWinsOverTheProjectFile covers the environment's
+// place: POO_SETTINGS is read before the project's file is looked for.
+func TestTheEnvironmentFileWinsOverTheProjectFile(t *testing.T) {
+	project := writeProject(t, t.TempDir(), `{"version":1}`)
+	env := writeSettingsFile(t, t.TempDir(), "chosen.json", `{"version":1}`)
+	t.Setenv(EnvSettings, env)
+
+	found, err := FindSettings("", filepath.Dir(project))
+	if err != nil {
+		t.Fatalf("the discovery failed: %v", err)
+	}
+	if found != env {
+		t.Errorf("the environment's file did not win: %q, want %q", found, env)
+	}
+}
+
+// TestADirectoryNamedLikeSettingsIsNotAFile covers what discovery accepts: a
+// directory with a settings name is skipped, and the file beside it is read.
+func TestADirectoryNamedLikeSettingsIsNotAFile(t *testing.T) {
+	t.Setenv(EnvSettings, "")
 	root := t.TempDir()
 	dir := filepath.Join(root, ProjectDirName)
-	jsonPath := writeSettingsFile(t, dir, SettingsFileName, `{"version":1}`)
-	writeSettingsFile(t, dir, "settings.yaml", "version: 1\n")
+	if err := os.MkdirAll(filepath.Join(dir, SettingsFileName), 0o755); err != nil {
+		t.Fatalf("writing the directory: %v", err)
+	}
+	yamlPath := writeSettingsFile(t, dir, "settings.yaml", "version: 1\n")
 
 	found, err := FindSettings("", root)
 	if err != nil {
 		t.Fatalf("the file was refused: %v", err)
 	}
-	if found != jsonPath {
-		t.Errorf("the directory resolved to %q, want %q", found, jsonPath)
+	if found != yamlPath {
+		t.Errorf("the directory resolved to %q, want %q", found, yamlPath)
 	}
 }
 
@@ -188,12 +268,7 @@ func TestTheFirstSettingsNameWins(t *testing.T) {
 // directory: the names are tried there too, and the file is read in its own
 // format.
 func TestTheUsersSettingsAreFoundUnderAnyName(t *testing.T) {
-	t.Setenv(EnvSettings, "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	config, err := os.UserConfigDir()
-	if err != nil {
-		t.Fatalf("reading the config directory: %v", err)
-	}
+	config := tempUserConfigDir(t)
 	path := writeSettingsFile(t, filepath.Join(config, "poo"), "settings.toml", "version = 1\n")
 
 	found, err := FindSettings("", t.TempDir())
@@ -212,16 +287,8 @@ func TestTheUsersSettingsAreFoundUnderAnyName(t *testing.T) {
 // settings shadow the user's.
 func TestTheProjectFileWinsOverTheUserFile(t *testing.T) {
 	project := writeProject(t, t.TempDir(), `{"version":1}`)
-	config := t.TempDir()
-	user := filepath.Join(config, "poo", SettingsFileName)
-	if err := os.MkdirAll(filepath.Dir(user), 0o755); err != nil {
-		t.Fatalf("writing the config directory: %v", err)
-	}
-	if err := os.WriteFile(user, []byte(`{"version":1}`), 0o644); err != nil {
-		t.Fatalf("writing the settings: %v", err)
-	}
-	t.Setenv("XDG_CONFIG_HOME", config)
-	t.Setenv(EnvSettings, "")
+	config := tempUserConfigDir(t)
+	writeSettingsFile(t, filepath.Join(config, "poo"), SettingsFileName, `{"version":1}`)
 
 	found, err := FindSettings("", filepath.Dir(project))
 	if err != nil {

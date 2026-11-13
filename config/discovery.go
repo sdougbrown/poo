@@ -8,10 +8,11 @@ import (
 
 // The places a settings file is discovered at, in the order a command
 // reads them. The explicit path wins — the --settings flag or the
-// POO_SETTINGS environment variable; then the project's
-// `.poo/settings.json`, walking up from the working directory the way
-// git finds its repository; then the user's config directory; and a
-// command that finds nothing runs on the defaults.
+// POO_SETTINGS environment variable; then the project's `.poo`
+// directory, walking up from the working directory the way git finds
+// its repository; then the user's config directory; and a command that
+// finds nothing runs on the defaults. Each directory is searched for
+// the names settingsFileNames lists.
 const (
 	// EnvSettings is the environment variable a settings file is
 	// pointed at by.
@@ -19,17 +20,17 @@ const (
 	// ProjectDirName is the directory a project's settings live in.
 	ProjectDirName = ".poo"
 	// SettingsFileName is the name a settings file is discovered by, and
-	// the first name SettingsFileNames tries.
+	// the first name settingsFileNames tries.
 	SettingsFileName = "settings.json"
 )
 
-// SettingsFileNames are the names a discovered settings file goes by, in the
+// settingsFileNames are the names a discovered settings file goes by, in the
 // order a command tries them in each directory.
 //
 // The extension picks the parser, so a YAML or TOML file is discovered under
 // its own name. A directory holding several is read through the first name it
 // holds, and a JSON file therefore shadows a YAML one beside it.
-var SettingsFileNames = []string{
+var settingsFileNames = []string{
 	SettingsFileName,
 	"settings.yaml",
 	"settings.yml",
@@ -99,7 +100,7 @@ func userSettings() (string, bool) {
 // settingsFileIn returns the settings file in dir, or false when dir holds
 // none of the names.
 func settingsFileIn(dir string) (string, bool) {
-	for _, name := range SettingsFileNames {
+	for _, name := range settingsFileNames {
 		path := filepath.Join(dir, name)
 		if fileExists(path) {
 			return path, true

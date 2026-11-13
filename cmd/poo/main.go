@@ -41,7 +41,7 @@ Settings discovery:
   Without --settings, the settings are found at the file the
   POO_SETTINGS environment variable names, then the project's .poo
   directory (walking up from the current directory), then the user's
-  ~/.config/poo. Each is searched for settings.json, settings.yaml,
+  config directory. Each is searched for settings.json, settings.yaml,
   settings.yml and settings.toml, and the extension picks the parser.
   A command that finds none runs on the defaults.
 
