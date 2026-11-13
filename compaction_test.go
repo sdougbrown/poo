@@ -403,15 +403,18 @@ func TestRewriteKeepsTheOriginalRecord(t *testing.T) {
 func TestARewriteDropsTheAttachmentsOfTheResultItRewrites(t *testing.T) {
 	tool := &echoTool{call: func(context.Context) (poo.ToolResult, error) {
 		return poo.ToolResult{
-			Text:        "original",
-			Attachments: []poo.Attachment{{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1, 2, 3}}},
+			Text: "original",
+			Attachments: []poo.Attachment{
+				{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1, 2, 3}},
+				{Modality: poo.ModalityAudio, MediaType: "audio/wav", Data: []byte{4, 5, 6}},
+			},
 		}, nil
 	}}
 	tr := scripted([]fakeResponse{toolCallTurn(), toolCallTurn(), {text: "done"}})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, tool, sink)
 	// The model reads attachments, so the session sends them.
-	opts.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
+	opts.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage, poo.ModalityAudio}
 	opts.Compactor = &compactionCompactor{
 		should: afterTurns(2),
 		compaction: func(poo.View) (poo.Compaction, error) {
@@ -424,23 +427,23 @@ func TestARewriteDropsTheAttachmentsOfTheResultItRewrites(t *testing.T) {
 	s := newTestSession(t, opts)
 	runSession(t, s, "start")
 
-	var carried bool
+	seen := map[poo.ContentKind]bool{}
 	for _, req := range tr.Requests() {
 		for _, m := range req.Messages {
 			for _, b := range m.Content {
-				if b.Kind == poo.ContentImage {
-					carried = true
+				if b.Kind == poo.ContentImage || b.Kind == poo.ContentAudio {
+					seen[b.Kind] = true
 				}
 			}
 		}
 	}
-	if !carried {
-		t.Fatal("the case never carried an image, so it proves nothing")
+	if !seen[poo.ContentImage] || !seen[poo.ContentAudio] {
+		t.Fatalf("the case carried %v, so it proves nothing", seen)
 	}
 	last := tr.Requests()[len(tr.Requests())-1]
 	// r1's result is the one the rewrite targeted, so its message is the
-	// one that must carry no image any more; r2's fresh result keeps its
-	// own.
+	// one that must carry no attachment any more; r2's fresh result keeps
+	// its own.
 	for _, m := range last.Messages {
 		rewritten := false
 		for _, b := range m.Content {
@@ -452,27 +455,28 @@ func TestARewriteDropsTheAttachmentsOfTheResultItRewrites(t *testing.T) {
 			continue
 		}
 		for _, b := range m.Content {
-			if b.Kind == poo.ContentImage {
-				t.Fatal("a rewritten result still carries its image")
+			if b.Kind == poo.ContentImage || b.Kind == poo.ContentAudio {
+				t.Fatalf("a rewritten result still carries its %s", b.Kind)
 			}
 		}
 	}
 
-	// The result the rewrite did not target keeps its picture.
-	fresh := false
+	// The result the rewrite did not target keeps its attachments.
+	fresh := map[poo.ContentKind]bool{}
 	for _, m := range last.Messages {
 		for _, b := range m.Content {
-			if b.Kind == poo.ContentToolResult && strings.HasPrefix(b.Text, "[r2 ·") {
-				for _, image := range m.Content {
-					if image.Kind == poo.ContentImage {
-						fresh = true
-					}
+			if b.Kind != poo.ContentToolResult || !strings.HasPrefix(b.Text, "[r2 ·") {
+				continue
+			}
+			for _, attachment := range m.Content {
+				if attachment.Kind == poo.ContentImage || attachment.Kind == poo.ContentAudio {
+					fresh[attachment.Kind] = true
 				}
 			}
 		}
 	}
-	if !fresh {
-		t.Error("a result the rewrite left alone lost its image")
+	if len(fresh) != 2 {
+		t.Errorf("a result the rewrite left alone kept %v, want its image and its audio", fresh)
 	}
 }
 

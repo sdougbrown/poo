@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1575,6 +1576,86 @@ func recordArgs(raw json.RawMessage) json.RawMessage {
 	return quoted
 }
 
+// audioTokensPerSecond is what a second of audio is worth in the estimator's
+// characters, at the default ratio: twenty-five tokens a second, measured
+// rather than assumed.
+//
+// llama.cpp's mtmd projector on gemma-4-E4B came to 25.0 tokens a second over
+// clips of 1, 2, 3, 5 and 8 seconds, and SGLang reported 25 for one second. A
+// second of sound is not free, and a rule that undercounts it lets a session
+// with several recordings overrun the budget it was estimated against.
+//
+// Only audio the estimator has not been told about is priced here: a usage
+// report replaces this charge for everything the view already holds.
+//
+// A clip whose header cannot be read is charged a default length, so one
+// unknown recording is never free.
+const (
+	audioTokensPerSecond = 25
+	audioDefaultSeconds  = 30
+	// audioMaxSeconds caps what one recording is charged. A header can name a
+	// rate as low as it likes, and a low rate makes the same bytes last far
+	// longer, so a declared length is capped like a declared picture size.
+	audioMaxSeconds = 3600
+)
+
+// audioChars returns audio's cost in the estimator's characters.
+func audioChars(data []byte) int {
+	return int(audioSeconds(data) * audioTokensPerSecond * CharsPerToken)
+}
+
+// audioSeconds returns a WAV file's length, or the default when the header does
+// not say.
+//
+// The length is the data chunk's own size over the format chunk's frame rate. A
+// header carries other chunks — a LIST of metadata, a fact — before or between
+// those two, so the chunks are walked rather than read from fixed offsets, and
+// their bytes are not counted as sound.
+//
+// MP3 frames are not parsed: a compressed stream's length needs a decoder the
+// harness does not carry, so it is charged the default.
+func audioSeconds(data []byte) float64 {
+	if len(data) < 12 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WAVE" {
+		return audioDefaultSeconds
+	}
+	var (
+		channels, rate, bits, frames int
+	)
+	for offset := 12; offset+8 <= len(data); {
+		id := string(data[offset : offset+4])
+		size := int(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
+		body := offset + 8
+		switch id {
+		case "fmt ":
+			if size < 16 || body+16 > len(data) {
+				return audioDefaultSeconds
+			}
+			channels = int(binary.LittleEndian.Uint16(data[body+2 : body+4]))
+			rate = int(binary.LittleEndian.Uint32(data[body+4 : body+8]))
+			bits = int(binary.LittleEndian.Uint16(data[body+14 : body+16]))
+		case "data":
+			// A file cut short of the size its header declares holds the
+			// bytes that are there.
+			frames = size
+			if body+size > len(data) {
+				frames = len(data) - body
+			}
+		}
+		// A chunk's body is padded to an even length, and the padding is
+		// not part of it.
+		offset = body + size + size%2
+	}
+	bytesPerFrame := channels * bits / 8
+	if rate <= 0 || bytesPerFrame <= 0 || frames <= 0 {
+		return audioDefaultSeconds
+	}
+	seconds := float64(frames) / float64(rate*bytesPerFrame)
+	if seconds > audioMaxSeconds {
+		return audioMaxSeconds
+	}
+	return seconds
+}
+
 // imagePixelsPerToken is the rule providers share for a picture's cost: an
 // image is about one token per 750 pixels. Its bytes are not its cost, so the
 // estimator counts pixels, and a picture of unknown size is never free.
@@ -1594,6 +1675,8 @@ func attachmentChars(block ContentBlock) int {
 	switch block.Kind {
 	case ContentImage:
 		return imageChars(block.Data)
+	case ContentAudio:
+		return audioChars(block.Data)
 	}
 	return 0
 }
