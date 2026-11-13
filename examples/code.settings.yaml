@@ -36,7 +36,7 @@ models:
     model_id: "gemma4"
     api: chat_completions
     tools_mode: native
-    ops: [chat, systemone]
+    ops: [chat, systemone, decisions]
     inputs: [text]
     context_limit: 131072
 
