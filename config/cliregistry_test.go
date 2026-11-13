@@ -1050,6 +1050,26 @@ func countTool(names []string, name string) int {
 	return count
 }
 
+// TestARegistryThatWithholdsEveryEntryIsOfferedWhole covers the empty result of
+// the rules: a profile with tools whose rules leave no entry earns no catalog,
+// so the session offers neither the call tool nor a section.
+func TestARegistryThatWithholdsEveryEntryIsOfferedWhole(t *testing.T) {
+	runtime, err := gatedBuild(t, thresholdRegistry(t, 5, 5), search.Name)
+	if err != nil {
+		t.Fatalf("building the read-only runtime: %v", err)
+	}
+	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the session offers %v, and the rules leave no entry", runtime.Options.ToolOrder)
+	}
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "Registered CLIs:") {
+		t.Errorf("the prompt carries a catalog the rules emptied: %q", text)
+	}
+	// The build still holds the catalog the settings named.
+	if runtime.Registry == nil || runtime.Registry.Len() != 5 {
+		t.Fatalf("the build holds %v, want the five entries the manifests loaded", runtime.Registry)
+	}
+}
+
 // TestARegistryThatDeclaresAConditionPooCannotSupplyIsRefused covers the
 // contract: poo supplies the profile fact and nothing else, so a manifest that
 // reads another condition fails the build naming it, rather than judging an
