@@ -30,16 +30,19 @@ poo run --endpoint http://localhost:4000/v1 --model-id gemma4 \
 links as its front door — the repl. The settings pick another one:
 set `ui` in the settings file the command resolves — the `--settings`
 file, the `POO_SETTINGS` environment variable's, the project's
-`.poo/settings.json` (found by walking up), or the user's
-`~/.config/poo/settings.json`. A binary with none linked, or a name
-it does not offer, shows the usage instead.
+settings directory (found by walking up), or the user's config
+file. A binary with none linked, or a name it does not offer, shows
+the usage instead.
 
 **Settings discovery.** Every command resolves its settings file the
 same way: the explicit `--settings` file, then the file the
 `POO_SETTINGS` environment variable names, then the project's
-`.poo/settings.json` walking up from the current directory, then the
-user's `~/.config/poo/settings.json`. A command that finds none runs
-on the defaults, and the flags change them.
+`.poo/` directory walking up from the current directory, then the
+user's `~/.config/poo/`. Each of those directories is searched for
+`settings.json`, then `settings.yaml`, `settings.yml` and
+`settings.toml`, and the extension picks the parser. A command that
+finds none runs on the defaults, and the flags change them.
+`examples/code.settings.yaml` is the file to start from.
 
 **Models.** The settings define the models: `endpoints` name the
 servers (with `api_key_env` for the credential's environment

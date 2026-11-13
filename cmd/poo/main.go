@@ -39,10 +39,11 @@ Shared flags:
 
 Settings discovery:
   Without --settings, the settings are found at the file the
-  POO_SETTINGS environment variable names, then the project's
-  .poo/settings.json (walking up from the current directory), then
-  the user's ~/.config/poo/settings.json. A command that finds none
-  runs on the defaults.
+  POO_SETTINGS environment variable names, then the project's .poo
+  directory (walking up from the current directory), then the user's
+  ~/.config/poo. Each is searched for settings.json, settings.yaml,
+  settings.yml and settings.toml, and the extension picks the parser.
+  A command that finds none runs on the defaults.
 
 Run flags:
   --endpoint <url>       The model's endpoint, e.g. http://localhost:4000/v1

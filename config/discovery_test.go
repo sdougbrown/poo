@@ -70,6 +70,20 @@ func TestTheProjectSettingsAreFoundWalkingUp(t *testing.T) {
 	}
 }
 
+// writeSettingsFile writes a settings file named name into dir and returns the
+// path.
+func writeSettingsFile(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("writing the directory: %v", err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	return path
+}
+
 // TestTheProjectSearchStopsWhereItStarted covers the walk's start:
 // an empty working directory walks up from the current directory.
 func TestTheProjectSearchStopsWhereItStarted(t *testing.T) {
@@ -115,6 +129,82 @@ func TestTheUserSettingsAreTheLastResort(t *testing.T) {
 	}
 	if found, err := FindSettings("", empty); err != nil || found != "" {
 		t.Errorf("a machine with no settings resolved to %q (%v), want the defaults", found, err)
+	}
+}
+
+// TestADiscoveredSettingsFileIsReadInItsOwnFormat covers the names: a
+// project's file is discovered as YAML or TOML too, and the extension picks
+// the parser, so what a command reads is a document it can decode.
+func TestADiscoveredSettingsFileIsReadInItsOwnFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "settings.yaml", body: "version: 1\nprofile: code\n"},
+		{name: "settings.yml", body: "version: 1\nprofile: code\n"},
+		{name: "settings.toml", body: "version = 1\nprofile = \"code\"\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeSettingsFile(t, filepath.Join(root, ProjectDirName), tt.name, tt.body)
+
+			found, err := FindSettings("", root)
+			if err != nil {
+				t.Fatalf("the file was refused: %v", err)
+			}
+			if found != path {
+				t.Fatalf("the file resolved to %q, want %q", found, path)
+			}
+			settings, err := Load(found)
+			if err != nil {
+				t.Fatalf("reading the discovered file: %v", err)
+			}
+			if settings.Profile != "code" {
+				t.Errorf("the file reads as %q, want profile code", settings.Profile)
+			}
+		})
+	}
+}
+
+// TestTheFirstSettingsNameWins covers a directory holding several: the names
+// are tried in order, so a JSON file shadows a YAML one beside it.
+func TestTheFirstSettingsNameWins(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ProjectDirName)
+	jsonPath := writeSettingsFile(t, dir, SettingsFileName, `{"version":1}`)
+	writeSettingsFile(t, dir, "settings.yaml", "version: 1\n")
+
+	found, err := FindSettings("", root)
+	if err != nil {
+		t.Fatalf("the file was refused: %v", err)
+	}
+	if found != jsonPath {
+		t.Errorf("the directory resolved to %q, want %q", found, jsonPath)
+	}
+}
+
+// TestTheUsersSettingsAreFoundUnderAnyName covers the user's config
+// directory: the names are tried there too, and the file is read in its own
+// format.
+func TestTheUsersSettingsAreFoundUnderAnyName(t *testing.T) {
+	t.Setenv(EnvSettings, "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	config, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("reading the config directory: %v", err)
+	}
+	path := writeSettingsFile(t, filepath.Join(config, "poo"), "settings.toml", "version = 1\n")
+
+	found, err := FindSettings("", t.TempDir())
+	if err != nil {
+		t.Fatalf("the user file was refused: %v", err)
+	}
+	if found != path {
+		t.Errorf("the user file resolved to %q, want %q", found, path)
+	}
+	if _, err := Load(found); err != nil {
+		t.Errorf("reading the discovered user file: %v", err)
 	}
 }
 
