@@ -213,6 +213,8 @@ type echoTool struct {
 	mu sync.Mutex
 	// calls holds the arguments the tool received.
 	calls []string
+	// envs holds the environment of every call, in order.
+	envs []poo.ToolEnv
 	// result is the text the tool returns.
 	result string
 	// class is the tool's side-effect class.
@@ -233,6 +235,13 @@ func (t *echoTool) Calls() []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]string(nil), t.calls...)
+}
+
+// Envs returns the environment of every call, in order.
+func (t *echoTool) Envs() []poo.ToolEnv {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]poo.ToolEnv(nil), t.envs...)
 }
 
 // Spec describes the tool.
@@ -264,6 +273,7 @@ func (t *echoTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (
 	p := in.(echoPrepared)
 	t.mu.Lock()
 	t.calls = append(t.calls, p.text)
+	t.envs = append(t.envs, env)
 	t.mu.Unlock()
 	if t.call != nil {
 		return t.call(ctx)

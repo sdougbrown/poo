@@ -32,6 +32,11 @@ func TestEveryBlockTypeIsRepresentable(t *testing.T) {
 			IsError:    true,
 		},
 		{
+			Kind:      poo.ContentImage,
+			MediaType: "image/png",
+			Data:      []byte{0x89, 0x50},
+		},
+		{
 			Kind: poo.ContentProvider,
 			Provider: &poo.ProviderBlock{
 				API:      poo.APIResponses,
@@ -106,6 +111,56 @@ func TestEveryBlockTypeIsRepresentable(t *testing.T) {
 // TestAMessageCarriesItsIdOriginAndDeliveryNote covers the three fields
 // the record adds to a message: the session-monotonic id, the origin and
 // the delivery note.
+func TestAToolResultCarriesTheImagesBesideItsText(t *testing.T) {
+	image := poo.Image{MediaType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}}
+	msg := poo.ToolResultMessage("call_1", "read", "read: shot.png (image, 4 bytes)", false, []poo.Image{image})
+
+	if msg.Role != poo.RoleTool {
+		t.Errorf("the message's role is %q, want tool", msg.Role)
+	}
+	if len(msg.Content) != 2 {
+		t.Fatalf("the message holds %d blocks, want the result and one image", len(msg.Content))
+	}
+	if msg.Content[0].Kind != poo.ContentToolResult || msg.Content[0].ToolCallID != "call_1" {
+		t.Errorf("the first block is %+v, want the tool result for call_1", msg.Content[0])
+	}
+	got := msg.Content[1]
+	if got.Kind != poo.ContentImage {
+		t.Fatalf("the second block is %q, want an image", got.Kind)
+	}
+	if got.MediaType != image.MediaType {
+		t.Errorf("the image's media type is %q, want %q", got.MediaType, image.MediaType)
+	}
+	if string(got.Data) != string(image.Data) {
+		t.Errorf("the image's bytes are %v, want %v", got.Data, image.Data)
+	}
+
+	// The block round-trips through the record's own encoding.
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("encoding the message: %v", err)
+	}
+	var decoded poo.Message
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decoding the message: %v", err)
+	}
+	if len(decoded.Content) != 2 || decoded.Content[1].Kind != poo.ContentImage {
+		t.Fatalf("the decoded message lost its image: %+v", decoded.Content)
+	}
+	if decoded.Content[1].MediaType != image.MediaType {
+		t.Errorf("the decoded media type is %q, want %q", decoded.Content[1].MediaType, image.MediaType)
+	}
+	if string(decoded.Content[1].Data) != string(image.Data) {
+		t.Errorf("the decoded bytes are %v, want %v", decoded.Content[1].Data, image.Data)
+	}
+
+	// A result without images is the one block it always was.
+	plain := poo.ToolResultMessage("call_2", "bash", "out", true, nil)
+	if len(plain.Content) != 1 {
+		t.Errorf("a plain result holds %d blocks, want one", len(plain.Content))
+	}
+}
+
 func TestAMessageCarriesItsIdOriginAndDeliveryNote(t *testing.T) {
 	msg := poo.Message{
 		Role:   poo.RoleUser,

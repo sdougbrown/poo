@@ -78,6 +78,9 @@ func CloneMessages(in []Message) []Message {
 				if c.Arguments != nil {
 					out[i].Content[j].Arguments = append([]byte(nil), c.Arguments...)
 				}
+				if c.Data != nil {
+					out[i].Content[j].Data = append([]byte(nil), c.Data...)
+				}
 				if c.Provider != nil {
 					p := *c.Provider
 					if p.Data != nil {
@@ -101,5 +104,6 @@ func copyResult(r ToolResult) ToolResult {
 	if r.Structured != nil {
 		out.Structured = append([]byte(nil), r.Structured...)
 	}
+	out.Images = cloneImages(r.Images)
 	return out
 }

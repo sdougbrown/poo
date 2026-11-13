@@ -449,6 +449,7 @@ func pendingJobResults(records []Record) []jobResult {
 				runID:   r.RunID,
 				outcome: r.Outcome,
 				text:    r.Text,
+				images:  r.Images,
 				fatal:   r.Fatal,
 			})
 		case *InputQueuedRecord:
@@ -475,6 +476,7 @@ func publicJobResult(job jobResult) JobResult {
 		Handle:  job.handle,
 		Tool:    job.tool,
 		Text:    job.text,
+		Images:  job.images,
 		Outcome: jobOutcomeToCallOutcome(job.outcome),
 		Fatal:   job.fatal,
 		InputID: job.id,

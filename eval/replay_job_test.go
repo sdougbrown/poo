@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -32,5 +33,26 @@ func TestReplayDeliversAJobResultInAWokenRun(t *testing.T) {
 	}
 	if !res.Match {
 		t.Errorf("the replay's calls differ from the recording: %v", res.Differences)
+	}
+}
+
+// TestAJobResultsImageDecodesFromTheLog covers the log's own tag: a picture
+// written by the runner is read back by a replay, so a rename of the field
+// cannot silently empty every recorded result.
+func TestAJobResultsImageDecodesFromTheLog(t *testing.T) {
+	line := `{"record":"job.ended","job":"j1","input_id":"s1-ji1","text":"read: shot.png",` +
+		`"images":[{"media_type":"image/png","data":"iVBORw=="}]}`
+	var rec LogRecord
+	if err := json.Unmarshal([]byte(line), &rec); err != nil {
+		t.Fatalf("decoding the record: %v", err)
+	}
+	if len(rec.Images) != 1 {
+		t.Fatalf("the record holds %d images, want one", len(rec.Images))
+	}
+	if rec.Images[0].MediaType != "image/png" {
+		t.Errorf("the media type is %q, want image/png", rec.Images[0].MediaType)
+	}
+	if string(rec.Images[0].Data) != "\x89PNG" {
+		t.Errorf("the bytes are %v, want the picture's", rec.Images[0].Data)
 	}
 }

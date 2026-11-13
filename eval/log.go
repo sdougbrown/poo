@@ -81,6 +81,9 @@ type LogRecord struct {
 	InputID string `json:"input_id"`
 	Fatal   bool   `json:"fatal"`
 	Mode    string `json:"mode"`
+	// Images are the pictures a job's result carries, so a replay delivers
+	// what the recording did.
+	Images []poo.Image `json:"images,omitempty"`
 
 	// The usage record's fields.
 	Request         int     `json:"request"`

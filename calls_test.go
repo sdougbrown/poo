@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -253,4 +254,93 @@ func lastJobEnd(sink *recordingSink) *poo.JobEndedRecord {
 		}
 	}
 	return last
+}
+
+// TestARestoredHeldResultKeepsItsImage covers the restart: a held result's
+// picture is on the record, so a restored session still delivers a picture
+// rather than text that names one.
+func TestARestoredHeldResultKeepsItsImage(t *testing.T) {
+	image := poo.Image{MediaType: "image/png", Data: []byte{1, 2, 3, 4}}
+	records := []poo.Record{
+		jobHeader("s1"),
+		&poo.JobEndedRecord{
+			RecordMeta: poo.NewRecordMeta("job.ended"),
+			SessionID:  "s1",
+			JobID:      "j1",
+			Handle:     "r1",
+			Tool:       "job",
+			RunID:      "r1",
+			Outcome:    poo.OutcomeOK,
+			InputID:    "s1-ji1",
+			Text:       "read: shot.png (image, 4 bytes)",
+			Images:     []poo.Image{image},
+			EndedAt:    "2026-01-01T00:00:01Z",
+		},
+	}
+	tool := pootest.NewJobTool("job", poo.BackgroundAlways)
+	tr := scripted([]fakeResponse{{text: "the answer"}})
+	opts := jobOptions(t, tr, tool, &recordingSink{})
+	session, restored, err := poo.Restore(opts, records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+
+	if len(restored.Jobs) != 1 {
+		t.Fatalf("the restored session lists %d results, want one", len(restored.Jobs))
+	}
+	if len(restored.Jobs[0].Images) != 1 {
+		t.Fatalf("the restored result carries %d images, want one", len(restored.Jobs[0].Images))
+	}
+	if restored.Jobs[0].Images[0].MediaType != image.MediaType {
+		t.Errorf("the restored image is %q, want %q", restored.Jobs[0].Images[0].MediaType, image.MediaType)
+	}
+	if string(restored.Jobs[0].Images[0].Data) != string(image.Data) {
+		t.Errorf("the restored bytes are %v, want %v", restored.Jobs[0].Images[0].Data, image.Data)
+	}
+}
+
+// TestAJobResultsImageSurvivesItsRecord covers the record's encoding: a
+// picture on a job's end record is written and read back, so a restart that
+// loads the log delivers the picture rather than text that names one.
+func TestAJobResultsImageSurvivesItsRecord(t *testing.T) {
+	image := poo.Image{MediaType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}}
+	record := &poo.JobEndedRecord{
+		RecordMeta: poo.NewRecordMeta("job.ended"),
+		SessionID:  "s1",
+		JobID:      "j1",
+		Handle:     "r1",
+		Tool:       "read",
+		RunID:      "r1",
+		Outcome:    poo.OutcomeOK,
+		InputID:    "s1-ji1",
+		Text:       "read: shot.png (image, 4 bytes)",
+		Images:     []poo.Image{image},
+		EndedAt:    "2026-01-01T00:00:01Z",
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("encoding the record: %v", err)
+	}
+	// The keys are the record's own: a renamed tag would drop every picture
+	// from every log.
+	for _, key := range []string{`"images"`, `"media_type"`, `"data"`} {
+		if !strings.Contains(string(raw), key) {
+			t.Fatalf("the encoded record carries no %s: %s", key, raw)
+		}
+	}
+
+	var decoded poo.JobEndedRecord
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decoding the record: %v", err)
+	}
+	if len(decoded.Images) != 1 {
+		t.Fatalf("the decoded record holds %d images, want one", len(decoded.Images))
+	}
+	if decoded.Images[0].MediaType != image.MediaType {
+		t.Errorf("the decoded media type is %q, want %q", decoded.Images[0].MediaType, image.MediaType)
+	}
+	if string(decoded.Images[0].Data) != string(image.Data) {
+		t.Errorf("the decoded bytes are %v, want %v", decoded.Images[0].Data, image.Data)
+	}
 }

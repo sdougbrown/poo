@@ -1,5 +1,7 @@
 package poo
 
+import "slices"
+
 // ModelInfo describes one model the harness can use.
 //
 // Every model resolves to one ModelInfo: the catalog builds it from its
@@ -62,6 +64,14 @@ const (
 	// OpCompact is a native compaction.
 	OpCompact Op = "compact"
 )
+
+// ReadsImages reports whether the model declares image input.
+//
+// It is the one answer to that question: the tool that returns a picture, the
+// request that may carry one, and the settings that build them all ask it.
+func (m ModelInfo) ReadsImages() bool {
+	return slices.Contains(m.Inputs, ModalityImage)
+}
 
 // Modality names a kind of input a model reads.
 type Modality string

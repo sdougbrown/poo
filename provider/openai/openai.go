@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -173,11 +174,28 @@ type streamOptions struct {
 }
 
 // chatMessage is the wire shape of one message.
+//
+// Content is a string for a message whose content is text, and the parts
+// array when the message carries an image: the Chat Completions API takes an
+// image only in a user message's parts, so an image a tool returned is sent
+// in the message that follows its result.
 type chatMessage struct {
 	Role       string         `json:"role"`
-	Content    string         `json:"content,omitempty"`
+	Content    any            `json:"content,omitempty"`
 	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
+}
+
+// chatContentPart is one part of a message's parts array.
+type chatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
+}
+
+// chatImageURL is the image a part carries, as a data URL.
+type chatImageURL struct {
+	URL string `json:"url"`
 }
 
 // chatToolCall is the wire shape of a tool call.
@@ -417,11 +435,11 @@ func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error
 				}
 			}
 		}
-		for _, m := range appended {
-			cm, err := convertMessage(m)
-			if err != nil {
-				return nil, err
-			}
+		converted, err := convertMessages(appended)
+		if err != nil {
+			return nil, err
+		}
+		for _, cm := range converted {
 			raw, err := json.Marshal(cm)
 			if err != nil {
 				return nil, &poo.ProviderError{
@@ -612,17 +630,19 @@ func ChatURL(baseURL string) string {
 }
 
 // convertMessage turns a core message into the wire shape.
-func convertMessage(m poo.Message) (chatMessage, error) {
+func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 	cm := chatMessage{Role: string(m.Role)}
 
 	var text strings.Builder
 	var calls []chatToolCall
+	var images []poo.ContentBlock
+	toolResult := false
 	// The provider blocks are checked in a pass of their own, so a block
 	// after a tool result is checked too.
 	for _, c := range m.Content {
 		if c.Provider != nil {
 			if err := checkProviderBlock(c.Provider); err != nil {
-				return chatMessage{}, err
+				return chatMessage{}, nil, err
 			}
 		}
 	}
@@ -647,17 +667,82 @@ func convertMessage(m poo.Message) (chatMessage, error) {
 			ct.Function.Name = c.Name
 			ct.Function.Arguments = string(c.Arguments)
 			calls = append(calls, ct)
+		case poo.ContentImage:
+			images = append(images, c)
 		case poo.ContentToolResult:
+			// The loop keeps going: an image the tool returned follows its
+			// result block, in the same message.
+			toolResult = true
 			cm.Role = "tool"
 			cm.ToolCallID = c.ToolCallID
 			cm.Content = c.Text
-			return cm, nil
 		}
 	}
+	if toolResult {
+		return cm, imageParts(images), nil
+	}
 
-	cm.Content = text.String()
+	if text.Len() > 0 {
+		cm.Content = text.String()
+	}
 	cm.ToolCalls = calls
-	return cm, nil
+	return cm, imageParts(images), nil
+}
+
+// convertMessages turns core messages into the wire shape, one or two at a
+// time.
+//
+// A tool result that carries images becomes the tool message plus a user
+// message carrying them: the Chat Completions API takes an image only in a
+// user message's parts, unlike the Responses and Messages APIs, which take one
+// inside the tool result itself.
+func convertMessages(msgs []poo.Message) ([]chatMessage, error) {
+	out := make([]chatMessage, 0, len(msgs))
+	var pending []chatContentPart
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		out = append(out, chatMessage{Role: "user", Content: pending})
+		pending = nil
+	}
+	for _, m := range msgs {
+		cm, images, err := convertMessage(m)
+		if err != nil {
+			return nil, err
+		}
+		// A batch of tool results answers one assistant message, so the
+		// pictures ride in one user message after the last of them: a
+		// server that enforces alternation reads one turn, not one per
+		// result.
+		if cm.Role != "tool" {
+			flush()
+		}
+		out = append(out, cm)
+		pending = append(pending, images...)
+	}
+	flush()
+	return out, nil
+}
+
+// imageParts renders image blocks as the parts a user message carries.
+func imageParts(images []poo.ContentBlock) []chatContentPart {
+	if len(images) == 0 {
+		return nil
+	}
+	parts := make([]chatContentPart, 0, len(images))
+	for _, image := range images {
+		parts = append(parts, chatContentPart{
+			Type:     "image_url",
+			ImageURL: &chatImageURL{URL: imageDataURL(image)},
+		})
+	}
+	return parts
+}
+
+// imageDataURL renders an image block as a data URL.
+func imageDataURL(image poo.ContentBlock) string {
+	return "data:" + image.MediaType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)
 }
 
 // checkProviderBlock applies the opaque-block rule to one block.

@@ -2,6 +2,7 @@ package openai_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -488,7 +489,7 @@ func TestAToolResultMessageBecomesAToolMessage(t *testing.T) {
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model: "m",
 		Messages: []poo.Message{
-			poo.ToolResultMessage("call_1", "bash", "the output", false),
+			poo.ToolResultMessage("call_1", "bash", "the output", false, nil),
 		},
 		MaxTokens: 16,
 	})
@@ -508,6 +509,85 @@ func TestAToolResultMessageBecomesAToolMessage(t *testing.T) {
 	}
 	if first["content"] != "the output" {
 		t.Errorf("the message's content is %v, want the tool output", first["content"])
+	}
+}
+
+func TestAToolResultImageBecomesAUserMessage(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	image := poo.Image{MediaType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}}
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model: "m",
+		Messages: []poo.Message{
+			poo.ToolResultMessage("call_1", "read", "read: shot.png (image, 4 bytes)", false, []poo.Image{image}),
+		},
+		MaxTokens: 16,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	messages, _ := srv.requests[0]["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("the request held %d messages, want the tool result and one more", len(messages))
+	}
+
+	// The tool result stays a plain tool message: the API takes a string
+	// there.
+	first, _ := messages[0].(map[string]any)
+	if first["role"] != "tool" {
+		t.Errorf("the first message's role is %v, want tool", first["role"])
+	}
+	if first["content"] != "read: shot.png (image, 4 bytes)" {
+		t.Errorf("the tool message's content is %v", first["content"])
+	}
+
+	// The image rides in the user message that follows it.
+	second, _ := messages[1].(map[string]any)
+	if second["role"] != "user" {
+		t.Fatalf("the second message's role is %v, want user", second["role"])
+	}
+	parts, _ := second["content"].([]any)
+	if len(parts) != 1 {
+		t.Fatalf("the user message holds %d parts, want one", len(parts))
+	}
+	part, _ := parts[0].(map[string]any)
+	if part["type"] != "image_url" {
+		t.Errorf("the part's type is %v, want image_url", part["type"])
+	}
+	imageURL, _ := part["image_url"].(map[string]any)
+	url, _ := imageURL["url"].(string)
+	want := "data:image/png;base64," + base64.StdEncoding.EncodeToString(image.Data)
+	if url != want {
+		t.Errorf("the image url is %q, want %q", url, want)
+	}
+}
+
+func TestAToolResultWithoutImagesAddsNoMessage(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model: "m",
+		Messages: []poo.Message{
+			poo.ToolResultMessage("call_2", "bash", "the output", true, nil),
+		},
+		MaxTokens: 16,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	messages, _ := srv.requests[0]["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("the request held %d messages, want one", len(messages))
 	}
 }
 
@@ -1059,5 +1139,132 @@ func TestChatURLAppendsThePathOnlyOnce(t *testing.T) {
 		if got := openai.ChatURL(c.base); got != c.want {
 			t.Errorf("ChatURL(%q) is %q, want %q", c.base, got, c.want)
 		}
+	}
+}
+
+// TestAParallelBatchOfImagesKeepsOneToolTurn covers the batch: two tool
+// results of one assistant turn carry their pictures in one user message after
+// the last of them, so a server that enforces alternation reads one turn.
+func TestAParallelBatchOfImagesKeepsOneToolTurn(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	first := poo.Image{MediaType: "image/png", Data: []byte{1}}
+	second := poo.Image{MediaType: "image/jpeg", Data: []byte{2}}
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model: "m",
+		Messages: []poo.Message{
+			poo.NewTextMessage(poo.RoleUser, "look at both"),
+			poo.ToolResultMessage("call_1", "read", "read: a.png", false, []poo.Image{first}),
+			poo.ToolResultMessage("call_2", "read", "read: b.jpg", false, []poo.Image{second}),
+		},
+		MaxTokens: 16,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	messages, _ := srv.requests[0]["messages"].([]any)
+	if len(messages) != 4 {
+		t.Fatalf("the request held %d messages, want user, tool, tool, user", len(messages))
+	}
+	roles := make([]string, 0, len(messages))
+	for _, raw := range messages {
+		m, _ := raw.(map[string]any)
+		roles = append(roles, m["role"].(string))
+	}
+	want := []string{"user", "tool", "tool", "user"}
+	for i, role := range want {
+		if roles[i] != role {
+			t.Fatalf("the message roles are %v, want %v", roles, want)
+		}
+	}
+	last, _ := messages[3].(map[string]any)
+	parts, _ := last["content"].([]any)
+	if len(parts) != 2 {
+		t.Fatalf("the user message holds %d parts, want both pictures", len(parts))
+	}
+	for i, wantType := range []string{"image/png", "image/jpeg"} {
+		part, _ := parts[i].(map[string]any)
+		imageURL, _ := part["image_url"].(map[string]any)
+		url, _ := imageURL["url"].(string)
+		if !strings.HasPrefix(url, "data:"+wantType+";base64,") {
+			t.Errorf("part %d is %q, want a %s data url", i, url, wantType)
+		}
+	}
+}
+
+// TestTwoImagesInOneResultBothReachTheModel covers the second picture of a
+// single result: the transport coalesces none of them.
+func TestTwoImagesInOneResultBothReachTheModel(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model: "m",
+		Messages: []poo.Message{
+			poo.ToolResultMessage("call_1", "read", "read: both", false, []poo.Image{
+				{MediaType: "image/png", Data: []byte{1}},
+				{MediaType: "image/png", Data: []byte{2}},
+			}),
+		},
+		MaxTokens: 16,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	messages, _ := srv.requests[0]["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("the request held %d messages, want the result and one more", len(messages))
+	}
+	user, _ := messages[1].(map[string]any)
+	parts, _ := user["content"].([]any)
+	if len(parts) != 2 {
+		t.Errorf("the user message holds %d parts, want two", len(parts))
+	}
+}
+
+// TestAToolCallOnlyMessageOmitsItsContent covers the wire shape: an assistant
+// turn that is nothing but tool calls sends no content field, as it did before
+// a message's content could be parts.
+func TestAToolCallOnlyMessageOmitsItsContent(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	call := poo.ContentBlock{
+		Kind:       poo.ContentToolCall,
+		ToolCallID: "call_1",
+		Name:       "bash",
+		Arguments:  []byte(`{"command":"ls"}`),
+	}
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "m",
+		Messages:  []poo.Message{{Role: poo.RoleAssistant, Content: []poo.ContentBlock{call}}},
+		MaxTokens: 16,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	messages, _ := srv.requests[0]["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("the request held %d messages, want one", len(messages))
+	}
+	first, _ := messages[0].(map[string]any)
+	if _, present := first["content"]; present {
+		t.Errorf("a tool-call-only message sent content %v, want the field left out", first["content"])
+	}
+	if calls, _ := first["tool_calls"].([]any); len(calls) != 1 {
+		t.Errorf("the message carries %d tool calls, want one", len(calls))
 	}
 }

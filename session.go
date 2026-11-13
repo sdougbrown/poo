@@ -1,13 +1,17 @@
 package poo
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
-
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -1061,11 +1065,49 @@ func (s *Session) modelMessagesLocked() []Message {
 		}
 		messages = append(messages, msg)
 	}
-	// The provider blocks the current model cannot read are left out of
-	// the request: the history keeps them, and the switch that brought
-	// the model recorded the omission.
+	// What the current model cannot read is left out of the request: the
+	// history keeps it, so a switch back sends it again. A provider block's
+	// omission is on the switch record; an image's is not, because the
+	// model's own inputs say why it was left out.
 	messages = stripForeignBlocks(messages, s.opts.Model.API)
+	messages = stripUnreadableImages(messages, s.opts.Model)
 	return CloneMessages(messages)
+}
+
+// stripUnreadableImages drops image blocks when the model does not read
+// images.
+//
+// A model swapped in mid-session need not read them, and neither does a
+// session restored under one. The history keeps the pictures, so a switch
+// back sends them again.
+func stripUnreadableImages(messages []Message, model ModelInfo) []Message {
+	if model.ReadsImages() {
+		return messages
+	}
+	out := make([]Message, 0, len(messages))
+	for _, msg := range messages {
+		hasImage := false
+		for _, block := range msg.Content {
+			if block.Kind == ContentImage {
+				hasImage = true
+				break
+			}
+		}
+		if !hasImage {
+			out = append(out, msg)
+			continue
+		}
+		blocks := make([]ContentBlock, 0, len(msg.Content))
+		for _, block := range msg.Content {
+			if block.Kind == ContentImage {
+				continue
+			}
+			blocks = append(blocks, block)
+		}
+		msg.Content = blocks
+		out = append(out, msg)
+	}
+	return out
 }
 
 // budget returns the run's context budget.
@@ -1520,6 +1562,29 @@ func recordArgs(raw json.RawMessage) json.RawMessage {
 	return quoted
 }
 
+// imagePixelsPerToken is the rule providers share for a picture's cost: an
+// image is about one token per 750 pixels. Its bytes are not its cost, so the
+// estimator counts pixels, and a picture of unknown size is never free.
+const (
+	imagePixelsPerToken = 750
+	imageDefaultPixels  = 1024 * 1024
+	// imageMaxPixels caps what one picture is charged. A header can name any
+	// size at all, and a declared one is not a reason to compact at once.
+	imageMaxPixels = 100 * 1000 * 1000
+)
+
+// imageChars returns an image's cost in the estimator's characters.
+func imageChars(data []byte) int {
+	pixels := imageDefaultPixels
+	if config, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil && config.Width > 0 && config.Height > 0 {
+		pixels = config.Width * config.Height
+	}
+	if pixels > imageMaxPixels {
+		pixels = imageMaxPixels
+	}
+	return int(float64(pixels) / imagePixelsPerToken * CharsPerToken)
+}
+
 // estimateMessageChars returns the approximate serialized size of a
 // message.
 func estimateMessageChars(m Message) int {
@@ -1531,6 +1596,9 @@ func estimateMessageChars(m Message) int {
 		}
 		if c.Provider != nil {
 			chars += len(c.Provider.Data)
+		}
+		if c.Kind == ContentImage {
+			chars += imageChars(c.Data)
 		}
 	}
 	// The delivery note's text is already part of the message's content,

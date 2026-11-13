@@ -463,6 +463,9 @@ type JobResult struct {
 	Tool string `json:"tool"`
 	// Text is the result, as the model reads it.
 	Text string `json:"text"`
+	// Images are the pictures the result carries, delivered beside the
+	// text.
+	Images []Image `json:"images,omitempty"`
 	// Outcome is the job's outcome. A feed's input is always ok.
 	Outcome Outcome `json:"outcome"`
 	// Fatal reports that the job failed with an error that wraps

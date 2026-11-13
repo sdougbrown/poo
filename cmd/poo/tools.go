@@ -77,7 +77,7 @@ func linkedTools() map[string]config.ToolFactory {
 		"bash": func(opts config.ToolOptions) poo.Tool {
 			return bash.New(bash.WithExecutor(opts.Executor), bash.WithScrub(opts.Scrub))
 		},
-		"read": func(config.ToolOptions) poo.Tool { return read.New() },
+		"read": func(opts config.ToolOptions) poo.Tool { return read.New(read.WithImages(opts.Images)) },
 		"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
 		"codemode": func(config.ToolOptions) poo.Tool {

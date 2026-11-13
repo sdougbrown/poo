@@ -27,6 +27,8 @@ type JobTool struct {
 	background poo.Background
 	// result is the text the tool returns.
 	result string
+	// images are the pictures the tool returns beside its text.
+	images []poo.Image
 	// err is the failure the tool returns, when it is set.
 	err error
 	// started is signalled when a call starts, so a test knows the job
@@ -135,6 +137,13 @@ func (t *JobTool) SetResult(text string) {
 	t.result = text
 }
 
+// SetImages sets the images the tool returns beside its text.
+func (t *JobTool) SetImages(images ...poo.Image) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.images = images
+}
+
 // SetError makes the tool fail with an error.
 func (t *JobTool) SetError(err error) {
 	t.mu.Lock()
@@ -205,12 +214,13 @@ func (t *JobTool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (p
 
 	t.mu.Lock()
 	result := t.result
+	images := append([]poo.Image(nil), t.images...)
 	err := t.err
 	t.mu.Unlock()
 	if err != nil {
 		return poo.ToolResult{}, err
 	}
-	return poo.ToolResult{Text: result}, nil
+	return poo.ToolResult{Text: result, Images: images}, nil
 }
 
 // jobPrepared is a prepared job-tool call.
