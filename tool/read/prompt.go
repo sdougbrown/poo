@@ -3,13 +3,15 @@ package read
 import (
 	_ "embed"
 
+	"github.com/sdougbrown/poo"
+
 	"github.com/sdougbrown/poo/prompt"
 )
 
 //go:embed prompt.md
 var sectionText string
 
-// imageText is the line a session whose model reads images adds: the read
+// imageText is the line a session whose model reads attachments adds: the read
 // returns the picture itself, so the model is told it can look at one.
 const imageText = "- An image file comes back as the image itself, so a screenshot is examined rather than described.\n"
 
@@ -24,7 +26,7 @@ var (
 
 // PromptSection renders the tool's own section of the system prompt.
 func (t *Tool) PromptSection(env prompt.Env) string {
-	if t.images {
+	if t.inputs[poo.ModalityImage] {
 		return sectionWithImages.Render(env)
 	}
 	return section.Render(env)

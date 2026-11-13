@@ -81,9 +81,9 @@ type LogRecord struct {
 	InputID string `json:"input_id"`
 	Fatal   bool   `json:"fatal"`
 	Mode    string `json:"mode"`
-	// Images are the pictures a job's result carries, so a replay delivers
+	// Attachments are the files a job's result carries, so a replay delivers
 	// what the recording did.
-	Images []poo.Image `json:"images,omitempty"`
+	Attachments []poo.Attachment `json:"attachments,omitempty"`
 
 	// The usage record's fields.
 	Request         int     `json:"request"`
@@ -188,6 +188,31 @@ func decodeRecord(text string) (LogRecord, error) {
 		return LogRecord{}, err
 	}
 	return rec, nil
+}
+
+// UnmarshalJSON reads a record, including the pictures an earlier build wrote
+// under their own key.
+//
+// A replay hands a job's result back the way the recording delivered it, and an
+// attachment was an image when this record named it `images`.
+func (r *LogRecord) UnmarshalJSON(data []byte) error {
+	type record LogRecord
+	decoded := struct {
+		*record
+		Images json.RawMessage `json:"images"`
+	}{record: (*record)(r)}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if len(r.Attachments) > 0 {
+		return nil
+	}
+	images, err := poo.EarlierImages(decoded.Images)
+	if err != nil {
+		return err
+	}
+	r.Attachments = images
+	return nil
 }
 
 // ToolCalls returns the tool calls the run made, in order.

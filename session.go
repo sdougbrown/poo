@@ -1067,39 +1067,52 @@ func (s *Session) modelMessagesLocked() []Message {
 	}
 	// What the current model cannot read is left out of the request: the
 	// history keeps it, so a switch back sends it again. A provider block's
-	// omission is on the switch record; an image's is not, because the
+	// omission is on the switch record; an attachment's is not, because the
 	// model's own inputs say why it was left out.
 	messages = stripForeignBlocks(messages, s.opts.Model.API)
-	messages = stripUnreadableImages(messages, s.opts.Model)
+	messages = stripUnreadableAttachments(messages, s.opts.Model)
 	return CloneMessages(messages)
 }
 
-// stripUnreadableImages drops image blocks when the model does not read
-// images.
+// stripUnreadableAttachments drops the blocks whose modality the model does
+// not read.
 //
-// A model swapped in mid-session need not read them, and neither does a
-// session restored under one. The history keeps the pictures, so a switch
-// back sends them again.
-func stripUnreadableImages(messages []Message, model ModelInfo) []Message {
-	if model.ReadsImages() {
+// A model swapped in mid-session need not read one, and neither does a session
+// restored under one. The history keeps the attachments, so a switch back
+// sends them again.
+func stripUnreadableAttachments(messages []Message, model ModelInfo) []Message {
+	// A model that reads every modality an attachment may have drops nothing,
+	// and the request goes out as the history is.
+	readsAll := true
+	for modality := range attachmentKinds {
+		if !model.Reads(modality) {
+			readsAll = false
+			break
+		}
+	}
+	if readsAll {
 		return messages
+	}
+	unreadable := func(block ContentBlock) bool {
+		modality, ok := modalityOf(block.Kind)
+		return ok && !model.Reads(modality)
 	}
 	out := make([]Message, 0, len(messages))
 	for _, msg := range messages {
-		hasImage := false
+		dropped := false
 		for _, block := range msg.Content {
-			if block.Kind == ContentImage {
-				hasImage = true
+			if unreadable(block) {
+				dropped = true
 				break
 			}
 		}
-		if !hasImage {
+		if !dropped {
 			out = append(out, msg)
 			continue
 		}
 		blocks := make([]ContentBlock, 0, len(msg.Content))
 		for _, block := range msg.Content {
-			if block.Kind == ContentImage {
+			if unreadable(block) {
 				continue
 			}
 			blocks = append(blocks, block)
@@ -1573,7 +1586,19 @@ const (
 	imageMaxPixels = 100 * 1000 * 1000
 )
 
-// imageChars returns an image's cost in the estimator's characters.
+// attachmentChars returns an attachment's cost in the estimator's characters.
+//
+// The cost belongs to the modality: a picture is its pixels, and a modality
+// this estimator has no rule for costs nothing here.
+func attachmentChars(block ContentBlock) int {
+	switch block.Kind {
+	case ContentImage:
+		return imageChars(block.Data)
+	}
+	return 0
+}
+
+// imageChars returns a picture's cost in the estimator's characters.
 func imageChars(data []byte) int {
 	pixels := imageDefaultPixels
 	if config, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil && config.Width > 0 && config.Height > 0 {
@@ -1597,9 +1622,7 @@ func estimateMessageChars(m Message) int {
 		if c.Provider != nil {
 			chars += len(c.Provider.Data)
 		}
-		if c.Kind == ContentImage {
-			chars += imageChars(c.Data)
-		}
+		chars += attachmentChars(c)
 	}
 	// The delivery note's text is already part of the message's content,
 	// where it was prefixed, so it is not counted again.

@@ -442,15 +442,15 @@ func pendingJobResults(records []Record) []jobResult {
 				continue
 			}
 			out = append(out, jobResult{
-				id:      r.InputID,
-				job:     r.JobID,
-				handle:  r.Handle,
-				tool:    r.Tool,
-				runID:   r.RunID,
-				outcome: r.Outcome,
-				text:    r.Text,
-				images:  r.Images,
-				fatal:   r.Fatal,
+				id:          r.InputID,
+				job:         r.JobID,
+				handle:      r.Handle,
+				tool:        r.Tool,
+				runID:       r.RunID,
+				outcome:     r.Outcome,
+				text:        r.Text,
+				attachments: r.Attachments,
+				fatal:       r.Fatal,
 			})
 		case *InputQueuedRecord:
 			if r.Mode != InputModeFeed || fated[r.InputID] {
@@ -472,15 +472,15 @@ func pendingJobResults(records []Record) []jobResult {
 // publicJobResult turns an internal result into the public one.
 func publicJobResult(job jobResult) JobResult {
 	return JobResult{
-		JobID:   job.job,
-		Handle:  job.handle,
-		Tool:    job.tool,
-		Text:    job.text,
-		Images:  job.images,
-		Outcome: jobOutcomeToCallOutcome(job.outcome),
-		Fatal:   job.fatal,
-		InputID: job.id,
-		Origin:  job.origin,
+		JobID:       job.job,
+		Handle:      job.handle,
+		Tool:        job.tool,
+		Text:        job.text,
+		Attachments: job.attachments,
+		Outcome:     jobOutcomeToCallOutcome(job.outcome),
+		Fatal:       job.fatal,
+		InputID:     job.id,
+		Origin:      job.origin,
 	}
 }
 

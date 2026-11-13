@@ -112,8 +112,8 @@ func TestEveryBlockTypeIsRepresentable(t *testing.T) {
 // the record adds to a message: the session-monotonic id, the origin and
 // the delivery note.
 func TestAToolResultCarriesTheImagesBesideItsText(t *testing.T) {
-	image := poo.Image{MediaType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}}
-	msg := poo.ToolResultMessage("call_1", "read", "read: shot.png (image, 4 bytes)", false, []poo.Image{image})
+	image := poo.Attachment{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}}
+	msg := poo.ToolResultMessage("call_1", "read", "read: shot.png (image, 4 bytes)", false, []poo.Attachment{image})
 
 	if msg.Role != poo.RoleTool {
 		t.Errorf("the message's role is %q, want tool", msg.Role)
@@ -154,7 +154,7 @@ func TestAToolResultCarriesTheImagesBesideItsText(t *testing.T) {
 		t.Errorf("the decoded bytes are %v, want %v", decoded.Content[1].Data, image.Data)
 	}
 
-	// A result without images is the one block it always was.
+	// A result without attachments is the one block it always was.
 	plain := poo.ToolResultMessage("call_2", "bash", "out", true, nil)
 	if len(plain.Content) != 1 {
 		t.Errorf("a plain result holds %d blocks, want one", len(plain.Content))

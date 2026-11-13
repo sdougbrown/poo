@@ -397,20 +397,20 @@ func TestRewriteKeepsTheOriginalRecord(t *testing.T) {
 	}
 }
 
-// TestARewriteDropsTheImagesOfTheResultItRewrites covers the context an
-// image costs: a rewritten result keeps no picture, because freeing that
+// TestARewriteDropsTheAttachmentsOfTheResultItRewrites covers the context an
+// attachment costs: a rewritten result keeps none, because freeing that
 // context is what the rewrite is for.
-func TestARewriteDropsTheImagesOfTheResultItRewrites(t *testing.T) {
+func TestARewriteDropsTheAttachmentsOfTheResultItRewrites(t *testing.T) {
 	tool := &echoTool{call: func(context.Context) (poo.ToolResult, error) {
 		return poo.ToolResult{
-			Text:   "original",
-			Images: []poo.Image{{MediaType: "image/png", Data: []byte{1, 2, 3}}},
+			Text:        "original",
+			Attachments: []poo.Attachment{{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1, 2, 3}}},
 		}, nil
 	}}
 	tr := scripted([]fakeResponse{toolCallTurn(), toolCallTurn(), {text: "done"}})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, tool, sink)
-	// The model reads images, so the session sends them.
+	// The model reads attachments, so the session sends them.
 	opts.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
 	opts.Compactor = &compactionCompactor{
 		should: afterTurns(2),

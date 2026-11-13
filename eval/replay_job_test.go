@@ -41,18 +41,18 @@ func TestReplayDeliversAJobResultInAWokenRun(t *testing.T) {
 // cannot silently empty every recorded result.
 func TestAJobResultsImageDecodesFromTheLog(t *testing.T) {
 	line := `{"record":"job.ended","job":"j1","input_id":"s1-ji1","text":"read: shot.png",` +
-		`"images":[{"media_type":"image/png","data":"iVBORw=="}]}`
+		`"attachments":[{"media_type":"image/png","data":"iVBORw=="}]}`
 	var rec LogRecord
 	if err := json.Unmarshal([]byte(line), &rec); err != nil {
 		t.Fatalf("decoding the record: %v", err)
 	}
-	if len(rec.Images) != 1 {
-		t.Fatalf("the record holds %d images, want one", len(rec.Images))
+	if len(rec.Attachments) != 1 {
+		t.Fatalf("the record holds %d attachments, want one", len(rec.Attachments))
 	}
-	if rec.Images[0].MediaType != "image/png" {
-		t.Errorf("the media type is %q, want image/png", rec.Images[0].MediaType)
+	if rec.Attachments[0].MediaType != "image/png" {
+		t.Errorf("the media type is %q, want image/png", rec.Attachments[0].MediaType)
 	}
-	if string(rec.Images[0].Data) != "\x89PNG" {
-		t.Errorf("the bytes are %v, want the picture's", rec.Images[0].Data)
+	if string(rec.Attachments[0].Data) != "\x89PNG" {
+		t.Errorf("the bytes are %v, want the picture's", rec.Attachments[0].Data)
 	}
 }

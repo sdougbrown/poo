@@ -65,12 +65,12 @@ const (
 	OpCompact Op = "compact"
 )
 
-// ReadsImages reports whether the model declares image input.
+// Reads reports whether the model declares an input modality.
 //
-// It is the one answer to that question: the tool that returns a picture, the
-// request that may carry one, and the settings that build them all ask it.
-func (m ModelInfo) ReadsImages() bool {
-	return slices.Contains(m.Inputs, ModalityImage)
+// It is the one answer to that question: the tool that returns an attachment,
+// the request that may carry one, and the settings that build them all ask it.
+func (m ModelInfo) Reads(modality Modality) bool {
+	return slices.Contains(m.Inputs, modality)
 }
 
 // Modality names a kind of input a model reads.

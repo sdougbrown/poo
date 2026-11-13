@@ -704,7 +704,7 @@ func TestAJobDeliversTheImageItsResultCarries(t *testing.T) {
 	sink := &recordingSink{}
 	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
 	tool.SetResult("read: shot.png (image, 4 bytes)")
-	tool.SetImages(poo.Image{MediaType: "image/png", Data: []byte{1, 2, 3, 4}})
+	tool.SetAttachments(poo.Attachment{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1, 2, 3, 4}})
 
 	opts := jobOptions(t, tr, tool, sink)
 	s := newTestSession(t, opts)

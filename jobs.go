@@ -129,9 +129,9 @@ type JobEndedRecord struct {
 	InputID string `json:"input_id"`
 	// Text is the result the model reads.
 	Text string `json:"text"`
-	// Images are the pictures the result carries, so a held result is still
-	// a picture after a restart.
-	Images []Image `json:"images,omitempty"`
+	// Attachments are the files the result carries, so a held result is still
+	// one after a restart.
+	Attachments []Attachment `json:"attachments,omitempty"`
 	// Fatal reports that the job failed with an error that wraps
 	// ErrFatal. A run that receives the result settles tool_fatal.
 	Fatal bool `json:"fatal,omitempty"`
@@ -147,6 +147,56 @@ type JobEndedRecord struct {
 	Hooks []HookDecision `json:"hooks,omitempty"`
 	// EndedAt is the RFC 3339 end time in UTC.
 	EndedAt string `json:"ended_at"`
+}
+
+// UnmarshalJSON reads a job's end, including the pictures an earlier build
+// wrote under their own key.
+//
+// An attachment was an image when this record named it `images`, so a held
+// result recorded under that name still reaches the model as the picture it
+// was rather than as a text line.
+func (r *JobEndedRecord) UnmarshalJSON(data []byte) error {
+	type record JobEndedRecord
+	decoded := struct {
+		*record
+		Images json.RawMessage `json:"images"`
+	}{record: (*record)(r)}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if len(r.Attachments) > 0 {
+		return nil
+	}
+	images, err := EarlierImages(decoded.Images)
+	if err != nil {
+		return err
+	}
+	r.Attachments = images
+	return nil
+}
+
+// EarlierImages reads the pictures a record of an earlier build wrote under
+// `images`, as the attachments a record carries now.
+//
+// A record also carries `attachments` in the current vocabulary, and those win:
+// raw is the record's `images` key alone, and a record that has the new key
+// leaves it out.
+func EarlierImages(raw json.RawMessage) ([]Attachment, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var images []struct {
+		MediaType string `json:"media_type"`
+		Data      []byte `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &images); err != nil {
+		return nil, err
+	}
+	out := make([]Attachment, 0, len(images))
+	for _, image := range images {
+		out = append(out, Attachment{Modality: ModalityImage, MediaType: image.MediaType, Data: image.Data})
+	}
+	return out, nil
 }
 
 // InputHeldRecord records that job results were held instead of delivered.
@@ -238,9 +288,9 @@ type jobResult struct {
 	// text is the result the model reads. A feed's input carries the
 	// text rendered at acceptance, and the delivery uses it verbatim.
 	text string
-	// images are the pictures the result carries, delivered beside the
+	// attachments are the files the result carries, delivered beside the
 	// text.
-	images []Image
+	attachments []Attachment
 	// fatal reports that the job failed with an error that wraps
 	// ErrFatal. The receiving run settles tool_fatal.
 	fatal bool
@@ -579,9 +629,9 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	// The chain runs once, at the completion, under a context of its
 	// own. A close is a completion too: it sets the cause and the text,
 	// and the chain still sees the partial output before it is held.
-	// The images the tool produced ride with the text, so a result that was
-	// a picture is still one after the job's own stop or rewrite.
-	s.completeJob(job, ToolResult{Text: text, Images: result.Images, IsError: outcome == OutcomeError}, outcome, timedOut, fatal, "")
+	// The attachments the tool produced ride with the text, so a result that was
+	// an attachment is still one after the job's own stop or rewrite.
+	s.completeJob(job, ToolResult{Text: text, Attachments: result.Attachments, IsError: outcome == OutcomeError}, outcome, timedOut, fatal, "")
 }
 
 // completeJob runs a job's after-tool chain once and records its end.
@@ -677,23 +727,23 @@ func (s *Session) jobToolEnv(job *jobState) ToolEnv {
 // leaks what a hook would have redacted.
 func (s *Session) jobEnded(job *jobState, inputID string, outcome Outcome, cause Cause, timedOut, fatal bool, text string, out afterToolOutcome) (*JobEndedRecord, map[string]any) {
 	rec := &JobEndedRecord{
-		RecordMeta: NewRecordMeta("job.ended"),
-		SessionID:  s.opts.SessionID,
-		JobID:      job.id,
-		Handle:     job.handle,
-		Tool:       job.tool,
-		RunID:      job.runID,
-		Outcome:    outcome,
-		Cause:      cause,
-		TimedOut:   timedOut,
-		Fatal:      fatal,
-		InputID:    inputID,
-		Text:       text,
-		Images:     out.result.Images,
-		Redacted:   out.redacted,
-		RedactedBy: out.redactedBy,
-		Hooks:      out.decisions,
-		EndedAt:    nowRFC3339(),
+		RecordMeta:  NewRecordMeta("job.ended"),
+		SessionID:   s.opts.SessionID,
+		JobID:       job.id,
+		Handle:      job.handle,
+		Tool:        job.tool,
+		RunID:       job.runID,
+		Outcome:     outcome,
+		Cause:       cause,
+		TimedOut:    timedOut,
+		Fatal:       fatal,
+		InputID:     inputID,
+		Text:        text,
+		Attachments: out.result.Attachments,
+		Redacted:    out.redacted,
+		RedactedBy:  out.redactedBy,
+		Hooks:       out.decisions,
+		EndedAt:     nowRFC3339(),
 	}
 	if out.original != nil {
 		rec.Original = &ToolResultData{
@@ -767,15 +817,15 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 	s.events.emit(EventJobEnded, payload)
 
 	s.queueJobResult(jobResult{
-		id:      inputID,
-		job:     job.id,
-		handle:  handle,
-		tool:    tool,
-		runID:   runID,
-		outcome: jobOutcome,
-		text:    text,
-		images:  cloneImages(out.result.Images),
-		fatal:   fatal,
+		id:          inputID,
+		job:         job.id,
+		handle:      handle,
+		tool:        tool,
+		runID:       runID,
+		outcome:     jobOutcome,
+		text:        text,
+		attachments: cloneAttachments(out.result.Attachments),
+		fatal:       fatal,
 	})
 }
 
@@ -830,15 +880,15 @@ func (s *Session) QueueJobResult(result JobResult) {
 		id = result.InputID
 	}
 	s.queueJobResult(jobResult{
-		id:      id,
-		job:     result.JobID,
-		handle:  result.Handle,
-		tool:    result.Tool,
-		outcome: jobOutcomeOf(result.Outcome),
-		text:    result.Text,
-		images:  cloneImages(result.Images),
-		fatal:   result.Fatal,
-		origin:  result.Origin,
+		id:          id,
+		job:         result.JobID,
+		handle:      result.Handle,
+		tool:        result.Tool,
+		outcome:     jobOutcomeOf(result.Outcome),
+		text:        result.Text,
+		attachments: cloneAttachments(result.Attachments),
+		fatal:       result.Fatal,
+		origin:      result.Origin,
 	})
 }
 
@@ -1276,8 +1326,8 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 	s.mu.Unlock()
 
 	msg := NewTextMessage(RoleUser, jobResultText(result))
-	if len(result.images) > 0 {
-		msg.Content = append(msg.Content, imageBlocks(result.images)...)
+	if len(result.attachments) > 0 {
+		msg.Content = append(msg.Content, attachmentBlocks(result.attachments)...)
 	}
 	msg.Origin = OriginJob
 	mode := InputModeJob
@@ -1452,13 +1502,13 @@ func publicJobResults(results []jobResult) []JobResult {
 			continue
 		}
 		out = append(out, JobResult{
-			JobID:   r.job,
-			Handle:  r.handle,
-			Tool:    r.tool,
-			Text:    r.text,
-			Images:  r.images,
-			Outcome: jobOutcomeToCallOutcome(r.outcome),
-			Fatal:   r.fatal,
+			JobID:       r.job,
+			Handle:      r.handle,
+			Tool:        r.tool,
+			Text:        r.text,
+			Attachments: r.attachments,
+			Outcome:     jobOutcomeToCallOutcome(r.outcome),
+			Fatal:       r.fatal,
 		})
 	}
 	if len(out) == 0 {

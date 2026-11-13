@@ -178,8 +178,8 @@ type ContentBlock struct {
 	// IsError marks a tool result that the model must see as a failure.
 	IsError bool `json:"is_error,omitempty"`
 
-	// MediaType and Data are set when Kind is ContentImage: the image's
-	// media type, and the bytes themselves.
+	// MediaType and Data are set when the kind is one an attachment rides
+	// as: its media type, and the bytes themselves.
 	MediaType string `json:"media_type,omitempty"`
 	Data      []byte `json:"data,omitempty"`
 
@@ -257,10 +257,10 @@ func NewTextMessage(role Role, text string) Message {
 
 // ToolResultMessage builds the message that carries a tool result back.
 //
-// An image the tool returned rides in its own block after the text, which is
-// the shape both the Responses API and the Messages API take inside a tool
+// An attachment the tool returned rides in its own block after the text, which
+// is the shape both the Responses API and the Messages API take inside a tool
 // result; a transport whose API cannot carry one there places it instead.
-func ToolResultMessage(id, name, text string, isError bool, images []Image) Message {
+func ToolResultMessage(id, name, text string, isError bool, attachments []Attachment) Message {
 	return Message{
 		Role: RoleTool,
 		Content: append([]ContentBlock{{
@@ -269,61 +269,91 @@ func ToolResultMessage(id, name, text string, isError bool, images []Image) Mess
 			Name:       name,
 			Text:       text,
 			IsError:    isError,
-		}}, imageBlocks(images)...),
+		}}, attachmentBlocks(attachments)...),
 	}
 }
 
-// imageMediaTypes are the media types a block may carry: the four providers
-// accept, which are the four the read tool recognises.
-var imageMediaTypes = map[string]bool{
-	"image/png":  true,
-	"image/jpeg": true,
-	"image/gif":  true,
-	"image/webp": true,
+// attachmentKind is what a modality brings with it: the block kind an
+// attachment rides as, and the media types providers accept for it.
+//
+// A modality is added in one place, its entry here. What one costs is the
+// estimator's rule, beside the other cost rules in the session.
+type attachmentKind struct {
+	// kind is the block kind the modality rides as.
+	kind ContentKind
+	// mediaTypes are the media types a block of that kind may carry.
+	mediaTypes map[string]bool
 }
 
-// IsImageMediaType reports whether an image's media type is one a provider
-// accepts.
-//
-// It is the one list of them: a tool that sniffs a picture's type checks it
-// here, so a type that is not accepted cannot be produced and quietly dropped.
-func IsImageMediaType(mediaType string) bool {
-	return imageMediaTypes[mediaType]
+// attachmentKinds are the modalities an attachment may have.
+var attachmentKinds = map[Modality]attachmentKind{
+	ModalityImage: {
+		kind: ContentImage,
+		// The four providers accept, which are the four the read tool
+		// recognises.
+		mediaTypes: map[string]bool{
+			"image/png":  true,
+			"image/jpeg": true,
+			"image/gif":  true,
+			"image/webp": true,
+		},
+	},
 }
 
-// imageBlocks renders images as content blocks, in order.
+// IsMediaType reports whether a media type is one providers accept for a
+// modality.
 //
-// An image whose media type no provider accepts is left out: a data URL the
-// provider refuses would fail every request the history carries, and a tool
-// that mislabels a picture is not a reason to stop a run.
-func imageBlocks(images []Image) []ContentBlock {
-	if len(images) == 0 {
+// It is the one list of them: a tool that sniffs a file's type checks it here,
+// so a type that is not accepted cannot be produced and quietly dropped.
+func IsMediaType(modality Modality, mediaType string) bool {
+	return attachmentKinds[modality].mediaTypes[mediaType]
+}
+
+// modalityOf returns the input modality a block's kind carries, and whether the
+// kind carries one at all.
+func modalityOf(kind ContentKind) (Modality, bool) {
+	for modality, attachment := range attachmentKinds {
+		if attachment.kind == kind {
+			return modality, true
+		}
+	}
+	return "", false
+}
+
+// attachmentBlocks renders attachments as content blocks, in order.
+//
+// An attachment whose modality or media type no provider accepts is left out: a
+// data URL the provider refuses would fail every request the history carries,
+// and a tool that mislabels a file is not a reason to stop a run.
+func attachmentBlocks(attachments []Attachment) []ContentBlock {
+	if len(attachments) == 0 {
 		return nil
 	}
-	blocks := make([]ContentBlock, 0, len(images))
-	for _, image := range images {
-		if !IsImageMediaType(image.MediaType) {
+	blocks := make([]ContentBlock, 0, len(attachments))
+	for _, attachment := range attachments {
+		rule, ok := attachmentKinds[attachment.Modality]
+		if !ok || !rule.mediaTypes[attachment.MediaType] {
 			continue
 		}
 		blocks = append(blocks, ContentBlock{
-			Kind:      ContentImage,
-			MediaType: image.MediaType,
-			Data:      image.Data,
+			Kind:      rule.kind,
+			MediaType: attachment.MediaType,
+			Data:      attachment.Data,
 		})
 	}
 	return blocks
 }
 
-// cloneImages returns a copy that owns its bytes.
-func cloneImages(images []Image) []Image {
-	if images == nil {
+// cloneAttachments returns a copy that owns its bytes.
+func cloneAttachments(attachments []Attachment) []Attachment {
+	if attachments == nil {
 		return nil
 	}
-	out := make([]Image, len(images))
-	for i, image := range images {
-		out[i] = image
-		if image.Data != nil {
-			out[i].Data = append([]byte(nil), image.Data...)
+	out := make([]Attachment, len(attachments))
+	for i, attachment := range attachments {
+		out[i] = attachment
+		if attachment.Data != nil {
+			out[i].Data = append([]byte(nil), attachment.Data...)
 		}
 	}
 	return out
@@ -375,23 +405,25 @@ const (
 // it — a denial comes from the policy hook, a skip from a truncated
 // response, a cancellation from an interrupt, and a "started" from the
 // job machinery. The outcome lives on the record and on the event.
-// Image is a picture a tool returned.
+// Attachment is a file a tool returned beside its text.
 //
-// The bytes are the tool's, and the media type says what they are: a
-// transport sends the two together, and a model reads them when its inputs
-// declare images.
-type Image struct {
-	// MediaType is the image's media type, e.g. "image/png".
+// The modality says what kind of input it is, and the media type says what the
+// bytes are: a transport sends them together, and a model reads the attachment
+// when its inputs declare the modality.
+type Attachment struct {
+	// Modality is the kind of input the attachment is.
+	Modality Modality `json:"modality"`
+	// MediaType is the attachment's media type, e.g. "image/png".
 	MediaType string `json:"media_type"`
-	// Data is the image's bytes.
+	// Data is the attachment's bytes.
 	Data []byte `json:"data"`
 }
 
 type ToolResult struct {
 	// Text is the model-facing text.
 	Text string `json:"text"`
-	// Images are pictures the tool returned beside the text.
-	Images []Image `json:"images,omitempty"`
+	// Attachments are the files the tool returned beside the text.
+	Attachments []Attachment `json:"attachments,omitempty"`
 	// Structured is an optional side channel for consumers.
 	Structured json.RawMessage `json:"structured,omitempty"`
 	// IsError marks a recoverable failure. The model sees the text and

@@ -9,13 +9,13 @@ import (
 )
 
 // TestATextOnlyModelIsSentNoImage covers the request's gate: a tool may hand
-// back a picture, and a model whose inputs do not declare images is not sent
+// back a picture, and a model whose inputs do not declare attachments is not sent
 // it.
 func TestATextOnlyModelIsSentNoImage(t *testing.T) {
 	tool := &echoTool{call: func(context.Context) (poo.ToolResult, error) {
 		return poo.ToolResult{
-			Text:   "read: shot.png (image, 4 bytes)",
-			Images: []poo.Image{{MediaType: "image/png", Data: []byte{1, 2, 3, 4}}},
+			Text:        "read: shot.png (image, 4 bytes)",
+			Attachments: []poo.Attachment{{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1, 2, 3, 4}}},
 		}, nil
 	}}
 	tr := scripted([]fakeResponse{toolCallTurn(), {text: "done"}})
@@ -30,7 +30,7 @@ func TestATextOnlyModelIsSentNoImage(t *testing.T) {
 		for _, m := range req.Messages {
 			for _, b := range m.Content {
 				if b.Kind == poo.ContentImage {
-					t.Fatal("a model that reads no images was sent one")
+					t.Fatal("a model that reads no attachments was sent one")
 				}
 			}
 		}
@@ -42,8 +42,8 @@ func TestATextOnlyModelIsSentNoImage(t *testing.T) {
 func TestAModelThatReadsImagesIsSentOne(t *testing.T) {
 	tool := &echoTool{call: func(context.Context) (poo.ToolResult, error) {
 		return poo.ToolResult{
-			Text:   "read: shot.png (image, 4 bytes)",
-			Images: []poo.Image{{MediaType: "image/png", Data: []byte{1, 2, 3, 4}}},
+			Text:        "read: shot.png (image, 4 bytes)",
+			Attachments: []poo.Attachment{{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1, 2, 3, 4}}},
 		}, nil
 	}}
 	tr := scripted([]fakeResponse{toolCallTurn(), {text: "done"}})
@@ -63,7 +63,7 @@ func TestAModelThatReadsImagesIsSentOne(t *testing.T) {
 		}
 	}
 	if !sent {
-		t.Error("a model that reads images was sent none")
+		t.Error("a model that reads attachments was sent none")
 	}
 }
 

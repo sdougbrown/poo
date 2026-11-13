@@ -329,14 +329,14 @@ func replayJobResults(log *Log) []poo.JobResult {
 			}
 		case "job.ended":
 			records = append(records, &poo.JobEndedRecord{
-				JobID:   r.JobID,
-				Handle:  r.Handle,
-				Tool:    r.Tool,
-				Outcome: poo.Outcome(r.Outcome),
-				InputID: r.InputID,
-				Text:    r.Text,
-				Images:  r.Images,
-				Fatal:   r.Fatal,
+				JobID:       r.JobID,
+				Handle:      r.Handle,
+				Tool:        r.Tool,
+				Outcome:     poo.Outcome(r.Outcome),
+				InputID:     r.InputID,
+				Text:        r.Text,
+				Attachments: r.Attachments,
+				Fatal:       r.Fatal,
 			})
 		}
 	}

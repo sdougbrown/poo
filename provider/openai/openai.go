@@ -635,7 +635,7 @@ func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 
 	var text strings.Builder
 	var calls []chatToolCall
-	var images []poo.ContentBlock
+	var attachments []poo.ContentBlock
 	toolResult := false
 	// The provider blocks are checked in a pass of their own, so a block
 	// after a tool result is checked too.
@@ -668,7 +668,7 @@ func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 			ct.Function.Arguments = string(c.Arguments)
 			calls = append(calls, ct)
 		case poo.ContentImage:
-			images = append(images, c)
+			attachments = append(attachments, c)
 		case poo.ContentToolResult:
 			// The loop keeps going: an image the tool returned follows its
 			// result block, in the same message.
@@ -679,20 +679,20 @@ func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 		}
 	}
 	if toolResult {
-		return cm, imageParts(images), nil
+		return cm, imageParts(attachments), nil
 	}
 
 	if text.Len() > 0 {
 		cm.Content = text.String()
 	}
 	cm.ToolCalls = calls
-	return cm, imageParts(images), nil
+	return cm, imageParts(attachments), nil
 }
 
 // convertMessages turns core messages into the wire shape, one or two at a
 // time.
 //
-// A tool result that carries images becomes the tool message plus a user
+// A tool result that carries attachments becomes the tool message plus a user
 // message carrying them: the Chat Completions API takes an image only in a
 // user message's parts, unlike the Responses and Messages APIs, which take one
 // inside the tool result itself.
@@ -707,7 +707,7 @@ func convertMessages(msgs []poo.Message) ([]chatMessage, error) {
 		pending = nil
 	}
 	for _, m := range msgs {
-		cm, images, err := convertMessage(m)
+		cm, attachments, err := convertMessage(m)
 		if err != nil {
 			return nil, err
 		}
@@ -719,19 +719,19 @@ func convertMessages(msgs []poo.Message) ([]chatMessage, error) {
 			flush()
 		}
 		out = append(out, cm)
-		pending = append(pending, images...)
+		pending = append(pending, attachments...)
 	}
 	flush()
 	return out, nil
 }
 
 // imageParts renders image blocks as the parts a user message carries.
-func imageParts(images []poo.ContentBlock) []chatContentPart {
-	if len(images) == 0 {
+func imageParts(attachments []poo.ContentBlock) []chatContentPart {
+	if len(attachments) == 0 {
 		return nil
 	}
-	parts := make([]chatContentPart, 0, len(images))
-	for _, image := range images {
+	parts := make([]chatContentPart, 0, len(attachments))
+	for _, image := range attachments {
 		parts = append(parts, chatContentPart{
 			Type:     "image_url",
 			ImageURL: &chatImageURL{URL: imageDataURL(image)},

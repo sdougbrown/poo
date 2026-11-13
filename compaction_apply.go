@@ -318,9 +318,9 @@ func (s *Session) rewriteViewLocked(rewrites []ToolResultRewrite) (compactionVie
 		content := make([]ContentBlock, 0, len(history[idx].Content))
 		replaced := false
 		for _, block := range history[idx].Content {
-			// A rewritten result keeps no picture: the context the image
-			// costs is what the rewrite exists to free.
-			if block.Kind == ContentImage {
+			// A rewritten result keeps no attachment: the context it costs
+			// is what the rewrite exists to free.
+			if _, ok := modalityOf(block.Kind); ok {
 				continue
 			}
 			if block.Kind == ContentToolResult {
@@ -340,9 +340,9 @@ func (s *Session) rewriteViewLocked(rewrites []ToolResultRewrite) (compactionVie
 		rw := rewrites[i]
 		result := s.results[rw.Handle]
 		result.Text = rw.Content
-		// The message dropped the picture, so the result the view reads
+		// The message dropped the attachment, so the result the view reads
 		// must not keep it.
-		result.Images = nil
+		result.Attachments = nil
 		results[rw.Handle] = result
 	}
 	return compactionView{

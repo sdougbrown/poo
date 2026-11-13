@@ -348,6 +348,40 @@ func TestAJobThatEndedIsQueuedAgain(t *testing.T) {
 	}
 }
 
+// TestAHeldImageOfAnEarlierLogIsStillAnAttachment covers the rename: a job's
+// end that recorded its picture under the earlier key still reaches the model
+// as the picture it was.
+func TestAHeldImageOfAnEarlierLogIsStillAnAttachment(t *testing.T) {
+	dir, store := newTestStore(t)
+	ctx := context.Background()
+
+	writeSession(t, dir, "s1",
+		createdRecord("s1"),
+		runStarted("r1"),
+		jobStarted("j1", "r1", "bash", "r1"),
+	)
+	// The line an earlier build wrote: `images`, and a modality on neither.
+	appendBytes(t, filepath.Join(dir, "s1.jsonl"), []byte(`{"record":"job.ended","seq":4,"ts":"2026-10-20T00:00:01Z","session_id":"s1","job":"j1","handle":"r1","tool":"bash","run_id":"r1","outcome":"ok","input_id":"s1-ji1","text":"read: shot.png","images":[{"media_type":"image/png","data":"AQID"}],"ended_at":"2026-10-20T00:00:01Z"}`+"\n"))
+
+	loaded, err := store.Load(ctx, "s1")
+	if err != nil {
+		t.Fatalf("loading the session: %v", err)
+	}
+	if len(loaded.Jobs) != 1 {
+		t.Fatalf("the load queues %d job results, want 1", len(loaded.Jobs))
+	}
+	attachments := loaded.Jobs[0].Attachments
+	if len(attachments) != 1 {
+		t.Fatalf("the held result carries %d attachments, want the recorded picture", len(attachments))
+	}
+	if attachments[0].Modality != poo.ModalityImage || attachments[0].MediaType != "image/png" {
+		t.Errorf("the attachment is %+v, want an image/png", attachments[0])
+	}
+	if string(attachments[0].Data) != "\x01\x02\x03" {
+		t.Errorf("the attachment holds %q, want the recorded bytes", attachments[0].Data)
+	}
+}
+
 // TestADeliveredJobIsNotQueuedAgain covers a job whose result reached
 // the model: there is nothing to deliver twice.
 func TestADeliveredJobIsNotQueuedAgain(t *testing.T) {
