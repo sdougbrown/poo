@@ -541,4 +541,7 @@ func combinedExitCode(codes []int) int {
 }
 
 // version is the build's version.
-const version = "0.1.0"
+//
+// A release sets it with -X main.version; a build from source reports the
+// development default.
+var version = "dev"
