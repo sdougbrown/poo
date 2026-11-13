@@ -166,13 +166,11 @@ func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings)
 		Params:        map[string]json.RawMessage{},
 	}
 
-	for _, m := range req.Messages {
-		cm, err := convertMessage(m)
-		if err != nil {
-			return nil, err
-		}
-		out.Messages = append(out.Messages, cm)
+	converted, err := convertMessages(req.Messages)
+	if err != nil {
+		return nil, err
 	}
+	out.Messages = append(out.Messages, converted...)
 
 	// In native mode the tools go in the request, and the model answers
 	// with tool_calls. In text mode the tools are described in the

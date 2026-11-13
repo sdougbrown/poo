@@ -397,6 +397,66 @@ func TestRewriteKeepsTheOriginalRecord(t *testing.T) {
 	}
 }
 
+// TestARewriteDropsTheImagesOfTheResultItRewrites covers the context an
+// image costs: a rewritten result keeps no picture, because freeing that
+// context is what the rewrite is for.
+func TestARewriteDropsTheImagesOfTheResultItRewrites(t *testing.T) {
+	tool := &echoTool{call: func(context.Context) (poo.ToolResult, error) {
+		return poo.ToolResult{
+			Text:   "original",
+			Images: []poo.Image{{MediaType: "image/png", Data: []byte{1, 2, 3}}},
+		}, nil
+	}}
+	tr := scripted([]fakeResponse{toolCallTurn(), toolCallTurn(), {text: "done"}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, tool, sink)
+	opts.Compactor = &compactionCompactor{
+		should: afterTurns(2),
+		compaction: func(poo.View) (poo.Compaction, error) {
+			return poo.Compaction{Strategy: "rewrite", Rewrite: []poo.ToolResultRewrite{{
+				Handle:  "r1",
+				Content: poo.CompactedHandleLine("r1", "echo") + "\nsummary",
+			}}}, nil
+		},
+	}
+	s := newTestSession(t, opts)
+	runSession(t, s, "start")
+
+	var carried bool
+	for _, req := range tr.Requests() {
+		for _, m := range req.Messages {
+			for _, b := range m.Content {
+				if b.Kind == poo.ContentImage {
+					carried = true
+				}
+			}
+		}
+	}
+	if !carried {
+		t.Fatal("the case never carried an image, so it proves nothing")
+	}
+	last := tr.Requests()[len(tr.Requests())-1]
+	// r1's result is the one the rewrite targeted, so its message is the
+	// one that must carry no image any more; r2's fresh result keeps its
+	// own.
+	for _, m := range last.Messages {
+		rewritten := false
+		for _, b := range m.Content {
+			if b.Kind == poo.ContentToolResult && strings.HasPrefix(b.Text, "[r1 ·") {
+				rewritten = true
+			}
+		}
+		if !rewritten {
+			continue
+		}
+		for _, b := range m.Content {
+			if b.Kind == poo.ContentImage {
+				t.Fatal("a rewritten result still carries its image")
+			}
+		}
+	}
+}
+
 // TestTokensAfterUsesTheRebasedEstimate covers the rule that
 // tokens_after is measured after the rebase.
 func TestTokensAfterUsesTheRebasedEstimate(t *testing.T) {

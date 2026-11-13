@@ -122,6 +122,12 @@ const (
 	ContentToolCall ContentKind = "tool_call"
 	// ContentToolResult is the result of a tool call.
 	ContentToolResult ContentKind = "tool_result"
+	// ContentImage is an image a tool returned.
+	//
+	// The block carries the bytes and their media type, so a transport can
+	// hand the model the picture itself. Only a model whose inputs declare
+	// images is offered one.
+	ContentImage ContentKind = "image"
 	// ContentProvider is opaque provider data.
 	//
 	// A provider block holds a value the model must carry without
@@ -171,6 +177,11 @@ type ContentBlock struct {
 	// ToolCallID is reused for a tool result, so the field above carries it.
 	// IsError marks a tool result that the model must see as a failure.
 	IsError bool `json:"is_error,omitempty"`
+
+	// MediaType and Data are set when Kind is ContentImage: the image's
+	// media type, and the bytes themselves.
+	MediaType string `json:"media_type,omitempty"`
+	Data      []byte `json:"data,omitempty"`
 
 	// Provider holds the opaque companion of this block, when it has one.
 	//
@@ -245,17 +256,26 @@ func NewTextMessage(role Role, text string) Message {
 }
 
 // ToolResultMessage builds the message that carries a tool result back.
-func ToolResultMessage(id, name, text string, isError bool) Message {
-	return Message{
-		Role: RoleTool,
-		Content: []ContentBlock{{
-			Kind:       ContentToolResult,
-			ToolCallID: id,
-			Name:       name,
-			Text:       text,
-			IsError:    isError,
-		}},
+//
+// An image the tool returned rides in its own block after the text, which is
+// the shape both the Responses API and the Messages API take inside a tool
+// result; a transport whose API cannot carry one there places it instead.
+func ToolResultMessage(id, name, text string, isError bool, images []Image) Message {
+	content := []ContentBlock{{
+		Kind:       ContentToolResult,
+		ToolCallID: id,
+		Name:       name,
+		Text:       text,
+		IsError:    isError,
+	}}
+	for _, image := range images {
+		content = append(content, ContentBlock{
+			Kind:      ContentImage,
+			MediaType: image.MediaType,
+			Data:      image.Data,
+		})
 	}
+	return Message{Role: RoleTool, Content: content}
 }
 
 // ToolCall is a request from the model to run a tool.
@@ -304,9 +324,23 @@ const (
 // it — a denial comes from the policy hook, a skip from a truncated
 // response, a cancellation from an interrupt, and a "started" from the
 // job machinery. The outcome lives on the record and on the event.
+// Image is a picture a tool returned.
+//
+// The bytes are the tool's, and the media type says what they are: a
+// transport sends the two together, and a model reads them when its inputs
+// declare images.
+type Image struct {
+	// MediaType is the image's media type, e.g. "image/png".
+	MediaType string `json:"media_type"`
+	// Data is the image's bytes.
+	Data []byte `json:"data"`
+}
+
 type ToolResult struct {
 	// Text is the model-facing text.
 	Text string `json:"text"`
+	// Images are pictures the tool returned beside the text.
+	Images []Image `json:"images,omitempty"`
 	// Structured is an optional side channel for consumers.
 	Structured json.RawMessage `json:"structured,omitempty"`
 	// IsError marks a recoverable failure. The model sees the text and

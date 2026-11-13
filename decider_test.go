@@ -223,7 +223,7 @@ func TestTheEvidenceTurnsHoldTheRecentConversation(t *testing.T) {
 				{Kind: poo.ContentToolCall, ToolCallID: "c1", Name: "read", Arguments: json.RawMessage(`{"path":"a.go"}`)},
 			},
 		},
-		poo.ToolResultMessage("c1", "read", "the file's contents", false),
+		poo.ToolResultMessage("c1", "read", "the file's contents", false, nil),
 		poo.NewTextMessage(poo.RoleUser, "thanks"),
 	}
 	view := poo.NewHistoryView(messages, nil, nil)

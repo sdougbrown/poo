@@ -315,14 +315,19 @@ func (s *Session) rewriteViewLocked(rewrites []ToolResultRewrite) (compactionVie
 		}
 		// The message's blocks are a copy: the recorded message keeps
 		// the slice it was recorded with.
-		content := append([]ContentBlock(nil), history[idx].Content...)
+		content := make([]ContentBlock, 0, len(history[idx].Content))
 		replaced := false
-		for i := range content {
-			if content[i].Kind != ContentToolResult {
+		for _, block := range history[idx].Content {
+			// A rewritten result keeps no picture: the context the image
+			// costs is what the rewrite exists to free.
+			if block.Kind == ContentImage {
 				continue
 			}
-			content[i].Text = rw.Content
-			replaced = true
+			if block.Kind == ContentToolResult {
+				block.Text = rw.Content
+				replaced = true
+			}
+			content = append(content, block)
 		}
 		if !replaced {
 			return compactionView{}, fmt.Errorf("%w: the result %q is not in the view", ErrInvalidCompaction, rw.Handle)

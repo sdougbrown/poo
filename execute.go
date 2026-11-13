@@ -1004,7 +1004,7 @@ func (s *Session) writeResult(run *runState, turn int, handle, tool, callID stri
 	}
 
 	// The result goes into the model's view and the turn's summary.
-	msg := ToolResultMessage(callID, tool, text, result.IsError)
+	msg := ToolResultMessage(callID, tool, text, result.IsError, result.Images)
 	msg.Origin = OriginTool
 	s.appendMessages(msg)
 	result.Text = text

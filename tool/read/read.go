@@ -6,6 +6,7 @@ package read
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,6 +41,10 @@ const (
 	// BinarySniffBytes is how much of a file is read to decide whether it
 	// is binary.
 	BinarySniffBytes = 8 << 10
+	// MaxImageBytes is the largest image the tool returns. Providers cap an
+	// image request themselves, the smallest of them at 5 MB, so a larger
+	// file is refused here rather than sent to fail there.
+	MaxImageBytes = 5 << 20
 )
 
 // OutputCap returns the cap on a read's output.
@@ -55,16 +60,40 @@ type Tool struct {
 	// OutputCap is the cap on the output. Zero means the cap is taken from
 	// the run's settings. A nonzero cap applies to a nested call as well.
 	OutputCap int
+	// images reports that the run's model reads images, so an image file is
+	// returned as the image rather than refused.
+	images bool
+}
+
+// Option sets up the read tool.
+type Option func(*Tool)
+
+// WithImages reports whether the run's model reads images.
+//
+// A model that does not is told the file is an image instead, so the refusal
+// costs a line and not a request the provider rejects.
+func WithImages(images bool) Option {
+	return func(t *Tool) { t.images = images }
 }
 
 // New returns a read tool.
-func New() *Tool { return &Tool{} }
+func New(opts ...Option) *Tool {
+	t := &Tool{}
+	for _, opt := range opts {
+		opt(t)
+	}
+	return t
+}
 
 // Spec describes the tool.
 func (t *Tool) Spec() poo.ToolSpec {
+	description := "Read a range of lines from a file."
+	if t.images {
+		description += " An image file is read as the image itself."
+	}
 	return poo.ToolSpec{
 		Name:        "read",
-		Description: "Read a range of lines from a file.",
+		Description: description,
 		Schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -167,6 +196,23 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 
 // absolutePath returns the path a call works on.
 //
+// imageMediaType reports the media type of the image the head of a file
+// starts with, and whether it is one. The four types are the ones providers
+// accept.
+func imageMediaType(head []byte) (string, bool) {
+	switch {
+	case bytes.HasPrefix(head, []byte("\x89PNG\r\n\x1a\n")):
+		return "image/png", true
+	case bytes.HasPrefix(head, []byte("\xff\xd8\xff")):
+		return "image/jpeg", true
+	case bytes.HasPrefix(head, []byte("GIF87a")), bytes.HasPrefix(head, []byte("GIF89a")):
+		return "image/gif", true
+	case len(head) > 12 && bytes.HasPrefix(head, []byte("RIFF")) && bytes.Equal(head[8:12], []byte("WEBP")):
+		return "image/webp", true
+	}
+	return "", false
+}
+
 // A relative path is taken from the working directory of the run.
 func absolutePath(path, workingDir string) string {
 	if filepath.IsAbs(path) {
@@ -208,6 +254,32 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	n, err := f.Read(sniff)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+	}
+	// An image carries NUL bytes, so it is recognised before the binary
+	// refusal, and the whole file is returned as the picture it is.
+	if media, ok := imageMediaType(sniff[:n]); ok {
+		if !t.images {
+			return poo.ToolResult{
+				Text: fmt.Sprintf("read: %s is an image (%s, %d bytes); this model does not accept image input", path, media, info.Size()),
+			}, nil
+		}
+		if info.Size() > MaxImageBytes {
+			return poo.ToolResult{
+				Text: fmt.Sprintf("read: %s is an image of %d bytes; the limit is %d bytes", path, info.Size(), MaxImageBytes),
+			}, nil
+		}
+		// The sniff moved the offset; the whole file is the picture.
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+		}
+		data, err := io.ReadAll(f)
+		if err != nil {
+			return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+		}
+		return poo.ToolResult{
+			Text:   fmt.Sprintf("read: %s (image, %d bytes)", path, len(data)),
+			Images: []poo.Image{{MediaType: media, Data: data}},
+		}, nil
 	}
 	if idx := indexNUL(sniff[:n]); idx >= 0 {
 		return poo.ToolResult{

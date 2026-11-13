@@ -219,7 +219,7 @@ func (p InterruptPolicy) Resolve(ctx context.Context, sink poo.RecordSink, pend 
 			if call.Nested || !call.MissingMessage {
 				continue
 			}
-			msg := poo.ToolResultMessage(call.CallID, call.Tool, text, isError)
+			msg := poo.ToolResultMessage(call.CallID, call.Tool, text, isError, nil)
 			if err := sink.Append(ctx, &poo.MessageRecord{
 				RecordMeta: poo.NewRecordMetaFrom("message", poo.OriginTool),
 				RunID:      call.RunID,
