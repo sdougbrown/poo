@@ -175,9 +175,19 @@ type Runtime struct {
 	Store *session.FileStore
 	// Catalog is the model catalog the roles are resolved in.
 	Catalog *catalog.Catalog
-	// Registry is the cli registry the session offers, or nil when the
-	// settings name none.
+	// Registry is the cli registry the settings name, or nil when they name none.
+	// Availability narrows it to the entries the profile may call. A profile that
+	// earns no catalog leaves it as the manifests loaded it, and no tool or
+	// prompt section reads it.
 	Registry *cli.Catalog
+	// loaded is the registry as the manifests loaded it, before availability
+	// narrows what a profile offers. The profiles the binary lists are judged
+	// against it, each under its own profile fact.
+	loaded *cli.Catalog
+	// registryOffered reports whether the session offers tools over the
+	// catalog. A binary may link them, and a profile may name them, without the
+	// session offering any.
+	registryOffered bool
 	// Feeds are the feed manifests the settings name, or nil when the
 	// settings name none.
 	Feeds *feed.Set
@@ -304,7 +314,8 @@ type ToolOptions struct {
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths *protect.Set
 	// Registry is the cli registry the registry's tools call. It is nil
-	// when the settings name no registry.
+	// when the settings name no registry, and when the session's profile
+	// earns none of the catalog the manifests loaded.
 	Registry *cli.Catalog
 	// Search reports that the session searches the catalog instead of
 	// listing it, so call_cli points an unknown name at the search.
@@ -458,7 +469,11 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	// run in the background or the session runs feeds, and the profile
 	// offers them with it.
 	r.Profile.Tools = withJobTools(r.Profile.Tools, r.hasFeeds())
-	r.Profiles = r.resolveProfiles(opts)
+	profiles, err := r.resolveProfiles(opts)
+	if err != nil {
+		return err
+	}
+	r.Profiles = profiles
 	return nil
 }
 
@@ -489,7 +504,8 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 		}
 	}
 	r.Registry = catalog
-	return nil
+	r.loaded = catalog
+	return checkRegistryConditions(catalog.AvailabilityInputs())
 }
 
 // againstDir resolves each relative path against dir and keeps each
@@ -549,8 +565,24 @@ func (r *Runtime) resolveDecider() {
 // decider role the settings name and the catalog cannot resolve gives
 // the session none.
 func (r *Runtime) findTool() bool {
-	return r.Registry != nil && r.Registry.Len() > cli.FindThreshold &&
-		r.deciderErr == nil && r.decider != nil
+	return r.Registry != nil && r.findToolFor(r.Registry.Len())
+}
+
+// findToolFor reports whether a catalog of count entries is searched instead
+// of listed. The session and the profiles the binary lists share the rule, so
+// a listing and a session agree about the tool they offer.
+func (r *Runtime) findToolFor(count int) bool {
+	return count > cli.FindThreshold && r.deciderErr == nil && r.decider != nil
+}
+
+// offersSearch reports whether the session offers the search over the catalog.
+//
+// The count decides whether a search is worth offering, and the operator's
+// disabled list decides whether the session has one: a session that turned
+// find_tool off lists the catalog its prompt shows, and points the model at
+// nothing it cannot call.
+func (r *Runtime) offersSearch() bool {
+	return slices.Contains(r.toolNames, cli.FindToolName)
 }
 
 // offersRegistry reports whether the session offers the registry's tools.
@@ -559,51 +591,79 @@ func (r *Runtime) findTool() bool {
 // search what it lists: a tool left out of the build takes its guidance
 // with it.
 func (r *Runtime) offersRegistry() bool {
-	for _, name := range r.toolNames {
-		if name == cli.CallToolName || name == cli.FindToolName {
-			return true
-		}
-	}
-	return false
+	return r.registryOffered
 }
 
 // addRegistryTools offers the registry's tools to the session.
 //
 // The catalog needs the tools that read it, and a binary that links none
 // of them cannot honour the settings: the operator is told which tool is
-// missing, whatever profile the session runs under. The tools themselves
-// join a profile that already offers a side-effecting tool: a registered
-// CLI can change anything, so a read-only profile stays read-only. The
-// disabled tools are already off the profile, so a tool the settings
-// disable does not come back here.
+// missing, whatever profile the session runs under, and whether or not the
+// profile earns the catalog. The tools themselves join the profile for the
+// entries the manifests' availability rules leave available: a registry that
+// declares no condition joins a profile that already offers a side-effecting
+// tool, and one that declares them is narrowed entry by entry. A tool the
+// profile already names is not offered twice. The disabled tools are already
+// off the profile, so a tool the settings disable does not come back here.
 func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 	if r.Registry == nil {
 		return nil
 	}
-	names := registryToolNames(r.findTool())
-	for _, name := range names {
-		if !linksTool(opts, name) {
-			source := "the settings"
-			if len(opts.Overrides.CLIRegistryPaths) > 0 {
-				source = "the settings or POO_CLI_REGISTRY_PATH / --cli-registry-path"
-			}
-			return &Error{
-				Code:    CodeUnsupported,
-				Field:   "cli_registry.paths",
-				Message: fmt.Sprintf("%s name a cli registry, and this binary does not link the %q tool", source, name),
-			}
-		}
+	// The catalog cannot be called without at least this tool, so the binary
+	// must link it whatever the profile earns.
+	if err := r.requireRegistryTools(opts, registryToolNames(false)); err != nil {
+		return err
 	}
-	if !offersSideEffects(r.Profile.Tools) {
+	offered, err := r.offeredRegistry(r.Profile.Tools)
+	if err != nil {
+		return err
+	}
+	if offered == nil {
 		return nil
+	}
+	// The session's catalog is what its rules leave available, so the prompt
+	// lists, and the call tool reaches, only the entries this profile may use.
+	// A search over a narrowed catalog is decided on the narrowed count, so the
+	// search tool is required only once the rules have left enough to search.
+	r.Registry = offered
+	find := r.findTool()
+	names := registryToolNames(find)
+	if find {
+		if err := r.requireRegistryTools(opts, names); err != nil {
+			return err
+		}
 	}
 	disabled := r.Settings.Tools.Disabled
 	for _, name := range names {
 		if slices.Contains(disabled, name) {
 			continue
 		}
+		r.registryOffered = true
+		if slices.Contains(r.toolNames, name) {
+			continue
+		}
 		r.Profile.Tools = append(r.Profile.Tools, toolInfo(opts.Tools[name]))
 		r.toolNames = append(r.toolNames, name)
+	}
+	return nil
+}
+
+// requireRegistryTools reports a linked tool the settings' registry needs and
+// the binary does not link.
+func (r *Runtime) requireRegistryTools(opts BuildOptions, names []string) error {
+	for _, name := range names {
+		if linksTool(opts, name) {
+			continue
+		}
+		source := "the settings"
+		if len(opts.Overrides.CLIRegistryPaths) > 0 {
+			source = "the settings or POO_CLI_REGISTRY_PATH / --cli-registry-path"
+		}
+		return &Error{
+			Code:    CodeUnsupported,
+			Field:   "cli_registry.paths",
+			Message: fmt.Sprintf("%s name a cli registry, and this binary does not link the %q tool", source, name),
+		}
 	}
 	return nil
 }
@@ -746,11 +806,9 @@ func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
 // The disabled list and the registry follow the same order here as they
 // do for the session running, so the listing and the session agree: the
 // disabled tools come off a profile before it is judged runnable, a
-// profile the settings empty is not offered, and a profile that has no
-// side-effecting tool left earns no registry tool.
-func (r *Runtime) resolveProfiles(opts BuildOptions) []poo.Profile {
-	registry := r.Registry != nil
-	find := r.findTool()
+// profile the settings empty is not offered, and a profile earns the
+// registry tools its own entries leave for it.
+func (r *Runtime) resolveProfiles(opts BuildOptions) ([]poo.Profile, error) {
 	feeds := r.hasFeeds()
 	disabled := r.Settings.Tools.Disabled
 	var out []poo.Profile
@@ -766,17 +824,25 @@ func (r *Runtime) resolveProfiles(opts BuildOptions) []poo.Profile {
 		if len(definition.Tools) > 0 && len(resolved.Tools) == 0 {
 			continue
 		}
-		if registry && offersSideEffects(resolved.Tools) {
-			for _, name := range registryToolNames(find) {
-				if linksTool(opts, name) && !slices.Contains(disabled, name) {
-					resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
+		offered, err := r.offeredRegistry(resolved.Tools)
+		if err != nil {
+			return nil, err
+		}
+		if offered != nil {
+			for _, name := range registryToolNames(r.findToolFor(offered.Len())) {
+				if !linksTool(opts, name) || slices.Contains(disabled, name) {
+					continue
 				}
+				if slices.ContainsFunc(resolved.Tools, func(tool poo.ToolInfo) bool { return tool.Name == name }) {
+					continue
+				}
+				resolved.Tools = append(resolved.Tools, toolInfo(opts.Tools[name]))
 			}
 		}
 		resolved.Tools = withJobTools(resolved.Tools, feeds)
 		out = append(out, resolved)
 	}
-	return out
+	return out, nil
 }
 
 // CatalogSettings returns the catalog's view of the settings.
@@ -1025,7 +1091,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		}
 	}
 
-	toolOptions := ToolOptions{Scrub: credentialScrub, ProtectedPaths: protected, Registry: r.Registry, Search: r.findTool()}
+	toolOptions := ToolOptions{Scrub: credentialScrub, ProtectedPaths: protected, Registry: r.offeredCatalog(), Search: r.offersSearch()}
 	if r.needsExecutor() {
 		executor, err := opts.Executors.New(executorName, exec.Options{
 			Masker: protected,
@@ -1462,7 +1528,7 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	// an operator who writes one keeps it.
 	var catalogTemplate *prompt.Template
 	if r.Registry != nil && r.offersRegistry() {
-		catalogTemplate = r.Registry.Template(r.findTool())
+		catalogTemplate = r.Registry.Template(r.offersSearch())
 		r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 			b.SetTemplate(cli.SectionName, catalogTemplate)
 		})
@@ -1581,10 +1647,14 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 	}
 	sources[prompt.ToolSection(profile.JobsToolName)] = nil
 	sources[prompt.ToolSection(profile.CancelJobToolName)] = nil
-	if r.Registry != nil {
+	linksCall := linksTool(opts, cli.CallToolName)
+	if r.Registry != nil || linksCall {
 		sources[prompt.ToolSection(cli.CallToolName)] = nil
 		sources[prompt.ToolSection(cli.FindToolName)] = nil
-		sources[cli.SectionName] = r.Registry.Template(r.findTool()).Data()
+		// A binary that links the tools still knows the section, so a prompt
+		// directory that carries it loads. A session offering no catalog
+		// renders it empty, and it is removed once the directory has applied.
+		sources[cli.SectionName] = r.offeredCatalog().Template(r.offersSearch()).Data()
 	}
 	return sources
 }

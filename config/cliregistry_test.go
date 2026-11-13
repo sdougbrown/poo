@@ -49,32 +49,71 @@ roles:
   decider: test-model
 `
 
-// registry writes a registry with the named entries and returns its
-// directory. The commands are the registry's own business: no case calls
-// one.
-func registry(t *testing.T, names ...string) string {
-	t.Helper()
-	dir := t.TempDir()
-	tools := map[string]any{}
-	for _, name := range names {
-		tools[name] = map[string]any{
-			"description": "The " + name + " command",
-			"command":     []string{"true"},
-			"inputSchema": map[string]any{
-				"type":                 "object",
-				"properties":           map[string]any{},
-				"additionalProperties": false,
-			},
-		}
+// registryEntry is one registered CLI. The commands are the registry's own
+// business: no case calls one.
+func registryEntry(description string) map[string]any {
+	return map[string]any{
+		"description": description,
+		"command":     []string{"true"},
+		"inputSchema": map[string]any{
+			"type":                 "object",
+			"properties":           map[string]any{},
+			"additionalProperties": false,
+		},
 	}
-	body, err := json.Marshal(map[string]any{"version": 1, "tools": tools})
+}
+
+// writeRegistryDoc writes a registry document and returns its directory.
+func writeRegistryDoc(t *testing.T, doc map[string]any) string {
+	t.Helper()
+	body, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatalf("encoding the registry: %v", err)
 	}
+	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "registry.json"), body, 0o600); err != nil {
 		t.Fatalf("writing the registry: %v", err)
 	}
 	return dir
+}
+
+// registry writes a registry with the named entries and returns its
+// directory.
+func registry(t *testing.T, names ...string) string {
+	t.Helper()
+	tools := map[string]any{}
+	for _, name := range names {
+		tools[name] = registryEntry("The " + name + " command")
+	}
+	return writeRegistryDoc(t, map[string]any{"version": 1, "tools": tools})
+}
+
+// gatedRegistry writes a registry of one entry that reads and one the rules
+// gate on the profile condition poo supplies itself.
+func gatedRegistry(t *testing.T, conditions map[string]any) string {
+	t.Helper()
+	return writeRegistryDoc(t, map[string]any{
+		"version": 1,
+		"tools": map[string]any{
+			"pr-view": registryEntry("Read a pull request"),
+			"pr-edit": registryEntry("Edit a pull request"),
+		},
+		"availability": map[string]any{
+			"conditions": conditions,
+			"rules": []any{map[string]any{
+				"type": "enabledWhen", "field": "pr-edit",
+				"when":   map[string]any{"op": "cond", "condition": "profile_side_effecting"},
+				"reason": "the profile is read-only",
+			}},
+		},
+	})
+}
+
+// profileCondition is the condition set poo supplies on its own.
+func profileCondition() map[string]any {
+	return map[string]any{
+		"profile_side_effecting": map[string]any{"type": "boolean"},
+	}
 }
 
 // hasTool reports whether a tool order holds a name.
@@ -534,5 +573,579 @@ func TestAPromptDirectoriesCatalogFollowsTheSession(t *testing.T) {
 	}
 	if strings.Contains(text, "Registered CLIs:") {
 		t.Errorf("the read-only session's prompt carries the embedded catalog: %q", text)
+	}
+}
+
+// TestAPromptDirectoriesCatalogLoadsWithoutARegistry covers the binary that
+// links the registry's tools and runs a session whose settings name no
+// registry: the catalog section is one the binary knows, so a directory
+// carrying catalog.md loads, and the session offers none of it, so the section
+// renders nothing.
+func TestAPromptDirectoriesCatalogLoadsWithoutARegistry(t *testing.T) {
+	prompts := fstest.MapFS{
+		"catalog.md": {Data: []byte("Call {{.Call}} with the registered CLIs.\n")},
+	}
+	buildPrompt := func(t *testing.T, tools map[string]config.ToolFactory, profileName string, profiles []profile.Profile) (*config.Runtime, error) {
+		t.Helper()
+		settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+		if err != nil {
+			t.Fatalf("decoding the settings: %v", err)
+		}
+		return config.Build(config.BuildOptions{
+			Settings:       settings,
+			WorkingDir:     t.TempDir(),
+			DefaultProfile: profileName,
+			Tools:          tools,
+			Profiles:       profiles,
+			Executors:      theExecutors(),
+			PromptFS:       prompts,
+		})
+	}
+	profiles := []profile.Profile{base.Profile(), code.Profile(), search.Profile()}
+
+	runtime, err := buildPrompt(t, theTools(), "code", profiles)
+	if err != nil {
+		t.Fatalf("a binary that links call_cli could not load catalog.md for a session naming no registry: %v", err)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if strings.Contains(text, "Call call_cli") || strings.Contains(text, "Registered CLIs:") {
+		t.Errorf("a session that offers no catalog renders one: %q", text)
+	}
+
+	// The section belongs to the binaries that link the tools: one that does
+	// not still has no catalog for a directory to replace.
+	if _, err := buildPrompt(t, readOnlyTools(), search.Name, []profile.Profile{search.Profile()}); err == nil || !strings.Contains(err.Error(), "unknown section") {
+		t.Errorf("a binary that links no call_cli accepted catalog.md: %v", err)
+	}
+	// A nil factory is how a binary declares a tool it does not link, so the
+	// section stays unknown to it too.
+	nilCall := theTools()
+	nilCall[cliregistry.CallToolName] = nil
+	if _, err := buildPrompt(t, nilCall, "code", profiles); err == nil || !strings.Contains(err.Error(), "unknown section") {
+		t.Errorf("a binary whose call_cli factory is nil accepted catalog.md: %v", err)
+	}
+}
+
+// gatedBuild builds a session whose settings name the gated registry, with the
+// profiles a real binary links.
+func gatedBuild(t *testing.T, dir, profileName string) (*config.Runtime, error) {
+	t.Helper()
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: "+profileName+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	return config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: profileName,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile()},
+		Executors:      theExecutors(),
+	})
+}
+
+// thresholdRegistry writes a registry of entries entries, the first gated of
+// which the profile condition gates: a read-only profile is left with the rest.
+func thresholdRegistry(t *testing.T, entries, gated int) string {
+	t.Helper()
+	tools := map[string]any{}
+	rules := make([]any, 0, gated)
+	for i := 0; i < entries; i++ {
+		name := fmt.Sprintf("entry-%03d", i)
+		tools[name] = registryEntry("The " + name + " command")
+		if i >= gated {
+			continue
+		}
+		rules = append(rules, map[string]any{
+			"type": "enabledWhen", "field": name,
+			"when":   map[string]any{"op": "cond", "condition": "profile_side_effecting"},
+			"reason": "the profile is read-only",
+		})
+	}
+	return writeRegistryDoc(t, map[string]any{
+		"version": 1,
+		"tools":   tools,
+		"availability": map[string]any{
+			"conditions": profileCondition(),
+			"rules":      rules,
+		},
+	})
+}
+
+// TestAReadOnlyProfileSearchesOnlyWhatItsRulesLeave covers the search over a
+// narrowed catalog: the rules leave a read-only profile fewer entries than the
+// threshold, so the session lists them and offers no search, however many
+// entries the manifests loaded.
+func TestAReadOnlyProfileSearchesOnlyWhatItsRulesLeave(t *testing.T) {
+	dir := thresholdRegistry(t, 40, 35)
+	runtime, err := buildGated(t, dir, search.Name, theTools())
+	if err != nil {
+		t.Fatalf("building the read-only runtime: %v", err)
+	}
+	// The session has the decider a search would ask, so the count the
+	// session searches is the only thing keeping the search off.
+	if runtime.Options.Decider == nil {
+		t.Fatal("the case has no decider, so it proves nothing about the threshold")
+	}
+	if runtime.Registry == nil || runtime.Registry.Len() != 5 {
+		t.Fatalf("the read-only session offers %v, want the five entries the rules leave", runtime.Registry)
+	}
+	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the read-only session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, "find_tool") {
+		t.Errorf("the session searches a catalog narrowed to five entries: %v", runtime.Options.ToolOrder)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "entry-035: The entry-035 command") {
+		t.Errorf("the prompt does not list the entries the rules leave: %q", text)
+	}
+	if strings.Contains(text, "entry-000:") {
+		t.Errorf("the prompt lists an entry the rules withhold: %q", text)
+	}
+
+	// The listing decides the search the same way the session does: the
+	// same profile, under its own fact, agrees about the tool.
+	assertListedFind(t, runtime, search.Name, false)
+	writeCapable, err := buildGated(t, dir, code.Name, theTools())
+	if err != nil {
+		t.Fatalf("building the write-capable runtime: %v", err)
+	}
+	assertListedFind(t, writeCapable, code.Name, true)
+}
+
+// assertListedFind checks the search a listed profile offers.
+func assertListedFind(t *testing.T, runtime *config.Runtime, profileName string, want bool) {
+	t.Helper()
+	for _, listed := range runtime.Profiles {
+		if listed.Name != profileName {
+			continue
+		}
+		names := make([]string, 0, len(listed.Tools))
+		for _, tool := range listed.Tools {
+			names = append(names, tool.Name)
+		}
+		if got := hasTool(names, "find_tool"); got != want {
+			t.Errorf("the listing offers %q the tools %v, and its search is %v", profileName, names, got)
+		}
+		return
+	}
+	t.Fatalf("the listing offers %v, and not the %q profile", runtime.Profiles, profileName)
+}
+
+// TestASearchIsRequiredOnlyOverAWholeCatalog covers the link requirement: a
+// binary that links call_cli alone serves a registry its rules narrow below the
+// threshold, and is refused for one that leaves more entries than a prompt
+// shows.
+func TestASearchIsRequiredOnlyOverAWholeCatalog(t *testing.T) {
+	runtime, err := buildGated(t, thresholdRegistry(t, 40, 35), search.Name, callOnlyTools())
+	if err != nil {
+		t.Fatalf("a binary linking call_cli alone was refused a registry narrowed to five entries: %v", err)
+	}
+	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	if hasTool(runtime.Options.ToolOrder, "find_tool") {
+		t.Errorf("the session offers a search the binary does not link: %v", runtime.Options.ToolOrder)
+	}
+
+	// The same binary over a catalog the rules leave whole: forty entries are
+	// more than a prompt shows, so the session needs the search it lacks.
+	_, err = buildGated(t, thresholdRegistry(t, 40, 0), code.Name, callOnlyTools())
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a binary linking no find_tool accepted a forty-entry catalog: %v", err)
+	}
+	if failure.Code != config.CodeUnsupported || failure.Field != "cli_registry.paths" {
+		t.Errorf("the failure is %+v, want unsupported on cli_registry.paths", failure)
+	}
+	if !strings.Contains(failure.Message, "find_tool") {
+		t.Errorf("the message %q does not name the tool", failure.Message)
+	}
+}
+
+// buildGatedDoc builds a runtime from the settings document doc, which carries
+// the model, over the registry at dir, with the tools the binary links and the
+// decider a search would ask.
+func buildGatedDoc(t *testing.T, doc, dir, profileName string, tools map[string]config.ToolFactory) (*config.Runtime, error) {
+	t.Helper()
+	settings, err := config.Parse([]byte(doc+"cli_registry:\n  paths: [\""+dir+"\"]\nprofile: "+profileName+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	return config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: profileName,
+		Tools:          tools,
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile()},
+		Executors:      theExecutors(),
+	})
+}
+
+// buildGated builds a runtime over the registry at dir, with the tools the
+// binary links and the decider a search would ask.
+func buildGated(t *testing.T, dir, profileName string, tools map[string]config.ToolFactory) (*config.Runtime, error) {
+	t.Helper()
+	return buildGatedDoc(t, withDecider, dir, profileName, tools)
+}
+
+// TestADisabledSearchLeavesTheCatalogListed covers the operator's disabled
+// list: a session that turns find_tool off over a long catalog lists the
+// catalog whole, and never points the model at a search it does not offer.
+func TestADisabledSearchLeavesTheCatalogListed(t *testing.T) {
+	runtime, err := buildGatedDoc(t, withDecider+"tools:\n  disabled: [find_tool]\n", thresholdRegistry(t, 40, 0), code.Name, theTools())
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if hasTool(runtime.Options.ToolOrder, "find_tool") {
+		t.Errorf("the session offers a search the settings disable: %v", runtime.Options.ToolOrder)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "Call one with call_cli") {
+		t.Errorf("the catalog is not listed for a session that cannot search: %q", text)
+	}
+	if strings.Contains(text, "too many to list") {
+		t.Errorf("the prompt names a search the session does not offer: %q", text)
+	}
+
+	// The call tool's hint follows the same fact as the prompt.
+	call := runtime.Options.Tools[cliregistry.CallToolName]
+	if call == nil {
+		t.Fatal("the session has no call_cli tool")
+	}
+	_, err = call.Prepare(json.RawMessage(`{"name":"nope"}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("an unknown name prepared a call")
+	}
+	if strings.Contains(err.Error(), "search it") {
+		t.Errorf("the hint points at a search the session does not offer: %q", err)
+	}
+	if !strings.Contains(err.Error(), "call one the prompt lists") {
+		t.Errorf("the hint %q does not point at the listed catalog", err)
+	}
+}
+
+// callOnlyTools are the tools a binary links when it offers the catalog but no
+// search over it.
+func callOnlyTools() map[string]config.ToolFactory {
+	tools := theTools()
+	delete(tools, "find_tool")
+	return tools
+}
+
+// TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave covers the per-entry
+// rule: a profile with no side-effecting tool earns the registry when the
+// manifests declare conditions, and the catalog it offers holds the entries
+// the rules leave. A profile that can already change things is offered every
+// entry the rules leave for it.
+func TestAReadOnlyProfileIsOfferedTheEntriesItsRulesLeave(t *testing.T) {
+	dir := gatedRegistry(t, profileCondition())
+
+	runtime, err := gatedBuild(t, dir, search.Name)
+	if err != nil {
+		t.Fatalf("building the read-only runtime: %v", err)
+	}
+	if runtime.Registry == nil {
+		t.Fatal("the read-only build loaded no registry")
+	}
+	if got := strings.Join(runtime.Registry.Names(), ","); got != "pr-view" {
+		t.Errorf("the read-only session offers %q, want pr-view alone", got)
+	}
+	if !hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the read-only session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+	if _, ok := runtime.Registry.Lookup("pr-edit"); ok {
+		t.Error("the read-only session can still name the gated entry")
+	}
+	// The tool the session builds reads the narrowed catalog, not the one the
+	// manifests loaded: the withheld entry cannot be prepared through it
+	// either, and a kept one can. The same options build the search, so this
+	// pins where both tools read the catalog.
+	call := runtime.Options.Tools[cliregistry.CallToolName]
+	if call == nil {
+		t.Fatal("the read-only session has no call_cli tool")
+	}
+	if _, err := call.Prepare(json.RawMessage(`{"name":"pr-edit"}`), poo.PrepareEnv{}); err == nil {
+		t.Error("the built call_cli prepared the entry the rules withhold")
+	}
+	if _, err := call.Prepare(json.RawMessage(`{"name":"pr-view"}`), poo.PrepareEnv{}); err != nil {
+		t.Errorf("the built call_cli refused the entry the rules leave: %v", err)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "pr-view") {
+		t.Errorf("the prompt %q does not list the entry the rules leave", text)
+	}
+	if strings.Contains(text, "pr-edit") {
+		t.Errorf("the prompt %q lists the entry the rules withhold", text)
+	}
+
+	// The listing the binary offers says what the session does: the same
+	// profile earns the same tool there.
+	var listed *poo.Profile
+	for i := range runtime.Profiles {
+		if runtime.Profiles[i].Name == search.Name {
+			listed = &runtime.Profiles[i]
+			break
+		}
+	}
+	if listed == nil {
+		t.Fatalf("the listing offers %v, and not the %q profile", runtime.Profiles, search.Name)
+	}
+	var names []string
+	for _, tool := range listed.Tools {
+		names = append(names, tool.Name)
+	}
+	if !hasTool(names, cliregistry.CallToolName) {
+		t.Errorf("the listing offers the %q profile %v, and its session offers call_cli", listed.Name, names)
+	}
+	// A profile that offers no tools earns no command runner, whatever the
+	// rules leave for the profiles beside it.
+	for _, listed := range runtime.Profiles {
+		if listed.Name != base.Profile().Name {
+			continue
+		}
+		listedNames := make([]string, 0, len(listed.Tools))
+		for _, tool := range listed.Tools {
+			listedNames = append(listedNames, tool.Name)
+		}
+		if hasTool(listedNames, cliregistry.CallToolName) {
+			t.Errorf("the listing offers the %q profile %v", listed.Name, listedNames)
+		}
+	}
+
+	// A profile that can change things gets every entry the rules leave.
+	runtime, err = gatedBuild(t, dir, code.Name)
+	if err != nil {
+		t.Fatalf("building the read-write runtime: %v", err)
+	}
+	if got := strings.Join(runtime.Registry.Names(), ","); got != "pr-edit,pr-view" {
+		t.Errorf("the read-write session offers %q, want both entries", got)
+	}
+}
+
+// TestARegistryThatGatesNothingStaysClosedToAReadOnlyProfile covers the
+// registry whose manifests declare no conditions: a registered CLI can change
+// anything, so a profile with no side-effecting tool is offered none of them.
+func TestARegistryThatGatesNothingStaysClosedToAReadOnlyProfile(t *testing.T) {
+	dir := registry(t, "deploy")
+	runtime, err := gatedBuild(t, dir, search.Name)
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the read-only session offers %v", runtime.Options.ToolOrder)
+	}
+	// The build still holds the catalog the settings named, and neither the
+	// prompt nor a tool reads it: the profile earns none.
+	if runtime.Registry == nil || runtime.Registry.Len() != 1 {
+		t.Fatalf("the read-only build holds %v, want the one entry", runtime.Registry)
+	}
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "deploy") {
+		t.Errorf("the read-only session's prompt lists the entry: %q", text)
+	}
+
+	// The same holds for a profile that names a registry tool itself: the
+	// tools are the profile's, and the catalog they read is still none. Here
+	// the rules leave nothing for a profile that can change things.
+	dir = writeRegistryDoc(t, map[string]any{
+		"version": 1,
+		"tools":   map[string]any{"deploy": registryEntry("The deploy command")},
+		"availability": map[string]any{
+			"conditions": profileCondition(),
+			"rules": []any{map[string]any{
+				"type": "enabledWhen", "field": "deploy",
+				"when": map[string]any{
+					"op": "not",
+					"expr": map[string]any{
+						"op": "cond", "condition": "profile_side_effecting",
+					},
+				},
+			}},
+		},
+	})
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: files\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	files := profile.Profile{Name: "files", Tools: []string{"read", "call_cli"}, Unmatched: "allow"}
+	runtime, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: files.Name,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile(), files},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime for a profile that names call_cli: %v", err)
+	}
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "deploy") {
+		t.Errorf("the prompt of a profile that names call_cli lists the entry: %q", text)
+	}
+}
+
+// TestAProfileThatNamesCallCLIIsOfferedTheCatalogOnce covers the overlap: a
+// profile that names the registry's own tool already offers it, so joining the
+// catalog to that profile must not offer the tool a second time. The session and
+// the listing both say call_cli once, and the catalog is still offered.
+func TestAProfileThatNamesCallCLIIsOfferedTheCatalogOnce(t *testing.T) {
+	dir := registry(t, "deploy", "logs")
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: files\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	files := profile.Profile{Name: "files", Tools: []string{"read", "call_cli"}, Unmatched: "allow"}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: files.Name,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile(), code.Profile(), search.Profile(), files},
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime for a profile that names call_cli: %v", err)
+	}
+
+	if got := countTool(runtime.Options.ToolOrder, cliregistry.CallToolName); got != 1 {
+		t.Errorf("the session offers call_cli %d times in %v, want once", got, runtime.Options.ToolOrder)
+	}
+	var names []string
+	for _, tool := range runtime.Profile.Tools {
+		names = append(names, tool.Name)
+	}
+	if got := countTool(names, cliregistry.CallToolName); got != 1 {
+		t.Errorf("the profile offers call_cli %d times in %v, want once", got, names)
+	}
+
+	// The listing says the same thing the session does.
+	for _, listed := range runtime.Profiles {
+		if listed.Name != files.Name {
+			continue
+		}
+		listedNames := make([]string, 0, len(listed.Tools))
+		for _, tool := range listed.Tools {
+			listedNames = append(listedNames, tool.Name)
+		}
+		if got := countTool(listedNames, cliregistry.CallToolName); got != 1 {
+			t.Errorf("the listing offers call_cli %d times in %v, want once", got, listedNames)
+		}
+	}
+
+	// A profile that names the tool itself still earns the catalog it reads.
+	if text := poo.PromptBuilder(runtime.Options).Render(); !strings.Contains(text, "deploy: The deploy command") {
+		t.Errorf("the prompt of a profile that names call_cli lists no catalog: %q", text)
+	}
+}
+
+// countTool counts the occurrences of a tool name.
+func countTool(names []string, name string) int {
+	count := 0
+	for _, listed := range names {
+		if listed == name {
+			count++
+		}
+	}
+	return count
+}
+
+// TestARegistryThatWithholdsEveryEntryIsOfferedWhole covers the empty result of
+// the rules: a profile with tools whose rules leave no entry earns no catalog,
+// so the session offers neither the call tool nor a section.
+func TestARegistryThatWithholdsEveryEntryIsOfferedWhole(t *testing.T) {
+	runtime, err := gatedBuild(t, thresholdRegistry(t, 5, 5), search.Name)
+	if err != nil {
+		t.Fatalf("building the read-only runtime: %v", err)
+	}
+	if hasTool(runtime.Options.ToolOrder, cliregistry.CallToolName) {
+		t.Errorf("the session offers %v, and the rules leave no entry", runtime.Options.ToolOrder)
+	}
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "Registered CLIs:") {
+		t.Errorf("the prompt carries a catalog the rules emptied: %q", text)
+	}
+	// The build still holds the catalog the settings named.
+	if runtime.Registry == nil || runtime.Registry.Len() != 5 {
+		t.Fatalf("the build holds %v, want the five entries the manifests loaded", runtime.Registry)
+	}
+}
+
+// TestARegistryThatDeclaresAConditionPooCannotSupplyIsRefused covers the
+// contract: poo supplies the profile fact and nothing else, so a manifest that
+// reads another condition fails the build naming it, rather than judging an
+// entry against a value nobody supplied.
+func TestARegistryThatDeclaresAConditionPooCannotSupplyIsRefused(t *testing.T) {
+	conditions := profileCondition()
+	conditions["messaging_enabled"] = map[string]any{"type": "boolean"}
+	dir := gatedRegistry(t, conditions)
+
+	_, err := gatedBuild(t, dir, code.Name)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the build of a registry with an unsupplied condition is %v, want a settings failure", err)
+	}
+	if failure.Field != "cli_registry.paths" {
+		t.Errorf("the failure names the field %q, want cli_registry.paths", failure.Field)
+	}
+	if !strings.Contains(failure.Message, "messaging_enabled") {
+		t.Errorf("the message %q does not name the condition", failure.Message)
+	}
+	if !strings.Contains(failure.Message, config.ProfileSideEffectingCondition) {
+		t.Errorf("the message %q does not name the condition poo supplies", failure.Message)
+	}
+}
+
+// TestAConditionPooCannotSupplyIsRefusedWhateverTheProfile covers where the
+// check runs: the declared set belongs to the manifests, so a build whose
+// profiles offer no tools still refuses a condition poo cannot supply.
+func TestAConditionPooCannotSupplyIsRefusedWhateverTheProfile(t *testing.T) {
+	conditions := profileCondition()
+	conditions["messaging_enabled"] = map[string]any{"type": "boolean"}
+	dir := gatedRegistry(t, conditions)
+
+	settings, err := config.Parse([]byte(registrySettings(dir)+"profile: base\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: base.Name,
+		Tools:          theTools(),
+		Profiles:       []profile.Profile{base.Profile()},
+		Executors:      theExecutors(),
+	})
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a build whose profile offers no tools accepted an unsupplied condition: %v", err)
+	}
+	if failure.Field != "cli_registry.paths" {
+		t.Errorf("the failure names the field %q, want cli_registry.paths", failure.Field)
+	}
+	if !strings.Contains(failure.Message, "messaging_enabled") {
+		t.Errorf("the message %q does not name the condition", failure.Message)
+	}
+}
+
+// TestARegistryThatDeclaresTheConditionAsAnotherTypeIsRefused covers the type
+// half of the same contract: poo supplies a boolean, so a manifest declaring the
+// condition as anything else would judge entries against a value it never
+// receives.
+func TestARegistryThatDeclaresTheConditionAsAnotherTypeIsRefused(t *testing.T) {
+	conditions := map[string]any{
+		config.ProfileSideEffectingCondition: map[string]any{"type": "string"},
+	}
+	dir := gatedRegistry(t, conditions)
+
+	_, err := gatedBuild(t, dir, code.Name)
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the build of a registry declaring the condition as a string is %v, want a settings failure", err)
+	}
+	if failure.Field != "cli_registry.paths" {
+		t.Errorf("the failure names the field %q, want cli_registry.paths", failure.Field)
+	}
+	if !strings.Contains(failure.Message, "boolean") {
+		t.Errorf("the message %q does not say what poo supplies", failure.Message)
 	}
 }
