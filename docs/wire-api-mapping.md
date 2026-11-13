@@ -185,12 +185,13 @@ These are deliberate, and they are not gaps in the model:
   OpenAI-compatible servers v1 targets do not all accept. The refusal text
   is kept as a text block, so nothing the model said is lost; what is
   lost is the *label*.
-- **An image a tool returns** is carried as its own block, and its place
-  on the wire belongs to the API: the Responses API and the Messages API take
-  it inside the tool result, and Chat Completions takes an image only in a
-  user message, so the transport sends the tool message and then a user
-  message carrying the picture. Audio is not carried: the block vocabulary
-  has no type for it.
+- **An image a tool returns** is carried as its own block, and its place on
+  the wire belongs to the API. Chat Completions takes an image only in a user
+  message, so this transport sends the tool message and then a user message
+  carrying the picture. No Responses or Messages transport ships here; when
+  one does, its own field takes the block without the extra message, since
+  both APIs name an image inside the tool result's output. Audio is not
+  carried: the block vocabulary has no type for it.
 - **The cache-write token count** (Anthropic's
   `cache_creation_input_tokens`) has no field: the plan's usage record names
   `input_tokens`, `output_tokens`, `cache_read_tokens` and `ttft_ms`, and

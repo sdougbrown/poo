@@ -313,3 +313,55 @@ func TestTheForkDiffersOnlyInTheMessagesAndTheCeiling(t *testing.T) {
 		t.Errorf("the bodies differ outside messages and max_tokens:\n%s\n%s", first, second)
 	}
 }
+
+// TestAForkCarriesAnAppendedImage covers the fork's appended messages: a tool
+// result that carries a picture is sent the way a normal request sends it, so
+// the handoff fork does not drop it.
+func TestAForkCarriesAnAppendedImage(t *testing.T) {
+	srv := newForkServer(t)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	req := poo.ChatRequest{
+		Model:     "m",
+		MaxTokens: 1024,
+		Messages: []poo.Message{
+			poo.NewTextMessage(poo.RoleUser, "the prompt"),
+		},
+	}
+	_, rendered, err := tr.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+
+	appended := []poo.Message{poo.ToolResultMessage("call_1", "read", "read: shot.png", false,
+		[]poo.Image{{MediaType: "image/png", Data: []byte{1, 2, 3}}})}
+	reader, err := tr.Fork(context.Background(), rendered, appended, 2048)
+	if err != nil {
+		t.Fatalf("forking: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	if len(srv.bodies) != 2 {
+		t.Fatalf("the server received %d bodies, want 2", len(srv.bodies))
+	}
+	var forked map[string]any
+	if err := json.Unmarshal([]byte(srv.bodies[1]), &forked); err != nil {
+		t.Fatalf("decoding the fork's body: %v", err)
+	}
+	messages, _ := forked["messages"].([]any)
+	if len(messages) != 3 {
+		t.Fatalf("the fork holds %d messages, want prompt, tool, and the picture", len(messages))
+	}
+	last, _ := messages[2].(map[string]any)
+	parts, _ := last["content"].([]any)
+	if len(parts) != 1 {
+		t.Fatalf("the appended picture produced %d parts, want one", len(parts))
+	}
+	part, _ := parts[0].(map[string]any)
+	imageURL, _ := part["image_url"].(map[string]any)
+	url, _ := imageURL["url"].(string)
+	if !strings.HasPrefix(url, "data:image/png;base64,") {
+		t.Errorf("the forked picture is %q, want a data url", url)
+	}
+}

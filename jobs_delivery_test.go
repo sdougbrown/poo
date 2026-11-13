@@ -692,3 +692,49 @@ func TestAJobDeliveryCarriesNoOrigin(t *testing.T) {
 		t.Errorf("the session emitted %d job delivery events, want 1", events)
 	}
 }
+
+// TestAJobDeliversTheImageItsResultCarries covers the picture: a job that
+// returns one delivers it beside the text, so the model reads a result whose
+// text names an image and can see it.
+func TestAJobDeliversTheImageItsResultCarries(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{jobCall("one", true)}},
+		{text: "the answer"},
+	})
+	sink := &recordingSink{}
+	tool := pootest.NewJobTool("job", poo.BackgroundAllowed)
+	tool.SetResult("read: shot.png (image, 4 bytes)")
+	tool.SetImages(poo.Image{MediaType: "image/png", Data: []byte{1, 2, 3, 4}})
+
+	opts := jobOptions(t, tr, tool, sink)
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tool.Started()
+	waitFor(t, "the run to wait", func() bool {
+		return s.State() == poo.StateWaiting
+	})
+	tool.Release()
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	delivered := false
+	for _, m := range sink.messages() {
+		if m.Origin != poo.OriginJob {
+			continue
+		}
+		for _, b := range m.Content {
+			if b.Kind == poo.ContentImage {
+				delivered = true
+				if b.MediaType != "image/png" {
+					t.Errorf("the delivered image is %q, want image/png", b.MediaType)
+				}
+			}
+		}
+	}
+	if !delivered {
+		t.Error("the job's image was not delivered with its text")
+	}
+}

@@ -410,6 +410,8 @@ func TestARewriteDropsTheImagesOfTheResultItRewrites(t *testing.T) {
 	tr := scripted([]fakeResponse{toolCallTurn(), toolCallTurn(), {text: "done"}})
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, tool, sink)
+	// The model reads images, so the session sends them.
+	opts.Model.Inputs = []poo.Modality{poo.ModalityText, poo.ModalityImage}
 	opts.Compactor = &compactionCompactor{
 		should: afterTurns(2),
 		compaction: func(poo.View) (poo.Compaction, error) {
@@ -454,6 +456,23 @@ func TestARewriteDropsTheImagesOfTheResultItRewrites(t *testing.T) {
 				t.Fatal("a rewritten result still carries its image")
 			}
 		}
+	}
+
+	// The result the rewrite did not target keeps its picture.
+	fresh := false
+	for _, m := range last.Messages {
+		for _, b := range m.Content {
+			if b.Kind == poo.ContentToolResult && strings.HasPrefix(b.Text, "[r2 ·") {
+				for _, image := range m.Content {
+					if image.Kind == poo.ContentImage {
+						fresh = true
+					}
+				}
+			}
+		}
+	}
+	if !fresh {
+		t.Error("a result the rewrite left alone lost its image")
 	}
 }
 

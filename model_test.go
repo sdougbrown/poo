@@ -135,6 +135,25 @@ func TestAToolResultCarriesTheImagesBesideItsText(t *testing.T) {
 		t.Errorf("the image's bytes are %v, want %v", got.Data, image.Data)
 	}
 
+	// The block round-trips through the record's own encoding.
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("encoding the message: %v", err)
+	}
+	var decoded poo.Message
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decoding the message: %v", err)
+	}
+	if len(decoded.Content) != 2 || decoded.Content[1].Kind != poo.ContentImage {
+		t.Fatalf("the decoded message lost its image: %+v", decoded.Content)
+	}
+	if decoded.Content[1].MediaType != image.MediaType {
+		t.Errorf("the decoded media type is %q, want %q", decoded.Content[1].MediaType, image.MediaType)
+	}
+	if string(decoded.Content[1].Data) != string(image.Data) {
+		t.Errorf("the decoded bytes are %v, want %v", decoded.Content[1].Data, image.Data)
+	}
+
 	// A result without images is the one block it always was.
 	plain := poo.ToolResultMessage("call_2", "bash", "out", true, nil)
 	if len(plain.Content) != 1 {

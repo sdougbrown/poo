@@ -682,7 +682,9 @@ func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 		return cm, imageParts(images), nil
 	}
 
-	cm.Content = text.String()
+	if text.Len() > 0 {
+		cm.Content = text.String()
+	}
 	cm.ToolCalls = calls
 	return cm, imageParts(images), nil
 }
@@ -696,16 +698,30 @@ func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 // inside the tool result itself.
 func convertMessages(msgs []poo.Message) ([]chatMessage, error) {
 	out := make([]chatMessage, 0, len(msgs))
+	var pending []chatContentPart
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		out = append(out, chatMessage{Role: "user", Content: pending})
+		pending = nil
+	}
 	for _, m := range msgs {
 		cm, images, err := convertMessage(m)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, cm)
-		if len(images) > 0 {
-			out = append(out, chatMessage{Role: "user", Content: images})
+		// A batch of tool results answers one assistant message, so the
+		// pictures ride in one user message after the last of them: a
+		// server that enforces alternation reads one turn, not one per
+		// result.
+		if cm.Role != "tool" {
+			flush()
 		}
+		out = append(out, cm)
+		pending = append(pending, images...)
 	}
+	flush()
 	return out, nil
 }
 

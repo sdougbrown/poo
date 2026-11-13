@@ -261,21 +261,32 @@ func NewTextMessage(role Role, text string) Message {
 // the shape both the Responses API and the Messages API take inside a tool
 // result; a transport whose API cannot carry one there places it instead.
 func ToolResultMessage(id, name, text string, isError bool, images []Image) Message {
-	content := []ContentBlock{{
-		Kind:       ContentToolResult,
-		ToolCallID: id,
-		Name:       name,
-		Text:       text,
-		IsError:    isError,
-	}}
+	return Message{
+		Role: RoleTool,
+		Content: append([]ContentBlock{{
+			Kind:       ContentToolResult,
+			ToolCallID: id,
+			Name:       name,
+			Text:       text,
+			IsError:    isError,
+		}}, imageBlocks(images)...),
+	}
+}
+
+// imageBlocks renders images as content blocks, in order.
+func imageBlocks(images []Image) []ContentBlock {
+	if len(images) == 0 {
+		return nil
+	}
+	blocks := make([]ContentBlock, 0, len(images))
 	for _, image := range images {
-		content = append(content, ContentBlock{
+		blocks = append(blocks, ContentBlock{
 			Kind:      ContentImage,
 			MediaType: image.MediaType,
 			Data:      image.Data,
 		})
 	}
-	return Message{Role: RoleTool, Content: content}
+	return blocks
 }
 
 // ToolCall is a request from the model to run a tool.

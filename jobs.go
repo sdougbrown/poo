@@ -235,6 +235,9 @@ type jobResult struct {
 	// text is the result the model reads. A feed's input carries the
 	// text rendered at acceptance, and the delivery uses it verbatim.
 	text string
+	// images are the pictures the result carries, delivered beside the
+	// text.
+	images []Image
 	// fatal reports that the job failed with an error that wraps
 	// ErrFatal. The receiving run settles tool_fatal.
 	fatal bool
@@ -573,7 +576,9 @@ func (s *Session) runJob(job *jobState, prepared Prepared) {
 	// The chain runs once, at the completion, under a context of its
 	// own. A close is a completion too: it sets the cause and the text,
 	// and the chain still sees the partial output before it is held.
-	s.completeJob(job, ToolResult{Text: text, IsError: outcome == OutcomeError}, outcome, timedOut, fatal, "")
+	// The images the tool produced ride with the text, so a result that was
+	// a picture is still one after the job's own stop or rewrite.
+	s.completeJob(job, ToolResult{Text: text, Images: result.Images, IsError: outcome == OutcomeError}, outcome, timedOut, fatal, "")
 }
 
 // completeJob runs a job's after-tool chain once and records its end.
@@ -765,6 +770,7 @@ func (s *Session) finishJob(job *jobState, outcome Outcome, out afterToolOutcome
 		runID:   runID,
 		outcome: jobOutcome,
 		text:    text,
+		images:  out.result.Images,
 		fatal:   fatal,
 	})
 }
@@ -826,6 +832,7 @@ func (s *Session) QueueJobResult(result JobResult) {
 		tool:    result.Tool,
 		outcome: jobOutcomeOf(result.Outcome),
 		text:    result.Text,
+		images:  result.Images,
 		fatal:   result.Fatal,
 		origin:  result.Origin,
 	})
@@ -1265,6 +1272,9 @@ func (s *Session) deliverTrackedJobResult(run *runState, item jobQueueItem) bool
 	s.mu.Unlock()
 
 	msg := NewTextMessage(RoleUser, jobResultText(result))
+	if len(result.images) > 0 {
+		msg.Content = append(msg.Content, imageBlocks(result.images)...)
+	}
 	msg.Origin = OriginJob
 	mode := InputModeJob
 	if IsFeedOrigin(result.origin) {

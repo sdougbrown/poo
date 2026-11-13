@@ -268,7 +268,11 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 				Text: fmt.Sprintf("read: %s is an image of %d bytes; the limit is %d bytes", path, info.Size(), MaxImageBytes),
 			}, nil
 		}
-		// The sniff moved the offset; the whole file is the picture.
+		// The sniff moved the offset; the whole file is the picture. A run
+		// stopped while the head was read does not pay for the rest.
+		if err := ctx.Err(); err != nil {
+			return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
+		}
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
 		}

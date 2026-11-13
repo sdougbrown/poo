@@ -2,6 +2,8 @@ package read_test
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/read"
 )
@@ -153,5 +156,60 @@ func TestAGifAndAWebPAreImages(t *testing.T) {
 				t.Errorf("the media type is %q, want %q", res.Images[0].MediaType, tt.media)
 			}
 		})
+	}
+}
+
+// TestAJPEGAndItsExactLimit covers the other common header and the cap's
+// edge: a file of exactly the limit is returned, one byte more is refused.
+func TestAJPEGAndItsExactLimit(t *testing.T) {
+	dir := t.TempDir()
+	head := []byte("\xff\xd8\xff\xe0")
+	exact := append(append([]byte(nil), head...), bytes.Repeat([]byte{0}, read.MaxImageBytes-len(head))...)
+	if err := os.WriteFile(filepath.Join(dir, "exact.jpg"), exact, 0o644); err != nil {
+		t.Fatalf("writing the image: %v", err)
+	}
+	res := call(t, read.New(read.WithImages(true)), map[string]any{"path": "exact.jpg"}, dir)
+	if len(res.Images) != 1 {
+		t.Fatalf("an image of exactly the limit was refused: %s", res.Text)
+	}
+	if res.Images[0].MediaType != "image/jpeg" {
+		t.Errorf("the media type is %q, want image/jpeg", res.Images[0].MediaType)
+	}
+
+	over := append(append([]byte(nil), head...), bytes.Repeat([]byte{0}, read.MaxImageBytes-len(head)+1)...)
+	if err := os.WriteFile(filepath.Join(dir, "over.jpg"), over, 0o644); err != nil {
+		t.Fatalf("writing the image: %v", err)
+	}
+	if res := call(t, read.New(read.WithImages(true)), map[string]any{"path": "over.jpg"}, dir); len(res.Images) != 0 {
+		t.Error("an image one byte past the limit was returned")
+	}
+}
+
+// TestACancelledImageReadStops covers the context: a cancelled run does not
+// pay to read five megabytes.
+func TestACancelledImageReadStops(t *testing.T) {
+	dir := t.TempDir()
+	pngFile(t, dir, "shot.png")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tool := read.New(read.WithImages(true))
+	raw, err := json.Marshal(map[string]any{"path": "shot.png"})
+	if err != nil {
+		t.Fatalf("marshalling args: %v", err)
+	}
+	prepared, err := tool.Prepare(raw, poo.PrepareEnv{WorkingDir: dir})
+	if err != nil {
+		t.Fatalf("preparing: %v", err)
+	}
+	res, err := tool.Call(ctx, prepared, poo.ToolEnv{PrepareEnv: poo.PrepareEnv{WorkingDir: dir}})
+	if err != nil {
+		t.Fatalf("calling: %v", err)
+	}
+	if len(res.Images) != 0 {
+		t.Error("a cancelled run read the image")
+	}
+	if !res.IsError {
+		t.Errorf("the cancellation is not an error: %q", res.Text)
 	}
 }
