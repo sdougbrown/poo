@@ -47,20 +47,26 @@ read through the first name it holds. A command that finds none runs
 on the defaults, and the flags change them.
 `examples/code.settings.yaml` is the file to start from.
 
+**A models file.** `models_file` names a models file — providers with
+`baseUrl`, `api` and `apiKey`, each with its models — and imports them
+under names of the form `provider/id`. The file's shape is the one pi
+writes, and that shape is the whole compatibility: poo reads the file
+the settings name, the credential file beside it, and never a pi
+installation's own directory. A relative path resolves against the
+settings file's own directory, and with no `models_file` named, a
+`models.json` beside the settings file is imported — so
+`~/.config/poo/settings.yaml` and `~/.config/poo/models.json` set up
+providers without the settings naming the file. The settings' own
+entries win on a name collision, and a provider whose models file
+carries no `apiKey` takes the key from an `auth.json` beside that
+file, in the same shape pi keeps its credentials.
+
 **Models.** The settings define the models: `endpoints` name the
 servers (with `api_key_env` for the credential's environment
 variable, or `api_key` for a key written in the settings), `models`
 pair an endpoint with a model id, and `roles` assign a model to a
-role. `pi_models_file` points at a models file in pi's format —
-providers with `baseUrl`, `api` and `apiKey`, each with its models —
-and imports them under names of the form `provider/id`; the
-settings' own entries win on a name collision. A provider whose
-models file carries no `apiKey` takes the key from an `auth.json`
-beside that file, in the same shape pi keeps its credentials. The
-compatibility is the file shapes alone: poo reads the models file the
-settings name, the credential file beside it, and never a pi
-installation's own directory. A
-`roles.chat` that names an imported model runs it like any other.
+role. `roles.chat` that names an imported model runs it like any
+other.
 
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as

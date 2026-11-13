@@ -27,6 +27,7 @@ type SettingsFields struct {
 	LimitsMaxDurationS              *float64 "json:\"limits.max_duration_s,omitempty\""
 	LimitsMaxTokensPerRun           *float64 "json:\"limits.max_tokens_per_run,omitempty\""
 	LimitsMaxTurns                  *float64 "json:\"limits.max_turns,omitempty\""
+	ModelsFile                      *string  "json:\"models_file,omitempty\""
 	PermissionAskers                []string "json:\"permission.askers,omitempty\""
 	PermissionChainTimeoutS         *float64 "json:\"permission.chain_timeout_s,omitempty\""
 	PermissionDecideAllow           *float64 "json:\"permission.decide.allow,omitempty\""
@@ -37,7 +38,6 @@ type SettingsFields struct {
 	PermissionDoomLoopThreshold     *float64 "json:\"permission.doom_loop.threshold,omitempty\""
 	PermissionFallback              *string  "json:\"permission.fallback,omitempty\""
 	PermissionUnmatched             *string  "json:\"permission.unmatched,omitempty\""
-	PiModelsFile                    *string  "json:\"pi_models_file,omitempty\""
 	Profile                         *string  "json:\"profile,omitempty\""
 	ReasoningChat                   *string  "json:\"reasoning.chat,omitempty\""
 	RolesChat                       *string  "json:\"roles.chat,omitempty\""
@@ -96,6 +96,7 @@ type SettingsAvailability struct {
 	LimitsMaxDurationS              FieldStatus
 	LimitsMaxTokensPerRun           FieldStatus
 	LimitsMaxTurns                  FieldStatus
+	ModelsFile                      FieldStatus
 	PermissionAskers                FieldStatus
 	PermissionChainTimeoutS         FieldStatus
 	PermissionDecideAllow           FieldStatus
@@ -106,7 +107,6 @@ type SettingsAvailability struct {
 	PermissionDoomLoopThreshold     FieldStatus
 	PermissionFallback              FieldStatus
 	PermissionUnmatched             FieldStatus
-	PiModelsFile                    FieldStatus
 	Profile                         FieldStatus
 	ReasoningChat                   FieldStatus
 	RolesChat                       FieldStatus
@@ -199,6 +199,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	LimitsMaxTokensPerRunSatisfied := f.LimitsMaxTokensPerRun != nil
 	LimitsMaxTurnsEnabled := true
 	LimitsMaxTurnsSatisfied := f.LimitsMaxTurns != nil
+	ModelsFileEnabled := true
+	ModelsFileSatisfied := func() bool { v := f.ModelsFile; return v != nil && *v != "" }()
 	PermissionAskersEnabled := true
 	PermissionAskersSatisfied := len(f.PermissionAskers) > 0
 	PermissionChainTimeoutSEnabled := true
@@ -219,8 +221,6 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	PermissionFallbackSatisfied := func() bool { v := f.PermissionFallback; return v != nil && *v != "" }()
 	PermissionUnmatchedEnabled := true
 	PermissionUnmatchedSatisfied := func() bool { v := f.PermissionUnmatched; return v != nil && *v != "" }()
-	PiModelsFileEnabled := true
-	PiModelsFileSatisfied := func() bool { v := f.PiModelsFile; return v != nil && *v != "" }()
 	ProfileEnabled := true
 	ProfileSatisfied := func() bool { v := f.Profile; return v != nil && *v != "" }()
 	ReasoningChatEnabled := true
@@ -743,6 +743,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		ModelsFile: FieldStatus{
+			Required:  ModelsFileEnabled && false,
+			Enabled:   ModelsFileEnabled,
+			Satisfied: ModelsFileSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		PermissionAskers: FieldStatus{
 			Required:  PermissionAskersEnabled && false,
 			Enabled:   PermissionAskersEnabled,
@@ -1027,28 +1049,6 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				if !(f.PermissionUnmatched != nil && isValidRegexMatch(*f.PermissionUnmatched, "^(allow|ask|deny)$")) && "permission.unmatched must be allow, ask or deny" != "" {
 					reasons = append(reasons, "permission.unmatched must be allow, ask or deny")
 				}
-				if reasons == nil {
-					reasons = []string{}
-				}
-				return reasons
-			}(),
-			Valid: nil,
-			Error: "",
-		},
-		PiModelsFile: FieldStatus{
-			Required:  PiModelsFileEnabled && false,
-			Enabled:   PiModelsFileEnabled,
-			Satisfied: PiModelsFileSatisfied,
-			Fair:      true,
-			Reason: func() *string {
-				var reasons []string
-				if len(reasons) == 0 {
-					return nil
-				}
-				return &reasons[0]
-			}(),
-			Reasons: func() []string {
-				var reasons []string
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -1830,6 +1830,9 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.LimitsMaxTokensPerRun != nil
 	case "LimitsMaxTurns":
 		return f.LimitsMaxTurns != nil
+	case "ModelsFile":
+		v := f.ModelsFile
+		return v != nil && *v != ""
 	case "PermissionAskers":
 		return len(f.PermissionAskers) > 0
 	case "PermissionChainTimeoutS":
@@ -1852,9 +1855,6 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return v != nil && *v != ""
 	case "PermissionUnmatched":
 		v := f.PermissionUnmatched
-		return v != nil && *v != ""
-	case "PiModelsFile":
-		v := f.PiModelsFile
 		return v != nil && *v != ""
 	case "Profile":
 		v := f.Profile
@@ -2208,6 +2208,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: limits.max_turns must not be negative")
+	case "ModelsFile", "models_file":
+		found = true
+		status = avail.ModelsFile
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "PermissionAskers", "permission.askers":
 		found = true
 		status = avail.PermissionAskers
@@ -2280,12 +2286,6 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: permission.unmatched must be allow, ask or deny")
-	case "PiModelsFile", "pi_models_file":
-		found = true
-		status = avail.PiModelsFile
-		if status.Reason != nil {
-			explanations = append(explanations, "* "+*status.Reason)
-		}
 	case "Profile", "profile":
 		found = true
 		status = avail.Profile
