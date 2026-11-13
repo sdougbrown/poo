@@ -54,6 +54,7 @@ func TestAnExplicitFileThatIsNotThereIsARefusal(t *testing.T) {
 // the working directory's .poo/settings.json is found, and so is one
 // several directories up, the way git finds its repository.
 func TestTheProjectSettingsAreFoundWalkingUp(t *testing.T) {
+	t.Setenv(EnvSettings, "")
 	root := t.TempDir()
 	path := writeProject(t, root, `{"version":1}`)
 	deep := filepath.Join(root, "a", "b", "c")
@@ -85,30 +86,34 @@ func writeSettingsFile(t *testing.T, dir, name, body string) string {
 }
 
 // tempUserConfigDir isolates the user's config directory for a test and
-// returns it.
+// returns the directory the platform resolves, not the one the variables were
+// set to: darwin appends Library/Application Support under HOME.
 //
-// The platform reads XDG_CONFIG_HOME on Linux and its own place on darwin and
-// windows, so a test that assumed the variable would touch the developer's real
-// config directory there. The test is skipped when the directory the platform
-// reports is not the one this helper made.
+// Each platform reads its own variable — XDG_CONFIG_HOME on Linux, HOME on
+// darwin, APPDATA on windows — so all of them are pointed at the same place.
+// The skip stays as a guard: a platform that still answers elsewhere skips
+// rather than writing into the developer's own config.
 func tempUserConfigDir(t *testing.T) string {
 	t.Helper()
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	t.Setenv("APPDATA", config)
 	t.Setenv(EnvSettings, "")
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		t.Skipf("the user config directory is not resolvable here: %v", err)
 	}
 	if !strings.HasPrefix(dir, config) {
-		t.Skipf("this platform's user config directory ignores XDG_CONFIG_HOME: %s", dir)
+		t.Skipf("this platform's user config directory is outside the test's directory: %s", dir)
 	}
-	return config
+	return dir
 }
 
 // TestTheProjectSearchStopsWhereItStarted covers the walk's start:
 // an empty working directory walks up from the current directory.
 func TestTheProjectSearchStopsWhereItStarted(t *testing.T) {
+	t.Setenv(EnvSettings, "")
 	root := t.TempDir()
 	path := writeProject(t, root, `{"version":1}`)
 	t.Chdir(root)
@@ -280,6 +285,27 @@ func TestTheUsersSettingsAreFoundUnderAnyName(t *testing.T) {
 	}
 	if _, err := Load(found); err != nil {
 		t.Errorf("reading the discovered user file: %v", err)
+	}
+}
+
+// TestAnUnreadableUserConfigDirectoryIsNoSettings covers the error path: a
+// platform that cannot name a config directory has no user settings file, and
+// discovery falls through to the defaults rather than failing.
+func TestAnUnreadableUserConfigDirectoryIsNoSettings(t *testing.T) {
+	t.Setenv(EnvSettings, "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("APPDATA", "")
+	if _, err := os.UserConfigDir(); err == nil {
+		t.Skip("this platform names a user config directory without any of the variables")
+	}
+
+	found, err := FindSettings("", t.TempDir())
+	if err != nil {
+		t.Fatalf("discovery failed with no config directory: %v", err)
+	}
+	if found != "" {
+		t.Errorf("discovery resolved %q, want the defaults", found)
 	}
 }
 

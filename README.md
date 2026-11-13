@@ -38,14 +38,14 @@ the usage instead.
 same way: the explicit `--settings` file, then the file the
 `POO_SETTINGS` environment variable names, then the project's
 `.poo/` directory walking up from the current directory, then the
-user's config directory — `~/.config/poo` on Linux, and
-`~/Library/Application Support/poo` on macOS. Each of those
-directories is searched for `settings.json`, then `settings.yaml`,
-`settings.yml` and `settings.toml`, and the extension picks the
-parser. A directory holding more than one is read through the first
-name it holds. A command that finds none runs on the defaults, and
-the flags change them. `examples/code.settings.yaml` is the file to
-start from.
+user's config directory — `~/.config/poo` on Linux,
+`~/Library/Application Support/poo` on macOS, `%AppData%\poo` on
+Windows. Each of those directories is searched for `settings.json`,
+then `settings.yaml`, `settings.yml` and `settings.toml`, and the
+extension picks the parser. A directory holding more than one is
+read through the first name it holds. A command that finds none runs
+on the defaults, and the flags change them.
+`examples/code.settings.yaml` is the file to start from.
 
 **Models.** The settings define the models: `endpoints` name the
 servers (with `api_key_env` for the credential's environment
