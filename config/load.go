@@ -55,7 +55,7 @@ func Load(path string) (*Settings, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: reading %s: %w", path, err)
 	}
-	settings, err := parse(data, FormatFor(path), filepath.Dir(path), true)
+	settings, err := parse(data, FormatFor(path), filepath.Dir(path))
 	if err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
 	}
@@ -72,15 +72,15 @@ func Load(path string) (*Settings, error) {
 // discovered beside it. Load is the reader that knows where the file came
 // from.
 func Parse(data []byte, format Format) (*Settings, error) {
-	return parse(data, format, "", false)
+	return parse(data, format, "")
 }
 
 // parse decodes and checks one document.
 //
-// dir is the directory the document was read from, empty for a document that
-// was not read from a file, and discover says whether a models file beside it
-// is imported when the settings name none.
-func parse(data []byte, format Format, dir string, discover bool) (*Settings, error) {
+// dir is the directory the document was read from, and empty for a document
+// that was not read from a file: a models file beside it is imported when the
+// settings name none, so a document with no directory discovers nothing.
+func parse(data []byte, format Format, dir string) (*Settings, error) {
 	normalized, err := Normalize(data, format)
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func parse(data []byte, format Format, dir string, discover bool) (*Settings, er
 		return nil, decodeError(err)
 	}
 	settings.Permission.askersNamed = namesAskers(normalized)
-	if err := settings.importModelsFile(dir, discover); err != nil {
+	if err := settings.importModelsFile(dir); err != nil {
 		return nil, err
 	}
 	if err := settings.Check(); err != nil {

@@ -785,3 +785,29 @@ func TestAMissingRelativeModelsFileIsARefusal(t *testing.T) {
 		t.Errorf("the failure names the field %q, want models_file", failure.Field)
 	}
 }
+
+// TestADiscoveredModelsFileThatDoesNotReadNamesTheFile covers the failure's
+// subject: the settings named no file, so the failure names the file beside
+// them rather than a setting that is unset.
+func TestADiscoveredModelsFileThatDoesNotReadNamesTheFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ModelsFileName), []byte(`{"providers":{}}`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	path := writeSettingsWith(t, dir, `{"version":1}`)
+
+	_, err := Load(path)
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("a discovered models file that does not read loaded: %v", err)
+	}
+	if failure.Field != "" {
+		t.Errorf("the failure names the field %q, and the settings named no models file", failure.Field)
+	}
+	if !strings.Contains(failure.Message, "beside the settings") {
+		t.Errorf("the message %q does not say where the file was found", failure.Message)
+	}
+	if !strings.Contains(failure.Error(), ModelsFileName) {
+		t.Errorf("the failure %q does not name the file", failure.Error())
+	}
+}

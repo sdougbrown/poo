@@ -18,13 +18,14 @@ const ModelsFileName = "models.json"
 // beside them.
 //
 // A named file wins over a discovered one, and a relative name resolves
-// against the settings file's own directory rather than the working
-// directory. A document parsed from memory has neither, so it imports only
-// what it names.
-func (s *Settings) importModelsFile(dir string, discover bool) error {
+// against dir — the settings file's own directory — rather than the working
+// directory. dir is empty for a document held in memory, which is what says
+// there is nothing to discover beside it.
+func (s *Settings) importModelsFile(dir string) error {
 	path := s.ModelsFile
+	named := path != ""
 	switch {
-	case path != "":
+	case named:
 		expanded, err := expandHome(path)
 		if err != nil {
 			return err
@@ -33,7 +34,7 @@ func (s *Settings) importModelsFile(dir string, discover bool) error {
 			expanded = filepath.Join(dir, expanded)
 		}
 		path = expanded
-	case discover && dir != "":
+	case dir != "":
 		candidate := filepath.Join(dir, ModelsFileName)
 		if !fileExists(candidate) {
 			return nil
@@ -44,6 +45,15 @@ func (s *Settings) importModelsFile(dir string, discover bool) error {
 	}
 	file, err := piimport.Read(path)
 	if err != nil {
+		if !named {
+			// The settings named no file, so no setting is at fault: the
+			// file beside them is, and the message names it.
+			return &Error{
+				Code:    CodeInvalid,
+				Message: "the models file beside the settings does not read",
+				Err:     err,
+			}
+		}
 		// The reader names the file it read; the setting that named it is
 		// what a caller branches on.
 		return &Error{Code: CodeInvalid, Field: "models_file", Err: err}
