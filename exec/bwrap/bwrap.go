@@ -207,11 +207,9 @@ func (e *Executor) Start(ctx context.Context, c pooexec.Command, out io.Writer) 
 		fmt.Sprintf("%s=%d", statusFDEnv, statusFD),
 		fmt.Sprintf("%s=%d", parentFDEnv, parentFD))
 	// The sandbox runs in its own process group, so the whole group can
-	// be signalled at once. The parent-death signal ties bubblewrap to
-	// poo: --die-with-parent ties the sandbox to bubblewrap, so a poo
-	// that dies without running a teardown takes the sandbox with it
-	// instead of leaving it to init.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
+	// be signalled at once, and on Linux the parent-death signal ties
+	// bubblewrap to poo.
+	cmd.SysProcAttr = sysProcAttr()
 
 	pr, pw, err := os.Pipe()
 	if err != nil {
