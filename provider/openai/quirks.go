@@ -272,3 +272,13 @@ func (t *Transport) sendsTools(settings requestSettings) bool {
 	mode := t.toolsMode(settings.info)
 	return mode == "native" || mode == "auto"
 }
+
+// shapeThrough applies each profile's request shaping to one shape, in the order
+// the model info named them.
+func shapeThrough(quirks []quirkProfile, shape *requestShape) {
+	for _, quirk := range quirks {
+		if quirk.shapeRequest != nil {
+			quirk.shapeRequest(shape)
+		}
+	}
+}
