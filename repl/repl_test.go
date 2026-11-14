@@ -2,6 +2,8 @@ package repl
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -275,6 +277,67 @@ func TestAnAskWaitsForTheDecisionItWasGiven(t *testing.T) {
 	}
 }
 
+// TestALineTypedDuringARunReachesTheServerAsASteer covers the whole
+// ride: the line typed while the run works goes out as run/message, the
+// server records it, and the transcript echoes it as a steer — the
+// mark that says the line rode the run instead of opening one.
+func TestALineTypedDuringARunReachesTheServerAsASteer(t *testing.T) {
+	hold := make(chan struct{})
+	server := &fakeServer{t: t, script: quietRun(hold)}
+	out, typeLine, code := startTypedRepl(t, server)
+
+	typeLine("work on it\n")
+	// The tool result is the first thing the run renders whole: it is
+	// the anchor that says the run is working.
+	waitFor(t, out, "a find")
+	typeLine("also check the tests\n")
+	waitFor(t, out, "» also check the tests")
+
+	server.mu.Lock()
+	sent := append([]string(nil), server.messages...)
+	server.mu.Unlock()
+	if len(sent) != 1 || sent[0] != "also check the tests" {
+		t.Fatalf("the server got %v, want one steer", sent)
+	}
+
+	close(hold)
+	waitFor(t, out, "✓ end_turn")
+	typeLine("/quit\n")
+	if got := <-code; got != 0 {
+		t.Fatalf("the repl exited %d, want 0", got)
+	}
+	if !strings.Contains(out.String(), "» also check the tests") {
+		t.Errorf("the steer is not in the transcript:\n%s", out.String())
+	}
+}
+
+// TestARefusedSteerFailsTheLineNotTheSession covers a run/message the
+// server refused — a run that cannot take the message: the refusal is
+// a failure line, and the session goes on.
+func TestARefusedSteerFailsTheLineNotTheSession(t *testing.T) {
+	hold := make(chan struct{})
+	server := &fakeServer{t: t, refuseMessage: true, script: quietRun(hold)}
+	out, typeLine, code := startTypedRepl(t, server)
+
+	typeLine("work on it\n")
+	waitFor(t, out, "a find")
+	typeLine("a line too late\n")
+	waitFor(t, out, "» a line too late")
+	waitFor(t, out, "✗")
+
+	close(hold)
+	waitFor(t, out, "✓ end_turn")
+	typeLine("/quit\n")
+	if got := <-code; got != 0 {
+		t.Fatalf("the repl exited %d, want 0", got)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if !server.closed {
+		t.Error("the repl left the session open")
+	}
+}
+
 func TestAnAskShowsEveryLineOfItsSummary(t *testing.T) {
 	server := &fakeServer{t: t, askSummary: "echo first\necho second"}
 	out, typeLine, code := startTypedRepl(t, server)
@@ -436,27 +499,86 @@ func TestALessWithoutAPagerFailsTheLineNotTheSession(t *testing.T) {
 	}
 }
 
-// TestALineTypedDuringARunIsNotLostSilently covers the Enter pressed
-// while a turn works: the line is not sent as the next prompt, and the
-// transcript says so — with the text and the key that stops the turn —
-// instead of discarding it.
-func TestALineTypedDuringARunIsNotLostSilently(t *testing.T) {
+// lineWriter records the lines the client writes, one per call: the
+// test reads them back and answers over the conn's demux, the way the
+// server would.
+type lineWriter struct {
+	lines chan string
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.lines <- string(p)
+	return len(p), nil
+}
+
+// TestALineTypedDuringARunSteersTheRun covers the Enter pressed while
+// a turn works: the line goes to the run as a steer — run/message, mode
+// steer — and reaches the model at the run's next turn end. A settle
+// that dropped it names the text the person wrote, not the input's id.
+func TestALineTypedDuringARunSteersTheRun(t *testing.T) {
 	var out bytes.Buffer
-	m := &machine{r: newRenderer(&out), status: newStatus("")}
+	lw := &lineWriter{lines: make(chan string, 8)}
+	m := &machine{r: newRenderer(&out), status: newStatus(""), sessionID: "s1"}
+	m.conn = &conn{
+		w:       lw,
+		pending: map[int]chan rpcResult{},
+		events:  make(chan protocol.Event, 8),
+		asks:    make(chan askRequest, 8),
+	}
 	m.runIDMu.Lock()
 	m.runID = "r1"
 	m.runIDMu.Unlock()
 	in := &plainInput{write: func(string) {}}
 
+	// The server's answer to the steer: an input id, the way the wire
+	// names an accepted input.
+	go func() {
+		raw := <-lw.lines
+		var req struct {
+			ID     int             `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal([]byte(raw), &req); err != nil {
+			t.Errorf("the steer was not one request line: %v", err)
+			return
+		}
+		if req.Method != protocol.MethodRunMessage {
+			t.Errorf("the line went out as %q, want run/message", req.Method)
+			return
+		}
+		var params protocol.MessageParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			t.Errorf("the steer's params did not decode: %v", err)
+			return
+		}
+		if params.Text != "a second thought" || params.Mode != "steer" || params.SessionID != "s1" {
+			t.Errorf("the steer's params were %+v", params)
+		}
+		m.conn.line([]byte(fmt.Sprintf(`{"id":%d,"result":{"input_id":"i1"}}`, req.ID)))
+	}()
+
 	if code, done := m.line(lineResult{line: "a second thought"}, in); done {
 		t.Fatalf("the line ended the session (code %d)", code)
 	}
 	drawn := out.String()
-	if !strings.Contains(drawn, "a second thought") {
-		t.Errorf("the typed line is not on screen:\n%s", drawn)
+	if !strings.Contains(drawn, "» a second thought") {
+		t.Errorf("the typed line is not on screen as a steer:\n%s", drawn)
 	}
-	if !strings.Contains(drawn, "Esc stops it") {
-		t.Errorf("nothing says which key stops the turn:\n%s", drawn)
+	if m.steers["i1"] != "a second thought" {
+		t.Errorf("the acceptance was not kept: %v", m.steers)
+	}
+
+	// A settle that reports the input undelivered says what it was.
+	m.event(protocol.Event{
+		Type: "run.settled",
+		Payload: map[string]any{"run_id": "r1", "reason": "cancelled", "turns": 1,
+			"detail": map[string]any{
+				"undelivered_input": []any{map[string]any{"input_id": "i1", "mode": "steer"}},
+			}},
+	}, "r1", &runState{})
+	if !strings.Contains(out.String(), `"a second thought" was delivered`) {
+		t.Errorf("the undelivered steer did not read back as its text:\n%s", out.String())
 	}
 }
 

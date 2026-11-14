@@ -140,6 +140,11 @@ type machine struct {
 	// not say what to stop.
 	runIDMu sync.Mutex
 	runID   string
+	// steers holds the lines this run accepted, by the input id the
+	// wire named: the settle reports undelivered inputs by id, and
+	// the transcript says what the person wrote. The map lives with
+	// the run: endRun drops it with the rest of the run's state.
+	steers map[string]string
 	// lastMatches holds the models the last listing offered, in the
 	// order it numbered them: a bare number picks out of it. It is the
 	// only state a pick keeps, and a listing replaces it whole.
@@ -321,14 +326,44 @@ func (m *machine) line(res lineResult, input input) (int, bool) {
 		return 0, false
 	case m.activeRun() != "":
 		// A run takes one prompt at a time, so a line submitted while
-		// it works is not the next one — but it is not dropped in
-		// silence either: the transcript says what was typed and which
-		// key stops the turn.
-		m.r.notice("the run is working — Esc stops it; %q was not sent", text)
-		return 0, false
+		// it works is not the next one. A line that is not a command
+		// is a steer: it rides the active run and reaches the model at
+		// the run's next turn end. A command still waits — the run is
+		// working, and the transcript says so, the way it always has.
+		if strings.HasPrefix(text, "/") {
+			m.r.notice("the run is working — Esc stops it; %q was not sent", text)
+			return 0, false
+		}
+		return m.steer(text, input)
 	default:
 		return m.command(text, input)
 	}
+}
+
+// steer sends a line to the run that is working: run/message, mode
+// steer. The core queues it, and the run's next turn end delivers it
+// to the model.
+//
+// The line's echo leads with a mark the prompt's does not carry, so
+// the person can tell a steer from a prompt at a glance. A refusal
+// keeps the session: the run that could not take the message goes on,
+// and what was typed is said to have not gone.
+func (m *machine) steer(text string, input input) (int, bool) {
+	m.r.steerPrompt(text)
+	var res protocol.MessageResult
+	if err := m.conn.call(protocol.MethodRunMessage, protocol.MessageParams{
+		SessionID: m.sessionID,
+		Text:      text,
+		Mode:      "steer",
+	}, &res); err != nil {
+		m.r.failure(err.Error())
+		return 0, false
+	}
+	if m.steers == nil {
+		m.steers = map[string]string{}
+	}
+	m.steers[res.InputID] = text
+	return 0, false
 }
 
 // prompt is the prompt the next read sits behind: the ask's when a
@@ -937,6 +972,7 @@ func (m *machine) endRun(input input) (int, bool) {
 	m.runID = ""
 	m.runIDMu.Unlock()
 	m.state = nil
+	m.steers = nil
 	if m.ask != nil {
 		m.ask = nil
 	}
@@ -1036,10 +1072,33 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 			// event either, so the statusline keeps the last fill it
 			// measured: that is the closest estimate of the window the
 			// next request asks for, and the settle's total is not.
+			m.reportUndelivered(evt.Payload)
 			return true
 		}
 	}
 	return false
+}
+
+// reportUndelivered says what a settle dropped: the inputs it accepted
+// but never delivered, the ones that were queued when the run stopped
+// taking turns. The notice names what the person wrote, when the
+// acceptance's answer named the input.
+func (m *machine) reportUndelivered(payload map[string]any) {
+	raw, err := json.Marshal(payload["detail"])
+	if err != nil {
+		return
+	}
+	var detail protocol.SettleDetail
+	if json.Unmarshal(raw, &detail) != nil {
+		return
+	}
+	for _, u := range detail.UndeliveredInput {
+		said := u.InputID
+		if text, ok := m.steers[u.InputID]; ok {
+			said = fmt.Sprintf("%q", text)
+		}
+		m.r.notice("the run settled before %s was delivered; send it again", said)
+	}
 }
 
 // settledUsage reads the token accounting out of a settle event's
