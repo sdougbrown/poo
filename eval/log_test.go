@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/sdougbrown/poo"
 )
 
 // writeLog writes a session log and returns its path.
@@ -319,5 +321,30 @@ func TestATruncatedToolResultEndsOnARuneBoundary(t *testing.T) {
 		if !utf8.ValidString(seg.Text) {
 			t.Errorf("the segment is not valid UTF-8: %q", seg.Text[len(seg.Text)-40:])
 		}
+	}
+}
+
+// TestAHeldImageOfAnEarlierLogReachesTheReplay covers the rename: a recording
+// that wrote a job's picture under the earlier key still hands the replay the
+// picture the run delivered.
+func TestAHeldImageOfAnEarlierLogReachesTheReplay(t *testing.T) {
+	path := writeLog(t,
+		`{"record":"session.created","seq":1,"ts":"2026-10-20T00:00:00Z","format":"poo-session-v0","session_id":"s","context_limit":32768}`,
+		`{"record":"job.ended","seq":2,"ts":"2026-10-20T00:00:01Z","session_id":"s","job":"j1","handle":"r1","tool":"read","run_id":"r1","outcome":"ok","input_id":"s-ji1","text":"read: shot.png","images":[{"media_type":"image/png","data":"AQID"}],"ended_at":"2026-10-20T00:00:01Z"}`,
+	)
+	log, err := ParseLog(path)
+	if err != nil {
+		t.Fatalf("parsing the log: %v", err)
+	}
+	results := replayJobResults(log)
+	if len(results) != 1 {
+		t.Fatalf("the replay holds %d results, want the recorded one", len(results))
+	}
+	attachments := results[0].Attachments
+	if len(attachments) != 1 {
+		t.Fatalf("the result carries %d attachments, want the recorded picture", len(attachments))
+	}
+	if attachments[0].Modality != poo.ModalityImage || attachments[0].MediaType != "image/png" {
+		t.Errorf("the attachment is %+v, want an image/png", attachments[0])
 	}
 }

@@ -60,20 +60,25 @@ type Tool struct {
 	// OutputCap is the cap on the output. Zero means the cap is taken from
 	// the run's settings. A nonzero cap applies to a nested call as well.
 	OutputCap int
-	// images reports that the run's model reads images, so an image file is
-	// returned as the image rather than refused.
-	images bool
+	// inputs are the modalities the run's model reads, so a file of one is
+	// returned rather than refused.
+	inputs map[poo.Modality]bool
 }
 
 // Option sets up the read tool.
 type Option func(*Tool)
 
-// WithImages reports whether the run's model reads images.
+// WithInputs reports which modalities the run's model reads.
 //
-// A model that does not is told the file is an image instead, so the refusal
-// costs a line and not a request the provider rejects.
-func WithImages(images bool) Option {
-	return func(t *Tool) { t.images = images }
+// A model that reads none of them is told what the file is instead, so the
+// refusal costs a line and not a request the provider rejects.
+func WithInputs(modalities ...poo.Modality) Option {
+	return func(t *Tool) {
+		t.inputs = make(map[poo.Modality]bool, len(modalities))
+		for _, modality := range modalities {
+			t.inputs[modality] = true
+		}
+	}
 }
 
 // New returns a read tool.
@@ -88,7 +93,7 @@ func New(opts ...Option) *Tool {
 // Spec describes the tool.
 func (t *Tool) Spec() poo.ToolSpec {
 	description := "Read a range of lines from a file."
-	if t.images {
+	if t.inputs[poo.ModalityImage] {
 		description += " An image file is read as the image itself."
 	}
 	return poo.ToolSpec{
@@ -196,16 +201,16 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 
 // absolutePath returns the path a call works on.
 //
-// readsImages reports whether the model this call runs for reads images.
+// accepts reports whether the model this call runs for reads a modality.
 //
 // The run's model decides it, so a session that switched models answers for
 // the model it has now; the tool's own answer is the fallback for a caller
 // that names no model.
-func (t *Tool) readsImages(env poo.ToolEnv) bool {
+func (t *Tool) accepts(modality poo.Modality, env poo.ToolEnv) bool {
 	if env.Model.Inputs != nil {
-		return env.Model.ReadsImages()
+		return env.Model.Reads(modality)
 	}
-	return t.images
+	return t.inputs[modality]
 }
 
 // imageMediaType reports the media type of the image the head of a file
@@ -269,8 +274,8 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	}
 	// An image carries NUL bytes, so it is recognised before the binary
 	// refusal, and the whole file is returned as the picture it is.
-	if media, ok := imageMediaType(sniff[:n]); ok && poo.IsImageMediaType(media) {
-		if !t.readsImages(env) {
+	if media, ok := imageMediaType(sniff[:n]); ok && poo.IsMediaType(poo.ModalityImage, media) {
+		if !t.accepts(poo.ModalityImage, env) {
 			return poo.ToolResult{
 				Text: fmt.Sprintf("read: %s is an image (%s, %d bytes); this model does not accept image input", path, media, info.Size()),
 			}, nil
@@ -293,8 +298,8 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 			return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
 		}
 		return poo.ToolResult{
-			Text:   fmt.Sprintf("read: %s (image, %d bytes)", path, len(data)),
-			Images: []poo.Image{{MediaType: media, Data: data}},
+			Text:        fmt.Sprintf("read: %s (image, %d bytes)", path, len(data)),
+			Attachments: []poo.Attachment{{Modality: poo.ModalityImage, MediaType: media, Data: data}},
 		}, nil
 	}
 	if idx := indexNUL(sniff[:n]); idx >= 0 {

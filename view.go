@@ -104,6 +104,6 @@ func copyResult(r ToolResult) ToolResult {
 	if r.Structured != nil {
 		out.Structured = append([]byte(nil), r.Structured...)
 	}
-	out.Images = cloneImages(r.Images)
+	out.Attachments = cloneAttachments(r.Attachments)
 	return out
 }

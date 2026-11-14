@@ -517,11 +517,11 @@ func TestAToolResultImageBecomesAUserMessage(t *testing.T) {
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
-	image := poo.Image{MediaType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}}
+	image := poo.Attachment{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}}
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model: "m",
 		Messages: []poo.Message{
-			poo.ToolResultMessage("call_1", "read", "read: shot.png (image, 4 bytes)", false, []poo.Image{image}),
+			poo.ToolResultMessage("call_1", "read", "read: shot.png (image, 4 bytes)", false, []poo.Attachment{image}),
 		},
 		MaxTokens: 16,
 	})
@@ -1150,14 +1150,14 @@ func TestAParallelBatchOfImagesKeepsOneToolTurn(t *testing.T) {
 	srv := newSSEServer(t, body)
 	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
 
-	first := poo.Image{MediaType: "image/png", Data: []byte{1}}
-	second := poo.Image{MediaType: "image/jpeg", Data: []byte{2}}
+	first := poo.Attachment{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1}}
+	second := poo.Attachment{Modality: poo.ModalityImage, MediaType: "image/jpeg", Data: []byte{2}}
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model: "m",
 		Messages: []poo.Message{
 			poo.NewTextMessage(poo.RoleUser, "look at both"),
-			poo.ToolResultMessage("call_1", "read", "read: a.png", false, []poo.Image{first}),
-			poo.ToolResultMessage("call_2", "read", "read: b.jpg", false, []poo.Image{second}),
+			poo.ToolResultMessage("call_1", "read", "read: a.png", false, []poo.Attachment{first}),
+			poo.ToolResultMessage("call_2", "read", "read: b.jpg", false, []poo.Attachment{second}),
 		},
 		MaxTokens: 16,
 	})
@@ -1207,9 +1207,9 @@ func TestTwoImagesInOneResultBothReachTheModel(t *testing.T) {
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
 		Model: "m",
 		Messages: []poo.Message{
-			poo.ToolResultMessage("call_1", "read", "read: both", false, []poo.Image{
-				{MediaType: "image/png", Data: []byte{1}},
-				{MediaType: "image/png", Data: []byte{2}},
+			poo.ToolResultMessage("call_1", "read", "read: both", false, []poo.Attachment{
+				{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1}},
+				{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{2}},
 			}),
 		},
 		MaxTokens: 16,

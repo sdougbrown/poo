@@ -230,12 +230,14 @@ Each content block holds:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `kind` | string | `"text"`, `"thinking"`, `"tool_call"`, `"tool_result"` or `"provider"`. |
+| `kind` | string | `"text"`, `"thinking"`, `"tool_call"`, `"tool_result"`, `"image"` or `"provider"`. |
 | `text` | string | The block's text. Absent when empty. |
 | `tool_call_id` | string | The provider's id for the call. Set on `tool_call` and `tool_result` blocks. |
 | `name` | string | The tool's name. Set on `tool_call` and `tool_result` blocks. |
 | `arguments` | object or string | A `tool_call` block's arguments. A JSON object when the model sent valid JSON, and a JSON string holding the raw text when it did not. |
 | `is_error` | boolean | `true` when a `tool_result` reports a failure. Absent when false. |
+| `media_type` | string | An attachment block's media type, e.g. `"image/png"`. |
+| `data` | string | An attachment block's bytes, base64-encoded. |
 | `provider` | object | The block's opaque provider companion. Absent when the block has none. |
 
 A `tool_result` block's `text` is the model-facing text of the result.
@@ -451,6 +453,7 @@ reads, so a held result survives a crash and a load can deliver it.
 | `fatal` | boolean | `true` when the job failed with a fatal error. A run that receives the result settles `tool_fatal`. Absent when the job did not. |
 | `input_id` | string | The id the queued result is delivered under. |
 | `text` | string | The result the model reads. |
+| `attachments` | array of objects | The files the result carries, each holding `modality`, `media_type` and `data` (base64), so a held result survives a restart with what it carried. Absent when the result carries none. An earlier build wrote this field as `images`, holding only `media_type` and `data`; a reader takes those as images. |
 | `ended_at` | string | RFC 3339, UTC. |
 
 ## `feed.started`

@@ -320,9 +320,9 @@ type ToolOptions struct {
 	// Search reports that the session searches the catalog instead of
 	// listing it, so call_cli points an unknown name at the search.
 	Search bool
-	// Images reports that the session's model reads images, so a tool that
-	// can return one does, rather than refusing what the model cannot see.
-	Images bool
+	// Inputs are the modalities the session's model reads, so a tool that can
+	// return one does, rather than refusing what the model cannot see.
+	Inputs []poo.Modality
 }
 
 // Build turns the settings into the runtime a session is built from.
@@ -578,18 +578,17 @@ func (r *Runtime) findToolFor(count int) bool {
 	return count > cli.FindThreshold && r.deciderErr == nil && r.decider != nil
 }
 
-// modelReadsImages reports whether the session's chat model declares image
-// input.
+// modelInputs returns the modalities the session's chat model declares.
 //
-// The model's own inputs decide it: a tool that hands over a picture is only
-// useful to a model that reads one, and a session without a resolvable chat
-// model is not one to guess for.
-func (r *Runtime) modelReadsImages() bool {
+// The model's own inputs decide them: a tool that hands over an attachment is
+// only useful to a model that reads one, and a session without a resolvable
+// chat model is not one to guess for.
+func (r *Runtime) modelInputs() []poo.Modality {
 	model, err := r.ChatModel()
 	if err != nil {
-		return false
+		return nil
 	}
-	return model.ReadsImages()
+	return model.Inputs
 }
 
 // offersSearch reports whether the session offers the search over the catalog.
@@ -1113,7 +1112,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		ProtectedPaths: protected,
 		Registry:       r.offeredCatalog(),
 		Search:         r.offersSearch(),
-		Images:         r.modelReadsImages(),
+		Inputs:         r.modelInputs(),
 	}
 	if r.needsExecutor() {
 		executor, err := opts.Executors.New(executorName, exec.Options{

@@ -41,18 +41,28 @@ func TestAnImageIsReturnedAsTheImage(t *testing.T) {
 	dir := t.TempDir()
 	path, size := pngFile(t, dir, "shot.png")
 
-	res := call(t, read.New(read.WithImages(true)), map[string]any{"path": "shot.png"}, dir)
+	res := call(t, read.New(read.WithInputs(poo.ModalityImage)), map[string]any{"path": "shot.png"}, dir)
 	if res.IsError {
 		t.Fatalf("reading an image failed: %s", res.Text)
 	}
-	if len(res.Images) != 1 {
-		t.Fatalf("the read returned %d images, want one", len(res.Images))
+	if len(res.Attachments) != 1 {
+		t.Fatalf("the read returned %d attachments, want one", len(res.Attachments))
 	}
-	if res.Images[0].MediaType != "image/png" {
-		t.Errorf("the image's media type is %q, want image/png", res.Images[0].MediaType)
+	if res.Attachments[0].Modality != poo.ModalityImage {
+		t.Errorf("the image's modality is %q, want image", res.Attachments[0].Modality)
 	}
-	if len(res.Images[0].Data) != size {
-		t.Errorf("the image holds %d bytes, want %d", len(res.Images[0].Data), size)
+	if res.Attachments[0].MediaType != "image/png" {
+		t.Errorf("the image's media type is %q, want image/png", res.Attachments[0].MediaType)
+	}
+	if len(res.Attachments[0].Data) != size {
+		t.Errorf("the image holds %d bytes, want %d", len(res.Attachments[0].Data), size)
+	}
+	// The block the request carries follows from the attachment's modality, so
+	// a read whose result reaches the model as a text line alone has lost the
+	// picture.
+	msg := poo.ToolResultMessage("c1", "read", res.Text, false, res.Attachments)
+	if len(msg.Content) != 2 || msg.Content[1].Kind != poo.ContentImage {
+		t.Fatalf("the result's message carries %+v, want the text and the picture", msg.Content)
 	}
 	// The text names the file and its size, so a front end that cannot draw
 	// the image still says what the model saw.
@@ -75,11 +85,11 @@ func TestAnImageIsRefusedForAModelThatCannotReadIt(t *testing.T) {
 	_, size := pngFile(t, dir, "shot.png")
 
 	res := call(t, read.New(), map[string]any{"path": "shot.png"}, dir)
-	if len(res.Images) != 0 {
-		t.Fatalf("a model that cannot read images was given %d", len(res.Images))
+	if len(res.Attachments) != 0 {
+		t.Fatalf("a model that cannot read attachments was given %d", len(res.Attachments))
 	}
 	if !strings.Contains(res.Text, "does not accept image input") {
-		t.Errorf("the refusal is %q, want it to say the model cannot read images", res.Text)
+		t.Errorf("the refusal is %q, want it to say the model cannot read attachments", res.Text)
 	}
 	if !strings.Contains(res.Text, fmt.Sprintf("%d bytes", size)) {
 		t.Errorf("the refusal %q does not name the size", res.Text)
@@ -102,8 +112,8 @@ func TestAnOversizedImageIsRefused(t *testing.T) {
 		t.Fatalf("writing the image: %v", err)
 	}
 
-	res := call(t, read.New(read.WithImages(true)), map[string]any{"path": "big.png"}, dir)
-	if len(res.Images) != 0 {
+	res := call(t, read.New(read.WithInputs(poo.ModalityImage)), map[string]any{"path": "big.png"}, dir)
+	if len(res.Attachments) != 0 {
 		t.Fatalf("an oversized image was returned")
 	}
 	if !strings.Contains(res.Text, "limit") {
@@ -115,19 +125,19 @@ func TestAnOversizedImageIsRefused(t *testing.T) {
 // description: a tool a model cannot use must not advertise the use.
 func TestTheImageDescriptionIsOnlyOfferedToAModelThatReadsThem(t *testing.T) {
 	without := read.New()
-	with := read.New(read.WithImages(true))
+	with := read.New(read.WithInputs(poo.ModalityImage))
 	if strings.Contains(without.Spec().Description, "image") {
-		t.Errorf("a model that cannot read images is offered them: %q", without.Spec().Description)
+		t.Errorf("a model that cannot read attachments is offered them: %q", without.Spec().Description)
 	}
 	if !strings.Contains(with.Spec().Description, "image") {
-		t.Errorf("a model that reads images is not told so: %q", with.Spec().Description)
+		t.Errorf("a model that reads attachments is not told so: %q", with.Spec().Description)
 	}
 	// The guidance the tool brings says the same thing as its description.
 	if strings.Contains(without.PromptSection(prompt.Env{}), "image file") {
-		t.Error("a model that cannot read images is told how to read one")
+		t.Error("a model that cannot read attachments is told how to read one")
 	}
 	if !strings.Contains(with.PromptSection(prompt.Env{}), "image file") {
-		t.Error("a model that reads images is not told how")
+		t.Error("a model that reads attachments is not told how")
 	}
 }
 
@@ -148,12 +158,12 @@ func TestAGifAndAWebPAreImages(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, tt.name), body, 0o644); err != nil {
 				t.Fatalf("writing the file: %v", err)
 			}
-			res := call(t, read.New(read.WithImages(true)), map[string]any{"path": tt.name}, dir)
-			if len(res.Images) != 1 {
-				t.Fatalf("the read returned %d images, want one: %s", len(res.Images), res.Text)
+			res := call(t, read.New(read.WithInputs(poo.ModalityImage)), map[string]any{"path": tt.name}, dir)
+			if len(res.Attachments) != 1 {
+				t.Fatalf("the read returned %d attachments, want one: %s", len(res.Attachments), res.Text)
 			}
-			if res.Images[0].MediaType != tt.media {
-				t.Errorf("the media type is %q, want %q", res.Images[0].MediaType, tt.media)
+			if res.Attachments[0].MediaType != tt.media {
+				t.Errorf("the media type is %q, want %q", res.Attachments[0].MediaType, tt.media)
 			}
 		})
 	}
@@ -168,19 +178,19 @@ func TestAJPEGAndItsExactLimit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "exact.jpg"), exact, 0o644); err != nil {
 		t.Fatalf("writing the image: %v", err)
 	}
-	res := call(t, read.New(read.WithImages(true)), map[string]any{"path": "exact.jpg"}, dir)
-	if len(res.Images) != 1 {
+	res := call(t, read.New(read.WithInputs(poo.ModalityImage)), map[string]any{"path": "exact.jpg"}, dir)
+	if len(res.Attachments) != 1 {
 		t.Fatalf("an image of exactly the limit was refused: %s", res.Text)
 	}
-	if res.Images[0].MediaType != "image/jpeg" {
-		t.Errorf("the media type is %q, want image/jpeg", res.Images[0].MediaType)
+	if res.Attachments[0].MediaType != "image/jpeg" {
+		t.Errorf("the media type is %q, want image/jpeg", res.Attachments[0].MediaType)
 	}
 
 	over := append(append([]byte(nil), head...), bytes.Repeat([]byte{0}, read.MaxImageBytes-len(head)+1)...)
 	if err := os.WriteFile(filepath.Join(dir, "over.jpg"), over, 0o644); err != nil {
 		t.Fatalf("writing the image: %v", err)
 	}
-	if res := call(t, read.New(read.WithImages(true)), map[string]any{"path": "over.jpg"}, dir); len(res.Images) != 0 {
+	if res := call(t, read.New(read.WithInputs(poo.ModalityImage)), map[string]any{"path": "over.jpg"}, dir); len(res.Attachments) != 0 {
 		t.Error("an image one byte past the limit was returned")
 	}
 }
@@ -193,7 +203,7 @@ func TestACancelledImageReadStops(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	tool := read.New(read.WithImages(true))
+	tool := read.New(read.WithInputs(poo.ModalityImage))
 	raw, err := json.Marshal(map[string]any{"path": "shot.png"})
 	if err != nil {
 		t.Fatalf("marshalling args: %v", err)
@@ -206,7 +216,7 @@ func TestACancelledImageReadStops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("calling: %v", err)
 	}
-	if len(res.Images) != 0 {
+	if len(res.Attachments) != 0 {
 		t.Error("a cancelled run read the image")
 	}
 	if !res.IsError {
@@ -240,15 +250,15 @@ func TestTheRunsModelDecidesAtCallTime(t *testing.T) {
 		return res
 	}
 
-	// Built for a text-only model, run for one that reads images.
+	// Built for a text-only model, run for one that reads attachments.
 	res := callWith(t, read.New(), []poo.Modality{poo.ModalityText, poo.ModalityImage})
-	if len(res.Images) != 1 {
-		t.Errorf("a model that reads images was given %d: %s", len(res.Images), res.Text)
+	if len(res.Attachments) != 1 {
+		t.Errorf("a model that reads attachments was given %d: %s", len(res.Attachments), res.Text)
 	}
 
-	// Built for a model that reads images, run for one that does not.
-	res = callWith(t, read.New(read.WithImages(true)), []poo.Modality{poo.ModalityText})
-	if len(res.Images) != 0 {
+	// Built for a model that reads attachments, run for one that does not.
+	res = callWith(t, read.New(read.WithInputs(poo.ModalityImage)), []poo.Modality{poo.ModalityText})
+	if len(res.Attachments) != 0 {
 		t.Error("a text-only model was given an image")
 	}
 	if !strings.Contains(res.Text, "does not accept image input") {
@@ -256,8 +266,8 @@ func TestTheRunsModelDecidesAtCallTime(t *testing.T) {
 	}
 
 	// A caller that names no model falls back to what the tool was built for.
-	res = callWith(t, read.New(read.WithImages(true)), nil)
-	if len(res.Images) != 1 {
+	res = callWith(t, read.New(read.WithInputs(poo.ModalityImage)), nil)
+	if len(res.Attachments) != 1 {
 		t.Errorf("a caller with no model lost the tool's own answer: %s", res.Text)
 	}
 }
@@ -267,7 +277,7 @@ func TestTheRunsModelDecidesAtCallTime(t *testing.T) {
 // be dropped on the way out.
 func TestEverySniffedTypeIsOneABlockCarries(t *testing.T) {
 	for _, media := range []string{"image/png", "image/jpeg", "image/gif", "image/webp"} {
-		if !poo.IsImageMediaType(media) {
+		if !poo.IsMediaType(poo.ModalityImage, media) {
 			t.Errorf("the sniffer produces %q, and a block would drop it", media)
 		}
 	}

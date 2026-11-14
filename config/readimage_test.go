@@ -8,7 +8,7 @@ import (
 )
 
 // TestTheReadToolFollowsTheModelThatReadsImages covers the wiring: the tool
-// a session builds is told whether the model reads images, so a text-only
+// a session builds is told whether the model reads attachments, so a text-only
 // model is never offered a picture it cannot see.
 func TestTheReadToolFollowsTheModelThatReadsImages(t *testing.T) {
 	tests := []struct {
@@ -16,7 +16,7 @@ func TestTheReadToolFollowsTheModelThatReadsImages(t *testing.T) {
 		inputs  string
 		offered bool
 	}{
-		{name: "a model that reads images", inputs: "    inputs: [text, image]\n", offered: true},
+		{name: "a model that reads attachments", inputs: "    inputs: [text, image]\n", offered: true},
 		{name: "a model that reads text", inputs: "    inputs: [text]\n", offered: false},
 	}
 	for _, tt := range tests {
@@ -49,7 +49,7 @@ models:
 			}
 			description := tool.Spec().Description
 			if got := strings.Contains(description, "image"); got != tt.offered {
-				t.Errorf("the read description is %q, and images are offered: %v, want %v", description, got, tt.offered)
+				t.Errorf("the read description is %q, and attachments are offered: %v, want %v", description, got, tt.offered)
 			}
 		})
 	}

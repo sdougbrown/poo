@@ -334,7 +334,7 @@ func TestAForkCarriesAnAppendedImage(t *testing.T) {
 	}
 
 	appended := []poo.Message{poo.ToolResultMessage("call_1", "read", "read: shot.png", false,
-		[]poo.Image{{MediaType: "image/png", Data: []byte{1, 2, 3}}})}
+		[]poo.Attachment{{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1, 2, 3}}})}
 	reader, err := tr.Fork(context.Background(), rendered, appended, 2048)
 	if err != nil {
 		t.Fatalf("forking: %v", err)
