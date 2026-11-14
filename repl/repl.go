@@ -1024,7 +1024,10 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 			reason, _ := evt.Payload["reason"].(string)
 			input, output := settledUsage(evt.Payload)
 			m.r.settle(reason, state.turns, input, output)
-			m.status.setTokens(input)
+			// The settle's usage is the run's total, the sum of every
+			// request's count, and the statusline wants the last
+			// request's: the usage events already put it there. Feeding
+			// the sum in would show a context fuller than the window.
 			return true
 		}
 	}
