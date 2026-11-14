@@ -213,6 +213,14 @@ type Rendered struct {
 	// Messages is the number of messages the body carried, so a fork
 	// knows where the appended messages go.
 	Messages int
+	// Quirks are the profiles the body was shaped with, in the order they
+	// applied.
+	//
+	// The body is sent as it is, so a fork shapes the messages it appends
+	// with the same profiles: a request that named a profile and a
+	// transport whose own model info names another must not disagree about
+	// the shape of a message.
+	Quirks []string
 }
 
 // ChatTransport sends a chat request to a provider.

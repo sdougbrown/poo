@@ -198,11 +198,7 @@ func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings)
 		return nil, err
 	}
 	t.shapeSampling(settings.info, shape)
-	for _, quirk := range settings.quirks {
-		if quirk.shapeRequest != nil {
-			quirk.shapeRequest(shape)
-		}
-	}
+	shapeThrough(settings.quirks, shape)
 	if len(out.Params) == 0 {
 		out.Params = nil
 	}

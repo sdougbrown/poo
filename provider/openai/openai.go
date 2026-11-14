@@ -275,6 +275,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		API:      poo.APIChatCompletions,
 		Body:     body,
 		Messages: len(req.Messages),
+		Quirks:   settings.info.Quirks,
 	}
 
 	reader, attempt, err := t.openWithRetry(ctx, body, req.OnAttempt, settings)
@@ -314,12 +315,15 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 			Message: "the request snapshot holds no body to fork",
 		}
 	}
-	body, err := forkBody(prev.Body, appended, maxTokens)
+	// The snapshot carries the profiles the body was shaped with, so the
+	// appended messages are shaped by those and not by the transport's own
+	// model info: a request may name a profile the transport's info does not.
+	settings := t.requestSettings(poo.ChatRequest{})
+	body, err := forkBody(prev.Body, appended, maxTokens, quirksFor(prev.Quirks, t.logger))
 	if err != nil {
 		return nil, err
 	}
 
-	settings := t.requestSettings(poo.ChatRequest{})
 	reader, attempt, err := t.openWithRetry(ctx, body, nil, settings)
 	if err != nil {
 		return nil, err
@@ -434,7 +438,7 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 // key order is the one the body already had, because the keys are
 // written in the transport's own order and any key it does not know
 // keeps its position.
-func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error) {
+func forkBody(body []byte, appended []poo.Message, maxTokens int, quirks []quirkProfile) ([]byte, error) {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, &poo.ProviderError{
@@ -457,7 +461,7 @@ func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error
 		if err != nil {
 			return nil, err
 		}
-		for _, cm := range converted {
+		for _, cm := range shapeAppended(quirks, converted) {
 			raw, err := json.Marshal(cm)
 			if err != nil {
 				return nil, &poo.ProviderError{
@@ -522,6 +526,28 @@ func forkBody(body []byte, appended []poo.Message, maxTokens int) ([]byte, error
 	}
 	b.WriteByte('}')
 	return b.Bytes(), nil
+}
+
+// shapeAppended applies the request-shaping quirks to the messages a fork
+// appends.
+//
+// The snapshot's own body was shaped when it was built, and the fork re-sends
+// it as it is. An appended message is new, so the model's quirks shape it the
+// way they shape any other message: a model whose server needs a part in
+// another shape would otherwise get that shape in a prompt request and the
+// spec's shape in a fork.
+func shapeAppended(quirks []quirkProfile, messages []chatMessage) []chatMessage {
+	if len(quirks) == 0 || len(messages) == 0 {
+		return messages
+	}
+	shape := &requestShape{
+		// The parameters belong to the snapshot, so the profiles may write
+		// them and the fork drops what they write.
+		request: &chatRequest{Messages: messages},
+		params:  map[string]json.RawMessage{},
+	}
+	shapeThrough(quirks, shape)
+	return shape.request.Messages
 }
 
 // jsonKeyOrder returns the top-level keys of a JSON object, in the order
