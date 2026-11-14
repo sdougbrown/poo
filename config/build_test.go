@@ -488,6 +488,51 @@ func TestTheSettingsPromptIsTheSessionPrompt(t *testing.T) {
 	}
 }
 
+// TestTheProjectPromptSettingFillsTheProjectSection covers the
+// setting: the working directory's AGENTS.md fills the prompt's
+// project section, the way the --project-prompt flag does, and a
+// directory with neither file leaves the section empty.
+func TestTheProjectPromptSettingFillsTheProjectSection(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("run the tests before you stop"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "run the tests before you stop") {
+		t.Errorf("the prompt holds no project instructions: %q", text)
+	}
+
+	// The same directory with the setting off holds nothing: the
+	// instructions are opt-in at both layers.
+	settings, err = config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime = buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+	text = poo.PromptBuilder(runtime.Options).Render()
+	if strings.Contains(text, "run the tests before you stop") {
+		t.Errorf("the prompt took the instructions the settings did not ask for: %q", text)
+	}
+
+	// A directory with neither file is not an error: the section is
+	// only ever filled from what is there.
+	empty := t.TempDir()
+	settings, err = config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime = buildIn(t, settings, config.Overrides{}, empty, theExecutors())
+	text = poo.PromptBuilder(runtime.Options).Render()
+	if strings.Contains(text, "run the tests before you stop") {
+		t.Errorf("the prompt of an empty directory holds instructions: %q", text)
+	}
+}
+
 // TestTheBuildMakesTheStore covers the session's home: the store is
 // the settings' directory, and the ephemeral mode has none.
 func TestTheBuildMakesTheStore(t *testing.T) {

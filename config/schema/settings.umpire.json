@@ -58,6 +58,7 @@
     "feeds.paths": { "isEmpty": "array" },
     "session.mode": { "isEmpty": "string" },
     "session.dir": { "isEmpty": "string" },
+    "session.project_prompt": { "isEmpty": "boolean" },
     "session.retention.max_age_days": { "isEmpty": "number" },
     "session.retention.max_sessions": { "isEmpty": "number" }
   },

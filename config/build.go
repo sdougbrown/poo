@@ -26,6 +26,7 @@ import (
 	permissive "github.com/sdougbrown/poo/perm/decide"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/prompt/agentsmd"
 	"github.com/sdougbrown/poo/protect"
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/openai"
@@ -36,6 +37,9 @@ import (
 const (
 	// BaseSection is the name of the prompt's base section.
 	BaseSection = "base"
+	// ProjectSection is the name of the prompt's project section: the
+	// working directory's instructions the model reads.
+	ProjectSection = "project"
 	// ToolBash is the name of the bash tool.
 	ToolBash = "bash"
 )
@@ -1651,6 +1655,29 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 			}
 		}
 		r.FinishSchema = json.RawMessage(data)
+	}
+	// The project's instructions are the working directory's AGENTS.md,
+	// or CLAUDE.md when there is none, and they fill the project
+	// section the way the --project-prompt flag does. The setting asks
+	// for them; a directory with neither file holds no instructions,
+	// and the section stays empty. A file that cannot be read fails
+	// the build: the setting asked for the instructions, and an empty
+	// section would say the project has none.
+	if settings.Session.ProjectPrompt != nil && *settings.Session.ProjectPrompt {
+		text, err := agentsmd.Load(workingDir)
+		if err != nil {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "session.project_prompt",
+				Message: "the project's instructions cannot be read",
+				Err:     err,
+			}
+		}
+		if text != "" {
+			r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+				b.Set(ProjectSection, text)
+			})
+		}
 	}
 	// The prompt the settings ask for is the session's prompt: the
 	// changes are the session's own, and a command's own changes come

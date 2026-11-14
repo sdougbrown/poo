@@ -44,6 +44,7 @@ type SettingsFields struct {
 	RolesDecider                    *string  "json:\"roles.decider,omitempty\""
 	SessionDir                      *string  "json:\"session.dir,omitempty\""
 	SessionMode                     *string  "json:\"session.mode,omitempty\""
+	SessionProjectPrompt            *bool    "json:\"session.project_prompt,omitempty\""
 	SessionRetentionMaxAgeDays      *float64 "json:\"session.retention.max_age_days,omitempty\""
 	SessionRetentionMaxSessions     *float64 "json:\"session.retention.max_sessions,omitempty\""
 	SystemPromptAppend              *string  "json:\"system_prompt.append,omitempty\""
@@ -113,6 +114,7 @@ type SettingsAvailability struct {
 	RolesDecider                    FieldStatus
 	SessionDir                      FieldStatus
 	SessionMode                     FieldStatus
+	SessionProjectPrompt            FieldStatus
 	SessionRetentionMaxAgeDays      FieldStatus
 	SessionRetentionMaxSessions     FieldStatus
 	SystemPromptAppend              FieldStatus
@@ -233,6 +235,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	SessionDirSatisfied := func() bool { v := f.SessionDir; return v != nil && *v != "" }()
 	SessionModeEnabled := true
 	SessionModeSatisfied := func() bool { v := f.SessionMode; return v != nil && *v != "" }()
+	SessionProjectPromptEnabled := true
+	SessionProjectPromptSatisfied := f.SessionProjectPrompt != nil
 	SessionRetentionMaxAgeDaysEnabled := true
 	SessionRetentionMaxAgeDaysSatisfied := f.SessionRetentionMaxAgeDays != nil
 	SessionRetentionMaxSessionsEnabled := true
@@ -1201,6 +1205,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		SessionProjectPrompt: FieldStatus{
+			Required:  SessionProjectPromptEnabled && false,
+			Enabled:   SessionProjectPromptEnabled,
+			Satisfied: SessionProjectPromptSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		SessionRetentionMaxAgeDays: FieldStatus{
 			Required:  SessionRetentionMaxAgeDaysEnabled && false,
 			Enabled:   SessionRetentionMaxAgeDaysEnabled,
@@ -1874,6 +1900,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "SessionMode":
 		v := f.SessionMode
 		return v != nil && *v != ""
+	case "SessionProjectPrompt":
+		return f.SessionProjectPrompt != nil
 	case "SessionRetentionMaxAgeDays":
 		return f.SessionRetentionMaxAgeDays != nil
 	case "SessionRetentionMaxSessions":
@@ -2324,6 +2352,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: session.mode must be logged or ephemeral")
+	case "SessionProjectPrompt", "session.project_prompt":
+		found = true
+		status = avail.SessionProjectPrompt
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "SessionRetentionMaxAgeDays", "session.retention.max_age_days":
 		found = true
 		status = avail.SessionRetentionMaxAgeDays

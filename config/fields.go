@@ -82,6 +82,7 @@ func fieldsOf(s *Settings) SettingsFields {
 
 	f.SessionMode = pointer(s.Session.Mode)
 	f.SessionDir = pointer(s.Session.Dir)
+	f.SessionProjectPrompt = flag(s.Session.ProjectPrompt)
 	f.SessionRetentionMaxAgeDays = count(s.Session.Retention.MaxAgeDays)
 	f.SessionRetentionMaxSessions = count(s.Session.Retention.MaxSessions)
 
