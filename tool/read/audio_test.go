@@ -115,10 +115,18 @@ func TestAnMP3AndItsHeaderAreRecognised(t *testing.T) {
 	}
 }
 
-// TestAnOversizedRecordingIsRefused covers the cap.
+// TestAnOversizedRecordingIsRefused covers the cap: a recording of exactly the
+// limit is returned, and one byte more is refused.
 func TestAnOversizedRecordingIsRefused(t *testing.T) {
 	dir := t.TempDir()
-	body := append([]byte("ID3\x04\x00\x00"), make([]byte, read.MaxAudioBytes)...)
+	head := []byte("ID3\x04\x00\x00")
+	exact := append(append([]byte(nil), head...), make([]byte, read.MaxAudioBytes-len(head))...)
+	writeAudio(t, dir, "exact.mp3", exact)
+	if res := call(t, read.New(read.WithInputs(poo.ModalityAudio)), map[string]any{"path": "exact.mp3"}, dir); len(res.Attachments) != 1 {
+		t.Fatalf("a recording of exactly the limit was refused: %s", res.Text)
+	}
+
+	body := append(append([]byte(nil), head...), make([]byte, read.MaxAudioBytes-len(head)+1)...)
 	writeAudio(t, dir, "big.mp3", body)
 
 	res := call(t, read.New(read.WithInputs(poo.ModalityAudio)), map[string]any{"path": "big.mp3"}, dir)

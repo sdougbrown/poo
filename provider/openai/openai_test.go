@@ -1353,3 +1353,36 @@ func TestAnImageAndAnAudioPartTogether(t *testing.T) {
 		t.Errorf("the part's format is %v, want mp3", input["format"])
 	}
 }
+
+// TestAnAudioTypeTheTransportCannotNameFailsTheRequest covers the boundary: a
+// block the core accepts and this transport has no wire name for is a request
+// error, not a part quietly left out.
+func TestAnAudioTypeTheTransportCannotNameFailsTheRequest(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	// The message is built by hand: a result message filters the types the
+	// core does not accept, and this one is a block that bypassed it.
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model: "m",
+		Messages: []poo.Message{{
+			Role: poo.RoleTool,
+			Content: []poo.ContentBlock{
+				{Kind: poo.ContentToolResult, ToolCallID: "call_1", Name: "read", Text: "read: clip.ogg"},
+				{Kind: poo.ContentAudio, MediaType: "audio/ogg", Data: []byte{1, 2, 3}},
+			},
+		}},
+		MaxTokens: 16,
+	})
+	if err == nil {
+		reader.Close()
+		t.Fatal("the transport sent a recording it has no wire shape for")
+	}
+	if !strings.Contains(err.Error(), "audio/ogg") {
+		t.Errorf("the error is %q, want it to name the media type", err)
+	}
+	if len(srv.requests) != 0 {
+		t.Errorf("the transport sent %d requests, want none", len(srv.requests))
+	}
+}

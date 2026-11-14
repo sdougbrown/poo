@@ -893,6 +893,7 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			MaxOutput:       model.MaxOutput,
 			Reasoning:       model.Reasoning,
 			ReasoningLevels: model.ReasoningLevels,
+			Quirks:          model.Quirks,
 		}
 	}
 	for role, model := range s.Roles {

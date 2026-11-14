@@ -34,6 +34,10 @@ const (
 	QuirkDegenerateStream = "degenerate_stream"
 	// QuirkTextToolCalls reads the tool calls a model writes as text.
 	QuirkTextToolCalls = "text_tool_calls"
+	// QuirkAudioURL sends an audio part as a URL rather than the base64 the
+	// spec names in `input_audio`. Some servers, SGLang among them, mirror
+	// `image_url` for sound and refuse the spec's part.
+	QuirkAudioURL = "audio_url"
 )
 
 // quirkProfile is one named quirk.
@@ -207,6 +211,33 @@ func init() {
 		name: QuirkTextToolCalls,
 		repairResponse: func(r *responseRepair) {
 			r.textCalls = true
+		},
+	})
+	registerQuirk(quirkProfile{
+		name: QuirkAudioURL,
+		shapeRequest: func(s *requestShape) {
+			for i := range s.request.Messages {
+				parts, ok := s.request.Messages[i].Content.([]chatContentPart)
+				if !ok {
+					continue
+				}
+				changed := false
+				for j := range parts {
+					if parts[j].InputAudio == nil {
+						continue
+					}
+					parts[j] = chatContentPart{
+						Type: "audio_url",
+						AudioURL: &chatAudioURL{
+							URL: "data:" + audioMediaType(parts[j].InputAudio.Format) + ";base64," + parts[j].InputAudio.Data,
+						},
+					}
+					changed = true
+				}
+				if changed {
+					s.request.Messages[i].Content = parts
+				}
+			}
 		},
 	})
 }

@@ -123,6 +123,10 @@ type Model struct {
 	// first, e.g. off, minimal, low, medium, high, xhigh. A model that
 	// names none is set by its reasoning control alone.
 	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
+	// Quirks are the transport's named adaptations this model needs, in the
+	// order they apply, e.g. "audio_url" for a server that takes an audio part
+	// as a URL. A name the transport does not ship is skipped with a warning.
+	Quirks []string `json:"quirks,omitempty"`
 }
 
 // Decider are the decider's settings.
