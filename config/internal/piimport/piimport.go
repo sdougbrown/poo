@@ -101,6 +101,7 @@ type piModel struct {
 var modalities = map[string]bool{
 	string(poo.ModalityText):  true,
 	string(poo.ModalityImage): true,
+	string(poo.ModalityAudio): true,
 }
 
 // Read reads the models file at path.

@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"sync"
 	"testing"
 )
@@ -172,4 +173,123 @@ func TestAnOversizedHeaderIsChargedTheCap(t *testing.T) {
 	if got := attachmentChars(ContentBlock{Kind: ContentImage, Data: head}); got != want {
 		t.Errorf("an image of declared %d pixels costs %d chars, want the cap's %d", config.Width*config.Height, got, want)
 	}
+}
+
+// TestAudioCostsItsSeconds covers the estimator's audio rule: a recording is
+// charged by its length, and one whose header does not parse is charged a
+// default rather than nothing.
+func TestAudioCostsItsSeconds(t *testing.T) {
+	short := wavForTest(t, 1)
+	long := wavForTest(t, 10)
+	shortChars := attachmentChars(ContentBlock{Kind: ContentAudio, Data: short})
+	longChars := attachmentChars(ContentBlock{Kind: ContentAudio, Data: long})
+	if longChars <= shortChars {
+		t.Fatalf("ten seconds cost %d chars and one second %d", longChars, shortChars)
+	}
+	// One second at the shared rule, within rounding.
+	wantShort := int(math.Round(float64(audioTokensPerSecond) * CharsPerToken))
+	if diff := shortChars - wantShort; diff > 100 || diff < -100 {
+		t.Errorf("one second costs %d chars, want about %d", shortChars, wantShort)
+	}
+	unknown := attachmentChars(ContentBlock{Kind: ContentAudio, MediaType: "audio/mpeg", Data: []byte("ID3nope")})
+	if unknown != int(float64(audioDefaultSeconds)*audioTokensPerSecond*CharsPerToken) {
+		t.Errorf("an unknown clip costs %d chars, want the default's", unknown)
+	}
+	// A header that declares a rate as low as it likes is capped, the way a
+	// picture whose header names an enormous size is.
+	slow := attachmentChars(ContentBlock{Kind: ContentAudio, Data: wavWithRate(t, 1, 4096)})
+	if want := int(float64(audioMaxSeconds) * audioTokensPerSecond * CharsPerToken); slow != want {
+		t.Errorf("a clip declared at 1 Hz costs %d chars, want the cap's %d", slow, want)
+	}
+	// A header that does not parse is charged the default, so a corrupt file
+	// is never free: a format chunk cut short of its fields, and one that
+	// names no sample rate.
+	defaultChars := int(float64(audioDefaultSeconds) * audioTokensPerSecond * CharsPerToken)
+	truncated := []byte("RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00")
+	if got := attachmentChars(ContentBlock{Kind: ContentAudio, Data: truncated}); got != defaultChars {
+		t.Errorf("a clip cut short inside its format chunk costs %d chars, want the default's %d", got, defaultChars)
+	}
+	unsigned := wavWithRate(t, 0, 100)
+	if got := attachmentChars(ContentBlock{Kind: ContentAudio, Data: unsigned}); got != defaultChars {
+		t.Errorf("a clip that names no sample rate costs %d chars, want the default's %d", got, defaultChars)
+	}
+	// A file cut short of the size its header declares is as long as the
+	// bytes that are left, not as long as it claimed.
+	cut := wavForTest(t, 2)
+	cut = cut[:len(cut)/2]
+	// The same sound, with a header that declares what the file holds.
+	honest := wavWithRate(t, 8000, (len(cut)-44)/2)
+	if got, want := attachmentChars(ContentBlock{Kind: ContentAudio, Data: cut}), attachmentChars(ContentBlock{Kind: ContentAudio, Data: honest}); got != want {
+		t.Errorf("a truncated clip costs %d chars, want the %d of the bytes it holds", got, want)
+	}
+	// A metadata chunk before the sound is a chunk, not frames: a recording
+	// with one is as long as the same recording without.
+	// The chunk is half a second of sound at this rate, so counting it as
+	// frames would charge half again as much.
+	listing := wavWithMetadata(t, short, 8000)
+	if got := attachmentChars(ContentBlock{Kind: ContentAudio, Data: listing}); got != shortChars {
+		t.Errorf("a clip with a metadata chunk costs %d chars, want the %d of the same clip without one", got, shortChars)
+	}
+}
+
+// TestAModelThatCannotReadAudioIsSentNone covers the strip: the block goes out
+// of the request and stays in the history.
+func TestAModelThatCannotReadAudioIsSentNone(t *testing.T) {
+	audio := ToolResultMessage("c1", "read", "read: clip.wav", false,
+		[]Attachment{{Modality: ModalityAudio, MediaType: "audio/wav", Data: []byte{1}}})
+	kept := stripUnreadableAttachments([]Message{audio}, ModelInfo{Inputs: []Modality{ModalityText, ModalityAudio}})
+	if len(kept[0].Content) != 2 {
+		t.Fatalf("a model that reads audio lost the recording: %+v", kept[0].Content)
+	}
+	history := []Message{audio}
+	stripped := stripUnreadableAttachments(history, ModelInfo{Inputs: []Modality{ModalityText, ModalityImage}})
+	if len(stripped[0].Content) != 1 {
+		t.Errorf("a model that reads no audio kept %d blocks", len(stripped[0].Content))
+	}
+	// The history keeps the recording: a model swapped back sends it again.
+	if len(history[0].Content) != 2 {
+		t.Errorf("stripping left %d blocks in the history, want the result and the recording", len(history[0].Content))
+	}
+}
+
+// wavForTest renders a mono 16-bit WAV of the given length.
+func wavForTest(t *testing.T, seconds int) []byte {
+	t.Helper()
+	return wavWithRate(t, 8000, seconds*8000)
+}
+
+// wavWithRate renders a mono 16-bit WAV of the given frame rate and length.
+func wavWithRate(t *testing.T, rate, frames int) []byte {
+	t.Helper()
+	body := make([]byte, frames*2)
+	out := make([]byte, 44, 44+len(body))
+	copy(out[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(out[4:8], uint32(len(body)+36))
+	copy(out[8:12], "WAVE")
+	copy(out[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(out[16:20], 16)
+	binary.LittleEndian.PutUint16(out[20:22], 1)
+	binary.LittleEndian.PutUint16(out[22:24], 1)
+	binary.LittleEndian.PutUint32(out[24:28], uint32(rate))
+	binary.LittleEndian.PutUint32(out[28:32], uint32(rate*2))
+	binary.LittleEndian.PutUint16(out[32:34], 2)
+	binary.LittleEndian.PutUint16(out[34:36], 16)
+	copy(out[36:40], "data")
+	binary.LittleEndian.PutUint32(out[40:44], uint32(len(body)))
+	return append(out, body...)
+}
+
+// wavWithMetadata inserts a LIST chunk of the given size before a WAV's sound.
+func wavWithMetadata(t *testing.T, wav []byte, size int) []byte {
+	t.Helper()
+	// The header is the RIFF tag and the format chunk, up to the sound.
+	const header = 36
+	out := append([]byte(nil), wav[:header]...)
+	chunk := make([]byte, 8+size+size%2)
+	copy(chunk[0:4], "LIST")
+	binary.LittleEndian.PutUint32(chunk[4:8], uint32(size))
+	out = append(out, chunk...)
+	out = append(out, wav[header:]...)
+	binary.LittleEndian.PutUint32(out[4:8], uint32(len(out)-8))
+	return out
 }

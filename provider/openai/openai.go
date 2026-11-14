@@ -188,13 +188,31 @@ type chatMessage struct {
 
 // chatContentPart is one part of a message's parts array.
 type chatContentPart struct {
-	Type     string        `json:"type"`
-	Text     string        `json:"text,omitempty"`
-	ImageURL *chatImageURL `json:"image_url,omitempty"`
+	Type       string          `json:"type"`
+	Text       string          `json:"text,omitempty"`
+	ImageURL   *chatImageURL   `json:"image_url,omitempty"`
+	InputAudio *chatInputAudio `json:"input_audio,omitempty"`
+	AudioURL   *chatAudioURL   `json:"audio_url,omitempty"`
+}
+
+// chatInputAudio is the audio a part carries: base64 and the format the API
+// names for it.
+type chatInputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
 }
 
 // chatImageURL is the image a part carries, as a data URL.
 type chatImageURL struct {
+	URL string `json:"url"`
+}
+
+// chatAudioURL is the audio a part carries, as a URL.
+//
+// The spec calls the part `input_audio` and carries base64 with a format name;
+// a server that mirrors `image_url` for sound names this instead. The quirk
+// that emits it is what a model on such a server names.
+type chatAudioURL struct {
 	URL string `json:"url"`
 }
 
@@ -667,11 +685,11 @@ func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 			ct.Function.Name = c.Name
 			ct.Function.Arguments = string(c.Arguments)
 			calls = append(calls, ct)
-		case poo.ContentImage:
+		case poo.ContentImage, poo.ContentAudio:
 			attachments = append(attachments, c)
 		case poo.ContentToolResult:
-			// The loop keeps going: an image the tool returned follows its
-			// result block, in the same message.
+			// The loop keeps going: an attachment the tool returned follows
+			// its result block, in the same message.
 			toolResult = true
 			cm.Role = "tool"
 			cm.ToolCallID = c.ToolCallID
@@ -679,14 +697,16 @@ func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 		}
 	}
 	if toolResult {
-		return cm, imageParts(attachments), nil
+		parts, err := attachmentParts(attachments)
+		return cm, parts, err
 	}
 
 	if text.Len() > 0 {
 		cm.Content = text.String()
 	}
 	cm.ToolCalls = calls
-	return cm, imageParts(attachments), nil
+	parts, err := attachmentParts(attachments)
+	return cm, parts, err
 }
 
 // convertMessages turns core messages into the wire shape, one or two at a
@@ -725,24 +745,66 @@ func convertMessages(msgs []poo.Message) ([]chatMessage, error) {
 	return out, nil
 }
 
-// imageParts renders image blocks as the parts a user message carries.
-func imageParts(attachments []poo.ContentBlock) []chatContentPart {
+// attachmentParts renders the blocks a tool returned as the parts a user
+// message carries, one part per modality.
+//
+// A block the transport cannot render fails the request: an attachment the
+// core accepts and this transport leaves out is a picture or a recording the
+// model never hears about, and a silent drop is worse than a loud one.
+func attachmentParts(attachments []poo.ContentBlock) ([]chatContentPart, error) {
 	if len(attachments) == 0 {
-		return nil
+		return nil, nil
 	}
 	parts := make([]chatContentPart, 0, len(attachments))
-	for _, image := range attachments {
-		parts = append(parts, chatContentPart{
-			Type:     "image_url",
-			ImageURL: &chatImageURL{URL: imageDataURL(image)},
-		})
+	for _, attachment := range attachments {
+		switch attachment.Kind {
+		case poo.ContentImage:
+			parts = append(parts, chatContentPart{
+				Type:     "image_url",
+				ImageURL: &chatImageURL{URL: attachmentDataURL(attachment)},
+			})
+		case poo.ContentAudio:
+			format, ok := audioFormats[attachment.MediaType]
+			if !ok {
+				return nil, fmt.Errorf("openai: the transport has no format name for %q", attachment.MediaType)
+			}
+			parts = append(parts, chatContentPart{
+				Type: "input_audio",
+				InputAudio: &chatInputAudio{
+					Data:   base64.StdEncoding.EncodeToString(attachment.Data),
+					Format: format,
+				},
+			})
+		}
 	}
-	return parts
+	return parts, nil
 }
 
-// imageDataURL renders an image block as a data URL.
-func imageDataURL(image poo.ContentBlock) string {
-	return "data:" + image.MediaType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)
+// attachmentDataURL renders a block as a data URL.
+func attachmentDataURL(attachment poo.ContentBlock) string {
+	return "data:" + attachment.MediaType + ";base64," + base64.StdEncoding.EncodeToString(attachment.Data)
+}
+
+// audioFormats names the format the API takes for an audio media type.
+//
+// The audio part's format is a plain name, and wav and mp3 are the two the API
+// accepts; a media type outside them is not carried.
+var audioFormats = map[string]string{
+	"audio/wav":  "wav",
+	"audio/mpeg": "mp3",
+}
+
+// audioMediaType names the media type a format stands for.
+//
+// A quirk that rewrites the part as a URL needs the media type back, and the
+// format is the only name the part keeps.
+func audioMediaType(format string) string {
+	for mediaType, name := range audioFormats {
+		if name == format {
+			return mediaType
+		}
+	}
+	return ""
 }
 
 // checkProviderBlock applies the opaque-block rule to one block.

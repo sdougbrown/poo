@@ -34,7 +34,7 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 				"models": [
 					{
 						"id": "qwen",
-						"input": ["text", "image"],
+						"input": ["text", "image", "audio"],
 						"contextWindow": 196608,
 						"maxTokens": 81920,
 						"reasoning": true,
@@ -70,7 +70,7 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 	if model.ContextLimit != 196608 || model.MaxOutput != 81920 {
 		t.Errorf("the model's limits imported as %d/%d", model.ContextLimit, model.MaxOutput)
 	}
-	if len(model.Inputs) != 2 || model.Inputs[0] != "text" || model.Inputs[1] != "image" {
+	if len(model.Inputs) != 3 || model.Inputs[0] != "text" || model.Inputs[1] != "image" || model.Inputs[2] != "audio" {
 		t.Errorf("the model's inputs imported as %v", model.Inputs)
 	}
 	if model.Reasoning == nil || model.Reasoning.Mode != poo.ReasoningEffort || model.Reasoning.Param != "reasoning_effort" {

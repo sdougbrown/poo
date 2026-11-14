@@ -45,6 +45,10 @@ const (
 	// image request themselves, the smallest of them at 5 MB, so a larger
 	// file is refused here rather than sent to fail there.
 	MaxImageBytes = 5 << 20
+	// MaxAudioBytes is the largest recording the tool returns. The audio part's
+	// own limit is 25 MB, so a larger file is refused here rather than sent to
+	// fail there.
+	MaxAudioBytes = 25 << 20
 )
 
 // OutputCap returns the cap on a read's output.
@@ -95,6 +99,9 @@ func (t *Tool) Spec() poo.ToolSpec {
 	description := "Read a range of lines from a file."
 	if t.inputs[poo.ModalityImage] {
 		description += " An image file is read as the image itself."
+	}
+	if t.inputs[poo.ModalityAudio] {
+		description += " An audio file is read as the recording itself."
 	}
 	return poo.ToolSpec{
 		Name:        "read",
@@ -213,6 +220,55 @@ func (t *Tool) accepts(modality poo.Modality, env poo.ToolEnv) bool {
 	return t.inputs[modality]
 }
 
+// attachmentType reports the modality and media type a file's head names, and
+// whether it names one the tool returns.
+func attachmentType(head []byte) (poo.Modality, string, bool) {
+	if media, ok := imageMediaType(head); ok && poo.IsMediaType(poo.ModalityImage, media) {
+		return poo.ModalityImage, media, true
+	}
+	if media, ok := audioMediaType(head); ok && poo.IsMediaType(poo.ModalityAudio, media) {
+		return poo.ModalityAudio, media, true
+	}
+	return "", "", false
+}
+
+// maxBytes names the largest file of a modality the tool returns.
+func maxBytes(modality poo.Modality) int64 {
+	switch modality {
+	case poo.ModalityAudio:
+		return MaxAudioBytes
+	}
+	return MaxImageBytes
+}
+
+// audioMediaType reports the media type of the audio the head of a file starts
+// with, and whether it is one. The two types are the ones the API accepts.
+func audioMediaType(head []byte) (string, bool) {
+	switch {
+	case len(head) > 12 && string(head[0:4]) == "RIFF" && string(head[8:12]) == "WAVE":
+		return "audio/wav", true
+	case len(head) > 3 && string(head[0:3]) == "ID3":
+		return "audio/mpeg", true
+	case mp3Head(head):
+		return "audio/mpeg", true
+	}
+	return "", false
+}
+
+// mp3Head reports whether a file's head starts at an MP3 frame header.
+//
+// Eleven set bits start every MPEG audio frame, so the two bits after them must
+// name a layer and a version MP3 has: an AAC stream's ADTS header shares the
+// syncword and sets the layer bits to the value MP3 reserves.
+func mp3Head(head []byte) bool {
+	if len(head) < 2 || head[0] != 0xff || head[1]&0xe0 != 0xe0 {
+		return false
+	}
+	version := (head[1] >> 3) & 0x03
+	layer := (head[1] >> 1) & 0x03
+	return version != 0x01 && layer != 0x00
+}
+
 // imageMediaType reports the media type of the image the head of a file
 // starts with, and whether it is one. The four types are the ones providers
 // accept.
@@ -272,20 +328,20 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 	if err != nil && !errors.Is(err, io.EOF) {
 		return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
 	}
-	// An image carries NUL bytes, so it is recognised before the binary
-	// refusal, and the whole file is returned as the picture it is.
-	if media, ok := imageMediaType(sniff[:n]); ok && poo.IsMediaType(poo.ModalityImage, media) {
-		if !t.accepts(poo.ModalityImage, env) {
+	// An attachment carries NUL bytes, so it is recognised before the binary
+	// refusal, and the whole file is returned as what it is.
+	if modality, media, ok := attachmentType(sniff[:n]); ok {
+		if !t.accepts(modality, env) {
 			return poo.ToolResult{
-				Text: fmt.Sprintf("read: %s is an image (%s, %d bytes); this model does not accept image input", path, media, info.Size()),
+				Text: fmt.Sprintf("read: %s is %s (%s, %d bytes); this model does not accept %s input", path, modality, media, info.Size(), modality),
 			}, nil
 		}
-		if info.Size() > MaxImageBytes {
+		if limit := maxBytes(modality); info.Size() > limit {
 			return poo.ToolResult{
-				Text: fmt.Sprintf("read: %s is an image of %d bytes; the limit is %d bytes", path, info.Size(), MaxImageBytes),
+				Text: fmt.Sprintf("read: %s is %s of %d bytes; the limit is %d bytes", path, modality, info.Size(), limit),
 			}, nil
 		}
-		// The sniff moved the offset; the whole file is the picture. A run
+		// The sniff moved the offset; the whole file is the attachment. A run
 		// stopped while the head was read does not pay for the rest.
 		if err := ctx.Err(); err != nil {
 			return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
@@ -298,8 +354,8 @@ func (t *Tool) Call(ctx context.Context, in poo.Prepared, env poo.ToolEnv) (poo.
 			return poo.ToolResult{Text: fmt.Sprintf("read: %v", err), IsError: true}, nil
 		}
 		return poo.ToolResult{
-			Text:        fmt.Sprintf("read: %s (image, %d bytes)", path, len(data)),
-			Attachments: []poo.Attachment{{Modality: poo.ModalityImage, MediaType: media, Data: data}},
+			Text:        fmt.Sprintf("read: %s (%s, %d bytes)", path, modality, len(data)),
+			Attachments: []poo.Attachment{{Modality: modality, MediaType: media, Data: data}},
 		}, nil
 	}
 	if idx := indexNUL(sniff[:n]); idx >= 0 {

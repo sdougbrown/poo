@@ -1268,3 +1268,121 @@ func TestAToolCallOnlyMessageOmitsItsContent(t *testing.T) {
 		t.Errorf("the message carries %d tool calls, want one", len(calls))
 	}
 }
+
+// TestAToolResultAudioBecomesAnInputAudioPart covers the audio part: the tool
+// message stays a string, and the sound rides in the user message after it with
+// the format the API names.
+func TestAToolResultAudioBecomesAnInputAudioPart(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	audio := poo.Attachment{Modality: poo.ModalityAudio, MediaType: "audio/wav", Data: []byte{1, 2, 3}}
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model: "m",
+		Messages: []poo.Message{
+			poo.ToolResultMessage("call_1", "read", "read: clip.wav (audio, 3 bytes)", false, []poo.Attachment{audio}),
+		},
+		MaxTokens: 16,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	messages, _ := srv.requests[0]["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("the request held %d messages, want the result and one more", len(messages))
+	}
+	user, _ := messages[1].(map[string]any)
+	parts, _ := user["content"].([]any)
+	if len(parts) != 1 {
+		t.Fatalf("the user message holds %d parts, want one", len(parts))
+	}
+	part, _ := parts[0].(map[string]any)
+	if part["type"] != "input_audio" {
+		t.Errorf("the part's type is %v, want input_audio", part["type"])
+	}
+	input, _ := part["input_audio"].(map[string]any)
+	if input["format"] != "wav" {
+		t.Errorf("the part's format is %v, want wav", input["format"])
+	}
+	if input["data"] != base64.StdEncoding.EncodeToString(audio.Data) {
+		t.Errorf("the part's data is %v, want the recording", input["data"])
+	}
+}
+
+// TestAnImageAndAnAudioPartTogether covers the mixed batch: one user message
+// carries both parts, in the order the tool returned them.
+func TestAnImageAndAnAudioPartTogether(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	attachments := []poo.Attachment{
+		{Modality: poo.ModalityImage, MediaType: "image/png", Data: []byte{1}},
+		{Modality: poo.ModalityAudio, MediaType: "audio/mpeg", Data: []byte{2}},
+	}
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "m",
+		Messages:  []poo.Message{poo.ToolResultMessage("call_1", "read", "read: both", false, attachments)},
+		MaxTokens: 16,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	messages, _ := srv.requests[0]["messages"].([]any)
+	user, _ := messages[1].(map[string]any)
+	parts, _ := user["content"].([]any)
+	if len(parts) != 2 {
+		t.Fatalf("the user message holds %d parts, want two", len(parts))
+	}
+	if first, _ := parts[0].(map[string]any); first["type"] != "image_url" {
+		t.Errorf("the first part is %v, want image_url", first["type"])
+	}
+	second, _ := parts[1].(map[string]any)
+	if second["type"] != "input_audio" {
+		t.Fatalf("the second part is %v, want input_audio", second["type"])
+	}
+	input, _ := second["input_audio"].(map[string]any)
+	if input["format"] != "mp3" {
+		t.Errorf("the part's format is %v, want mp3", input["format"])
+	}
+}
+
+// TestAnAudioTypeTheTransportCannotNameFailsTheRequest covers the boundary: a
+// block the core accepts and this transport has no wire name for is a request
+// error, not a part quietly left out.
+func TestAnAudioTypeTheTransportCannotNameFailsTheRequest(t *testing.T) {
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`) + done
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m"})
+
+	// The message is built by hand: a result message filters the types the
+	// core does not accept, and this one is a block that bypassed it.
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model: "m",
+		Messages: []poo.Message{{
+			Role: poo.RoleTool,
+			Content: []poo.ContentBlock{
+				{Kind: poo.ContentToolResult, ToolCallID: "call_1", Name: "read", Text: "read: clip.ogg"},
+				{Kind: poo.ContentAudio, MediaType: "audio/ogg", Data: []byte{1, 2, 3}},
+			},
+		}},
+		MaxTokens: 16,
+	})
+	if err == nil {
+		reader.Close()
+		t.Fatal("the transport sent a recording it has no wire shape for")
+	}
+	if !strings.Contains(err.Error(), "audio/ogg") {
+		t.Errorf("the error is %q, want it to name the media type", err)
+	}
+	if len(srv.requests) != 0 {
+		t.Errorf("the transport sent %d requests, want none", len(srv.requests))
+	}
+}

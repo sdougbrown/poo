@@ -128,6 +128,12 @@ const (
 	// hand the model the picture itself. Only a model whose inputs declare
 	// images is offered one.
 	ContentImage ContentKind = "image"
+	// ContentAudio is audio a tool returned.
+	//
+	// The block carries the bytes and their media type, so a transport can
+	// hand the model the sound itself. Only a model whose inputs declare
+	// audio is offered one.
+	ContentAudio ContentKind = "audio"
 	// ContentProvider is opaque provider data.
 	//
 	// A provider block holds a value the model must carry without
@@ -296,6 +302,15 @@ var attachmentKinds = map[Modality]attachmentKind{
 			"image/jpeg": true,
 			"image/gif":  true,
 			"image/webp": true,
+		},
+	},
+	// The two the Chat Completions audio part carries. A provider that takes
+	// another format would need a conversion the harness does not ship.
+	ModalityAudio: {
+		kind: ContentAudio,
+		mediaTypes: map[string]bool{
+			"audio/wav":  true,
+			"audio/mpeg": true,
 		},
 	},
 }
