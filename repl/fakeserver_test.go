@@ -319,6 +319,12 @@ func (s *fakeServer) run() {
 	s.event("message.delta", map[string]any{
 		"run_id": "r1", "message_id": "m1", "kind": "text", "text": "world.",
 	})
+	// The first request's accounting, the way the wire reports it: a
+	// usage event per request, and the settle carries the run's sum.
+	s.event("usage", map[string]any{
+		"run_id": "r1", "turn": 1, "request": 1,
+		"input_tokens": 8000, "output_tokens": 500,
+	})
 	s.event("turn.ended", map[string]any{"run_id": "r1", "turn": 1})
 	s.event("turn.started", map[string]any{"run_id": "r1", "turn": 2})
 	if s.staleSettle {
@@ -364,10 +370,18 @@ func (s *fakeServer) run() {
 		"text": "file one\nfile two\n",
 	})
 	s.event("turn.ended", map[string]any{"run_id": "r1", "turn": 2})
+	// The second request's accounting, and the settle's run total: the
+	// sum of both requests. A statusline that read the sum for the
+	// snapshot would end the run at 20.3k when the last request's
+	// window held 12.3k.
+	s.event("usage", map[string]any{
+		"run_id": "r1", "turn": 2, "request": 2,
+		"input_tokens": 12300, "output_tokens": 600,
+	})
 	s.event("run.settled", map[string]any{
 		"run_id": "r1", "reason": "end_turn", "turns": 2,
 		"detail": map[string]any{
-			"usage": map[string]any{"input_tokens": 12300, "output_tokens": 1100},
+			"usage": map[string]any{"input_tokens": 20300, "output_tokens": 1100},
 		},
 	})
 }

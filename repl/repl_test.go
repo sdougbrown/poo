@@ -166,6 +166,30 @@ func TestUsageUpdatesTheStatus(t *testing.T) {
 	}
 }
 
+// TestTheSettleDoesNotStealTheStatusline covers the run.settled feed:
+// the settle's usage is the run's total, the sum of every request, and
+// a statusline that read it for the snapshot would show a context
+// fuller than the window. The snapshot comes from the usage events;
+// the settle leaves it alone.
+func TestTheSettleDoesNotStealTheStatusline(t *testing.T) {
+	var out bytes.Buffer
+	m := &machine{status: &status{contextLimit: 262144}, r: newRenderer(&out)}
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"input_tokens": 12300}}, "r1", &runState{})
+	m.event(protocol.Event{
+		Type: "run.settled",
+		Payload: map[string]any{"run_id": "r1", "reason": "end_turn", "turns": 2,
+			"detail": map[string]any{
+				"usage": map[string]any{"input_tokens": 20300, "output_tokens": 1100},
+			}},
+	}, "r1", &runState{})
+	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
+		t.Errorf("the settle's run total displaced the last request's snapshot: %s", prompt)
+	}
+	if prompt := m.status.prompt(); strings.Contains(prompt, "20.3k") {
+		t.Errorf("the statusline shows the run's total: %s", prompt)
+	}
+}
+
 func TestCtrlCClearsWhitespace(t *testing.T) {
 	m := &machine{}
 	if code, done := m.line(lineResult{line: " ", err: readline.ErrInterrupt}, nil); done {
