@@ -792,11 +792,13 @@ func TestACancelDuringAnInterruptWins(t *testing.T) {
 	}
 }
 
-// TestASteerBeforeAnAfterTurnStopIsDropped covers the rule: a
-// steer that arrives just before an AfterTurn stop is dropped and
-// reported with the run's reason.
-func TestASteerBeforeAnAfterTurnStopIsDropped(t *testing.T) {
-	tr := scripted([]fakeResponse{{text: "the answer"}})
+// TestASteerBeforeAnAfterTurnStopIsDelivered covers the rule: a steer
+// queued while its turn runs reaches the turn end's drain, and the
+// AfterTurn stop that follows still settles the run. Nothing about the
+// steer's fate depends on when the test's Send lands, so the transport
+// holds the turn until it has.
+func TestASteerBeforeAnAfterTurnStopIsDelivered(t *testing.T) {
+	tr := newGatedTransport(t, fakeResponse{text: "the answer"}.turn())
 	sink := &recordingSink{}
 	tool := &echoTool{result: "echoed"}
 	hook := &stoppingAfterTurn{}
@@ -808,11 +810,14 @@ func TestASteerBeforeAnAfterTurnStopIsDropped(t *testing.T) {
 	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
 		t.Fatalf("starting the run: %v", err)
 	}
-	// The steer arrives while the turn is ending, and the hook stops
-	// the run, so the steer never reaches the model.
+	// The transport holds the turn, so the steer is queued while the
+	// turn it steers is still running, and cannot land after a settle
+	// that was already chosen.
+	<-tr.entered
 	if _, err := s.Send("actually, do this", poo.Steer); err != nil {
 		t.Fatalf("sending the steer: %v", err)
 	}
+	close(tr.release)
 	res, err := s.Wait(context.Background())
 	if err != nil {
 		t.Fatalf("waiting for the run: %v", err)
@@ -820,12 +825,11 @@ func TestASteerBeforeAnAfterTurnStopIsDropped(t *testing.T) {
 	if res.Reason != poo.ReasonStopRequested {
 		t.Errorf("the run settled %q, want stop_requested", res.Reason)
 	}
-	// The steer is either delivered (it reached the turn end's drain) or
-	// dropped, never both.
-	delivered := sink.count("input.delivered")
-	dropped := sink.count("input.dropped")
-	if delivered+dropped != 1 {
-		t.Errorf("the steer was delivered %d times and dropped %d times, want exactly one fate", delivered, dropped)
+	if delivered := sink.count("input.delivered"); delivered != 1 {
+		t.Errorf("the log holds %d input.delivered records, want 1", delivered)
+	}
+	if dropped := sink.count("input.dropped"); dropped != 0 {
+		t.Errorf("the log holds %d input.dropped records, want none: the drain took the steer", dropped)
 	}
 }
 
