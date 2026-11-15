@@ -37,11 +37,8 @@ type resultPreview struct {
 	status string
 }
 
-// bashObservation is the envelope a bash result carries.
-//
-// The text fields stay raw so the decode can tell an absent field from
-// a null one, which the JSON decoder would otherwise read as an empty
-// string.
+// bashObservation is the envelope a bash result carries. Its text
+// fields stay raw so a null reads as malformed, not as an empty string.
 type bashObservation struct {
 	Output     json.RawMessage `json:"output"`
 	OutputHead json.RawMessage `json:"output_head"`
@@ -118,13 +115,9 @@ func splitHandle(text string) (handle, rest string) {
 	return line, body
 }
 
-// decodeBashObservation reads a bash result's envelope.
-//
-// The envelope always names the return code, the timeout and an output
-// stream, and a text that does not is some other tool's result rather
-// than an observation this repl should rewrite. A field of the wrong
-// type makes the text malformed, and a malformed text falls back to
-// itself.
+// decodeBashObservation reads a bash result's envelope. The envelope
+// names the return code, the timeout and an output stream. A text that
+// does not is another tool's result, and a malformed field falls back.
 func decodeBashObservation(tool, text string) (bashObservation, bool) {
 	if tool != bashToolName {
 		return bashObservation{}, false
@@ -242,12 +235,9 @@ func resultLines(text string) []string {
 	return strings.Split(text, "\n")
 }
 
-// sanitizeLine makes one line of a tool result safe to print.
-//
-// A result is terminal data: its tabs become the spaces a terminal's
-// tab stops would, its escape sequences are stripped, and the controls
-// that would move the cursor or erase the row go. Source indentation
-// stays, because it is spaces.
+// sanitizeLine makes one line of a tool result safe to print: tabs
+// expand, escape sequences strip, and cursor controls go. Source
+// indentation stays, because it is spaces.
 func sanitizeLine(line string) string {
 	if line == "" {
 		return ""

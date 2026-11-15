@@ -247,9 +247,8 @@ func TestAnUnknownResultFallsBackToItsText(t *testing.T) {
 	}
 }
 
-// TestAMalformedObservationFallsBackToItsText covers an envelope the
-// wire cut short, gave the wrong type, or left without an output: the
-// original text reads rather than a half decode.
+// TestAMalformedObservationFallsBackToItsText covers a cut-short,
+// wrong-typed or output-less envelope: the original text reads.
 func TestAMalformedObservationFallsBackToItsText(t *testing.T) {
 	for _, envelope := range []string{
 		`{"returncode":0,"timed_out":`,
@@ -312,9 +311,8 @@ func TestADecodedResultStillKeepsTheRowCap(t *testing.T) {
 	}
 }
 
-// TestAWideRuneResultIsBoundedByVisualWidth covers the width bound on
-// text whose characters are wider than a column: the preview ends at
-// the terminal's edge in columns, not in runes.
+// TestAWideRuneResultIsBoundedByVisualWidth covers characters wider
+// than a column: the preview ends at the terminal's edge in columns.
 func TestAWideRuneResultIsBoundedByVisualWidth(t *testing.T) {
 	var out bytes.Buffer
 	r := newRenderer(&out)
@@ -330,5 +328,91 @@ func TestAWideRuneResultIsBoundedByVisualWidth(t *testing.T) {
 	}
 	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "…") {
 		t.Errorf("the clipped line does not say it was cut: %q", lines[0])
+	}
+}
+
+// TestASeparateStderrReadsBelowItsLabel covers a command whose streams
+// are captured apart: the error output reads under its own label.
+func TestASeparateStderrReadsBelowItsLabel(t *testing.T) {
+	var out bytes.Buffer
+	r := newRenderer(&out)
+	r.toolResult("bash", "error", aBashObservation(t, map[string]any{
+		"returncode": 1, "timed_out": false,
+		"output": "out line\n",
+		"stderr": "err line\n",
+	}), 0)
+
+	rendered := ansi.Strip(out.String())
+	stdout := strings.Index(rendered, "out line")
+	label := strings.Index(rendered, "stderr:")
+	stderr := strings.Index(rendered, "err line")
+	if stdout < 0 || label < 0 || stderr < 0 {
+		t.Fatalf("the streams do not read:\n%s", rendered)
+	}
+	if !(stdout < label && label < stderr) {
+		t.Errorf("the streams read out of order:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "exit 1") {
+		t.Errorf("the exit status does not read:\n%s", rendered)
+	}
+}
+
+// TestACappedStderrKeepsItsTailAndStatus covers an elided error stream:
+// its label, tail, elided count, hint and exit status all read.
+func TestACappedStderrKeepsItsTailAndStatus(t *testing.T) {
+	var out bytes.Buffer
+	r := newRenderer(&out)
+	r.toolResult("bash", "error", aBashObservation(t, map[string]any{
+		"returncode":   7,
+		"timed_out":    false,
+		"output":       "out line\n",
+		"stderr_head":  "err head one\nerr head two\n",
+		"stderr_tail":  "err tail\n",
+		"elided_chars": 500,
+		"hint":         "narrow the range",
+	}), 0)
+
+	rendered := ansi.Strip(out.String())
+	for _, want := range []string{
+		"stderr:", "err head one", "err tail", "500 characters elided",
+		"narrow the range", "exit 7",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("the capped stderr lacks %q:\n%s", want, rendered)
+		}
+	}
+}
+
+// TestAResizedTerminalBoundsTheNextPreview covers the live width: a
+// terminal narrowed after a render clips the next summary and result.
+func TestAResizedTerminalBoundsTheNextPreview(t *testing.T) {
+	var out bytes.Buffer
+	r := newRenderer(&out)
+	width := 80
+	r.liveWidth = func() int { return width }
+	r.toolCall("bash", strings.Repeat("a", 200))
+	r.toolResult("grep", "ok", strings.Repeat("b", 200), 0)
+	for _, line := range plainLines(r.transcriptText()) {
+		if got := ansi.StringWidth(line); got > 80 {
+			t.Errorf("a wide terminal line is %d columns:\n%q", got, line)
+		}
+	}
+
+	width = 20
+	out.Reset()
+	r.transcript.Reset()
+	r.toolCall("bash", strings.Repeat("a", 200))
+	r.toolResult("grep", "ok", strings.Repeat("c", 200), 0)
+	lines := plainLines(r.transcriptText())
+	if len(lines) != 2 {
+		t.Fatalf("the narrowed render reads as %d lines:\n%s", len(lines), r.transcriptText())
+	}
+	for _, line := range lines {
+		if got := ansi.StringWidth(line); got > 20 {
+			t.Errorf("a narrowed line is %d columns, want at most 20:\n%q", got, line)
+		}
+		if !strings.Contains(line, "…") {
+			t.Errorf("a narrowed line does not say it was cut:\n%q", line)
+		}
 	}
 }

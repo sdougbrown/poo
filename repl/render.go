@@ -476,10 +476,14 @@ func (r *renderer) toolResult(tool, outcome, text string, elided int) {
 }
 
 // previewContentWidth is the columns a tool result's line has after the
-// transcript's indent. A writer that is not a terminal has no width of
-// its own, and reads at the renderer's wrap.
+// transcript's indent, at the terminal's width now.
 func (r *renderer) previewContentWidth() int {
 	width := r.width
+	if r.liveWidth != nil {
+		if live := r.liveWidth(); live > 0 {
+			width = live
+		}
+	}
 	if width <= 0 {
 		width = r.wrap
 	}
