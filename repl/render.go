@@ -540,51 +540,47 @@ func sealedRows(body string) string {
 // stream commits on the boundaries the render will use.
 var streamParser = goldmark.DefaultParser()
 
-// splitStream splits the open markdown source before its last
-// top-level block. Everything above that block is finished, and the
-// block itself is still being typed, so a list, a fence or a table is
-// never cut through its middle. A source with one block is all pending.
+// splitStream splits the open markdown source after its last completed
+// paragraph, when another top-level block follows it. A paragraph's
+// last line has a known end, so everything above the split is complete,
+// fences and lists included; the block after it stays pending whole.
+// Nothing is committed when no paragraph ends before the final block.
 func splitStream(source string) (done, rest string) {
 	doc := streamParser.Parse(goldmarktext.NewReader([]byte(source)))
 	last := doc.LastChild()
 	if last == nil {
 		return "", source
 	}
-	start := streamBlockStart(last, source)
-	if start <= 0 {
+	var candidate ast.Node
+	for n := last.PreviousSibling(); n != nil; n = n.PreviousSibling() {
+		if _, ok := n.(*ast.Paragraph); ok {
+			candidate = n
+			break
+		}
+	}
+	if candidate == nil {
 		return "", source
 	}
-	return source[:start], source[start:]
+	end := streamParagraphEnd(candidate, source)
+	if end <= 0 {
+		return "", source
+	}
+	return source[:end], source[end:]
 }
 
-// streamBlockStart returns the offset of the line the block begins on.
-// A block's lines point at its content, behind whatever marker the
-// block uses, so the line's own start is where the block starts.
-func streamBlockStart(n ast.Node, source string) int {
-	first := streamFirstLine(n)
-	if first < 0 {
+// streamParagraphEnd returns the offset just after the paragraph's last
+// line, its newline included. A paragraph has no closing marker, so that
+// line is where its source ends.
+func streamParagraphEnd(n ast.Node, source string) int {
+	lines := n.Lines()
+	if lines == nil || lines.Len() == 0 {
 		return -1
 	}
-	if i := strings.LastIndexByte(source[:first], '\n'); i >= 0 {
-		return i + 1
+	end := lines.At(lines.Len() - 1).Stop
+	if end < len(source) && source[end] == '\n' {
+		end++
 	}
-	return 0
-}
-
-// streamFirstLine finds the source offset of the first line a block
-// owns, looking inside the containers that carry no lines of their own.
-func streamFirstLine(n ast.Node) int {
-	if n.Type() == ast.TypeBlock {
-		if lines := n.Lines(); lines != nil && lines.Len() > 0 {
-			return lines.At(0).Start
-		}
-	}
-	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-		if start := streamFirstLine(c); start >= 0 {
-			return start
-		}
-	}
-	return -1
+	return end
 }
 
 // userPrompt echoes the prompt the session runs.

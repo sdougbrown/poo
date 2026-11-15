@@ -240,3 +240,72 @@ func TestAThinkingParagraphDoesNotRepeatWhenTheReplyStarts(t *testing.T) {
 		t.Errorf("the thought and the reply are out of order:\n%s", drawn)
 	}
 }
+
+// TestAStreamingFenceMatchesItsFinalRender covers the fence that
+// follows a finished paragraph: the whole fence stays pending, so the
+// code streams with the block's own indentation instead of the prose
+// margin. The live row must equal the row the full render settles to.
+func TestAStreamingFenceMatchesItsFinalRender(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("go")
+	source := "Intro paragraph.\n\n```go\nfunc main() {\n"
+	want := rowFrom(plain(r.markdown(source)), "func main() {")
+
+	r.streamDelta("text", "Intro paragraph.\n\n```go\n")
+	r.streamDelta("text", "func main() {\n")
+	if got := renderedRow(t, r, scr.text(), "func main() {"); got != want {
+		t.Fatalf("the live code row is %q, want the render's row %q:\n%s", got, want, scr.text())
+	}
+	r.finish()
+	if got := renderedRow(t, r, scr.text(), "func main() {"); got != want {
+		t.Errorf("the settled code row is %q, want the render's row %q:\n%s", got, want, scr.text())
+	}
+}
+
+// TestAnEmptyFirstListItemKeepsItsNumbering covers a list whose first
+// item is empty: the whole list stays pending, so its second item keeps
+// the number the full render gives it instead of restarting at one.
+func TestAnEmptyFirstListItemKeepsItsNumbering(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("go")
+	source := "Intro paragraph.\n\n1.\n\n2. second item\n"
+	want := rowFrom(plain(r.markdown(source)), "2. second item")
+
+	r.streamDelta("text", "Intro paragraph.\n\n1.\n\n")
+	r.streamDelta("text", "2. second item\n")
+	drawn := scr.text()
+	if got := renderedRow(t, r, drawn, "second item"); got != want {
+		t.Fatalf("the live list row is %q, want the render's row %q:\n%s", got, want, drawn)
+	}
+	if strings.Contains(drawn, "1. second item") {
+		t.Errorf("the list restarted its numbering:\n%s", drawn)
+	}
+	// The list is one block, so none of it is in the settled transcript
+	// until the block ends: a split at the empty item would commit the
+	// first item alone.
+	if before := plain(r.transcriptText()); strings.Contains(before, "1.") {
+		t.Errorf("the unfinished list committed before the settle:\n%s", before)
+	}
+	r.finish()
+	if got := renderedRow(t, r, scr.text(), "second item"); got != want {
+		t.Errorf("the settled list row is %q, want the render's row %q:\n%s", got, want, scr.text())
+	}
+}
+
+// renderedRow returns the first row of a rendered text that shows want,
+// with trailing spaces trimmed: the emulator's rows and the renderer's
+// rows are compared the same way.
+func renderedRow(t *testing.T, r *renderer, text, want string) string {
+	t.Helper()
+	return rowFrom(plain(text), want)
+}
+
+// rowFrom returns the first row of text that shows want.
+func rowFrom(text, want string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, want) {
+			return strings.TrimRight(line, " ")
+		}
+	}
+	return ""
+}
