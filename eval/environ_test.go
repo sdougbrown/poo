@@ -2,28 +2,18 @@ package eval
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/poo/pootest"
 )
 
-// TestMain points POO_SETTINGS at the smallest settings file that
-// parses, so a run the tests execute cannot discover the operator's
-// own settings — whose models and askers a test cannot serve.
-//
-// The variable is set, not unset, because an empty value is no value to
-// the discovery: FindSettings reads an empty POO_SETTINGS as absent and
-// walks on to the user's config directory, which is the leak this
-// closes. The exec'd binary inherits the environment, so this covers
-// the runs the runner starts.
+// TestMain runs the tests under a settings file of the tests' own, so a
+// run the tests execute cannot discover the operator's settings — whose
+// models and askers a test cannot serve. The exec'd binary inherits the
+// environment, so this covers the runs the runner starts.
 func TestMain(m *testing.M) {
-	path := filepath.Join(os.TempDir(), "poo-test-settings.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\n"), 0o644); err != nil {
-		println("poo tests: writing the test settings:", err.Error())
-		os.Exit(1)
-	}
-	os.Setenv("POO_SETTINGS", path)
-	os.Exit(m.Run())
+	os.Exit(pootest.Main(m))
 }
 
 // TestTheChildEnvironmentHoldsOnlyTheRunningModelsKey covers the
