@@ -72,6 +72,14 @@ func runPrompt(args []string) int {
 		return 2
 	}
 	model := runtime.Options.Model
+	instructions, err := runtime.ProjectInstructions(workDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
+		return 2
+	}
+	if instructions != nil {
+		runtime.Options.Prompt = append(runtime.Options.Prompt, instructions)
+	}
 	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model))
 
 	// The build rendered the prompt; the sections the command adds after

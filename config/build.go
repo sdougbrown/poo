@@ -270,6 +270,9 @@ type Runtime struct {
 	toolNames []string
 	// httpClient is the client the transports and the probes use.
 	httpClient *http.Client
+	// projectPromptField names what asked for the working directory's
+	// project instructions, and is empty when nothing did.
+	projectPromptField string
 }
 
 // WithOverrides returns a copy of the settings with the command line's
@@ -1661,26 +1664,14 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	}
 	// The project's instructions are the working directory's AGENTS.md,
 	// or CLAUDE.md when there is none, and they fill the project
-	// section. Either the setting or the flag asks for them; a
-	// directory with neither file holds no instructions, and the
-	// section stays empty. A file that cannot be read fails the build:
-	// the instructions were asked for, and an empty section would say
-	// the project has none.
-	if opts.Overrides.ProjectPrompt || (settings.Session.ProjectPrompt != nil && *settings.Session.ProjectPrompt) {
-		text, err := agentsmd.Load(workingDir)
-		if err != nil {
-			return &Error{
-				Code:    CodeInvalid,
-				Field:   "session.project_prompt",
-				Message: "the project's instructions cannot be read",
-				Err:     err,
-			}
-		}
-		if text != "" {
-			r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
-				b.Set(ProjectSection, text)
-			})
-		}
+	// section. Either the setting or the flag asks for them, and
+	// ProjectInstructions reads them for the directory a session works
+	// in: a session over the wire names its own, which need not be this
+	// process's.
+	if opts.Overrides.ProjectPrompt {
+		r.projectPromptField = "--project-prompt"
+	} else if settings.Session.ProjectPrompt != nil && *settings.Session.ProjectPrompt {
+		r.projectPromptField = "session.project_prompt"
 	}
 	// The prompt the settings ask for is the session's prompt: the
 	// changes are the session's own, and a command's own changes come
@@ -1754,6 +1745,36 @@ func (r *Runtime) OpenStore(mode, dir string) (session.Store, error) {
 	return session.NewMemory(), nil
 }
 
+// ProjectInstructions returns the mutation that fills the prompt's
+// project section with the instructions a directory holds, or nil when
+// nothing asked for them or the directory holds none.
+//
+// The instructions are the session's, not the process's: a session over
+// the wire works in the directory its header names, which need not be
+// the one this process was built in. A file that cannot be read is an
+// error — the instructions were asked for, and an empty section would
+// say the project has none.
+func (r *Runtime) ProjectInstructions(dir string) (func(*prompt.Builder), error) {
+	if r.projectPromptField == "" {
+		return nil, nil
+	}
+	text, err := agentsmd.Load(dir)
+	if err != nil {
+		return nil, &Error{
+			Code:    CodeInvalid,
+			Field:   r.projectPromptField,
+			Message: "the project's instructions cannot be read",
+			Err:     err,
+		}
+	}
+	if text == "" {
+		return nil, nil
+	}
+	return func(b *prompt.Builder) {
+		b.Set(ProjectSection, text)
+	}, nil
+}
+
 // CreateSession creates a session in the store and returns it.
 //
 // The session's records go to the store, and the store holds the
@@ -1778,6 +1799,16 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 	// work there, and the prompt names it.
 	if created.WorkingDir != "" {
 		opts.WorkingDir = created.WorkingDir
+	}
+	// The project's instructions are read from the directory the
+	// session works in: the build read none, because it does not know
+	// which one this session names.
+	instructions, err := r.ProjectInstructions(opts.WorkingDir)
+	if err != nil {
+		return nil, err
+	}
+	if instructions != nil {
+		opts.Prompt = append(opts.Prompt, instructions)
 	}
 	opts.Sink = store
 	opts.SessionID = created.SessionID

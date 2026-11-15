@@ -16,6 +16,7 @@ import (
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/perm"
+	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/code"
@@ -489,34 +490,50 @@ func TestTheSettingsPromptIsTheSessionPrompt(t *testing.T) {
 }
 
 // TestTheProjectPromptSettingFillsTheProjectSection covers the
-// setting: the working directory's AGENTS.md fills the prompt's
-// project section, the way the --project-prompt flag does, and a
-// directory with neither file leaves the section empty.
+// setting: the instructions of the directory a session works in fill
+// the prompt's project section, the way the --project-prompt flag does,
+// and a directory with neither file leaves the section empty.
 func TestTheProjectPromptSettingFillsTheProjectSection(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("run the tests before you stop"), 0o644); err != nil {
+	built := t.TempDir()
+	asked := t.TempDir()
+	if err := os.WriteFile(filepath.Join(asked, "AGENTS.md"), []byte("run the tests before you stop"), 0o644); err != nil {
 		t.Fatalf("writing the file: %v", err)
 	}
 	settings, err := config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
-	runtime := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
-	text := poo.PromptBuilder(runtime.Options).Render()
-	if !strings.Contains(text, "run the tests before you stop") {
+	// The runtime is built somewhere other than the directory the
+	// session works in: a session over the wire names its own.
+	runtime := buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	instructions, err := runtime.ProjectInstructions(asked)
+	if err != nil {
+		t.Fatalf("reading the instructions: %v", err)
+	}
+	if instructions == nil {
+		t.Fatal("the setting asked for no instructions")
+	}
+	builder := poo.PromptBuilder(runtime.Options)
+	instructions(builder)
+	if text := builder.Render(); !strings.Contains(text, "run the tests before you stop") {
 		t.Errorf("the prompt holds no project instructions: %q", text)
 	}
 
 	// The same directory with the setting off holds nothing: the
-	// instructions are opt-in at both layers.
+	// instructions are opt-in.
 	settings, err = config.Parse([]byte(theModelSettings), config.FormatYAML)
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
-	runtime = buildIn(t, settings, config.Overrides{}, dir, theExecutors())
-	text = poo.PromptBuilder(runtime.Options).Render()
-	if strings.Contains(text, "run the tests before you stop") {
-		t.Errorf("the prompt took the instructions the settings did not ask for: %q", text)
+	runtime = buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	if instructions, err := runtime.ProjectInstructions(asked); err != nil || instructions != nil {
+		t.Errorf("the settings that asked for nothing handed over a mutation (%v)", err)
+	}
+
+	// The flag asks for them without the setting.
+	runtime = buildIn(t, settings, config.Overrides{ProjectPrompt: true}, built, theExecutors())
+	if instructions, err := runtime.ProjectInstructions(asked); err != nil || instructions == nil {
+		t.Errorf("the flag asked for no instructions (%v)", err)
 	}
 
 	// A directory with neither file is not an error: the section is
@@ -526,10 +543,75 @@ func TestTheProjectPromptSettingFillsTheProjectSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decoding the settings: %v", err)
 	}
-	runtime = buildIn(t, settings, config.Overrides{}, empty, theExecutors())
-	text = poo.PromptBuilder(runtime.Options).Render()
-	if strings.Contains(text, "run the tests before you stop") {
-		t.Errorf("the prompt of an empty directory holds instructions: %q", text)
+	runtime = buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	if instructions, err := runtime.ProjectInstructions(empty); err != nil || instructions != nil {
+		t.Errorf("an empty directory handed over a mutation (%v)", err)
+	}
+}
+
+// TestASessionReadsTheInstructionsOfItsOwnDirectory covers a session
+// over the wire: it works in the directory its header names, which need
+// not be the one the process was built in, and the prompt holds that
+// directory's instructions.
+func TestASessionReadsTheInstructionsOfItsOwnDirectory(t *testing.T) {
+	built := t.TempDir()
+	asked := t.TempDir()
+	for dir, text := range map[string]string{built: "the process's instructions", asked: "the session's instructions"} {
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(text), 0o644); err != nil {
+			t.Fatalf("writing the file: %v", err)
+		}
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	store, err := runtime.OpenStore("ephemeral", "")
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer store.Close()
+	transport := pootest.NewTransport(pootest.Turn{Text: "done"})
+	runtime.Options.Transport = transport
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "ephemeral",
+			CreatedAt:  "2026-10-22T12:00:00Z",
+			WorkingDir: asked,
+
+			Profile: "code", Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
+	}
+	sess, err := runtime.CreateSession(context.Background(), store, created)
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+
+	ctx := context.Background()
+	runID, err := sess.Prompt(ctx, "do the thing")
+	if err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := sess.WaitRun(ctx, runID); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	requests := transport.Requests()
+	if len(requests) == 0 {
+		t.Fatal("the endpoint got no request")
+	}
+	system := ""
+	for _, message := range requests[0].Messages {
+		if message.Role == poo.RoleSystem {
+			system = message.Text()
+		}
+	}
+	if !strings.Contains(system, "the session's instructions") {
+		t.Errorf("the prompt holds no instructions of the session's own directory")
+	}
+	if strings.Contains(system, "the process's instructions") {
+		t.Error("the prompt holds the instructions of the directory the process was built in")
 	}
 }
 

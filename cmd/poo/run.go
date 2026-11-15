@@ -388,6 +388,13 @@ func (o *runOptions) workingDirectory() (string, error) {
 // carries the build's message and takes the build's exit code. Every
 // other construction failure is the run's own.
 func newSession(runtime *config.Runtime) (*poo.Session, int, error) {
+	instructions, err := runtime.ProjectInstructions(runtime.Options.WorkingDir)
+	if err != nil {
+		return nil, 2, err
+	}
+	if instructions != nil {
+		runtime.Options.Prompt = append(runtime.Options.Prompt, instructions)
+	}
 	sess, err := poo.New(runtime.Options, poo.WithPolicy(runtime.Policy))
 	if err == nil {
 		return sess, 0, nil

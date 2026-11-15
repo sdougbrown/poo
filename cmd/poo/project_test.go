@@ -92,6 +92,25 @@ func TestTheProjectInstructionsAreNotThereWithoutTheFlag(t *testing.T) {
 	}
 }
 
+// TestTheProjectPromptFlagServesThePromptCommand covers the flag's
+// other front door: `poo prompt` prints the sections, and the project's
+// instructions are one of them.
+func TestTheProjectPromptFlagServesThePromptCommand(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("run the tests before you stop"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	t.Chdir(dir)
+
+	code, stderr, stdout := runCLIWithStdout(t, "prompt", "--project-prompt")
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "run the tests before you stop") {
+		t.Errorf("the prompt holds no project instructions:\n%s", stdout)
+	}
+}
+
 // TestTheProjectPromptFailsOnAFileItCannotRead covers the flag with a
 // file the loader cannot read: the run refuses it and says why.
 func TestTheProjectPromptFailsOnAFileItCannotRead(t *testing.T) {
