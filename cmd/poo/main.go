@@ -64,7 +64,7 @@ func hoistRunFlags(args []string) (flags, words []string) {
 		case token == "--":
 			// Everything after the terminator is the prompt.
 			return flags, append(words, args[i+1:]...)
-		case len(words) == 0 && (token == "-h" || token == "--help"):
+		case len(words) == 0 && helpToken(token):
 			// A help request before the prompt starts is the run's own.
 			// Once the prompt has started, a dash word is prompt text, as
 			// it is after run.
@@ -88,6 +88,17 @@ func hoistRunFlags(args []string) (flags, words []string) {
 		}
 	}
 	return flags, words
+}
+
+// helpToken reports a request for the run's help in every spelling the
+// parser accepts: the shorthand, the long flag, and the single-dash long
+// form the parser rewrites.
+func helpToken(token string) bool {
+	if !flagToken(token) {
+		return false
+	}
+	name, _, _ := strings.Cut(strings.TrimLeft(token, "-"), "=")
+	return name == "h" || name == "help"
 }
 
 // declaredRunFlag answers the declaration of a token that names one of the

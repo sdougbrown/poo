@@ -40,11 +40,18 @@ func runUI() int {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
 		return usageExitCode
 	}
+	return run(frontDoorArgs(name, path))
+}
+
+// frontDoorArgs is the argv a bare invocation dispatches: the interface the
+// settings named, and the settings file itself, so the session it opens
+// reads what the settings said.
+func frontDoorArgs(name, settingsPath string) []string {
 	args := []string{name}
-	if path != "" {
-		args = append(args, "--settings", path)
+	if settingsPath != "" {
+		args = append(args, "--settings", settingsPath)
 	}
-	return run(args)
+	return args
 }
 
 // pickUI decides which interface a bare invocation launches.

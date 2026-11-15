@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -158,5 +159,27 @@ func TestAFrontDoorIsADeclaredCommand(t *testing.T) {
 	}
 	if !frontDoors[defaultUI] {
 		t.Errorf("the default ui %q is not one of the front doors", defaultUI)
+	}
+}
+
+// TestABareInvocationHandsTheSettingsToTheInterface covers the argv a bare
+// invocation dispatches: the settings file the command resolved reaches the
+// interface, so the session it opens reads what it read.
+func TestABareInvocationHandsTheSettingsToTheInterface(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want []string
+	}{
+		{name: "the settings were found", path: "/project/.poo/settings.yaml", want: []string{"repl", "--settings", "/project/.poo/settings.yaml"}},
+		{name: "no settings were found", path: "", want: []string{"repl"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := frontDoorArgs("repl", c.path)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("the argv is %q, want %q", got, c.want)
+			}
+		})
 	}
 }

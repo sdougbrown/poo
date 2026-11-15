@@ -466,7 +466,7 @@ func TestThePrintAliasHoistsTheRunsFlags(t *testing.T) {
 // request before the prompt starts prints the run's own help, and no
 // session runs.
 func TestThePrintAliasAsksForHelp(t *testing.T) {
-	for _, alias := range [][]string{{"-p", "--help"}, {"-p", "-h"}, {"--print", "--help"}} {
+	for _, alias := range [][]string{{"-p", "--help"}, {"-p", "-h"}, {"-p", "-help"}, {"--print", "--help"}} {
 		t.Run(alias[len(alias)-1]+" after "+alias[0], func(t *testing.T) {
 			code, _, stdout := runCLIWithStdout(t, alias...)
 			if code != 0 {
