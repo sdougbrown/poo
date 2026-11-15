@@ -29,8 +29,8 @@ const (
 	newAccount = "acct-new"
 )
 
-// stored is an auth.json holding one Codex credential that expires at
-// the given millisecond, and the neighbours a real file holds: an api key
+// stored is an auth.json holding one Codex credential that expires at the
+// given millisecond. It holds the neighbours a real file holds too: an api key
 // whose value names an environment variable, and another provider's oauth
 // credential.
 const stored = `{
@@ -109,9 +109,9 @@ type tokenEndpoint struct {
 	forms []map[string]string
 }
 
-// newTokenEndpoint serves refreshes. answer says what each one carries,
-// and during runs while the refresh is being answered, which is how a
-// test watches the lock a refresh holds.
+// newTokenEndpoint serves refreshes. answer says what each one carries. The
+// during hook runs while the refresh is being answered, so a test can watch the
+// lock a refresh holds.
 func newTokenEndpoint(t *testing.T, answer func() (int, string), during func()) *tokenEndpoint {
 	t.Helper()
 	endpoint := &tokenEndpoint{}
@@ -221,9 +221,9 @@ func readFile(t *testing.T, path string) string {
 	return string(data)
 }
 
-// TestAnExpiredTokenIsRefreshedAndWrittenBack covers the whole job: an
-// expired credential is traded for a new one, the new one is what the
-// caller gets, and the file holds it.
+// TestAnExpiredTokenIsRefreshedAndWrittenBack covers the whole job. An expired
+// credential is traded for a new one, the new one is what the caller gets, and
+// the file holds it.
 func TestAnExpiredTokenIsRefreshedAndWrittenBack(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
 	access := codexToken(t, newAccount)
@@ -286,10 +286,10 @@ func TestALiveTokenIsUsedWithoutAskingTheEndpoint(t *testing.T) {
 	}
 }
 
-// TestATokenInsidePisLeewayIsRefreshed covers the token pi would refresh
-// too: one with another two minutes to live is traded, because pi refreshes
-// five minutes before expiry and two writers of one credential must not
-// disagree about what expiry means.
+// TestATokenInsidePisLeewayIsRefreshed covers the token pi would refresh too.
+// One with another two minutes to live is traded. pi refreshes five minutes
+// before expiry, and two writers of one credential must not disagree about
+// what expiry means.
 func TestATokenInsidePisLeewayIsRefreshed(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(2*time.Minute)))
 	access := codexToken(t, oldAccount)
@@ -310,10 +310,10 @@ func TestATokenInsidePisLeewayIsRefreshed(t *testing.T) {
 	}
 }
 
-// TestATokenAtTheLeewayBoundaryIsRefreshed covers the millisecond the
-// leeway is decided on: a token with exactly pi's five minutes left is
-// traded, because a token pi would refresh is not one to use, and one
-// millisecond more than that is used as it is.
+// TestATokenAtTheLeewayBoundaryIsRefreshed covers the millisecond the leeway
+// is decided on. A token with exactly pi's five minutes left is traded,
+// because a token pi would refresh is not one to use. One millisecond more
+// than that is used as it is.
 func TestATokenAtTheLeewayBoundaryIsRefreshed(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -345,9 +345,9 @@ func TestATokenAtTheLeewayBoundaryIsRefreshed(t *testing.T) {
 	}
 }
 
-// TestARefreshKeepsEveryOtherCredential covers the file around the
-// credential: pi's neighbours keep their values, the file keeps the mode
-// its owner gave it, and it is laid out the way pi writes one.
+// TestARefreshKeepsEveryOtherCredential covers the file around the credential.
+// pi's neighbours keep their values, the file keeps the mode its owner gave it,
+// and it is laid out the way pi writes one.
 func TestARefreshKeepsEveryOtherCredential(t *testing.T) {
 	path := authFileWithMode(t, fmt.Sprintf(stored, expires(-time.Hour)), 0o640)
 	before := entries(t, path)
@@ -409,8 +409,8 @@ func TestARefreshHoldsPisLock(t *testing.T) {
 }
 
 // TestASecondCallerWaitsForTheFirstRefresh covers two callers of one
-// credential: one trades the refresh token, and the other finds the token
-// the first stored instead of trading it again.
+// credential. One trades the refresh token, and the other finds the token the
+// first stored instead of trading it again.
 func TestASecondCallerWaitsForTheFirstRefresh(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
 	access := codexToken(t, newAccount)
@@ -505,9 +505,9 @@ func TestARefreshThatOmitsTheRefreshTokenKeepsTheStoredOne(t *testing.T) {
 	}
 }
 
-// TestTheAccountComesFromTheNewAccessToken covers the account a traded
-// token names: a token claims its own account, and a token that claims none
-// keeps the one the file already had.
+// TestTheAccountComesFromTheNewAccessToken covers the account a traded token
+// names. A token claims its own account, and a token that claims none keeps
+// the one the file already had.
 func TestTheAccountComesFromTheNewAccessToken(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -546,9 +546,9 @@ func TestTheAccountComesFromTheNewAccessToken(t *testing.T) {
 	}
 }
 
-// TestAForeignLockIsWaitedOut covers pi refreshing at the same moment: the
-// lock is held when this package arrives, and is given up while this
-// package is waiting, so the wait ends in a token.
+// TestAForeignLockIsWaitedOut covers pi refreshing at the same moment. The lock
+// is held when this package arrives, and is given up while this package is
+// waiting. The wait then ends in a token.
 func TestAForeignLockIsWaitedOut(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
 	lockPath := path + ".lock"
@@ -695,9 +695,9 @@ func TestAnAuthFileWithoutACodexCredentialIsReported(t *testing.T) {
 	}
 }
 
-// TestAMalformedAuthFileIsNotWrittenOver covers the file this package
-// cannot read: it is reported, and it is left as it was, because a write
-// over it would drop whatever it holds.
+// TestAMalformedAuthFileIsNotWrittenOver covers the file this package cannot
+// read. It is reported, and it is left as it was, because a write over it
+// would drop whatever it holds.
 func TestAMalformedAuthFileIsNotWrittenOver(t *testing.T) {
 	body := `{"openai-codex": {"type": "oauth", "access": `
 	path := authFile(t, body)
@@ -718,10 +718,9 @@ func TestAMalformedAuthFileIsNotWrittenOver(t *testing.T) {
 	}
 }
 
-// TestARefreshAnswerWithoutATokenIsReported covers the endpoint that
-// answers with something that is not a refresh: the credential is not
-// written from it, because an entry holding no token is a credential pi
-// cannot use either.
+// TestARefreshAnswerWithoutATokenIsReported covers the endpoint that answers
+// with something that is not a refresh. The credential is not written from it,
+// because an entry holding no token is a credential pi cannot use either.
 func TestARefreshAnswerWithoutATokenIsReported(t *testing.T) {
 	for _, answer := range []string{
 		`{"expires_in":3600}`,
@@ -744,7 +743,7 @@ func TestARefreshAnswerWithoutATokenIsReported(t *testing.T) {
 }
 
 // TestACancelledWaitLeavesTheLockAlone covers a caller that gives up while
-// another writer holds the lock: the wait ends with the context, and the
+// another writer holds the lock. The wait ends with the context, and the
 // holder's lock is left for it to give up.
 func TestACancelledWaitLeavesTheLockAlone(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))

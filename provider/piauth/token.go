@@ -19,8 +19,8 @@ var defaultHTTP = &http.Client{Timeout: DefaultTimeout}
 type tokenResponse struct {
 	// AccessToken is the new bearer token.
 	AccessToken string `json:"access_token"`
-	// RefreshToken is the token that replaces the one traded. An endpoint
-	// may leave it out, and the traded token stays valid then.
+	// RefreshToken is the token that replaces the one traded. An endpoint may
+	// leave it out, and the traded token stays valid then.
 	RefreshToken string `json:"refresh_token"`
 	// ExpiresIn is how many seconds the access token lives.
 	ExpiresIn float64 `json:"expires_in"`
@@ -28,14 +28,14 @@ type tokenResponse struct {
 
 // refresh trades the credential's refresh token for a new access token.
 //
-// The request is the one pi sends: a form POST carrying the refresh
-// grant, the refresh token and the client id. The answer carries the new
-// pair and the access token's lifetime; the account is read from the new
-// token, and a token that names no account keeps the one already stored.
+// The request is the one pi sends: a form POST carrying the refresh grant,
+// the refresh token and the client id. The answer carries the new pair and
+// the access token's lifetime. The account is read from the new token, and a
+// token that names no account keeps the one already stored.
 //
-// A failure reports the status and a standard OAuth error code, and
-// nothing else from the answer: an answer is untrusted, and a caller's log
-// is no place for its words.
+// A failure reports the status and a standard OAuth error code, and nothing
+// else from the answer. An answer is untrusted, and a caller's log is no
+// place for its words.
 func (c Credentials) refresh(ctx context.Context, stored credential) (credential, error) {
 	endpoint := c.tokenURL()
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
@@ -86,12 +86,10 @@ func (c Credentials) refresh(ctx context.Context, stored credential) (credential
 
 // errorCode is the endpoint's own error, as a suffix an error carries.
 //
-// The answer's error field is a string in an OAuth error and an object with
+// The answer's error field is a string in an OAuth error, and an object with
 // a code beside it in some others. Only a code from the OAuth error set is
-// carried, because everything else an answer says is untrusted: an answer
-// that repeats the credential it was sent, names a failure of its own, or
-// dresses its own words up as a standard code adds nothing here, and the
-// status alone reports the refusal.
+// carried. Everything else an answer says is untrusted, and the status alone
+// reports the refusal.
 func errorCode(body []byte) string {
 	var answer struct {
 		Error json.RawMessage `json:"error"`
@@ -122,7 +120,7 @@ func errorCode(body []byte) string {
 // client is the client a refresh goes through.
 //
 // The redirect policy is this package's even when a caller supplies the
-// client: Go replays a 307 or 308 request body to wherever the redirect
+// client. Go replays a 307 or 308 request body to wherever the redirect
 // points, and a refresh's body is the refresh token. A redirect is answered
 // as the refusal it is, with the status the error names. The transport and
 // the timeout are the caller's.

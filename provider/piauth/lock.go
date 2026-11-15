@@ -12,35 +12,27 @@ import (
 
 // The lock pi takes on its auth.json.
 //
-// pi locks the file with proper-lockfile, and that library takes the lock
-// by creating the directory <file>.lock with mkdir: the mkdir is what
-// makes the acquisition atomic, and the directory is what says a holder is
-// there. This package speaks the same three rules, because agreeing on them
-// is what makes two processes exclude each other:
+// pi locks the file with proper-lockfile, which takes the lock by creating
+// the directory <file>.lock with mkdir. Agreement on the rules is what makes
+// two processes exclude each other.
 //
-//   - the lock is the directory <auth.json>.lock, holding nothing;
-//   - a holder keeps the directory's mtime fresh while it holds it;
-//   - a writer may break a lock whose mtime is older than the staleness
-//     bound.
+// The lock is the directory <auth.json>.lock, holding nothing. A holder keeps
+// the directory's mtime fresh. A writer may break a lock older than the
+// staleness bound.
 //
-// The directory holds nothing on purpose: pi releases its lock with
-// rmdir, which fails on a directory that holds a file, so a marker file in
-// there would leave pi unable to release.
+// The directory stays empty because pi releases its lock with rmdir. A
+// marker file in there would leave pi unable to release.
 //
-// Ownership is the directory's identity and not only its mtime. A writer
-// that breaks a lock and takes it creates a new directory, so the inode
-// differs even when the filesystem's mtime granularity would give the
-// two directories the same stamp; a filesystem that rounds the mtime still
-// cannot hide a different directory. The mtime is checked beside the
-// identity, so a lock whose stamp changed under this holder is treated as
-// taken rather than as this holder's. What remains is the window every
-// mkdir lock has: a takeover between the last check and the write itself is
-// not detectable, and no amount of stamping closes it. pi's lock is the
-// same rule with the mtime alone.
+// Ownership is the directory's identity, not only its mtime. A writer that
+// breaks a lock and takes it creates a new directory. The inode differs even
+// when a coarse mtime would give both the same stamp. The mtime is checked
+// beside the identity, so a stamp that changed under this holder means the
+// lock is taken. What remains is the window every mkdir lock has: a takeover
+// between the last check and the write is not detectable.
 //
 // A filesystem that will not take the stamp ends the holder's keepalive
-// instead of leaving a lock no later writer can judge: the refresh is
-// reported as not stored rather than written under a lock that may already
+// rather than leaving a lock no later writer can judge. The refresh is
+// reported as not stored instead of written under a lock that may already
 // be someone else's.
 const (
 	// lockSuffix names the directory the lock is.
@@ -48,20 +40,17 @@ const (
 
 	// lockStale is how old the lock directory's mtime may get before
 	// another writer may break the lock. pi's async refresh waits out a
-	// lock for thirty seconds, so a shorter bound here would break pi's
-	// lock while pi is still holding it.
+	// lock for thirty seconds. A shorter bound here would break pi's lock
+	// while pi still holds it.
 	lockStale = 30 * time.Second
 
-	// lockRefresh is how often the holder puts a fresh mtime on the lock
-	// directory, so a refresh that takes seconds does not go stale under
-	// it. pi's synchronous path breaks a lock that is ten seconds old,
-	// which is the shortest bound either side uses, so this stays under
-	// it.
+	// lockRefresh is how often the holder restamps the lock directory, so a
+	// refresh that takes seconds does not go stale under it. pi's
+	// synchronous path breaks a lock ten seconds old, the shortest bound
+	// either side uses. This stays under it.
 	lockRefresh = 5 * time.Second
 
-	// lockDirMode is the mode the lock directory is created with. It
-	// holds nothing, and a writer of the auth file needs the directory
-	// only to exist.
+	// lockDirMode is the mode the lock directory is created with.
 	lockDirMode = 0o700
 
 	// lockWaitBase and lockWaitMax bound one wait between two attempts on
@@ -74,16 +63,15 @@ const (
 type lock struct {
 	// path is the lock directory's path.
 	path string
-	// dir is the directory this holder created. Its identity is what says
-	// the directory is still this holder's, whatever the mtime says.
+	// dir is the directory this holder created. Its identity says the
+	// directory is still this holder's, whatever the mtime says.
 	dir os.FileInfo
 	// done stops the refresh, and stopped says it has stopped.
 	done    chan struct{}
 	stopped chan struct{}
 	// mu guards mtime and lost, and it is held across a whole check and
-	// stamp: a check that ran beside a stamp would read the stamp the
-	// holder is in the middle of writing and take its own lock for
-	// another writer's.
+	// stamp. A check that ran beside a stamp would read the half-written
+	// stamp and take this lock for another writer's.
 	mu sync.Mutex
 	// mtime is the mtime this holder last saw on the directory.
 	mtime time.Time
@@ -95,8 +83,8 @@ type lock struct {
 // acquire takes the lock of an auth.json, waiting for its holder for at
 // most wait.
 //
-// The lock's business is the filesystem's time, so every deadline here is
-// the wall clock's, not the clock a test ages a credential with.
+// Every deadline here is the wall clock's, not the clock a test ages a
+// credential with, because the lock's business is the filesystem's time.
 func acquire(ctx context.Context, path string, wait time.Duration) (*lock, error) {
 	lockPath := path + lockSuffix
 	deadline := time.Now().Add(wait)
@@ -113,17 +101,16 @@ func acquire(ctx context.Context, path string, wait time.Duration) (*lock, error
 		}
 		info, err := os.Stat(lockPath)
 		if errors.Is(err, fs.ErrNotExist) {
-			// The holder released between the mkdir and the stat: the
-			// lock is free, so the next attempt takes it.
+			// The holder released between the mkdir and the stat, so the
+			// lock is free and the next attempt takes it.
 			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%w: locking %s: %w", ErrStorage, path, err)
 		}
 		if time.Since(info.ModTime()) >= lockStale {
-			// The holder is gone, and pi breaks a lock this old too, so
-			// breaking it is what keeps a dead holder from blocking the
-			// file for good.
+			// The holder is gone. pi breaks a lock this old too, so
+			// breaking it keeps a dead holder from blocking the file.
 			if err := os.Remove(lockPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return nil, fmt.Errorf("%w: breaking the stale lock %s: %w", ErrStorage, lockPath, err)
 			}
@@ -169,8 +156,8 @@ func waitDelay(attempt int) time.Duration {
 	return min(delay, lockWaitMax)
 }
 
-// keep puts a fresh mtime on the lock directory until the lock is released,
-// so a refresh that takes a while does not go stale under it.
+// keep puts a fresh mtime on the lock directory until the lock is released.
+// A refresh that takes a while then does not go stale under it.
 func (l *lock) keep() {
 	defer close(l.stopped)
 	ticker := time.NewTicker(lockRefresh)
@@ -190,13 +177,12 @@ func (l *lock) keep() {
 	}
 }
 
-// touch puts this holder's time on the lock directory, after checking the
-// directory is still this holder's: a tick that stamped a directory another
-// writer took would hand this holder a lock that writer believes it owns.
+// touch puts this holder's time on the lock directory, after checking that
+// the directory is still this holder's. A tick that stamped another writer's
+// directory would hand this holder a lock that writer believes it owns.
 //
-// The check, the stamp and the record are one critical section, so the
-// pre-write check never reads a stamp this holder is in the middle of
-// changing.
+// The check, the stamp and the record are one critical section. A check never
+// reads a stamp this holder is in the middle of changing.
 func (l *lock) touch() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -215,7 +201,7 @@ func (l *lock) touch() error {
 		return fmt.Errorf("stating %s: %w", l.path, err)
 	}
 	// The filesystem may keep less of the stamp than it was given, so the
-	// record is what the filesystem kept and not what was asked for.
+	// record holds what it kept.
 	l.mtime = info.ModTime()
 	return nil
 }
@@ -254,11 +240,11 @@ func (l *lock) verify() error {
 
 // release gives the lock up.
 //
-// A directory that is no longer this holder's is left alone: it belongs to
-// whoever took it over, and removing it would hand the file to a third
-// writer while the taker believes it holds the lock. A release that cannot
-// remove the directory reports nothing, the way pi's own release swallows
-// its failure: the directory goes stale and the next writer breaks it.
+// A directory that is no longer this holder's is left alone, because it
+// belongs to whoever took it over. Removing it would hand the file to a
+// third writer while the taker believes it holds the lock. A release that
+// cannot remove the directory reports nothing, as pi's own release does. The
+// directory then goes stale and the next writer breaks it.
 func (l *lock) release() {
 	close(l.done)
 	<-l.stopped

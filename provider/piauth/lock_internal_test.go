@@ -27,9 +27,8 @@ func takeOver(t *testing.T, lockPath string, mtime time.Time) {
 }
 
 // TestTheKeepaliveDoesNotRestampATakenLock covers the keepalive of a lock
-// another writer took over: the tick must find the directory not its own
-// and stop, not put its own time on the taker's directory and then believe
-// it still holds the lock.
+// another writer took over. The tick must find the directory not its own and
+// stop, not stamp the taker's directory and believe it still holds the lock.
 func TestTheKeepaliveDoesNotRestampATakenLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
 	hold, err := acquire(context.Background(), path, time.Second)
@@ -63,9 +62,9 @@ func TestTheKeepaliveDoesNotRestampATakenLock(t *testing.T) {
 	}
 }
 
-// TestTheKeepaliveKeepsTheHeldLockFresh covers the other half of the tick:
-// a lock this holder still owns is stamped again, so a long refresh does
-// not go stale and get broken.
+// TestTheKeepaliveKeepsTheHeldLockFresh covers the other half of the tick. A
+// lock this holder still owns is stamped again, so a long refresh does not go
+// stale and get broken.
 func TestTheKeepaliveKeepsTheHeldLockFresh(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
 	hold, err := acquire(context.Background(), path, time.Second)
@@ -90,9 +89,9 @@ func TestTheKeepaliveKeepsTheHeldLockFresh(t *testing.T) {
 }
 
 // TestAVerifyBetweenTicksStillSeesOneOwner covers the keepalive and the
-// pre-write check sharing a lock: a verify that runs while the keepalive
-// stamps the directory must not read the new mtime against the old
-// expectation and report the holder's own lock as another writer's.
+// pre-write check sharing a lock. A verify that runs while the keepalive stamps
+// the directory must not read the new mtime against the old expectation. That
+// would report the holder's own lock as another writer's.
 func TestAVerifyBetweenTicksStillSeesOneOwner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
 	hold, err := acquire(context.Background(), path, time.Second)
@@ -127,10 +126,9 @@ func TestAVerifyBetweenTicksStillSeesOneOwner(t *testing.T) {
 }
 
 // TestTheKeepaliveStampsTheHeldLock covers the tick the keepalive's own
-// goroutine makes: it finds the stamp this holder left behind nearly stale,
-// which is what a tick that ran late leaves, and puts a fresh one on the
-// directory, so a writer judging the lock stale does not break a lock this
-// holder still holds.
+// goroutine makes. It finds the stamp this holder left behind nearly stale, as
+// a tick that ran late leaves it, and restamps the directory. A writer judging
+// the lock stale then does not break a lock this holder still holds.
 //
 // The tick comes at the package's own interval, so the test waits seconds for
 // it. It waits for the stamp on the filesystem, which outlives the wait,
@@ -189,9 +187,9 @@ func TestTheKeepaliveStampsTheHeldLock(t *testing.T) {
 	}
 }
 
-// TestReleaseLeavesATakenLockAlone covers the release of a lock another
-// writer took: the directory is the taker's, and removing it would hand the
-// file to a third writer while the taker believes it holds the lock.
+// TestReleaseLeavesATakenLockAlone covers the release of a lock another writer
+// took. The directory is the taker's, and removing it would hand the file to a
+// third writer while the taker holds it.
 func TestReleaseLeavesATakenLockAlone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
 	hold, err := acquire(context.Background(), path, time.Second)

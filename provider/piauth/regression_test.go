@@ -18,10 +18,10 @@ import (
 	"github.com/sdougbrown/poo/provider/piauth"
 )
 
-// TestALockTakenDuringARefreshIsNotWrittenUnder covers the write a taken
-// lock forbids: the writer that broke this holder's lock expects to own the
-// file, so the caller is told the traded token was not stored, the file is
-// left to that writer, and its lock is left alone too.
+// TestALockTakenDuringARefreshIsNotWrittenUnder covers the write a taken lock
+// forbids. The writer that broke this holder's lock expects to own the file, so
+// the caller is told the traded token was not stored. The file is left to that
+// writer, and its lock is left alone too.
 func TestALockTakenDuringARefreshIsNotWrittenUnder(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
 	before := readFile(t, path)
@@ -50,9 +50,9 @@ func TestALockTakenDuringARefreshIsNotWrittenUnder(t *testing.T) {
 }
 
 // TestALockTakenWithTheHeldMtimeIsDetected covers the takeover a bare mtime
-// comparison cannot see: the taker's directory carries the same mtime the
-// holder recorded, which is what a filesystem with coarse mtime granularity
-// gives for a takeover inside one tick.
+// comparison cannot see. The taker's directory carries the same mtime the
+// holder recorded, which a coarse-grained filesystem gives for a takeover
+// inside one tick.
 func TestALockTakenWithTheHeldMtimeIsDetected(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
 	before := readFile(t, path)
@@ -81,10 +81,9 @@ func TestALockTakenWithTheHeldMtimeIsDetected(t *testing.T) {
 	}
 }
 
-// TestABomFileRefreshesLikeAPiFile covers the file pi reads and this
-// package used to refuse: pi strips the byte order mark before parsing, so
-// a BOM auth.json is pi's, and the write that follows is without one, the
-// way pi writes it.
+// TestABomFileRefreshesLikeAPiFile covers the file pi reads. pi strips the byte
+// order mark before parsing, so a BOM auth.json is pi's. The write that follows
+// is without one, the way pi writes it.
 func TestABomFileRefreshesLikeAPiFile(t *testing.T) {
 	path := authFile(t, "\ufeff"+fmt.Sprintf(stored, expires(-time.Hour)))
 	access := codexToken(t, newAccount)
@@ -108,9 +107,9 @@ func TestABomFileRefreshesLikeAPiFile(t *testing.T) {
 	}
 }
 
-// TestARefreshKeepsTheFieldsOfTheEntryItDoesNotOwn covers an entry that
-// carries more than this package models, as pi's own credential type
-// allows: the fields it does not own survive the write.
+// TestARefreshKeepsTheFieldsOfTheEntryItDoesNotOwn covers an entry that carries
+// more than this package models, as pi's own credential type allows. The fields
+// it does not own survive the write.
 func TestARefreshKeepsTheFieldsOfTheEntryItDoesNotOwn(t *testing.T) {
 	body := strings.Replace(
 		fmt.Sprintf(stored, expires(-time.Hour)),
@@ -155,9 +154,9 @@ func TestARefreshKeepsTheFieldsOfTheEntryItDoesNotOwn(t *testing.T) {
 	}
 }
 
-// TestARefreshDoesNotFollowARedirect covers the redirect that would replay
-// the refresh token at wherever it points: the redirect is the answer, it
-// is not followed, and the credential is untouched.
+// TestARefreshDoesNotFollowARedirect covers the redirect that would replay the
+// refresh token at wherever it points. The redirect is the answer, it is not
+// followed, and the credential is untouched.
 func TestARefreshDoesNotFollowARedirect(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
 	before := readFile(t, path)
@@ -192,9 +191,9 @@ func TestARefreshDoesNotFollowARedirect(t *testing.T) {
 }
 
 // TestARefreshDoesNotFollowARedirectEvenWhenTheClientWould covers the client a
-// caller supplies: the credentials' redirect policy is the package's, so a
-// client whose own policy follows a 307, which replays the refresh body to
-// wherever it points, cannot hand the token over.
+// caller supplies. The credentials' redirect policy is the package's, whatever
+// the caller's client does. A client whose own policy follows a 307 cannot hand
+// the token over, because a 307 replays the refresh body at its target.
 func TestARefreshDoesNotFollowARedirectEvenWhenTheClientWould(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
 	before := readFile(t, path)
@@ -241,10 +240,10 @@ func TestARefreshDoesNotFollowARedirectEvenWhenTheClientWould(t *testing.T) {
 	}
 }
 
-// TestARefreshThatCannotBeStoredIsReportedAsSuch covers the outcome the
-// caller must be able to tell from a refusal: the endpoint traded the
-// refresh token, so the token in the file may be spent, and the file is not
-// the one the caller is told about.
+// TestARefreshThatCannotBeStoredIsReportedAsSuch covers the outcome the caller
+// must be able to tell from a refusal. The endpoint traded the refresh token,
+// so the token in the file may be spent. The file is not the one the caller is
+// told about.
 func TestARefreshThatCannotBeStoredIsReportedAsSuch(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores the file mode this test needs")
@@ -293,9 +292,10 @@ func TestARefusalIsNotAPersistenceFailure(t *testing.T) {
 
 // TestARefusalCarriesOnlyAStandardCode covers what a refusal's error takes
 // from the answer: the status, and a code the OAuth spec names. Everything
-// else in an answer is untrusted, so an answer that repeats the credential it
-// was sent, names a failure of its own, or dresses its own words up as a
-// standard code puts none of them in the caller's log.
+// else in an answer is untrusted. An answer that repeats the credential it was
+// sent, or names a failure of its own, puts none of it in the caller's log. An
+// answer that dresses its own words up as a standard code is not carried
+// either.
 func TestARefusalCarriesOnlyAStandardCode(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -365,8 +365,8 @@ func TestARefusalCarriesOnlyAStandardCode(t *testing.T) {
 	}
 }
 
-// heldEndpoint serves one refresh it holds open until the test closes
-// answer, so a test can act on the lock while a refresh is in flight.
+// heldEndpoint serves one refresh it holds open until the test closes answer.
+// A test can then act on the lock while a refresh is in flight.
 func heldEndpoint(t *testing.T) (entered chan struct{}, answer chan struct{}, url string) {
 	t.Helper()
 	entered = make(chan struct{})
@@ -382,8 +382,8 @@ func heldEndpoint(t *testing.T) (entered chan struct{}, answer chan struct{}, ur
 	return entered, answer, server.URL
 }
 
-// tokenRuns are the eight-character stretches of a token: enough of one
-// that the rest is a lookup away, and short enough that an answer which
+// tokenRuns are the eight-character stretches of a token. A run is long enough
+// that the rest is a lookup away. It is short enough that an answer which
 // repeats part of a token is not a coincidence.
 func tokenRuns(secret string) []string {
 	const run = 8
@@ -394,9 +394,8 @@ func tokenRuns(secret string) []string {
 	return runs
 }
 
-// takeOver breaks the lock a test's writer holds and creates a new
-// directory in its place, the way a writer that judged the lock stale
-// would.
+// takeOver breaks the lock a test's writer holds and creates a new directory in
+// its place. It does what a writer that judged the lock stale would.
 func takeOver(t *testing.T, lockPath string, mtime time.Time) {
 	t.Helper()
 	if err := os.Remove(lockPath); err != nil {
@@ -410,11 +409,11 @@ func takeOver(t *testing.T, lockPath string, mtime time.Time) {
 	}
 }
 
-// TestARefreshFollowsTheAuthFileSymlink covers the auth.json an operator
-// keeps elsewhere: the write goes through the link, so the link is still a
-// link and its target holds the refreshed credential. A write that replaced
-// the path with a regular file would break the operator's file the first
-// time a token expired.
+// TestARefreshFollowsTheAuthFileSymlink covers the auth.json an operator keeps
+// elsewhere. The write goes through the link, so the link is still a link and
+// its target holds the refreshed credential. A write that replaced the path
+// with a regular file would break the operator's file the first time a token
+// expired.
 func TestARefreshFollowsTheAuthFileSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := dir + "/pi-auth.json"
