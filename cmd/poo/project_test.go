@@ -111,6 +111,62 @@ func TestTheProjectPromptFlagServesThePromptCommand(t *testing.T) {
 	}
 }
 
+// TestTheUserPromptFlagAddsTheInstructions covers the user's own
+// instructions: `poo prompt` prints them, from the file the flag names.
+func TestTheUserPromptFlagAddsTheInstructions(t *testing.T) {
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "instructions.md")
+	if err := os.WriteFile(userFile, []byte("answer in British English"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+
+	code, stderr, stdout := runCLIWithStdout(t, "prompt", "--user-prompt-file", userFile)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "answer in British English") {
+		t.Errorf("the prompt holds no user instructions:\n%s", stdout)
+	}
+}
+
+// TestTheUserPromptSettingAddsTheInstructions covers the setting: a run
+// reads the file the settings name, with no flag at all, and the
+// instructions land in the logged system prompt.
+func TestTheUserPromptSettingAddsTheInstructions(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "instructions.md")
+	if err := os.WriteFile(userFile, []byte("answer in British English"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	settings := filepath.Join(dir, "settings.yaml")
+	body2 := "version: 1\nsession:\n  user_prompt_file: " + userFile + "\n"
+	if err := os.WriteFile(settings, []byte(body2), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	logPath := filepath.Join(dir, "run.jsonl")
+
+	t.Setenv("POO_SETTINGS", settings)
+	code, stderr := runCLI(t,
+		"run",
+		"--endpoint", endpoint.URL+"/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--log", logPath,
+		"say hello",
+	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0; stderr: %s", code, stderr)
+	}
+	if prompt := promptInLog(t, logPath); !strings.Contains(prompt, "answer in British English") {
+		t.Errorf("the prompt holds no user instructions: %q", prompt)
+	}
+}
+
 // TestTheProjectPromptFailsOnAFileItCannotRead covers the flag with a
 // file the loader cannot read: the run refuses it and says why.
 func TestTheProjectPromptFailsOnAFileItCannotRead(t *testing.T) {

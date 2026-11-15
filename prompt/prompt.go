@@ -168,7 +168,7 @@ const ProfileSection = "profile"
 //
 // The slice is read-only: a consumer that changes it changes the prompt
 // for everybody.
-var DefaultOrder = []string{"base", "profile", "tools", "catalog", "environment", "project"}
+var DefaultOrder = []string{"base", "profile", "tools", "catalog", "environment", "user", "project"}
 
 // Order returns the order the sections render in.
 //

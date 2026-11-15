@@ -47,6 +47,8 @@ type SettingsFields struct {
 	SessionProjectPrompt            *bool    "json:\"session.project_prompt,omitempty\""
 	SessionRetentionMaxAgeDays      *float64 "json:\"session.retention.max_age_days,omitempty\""
 	SessionRetentionMaxSessions     *float64 "json:\"session.retention.max_sessions,omitempty\""
+	SessionUserPrompt               *bool    "json:\"session.user_prompt,omitempty\""
+	SessionUserPromptFile           *string  "json:\"session.user_prompt_file,omitempty\""
 	SystemPromptAppend              *string  "json:\"system_prompt.append,omitempty\""
 	SystemPromptBaseFile            *string  "json:\"system_prompt.base_file,omitempty\""
 	SystemPromptRemove              []string "json:\"system_prompt.remove,omitempty\""
@@ -117,6 +119,8 @@ type SettingsAvailability struct {
 	SessionProjectPrompt            FieldStatus
 	SessionRetentionMaxAgeDays      FieldStatus
 	SessionRetentionMaxSessions     FieldStatus
+	SessionUserPrompt               FieldStatus
+	SessionUserPromptFile           FieldStatus
 	SystemPromptAppend              FieldStatus
 	SystemPromptBaseFile            FieldStatus
 	SystemPromptRemove              FieldStatus
@@ -241,6 +245,10 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	SessionRetentionMaxAgeDaysSatisfied := f.SessionRetentionMaxAgeDays != nil
 	SessionRetentionMaxSessionsEnabled := true
 	SessionRetentionMaxSessionsSatisfied := f.SessionRetentionMaxSessions != nil
+	SessionUserPromptEnabled := true
+	SessionUserPromptSatisfied := f.SessionUserPrompt != nil
+	SessionUserPromptFileEnabled := true
+	SessionUserPromptFileSatisfied := func() bool { v := f.SessionUserPromptFile; return v != nil && *v != "" }()
 	SystemPromptAppendEnabled := true
 	SystemPromptAppendSatisfied := func() bool { v := f.SystemPromptAppend; return v != nil && *v != "" }()
 	SystemPromptBaseFileEnabled := !(f.SystemPromptReplace != nil)
@@ -1283,6 +1291,50 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		SessionUserPrompt: FieldStatus{
+			Required:  SessionUserPromptEnabled && false,
+			Enabled:   SessionUserPromptEnabled,
+			Satisfied: SessionUserPromptSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		SessionUserPromptFile: FieldStatus{
+			Required:  SessionUserPromptFileEnabled && false,
+			Enabled:   SessionUserPromptFileEnabled,
+			Satisfied: SessionUserPromptFileSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		SystemPromptAppend: FieldStatus{
 			Required:  SystemPromptAppendEnabled && false,
 			Enabled:   SystemPromptAppendEnabled,
@@ -1906,6 +1958,11 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.SessionRetentionMaxAgeDays != nil
 	case "SessionRetentionMaxSessions":
 		return f.SessionRetentionMaxSessions != nil
+	case "SessionUserPrompt":
+		return f.SessionUserPrompt != nil
+	case "SessionUserPromptFile":
+		v := f.SessionUserPromptFile
+		return v != nil && *v != ""
 	case "SystemPromptAppend":
 		v := f.SystemPromptAppend
 		return v != nil && *v != ""
@@ -2372,6 +2429,18 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: session.retention.max_sessions must not be negative")
+	case "SessionUserPrompt", "session.user_prompt":
+		found = true
+		status = avail.SessionUserPrompt
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "SessionUserPromptFile", "session.user_prompt_file":
+		found = true
+		status = avail.SessionUserPromptFile
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "SystemPromptAppend", "system_prompt.append":
 		found = true
 		status = avail.SystemPromptAppend

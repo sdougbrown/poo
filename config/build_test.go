@@ -83,15 +83,25 @@ func build(t *testing.T, settings *config.Settings, overrides config.Overrides) 
 // the executors the binary links.
 func buildIn(t *testing.T, settings *config.Settings, overrides config.Overrides, workingDir string, executors *bash.Registry) *config.Runtime {
 	t.Helper()
-	runtime, err := config.Build(config.BuildOptions{
-		Settings:       settings,
-		Overrides:      overrides,
-		WorkingDir:     workingDir,
-		DefaultProfile: "code",
-		Tools:          theTools(),
-		Profiles:       theProfiles(),
-		Executors:      executors,
+	return buildWith(t, config.BuildOptions{
+		Settings:   settings,
+		Overrides:  overrides,
+		WorkingDir: workingDir,
+		Executors:  executors,
 	})
+}
+
+// buildWith builds the runtime from opts, filling in what every test's
+// build fills.
+func buildWith(t *testing.T, opts config.BuildOptions) *config.Runtime {
+	t.Helper()
+	opts.DefaultProfile = "code"
+	opts.Tools = theTools()
+	opts.Profiles = theProfiles()
+	if opts.Executors == nil {
+		opts.Executors = theExecutors()
+	}
+	runtime, err := config.Build(opts)
 	if err != nil {
 		t.Fatalf("building the runtime: %v", err)
 	}
@@ -740,6 +750,146 @@ func TestACreatedSessionRefusesInstructionsItCannotRead(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "AGENTS.md") {
 		t.Errorf("the error %q does not name the file", err)
+	}
+}
+
+// TestTheUserPromptSettingFillsTheUserSection covers the setting: the
+// file the settings name fills the prompt's user section, before the
+// project's own instructions.
+func TestTheUserPromptSettingFillsTheUserSection(t *testing.T) {
+	dir := t.TempDir()
+	userFile := filepath.Join(dir, "instructions.md")
+	if err := os.WriteFile(userFile, []byte("answer in British English"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("run the tests before you stop"), 0o644); err != nil {
+		t.Fatalf("writing the project file: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+
+		"session:\n  project_prompt: true\n  user_prompt_file: "+userFile+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+
+	// The project's instructions are the session's, so they join the
+	// build's render the way a session joins them.
+	builder := poo.PromptBuilder(runtime.Options)
+	addProject, err := runtime.ProjectInstructions(dir)
+	if err != nil {
+		t.Fatalf("reading the project's instructions: %v", err)
+	}
+	if addProject == nil {
+		t.Fatal("the settings asked for no project instructions")
+	}
+	addProject(builder)
+	text := builder.Render()
+	if !strings.Contains(text, "answer in British English") {
+		t.Errorf("the prompt holds no user instructions: %q", text)
+	}
+	user := strings.Index(text, "answer in British English")
+	project := strings.Index(text, "run the tests before you stop")
+	if project < 0 {
+		t.Fatalf("the prompt holds no project instructions: %q", text)
+	}
+	if user > project {
+		t.Errorf("the user's instructions render after the project's: %q", text)
+	}
+}
+
+// TestTheUserPromptNamesTheBinaryDefault covers the binary's default
+// path: the setting asks for the instructions, and the binary says where
+// they are.
+func TestTheUserPromptNamesTheBinaryDefault(t *testing.T) {
+	userFile := filepath.Join(t.TempDir(), "instructions.md")
+	if err := os.WriteFile(userFile, []byte("answer in British English"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  user_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildWith(t, config.BuildOptions{Settings: settings, WorkingDir: t.TempDir(), UserPromptFile: userFile})
+	if text := poo.PromptBuilder(runtime.Options).Render(); !strings.Contains(text, "answer in British English") {
+		t.Errorf("the prompt holds no user instructions: %q", text)
+	}
+}
+
+// TestTheUserPromptDefaultFileMayBeAbsent covers the binary's default:
+// it is a convention, not a promise, so a file that is not there holds
+// no instructions and the build goes on.
+func TestTheUserPromptDefaultFileMayBeAbsent(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  user_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	missing := filepath.Join(t.TempDir(), "instructions.md")
+	runtime := buildWith(t, config.BuildOptions{Settings: settings, WorkingDir: t.TempDir(), UserPromptFile: missing})
+	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "user") {
+		t.Errorf("the prompt holds a user section: %q", text)
+	}
+}
+
+// TestTheUserPromptFlagNamesTheFile covers the flag: naming a file asks
+// for the instructions, with no setting behind it.
+func TestTheUserPromptFlagNamesTheFile(t *testing.T) {
+	userFile := filepath.Join(t.TempDir(), "instructions.md")
+	if err := os.WriteFile(userFile, []byte("answer in British English"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{UserPromptFile: userFile}, t.TempDir(), theExecutors())
+	if text := poo.PromptBuilder(runtime.Options).Render(); !strings.Contains(text, "answer in British English") {
+		t.Errorf("the prompt holds no user instructions: %q", text)
+	}
+}
+
+// TestTheUserPromptFailsOnAFileItCannotRead covers a named file that
+// cannot be read: the build refuses it and names what asked.
+func TestTheUserPromptFailsOnAFileItCannotRead(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  user_prompt: true\n  user_prompt_file: "+t.TempDir()+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build accepted a file it cannot read")
+	}
+	if field, _ := config.FieldOf(err); field != "session.user_prompt_file" {
+		t.Errorf("the field is %q, want session.user_prompt_file", field)
+	}
+}
+
+// TestTheUserPromptNeedsAFile covers the setting with nothing to read:
+// no flag, no path, and a binary with no default of its own.
+func TestTheUserPromptNeedsAFile(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  user_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build accepted a setting with no file behind it")
+	}
+	if field, _ := config.FieldOf(err); field != "session.user_prompt" {
+		t.Errorf("the field is %q, want session.user_prompt", field)
 	}
 }
 

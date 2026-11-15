@@ -97,6 +97,8 @@ session:
   mode: logged
   dir: ~/.local/state/poo/sessions
   project_prompt: true
+  user_prompt: true
+  user_prompt_file: ~/.config/poo/AGENTS.md
   retention:
     max_age_days: 30
     max_sessions: 500
@@ -206,6 +208,8 @@ paths = ["./registry"]
 mode = "logged"
 dir = "~/.local/state/poo/sessions"
 project_prompt = true
+user_prompt = true
+user_prompt_file = "~/.config/poo/AGENTS.md"
 
 [session.retention]
 max_age_days = 30
@@ -263,6 +267,8 @@ const theJSON = `{
     "mode": "logged",
     "dir": "~/.local/state/poo/sessions",
     "project_prompt": true,
+    "user_prompt": true,
+    "user_prompt_file": "~/.config/poo/AGENTS.md",
     "retention": {"max_age_days": 30, "max_sessions": 500}
   }
 }
