@@ -121,9 +121,13 @@ func TestLoadFailsOnFrontMatterThatDoesNotParse(t *testing.T) {
 	}
 
 	unclosed := t.TempDir()
-	writeSkill(t, unclosed, "open", "---\ndescription: no closing marker\n")
-	if _, err := skill.Load(unclosed); err == nil {
-		t.Fatal("the load accepted front matter with no end")
+	writeSkill(t, unclosed, "open", "---\nA horizontal rule, and then prose.\n")
+	set, err := skill.Load(unclosed)
+	if err != nil {
+		t.Fatalf("a file that opens with a rule failed the load: %v", err)
+	}
+	if got := set.Len(); got != 0 {
+		t.Errorf("the set holds %d skills, want none: a file with no front matter is not a skill", got)
 	}
 }
 

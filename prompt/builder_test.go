@@ -22,7 +22,7 @@ func testEnv(tools ...string) prompt.Env {
 }
 
 // TestTheSectionsRenderInTheDefaultOrder covers the order: the
-// base, the tools, the catalog, the environment, the user's
+// base, the tools, the catalog, the environment, the skills, the user's
 // instructions and the project's, and then the consumer's own sections
 // in the order they were added.
 func TestTheSectionsRenderInTheDefaultOrder(t *testing.T) {
@@ -31,11 +31,12 @@ func TestTheSectionsRenderInTheDefaultOrder(t *testing.T) {
 	b.Set("catalog", "the catalog")
 	b.Set("environment", "the environment")
 	b.Set("user", "the user")
+	b.Set("skills", "the skills")
 	b.Set("project", "the project")
 	b.Set("first", "the first")
 	b.Set("second", "the second")
 
-	want := "the base\n\nthe catalog\n\nthe environment\n\nthe user\n\nthe project\n\nthe first\n\nthe second\n"
+	want := "the base\n\nthe catalog\n\nthe skills\n\nthe environment\n\nthe user\n\nthe project\n\nthe first\n\nthe second\n"
 	if got := b.Render(); got != want {
 		t.Errorf("the prompt is %q, want %q", got, want)
 	}

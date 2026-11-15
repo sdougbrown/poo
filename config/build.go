@@ -91,6 +91,8 @@ type Overrides struct {
 	FeedsPaths []string
 	// CLIRegistryPaths are additional cli registry manifest paths.
 	CLIRegistryPaths []string
+	// SkillsPaths are additional directories of skills.
+	SkillsPaths []string
 	// CredentialEnvNames are environment names a launcher provisions for
 	// poo's own subsystems. They stay in the session environment, which the
 	// feed and a cli entry's bindings read, and are removed from the
@@ -114,17 +116,19 @@ const (
 	// EnvCredentialEnv names the environment names a launcher declares
 	// for poo's own subsystems.
 	EnvCredentialEnv = "POO_CREDENTIAL_ENV"
+	// EnvSkillsPath names the directories a session offers skills from.
+	EnvSkillsPath = "POO_SKILLS_PATH"
 )
 
 // EnvOverrideNames are the variables EnvOverrides reads, in the order it
 // reads them. The same names are kept out of a tool's child environment.
-var EnvOverrideNames = []string{EnvFeedsPath, EnvCLIRegistryPath, EnvCredentialEnv}
+var EnvOverrideNames = []string{EnvFeedsPath, EnvCLIRegistryPath, EnvCredentialEnv, EnvSkillsPath}
 
 // EnvOverrides adds what the environment names after the caller's own values.
 //
-// POO_FEEDS_PATH and POO_CLI_REGISTRY_PATH are path lists, and
-// POO_CREDENTIAL_ENV is a list of environment names a launcher declares for
-// poo's own subsystems. The returned overrides hold fresh slices, so appending
+// POO_FEEDS_PATH, POO_CLI_REGISTRY_PATH and POO_SKILLS_PATH are path lists,
+// and POO_CREDENTIAL_ENV is a list of environment names a launcher declares
+// for poo's own subsystems. The returned overrides hold fresh slices, so appending
 // to them never writes into the caller's.
 func EnvOverrides(o Overrides) Overrides {
 	paths := func(existing []string, name string) []string {
@@ -141,6 +145,7 @@ func EnvOverrides(o Overrides) Overrides {
 	o.FeedsPaths = paths(o.FeedsPaths, EnvFeedsPath)
 	o.CLIRegistryPaths = paths(o.CLIRegistryPaths, EnvCLIRegistryPath)
 	o.CredentialEnvNames = paths(o.CredentialEnvNames, EnvCredentialEnv)
+	o.SkillsPaths = paths(o.SkillsPaths, EnvSkillsPath)
 	return o
 }
 
@@ -568,7 +573,8 @@ func (r *Runtime) resolveSkills(opts BuildOptions, workingDir string) error {
 		}
 		dirs = append(dirs, path)
 	}
-	for _, path := range againstDir(settings.Paths, workingDir) {
+	paths := append(append([]string{}, settings.Paths...), opts.Overrides.SkillsPaths...)
+	for _, path := range againstDir(paths, workingDir) {
 		if _, err := os.Stat(path); err != nil {
 			r.warn(fmt.Sprintf("skills.paths: %s holds no skills: %v", path, err))
 			continue

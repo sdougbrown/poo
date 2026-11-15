@@ -264,8 +264,8 @@ start, and the failure names the file and the feed.
 
 `feeds.paths` is a settings entry beside `cli_registry.paths`. For
 binaries built on `server.New` and for `poo run` and `prompt`,
-`POO_FEEDS_PATH` and `POO_CLI_REGISTRY_PATH` add paths to those settings
-respectively. Each is a path list separated by the operating system's
+`POO_FEEDS_PATH`, `POO_CLI_REGISTRY_PATH` and `POO_SKILLS_PATH` add paths to
+those settings respectively. Each is a path list separated by the operating system's
 path-list separator. The `poo run`, `serve` and `prompt` commands also
 accept repeatable `--feeds-path` and `--cli-registry-path` flags. Override
 paths add to the settings' paths. Every path is discovered and the files

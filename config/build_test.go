@@ -1022,6 +1022,42 @@ func TestTheSkillDirectoriesAreReadRoots(t *testing.T) {
 	}
 }
 
+// TestTheSkillsDefaultReadsTheConventionDirectory covers `default: true`:
+// the session reads the directory the rest of the family uses, resolved
+// through the home directory rather than against the working one.
+func TestTheSkillsDefaultReadsTheConventionDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeSkillFile(t, filepath.Join(home, ".agents", "skills", "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  default: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want the home directory's", runtime.Skills)
+	}
+	if got := runtime.Skills.Skills(); got[0].Name != "review" {
+		t.Errorf("the skill is %q, want review", got[0].Name)
+	}
+}
+
+// TestTheSkillsPathOverrideAddsADirectory covers the override a
+// launcher passes: the directories beside the settings', the way the cli
+// registry and the feeds take theirs.
+func TestTheSkillsPathOverrideAddsADirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{SkillsPaths: []string{dir}}, t.TempDir(), theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want the override's", runtime.Skills)
+	}
+}
+
 // TestTheSkillsPathsAreDroppedWithAWarning covers a named path that is
 // not there: it is dropped rather than failing the build, and the
 // warning says which path.

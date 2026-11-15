@@ -103,6 +103,11 @@ func read(dir string) (Skill, bool, error) {
 // The second return value says the file carries front matter at all. A
 // file with none is not a skill, and a file whose front matter does not
 // parse is a skill that cannot be read.
+//
+// An opening marker with no closing one is no front matter rather than a
+// broken skill: markdown opens with a horizontal rule often enough, and
+// one stray file in a collection shared across harnesses is not worth
+// failing a session over.
 func parseFrontMatter(data []byte) (frontMatter, bool, error) {
 	text := string(data)
 	if !strings.HasPrefix(text, "---") {
@@ -112,7 +117,7 @@ func parseFrontMatter(data []byte) (frontMatter, bool, error) {
 	rest = strings.TrimPrefix(rest, "\r")
 	end := strings.Index(rest, "\n---")
 	if end < 0 {
-		return frontMatter{}, false, fmt.Errorf("the front matter is not closed with ---")
+		return frontMatter{}, false, nil
 	}
 	var front frontMatter
 	if err := yaml.Unmarshal([]byte(rest[:end]), &front); err != nil {

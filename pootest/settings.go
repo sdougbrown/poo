@@ -24,7 +24,7 @@ const settingsEnv = "POO_SETTINGS"
 // package's tests do not have. They are the ones config.EnvOverrides
 // reads, which this package cannot import: settings_test.go holds the
 // two lists together.
-var manifestOverrides = []string{"POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH", "POO_CREDENTIAL_ENV"}
+var manifestOverrides = []string{"POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH", "POO_CREDENTIAL_ENV", "POO_SKILLS_PATH"}
 
 // ManifestOverrides returns the environment variables Main removes, in
 // the order it removes them.
