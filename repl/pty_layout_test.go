@@ -3,10 +3,12 @@
 package repl
 
 import (
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"testing"
@@ -267,7 +269,10 @@ func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {
 	if _, err := exec.LookPath("less"); err != nil {
 		t.Skip("no less on the path")
 	}
+	// -X keeps less on the primary screen, so the region handoff is in
+	// the stream the test reads rather than hidden by an alt buffer.
 	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LESS", "-X")
 	server := &fakeServer{t: t}
 	// A line that reaches the server by mistake settles rather than
 	// leaving a goroutine waiting on an ask the test never answers.
@@ -277,24 +282,42 @@ func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {
 	term, code := startTerminalRepl(t, server)
 	waitBottom(t, term)
 
+	// The bytes after this point hold the pager's turn at the terminal.
+	start := len(term.String())
 	term.press("/less\n")
-	// less takes the alternate screen, and the prompt goes with it; a
-	// pager that failed to start leaves the prompt standing.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && term.rowOf("💩❯") >= 0 {
-		time.Sleep(5 * time.Millisecond)
-	}
+	// less's own end marker says it is reading the terminal; a pager
+	// that did not start leaves the prompt standing instead. The
+	// forty-column status line cuts the marker's last glyph.
+	waitScreen(t, term, "(END")
 	if term.rowOf("💩❯") >= 0 {
 		t.Fatalf("the pager did not take the terminal:\n%s", term.screen())
 	}
 	term.press("q")
 	// The statusline is not in the transcript the pager shows: its
 	// return says the pager left and the session's own screen is back.
-	deadline = time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) && term.rowOf("⌂") < 0 {
 		time.Sleep(5 * time.Millisecond)
 	}
 	waitBottom(t, term)
+
+	// The region came off before the pager drew, and went back after:
+	// the reset precedes less's own end marker, and a region set follows
+	// it.
+	seq := term.String()[start:]
+	reset := strings.Index(seq, seqResetRegion)
+	pager := strings.Index(seq, "(END")
+	if reset < 0 || pager < 0 || reset > pager {
+		t.Fatalf("the region was not reset before the pager drew (reset %d, pager %d):\n%q", reset, pager, seq)
+	}
+	region := regexp.MustCompile(`\x1b\[1;[0-9]+r`).FindStringIndex(seq[pager:])
+	if region == nil {
+		t.Fatalf("the region was not reserved again after the pager:\n%q", seq[pager:])
+	}
+	if strings.Contains(seq, "\x1b[?1049") {
+		t.Errorf("less used an alt buffer despite -X; the primary-screen witness is weaker")
+	}
+
 	term.press("/quit\n")
 	select {
 	case got := <-code:
@@ -604,5 +627,34 @@ func TestAResizeDuringAHeldPreviewKeepsTheInputAtTheBottom(t *testing.T) {
 	case <-code:
 	case <-time.After(10 * time.Second):
 		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}
+
+func TestAStartupThatFailsLeavesTheTerminalWhole(t *testing.T) {
+	term := openTerminal(t)
+	code := make(chan int, 1)
+	opts := Options{
+		WorkingDir: t.TempDir(),
+		In:         term.slave,
+		Out:        term.slave,
+		StartServer: func(args []string) (io.WriteCloser, io.ReadCloser, func() error, error) {
+			return nil, nil, nil, errors.New("no server to start")
+		},
+	}
+	go func() { code <- Run(opts) }()
+	select {
+	case got := <-code:
+		if got != 1 {
+			t.Fatalf("the repl exited %d, want 1", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not fail; it drew:\n%s", term.screen())
+	}
+	waitScreen(t, term, "no server to start")
+	if region := regexp.MustCompile(`\x1b\[1;[0-9]+r`).FindString(term.String()); region != "" {
+		t.Errorf("a handshake that never opened reserved the region %q", region)
+	}
+	if term.rowOf("💩❯") >= 0 {
+		t.Errorf("a handshake that never opened drew a prompt:\n%s", term.screen())
 	}
 }

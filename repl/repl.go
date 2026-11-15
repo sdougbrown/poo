@@ -91,8 +91,10 @@ func Run(opts Options) int {
 	// the plain stream, where a redirect or a test reads the words.
 	if termIsTerminal(in) && termIsTerminal(out) {
 		if l := newLayout(out); l != nil {
+			// The region is reserved once the session is open. A
+			// startup failure or an interrupt during the handshake
+			// must leave the terminal as it found it.
 			defer l.leave()
-			l.enter()
 			r.layout = l
 		}
 	}
@@ -234,6 +236,11 @@ func (m *machine) run() int {
 	if m.r.layout != nil {
 		resizeSignals(resizes)
 		defer signal.Stop(resizes)
+	}
+	// The handshake is done and Ctrl-C has a handler: the terminal can
+	// give up its bottom rows now, and every way out restores them.
+	if m.r.layout != nil {
+		m.r.layout.enter()
 	}
 	go func() {
 		for range interrupts {
