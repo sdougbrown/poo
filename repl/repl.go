@@ -330,7 +330,7 @@ func (m *machine) line(res lineResult, input input) (int, bool) {
 		// is a steer: it rides the active run and reaches the model at
 		// the run's next turn end. A command still waits — the run is
 		// working, and the transcript says so, the way it always has.
-		if strings.HasPrefix(text, "/") {
+		if name, _ := commandName(text); name != "" {
 			m.r.notice("the run is working — Esc stops it; %q was not sent", text)
 			return 0, false
 		}
@@ -715,10 +715,33 @@ func (m *machine) greet() {
 	m.r.notice("poo repl — /help for the commands, /quit to leave")
 }
 
+// commandName returns the command a line names and its argument, or an
+// empty name when the line is a prompt. A command is one of the names
+// the repl knows, whole, or one of the names that takes an argument and
+// a space after it.
+//
+// One reader decides what a command is: the dispatcher below and the
+// line typed while a run works agree, so a line that would be a prompt
+// on an idle session steers a working one.
+func commandName(line string) (name, arg string) {
+	if strings.HasPrefix(line, "/model ") {
+		return "/model", strings.TrimSpace(strings.TrimPrefix(line, "/model "))
+	}
+	if strings.HasPrefix(line, "/thinking ") {
+		return "/thinking", strings.TrimSpace(strings.TrimPrefix(line, "/thinking "))
+	}
+	switch line {
+	case "/quit", "/q", "/exit", "/help", "/h", "?", "/less", "/model", "/models", "/cancel", "/thinking":
+		return line, ""
+	}
+	return "", ""
+}
+
 // command runs one input line. The bool says the repl is done, and
 // the code is the exit code it takes.
 func (m *machine) command(line string, input input) (int, bool) {
-	switch line {
+	name, arg := commandName(line)
+	switch name {
 	case "/quit", "/q", "/exit":
 		return 0, true
 	case "/help", "/h", "?":
@@ -741,21 +764,17 @@ anything else    a prompt for the session`)
 		}
 		return 0, false
 	case "/model", "/models":
-		m.listModels(m.catalogNames(), "/model <text> filters this list, /model <number> picks from it")
+		if arg == "" {
+			m.listModels(m.catalogNames(), "/model <text> filters this list, /model <number> picks from it")
+			return 0, false
+		}
+		m.switchModel(arg)
 		return 0, false
 	case "/cancel":
 		m.cancelRun(m.activeRun())
 		return 0, false
 	case "/thinking":
-		m.thinking("")
-		return 0, false
-	}
-	if name, ok := strings.CutPrefix(line, "/model "); ok {
-		m.switchModel(strings.TrimSpace(name))
-		return 0, false
-	}
-	if level, ok := strings.CutPrefix(line, "/thinking "); ok {
-		m.thinking(strings.TrimSpace(level))
+		m.thinking(arg)
 		return 0, false
 	}
 	if err := m.startRun(line); err != nil {
@@ -963,6 +982,7 @@ func (m *machine) startRun(text string) error {
 	m.runID = res.RunID
 	m.runIDMu.Unlock()
 	m.state = &runState{}
+	m.steers = nil
 	return nil
 }
 

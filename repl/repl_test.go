@@ -600,6 +600,103 @@ func TestALineTypedDuringARunSteersTheRun(t *testing.T) {
 	}
 }
 
+// TestASlashCommandTypedDuringARunWaitsForTheNextPrompt covers a
+// command typed while the run works: it does not steer, and the
+// transcript says the line was not sent and which key stops the turn.
+func TestASlashCommandTypedDuringARunWaitsForTheNextPrompt(t *testing.T) {
+	sent := make(chan string, 1)
+	m, out, in := steering(t, sent)
+
+	if code, done := m.line(lineResult{line: "/model qwen"}, in); done {
+		t.Fatalf("the line ended the session (code %d)", code)
+	}
+	if drawn := out.String(); !strings.Contains(drawn, "was not sent") {
+		t.Errorf("the command went out instead of waiting:\n%s", drawn)
+	}
+	select {
+	case raw := <-sent:
+		t.Errorf("the command went out as a request: %s", raw)
+	default:
+	}
+}
+
+// TestALineTheDispatcherWouldRunAsAPromptSteers covers the shared
+// reading of a command: a slash line the dispatcher would send as a
+// prompt steers the working run, rather than being refused here and
+// prompted there.
+func TestALineTheDispatcherWouldRunAsAPromptSteers(t *testing.T) {
+	sent := make(chan string, 1)
+	m, out, in := steering(t, sent)
+
+	if code, done := m.line(lineResult{line: "/remind me tomorrow"}, in); done {
+		t.Fatalf("the line ended the session (code %d)", code)
+	}
+	if drawn := out.String(); strings.Contains(drawn, "was not sent") {
+		t.Errorf("an unknown slash line was refused instead of steered:\n%s", drawn)
+	}
+	select {
+	case raw := <-sent:
+		if !strings.Contains(raw, `"/remind me tomorrow"`) {
+			t.Errorf("the steer carried something else: %s", raw)
+		}
+	default:
+		t.Error("the line did not reach the run")
+	}
+}
+
+// TestAnUndeliveredInputTheReplNeverSentNamesItsId covers the settle's
+// fallback: an input the client did not accept here has no text to read
+// back, so the notice names the id the server reported.
+func TestAnUndeliveredInputTheReplNeverSentNamesItsId(t *testing.T) {
+	_, out, _ := steering(t, make(chan string, 1))
+	m := &machine{r: newRenderer(out), status: newStatus(""), sessionID: "s1"}
+	m.event(protocol.Event{
+		Type: "run.settled",
+		Payload: map[string]any{"run_id": "r1", "reason": "cancelled", "turns": 1,
+			"detail": map[string]any{
+				"undelivered_input": []any{map[string]any{"input_id": "elsewhere-7", "mode": "steer"}},
+			}},
+	}, "r1", &runState{})
+	if !strings.Contains(out.String(), "elsewhere-7") {
+		t.Errorf("the notice does not name the input:\n%s", out.String())
+	}
+}
+
+// steering returns a machine with a run active, its transcript, and the
+// input the tests submit. Every line the client writes is answered the
+// way the server would, and the raw line is handed to sent: a test that
+// expects no request gets nothing, and one that expects a request reads
+// it there.
+func steering(t *testing.T, sent chan string) (*machine, *bytes.Buffer, input) {
+	t.Helper()
+	out := &bytes.Buffer{}
+	lw := &lineWriter{lines: make(chan string, 8)}
+	m := &machine{r: newRenderer(out), status: newStatus(""), sessionID: "s1"}
+	m.conn = &conn{
+		w:       lw,
+		pending: map[int]chan rpcResult{},
+		events:  make(chan protocol.Event, 8),
+		asks:    make(chan askRequest, 8),
+	}
+	m.runIDMu.Lock()
+	m.runID = "r1"
+	m.runIDMu.Unlock()
+	go func() {
+		for raw := range lw.lines {
+			var req struct {
+				ID int `json:"id"`
+			}
+			if err := json.Unmarshal([]byte(raw), &req); err != nil {
+				t.Errorf("the line was not one request: %v", err)
+				return
+			}
+			m.conn.line([]byte(fmt.Sprintf(`{"id":%d,"result":{"input_id":"i1"}}`, req.ID)))
+			sent <- raw
+		}
+	}()
+	return m, out, &plainInput{write: func(string) {}}
+}
+
 // TestAModelSwitchTakesTheNewModelAndItsWindow covers `/model <name>`:
 // the session's chat role moves on the wire, and the statusline names
 // the new model and its window.
