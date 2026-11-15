@@ -2,11 +2,9 @@ package openai
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
-	"sort"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
 // The request shaping.
@@ -32,32 +30,10 @@ type requestSettings struct {
 // requestSettings returns the settings a request is shaped by.
 func (t *Transport) requestSettings(req poo.ChatRequest) requestSettings {
 	info := req.ModelInfo
-	if zeroModelInfo(info) {
+	if support.ZeroModelInfo(info) {
 		info = t.cfg.ModelInfo
 	}
 	return requestSettings{info: info, quirks: quirksFor(info.Quirks, t.logger)}
-}
-
-// zeroModelInfo reports that a request carried no model info.
-func zeroModelInfo(info poo.ModelInfo) bool {
-	return info.Name == "" &&
-		info.Endpoint == "" &&
-		info.ModelID == "" &&
-		info.API == "" &&
-		len(info.Ops) == 0 &&
-		len(info.Inputs) == 0 &&
-		info.ContextLimit == 0 &&
-		info.MaxOutput == 0 &&
-		info.Sampling == poo.Sampling{} &&
-		info.PrefixCache == nil &&
-		info.Tools == poo.ToolCalling{} &&
-		info.Reasoning == poo.ReasoningControl{} &&
-		len(info.ReasoningLevels) == 0 &&
-		info.Temperature == "" &&
-		info.PromptCache == "" &&
-		info.PromptVariant == "" &&
-		len(info.Quirks) == 0 &&
-		len(info.Source) == 0
 }
 
 // reasoningSetting returns the reasoning setting a request uses.
@@ -87,24 +63,12 @@ func (t *Transport) reasoningSetting(req poo.ChatRequest) string {
 func (t *Transport) shapeReasoning(req poo.ChatRequest, info poo.ModelInfo, shape *requestShape) error {
 	fields, err := info.ReasoningFields(t.reasoningSetting(req))
 	if err != nil {
-		return configErrorf("%s", reasonError(err))
+		return support.ConfigErrorf("%s", support.ReasonError(err))
 	}
 	for _, field := range fields {
 		shape.setParam(field.Path, field.Value)
 	}
 	return nil
-}
-
-// reasonError renders a configuration error for the request's failure.
-//
-// The error names the setting that is at fault, so the reader knows
-// what to change.
-func reasonError(err error) string {
-	var cfg *poo.ConfigError
-	if errors.As(err, &cfg) {
-		return cfg.Field + ": " + cfg.Message
-	}
-	return err.Error()
 }
 
 // shapeSampling sets the sampling parameters the request carries.
@@ -125,17 +89,6 @@ func (t *Transport) shapeSampling(info poo.ModelInfo, shape *requestShape) {
 	}
 	if v := sampling.MinP; v != nil {
 		shape.setParam("min_p", *v)
-	}
-}
-
-// configErrorf is a failure in the transport's own configuration.
-//
-// It is a rejected request: the endpoint never saw it, and the run
-// settles with the message.
-func configErrorf(format string, args ...any) error {
-	return &poo.ProviderError{
-		Kind:    poo.ProviderKindInvalidRequest,
-		Message: fmt.Sprintf(format, args...),
 	}
 }
 
@@ -176,8 +129,8 @@ func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings)
 	// with tool_calls. In text mode the tools are described in the
 	// prompt instead, and the model answers with text that the parser
 	// reads. In auto mode both happen.
-	if mode := t.toolsMode(settings.info); mode == "native" || mode == "auto" {
-		for _, spec := range sortedTools(req.Tools) {
+	if mode := support.ToolsMode(settings.info, t.cfg.ToolsMode); mode == "native" || mode == "auto" {
+		for _, spec := range support.SortedTools(req.Tools) {
 			var ct chatTool
 			ct.Type = "function"
 			ct.Function.Name = spec.Name
@@ -223,17 +176,4 @@ func (t *Transport) maxTokens(req poo.ChatRequest, info poo.ModelInfo) int {
 		limit = 1
 	}
 	return limit
-}
-
-// sortedTools returns the tools in the order the request sends them.
-//
-// The order is by name, so two sessions that registered the same tools
-// in different orders send the same array. The array is part of the
-// prompt's prefix, and a prefix that changes breaks the endpoint's
-// cache.
-func sortedTools(specs []poo.ToolSpec) []poo.ToolSpec {
-	out := make([]poo.ToolSpec, len(specs))
-	copy(out, specs)
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
 }

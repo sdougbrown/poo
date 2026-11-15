@@ -21,7 +21,15 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/support"
 )
+
+// Attempt is one attempt of a request that failed.
+//
+// The transport reports every attempt, so a consumer can write the
+// attempt to the log and tell how a request ended. It is the core's
+// type: the core writes the attempts to the session's record.
+type Attempt = poo.Attempt
 
 // Options configures the transport.
 type Options struct {
@@ -75,7 +83,7 @@ type Transport struct {
 	cfg  Options
 	http *http.Client
 	// policy is the retry policy.
-	policy retryPolicy
+	policy support.Policy
 	// logger receives the transport's notes.
 	logger *slog.Logger
 }
@@ -90,28 +98,12 @@ func New(cfg Options) *Transport {
 			IdleConnTimeout:       90 * time.Second,
 		}}
 	}
-	policy := defaultRetryPolicy()
-	if cfg.MaxAttempts > 0 {
-		policy.attempts = cfg.MaxAttempts
-	}
-	if len(cfg.Backoff) > 0 {
-		policy.backoff = cfg.Backoff
-	}
+	policy := support.DefaultPolicy().With(cfg.MaxAttempts, cfg.Backoff)
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Transport{cfg: cfg, http: client, policy: policy, logger: logger}
-}
-
-// toolsMode returns how the run asks for tool calls.
-//
-// A model info that names a mode wins over the configured one.
-func (t *Transport) toolsMode(info poo.ModelInfo) string {
-	if mode := info.Tools.Mode; mode != "" {
-		return string(mode)
-	}
-	return t.cfg.ToolsMode
 }
 
 // chatRequest is the wire shape of a chat completion request.
@@ -237,24 +229,22 @@ type chatTool struct {
 	} `json:"function"`
 }
 
-// errorResponse is the wire shape of an OpenAI-style error.
-type errorResponse struct {
-	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    any    `json:"code"`
-	} `json:"error"`
-	// ResetsAt is when the endpoint says the limit resets. Some
-	// endpoints put it beside the error rather than in it.
-	ResetsAt any `json:"resets_at"`
-}
-
-// errorBody is the wire shape of an error payload, without the envelope.
-// A stream chunk carries the error directly rather than in the envelope.
-type errorBody struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    any    `json:"code"`
+// reporter returns the function that hears every attempt a request makes.
+//
+// The transport's own reporter is the consumer's, and the request's own is
+// the core's: the core writes the attempt to the session's record, so both
+// hear the attempt, in that order.
+func (t *Transport) reporter(request func(poo.Attempt)) func(poo.Attempt) {
+	if t.cfg.OnAttempt == nil {
+		return request
+	}
+	own := t.cfg.OnAttempt
+	return func(a poo.Attempt) {
+		own(a)
+		if request != nil {
+			request(a)
+		}
+	}
 }
 
 // Stream starts a chat completion request and returns the response stream.
@@ -278,19 +268,15 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		Quirks:   settings.info.Quirks,
 	}
 
-	reader, attempt, err := t.openWithRetry(ctx, body, req.OnAttempt, settings)
+	open := func(ctx context.Context) (support.Reader, error) {
+		return t.open(ctx, body, settings)
+	}
+	report := t.reporter(req.OnAttempt)
+	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, report)
 	if err != nil {
 		return nil, rendered, err
 	}
-	return &streamWithRetry{
-		transport: t,
-		ctx:       ctx,
-		body:      body,
-		attempt:   attempt,
-		current:   reader,
-		report:    req.OnAttempt,
-		settings:  settings,
-	}, rendered, nil
+	return support.NewRetrying(ctx, t.policy, open, report, reader, attempt), rendered, nil
 }
 
 // Fork sends a body that is byte-identical to the snapshot, apart from
@@ -324,18 +310,15 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 		return nil, err
 	}
 
-	reader, attempt, err := t.openWithRetry(ctx, body, nil, settings)
+	open := func(ctx context.Context) (support.Reader, error) {
+		return t.open(ctx, body, settings)
+	}
+	report := t.reporter(nil)
+	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, report)
 	if err != nil {
 		return nil, err
 	}
-	return &streamWithRetry{
-		transport: t,
-		ctx:       ctx,
-		body:      body,
-		attempt:   attempt,
-		current:   reader,
-		settings:  settings,
-	}, nil
+	return support.NewRetrying(ctx, t.policy, open, report, reader, attempt), nil
 }
 
 // open sends a serialized body and returns the response stream.
@@ -379,7 +362,7 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 		// The failure is classified before the request's context is
 		// released, because releasing it would replace the failure with
 		// the context's own error.
-		perr := classifyTransportError(parent, ctx, err)
+		perr := support.ClassifyTransportError(parent, ctx, err)
 		release()
 		return nil, perr
 	}
@@ -388,7 +371,7 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 		// The body is read under the request's timeout, so the context is
 		// released after it.
 		defer release()
-		return nil, classifyStatus(resp)
+		return nil, support.ClassifyStatus(resp)
 	}
 
 	// Some servers answer a failed request with a 200 and a JSON error
@@ -396,7 +379,7 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 	// so the stream is not buffered and the time to the first token
 	// measures the endpoint's latency rather than the reader's.
 	br := bufio.NewReader(resp.Body)
-	first, err := peekFirstByte(br)
+	first, err := support.PeekFirstByte(br)
 	if err != nil {
 		resp.Body.Close()
 		release()
@@ -409,7 +392,7 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 		if err != nil {
 			return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 		}
-		if perr, ok := errorInBody(errBody, resp.StatusCode, resp.Header); ok {
+		if perr, ok := support.ErrorInBody(errBody, resp.StatusCode, resp.Header); ok {
 			return nil, perr
 		}
 		return nil, &poo.ProviderError{
@@ -421,13 +404,13 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 
 	return &streamReader{
 		body:        resp.Body,
-		scanner:     newSSEScanner(br),
+		scanner:     support.SSEScanner(br),
 		filters:     t.textFilters(settings),
 		deferParsed: t.sendsTools(settings),
 		ctx:         ctx,
 		parent:      parent,
 		cancel:      cancel,
-		started:     started,
+		ttft:        support.NewTTFT(started),
 	}, nil
 }
 
@@ -496,36 +479,12 @@ func forkBody(body []byte, appended []poo.Message, maxTokens int, quirks []quirk
 	// prefix is byte-identical to the original. Every key the payload
 	// holds came from the body, except the two the fork may add; those
 	// go last, in the order they are named.
-	order, err := jsonKeyOrder(body)
+	order, err := support.JSONKeyOrder(body)
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
-	for _, k := range order {
-		seen[k] = true
-	}
-	for _, k := range []string{"messages", "max_tokens"} {
-		if !seen[k] {
-			if _, ok := payload[k]; ok {
-				order = append(order, k)
-				seen[k] = true
-			}
-		}
-	}
-	var b bytes.Buffer
-	b.WriteByte('{')
-	for i, k := range order {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		// A string always encodes.
-		key, _ := json.Marshal(k)
-		b.Write(key)
-		b.WriteByte(':')
-		b.Write(payload[k])
-	}
-	b.WriteByte('}')
-	return b.Bytes(), nil
+	order = support.WithKeys(order, payload, []string{"messages", "max_tokens"})
+	return support.EncodeObject(payload, order), nil
 }
 
 // shapeAppended applies the request-shaping quirks to the messages a fork
@@ -548,118 +507,6 @@ func shapeAppended(quirks []quirkProfile, messages []chatMessage) []chatMessage 
 	}
 	shapeThrough(quirks, shape)
 	return shape.request.Messages
-}
-
-// jsonKeyOrder returns the top-level keys of a JSON object, in the order
-// the object holds them.
-//
-// The order matters for a fork: the forked body has to be byte-identical
-// to the body it came from, apart from the fields that changed, and a
-// JSON object decoded into a map loses its order.
-func jsonKeyOrder(body []byte) ([]string, error) {
-	dec := json.NewDecoder(bytes.NewReader(body))
-	tok, err := dec.Token()
-	if err != nil {
-		return nil, &poo.ProviderError{
-			Kind:    poo.ProviderKindInvalidRequest,
-			Message: "the request snapshot does not hold a JSON body",
-		}
-	}
-	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		return nil, &poo.ProviderError{
-			Kind:    poo.ProviderKindInvalidRequest,
-			Message: "the request snapshot does not hold a JSON object",
-		}
-	}
-	var order []string
-	for dec.More() {
-		keyTok, err := dec.Token()
-		if err != nil {
-			return nil, &poo.ProviderError{
-				Kind:    poo.ProviderKindInvalidRequest,
-				Message: "the request snapshot's keys do not decode",
-			}
-		}
-		key, ok := keyTok.(string)
-		if !ok {
-			return nil, &poo.ProviderError{
-				Kind:    poo.ProviderKindInvalidRequest,
-				Message: "the request snapshot's keys do not decode",
-			}
-		}
-		order = append(order, key)
-		// The value is skipped: the payload map already holds it.
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
-			return nil, &poo.ProviderError{
-				Kind:    poo.ProviderKindInvalidRequest,
-				Message: "the request snapshot's values do not decode",
-			}
-		}
-	}
-	return order, nil
-}
-
-// peekFirstByte returns the first non-space byte of the body, without
-// consuming it.
-func peekFirstByte(br *bufio.Reader) (byte, error) {
-	for {
-		b, err := br.Peek(1)
-		if err != nil {
-			return 0, err
-		}
-		switch b[0] {
-		case ' ', '\t', '\r', '\n':
-			if _, err := br.ReadByte(); err != nil {
-				return 0, err
-			}
-		default:
-			return b[0], nil
-		}
-	}
-}
-
-// errorInBody reports whether a response body is a JSON error rather than
-// an SSE stream.
-//
-// A body that names no failure is not one: the endpoint answered with
-// something the transport cannot read, and the caller says so.
-func errorInBody(body []byte, status int, header http.Header) (*poo.ProviderError, bool) {
-	trimmed := bytes.TrimSpace(body)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil, false
-	}
-	var payload struct {
-		Error *errorBody `json:"error"`
-	}
-	if err := json.Unmarshal(trimmed, &payload); err != nil || payload.Error == nil {
-		return nil, false
-	}
-	code := codeString(payload.Error.Code)
-	message := payload.Error.Message
-	if message == "" {
-		message = "the endpoint returned an error"
-	}
-	return &poo.ProviderError{
-		Kind:     failureKind(status, code, payload.Error.Type, message, poo.ProviderKindInvalidRequest),
-		Message:  message,
-		Code:     code,
-		Status:   status,
-		ResetsAt: resetAt(header, body),
-	}, true
-}
-
-// codeString renders an error code, which a server may send as a string
-// or as a number.
-func codeString(v any) string {
-	switch c := v.(type) {
-	case string:
-		return c
-	case float64:
-		return fmt.Sprintf("%v", c)
-	default:
-		return ""
-	}
 }
 
 // ChatURL returns the chat completion URL of an endpoint.
@@ -685,7 +532,7 @@ func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 	// after a tool result is checked too.
 	for _, c := range m.Content {
 		if c.Provider != nil {
-			if err := checkProviderBlock(c.Provider); err != nil {
+			if err := support.CarryError(poo.APIChatCompletions, false, c.Provider); err != nil {
 				return chatMessage{}, nil, err
 			}
 		}
@@ -694,7 +541,7 @@ func convertMessage(m poo.Message) (chatMessage, []chatContentPart, error) {
 		switch c.Kind {
 		case poo.ContentProvider:
 			// The block's payload is opaque and has no wire field here.
-			// checkProviderBlock has already refused a required block, so
+			// CarryError has already refused a required block, so
 			// what is left is optional and omitted. The plan's "the
 			// omission is recorded" is the loop's responsibility: the
 			// transport cannot write records.
@@ -787,11 +634,11 @@ func attachmentParts(attachments []poo.ContentBlock) ([]chatContentPart, error) 
 		case poo.ContentImage:
 			parts = append(parts, chatContentPart{
 				Type:     "image_url",
-				ImageURL: &chatImageURL{URL: attachmentDataURL(attachment)},
+				ImageURL: &chatImageURL{URL: support.AttachmentDataURL(attachment)},
 			})
 		case poo.ContentAudio:
-			format, ok := audioFormats[attachment.MediaType]
-			if !ok {
+			format := support.AudioFormat(attachment.MediaType)
+			if format == "" {
 				return nil, fmt.Errorf("openai: the transport has no format name for %q", attachment.MediaType)
 			}
 			parts = append(parts, chatContentPart{
@@ -804,58 +651,4 @@ func attachmentParts(attachments []poo.ContentBlock) ([]chatContentPart, error) 
 		}
 	}
 	return parts, nil
-}
-
-// attachmentDataURL renders a block as a data URL.
-func attachmentDataURL(attachment poo.ContentBlock) string {
-	return "data:" + attachment.MediaType + ";base64," + base64.StdEncoding.EncodeToString(attachment.Data)
-}
-
-// audioFormats names the format the API takes for an audio media type.
-//
-// The audio part's format is a plain name, and wav and mp3 are the two the API
-// accepts; a media type outside them is not carried.
-var audioFormats = map[string]string{
-	"audio/wav":  "wav",
-	"audio/mpeg": "mp3",
-}
-
-// audioMediaType names the media type a format stands for.
-//
-// A quirk that rewrites the part as a URL needs the media type back, and the
-// format is the only name the part keeps.
-func audioMediaType(format string) string {
-	for mediaType, name := range audioFormats {
-		if name == format {
-			return mediaType
-		}
-	}
-	return ""
-}
-
-// checkProviderBlock applies the opaque-block rule to one block.
-//
-// Chat Completions has no field that carries opaque data, so no block can
-// be sent. An optional block is omitted, and a required one fails the
-// request, whichever API produced it.
-func checkProviderBlock(p *poo.ProviderBlock) error {
-	if p.Required {
-		return &poo.ProviderError{
-			Kind: poo.ProviderKindSessionIncompatible,
-			Message: fmt.Sprintf("the history holds a required %q block (%s) that Chat Completions cannot carry",
-				p.Type, p.API),
-		}
-	}
-	return nil
-}
-
-// classifyTransportError turns a request failure into a provider error.
-func classifyTransportError(parent, request context.Context, err error) error {
-	if parent != nil && parent.Err() != nil {
-		return parent.Err()
-	}
-	if request != nil && request.Err() != nil {
-		return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: request.Err().Error()}
-	}
-	return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 }
