@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
-	"flag"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/session"
@@ -90,12 +93,17 @@ func TestTheUnmatchedFlagChangesThePolicy(t *testing.T) {
 // empty value, such as an unset variable expanded on the command line,
 // adds no path, so it never resolves to the working directory.
 func TestAnEmptyManifestPathFlagIsSkipped(t *testing.T) {
-	var f sharedFlags
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	f.register(fs)
-	if err := fs.Parse([]string{"--feeds-path", "", "--feeds-path", "feeds", "--cli-registry-path", ""}); err != nil {
+	inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+		"models",
+		"--feeds-path", "",
+		"--feeds-path", "feeds",
+		"--cli-registry-path", "",
+	})
+	if err != nil {
 		t.Fatalf("parsing the flags: %v", err)
 	}
+	var f sharedFlags
+	f.bind(inv)
 	overrides, err := f.overrides()
 	if err != nil {
 		t.Fatalf("reading the overrides: %v", err)
@@ -234,5 +242,86 @@ func TestThePruneOlderThanFlagDeletesTheOldSessions(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(sessionDir, "old-session.jsonl")); !os.IsNotExist(err) {
 		t.Errorf("the old session is still there: %v", err)
+	}
+}
+
+// TestTheRunFlagsReachTheOptions covers the binding: every flag the run
+// declares lands in the field that reads it. A lookup that names the wrong
+// flag reads an empty value without failing, so the whole struct is
+// compared at once.
+func TestTheRunFlagsReachTheOptions(t *testing.T) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+		"run",
+		"--settings", "s.yaml",
+		"--system-prompt", "system.md",
+		"--append-system-prompt", "extra",
+		"--permission-unmatched", "ask",
+		"--session-dir", "sessions",
+		"--user-prompt-file", "user.md",
+		"--ephemeral",
+		"--profile", "search",
+		"--feeds-path", "feeds.yaml",
+		"--feeds-path", "more.yaml",
+		"--cli-registry-path", "registry.yaml",
+		"--endpoint", "http://localhost:4000/v1",
+		"--model-id", "test-model",
+		"--context-limit", "8192",
+		"--api-key-env", "POO_KEY",
+		"--tools-mode", "text",
+		"--permission-fallback", "deny",
+		"--reasoning-effort", "low",
+		"--max-turns", "3",
+		"--max-output", "1024",
+		"--log", "run.jsonl",
+		"--working-dir", "/tmp",
+		"--executor", "bwrap",
+		"--project-prompt",
+		"--timeout", "5m",
+		"--no-wait-jobs",
+		"--",
+		"a prompt",
+	})
+	if err != nil {
+		t.Fatalf("parsing the run's flags: %v", err)
+	}
+	var o runOptions
+	o.bind(inv)
+
+	want := runOptions{
+		sharedFlags: sharedFlags{
+			settingsFile:        "s.yaml",
+			systemPrompt:        "system.md",
+			appendSystemPrompt:  "extra",
+			permissionUnmatched: "ask",
+			sessionDir:          "sessions",
+			userPromptFile:      "user.md",
+			ephemeral:           true,
+			profile:             "search",
+			feedsPaths:          []string{"feeds.yaml", "more.yaml"},
+			cliRegistryPaths:    []string{"registry.yaml"},
+		},
+		endpointFlags: endpointFlags{
+			endpoint:     "http://localhost:4000/v1",
+			modelID:      "test-model",
+			contextLimit: 8192,
+			apiKeyEnv:    "POO_KEY",
+			toolsMode:    "text",
+		},
+		permissionFallback: "deny",
+		reasoningEffort:    "low",
+		maxTurns:           3,
+		maxOutput:          1024,
+		logPath:            "run.jsonl",
+		workingDir:         "/tmp",
+		executor:           "bwrap",
+		projectPrompt:      true,
+		timeout:            5 * time.Minute,
+		noWaitJobs:         true,
+	}
+	if !reflect.DeepEqual(o, want) {
+		t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
+	}
+	if len(inv.Args) != 1 || inv.Args[0] != "a prompt" {
+		t.Errorf("the prompt is %q, want one word", inv.Args)
 	}
 }

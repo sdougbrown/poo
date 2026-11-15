@@ -34,7 +34,7 @@ func TestServeSpeaksTheProtocol(t *testing.T) {
 
 	codes := make(chan int, 1)
 	go func() {
-		codes <- runServe([]string{
+		codes <- run([]string{"serve",
 			"--endpoint", endpoint.URL,
 			"--model-id", "test-model",
 			"--context-limit", "8192",

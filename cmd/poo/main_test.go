@@ -4,8 +4,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
@@ -408,5 +411,112 @@ func TestTheTextModePromptNamesTheToolsAndTheCallFormat(t *testing.T) {
 		if !strings.Contains(prompt, needle) {
 			t.Errorf("the prompt does not mention %q", needle)
 		}
+	}
+}
+
+// TestThePromptBoundary covers where the run's flags stop: a flag written
+// after the prompt's first word is prompt text, because a prompt may hold a
+// word that looks like a flag.
+func TestThePromptBoundary(t *testing.T) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), []string{"run", "say", "--log", "x"})
+	if err != nil {
+		t.Fatalf("parsing the run: %v", err)
+	}
+	if want := []string{"say", "--log", "x"}; !slices.Equal(inv.Args, want) {
+		t.Errorf("the prompt is %q, want %q", inv.Args, want)
+	}
+	if inv.Supplied["log"] {
+		t.Error("the run read the flag written after the prompt")
+	}
+}
+
+// TestThePrintPromptAfterTheTerminator covers the terminator: the words a
+// caller wrote after `--` are the prompt, even when they are spelled like
+// the run's own flags.
+func TestThePrintPromptAfterTheTerminator(t *testing.T) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), printAlias([]string{"-p", "--", "--endpoint", "x", "hello"}))
+	if err != nil {
+		t.Fatalf("parsing the alias: %v", err)
+	}
+	if want := []string{"--endpoint", "x", "hello"}; !slices.Equal(inv.Args, want) {
+		t.Errorf("the prompt is %q, want %q", inv.Args, want)
+	}
+	if inv.Supplied["endpoint"] {
+		t.Error("the run read a prompt word as its endpoint flag")
+	}
+}
+
+// TestThePrintAliasHoistsTheRunsFlags covers the alias's own work: the
+// run's flags are moved ahead of the prompt, wherever the caller wrote
+// them, and a dash word the run does not declare stays in the prompt.
+func TestThePrintAliasHoistsTheRunsFlags(t *testing.T) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), printAlias([]string{"--print", "say", "hello", "--log", "x", "--model-id", "m"}))
+	if err != nil {
+		t.Fatalf("parsing the alias: %v", err)
+	}
+	if want := []string{"say", "hello"}; !slices.Equal(inv.Args, want) {
+		t.Errorf("the prompt is %q, want %q", inv.Args, want)
+	}
+	if inv.Flags["log"] != "x" || inv.Flags["model-id"] != "m" {
+		t.Errorf("the hoisted flags are %q, want log=x and model-id=m", inv.Flags)
+	}
+}
+
+// TestThePrintAliasAsksForHelp covers the alias's help branch: a help
+// request before the prompt starts prints the run's own help, and no
+// session runs.
+func TestThePrintAliasAsksForHelp(t *testing.T) {
+	for _, alias := range [][]string{{"-p", "--help"}, {"-p", "-h"}, {"-p", "-help"}, {"--print", "--help"}} {
+		t.Run(alias[len(alias)-1]+" after "+alias[0], func(t *testing.T) {
+			code, _, stdout := runCLIWithStdout(t, alias...)
+			if code != 0 {
+				t.Fatalf("the exit code is %d, want 0", code)
+			}
+			if !strings.Contains(stdout, "poo run [prompt...]") {
+				t.Errorf("the help is not the run's own:\n%s", stdout)
+			}
+		})
+	}
+}
+
+// TestThePrintAliasLeavesHelpInAPrompt covers the other side of that
+// boundary: once the prompt has started, a help flag is prompt text, as it
+// is after `run`.
+func TestThePrintAliasLeavesHelpInAPrompt(t *testing.T) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), printAlias([]string{"-p", "fix", "the", "-h", "thing"}))
+	if err != nil {
+		t.Fatalf("parsing the alias: %v", err)
+	}
+	if want := []string{"fix", "the", "-h", "thing"}; !slices.Equal(inv.Args, want) {
+		t.Errorf("the prompt is %q, want %q", inv.Args, want)
+	}
+}
+
+// TestADispatchFailureCarriesOnePrefix covers the diagnostic the library
+// builds before dispatch: it already names the app, so the adapter must not
+// name it again.
+func TestADispatchFailureCarriesOnePrefix(t *testing.T) {
+	code, stderr := runCLI(t, "--settings")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if strings.Contains(stderr, "poo: poo:") {
+		t.Errorf("the diagnostic is prefixed twice: %q", stderr)
+	}
+	if !strings.HasPrefix(stderr, "poo:") {
+		t.Errorf("the diagnostic is %q, want the app's prefix", stderr)
+	}
+}
+
+// TestThePrintAliasFailsFastOnAMistypedFlag covers the alias's refusal:
+// before the prompt starts, a dash word the run does not declare is the
+// parser's to refuse, so a typo never becomes the prompt.
+func TestThePrintAliasFailsFastOnAMistypedFlag(t *testing.T) {
+	code, stderr := runCLI(t, "-p", "--typo", "prompt")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "unknown flag") {
+		t.Errorf("the refusal is %q, want it to name the flag", stderr)
 	}
 }

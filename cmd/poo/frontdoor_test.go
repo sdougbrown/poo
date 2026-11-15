@@ -1,8 +1,10 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,7 +16,7 @@ import (
 // everything else.
 func TestTheUIFollowsTheSettings(t *testing.T) {
 	settings := &config.Settings{Version: 1}
-	name, err := pickUI(settings, defaultUI, uis)
+	name, err := pickUI(settings, defaultUI, frontDoors)
 	if err != nil {
 		t.Fatalf("the default ui was refused: %v", err)
 	}
@@ -23,7 +25,7 @@ func TestTheUIFollowsTheSettings(t *testing.T) {
 	}
 
 	settings.UI = "repl"
-	if name, _ := pickUI(settings, defaultUI, uis); name != "repl" {
+	if name, _ := pickUI(settings, defaultUI, frontDoors); name != "repl" {
 		t.Errorf("the settings' ui is %q, want repl", name)
 	}
 }
@@ -32,7 +34,7 @@ func TestTheUIFollowsTheSettings(t *testing.T) {
 // the binary does not link: the refusal lists what it offers.
 func TestAnUnknownUIIsRefused(t *testing.T) {
 	settings := &config.Settings{Version: 1, UI: "tui"}
-	_, err := pickUI(settings, defaultUI, uis)
+	_, err := pickUI(settings, defaultUI, frontDoors)
 	if err == nil {
 		t.Fatal("an unknown ui was picked")
 	}
@@ -90,7 +92,7 @@ func TestTheUIReadsTheSettingsTheCommandResolves(t *testing.T) {
 // own flag handling: a flag it does not know is a refusal, and no
 // server starts for it.
 func TestTheReplRefusesItsFlagsBeforeTheServerStarts(t *testing.T) {
-	if code := runRepl([]string{"--no-such-flag"}); code != 2 {
+	if code := run([]string{"repl", "--no-such-flag"}); code != 2 {
 		t.Errorf("an unknown flag exited %d, want 2", code)
 	}
 }
@@ -142,5 +144,41 @@ func TestAStandaloneArgumentIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "unexpected argument") {
 		t.Errorf("the refusal does not name the argument: %q", stderr)
+	}
+}
+
+// TestAFrontDoorIsADeclaredCommand covers the doors: each carries its own
+// command, so the declaration and the launch read one entry.
+func TestAFrontDoorIsADeclaredCommand(t *testing.T) {
+	app := pooApp(io.Discard)
+	for door := range frontDoors {
+		if app.Find(door) == nil {
+			t.Errorf("the front door %q is not a declared command", door)
+		}
+	}
+	if _, ok := frontDoors[defaultUI]; !ok {
+		t.Errorf("the default ui %q is not one of the front doors", defaultUI)
+	}
+}
+
+// TestABareInvocationHandsTheSettingsToTheInterface covers the argv a bare
+// invocation dispatches: the settings file the command resolved reaches the
+// interface, so the session it opens reads what it read.
+func TestABareInvocationHandsTheSettingsToTheInterface(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want []string
+	}{
+		{name: "the settings were found", path: "/project/.poo/settings.yaml", want: []string{"repl", "--settings", "/project/.poo/settings.yaml"}},
+		{name: "no settings were found", path: "", want: []string{"repl"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := frontDoorArgs("repl", c.path)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("the argv is %q, want %q", got, c.want)
+			}
+		})
 	}
 }

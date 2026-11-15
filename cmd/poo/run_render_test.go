@@ -44,7 +44,7 @@ func TestAPromptThatFailsWithTheAddedToolTakesTheConfigExit(t *testing.T) {
 		PromptFS: fstest.MapFS{
 			"base.md": {Data: []byte("{{if gt (len .Tools) 6}}{{index .Tools 99}}{{end}}the base\n")},
 		},
-		Build: poo.BuildInfo{Name: "poo", Version: version},
+		Build: poo.BuildInfo{Name: "poo", Version: buildVersion().String()},
 	})
 	if err != nil {
 		t.Fatalf("the build refused a prompt that renders on the build's tools: %v", err)

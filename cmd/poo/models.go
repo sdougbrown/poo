@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"os"
+	"io"
 	"text/tabwriter"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/provider/catalog"
@@ -21,57 +22,55 @@ type modelsOptions struct {
 	explain string
 }
 
-// runModels executes `poo models`.
+// bind reads the models command's flags out of a parsed invocation.
+func (o *modelsOptions) bind(inv clicontract.Invocation) {
+	o.sharedFlags.bind(inv)
+	o.json = inv.Bools["json"]
+	o.explain = inv.Flags["explain"]
+}
+
+// handleModels executes `poo models`.
 //
 // The command lists the effective catalog: the models the settings
 // offer, the models the binary knows about, and what the endpoints
 // report.
-func runModels(args []string) int {
-	fs := flag.NewFlagSet("poo models", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
-
+func handleModels(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o modelsOptions
-	o.register(fs)
-	fs.BoolVar(&o.json, "json", false, "Print the models as JSON")
-	fs.StringVar(&o.explain, "explain", "", "Explain one model: the fields and the layer that set each")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
+	o.bind(inv)
 
 	settings, err := o.settings("")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo models: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo models: %v\n", err)
+		return exit{usageExitCode}
 	}
 	cat := catalog.New(catalog.Options{Settings: settings.CatalogSettings()})
 	// A probe that fails falls back to the cache and then to the
 	// curated catalog, with a warning: the list is still the list.
 	if err := cat.Refresh(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "poo models: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "poo models: %v\n", err)
+		return exit{operationalExitCode}
 	}
 
 	if o.explain != "" {
-		return explainModel(cat, o.explain)
+		return explainModel(cat, o.explain, stdout, stderr)
 	}
 	models := cat.List()
 	if o.json {
 		encoded, err := json.MarshalIndent(models, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "poo models: %v\n", err)
-			return 1
+			fmt.Fprintf(stderr, "poo models: %v\n", err)
+			return exit{operationalExitCode}
 		}
-		fmt.Println(string(encoded))
-		return 0
+		fmt.Fprintln(stdout, string(encoded))
+		return exit{}
 	}
-	printModels(models)
-	return 0
+	printModels(models, stdout)
+	return exit{}
 }
 
 // printModels prints the catalog as a table.
-func printModels(models []poo.ModelInfo) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+func printModels(models []poo.ModelInfo, stdout io.Writer) {
+	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tMODEL\tENDPOINT\tAPI\tCONTEXT\tOPS")
 	for _, model := range models {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
@@ -87,20 +86,20 @@ func printModels(models []poo.ModelInfo) {
 
 // explainModel prints the fields of a model and the layer that set
 // each of them.
-func explainModel(cat *catalog.Catalog, name string) int {
+func explainModel(cat *catalog.Catalog, name string, stdout, stderr io.Writer) exit {
 	info, fields, err := cat.Explain(name)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo models: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo models: %v\n", err)
+		return exit{usageExitCode}
 	}
-	fmt.Printf("%s (%s)\n", info.Name, info.ModelID)
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(stdout, "%s (%s)\n", info.Name, info.ModelID)
+	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "FIELD\tVALUE\tLAYER")
 	for _, field := range fields {
 		fmt.Fprintf(w, "%s\t%s\t%s\n", field.Field, field.Value, field.Layer)
 	}
 	_ = w.Flush()
-	return 0
+	return exit{}
 }
 
 // joinOps renders the operations a model serves.

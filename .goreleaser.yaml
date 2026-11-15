@@ -9,8 +9,16 @@ builds:
     main: ./cmd/poo
     env:
       - CGO_ENABLED=0
+    # The binary answers --version from its own build information: the
+    # module version the toolchain resolves from the checkout's tag, plus
+    # the stamped revision, time and modified flag. Nothing here stamps a
+    # version string, so nothing here can go stale. Both readings need the
+    # checkout's version control information in the binary: a build with
+    # -buildvcs=false reports "(devel)" and carries no revision.
+    flags:
+      - -buildvcs=true
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -s -w
     goos:
       - linux
       - darwin

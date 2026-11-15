@@ -1,9 +1,11 @@
 package main
 
 import (
-	"flag"
 	"fmt"
+	"io"
 	"os"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
@@ -17,40 +19,38 @@ type promptOptions struct {
 	projectPrompt bool
 }
 
-// runPrompt executes `poo prompt`.
+// bind reads the prompt command's flags out of a parsed invocation.
+func (o *promptOptions) bind(inv clicontract.Invocation) {
+	o.sharedFlags.bind(inv)
+	o.projectPrompt = inv.Bools["project-prompt"]
+}
+
+// handlePrompt executes `poo prompt`.
 //
 // The command prints the prompt a session would send, with the sections
 // marked, so an operator can see what the model is told.
-func runPrompt(args []string) int {
-	fs := flag.NewFlagSet("poo prompt", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
-
+func handlePrompt(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o promptOptions
-	o.register(fs)
-	fs.BoolVar(&o.projectPrompt, "project-prompt", false, "Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
+	o.bind(inv)
 	if err := o.checkUnmatched(); err != nil {
-		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo prompt: %v\n", err)
+		return exit{usageExitCode}
 	}
 
 	settings, err := o.settings("")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo prompt: %v\n", err)
+		return exit{usageExitCode}
 	}
 	workDir, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "poo prompt: %v\n", err)
+		return exit{operationalExitCode}
 	}
 	overrides, err := o.overrides()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo prompt: %v\n", err)
+		return exit{usageExitCode}
 	}
 	overrides.ProjectPrompt = o.projectPrompt
 	runtime, err := config.Build(config.BuildOptions{
@@ -66,17 +66,17 @@ func runPrompt(args []string) int {
 		// The command shows a prompt, and a prompt does not need a
 		// model: the prompt names the model, and a name may be empty.
 		NoChatModel: true,
-		Build:       poo.BuildInfo{Name: "poo", Version: version},
+		Build:       poo.BuildInfo{Name: "poo", Version: buildVersion().String()},
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo prompt: %v\n", err)
+		return exit{usageExitCode}
 	}
 	model := runtime.Options.Model
 	instructions, err := runtime.ProjectInstructions(workDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo prompt: %v\n", err)
+		return exit{usageExitCode}
 	}
 	if instructions != nil {
 		runtime.Options.Prompt = append(runtime.Options.Prompt, instructions)
@@ -87,7 +87,7 @@ func runPrompt(args []string) int {
 	// it are its own fixed templates, so the render cannot fail here.
 	sections := poo.PromptBuilder(runtime.Options).Sections()
 	for _, section := range sections {
-		fmt.Printf("--- %s ---\n%s\n", section.Name, section.Text)
+		fmt.Fprintf(stdout, "--- %s ---\n%s\n", section.Name, section.Text)
 	}
-	return 0
+	return exit{}
 }

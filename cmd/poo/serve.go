@@ -1,40 +1,17 @@
 package main
 
 import (
-	"flag"
 	"fmt"
+	"io"
 	"os"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/server"
 	"github.com/sdougbrown/poo/wire"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
-
-// serveUsage is the usage of `poo serve`.
-const serveUsage = `poo serve runs the wire protocol on stdin and stdout.
-
-Usage:
-  poo serve [flags]
-
-Serve flags:
-  --settings <file>            The settings file: JSON, TOML or YAML
-  --system-prompt <file>       The file holding the system prompt's base section
-  --append-system-prompt <t>   Text appended to the system prompt, or @file
-  --permission-unmatched <a>   What to do with a side-effecting call no rule covers
-  --session-dir <dir>          The directory the session files live in
-  --ephemeral                  Keep the sessions in memory and write no files
-  --profile <name>             The profile to run under: base, code or search
-  --feeds-path <path>          Additional feed manifest path (repeatable)
-  --cli-registry-path <path>   Additional cli registry manifest path (repeatable)
-  --endpoint <url>             The model's endpoint, e.g. http://localhost:4000/v1
-  --model-id <id>              The model identifier
-  --context-limit <n>          The model's context window in tokens
-  --api-key-env <var>          The environment variable holding the API key
-  --tools-mode <mode>          native (default), text or auto
-  --working-dir <dir>          The directory the tools work in (default: the current one)
-  --executor <name>            The executor the bash tool runs commands through: local or bwrap
-`
 
 // serveOptions are the flags of `poo serve`.
 type serveOptions struct {
@@ -46,65 +23,49 @@ type serveOptions struct {
 	executor string
 }
 
-// register adds the serve flags to a flag set.
-func (o *serveOptions) register(fs *flag.FlagSet) {
-	o.sharedFlags.register(fs)
-	o.endpointFlags.register(fs)
-	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
-	fs.StringVar(&o.executor, "executor", "", "The executor the bash tool runs commands through")
+// bind reads the serve flags out of a parsed invocation.
+func (o *serveOptions) bind(inv clicontract.Invocation) {
+	o.sharedFlags.bind(inv)
+	o.endpointFlags.bind(inv)
+	o.workingDir = inv.Flags["working-dir"]
+	o.executor = inv.Flags["executor"]
 }
 
-// parseServeFlags parses the serve flag set for the named command,
-// which is the flag set's name and the prefix of its errors. The bool
-// says the flags parsed and passed the checks the server's two front
-// doors share.
-func parseServeFlags(name, usage string, args []string) (serveOptions, bool) {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
-
-	var o serveOptions
-	o.register(fs)
-	if err := fs.Parse(args); err != nil {
-		return o, false
-	}
-	// A positional argument is a mistyped invocation: the flags say
-	// what the session runs, and nothing else does.
-	if len(fs.Args()) != 0 {
-		fmt.Fprintf(os.Stderr, "%s: unexpected argument %q\n", name, fs.Args()[0])
-		return o, false
-	}
+// validate checks the flags the server's two front doors share: a bad
+// policy value or half a model is refused before the server starts.
+func (o *serveOptions) validate(name string, stderr io.Writer) bool {
 	if err := o.checkUnmatched(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
-		return o, false
+		fmt.Fprintf(stderr, "%s: %v\n", name, err)
+		return false
 	}
 	if err := o.endpointFlags.validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
-		return o, false
+		fmt.Fprintf(stderr, "%s: %v\n", name, err)
+		return false
 	}
-	return o, true
+	return true
 }
 
-// runServe executes `poo serve`.
+// handleServe executes `poo serve`.
 //
 // The server reads the client's requests from stdin and writes its
 // answers to stdout. It returns the process exit code: zero after a
 // clean teardown, and one after a transport failure.
-func runServe(args []string) int {
-	o, ok := parseServeFlags("poo serve", serveUsage, args)
-	if !ok {
-		return 2
+func handleServe(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
+	var o serveOptions
+	o.bind(inv)
+	if !o.validate("poo serve", stderr) {
+		return exit{usageExitCode}
 	}
 
 	workDir, err := workingDirectory(o.workingDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo serve: %v\n", err)
+		return exit{usageExitCode}
 	}
 	settings, err := o.settings(workDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo serve: %v\n", err)
+		return exit{usageExitCode}
 	}
 	o.endpointFlags.apply(settings)
 	if o.executor != "" {
@@ -113,8 +74,8 @@ func runServe(args []string) int {
 	}
 	overrides, err := o.overrides()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo serve: %v\n", err)
+		return exit{usageExitCode}
 	}
 	srv, err := server.New(server.Options{
 		Settings:       settings,
@@ -125,29 +86,29 @@ func runServe(args []string) int {
 		Tools:          linkedTools(),
 		Executors:      executorRegistry(),
 		Profiles:       linkedProfiles(),
-		Build:          poo.BuildInfo{Name: "poo", Version: version},
+		Build:          poo.BuildInfo{Name: "poo", Version: buildVersion().String()},
 		SessionTools:   addFinishTool,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo serve: %v\n", err)
+		return exit{usageExitCode}
 	}
 	if warning := srv.Warning(); warning != "" {
-		fmt.Fprintf(os.Stderr, "poo serve: warning: %s\n", warning)
+		fmt.Fprintf(stderr, "poo serve: warning: %s\n", warning)
 	}
 	err = wire.Serve(wire.Options{
 		In:      os.Stdin,
-		Out:     os.Stdout,
+		Out:     stdout,
 		Factory: srv,
 		Build: protocol.Build{
 			Name:       "poo",
-			Version:    version,
-			PooVersion: version,
+			Version:    buildVersion().String(),
+			PooVersion: buildVersion().String(),
 		},
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo serve: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "poo serve: %v\n", err)
+		return exit{operationalExitCode}
 	}
-	return 0
+	return exit{}
 }

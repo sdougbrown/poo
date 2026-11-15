@@ -2,32 +2,17 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	clicontract "github.com/sdougbrown/cli-contract"
+
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/provider/catalog"
 )
-
-// stringList is a repeatable flag: each use adds one value.
-type stringList []string
-
-// String returns the values, comma separated.
-func (s *stringList) String() string { return strings.Join(*s, ", ") }
-
-// Set adds one value. An empty value adds nothing, as an empty entry
-// in the matching environment variable does, so it never resolves to
-// the working directory.
-func (s *stringList) Set(value string) error {
-	if value != "" {
-		*s = append(*s, value)
-	}
-	return nil
-}
 
 // sharedFlags are the flags every command takes.
 //
@@ -55,24 +40,56 @@ type sharedFlags struct {
 	// profile is the profile the session is built from.
 	profile string
 	// feedsPaths are feed manifest paths added to the settings' paths.
-	feedsPaths stringList
+	feedsPaths []string
 	// cliRegistryPaths are cli registry manifest paths added to the
 	// settings' paths.
-	cliRegistryPaths stringList
+	cliRegistryPaths []string
 }
 
-// register adds the shared flags to a flag set.
-func (f *sharedFlags) register(fs *flag.FlagSet) {
-	fs.StringVar(&f.settingsFile, "settings", "", "The settings file: JSON, TOML or YAML")
-	fs.StringVar(&f.systemPrompt, "system-prompt", "", "The file holding the system prompt's base section")
-	fs.StringVar(&f.appendSystemPrompt, "append-system-prompt", "", "Text appended to the system prompt, or @file")
-	fs.StringVar(&f.permissionUnmatched, "permission-unmatched", "", "What to do with a side-effecting call no rule covers: allow, ask or deny")
-	fs.StringVar(&f.sessionDir, "session-dir", "", "The directory the session files live in")
-	fs.StringVar(&f.userPromptFile, "user-prompt-file", "", "The file holding the user's own instructions")
-	fs.BoolVar(&f.ephemeral, "ephemeral", false, "Run without writing a session")
-	fs.StringVar(&f.profile, "profile", "", "The profile to run under: base, code or search")
-	fs.Var(&f.feedsPaths, "feeds-path", "Additional feed manifest path (repeatable)")
-	fs.Var(&f.cliRegistryPaths, "cli-registry-path", "Additional cli registry manifest path (repeatable)")
+// sharedFlagSpecs declares the flags every command takes, in the order
+// the help prints them.
+func sharedFlagSpecs() []clicontract.Flag {
+	return []clicontract.Flag{
+		{Name: "settings", Kind: clicontract.String, Usage: "The settings file: JSON, TOML or YAML"},
+		{Name: "system-prompt", Kind: clicontract.String, Usage: "The file holding the system prompt's base section"},
+		{Name: "append-system-prompt", Kind: clicontract.String, Usage: "Text appended to the system prompt, or @file"},
+		{Name: "permission-unmatched", Kind: clicontract.String, Usage: "What to do with a side-effecting call no rule covers: allow, ask or deny"},
+		{Name: "session-dir", Kind: clicontract.String, Usage: "The directory the session files live in"},
+		{Name: "user-prompt-file", Kind: clicontract.String, Usage: "The file holding the user's own instructions"},
+		{Name: "ephemeral", Kind: clicontract.Bool, Usage: "Run without writing a session"},
+		{Name: "profile", Kind: clicontract.String, Usage: "The profile to run under: base, code or search"},
+		{Name: "feeds-path", Kind: clicontract.Repeat, Usage: "Additional feed manifest path (repeatable)"},
+		{Name: "cli-registry-path", Kind: clicontract.Repeat, Usage: "Additional cli registry manifest path (repeatable)"},
+	}
+}
+
+// bind reads the shared flags out of a parsed invocation.
+//
+// An empty repeated value adds no path, as an empty entry in the matching
+// environment variable does, so it never resolves to the working
+// directory.
+func (f *sharedFlags) bind(inv clicontract.Invocation) {
+	f.settingsFile = inv.Flags["settings"]
+	f.systemPrompt = inv.Flags["system-prompt"]
+	f.appendSystemPrompt = inv.Flags["append-system-prompt"]
+	f.permissionUnmatched = inv.Flags["permission-unmatched"]
+	f.sessionDir = inv.Flags["session-dir"]
+	f.userPromptFile = inv.Flags["user-prompt-file"]
+	f.ephemeral = inv.Bools["ephemeral"]
+	f.profile = inv.Flags["profile"]
+	f.feedsPaths = nonEmpty(inv.Repeated["feeds-path"])
+	f.cliRegistryPaths = nonEmpty(inv.Repeated["cli-registry-path"])
+}
+
+// nonEmpty drops the empty values from a repeated flag.
+func nonEmpty(values []string) []string {
+	var kept []string
+	for _, value := range values {
+		if value != "" {
+			kept = append(kept, value)
+		}
+	}
+	return kept
 }
 
 // defaultUserPromptFile is the file the user's own instructions are read
@@ -216,13 +233,25 @@ type endpointFlags struct {
 	toolsMode string
 }
 
-// register adds the endpoint flags to a flag set.
-func (f *endpointFlags) register(fs *flag.FlagSet) {
-	fs.StringVar(&f.endpoint, "endpoint", "", "The model's endpoint")
-	fs.StringVar(&f.modelID, "model-id", "", "The model identifier")
-	fs.IntVar(&f.contextLimit, "context-limit", 0, "The model's context window in tokens")
-	fs.StringVar(&f.apiKeyEnv, "api-key-env", "", "The environment variable holding the API key")
-	fs.StringVar(&f.toolsMode, "tools-mode", "", "native, text or auto")
+// endpointFlagSpecs declares the flags that describe the endpoint and the
+// model a command talks to, in the order the help prints them.
+func endpointFlagSpecs() []clicontract.Flag {
+	return []clicontract.Flag{
+		{Name: "endpoint", Kind: clicontract.String, Usage: "The model's endpoint, e.g. http://localhost:4000/v1"},
+		{Name: "model-id", Kind: clicontract.String, Usage: "The model identifier"},
+		{Name: "context-limit", Kind: clicontract.Int, Usage: "The model's context window in tokens"},
+		{Name: "api-key-env", Kind: clicontract.String, Usage: "The environment variable holding the API key"},
+		{Name: "tools-mode", Kind: clicontract.String, Usage: "How the run asks for tool calls: native, text or auto"},
+	}
+}
+
+// bind reads the endpoint flags out of a parsed invocation.
+func (f *endpointFlags) bind(inv clicontract.Invocation) {
+	f.endpoint = inv.Flags["endpoint"]
+	f.modelID = inv.Flags["model-id"]
+	f.contextLimit = inv.Ints["context-limit"]
+	f.apiKeyEnv = inv.Flags["api-key-env"]
+	f.toolsMode = inv.Flags["tools-mode"]
 }
 
 // apply turns the flags into settings.

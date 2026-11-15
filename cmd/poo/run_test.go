@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 )
 
 // fakeEndpoint is a scripted chat endpoint.
@@ -677,5 +680,32 @@ func TestTheRunHeaderRecordsTheToolsBackgroundMode(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("the header does not name the bash tool")
+	}
+}
+
+// TestTheRunsAnswerGoesToTheAppsWriter covers the writer the command
+// surface is built with: the answer is written there, not to the process's
+// own stdout.
+func TestTheRunsAnswerGoesToTheAppsWriter(t *testing.T) {
+	body := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	endpoint := newFakeEndpoint(t, body)
+	dir := t.TempDir()
+
+	var out bytes.Buffer
+	code := clicontract.Run(pooApp(&out), pooAdapter{}, []string{
+		"run",
+		"--endpoint", endpoint.URL + "/v1",
+		"--model-id", "test-model",
+		"--context-limit", "32768",
+		"--working-dir", dir,
+		"--ephemeral",
+		"say hello",
+	}, &out, io.Discard)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0", code)
+	}
+	if !strings.Contains(out.String(), "done") {
+		t.Errorf("the writer got %q, want the run's answer", out.String())
 	}
 }

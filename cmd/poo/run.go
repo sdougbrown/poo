@@ -3,14 +3,16 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
@@ -49,36 +51,47 @@ type runOptions struct {
 	noWaitJobs bool
 }
 
-// register adds the run flags to a flag set.
-func (o *runOptions) register(fs *flag.FlagSet) {
-	o.sharedFlags.register(fs)
-	o.endpointFlags.register(fs)
-	fs.StringVar(&o.permissionFallback, "permission-fallback", "", "The decision when the asker chain is exhausted: allow or deny")
-	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "The reasoning_effort to send, for models that think only when asked")
-	fs.IntVar(&o.maxTurns, "max-turns", 0, "The turn limit")
-	fs.IntVar(&o.maxOutput, "max-output", 0, "The model's output-token limit")
-	fs.StringVar(&o.logPath, "log", "", "The session log path")
-	fs.StringVar(&o.workingDir, "working-dir", "", "The directory the tools work in")
-	fs.StringVar(&o.executor, "executor", "", "The executor the bash tool runs its commands through")
-	fs.BoolVar(&o.projectPrompt, "project-prompt", false, "Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt")
-	fs.DurationVar(&o.timeout, "timeout", 0, "The wall-clock limit for the run")
-	fs.BoolVar(&o.noWaitJobs, "no-wait-jobs", false, "Exit at the first settle; the running jobs stop through the session's close")
+// runFlagSpecs declares the flags of `poo run`: the endpoint, then the
+// run's own, in the order the help prints them.
+func runFlagSpecs() []clicontract.Flag {
+	specs := append(endpointFlagSpecs(),
+		clicontract.Flag{Name: "permission-fallback", Kind: clicontract.String, Usage: "The decision when the asker chain is exhausted: allow or deny"},
+		clicontract.Flag{Name: "reasoning-effort", Kind: clicontract.String, Usage: "The reasoning_effort to send, for models that think only when asked"},
+		clicontract.Flag{Name: "max-turns", Kind: clicontract.Int, Usage: "The turn limit"},
+		clicontract.Flag{Name: "max-output", Kind: clicontract.Int, Usage: "The model's output-token limit"},
+		clicontract.Flag{Name: "log", Kind: clicontract.String, Usage: "The session log path"},
+	)
+	specs = append(specs, toolFlagSpecs()...)
+	specs = append(specs, projectPromptFlagSpecs()...)
+	return append(specs,
+		clicontract.Flag{Name: "timeout", Kind: clicontract.Duration, Usage: "The wall-clock limit for the run, e.g. 5m"},
+		clicontract.Flag{Name: "no-wait-jobs", Kind: clicontract.Bool, Usage: "Exit at the first settle; the running jobs stop through the session's close"},
+	)
 }
 
-// runRun executes `poo run`.
-func runRun(args []string) int {
-	fs := flag.NewFlagSet("poo run", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+// bind reads the run's flags out of a parsed invocation.
+func (o *runOptions) bind(inv clicontract.Invocation) {
+	o.sharedFlags.bind(inv)
+	o.endpointFlags.bind(inv)
+	o.permissionFallback = inv.Flags["permission-fallback"]
+	o.reasoningEffort = inv.Flags["reasoning-effort"]
+	o.maxTurns = inv.Ints["max-turns"]
+	o.maxOutput = inv.Ints["max-output"]
+	o.logPath = inv.Flags["log"]
+	o.workingDir = inv.Flags["working-dir"]
+	o.executor = inv.Flags["executor"]
+	o.projectPrompt = inv.Bools["project-prompt"]
+	o.timeout = inv.Durations["timeout"]
+	o.noWaitJobs = inv.Bools["no-wait-jobs"]
+}
 
+// handleRun executes `poo run`.
+func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o runOptions
-	o.register(fs)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if err := o.validate(fs.Args()); err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 2
+	o.bind(inv)
+	if err := o.validate(inv.Args); err != nil {
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{usageExitCode}
 	}
 
 	// The working directory comes first: the settings are discovered
@@ -86,27 +99,27 @@ func runRun(args []string) int {
 	// settings.
 	workDir, err := o.workingDirectory()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{usageExitCode}
 	}
 	settings, err := o.settings(workDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{usageExitCode}
 	}
 	if err := o.apply(settings); err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{usageExitCode}
 	}
 	if settings.Roles[string(catalog.RoleChat)] == "" && o.endpoint == "" {
-		fmt.Fprintf(os.Stderr, "poo run: --endpoint, --model-id and --context-limit are required, or a settings file that names a chat model\n")
-		return 2
+		fmt.Fprintf(stderr, "poo run: --endpoint, --model-id and --context-limit are required, or a settings file that names a chat model\n")
+		return exit{usageExitCode}
 	}
 
 	overrides, err := o.overrides()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{usageExitCode}
 	}
 	overrides.ProjectPrompt = o.projectPrompt
 	overrides.PermissionFallback = o.permissionFallback
@@ -123,14 +136,14 @@ func runRun(args []string) int {
 		// asker alone, and it is there only when a decider model is
 		// configured.
 		Askers: []string{"decide"},
-		Build:  poo.BuildInfo{Name: "poo", Version: version},
+		Build:  poo.BuildInfo{Name: "poo", Version: buildVersion().String()},
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{usageExitCode}
 	}
 	if runtime.Warning != "" {
-		fmt.Fprintf(os.Stderr, "poo run: warning: %s\n", runtime.Warning)
+		fmt.Fprintf(stderr, "poo run: warning: %s\n", runtime.Warning)
 	}
 
 	// The model the run talks to. The flags name it, and they change
@@ -139,20 +152,20 @@ func runRun(args []string) int {
 	runtime.Options.Model = model
 
 	if err := addFinishTool(runtime); err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{usageExitCode}
 	}
 
 	transport, err := runtime.Transport(model)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{operationalExitCode}
 	}
 
 	interrupts := make(chan os.Signal, 2)
 	signal.Notify(interrupts, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(interrupts)
-	baseCtx, stop := context.WithCancel(context.Background())
+	baseCtx, stop := context.WithCancel(parent)
 	defer stop()
 	ctx := baseCtx
 	if o.timeout > 0 {
@@ -179,7 +192,7 @@ func runRun(args []string) int {
 			// it was built from, and the models it talked to.
 			Profile:         runtime.Profile.Name,
 			Roles:           poo.ModelRoles{Chat: &chatModel},
-			Build:           poo.BuildInfo{Name: "poo", Version: version},
+			Build:           poo.BuildInfo{Name: "poo", Version: buildVersion().String()},
 			Model:           poo.SessionModel{ModelID: model.ModelID, Endpoint: session.LoggedEndpoint(model.Endpoint), MaxOutput: model.MaxOutput},
 			ContextLimit:    model.ContextLimit,
 			ToolsMode:       poo.ToolsMode(model.Tools.Mode),
@@ -193,8 +206,8 @@ func runRun(args []string) int {
 
 	sink, err := openSink(ctx, runtime, created, o.logPath, workDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{usageExitCode}
 	}
 	defer sink.Close()
 
@@ -212,8 +225,8 @@ func runRun(args []string) int {
 
 	sess, code, err := newSession(runtime)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return code
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{code}
 	}
 	defer sess.Close()
 
@@ -225,21 +238,21 @@ func runRun(args []string) int {
 	defer close(finished)
 	go watchInterrupts(interrupts, stop, sess.Close, finished, exitProcess)
 
-	runID, err := sess.Prompt(ctx, strings.Join(fs.Args(), " "))
+	runID, err := sess.Prompt(ctx, strings.Join(inv.Args, " "))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{operationalExitCode}
 	}
 
 	// The answer and the exit code belong to the run the client asked
 	// for, not to a later run that a job result woke.
 	res, err := sess.WaitRun(ctx, runID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "poo run: %v\n", err)
+		return exit{operationalExitCode}
 	}
 
-	fmt.Fprintf(os.Stderr, "poo: settled %s after %d turn(s)\n", res.Reason, res.Turns)
+	fmt.Fprintf(stderr, "poo: settled %s after %d turn(s)\n", res.Reason, res.Turns)
 
 	// The one-shot waits for the jobs, so the work the model put in the
 	// background is done before the process goes. The answer is selected
@@ -247,20 +260,20 @@ func runRun(args []string) int {
 	// turns the wait off, and the jobs stop through the session's close.
 	answer, waitErr := runOutput(ctx, sess, res, o.noWaitJobs)
 	if waitErr != nil {
-		fmt.Fprintf(os.Stderr, "poo run: %v\n", waitErr)
+		fmt.Fprintf(stderr, "poo run: %v\n", waitErr)
 	}
 
 	// The run's answer goes to stdout: the finish result when the
 	// client's run produced one, and the last assistant message
 	// otherwise.
 	if answer != "" {
-		fmt.Println(answer)
+		fmt.Fprintln(stdout, answer)
 	}
 
 	// The held results do not keep the process alive: they wait for the
 	// next load, and the client is told which ones they are.
 	if held := sess.HeldJobs(); len(held) > 0 {
-		fmt.Fprintf(os.Stderr, "poo: %d job result(s) held for the next run: %s\n", len(held), strings.Join(held, ", "))
+		fmt.Fprintf(stderr, "poo: %d job result(s) held for the next run: %s\n", len(held), strings.Join(held, ", "))
 	}
 
 	// The exit code comes from the settle-reason table, combined
@@ -268,7 +281,7 @@ func runRun(args []string) int {
 	// wait is the client's own context - the jobs stop through the
 	// close, and the wait error is on stderr - so it does not add a
 	// code of its own.
-	return combinedExitCode(sess.SettleCodes())
+	return exit{combinedExitCode(sess.SettleCodes())}
 }
 
 // The exit code a second interrupt leaves: the one a cancelled run
@@ -535,9 +548,3 @@ func combinedExitCode(codes []int) int {
 	}
 	return 0
 }
-
-// version is the build's version.
-//
-// A release sets it with -X main.version; a build from source reports the
-// development default.
-var version = "dev"
