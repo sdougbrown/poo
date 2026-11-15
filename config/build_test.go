@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -612,6 +613,92 @@ func TestASessionReadsTheInstructionsOfItsOwnDirectory(t *testing.T) {
 	}
 	if strings.Contains(system, "the process's instructions") {
 		t.Error("the prompt holds the instructions of the directory the process was built in")
+	}
+}
+
+// TestSessionsMadeAtOnceKeepTheirOwnInstructions covers what a created
+// session adds to its prompt: the runtime's slice is shared by every
+// session the process makes, and each session's instructions are its
+// own directory's.
+func TestSessionsMadeAtOnceKeepTheirOwnInstructions(t *testing.T) {
+	built := t.TempDir()
+	dirs := []string{t.TempDir(), t.TempDir()}
+	for i, dir := range dirs {
+		text := fmt.Sprintf("the instructions of directory %d", i)
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(text), 0o644); err != nil {
+			t.Fatalf("writing the file: %v", err)
+		}
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	transport := pootest.NewTransport(pootest.Turn{Text: "done"}, pootest.Turn{Text: "done"})
+	runtime.Options.Transport = transport
+
+	sessions := make([]*poo.Session, len(dirs))
+	errs := make([]error, len(dirs))
+	var creating sync.WaitGroup
+	for i, dir := range dirs {
+		creating.Add(1)
+		go func(i int, dir string) {
+			defer creating.Done()
+			store, err := runtime.OpenStore("ephemeral", "")
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer store.Close()
+			created := &poo.SessionCreatedRecord{
+				RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+					SessionID: fmt.Sprintf("s%d", i), Mode: "ephemeral", CreatedAt: "2026-10-22T12:00:00Z",
+					WorkingDir: dir, Profile: "code", Model: poo.SessionModel{ModelID: "test-model"},
+					ContextLimit: 32768},
+			}
+			sessions[i], errs[i] = runtime.CreateSession(context.Background(), store, created)
+		}(i, dir)
+	}
+	creating.Wait()
+
+	ctx := context.Background()
+	for i, sess := range sessions {
+		if errs[i] != nil {
+			t.Fatalf("creating session %d: %v", i, errs[i])
+		}
+		runID, err := sess.Prompt(ctx, "do the thing")
+		if err != nil {
+			t.Fatalf("starting run %d: %v", i, err)
+		}
+		if _, err := sess.WaitRun(ctx, runID); err != nil {
+			t.Fatalf("waiting for run %d: %v", i, err)
+		}
+		sess.Close()
+	}
+
+	requests := transport.Requests()
+	if len(requests) != len(dirs) {
+		t.Fatalf("the endpoint got %d requests, want %d", len(requests), len(dirs))
+	}
+	for i, request := range requests {
+		system := ""
+		for _, message := range request.Messages {
+			if message.Role == poo.RoleSystem {
+				system = message.Text()
+			}
+		}
+		want := fmt.Sprintf("the instructions of directory %d", i)
+		if !strings.Contains(system, want) {
+			t.Errorf("session %d's prompt holds no %q", i, want)
+		}
+		for j := range dirs {
+			if j == i {
+				continue
+			}
+			if other := fmt.Sprintf("the instructions of directory %d", j); strings.Contains(system, other) {
+				t.Errorf("session %d's prompt holds %q", i, other)
+			}
+		}
 	}
 }
 

@@ -1808,7 +1808,11 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 		return nil, err
 	}
 	if instructions != nil {
-		opts.Prompt = append(opts.Prompt, instructions)
+		// The session's prompt is its own slice: the runtime's is shared
+		// by every session this process creates, and two of them
+		// appending at once would write the same spare slot.
+		prompt := append([]func(*prompt.Builder){}, opts.Prompt...)
+		opts.Prompt = append(prompt, instructions)
 	}
 	opts.Sink = store
 	opts.SessionID = created.SessionID
