@@ -514,9 +514,9 @@ func (r *renderer) finish() {
 	}
 	r.transcript.WriteString(body)
 	if len(textRows(body, r.width)) > r.block.previewRows {
-		// The preview showed only the tail the region had room for.
-		// Take it back and write the final body once, so the rows the
-		// preview could not show reach the history with it.
+		// The preview showed only the tail the region had room for. Take
+		// it back and write the final body once, so the rows the preview
+		// cannot show reach the history with it.
 		r.layout.clearPreview()
 		r.layout.write(body)
 	} else {

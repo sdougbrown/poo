@@ -185,9 +185,9 @@ func textRows(s string, width int) []string {
 }
 
 // rowsSeq writes rows under the last transcript row, scrolling the
-// region one row each time a row would fall below it. Every row is
-// written inside the region, so a write longer than the screen never
-// reaches the footer.
+// region one row each time a row falls below it. Every row is written
+// inside the region, so a write longer than the screen never reaches the
+// footer.
 func (l *layout) rowsSeq(rows []string) string {
 	if len(rows) == 0 {
 		return ""
@@ -229,8 +229,8 @@ func (l *layout) scrollSeq(n int) string {
 // returns the rows it shows. They stand under the last committed row and
 // are repainted as the stream grows.
 //
-// The region scrolls only over committed rows. A taller preview shows
-// its visible tail and waits for the commit.
+// The region scrolls only over committed rows, and a taller preview
+// shows its visible tail until the commit.
 func (l *layout) paintPreview(rows []string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -316,9 +316,8 @@ func (l *layout) sealPreview() {
 // spare row while a draft is typed, so the keystroke that wraps has
 // somewhere to go.
 //
-// Growing scrolls the region first. The transcript's last rows move into
-// the scrollback rather than under the editor, and the cursor keeps its
-// offset in the footer.
+// Growing scrolls the region first, so the last transcript rows move up
+// into the scrollback and the cursor keeps its offset.
 func (l *layout) ensure(footer int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -338,9 +337,9 @@ func (l *layout) ensure(footer int) bool {
 	var b strings.Builder
 	b.WriteString(seqSaveCursor)
 	if delta > 0 {
-		// Only committed rows may scroll: a pending preview row that
-		// left the region would be written again when the stream
-		// repaints. The footer's growth covers the rest.
+		// Only committed rows scroll. A pending preview row that left the
+		// region is written again when the stream repaints, and the
+		// footer's growth covers the rest.
 		k := delta
 		if committed := l.last - (l.regionTop() - 1); k > committed {
 			k = committed
