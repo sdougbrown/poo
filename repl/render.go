@@ -149,8 +149,19 @@ func newRenderer(out io.Writer) *renderer {
 	return r
 }
 
-// write appends a chunk to the transcript and the terminal.
+// write appends a chunk to the transcript and the terminal. A line the
+// repl writes for itself — a steer's echo, a notice, a failure — ends
+// the open block first, so the screen and the transcript keep one order.
 func (r *renderer) write(s string) {
+	if r.block.hint || r.live.kind != "" {
+		r.finish()
+	}
+	r.emit(s)
+}
+
+// emit writes s without touching the stream: the stream's own flushes
+// use it, so a write never re-enters the boundary that called it.
+func (r *renderer) emit(s string) {
 	r.transcript.WriteString(s)
 	if r.streams() {
 		// The editor's cursor may stand mid-row, where the person's
@@ -438,10 +449,11 @@ func isFinalByte(b rune) bool {
 func (r *renderer) finish() {
 	r.takeHint()
 	if !r.streams() {
-		if body := r.pendingBody(); body != "" {
-			r.write(body)
-		}
+		body := r.pendingBody()
 		r.resetStream()
+		if body != "" {
+			r.emit(body)
+		}
 		return
 	}
 	if r.block.stalled {

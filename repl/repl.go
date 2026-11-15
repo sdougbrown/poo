@@ -1041,17 +1041,24 @@ func (m *machine) cancelRun(runID string) {
 func (m *machine) event(evt protocol.Event, runID string, state *runState) bool {
 	switch evt.Type {
 	case "message.delta":
+		id, _ := evt.Payload["message_id"].(string)
 		kind, _ := evt.Payload["kind"].(string)
 		text, _ := evt.Payload["text"].(string)
+		// A delta that names another message starts a block of its own:
+		// two messages cannot run their words together.
+		if id != "" && state.messageID != "" && id != state.messageID {
+			m.r.finish()
+		}
+		if id != "" {
+			state.messageID = id
+		}
 		// The reply and the thinking both stream as markdown in the
 		// order they arrive. A kind the renderer does not know reads
 		// with the thinking, so it cannot join the reply's body.
 		m.r.streamDelta(kind, text)
 	case "tool.call":
-		// The message the call interrupts is done as far as the deltas
-		// go: it settles, and the call decorates the transcript below
-		// it.
-		m.r.finish()
+		// The call decorates the transcript below the message it
+		// interrupted; the call's own write settles that message first.
 		tool, _ := evt.Payload["tool"].(string)
 		summary, _ := evt.Payload["summary"].(string)
 		m.r.toolCall(tool, summary)
@@ -1078,7 +1085,6 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		state.turns++
 	case "run.settled":
 		if id, _ := evt.Payload["run_id"].(string); id != "" && id == runID {
-			m.r.finish()
 			reason, _ := evt.Payload["reason"].(string)
 			detail := settleDetail(evt.Payload)
 			// The settle's usage is the run's total, the sum of every
@@ -1177,9 +1183,6 @@ func (m *machine) handleAsk(req askRequest, input input) (int, bool) {
 				return code, true
 			}
 		default:
-			if m.state != nil {
-				m.r.finish()
-			}
 			m.openAsk(req, input)
 			return 0, false
 		}
@@ -1244,6 +1247,9 @@ type runState struct {
 	// turns is how many turns the run took: the wire's settle event
 	// does not carry the count, the turn events do.
 	turns int
+	// messageID is the message the deltas are writing. A delta that
+	// names another message ends the open block first.
+	messageID string
 }
 
 // The errors the run loop reports to the caller.

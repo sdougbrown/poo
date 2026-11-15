@@ -309,3 +309,78 @@ func rowFrom(text, want string) string {
 	}
 	return ""
 }
+
+// TestAnUnrelatedLineEndsTheOpenBlockFirst covers the line the repl can
+// write while a reply streams — a steer echo, a notice, a failure: the
+// open block settles before it, so the screen and the transcript read
+// the same order and no word is repeated or erased.
+func TestAnUnrelatedLineEndsTheOpenBlockFirst(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("go")
+	scr.typeText("draft")
+
+	r.streamDelta("text", "Half a reply")
+	r.steerPrompt("steer this")
+	r.notice("a notice")
+	r.failure("a failure")
+	r.streamDelta("text", " and the rest.")
+	r.finish()
+
+	drawn := scr.text()
+	order := []string{"Half a reply", "steer this", "a notice", "a failure", "and the rest."}
+	last := -1
+	for _, want := range order {
+		if n := countOf(t, scr, want); n != 1 {
+			t.Fatalf("%q shows %d time(s), want 1:\n%s", want, n, drawn)
+		}
+		row := rowOf(t, scr, want)
+		if row <= last {
+			t.Errorf("%q landed above the line before it:\n%s", want, drawn)
+		}
+		last = row
+	}
+	if rowOf(t, scr, promptMark+"draft") < 0 {
+		t.Errorf("the draft did not survive the lines:\n%s", drawn)
+	}
+
+	tr := plain(r.transcriptText())
+	last = -1
+	for _, want := range order {
+		if n := strings.Count(tr, want); n != 1 {
+			t.Fatalf("the transcript shows %q %d time(s), want 1:\n%s", want, n, tr)
+		}
+		at := strings.Index(tr, want)
+		if at <= last {
+			t.Errorf("the transcript reads %q out of order:\n%s", want, tr)
+		}
+		last = at
+	}
+}
+
+// TestTwoMessageIDsReadAsSeparateParagraphs covers the message
+// boundary: two replies with different ids are two blocks, not one word
+// glued to the other.
+func TestTwoMessageIDsReadAsSeparateParagraphs(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	m := &machine{r: r, status: newStatus("")}
+	state := &runState{}
+
+	m.event(deltaEvent("m1", "text", "alpha"), "r1", state)
+	m.event(deltaEvent("m2", "text", "beta"), "r1", state)
+	m.event(eventOf("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"}), "r1", state)
+
+	drawn := plain(out.String())
+	if strings.Contains(drawn, "alphabeta") {
+		t.Fatalf("the two messages glued together:\n%s", drawn)
+	}
+	alpha := strings.Index(drawn, "alpha")
+	beta := strings.Index(drawn, "beta")
+	if alpha < 0 || beta < 0 || alpha > beta {
+		t.Fatalf("the two messages do not read in order:\n%s", drawn)
+	}
+	tr := plain(r.transcriptText())
+	if strings.Contains(tr, "alphabeta") {
+		t.Fatalf("the transcript glued the two messages:\n%s", tr)
+	}
+}
