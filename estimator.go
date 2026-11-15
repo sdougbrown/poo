@@ -87,3 +87,12 @@ func estimateHistoryChars(history []Message) int {
 	}
 	return chars
 }
+
+// EstimateHistoryChars returns the serialized size of a view, in
+// characters.
+//
+// It is the core's own measurement, exported for a compaction strategy
+// that sizes a range of the history before it decides what to keep.
+func EstimateHistoryChars(messages []Message) int {
+	return estimateHistoryChars(messages)
+}

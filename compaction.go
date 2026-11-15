@@ -12,10 +12,30 @@ type Compactor interface {
 	// ShouldCompact reports whether the view should be compacted before
 	// the next request.
 	ShouldCompact(view View, budget ContextBudget) bool
-	// Compact compacts the view. The fork is the only way to reach the
-	// provider: a strategy that needs the model to write something
-	// forks the last request.
-	Compact(ctx context.Context, view View, fork ForkFunc) (Compaction, error)
+	// Compact compacts the view the environment carries.
+	Compact(ctx context.Context, in CompactionEnv) (Compaction, error)
+}
+
+// CompactionEnv is what the core hands a compactor: the view to compact,
+// the run's budget, and the two ways a strategy reaches the model.
+//
+// The view is the model's history as it stands now, after any compaction,
+// so a strategy never summarizes a window the run has moved past.
+type CompactionEnv struct {
+	// View is the model's history.
+	View View
+	// Budget is the run's context budget.
+	Budget ContextBudget
+	// Fork re-sends the last main request with messages appended. It is
+	// the cheapest way to ask the model something, and the only way to
+	// see what the model itself saw, so it is what a strategy that
+	// asks about the conversation uses.
+	Fork ForkFunc
+	// Ask sends messages of the strategy's own, with nothing before
+	// them. It is how a strategy reads the whole current view, which a
+	// fork cannot: a fork carries the window of the last main request,
+	// and that window cannot be reshaped.
+	Ask AskFunc
 }
 
 // ForkFunc sends a request that is byte-identical to the last main
@@ -23,7 +43,27 @@ type Compactor interface {
 //
 // Core binds it to the transport's Fork and to the last request's
 // snapshot, so a strategy cannot build a fork request any other way.
-type ForkFunc func(ctx context.Context, appended []Message, maxTokens int) (Message, UsageReport, error)
+type ForkFunc func(ctx context.Context, appended []Message, maxTokens int) (Reply, error)
+
+// AskFunc sends the messages alone, as a request of the strategy's own.
+//
+// The request is not a turn: it appends nothing to the history, carries
+// no tools, and the run reads nothing it produced.
+type AskFunc func(ctx context.Context, messages []Message, maxTokens int) (Reply, error)
+
+// Reply is what a request a strategy made produced.
+//
+// A strategy that records the reply needs the finish reason: a reply the
+// output limit cut short is incomplete, and recording it as if it were
+// whole hands the model a truncated note or summary.
+type Reply struct {
+	// Message is the model's reply.
+	Message Message
+	// Finish is why the model stopped.
+	Finish FinishReason
+	// Usage is what the request cost.
+	Usage UsageReport
+}
 
 // Compaction is what a compactor produced.
 //

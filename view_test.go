@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 
@@ -230,5 +231,46 @@ func TestTheViewOrderMatchesTheRequestOrder(t *testing.T) {
 		if req[i].Role != view[i].Role || req[i].Text() != view[i].Text() {
 			t.Fatalf("the view and request differ at %d: view=%s:%q request=%s:%q", i, view[i].Role, view[i].Text(), req[i].Role, req[i].Text())
 		}
+	}
+}
+
+// TestATurnSummaryNamesItsMessageRange covers the contract a compaction
+// strategy reads: a turn summary names the turn's own messages in the
+// view, so a strategy can size a turn and read what it said.
+func TestATurnSummaryNamesItsMessageRange(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the first reply", calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer"},
+	})
+	opts := testOptions(t, tr, &echoTool{result: "the output"}, &recordingSink{})
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	view := poo.SessionView(s)
+	messages := view.Messages()
+	turns := view.Turns()
+	if len(turns) < 1 {
+		t.Fatalf("the view reports %d turns, want at least 1", len(turns))
+	}
+	first := turns[0]
+	if first.Removed {
+		t.Fatalf("the view reports the first turn as removed")
+	}
+	if first.Start < 0 || first.End > len(messages) || first.Start >= first.End {
+		t.Fatalf("the first turn's range is %d to %d of %d messages", first.Start, first.End, len(messages))
+	}
+	got := messages[first.Start:first.End]
+	if !strings.Contains(got[0].Text(), "the first reply") {
+		t.Errorf("the turn's range starts at %q, want the model's reply", got[0].Text())
+	}
+	result := got[len(got)-1]
+	found := false
+	for _, c := range result.Content {
+		if c.Kind == poo.ContentToolResult && strings.Contains(c.Text, "the output") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the turn's range ends at %+v, want the tool's result", result.Content)
 	}
 }

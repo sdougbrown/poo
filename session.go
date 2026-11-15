@@ -1052,7 +1052,37 @@ func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn in
 func (s *Session) view() View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return NewHistoryView(s.modelMessagesLocked(), s.results, s.turns)
+	messages, index := s.modelViewLocked()
+	return NewHistoryView(messages, s.results, s.turnsWithRangesLocked(index))
+}
+
+// turnsWithRangesLocked returns the turn summaries with their message
+// ranges in the view.
+//
+// The view's summary carries the range because a compaction strategy
+// sizes the turns it keeps and reads the turns it summarizes. A turn a
+// compaction removed has no range: its messages left the view.
+//
+// The caller holds the session's lock.
+func (s *Session) turnsWithRangesLocked(index []int) []TurnSummary {
+	turns := make([]TurnSummary, len(s.turns))
+	copy(turns, s.turns)
+	for i := range turns {
+		if i >= len(s.spans) {
+			break
+		}
+		span := s.spans[i]
+		turns[i].Removed = span.removed
+		if span.removed {
+			continue
+		}
+		if span.start < 0 || span.end > len(s.history) || span.start > span.end {
+			continue
+		}
+		turns[i].Start = index[span.start]
+		turns[i].End = index[span.end]
+	}
+	return turns
 }
 
 // modelMessagesLocked returns the messages in the order the model reads
@@ -1065,23 +1095,40 @@ func (s *Session) view() View {
 //
 // The caller holds the session's lock.
 func (s *Session) modelMessagesLocked() []Message {
+	messages, _ := s.modelViewLocked()
+	return messages
+}
+
+// modelViewLocked returns the view's messages and where each history
+// message landed among them.
+//
+// index holds one entry per history message and one for the end of the
+// history, so a turn's range in the view is index[start] to index[end].
+// A history system message is not sent, so it lands where the next
+// message does: its range is empty.
+//
+// The caller holds the session's lock.
+func (s *Session) modelViewLocked() ([]Message, []int) {
 	messages := make([]Message, 0, len(s.history)+1)
+	index := make([]int, 0, len(s.history)+1)
 	if s.run != nil && s.run.systemMessage != nil {
 		messages = append(messages, *s.run.systemMessage)
 	}
 	for _, msg := range s.history {
+		index = append(index, len(messages))
 		if msg.Role == RoleSystem {
 			continue
 		}
 		messages = append(messages, msg)
 	}
+	index = append(index, len(messages))
 	// What the current model cannot read is left out of the request: the
 	// history keeps it, so a switch back sends it again. A provider block's
 	// omission is on the switch record; an attachment's is not, because the
 	// model's own inputs say why it was left out.
 	messages = stripForeignBlocks(messages, s.opts.Model.API)
 	messages = stripUnreadableAttachments(messages, s.opts.Model)
-	return CloneMessages(messages)
+	return CloneMessages(messages), index
 }
 
 // stripUnreadableAttachments drops the blocks whose modality the model does

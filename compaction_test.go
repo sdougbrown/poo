@@ -167,7 +167,7 @@ func TestInterruptDiscardsASuccessfulCompaction(t *testing.T) {
 	opts := testOptions(t, tr, &echoTool{result: "output"}, sink)
 	opts.Compactor = &scriptedCompactor{
 		should: func(v poo.View, b poo.ContextBudget) bool { return b.Turns == 1 && !used.Load() },
-		compact: func(ctx context.Context, _ poo.View, _ poo.ForkFunc) (poo.Compaction, error) {
+		compact: func(ctx context.Context, _ poo.CompactionEnv) (poo.Compaction, error) {
 			used.Store(true)
 			close(entered)
 			<-ctx.Done()
@@ -202,7 +202,7 @@ func TestInterruptDuringACompactionRechecksTheGate(t *testing.T) {
 	opts.Model.ContextLimit = 10000
 	opts.Compactor = &scriptedCompactor{
 		should: func(v poo.View, b poo.ContextBudget) bool { return b.Turns == 1 && !used.Load() },
-		compact: func(ctx context.Context, _ poo.View, _ poo.ForkFunc) (poo.Compaction, error) {
+		compact: func(ctx context.Context, _ poo.CompactionEnv) (poo.Compaction, error) {
 			used.Store(true)
 			close(entered)
 			<-ctx.Done()
@@ -574,16 +574,16 @@ func (c *compactionCompactor) ShouldCompact(view poo.View, budget poo.ContextBud
 }
 
 // Compact answers the scripted compaction.
-func (c *compactionCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+func (c *compactionCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	c.mu.Lock()
 	c.calls++
-	c.views = append(c.views, view)
+	c.views = append(c.views, in.View)
 	answer := c.compaction
 	c.mu.Unlock()
 	if answer == nil {
 		return poo.Compaction{}, nil
 	}
-	return answer(view)
+	return answer(in.View)
 }
 
 // Calls returns how many times the compactor compacted.
@@ -1657,4 +1657,69 @@ func TestTheSessionKeepsItsJobsAfterAnEnd(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// TestAReplacementThatStartsLaterKeepsTheEarlierOne covers the rule that
+// only a cut reaching back to the earliest turn in the view supersedes
+// what an earlier compaction wrote: a strategy that replaces a later
+// range leaves the earlier replacement in place, because the model still
+// needs it.
+func TestAReplacementThatStartsLaterKeepsTheEarlierOne(t *testing.T) {
+	replacement := func(cut poo.TurnRange, text string) poo.Compaction {
+		return poo.Compaction{
+			Strategy: "stepwise",
+			Replace: &poo.RangeReplacement{
+				Cut:      cut,
+				Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, text)},
+			},
+		}
+	}
+	compactor := &compactionCompactor{
+		should: func(view poo.View, budget poo.ContextBudget) bool {
+			turns := len(view.Turns())
+			return turns == 1 || turns == 3
+		},
+	}
+	compactor.compaction = func(view poo.View) (poo.Compaction, error) {
+		if compactor.Calls() == 1 {
+			return replacement(poo.TurnRange{First: 1, Last: 1}, "the first summary"), nil
+		}
+		return replacement(poo.TurnRange{First: 3, Last: 3}, "the second summary"), nil
+	}
+	tr := scripted([]fakeResponse{
+		{text: "one", calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "two", calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{text: "three", calls: []poo.ToolCall{{CallID: "c3", Name: "echo", Arguments: []byte(`{"text":"three"}`)}}},
+		{text: "the answer"},
+	})
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	if got := compactor.Calls(); got != 2 {
+		t.Fatalf("the compactor ran %d times, want 2", got)
+	}
+	reqs := tr.Requests()
+	held := 0
+	for _, m := range reqs[len(reqs)-1].Messages {
+		if m.Origin != poo.OriginCompaction {
+			continue
+		}
+		held++
+	}
+	if held != 2 {
+		t.Fatalf("the last request holds %d compaction messages, want 2", held)
+	}
+
+	// The turns the two cuts covered left the view, and the view says so.
+	removed := 0
+	for _, turn := range poo.SessionView(s).Turns() {
+		if turn.Removed {
+			removed++
+		}
+	}
+	if removed != 2 {
+		t.Errorf("the view reports %d removed turns, want 2", removed)
+	}
 }

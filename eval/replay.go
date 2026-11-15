@@ -444,7 +444,7 @@ func (c *recordedCompactor) ShouldCompact(view poo.View, budget poo.ContextBudge
 }
 
 // Compact hands out the next recorded compaction.
-func (c *recordedCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+func (c *recordedCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.applied >= len(c.compactions) {

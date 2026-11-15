@@ -255,14 +255,46 @@ func (s *Session) replaceViewLocked(r RangeReplacement) (compactionView, error) 
 		m.DeliveryNote = nil
 		replacement = append(replacement, m)
 	}
+	// A replacement whose cut starts at the earliest turn still in the
+	// view supersedes the replacement an earlier compaction left there:
+	// the model reads one summary of the region, not a stack of them.
+	// Every compaction-origin message before the cut is one of those
+	// replacements, because a compaction inserts its messages at the
+	// first turn it covers.
+	//
+	// Provider data is never superseded. A window is the model's own
+	// compacted state, and nothing but the provider can write it again,
+	// so a replacement that reaches over one leaves it in place.
+	supersede := false
+	for _, span := range s.spans {
+		if span.removed {
+			continue
+		}
+		supersede = span.turn == r.Cut.First
+		break
+	}
+
 	// The cut's messages leave the view. The messages between two cut
 	// turns stay: a message that arrived between the turns is not part
 	// of either.
 	out := make([]Message, 0, len(s.history))
 	pos := 0
 	removed := 0
+	superseded := 0
 	for i, span := range spans {
-		out = append(out, s.history[pos:span.start]...)
+		seg := s.history[pos:span.start]
+		if i == 0 && supersede {
+			kept := make([]Message, 0, len(seg))
+			for _, m := range seg {
+				if m.Origin == OriginCompaction && !hasProviderBlock(m) {
+					continue
+				}
+				kept = append(kept, m)
+			}
+			superseded = len(seg) - len(kept)
+			seg = kept
+		}
+		out = append(out, seg...)
 		if i == 0 {
 			out = append(out, replacement...)
 		}
@@ -274,7 +306,7 @@ func (s *Session) replaceViewLocked(r RangeReplacement) (compactionView, error) 
 	// The spans after the cut move with the view, and the cut's own
 	// turns are gone.
 	newSpans := append([]turnSpan(nil), s.spans...)
-	shift := len(replacement) - removed
+	shift := len(replacement) - removed - superseded
 	for i := range newSpans {
 		switch {
 		case newSpans[i].turn < r.Cut.First:
@@ -393,4 +425,18 @@ func (s *Session) windowViewLocked(w ProviderWindow) (compactionView, error) {
 		spans:             spans,
 		clearSystemPrompt: true,
 	}, nil
+}
+
+// hasProviderBlock reports that a message carries data the provider
+// wrote.
+//
+// A compaction never rewrites or drops such a message: the payload is the
+// provider's own state, and only the provider can write it again.
+func hasProviderBlock(m Message) bool {
+	for _, c := range m.Content {
+		if c.Provider != nil {
+			return true
+		}
+	}
+	return false
 }

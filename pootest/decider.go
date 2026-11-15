@@ -235,10 +235,10 @@ func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool 
 }
 
 // Compact answers the scripted compaction.
-func (c *Compactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	c.mu.Lock()
 	c.calls++
-	c.views = append(c.views, view)
+	c.views = append(c.views, in.View)
 	err := c.err
 	compaction := c.compaction
 	c.mu.Unlock()
@@ -252,12 +252,12 @@ func (c *Compactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFun
 // Fork calls the fork function and records the call.
 //
 // It is a helper for a compactor that wants to reach the model.
-func (c *Compactor) Fork(ctx context.Context, fork poo.ForkFunc, appended []poo.Message, maxTokens int) (poo.Message, poo.UsageReport, error) {
+func (c *Compactor) Fork(ctx context.Context, fork poo.ForkFunc, appended []poo.Message, maxTokens int) (poo.Reply, error) {
 	c.mu.Lock()
 	c.forks = append(c.forks, ForkCall{Appended: appended, MaxTokens: maxTokens})
 	c.mu.Unlock()
 	if fork == nil {
-		return poo.Message{}, poo.UsageReport{}, fmt.Errorf("pootest: there is no fork to call")
+		return poo.Reply{}, fmt.Errorf("pootest: there is no fork to call")
 	}
 	return fork(ctx, appended, maxTokens)
 }
