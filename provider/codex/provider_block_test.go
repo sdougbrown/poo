@@ -291,6 +291,78 @@ func TestARequiredForeignBlockInASystemMessageFailsTheRequest(t *testing.T) {
 	}
 }
 
+// emptyBlock is a block this API produced that carries no payload.
+func emptyBlock(required bool) poo.ProviderBlock {
+	return poo.ProviderBlock{
+		API:      poo.APIResponses,
+		Type:     "compaction",
+		Required: required,
+	}
+}
+
+// TestARequiredEmptyBlockFailsTheRequest covers a required block of this API
+// with no payload to give back. The request is refused, in a stream and in a
+// fork's appended messages, rather than shaped as if the block were absent.
+func TestARequiredEmptyBlockFailsTheRequest(t *testing.T) {
+	srv := newServer(t, completedStream)
+	tr := newTransport(srv.URL)
+
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		MaxTokens: 64,
+		Messages:  []poo.Message{userMessage(emptyBlock(true))},
+	})
+	assertSessionIncompatible(t, err)
+	if n := srv.count(); n != 0 {
+		t.Errorf("the endpoint received %d requests, want none: the history holds required data the request cannot drop", n)
+	}
+
+	reader, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	read(t, reader)
+	reader.Close()
+
+	_, err = tr.Fork(context.Background(), rendered, []poo.Message{userMessage(emptyBlock(true))}, 64)
+	assertSessionIncompatible(t, err)
+	if n := srv.count(); n != 1 {
+		t.Errorf("the endpoint received %d requests, want the one the fork was refused for", n)
+	}
+}
+
+// TestAnOptionalEmptyBlockIsOmitted covers an optional block with no payload:
+// the text travels and the empty block is left out.
+func TestAnOptionalEmptyBlockIsOmitted(t *testing.T) {
+	srv := newServer(t, completedStream)
+	tr := newTransport(srv.URL)
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		MaxTokens: 64,
+		Messages:  []poo.Message{userMessage(emptyBlock(false))},
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	if n := srv.count(); n != 1 {
+		t.Fatalf("the endpoint received %d requests, want the one that carried the text", n)
+	}
+	req := srv.request(t, 0)
+	input := field[[]map[string]any](t, req, "input")
+	if len(input) != 1 {
+		t.Fatalf("the request carries %d input items, want the user message alone: %s", len(input), req.body)
+	}
+	expectJSON(t, input[0], `{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}`)
+}
+
 // assertSessionIncompatible reports that the failure is the one a history
 // this API cannot carry settles with.
 func assertSessionIncompatible(t *testing.T, err error) {
