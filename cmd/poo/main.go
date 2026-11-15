@@ -30,11 +30,12 @@ func run(args []string) int {
 //
 // `poo -p "prompt" [flags]` is `poo run`, and the alias takes the run's
 // flags before or after the prompt: they are moved ahead of it, and only
-// the flags the run declares move. A help request is the run's help,
-// wherever it is written.
+// the flags the run declares move.
 //
-// The words follow a terminator, so a prompt the caller wrote after `--`
-// stays the prompt even when it is spelled like a flag.
+// The prompt's boundary is the run's: a help request before its first word
+// is the run's help, and a dash word after it is prompt text. The words
+// follow a terminator, so a prompt the caller wrote after `--` stays the
+// prompt even when it is spelled like a flag.
 func printAlias(args []string) []string {
 	if args[0] != "-p" && args[0] != "--print" {
 		return args
