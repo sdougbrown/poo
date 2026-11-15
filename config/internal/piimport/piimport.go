@@ -39,6 +39,9 @@ type Provider struct {
 	APIKeyEnv string
 	// APIKey is the key itself, when poo can send it.
 	APIKey string
+	// ToolsMode is how the provider asks for tool calls. Empty means
+	// whatever the model needs.
+	ToolsMode string
 	// Models are the models the provider serves.
 	Models []Model
 }
@@ -149,7 +152,7 @@ func Read(path string) (File, error) {
 		env, key := keyFromValue(definition.APIKey)
 		if env == "" && key == "" {
 			if !authRead {
-				keys, err = readAuth(filepath.Join(filepath.Dir(path), authFile))
+				keys, err = readAuth(filepath.Join(filepath.Dir(path), AuthFileName))
 				if err != nil {
 					return File{}, err
 				}
@@ -194,9 +197,18 @@ func Read(path string) (File, error) {
 }
 
 // wireAPI maps a provider's api name onto the one poo speaks.
+//
+// pi's Codex API is the Responses API with pi's own name for it, and only the
+// Codex provider may speak it: another provider that named it would be read as
+// a chat-completions endpoint, or handed a credential that is not its own.
 func wireAPI(provider, api string) (string, error) {
-	if api == "" || api == "openai-completions" {
+	switch api {
+	case "", "openai-completions":
 		return "", nil
+	case "openai-codex-responses":
+		if provider == CodexProvider {
+			return string(poo.APIResponses), nil
+		}
 	}
 	return "", fmt.Errorf("the provider %s speaks %q, which poo does not know", provider, api)
 }
@@ -219,9 +231,9 @@ type credential struct {
 	Key string `json:"key"`
 }
 
-// authFile is the name pi's credentials file goes by, beside the
+// AuthFileName is the name pi's credentials file goes by, beside the
 // models file.
-const authFile = "auth.json"
+const AuthFileName = "auth.json"
 
 // readAuth reads pi's auth.json: credentials by provider name. A file
 // that is not there is a file without credentials, not a failure.

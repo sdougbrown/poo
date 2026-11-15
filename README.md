@@ -80,7 +80,7 @@ credentials. A discovered `models.json` that does not read fails the
 load, as a settings file that does not decode does. A file the
 operator put there is never skipped in silence.
 
-`models_file` is the one setting whose relative path answers to the
+`models_file` and `pi_auth_file` resolve relative paths against the
 settings file's directory. `cli_registry.paths` and `feeds.paths`
 answer to the working directory.
 
@@ -90,6 +90,34 @@ variable, or `api_key` for a key written in the settings), `models`
 pair an endpoint with a model id, and `roles` assign a model to a
 role. `roles.chat` that names an imported model runs it like any
 other.
+
+**pi's Codex provider.** The pi provider `openai-codex` is built in.
+Its models are named `openai-codex/<id>`, and its credential is pi's
+OAuth entry in an `auth.json`. Name the file with `pi_auth_file` — a
+relative path resolves against the settings file's own directory, like
+`models_file` — or let poo read the `auth.json` beside the models file:
+
+```yaml
+pi_auth_file: ~/.pi/agent/auth.json
+roles:
+  chat: openai-codex/gpt-6.1-sol
+```
+
+No provider in `models.json` is needed for this. When a pi auth file is
+there, the built-in provider adds the Codex models pi bundles; a
+`models_file` or the settings' own `models` still win on a name
+collision, and a model pi adds later can be named under the same
+provider. The built-in list is a snapshot, so a newer id is a `models`
+entry away.
+
+poo reads the credential only for the provider id `openai-codex`, and
+sends it only to the built-in `https://chatgpt.com/backend-api`
+endpoint: the provider pointed anywhere else is refused, so an OAuth
+token cannot reach an endpoint the operator did not name. A token that
+pi would refresh is refreshed under the lock pi takes, and pi's file is
+written back with the refreshed Codex entry and every other provider's
+entry as it was found. The Codex models serve chat turns, so they cannot
+be the decider, and the Codex endpoint is not probed for a model list.
 
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as

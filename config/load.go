@@ -101,7 +101,7 @@ func parse(data []byte, format Format, dir string) (*Settings, error) {
 		return nil, decodeError(err)
 	}
 	settings.Permission.askersNamed = namesAskers(normalized)
-	if err := settings.importModelsFile(dir); err != nil {
+	if err := settings.importPi(dir); err != nil {
 		return nil, err
 	}
 	if err := settings.Check(); err != nil {

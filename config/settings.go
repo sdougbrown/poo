@@ -76,8 +76,22 @@ type Settings struct {
 	// holds an api credential for the provider.
 	//
 	// A relative path resolves against the settings file's own directory. With
-	// none named, a models.json beside the settings file is imported.
+	// none named, a models.json beside the settings file is imported. The
+	// auth.json beside the file is also the built-in Codex provider's
+	// credential.
 	ModelsFile string `json:"models_file,omitempty"`
+	// PiAuthFile names the auth.json pi keeps its credentials in. poo reads
+	// the openai-codex OAuth credential from it and writes a refreshed one
+	// back under the lock pi takes; no other endpoint ever sees it.
+	//
+	// A relative path resolves against the settings file's own directory,
+	// like models_file. With none named, an auth.json beside the models file
+	// is used, and pi's built-in Codex provider is offered when that file is
+	// there.
+	PiAuthFile string `json:"pi_auth_file,omitempty"`
+	// piAuthPath is the resolved path of pi's auth.json, empty when neither
+	// the settings nor a models file name one.
+	piAuthPath string
 }
 
 // Endpoint is one endpoint in the settings.

@@ -146,7 +146,12 @@ func (c Checker) rules() []rule {
 				// failure table, the retry policy and the SSE scanner a
 				// transport composes.
 				m + "/provider/internal/support",
+				// The settings package builds a Codex transport and
+				// reads pi's credential for it, so the server reaches
+				// both through the build.
+				m + "/provider/codex",
 				m + "/provider/openai",
+				m + "/provider/piauth",
 				m + "/session",
 				m + "/wire",
 				m + "/wire/protocol",

@@ -19,6 +19,7 @@ import (
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/compact/summary"
+	"github.com/sdougbrown/poo/config/internal/piimport"
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/feed"
@@ -1046,6 +1047,10 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			Endpoint:  endpoint.Endpoint,
 			APIKeyEnv: endpoint.APIKeyEnv,
 			APIKey:    endpoint.APIKey,
+			// The Codex provider's models are declared with the provider:
+			// the endpoint has no model list, and a probe would reach it
+			// with no credential.
+			SkipProbe: name == piimport.CodexProvider,
 		}
 	}
 
@@ -2211,6 +2216,9 @@ func (r *Runtime) DeciderModel() (poo.ModelInfo, error) {
 // environment variable when the environment holds it, else the literal
 // the settings carry.
 func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
+	if r.codexModel(model) {
+		return r.codexTransport(model)
+	}
 	apiKey := r.apiKey(model.Name)
 	transport := openai.New(openai.Options{
 		Endpoint:   model.Endpoint,
@@ -2270,6 +2278,17 @@ func (r *Runtime) DeciderFor(name string) (poo.ModelInfo, decide.Decider, error)
 // model has to serve that operation: a model that cannot answer a
 // question is not a decider.
 func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
+	// The Codex provider serves chat turns only, so a decider built for it would
+	// ask an endpoint a question it does not answer. The settings failure names
+	// the provider, which is what the operator can act on.
+	if r.codexModel(model) {
+		return nil, &Error{
+			Code:  CodeUnsupported,
+			Field: "roles.decider",
+			Message: fmt.Sprintf("the model %q is served by the %s provider, which does not answer decision questions",
+				model.Name, piimport.CodexProvider),
+		}
+	}
 	timeout := time.Duration(0)
 	if r.Settings.Decider.TimeoutMS != nil {
 		timeout = time.Duration(*r.Settings.Decider.TimeoutMS) * time.Millisecond
