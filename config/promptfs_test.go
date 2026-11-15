@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -52,6 +53,27 @@ func TestABinarysPromptDirectoryReplacesTheDefaults(t *testing.T) {
 	}
 	if strings.Contains(text, "Keep going until the task is done.") {
 		t.Errorf("the prompt still holds the embedded base:\n%s", text)
+	}
+}
+
+// TestABinarysPromptDirectoryReplacesTheSkillsSection covers the skills
+// section in the prompt directory: a binary that ships skills.md renders
+// with the session's skills, the way the catalog's own does.
+func TestABinarysPromptDirectoryReplacesTheSkillsSection(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	runtime, err := buildWithPrompt(t, theModelSettings+"skills:\n  user_path: "+dir+"\n", fstest.MapFS{
+		"skills.md": {Data: []byte("The binary's skills:\n{{range .Skills}}{{.Name}} ({{.Path}})\n{{end}}")},
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "The binary's skills:") {
+		t.Errorf("the prompt does not hold the directory's skills section:\n%s", text)
+	}
+	if !strings.Contains(text, "review (") {
+		t.Errorf("the directory's section renders without the session's skills:\n%s", text)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/poo/skill"
 )
@@ -209,5 +210,28 @@ func TestLoadCutsALongSingleSentence(t *testing.T) {
 	trimmed := strings.TrimSuffix(description, "\u2026")
 	if strings.HasSuffix(trimmed, "wor") || !strings.HasSuffix(trimmed, "word") {
 		t.Errorf("the cut landed inside a word: %q", description)
+	}
+}
+
+// TestLoadCutsNonLatinTextWhereItCanBeRead covers a description whose
+// characters take more than one byte: the cut lands on a character
+// boundary, so the catalog never carries half a rune.
+func TestLoadCutsNonLatinTextWhereItCanBeRead(t *testing.T) {
+	dir := t.TempDir()
+	writeSkill(t, dir, "wide", front("description: "+strings.Repeat("\u4e16", 210)+"\n"))
+
+	set, err := skill.Load(dir)
+	if err != nil {
+		t.Fatalf("loading the skills: %v", err)
+	}
+	got := set.Skills()
+	if len(got) != 1 {
+		t.Fatalf("the set holds %d skills, want one", len(got))
+	}
+	if !utf8.ValidString(got[0].Description) {
+		t.Errorf("the description is not valid UTF-8: %q", got[0].Description)
+	}
+	if runes := len([]rune(got[0].Description)); runes > 201 {
+		t.Errorf("the description is %d runes, want 200 plus the ellipsis", runes)
 	}
 }

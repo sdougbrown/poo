@@ -137,10 +137,13 @@ func oneLine(description string) string {
 		line = line[:i+1]
 	}
 	const limit = 200
-	if len(line) <= limit {
+	// The cut is counted in runes, so a description in a language whose
+	// characters take several bytes is cut where it can still be read.
+	runes := []rune(line)
+	if len(runes) <= limit {
 		return line
 	}
-	cut := line[:limit]
+	cut := string(runes[:limit])
 	if i := strings.LastIndex(cut, " "); i > 0 {
 		cut = cut[:i]
 	}

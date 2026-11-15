@@ -551,32 +551,37 @@ func (r *Runtime) resolveSkills(opts BuildOptions, workingDir string) error {
 	dirs := make([]string, 0, len(settings.Paths)+1)
 	switch {
 	case settings.UserPath != nil && *settings.UserPath != "":
-		path, err := expandHome(*settings.UserPath)
+		path, err := r.skillDir("skills.user_path", *settings.UserPath, false)
 		if err != nil {
-			return &Error{
-				Code:    CodeInvalid,
-				Field:   "skills.user_path",
-				Message: "the skills directory cannot be read",
-				Err:     err,
-			}
+			return err
 		}
-		dirs = append(dirs, path)
+		if path != "" {
+			dirs = append(dirs, path)
+		}
 	case settings.Default != nil && *settings.Default:
-		path, err := expandHome(skill.DefaultDir)
+		// The default is a convention, not a promise: a person who has no
+		// skills directory is not told about it every session.
+		path, err := r.skillDir("skills.default", skill.DefaultDir, true)
 		if err != nil {
-			return &Error{
-				Code:    CodeInvalid,
-				Field:   "skills.default",
-				Message: "the skills directory cannot be read",
-				Err:     err,
-			}
+			return err
 		}
-		dirs = append(dirs, path)
+		if path != "" {
+			dirs = append(dirs, path)
+		}
 	}
 	paths := append(append([]string{}, settings.Paths...), opts.Overrides.SkillsPaths...)
 	for _, path := range againstDir(paths, workingDir) {
-		if _, err := os.Stat(path); err != nil {
+		// A directory that is not there, and a file named where a
+		// directory belongs, are both dropped with a warning: skills are
+		// guidance a session offers, and a path that is not a directory
+		// of them leaves it with less to offer rather than broken.
+		info, err := os.Stat(path)
+		if err != nil {
 			r.warn(fmt.Sprintf("skills.paths: %s holds no skills: %v", path, err))
+			continue
+		}
+		if !info.IsDir() {
+			r.warn(fmt.Sprintf("skills.paths: %s is not a directory", path))
 			continue
 		}
 		dirs = append(dirs, path)
@@ -593,6 +598,10 @@ func (r *Runtime) resolveSkills(opts BuildOptions, workingDir string) error {
 			Err:     err,
 		}
 	}
+	// The read tool reaches the directories that loaded, whatever the
+	// catalog shows: a skill the model may not invoke is still one the
+	// person may ask it to follow.
+	r.Options.ReadRoots = append(r.Options.ReadRoots, set.Dirs()...)
 	if set.Len() == 0 {
 		return nil
 	}
@@ -600,11 +609,32 @@ func (r *Runtime) resolveSkills(opts BuildOptions, workingDir string) error {
 	r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 		b.SetTemplate(skill.SectionName, set.Template())
 	})
-	// The catalog tells the model to read a skill, and a skill is not in
-	// the tree the session works in: the read tool reaches these
-	// directories, and the tools that change or search a tree do not.
-	r.Options.ReadRoots = append(r.Options.ReadRoots, set.Dirs()...)
 	return nil
+}
+
+// skillDir resolves one skills directory the settings named, and reports
+// whether it holds anything to read.
+//
+// A named directory that is not there is dropped rather than failing the
+// build, the rule the paths follow. quiet keeps a convention's absence
+// out of the warnings: the default directory is not a promise.
+func (r *Runtime) skillDir(field, named string, quiet bool) (string, error) {
+	path, err := expandHome(named)
+	if err != nil {
+		return "", &Error{
+			Code:    CodeInvalid,
+			Field:   field,
+			Message: "the skills directory cannot be read",
+			Err:     err,
+		}
+	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		if !quiet {
+			r.warn(fmt.Sprintf("%s: %s holds no skills", field, path))
+		}
+		return "", nil
+	}
+	return path, nil
 }
 
 // warn adds a warning to the runtime's own, so a command prints it with
