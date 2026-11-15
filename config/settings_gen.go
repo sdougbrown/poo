@@ -49,6 +49,9 @@ type SettingsFields struct {
 	SessionRetentionMaxSessions     *float64 "json:\"session.retention.max_sessions,omitempty\""
 	SessionUserPrompt               *bool    "json:\"session.user_prompt,omitempty\""
 	SessionUserPromptFile           *string  "json:\"session.user_prompt_file,omitempty\""
+	SkillsDefault                   *bool    "json:\"skills.default,omitempty\""
+	SkillsPaths                     []string "json:\"skills.paths,omitempty\""
+	SkillsUserPath                  *string  "json:\"skills.user_path,omitempty\""
 	SystemPromptAppend              *string  "json:\"system_prompt.append,omitempty\""
 	SystemPromptBaseFile            *string  "json:\"system_prompt.base_file,omitempty\""
 	SystemPromptRemove              []string "json:\"system_prompt.remove,omitempty\""
@@ -121,6 +124,9 @@ type SettingsAvailability struct {
 	SessionRetentionMaxSessions     FieldStatus
 	SessionUserPrompt               FieldStatus
 	SessionUserPromptFile           FieldStatus
+	SkillsDefault                   FieldStatus
+	SkillsPaths                     FieldStatus
+	SkillsUserPath                  FieldStatus
 	SystemPromptAppend              FieldStatus
 	SystemPromptBaseFile            FieldStatus
 	SystemPromptRemove              FieldStatus
@@ -249,6 +255,12 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	SessionUserPromptSatisfied := f.SessionUserPrompt != nil
 	SessionUserPromptFileEnabled := true
 	SessionUserPromptFileSatisfied := func() bool { v := f.SessionUserPromptFile; return v != nil && *v != "" }()
+	SkillsDefaultEnabled := !(f.SkillsUserPath != nil)
+	SkillsDefaultSatisfied := f.SkillsDefault != nil
+	SkillsPathsEnabled := true
+	SkillsPathsSatisfied := len(f.SkillsPaths) > 0
+	SkillsUserPathEnabled := !(f.SkillsDefault != nil)
+	SkillsUserPathSatisfied := func() bool { v := f.SkillsUserPath; return v != nil && *v != "" }()
 	SystemPromptAppendEnabled := true
 	SystemPromptAppendSatisfied := func() bool { v := f.SystemPromptAppend; return v != nil && *v != "" }()
 	SystemPromptBaseFileEnabled := !(f.SystemPromptReplace != nil)
@@ -1335,6 +1347,84 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		SkillsDefault: FieldStatus{
+			Required:  SkillsDefaultEnabled && false,
+			Enabled:   SkillsDefaultEnabled,
+			Satisfied: SkillsDefaultSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if f.SkillsUserPath != nil && "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own" != "" {
+					reasons = append(reasons, "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if f.SkillsUserPath != nil && "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own" != "" {
+					reasons = append(reasons, "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		SkillsPaths: FieldStatus{
+			Required:  SkillsPathsEnabled && false,
+			Enabled:   SkillsPathsEnabled,
+			Satisfied: SkillsPathsSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		SkillsUserPath: FieldStatus{
+			Required:  SkillsUserPathEnabled && false,
+			Enabled:   SkillsUserPathEnabled,
+			Satisfied: SkillsUserPathSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if f.SkillsDefault != nil && "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own" != "" {
+					reasons = append(reasons, "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own")
+				}
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if f.SkillsDefault != nil && "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own" != "" {
+					reasons = append(reasons, "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own")
+				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		SystemPromptAppend: FieldStatus{
 			Required:  SystemPromptAppendEnabled && false,
 			Enabled:   SystemPromptAppendEnabled,
@@ -1963,6 +2053,13 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "SessionUserPromptFile":
 		v := f.SessionUserPromptFile
 		return v != nil && *v != ""
+	case "SkillsDefault":
+		return f.SkillsDefault != nil
+	case "SkillsPaths":
+		return len(f.SkillsPaths) > 0
+	case "SkillsUserPath":
+		v := f.SkillsUserPath
+		return v != nil && *v != ""
 	case "SystemPromptAppend":
 		v := f.SystemPromptAppend
 		return v != nil && *v != ""
@@ -2158,6 +2255,8 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "SessionMode", RuleType: "check", Expr: "f.SessionMode != nil && isValidRegexMatch(*f.SessionMode, \"^(logged|ephemeral)$\")", Reason: "session.mode must be logged or ephemeral"},
 	{Field: "SessionRetentionMaxAgeDays", RuleType: "check", Expr: "f.SessionRetentionMaxAgeDays != nil && *f.SessionRetentionMaxAgeDays >= 0", Reason: "session.retention.max_age_days must not be negative"},
 	{Field: "SessionRetentionMaxSessions", RuleType: "check", Expr: "f.SessionRetentionMaxSessions != nil && *f.SessionRetentionMaxSessions >= 0", Reason: "session.retention.max_sessions must not be negative"},
+	{Field: "SkillsDefault", RuleType: "disables", Expr: "f.SkillsUserPath != nil", Reason: "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own"},
+	{Field: "SkillsUserPath", RuleType: "disables", Expr: "f.SkillsDefault != nil", Reason: "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own"},
 	{Field: "SystemPromptBaseFile", RuleType: "disables", Expr: "f.SystemPromptReplace != nil", Reason: "system_prompt.base_file and system_prompt.replace are mutually exclusive"},
 	{Field: "SystemPromptReplace", RuleType: "disables", Expr: "f.SystemPromptBaseFile != nil", Reason: "system_prompt.base_file and system_prompt.replace are mutually exclusive"},
 	{Field: "ToolsBashExecutor", RuleType: "check", Expr: "f.ToolsBashExecutor != nil && isValidRegexMatch(*f.ToolsBashExecutor, \"^[a-z][a-z0-9_-]*$\")", Reason: "tools.bash.executor must be the name of a linked executor"},
@@ -2441,6 +2540,26 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+	case "SkillsDefault", "skills.default":
+		found = true
+		status = avail.SkillsDefault
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* disables: skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own")
+	case "SkillsPaths", "skills.paths":
+		found = true
+		status = avail.SkillsPaths
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "SkillsUserPath", "skills.user_path":
+		found = true
+		status = avail.SkillsUserPath
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+		explanations = append(explanations, "* disables: skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own")
 	case "SystemPromptAppend", "system_prompt.append":
 		found = true
 		status = avail.SystemPromptAppend

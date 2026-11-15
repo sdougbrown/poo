@@ -4,6 +4,8 @@
 //     decide packages
 //   - the prompt, prompt/agentsmd, decide and wire/protocol packages may
 //     import the standard library only
+//   - the skill package may import the standard library, the prompt package
+//     and the YAML decoder, and no other package of this module
 //   - the wire package may import the core package, the permission
 //     package, the session package and the wire/protocol package
 //   - the wire/conformance package may import the standard library and
@@ -96,6 +98,7 @@ func (c Checker) rules() []rule {
 		{path: m, allowed: []string{m + "/prompt", m + "/decide", "github.com/sdougbrown/cli-registry/schema"}},
 		{path: m + "/prompt"},
 		{path: m + "/prompt/agentsmd"},
+		{path: m + "/skill", allowed: []string{m + "/prompt"}, external: true},
 		{path: m + "/decide"},
 		{path: m + "/wire/protocol"},
 		{path: m + "/wire", allowed: []string{m, m + "/perm", m + "/session", m + "/wire/protocol"}},
@@ -132,6 +135,9 @@ func (c Checker) rules() []rule {
 				// prompt's own package holds the sections, and the loader
 				// holds the working directory's instructions for one.
 				m + "/prompt/agentsmd",
+				// The skills catalog: what the person can do, and the
+				// section that names it.
+				m + "/skill",
 				m + "/protect",
 				m + "/provider/catalog",
 				m + "/provider/openai",

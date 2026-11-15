@@ -156,6 +156,11 @@ the prompt the binary ships. `system_prompt.replace` clears the directory's
 sections. If the session offers registry tools, the build restores the embedded
 catalog after replacement, so a directory's `catalog.md` does not apply.
 
+The skills catalog is a section of its own and not a layer: `skills.default`,
+`skills.user_path` and `skills.paths` name the directories it is built from,
+and a session that names none carries no section. It renders after the catalog
+and before the environment.
+
 The last two layers are opt-in, and they differ in scope. The user's
 instructions are process-wide: `BuildOptions.UserPromptFile` names the path a
 binary reads them from when `session.user_prompt_file` names none, and an empty

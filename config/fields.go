@@ -78,6 +78,9 @@ func fieldsOf(s *Settings) SettingsFields {
 
 	f.CliRegistryPaths = list(s.CLIRegistry.Paths)
 
+	f.SkillsDefault = flag(s.Skills.Default)
+	f.SkillsUserPath = pointer(s.Skills.UserPath)
+	f.SkillsPaths = list(s.Skills.Paths)
 	f.FeedsPaths = list(s.Feeds.Paths)
 
 	f.SessionMode = pointer(s.Session.Mode)

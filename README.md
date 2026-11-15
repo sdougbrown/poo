@@ -195,6 +195,11 @@ embedded beside the package that owns it.
   `session.user_prompt_file` or the binary's `BuildOptions.UserPromptFile`;
   `session.project_prompt` adds the working directory's `AGENTS.md`, read
   per session from the directory that session works in.
+- `skills.paths`, `skills.default` and `skills.user_path` name directories of
+  skills — each a folder with a `SKILL.md` — and the prompt carries a catalog
+  line per skill. The guidance is a file the model reads with the read tool
+  when a description fits, so a session offering thirty skills pays for thirty
+  lines. `disable-model-invocation` keeps a skill out of the model's catalog.
 - `poo prompt` prints the sections a session would send.
 
 **CLI registry.** When the settings list manifests in `cli_registry.paths`,

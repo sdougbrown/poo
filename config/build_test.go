@@ -23,6 +23,7 @@ import (
 	"github.com/sdougbrown/poo/profile/code"
 	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/skill"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
 	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
@@ -947,6 +948,103 @@ func TestTheUserPromptNeedsAFile(t *testing.T) {
 	}
 	if field, _ := config.FieldOf(err); field != "session.user_prompt" {
 		t.Errorf("the field is %q, want session.user_prompt", field)
+	}
+}
+
+// TestTheSkillsSettingsFillTheSkillsSection covers the three ways a
+// session is told where skills are: the default directory, the person's
+// own, and the paths beside them.
+func TestTheSkillsSettingsFillTheSkillsSection(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: "+dir+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want one", runtime.Skills)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "review") || !strings.Contains(text, "Reviews a diff.") {
+		t.Errorf("the prompt holds no skills catalog: %q", text)
+	}
+}
+
+// TestTheSkillsPathsAreDroppedWithAWarning covers a named path that is
+// not there: it is dropped rather than failing the build, and the
+// warning says which path.
+func TestTheSkillsPathsAreDroppedWithAWarning(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	missing := filepath.Join(t.TempDir(), "absent")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  paths: ["+missing+", "+dir+"]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want the one beside the missing path", runtime.Skills)
+	}
+	if !strings.Contains(runtime.Warning, missing) {
+		t.Errorf("the warning is %q, want it to name %s", runtime.Warning, missing)
+	}
+}
+
+// TestTheSkillsRelativePathIsTheWorkingDirectorys covers a relative
+// path: it is resolved against the working directory, the way every
+// other path a command line takes is.
+func TestTheSkillsRelativePathIsTheWorkingDirectorys(t *testing.T) {
+	workingDir := t.TempDir()
+	writeSkillFile(t, filepath.Join(workingDir, "team", "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  paths: [team]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, workingDir, theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want the team's", runtime.Skills)
+	}
+}
+
+// TestSkillsOffersNothingWithoutASetting covers the opt-in: a session
+// that names no directory pays for no section.
+func TestSkillsOffersNothingWithoutASetting(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills != nil {
+		t.Errorf("the runtime offers %v skills, want none", runtime.Skills)
+	}
+	if names := poo.PromptBuilder(runtime.Options).Names(); slices.Contains(names, skill.SectionName) {
+		t.Errorf("the prompt holds a %q section: %v", skill.SectionName, names)
+	}
+}
+
+// TestTheSkillsDefaultAndTheUserPathAreExclusive covers the settings
+// check: one names the default directory, the other the person's own,
+// and a file that names both is refused.
+func TestTheSkillsDefaultAndTheUserPathAreExclusive(t *testing.T) {
+	_, err := config.Parse([]byte(theModelSettings+"skills:\n  default: true\n  user_path: /tmp/skills\n"), config.FormatYAML)
+	if err == nil {
+		t.Fatal("the settings accepted both a default and a user path")
+	}
+	if !strings.Contains(err.Error(), "skills.default") || !strings.Contains(err.Error(), "skills.user_path") {
+		t.Errorf("the error %q does not name both fields", err)
+	}
+}
+
+// writeSkillFile puts a SKILL.md in dir.
+func writeSkillFile(t *testing.T, dir, description string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("making %s: %v", dir, err)
+	}
+	body := "---\ndescription: " + description + "---\n\nThe guidance.\n"
+	if err := os.WriteFile(filepath.Join(dir, skill.SkillFileName), []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the skill: %v", err)
 	}
 }
 

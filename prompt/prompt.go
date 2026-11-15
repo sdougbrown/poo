@@ -163,12 +163,14 @@ const ProfileSection = "profile"
 //
 // "tools" stands for the per-tool sections, which are named
 // "tools.<name>" and render together where "tools" sits, in the order
-// the tools are offered in. A consumer's own sections come last, in the
-// order they were added.
+// the tools are offered in. "skills" is what the person can do, and the
+// catalog is what the session can call: the catalog comes first, so the
+// model reads what it has before what it could follow. A consumer's own
+// sections come last, in the order they were added.
 //
 // The slice is read-only: a consumer that changes it changes the prompt
 // for everybody.
-var DefaultOrder = []string{"base", "profile", "tools", "catalog", "environment", "user", "project"}
+var DefaultOrder = []string{"base", "profile", "tools", "catalog", "skills", "environment", "user", "project"}
 
 // Order returns the order the sections render in.
 //

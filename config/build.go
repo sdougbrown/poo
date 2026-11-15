@@ -31,6 +31,7 @@ import (
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
+	"github.com/sdougbrown/poo/skill"
 )
 
 // The names the settings and the profiles use.
@@ -213,6 +214,9 @@ type Runtime struct {
 	// earns no catalog leaves it as the manifests loaded it, and no tool or
 	// prompt section reads it.
 	Registry *cli.Catalog
+	// Skills are the skills the session offers, or nil when it offers
+	// none.
+	Skills *skill.Set
 	// loaded is the registry as the manifests loaded it, before availability
 	// narrows what a profile offers. The profiles the binary lists are judged
 	// against it, each under its own profile fact.
@@ -390,6 +394,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
 	}
+	if err := runtime.resolveSkills(opts, workingDir); err != nil {
+		return nil, err
+	}
 	if err := runtime.resolveFeeds(opts, workingDir); err != nil {
 		return nil, err
 	}
@@ -523,6 +530,84 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 // hasFeeds reports whether the session runs feeds.
 func (r *Runtime) hasFeeds() bool {
 	return r.Feeds.Len() > 0
+}
+
+// resolveSkills loads the skills the settings name.
+//
+// The directories are the person's own — the default one, or the one
+// they name — and then the paths beside them, resolved against the
+// working directory. A directory that is not there is dropped with a
+// warning rather than failing the build: skills are guidance a session
+// offers, and a tree without the directory is not a tree a session
+// cannot work in. A SKILL.md that is there and does not parse is an
+// error, because the directory was offered on purpose.
+func (r *Runtime) resolveSkills(opts BuildOptions, workingDir string) error {
+	settings := r.Settings.Skills
+	dirs := make([]string, 0, len(settings.Paths)+1)
+	switch {
+	case settings.UserPath != nil && *settings.UserPath != "":
+		path, err := expandHome(*settings.UserPath)
+		if err != nil {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "skills.user_path",
+				Message: "the skills directory cannot be read",
+				Err:     err,
+			}
+		}
+		dirs = append(dirs, path)
+	case settings.Default != nil && *settings.Default:
+		path, err := expandHome(skill.DefaultDir)
+		if err != nil {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "skills.default",
+				Message: "the skills directory cannot be read",
+				Err:     err,
+			}
+		}
+		dirs = append(dirs, path)
+	}
+	for _, path := range againstDir(settings.Paths, workingDir) {
+		if _, err := os.Stat(path); err != nil {
+			r.warn(fmt.Sprintf("skills.paths: %s holds no skills: %v", path, err))
+			continue
+		}
+		dirs = append(dirs, path)
+	}
+	if len(dirs) == 0 {
+		return nil
+	}
+	set, err := skill.Load(dirs...)
+	if err != nil {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "skills",
+			Message: "the skills do not load",
+			Err:     err,
+		}
+	}
+	if set.Len() == 0 {
+		return nil
+	}
+	r.Skills = set
+	r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+		b.SetTemplate(skill.SectionName, set.Template())
+	})
+	return nil
+}
+
+// warn adds a warning to the runtime's own, so a command prints it with
+// the rest.
+func (r *Runtime) warn(text string) {
+	if text == "" {
+		return
+	}
+	if r.Warning == "" {
+		r.Warning = text
+		return
+	}
+	r.Warning += "; " + text
 }
 
 // resolveRegistry loads the cli registries the settings and overrides name.
@@ -1353,7 +1438,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 	}
 	r.Policy = policy
 	r.Askers = askers
-	r.Warning = perm.Warning(policy, askers)
+	r.warn(perm.Warning(policy, askers))
 	return nil
 }
 
@@ -1714,6 +1799,7 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 		"base":         nil,
 		"profile":      nil,
 		"environment":  nil,
+		"skills":       nil,
 		UserSection:    nil,
 		ProjectSection: nil,
 	}
@@ -1733,6 +1819,9 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 		// directory that carries it loads. A session offering no catalog
 		// renders it empty, and it is removed once the directory has applied.
 		sources[cli.SectionName] = r.offeredCatalog().Template(r.offersSearch()).Data()
+	}
+	if r.Skills != nil {
+		sources[skill.SectionName] = r.Skills.Template().Data()
 	}
 	return sources
 }

@@ -56,6 +56,9 @@
     "finish.schema_file": { "isEmpty": "string" },
     "cli_registry.paths": { "isEmpty": "array" },
     "feeds.paths": { "isEmpty": "array" },
+    "skills.default": { "isEmpty": "boolean" },
+    "skills.user_path": { "isEmpty": "string" },
+    "skills.paths": { "isEmpty": "array" },
     "session.mode": { "isEmpty": "string" },
     "session.dir": { "isEmpty": "string" },
     "session.project_prompt": { "isEmpty": "boolean" },
@@ -86,6 +89,18 @@
       "field": "permission.decide.timeout_ms",
       "when": { "op": "cond", "condition": "has_decider" },
       "reason": "the decide timeout needs a decider model: roles.decider names one"
+    },
+    {
+      "type": "disables",
+      "when": { "op": "present", "field": "skills.default" },
+      "targets": ["skills.user_path"],
+      "reason": "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own"
+    },
+    {
+      "type": "disables",
+      "when": { "op": "present", "field": "skills.user_path" },
+      "targets": ["skills.default"],
+      "reason": "skills.default and skills.user_path are mutually exclusive: one names the default directory, the other the person's own"
     },
     {
       "type": "disables",

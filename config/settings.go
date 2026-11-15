@@ -58,6 +58,8 @@ type Settings struct {
 	CLIRegistry CLIRegistry `json:"cli_registry,omitempty"`
 	// Feeds are the feed manifests' settings.
 	Feeds Feeds `json:"feeds,omitempty"`
+	// Skills are the skills' settings.
+	Skills Skills `json:"skills,omitempty"`
 	// Session are the session's settings.
 	Session Session `json:"session,omitempty"`
 	// UI is the name of the interface a bare invocation of the
@@ -391,6 +393,28 @@ type CLIRegistry struct {
 // Feeds are the feed manifests' settings.
 type Feeds struct {
 	// Paths are the feed manifest directories.
+	Paths []string `json:"paths,omitempty"`
+}
+
+// Skills are the skills' settings.
+//
+// A session names the skills it offers, and the prompt says what
+// exists: each skill's name and what it does. The guidance itself is a
+// file the model reads when the description fits, so the prompt pays
+// for a catalog line and no more.
+type Skills struct {
+	// Default offers the skills in the directory the rest of the family
+	// keeps them in, so a person who already has skills has them without
+	// saying where. It is mutually exclusive with UserPath.
+	Default *bool `json:"default,omitempty"`
+	// UserPath is the directory the person's skills are in, when they
+	// keep them somewhere of their own. It is mutually exclusive with
+	// Default.
+	UserPath *string `json:"user_path,omitempty"`
+	// Paths are further directories of skills, resolved against the
+	// working directory. A path that is not there is dropped with a
+	// warning: skills are guidance a session offers, and a directory
+	// that is missing leaves it with less to offer rather than broken.
 	Paths []string `json:"paths,omitempty"`
 }
 
