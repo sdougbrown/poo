@@ -461,3 +461,33 @@ func TestThePrintAliasHoistsTheRunsFlags(t *testing.T) {
 		t.Errorf("the hoisted flags are %q, want log=x and model-id=m", inv.Flags)
 	}
 }
+
+// TestThePrintAliasAsksForHelp covers the alias's help branch: a help
+// request before the prompt starts prints the run's own help, and no
+// session runs.
+func TestThePrintAliasAsksForHelp(t *testing.T) {
+	for _, alias := range [][]string{{"-p", "--help"}, {"-p", "-h"}, {"--print", "--help"}} {
+		t.Run(alias[len(alias)-1]+" after "+alias[0], func(t *testing.T) {
+			code, _, stdout := runCLIWithStdout(t, alias...)
+			if code != 0 {
+				t.Fatalf("the exit code is %d, want 0", code)
+			}
+			if !strings.Contains(stdout, "poo run [prompt...]") {
+				t.Errorf("the help is not the run's own:\n%s", stdout)
+			}
+		})
+	}
+}
+
+// TestThePrintAliasLeavesHelpInAPrompt covers the other side of that
+// boundary: once the prompt has started, a help flag is prompt text, as it
+// is after `run`.
+func TestThePrintAliasLeavesHelpInAPrompt(t *testing.T) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), printAlias([]string{"-p", "fix", "the", "-h", "thing"}))
+	if err != nil {
+		t.Fatalf("parsing the alias: %v", err)
+	}
+	if want := []string{"fix", "the", "-h", "thing"}; !slices.Equal(inv.Args, want) {
+		t.Errorf("the prompt is %q, want %q", inv.Args, want)
+	}
+}

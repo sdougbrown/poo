@@ -64,7 +64,10 @@ func hoistRunFlags(args []string) (flags, words []string) {
 		case token == "--":
 			// Everything after the terminator is the prompt.
 			return flags, append(words, args[i+1:]...)
-		case token == "-h" || token == "--help":
+		case len(words) == 0 && (token == "-h" || token == "--help"):
+			// A help request before the prompt starts is the run's own.
+			// Once the prompt has started, a dash word is prompt text, as
+			// it is after run.
 			return append(flags, "--help"), words
 		}
 		spec, declared := declaredRunFlag(token)
