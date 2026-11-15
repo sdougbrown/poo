@@ -4,8 +4,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
@@ -408,5 +411,53 @@ func TestTheTextModePromptNamesTheToolsAndTheCallFormat(t *testing.T) {
 		if !strings.Contains(prompt, needle) {
 			t.Errorf("the prompt does not mention %q", needle)
 		}
+	}
+}
+
+// TestThePromptBoundary covers where the run's flags stop: a flag written
+// after the prompt's first word is prompt text, because a prompt may hold a
+// word that looks like a flag.
+func TestThePromptBoundary(t *testing.T) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), []string{"run", "say", "--log", "x"})
+	if err != nil {
+		t.Fatalf("parsing the run: %v", err)
+	}
+	if want := []string{"say", "--log", "x"}; !slices.Equal(inv.Args, want) {
+		t.Errorf("the prompt is %q, want %q", inv.Args, want)
+	}
+	if inv.Supplied["log"] {
+		t.Error("the run read the flag written after the prompt")
+	}
+}
+
+// TestThePrintPromptAfterTheTerminator covers the terminator: the words a
+// caller wrote after `--` are the prompt, even when they are spelled like
+// the run's own flags.
+func TestThePrintPromptAfterTheTerminator(t *testing.T) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), printAlias([]string{"-p", "--", "--endpoint", "x", "hello"}))
+	if err != nil {
+		t.Fatalf("parsing the alias: %v", err)
+	}
+	if want := []string{"--endpoint", "x", "hello"}; !slices.Equal(inv.Args, want) {
+		t.Errorf("the prompt is %q, want %q", inv.Args, want)
+	}
+	if inv.Supplied["endpoint"] {
+		t.Error("the run read a prompt word as its endpoint flag")
+	}
+}
+
+// TestThePrintAliasHoistsTheRunsFlags covers the alias's own work: the
+// run's flags are moved ahead of the prompt, wherever the caller wrote
+// them, and a dash word the run does not declare stays in the prompt.
+func TestThePrintAliasHoistsTheRunsFlags(t *testing.T) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), printAlias([]string{"--print", "say", "hello", "--log", "x", "--model-id", "m"}))
+	if err != nil {
+		t.Fatalf("parsing the alias: %v", err)
+	}
+	if want := []string{"say", "hello"}; !slices.Equal(inv.Args, want) {
+		t.Errorf("the prompt is %q, want %q", inv.Args, want)
+	}
+	if inv.Flags["log"] != "x" || inv.Flags["model-id"] != "m" {
+		t.Errorf("the hoisted flags are %q, want log=x and model-id=m", inv.Flags)
 	}
 }

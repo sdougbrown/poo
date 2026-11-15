@@ -23,22 +23,29 @@ func run(args []string) int {
 	if len(args) == 0 {
 		return runUI()
 	}
-	return clicontract.Run(pooApp(os.Stdout, os.Stderr), pooAdapter{}, printAlias(args), os.Stdout, os.Stderr)
+	return clicontract.Run(pooApp(os.Stdout), pooAdapter{}, printAlias(args), os.Stdout, os.Stderr)
 }
 
 // printAlias rewrites the print alias into the command it aliases.
 //
 // `poo -p "prompt" [flags]` is `poo run`, and the alias takes the run's
 // flags before or after the prompt: they are moved ahead of it, and only
-// the flags the run declares move.
+// the flags the run declares move. A help request is the run's help,
+// wherever it is written.
+//
+// The words follow a terminator, so a prompt the caller wrote after `--`
+// stays the prompt even when it is spelled like a flag.
 func printAlias(args []string) []string {
 	if args[0] != "-p" && args[0] != "--print" {
 		return args
 	}
 	flags, words := hoistRunFlags(args[1:])
-	aliased := make([]string, 0, 1+len(flags)+len(words))
+	aliased := make([]string, 0, 2+len(flags)+len(words))
 	aliased = append(aliased, "run")
 	aliased = append(aliased, flags...)
+	if len(words) > 0 {
+		aliased = append(aliased, "--")
+	}
 	return append(aliased, words...)
 }
 
