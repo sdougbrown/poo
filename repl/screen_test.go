@@ -107,6 +107,18 @@ func countOf(t *testing.T, scr screen, want string) int {
 	return n
 }
 
+// rowStandsAlone says the text reads as a whole row of the screen,
+// starting at column zero: a row that starts mid-column carries extra
+// leading spaces or the row before it, and does not match whole.
+func rowStandsAlone(drawn, want string) bool {
+	for _, line := range strings.Split(drawn, "\n") {
+		if line == want {
+			return true
+		}
+	}
+	return false
+}
+
 // TestTheScreenKeepsTheStreamWhileTheDraftTypes covers the regression
 // the raw byte tests could not see: the streamed text shares the
 // prompt's row with the draft, and the editor's redraw erased it. The
@@ -380,5 +392,59 @@ func TestAWidthThatCannotBeReadKeepsStreaming(t *testing.T) {
 	}
 	if r.width != 40 {
 		t.Errorf("the width became %d, want it left at 40", r.width)
+	}
+}
+
+// TestAMultilineToolResultStartsEachRowAtColumnZero covers the
+// staircase: a tool result that spans rows must paint every row at
+// column zero on the terminal, the code's indentation reads as
+// written, and the draft keeps its place below.
+func TestAMultilineToolResultStartsEachRowAtColumnZero(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("read a file")
+	r.toolCall("read", "a file")
+	r.toolResult("read", "ok", "func main() {\n    fmt.Println(\"hi\")\n}\nsecond line of output", 0)
+	r.notice("the read finished")
+	scr.typeText("draft")
+	drawn := scr.text()
+
+	for _, w := range []string{
+		"  func main() {",
+		"      fmt.Println(\"hi\")",
+		"  }",
+		"  second line of output",
+		"the read finished",
+	} {
+		if !rowStandsAlone(drawn, w) {
+			t.Errorf("the screen lacks the row %q standing at column zero:\n%s", w, drawn)
+		}
+	}
+	if rowOf(t, scr, promptMark+"draft") < 0 {
+		t.Errorf("the draft did not survive under the multiline result:\n%s", drawn)
+	}
+}
+
+// TestAMultilineThinkingBlockStartsEachRowAtColumnZero covers the
+// thinking-only flush: the thinking block renders with no streamed
+// text, and its rows must paint at column zero, the hint taken back
+// and the draft intact below.
+func TestAMultilineThinkingBlockStartsEachRowAtColumnZero(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("think about it")
+	r.hint()
+	scr.typeText("draft")
+	r.replace(r.thinkingText("step one\nstep two\nstep three"))
+	drawn := scr.text()
+
+	for _, w := range []string{"· thinking ·", "step one", "step two", "step three"} {
+		if !rowStandsAlone(drawn, w) {
+			t.Errorf("the screen lacks the row %q standing at column zero:\n%s", w, drawn)
+		}
+	}
+	if rowOf(t, scr, "… writing") >= 0 {
+		t.Errorf("the hint stood over the thinking block:\n%s", drawn)
+	}
+	if rowOf(t, scr, promptMark+"draft") < 0 {
+		t.Errorf("the draft did not survive the thinking flush:\n%s", drawn)
 	}
 }

@@ -48,7 +48,7 @@ func TestAReplyStreamsRawAndTheRenderTakesItsPlace(t *testing.T) {
 	// Each delta paints a sealed row of its own: the first lands where
 	// the prompt stood, the second climbs back up to it and rewrites
 	// it, and the prompt's redraw takes a fresh line below either way.
-	want := "\r" + ansiBold + "❯ say hello" + ansiReset + "\n" +
+	want := "\r" + ansiBold + "❯ say hello" + ansiReset + "\r\n" +
 		"\r" + ansi.EraseDisplay(0) + "Hello, " + "\r\n" +
 		"\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0) + "Hello, world." + "\r\n"
 	if got := out.String(); got != want {
@@ -63,7 +63,7 @@ func TestAReplyStreamsRawAndTheRenderTakesItsPlace(t *testing.T) {
 	// The render takes the block's place: the cursor climbs over the
 	// row the block filled, everything below comes off, and the raw
 	// text leaves the transcript with it.
-	want = "\r" + ansiBold + "❯ say hello" + ansiReset + "\n" +
+	want = "\r" + ansiBold + "❯ say hello" + ansiReset + "\r\n" +
 		"\r" + ansi.EraseDisplay(0) + "Hello, " + "\r\n" +
 		"\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0) + "Hello, world." + "\r\n" +
 		"\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0) +
@@ -114,7 +114,7 @@ func TestTheStreamHardWrapsAtTheWidth(t *testing.T) {
 	r.userPrompt("wrap it")
 	r.streamText("one two three four")
 	r.streamText("\nlast")
-	want := "\r" + ansiBold + "❯ wrap it" + ansiReset + "\n" +
+	want := "\r" + ansiBold + "❯ wrap it" + ansiReset + "\r\n" +
 		"\r" + ansi.EraseDisplay(0) + "one two th" + "\r\n" + "ree four" + "\r\n" +
 		"\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0) + "ree four" + "\r\n" + "last" + "\r\n"
 	if got := out.String(); got != want {

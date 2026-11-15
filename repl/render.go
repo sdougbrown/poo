@@ -147,9 +147,27 @@ func (r *renderer) write(s string) {
 		// The editor's cursor may stand mid-row, where the person's
 		// last keystroke left it: the line starts at column zero on the
 		// terminal, and the transcript keeps the line without it.
-		s = "\r" + s
+		s = "\r" + terminalNewlines(s)
 	}
 	fmt.Fprint(r.sink, s)
+}
+
+// terminalNewlines converts the bare line feeds in s to CRLFs for
+// the terminal, without duplicating existing carriage returns: the
+// conversion is idempotent, so a row never reads CRCRLF.
+func terminalNewlines(s string) string {
+	if !strings.Contains(s, "\n") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' && (i == 0 || s[i-1] != '\r') {
+			b.WriteByte('\r')
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // streams reports whether text goes to the terminal as it arrives.
@@ -363,10 +381,8 @@ func (r *renderer) replace(content string) {
 	}
 	r.transcript.Truncate(r.block.mark)
 	r.transcript.WriteString(content)
-	// The render's newlines go out as CRLFs: a bare line feed keeps
-	// the column, and the next row would start mid-line.
 	content = strings.TrimLeft(content, "\n")
-	content = strings.ReplaceAll(content, "\n", "\r\n")
+	content = terminalNewlines(content)
 	var seq strings.Builder
 	// The climb starts at column zero, wherever the cursor stood: the
 	// rows the block filled count from there.
