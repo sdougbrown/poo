@@ -396,8 +396,8 @@ func TestATallPreviewNeverScrollsPendingRows(t *testing.T) {
 		t.Fatalf("the repaint scrolled %d pending rows into history, want 0", got)
 	}
 
-	// The commit writes the whole body once; the rows the preview could
-	// never show reach the history with it, exactly once.
+	// The commit writes the whole body once; the rows the preview never
+	// showed reach the history with it, exactly once.
 	l.clearPreview()
 	commit := strings.Repeat(strings.Join(previewRows(24), "\n")+"\n", 1)
 	l.write(commit)

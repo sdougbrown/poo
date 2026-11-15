@@ -366,10 +366,11 @@ func (r *renderer) contentWidth() int {
 		}
 	}
 	return r.width
+}
 
-// repaintPreview lays the open stream out again after a resize. The rows
-// it painted wrap at the old width, and the resize cleared them, so the
-// preview paints from the new wrap and the next delta carries on.
+// repaintPreview lays the open stream out again after a resize. Its rows
+// wrapped at the old width, and the resize cleared them. The preview
+// paints from the new wrap, and the next delta carries on.
 func (r *renderer) repaintPreview() {
 	if !r.streams() || r.live.kind == "" {
 		return

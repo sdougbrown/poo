@@ -76,8 +76,8 @@ func openTerminal(t *testing.T) *terminal {
 // emulator's own window does.
 func (term *terminal) resize(cols, rows int) {
 	term.t.Helper()
-	// The emulator is ready before the pty tells the repl: the signal
-	// can arrive during the ioctl, and the redraw must land on the new
+	// The emulator is ready before the pty tells the repl. The signal can
+	// arrive during the ioctl, and the redraw must land on the new
 	// screen.
 	if term.vt != nil {
 		term.vt.Resize(cols, rows)

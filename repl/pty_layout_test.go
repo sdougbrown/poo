@@ -229,7 +229,7 @@ func TestAResizeMovesTheInputToTheNewBottomRow(t *testing.T) {
 	term.resize(60, 20)
 	// The terminal's own size change signals the foreground process
 	// group. A pty with no controlling terminal has no one to signal, so
-	// the test sends the signal the emulator would.
+	// the test sends the signal itself.
 	if err := syscall.Kill(os.Getpid(), syscall.SIGWINCH); err != nil {
 		t.Fatalf("signalling the resize: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {
 
 	term.press("/less\n")
 	// less takes the alternate screen, and the prompt goes with it; a
-	// pager that could not start leaves the prompt standing.
+	// pager that failed to start leaves the prompt standing.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) && term.rowOf("💩❯") >= 0 {
 		time.Sleep(5 * time.Millisecond)
@@ -416,8 +416,8 @@ func TestAPipedInputKeepsThePlainTranscript(t *testing.T) {
 	term, code := startPipedRepl(t, server, "say hello\n")
 	waitScreen(t, term, "❯ say hello")
 	<-sent
-	// A run held open: a stream would show the words now; a pipe waits
-	// for the settle.
+	// A run held open: a stream shows the words now; a pipe waits for
+	// the settle.
 	time.Sleep(150 * time.Millisecond)
 	streamed := strings.Contains(term.screen(), "Hello, world.")
 	close(release)
@@ -591,7 +591,7 @@ func TestAResizeDuringAHeldPreviewKeepsTheInputAtTheBottom(t *testing.T) {
 	waitBottomRows(t, term, 16)
 
 	// The rows the preview clipped reach the terminal once, at the
-	// commit: the resize cleared the stale preview instead of letting
+	// commit. The resize cleared the stale preview instead of letting
 	// the commit write it beside itself.
 	raw := term.String()
 	for _, marker := range []string{"preview row 0|", "preview row 10|"} {
