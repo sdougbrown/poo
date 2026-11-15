@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -482,6 +483,89 @@ roles:
 	}
 	if !strings.Contains(failure.Message, "sends pi's credential only to") {
 		t.Errorf("the failure is %q, want it to say where the credential may go", failure.Message)
+	}
+}
+
+// loopbackOnly is the client's transport: it records every request the build
+// asks for, and refuses any host but the loopback endpoint, so a request that
+// got past a guard fails here instead of reaching the network.
+type loopbackOnly struct {
+	allowed  string
+	requests []string
+}
+
+func (l *loopbackOnly) RoundTrip(req *http.Request) (*http.Response, error) {
+	l.requests = append(l.requests, req.URL.Host)
+	if req.URL.Host != l.allowed {
+		return nil, fmt.Errorf("the test refused a request to %s", req.URL)
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// TestAPiModelsFileCannotPointCodexElsewhere covers the models file's reach.
+// pi's models file may name openai-codex itself, so a file that gives the
+// provider a foreign baseUrl would offer models whose endpoint is that host.
+// Selecting one is refused with the endpoint's config error, before pi's token
+// is read and before any request goes out.
+func TestAPiModelsFileCannotPointCodexElsewhere(t *testing.T) {
+	dir := t.TempDir()
+	token := fakeCodexToken(t, "acct_live")
+	writeCodexAuth(t, dir, token, "rt_live", 4102444800000)
+
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, stream)
+	}))
+	defer foreign.Close()
+
+	if err := os.WriteFile(filepath.Join(dir, config.ModelsFileName), []byte(`{
+		"providers": {
+			"openai-codex": {
+				"baseUrl": "`+foreign.URL+`",
+				"api": "openai-codex-responses",
+				"models": [{"id": "gpt-6.1-sol", "contextWindow": 111111, "maxTokens": 4096}]
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	path := writeCodexSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+roles:
+  chat: openai-codex/gpt-6.1-sol
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	if got := settings.Endpoints["openai-codex"].Endpoint; got != foreign.URL {
+		t.Fatalf("the endpoint is %q, want the models file's %q", got, foreign.URL)
+	}
+	if got := settings.Models["openai-codex/gpt-6.1-sol"].ContextLimit; got != 111111 {
+		t.Fatalf("the model's context limit is %d, want the models file's 111111", got)
+	}
+
+	client := &loopbackOnly{allowed: strings.TrimPrefix(foreign.URL, "http://")}
+
+	// Building the runtime selects the chat model and its transport, so the
+	// refusal is what the build reports.
+	_, err = buildCodex(t, settings, &http.Client{Transport: client})
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the build is %v, want a settings failure", err)
+	}
+	if failure.Code != config.CodeUnsupported {
+		t.Errorf("the failure's code is %q, want %q", failure.Code, config.CodeUnsupported)
+	}
+	if failure.Field != "endpoints.openai-codex.endpoint" {
+		t.Errorf("the failure names %q, want the Codex endpoint", failure.Field)
+	}
+	// Neither the foreign endpoint nor pi's token endpoint was asked for
+	// anything, so the token was never offered to a host the operator did not
+	// name.
+	if len(client.requests) != 0 {
+		t.Errorf("the build made %v, want no request", client.requests)
 	}
 }
 
