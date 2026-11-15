@@ -25,7 +25,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +35,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
 // DefaultEndpoint is the endpoint the Codex requests go to when the
@@ -50,10 +50,13 @@ const DefaultOriginator = "poo"
 type Credential struct {
 	// Token is the bearer token.
 	Token string
-	// AccountID is the ChatGPT account the token belongs to.
+	// AccountID is the ChatGPT account the token belongs to. It is the
+	// chatgpt-account-id header, and a credential without one fails the
+	// request before it goes out.
 	//
-	// An empty account id is read from the token's own claims, so a
-	// resolver that holds only the token resolves one credential.
+	// The resolver names it, because the resolver is what read the token:
+	// a credential store that keeps the account beside the token has
+	// nothing to re-derive here.
 	AccountID string
 }
 
@@ -107,10 +110,12 @@ type Options struct {
 	// TextVerbosity is the answer's verbosity: "low", "medium" or
 	// "high". Empty means "low".
 	TextVerbosity string
-	// SessionID is the session the request belongs to. It rides in the
-	// session and client-request headers and in the body's prompt-cache
-	// key, so the endpoint can keep one cache across a session's
-	// requests. Empty sends none of them.
+	// SessionID is the session a request that names none belongs to.
+	//
+	// A request's own SessionID wins, because one transport may serve
+	// several sessions and each keys the endpoint's prompt cache by its
+	// own id. It rides in the session and client-request headers and in
+	// the body's prompt-cache key. Empty sends none of them.
 	SessionID string
 	// Originator is the originator header. Empty means
 	// DefaultOriginator.
@@ -141,7 +146,7 @@ type Options struct {
 type Transport struct {
 	cfg    Options
 	http   *http.Client
-	policy retryPolicy
+	policy support.Policy
 }
 
 // New returns a transport.
@@ -163,56 +168,50 @@ func New(cfg Options) *Transport {
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		return &redirectError{Location: req.URL.String()}
 	}
-	policy := defaultRetryPolicy()
-	if cfg.MaxAttempts > 0 {
-		policy.attempts = cfg.MaxAttempts
-	}
-	if len(cfg.Backoff) > 0 {
-		policy.backoff = cfg.Backoff
-	}
+	policy := support.DefaultPolicy().With(cfg.MaxAttempts, cfg.Backoff)
 	return &Transport{cfg: cfg, http: client, policy: policy}
 }
 
 // Stream starts a request and returns the response stream along with the
 // snapshot of the request that was sent.
 //
-// The snapshot carries the attachments the body was shaped for as its
-// profiles. The model info that shaped the request is not part of the body.
-// A fork therefore appends its messages the way the request was shaped.
+// The snapshot carries the attachments the body was shaped for and the
+// session it was sent in. The model info that shaped the request is not part
+// of the body, so the snapshot is what says how a fork shapes what it
+// appends and which cache key it names.
 func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
 	body, err := t.buildBody(req)
 	if err != nil {
 		return nil, poo.Rendered{}, err
 	}
+	session := t.sessionID(req.SessionID)
 	rendered := poo.Rendered{
-		API:      poo.APIResponses,
-		Body:     body,
-		Messages: len(req.Messages),
-		Quirks:   modalitiesOf(t.modelInfo(req)).quirks(),
+		API:       poo.APIResponses,
+		Body:      body,
+		Messages:  len(req.Messages),
+		Inputs:    modalitiesOf(t.modelInfo(req)).inputs(),
+		SessionID: session,
 	}
 
-	reader, attempt, err := t.openWithRetry(ctx, body, req.OnAttempt)
+	open := func(ctx context.Context) (support.Reader, error) {
+		return t.open(ctx, body, session)
+	}
+	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, req.OnAttempt)
 	if err != nil {
 		return nil, rendered, err
 	}
-	return &streamWithRetry{
-		transport: t,
-		ctx:       ctx,
-		body:      body,
-		attempt:   attempt,
-		current:   reader,
-		report:    req.OnAttempt,
-	}, rendered, nil
+	return support.NewRetrying(ctx, t.policy, open, req.OnAttempt, reader, attempt), rendered, nil
 }
 
 // Fork sends a body that is byte-identical to the snapshot, apart from
 // the input items appended after the last one.
 //
-// The appended messages are shaped by the profiles the snapshot carries.
+// The appended messages are shaped by the attachments the snapshot carries.
 // The model info a request was shaped for is not part of the body. The
-// snapshot's profiles are therefore what say which attachments the model
-// reads. The output limit is the caller's. The endpoint takes none, so the
-// fork does not rewrite one.
+// snapshot's inputs are therefore what say which attachments the model
+// reads, and its session is the cache key the fork names. The output limit
+// is the caller's. The endpoint takes none, so the fork does not rewrite
+// one.
 func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
 	if prev.API != poo.APIResponses {
 		return nil, &poo.ProviderError{
@@ -226,21 +225,18 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 			Message: "the request snapshot holds no body to fork",
 		}
 	}
-	body, err := forkBody(prev.Body, appended, modalitiesOfQuirks(prev.Quirks))
+	body, err := forkBody(prev.Body, appended, modalitiesOfInputs(prev.Inputs))
 	if err != nil {
 		return nil, err
 	}
-	reader, attempt, err := t.openWithRetry(ctx, body, nil)
+	open := func(ctx context.Context) (support.Reader, error) {
+		return t.open(ctx, body, prev.SessionID)
+	}
+	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, nil)
 	if err != nil {
 		return nil, err
 	}
-	return &streamWithRetry{
-		transport: t,
-		ctx:       ctx,
-		body:      body,
-		attempt:   attempt,
-		current:   reader,
-	}, nil
+	return support.NewRetrying(ctx, t.policy, open, nil, reader, attempt), nil
 }
 
 // redirectError is the refusal a redirect turns into.
@@ -269,7 +265,7 @@ func (e *redirectError) Error() string {
 // store that never answers cannot hold an attempt. The bound ending while
 // the run is alive is a resolution that did not finish in time, not the
 // run stopping. That is why the parent is kept apart from it.
-func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error) {
+func (t *Transport) open(ctx context.Context, body []byte, session string) (*streamReader, error) {
 	// The timeout bounds the whole request, streaming included, so the
 	// context is created before the request goes out. The parent stays
 	// apart, so a timeout the transport imposed is told from the run's
@@ -296,7 +292,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 		release()
 		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
-	t.setHeaders(httpReq, credential)
+	t.setHeaders(httpReq, credential, session)
 
 	// The request is timed from the moment it goes out, so the time to
 	// the first token includes the endpoint's own latency.
@@ -322,7 +318,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 			release()
 			return nil, failure
 		}
-		perr := classifyTransportError(parent, ctx, err)
+		perr := support.ClassifyTransportError(parent, ctx, err)
 		release()
 		return nil, perr
 	}
@@ -331,7 +327,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 		// The body is read under the request's timeout, so the context is
 		// released after it.
 		defer release()
-		return nil, classifyStatus(resp)
+		return nil, support.ClassifyStatus(resp)
 	}
 
 	// A failed request answered with 200 and a JSON body is not a stream.
@@ -339,7 +335,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 	// buffered, and the time to the first token measures the endpoint's
 	// latency rather than the reader's.
 	br := bufio.NewReader(resp.Body)
-	first, err := peekFirstByte(br)
+	first, err := support.PeekFirstByte(br)
 	if err != nil {
 		resp.Body.Close()
 		release()
@@ -352,7 +348,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 		if err != nil {
 			return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 		}
-		if perr, ok := errorInBody(errBody, resp.StatusCode, resp.Header); ok {
+		if perr, ok := support.ErrorInBody(errBody, resp.StatusCode, resp.Header); ok {
 			return nil, perr
 		}
 		return nil, &poo.ProviderError{
@@ -364,12 +360,25 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 
 	return &streamReader{
 		body:    resp.Body,
-		scanner: newSSEScanner(br),
+		scanner: support.SSEScanner(br),
 		ctx:     ctx,
 		parent:  parent,
 		cancel:  cancel,
-		started: started,
+		ttft:    support.NewTTFT(started),
 	}, nil
+}
+
+// sessionID returns the session a request names, clamped to the length the
+// endpoint takes.
+//
+// The request's own session wins: the transport may serve several sessions,
+// and each of them keys the endpoint's prompt cache by its own id. A request
+// that names none falls back to the transport's configuration.
+func (t *Transport) sessionID(request string) string {
+	if request != "" {
+		return clampSessionID(request)
+	}
+	return clampSessionID(t.cfg.SessionID)
 }
 
 // setHeaders sets the headers a Codex request carries.
@@ -377,7 +386,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 // The transport's own headers are set first and the caller's last, so a
 // caller can override one. The credential headers are the transport's, and
 // are set after the caller's.
-func (t *Transport) setHeaders(req *http.Request, credential Credential) {
+func (t *Transport) setHeaders(req *http.Request, credential Credential, session string) {
 	originator := t.cfg.Originator
 	if originator == "" {
 		originator = DefaultOriginator
@@ -386,7 +395,7 @@ func (t *Transport) setHeaders(req *http.Request, credential Credential) {
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("originator", originator)
-	if session := clampSessionID(t.cfg.SessionID); session != "" {
+	if session != "" {
 		req.Header.Set("session-id", session)
 		req.Header.Set("x-client-request-id", session)
 	}
@@ -405,7 +414,7 @@ func (t *Transport) setHeaders(req *http.Request, credential Credential) {
 // failure the resolver reports is read against.
 func (t *Transport) credential(parent, ctx context.Context) (Credential, error) {
 	if t.cfg.Credentials == nil {
-		return Credential{}, configErrorf("the Codex transport has no credential resolver")
+		return Credential{}, support.ConfigErrorf("the Codex transport has no credential resolver")
 	}
 	credential, err := t.cfg.Credentials(ctx)
 	if err != nil {
@@ -418,11 +427,10 @@ func (t *Transport) credential(parent, ctx context.Context) (Credential, error) 
 		}
 	}
 	if credential.AccountID == "" {
-		account, err := AccountIDFromToken(credential.Token)
-		if err != nil {
-			return Credential{}, &poo.ProviderError{Kind: poo.ProviderKindAuthFailed, Message: err.Error()}
+		return Credential{}, &poo.ProviderError{
+			Kind:    poo.ProviderKindAuthFailed,
+			Message: "the credential resolver named no account, and a Codex request spends the one its token belongs to",
 		}
-		credential.AccountID = account
 	}
 	return credential, nil
 }
@@ -464,35 +472,6 @@ func credentialError(parent, request context.Context, err error) error {
 		return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 	return &poo.ProviderError{Kind: poo.ProviderKindAuthFailed, Message: err.Error()}
-}
-
-// accountClaimPath is the token claim that holds the ChatGPT account.
-const accountClaimPath = "https://api.openai.com/auth"
-
-// AccountIDFromToken returns the ChatGPT account a token belongs to.
-//
-// The account rides in the token's own claims, so a credential that
-// holds only the token resolves one without a second source.
-func AccountIDFromToken(token string) (string, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return "", errors.New("the token is not a JWT, so it names no account")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", errors.New("the token's claims do not decode, so it names no account")
-	}
-	var claims map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", errors.New("the token's claims are not JSON, so it names no account")
-	}
-	var auth struct {
-		AccountID string `json:"chatgpt_account_id"`
-	}
-	if err := json.Unmarshal(claims[accountClaimPath], &auth); err != nil || auth.AccountID == "" {
-		return "", fmt.Errorf("the token carries no ChatGPT account in its %s claim", accountClaimPath)
-	}
-	return auth.AccountID, nil
 }
 
 // ResponsesURL returns the Codex responses URL of an endpoint.
@@ -638,29 +617,6 @@ func jsonKeyOrder(body []byte) ([]string, error) {
 		}
 	}
 	return order, nil
-}
-
-// peekFirstByte returns the first non-space byte of the body, without
-// consuming it.
-//
-// An endpoint that answers a refused request with a pretty-printed JSON
-// body opens it with a newline. The first byte is what tells an error body
-// from a stream.
-func peekFirstByte(br *bufio.Reader) (byte, error) {
-	for {
-		b, err := br.Peek(1)
-		if err != nil {
-			return 0, err
-		}
-		switch b[0] {
-		case ' ', '\t', '\r', '\n':
-			if _, err := br.ReadByte(); err != nil {
-				return 0, err
-			}
-		default:
-			return b[0], nil
-		}
-	}
 }
 
 // maxSessionIDLength is the longest session identifier the endpoint takes.

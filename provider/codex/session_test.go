@@ -81,6 +81,18 @@ func TestASessionRunsOnTheTransport(t *testing.T) {
 	if got := field[string](t, first, "instructions"); got != "the prompt" {
 		t.Errorf("the instructions are %q, want the session's prompt", got)
 	}
+	// The session's id reaches the request without the transport being
+	// told one: it travels with the request, and the endpoint's cache key
+	// and its session headers are all that id.
+	if got := first.header.Get("Session-Id"); got != "s1" {
+		t.Errorf("the session header is %q, want the session's id", got)
+	}
+	if got := first.header.Get("X-Client-Request-Id"); got != "s1" {
+		t.Errorf("the client request header is %q, want the session's id", got)
+	}
+	if got := field[string](t, first, "prompt_cache_key"); got != "s1" {
+		t.Errorf("the prompt cache key is %q, want the session's id", got)
+	}
 	tools := field[[]map[string]any](t, first, "tools")
 	if len(tools) != 1 || tools[0]["name"] != "echo" {
 		t.Errorf("the request offers %v, want the echo tool", tools)

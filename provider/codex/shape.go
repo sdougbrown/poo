@@ -3,13 +3,11 @@ package codex
 import (
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"reflect"
-	"sort"
 	"strings"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
 // The request shaping.
@@ -139,18 +137,7 @@ func (t *Transport) modelInfo(req poo.ChatRequest) poo.ModelInfo {
 
 // zeroModelInfo reports that a request carried no model info.
 func zeroModelInfo(info poo.ModelInfo) bool {
-	return reflect.DeepEqual(info, poo.ModelInfo{})
-}
-
-// configErrorf is a failure in the transport's own configuration.
-//
-// It is a rejected request: the endpoint never saw it, and the run
-// settles with the message.
-func configErrorf(format string, args ...any) error {
-	return &poo.ProviderError{
-		Kind:    poo.ProviderKindInvalidRequest,
-		Message: fmt.Sprintf(format, args...),
-	}
+	return support.ZeroModelInfo(info)
 }
 
 // encodeError is a request that cannot be serialized.
@@ -165,10 +152,7 @@ func encodeError(what string) error {
 //
 // A model info that names a mode wins over the configured one.
 func (t *Transport) toolsMode(info poo.ModelInfo) string {
-	if mode := info.Tools.Mode; mode != "" {
-		return string(mode)
-	}
-	return t.cfg.ToolsMode
+	return support.ToolsMode(info, t.cfg.ToolsMode)
 }
 
 // textVerbosity returns the verbosity the request asks for.
@@ -193,7 +177,7 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 		model = info.ModelID
 	}
 	if model == "" {
-		return nil, configErrorf("the request names no model")
+		return nil, support.ConfigErrorf("the request names no model")
 	}
 
 	out := responsesRequest{
@@ -201,7 +185,7 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 		ToolChoice:     "auto",
 		Include:        []string{"reasoning.encrypted_content"},
 		Text:           &textControl{Verbosity: t.textVerbosity()},
-		PromptCacheKey: clampSessionID(t.cfg.SessionID),
+		PromptCacheKey: t.sessionID(req.SessionID),
 		// The endpoint rejects a stored response, and every request
 		// carries the whole history.
 		Store:             false,
@@ -250,10 +234,10 @@ func (t *Transport) tools(info poo.ModelInfo, specs []poo.ToolSpec) ([]responses
 		return nil, nil
 	case "native", "auto", "":
 	default:
-		return nil, configErrorf("the Codex endpoint makes native tool calls, so %q is not a tools mode it serves", mode)
+		return nil, support.ConfigErrorf("the Codex endpoint makes native tool calls, so %q is not a tools mode it serves", mode)
 	}
 	out := make([]responsesTool, 0, len(specs))
-	for _, spec := range sortedTools(specs) {
+	for _, spec := range support.SortedTools(specs) {
 		parameters := spec.Schema
 		if len(parameters) == 0 {
 			parameters = json.RawMessage(`{"type":"object","properties":{}}`)
@@ -269,19 +253,6 @@ func (t *Transport) tools(info poo.ModelInfo, specs []poo.ToolSpec) ([]responses
 	return out, nil
 }
 
-// sortedTools returns the tools in the order the request sends them.
-//
-// The order is by name, so two sessions that registered the same tools
-// in different orders send the same array. The array is part of the
-// prompt's prefix, and a prefix that changes breaks the endpoint's
-// cache.
-func sortedTools(specs []poo.ToolSpec) []poo.ToolSpec {
-	out := make([]poo.ToolSpec, len(specs))
-	copy(out, specs)
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
-}
-
 // shapeReasoning sets the request's reasoning control.
 //
 // The model info holds the rule. The model's reasoning control validates the
@@ -293,16 +264,16 @@ func (t *Transport) shapeReasoning(req poo.ChatRequest, info poo.ModelInfo, out 
 	setting := t.reasoningSetting(req)
 	fields, err := info.ReasoningFields(setting)
 	if err != nil {
-		return configErrorf("%s", reasonError(err))
+		return support.ConfigErrorf("%s", support.ReasonError(err))
 	}
 	effort := ""
 	for _, field := range fields {
 		if field.Path != poo.ReasoningPathEffort {
-			return configErrorf("the Codex endpoint takes an effort level, not %s", field.Path)
+			return support.ConfigErrorf("the Codex endpoint takes an effort level, not %s", field.Path)
 		}
 		value, ok := field.Value.(string)
 		if !ok {
-			return configErrorf("the reasoning effort %v is not a level", field.Value)
+			return support.ConfigErrorf("the reasoning effort %v is not a level", field.Value)
 		}
 		effort = value
 	}
@@ -341,37 +312,11 @@ func (t *Transport) reasoningSummary() string {
 	return "auto"
 }
 
-// reasonError renders a configuration error for the request's failure.
-//
-// The error names the setting that is at fault, so the reader knows what
-// to change.
-func reasonError(err error) string {
-	var cfg *poo.ConfigError
-	if errors.As(err, &cfg) {
-		return cfg.Field + ": " + cfg.Message
-	}
-	return err.Error()
-}
-
-// The profiles a Codex body is shaped with.
-//
-// The model info that shaped a request is not part of its body. The
-// attachments the model reads therefore travel into the snapshot as these
-// profiles, and the messages a fork appends are shaped by them.
-const (
-	// quirkReadsImages is the profile of a body shaped for a model that
-	// reads images.
-	quirkReadsImages = "inputs:image"
-	// quirkReadsAudio is the profile of a body shaped for a model that
-	// reads audio.
-	quirkReadsAudio = "inputs:audio"
-)
-
 // modalities are the attachments a request may carry.
 //
 // The model info a request carries decides them, and a fork has the body
-// and no model info. The snapshot records them as the profiles its body
-// was shaped with, so an appended attachment survives the fork.
+// and no model info. The snapshot records the attachments its body was
+// shaped for, so an appended attachment survives the fork.
 type modalities struct {
 	// image reports that the model reads images.
 	image bool
@@ -387,28 +332,28 @@ func modalitiesOf(info poo.ModelInfo) modalities {
 	}
 }
 
-// quirks returns the profiles a request shaped for these modalities
-// carries into its snapshot.
-func (m modalities) quirks() []string {
-	var out []string
+// inputs returns the attachments a request shaped for these modalities was
+// shaped for, in the shape the snapshot carries.
+func (m modalities) inputs() []poo.Modality {
+	var out []poo.Modality
 	if m.image {
-		out = append(out, quirkReadsImages)
+		out = append(out, poo.ModalityImage)
 	}
 	if m.audio {
-		out = append(out, quirkReadsAudio)
+		out = append(out, poo.ModalityAudio)
 	}
 	return out
 }
 
-// modalitiesOfQuirks returns the attachments the profiles a snapshot
-// carries say the model reads.
-func modalitiesOfQuirks(quirks []string) modalities {
+// modalitiesOfInputs returns the attachments a snapshot's inputs say the
+// model reads.
+func modalitiesOfInputs(inputs []poo.Modality) modalities {
 	var out modalities
-	for _, quirk := range quirks {
-		switch quirk {
-		case quirkReadsImages:
+	for _, input := range inputs {
+		switch input {
+		case poo.ModalityImage:
 			out.image = true
-		case quirkReadsAudio:
+		case poo.ModalityAudio:
 			out.audio = true
 		}
 	}
@@ -436,7 +381,7 @@ func inputItems(messages []poo.Message, reads modalities, firstID int) ([]json.R
 	next := firstID
 	for i, m := range messages {
 		for _, c := range m.Content {
-			if err := checkProviderBlock(c.Provider); err != nil {
+			if err := support.CarryError(poo.APIResponses, true, c.Provider); err != nil {
 				return nil, "", err
 			}
 		}
@@ -644,12 +589,12 @@ func inputParts(blocks []poo.ContentBlock, reads modalities) []inputPart {
 			if !reads.image {
 				continue
 			}
-			parts = append(parts, inputPart{Type: "input_image", Detail: "auto", ImageURL: dataURL(c)})
+			parts = append(parts, inputPart{Type: "input_image", Detail: "auto", ImageURL: support.AttachmentDataURL(c)})
 		case poo.ContentAudio:
 			if !reads.audio {
 				continue
 			}
-			format := audioFormat(c.MediaType)
+			format := support.AudioFormat(c.MediaType)
 			if format == "" {
 				continue
 			}
@@ -660,44 +605,6 @@ func inputParts(blocks []poo.ContentBlock, reads modalities) []inputPart {
 		}
 	}
 	return parts
-}
-
-// dataURL renders an attachment as the data URL an image part takes.
-func dataURL(attachment poo.ContentBlock) string {
-	return "data:" + attachment.MediaType + ";base64," + base64.StdEncoding.EncodeToString(attachment.Data)
-}
-
-// audioFormat returns the format name an audio part takes for a media
-// type. A type the API has no name for returns the empty string.
-func audioFormat(mediaType string) string {
-	switch mediaType {
-	case "audio/wav":
-		return "wav"
-	case "audio/mpeg":
-		return "mp3"
-	default:
-		return ""
-	}
-}
-
-// checkProviderBlock refuses a required block another API produced.
-//
-// The block is opaque provider data, so this transport can only give it
-// back to the API that produced it. An optional block from another API
-// is simply left out of the request. A required one makes the
-// request impossible, which the run settles as an incompatible session.
-func checkProviderBlock(p *poo.ProviderBlock) error {
-	if p == nil || p.API == poo.APIResponses {
-		return nil
-	}
-	if p.Required {
-		return &poo.ProviderError{
-			Kind: poo.ProviderKindSessionIncompatible,
-			Message: fmt.Sprintf("the history holds a required %s block, which a %s request cannot carry",
-				p.API, poo.APIResponses),
-		}
-	}
-	return nil
 }
 
 // providerItem returns the payload of a provider block this API owns,

@@ -334,14 +334,15 @@ func TestTheCredentialIsResolvedForEveryRequest(t *testing.T) {
 	}
 }
 
-// TestTheAccountIsReadFromTheToken covers a resolver that holds only the
-// token: the account rides in the token's claims.
-func TestTheAccountIsReadFromTheToken(t *testing.T) {
+// TestTheAccountIsTheOneTheResolverNamed covers where the account comes
+// from: the resolver names it, exactly as the credential store that read the
+// token does. A claim the token also carries is not a second answer.
+func TestTheAccountIsTheOneTheResolverNamed(t *testing.T) {
 	srv := newServer(t, completedStream)
-	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-9"}}`))
+	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-claim"}}`))
 	token := "header." + claims + ".signature"
 	tr := newTransport(srv.URL, func(o *codex.Options) {
-		o.Credentials = credential(token, "")
+		o.Credentials = credential(token, "acct-resolved")
 	})
 
 	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
@@ -355,8 +356,8 @@ func TestTheAccountIsReadFromTheToken(t *testing.T) {
 	defer reader.Close()
 	read(t, reader)
 
-	if got := srv.request(t, 0).header.Get("Chatgpt-Account-Id"); got != "acct-9" {
-		t.Errorf("the account header is %q, want the token's claim", got)
+	if got := srv.request(t, 0).header.Get("Chatgpt-Account-Id"); got != "acct-resolved" {
+		t.Errorf("the account header is %q, want the account the resolver named", got)
 	}
 }
 
@@ -488,6 +489,37 @@ func canonical(t *testing.T, value any) string {
 		t.Fatalf("the value does not encode: %v", err)
 	}
 	return string(raw)
+}
+
+// TestAForkKeepsTheSessionsCacheKey covers the fork's session: a fork is
+// the same session's next request, so it names the same cache key and the
+// same session headers the snapshot was sent with.
+func TestAForkKeepsTheSessionsCacheKey(t *testing.T) {
+	srv := newServer(t, completedStream, completedStream)
+	tr := newTransport(srv.URL)
+
+	reader, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+		SessionID: "s-request",
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	read(t, reader)
+	reader.Close()
+
+	fork, err := tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 0)
+	if err != nil {
+		t.Fatalf("forking: %v", err)
+	}
+	defer fork.Close()
+	read(t, fork)
+
+	if got := srv.request(t, 1).header.Get("Session-Id"); got != "s-request" {
+		t.Errorf("the fork's session header is %q, want the snapshot's session", got)
+	}
 }
 
 // TestAForkOfAnotherAPIIsRefused covers the snapshot a fork cannot use.
