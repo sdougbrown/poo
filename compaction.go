@@ -4,7 +4,6 @@ import "context"
 
 // Compactor is a strategy that changes the model's view of the history.
 //
-// The seam exists in v1; no strategy ships with it but the handoff one.
 // A compactor may only change what the model sees, and the change must be
 // visible: the store keeps the original history and records what the
 // compactor did.

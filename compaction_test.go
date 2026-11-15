@@ -1713,13 +1713,100 @@ func TestAReplacementThatStartsLaterKeepsTheEarlierOne(t *testing.T) {
 	}
 
 	// The turns the two cuts covered left the view, and the view says so.
+	// The turns that stayed still name their own messages: a replacement
+	// moves them, and a strategy sizes the next cut by those ranges.
 	removed := 0
+	history := poo.SessionView(s).Messages()
 	for _, turn := range poo.SessionView(s).Turns() {
 		if turn.Removed {
 			removed++
+			continue
+		}
+		span, ok := poo.TurnSpanMessages(s, turn.TurnIndex)
+		if !ok {
+			t.Fatalf("the session has no span for the turn %d", turn.TurnIndex)
+		}
+		if got, want := turnSpanText(history[turn.Start:turn.End]), turnSpanText(span); got != want {
+			t.Errorf("the turn %d's range holds %q, want %q", turn.TurnIndex, got, want)
 		}
 	}
 	if removed != 2 {
 		t.Errorf("the view reports %d removed turns, want 2", removed)
+	}
+}
+
+// turnSpanText returns every text a turn's messages show the model.
+func turnSpanText(messages []poo.Message) string {
+	var b strings.Builder
+	for _, m := range messages {
+		for _, c := range m.Content {
+			if c.Kind == poo.ContentText || c.Kind == poo.ContentToolResult {
+				b.WriteString(c.Text)
+				b.WriteString("\n")
+			}
+		}
+	}
+	return b.String()
+}
+
+// TestAReplacementLeavesProviderDataInTheView covers the rule that a
+// replacement never supersedes a provider window or the marker the core
+// wrote for it: only the provider can write a window again, and a view
+// that lost its marker would look compacted with nothing saying so.
+func TestAReplacementLeavesProviderDataInTheView(t *testing.T) {
+	compactor := &compactionCompactor{
+		should: func(view poo.View, budget poo.ContextBudget) bool { return len(view.Turns()) >= 1 },
+	}
+	compactor.compaction = func(view poo.View) (poo.Compaction, error) {
+		if compactor.Calls() == 1 {
+			return poo.Compaction{Strategy: "window", Window: &poo.ProviderWindow{}}, nil
+		}
+		return poo.Compaction{
+			Strategy: "stepwise",
+			Replace: &poo.RangeReplacement{
+				Cut:      poo.TurnRange{First: 2, Last: 2},
+				Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "the summary")},
+			},
+		}, nil
+	}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{text: "the answer"},
+	})
+	tr.SetWindow(poo.ProviderWindow{Items: []poo.ContentBlock{{
+		Kind:     poo.ContentProvider,
+		Provider: &poo.ProviderBlock{API: poo.APIChatCompletions, Required: true, Data: []byte(`{"w":1}`)},
+	}}})
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	if got := compactor.Calls(); got != 2 {
+		t.Fatalf("the compactor ran %d times, want 2", got)
+	}
+	keptWindow, keptMarker, keptSummary := false, false, false
+	for _, m := range poo.Messages(s) {
+		if m.Text() == poo.CompactionMarkerText {
+			keptMarker = true
+		}
+		if m.Text() == "the summary" {
+			keptSummary = true
+		}
+		for _, c := range m.Content {
+			if c.Provider != nil {
+				keptWindow = true
+			}
+		}
+	}
+	if !keptWindow {
+		t.Error("the view lost the provider's window")
+	}
+	if !keptMarker {
+		t.Error("the view lost the marker the core wrote for the window")
+	}
+	if !keptSummary {
+		t.Error("the view holds no replacement")
 	}
 }

@@ -413,7 +413,7 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 			return Reply{}, err
 		}
 		defer reader.Close()
-		return s.readSideReply(ctx, run, reader)
+		return s.readSideReply(ctx, run, reader, len(rendered.Body))
 	}
 }
 
@@ -426,7 +426,7 @@ func (s *Session) askFunc(run *runState) AskFunc {
 		s.mu.Lock()
 		model := s.opts.Model
 		s.mu.Unlock()
-		reader, _, err := s.opts.Transport.Stream(ctx, ChatRequest{
+		reader, rendered, err := s.opts.Transport.Stream(ctx, ChatRequest{
 			Model:     model.ModelID,
 			ModelInfo: model,
 			Messages:  CloneMessages(messages),
@@ -436,7 +436,7 @@ func (s *Session) askFunc(run *runState) AskFunc {
 			return Reply{}, err
 		}
 		defer reader.Close()
-		return s.readSideReply(ctx, run, reader)
+		return s.readSideReply(ctx, run, reader, len(rendered.Body))
 	}
 }
 
@@ -445,25 +445,29 @@ func (s *Session) askFunc(run *runState) AskFunc {
 //
 // A side request is not a turn: it appends nothing to the history and
 // records no message. Its tokens still count against the run's ceiling,
-// because the endpoint charged for them.
-func (s *Session) readSideReply(ctx context.Context, run *runState, reader StreamReader) (Reply, error) {
+// because the endpoint charged for them. An endpoint that reports no
+// usage is charged the estimate a turn would get, from the request's own
+// size: a fork re-sends the whole conversation, so counting it as free
+// would hide the cost of compacting.
+func (s *Session) readSideReply(ctx context.Context, run *runState, reader StreamReader, requestChars int) (Reply, error) {
 	resp, err := readResponse(ctx, reader, nil, run.id, 0, run.requests, nil)
 	if err != nil {
 		return Reply{}, err
 	}
-	reply := Reply{
-		Message: Message{Role: RoleAssistant, Content: resp.content, Origin: OriginModel},
-		Finish:  resp.finish,
+	reply := Reply{Message: assistantMessage(resp), Finish: resp.finish}
+	// A request that finishes after the run settled does not add to the
+	// settled run's token counter.
+	s.mu.Lock()
+	if !run.committed && !run.sealed {
+		if resp.usage != nil {
+			run.tokens += resp.usage.InputTokens + resp.usage.OutputTokens
+		} else {
+			run.tokens += s.tokensForCharsLocked(requestChars + estimateMessageChars(reply.Message))
+		}
 	}
+	s.mu.Unlock()
 	if resp.usage != nil {
 		reply.Usage = *resp.usage
-		// A request that finishes after the run settled does not add
-		// to the settled run's token counter.
-		s.mu.Lock()
-		if !run.committed && !run.sealed {
-			run.tokens += resp.usage.InputTokens + resp.usage.OutputTokens
-		}
-		s.mu.Unlock()
 	}
 	return reply, nil
 }

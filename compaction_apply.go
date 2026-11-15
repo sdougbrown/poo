@@ -286,7 +286,7 @@ func (s *Session) replaceViewLocked(r RangeReplacement) (compactionView, error) 
 		if i == 0 && supersede {
 			kept := make([]Message, 0, len(seg))
 			for _, m := range seg {
-				if m.Origin == OriginCompaction && !hasProviderBlock(m) {
+				if supersedable(m) {
 					continue
 				}
 				kept = append(kept, m)
@@ -425,6 +425,20 @@ func (s *Session) windowViewLocked(w ProviderWindow) (compactionView, error) {
 		spans:             spans,
 		clearSystemPrompt: true,
 	}, nil
+}
+
+// supersedable reports that a replacement may take a compaction-origin
+// message out of the view.
+//
+// A replacement's own text is what a new replacement supersedes.
+// Provider data stays, because nothing but the provider can write a
+// window again, and the marker the core wrote for a window stays with
+// it: a compacted view must never lose the note that says so.
+func supersedable(m Message) bool {
+	if m.Origin != OriginCompaction || hasProviderBlock(m) {
+		return false
+	}
+	return strings.TrimSpace(m.Text()) != CompactionMarkerText
 }
 
 // hasProviderBlock reports that a message carries data the provider
