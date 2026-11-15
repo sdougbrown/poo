@@ -279,23 +279,28 @@ func marker(cut poo.TurnRange) string {
 // view, so the request updates it instead of summarizing that work
 // again from nothing.
 //
-// The strategy recognizes its own replacement by its marker line, so a
-// replacement another strategy wrote is left to the core's supersession
-// rule.
+// Any compaction's visible text counts, not only this strategy's: a run
+// whose strategy changed keeps the checkpoint the earlier one wrote.
+// A provider window and the marker the core writes for it are not
+// summaries, and neither is an empty message.
 func previousSummary(messages []poo.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		m := messages[i]
 		if m.Origin != poo.OriginCompaction {
 			continue
 		}
-		text := m.Text()
-		if !strings.HasPrefix(text, markerPrefix) {
+		text := strings.TrimSpace(m.Text())
+		if text == "" || text == poo.CompactionMarkerText {
 			continue
 		}
-		if _, rest, ok := strings.Cut(text, "\n\n"); ok {
-			return strings.TrimSpace(rest)
+		// A replacement this strategy wrote carries its marker line
+		// first: the summary is what follows it.
+		if strings.HasPrefix(text, markerPrefix) {
+			if _, rest, ok := strings.Cut(text, "\n\n"); ok {
+				return strings.TrimSpace(rest)
+			}
 		}
-		return strings.TrimSpace(text)
+		return text
 	}
 	return ""
 }

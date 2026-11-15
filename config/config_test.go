@@ -577,3 +577,24 @@ func TestASetZeroIsChecked(t *testing.T) {
 		}
 	}
 }
+
+// TestAnUnknownCompactionStrategyIsRefused covers the generated check on
+// context.strategy: a name the build does not implement is refused, so
+// a session never runs with no compactor because of a typo.
+func TestAnUnknownCompactionStrategyIsRefused(t *testing.T) {
+	_, err := config.Parse([]byte("version: 1\ncontext:\n  strategy: summarize\n"), config.FormatYAML)
+	if err == nil {
+		t.Fatal("the settings decoded, want a failure")
+	}
+	field, ok := config.FieldOf(err)
+	if !ok || field != "context.strategy" {
+		t.Fatalf("the failure names %q, want context.strategy", field)
+	}
+	var settingsErr *config.Error
+	if !asError(err, &settingsErr) {
+		t.Fatalf("the failure is %T, want a settings failure", err)
+	}
+	if joined := strings.Join(settingsErr.Challenge, "\n"); !strings.Contains(joined, "summary") {
+		t.Errorf("the challenge does not name the strategies: %q", joined)
+	}
+}

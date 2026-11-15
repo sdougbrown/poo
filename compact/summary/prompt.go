@@ -126,6 +126,19 @@ func summarizationRequest(covered []poo.Message, previous string) []poo.Message 
 	}
 }
 
+// escapeTags defangs the tags the request uses to delimit its parts.
+//
+// A tool result is not the request's own words, and one that emits a
+// closing tag could pose as the end of the conversation or as an earlier
+// summary. The role prefixes stay forgeable, as they are in any
+// transcript format, but the structure the request is parsed by does not.
+var escapeTags = strings.NewReplacer(
+	"<conversation>", `\<conversation>`,
+	"</conversation>", `<\/conversation>`,
+	"<previous-summary>", `\<previous-summary>`,
+	"</previous-summary>", `<\/previous-summary>`,
+)
+
 // serialize renders the covered messages as one block of text.
 //
 // Tool results are capped: the full text of one is what the summary does
@@ -165,7 +178,7 @@ func serialize(messages []poo.Message) string {
 			}
 		}
 	}
-	return strings.Join(parts, "\n\n")
+	return escapeTags.Replace(strings.Join(parts, "\n\n"))
 }
 
 // callText renders one tool call as a line of the transcript.
