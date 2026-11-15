@@ -63,9 +63,16 @@ func (s *Settings) Check() error {
 // that names the field: the operator set it, and the other settings
 // do not allow it there. The generated check's own account of the
 // field is the failure's explanation.
+//
+// The check judges the settings for a runtime that has every
+// capability. Settings are one file an operator shares between front
+// doors, so the front door without a wire client must not refuse a
+// chain that names the wire asker. The build judges the same settings
+// with what it has, and warns about what that leaves out.
 func (s *Settings) checkAvailability() error {
 	fields := fieldsOf(s)
 	conditions := conditionsOf(s)
+	conditions.HasWireClient = true
 	availability := Check(fields, conditions, SettingsFields{})
 
 	value := reflect.ValueOf(fields)

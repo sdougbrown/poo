@@ -56,6 +56,14 @@ explicit empty list is a chain with no askers, so an `ask` goes straight to
 the fallback, and an absent list takes the binary's own chain (`[wire]` in
 `poo serve`).
 
+A chain that names an asker the current runtime cannot provide loses that
+asker instead of the whole file failing: `poo run` builds no wire client, so
+`askers: [decide, wire]` runs with the decide asker and warns where the wire
+asker went. The settings schema carries the rule — a `fairWhen` on
+`permission.askers` over the `has_wire_client` condition — so the reason the
+warning prints is the schema's own, and one settings file serves the repl and
+a headless run alike.
+
 A chain that asks the wire only reaches a client that declared
 `capabilities.permission_answers` in `poo/initialize`. A client that did
 not is never asked, and every ask falls back; the session's create and
