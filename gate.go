@@ -404,6 +404,9 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 		s.mu.Lock()
 		rendered := run.lastRendered
 		has := run.hasRendered
+		// The fork's own size is the view it re-sends plus what it
+		// appends, measured the way the run's requests are.
+		chars := s.historyCharsLocked()
 		s.mu.Unlock()
 		if !has {
 			return Reply{}, fmt.Errorf("poo: there is no request to fork")
@@ -413,7 +416,7 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 			return Reply{}, err
 		}
 		defer reader.Close()
-		return s.readSideReply(ctx, run, reader, len(rendered.Body))
+		return s.readSideReply(ctx, run, reader, chars+estimateHistoryChars(appended))
 	}
 }
 
@@ -426,7 +429,7 @@ func (s *Session) askFunc(run *runState) AskFunc {
 		s.mu.Lock()
 		model := s.opts.Model
 		s.mu.Unlock()
-		reader, rendered, err := s.opts.Transport.Stream(ctx, ChatRequest{
+		reader, _, err := s.opts.Transport.Stream(ctx, ChatRequest{
 			Model:     model.ModelID,
 			ModelInfo: model,
 			Messages:  CloneMessages(messages),
@@ -436,7 +439,7 @@ func (s *Session) askFunc(run *runState) AskFunc {
 			return Reply{}, err
 		}
 		defer reader.Close()
-		return s.readSideReply(ctx, run, reader, len(rendered.Body))
+		return s.readSideReply(ctx, run, reader, estimateHistoryChars(messages))
 	}
 }
 
@@ -446,9 +449,9 @@ func (s *Session) askFunc(run *runState) AskFunc {
 // A side request is not a turn: it appends nothing to the history and
 // records no message. Its tokens still count against the run's ceiling,
 // because the endpoint charged for them. An endpoint that reports no
-// usage is charged the estimate a turn would get, from the request's own
-// size: a fork re-sends the whole conversation, so counting it as free
-// would hide the cost of compacting.
+// usage is charged the estimate a turn would get, measured the same way
+// and so in the same unit: a fork re-sends the whole conversation, so
+// counting it as free would hide the cost of compacting.
 func (s *Session) readSideReply(ctx context.Context, run *runState, reader StreamReader, requestChars int) (Reply, error) {
 	resp, err := readResponse(ctx, reader, nil, run.id, 0, run.requests, nil)
 	if err != nil {

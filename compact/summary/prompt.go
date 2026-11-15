@@ -264,9 +264,9 @@ func bullets(paths []string) string {
 // defaultFileOp reports the file a call to one of poo's own file tools
 // names.
 //
-// poo ships read, edit and write, and each names its file in a "path"
-// argument. A consumer's tools are its own, so the default knows only
-// these, and a strategy configured by that consumer reports its own.
+// poo ships read and edit, and each names its file in a "path" argument.
+// A consumer's tools are its own, so the default knows only these two, and
+// a consumer configures Options.Files for the rest.
 func defaultFileOp(name string, arguments json.RawMessage) (string, bool) {
 	path := argumentPath(arguments)
 	if path == "" {
@@ -275,7 +275,7 @@ func defaultFileOp(name string, arguments json.RawMessage) (string, bool) {
 	switch name {
 	case "read":
 		return path, false
-	case "edit", "write":
+	case "edit":
 		return path, true
 	}
 	return "", false

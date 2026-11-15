@@ -487,9 +487,12 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  ContextSummaryKeepRecentTokensEnabled && false,
 			Enabled:   ContextSummaryKeepRecentTokensEnabled,
 			Satisfied: ContextSummaryKeepRecentTokensSatisfied,
-			Fair:      true,
+			Fair:      f.ContextSummaryKeepRecentTokens != nil && *f.ContextSummaryKeepRecentTokens >= 0,
 			Reason: func() *string {
 				var reasons []string
+				if !(f.ContextSummaryKeepRecentTokens != nil && *f.ContextSummaryKeepRecentTokens >= 0) && "context.summary.keep_recent_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.summary.keep_recent_tokens must not be negative")
+				}
 				if len(reasons) == 0 {
 					return nil
 				}
@@ -497,6 +500,9 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
+				if !(f.ContextSummaryKeepRecentTokens != nil && *f.ContextSummaryKeepRecentTokens >= 0) && "context.summary.keep_recent_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.summary.keep_recent_tokens must not be negative")
+				}
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -509,9 +515,12 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  ContextSummaryMaxTokensEnabled && false,
 			Enabled:   ContextSummaryMaxTokensEnabled,
 			Satisfied: ContextSummaryMaxTokensSatisfied,
-			Fair:      true,
+			Fair:      f.ContextSummaryMaxTokens != nil && *f.ContextSummaryMaxTokens >= 0,
 			Reason: func() *string {
 				var reasons []string
+				if !(f.ContextSummaryMaxTokens != nil && *f.ContextSummaryMaxTokens >= 0) && "context.summary.max_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.summary.max_tokens must not be negative")
+				}
 				if len(reasons) == 0 {
 					return nil
 				}
@@ -519,6 +528,9 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
+				if !(f.ContextSummaryMaxTokens != nil && *f.ContextSummaryMaxTokens >= 0) && "context.summary.max_tokens must not be negative" != "" {
+					reasons = append(reasons, "context.summary.max_tokens must not be negative")
+				}
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -531,9 +543,12 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  ContextSummaryRatioEnabled && false,
 			Enabled:   ContextSummaryRatioEnabled,
 			Satisfied: ContextSummaryRatioSatisfied,
-			Fair:      true,
+			Fair:      f.ContextSummaryRatio != nil && *f.ContextSummaryRatio >= 0 && *f.ContextSummaryRatio <= 1,
 			Reason: func() *string {
 				var reasons []string
+				if !(f.ContextSummaryRatio != nil && *f.ContextSummaryRatio >= 0 && *f.ContextSummaryRatio <= 1) && "context.summary.ratio must be between 0 and 1" != "" {
+					reasons = append(reasons, "context.summary.ratio must be between 0 and 1")
+				}
 				if len(reasons) == 0 {
 					return nil
 				}
@@ -541,6 +556,9 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
+				if !(f.ContextSummaryRatio != nil && *f.ContextSummaryRatio >= 0 && *f.ContextSummaryRatio <= 1) && "context.summary.ratio must be between 0 and 1" != "" {
+					reasons = append(reasons, "context.summary.ratio must be between 0 and 1")
+				}
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -2314,6 +2332,9 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "ContextHardRatio", RuleType: "check", Expr: "f.ContextHardRatio != nil && *f.ContextHardRatio >= 0 && *f.ContextHardRatio <= 1", Reason: "context.hard_ratio must be between 0 and 1"},
 	{Field: "ContextNoticeRatio", RuleType: "check", Expr: "f.ContextNoticeRatio != nil && *f.ContextNoticeRatio >= 0 && *f.ContextNoticeRatio <= 1", Reason: "context.notice_ratio must be between 0 and 1"},
 	{Field: "ContextStrategy", RuleType: "check", Expr: "f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, \"^(summary|handoff|none)$\")", Reason: "context.strategy must be summary, handoff or none"},
+	{Field: "ContextSummaryKeepRecentTokens", RuleType: "check", Expr: "f.ContextSummaryKeepRecentTokens != nil && *f.ContextSummaryKeepRecentTokens >= 0", Reason: "context.summary.keep_recent_tokens must not be negative"},
+	{Field: "ContextSummaryMaxTokens", RuleType: "check", Expr: "f.ContextSummaryMaxTokens != nil && *f.ContextSummaryMaxTokens >= 0", Reason: "context.summary.max_tokens must not be negative"},
+	{Field: "ContextSummaryRatio", RuleType: "check", Expr: "f.ContextSummaryRatio != nil && *f.ContextSummaryRatio >= 0 && *f.ContextSummaryRatio <= 1", Reason: "context.summary.ratio must be between 0 and 1"},
 	{Field: "DeciderTimeoutMs", RuleType: "check", Expr: "f.DeciderTimeoutMs != nil && *f.DeciderTimeoutMs >= 1", Reason: "decider.timeout_ms must be at least a millisecond"},
 	{Field: "JobsMaxRunning", RuleType: "check", Expr: "f.JobsMaxRunning != nil && *f.JobsMaxRunning >= 0", Reason: "jobs.max_running must not be negative"},
 	{Field: "JobsMaxUnattendedWakes", RuleType: "check", Expr: "f.JobsMaxUnattendedWakes != nil && *f.JobsMaxUnattendedWakes >= 0", Reason: "jobs.max_unattended_wakes must not be negative"},
@@ -2407,18 +2428,21 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+		explanations = append(explanations, "* check: context.summary.keep_recent_tokens must not be negative")
 	case "ContextSummaryMaxTokens", "context.summary.max_tokens":
 		found = true
 		status = avail.ContextSummaryMaxTokens
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+		explanations = append(explanations, "* check: context.summary.max_tokens must not be negative")
 	case "ContextSummaryRatio", "context.summary.ratio":
 		found = true
 		status = avail.ContextSummaryRatio
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+		explanations = append(explanations, "* check: context.summary.ratio must be between 0 and 1")
 	case "DeciderTimeoutMs", "decider.timeout_ms":
 		found = true
 		status = avail.DeciderTimeoutMs

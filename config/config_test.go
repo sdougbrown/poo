@@ -598,3 +598,17 @@ func TestAnUnknownCompactionStrategyIsRefused(t *testing.T) {
 		t.Errorf("the challenge does not name the strategies: %q", joined)
 	}
 }
+
+// TestASummaryRatioOutOfRangeIsRefused covers the rule the generated
+// check carries for the summary strategy: a ratio above one would never
+// reach the trigger, so the strategy would be silently disabled.
+func TestASummaryRatioOutOfRangeIsRefused(t *testing.T) {
+	_, err := config.Parse([]byte("version: 1\ncontext:\n  strategy: summary\n  summary:\n    ratio: 5\n"), config.FormatYAML)
+	if err == nil {
+		t.Fatal("the settings decoded, want a failure")
+	}
+	field, ok := config.FieldOf(err)
+	if !ok || field != "context.summary.ratio" {
+		t.Fatalf("the failure names %q, want context.summary.ratio", field)
+	}
+}

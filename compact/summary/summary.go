@@ -71,8 +71,8 @@ type Options struct {
 	// MaxTokens is the output limit of the summarization request. It
 	// defaults to DefaultMaxTokens.
 	MaxTokens int
-	// Files reports the file a tool call names. It defaults to the tools
-	// poo ships: read, edit and write, with the path in a "path"
+	// Files reports the file a tool call names. It defaults to the two
+	// file tools poo ships, read and edit, with the path in a "path"
 	// argument. A consumer whose tools are named otherwise sets it, so
 	// the summary states the files the work touched.
 	Files FileOp

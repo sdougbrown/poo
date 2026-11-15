@@ -452,6 +452,34 @@ func TestTheCutKeepsTheNewestTurnsWithinTheTail(t *testing.T) {
 		}
 	})
 
+	t.Run("the provider's marker is not a summary", func(t *testing.T) {
+		messages := []poo.Message{
+			poo.NewTextMessage(poo.RoleSystem, "the system prompt"),
+			{Origin: poo.OriginCompaction, Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: poo.CompactionMarkerText}}},
+			poo.NewTextMessage(poo.RoleAssistant, strings.Repeat("a", 2000)),
+			poo.NewTextMessage(poo.RoleAssistant, strings.Repeat("b", 2000)),
+			poo.NewTextMessage(poo.RoleAssistant, strings.Repeat("c", 2000)),
+		}
+		v := poo.NewHistoryView(messages, nil, []poo.TurnSummary{
+			{TurnIndex: 1, Start: 2, End: 3},
+			{TurnIndex: 2, Start: 3, End: 4},
+			{TurnIndex: 3, Start: 4, End: 5},
+		})
+		var got []poo.Message
+		c := summary.New(summary.Options{KeepRecentTokens: 400})
+		if _, err := c.Compact(context.Background(), poo.CompactionEnv{
+			View:   v,
+			Budget: poo.ContextBudget{ContextLimit: 100000, CharsPerToken: 4},
+			Ask:    ask(&got),
+		}); err != nil {
+			t.Fatalf("compacting: %v", err)
+		}
+		prompt := got[len(got)-1].Text()
+		if strings.Contains(prompt, "<previous-summary>") {
+			t.Errorf("the request carries the provider's marker as a prior summary: %q", prompt)
+		}
+	})
+
 	t.Run("an earlier strategy's summary is carried forward", func(t *testing.T) {
 		messages := []poo.Message{
 			poo.NewTextMessage(poo.RoleSystem, "the system prompt"),

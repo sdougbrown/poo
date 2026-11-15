@@ -314,6 +314,28 @@
     },
     {
       "type": "check",
+      "field": "context.summary.ratio",
+      "op": "range",
+      "min": 0,
+      "max": 1,
+      "reason": "context.summary.ratio must be between 0 and 1"
+    },
+    {
+      "type": "check",
+      "field": "context.summary.keep_recent_tokens",
+      "op": "min",
+      "value": 0,
+      "reason": "context.summary.keep_recent_tokens must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "context.summary.max_tokens",
+      "op": "min",
+      "value": 0,
+      "reason": "context.summary.max_tokens must not be negative"
+    },
+    {
+      "type": "check",
       "field": "session.retention.max_age_days",
       "op": "min",
       "value": 0,
