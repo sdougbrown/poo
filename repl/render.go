@@ -395,7 +395,7 @@ func (r *renderer) stalledNow() bool {
 	if width <= 0 || width == r.width {
 		return false
 	}
-	r.rewrap(width)
+	r.width = width
 	return true
 }
 
