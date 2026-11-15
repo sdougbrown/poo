@@ -4,7 +4,8 @@
 // The file is pi's: credentials by provider id, one entry each. poo reads the
 // file the settings name, never a pi installation's own directory, so a
 // caller hands the path over. This package does not log in: pi's login writes
-// the credential, and this package keeps it alive.
+// the credential, and this package keeps it alive. Access uses the credential
+// the file holds, and Refresh trades it for a new one.
 //
 // A stored access token expires, and pi and this package both refresh one by
 // trading the refresh token at the same endpoint. Two refreshes of one
@@ -167,13 +168,32 @@ type Credentials struct {
 //
 // The failures tell a caller what a retry would cost. ErrLocked and
 // ErrStorage come before anything is traded, so the file is untouched and a
-// retry is free. ErrRefresh comes from the endpoint's answer, so the file is
-// untouched and its grant is the one that was refused. ErrPersist comes after
-// the endpoint traded the token, so the file holds a refresh token that may
+// retry is free. ErrRefresh leaves the file untouched, but the endpoint may
+// have traded the token before its response was lost. ErrPersist means the
+// endpoint traded the token, so the file holds a refresh token that may
 // be spent. A retry cannot be expected to work, and pi's login is the way
 // back. A caller that gets ErrPersist gets no token either, because the traded
 // token would go into a session the next process cannot reload.
 func (c Credentials) Access(ctx context.Context) (Token, error) {
+	return c.token(ctx, false)
+}
+
+// Refresh trades the credential's refresh token for a new one, whether the
+// stored access token is live or not. A caller that needs the credential
+// replaced, rather than used, calls this.
+//
+// The trade is Access's trade: the same lock, the same request, and the same
+// write that keeps every other entry and field. The failures are the same.
+// Concurrent calls each refresh in turn. The second uses the refresh token
+// stored by the first.
+func (c Credentials) Refresh(ctx context.Context) (Token, error) {
+	return c.token(ctx, true)
+}
+
+// token reads the credential, trades it when force says so or when it is not
+// live, and writes the traded one back. The whole of it is one critical
+// section under pi's lock.
+func (c Credentials) token(ctx context.Context, force bool) (Token, error) {
 	if c.Path == "" {
 		return Token{}, errors.New("piauth: no auth.json path")
 	}
@@ -186,8 +206,8 @@ func (c Credentials) Access(ctx context.Context) (Token, error) {
 	if err != nil {
 		return Token{}, err
 	}
-	if !stored.live(c.now(), c.leeway()) {
-		refreshed, err := c.refresh(ctx, stored)
+	if force || !stored.live(c.now(), c.leeway()) {
+		refreshed, err := c.trade(ctx, stored)
 		if err != nil {
 			return Token{}, err
 		}
