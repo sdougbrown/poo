@@ -2,6 +2,8 @@ package piauth
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -62,6 +64,41 @@ func TestTheKeepaliveDoesNotRestampATakenLock(t *testing.T) {
 	}
 }
 
+// TestEveryTakeoverWithTheHeldMtimeIsDetected covers the takeover a coarse
+// stamp hides. It repeats the attempt, because a filesystem hands the removed
+// directory's inode number straight back often enough for one round to miss
+// it. A holder that survives any one takeover writes under another writer's
+// lock, and the other writer's refresh is lost.
+func TestEveryTakeoverWithTheHeldMtimeIsDetected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	lockPath := path + ".lock"
+	for round := 0; round < 16; round++ {
+		// The path holds the last round's taker, which no holder owns.
+		if err := os.Remove(lockPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("round %d: clearing the taken lock: %v", round, err)
+		}
+		hold, err := acquire(context.Background(), path, time.Second)
+		if err != nil {
+			t.Fatalf("round %d: taking the lock: %v", round, err)
+		}
+		held, err := os.Stat(lockPath)
+		if err != nil {
+			hold.release()
+			t.Fatalf("round %d: stating the held lock: %v", round, err)
+		}
+
+		takeOver(t, lockPath, held.ModTime())
+
+		if err := hold.touch(); err == nil {
+			t.Errorf("round %d: the keepalive stamped the taken lock and still believes it holds it", round)
+		}
+		if err := hold.verify(); err == nil {
+			t.Errorf("round %d: a verify after the takeover still reports the lock as this holder's", round)
+		}
+		hold.release()
+	}
+}
+
 // TestTheKeepaliveKeepsTheHeldLockFresh covers the other half of the tick. A
 // lock this holder still owns is stamped again, so a long refresh does not go
 // stale and get broken.
@@ -72,18 +109,23 @@ func TestTheKeepaliveKeepsTheHeldLockFresh(t *testing.T) {
 		t.Fatalf("taking the lock: %v", err)
 	}
 	defer hold.release()
+	hold.mu.Lock()
 	before := hold.mtime
+	hold.mu.Unlock()
 
 	if err := hold.touch(); err != nil {
 		t.Fatalf("the keepalive refused a lock it holds: %v", err)
 	}
-	if hold.mtime.Before(before) {
-		t.Errorf("the keepalive moved the lock's mtime back, to %v from %v", hold.mtime, before)
+	hold.mu.Lock()
+	after := hold.mtime
+	hold.mu.Unlock()
+	if after.Before(before) {
+		t.Errorf("the keepalive moved the lock's mtime back, to %v from %v", after, before)
 	}
 	if err := hold.verify(); err != nil {
 		t.Errorf("the lock is not this holder's after a tick: %v", err)
 	}
-	if age := time.Since(hold.mtime); age > lockRefresh {
+	if age := time.Since(after); age > lockRefresh {
 		t.Errorf("the tick left an mtime %v old, want it fresher than %v", age, lockRefresh)
 	}
 }

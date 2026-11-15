@@ -23,12 +23,21 @@ import (
 // The directory stays empty because pi releases its lock with rmdir. A
 // marker file in there would leave pi unable to release.
 //
-// Ownership is the directory's identity, not only its mtime. A writer that
-// breaks a lock and takes it creates a new directory. The inode differs even
-// when a coarse mtime would give both the same stamp. The mtime is checked
-// beside the identity, so a stamp that changed under this holder means the
-// lock is taken. What remains is the window every mkdir lock has: a takeover
-// between the last check and the write is not detectable.
+// Ownership is the directory's identity, not only its mtime. A takeover
+// creates a new directory, and its identity says the lock changed hands,
+// whatever stamp the taker leaves. The mtime is checked beside that identity:
+// a stamp that changed under this holder means the lock is taken. What
+// remains is the window every mkdir lock has: a takeover between the last
+// check and the write is not detectable.
+//
+// A bare inode number is not identity enough. A filesystem hands a removed
+// directory's number out again, often to the very next mkdir. A takeover
+// inside one coarse mtime tick then looks exactly like the holder's own
+// directory. So the holder keeps an open handle on that directory for the
+// whole hold. A kernel does not free an inode a live reference holds, so no
+// taker can be handed the number this holder is keeping alive. The holder
+// states the handle as well. A filesystem that frees the directory anyway, as
+// a FUSE mount of an ext4 image does, fails that stat.
 //
 // A filesystem that will not take the stamp ends the holder's keepalive
 // rather than leaving a lock no later writer can judge. The refresh is
@@ -66,6 +75,13 @@ type lock struct {
 	// dir is the directory this holder created. Its identity says the
 	// directory is still this holder's, whatever the mtime says.
 	dir os.FileInfo
+	// handle is this holder's open reference to that directory, held for
+	// the whole hold. It keeps dir's inode from being handed to a taker,
+	// and it is closed only when the lock is released. Windows will not
+	// remove a directory with an open handle, its own process's included,
+	// so release closes first. poo ships for Linux and macOS, which allow
+	// both.
+	handle *os.File
 	// done stops the refresh, and stopped says it has stopped.
 	done    chan struct{}
 	stopped chan struct{}
@@ -130,15 +146,25 @@ func acquire(ctx context.Context, path string, wait time.Duration) (*lock, error
 
 // held starts a lock's refresh and hands the lock over. The mkdir that took
 // the lock also stamped the directory, so the fresh lock needs no stamp.
+//
+// The identity is read through the handle, so record and reference are one
+// inode: the one the mkdir created.
 func held(lockPath string) (*lock, error) {
-	info, err := os.Stat(lockPath)
+	handle, err := os.Open(lockPath)
 	if err != nil {
+		_ = os.Remove(lockPath)
+		return nil, fmt.Errorf("%w: locking %s: %w", ErrStorage, lockPath, err)
+	}
+	info, err := handle.Stat()
+	if err != nil {
+		_ = handle.Close()
 		_ = os.Remove(lockPath)
 		return nil, fmt.Errorf("%w: locking %s: %w", ErrStorage, lockPath, err)
 	}
 	hold := &lock{
 		path:    lockPath,
 		dir:     info,
+		handle:  handle,
 		mtime:   info.ModTime(),
 		done:    make(chan struct{}),
 		stopped: make(chan struct{}),
@@ -208,7 +234,14 @@ func (l *lock) touch() error {
 
 // owns reports whether the directory is still the one this holder created
 // and still carries the mtime this holder left on it. The caller holds mu.
+//
+// The handle's own stat comes first. A directory whose inode the filesystem
+// freed under this holder is one a taker replaced. Such a filesystem can hand
+// the taker the number the holder recorded.
 func (l *lock) owns() error {
+	if _, err := l.handle.Stat(); err != nil {
+		return fmt.Errorf("the held directory %s is gone: %w", l.path, err)
+	}
 	info, err := os.Stat(l.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("%s was taken away", l.path)
@@ -245,12 +278,18 @@ func (l *lock) verify() error {
 // third writer while the taker believes it holds the lock. A release that
 // cannot remove the directory reports nothing, as pi's own release does. The
 // directory then goes stale and the next writer breaks it.
+//
+// The handle is closed before the directory is removed, because Windows will
+// not remove a directory its own process holds open. The check above has
+// already settled that the directory is this holder's.
 func (l *lock) release() {
 	close(l.done)
 	<-l.stopped
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.owns() != nil {
+	owned := l.owns() == nil
+	_ = l.handle.Close()
+	if !owned {
 		return
 	}
 	_ = os.Remove(l.path)
