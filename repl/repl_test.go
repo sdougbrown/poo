@@ -160,9 +160,43 @@ func (s *fakeServer) waitCancels(t *testing.T, want int) []string {
 
 func TestUsageUpdatesTheStatus(t *testing.T) {
 	m := &machine{status: &status{contextLimit: 262144}}
-	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"input_tokens": 12300}}, "r1", &runState{})
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
 	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
 		t.Fatalf("the prompt lacks the run's usage: %s", prompt)
+	}
+}
+
+// TestTheSettleDoesNotStealTheStatusline covers the run.settled feed:
+// the settle's usage is the run's total, the sum of every request, and
+// a statusline that read it for the snapshot would show a context
+// fuller than the window. The snapshot comes from the usage events;
+// the settle leaves it alone.
+func TestTheSettleDoesNotStealTheStatusline(t *testing.T) {
+	var out bytes.Buffer
+	m := &machine{status: &status{contextLimit: 262144}, r: newRenderer(&out)}
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
+	m.event(protocol.Event{
+		Type: "run.settled",
+		Payload: map[string]any{"run_id": "r1", "reason": "end_turn", "turns": 2,
+			"detail": map[string]any{
+				"usage": map[string]any{"input_tokens": 20300, "output_tokens": 1100},
+			}},
+	}, "r1", &runState{})
+	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
+		t.Errorf("the statusline does not hold the last request's fill: %s", prompt)
+	}
+}
+
+// TestAnotherRunsUsageLeavesTheStatuslineAlone covers the filter: a
+// background job's request rides the session's own connection, and its
+// count is not the conversation's fill.
+func TestAnotherRunsUsageLeavesTheStatuslineAlone(t *testing.T) {
+	var out bytes.Buffer
+	m := &machine{status: &status{contextLimit: 262144}, r: newRenderer(&out)}
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "job-7", "input_tokens": 99000}}, "r1", &runState{})
+	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
+		t.Errorf("another run's request took the statusline: %s", prompt)
 	}
 }
 
@@ -190,6 +224,10 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 		"file two",
 		"end_turn",
 		"2 turn(s)",
+		// The settle's input side, from the fake's 20300-token run
+		// total: feeding it the last request's 12300 instead would
+		// print "12.3k in".
+		"20.3k in",
 		// The settle's output side, from the fake's 1100 output tokens:
 		// a regression in decoding them would print "0 out".
 		"1.1k out",

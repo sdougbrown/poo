@@ -1012,7 +1012,10 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 	case "usage":
 		if raw, err := json.Marshal(evt.Payload); err == nil {
 			var usage protocol.UsageEvent
-			if json.Unmarshal(raw, &usage) == nil {
+			// The run's own requests are the ones the statusline
+			// reports: a background job's request rides the same
+			// connection and counts against its own fill.
+			if json.Unmarshal(raw, &usage) == nil && usage.RunID == runID {
 				m.status.setTokens(usage.InputTokens)
 			}
 		}
@@ -1024,7 +1027,15 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 			reason, _ := evt.Payload["reason"].(string)
 			input, output := settledUsage(evt.Payload)
 			m.r.settle(reason, state.turns, input, output)
-			m.status.setTokens(input)
+			// The settle's usage is the run's total, the sum of every
+			// request's count, and the statusline wants the last
+			// request's: the usage events already put it there. Feeding
+			// the sum in would show a context fuller than the window.
+			//
+			// A run whose endpoint reported no usage emits no usage
+			// event either, so the statusline keeps the last fill it
+			// measured: that is the closest estimate of the window the
+			// next request asks for, and the settle's total is not.
 			return true
 		}
 	}
@@ -1034,7 +1045,11 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 // settledUsage reads the token accounting out of a settle event's
 // detail: the payload is re-encoded and read through the protocol's own
 // shape, so a field the contract renames is a compile error here, not a
-// statusline that silently reads zero.
+// settle line that silently reads zero.
+//
+// The accounting is the run's total, the sum of every request's count.
+// The statusline does not read it: the per-request usage events carry
+// the last request's fill, which is what it shows.
 func settledUsage(payload map[string]any) (input, output int) {
 	raw, err := json.Marshal(payload["detail"])
 	if err != nil {
