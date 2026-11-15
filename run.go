@@ -1253,6 +1253,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 		Messages:  messages,
 		Tools:     tools,
 		MaxTokens: maxTokens,
+		SessionID: s.ID(),
 		Reasoning: reasoning,
 		OnAttempt: func(a Attempt) { s.reportAttempt(run, turn, a) },
 	})

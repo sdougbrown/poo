@@ -7,9 +7,9 @@ import (
 	"errors"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
 // The response side.
@@ -20,21 +20,15 @@ import (
 
 // codexEvent is one SSE data payload.
 type codexEvent struct {
-	Type        string          `json:"type"`
-	OutputIndex int             `json:"output_index"`
-	Delta       string          `json:"delta"`
-	Arguments   string          `json:"arguments"`
-	Item        json.RawMessage `json:"item"`
-	Response    *codexResponse  `json:"response"`
-	Code        string          `json:"code"`
-	Message     string          `json:"message"`
-	Error       *codexEventErr  `json:"error"`
-}
-
-// codexEventErr is the error an event or a response names.
-type codexEventErr struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Type        string             `json:"type"`
+	OutputIndex int                `json:"output_index"`
+	Delta       string             `json:"delta"`
+	Arguments   string             `json:"arguments"`
+	Item        json.RawMessage    `json:"item"`
+	Response    *codexResponse     `json:"response"`
+	Code        string             `json:"code"`
+	Message     string             `json:"message"`
+	Error       *support.ErrorBody `json:"error"`
 }
 
 // codexItem is the output item an event adds or completes.
@@ -68,8 +62,8 @@ type codexResponse struct {
 	Status string `json:"status"`
 	// Output is the response's items, whole. The encrypted reasoning
 	// payload may arrive only here.
-	Output            []json.RawMessage `json:"output"`
-	Error             *codexEventErr    `json:"error"`
+	Output            []json.RawMessage  `json:"output"`
+	Error             *support.ErrorBody `json:"error"`
 	IncompleteDetails *struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details"`
@@ -143,13 +137,8 @@ type streamReader struct {
 	err error
 	// closed reports that the body is closed.
 	closed bool
-	// started is when the request was sent, for the time to the first
-	// token.
-	started time.Time
 	// ttft is the time to the first streamed token.
-	ttft time.Duration
-	// ttftSet reports that the first token has arrived.
-	ttftSet bool
+	ttft support.TTFT
 	// usageSent reports that the usage report has been produced.
 	usageSent bool
 	// usage holds the usage report, so a stream that fails before its
@@ -159,18 +148,10 @@ type streamReader struct {
 	sawToolCall bool
 }
 
-// newSSEScanner returns a scanner for SSE lines. A single event line can
-// be large, so the line limit is 16 MiB.
-func newSSEScanner(r io.Reader) *bufio.Scanner {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	return sc
-}
-
 // init makes the scanner when the reader was built without one.
 func (r *streamReader) init() {
 	if r.scanner == nil {
-		r.scanner = newSSEScanner(r.body)
+		r.scanner = support.SSEScanner(r.body)
 	}
 	if r.slots == nil {
 		r.slots = map[slotKey]*itemSlot{}
@@ -181,7 +162,7 @@ func (r *streamReader) init() {
 func (r *streamReader) Next() (poo.StreamItem, error) {
 	r.init()
 
-	if ev, ok := r.take(); ok {
+	if ev, ok := support.Take(&r.pending); ok {
 		return ev, nil
 	}
 	if r.done {
@@ -191,7 +172,7 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 	for {
 		if !r.scanner.Scan() {
 			if err := r.scanner.Err(); err != nil {
-				return r.fail(r.contextError(err))
+				return r.fail(support.ContextError(r.parent, r.ctx, r.ttft.Arrived(), err))
 			}
 			// The stream ended. Whatever event is still buffered is
 			// dispatched, and a stream that never named its end fails.
@@ -204,7 +185,7 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 			if err := r.dispatch(); err != nil {
 				return r.fail(err)
 			}
-			if ev, ok := r.take(); ok {
+			if ev, ok := support.Take(&r.pending); ok {
 				return ev, nil
 			}
 			if r.done {
@@ -238,7 +219,7 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 			r.data = nil
 		}
 		r.data = append(r.data, payload)
-		if ev, ok := r.take(); ok {
+		if ev, ok := support.Take(&r.pending); ok {
 			return ev, nil
 		}
 	}
@@ -288,16 +269,6 @@ func payloadStateOf(data []string) payloadState {
 	default:
 		return payloadBroken
 	}
-}
-
-// take removes the next queued event and reports whether there was one.
-func (r *streamReader) take() (poo.StreamItem, bool) {
-	if len(r.pending) == 0 {
-		return poo.StreamItem{}, false
-	}
-	ev := r.pending[0]
-	r.pending = r.pending[1:]
-	return ev, true
 }
 
 // finishReading returns what is left of a stream that has ended.
@@ -351,7 +322,7 @@ func (r *streamReader) close() (poo.StreamItem, error) {
 			Message: "the stream ended before a terminal response event",
 		})
 	}
-	if ev, ok := r.take(); ok {
+	if ev, ok := support.Take(&r.pending); ok {
 		return ev, nil
 	}
 	return r.finishReading()
@@ -368,7 +339,7 @@ func (r *streamReader) fail(err error) (poo.StreamItem, error) {
 	if !r.usageSent {
 		r.pending = append(r.pending, r.usageItem())
 	}
-	if ev, ok := r.take(); ok {
+	if ev, ok := support.Take(&r.pending); ok {
 		return ev, nil
 	}
 	return poo.StreamItem{}, err
@@ -453,7 +424,7 @@ func (r *streamReader) itemAdded(ev codexEvent) []poo.StreamItem {
 		r.slotFor(ev.OutputIndex, "text")
 	case "function_call":
 		r.slotFor(ev.OutputIndex, "tool_call")
-		r.markFirstToken()
+		r.ttft.Mark()
 		r.sawToolCall = true
 		return []poo.StreamItem{{
 			Kind: "tool_call",
@@ -477,7 +448,7 @@ func (r *streamReader) textDelta(ev codexEvent, kind string) []poo.StreamItem {
 	if slot == nil {
 		return nil
 	}
-	r.markFirstToken()
+	r.ttft.Mark()
 	slot.text.WriteString(ev.Delta)
 	return []poo.StreamItem{{
 		Kind:  "delta",
@@ -595,7 +566,7 @@ func (r *streamReader) finishCall(index int, item codexItem) []poo.StreamItem {
 	key := slotKey{index, "tool_call"}
 	var items []poo.StreamItem
 	if _, announced := r.slots[key]; !announced {
-		r.markFirstToken()
+		r.ttft.Mark()
 		r.sawToolCall = true
 		items = append(items, poo.StreamItem{
 			Kind: "tool_call",
@@ -639,7 +610,7 @@ func argumentFragment(slot *itemSlot, index int, text string) *poo.ToolCallDelta
 	return &poo.ToolCallDelta{
 		Index:     index,
 		Arguments: []byte(text),
-		Complete:  isCompleteJSON(slot.arguments.String()),
+		Complete:  support.IsCompleteJSON(slot.arguments.String()),
 		Origin:    poo.CallOriginWire,
 	}
 }
@@ -714,7 +685,7 @@ func (r *streamReader) responseFailure(ev codexEvent) error {
 	}
 	code, message := "", ""
 	if resp != nil && resp.Error != nil {
-		code, message = resp.Error.Code, resp.Error.Message
+		code, message = support.CodeString(resp.Error.Code), resp.Error.Message
 	}
 	if message == "" {
 		if resp != nil && resp.IncompleteDetails != nil && resp.IncompleteDetails.Reason != "" {
@@ -727,7 +698,7 @@ func (r *streamReader) responseFailure(ev codexEvent) error {
 		code = ev.Code
 	}
 	return &poo.ProviderError{
-		Kind:    failureKind(0, code, "", message, poo.ProviderKindServer),
+		Kind:    support.FailureKind(0, code, "", message, poo.ProviderKindServer),
 		Message: message,
 		Code:    code,
 	}
@@ -737,8 +708,8 @@ func (r *streamReader) responseFailure(ev codexEvent) error {
 func (r *streamReader) eventFailure(ev codexEvent) error {
 	code, message := ev.Code, ev.Message
 	if ev.Error != nil {
-		if ev.Error.Code != "" {
-			code = ev.Error.Code
+		if named := support.CodeString(ev.Error.Code); named != "" {
+			code = named
 		}
 		if ev.Error.Message != "" {
 			message = ev.Error.Message
@@ -748,7 +719,7 @@ func (r *streamReader) eventFailure(ev codexEvent) error {
 		message = "the endpoint reported an error"
 	}
 	return &poo.ProviderError{
-		Kind:    failureKind(0, code, "", message, poo.ProviderKindServer),
+		Kind:    support.FailureKind(0, code, "", message, poo.ProviderKindServer),
 		Message: message,
 		Code:    code,
 	}
@@ -782,34 +753,9 @@ func (r *streamReader) usageItem() poo.StreamItem {
 	if r.usage == nil {
 		r.usage = &poo.UsageReport{}
 	}
-	r.usage.TTFTMS = r.ttftMS()
+	r.usage.TTFTMS = r.ttft.MS()
 	r.usageSent = true
 	return poo.StreamItem{Kind: "usage", Usage: r.usage}
-}
-
-// contextError turns a read failure into the context's error when the
-// context is what ended the request.
-//
-// A stream that already carried a delta cannot be retried: the model has
-// seen part of the answer. The failure says so, so the settle reason names
-// it. The kind the failure had before the reclassification stays in the
-// error's code, where the plan keeps it.
-func (r *streamReader) contextError(err error) error {
-	if r.parent != nil && r.parent.Err() != nil {
-		return r.parent.Err()
-	}
-	if r.ctx != nil && r.ctx.Err() != nil {
-		kind := poo.ProviderKindNetwork
-		if r.ttftSet {
-			return &poo.ProviderError{
-				Kind:    poo.ProviderKindInterruptedStream,
-				Code:    string(kind),
-				Message: r.ctx.Err().Error(),
-			}
-		}
-		return &poo.ProviderError{Kind: kind, Message: r.ctx.Err().Error()}
-	}
-	return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 }
 
 // slotFor returns the slot an output index has for a kind of content, and
@@ -826,27 +772,6 @@ func (r *streamReader) slotFor(index int, kind string) *itemSlot {
 	slot := &itemSlot{kind: kind}
 	r.slots[key] = slot
 	return slot
-}
-
-// markFirstToken records the time the first token arrived.
-//
-// A token is a non-empty text or thinking delta, or a tool call. An event
-// that only announces an item carries no token, so it does not start the
-// clock.
-func (r *streamReader) markFirstToken() {
-	if r.ttftSet {
-		return
-	}
-	r.ttftSet = true
-	r.ttft = time.Since(r.started)
-}
-
-// ttftMS returns the time to the first token in milliseconds.
-func (r *streamReader) ttftMS() float64 {
-	if !r.ttftSet {
-		return 0
-	}
-	return float64(r.ttft.Microseconds()) / 1000
 }
 
 // terminalReasoning returns the reasoning items the terminal response
@@ -909,13 +834,4 @@ func partsText(parts []codexPart) string {
 		b.WriteString(part.text())
 	}
 	return b.String()
-}
-
-// isCompleteJSON reports whether a string is a complete JSON object.
-func isCompleteJSON(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	return json.Valid([]byte(s))
 }
