@@ -33,9 +33,9 @@ type tokenResponse struct {
 // pair and the access token's lifetime; the account is read from the new
 // token, and a token that names no account keeps the one already stored.
 //
-// A failure reports the status and the endpoint's own error code, and
-// nothing of the request: an error a caller logs must not carry a
-// secret.
+// A failure reports the status and a standard OAuth error code, and
+// nothing else from the answer: an answer is untrusted, and a caller's log
+// is no place for its words.
 func (c Credentials) refresh(ctx context.Context, stored credential) (credential, error) {
 	endpoint := c.tokenURL()
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
@@ -86,9 +86,12 @@ func (c Credentials) refresh(ctx context.Context, stored credential) (credential
 
 // errorCode is the endpoint's own error, as a suffix an error carries.
 //
-// The answer's error field is a string in an OAuth error and an object
-// with a code beside it in some others; either names the refusal. An
-// answer that is not that shape adds nothing.
+// The answer's error field is a string in an OAuth error and an object with
+// a code beside it in some others. Only a code from the OAuth error set is
+// carried, because everything else an answer says is untrusted: an answer
+// that repeats the credential it was sent, names a failure of its own, or
+// dresses its own words up as a standard code adds nothing here, and the
+// status alone reports the refusal.
 func errorCode(body []byte) string {
 	var answer struct {
 		Error json.RawMessage `json:"error"`
@@ -106,22 +109,14 @@ func errorCode(body []byte) string {
 		}
 		code = nested.Code
 	}
-	if code == "" {
-		return ""
+	// The codes RFC 6749 gives a refused grant, and the two it gives a
+	// server's own failure.
+	switch code {
+	case "invalid_request", "invalid_client", "invalid_grant", "unauthorized_client",
+		"unsupported_grant_type", "invalid_scope", "server_error", "temporarily_unavailable":
+		return " (" + code + ")"
 	}
-	if len(code) > 64 {
-		code = code[:64]
-	}
-	return " (" + strings.Map(withoutControl, code) + ")"
-}
-
-// withoutControl drops what an error code may not hold, so a code cannot
-// carry a line break or a control character into a log.
-func withoutControl(r rune) rune {
-	if r < 0x20 || r == 0x7f {
-		return -1
-	}
-	return r
+	return ""
 }
 
 // client is the client a refresh goes through.

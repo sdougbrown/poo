@@ -310,6 +310,41 @@ func TestATokenInsidePisLeewayIsRefreshed(t *testing.T) {
 	}
 }
 
+// TestATokenAtTheLeewayBoundaryIsRefreshed covers the millisecond the
+// leeway is decided on: a token with exactly pi's five minutes left is
+// traded, because a token pi would refresh is not one to use, and one
+// millisecond more than that is used as it is.
+func TestATokenAtTheLeewayBoundaryIsRefreshed(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		life   time.Duration
+		traded bool
+	}{
+		{name: "exactly the leeway", life: piauth.DefaultLeeway, traded: true},
+		{name: "a millisecond past it", life: piauth.DefaultLeeway + time.Millisecond, traded: false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := authFile(t, fmt.Sprintf(stored, expires(c.life)))
+			access := codexToken(t, oldAccount)
+			endpoint := newTokenEndpoint(t, func() (int, string) {
+				return http.StatusOK, traded(t, access, time.Hour)
+			}, nil)
+			credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+
+			token, err := credentials.Access(context.Background())
+			if err != nil {
+				t.Fatalf("the credential did not reach a token: %v", err)
+			}
+			if traded := endpoint.count() == 1; traded != c.traded {
+				t.Errorf("the token with %v to live was traded %v, want %v", c.life, traded, c.traded)
+			}
+			if !c.traded && token.Access != oldAccess {
+				t.Errorf("the caller got the token %q, want the stored one", token.Access)
+			}
+		})
+	}
+}
+
 // TestARefreshKeepsEveryOtherCredential covers the file around the
 // credential: pi's neighbours keep their values, the file keeps the mode
 // its owner gave it, and it is laid out the way pi writes one.
