@@ -15,7 +15,6 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/prompt"
-	"github.com/sdougbrown/poo/prompt/agentsmd"
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/session"
 )
@@ -109,6 +108,7 @@ func runRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 2
 	}
+	overrides.ProjectPrompt = o.projectPrompt
 	overrides.PermissionFallback = o.permissionFallback
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
@@ -146,18 +146,6 @@ func runRun(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo run: %v\n", err)
 		return 1
-	}
-
-	// The project's instructions are opt-in: the flag asks for them, and
-	// the loader reads the working directory only.
-	project := ""
-	if o.projectPrompt {
-		text, err := agentsmd.Load(workDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "poo run: --project-prompt: %v\n", err)
-			return 2
-		}
-		project = text
 	}
 
 	interrupts := make(chan os.Signal, 2)
@@ -214,7 +202,7 @@ func runRun(args []string) int {
 	runtime.Options.SessionID = sessionID
 	runtime.Options.ReasoningEffort = o.reasoningEffort
 	runtime.Options.ToolsMode = string(model.Tools.Mode)
-	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model, project))
+	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model))
 
 	if deciderModel, decider, err := runtime.Decider(); err == nil {
 		runtime.Options.DeciderModel = deciderModel
@@ -414,10 +402,10 @@ func newSession(runtime *config.Runtime) (*poo.Session, int, error) {
 //
 // The command's own sections come after the settings': the flags come
 // last, so they change what the settings file said.
-func promptMutation(runtime *config.Runtime, model poo.ModelInfo, project string) func(*prompt.Builder) {
+func promptMutation(runtime *config.Runtime, model poo.ModelInfo) func(*prompt.Builder) {
 	tools := runtime.ToolSpecs()
 	toolsMode := string(model.Tools.Mode)
-	return systemPrompt(model.ModelID, tools, toolsMode, project)
+	return systemPrompt(model.ModelID, tools, toolsMode)
 }
 
 // openSink opens the session's records.

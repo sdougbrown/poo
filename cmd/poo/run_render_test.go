@@ -56,7 +56,7 @@ func TestAPromptThatFailsWithTheAddedToolTakesTheConfigExit(t *testing.T) {
 	if err := addFinishTool(runtime); err != nil {
 		t.Fatalf("adding the finish tool: %v", err)
 	}
-	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, runtime.Options.Model, ""))
+	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, runtime.Options.Model))
 
 	sess, code, err := newSession(runtime)
 	if sess != nil {

@@ -54,16 +54,10 @@ type toolCallsData struct {
 // transport's parser reads. The native mode needs neither: the
 // transport sends the tools in the request, so the prompt says nothing
 // about them.
-//
-// The project's instructions are a section of their own, and the
-// section is there only when the caller loaded them.
-func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode, project string) func(*prompt.Builder) {
+func systemPrompt(modelID string, tools []poo.ToolSpec, toolsMode string) func(*prompt.Builder) {
 	return func(b *prompt.Builder) {
 		if len(tools) > 0 && toolsMode != "native" {
 			b.SetTemplate("tool-calls", toolCallsTemplate(tools))
-		}
-		if project != "" {
-			b.Set("project", project)
 		}
 		b.SetTemplate("environment", environmentTemplate(modelID))
 	}

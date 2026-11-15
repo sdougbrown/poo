@@ -7,7 +7,6 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
-	"github.com/sdougbrown/poo/prompt/agentsmd"
 )
 
 // promptOptions are the flags of `poo prompt`.
@@ -53,6 +52,7 @@ func runPrompt(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
 		return 2
 	}
+	overrides.ProjectPrompt = o.projectPrompt
 	runtime, err := config.Build(config.BuildOptions{
 		Settings:       settings,
 		Overrides:      config.EnvOverrides(overrides),
@@ -71,17 +71,8 @@ func runPrompt(args []string) int {
 		fmt.Fprintf(os.Stderr, "poo prompt: %v\n", err)
 		return 2
 	}
-	project := ""
-	if o.projectPrompt {
-		text, err := agentsmd.Load(workDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "poo prompt: --project-prompt: %v\n", err)
-			return 2
-		}
-		project = text
-	}
 	model := runtime.Options.Model
-	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model, project))
+	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model))
 
 	// The build rendered the prompt; the sections the command adds after
 	// it are its own fixed templates, so the render cannot fail here.

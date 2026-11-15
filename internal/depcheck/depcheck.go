@@ -128,6 +128,10 @@ func (c Checker) rules() []rule {
 				m + "/perm/decide",
 				m + "/profile",
 				m + "/prompt",
+				// The loader the settings' project-prompt key reads: the
+				// prompt's own package holds the sections, and the loader
+				// holds the working directory's instructions for one.
+				m + "/prompt/agentsmd",
 				m + "/protect",
 				m + "/provider/catalog",
 				m + "/provider/openai",

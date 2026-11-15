@@ -92,6 +92,9 @@ type Overrides struct {
 	// feed and a cli entry's bindings read, and are removed from the
 	// environment a model-invoked tool subprocess receives.
 	CredentialEnvNames []string
+	// ProjectPrompt asks for the working directory's project
+	// instructions, whatever the settings say.
+	ProjectPrompt bool
 }
 
 // The environment variables a shell or a launcher names a build's
@@ -1658,12 +1661,12 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 	}
 	// The project's instructions are the working directory's AGENTS.md,
 	// or CLAUDE.md when there is none, and they fill the project
-	// section the way the --project-prompt flag does. The setting asks
-	// for them; a directory with neither file holds no instructions,
-	// and the section stays empty. A file that cannot be read fails
-	// the build: the setting asked for the instructions, and an empty
-	// section would say the project has none.
-	if settings.Session.ProjectPrompt != nil && *settings.Session.ProjectPrompt {
+	// section. Either the setting or the flag asks for them; a
+	// directory with neither file holds no instructions, and the
+	// section stays empty. A file that cannot be read fails the build:
+	// the instructions were asked for, and an empty section would say
+	// the project has none.
+	if opts.Overrides.ProjectPrompt || (settings.Session.ProjectPrompt != nil && *settings.Session.ProjectPrompt) {
 		text, err := agentsmd.Load(workingDir)
 		if err != nil {
 			return &Error{
@@ -1700,10 +1703,10 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 // tool.
 func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 	sources := prompt.Sources{
-		"base":        nil,
-		"profile":     nil,
-		"environment": nil,
-		"project":     nil,
+		"base":         nil,
+		"profile":      nil,
+		"environment":  nil,
+		ProjectSection: nil,
 	}
 	for name, factory := range opts.Tools {
 		if factory == nil {
