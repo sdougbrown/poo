@@ -3,6 +3,7 @@ package codex_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -322,59 +323,87 @@ func TestTheRecordedUsageIsTheEndpointsOwn(t *testing.T) {
 	}
 }
 
+// failedAttemptStream is the stream of an attempt that reported what it spent
+// and then failed, so a retried request has a failed attempt to count.
+func failedAttemptStream(input, output int) string {
+	return frame(fmt.Sprintf(`{"type":"response.failed","response":{"status":"failed",`+
+		`"error":{"code":"rate_limit_exceeded","message":"slow down"},`+
+		`"usage":{"input_tokens":%d,"output_tokens":%d}}}`, input, output))
+}
+
 // TestTheRecordedUsageCountsEveryAttempt covers the usage a retried request
 // records. An attempt that failed before it answered still spent tokens, so the
-// record holds what the attempts spent together.
+// record holds what the attempts spent together, however many of them failed.
 func TestTheRecordedUsageCountsEveryAttempt(t *testing.T) {
-	sink := pootest.NewSink()
-	srv := newServer(t,
-		frame(`{"type":"response.failed","response":{"status":"failed",`+
-			`"error":{"code":"rate_limit_exceeded","message":"slow down"},`+
-			`"usage":{"input_tokens":10,"output_tokens":4}}}`),
-		frame(`{"type":"response.output_text.delta","output_index":0,"delta":"the answer"}`)+
-			frame(`{"type":"response.completed","response":{"status":"completed",`+
-				`"usage":{"input_tokens":20,"output_tokens":6}}}`),
-	)
-	opts := sessionOptions(t, srv.URL, sink)
-	tr := newTransport(srv.URL, func(o *codex.Options) {
-		o.MaxAttempts = 2
-		o.Backoff = []time.Duration{time.Millisecond}
-	})
-	opts.Transport = tr
-	session, err := poo.New(opts)
-	if err != nil {
-		t.Fatalf("building the session: %v", err)
+	answer := frame(`{"type":"response.output_text.delta","output_index":0,"delta":"the answer"}`) +
+		frame(`{"type":"response.completed","response":{"status":"completed",`+
+			`"usage":{"input_tokens":20,"output_tokens":6}}}`)
+	cases := []struct {
+		name          string
+		failures      []string
+		input, output int
+	}{
+		{
+			name:     "one failed attempt before the answer",
+			failures: []string{failedAttemptStream(10, 4)},
+			input:    30,
+			output:   10,
+		},
+		{
+			name:     "two failed attempts before the answer",
+			failures: []string{failedAttemptStream(10, 4), failedAttemptStream(5, 3)},
+			input:    35,
+			output:   13,
+		},
 	}
-	defer session.Close()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := pootest.NewSink()
+			srv := newServer(t, append(tc.failures, answer)...)
+			opts := sessionOptions(t, srv.URL, sink)
+			tr := newTransport(srv.URL, func(o *codex.Options) {
+				o.MaxAttempts = 3
+				o.Backoff = []time.Duration{time.Millisecond, time.Millisecond}
+			})
+			opts.Transport = tr
+			session, err := poo.New(opts)
+			if err != nil {
+				t.Fatalf("building the session: %v", err)
+			}
+			defer session.Close()
 
-	if _, err := session.Prompt(context.Background(), "do the thing"); err != nil {
-		t.Fatalf("starting the run: %v", err)
-	}
-	result, err := session.Wait(context.Background())
-	if err != nil {
-		t.Fatalf("waiting for the run: %v", err)
-	}
-	if result.Reason != poo.ReasonEndTurn {
-		t.Errorf("the run settled %q, want end_turn", result.Reason)
-	}
-	if n := srv.count(); n != 2 {
-		t.Fatalf("the endpoint received %d requests, want the failed attempt and the one that answered", n)
-	}
+			if _, err := session.Prompt(context.Background(), "do the thing"); err != nil {
+				t.Fatalf("starting the run: %v", err)
+			}
+			result, err := session.Wait(context.Background())
+			if err != nil {
+				t.Fatalf("waiting for the run: %v", err)
+			}
+			if result.Reason != poo.ReasonEndTurn {
+				t.Errorf("the run settled %q, want end_turn", result.Reason)
+			}
+			if n := srv.count(); n != len(tc.failures)+1 {
+				t.Fatalf("the endpoint received %d requests, want the failed attempts and the one that answered", n)
+			}
 
-	var usage *poo.UsageRecord
-	for _, rec := range sink.Records() {
-		if u, ok := rec.(*poo.UsageRecord); ok {
-			usage = u
-		}
-	}
-	if usage == nil {
-		t.Fatal("the run recorded no usage")
-	}
-	if usage.InputTokens != 30 {
-		t.Errorf("the recorded input count is %d, want the 30 both attempts spent", usage.InputTokens)
-	}
-	if usage.OutputTokens != 10 {
-		t.Errorf("the recorded output count is %d, want the 10 both attempts spent", usage.OutputTokens)
+			var usage *poo.UsageRecord
+			records := 0
+			for _, rec := range sink.Records() {
+				if u, ok := rec.(*poo.UsageRecord); ok {
+					usage = u
+					records++
+				}
+			}
+			if records != 1 {
+				t.Fatalf("the run wrote %d usage records, want one for the request", records)
+			}
+			if usage.InputTokens != tc.input {
+				t.Errorf("the recorded input count is %d, want the %d every attempt spent", usage.InputTokens, tc.input)
+			}
+			if usage.OutputTokens != tc.output {
+				t.Errorf("the recorded output count is %d, want the %d every attempt spent", usage.OutputTokens, tc.output)
+			}
+		})
 	}
 }
 
