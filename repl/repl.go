@@ -1037,7 +1037,11 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 // settledUsage reads the token accounting out of a settle event's
 // detail: the payload is re-encoded and read through the protocol's own
 // shape, so a field the contract renames is a compile error here, not a
-// statusline that silently reads zero.
+// settle line that silently reads zero.
+//
+// The accounting is the run's total, the sum of every request's count.
+// The statusline does not read it: the per-request usage events carry
+// the last request's fill, which is what it shows.
 func settledUsage(payload map[string]any) (input, output int) {
 	raw, err := json.Marshal(payload["detail"])
 	if err != nil {

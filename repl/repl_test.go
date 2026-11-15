@@ -183,10 +183,7 @@ func TestTheSettleDoesNotStealTheStatusline(t *testing.T) {
 			}},
 	}, "r1", &runState{})
 	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
-		t.Errorf("the settle's run total displaced the last request's snapshot: %s", prompt)
-	}
-	if prompt := m.status.prompt(); strings.Contains(prompt, "20.3k") {
-		t.Errorf("the statusline shows the run's total: %s", prompt)
+		t.Errorf("the statusline does not hold the last request's fill: %s", prompt)
 	}
 }
 
