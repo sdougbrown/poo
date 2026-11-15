@@ -267,6 +267,7 @@ func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {
 	if _, err := exec.LookPath("less"); err != nil {
 		t.Skip("no less on the path")
 	}
+	t.Setenv("TERM", "xterm-256color")
 	server := &fakeServer{t: t}
 	// A line that reaches the server by mistake settles rather than
 	// leaving a goroutine waiting on an ask the test never answers.
@@ -276,7 +277,6 @@ func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {
 	term, code := startTerminalRepl(t, server)
 	waitBottom(t, term)
 
-	t.Setenv("TERM", "xterm-256color")
 	term.press("/less\n")
 	// less takes the alternate screen, and the prompt goes with it; a
 	// pager that could not start leaves the prompt standing.
@@ -285,7 +285,7 @@ func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if term.rowOf("💩❯") >= 0 {
-		t.Skipf("the pager did not take the terminal:\n%s", term.screen())
+		t.Fatalf("the pager did not take the terminal:\n%s", term.screen())
 	}
 	term.press("q")
 	// The statusline is not in the transcript the pager shows: its
@@ -539,6 +539,66 @@ func TestARecalledHistoryLineTakesTheFooter(t *testing.T) {
 	}
 	waitScreen(t, term, "✓ end_turn")
 	waitBottom(t, term)
+	term.press("/quit\n")
+	select {
+	case <-code:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}
+
+func TestAResizeDuringAHeldPreviewKeepsTheInputAtTheBottom(t *testing.T) {
+	sent := make(chan struct{})
+	release := make(chan struct{})
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		var block strings.Builder
+		block.WriteString("```text\n")
+		for i := 0; i < 30; i++ {
+			block.WriteString("preview row " + itoa(i) + "|\n")
+		}
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": block.String(),
+		})
+		close(sent)
+		<-release
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text",
+			"text": "```\n\nAfter the block.\n\nEverything is done.",
+		})
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+	}
+	term, code := startTerminalRepl(t, server)
+	waitBottom(t, term)
+	term.press("work\n")
+	<-sent
+	waitScreen(t, term, "preview row 29|")
+
+	// Narrower and taller while the run holds: the preview was laid out
+	// at forty columns and the footer at twelve rows.
+	term.resize(30, 16)
+	if err := syscall.Kill(os.Getpid(), syscall.SIGWINCH); err != nil {
+		t.Fatalf("signalling the resize: %v", err)
+	}
+	waitBottomRows(t, term, 16)
+	if term.rowOf("preview row") < 0 {
+		t.Errorf("the resize took the held preview off the screen:\n%s", indexedRows(term))
+	}
+
+	close(release)
+	waitScreen(t, term, "✓ end_turn")
+	waitScreen(t, term, "After the block.")
+	waitBottomRows(t, term, 16)
+
+	// The rows the preview clipped reach the terminal once, at the
+	// commit: the resize cleared the stale preview instead of letting
+	// the commit write it beside itself.
+	raw := term.String()
+	for _, marker := range []string{"preview row 0|", "preview row 10|"} {
+		if n := strings.Count(raw, marker); n != 1 {
+			t.Errorf("the clipped row %q entered the terminal %d time(s), want 1", marker, n)
+		}
+	}
 	term.press("/quit\n")
 	select {
 	case <-code:

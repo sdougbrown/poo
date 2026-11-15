@@ -445,7 +445,18 @@ func (l *layout) resize() bool {
 	}
 	l.preview = 0
 	if l.active {
-		l.emit(l.regionSeq() + l.footerSeq())
+		var b strings.Builder
+		b.WriteString(l.regionSeq())
+		b.WriteString(l.footerSeq())
+		// The rows under the committed boundary held a preview laid out
+		// for the old width. They are stale now.
+		if l.last < l.regionBottom() {
+			for row := l.last + 1; row <= l.regionBottom(); row++ {
+				b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", row))
+				b.WriteString(seqEraseLine)
+			}
+		}
+		l.emit(b.String())
 	}
 	return true
 }

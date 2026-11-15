@@ -24,14 +24,17 @@ import (
 // style is what the emulator's rows show once the escapes are gone.
 func aStreamingRenderer(t *testing.T, out io.Writer, width int, l *layout) *renderer {
 	t.Helper()
-	tr, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
-		glamour.WithWordWrap(width-2),
-	)
+	newTR := func(wrap int) (*glamour.TermRenderer, error) {
+		return glamour.NewTermRenderer(
+			glamour.WithStandardStyle("dark"),
+			glamour.WithWordWrap(wrap),
+		)
+	}
+	tr, err := newTR(width - 2)
 	if err != nil {
 		t.Fatalf("building the markdown renderer: %v", err)
 	}
-	return &renderer{out: out, tr: tr, wrap: width - 2, width: width, layout: l}
+	return &renderer{out: out, tr: tr, wrap: width - 2, width: width, layout: l, newTR: newTR}
 }
 
 // screenHarness is the editor around an emulator. The renderer writes

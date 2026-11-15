@@ -76,14 +76,17 @@ func openTerminal(t *testing.T) *terminal {
 // emulator's own window does.
 func (term *terminal) resize(cols, rows int) {
 	term.t.Helper()
+	// The emulator is ready before the pty tells the repl: the signal
+	// can arrive during the ioctl, and the redraw must land on the new
+	// screen.
+	if term.vt != nil {
+		term.vt.Resize(cols, rows)
+	}
 	ws := struct {
 		Row, Col, Xpixel, Ypixel uint16
 	}{Row: uint16(rows), Col: uint16(cols)}
 	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, term.master.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws))); errno != 0 {
 		term.t.Fatalf("sizing the pty: %v", errno)
-	}
-	if term.vt != nil {
-		term.vt.Resize(cols, rows)
 	}
 }
 

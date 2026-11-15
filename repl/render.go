@@ -48,6 +48,9 @@ type renderer struct {
 	// tr renders markdown for the terminal. It is nil for a writer
 	// that is not a terminal, where markdown renders as plain text.
 	tr *glamour.TermRenderer
+	// newTR builds the markdown renderer at a width, so a terminal that
+	// changes size renders the next message at the new one.
+	newTR func(wrap int) (*glamour.TermRenderer, error)
 	// transcript mirrors the writes that went through write and the
 	// rendered chunks a stream commits as they finish. It is the
 	// conversation as the pager shows it again. The cursor-control
@@ -127,7 +130,7 @@ type streamSegment struct {
 // anything else gets plain text, so a test or a pipe reads the same
 // words without the escapes, and streams nothing.
 func newRenderer(out io.Writer) *renderer {
-	r := &renderer{out: out, wrap: 80}
+	r := &renderer{out: out, wrap: 80, newTR: autoTermRenderer}
 	r.term = termIsTerminal(out)
 	if r.term {
 		if f, ok := out.(interface{ Fd() uintptr }); ok {
@@ -140,15 +143,36 @@ func newRenderer(out io.Writer) *renderer {
 				r.wrap = w - 2
 			}
 		}
-		tr, err := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
-			glamour.WithWordWrap(r.wrap),
-		)
-		if err == nil {
+		if tr, err := r.newTR(r.wrap); err == nil {
 			r.tr = tr
 		}
 	}
 	return r
+}
+
+// autoTermRenderer builds the markdown renderer for the terminal's own
+// palette.
+func autoTermRenderer(wrap int) (*glamour.TermRenderer, error) {
+	return glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(wrap),
+	)
+}
+
+// rewrap lays future messages out at the terminal's new width.
+func (r *renderer) rewrap(width int) bool {
+	if width <= 4 || width == r.width {
+		return false
+	}
+	r.width = width
+	r.wrap = width - 2
+	if r.newTR == nil {
+		return true
+	}
+	if tr, err := r.newTR(r.wrap); err == nil {
+		r.tr = tr
+	}
+	return true
 }
 
 // write appends a chunk to the transcript and the terminal. A line the
@@ -342,6 +366,21 @@ func (r *renderer) contentWidth() int {
 		}
 	}
 	return r.width
+
+// repaintPreview lays the open stream out again after a resize. The rows
+// it painted wrap at the old width, and the resize cleared them, so the
+// preview paints from the new wrap and the next delta carries on.
+func (r *renderer) repaintPreview() {
+	if !r.streams() || r.live.kind == "" {
+		return
+	}
+	r.block.stalled = false
+	if r.block.hint {
+		r.block.hint = false
+		r.hint()
+	}
+	r.paintStream()
+	r.live.dirty = false
 }
 
 // stalledNow reports that the terminal's width has changed under a
@@ -355,7 +394,7 @@ func (r *renderer) stalledNow() bool {
 	if width <= 0 || width == r.width {
 		return false
 	}
-	r.width = width
+	r.rewrap(width)
 	return true
 }
 

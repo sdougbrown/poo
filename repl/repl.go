@@ -287,6 +287,8 @@ func (m *machine) run() int {
 			// the new geometry and redraw the prompt where it now
 			// belongs.
 			if m.r.layout.resize() {
+				m.r.rewrap(m.r.layout.cols())
+				m.r.repaintPreview()
 				input.prompt(m.prompt())
 			}
 		case runID := <-m.esc:
