@@ -107,9 +107,6 @@ func countOf(t *testing.T, scr screen, want string) int {
 	return n
 }
 
-// rowStandsAlone says the text reads as a whole row of the screen,
-// starting at column zero: a row that starts mid-column carries extra
-// leading spaces or the row before it, and does not match whole.
 func rowStandsAlone(drawn, want string) bool {
 	for _, line := range strings.Split(drawn, "\n") {
 		if line == want {
@@ -395,10 +392,6 @@ func TestAWidthThatCannotBeReadKeepsStreaming(t *testing.T) {
 	}
 }
 
-// TestAMultilineToolResultStartsEachRowAtColumnZero covers the
-// staircase: a tool result that spans rows must paint every row at
-// column zero on the terminal, the code's indentation reads as
-// written, and the draft keeps its place below.
 func TestAMultilineToolResultStartsEachRowAtColumnZero(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("read a file")
@@ -424,10 +417,6 @@ func TestAMultilineToolResultStartsEachRowAtColumnZero(t *testing.T) {
 	}
 }
 
-// TestAMultilineThinkingBlockStartsEachRowAtColumnZero covers the
-// thinking-only flush: the thinking block renders with no streamed
-// text, and its rows must paint at column zero, the hint taken back
-// and the draft intact below.
 func TestAMultilineThinkingBlockStartsEachRowAtColumnZero(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("think about it")

@@ -152,9 +152,7 @@ func (r *renderer) write(s string) {
 	fmt.Fprint(r.sink, s)
 }
 
-// terminalNewlines converts the bare line feeds in s to CRLFs for
-// the terminal, without duplicating existing carriage returns: the
-// conversion is idempotent, so a row never reads CRCRLF.
+// terminalNewlines converts bare LF to CRLF without duplicating carriage returns.
 func terminalNewlines(s string) string {
 	if !strings.Contains(s, "\n") {
 		return s
