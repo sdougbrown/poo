@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 
 	clicontract "github.com/sdougbrown/cli-contract"
 )
@@ -68,6 +69,15 @@ func (pooAdapter) HandlerDiagnostic(_ clicontract.Invocation, err error) string 
 }
 
 // DispatchDiagnostic keeps the prefix every poo diagnostic carries.
+//
+// The library builds the failure before dispatch and prefixes it with the
+// command path, so a message that already carries the prefix is left
+// alone: only the failures cobra raises itself, such as an unknown
+// command, arrive bare.
 func (pooAdapter) DispatchDiagnostic(_ string, err error) string {
-	return "poo: " + err.Error()
+	message := err.Error()
+	if strings.HasPrefix(message, "poo:") || strings.HasPrefix(message, "poo ") {
+		return message
+	}
+	return "poo: " + message
 }

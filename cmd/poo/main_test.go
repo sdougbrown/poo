@@ -491,3 +491,32 @@ func TestThePrintAliasLeavesHelpInAPrompt(t *testing.T) {
 		t.Errorf("the prompt is %q, want %q", inv.Args, want)
 	}
 }
+
+// TestADispatchFailureCarriesOnePrefix covers the diagnostic the library
+// builds before dispatch: it already names the app, so the adapter must not
+// name it again.
+func TestADispatchFailureCarriesOnePrefix(t *testing.T) {
+	code, stderr := runCLI(t, "--settings")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if strings.Contains(stderr, "poo: poo:") {
+		t.Errorf("the diagnostic is prefixed twice: %q", stderr)
+	}
+	if !strings.HasPrefix(stderr, "poo:") {
+		t.Errorf("the diagnostic is %q, want the app's prefix", stderr)
+	}
+}
+
+// TestThePrintAliasFailsFastOnAMistypedFlag covers the alias's refusal:
+// before the prompt starts, a dash word the run does not declare is the
+// parser's to refuse, so a typo never becomes the prompt.
+func TestThePrintAliasFailsFastOnAMistypedFlag(t *testing.T) {
+	code, stderr := runCLI(t, "-p", "--typo", "prompt")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "unknown flag") {
+		t.Errorf("the refusal is %q, want it to name the flag", stderr)
+	}
+}

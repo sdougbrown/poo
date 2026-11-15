@@ -73,6 +73,13 @@ func hoistRunFlags(args []string) (flags, words []string) {
 		spec, declared := declaredRunFlag(token)
 		if !declared {
 			if flagToken(token) {
+				// Before the prompt starts, a dash word the run does not
+				// declare is the parser's to refuse, so a mistyped flag
+				// fails fast instead of becoming the prompt. After it, the
+				// word is prompt text, as it is after run.
+				if len(words) == 0 {
+					return append(flags, args[i:]...), words
+				}
 				return flags, append(words, args[i:]...)
 			}
 			words = append(words, token)

@@ -267,7 +267,7 @@ func handleRun(parent context.Context, inv clicontract.Invocation, stdout, stder
 	// client's run produced one, and the last assistant message
 	// otherwise.
 	if answer != "" {
-		fmt.Println(answer)
+		fmt.Fprintln(stdout, answer)
 	}
 
 	// The held results do not keep the process alive: they wait for the
