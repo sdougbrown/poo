@@ -14,7 +14,6 @@ import (
 	"github.com/sdougbrown/poo/provider/catalog"
 )
 
-// stringList is a repeatable flag: each use adds one value.
 // sharedFlags are the flags every command takes.
 //
 // The settings are a command's configuration, and the flags change what

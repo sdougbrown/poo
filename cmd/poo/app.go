@@ -208,13 +208,20 @@ func serverFlagSpecs() []clicontract.Flag {
 	return append(sharedFlagSpecs(), serveFlagSpecs()...)
 }
 
-// serveFlagSpecs declares the flags serve and repl share: the endpoint, the
-// working directory and the executor.
+// serveFlagSpecs declares the flags serve and repl share: the endpoint and
+// the placement of the tools.
 func serveFlagSpecs() []clicontract.Flag {
-	return append(endpointFlagSpecs(),
-		clicontract.Flag{Name: "working-dir", Kind: clicontract.String, Usage: "The directory the tools work in (default: the current one)"},
-		clicontract.Flag{Name: "executor", Kind: clicontract.String, Usage: "The executor the bash tool runs commands through: local or bwrap"},
-	)
+	return append(endpointFlagSpecs(), toolFlagSpecs()...)
+}
+
+// toolFlagSpecs declares the flags that place the tools: the directory they
+// work in, and the executor the bash tool runs through. The run and the
+// server both take them, so they are declared here once.
+func toolFlagSpecs() []clicontract.Flag {
+	return []clicontract.Flag{
+		{Name: "working-dir", Kind: clicontract.String, Usage: "The directory the tools work in (default: the current one)"},
+		{Name: "executor", Kind: clicontract.String, Usage: "The executor the bash tool runs commands through: local or bwrap"},
+	}
 }
 
 // renderFlags spells an invocation's supplied flags back into argv, in the

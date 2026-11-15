@@ -54,14 +54,15 @@ type runOptions struct {
 // runFlagSpecs declares the flags of `poo run`: the endpoint, then the
 // run's own, in the order the help prints them.
 func runFlagSpecs() []clicontract.Flag {
-	return append(endpointFlagSpecs(),
+	specs := append(endpointFlagSpecs(),
 		clicontract.Flag{Name: "permission-fallback", Kind: clicontract.String, Usage: "The decision when the asker chain is exhausted: allow or deny"},
 		clicontract.Flag{Name: "reasoning-effort", Kind: clicontract.String, Usage: "The reasoning_effort to send, for models that think only when asked"},
 		clicontract.Flag{Name: "max-turns", Kind: clicontract.Int, Usage: "The turn limit"},
 		clicontract.Flag{Name: "max-output", Kind: clicontract.Int, Usage: "The model's output-token limit"},
 		clicontract.Flag{Name: "log", Kind: clicontract.String, Usage: "The session log path"},
-		clicontract.Flag{Name: "working-dir", Kind: clicontract.String, Usage: "The directory the tools work in (default: the current one)"},
-		clicontract.Flag{Name: "executor", Kind: clicontract.String, Usage: "The executor the bash tool runs commands through: local or bwrap"},
+	)
+	specs = append(specs, toolFlagSpecs()...)
+	return append(specs,
 		clicontract.Flag{Name: "project-prompt", Kind: clicontract.Bool, Usage: "Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt"},
 		clicontract.Flag{Name: "timeout", Kind: clicontract.Duration, Usage: "The wall-clock limit for the run, e.g. 5m"},
 		clicontract.Flag{Name: "no-wait-jobs", Kind: clicontract.Bool, Usage: "Exit at the first settle; the running jobs stop through the session's close"},
