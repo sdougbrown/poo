@@ -75,6 +75,8 @@ github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJ
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
+github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57HuXjmddZPjrls/28=
+github.com/santhosh-tekuri/jsonschema/v6 v6.0.3/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
 github.com/sdougbrown/cli-contract v0.10.0 h1:W6+jFVclqH6fB+D5gJWW80avdUzQTDYlL5XeTn2XqQQ=
 github.com/sdougbrown/cli-contract v0.10.0/go.mod h1:gUVC+vCw8jx+czT9PMdPsMQPq4pJMWBh0tsOoOKdEMo=
 github.com/sdougbrown/cli-registry v0.4.0 h1:YD2nBRmj9MWvkcXg7h6nRZ2p2D3Vi8gbDE8biLzYGCM=

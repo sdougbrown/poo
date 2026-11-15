@@ -38,12 +38,14 @@ Settings discovery:
   none runs on the defaults.`
 
 // runLong is the help body of `poo run`.
-const runLong = `The prompt is every argument that is not one of the run's flags. The
-answer goes to stdout, the progress and the diagnostics to stderr, and
-the exit code says why the run ended: 0 when it settled finished, the
-settle reason's own code otherwise (the README lists them), 2 when the
-command refuses its arguments or its settings, and 1 for a failure with
-no code of its own.
+const runLong = `The prompt starts at the first argument that is not one of the run's
+flags. A flag written after it is prompt text, and poo -p is the way to
+put the run's flags after the prompt instead.
+
+The answer goes to stdout and the progress to stderr. The exit code says
+why the run ended: 0 when it settled finished, the settle reason's own
+code otherwise (the README lists them), 2 when the command refuses its
+arguments or its settings, and 1 for a failure with no code of its own.
 
 --endpoint, --model-id and --context-limit are required unless the
 settings file names a chat model.`
@@ -74,11 +76,14 @@ the settings' retention policy or by the flags.`
 // versionLong is the help body of `poo version`.
 const versionLong = `The values come from the binary's own build information: the module
 version for a binary installed with ` + "`go install module@version`" + `, and the
-revision, time and modified flag for a build from a checkout.`
+revision, time and modified flag for a build from a checkout.
 
-// pooApp assembles the declared CLI around the writers a command's own
-// output goes to.
-func pooApp(stdout, stderr io.Writer) *clicontract.App {
+--version prints the one word this information renders: the release, or
+dev plus the short revision of a build from a checkout.`
+
+// pooApp assembles the declared CLI around the writer a command's own
+// stdout goes to. Diagnostics use the writer dispatch hands the command.
+func pooApp(stdout io.Writer) *clicontract.App {
 	return &clicontract.App{
 		Name:    "poo",
 		Version: buildVersion().String(),
@@ -150,7 +155,7 @@ func pooApp(stdout, stderr io.Writer) *clicontract.App {
 				Name:        "sessions",
 				Short:       "List and prune the stored sessions",
 				Long:        sessionsLong,
-				Subcommands: []*clicontract.Command{sessionsListCommand(stdout, stderr), sessionsPruneCommand(stdout, stderr)},
+				Subcommands: []*clicontract.Command{sessionsListCommand(stdout), sessionsPruneCommand(stdout)},
 			},
 			{
 				Name:  "version",
@@ -168,7 +173,7 @@ func pooApp(stdout, stderr io.Writer) *clicontract.App {
 }
 
 // sessionsListCommand declares `poo sessions list`.
-func sessionsListCommand(stdout, stderr io.Writer) *clicontract.Command {
+func sessionsListCommand(stdout io.Writer) *clicontract.Command {
 	return &clicontract.Command{
 		Name:  "list",
 		Short: "List the sessions the store holds",
@@ -182,7 +187,7 @@ func sessionsListCommand(stdout, stderr io.Writer) *clicontract.Command {
 }
 
 // sessionsPruneCommand declares `poo sessions prune`.
-func sessionsPruneCommand(stdout, stderr io.Writer) *clicontract.Command {
+func sessionsPruneCommand(stdout io.Writer) *clicontract.Command {
 	return &clicontract.Command{
 		Name:  "prune",
 		Short: "Delete the sessions a retention policy marks",
@@ -195,6 +200,12 @@ func sessionsPruneCommand(stdout, stderr io.Writer) *clicontract.Command {
 			return handleSessionsPrune(inv, stdout, cmdStderr), nil
 		},
 	}
+}
+
+// serverFlagSpecs are the flags the repl spells for the server it starts:
+// the shared flags the child reads, then the flags it parses.
+func serverFlagSpecs() []clicontract.Flag {
+	return append(sharedFlagSpecs(), serveFlagSpecs()...)
 }
 
 // serveFlagSpecs declares the flags serve and repl share: the endpoint, the

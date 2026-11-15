@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,5 +143,20 @@ func TestAStandaloneArgumentIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "unexpected argument") {
 		t.Errorf("the refusal does not name the argument: %q", stderr)
+	}
+}
+
+// TestAFrontDoorIsADeclaredCommand covers the front-door names: a bare
+// invocation dispatches one of them, so a name the binary does not declare
+// would be a door that cannot open.
+func TestAFrontDoorIsADeclaredCommand(t *testing.T) {
+	app := pooApp(io.Discard)
+	for door := range frontDoors {
+		if app.Find(door) == nil {
+			t.Errorf("the front door %q is not a declared command", door)
+		}
+	}
+	if !frontDoors[defaultUI] {
+		t.Errorf("the default ui %q is not one of the front doors", defaultUI)
 	}
 }

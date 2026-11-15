@@ -45,7 +45,7 @@ func commandHelps(app *clicontract.App) []commandHelp {
 // owns: `poo <command> --help` prints the command's own usage and flags,
 // not the root block.
 func TestEachCommandHelpPrintsItsOwnSection(t *testing.T) {
-	app := pooApp(io.Discard, io.Discard)
+	app := pooApp(io.Discard)
 	for _, help := range commandHelps(app) {
 		path := strings.Join(help.path, " ")
 		t.Run(path, func(t *testing.T) {

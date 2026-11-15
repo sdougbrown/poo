@@ -128,24 +128,28 @@ func TestTheVersionCommandAnswersInBothForms(t *testing.T) {
 }
 
 // TestTheVersionFlagAgreesWithTheCommand covers the alias: `--version`
-// prints the same one word the command reports.
+// prints the one word the build information renders, and the command
+// reports the same build.
 func TestTheVersionFlagAgreesWithTheCommand(t *testing.T) {
-	_, _, command := runCLIWithStdout(t, "version", "--json")
-	var fields map[string]any
-	if err := json.Unmarshal([]byte(command), &fields); err != nil {
-		t.Fatalf("decoding the version: %v\n%s", err, command)
-	}
-	version, _ := fields["version"].(string)
+	info := buildVersion()
 
 	code, _, flagged := runCLIWithStdout(t, "--version")
 	if code != 0 {
 		t.Fatalf("poo --version exited %d, want 0", code)
 	}
-	display := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(flagged), "poo "))
-	if display == "" {
-		t.Fatalf("the --version output is %q, want a version", flagged)
+	if want := "poo " + info.String() + "\n"; flagged != want {
+		t.Errorf("--version prints %q, want %q", flagged, want)
 	}
-	if version != "dev" && !strings.HasPrefix(display, version) {
-		t.Errorf("--version reports %q, and the command reports the version %q", display, version)
+
+	_, _, command := runCLIWithStdout(t, "version", "--json")
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(command), &fields); err != nil {
+		t.Fatalf("decoding the version: %v\n%s", err, command)
+	}
+	if fields["version"] != info.Version {
+		t.Errorf("the command reports the version %v, want %q", fields["version"], info.Version)
+	}
+	if fields["go_version"] != info.GoVersion {
+		t.Errorf("the command reports the Go version %v, want %q", fields["go_version"], info.GoVersion)
 	}
 }

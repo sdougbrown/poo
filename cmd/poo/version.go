@@ -15,7 +15,7 @@ import (
 //
 // The values come from the build information the Go toolchain embeds: the
 // module version for a binary installed with `go install module@version`,
-// and the VCS stamp for a build from a checkout. Nothing here is a
+// and the version control stamp for a build from a checkout. Nothing here is a
 // constant or a linker flag, so it cannot go stale.
 type versionInfo struct {
 	Version   string `json:"version"`
