@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
 // streamChunk is the wire shape of one SSE data payload.
@@ -62,7 +62,7 @@ type streamChunk struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
-	Error *errorBody `json:"error"`
+	Error *support.ErrorBody `json:"error"`
 }
 
 // streamReader reads an SSE response.
@@ -94,13 +94,8 @@ type streamReader struct {
 	err error
 	// closed reports that the body is closed.
 	closed bool
-	// started is when the request was sent, for the time to the first
-	// token.
-	started time.Time
 	// ttft is the time to the first streamed token.
-	ttft time.Duration
-	// ttftSet reports that the first token has arrived.
-	ttftSet bool
+	ttft support.TTFT
 	// usageSent reports that the usage report has been produced.
 	usageSent bool
 	// usage holds the usage report, so a stream that fails before its
@@ -116,18 +111,10 @@ type streamReader struct {
 	deferred []poo.StreamItem
 }
 
-// newSSEScanner returns a scanner for SSE lines. A single event line can
-// be large, so the line limit is 16 MiB.
-func newSSEScanner(r io.Reader) *bufio.Scanner {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	return sc
-}
-
 // init makes the scanner when the reader was built without one.
 func (r *streamReader) init() {
 	if r.scanner == nil {
-		r.scanner = newSSEScanner(r.body)
+		r.scanner = support.SSEScanner(r.body)
 	}
 }
 
@@ -151,7 +138,7 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 		if !r.scanner.Scan() {
 			r.done = true
 			if err := r.scanner.Err(); err != nil {
-				return r.fail(r.contextError(err))
+				return r.fail(support.ContextError(r.parent, r.ctx, r.ttft.Arrived(), err))
 			}
 			// The stream ended without a [DONE] marker. Whatever the
 			// parser still holds is flushed, so a text-mode tool call
@@ -165,7 +152,7 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 			if err := r.dispatch(); err != nil {
 				return r.fail(err)
 			}
-			if ev, ok := r.take(); ok {
+			if ev, ok := support.Take(&r.pending); ok {
 				return ev, nil
 			}
 			continue
@@ -194,23 +181,13 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 				return r.fail(err)
 			}
 			r.data = append(r.data, payload)
-			if ev, ok := r.take(); ok {
+			if ev, ok := support.Take(&r.pending); ok {
 				return ev, nil
 			}
 			continue
 		}
 		r.data = append(r.data, payload)
 	}
-}
-
-// take removes the next queued event and reports whether there was one.
-func (r *streamReader) take() (poo.StreamItem, bool) {
-	if len(r.pending) == 0 {
-		return poo.StreamItem{}, false
-	}
-	ev := r.pending[0]
-	r.pending = r.pending[1:]
-	return ev, true
 }
 
 // dispatch turns the event the reader has collected into events.
@@ -269,7 +246,7 @@ func (r *streamReader) close() (poo.StreamItem, error) {
 	r.deferred = nil
 	r.pending = append(r.pending, flushed...)
 	r.pending = r.appendUsage(r.pending)
-	if ev, ok := r.take(); ok {
+	if ev, ok := support.Take(&r.pending); ok {
 		return ev, nil
 	}
 	if r.err != nil {
@@ -307,7 +284,7 @@ func (r *streamReader) fail(err error) (poo.StreamItem, error) {
 	r.done = true
 	r.err = err
 	r.pending = r.appendUsage(r.pending)
-	if ev, ok := r.take(); ok {
+	if ev, ok := support.Take(&r.pending); ok {
 		return ev, nil
 	}
 	return poo.StreamItem{}, err
@@ -321,43 +298,18 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 	return r.usage
 }
 
-// contextError turns a read failure into the context's error when the
-// context is what ended the request.
-//
-// A stream that already carried a delta cannot be retried: the model has
-// seen part of the answer. The failure says so, so the settle reason
-// names it, and the kind the failure had before the reclassification
-// stays in the error's code, where the plan keeps it.
-func (r *streamReader) contextError(err error) error {
-	if r.parent != nil && r.parent.Err() != nil {
-		return r.parent.Err()
-	}
-	if r.ctx != nil && r.ctx.Err() != nil {
-		kind := poo.ProviderKindNetwork
-		if r.ttftSet {
-			return &poo.ProviderError{
-				Kind:    poo.ProviderKindInterruptedStream,
-				Code:    string(kind),
-				Message: r.ctx.Err().Error(),
-			}
-		}
-		return &poo.ProviderError{Kind: kind, Message: r.ctx.Err().Error()}
-	}
-	return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
-}
-
 // providerError turns an error chunk into a provider error.
 //
 // The chunk carries no status, so its class comes from the code and the
 // message, and the server's own failure is the default.
-func (r *streamReader) providerError(body *errorBody) error {
-	code := codeString(body.Code)
+func (r *streamReader) providerError(body *support.ErrorBody) error {
+	code := support.CodeString(body.Code)
 	message := body.Message
 	if message == "" {
 		message = "the endpoint returned an error"
 	}
 	return &poo.ProviderError{
-		Kind:    failureKind(0, code, body.Type, message, poo.ProviderKindServer),
+		Kind:    support.FailureKind(0, code, body.Type, message, poo.ProviderKindServer),
 		Message: message,
 		Code:    code,
 	}
@@ -378,13 +330,13 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 		}
 
 		if thinking := delta.ReasoningContent; thinking != "" {
-			r.markFirstToken()
+			r.ttft.Mark()
 			out = append(out, poo.StreamItem{
 				Kind:  "delta",
 				Delta: &poo.Delta{Kind: "thinking", Text: thinking},
 			})
 		} else if thinking := delta.Reasoning; thinking != "" {
-			r.markFirstToken()
+			r.ttft.Mark()
 			out = append(out, poo.StreamItem{
 				Kind:  "delta",
 				Delta: &poo.Delta{Kind: "thinking", Text: thinking},
@@ -392,7 +344,7 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 		}
 
 		if delta.Content != "" {
-			r.markFirstToken()
+			r.ttft.Mark()
 			// The filters own the text: they strip the call markup and
 			// the thinking tags, and they emit the prose themselves.
 			// Emitting the raw delta as well would double the prose and
@@ -411,12 +363,12 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 		for _, tc := range delta.ToolCalls {
 			// A tool call is the first token too: a turn that only asks
 			// for a tool call still has a time to its first token.
-			r.markFirstToken()
+			r.ttft.Mark()
 			r.sawToolCall = true
 			// The native call wins over the calls the model wrote as
 			// text, so the parsed ones are dropped.
 			r.deferred = nil
-			complete := isCompleteJSON(tc.Function.Arguments)
+			complete := support.IsCompleteJSON(tc.Function.Arguments)
 			out = append(out, poo.StreamItem{
 				Kind: "tool_call",
 				ToolCall: &poo.ToolCallDelta{
@@ -443,7 +395,7 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 		u := &poo.UsageReport{
 			InputTokens:  chunk.Usage.PromptTokens,
 			OutputTokens: chunk.Usage.CompletionTokens,
-			TTFTMS:       r.ttftMS(),
+			TTFTMS:       r.ttft.MS(),
 		}
 		if d := chunk.Usage.PromptTokensDetails; d != nil {
 			cached := d.CachedTokens
@@ -455,27 +407,6 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 	}
 
 	return out, nil
-}
-
-// markFirstToken records the time the first token arrived.
-//
-// A token is a non-empty text or thinking delta, or a tool call. A chunk
-// that only announces the assistant's role carries no token, so it does
-// not start the clock.
-func (r *streamReader) markFirstToken() {
-	if r.ttftSet {
-		return
-	}
-	r.ttftSet = true
-	r.ttft = time.Since(r.started)
-}
-
-// ttftMS returns the time to the first token in milliseconds.
-func (r *streamReader) ttftMS() float64 {
-	if !r.ttftSet {
-		return 0
-	}
-	return float64(r.ttft.Microseconds()) / 1000
 }
 
 // appendUsage adds the usage report to a list of events.
@@ -497,7 +428,7 @@ func (r *streamReader) ensureUsage() {
 	if r.usage != nil {
 		return
 	}
-	r.usage = &poo.UsageReport{TTFTMS: r.ttftMS()}
+	r.usage = &poo.UsageReport{TTFTMS: r.ttft.MS()}
 	r.usageSent = true
 }
 
@@ -511,13 +442,4 @@ func (r *streamReader) Close() error {
 		r.cancel()
 	}
 	return r.body.Close()
-}
-
-// isCompleteJSON reports whether a string is a complete JSON object.
-func isCompleteJSON(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	return json.Valid([]byte(s))
 }

@@ -81,7 +81,7 @@ func TestAnErrorBodyWithItsOwnKindKeepsIt(t *testing.T) {
 	}
 }
 
-// TestTheStatusMapsTheErrorKind covers classifyStatus's status table and
+// TestTheStatusMapsTheErrorKind covers the shared status table and
 // the payload's refinement of it: the same error words classify the same
 // way whichever door they came through.
 func TestTheStatusMapsTheErrorKind(t *testing.T) {
