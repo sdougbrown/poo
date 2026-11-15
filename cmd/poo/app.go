@@ -81,10 +81,23 @@ revision, time and modified flag for a build from a checkout.
 --version prints the one word this information renders: the release, or
 dev plus the short revision of a build from a checkout.`
 
+// replCommand declares `poo repl`, the binary's front door.
+func replCommand(stdout io.Writer) *clicontract.Command {
+	return &clicontract.Command{
+		Name:  "repl",
+		Short: "An interactive session in the terminal (vi keys, markdown rendering)",
+		Long:  replLong,
+		Flags: serveFlagSpecs(),
+		Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
+			return handleRepl(inv, stdout, cmdStderr), nil
+		},
+	}
+}
+
 // pooApp assembles the declared CLI around the writer a command's own
 // stdout goes to. Diagnostics use the writer dispatch hands the command.
 func pooApp(stdout io.Writer) *clicontract.App {
-	return &clicontract.App{
+	app := &clicontract.App{
 		Name:    "poo",
 		Version: buildVersion().String(),
 		// The binary owns its signals: a run settles a cancelled run
@@ -108,15 +121,6 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				Flags:          runFlagSpecs(),
 				Handle: func(ctx context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 					return handleRun(ctx, inv, stdout, cmdStderr), nil
-				},
-			},
-			{
-				Name:  "repl",
-				Short: "An interactive session in the terminal (vi keys, markdown rendering)",
-				Long:  replLong,
-				Flags: serveFlagSpecs(),
-				Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
-					return handleRepl(inv, stdout, cmdStderr), nil
 				},
 			},
 			{
@@ -170,6 +174,12 @@ func pooApp(stdout io.Writer) *clicontract.App {
 			},
 		},
 	}
+	// The front doors join the declared commands, so an interface is
+	// declared and launchable in one entry.
+	for _, door := range frontDoors {
+		app.Commands = append(app.Commands, door(stdout))
+	}
+	return app
 }
 
 // sessionsListCommand declares `poo sessions list`.

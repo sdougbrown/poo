@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo/config"
 )
@@ -16,11 +19,14 @@ import (
 // refuses the bare invocation.
 const defaultUI = "repl"
 
-// frontDoors are the interfaces this binary links, by name. Each is a
-// declared command, so a bare invocation dispatches the one the settings
-// name the way any other command runs.
-var frontDoors = map[string]bool{
-	"repl": true,
+// frontDoors are the interfaces this binary links: the name a bare
+// invocation may launch, and the command that launch dispatches.
+//
+// The two are one entry, so an interface cannot be declared without being
+// launchable or launchable without being declared: the declaration in
+// app.go takes its commands from this map.
+var frontDoors = map[string]func(io.Writer) *clicontract.Command{
+	"repl": replCommand,
 }
 
 // runUI executes a bare `poo`.
@@ -59,12 +65,12 @@ func frontDoorArgs(name, settingsPath string) []string {
 // The settings' name wins when they name one; the binary's default
 // covers everything else. A name the binary does not link is an
 // error that lists what it does offer.
-func pickUI(settings *config.Settings, fallback string, doors map[string]bool) (string, error) {
+func pickUI(settings *config.Settings, fallback string, doors map[string]func(io.Writer) *clicontract.Command) (string, error) {
 	name := settings.UI
 	if name == "" {
 		name = fallback
 	}
-	if doors[name] {
+	if _, ok := doors[name]; ok {
 		return name, nil
 	}
 	known := make([]string, 0, len(doors))

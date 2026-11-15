@@ -147,9 +147,8 @@ func TestAStandaloneArgumentIsRefused(t *testing.T) {
 	}
 }
 
-// TestAFrontDoorIsADeclaredCommand covers the front-door names: a bare
-// invocation dispatches one of them, so a name the binary does not declare
-// would be a door that cannot open.
+// TestAFrontDoorIsADeclaredCommand covers the doors: each carries its own
+// command, so the declaration and the launch read one entry.
 func TestAFrontDoorIsADeclaredCommand(t *testing.T) {
 	app := pooApp(io.Discard)
 	for door := range frontDoors {
@@ -157,7 +156,7 @@ func TestAFrontDoorIsADeclaredCommand(t *testing.T) {
 			t.Errorf("the front door %q is not a declared command", door)
 		}
 	}
-	if !frontDoors[defaultUI] {
+	if _, ok := frontDoors[defaultUI]; !ok {
 		t.Errorf("the default ui %q is not one of the front doors", defaultUI)
 	}
 }
