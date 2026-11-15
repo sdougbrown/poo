@@ -164,6 +164,11 @@ type lineResult struct {
 // to cover the reader's own scheduling.
 const escWindow = 40 * time.Millisecond
 
+// streamFrame is how often the run loop paints the preview a delta left
+// dirty: a long block coalesces its frames instead of rendering every
+// token.
+const streamFrame = 33 * time.Millisecond
+
 // input reads the lines a person types. A terminal gets the readline
 // editor with its vi mode; anything else gets plain lines, so a pipe
 // or a test drives the repl too.
@@ -205,6 +210,8 @@ func (m *machine) run() int {
 	m.gate = make(chan struct{})
 	m.lines = make(chan lineResult)
 	m.esc = make(chan string, 1)
+	frame := time.NewTicker(streamFrame)
+	defer frame.Stop()
 
 	quit := make(chan struct{})
 	interrupts := make(chan os.Signal, 1)
@@ -255,6 +262,8 @@ func (m *machine) run() int {
 			if code, done := m.handleAsk(req, input); done {
 				return code
 			}
+		case <-frame.C:
+			m.r.paintPending()
 		case runID := <-m.esc:
 			m.cancelRun(runID)
 		case res := <-m.lines:

@@ -127,6 +127,7 @@ func TestASplitFenceCommitsAsOneBlock(t *testing.T) {
 	r.userPrompt("go")
 	r.streamDelta("text", "```go\nfunc main() {")
 	r.streamDelta("text", "\n}\n```\n\nAfter the fence.")
+	r.paintPending()
 	r.finish()
 
 	drawn := scr.text()
@@ -230,12 +231,21 @@ func TestAStreamingFenceMatchesItsFinalRender(t *testing.T) {
 
 	r.streamDelta("text", "Intro paragraph.\n\n```go\n")
 	r.streamDelta("text", "func main() {\n")
+	r.paintPending()
+	// The intro above the fence may already be committed, but the
+	// unclosed fence must not be: its code is still being typed.
+	if tr := plain(r.transcriptText()); strings.Contains(tr, "func main()") {
+		t.Errorf("the unclosed fence committed its code before the settle:\n%s", tr)
+	}
 	if got := renderedRow(t, r, scr.text(), "func main() {"); got != want {
 		t.Fatalf("the live code row is %q, want the render's row %q:\n%s", got, want, scr.text())
 	}
 	r.finish()
 	if got := renderedRow(t, r, scr.text(), "func main() {"); got != want {
 		t.Errorf("the settled code row is %q, want the render's row %q:\n%s", got, want, scr.text())
+	}
+	if tr := plain(r.transcriptText()); strings.Count(tr, "func main()") != 1 {
+		t.Errorf("the settled transcript reads the code %d time(s), want 1:\n%s", strings.Count(tr, "func main()"), tr)
 	}
 }
 
@@ -247,6 +257,7 @@ func TestAnEmptyFirstListItemKeepsItsNumbering(t *testing.T) {
 
 	r.streamDelta("text", "Intro paragraph.\n\n1.\n\n")
 	r.streamDelta("text", "2. second item\n")
+	r.paintPending()
 	drawn := scr.text()
 	if got := renderedRow(t, r, drawn, "second item"); got != want {
 		t.Fatalf("the live list row is %q, want the render's row %q:\n%s", got, want, drawn)
@@ -352,5 +363,57 @@ func TestTwoMessageIDsReadAsSeparateParagraphs(t *testing.T) {
 	tr := plain(r.transcriptText())
 	if strings.Contains(tr, "alphabeta") {
 		t.Fatalf("the transcript glued the two messages:\n%s", tr)
+	}
+}
+
+// TestTheStreamPaintsItsFirstDeltaAndCoalescesTheRest covers the frame:
+// the first text of a block lands at once, the deltas after it wait for
+// one paint, and a second frame with nothing new paints nothing.
+func TestTheStreamPaintsItsFirstDeltaAndCoalescesTheRest(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	r.userPrompt("go")
+	r.streamDelta("text", "one ")
+	first := out.String()
+
+	r.streamDelta("text", "two ")
+	r.streamDelta("text", "three")
+	if got := out.String(); got != first {
+		t.Fatalf("the stream painted before its frame:\n%q", got)
+	}
+	r.paintPending()
+	if got := out.String(); got == first {
+		t.Fatal("the frame painted nothing")
+	}
+	if got := strings.Count(plain(out.String()), "one two three"); got != 1 {
+		t.Errorf("the latest text reads %d time(s), want 1:\n%q", got, plain(out.String()))
+	}
+	painted := out.String()
+	r.paintPending()
+	if got := out.String(); got != painted {
+		t.Errorf("an unpainted frame painted again:\n%q", got)
+	}
+}
+
+// TestTheFinishPaintsTheDirtyTailWithoutATick covers the last token
+// before a tool call or settle: the flush paints the dirty preview
+// itself, so the tail shows even when no frame runs first.
+func TestTheFinishPaintsTheDirtyTailWithoutATick(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	r.userPrompt("go")
+	r.streamDelta("text", "tail one ")
+	first := out.String()
+
+	r.streamDelta("text", "tail two")
+	r.finish()
+	if got := out.String(); got == first {
+		t.Fatal("the finish painted nothing")
+	}
+	if got := plain(out.String()); !strings.Contains(got, "tail one tail two") {
+		t.Errorf("the dirty tail never showed:\n%q", got)
+	}
+	if got := plain(r.transcriptText()); strings.Count(got, "tail one tail two") != 1 {
+		t.Errorf("the transcript reads the tail %d time(s), want 1:\n%q", strings.Count(got, "tail one tail two"), got)
 	}
 }

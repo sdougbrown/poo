@@ -110,6 +110,9 @@ type streamLive struct {
 	// parked are the segments a stalled block could not paint, oldest
 	// first. They render when the block is flushed.
 	parked []streamSegment
+	// dirty says the source has changed since the last paint: the run
+	// loop paints it on its next frame, or the flush paints it first.
+	dirty bool
 }
 
 // streamSegment is one kind's markdown, waiting to be rendered.
@@ -292,11 +295,29 @@ func (r *renderer) streamDelta(kind, text string) {
 		r.bufferDelta(kind, clean)
 		return
 	}
-	if r.live.kind != kind {
+	first := r.live.kind != kind
+	if first {
 		r.switchKind(kind)
 	}
 	r.live.source += clean
+	if first {
+		// The first text of a kind lands at once; the frames that
+		// follow coalesce until the run loop paints them.
+		r.paintStream()
+		r.live.dirty = false
+		return
+	}
+	r.live.dirty = true
+}
+
+// paintPending paints the source a delta left dirty, once. The run loop
+// calls it on its frame, and the flush calls it before it seals.
+func (r *renderer) paintPending() {
+	if !r.streams() || r.block.stalled || !r.live.dirty {
+		return
+	}
 	r.paintStream()
+	r.live.dirty = false
 }
 
 // contentWidth is the columns the terminal has now: the live width
@@ -334,6 +355,8 @@ const thinkingIntro = "· thinking ·\n\n"
 // of another kind. The closed segment's preview is already its final
 // rendering, so it is sealed rather than rendered again.
 func (r *renderer) switchKind(kind string) {
+	// The old segment's last tokens reach the screen before it seals.
+	r.paintPending()
 	var seq strings.Builder
 	if r.block.previewRows > 0 {
 		erasePreview(&seq, r.block.previewRows)
@@ -448,6 +471,7 @@ func isFinalByte(b rune) bool {
 // prompt and stay there; the next write starts below them.
 func (r *renderer) finish() {
 	r.takeHint()
+	r.paintPending()
 	if !r.streams() {
 		body := r.pendingBody()
 		r.resetStream()

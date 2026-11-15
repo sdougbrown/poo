@@ -142,6 +142,7 @@ func TestAStreamedSequenceNeverReachesTheTerminal(t *testing.T) {
 	r.streamDelta("text", "\x1b]52;c;"+"QUJD"+"\x07clipboard"+"\x1b[2Jcleared")
 	out.Reset()
 	r.streamDelta("text", "safe"+"\x1b[2J"+"text")
+	r.paintPending()
 	if strings.Contains(out.String(), "\x1b[2J") {
 		t.Errorf("the terminal was told to erase:\n%q", out.String())
 	}
@@ -160,6 +161,7 @@ func TestAStreamedSequenceNeverReachesTheTerminal(t *testing.T) {
 		t.Errorf("the pending head leaked:\n%q", out.String())
 	}
 	r.streamDelta("text", "1mrest")
+	r.paintPending()
 	if strings.Contains(out.String(), "\x1b[31m") {
 		t.Errorf("the split sequence reached the terminal:\n%q", out.String())
 	}
@@ -182,6 +184,7 @@ func TestASplitOSCStaysData(t *testing.T) {
 		t.Errorf("the unfinished sequence printed:\n%q", out.String())
 	}
 	r.streamDelta("text", "\x07tail")
+	r.paintPending()
 	if strings.Contains(out.String(), "window title") {
 		t.Errorf("the completed sequence reached the terminal:\n%q", out.String())
 	}
@@ -198,6 +201,7 @@ func TestASplitOSCStaysData(t *testing.T) {
 		t.Errorf("the unfinished ST sequence printed:\n%q", out.String())
 	}
 	r.streamDelta("text", "\\tail")
+	r.paintPending()
 	if strings.Contains(out.String(), "title") {
 		t.Errorf("the ST sequence reached the terminal:\n%q", out.String())
 	}
@@ -219,6 +223,7 @@ func TestAnEndlessEscapeIsDropped(t *testing.T) {
 		t.Fatalf("the held tail is %d bytes, want at most %d", n, maxPending)
 	}
 	r.streamDelta("text", "after")
+	r.paintPending()
 	if !strings.Contains(plain(out.String()), "after") {
 		t.Errorf("the stream stopped after the endless escape:\n%q", plain(out.String()))
 	}

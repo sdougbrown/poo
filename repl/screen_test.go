@@ -143,6 +143,7 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 	}
 
 	r.streamDelta("text", "world.")
+	r.paintPending()
 	// The paragraph reads once, with the draft intact below it, and the
 	// hint has given way to the text.
 	if got := countOf(t, scr, "Hello, world."); got != 1 {

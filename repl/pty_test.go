@@ -373,3 +373,43 @@ func TestAForeignSettleDoesNotEndTheRun(t *testing.T) {
 		t.Fatalf("the repl never left; it drew:\n%s", term.String())
 	}
 }
+
+// TestTheFramePaintsAQuietDeltaWithoutAnotherEvent covers the coalesced
+// frame over a real terminal: the run is held open after a later delta,
+// and the delta still reaches the screen before another event or the
+// settle, because the run loop's frame paints it.
+func TestTheFramePaintsAQuietDeltaWithoutAnotherEvent(t *testing.T) {
+	later := make(chan struct{})
+	hold := make(chan struct{})
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "First chunk ",
+		})
+		<-later
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "SECONDCHUNK",
+		})
+		<-hold
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+	}
+	term, code := startTerminalRepl(t, server)
+
+	term.press("work\n")
+	waitFor(t, term, "First chunk")
+	close(later)
+	// No delta and no settle can paint it: the frame is the only writer.
+	waitFor(t, term, "SECONDCHUNK")
+	close(hold)
+	waitFor(t, term, "✓ end_turn")
+	term.press("/quit\n")
+
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl never left after /quit; it drew:\n%s", term.String())
+	}
+}
