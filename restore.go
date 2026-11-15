@@ -516,8 +516,11 @@ func (s *Session) rebuild(records []Record, out *Restored) error {
 	s.spans = make([]turnSpan, 0, offset)
 	for _, id := range runs {
 		for t := 1; t <= runTurns[id]; t++ {
-			s.turns = append(s.turns, TurnSummary{Index: t, TurnIndex: offset - runTurns[id] + t})
-			s.spans = append(s.spans, turnSpan{turn: offset - runTurns[id] + t, run: t})
+			// The map is the numbering the records were written with, so
+			// the summaries read it rather than recomputing it.
+			turn := sessionTurn[turnKey{run: id, turn: t}]
+			s.turns = append(s.turns, TurnSummary{Index: t, TurnIndex: turn})
+			s.spans = append(s.spans, turnSpan{turn: turn, run: t})
 		}
 	}
 	s.mu.Unlock()

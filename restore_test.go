@@ -766,3 +766,36 @@ func TestTheHeaderTheRunCommandWritesCanBeRestored(t *testing.T) {
 		t.Fatalf("the restore of a session this binary wrote failed: %v", err)
 	}
 }
+
+// TestTheRestoreNumbersTheTurnsAcrossRuns covers the rule that a
+// restored session keeps the turn numbers the records were written
+// with: a compaction names a range of turns, so a number that shifts
+// with the run a turn is in cuts the wrong work.
+func TestTheRestoreNumbersTheTurnsAcrossRuns(t *testing.T) {
+	original := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{text: "done"},
+		{text: "ok"},
+	})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, original, &echoTool{}, sink))
+	runSession(t, s, "do the thing")
+	runSession(t, s, "again")
+
+	records := append([]poo.Record{header("s1")}, sink.allRecords()...)
+	session, _, err := poo.Restore(restoreOptions(t, scripted(nil), &recordingSink{}), records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+
+	turns := poo.SessionView(session).Turns()
+	if len(turns) != 3 {
+		t.Fatalf("the restored session holds %d turns, want 3", len(turns))
+	}
+	for i, turn := range turns {
+		if turn.TurnIndex != i+1 {
+			t.Errorf("the restored turn %d is numbered %d, want %d", i+1, turn.TurnIndex, i+1)
+		}
+	}
+}
