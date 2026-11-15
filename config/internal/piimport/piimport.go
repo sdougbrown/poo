@@ -198,9 +198,9 @@ func Read(path string) (File, error) {
 
 // wireAPI maps a provider's api name onto the one poo speaks.
 //
-// pi's Codex API is the Responses API with pi's own name for it, and only the
-// Codex provider may speak it: another provider that named it would be read as
-// a chat-completions endpoint, or handed a credential that is not its own.
+// pi's Codex API is the Responses API under pi's own name, and only the Codex
+// provider may speak it. Another provider that named it would be read as a
+// chat-completions endpoint, or handed a credential that is not its own.
 func wireAPI(provider, api string) (string, error) {
 	switch api {
 	case "", "openai-completions":

@@ -33,8 +33,8 @@ func (s *Settings) importPi(dir string) error {
 	if err != nil {
 		return err
 	}
-	// pi's built-in providers are offered when a pi auth file is there: they
-	// are what its credential can run, and a settings file that names none of
+	// pi's built-in providers are offered when a pi auth file is there, because
+	// they are what its credential can run. A settings file that names none of
 	// pi's files gains no models it did not ask for. The models file and the
 	// settings' own entries still win on a collision.
 	if s.piAuthPath != "" && fileExists(s.piAuthPath) {
@@ -96,7 +96,7 @@ func (s *Settings) importModelsFile(dir string) (string, error) {
 // An explicit pi_auth_file wins, and a relative one answers to the settings
 // file's directory the way models_file does. A named file that is not there is
 // a settings failure: an explicit path is a promise. With none named, auth.json
-// beside the models file is the file, whether or not it exists yet — the Codex
+// beside the models file is the file, whether or not it exists yet. The Codex
 // transport reports a credential that is missing, with the path it looked in.
 func (s *Settings) resolvePiAuthFile(dir, modelsPath string) (string, error) {
 	if s.PiAuthFile == "" {
@@ -120,7 +120,7 @@ func (s *Settings) resolvePiAuthFile(dir, modelsPath string) (string, error) {
 
 // piAuthFile returns the auth file the Codex provider reads.
 //
-// A Settings that was loaded has the path resolved; one built by hand names it,
+// A Settings that was loaded has the path resolved. One built by hand names it,
 // and the path answers to the working directory the way every other hand-built
 // path does.
 func (s *Settings) piAuthFile() string {

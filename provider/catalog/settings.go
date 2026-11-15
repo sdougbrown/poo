@@ -30,8 +30,8 @@ type EndpointSettings struct {
 	// APIKey is a key written in the settings themselves.
 	APIKey string
 	// SkipProbe says the endpoint is not asked what it serves: its models are
-	// declared by the settings or the curated layer, and a request to the
-	// endpoint would send nothing it understands.
+	// declared by the settings or the curated layer. A request to the endpoint
+	// would send nothing it understands.
 	SkipProbe bool
 }
 

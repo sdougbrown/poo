@@ -69,8 +69,8 @@ func writeCodexAuth(t *testing.T, dir, access, refresh string, expires int64) st
 }
 
 // codexEndpoint answers the token endpoint and the Codex endpoint as a fake
-// HTTP transport, so the test reaches Runtime.Transport's real endpoint and
-// never the network.
+// HTTP transport. The test reaches Runtime.Transport's real endpoint and never
+// the network.
 type codexEndpoint struct {
 	// accessToken is the token the refresh answers with.
 	accessToken string
@@ -139,10 +139,10 @@ func buildCodex(t *testing.T, settings *config.Settings, client *http.Client) (*
 	})
 }
 
-// TestACodexModelRunsOnPisCredential covers the whole path: the built-in
-// openai-codex model, the auth file the settings name, the expired credential
-// pi left behind refreshed under the same lock, and the request carrying the
-// refreshed token to the Codex endpoint.
+// TestACodexModelRunsOnPisCredential covers the whole path. The built-in
+// openai-codex model reads the auth file the settings name. The expired
+// credential pi left behind is refreshed under the same lock, and the request
+// carries the refreshed token to the Codex endpoint.
 func TestACodexModelRunsOnPisCredential(t *testing.T) {
 	dir := t.TempDir()
 	oldToken := fakeCodexToken(t, "acct_stored")
@@ -238,7 +238,7 @@ roles:
 		t.Errorf("the request carried account %q, want the refreshed token's account", endpoint.account)
 	}
 	// The model has no level that turns reasoning off, so a request with no
-	// level of its own asks for the lowest one it does take.
+	// level asks for the lowest one it takes.
 	var request struct {
 		Reasoning struct {
 			Effort string `json:"effort"`
@@ -277,7 +277,7 @@ roles:
 }
 
 // TestPisAuthFileBesideTheModelsFileIsUsed covers the alignment with
-// models_file: an auth.json beside the models file is pi's auth file, and the
+// models_file. An auth.json beside the models file is pi's auth file, and the
 // built-in provider is offered without the settings naming either.
 func TestPisAuthFileBesideTheModelsFileIsUsed(t *testing.T) {
 	dir := t.TempDir()
@@ -335,8 +335,8 @@ roles:
 	}
 }
 
-// TestAMissingPiAuthFileIsARefusal covers the explicit path's promise: a file
-// the settings name is the file they mean, and one that is not there fails the
+// TestAMissingPiAuthFileIsARefusal covers the explicit path's promise. A file
+// the settings name is the file they mean. One that is not there fails the
 // load rather than falling back to a sibling.
 func TestAMissingPiAuthFileIsARefusal(t *testing.T) {
 	dir := t.TempDir()
@@ -387,9 +387,9 @@ roles:
 	}
 }
 
-// TestABuiltinProviderNeedsTheAuthFileItReads covers the gate: a models file
-// on its own is a provider list, not a pi login, so pi's Codex models are not
-// offered beside it until pi's auth.json is there too.
+// TestABuiltinProviderNeedsTheAuthFileItReads covers the gate. A models file
+// on its own is a provider list, not a pi login, so pi's Codex models need
+// pi's auth.json beside it.
 func TestABuiltinProviderNeedsTheAuthFileItReads(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, config.ModelsFileName), []byte(`{
@@ -412,8 +412,8 @@ roles:
 	}
 }
 
-// TestACodexModelWithoutPisAuthFileIsRefused covers the explicit credential:
-// a Codex model the settings define has no credential unless a pi auth file is
+// TestACodexModelWithoutPisAuthFileIsRefused covers the explicit credential.
+// A Codex model the settings define has no credential unless a pi auth file is
 // named or found beside the models file.
 func TestACodexModelWithoutPisAuthFileIsRefused(t *testing.T) {
 	dir := t.TempDir()
@@ -446,9 +446,9 @@ roles:
 	}
 }
 
-// TestACodexModelRefusesAnotherEndpoint covers the credential's promise: pi's
+// TestACodexModelRefusesAnotherEndpoint covers the credential's promise. pi's
 // OAuth token is for the built-in Codex endpoint, and a provider pointed
-// somewhere else is refused rather than sent the token.
+// elsewhere is refused rather than sent the token.
 func TestACodexModelRefusesAnotherEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	writeCodexAuth(t, dir, fakeCodexToken(t, "acct_live"), "rt_live", 4102444800000)
@@ -524,7 +524,7 @@ roles:
 	}
 }
 
-// TestADeciderRequestForACodexModelIsRefused covers the request path: a
+// TestADeciderRequestForACodexModelIsRefused covers the request path. A
 // decider can be named directly, and a Codex model named that way is refused
 // before the systemone transport is built.
 func TestADeciderRequestForACodexModelIsRefused(t *testing.T) {
@@ -590,7 +590,7 @@ func writeAuthBeside(t *testing.T, dir, key, token string) string {
 }
 
 // TestAModelsFileDefinitionWinsOverTheBuiltinCodexModel covers the collision
-// on the built-in provider id: a models file that defines openai-codex is the
+// on the built-in provider id. A models file that defines openai-codex is the
 // definition that runs, and the built-in models it does not name are still
 // offered. The models file names the pinned endpoint, which is the one poo
 // sends pi's credential to, so the model it defines is not refused.
@@ -738,7 +738,7 @@ roles:
 }
 
 // TestAModelsFileInAnotherDirectoryTakesTheAuthBesideIt covers the path the
-// credential resolves against: the auth.json beside a models file in another
+// credential resolves against. The auth.json beside a models file in another
 // directory is the one read, not a same-named file beside the settings. Both
 // halves are observable — the imported api key and the token the Codex request
 // carries.

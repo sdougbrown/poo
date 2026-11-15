@@ -16,10 +16,10 @@ import (
 // codexModel reports whether the model is served by pi's built-in Codex
 // provider.
 //
-// The provider is the settings' endpoint name, and nothing else infers it: a
-// responses API on another endpoint is not Codex, and neither is the Codex URL
-// under another name. The name is pi's provider id, which is also the key pi
-// stores the credential under.
+// The provider is the settings' endpoint name, and nothing else infers it. A
+// responses API on another endpoint is not Codex, nor is the Codex URL under
+// another name. The name is pi's provider id, which is also the key pi stores
+// the credential under.
 func (r *Runtime) codexModel(model poo.ModelInfo) bool {
 	entry, ok := r.Settings.Models[model.Name]
 	return ok && entry.Endpoint == piimport.CodexProvider
@@ -28,9 +28,8 @@ func (r *Runtime) codexModel(model poo.ModelInfo) bool {
 // codexTransport builds the Codex transport for a model.
 //
 // The endpoint is pi's built-in one. pi's credential is an OAuth token for that
-// endpoint, and sending it anywhere else would hand it to a host the operator
-// did not name, so a model that points the provider elsewhere is refused rather
-// than sent.
+// endpoint, and sending it elsewhere would hand it to a host the operator did
+// not name. A model that points the provider elsewhere is refused, not sent.
 func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	endpoint := strings.TrimRight(strings.TrimSpace(model.Endpoint), "/")
 	if endpoint != codex.DefaultEndpoint {
@@ -65,7 +64,7 @@ func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error)
 //
 // The settings' reasoning.chat is the operator's, and the session sends its own
 // level on every request. A model that has no level which turns reasoning off
-// would otherwise be asked for one by a transport with no setting: its lowest
+// would otherwise be asked for one by a transport with no setting. Its lowest
 // level is the fallback.
 func (r *Runtime) codexReasoning(model poo.ModelInfo) string {
 	if r.Settings.Reasoning.Chat != nil {
@@ -99,7 +98,7 @@ func codexCredentials(credentials piauth.Credentials) func(context.Context) (cod
 // codexCredentialError classifies the failure a resolution reported.
 //
 // A traded token that could not be stored and a refresh whose answer is
-// unknown are terminal: another attempt would trade a refresh token that may
+// unknown are terminal. Another attempt would trade a refresh token that may
 // already be spent. ErrPersist therefore wins over any lock in its chain — the
 // lock is what stopped the write, not what makes the failure free to retry. A
 // lock that stopped the refresh before anything was traded is the transient

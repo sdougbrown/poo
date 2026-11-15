@@ -52,8 +52,8 @@ func writeModels(t *testing.T, body string) string {
 }
 
 // TestTheCodexAPIImportsForTheCodexProvider covers pi's own name for the
-// Codex wire: the Codex provider is read as the Responses API, so a models
-// file that names it imports into a model poo can run.
+// Codex wire. The Codex provider is read as the Responses API, so a models file
+// that names it imports into a model poo can run.
 func TestTheCodexAPIImportsForTheCodexProvider(t *testing.T) {
 	file, err := piimport.Read(writeModels(t, `{
 		"providers": {
@@ -76,8 +76,8 @@ func TestTheCodexAPIImportsForTheCodexProvider(t *testing.T) {
 	}
 }
 
-// TestTheCodexAPIIsRefusedForAnotherProvider covers the other half: another
-// provider that named pi's Codex API would be sent the wrong requests, so the
+// TestTheCodexAPIIsRefusedForAnotherProvider covers the other half. Another
+// provider that named pi's Codex API would be sent the wrong requests. The
 // import refuses it rather than reading it as something it is not.
 func TestTheCodexAPIIsRefusedForAnotherProvider(t *testing.T) {
 	_, err := piimport.Read(writeModels(t, `{

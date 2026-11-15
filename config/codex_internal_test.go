@@ -36,9 +36,9 @@ func writeCodexAuthFile(t *testing.T, body string) string {
 // liveCodexAuth is pi's auth.json with a credential that needs no refresh.
 const liveCodexAuth = `{"openai-codex":{"type":"oauth","access":"live-token","refresh":"rt_live","expires":4102444800000,"accountId":"acct_live"}}`
 
-// TestCodexCredentialsRetryWhenTheAuthFileIsLocked covers the lock: pi holds
-// the auth file while it refreshes, so the failure is a transient one the
-// transport may retry, and the failure keeps the lock it found.
+// TestCodexCredentialsRetryWhenTheAuthFileIsLocked covers the lock. pi holds
+// the auth file while it refreshes, so the failure is transient and retryable,
+// and it names the lock it found.
 func TestCodexCredentialsRetryWhenTheAuthFileIsLocked(t *testing.T) {
 	path := writeCodexAuthFile(t, liveCodexAuth)
 	lockPath := path + ".lock"
@@ -96,7 +96,7 @@ func TestCodexCredentialsPreserveCancellation(t *testing.T) {
 }
 
 // TestTheCodexTransportRetriesALockedAuthFile covers the mapping where it is
-// consumed: the transport takes the lock for a transient failure and spends its
+// consumed. A locked auth file is transient, so the transport spends its
 // attempts on it, and no request goes out without a credential.
 func TestTheCodexTransportRetriesALockedAuthFile(t *testing.T) {
 	path := writeCodexAuthFile(t, liveCodexAuth)
@@ -176,9 +176,8 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 const expiredCodexAuth = `{"openai-codex":{"type":"oauth","access":"expired-token","refresh":"rt_old","expires":1,"accountId":"acct_old"}}`
 
 // TestCodexCredentialErrorKeepsATradedTokenTerminal covers the traded token
-// that was not stored: the lock may be part of that failure, and it is still
-// terminal, because another attempt would trade a refresh token that is
-// already spent.
+// that was not stored. The failure is terminal even with a lock in its chain,
+// because another attempt would trade a refresh token that is already spent.
 func TestCodexCredentialErrorKeepsATradedTokenTerminal(t *testing.T) {
 	err := fmt.Errorf("%w: another writer took the lock: %w", piauth.ErrPersist, piauth.ErrLocked)
 	mapped := codexCredentialError(context.Background(), err)
@@ -192,9 +191,8 @@ func TestCodexCredentialErrorKeepsATradedTokenTerminal(t *testing.T) {
 }
 
 // TestCodexCredentialErrorKeepsAnUncertainRefreshTerminal covers the refresh
-// whose answer was lost: the endpoint may have traded the token, so the
-// failure is terminal even when the transport underneath it was a network
-// error.
+// whose answer was lost. The endpoint may have traded the token, so the
+// failure is terminal even when the transport error is a network one.
 func TestCodexCredentialErrorKeepsAnUncertainRefreshTerminal(t *testing.T) {
 	err := fmt.Errorf("%w: %w", piauth.ErrRefresh, &net.DNSError{Err: "i/o timeout", IsTimeout: true})
 	mapped := codexCredentialError(context.Background(), err)
@@ -332,7 +330,7 @@ func TestTheCodexTransportStopsAfterATradedTokenIsNotStored(t *testing.T) {
 }
 
 // TestTheCodexTransportDoesNotRetryAnUncertainRefresh covers a refresh whose
-// request reached the endpoint and whose answer did not come back: the token
+// request reached the endpoint and whose answer did not come back. The token
 // may be traded, so the request settles without a second exchange.
 func TestTheCodexTransportDoesNotRetryAnUncertainRefresh(t *testing.T) {
 	path := writeCodexAuthFile(t, expiredCodexAuth)

@@ -171,9 +171,9 @@ func (c *Catalog) applyDiscovery(found *discovery) {
 // sorted.
 //
 // The hosted providers are not probed: a hosted endpoint is asked for a
-// key that is not there, and the curated entry already says what the
+// key that is not there. The curated entry already says what the
 // provider's models are. An endpoint the settings mark unprobed is not
-// asked either: its models are declared, and a probe would send a request
+// asked either. Its models are declared, and a probe would send a request
 // the endpoint has no list to answer.
 func (c *Catalog) endpointNames() []string {
 	var names []string

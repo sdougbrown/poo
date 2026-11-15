@@ -10,9 +10,9 @@ import (
 	"github.com/sdougbrown/poo/provider/catalog"
 )
 
-// TestAnUnprobedEndpointIsNotAsked covers the declared endpoint: an endpoint
-// whose models are declared is not probed, so the endpoint sees no request at
-// all, and its models keep the settings' own fields.
+// TestAnUnprobedEndpointIsNotAsked covers the declared endpoint. An endpoint
+// whose models are declared is not probed, so it sees no request at all, and
+// its models keep the settings' own fields.
 func TestAnUnprobedEndpointIsNotAsked(t *testing.T) {
 	var probes atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
