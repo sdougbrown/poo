@@ -140,6 +140,29 @@ func (s *fakeServer) waitPrompts(t *testing.T, want int) []string {
 	return nil
 }
 
+// waitMessages waits until the server has want run/message texts from
+// the session, and returns them.
+//
+// The transcript's steer echo is written before the request goes out,
+// so a test that waits for the echo has not yet waited for the send.
+func (s *fakeServer) waitMessages(t *testing.T, want int) []string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		messages := append([]string(nil), s.messages...)
+		s.mu.Unlock()
+		if len(messages) >= want {
+			return messages
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t.Fatalf("the server got %d messages, want %d: %v", len(s.messages), want, s.messages)
+	return nil
+}
+
 // waitCancels waits until the session's cancels number want, and
 // returns them.
 func (s *fakeServer) waitCancels(t *testing.T, want int) []string {
@@ -293,9 +316,7 @@ func TestALineTypedDuringARunReachesTheServerAsASteer(t *testing.T) {
 	typeLine("also check the tests\n")
 	waitFor(t, out, "» also check the tests")
 
-	server.mu.Lock()
-	sent := append([]string(nil), server.messages...)
-	server.mu.Unlock()
+	sent := server.waitMessages(t, 1)
 	if len(sent) != 1 || sent[0] != "also check the tests" {
 		t.Fatalf("the server got %v, want one steer", sent)
 	}

@@ -1061,18 +1061,23 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		if id, _ := evt.Payload["run_id"].(string); id != "" && id == runID {
 			state.flush(m.r)
 			reason, _ := evt.Payload["reason"].(string)
-			input, output := settledUsage(evt.Payload)
-			m.r.settle(reason, state.turns, input, output)
+			detail := settleDetail(evt.Payload)
 			// The settle's usage is the run's total, the sum of every
-			// request's count, and the statusline wants the last
-			// request's: the usage events already put it there. Feeding
-			// the sum in would show a context fuller than the window.
+			// request's count, and the settle line is where the run's own
+			// accounting belongs. The statusline is not: the usage events
+			// already put the last request's fill there, and feeding the
+			// sum in would show a context fuller than the window.
 			//
 			// A run whose endpoint reported no usage emits no usage
 			// event either, so the statusline keeps the last fill it
 			// measured: that is the closest estimate of the window the
 			// next request asks for, and the settle's total is not.
-			m.reportUndelivered(evt.Payload)
+			input, output := 0, 0
+			if detail.Usage != nil {
+				input, output = detail.Usage.InputTokens, detail.Usage.OutputTokens
+			}
+			m.r.settle(reason, state.turns, input, output)
+			m.reportUndelivered(detail.UndeliveredInput)
 			return true
 		}
 	}
@@ -1083,16 +1088,8 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 // but never delivered, the ones that were queued when the run stopped
 // taking turns. The notice names what the person wrote, when the
 // acceptance's answer named the input.
-func (m *machine) reportUndelivered(payload map[string]any) {
-	raw, err := json.Marshal(payload["detail"])
-	if err != nil {
-		return
-	}
-	var detail protocol.SettleDetail
-	if json.Unmarshal(raw, &detail) != nil {
-		return
-	}
-	for _, u := range detail.UndeliveredInput {
+func (m *machine) reportUndelivered(dropped []protocol.UndeliveredInput) {
+	for _, u := range dropped {
 		said := u.InputID
 		if text, ok := m.steers[u.InputID]; ok {
 			said = fmt.Sprintf("%q", text)
@@ -1101,24 +1098,21 @@ func (m *machine) reportUndelivered(payload map[string]any) {
 	}
 }
 
-// settledUsage reads the token accounting out of a settle event's
-// detail: the payload is re-encoded and read through the protocol's own
-// shape, so a field the contract renames is a compile error here, not a
-// settle line that silently reads zero.
+// settleDetail reads a settle event's detail through the protocol's
+// own shape: the payload is re-encoded and decoded, so a field the
+// contract renames is a compile error here, not a settle line and a
+// delivery notice that silently read nothing.
 //
-// The accounting is the run's total, the sum of every request's count.
-// The statusline does not read it: the per-request usage events carry
-// the last request's fill, which is what it shows.
-func settledUsage(payload map[string]any) (input, output int) {
+// A detail that will not decode is the zero detail: the settle line
+// renders the reason alone, and no notice claims an input was dropped.
+func settleDetail(payload map[string]any) protocol.SettleDetail {
+	var detail protocol.SettleDetail
 	raw, err := json.Marshal(payload["detail"])
 	if err != nil {
-		return 0, 0
+		return detail
 	}
-	var detail protocol.SettleDetail
-	if json.Unmarshal(raw, &detail) != nil || detail.Usage == nil {
-		return 0, 0
-	}
-	return detail.Usage.InputTokens, detail.Usage.OutputTokens
+	json.Unmarshal(raw, &detail)
+	return detail
 }
 
 // flushPending renders what the deltas had buffered when the session
