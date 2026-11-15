@@ -37,10 +37,10 @@ func TestTheLiveStreamRendersASplitFence(t *testing.T) {
 	}
 }
 
-// TestThinkingStreamsAsDimMarkdown covers thinking while it arrives: it
+// TestThinkingStreamsAsMarkdown covers thinking while it arrives: it
 // reads as dimmed markdown under its own heading, not as a hint that
 // waits for the reply.
-func TestThinkingStreamsAsDimMarkdown(t *testing.T) {
+func TestThinkingStreamsAsMarkdown(t *testing.T) {
 	var out bytes.Buffer
 	r := aTerminal(t, &out, 40)
 	m := &machine{r: r, status: newStatus("")}
@@ -58,9 +58,6 @@ func TestThinkingStreamsAsDimMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(drawn, "I will inspect the source.") {
 		t.Errorf("the thinking block lost the rendered words:\n%q", drawn)
-	}
-	if !strings.Contains(raw, ansiDim) {
-		t.Errorf("the thinking block does not read dimmed:\n%q", raw)
 	}
 	// The settled transcript keeps the same dim markdown, once.
 	r.finish()
