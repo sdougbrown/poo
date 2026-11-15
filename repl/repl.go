@@ -1028,6 +1028,11 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 			// request's count, and the statusline wants the last
 			// request's: the usage events already put it there. Feeding
 			// the sum in would show a context fuller than the window.
+			//
+			// A run whose endpoint reported no usage emits no usage
+			// event either, so the statusline keeps the last fill it
+			// measured: that is the closest estimate of the window the
+			// next request asks for, and the settle's total is not.
 			return true
 		}
 	}

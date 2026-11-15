@@ -211,6 +211,10 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 		"file two",
 		"end_turn",
 		"2 turn(s)",
+		// The settle's input side, from the fake's 20300-token run
+		// total: feeding it the last request's 12300 instead would
+		// print "12.3k in".
+		"20.3k in",
 		// The settle's output side, from the fake's 1100 output tokens:
 		// a regression in decoding them would print "0 out".
 		"1.1k out",
