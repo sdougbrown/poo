@@ -11,15 +11,29 @@ import (
 // test binary cannot serve.
 const settingsFile = "version: 1\n"
 
+// settingsEnv is the variable the settings discovery reads a file from.
+//
+// It spells the name config.EnvSettings holds rather than importing it:
+// the session package's tests reach this package, and this package
+// reaching config would close a cycle through the session package.
+// settings_test.go holds the two names together.
+const settingsEnv = "POO_SETTINGS"
+
+// manifestOverrides are the environment variables a shell may carry from
+// an operator's own session, naming manifests this package's tests do
+// not load.
+var manifestOverrides = []string{"POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH"}
+
 // Main runs a package's tests under a settings file of the tests' own,
 // and returns the code TestMain passes to os.Exit.
 //
-// Discovery finds the file through POO_SETTINGS, which is set rather
-// than unset: an empty value is no value to the discovery, and
+// Discovery finds the file through settingsEnv, which is set
+// rather than unset: an empty value is no value to the discovery, and
 // FindSettings walks past it to the project's .poo directory and then
 // the user's config directory, whose settings a test cannot serve. A
 // test that names its own file overrides the variable with t.Setenv and
-// is unaffected.
+// is unaffected. The manifest overrides inherited from the shell go
+// with it.
 //
 // The file lives in a directory of the process's own, so packages
 // running at the same time never write over one another, and the
@@ -36,9 +50,12 @@ func Main(m *testing.M) int {
 		println("poo tests: writing the test settings:", err.Error())
 		return 1
 	}
-	if err := os.Setenv("POO_SETTINGS", path); err != nil {
-		println("poo tests: pointing POO_SETTINGS at the test settings:", err.Error())
+	if err := os.Setenv(settingsEnv, path); err != nil {
+		println("poo tests: pointing the settings discovery at the test settings:", err.Error())
 		return 1
+	}
+	for _, name := range manifestOverrides {
+		os.Unsetenv(name)
 	}
 	return m.Run()
 }
