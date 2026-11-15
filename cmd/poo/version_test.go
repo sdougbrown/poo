@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"runtime/debug"
 	"strings"
@@ -151,5 +152,59 @@ func TestTheVersionFlagAgreesWithTheCommand(t *testing.T) {
 	}
 	if fields["go_version"] != info.GoVersion {
 		t.Errorf("the command reports the Go version %v, want %q", fields["go_version"], info.GoVersion)
+	}
+}
+
+// TestTheVersionTextNamesTheBuild covers the human form: the fields a
+// person reads are the ones the build information carries, and a build
+// with no checkout stamp prints no lines for it.
+func TestTheVersionTextNamesTheBuild(t *testing.T) {
+	cases := []struct {
+		name     string
+		info     versionInfo
+		want     []string
+		unwanted []string
+	}{
+		{
+			name: "a build from a checkout",
+			info: versionInfo{
+				Version:   "dev",
+				Revision:  "0123456789abcdef0123456789abcdef01234567",
+				Time:      "2026-11-14T06:03:57Z",
+				Modified:  true,
+				GoVersion: "go1.26.8",
+			},
+			want: []string{
+				"poo dev+0123456-dirty\n",
+				"revision: 0123456789abcdef0123456789abcdef01234567\n",
+				"time: 2026-11-14T06:03:57Z\n",
+				"modified: true\n",
+				"go: go1.26.8\n",
+			},
+		},
+		{
+			name:     "a binary installed from the module",
+			info:     versionInfo{Version: "v0.4.1", GoVersion: "go1.26.8"},
+			want:     []string{"poo v0.4.1\n", "go: go1.26.8\n"},
+			unwanted: []string{"revision:", "time:", "modified:"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := writeVersion(&out, c.info, false); err != nil {
+				t.Fatalf("writing the version: %v", err)
+			}
+			for _, want := range c.want {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("the text holds no %q:\n%s", want, out.String())
+				}
+			}
+			for _, unwanted := range c.unwanted {
+				if strings.Contains(out.String(), unwanted) {
+					t.Errorf("the text holds %q, and the build carries none:\n%s", unwanted, out.String())
+				}
+			}
+		})
 	}
 }
