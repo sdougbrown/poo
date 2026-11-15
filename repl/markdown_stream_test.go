@@ -1,0 +1,242 @@
+package repl
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/sdougbrown/poo/wire/protocol"
+)
+
+// TestTheLiveStreamShowsTheMarkdownItWillSettleTo covers the jump the
+// stream is for: the words on the screen while the message arrives are
+// the words the render settles to, emphasis markers and all gone.
+func TestTheLiveStreamShowsTheMarkdownItWillSettleTo(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("go")
+	r.streamDelta("text", "I can check **both tools**.")
+
+	drawn := scr.text()
+	if strings.Contains(drawn, "**both tools**") {
+		t.Fatalf("the live stream shows the markdown source:\n%s", drawn)
+	}
+	if !strings.Contains(drawn, "I can check both tools.") {
+		t.Fatalf("the live stream lost the rendered words:\n%s", drawn)
+	}
+}
+
+// TestTheLiveStreamRendersASplitFence covers the structural block: the
+// backticks of a fence are never shown, and the code inside reads the
+// way the rendered block reads, even before the fence closes.
+func TestTheLiveStreamRendersASplitFence(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("go")
+	r.streamDelta("text", "```go\nfunc main() {\n")
+	r.streamDelta("text", "}\n```\n")
+
+	drawn := scr.text()
+	if strings.Contains(drawn, "```") {
+		t.Fatalf("the live stream shows the fence markers:\n%s", drawn)
+	}
+	if rowOf(t, scr, "func main() {") < 0 {
+		t.Fatalf("the live stream lost the code:\n%s", drawn)
+	}
+}
+
+// TestThinkingStreamsAsDimMarkdown covers thinking while it arrives: it
+// reads as dimmed markdown under its own heading, not as a hint that
+// waits for the reply.
+func TestThinkingStreamsAsDimMarkdown(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	m := &machine{r: r, status: newStatus("")}
+	state := &runState{}
+
+	m.event(deltaEvent("m1", "thinking", "I will inspect **the source**."), "r1", state)
+
+	raw := out.String()
+	drawn := plain(raw)
+	if !strings.Contains(drawn, "· thinking ·") {
+		t.Fatalf("the thinking block has no heading:\n%q", drawn)
+	}
+	if strings.Contains(drawn, "**the source**") {
+		t.Errorf("the thinking block shows the markdown source:\n%q", drawn)
+	}
+	if !strings.Contains(drawn, "I will inspect the source.") {
+		t.Errorf("the thinking block lost the rendered words:\n%q", drawn)
+	}
+	if !strings.Contains(raw, ansiDim) {
+		t.Errorf("the thinking block does not read dimmed:\n%q", raw)
+	}
+	// The settled transcript keeps the same dim markdown, once.
+	r.finish()
+	settled := plain(r.transcriptText())
+	if n := strings.Count(settled, "I will inspect the source."); n != 1 {
+		t.Errorf("the settled thinking reads %d time(s), want 1:\n%q", n, settled)
+	}
+}
+
+// TestThinkingAndReplyKeepTheirArrivalOrder covers the two kinds of
+// delta one message can carry: each piece reads where it arrived, so a
+// thought that follows the reply does not jump back above it.
+func TestThinkingAndReplyKeepTheirArrivalOrder(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	m := &machine{r: r, status: newStatus("")}
+	state := &runState{}
+
+	m.event(deltaEvent("m1", "thinking", "first thought"), "r1", state)
+	m.event(deltaEvent("m1", "text", "the answer"), "r1", state)
+	m.event(deltaEvent("m1", "thinking", "second thought"), "r1", state)
+	m.event(eventOf("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"}), "r1", state)
+
+	drawn := plain(r.transcriptText())
+	first := strings.Index(drawn, "first thought")
+	answer := strings.Index(drawn, "the answer")
+	second := strings.Index(drawn, "second thought")
+	if first < 0 || answer < 0 || second < 0 {
+		t.Fatalf("the transcript is missing part of the message:\n%s", drawn)
+	}
+	if !(first < answer && answer < second) {
+		t.Errorf("the transcript reads out of arrival order:\n%s", drawn)
+	}
+	if n := strings.Count(drawn, "· thinking ·"); n != 2 {
+		t.Errorf("the transcript has %d thinking headings, want one per thought:\n%s", n, drawn)
+	}
+}
+
+// TestACompletedParagraphKeepsItsRows covers the stability the chunking
+// buys: once a paragraph's block is finished, the next one's arrival
+// paints below it, and the settle does not move it.
+func TestACompletedParagraphKeepsItsRows(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("go")
+	r.streamDelta("text", "First paragraph is finished.\n\nSecond paragraph is still being typed")
+	if rowOf(t, scr, "First paragraph is finished.") < 0 {
+		t.Fatalf("the finished paragraph never showed:\n%s", scr.text())
+	}
+	first := rowOf(t, scr, "First paragraph is finished.")
+
+	r.streamDelta("text", " and grows.")
+	r.finish()
+	drawn := scr.text()
+	if got := rowOf(t, scr, "First paragraph is finished."); got != first {
+		t.Errorf("the finished paragraph moved from row %d to %d:\n%s", first, got, drawn)
+	}
+	if got := countOf(t, scr, "First paragraph is finished."); got != 1 {
+		t.Errorf("the finished paragraph reads %d time(s), want 1:\n%s", got, drawn)
+	}
+	if got := countOf(t, scr, "Second paragraph is still being"); got != 1 {
+		t.Errorf("the second paragraph reads %d time(s), want 1:\n%s", got, drawn)
+	}
+	if rowOf(t, scr, "typed and grows.") < 0 {
+		t.Errorf("the tail of the second paragraph never showed:\n%s", drawn)
+	}
+}
+
+// TestASplitFenceCommitsAsOneBlock covers the structural block: the
+// fence arrives in pieces, its code streams as code, and the settle
+// leaves one rendered block with no fence markers on the screen.
+func TestASplitFenceCommitsAsOneBlock(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("go")
+	r.streamDelta("text", "```go\nfunc main() {")
+	r.streamDelta("text", "\n}\n```\n\nAfter the fence.")
+	r.finish()
+
+	drawn := scr.text()
+	if strings.Contains(drawn, "```") {
+		t.Errorf("the fence markers showed:\n%s", drawn)
+	}
+	if got := countOf(t, scr, "func main() {"); got != 1 {
+		t.Errorf("the code reads %d time(s), want 1:\n%s", got, drawn)
+	}
+	if rowOf(t, scr, "After the fence.") < 0 {
+		t.Errorf("the paragraph after the fence never showed:\n%s", drawn)
+	}
+}
+
+// TestAThinkingBlockEndsAboveAToolCall covers the ordering across the
+// block's edge: the thought settles before the call decorates the
+// transcript, and the reply that follows keeps its place.
+func TestAThinkingBlockEndsAboveAToolCall(t *testing.T) {
+	var out bytes.Buffer
+	r := aTerminal(t, &out, 40)
+	m := &machine{r: r, status: newStatus("")}
+	state := &runState{}
+
+	m.event(deltaEvent("m1", "thinking", "weighing it"), "r1", state)
+	m.event(deltaEvent("m1", "text", "Let me look."), "r1", state)
+	m.event(eventOf("tool.call", map[string]any{"tool": "bash", "summary": "ls"}), "r1", state)
+	m.event(eventOf("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"}), "r1", state)
+
+	drawn := plain(r.transcriptText())
+	thought := strings.Index(drawn, "weighing it")
+	answer := strings.Index(drawn, "Let me look.")
+	call := strings.Index(drawn, "⚙ bash")
+	if thought < 0 || answer < 0 || call < 0 {
+		t.Fatalf("the transcript is missing part of the run:\n%s", drawn)
+	}
+	if !(thought < answer && answer < call) {
+		t.Errorf("the run reads out of order:\n%s", drawn)
+	}
+	if n := strings.Count(drawn, "weighing it"); n != 1 {
+		t.Errorf("the thought reads %d time(s), want 1:\n%s", n, drawn)
+	}
+}
+
+// TestAnAskFlushesTheThinkingAboveIt covers the permission ask that
+// arrives while thinking streams: the thought settles above the
+// question, whole, and the question asks below it.
+func TestAnAskFlushesTheThinkingAboveIt(t *testing.T) {
+	var out bytes.Buffer
+	m := &machine{r: aTerminal(t, &out, 40), status: newStatus("")}
+	m.conn = &conn{events: make(chan protocol.Event, 8), asks: make(chan askRequest, 8)}
+	m.runIDMu.Lock()
+	m.runID = "r1"
+	m.runIDMu.Unlock()
+	m.state = &runState{}
+	m.conn.events <- deltaEvent("m1", "thinking", "weighing it")
+	in := &plainInput{write: func(string) {}}
+
+	if _, done := m.handleAsk(askRequest{ask: protocol.AskParams{SessionID: "s1", RunID: "r1", AskID: "a1", Tool: "bash"}}, in); done {
+		t.Fatal("the ask ended the session")
+	}
+	drawn := plain(m.r.transcriptText())
+	thought := strings.Index(drawn, "weighing it")
+	asked := strings.Index(drawn, "permission")
+	if thought < 0 || asked < 0 || thought > asked {
+		t.Fatalf("the ask landed over the thinking:\n%s", drawn)
+	}
+	if n := strings.Count(drawn, "weighing it"); n != 1 {
+		t.Errorf("the thought reads %d time(s), want 1:\n%s", n, drawn)
+	}
+}
+
+// TestAThinkingParagraphDoesNotRepeatWhenTheReplyStarts covers the row
+// the thinking block ends on: the preview is replaced whole when the
+// reply's first delta switches kind, so the dim paragraph reads once and
+// the reply starts below it.
+func TestAThinkingParagraphDoesNotRepeatWhenTheReplyStarts(t *testing.T) {
+	scr, r := aScreen(t, 100)
+	r.userPrompt("look at both tools")
+	r.hint()
+	r.streamDelta("thinking", "I will inspect **the source** and use `printf`.\n\n")
+	if got := countOf(t, scr, "I will inspect the source"); got != 1 {
+		t.Fatalf("the thinking paragraph reads %d time(s), want 1:\n%s", got, scr.text())
+	}
+
+	r.streamDelta("text", "I can check **both tools**.\n\n")
+	drawn := scr.text()
+	if got := countOf(t, scr, "I will inspect the source"); got != 1 {
+		t.Errorf("the thinking paragraph reads %d time(s) after the reply starts, want 1:\n%s", got, drawn)
+	}
+	if got := countOf(t, scr, "I can check both tools."); got != 1 {
+		t.Errorf("the reply reads %d time(s), want 1:\n%s", got, drawn)
+	}
+	thought := rowOf(t, scr, "I will inspect the source")
+	reply := rowOf(t, scr, "I can check both tools.")
+	if thought < 0 || reply < 0 || thought > reply {
+		t.Errorf("the thought and the reply are out of order:\n%s", drawn)
+	}
+}
