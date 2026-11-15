@@ -56,7 +56,7 @@ const (
 
 	// markerPrefix starts every replacement the strategy writes. The
 	// model reads it as the sign that its history was replaced, and the
-	// strategy recognizes its own previous summary by it.
+	// strategy strips it when it carries its own summary forward.
 	markerPrefix = "[Context compacted:"
 )
 
