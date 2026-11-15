@@ -12,11 +12,11 @@ import (
 	"github.com/sdougbrown/poo/pootest"
 )
 
-// The core records the opaque blocks a provider reports with the response
-// that produced them, and gives them back on the next request. The tests
-// drive that seam through a session: the readers are root test fakes with
-// a block reporter, and the record and the next request are what they
-// measure.
+// These tests drive the provider-block seam through a session. The core
+// records the blocks a provider reports with the response that produced
+// them, and gives them back on the next request. The readers are root test
+// fakes with a block reporter, and the tests measure the recorded message
+// and the next request.
 
 // reasoningBlock returns one opaque provider block, shaped like the
 // encrypted reasoning a storeless Responses endpoint sends.
@@ -57,10 +57,8 @@ type providerBlockReader struct {
 	failed bool
 }
 
-// ReportProviderBlocks returns the reported blocks.
 func (r *providerBlockReader) ReportProviderBlocks() []poo.ProviderBlock { return r.blocks }
 
-// Next hands out the events and then the failure.
 func (r *providerBlockReader) Next() (poo.StreamItem, error) {
 	ev, err := r.fakeReader.Next()
 	if r.err != nil && errors.Is(err, io.EOF) && !r.failed {
@@ -79,7 +77,6 @@ type providerBlockTransport struct {
 	requests []poo.ChatRequest
 }
 
-// Stream hands out the next reader.
 func (t *providerBlockTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -92,12 +89,10 @@ func (t *providerBlockTransport) Stream(ctx context.Context, req poo.ChatRequest
 	return reader, poo.Rendered{API: poo.APIResponses}, nil
 }
 
-// Fork is not implemented by the fake.
 func (t *providerBlockTransport) Fork(context.Context, poo.Rendered, []poo.Message, int) (poo.StreamReader, error) {
 	return nil, errNoFork
 }
 
-// Requests returns the requests the transport received, in order.
 func (t *providerBlockTransport) Requests() []poo.ChatRequest {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -144,7 +139,7 @@ func wantBlock(t *testing.T, block *poo.ProviderBlock, want poo.ProviderBlock) {
 	}
 }
 
-// blockKinds names the kinds of a message's blocks, for a failure message.
+// blockKinds names a message's block kinds for a failure message.
 func blockKinds(blocks []poo.ContentBlock) []poo.ContentKind {
 	kinds := make([]poo.ContentKind, len(blocks))
 	for i, block := range blocks {
@@ -154,9 +149,9 @@ func blockKinds(blocks []poo.ContentBlock) []poo.ContentKind {
 }
 
 // TestTheReportedReasoningRidesWithTheThinkingBlock covers the companion:
-// the first reported block rides beside the thinking text it belongs to,
-// the rest follow it as blocks of their own ahead of the text, and the
-// next request gives them back in the order the response produced them.
+// the first reported block rides beside the thinking text it belongs to.
+// The rest follow as blocks of their own ahead of the text. The next
+// request gives them back in the order the response produced them.
 func TestTheReportedReasoningRidesWithTheThinkingBlock(t *testing.T) {
 	first := reasoningBlock("enc_one")
 	second := reasoningBlock("enc_two")
@@ -208,7 +203,7 @@ func TestTheReportedReasoningRidesWithTheThinkingBlock(t *testing.T) {
 }
 
 // TestTheReportedBlocksStandAloneWithoutThinking covers a response that
-// reports blocks and no reasoning text: every block rides alone, ahead of
+// reports blocks and no reasoning text. Every block rides alone ahead of
 // the text, and the next request gives them back in order.
 func TestTheReportedBlocksStandAloneWithoutThinking(t *testing.T) {
 	first := reasoningBlock("enc_one")
@@ -258,7 +253,7 @@ func TestTheReportedBlocksStandAloneWithoutThinking(t *testing.T) {
 }
 
 // TestTheOneReportedBlockRidesOnlyOnTheThinking covers a response that
-// reports a single block beside its reasoning: the block is the thinking
+// reports one block beside its reasoning. That block is the thinking
 // block's companion, so the recorded message and the next request hold
 // the thinking and the answer, with no lone block.
 func TestTheOneReportedBlockRidesOnlyOnTheThinking(t *testing.T) {
@@ -305,11 +300,11 @@ func TestTheOneReportedBlockRidesOnlyOnTheThinking(t *testing.T) {
 	}
 }
 
-// TestTheReportedBlocksSurviveABrokenStream covers the partial path: a
-// stream that breaks after its reasoning still costs the endpoint its
-// reasoning, so the blocks are recorded with the partial message, the
-// first beside the thinking and the rest on their own, and the next
-// request carries them back.
+// TestTheReportedBlocksSurviveABrokenStream covers the partial path. A
+// stream that breaks after its reasoning must not cost the endpoint that
+// reasoning. The blocks are recorded with the partial message: the first
+// beside the thinking, the rest on their own. The next request carries
+// them back.
 func TestTheReportedBlocksSurviveABrokenStream(t *testing.T) {
 	first := reasoningBlock("enc_one")
 	second := reasoningBlock("enc_two")

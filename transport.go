@@ -154,10 +154,10 @@ type UsageReporter interface {
 // breaks still reports what it produced, so the reasoning of a partial
 // message is not lost with the connection.
 //
-// The core asks the reader the transport handed it. A transport whose
-// reader wraps the attempt's own — to retry it, or to watch it — must
-// forward the report from the attempt reader, the way it forwards usage,
-// or the response's reasoning is lost with the wrapper.
+// The core asks the reader the transport handed it. A retrying or watching
+// transport wraps the attempt's own reader, so it must forward the report
+// the way it forwards usage. Otherwise the response's reasoning is lost
+// with the wrapper.
 type ProviderBlockReporter interface {
 	// ReportProviderBlocks returns the provider blocks the response
 	// produced, in the order it produced them.

@@ -1947,11 +1947,11 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 
 // collectProviderBlocks records the opaque blocks the response produced.
 //
-// The blocks travel with the assistant message, in the order the response
-// produced them: the first one rides beside the thinking text it belongs
-// to, and the rest follow it as blocks of their own, ahead of the text and
-// the calls the response carried. The next request gives them back, which
-// is what a storeless endpoint needs to keep its reasoning across turns.
+// The blocks join the assistant message in the order the response produced
+// them. If there is a thinking block, the first becomes its companion.
+// The rest follow ahead of the response's text and tool calls. The
+// next request gives them back, which is what a storeless endpoint needs
+// to keep its reasoning across turns.
 func (r *response) collectProviderBlocks(reader StreamReader) {
 	reporter, ok := reader.(ProviderBlockReporter)
 	if !ok {
@@ -1961,8 +1961,8 @@ func (r *response) collectProviderBlocks(reader StreamReader) {
 	if len(blocks) == 0 {
 		return
 	}
-	// The thinking block's own companion is the one the transport gives
-	// back in place of the reasoning text.
+	// The transport reports the thinking block's companion first, so it
+	// attaches to that block rather than riding on its own.
 	split := 0
 	if len(r.content) > 0 && r.content[0].Kind == ContentThinking && r.content[0].Provider == nil {
 		block := blocks[0]
