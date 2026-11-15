@@ -14,8 +14,9 @@ import (
 // terminal width columns wide.
 //
 // newRenderer reaches that state by finding a terminal behind the
-// writer, which a test has no pty for; the fields it would set are the
-// ones set here, so the streaming path is the same code either way.
+// writer, which a test has no pty for. The fields it would set are
+// the ones set here, so the streaming path is the same code either
+// way.
 func aTerminal(t *testing.T, out io.Writer, width int) *renderer {
 	t.Helper()
 	return aStreamingRenderer(t, out, out, width)
@@ -127,9 +128,6 @@ func TestAPipeStripsTheEscapesAModelSends(t *testing.T) {
 	}
 }
 
-// TestAToolCallRendersTheStreamedMessageAboveItself covers the
-// interleaving: the message a tool call interrupts is sealed above the
-// call, and the reply that follows streams as a block of its own.
 func TestAToolCallRendersTheStreamedMessageAboveItself(t *testing.T) {
 	var out bytes.Buffer
 	r := aTerminal(t, &out, 40)
@@ -192,10 +190,6 @@ func TestTwoMessagesReadInOrder(t *testing.T) {
 	}
 }
 
-// TestAnAskRendersTheDeltasThatArrivedBeforeIt covers the ask that
-// races the deltas: the ask's handler drains the events that reached
-// the connection first, so the reply so far settles above the question,
-// never split by it.
 func TestAnAskRendersTheDeltasThatArrivedBeforeIt(t *testing.T) {
 	var out bytes.Buffer
 	m := &machine{r: newRenderer(&out), status: newStatus("")}

@@ -17,8 +17,8 @@ import (
 // way readline's Refresh does around every write.
 
 // aStreamingRenderer builds the renderer a terminal session gets: the
-// markdown a terminal shows, the width the stream lays out at, and the
-// editor's writer as the sink. The three test harnesses share it so a
+// markdown a terminal shows, at the width the stream lays out at. The
+// editor's writer is the sink. The three test harnesses share it so a
 // field added to the streaming shape is set in one place. The dark
 // style is the one a light-on-dark terminal picks, and it is what the
 // emulator's rows show once the escapes are gone.
@@ -119,11 +119,6 @@ func rowStandsAlone(drawn, want string) bool {
 	return false
 }
 
-// TestTheScreenKeepsTheStreamWhileTheDraftTypes covers the regression
-// the byte tests could not see: the streamed text sits on sealed rows
-// above the prompt, and the editor's redraw erased the prompt's row. The
-// sealed rows must keep the words on the screen while the person types,
-// without duplicates, with the draft intact below.
 func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("say hello")
@@ -179,9 +174,6 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 	}
 }
 
-// TestTheScreenKeepsThePriorLines covers the rows above the block: a
-// transcript line the repl printed before the run stays where it was
-// while the stream and the settle paint below it.
 func TestTheScreenKeepsThePriorLines(t *testing.T) {
 	scr, r := aScreen(t, 30)
 	r.userPrompt("say hello")
@@ -200,9 +192,6 @@ func TestTheScreenKeepsThePriorLines(t *testing.T) {
 	}
 }
 
-// TestTheScreenHardWrapMatchesTheTerminal covers the width: the
-// markdown renderer lays the paragraph out inside the terminal, so every
-// row stays at most as wide as the screen and the words do not double.
 func TestTheScreenHardWrapMatchesTheTerminal(t *testing.T) {
 	scr, r := aScreen(t, 20)
 	r.userPrompt("go")
@@ -257,11 +246,6 @@ func aQuietScreen(t *testing.T, width int) (*quietHarness, *renderer) {
 	return scr, aStreamingRenderer(t, vt, scr, width)
 }
 
-// TestTheStreamStartsAtColumnZero covers the start of the block: the
-// editor's cursor stands after the prompt it drew and no hint stood
-// before the text, so the rows the stream paints must begin at column
-// zero — or the first row is counted short and the settle leaves a
-// fragment behind.
 func TestTheStreamStartsAtColumnZero(t *testing.T) {
 	scr, r := aQuietScreen(t, 40)
 	// The editor drew the prompt; the cursor stands after it, and no
@@ -275,9 +259,6 @@ func TestTheStreamStartsAtColumnZero(t *testing.T) {
 	scr.typeText(" draft")
 	r.streamDelta("text", " more words here to finish the paragraph off nicely indeed yes")
 	r.finish()
-	// The settle leaves the paragraph where it stands; the editor's next
-	// draw — the prompt the run loop sets when the run ends — repaints
-	// the prompt and the draft below it.
 	scr.typeText("")
 
 	drawn := scr.text()
@@ -332,10 +313,6 @@ func TestTheFlushKeepsTheScreenWhenTheBlockOutgrowsIt(t *testing.T) {
 	}
 }
 
-// TestAResizeMidBlockStopsThePainting covers the width the rows are
-// counted at: a terminal that changes width while a block streams keeps
-// its old rows on the screen, the painting stops, and the settle lays
-// the whole paragraph out once instead of painting at the old width.
 func TestAResizeMidBlockStopsThePainting(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	width := 40

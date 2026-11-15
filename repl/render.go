@@ -49,11 +49,11 @@ type renderer struct {
 	// tr renders markdown for the terminal. It is nil for a writer
 	// that is not a terminal, where markdown renders as plain text.
 	tr *glamour.TermRenderer
-	// transcript mirrors the writes that went through write, and the
-	// rendered chunks a stream commits as they finish: the conversation
-	// as the pager shows it again. The cursor-control sequences the
-	// streaming writes — the erases, the repaints of the preview — go to
-	// the terminal directly, and are not part of it.
+	// transcript mirrors the writes that went through write and the
+	// rendered chunks a stream commits as they finish. It is the
+	// conversation as the pager shows it again. The cursor-control
+	// sequences the streaming writes — the erases, the repaints of the
+	// preview — go to the terminal directly, and are not part of it.
 	transcript bytes.Buffer
 	// pending holds the tail of a streamed delta that may be an escape
 	// sequence still arriving: a sequence split across deltas is
@@ -65,8 +65,8 @@ type renderer struct {
 	// writer that is not a terminal, which streams nothing.
 	width int
 	// editor says the sink is the line editor's writer, whose redraws
-	// erase their own row: streamed rows are sealed with their own
-	// newline so the redraw passes below them.
+	// erase their own row. Streamed rows are sealed with their own
+	// newline, so the redraw passes below them.
 	editor bool
 	// liveWidth reads the terminal's width now, when the renderer has a
 	// reader for it: the streamed rows and the editor's prompt must
@@ -96,9 +96,9 @@ type streamBlock struct {
 	hint bool
 }
 
-// streamLive is one message being streamed: the markdown a segment has
-// not committed yet, and the segments a stalled block collected after
-// the last row it could paint.
+// streamLive is one message being streamed. It holds the markdown a
+// segment has not committed yet, and the segments a stalled block
+// collected after the last row it could paint.
 type streamLive struct {
 	// kind is the segment's kind: "text" for the reply, "thinking" for
 	// everything that is not the reply. Empty when no segment is open.
@@ -151,7 +151,7 @@ func newRenderer(out io.Writer) *renderer {
 
 // write appends a chunk to the transcript and the terminal. A line the
 // repl writes for itself — a steer's echo, a notice, a failure — ends
-// the open block first, so the screen and the transcript keep one order.
+// the open block first. The screen and the transcript keep one order.
 func (r *renderer) write(s string) {
 	if r.block.hint || r.live.kind != "" {
 		r.finish()
@@ -249,7 +249,7 @@ func (r *renderer) takeHint() {
 }
 
 // streamDelta renders one delta of a message as it arrives. The reply
-// streams as markdown paragraphs, committed one block at a time; the
+// streams as markdown paragraphs, committed one block at a time. The
 // unfinished tail is a preview rendered by the same markdown renderer,
 // so the words do not move or change style when the block settles.
 // Thinking streams the same way, dimmed under its own heading. Each
@@ -260,9 +260,9 @@ func (r *renderer) takeHint() {
 // is data, and a sequence split across deltas is held pending and
 // stripped when its tail lands.
 //
-// The editor erases its own row on every redraw, so every row the
-// stream paints is sealed with its own newline and the prompt redraw
-// passes below it.
+// The editor erases its own row on every redraw. Every row the stream
+// paints is sealed with its own newline, and the prompt redraw passes
+// below it.
 func (r *renderer) streamDelta(kind, text string) {
 	if text == "" {
 		return
@@ -311,7 +311,7 @@ func (r *renderer) contentWidth() int {
 }
 
 // stalledNow reports that the terminal's width has changed under a
-// block that is painting: the rows already painted wrap at the old
+// block that is painting. The rows already painted wrap at the old
 // width, so painting stops until the flush lays them out again.
 func (r *renderer) stalledNow() bool {
 	if r.liveWidth == nil {
@@ -376,9 +376,9 @@ func (r *renderer) paintStream() {
 	fmt.Fprint(r.sink, seq.String())
 }
 
-// bufferDelta adds a delta to the open segment without painting it: a
-// sink that cannot stream renders the segments whole at the flush, and
-// a stalled block collects everything after the last row it painted.
+// bufferDelta adds a delta to the open segment without painting it. A
+// sink that cannot stream renders the segments whole at the flush. A
+// stalled block collects everything after the last row it painted.
 func (r *renderer) bufferDelta(kind, text string) {
 	if r.live.kind != kind {
 		if r.live.kind != "" {
@@ -442,8 +442,8 @@ func isFinalByte(b rune) bool {
 	return b >= 0x40 && b <= 0x7e
 }
 
-// finish ends the streamed block: a pipe and a stalled block render
-// what they collected, and a live block seals the preview that already
+// finish ends the streamed block. A pipe and a stalled block render
+// what they collected. A live block seals the preview that already
 // stands, so no row it painted moves. The block's rows are above the
 // prompt and stay there; the next write starts below them.
 func (r *renderer) finish() {
@@ -493,10 +493,10 @@ func (r *renderer) pendingBody() string {
 	return b.String()
 }
 
-// chunkBody renders one markdown chunk the way the stream paints it:
-// the leading blank glamour puts above a block is dropped, since the
-// row the chunk lands on is already the right place for it. A thinking
-// chunk is dimmed whole.
+// chunkBody renders one markdown chunk the way the stream paints it.
+// The leading blank glamour puts above a block is dropped: the row the
+// chunk lands on is already the right place for it. A thinking chunk
+// is dimmed whole.
 func (r *renderer) chunkBody(kind, source string) string {
 	if strings.TrimSpace(source) == "" {
 		return ""
@@ -509,7 +509,7 @@ func (r *renderer) chunkBody(kind, source string) string {
 }
 
 // dimText dims a rendered block whole. A reset inside the block is
-// followed by the dim again, so the renderer's own styling does not
+// followed by the dim again. The renderer's own styling does not
 // brighten the rest of the line it touches. The dim is closed before the
 // block's trailing newlines, so the rows the block fills end where its
 // text does.
@@ -534,7 +534,7 @@ func erasePreview(seq *strings.Builder, rows int) {
 	seq.WriteString(ansi.EraseDisplay(0))
 }
 
-// sealedRows writes a rendered block as rows the terminal keeps: each
+// sealedRows writes a rendered block as rows the terminal keeps. Each
 // line ends in its own CRLF, so the editor's redraw passes below the
 // block instead of erasing the row it shares.
 func sealedRows(body string) string {
@@ -554,8 +554,8 @@ var streamParser = goldmark.DefaultParser()
 
 // splitStream splits the open markdown source after its last completed
 // paragraph, when another top-level block follows it. A paragraph's
-// last line has a known end, so everything above the split is complete,
-// fences and lists included; the block after it stays pending whole.
+// last line has a known end. Everything above the split is complete,
+// fences and lists included. The block after it stays pending whole.
 // Nothing is committed when no paragraph ends before the final block.
 func splitStream(source string) (done, rest string) {
 	doc := streamParser.Parse(goldmarktext.NewReader([]byte(source)))

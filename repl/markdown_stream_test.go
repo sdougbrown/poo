@@ -8,9 +8,6 @@ import (
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
-// TestTheLiveStreamShowsTheMarkdownItWillSettleTo covers the jump the
-// stream is for: the words on the screen while the message arrives are
-// the words the render settles to, emphasis markers and all gone.
 func TestTheLiveStreamShowsTheMarkdownItWillSettleTo(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
@@ -25,9 +22,6 @@ func TestTheLiveStreamShowsTheMarkdownItWillSettleTo(t *testing.T) {
 	}
 }
 
-// TestTheLiveStreamRendersASplitFence covers the structural block: the
-// backticks of a fence are never shown, and the code inside reads the
-// way the rendered block reads, even before the fence closes.
 func TestTheLiveStreamRendersASplitFence(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
@@ -76,9 +70,6 @@ func TestThinkingStreamsAsDimMarkdown(t *testing.T) {
 	}
 }
 
-// TestThinkingAndReplyKeepTheirArrivalOrder covers the two kinds of
-// delta one message can carry: each piece reads where it arrived, so a
-// thought that follows the reply does not jump back above it.
 func TestThinkingAndReplyKeepTheirArrivalOrder(t *testing.T) {
 	var out bytes.Buffer
 	r := aTerminal(t, &out, 40)
@@ -105,9 +96,6 @@ func TestThinkingAndReplyKeepTheirArrivalOrder(t *testing.T) {
 	}
 }
 
-// TestACompletedParagraphKeepsItsRows covers the stability the chunking
-// buys: once a paragraph's block is finished, the next one's arrival
-// paints below it, and the settle does not move it.
 func TestACompletedParagraphKeepsItsRows(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
@@ -134,9 +122,6 @@ func TestACompletedParagraphKeepsItsRows(t *testing.T) {
 	}
 }
 
-// TestASplitFenceCommitsAsOneBlock covers the structural block: the
-// fence arrives in pieces, its code streams as code, and the settle
-// leaves one rendered block with no fence markers on the screen.
 func TestASplitFenceCommitsAsOneBlock(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
@@ -213,10 +198,6 @@ func TestAnAskFlushesTheThinkingAboveIt(t *testing.T) {
 	}
 }
 
-// TestAThinkingParagraphDoesNotRepeatWhenTheReplyStarts covers the row
-// the thinking block ends on: the preview is replaced whole when the
-// reply's first delta switches kind, so the dim paragraph reads once and
-// the reply starts below it.
 func TestAThinkingParagraphDoesNotRepeatWhenTheReplyStarts(t *testing.T) {
 	scr, r := aScreen(t, 100)
 	r.userPrompt("look at both tools")
@@ -241,10 +222,6 @@ func TestAThinkingParagraphDoesNotRepeatWhenTheReplyStarts(t *testing.T) {
 	}
 }
 
-// TestAStreamingFenceMatchesItsFinalRender covers the fence that
-// follows a finished paragraph: the whole fence stays pending, so the
-// code streams with the block's own indentation instead of the prose
-// margin. The live row must equal the row the full render settles to.
 func TestAStreamingFenceMatchesItsFinalRender(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
@@ -262,9 +239,6 @@ func TestAStreamingFenceMatchesItsFinalRender(t *testing.T) {
 	}
 }
 
-// TestAnEmptyFirstListItemKeepsItsNumbering covers a list whose first
-// item is empty: the whole list stays pending, so its second item keeps
-// the number the full render gives it instead of restarting at one.
 func TestAnEmptyFirstListItemKeepsItsNumbering(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
@@ -280,9 +254,9 @@ func TestAnEmptyFirstListItemKeepsItsNumbering(t *testing.T) {
 	if strings.Contains(drawn, "1. second item") {
 		t.Errorf("the list restarted its numbering:\n%s", drawn)
 	}
-	// The list is one block, so none of it is in the settled transcript
-	// until the block ends: a split at the empty item would commit the
-	// first item alone.
+	// The list is one block, so none of it is in the settled
+	// transcript until the block ends. A split at the empty item
+	// would commit the first item alone.
 	if before := plain(r.transcriptText()); strings.Contains(before, "1.") {
 		t.Errorf("the unfinished list committed before the settle:\n%s", before)
 	}
@@ -292,9 +266,9 @@ func TestAnEmptyFirstListItemKeepsItsNumbering(t *testing.T) {
 	}
 }
 
-// renderedRow returns the first row of a rendered text that shows want,
-// with trailing spaces trimmed: the emulator's rows and the renderer's
-// rows are compared the same way.
+// renderedRow returns the first row of a rendered text that shows
+// want, with trailing spaces trimmed. The emulator's rows and the
+// renderer's rows are compared the same way.
 func renderedRow(t *testing.T, r *renderer, text, want string) string {
 	t.Helper()
 	return rowFrom(plain(text), want)
@@ -310,10 +284,6 @@ func rowFrom(text, want string) string {
 	return ""
 }
 
-// TestAnUnrelatedLineEndsTheOpenBlockFirst covers the line the repl can
-// write while a reply streams — a steer echo, a notice, a failure: the
-// open block settles before it, so the screen and the transcript read
-// the same order and no word is repeated or erased.
 func TestAnUnrelatedLineEndsTheOpenBlockFirst(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
