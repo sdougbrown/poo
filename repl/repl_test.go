@@ -648,7 +648,7 @@ func TestALineTheDispatcherWouldRunAsAPromptSteers(t *testing.T) {
 // fallback: an input the client did not accept here has no text to read
 // back, so the notice names the id the server reported.
 func TestAnUndeliveredInputTheReplNeverSentNamesItsId(t *testing.T) {
-	_, out, _ := steering(t, make(chan string, 1))
+	out := &bytes.Buffer{}
 	m := &machine{r: newRenderer(out), status: newStatus(""), sessionID: "s1"}
 	m.event(protocol.Event{
 		Type: "run.settled",
@@ -681,17 +681,27 @@ func steering(t *testing.T, sent chan string) (*machine, *bytes.Buffer, input) {
 	m.runIDMu.Lock()
 	m.runID = "r1"
 	m.runIDMu.Unlock()
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	// The line is recorded before the answer goes back: the test reads
+	// sent once m.line returns, and the call returns as soon as the
+	// answer lands.
 	go func() {
-		for raw := range lw.lines {
-			var req struct {
-				ID int `json:"id"`
-			}
-			if err := json.Unmarshal([]byte(raw), &req); err != nil {
-				t.Errorf("the line was not one request: %v", err)
+		for {
+			select {
+			case raw := <-lw.lines:
+				var req struct {
+					ID int `json:"id"`
+				}
+				if err := json.Unmarshal([]byte(raw), &req); err != nil {
+					t.Errorf("the line was not one request: %v", err)
+					return
+				}
+				sent <- raw
+				m.conn.line([]byte(fmt.Sprintf(`{"id":%d,"result":{"input_id":"i1"}}`, req.ID)))
+			case <-stop:
 				return
 			}
-			m.conn.line([]byte(fmt.Sprintf(`{"id":%d,"result":{"input_id":"i1"}}`, req.ID)))
-			sent <- raw
 		}
 	}()
 	return m, out, &plainInput{write: func(string) {}}
