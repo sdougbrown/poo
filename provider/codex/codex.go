@@ -10,12 +10,6 @@
 // history, `store` is always false, and the reasoning the endpoint returned
 // travels back as an opaque provider block.
 //
-// Three pieces here are the rules the Chat Completions transport already
-// applies: the failure-kind table, the retry policy and the SSE reader. They
-// are unexported in provider/openai, so this package holds its own copies. A
-// rule corrected in one belongs in the other, until the shared pieces move to
-// an internal package.
-//
 // The reader a request returns implements two reporting seams besides the
 // stream itself. ReportUsage reports the endpoint's own counts.
 // ReportProviderBlocks holds the reasoning items the endpoint returned, with

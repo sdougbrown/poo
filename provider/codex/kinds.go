@@ -39,16 +39,7 @@ type errorResponse struct {
 // inactive plan, and a context-length code is a context-length failure. A
 // failure that came without a status — an error event in a stream — takes its
 // class from its code. The server's own failure is the default.
-//
-// The table, one rule per line:
-//
-//   - context-length codes map to context_length.
-//   - quota codes map to usage_limit.
-//   - 429 maps to rate_limited.
-//   - 402, or a billing code, maps to plan_inactive.
-//   - 401 and 403 map to auth_failed.
-//   - other 4xx map to invalid_request.
-//   - 5xx map to server.
+
 func failureKind(status int, code, errType, message string, fallback poo.ProviderKind) poo.ProviderKind {
 	switch {
 	case isContextLength(code, message):
