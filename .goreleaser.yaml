@@ -9,8 +9,11 @@ builds:
     main: ./cmd/poo
     env:
       - CGO_ENABLED=0
+    # The binary answers --version from its own build information: the
+    # module version, or the VCS stamp of the checkout it was built from.
+    # Nothing here stamps a version, so nothing here can go stale.
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -s -w
     goos:
       - linux
       - darwin

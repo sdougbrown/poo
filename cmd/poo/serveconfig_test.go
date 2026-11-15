@@ -50,7 +50,7 @@ func startServe(t *testing.T, args ...string) *serveClient {
 
 	codes := make(chan int, 1)
 	go func() {
-		codes <- runServe(args)
+		codes <- run(append([]string{"serve"}, args...))
 	}()
 	t.Cleanup(func() {
 		inW.Close()

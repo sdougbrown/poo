@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
-	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/session"
@@ -90,12 +92,17 @@ func TestTheUnmatchedFlagChangesThePolicy(t *testing.T) {
 // empty value, such as an unset variable expanded on the command line,
 // adds no path, so it never resolves to the working directory.
 func TestAnEmptyManifestPathFlagIsSkipped(t *testing.T) {
-	var f sharedFlags
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	f.register(fs)
-	if err := fs.Parse([]string{"--feeds-path", "", "--feeds-path", "feeds", "--cli-registry-path", ""}); err != nil {
+	inv, err := clicontract.Parse(pooApp(io.Discard, io.Discard), []string{
+		"models",
+		"--feeds-path", "",
+		"--feeds-path", "feeds",
+		"--cli-registry-path", "",
+	})
+	if err != nil {
 		t.Fatalf("parsing the flags: %v", err)
 	}
+	var f sharedFlags
+	f.bind(inv)
 	overrides, err := f.overrides()
 	if err != nil {
 		t.Fatalf("reading the overrides: %v", err)

@@ -2,45 +2,41 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo/repl"
 )
 
-// replUsage is the usage of `poo repl`.
-const replUsage = `poo repl runs an interactive session in the terminal.
-
-Usage:
-  poo repl [flags]
-
-The repl takes the same flags as poo serve, and starts a poo serve
-with them. Its input reads with vi keys at a terminal, and the
-transcript renders as markdown. Type /help once it is up.
-`
-
-// runRepl executes `poo repl`.
+// handleRepl executes `poo repl`.
 //
 // The flags are the serve flags, and they pass through to the server
 // the repl starts: the repl holds no configuration of its own, so one
 // flag set says what both sides run. The parse and the validation run
 // here too, so a bad flag is refused before the server starts.
-func runRepl(args []string) int {
-	o, ok := parseServeFlags("poo repl", replUsage, args)
-	if !ok {
-		return 2
+func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
+	var o serveOptions
+	o.bind(inv)
+	if !o.validate("poo repl", stderr) {
+		return exit{usageExitCode}
 	}
 
 	workingDir, err := workingDirectory(o.workingDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo repl: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo repl: %v\n", err)
+		return exit{usageExitCode}
 	}
-	return repl.Run(repl.Options{
-		ServerArgs:  append([]string{"serve"}, args...),
+	// The repl runs the binary again as `poo serve`, so the flags it
+	// parsed are spelled a second time for the child.
+	serverArgs := append([]string{"serve"}, renderFlags(inv, append(sharedFlagSpecs(), serveFlagSpecs()...))...)
+	return exit{repl.Run(repl.Options{
+		ServerArgs:  serverArgs,
 		WorkingDir:  workingDir,
 		HistoryFile: historyPath(),
-	})
+	})}
 }
 
 // historyPath is where the repl keeps its input history between

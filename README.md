@@ -31,8 +31,8 @@ links as its front door — the repl. The settings pick another one:
 set `ui` in the settings file the command resolves — the `--settings`
 file, the `POO_SETTINGS` environment variable's, the project's
 settings directory (found by walking up), or the user's config
-file. A binary with none linked, or a name it does not offer, shows
-the usage instead.
+file. A binary with none linked, or a name it does not offer, refuses
+the bare invocation and names what it does offer.
 
 **Settings discovery.** Every command resolves its settings file the
 same way: the explicit `--settings` file, then the file the
@@ -46,6 +46,20 @@ extension picks the parser. A directory holding more than one is
 read through the first name it holds. A command that finds none runs
 on the defaults, and the flags change them.
 `examples/code.settings.yaml` is the file to start from.
+
+**One help per command.** Every command declares its own usage and its
+own flags, and `poo <command> --help` (or `poo help <command>`) prints
+that command's section — `poo sessions prune --help` names
+`--older-than`, `--keep` and `--dry-run`. The root help keeps the
+shared flags, the settings discovery rules above and the front-door
+note. The declaration is the source: the help, the parser and
+`--version` all come from it.
+
+**`poo version`.** The binary answers what it is from its own build
+information: the module version for one installed with
+`go install ...@version`, and the revision, time and modified flag for
+a build from a checkout. `poo version --json` prints the fields a
+script pins it by.
 
 **A models file.** `models_file` names a models file: providers with
 `baseUrl`, `api` and `apiKey`, each with its models. It imports them

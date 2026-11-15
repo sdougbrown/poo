@@ -4,38 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
-	"os"
+	"io"
 	"text/tabwriter"
 	"time"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/session"
 )
-
-// runSessions executes `poo sessions`.
-//
-// The command lists the sessions the store holds and prunes the ones a
-// retention policy marks.
-func runSessions(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, usage)
-		return 2
-	}
-	switch args[0] {
-	case "list":
-		return runSessionsList(args[1:])
-	case "prune":
-		return runSessionsPrune(args[1:])
-	case "-h", "--help", "help":
-		fmt.Print(usage)
-		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "poo sessions: unknown command %q\n\n%s", args[0], usage)
-		return 2
-	}
-}
 
 // sessionsOptions are the flags of the sessions commands.
 type sessionsOptions struct {
@@ -50,48 +28,41 @@ type sessionsOptions struct {
 	dryRun bool
 }
 
-// register adds the sessions flags to a flag set.
-func (o *sessionsOptions) register(fs *flag.FlagSet) {
-	o.sharedFlags.register(fs)
-	fs.BoolVar(&o.json, "json", false, "Print the sessions as JSON")
-	fs.IntVar(&o.olderThan, "older-than", 0, "Delete the sessions whose last activity is older than this many days")
-	fs.IntVar(&o.keep, "keep", 0, "Keep this many sessions, by last activity")
-	fs.BoolVar(&o.dryRun, "dry-run", false, "List the sessions the prune would delete and delete nothing")
+// bind reads the sessions flags out of a parsed invocation.
+func (o *sessionsOptions) bind(inv clicontract.Invocation) {
+	o.sharedFlags.bind(inv)
+	o.json = inv.Bools["json"]
+	o.olderThan = inv.Ints["older-than"]
+	o.keep = inv.Ints["keep"]
+	o.dryRun = inv.Bools["dry-run"]
 }
 
-// runSessionsList executes `poo sessions list`.
-func runSessionsList(args []string) int {
-	fs := flag.NewFlagSet("poo sessions list", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
-
+// handleSessionsList executes `poo sessions list`.
+func handleSessionsList(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o sessionsOptions
-	o.register(fs)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
+	o.bind(inv)
 	store, err := o.openStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo sessions list: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo sessions list: %v\n", err)
+		return exit{usageExitCode}
 	}
 	defer store.Close()
 
 	summaries, err := store.List(context.Background())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo sessions list: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "poo sessions list: %v\n", err)
+		return exit{operationalExitCode}
 	}
 	if o.json {
 		encoded, err := json.MarshalIndent(summaries, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "poo sessions list: %v\n", err)
-			return 1
+			fmt.Fprintf(stderr, "poo sessions list: %v\n", err)
+			return exit{operationalExitCode}
 		}
-		fmt.Println(string(encoded))
-		return 0
+		fmt.Fprintln(stdout, string(encoded))
+		return exit{}
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tCREATED\tPROFILE\tRUNS\tREASON\tSIZE\tLOCKED")
 	for _, summary := range summaries {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%d\t%t\n",
@@ -104,41 +75,34 @@ func runSessionsList(args []string) int {
 			summary.Locked)
 	}
 	_ = w.Flush()
-	return 0
+	return exit{}
 }
 
-// runSessionsPrune executes `poo sessions prune`.
+// handleSessionsPrune executes `poo sessions prune`.
 //
 // The policy is the settings' retention, and the flags change it. A
 // prune with no policy at all deletes nothing and says so: the exit
 // code is the store's no-policy code.
-func runSessionsPrune(args []string) int {
-	fs := flag.NewFlagSet("poo sessions prune", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
-
+func handleSessionsPrune(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o sessionsOptions
-	o.register(fs)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
+	o.bind(inv)
 	if o.olderThan < 0 {
-		fmt.Fprintf(os.Stderr, "poo sessions prune: --older-than must not be negative\n")
-		return 2
+		fmt.Fprintf(stderr, "poo sessions prune: --older-than must not be negative\n")
+		return exit{usageExitCode}
 	}
 	if o.keep < 0 {
-		fmt.Fprintf(os.Stderr, "poo sessions prune: --keep must not be negative\n")
-		return 2
+		fmt.Fprintf(stderr, "poo sessions prune: --keep must not be negative\n")
+		return exit{usageExitCode}
 	}
 	settings, err := o.settings("")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo sessions prune: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo sessions prune: %v\n", err)
+		return exit{usageExitCode}
 	}
 	store, err := o.openStore()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo sessions prune: %v\n", err)
-		return 2
+		fmt.Fprintf(stderr, "poo sessions prune: %v\n", err)
+		return exit{usageExitCode}
 	}
 	defer store.Close()
 
@@ -154,23 +118,23 @@ func runSessionsPrune(args []string) int {
 	result, err := store.Prune(context.Background(), policy)
 	if err != nil {
 		if errors.Is(err, session.ErrNoPolicy) {
-			fmt.Fprintf(os.Stderr, "poo sessions prune: there is no retention policy: the settings name none and the flags give none\n")
-			return 2
+			fmt.Fprintf(stderr, "poo sessions prune: there is no retention policy: the settings name none and the flags give none\n")
+			return exit{usageExitCode}
 		}
-		fmt.Fprintf(os.Stderr, "poo sessions prune: %v\n", err)
-		return 1
+		fmt.Fprintf(stderr, "poo sessions prune: %v\n", err)
+		return exit{operationalExitCode}
 	}
 	verb := "deleted"
 	if policy.DryRun {
 		verb = "would delete"
 	}
 	for _, summary := range result.Deleted {
-		fmt.Printf("%s %s\n", verb, summary.ID)
+		fmt.Fprintf(stdout, "%s %s\n", verb, summary.ID)
 	}
 	for _, summary := range result.Skipped {
-		fmt.Fprintf(os.Stderr, "poo sessions prune: skipped %s: another process holds its lock\n", summary.ID)
+		fmt.Fprintf(stderr, "poo sessions prune: skipped %s: another process holds its lock\n", summary.ID)
 	}
-	return 0
+	return exit{}
 }
 
 // openStore opens the store the sessions live in.

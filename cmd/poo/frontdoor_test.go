@@ -14,7 +14,7 @@ import (
 // everything else.
 func TestTheUIFollowsTheSettings(t *testing.T) {
 	settings := &config.Settings{Version: 1}
-	name, err := pickUI(settings, defaultUI, uis)
+	name, err := pickUI(settings, defaultUI, frontDoors)
 	if err != nil {
 		t.Fatalf("the default ui was refused: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestTheUIFollowsTheSettings(t *testing.T) {
 	}
 
 	settings.UI = "repl"
-	if name, _ := pickUI(settings, defaultUI, uis); name != "repl" {
+	if name, _ := pickUI(settings, defaultUI, frontDoors); name != "repl" {
 		t.Errorf("the settings' ui is %q, want repl", name)
 	}
 }
@@ -32,7 +32,7 @@ func TestTheUIFollowsTheSettings(t *testing.T) {
 // the binary does not link: the refusal lists what it offers.
 func TestAnUnknownUIIsRefused(t *testing.T) {
 	settings := &config.Settings{Version: 1, UI: "tui"}
-	_, err := pickUI(settings, defaultUI, uis)
+	_, err := pickUI(settings, defaultUI, frontDoors)
 	if err == nil {
 		t.Fatal("an unknown ui was picked")
 	}
@@ -90,7 +90,7 @@ func TestTheUIReadsTheSettingsTheCommandResolves(t *testing.T) {
 // own flag handling: a flag it does not know is a refusal, and no
 // server starts for it.
 func TestTheReplRefusesItsFlagsBeforeTheServerStarts(t *testing.T) {
-	if code := runRepl([]string{"--no-such-flag"}); code != 2 {
+	if code := run([]string{"repl", "--no-such-flag"}); code != 2 {
 		t.Errorf("an unknown flag exited %d, want 2", code)
 	}
 }

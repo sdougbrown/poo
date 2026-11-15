@@ -2,76 +2,17 @@
 //
 // The command runs one-shot sessions, lists the models it can use,
 // prints the prompt it would send and prunes the sessions it kept. The
-// exit code says why a run ended.
+// exit code says why a run ended. The command surface — every command,
+// its flags and its help — is the declaration in app.go, and cli-contract
+// renders the help, the help command and --version from it.
 package main
 
 import (
-	"flag"
-	"fmt"
-	"io"
 	"os"
 	"strings"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 )
-
-const usage = `poo runs a session against an OpenAI-compatible endpoint.
-
-Usage:
-  poo                        Launch the binary's front door (the repl, or ui in the settings)
-  poo run [flags] "prompt"
-  poo -p "prompt" [flags]    poo run, with the run's flags before or after the prompt (also --print)
-  poo repl [flags]           An interactive session in the terminal (vi keys, markdown rendering)
-  poo serve [flags]
-  poo models [--json] [--explain <name>]
-  poo prompt [flags]
-  poo sessions list [--json]
-  poo sessions prune [--older-than <days>] [--keep <n>] [--dry-run]
-
-Shared flags:
-  --settings <file>            The settings file: JSON, TOML or YAML
-  --system-prompt <file>       The file holding the system prompt's base section
-  --append-system-prompt <t>   Text appended to the system prompt, or @file
-  --permission-unmatched <a>   What to do with a side-effecting call no rule covers: allow, ask or deny
-  --session-dir <dir>          The directory the session files live in
-  --ephemeral                  Run without writing a session
-  --profile <name>             The profile to run under: base, code or search
-  --feeds-path <path>          Additional feed manifest path (repeatable)
-  --cli-registry-path <path>   Additional cli registry manifest path (repeatable)
-
-Settings discovery:
-  Without --settings, the settings are found at the file the
-  POO_SETTINGS environment variable names, then the project's .poo
-  directory (walking up from the current directory), then the user's
-  config directory. Each is searched for settings.json, settings.yaml,
-  settings.yml and settings.toml, and the extension picks the parser.
-  A command that finds none runs on the defaults.
-
-Run flags:
-  --endpoint <url>       The model's endpoint, e.g. http://localhost:4000/v1
-  --model-id <id>        The model identifier
-  --context-limit <n>    The model's context window in tokens (required)
-  --api-key-env <var>    The environment variable holding the API key
-  --tools-mode <mode>    native (default), text or auto
-  --reasoning-effort <e> reasoning_effort to send (e.g. low), for models that think only when asked
-  --max-turns <n>        The turn limit; 0 means unlimited
-  --max-output <n>       The model's output-token limit
-  --permission-fallback  The decision when the asker chain is exhausted: allow or deny
-  --log <path>           The session log path
-  --working-dir <dir>    The directory the tools work in (default: the current one)
-  --executor <name>      The executor the bash tool runs commands through: local (default) or bwrap
-  --project-prompt       Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt
-  --user-prompt-file <f> The file holding the user's own instructions
-  --timeout <dur>        The wall-clock limit for the run, e.g. 5m
-  --no-wait-jobs         Exit at the first settle; the running jobs stop through the session's close
-
-Serve:
-  poo serve runs the wire protocol on stdin and stdout. It takes the
-  same endpoint flags as poo run, plus --session-dir and --ephemeral.
-
-The front door:
-  A bare poo launches the interface the binary links as its front
-  door. The settings pick another one: set ui in the settings file
-  the command resolves.
-`
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -82,95 +23,79 @@ func run(args []string) int {
 	if len(args) == 0 {
 		return runUI()
 	}
-	switch args[0] {
-	case "run":
-		return runRun(args[1:])
-	case "-p", "--print":
-		return runPrint(args[1:])
-	case "repl":
-		return runRepl(args[1:])
-	case "serve":
-		return runServe(args[1:])
-	case "models":
-		return runModels(args[1:])
-	case "prompt":
-		return runPrompt(args[1:])
-	case "sessions":
-		return runSessions(args[1:])
-	case "-h", "--help", "help":
-		fmt.Print(usage)
-		return 0
-	default:
-		fmt.Fprintf(os.Stderr, "poo: unknown command %q\n\n%s", args[0], usage)
-		return 2
-	}
+	return clicontract.Run(pooApp(os.Stdout, os.Stderr), pooAdapter{}, printAlias(args), os.Stdout, os.Stderr)
 }
 
-// runPrint runs the print alias.
+// printAlias rewrites the print alias into the command it aliases.
 //
-// The run's flags may come before or after the prompt. The arguments are
-// read with the run's own flags: each flag the run defines moves ahead
-// of the prompt, and every other argument is a word of the prompt, in
-// order. From the first argument that is not a flag the run defines,
-// or after a "--", the rest is the prompt, as it is after run. A flag
-// with a bad value fails the way it does after run.
-func runPrint(args []string) int {
-	fs := flag.NewFlagSet("poo -p", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	var o runOptions
-	o.register(fs)
+// `poo -p "prompt" [flags]` is `poo run`, and the alias takes the run's
+// flags before or after the prompt: they are moved ahead of it, and only
+// the flags the run declares move.
+func printAlias(args []string) []string {
+	if args[0] != "-p" && args[0] != "--print" {
+		return args
+	}
+	flags, words := hoistRunFlags(args[1:])
+	aliased := make([]string, 0, 1+len(flags)+len(words))
+	aliased = append(aliased, "run")
+	aliased = append(aliased, flags...)
+	return append(aliased, words...)
+}
 
-	var flags, words []string
-	rest := args
-	for len(rest) > 0 {
-		if err := fs.Parse(rest); err != nil {
-			if !strings.HasPrefix(err.Error(), "flag provided but not defined") {
-				// A bad value or a help request is the run's to
-				// report.
-				return runRun(append(flags, rest...))
+// hoistRunFlags splits the alias's arguments into the run's flags and the
+// prompt's words.
+//
+// A token naming a flag the run declares is a flag, and a flag that is not
+// a bool takes the token after it as its value. Every other token is a
+// word of the prompt, and a dash token the run does not declare makes
+// everything from it on words: a prompt word that looks like a flag stays
+// in the prompt.
+func hoistRunFlags(args []string) (flags, words []string) {
+	for i := 0; i < len(args); i++ {
+		token := args[i]
+		switch {
+		case token == "--":
+			// Everything after the terminator is the prompt.
+			return flags, append(words, args[i+1:]...)
+		case token == "-h" || token == "--help":
+			return append(flags, "--help"), words
+		}
+		spec, declared := declaredRunFlag(token)
+		if !declared {
+			if flagToken(token) {
+				return flags, append(words, args[i:]...)
 			}
-			words = append(words, rest...)
-			break
+			words = append(words, token)
+			continue
 		}
-		consumed := rest[:len(rest)-len(fs.Args())]
-		rest = fs.Args()
-		if terminated(fs, consumed) {
-			flags = append(flags, consumed[:len(consumed)-1]...)
-			words = append(words, rest...)
-			break
+		flags = append(flags, token)
+		if spec.Kind == clicontract.Bool || strings.ContainsRune(token, '=') {
+			continue
 		}
-		flags = append(flags, consumed...)
-		if len(rest) == 0 {
-			break
+		if i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
 		}
-		words = append(words, rest[0])
-		rest = rest[1:]
 	}
-	return runRun(append(flags, words...))
+	return flags, words
 }
 
-// terminated reports whether a parse round ended at a "--" terminator.
-//
-// A "--" that follows a flag that takes a value is that flag's value,
-// not a terminator.
-func terminated(fs *flag.FlagSet, consumed []string) bool {
-	n := len(consumed)
-	if n == 0 || consumed[n-1] != "--" {
-		return false
+// declaredRunFlag answers the declaration of a token that names one of the
+// run's flags.
+func declaredRunFlag(token string) (clicontract.Flag, bool) {
+	if !flagToken(token) {
+		return clicontract.Flag{}, false
 	}
-	if n == 1 {
-		return true
+	name, _, _ := strings.Cut(strings.TrimLeft(token, "-"), "=")
+	for _, spec := range append(sharedFlagSpecs(), runFlagSpecs()...) {
+		if spec.Name == name {
+			return spec, true
+		}
 	}
-	prev := consumed[n-2]
-	if !strings.HasPrefix(prev, "-") || strings.Contains(prev, "=") {
-		return true
-	}
-	f := fs.Lookup(strings.TrimLeft(prev, "-"))
-	if f == nil {
-		return true
-	}
-	if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
-		return true
-	}
-	return false
+	return clicontract.Flag{}, false
+}
+
+// flagToken reports whether a token is spelled as a flag.
+func flagToken(token string) bool {
+	return len(token) > 1 && token[0] == '-'
 }
