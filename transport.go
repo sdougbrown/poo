@@ -150,7 +150,14 @@ type UsageReporter interface {
 // A provider that returns data the harness must give back unchanged — the
 // encrypted reasoning of a storeless Responses request — reports it here.
 // The core records the blocks with the response's message, in the order
-// they arrived, so the next request carries them back.
+// they arrived, so the next request carries them back. A stream that
+// breaks still reports what it produced, so the reasoning of a partial
+// message is not lost with the connection.
+//
+// The core asks the reader the transport handed it. A transport whose
+// reader wraps the attempt's own — to retry it, or to watch it — must
+// forward the report from the attempt reader, the way it forwards usage,
+// or the response's reasoning is lost with the wrapper.
 type ProviderBlockReporter interface {
 	// ReportProviderBlocks returns the provider blocks the response
 	// produced, in the order it produced them.

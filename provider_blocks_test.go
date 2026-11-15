@@ -257,10 +257,59 @@ func TestTheReportedBlocksStandAloneWithoutThinking(t *testing.T) {
 	wantBlock(t, carried.Content[1].Provider, second)
 }
 
+// TestTheOneReportedBlockRidesOnlyOnTheThinking covers a response that
+// reports a single block beside its reasoning: the block is the thinking
+// block's companion, so the recorded message and the next request hold
+// the thinking and the answer, with no lone block.
+func TestTheOneReportedBlockRidesOnlyOnTheThinking(t *testing.T) {
+	only := reasoningBlock("enc_one")
+	tr := &providerBlockTransport{readers: []poo.StreamReader{
+		&providerBlockReader{
+			fakeReader: fakeReader{events: blockEvents("weighing", "the answer")},
+			blocks:     []poo.ProviderBlock{only},
+		},
+		&providerBlockReader{fakeReader: fakeReader{events: blockEvents("", "the second answer")}},
+	}}
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	opts.Model.API = poo.APIResponses
+	s := newTestSession(t, opts)
+
+	runSession(t, s, "first")
+
+	msg := recordedAssistant(t, sink)
+	if len(msg.Content) != 2 {
+		t.Fatalf("the recorded message holds %v, want the thinking and the text", blockKinds(msg.Content))
+	}
+	if msg.Content[0].Kind != poo.ContentThinking || msg.Content[0].Text != "weighing" {
+		t.Errorf("the first block is %q %q, want the thinking", msg.Content[0].Kind, msg.Content[0].Text)
+	}
+	wantBlock(t, msg.Content[0].Provider, only)
+	if msg.Content[1].Kind != poo.ContentText || msg.Content[1].Text != "the answer" {
+		t.Errorf("the second block is %q %q, want the answer's text", msg.Content[1].Kind, msg.Content[1].Text)
+	}
+
+	runSession(t, s, "second")
+
+	requests := tr.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("the transport got %d requests, want two", len(requests))
+	}
+	carried := assistantIn(t, requests[1].Messages)
+	if len(carried.Content) != 2 {
+		t.Fatalf("the second request's assistant message holds %v, want the thinking and the text", blockKinds(carried.Content))
+	}
+	wantBlock(t, carried.Content[0].Provider, only)
+	if carried.Content[1].Kind != poo.ContentText || carried.Content[1].Text != "the answer" {
+		t.Errorf("the second request's second block is %q %q, want the answer's text", carried.Content[1].Kind, carried.Content[1].Text)
+	}
+}
+
 // TestTheReportedBlocksSurviveABrokenStream covers the partial path: a
 // stream that breaks after its reasoning still costs the endpoint its
 // reasoning, so the blocks are recorded with the partial message, the
-// first beside the thinking and the rest on their own.
+// first beside the thinking and the rest on their own, and the next
+// request carries them back.
 func TestTheReportedBlocksSurviveABrokenStream(t *testing.T) {
 	first := reasoningBlock("enc_one")
 	second := reasoningBlock("enc_two")
@@ -272,6 +321,7 @@ func TestTheReportedBlocksSurviveABrokenStream(t *testing.T) {
 			blocks: []poo.ProviderBlock{first, second},
 			err:    &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: "the stream broke"},
 		},
+		&providerBlockReader{fakeReader: fakeReader{events: blockEvents("", "the second answer")}},
 	}}
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{}, sink)
@@ -301,4 +351,23 @@ func TestTheReportedBlocksSurviveABrokenStream(t *testing.T) {
 		t.Errorf("the second block is %q, want a lone provider block", msg.Content[1].Kind)
 	}
 	wantBlock(t, msg.Content[1].Provider, second)
+
+	runSession(t, s, "second")
+
+	requests := tr.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("the transport got %d requests, want two", len(requests))
+	}
+	carried := assistantIn(t, requests[1].Messages)
+	if len(carried.Content) != 2 {
+		t.Fatalf("the second request's assistant message holds %v, want the thinking and one lone block", blockKinds(carried.Content))
+	}
+	if carried.Content[0].Kind != poo.ContentThinking || carried.Content[0].Text != "weighing" {
+		t.Errorf("the second request's first block is %q %q, want the thinking", carried.Content[0].Kind, carried.Content[0].Text)
+	}
+	wantBlock(t, carried.Content[0].Provider, first)
+	if carried.Content[1].Kind != poo.ContentProvider {
+		t.Errorf("the second request's second block is %q, want the lone provider block", carried.Content[1].Kind)
+	}
+	wantBlock(t, carried.Content[1].Provider, second)
 }
