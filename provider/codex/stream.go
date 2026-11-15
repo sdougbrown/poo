@@ -15,8 +15,8 @@ import (
 // The response side.
 //
 // The endpoint sends the Responses API's events, with the Codex backend's
-// own spelling of the terminal ones: response.done is response.completed,
-// and response.failed carries the failure the run settles with.
+// own spelling of the terminal ones. response.done is response.completed, and
+// response.failed carries the failure the run settles with.
 
 // codexEvent is one SSE data payload.
 type codexEvent struct {
@@ -87,9 +87,9 @@ type codexUsage struct {
 
 // slotKey names what one output index of the response produced.
 //
-// The kind is part of the key: a text answer, a reasoning summary and a
-// tool call are three namespaces on the wire, and an event that names no
-// index lands on an index another kind already took.
+// The kind is part of the key. A text answer, a reasoning summary and a tool
+// call are three namespaces on the wire. An event that names no index lands on
+// an index another kind already took.
 type slotKey struct {
 	// index is the output index the event carried.
 	index int
@@ -225,11 +225,10 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 		}
 
 		// A server that separates its events with a single newline
-		// never sends the blank line that ends an event, so the event
-		// is dispatched as soon as it holds one. A payload another data
-		// line cannot complete is dropped rather than carried, so one
-		// frame the transport cannot read does not swallow the events
-		// after it.
+		// never sends the blank line that ends an event. The event is
+		// therefore dispatched as soon as it holds one. A payload another
+		// data line cannot complete is dropped rather than carried, so one
+		// unreadable frame does not swallow the events after it.
 		switch payloadStateOf(r.data) {
 		case payloadComplete:
 			if err := r.dispatch(); err != nil {
@@ -250,7 +249,7 @@ type payloadState int
 
 const (
 	// payloadIncomplete means another data line may still complete the
-	// event: the payload ran out without a syntax error, which is what a
+	// event. The payload ran out without a syntax error, which is what a
 	// payload spread over several lines looks like.
 	payloadIncomplete payloadState = iota
 	// payloadComplete means the lines decode as one JSON value.
@@ -264,9 +263,9 @@ const (
 //
 // A payload that ended without a syntax error is kept for the next line,
 // because the event may be spread over several of them. A payload with a
-// syntax error is not: JSON has no construct a later line repairs, so the
-// frame is one the transport cannot read, and a frame it cannot read is
-// not worth failing the run over.
+// syntax error is not. JSON has no construct a later line repairs, so the
+// frame is one the transport cannot read. Such a frame is not worth failing
+// the run over.
 func payloadStateOf(data []string) payloadState {
 	if len(data) == 0 {
 		return payloadIncomplete
@@ -311,9 +310,9 @@ func (r *streamReader) finishReading() (poo.StreamItem, error) {
 
 // dispatch turns the event the reader has collected into events.
 //
-// An event whose payload does not parse is skipped: a chunk the
-// transport cannot read is not worth failing the run over, and the
-// endpoint's own error event is what fails it.
+// An event whose payload does not parse is skipped. A chunk the transport
+// cannot read is not worth failing the run over, and the endpoint's own error
+// event is what fails it.
 func (r *streamReader) dispatch() error {
 	if len(r.data) == 0 {
 		return nil
@@ -338,10 +337,10 @@ func (r *streamReader) dispatch() error {
 
 // close ends a stream whose bytes ran out.
 //
-// The event still buffered is dispatched first. A stream that never
-// named its terminal response event is a protocol failure: the run
-// cannot know whether the answer was complete, and the retry layer
-// decides whether it may be asked for again.
+// The event still buffered is dispatched first. A stream that never named
+// its terminal response event is a protocol failure. The run cannot know
+// whether the answer was complete, and the retry layer decides whether it may
+// be asked for again.
 func (r *streamReader) close() (poo.StreamItem, error) {
 	if err := r.dispatch(); err != nil {
 		return r.fail(err)
@@ -387,10 +386,9 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 // produced, in order.
 //
 // The endpoint returns the reasoning it thought with as an item that is
-// opaque to the harness: the item's summary is what the model wrote, and
-// its encrypted payload is what has to travel back with the next
-// request. The core records them with the response's message, so the
-// next request gives them back.
+// opaque to the harness. The item's summary is what the model wrote, and its
+// encrypted payload has to travel back with the next request. The core records
+// them with the response's message, so the next request gives them back.
 func (r *streamReader) ReportProviderBlocks() []poo.ProviderBlock {
 	return r.reasoning
 }
@@ -440,9 +438,9 @@ func (r *streamReader) events(ev codexEvent) ([]poo.StreamItem, error) {
 
 // itemAdded starts the slot an output item announces.
 //
-// A tool call's slot carries the call on its first fragment, because the
-// core creates a call from the fragment that names it and appends the
-// arguments the later fragments carry.
+// A tool call's slot carries the call on its first fragment. The core creates
+// a call from the fragment that names it, and appends the arguments the later
+// fragments carry.
 func (r *streamReader) itemAdded(ev codexEvent) []poo.StreamItem {
 	item, ok := decodeItem(ev.Item)
 	if !ok {
@@ -518,7 +516,7 @@ func (r *streamReader) callDelta(ev codexEvent) []poo.StreamItem {
 // The endpoint repeats the call's whole argument string when it is done.
 // Only the part the core has not seen is emitted, because the core
 // assembles a call by appending its fragments. An argument string that
-// disagrees with the fragments is left alone for the same reason: there
+// disagrees with the fragments is left alone for the same reason. There
 // is no way to replace what the core already holds.
 func (r *streamReader) callDone(ev codexEvent) []poo.StreamItem {
 	slot := r.slots[slotKey{ev.OutputIndex, "tool_call"}]
@@ -539,10 +537,10 @@ func (r *streamReader) callDone(ev codexEvent) []poo.StreamItem {
 
 // itemDone closes the slot an output item finishes.
 //
-// A server that only sends the finished item, without the deltas, is
-// read here: the item's own text is emitted as the one delta the answer
-// has. A reasoning item is held as a provider block, so the reasoning
-// the endpoint encrypted can travel back with the next request.
+// A server that only sends the finished item, without the deltas, is read
+// here. The item's own text is emitted as the one delta the answer has. A
+// reasoning item is held as a provider block, so the reasoning the endpoint
+// encrypted can travel back with the next request.
 func (r *streamReader) itemDone(ev codexEvent) []poo.StreamItem {
 	item, ok := decodeItem(ev.Item)
 	if !ok {
@@ -648,17 +646,17 @@ func argumentFragment(slot *itemSlot, index int, text string) *poo.ToolCallDelta
 
 // terminal ends the stream with the terminal response event's outcome.
 //
-// The response's status says why it stopped: a completed response is the
-// model's answer, an incomplete one stopped on its output limit or on a
-// reason the run has to know, and a failed one carries the failure. A
-// status this transport does not know is read as an answer, because a
-// provider that adds one has still said the response ended.
+// The response's status says why it stopped. A completed response is the
+// model's answer. An incomplete one stopped on its output limit or on a reason
+// the run has to know, and a failed one carries the failure. A status this
+// transport does not know is read as an answer, because a provider that adds
+// one has still said the response ended.
 func (r *streamReader) terminal(ev codexEvent) ([]poo.StreamItem, error) {
 	resp := ev.Response
 	r.sawTerminal = true
 	r.done = true
 	if resp == nil {
-		// The endpoint ended the response without describing it: the run
+		// The endpoint ended the response without describing it. The run
 		// still gets the finish and the usage, because the stream did
 		// end and the answer it carried is all there is.
 		r.pending = append(r.pending, poo.StreamItem{Kind: "finish", FinishReason: r.finishReason(resp)})
@@ -759,10 +757,10 @@ func (r *streamReader) eventFailure(ev codexEvent) error {
 // setUsage records the token accounting the terminal event carried.
 //
 // The endpoint's input count is the whole prompt, the tokens it served
-// from its cache included, and poo's input count is the same number: the
-// run's budget counts the prompt it sent. The cached tokens ride beside
-// it, because a reader that wants the cache hit rate asks for them and
-// not for a subtraction.
+// from its cache included. poo's input count is the same number, because the
+// run's budget counts the prompt it sent. The cached tokens ride beside it,
+// because a reader that wants the cache hit rate asks for them and not for a
+// subtraction.
 func (r *streamReader) setUsage(u *codexUsage) {
 	var cacheRead *int
 	if details := u.InputTokensDetails; details != nil {
@@ -793,9 +791,9 @@ func (r *streamReader) usageItem() poo.StreamItem {
 // context is what ended the request.
 //
 // A stream that already carried a delta cannot be retried: the model has
-// seen part of the answer. The failure says so, so the settle reason
-// names it, and the kind the failure had before the reclassification
-// stays in the error's code, where the plan keeps it.
+// seen part of the answer. The failure says so, so the settle reason names
+// it. The kind the failure had before the reclassification stays in the
+// error's code, where the plan keeps it.
 func (r *streamReader) contextError(err error) error {
 	if r.parent != nil && r.parent.Err() != nil {
 		return r.parent.Err()
@@ -817,9 +815,9 @@ func (r *streamReader) contextError(err error) error {
 // slotFor returns the slot an output index has for a kind of content, and
 // makes it when the response has not announced it.
 //
-// The kinds are separate slots on one index because the wire separates
-// them: an event that names no index lands on an index another kind took,
-// and it is still the item it says it is.
+// The kinds are separate slots on one index because the wire separates them.
+// An event that names no index lands on an index another kind took, and it is
+// still the item it says it is.
 func (r *streamReader) slotFor(index int, kind string) *itemSlot {
 	key := slotKey{index, kind}
 	if slot, ok := r.slots[key]; ok {
@@ -855,11 +853,10 @@ func (r *streamReader) ttftMS() float64 {
 // carries, and reports whether it carried any.
 //
 // The endpoint streams a reasoning item as a summary, and reports the item
-// again in the terminal response's output, where the encrypted payload
-// that has to travel back with the next request rides. The terminal items
-// are the response's items whole, so they replace what the stream holds
-// when there are any; a response that reports none keeps the items its
-// events carried.
+// again in the terminal response's output. The encrypted payload that has to
+// travel back with the next request rides only there. The terminal items are
+// the response's items whole, so they replace what the stream holds when there
+// are any. A response that reports none keeps the items its events carried.
 func terminalReasoning(output []json.RawMessage) ([]poo.ProviderBlock, bool) {
 	var blocks []poo.ProviderBlock
 	for _, raw := range output {
@@ -879,8 +876,8 @@ func terminalReasoning(output []json.RawMessage) ([]poo.ProviderBlock, bool) {
 //
 // The item is opaque: the transport keeps it verbatim, because only the
 // endpoint can read what it encrypted. An item that carries no encrypted
-// payload cannot be given back — the next request would name a reasoning
-// item the endpoint cannot match — so it is not a block at all; its
+// payload cannot be given back. The next request would name a reasoning
+// item the endpoint cannot match, so such an item is not a block at all. Its
 // summary already travelled as the thinking text.
 func reasoningBlock(raw json.RawMessage, item codexItem) (poo.ProviderBlock, bool) {
 	if item.EncryptedContent == "" {

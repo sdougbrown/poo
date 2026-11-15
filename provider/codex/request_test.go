@@ -49,9 +49,9 @@ func expectJSON(t *testing.T, got any, want string) {
 const reasoningItem = `{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"thinking"}],"encrypted_content":"opaque"}`
 
 // TestTheRequestCarriesTheHistoryAsResponsesItems covers the message
-// conversion: the system message is the instructions, an assistant
-// message is a message item plus one item per call, and a tool result is
-// an item of its own.
+// conversion. The system message is the instructions. An assistant message is
+// a message item plus one item per call, and a tool result is an item of its
+// own.
 func TestTheRequestCarriesTheHistoryAsResponsesItems(t *testing.T) {
 	srv := newServer(t, completedStream)
 	tr := newTransport(srv.URL, func(o *codex.Options) { o.SessionID = "s1" })
@@ -542,8 +542,8 @@ func TestAnEndpointThatAnswersWithJSONIsAFailure(t *testing.T) {
 }
 
 // TestTheToolsModeTheEndpointCannotServeIsRefused covers the mode the
-// endpoint has no way to serve: it makes native calls only, so a model
-// that asks for the tools in the prompt is a configuration error.
+// endpoint has no way to serve. It makes native calls only, so a model that
+// asks for the tools in the prompt is a configuration error.
 func TestTheToolsModeTheEndpointCannotServeIsRefused(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -634,10 +634,10 @@ func TestTheEndpointURL(t *testing.T) {
 	}
 }
 
-// TestTheRequestOmitsTheLimitAndSamplingTheEndpointRefuses covers the
-// fields the Codex endpoint rejects: it takes no output limit, no
-// temperature and no top-p, so neither the caller's limit nor the
-// model's sampling defaults reach the body.
+// TestTheRequestOmitsTheLimitAndSamplingTheEndpointRefuses covers the fields
+// the Codex endpoint rejects. It takes no output limit, no temperature and no
+// top-p, so neither the caller's limit nor the model's sampling defaults reach
+// the body.
 func TestTheRequestOmitsTheLimitAndSamplingTheEndpointRefuses(t *testing.T) {
 	srv := newServer(t, completedStream)
 	temperature := 0.25
@@ -670,9 +670,9 @@ func TestTheRequestOmitsTheLimitAndSamplingTheEndpointRefuses(t *testing.T) {
 }
 
 // TestAnErrorBodyWithLeadingWhitespaceIsAFailure covers an endpoint that
-// answers a refused parameter with a 200 and a pretty-printed error: the
-// body is an error whatever whitespace it opens with, and its own code is
-// what the run reports.
+// answers a refused parameter with a 200 and a pretty-printed error. The body
+// is an error whatever whitespace it opens with, and its own code is what the
+// run reports.
 func TestAnErrorBodyWithLeadingWhitespaceIsAFailure(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -708,10 +708,9 @@ func TestAnErrorBodyWithLeadingWhitespaceIsAFailure(t *testing.T) {
 	}
 }
 
-// TestALongSessionIdentifierIsClamped covers the session the endpoint
-// keeps its cache under: the identifier is cut to the length the endpoint
-// accepts, in characters rather than bytes, and the headers carry the
-// same cut.
+// TestALongSessionIdentifierIsClamped covers the session the endpoint keeps
+// its cache under. The identifier is cut to the length the endpoint accepts,
+// in characters rather than bytes, and the headers carry the same cut.
 func TestALongSessionIdentifierIsClamped(t *testing.T) {
 	srv := newServer(t, completedStream)
 	long := strings.Repeat("s", 60) + strings.Repeat("é", 10)
@@ -740,10 +739,10 @@ func TestALongSessionIdentifierIsClamped(t *testing.T) {
 	}
 }
 
-// TestAForkCarriesAnAppendedAttachmentTheSnapshotRead covers the snapshot
-// a fork shapes its appended messages from: the model info the request
-// carried is not part of the snapshot, so the modalities the body was
-// shaped for are, and an appended attachment the model reads survives.
+// TestAForkCarriesAnAppendedAttachmentTheSnapshotRead covers the snapshot a
+// fork shapes its appended messages from. The model info the request carried
+// is not part of the snapshot, so the modalities the body was shaped for are.
+// An appended attachment the model reads survives.
 func TestAForkCarriesAnAppendedAttachmentTheSnapshotRead(t *testing.T) {
 	srv := newServer(t, completedStream, completedStream)
 	tr := newTransport(srv.URL)
@@ -784,10 +783,10 @@ func TestAForkCarriesAnAppendedAttachmentTheSnapshotRead(t *testing.T) {
 	}
 }
 
-// TestARedirectIsRefused covers the endpoint that answers with a
-// redirect: the request carries the conversation and the account, so it
-// goes to the endpoint the transport was configured with and nowhere
-// else, whatever client the consumer injected.
+// TestARedirectIsRefused covers the endpoint that answers with a redirect. The
+// request carries the conversation and the account, so it goes to the endpoint
+// the transport was configured with. It goes nowhere else, whatever client the
+// consumer injected.
 func TestARedirectIsRefused(t *testing.T) {
 	clients := []struct {
 		name   string
@@ -851,9 +850,9 @@ func TestARedirectIsRefused(t *testing.T) {
 	}
 }
 
-// TestATransientCredentialFailureIsRetried covers a resolver that fails
-// the way a token store does: the failure it names is a provider failure,
-// so the attempt is retried and the request still goes out.
+// TestATransientCredentialFailureIsRetried covers a resolver that fails the
+// way a token store does. The failure it names is a provider failure, so the
+// attempt is retried and the request still goes out.
 func TestATransientCredentialFailureIsRetried(t *testing.T) {
 	srv := newServer(t, completedStream)
 	asked := 0
@@ -923,8 +922,8 @@ func TestACredentialResolutionThatTheRunEndedIsTheRuns(t *testing.T) {
 }
 
 // TestACredentialDeadlineIsATransientFailure covers a resolver whose own
-// refresh timed out while the run is alive: the failure is a network one,
-// so the run retries instead of settling on the account.
+// refresh timed out while the run is alive. The failure is a network one, so
+// the run retries instead of settling on the account.
 func TestACredentialDeadlineIsATransientFailure(t *testing.T) {
 	srv := newServer(t, completedStream)
 	tr := newTransport(srv.URL, func(o *codex.Options) {
@@ -951,9 +950,9 @@ func TestACredentialDeadlineIsATransientFailure(t *testing.T) {
 }
 
 // TestACredentialResolutionCutByTheTransportTimeoutIsRetried covers the
-// transport's own bound ending the resolution while the run is alive: the
-// resolution did not finish in time, which is a transient failure and not
-// the run's cancellation, so another attempt resolves a token.
+// transport's own bound ending the resolution while the run is alive. The
+// resolution did not finish in time, which is a transient failure and not the
+// run's cancellation, so another attempt resolves a token.
 func TestACredentialResolutionCutByTheTransportTimeoutIsRetried(t *testing.T) {
 	srv := newServer(t, completedStream)
 	asked := 0
@@ -1038,10 +1037,10 @@ func TestACancelledRunDuringCredentialResolutionIsTheRuns(t *testing.T) {
 }
 
 // TestATerminalCredentialFailureIsNotRetried covers the verdict of the
-// resolver's own failure: a refresh that traded the token and could not
-// store the new credential is terminal, and the transport hands it back
-// as it is. The transport's bound ending at the same time does not turn
-// it into a failure another attempt resolves.
+// resolver's own failure. A refresh that traded the token and could not store
+// the new credential is terminal, and the transport hands it back as it is. The
+// transport's bound ending at the same time does not turn it into a failure
+// another attempt resolves.
 func TestATerminalCredentialFailureIsNotRetried(t *testing.T) {
 	srv := newServer(t, completedStream)
 	asked := 0

@@ -12,8 +12,8 @@ import (
 
 // The provider-block side: the history may carry opaque data another
 // wire API produced. This transport can only give a block back to the
-// API that produced it, so an optional one is left out of the request
-// and a required one makes the request impossible.
+// API that produced it. An optional block is therefore left out of the
+// request, and a required one makes the request impossible.
 
 // foreignBlock is a block another wire API produced.
 func foreignBlock(required bool) poo.ProviderBlock {
@@ -47,8 +47,8 @@ func providerRequest(block poo.ProviderBlock) poo.ChatRequest {
 }
 
 // TestAnOptionalForeignBlockIsOmitted covers a block the request does not
-// need: the visible text still travels, and the payload the endpoint
-// cannot read is left out rather than sent.
+// need. The visible text still travels, and the payload the endpoint cannot
+// read is left out rather than sent.
 func TestAnOptionalForeignBlockIsOmitted(t *testing.T) {
 	srv := newServer(t, completedStream)
 	tr := newTransport(srv.URL)
@@ -147,9 +147,9 @@ func TestARequiredForeignCompanionFailsTheRequest(t *testing.T) {
 }
 
 // TestARequiredBlockAfterAToolResultFailsTheRequest covers a block that
-// follows a tool result in the same message: the block is refused rather
-// than dropped, because the request cannot carry it and the history says
-// it cannot do without it.
+// follows a tool result in the same message. The block is refused rather than
+// dropped. The request cannot carry it, and the history says it cannot do
+// without it.
 func TestARequiredBlockAfterAToolResultFailsTheRequest(t *testing.T) {
 	srv := newServer(t, completedStream)
 	tr := newTransport(srv.URL)
@@ -210,10 +210,9 @@ func TestAnOptionalBlockAfterAToolResultIsOmitted(t *testing.T) {
 	expectJSON(t, input[0], `{"type":"function_call_output","call_id":"call_1","output":"a.txt"}`)
 }
 
-// TestARequiredForeignBlockInAUserMessageFailsTheRequest covers a block
-// the caller put in a user message: the block is refused rather than left
-// out, because the request cannot carry it and the history says it cannot
-// do without it.
+// TestARequiredForeignBlockInAUserMessageFailsTheRequest covers a block the
+// caller put in a user message. The block is refused rather than left out. The
+// request cannot carry it, and the history says it cannot do without it.
 func TestARequiredForeignBlockInAUserMessageFailsTheRequest(t *testing.T) {
 	srv := newServer(t, completedStream)
 	tr := newTransport(srv.URL)

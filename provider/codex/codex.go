@@ -1,30 +1,30 @@
 // Package codex implements the ChatGPT Codex Responses transport.
 //
 // The Codex endpoint speaks the OpenAI Responses API with a base URL, an
-// authentication scheme and a handful of body fields of its own:
-// requests go to <endpoint>/codex/responses, the bearer token is the
-// ChatGPT credential, the account rides beside it in a header, and the
-// body asks for the reasoning summaries the endpoint returns.
+// authentication scheme and a handful of body fields of its own. Requests go
+// to <endpoint>/codex/responses, and the bearer token is the ChatGPT
+// credential. The account rides beside the token in a header. The body asks
+// for the reasoning summaries the endpoint returns.
 //
-// The transport is stateless like every other: the request carries the
-// whole history, `store` is always false, and the reasoning the endpoint
-// returned travels back as an opaque provider block.
+// The transport is stateless like every other. The request carries the whole
+// history, `store` is always false, and the reasoning the endpoint returned
+// travels back as an opaque provider block.
 //
 // Three pieces here are the rules the Chat Completions transport already
-// applies: the failure-kind table, the retry policy and the SSE reader.
-// They are unexported in provider/openai, so this package holds its own
-// copies; a rule corrected in one belongs in the other until the shared
-// pieces move to an internal package.
+// applies: the failure-kind table, the retry policy and the SSE reader. They
+// are unexported in provider/openai, so this package holds its own copies. A
+// rule corrected in one belongs in the other, until the shared pieces move to
+// an internal package.
 //
 // The reader a request returns implements two reporting seams besides the
-// stream itself: ReportUsage, which reports the endpoint's own counts, and
-// ReportProviderBlocks, which holds the reasoning items the endpoint
-// returned with the payload that lets it take them back. The core records
-// those with the response's message, and the next request gives them
-// back, which is what carries the reasoning across turns of a storeless
-// endpoint. An item the endpoint cut short before it carried that payload
-// is not a block: its summary already travelled as the thinking text, and
-// replaying it would name an item the endpoint cannot match.
+// stream itself. ReportUsage reports the endpoint's own counts.
+// ReportProviderBlocks holds the reasoning items the endpoint returned, with
+// the payload that lets it take them back. The core records those with the
+// response's message, and the next request gives them back. That is what
+// carries the reasoning across turns of a storeless endpoint. An item the
+// endpoint cut short before it carried that payload is not a block. Its
+// summary already travelled as the thinking text, and replaying it would name
+// an item the endpoint cannot match.
 package codex
 
 import (
@@ -74,19 +74,19 @@ type Options struct {
 	//
 	// It is called once per attempt, so an expired token is replaced
 	// between attempts rather than failing the run. The transport never
-	// reads a credential file or an environment variable itself: the
-	// consumer that links this package resolves the token and the
-	// account, and a test resolves a fixed one.
+	// reads a credential file or an environment variable itself. The
+	// consumer that links this package resolves the token and the account,
+	// and a test resolves a fixed one.
 	//
-	// A failure the resolver reports is classified by what it is: a
+	// A failure the resolver reports is classified by what it is. A
 	// *poo.ProviderError keeps the kind it names, and a retryable kind is
-	// retried (the resolver is asked again for the next attempt), which
-	// is how a consumer says its token store failed transiently. A
-	// resolution the run's own context ended is the run's failure. The
-	// transport's Timeout ending the resolution while the run is alive is
-	// a resolution that did not finish in time, so it is transient too.
-	// Any other failure is an authentication failure: the request could
-	// not name its account.
+	// retried: the resolver is asked again for the next attempt. That is
+	// how a consumer says its token store failed transiently. A resolution
+	// the run's own context ended is the run's failure. The transport's
+	// Timeout can end the resolution while the run is alive. That
+	// resolution did not finish in time, so it is transient too. Any other
+	// failure is an authentication failure: the request could not name its
+	// account.
 	//
 	// A nil resolver fails every request with a configuration error.
 	Credentials func(ctx context.Context) (Credential, error)
@@ -127,7 +127,7 @@ type Options struct {
 	// HTTPClient is the client to use. Nil means a default client.
 	//
 	// The transport uses a copy of it, and refuses redirects on that
-	// copy whatever the client's own policy: the request carries the
+	// copy whatever the client's own policy. The request carries the
 	// conversation and the account, so it goes only to the endpoint the
 	// transport was configured with. A change the caller makes to the
 	// client after New does not reach the requests.
@@ -153,7 +153,7 @@ type Transport struct {
 // New returns a transport.
 func New(cfg Options) *Transport {
 	// The client is the consumer's, so it is copied rather than changed
-	// under the consumer's feet: a redirect is refused for every request
+	// under the consumer's feet. A redirect is refused for every request
 	// this transport makes.
 	client := cfg.HTTPClient
 	if client == nil {
@@ -183,8 +183,8 @@ func New(cfg Options) *Transport {
 // snapshot of the request that was sent.
 //
 // The snapshot carries the attachments the body was shaped for as its
-// profiles, because the model info that shaped it is not part of the
-// body: a fork appends its messages the way the request was shaped.
+// profiles. The model info that shaped the request is not part of the body.
+// A fork therefore appends its messages the way the request was shaped.
 func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
 	body, err := t.buildBody(req)
 	if err != nil {
@@ -214,11 +214,11 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 // Fork sends a body that is byte-identical to the snapshot, apart from
 // the input items appended after the last one.
 //
-// The appended messages are shaped by the profiles the snapshot carries:
-// the model info a request was shaped for is not part of the body, so the
-// snapshot's profiles are what say which attachments the model reads. The
-// output limit is the caller's, and the endpoint takes none, so the fork
-// does not rewrite one.
+// The appended messages are shaped by the profiles the snapshot carries.
+// The model info a request was shaped for is not part of the body. The
+// snapshot's profiles are therefore what say which attachments the model
+// reads. The output limit is the caller's. The endpoint takes none, so the
+// fork does not rewrite one.
 func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.Message, maxTokens int) (poo.StreamReader, error) {
 	if prev.API != poo.APIResponses {
 		return nil, &poo.ProviderError{
@@ -273,8 +273,8 @@ func (e *redirectError) Error() string {
 //
 // The credential is resolved under the request's own bound, so a token
 // store that never answers cannot hold an attempt. The bound ending while
-// the run is alive is a resolution that did not finish in time rather
-// than the run stopping, which is why the parent is kept apart from it.
+// the run is alive is a resolution that did not finish in time, not the
+// run stopping. That is why the parent is kept apart from it.
 func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error) {
 	// The timeout bounds the whole request, streaming included, so the
 	// context is created before the request goes out. The parent stays
@@ -341,9 +341,9 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 	}
 
 	// A failed request answered with 200 and a JSON body is not a stream.
-	// The first byte tells the two apart, so the stream is not buffered
-	// and the time to the first token measures the endpoint's latency
-	// rather than the reader's.
+	// The first byte tells the two apart. The stream is therefore not
+	// buffered, and the time to the first token measures the endpoint's
+	// latency rather than the reader's.
 	br := bufio.NewReader(resp.Body)
 	first, err := peekFirstByte(br)
 	if err != nil {
@@ -381,8 +381,8 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 // setHeaders sets the headers a Codex request carries.
 //
 // The transport's own headers are set first and the caller's last, so a
-// caller can override one; the credential headers are the transport's
-// and are set after the caller's.
+// caller can override one. The credential headers are the transport's, and
+// are set after the caller's.
 func (t *Transport) setHeaders(req *http.Request, credential Credential) {
 	originator := t.cfg.Originator
 	if originator == "" {
@@ -436,15 +436,15 @@ func (t *Transport) credential(parent, ctx context.Context) (Credential, error) 
 // credentialError classifies the failure a resolver reported.
 //
 // The resolver is the one that knows what its failure means, so a
-// *poo.ProviderError it returns keeps its kind and the request is retried
-// when that kind is retryable, whatever ended at the same time: a
-// resolver that reports a terminal failure has traded what cannot be
-// traded twice. What is left is read by what it is: a run that is
-// stopping reports its own cancellation, the transport's own bound ending
-// while the run is alive is a resolution that did not finish in time,
-// which another attempt resolves, a resolver whose own wait ended failed
-// transiently, and any other failure means the request could not name its
-// account, which is an authentication failure.
+// *poo.ProviderError it returns keeps its kind. The request is retried when
+// that kind is retryable, whatever ended at the same time. A resolver that
+// reports a terminal failure has traded what cannot be traded twice. What is
+// left is read by what it is. A run that is stopping reports its own
+// cancellation. The transport's own bound ending while the run is alive is a
+// resolution that did not finish in time, which another attempt resolves. A
+// resolver whose own wait ended failed transiently. Any other failure means
+// the request could not name its account, which is an authentication
+// failure.
 func credentialError(parent, request context.Context, err error) error {
 	var perr *poo.ProviderError
 	if errors.As(err, &perr) {
@@ -522,8 +522,8 @@ func ResponsesURL(baseURL string) string {
 
 // forkBody appends messages to a serialized request body.
 //
-// The body is decoded, the converted messages are appended after the last
-// input item, and the result is serialized again in the order the body
+// The body is decoded, and the converted messages are appended after the
+// last input item. The result is serialized again in the order the body
 // already had its keys. Every other byte is the body's own, so the fork's
 // prefix is the one the endpoint has already cached.
 func forkBody(body []byte, appended []poo.Message, reads modalities) ([]byte, error) {
@@ -599,9 +599,9 @@ func forkBody(body []byte, appended []poo.Message, reads modalities) ([]byte, er
 // jsonKeyOrder returns the top-level keys of a JSON object, in the order
 // the object holds them.
 //
-// The order matters for a fork: the forked body has to be byte-identical
-// to the body it came from apart from the fields that changed, and a JSON
-// object decoded into a map loses its order.
+// The order matters for a fork. The forked body has to be byte-identical to
+// the body it came from, apart from the fields that changed. A JSON object
+// decoded into a map loses its order.
 func jsonKeyOrder(body []byte) ([]string, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	tok, err := dec.Token()
@@ -650,8 +650,8 @@ func jsonKeyOrder(body []byte) ([]string, error) {
 // consuming it.
 //
 // An endpoint that answers a refused request with a pretty-printed JSON
-// body opens it with a newline, and the first byte is what tells an error
-// body from a stream.
+// body opens it with a newline. The first byte is what tells an error body
+// from a stream.
 func peekFirstByte(br *bufio.Reader) (byte, error) {
 	for {
 		b, err := br.Peek(1)

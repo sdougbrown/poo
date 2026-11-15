@@ -14,14 +14,13 @@ import (
 
 // The request shaping.
 //
-// The body is the Responses API's shape with the fields the Codex
-// endpoint expects: no stored response, streamed, the reasoning
-// summaries asked for, and the input items the history converts to.
+// The body is the Responses API's shape, with the fields the Codex endpoint
+// expects. It asks for no stored response, streams the answer, asks for the
+// reasoning summaries, and sends the input items the history converts to.
 //
-// The endpoint refuses the fields the plain Responses API takes for
-// tuning: it rejects an output limit, a temperature and a top-p, so the
-// body carries none of them and the request's MaxTokens stays the core's
-// business.
+// The endpoint refuses the fields the plain Responses API takes for tuning. It
+// rejects an output limit, a temperature and a top-p, so the body carries none
+// of them. The request's MaxTokens stays the core's business.
 
 // defaultInstructions is the instruction the request carries when the
 // history holds no system message.
@@ -71,10 +70,10 @@ type responsesTool struct {
 
 // inputMessage is one message item of the request's input.
 //
-// The leading system message becomes the request's instructions, and a
-// later one rides as this item with the developer role and no type: the
-// API names a user or assistant message, and takes an instruction that
-// arrives mid-conversation as the role alone.
+// The leading system message becomes the request's instructions. A later one
+// rides as this item with the developer role and no type. The API names a user
+// or assistant message, and takes an instruction that arrives mid-conversation
+// as the role alone.
 type inputMessage struct {
 	Type    string      `json:"type,omitempty"`
 	Role    string      `json:"role"`
@@ -242,9 +241,9 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 
 // tools returns the tools the request offers, in the order it sends them.
 //
-// The endpoint makes native tool calls only, so a model that asks for
-// the tools to be described in the prompt is a configuration error
-// rather than a request the model cannot answer.
+// The endpoint makes native tool calls only. A model that asks for the tools
+// to be described in the prompt is therefore a configuration error. It is not
+// a request the model cannot answer.
 func (t *Transport) tools(info poo.ModelInfo, specs []poo.ToolSpec) ([]responsesTool, error) {
 	switch mode := t.toolsMode(info); mode {
 	case "none":
@@ -285,12 +284,11 @@ func sortedTools(specs []poo.ToolSpec) []poo.ToolSpec {
 
 // shapeReasoning sets the request's reasoning control.
 //
-// The model info holds the rule: the setting is validated by the model's
-// reasoning control, and the effort it yields is the one the endpoint
-// takes. The endpoint has no field for a token budget and none for a
-// chat-template switch, so a model that controls its reasoning another
-// way is a configuration error rather than a request that silently
-// reasons as much as it likes.
+// The model info holds the rule. The model's reasoning control validates the
+// setting, and the effort it yields is the one the endpoint takes. The endpoint
+// has no field for a token budget and none for a chat-template switch. A model
+// that controls its reasoning another way is therefore a configuration error.
+// Such a request would silently reason as much as it likes.
 func (t *Transport) shapeReasoning(req poo.ChatRequest, info poo.ModelInfo, out *responsesRequest) error {
 	setting := t.reasoningSetting(req)
 	fields, err := info.ReasoningFields(setting)
@@ -357,9 +355,9 @@ func reasonError(err error) string {
 
 // The profiles a Codex body is shaped with.
 //
-// The model info that shaped a request is not part of its body, so the
-// attachments the model reads travel into the snapshot as these profiles,
-// and the messages a fork appends are shaped by them.
+// The model info that shaped a request is not part of its body. The
+// attachments the model reads therefore travel into the snapshot as these
+// profiles, and the messages a fork appends are shaped by them.
 const (
 	// quirkReadsImages is the profile of a body shaped for a model that
 	// reads images.
@@ -372,7 +370,7 @@ const (
 // modalities are the attachments a request may carry.
 //
 // The model info a request carries decides them, and a fork has the body
-// and no model info: the snapshot records them as the profiles its body
+// and no model info. The snapshot records them as the profiles its body
 // was shaped with, so an appended attachment survives the fork.
 type modalities struct {
 	// image reports that the model reads images.
@@ -426,13 +424,12 @@ func modalitiesOfQuirks(quirks []string) modalities {
 // message item takes, so a fork numbers its appended items after the
 // snapshot's.
 //
-// Every message's provider blocks are checked in one pass of their own,
-// before the role decides what the message becomes: this transport can
-// only give a block back to the API that produced it, so a required
-// block from another API is refused wherever it rides, and an optional
-// one is left out. The pass covers the instructions, a caller-built
-// user message and a tool result as well as the assistant message the
-// endpoint returned.
+// Every message's provider blocks are checked in one pass of their own, before
+// the role decides what the message becomes. This transport can only give a
+// block back to the API that produced it. A required block from another API is
+// therefore refused wherever it rides, and an optional one is left out. The
+// pass covers the instructions, a caller-built user message and a tool result,
+// as well as the assistant message the endpoint returned.
 func inputItems(messages []poo.Message, reads modalities, firstID int) ([]json.RawMessage, string, error) {
 	var items []json.RawMessage
 	instructions := ""
@@ -490,10 +487,9 @@ func inputItems(messages []poo.Message, reads modalities, firstID int) ([]json.R
 
 // assistantItems turns an assistant message into the items the API takes.
 //
-// A message is one item on the wire only when it carries text: a tool
-// call and a reasoning item ride beside it, in the order the blocks
-// appear, because the API matches a call to its output by position as
-// well as by id.
+// A message is one item on the wire only when it carries text. A tool call
+// and a reasoning item ride beside it, in the order the blocks appear. The API
+// matches a call to its output by position as well as by id.
 func assistantItems(m poo.Message, next *int) ([]json.RawMessage, error) {
 	var items []json.RawMessage
 	for _, c := range m.Content {
@@ -555,8 +551,8 @@ func assistantItems(m poo.Message, next *int) ([]json.RawMessage, error) {
 // toolResultItems turns a tool message into the items the API takes.
 //
 // A tool result is a top-level item, and the attachments that follow it
-// in the same message are its own: the API carries them inside the
-// result's output rather than in a message of their own.
+// in the same message are its own. The API carries them inside the
+// result's output, rather than in a message of their own.
 func toolResultItems(m poo.Message, reads modalities) ([]json.RawMessage, error) {
 	var items []json.RawMessage
 	for i := 0; i < len(m.Content); i++ {
@@ -593,8 +589,8 @@ func toolResultItems(m poo.Message, reads modalities) ([]json.RawMessage, error)
 // toolOutput renders a tool result's output.
 //
 // Text alone rides as a string. A result that carries an attachment the
-// model reads rides as a list of parts, so the attachment travels inside
-// the result rather than in a message of its own.
+// model reads rides as a list of parts. The attachment then travels inside
+// the result, rather than in a message of its own.
 func toolOutput(text string, attachments []poo.ContentBlock, reads modalities) (json.RawMessage, error) {
 	parts := inputParts(attachments, reads)
 	hasText := strings.TrimSpace(text) != ""
@@ -672,7 +668,7 @@ func dataURL(attachment poo.ContentBlock) string {
 }
 
 // audioFormat returns the format name an audio part takes for a media
-// type, and the empty string for a type the API has no name for.
+// type. A type the API has no name for returns the empty string.
 func audioFormat(mediaType string) string {
 	switch mediaType {
 	case "audio/wav":
@@ -686,9 +682,9 @@ func audioFormat(mediaType string) string {
 
 // checkProviderBlock refuses a required block another API produced.
 //
-// The block is opaque provider data: this transport can only give it
+// The block is opaque provider data, so this transport can only give it
 // back to the API that produced it. An optional block from another API
-// is simply left out of the request, and a required one makes the
+// is simply left out of the request. A required one makes the
 // request impossible, which the run settles as an incompatible session.
 func checkProviderBlock(p *poo.ProviderBlock) error {
 	if p == nil || p.API == poo.APIResponses {

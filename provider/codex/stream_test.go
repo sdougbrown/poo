@@ -89,9 +89,9 @@ func TestTheStreamReadsThinkingTextAndUsage(t *testing.T) {
 	}
 }
 
-// TestAToolCallArrivesAssembled covers the fragments: the call is named
-// by its first fragment, its arguments are the fragments in order, and a
-// turn that called a tool finishes as one.
+// TestAToolCallArrivesAssembled covers the fragments. The call is named by its
+// first fragment, and its arguments are the fragments in order. A turn that
+// called a tool finishes as one.
 func TestAToolCallArrivesAssembled(t *testing.T) {
 	srv := newServer(t,
 		frame(`{"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","call_id":"call_1","name":"bash"}}`)+
@@ -251,10 +251,9 @@ func TestTheReasoningItemTravelsBackVerbatim(t *testing.T) {
 	expectJSON(t, input[1], reasoningItem)
 }
 
-// TestTheTerminalOutputAloneCarriesTheReasoningItem covers a response
-// that never reports its reasoning item as an item of its own: the
-// terminal output is the only place the item, encrypted payload
-// included, arrives.
+// TestTheTerminalOutputAloneCarriesTheReasoningItem covers a response that
+// never reports its reasoning item as an item of its own. The terminal output
+// is the only place the item arrives, encrypted payload included.
 func TestTheTerminalOutputAloneCarriesTheReasoningItem(t *testing.T) {
 	srv := newServer(t,
 		frame(`{"type":"response.output_text.delta","output_index":1,"delta":"the answer"}`)+
@@ -607,10 +606,10 @@ func TestAnUnknownEventIsSkipped(t *testing.T) {
 	}
 }
 
-// TestAFrameTheTransportCannotReadDoesNotPoisonTheStream covers a server
-// that separates its events with a single newline: a frame that is not
-// JSON is dropped rather than carried, so the events after it still
-// arrive and the stream still names its end.
+// TestAFrameTheTransportCannotReadDoesNotPoisonTheStream covers a server that
+// separates its events with a single newline. A frame that is not JSON is
+// dropped rather than carried. The events after it still arrive, and the stream
+// still names its end.
 func TestAFrameTheTransportCannotReadDoesNotPoisonTheStream(t *testing.T) {
 	srv := newServer(t,
 		// Every event on its own line, and no blank line between them.
@@ -641,10 +640,10 @@ func TestAFrameTheTransportCannotReadDoesNotPoisonTheStream(t *testing.T) {
 	}
 }
 
-// TestAMultiLineFrameIsJoinedWithoutABlankLine covers an event whose
-// payload is spread over several data lines with no blank line between
-// the events: the lines are joined, because another line may still
-// complete a payload that has not ended.
+// TestAMultiLineFrameIsJoinedWithoutABlankLine covers an event whose payload is
+// spread over several data lines with no blank line between the events. The
+// lines are joined, because another line may still complete a payload that has
+// not ended.
 func TestAMultiLineFrameIsJoinedWithoutABlankLine(t *testing.T) {
 	srv := newServer(t,
 		`data: {"type":"response.output_text.delta",`+"\n"+
@@ -671,9 +670,9 @@ func TestAMultiLineFrameIsJoinedWithoutABlankLine(t *testing.T) {
 	}
 }
 
-// TestAFinishedCallAtATakenIndexIsRead covers an event that names no
-// output index, so it lands on the one another item took: the call is
-// still a call, and the thinking before it is not lost or overwritten.
+// TestAFinishedCallAtATakenIndexIsRead covers an event that names no output
+// index, so it lands on the one another item took. The call is still a call,
+// and the thinking before it is not lost or overwritten.
 func TestAFinishedCallAtATakenIndexIsRead(t *testing.T) {
 	srv := newServer(t,
 		frame(`{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning"}}`)+
@@ -715,9 +714,9 @@ func TestAFinishedCallAtATakenIndexIsRead(t *testing.T) {
 	}
 }
 
-// TestACompletedEventWithoutAResponseEndsTheStream covers a terminal
-// event the endpoint sends without the response object: the stream ended,
-// so the run gets its finish and its usage rather than a protocol error.
+// TestACompletedEventWithoutAResponseEndsTheStream covers a terminal event the
+// endpoint sends without the response object. The stream ended, so the run gets
+// its finish and its usage rather than a protocol error.
 func TestACompletedEventWithoutAResponseEndsTheStream(t *testing.T) {
 	srv := newServer(t, frame(`{"type":"response.completed"}`)+done)
 	tr := newTransport(srv.URL, func(o *codex.Options) { o.MaxAttempts = 1 })
@@ -743,9 +742,9 @@ func TestACompletedEventWithoutAResponseEndsTheStream(t *testing.T) {
 	}
 }
 
-// TestTheTimeoutBoundsTheWaitForTheFirstByte covers an endpoint that
-// sends its headers and then nothing: the transport's own bound ends the
-// wait, so the run is not held by a body that never starts.
+// TestTheTimeoutBoundsTheWaitForTheFirstByte covers an endpoint that sends its
+// headers and then nothing. The transport's own bound ends the wait, so the run
+// is not held by a body that never starts.
 func TestTheTimeoutBoundsTheWaitForTheFirstByte(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
@@ -784,9 +783,8 @@ func TestTheTimeoutBoundsTheWaitForTheFirstByte(t *testing.T) {
 }
 
 // TestTheUsageReportsTheWholePrompt covers the counts poo's usage record
-// carries: the prompt count is the endpoint's own, and the cached tokens
-// are the ones it served from its cache, counted beside it rather than
-// taken out of it.
+// carries. The prompt count is the endpoint's own. The cached tokens are the
+// ones it served from its cache, counted beside it rather than taken out of it.
 func TestTheUsageReportsTheWholePrompt(t *testing.T) {
 	srv := newServer(t,
 		frame(`{"type":"response.output_text.delta","output_index":0,"delta":"hi"}`)+
@@ -817,10 +815,10 @@ func TestTheUsageReportsTheWholePrompt(t *testing.T) {
 	}
 }
 
-// TestAnInterruptedStreamKeepsOnlyReplayableReasoning covers the
-// reasoning a cut-short response produced: an item without the payload
-// that lets the endpoint take it back is not replayed, because the next
-// request would carry an item the endpoint cannot match.
+// TestAnInterruptedStreamKeepsOnlyReplayableReasoning covers the reasoning a
+// cut-short response produced. An item without the payload that lets the
+// endpoint take it back is not replayed. The next request would carry an item
+// the endpoint cannot match.
 func TestAnInterruptedStreamKeepsOnlyReplayableReasoning(t *testing.T) {
 	srv := newServer(t,
 		frame(`{"type":"response.reasoning_summary_text.delta","output_index":0,"delta":"think"}`)+

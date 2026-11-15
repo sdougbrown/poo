@@ -13,7 +13,7 @@ import (
 //
 // The plan: three attempts per request, the first try and two retries,
 // with a backoff of one second and then two. A Retry-After overrides
-// the backoff, capped at thirty seconds, and a rate limit that asks for
+// the backoff, capped at thirty seconds. A rate limit that asks for
 // longer than that is not retried at all: it settles the run. The wait
 // is cancellable, and a request is only retried while the attempt has
 // carried no delta.
@@ -53,9 +53,9 @@ func (p retryPolicy) delay(attempt int, err error) (time.Duration, bool) {
 	if !errors.As(err, &pe) {
 		return 0, false
 	}
-	// The failure's own rule decides: a rate limit is worth another
-	// attempt only when the endpoint asked for a wait of thirty seconds
-	// or less, a server failure and a network failure always are, and a
+	// The failure's own rule decides. A rate limit is worth another attempt
+	// only when the endpoint asked for a wait of thirty seconds or less. A
+	// server failure and a network failure always are worth one, and a
 	// rejection never is.
 	if !pe.Retryable() {
 		return 0, false
@@ -227,8 +227,9 @@ func (s *streamWithRetry) Next() (poo.StreamItem, error) {
 		if s.seen {
 			// The attempt carried part of the answer, so the request
 			// cannot be repeated. A failure that would be retryable
-			// before the first delta is an interrupted stream now, so
-			// the record and the settle reason name the real condition.
+			// before the first delta is an interrupted stream now. The
+			// record and the settle reason therefore name the real
+			// condition.
 			err = interruptedStreamError(err)
 		}
 		if !s.seen {
