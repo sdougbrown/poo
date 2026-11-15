@@ -3,11 +3,12 @@ package main
 import (
 	"os"
 	"testing"
+
+	"github.com/sdougbrown/poo/pootest"
 )
 
-// TestMain removes manifest overrides inherited from the shell.
+// TestMain runs the tests under a settings file of the tests' own, so a
+// run a test starts cannot discover the operator's settings.
 func TestMain(m *testing.M) {
-	os.Unsetenv("POO_FEEDS_PATH")
-	os.Unsetenv("POO_CLI_REGISTRY_PATH")
-	os.Exit(m.Run())
+	os.Exit(pootest.Main(m))
 }

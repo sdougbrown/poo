@@ -1,9 +1,20 @@
 package eval
 
 import (
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/poo/pootest"
 )
+
+// TestMain runs the tests under a settings file of the tests' own, so a
+// run the tests execute cannot discover the operator's settings — whose
+// models and askers a test cannot serve. The exec'd binary inherits the
+// environment, so this covers the runs the runner starts.
+func TestMain(m *testing.M) {
+	os.Exit(pootest.Main(m))
+}
 
 // TestTheChildEnvironmentHoldsOnlyTheRunningModelsKey covers the
 // scrub: every key variable is removed except the running model's own,
