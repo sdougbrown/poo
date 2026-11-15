@@ -419,7 +419,7 @@ func TestTheGeneratedFileIsFresh(t *testing.T) {
 	}
 	dir := t.TempDir()
 	out := filepath.Join(dir, "settings_gen.go")
-	cmd := exec.Command("go", "run", "github.com/umpire-tools/umpire-go-gen@v0.2.1",
+	cmd := exec.Command("go", "run", "github.com/umpire-tools/umpire-go-gen@v0.3.0",
 		"-i", "schema/settings.umpire.json", "-output-file", out, "-pkg", "config")
 	cmd.Dir = "."
 	if output, err := cmd.CombinedOutput(); err != nil {

@@ -81,6 +81,7 @@ type SettingsFields struct {
 type SettingsConditions struct {
 	HasCliRegistry bool "json:\"has_cli_registry\""
 	HasDecider     bool "json:\"has_decider\""
+	HasWireClient  bool "json:\"has_wire_client\""
 }
 
 // SettingsAvailability holds the availability status for each field.
@@ -166,14 +167,31 @@ type FieldStatus struct {
 	Error     string   `json:"error,omitempty"`
 }
 
-// contains reports whether a string slice contains a given value.
-func contains(s []string, v string) bool {
-	for _, ss := range s {
-		if ss == v {
+// contains reports whether s holds v.
+func contains[T comparable](s []T, v T) bool {
+	for _, item := range s {
+		if item == v {
 			return true
 		}
 	}
 	return false
+}
+
+// isTruthy reports whether a decoded JSON value is truthy: anything but
+// null, false, 0, and "".
+func isTruthy(v any) bool {
+	switch v := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return v
+	case float64:
+		return v != 0
+	case string:
+		return v != ""
+	default:
+		return true
+	}
 }
 func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) SettingsAvailability {
 	var _ = prev
@@ -793,9 +811,12 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  PermissionAskersEnabled && false,
 			Enabled:   PermissionAskersEnabled,
 			Satisfied: PermissionAskersSatisfied,
-			Fair:      true,
+			Fair:      (c.HasWireClient || !(contains(f.PermissionAskers, "wire"))),
 			Reason: func() *string {
 				var reasons []string
+				if !(c.HasWireClient || !(contains(f.PermissionAskers, "wire"))) && "the wire asker needs a wire client, and this runtime has none: the chain runs without it" != "" {
+					reasons = append(reasons, "the wire asker needs a wire client, and this runtime has none: the chain runs without it")
+				}
 				if len(reasons) == 0 {
 					return nil
 				}
@@ -803,6 +824,9 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
+				if !(c.HasWireClient || !(contains(f.PermissionAskers, "wire"))) && "the wire asker needs a wire client, and this runtime has none: the chain runs without it" != "" {
+					reasons = append(reasons, "the wire asker needs a wire client, and this runtime has none: the chain runs without it")
+				}
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -2239,6 +2263,7 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "LimitsMaxDurationS", RuleType: "check", Expr: "f.LimitsMaxDurationS != nil && *f.LimitsMaxDurationS >= 0", Reason: "limits.max_duration_s must not be negative"},
 	{Field: "LimitsMaxTokensPerRun", RuleType: "check", Expr: "f.LimitsMaxTokensPerRun != nil && *f.LimitsMaxTokensPerRun >= 0", Reason: "limits.max_tokens_per_run must not be negative"},
 	{Field: "LimitsMaxTurns", RuleType: "check", Expr: "f.LimitsMaxTurns != nil && *f.LimitsMaxTurns >= 0", Reason: "limits.max_turns must not be negative"},
+	{Field: "PermissionAskers", RuleType: "fairWhen", Expr: "(c.HasWireClient || !(contains(f.PermissionAskers, \"wire\")))", Reason: "the wire asker needs a wire client, and this runtime has none: the chain runs without it"},
 	{Field: "PermissionChainTimeoutS", RuleType: "check", Expr: "f.PermissionChainTimeoutS != nil && *f.PermissionChainTimeoutS >= 1", Reason: "permission.chain_timeout_s must be at least a second"},
 	{Field: "", RuleType: "enabledWhen", Expr: "c.HasDecider", Reason: "the decide threshold needs a decider model: roles.decider names one"},
 	{Field: "PermissionDecideAllow", RuleType: "check", Expr: "f.PermissionDecideAllow != nil && *f.PermissionDecideAllow >= 0 && *f.PermissionDecideAllow <= 1", Reason: "permission.decide.allow must be between 0 and 1"},
@@ -2404,6 +2429,7 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+		explanations = append(explanations, "* fairWhen: the wire asker needs a wire client, and this runtime has none: the chain runs without it")
 	case "PermissionChainTimeoutS", "permission.chain_timeout_s":
 		found = true
 		status = avail.PermissionChainTimeoutS

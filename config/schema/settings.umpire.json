@@ -69,7 +69,8 @@
   },
   "conditions": {
     "has_decider": { "type": "boolean", "description": "the settings name a model for the decider role" },
-    "has_cli_registry": { "type": "boolean", "description": "the settings name a cli registry" }
+    "has_cli_registry": { "type": "boolean", "description": "the settings name a cli registry" },
+    "has_wire_client": { "type": "boolean", "description": "the runtime supplies a wire client to answer permission asks" }
   },
   "rules": [
     {
@@ -89,6 +90,18 @@
       "field": "permission.decide.timeout_ms",
       "when": { "op": "cond", "condition": "has_decider" },
       "reason": "the decide timeout needs a decider model: roles.decider names one"
+    },
+    {
+      "type": "fairWhen",
+      "field": "permission.askers",
+      "when": {
+        "op": "or",
+        "exprs": [
+          { "op": "cond", "condition": "has_wire_client" },
+          { "op": "not", "expr": { "op": "contains", "field": "permission.askers", "value": "wire" } }
+        ]
+      },
+      "reason": "the wire asker needs a wire client, and this runtime has none: the chain runs without it"
     },
     {
       "type": "disables",

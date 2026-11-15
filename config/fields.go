@@ -97,7 +97,10 @@ func fieldsOf(s *Settings) SettingsFields {
 // conditionsOf returns the generated conditions for the settings.
 //
 // The conditions are the facts the rules are written against: whether
-// the settings name a decider, and whether they name a registry.
+// the settings name a decider, and whether they name a registry. A
+// capability condition — has_wire_client — is not the settings' to
+// answer: the load answers it for a runtime that has every capability,
+// and the build for the runtime it built.
 func conditionsOf(s *Settings) SettingsConditions {
 	return SettingsConditions{
 		HasDecider:     s.Roles["decider"] != "",

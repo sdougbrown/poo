@@ -1490,8 +1490,10 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 // absent, and the binary's own askers apply. The decide asker is only
 // in the chain when a decider model is configured: a chain that asks a
 // model that is not there would wait for an answer that cannot come.
-// The wire asker is only in the chain when the binary has a wire
-// client.
+// The wire asker is only in the chain when the runtime has a wire
+// client. One that has none leaves the asker out and warns instead of
+// refusing the settings: the file is the operator's, and the front
+// doors with a wire accept it.
 func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]perm.Asker, error) {
 	names := permission.Askers
 	if !permission.AskersNamed() {
@@ -1499,6 +1501,7 @@ func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]per
 	}
 	decider, deciderErr := r.DeciderModel()
 	var askers []perm.Asker
+	var droppedWire bool
 	for _, name := range names {
 		switch name {
 		case "decide":
@@ -1524,11 +1527,8 @@ func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]per
 			askers = append(askers, asker)
 		case "wire":
 			if opts.Wire == nil {
-				return nil, &Error{
-					Code:    CodeUnsupported,
-					Field:   "permission.askers",
-					Message: "the wire asker needs a wire client, and this binary has none",
-				}
+				droppedWire = true
+				continue
 			}
 			askers = append(askers, perm.NewWireAsker(opts.Wire, 0))
 		default:
@@ -1539,7 +1539,30 @@ func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]per
 			}
 		}
 	}
+	if droppedWire {
+		r.warn(r.droppedWireWarning(names))
+	}
 	return askers, nil
+}
+
+// droppedWireWarning is what the build says when it leaves the wire asker
+// out of the chain.
+//
+// The settings schema owns the wording: its fairWhen rule names the
+// capability the chain needs, and the check reports that rule against
+// the chain this build resolved, whether the settings named it or the
+// binary did. The caller asks only when the runtime has no wire client,
+// which is the condition the rule reads.
+func (r *Runtime) droppedWireWarning(chain []string) string {
+	fields := fieldsOf(r.Settings)
+	fields.PermissionAskers = chain
+	status := Check(fields, conditionsOf(r.Settings), SettingsFields{}).PermissionAskers
+	for _, reason := range status.Reasons {
+		if reason != "" {
+			return reason
+		}
+	}
+	return ""
 }
 
 // newDeciderAsker builds the asker that asks a decision model.

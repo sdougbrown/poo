@@ -92,7 +92,7 @@ func TestTheBuildKeepsAnEmptyChainEmpty(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &askClient{}
-			runtime := askerRuntime(t, tt.askers, client)
+			runtime := askerRuntime(t, theModelSettings, tt.askers, client)
 			if got := len(runtime.Askers); got != tt.askers0 {
 				t.Errorf("the chain holds %d asker(s), want %d", got, tt.askers0)
 			}
@@ -103,12 +103,83 @@ func TestTheBuildKeepsAnEmptyChainEmpty(t *testing.T) {
 	}
 }
 
+// wireAskerReason is the schema's own account of the capability the
+// chain needs, and what a build without it warns.
+const wireAskerReason = "this runtime has none"
+
+// TestASettingsNamedAskerTheRuntimeCannotProvideIsDropped covers the
+// chain a shared settings file names: a runtime without the capability
+// an asker needs leaves it out and says why, because the file is the
+// operator's and the front doors that have the capability accept it.
+func TestASettingsNamedAskerTheRuntimeCannotProvideIsDropped(t *testing.T) {
+	tests := []struct {
+		name    string
+		askers  string
+		askers0 int
+	}{
+		{name: "the only asker", askers: "  askers: [wire]\n", askers0: 0},
+		{name: "one of two", askers: "  askers: [decide, wire]\n", askers0: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtime := askerRuntime(t, withDecider, tt.askers, nil)
+			if got := len(runtime.Askers); got != tt.askers0 {
+				t.Fatalf("the chain holds %d asker(s), want %d", got, tt.askers0)
+			}
+			if !strings.Contains(runtime.Warning, wireAskerReason) {
+				t.Errorf("the warning is %q, want the settings' reason for the missing capability", runtime.Warning)
+			}
+		})
+	}
+}
+
+// TestTheRuntimeWithTheWireKeepsTheSettingsChain covers the runtime
+// that has the capability: the same settings keep the asker, and there
+// is nothing to warn about.
+func TestTheRuntimeWithTheWireKeepsTheSettingsChain(t *testing.T) {
+	runtime := askerRuntime(t, withDecider, "  askers: [wire]\n", &askClient{})
+	if got := len(runtime.Askers); got != 1 {
+		t.Fatalf("the chain holds %d asker(s), want 1", got)
+	}
+	if runtime.Warning != "" {
+		t.Errorf("the warning is %q, want none: the chain kept every asker it named", runtime.Warning)
+	}
+}
+
+// TestTheBinarysOwnChainLosesTheAskerItsRuntimeCannotProvide covers the
+// chain the binary names itself: the capability is the runtime's, so
+// the same degrade applies, and the settings schema speaks for that
+// chain too.
+func TestTheBinarysOwnChainLosesTheAskerItsRuntimeCannotProvide(t *testing.T) {
+	runtime := askerRuntime(t, theModelSettings, "", nil)
+	if got := len(runtime.Askers); got != 0 {
+		t.Fatalf("the chain holds %d asker(s), want 0: the runtime has no wire", got)
+	}
+	if !strings.Contains(runtime.Warning, wireAskerReason) {
+		t.Errorf("the warning is %q, want the settings' reason for the missing capability", runtime.Warning)
+	}
+}
+
+// TestAnAskerTheSettingsDoNotKnowStillFailsTheBuild covers the other
+// side: a name the settings system does not know is an operator's typo,
+// and the settings refuse it whatever the runtime can provide.
+func TestAnAskerTheSettingsDoNotKnowStillFailsTheBuild(t *testing.T) {
+	document := theModelSettings + "permission:\n  askers: [wire, wirre]\n"
+	_, err := config.Parse([]byte(document), config.FormatYAML)
+	if code, ok := config.CodeOf(err); !ok || code != config.CodeInvalid {
+		t.Fatalf("the failure's code is %q, want %q", code, config.CodeInvalid)
+	}
+	if field, ok := config.FieldOf(err); !ok || field != "permission.askers[1]" {
+		t.Errorf("the failure names the field %q, want permission.askers[1]", field)
+	}
+}
+
 // TestTheEmptyChainDoesNotAskTheWire covers the session: an ask rule
 // with no askers resolves to its fallback at once, and a capable wire
 // client is never asked.
 func TestTheEmptyChainDoesNotAskTheWire(t *testing.T) {
 	client := &askClient{}
-	runtime := askerRuntime(t, "  askers: []\n", client)
+	runtime := askerRuntime(t, theModelSettings, "  askers: []\n", client)
 	transport, session, elapsed := runWithTheReadCall(t, runtime)
 
 	asks := client.asks
@@ -142,7 +213,7 @@ func TestTheEmptyChainDoesNotAskTheWire(t *testing.T) {
 // with the chain absent, asks the client the binary offers.
 func TestAnAbsentChainAsksTheWire(t *testing.T) {
 	client := &askClient{}
-	runtime := askerRuntime(t, "", client)
+	runtime := askerRuntime(t, theModelSettings, "", client)
 	transport, session, _ := runWithTheReadCall(t, runtime)
 
 	asks := client.asks
@@ -177,10 +248,10 @@ func parseSettings(t *testing.T, document string, format config.Format) *config.
 
 // askerRuntime builds the code profile's runtime from a settings
 // document whose chain is the given YAML snippet, with a wire client
-// the chain may ask.
-func askerRuntime(t *testing.T, askers string, client perm.Client) *config.Runtime {
+// the chain may ask. It fails the test when the build does.
+func askerRuntime(t *testing.T, base, askers string, client perm.Client) *config.Runtime {
 	t.Helper()
-	document := theModelSettings + `permission:
+	document := base + `permission:
   rules:
     - tool: read
       action: ask
