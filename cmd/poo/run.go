@@ -115,6 +115,7 @@ func runRun(args []string) int {
 		Overrides:      config.EnvOverrides(overrides),
 		WorkingDir:     workDir,
 		DefaultProfile: defaultProfile,
+		UserPromptFile: defaultUserPromptFile(),
 		Tools:          linkedTools(),
 		Profiles:       linkedProfiles(),
 		Executors:      executorRegistry(),

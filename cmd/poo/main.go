@@ -59,6 +59,7 @@ Run flags:
   --working-dir <dir>    The directory the tools work in (default: the current one)
   --executor <name>      The executor the bash tool runs commands through: local (default) or bwrap
   --project-prompt       Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt
+  --user-prompt-file <f> The file holding the user's own instructions
   --timeout <dur>        The wall-clock limit for the run, e.g. 5m
   --no-wait-jobs         Exit at the first settle; the running jobs stop through the session's close
 

@@ -177,6 +177,10 @@ embedded beside the package that owns it.
   (`server.Options.PromptFS`).
 - The `system_prompt.*` settings, `--system-prompt` and
   `--append-system-prompt` (`@file` reads a file) apply on top.
+- `session.user_prompt` adds the user's own instructions, read once from
+  `session.user_prompt_file` or the binary's `BuildOptions.UserPromptFile`;
+  `session.project_prompt` adds the working directory's `AGENTS.md`, read
+  per session from the directory that session works in.
 - `poo prompt` prints the sections a session would send.
 
 **CLI registry.** When the settings list manifests in `cli_registry.paths`,

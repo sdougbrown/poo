@@ -121,6 +121,7 @@ func runServe(args []string) int {
 		Overrides:      overrides,
 		WorkingDir:     workDir,
 		DefaultProfile: defaultProfile,
+		UserPromptFile: defaultUserPromptFile(),
 		Tools:          linkedTools(),
 		Executors:      executorRegistry(),
 		Profiles:       linkedProfiles(),

@@ -40,6 +40,9 @@ const (
 	// ProjectSection is the name of the prompt's project section: the
 	// working directory's instructions the model reads.
 	ProjectSection = "project"
+	// UserSection is the name of the prompt's user section: the
+	// operator's own instructions, which the project's follow.
+	UserSection = "user"
 	// ToolBash is the name of the bash tool.
 	ToolBash = "bash"
 )
@@ -95,6 +98,9 @@ type Overrides struct {
 	// ProjectPrompt asks for the working directory's project
 	// instructions, whatever the settings say.
 	ProjectPrompt bool
+	// UserPromptFile names the file the user's instructions are read
+	// from, whatever the settings say.
+	UserPromptFile string
 }
 
 // The environment variables a shell or a launcher names a build's
@@ -176,6 +182,10 @@ type BuildOptions struct {
 	// A command that only shows the prompt does not need a model: the
 	// prompt names the model, and a name may be empty.
 	NoChatModel bool
+	// UserPromptFile is the file the binary reads the user's
+	// instructions from when the settings name none. An empty value
+	// leaves the feature with no default path.
+	UserPromptFile string
 	// PromptFS is the prompt directory the binary embeds.
 	//
 	// The files replace the sections they name after the binary's
@@ -307,6 +317,10 @@ func WithOverrides(settings *Settings, overrides Overrides) *Settings {
 	if overrides.SessionMode != "" {
 		value := overrides.SessionMode
 		effective.Session.Mode = &value
+	}
+	if overrides.UserPromptFile != "" {
+		value := overrides.UserPromptFile
+		effective.Session.UserPromptFile = &value
 	}
 	if overrides.SystemPrompt != "" {
 		effective.SystemPrompt.BaseFile = overrides.SystemPrompt
@@ -1662,6 +1676,9 @@ func (r *Runtime) resolvePrompt(opts BuildOptions, workingDir string) error {
 		}
 		r.FinishSchema = json.RawMessage(data)
 	}
+	if err := r.resolveUserPrompt(opts); err != nil {
+		return err
+	}
 	// The project's instructions are the working directory's AGENTS.md,
 	// or CLAUDE.md when there is none, and they fill the project
 	// section. Either the setting or the flag asks for them, and
@@ -1697,6 +1714,7 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 		"base":         nil,
 		"profile":      nil,
 		"environment":  nil,
+		UserSection:    nil,
 		ProjectSection: nil,
 	}
 	for name, factory := range opts.Tools {
@@ -1773,6 +1791,73 @@ func (r *Runtime) ProjectInstructions(dir string) (func(*prompt.Builder), error)
 	return func(b *prompt.Builder) {
 		b.Set(ProjectSection, text)
 	}, nil
+}
+
+// resolveUserPrompt fills the prompt's user section with the operator's
+// own instructions.
+//
+// A file that is named asks for them: the flag's path, then the
+// settings', then the binary's default, the way every other override
+// works. Naming a path is a promise, and a file that is not there fails
+// the build; the binary's own default is a convention, and a file that
+// is not there holds no instructions.
+//
+// The file is read with the build, not per session: a user's
+// instructions are the same wherever the session works, so a session
+// created over the wire has no reason to read them again.
+func (r *Runtime) resolveUserPrompt(opts BuildOptions) error {
+	settings := r.Settings
+	path, field := "", ""
+	named := true
+	if opts.Overrides.UserPromptFile != "" {
+		path, field = opts.Overrides.UserPromptFile, "--user-prompt-file"
+	} else if value := settings.Session.UserPromptFile; value != nil && *value != "" {
+		path, field = *value, "session.user_prompt_file"
+	} else if settings.Session.UserPrompt != nil && *settings.Session.UserPrompt {
+		// The setting asks for the instructions and leaves the file to
+		// the binary, whose default is a convention rather than a
+		// promise: a file that is not there holds no instructions.
+		named = false
+		path, field = opts.UserPromptFile, "session.user_prompt"
+		if path == "" {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   field,
+				Message: "no file holds the user's instructions",
+			}
+		}
+	} else {
+		return nil
+	}
+	expanded, err := expandHome(path)
+	if err != nil {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   field,
+			Message: "the user's instructions cannot be read",
+			Err:     err,
+		}
+	}
+	data, err := os.ReadFile(expanded)
+	if err != nil {
+		if !named && errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   field,
+			Message: "the user's instructions cannot be read",
+			Err:     err,
+		}
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	text := string(data)
+	r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+		b.Set(UserSection, text)
+	})
+	return nil
 }
 
 // CreateSession creates a session in the store and returns it.

@@ -47,6 +47,9 @@ type sharedFlags struct {
 	permissionUnmatched string
 	// sessionDir is the directory the session files live in.
 	sessionDir string
+	// userPromptFile is the file the user's own instructions are read
+	// from.
+	userPromptFile string
 	// ephemeral runs the command without writing a session.
 	ephemeral bool
 	// profile is the profile the session is built from.
@@ -65,10 +68,26 @@ func (f *sharedFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.appendSystemPrompt, "append-system-prompt", "", "Text appended to the system prompt, or @file")
 	fs.StringVar(&f.permissionUnmatched, "permission-unmatched", "", "What to do with a side-effecting call no rule covers: allow, ask or deny")
 	fs.StringVar(&f.sessionDir, "session-dir", "", "The directory the session files live in")
+	fs.StringVar(&f.userPromptFile, "user-prompt-file", "", "The file holding the user's own instructions")
 	fs.BoolVar(&f.ephemeral, "ephemeral", false, "Run without writing a session")
 	fs.StringVar(&f.profile, "profile", "", "The profile to run under: base, code or search")
 	fs.Var(&f.feedsPaths, "feeds-path", "Additional feed manifest path (repeatable)")
 	fs.Var(&f.cliRegistryPaths, "cli-registry-path", "Additional cli registry manifest path (repeatable)")
+}
+
+// defaultUserPromptFile is the file the user's own instructions are read
+// from when neither the flag nor the settings name one: the config
+// directory's AGENTS.md, beside the settings file a user finds there.
+//
+// A binary that keeps its instructions elsewhere sets BuildOptions'
+// UserPromptFile to its own path, and one that wants no default leaves
+// it empty.
+func defaultUserPromptFile() string {
+	dir, err := config.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "AGENTS.md")
 }
 
 // settings reads the settings file and returns the settings.
@@ -112,6 +131,7 @@ func (f *sharedFlags) overrides() (config.Overrides, error) {
 		Profile:             f.profile,
 		PermissionUnmatched: f.permissionUnmatched,
 		SessionDir:          f.sessionDir,
+		UserPromptFile:      f.userPromptFile,
 		SystemPrompt:        f.systemPrompt,
 		AppendSystemPrompt:  appended,
 		FeedsPaths:          f.feedsPaths,

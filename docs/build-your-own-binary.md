@@ -150,13 +150,19 @@ A session that changes its model or variant renders the prompt again. A prompt
 that cannot render there refuses the change and leaves the session as it was.
 
 The layers apply in this order: the embedded default, the binary's directory,
-the settings (`system_prompt.*`) and the project's `AGENTS.md`. A later layer
-wins, so an operator's settings file still changes the prompt the binary ships.
-`system_prompt.replace` clears the directory's sections. If the session offers
-registry tools, the build restores the embedded catalog after replacement, so
-a directory's `catalog.md` does not apply.
-The project layer is the consumer's to add: `server.New` loads no project file,
-and `poo prompt` includes one only when it is run with `--project-prompt`.
+the settings (`system_prompt.*`), the user's own instructions and the project's
+`AGENTS.md`. A later layer wins, so an operator's settings file still changes
+the prompt the binary ships. `system_prompt.replace` clears the directory's
+sections. If the session offers registry tools, the build restores the embedded
+catalog after replacement, so a directory's `catalog.md` does not apply.
+
+The last two layers are opt-in, and they differ in scope. The user's
+instructions are process-wide: `BuildOptions.UserPromptFile` names the path a
+binary reads them from when `session.user_prompt_file` names none, and an empty
+value leaves the feature with no default at all. The project's are the
+session's: `Runtime.ProjectInstructions` reads the directory the session works
+in, so a session created over the wire reads its own directory's file and not
+the serving process's.
 
 ## Inject tools
 

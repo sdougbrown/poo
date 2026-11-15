@@ -43,6 +43,9 @@ type Options struct {
 	// DefaultProfile is the profile a session runs under when neither
 	// the command line nor the settings name one.
 	DefaultProfile string
+	// UserPromptFile is the file the binary reads the user's
+	// instructions from when the settings name none.
+	UserPromptFile string
 	// Tools are the tool constructors the binary links, by name.
 	Tools map[string]config.ToolFactory
 	// Executors are the executors the binary links.
@@ -75,6 +78,7 @@ func New(opts Options) (*Server, error) {
 		Overrides:      config.EnvOverrides(opts.Overrides),
 		WorkingDir:     opts.WorkingDir,
 		DefaultProfile: opts.DefaultProfile,
+		UserPromptFile: opts.UserPromptFile,
 		Tools:          opts.Tools,
 		Profiles:       opts.Profiles,
 		Executors:      opts.Executors,

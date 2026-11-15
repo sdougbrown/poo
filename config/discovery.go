@@ -87,14 +87,28 @@ func findProjectSettings(workingDir string) (string, bool) {
 	}
 }
 
+// UserConfigDir returns the directory poo keeps a user's own files in:
+// the settings file, and the instructions beside it.
+//
+// The directory is the one os.UserConfigDir names, under poo's name, so
+// a caller that wants a file beside the settings finds it where the
+// discovery looks.
+func UserConfigDir() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "poo"), nil
+}
+
 // userSettings returns the settings file in the user's config
 // directory.
 func userSettings() (string, bool) {
-	config, err := os.UserConfigDir()
+	dir, err := UserConfigDir()
 	if err != nil {
 		return "", false
 	}
-	return settingsFileIn(filepath.Join(config, "poo"))
+	return settingsFileIn(dir)
 }
 
 // settingsFileIn returns the settings file in dir, or false when dir holds
