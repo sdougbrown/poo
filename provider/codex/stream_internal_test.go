@@ -30,10 +30,10 @@ var jsonPayloads = []string{
 }
 
 // TestNoPrefixOfAJSONPayloadIsDropped covers the rule the no-blank-line
-// reader depends on: a payload that may still be completed by another
-// data line is never treated as one no line can repair, so a frame spread
-// over several lines is never dropped. Every proper prefix of a payload,
-// and the whole payload, is checked.
+// reader depends on. A payload that may still be completed by another data line
+// is never treated as one no line can repair. A frame spread over several lines
+// is therefore never dropped. Every proper prefix of a payload, and the whole
+// payload, is checked.
 func TestNoPrefixOfAJSONPayloadIsDropped(t *testing.T) {
 	for _, payload := range jsonPayloads {
 		if got := payloadStateOf([]string{payload}); got != payloadComplete {
@@ -47,9 +47,9 @@ func TestNoPrefixOfAJSONPayloadIsDropped(t *testing.T) {
 	}
 }
 
-// TestEveryMultilineSplitOfAJSONPayloadIsJoined covers the shape a
-// server that separates its events with one newline sends when it splits
-// a payload: the lines are joined wherever the split leaves valid JSON.
+// TestEveryMultilineSplitOfAJSONPayloadIsJoined covers the shape a server
+// that separates its events with one newline sends when it splits a payload.
+// The lines are joined wherever the split leaves valid JSON.
 func TestEveryMultilineSplitOfAJSONPayloadIsJoined(t *testing.T) {
 	joined := 0
 	for _, payload := range jsonPayloads {

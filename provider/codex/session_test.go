@@ -129,9 +129,9 @@ func sessionOptions(t *testing.T, endpoint string, sink poo.RecordSink) poo.Opti
 }
 
 // TestASessionCarriesTheReasoningItemIntoTheNextRequest covers the loop a
-// storeless endpoint needs: the encrypted reasoning the first response
-// returned is recorded with the assistant message, and the next request
-// carries it back ahead of the call it reasoned about.
+// storeless endpoint needs. The encrypted reasoning the first response returned
+// is recorded with the assistant message. The next request carries it back
+// ahead of the call it reasoned about.
 func TestASessionCarriesTheReasoningItemIntoTheNextRequest(t *testing.T) {
 	srv := newServer(t, reasoningTurn, completedStream)
 	session, err := poo.New(sessionOptions(t, srv.URL, nil))
@@ -240,7 +240,7 @@ func sessionHeader() *poo.SessionCreatedRecord {
 const bareReasoningItem = `{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"thinking"}]}`
 
 // reasoningTurnTerminalOnly is the stream of a turn that reasoned
-// without encrypted payload at its item.done event: the terminal
+// without encrypted payload at its item.done event. The terminal
 // response carries the item whole, which is where the endpoint puts the
 // encrypted content.
 const reasoningTurnTerminalOnly = `data: {"type":"response.output_item.done","output_index":0,"item":` + bareReasoningItem + "}\n\n" +
@@ -249,9 +249,9 @@ const reasoningTurnTerminalOnly = `data: {"type":"response.output_item.done","ou
 	`data: {"type":"response.completed","response":{"status":"completed","output":[` + reasoningItem + `,{"type":"function_call","call_id":"call_1","name":"echo","arguments":"{\"text\":\"ping\"}"}],"usage":{"input_tokens":30,"output_tokens":5}}}` + "\n\n" + done
 
 // TestTheTerminalOutputCarriesTheEncryptedReasoning covers the shape the
-// endpoint really sends: the reasoning item's encrypted payload arrives
-// in the terminal response's output, not in its item.done event, and the
-// next request carries it back all the same.
+// endpoint really sends. The reasoning item's encrypted payload arrives in the
+// terminal response's output, not in its item.done event. The next request
+// carries it back all the same.
 func TestTheTerminalOutputCarriesTheEncryptedReasoning(t *testing.T) {
 	srv := newServer(t, reasoningTurnTerminalOnly, completedStream)
 	session, err := poo.New(sessionOptions(t, srv.URL, nil))
@@ -279,9 +279,9 @@ func TestTheTerminalOutputCarriesTheEncryptedReasoning(t *testing.T) {
 	expectJSON(t, input[1], reasoningItem)
 }
 
-// TestTheRecordedUsageIsTheEndpointsOwn covers the usage the run records:
-// the prompt count is the endpoint's own, and the cached tokens ride
-// beside it, so the run's token budget counts what the endpoint counted.
+// TestTheRecordedUsageIsTheEndpointsOwn covers the usage the run records.
+// The prompt count is the endpoint's own, and the cached tokens ride beside it,
+// so the run's token budget counts what the endpoint counted.
 func TestTheRecordedUsageIsTheEndpointsOwn(t *testing.T) {
 	sink := pootest.NewSink()
 	srv := newServer(t,
@@ -322,9 +322,9 @@ func TestTheRecordedUsageIsTheEndpointsOwn(t *testing.T) {
 	}
 }
 
-// TestTheRecordedUsageCountsEveryAttempt covers the usage a retried
-// request records: an attempt that failed before it answered still spent
-// tokens, so the record holds what the attempts spent together.
+// TestTheRecordedUsageCountsEveryAttempt covers the usage a retried request
+// records. An attempt that failed before it answered still spent tokens, so the
+// record holds what the attempts spent together.
 func TestTheRecordedUsageCountsEveryAttempt(t *testing.T) {
 	sink := pootest.NewSink()
 	srv := newServer(t,
@@ -386,9 +386,8 @@ const truncatedTurn = `data: {"type":"response.reasoning_summary_text.delta","ou
 	`data: {"type":"response.output_text.delta","output_index":1,"delta":"half an answer"}` + "\n\n"
 
 // TestARunCutShortKeepsTheReasoningItCanReplay covers the run that died
-// mid-stream: the reasoning item the endpoint completed is recorded with
-// the partial message the run keeps, and the next request carries it
-// back.
+// mid-stream. The reasoning item the endpoint completed is recorded with the
+// partial message the run keeps, and the next request carries it back.
 func TestARunCutShortKeepsTheReasoningItCanReplay(t *testing.T) {
 	sink := pootest.NewSink()
 	srv := newServer(t, truncatedTurn, completedStream)

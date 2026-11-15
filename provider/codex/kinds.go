@@ -34,22 +34,21 @@ type errorResponse struct {
 
 // failureKind names the failure class a provider failure carries.
 //
-// The status gives the class, and the provider's own code and type
-// refine it. A quota code is a usage limit whatever the status, a
-// billing code is an inactive plan, and a context-length code is a
-// context-length failure. A failure that came without a status — an
-// error event in a stream — takes its class from its code, and the
-// server's own failure is the default.
+// The status gives the class, and the provider's own code and type refine it.
+// A quota code is a usage limit whatever the status, a billing code is an
+// inactive plan, and a context-length code is a context-length failure. A
+// failure that came without a status — an error event in a stream — takes its
+// class from its code. The server's own failure is the default.
 //
-// The table, one row at a time:
+// The table, one rule per line:
 //
-//	context-length codes            → context_length
-//	quota codes                     → usage_limit
-//	429                             → rate_limited
-//	402, or a billing code          → plan_inactive
-//	401, 403                        → auth_failed
-//	other 4xx                       → invalid_request
-//	5xx                             → server
+//   - context-length codes map to context_length.
+//   - quota codes map to usage_limit.
+//   - 429 maps to rate_limited.
+//   - 402, or a billing code, maps to plan_inactive.
+//   - 401 and 403 map to auth_failed.
+//   - other 4xx map to invalid_request.
+//   - 5xx map to server.
 func failureKind(status int, code, errType, message string, fallback poo.ProviderKind) poo.ProviderKind {
 	switch {
 	case isContextLength(code, message):
@@ -82,8 +81,8 @@ func failureKind(status int, code, errType, message string, fallback poo.Provide
 // isQuota reports whether a failure means the account is out of quota.
 //
 // A failure that names no code is read from its message, because a
-// server that says only "quota exceeded" means the same thing, and the
-// Codex endpoint words its plan limit as a usage limit or a balance.
+// server that says only "quota exceeded" means the same thing. The Codex
+// endpoint words its plan limit as a usage limit or a balance.
 func isQuota(code, message string) bool {
 	if code != "" {
 		lower := strings.ToLower(code)
@@ -255,8 +254,8 @@ func parseReset(raw string, now time.Time) (time.Time, bool) {
 
 // classifyStatus turns a non-200 response into a provider error.
 //
-// The status gives the class, the payload refines it, and the headers
-// say how long the client was asked to wait and when the limit resets.
+// The status gives the class, and the payload refines it. The headers say
+// how long the client was asked to wait, and when the limit resets.
 func classifyStatus(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	er := errorResponse{}
