@@ -1,11 +1,7 @@
 package poo_test
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
-	"io"
-	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -14,8 +10,8 @@ import (
 
 // These tests drive the provider-block seam through a session. The core
 // records the blocks a provider reports with the response that produced
-// them, and gives them back on the next request. The readers are root test
-// fakes with a block reporter, and the tests measure the recorded message
+// them, and gives them back on the next request. The scripted transport
+// reports the blocks a turn names, so a test measures the recorded message
 // and the next request.
 
 // reasoningBlock returns one opaque provider block, shaped like the
@@ -28,75 +24,17 @@ func reasoningBlock(encrypted string) poo.ProviderBlock {
 	}
 }
 
-// blockEvents returns the events of a completed response.
-func blockEvents(thinking, text string) []poo.StreamItem {
-	var events []poo.StreamItem
-	if thinking != "" {
-		events = append(events, poo.StreamItem{
-			Kind:  "delta",
-			Delta: &poo.Delta{Kind: "thinking", Text: thinking},
-		})
-	}
-	if text != "" {
-		events = append(events, poo.StreamItem{
-			Kind:  "delta",
-			Delta: &poo.Delta{Kind: "text", Text: text},
-		})
-	}
-	return append(events, poo.StreamItem{Kind: "finish", FinishReason: poo.FinishStop})
-}
-
-// providerBlockReader is a root fakeReader with the block reporter seam a
-// storeless provider implements. When err is set, the stream reports it
-// after its events, so a test can drive the partial path.
-type providerBlockReader struct {
-	fakeReader
-	blocks []poo.ProviderBlock
-	err    error
-	// failed reports whether the reader already gave its failure out.
-	failed bool
-}
-
-func (r *providerBlockReader) ReportProviderBlocks() []poo.ProviderBlock { return r.blocks }
-
-func (r *providerBlockReader) Next() (poo.StreamItem, error) {
-	ev, err := r.fakeReader.Next()
-	if r.err != nil && errors.Is(err, io.EOF) && !r.failed {
-		r.failed = true
-		return poo.StreamItem{}, r.err
-	}
-	return ev, err
-}
-
-// providerBlockTransport serves its readers in order and keeps the
-// requests, so a test can read what a later request carried.
-type providerBlockTransport struct {
-	mu       sync.Mutex
-	readers  []poo.StreamReader
-	served   int
-	requests []poo.ChatRequest
-}
-
-func (t *providerBlockTransport) Stream(ctx context.Context, req poo.ChatRequest) (poo.StreamReader, poo.Rendered, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.requests = append(t.requests, req)
-	if t.served >= len(t.readers) {
-		return nil, poo.Rendered{}, pootest.ErrScriptExhausted
-	}
-	reader := t.readers[t.served]
-	t.served++
-	return reader, poo.Rendered{API: poo.APIResponses}, nil
-}
-
-func (t *providerBlockTransport) Fork(context.Context, poo.Rendered, []poo.Message, int) (poo.StreamReader, error) {
-	return nil, errNoFork
-}
-
-func (t *providerBlockTransport) Requests() []poo.ChatRequest {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return append([]poo.ChatRequest(nil), t.requests...)
+// blocksSession builds a session whose script is the turns, and returns it
+// with the transport and the sink the record lands in.
+func blocksSession(t *testing.T, turns ...pootest.Turn) (*poo.Session, *pootest.Transport, *recordingSink) {
+	t.Helper()
+	tr := pootest.NewTransport(turns...)
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{}, sink)
+	// The model speaks the Responses API, so the core keeps the blocks
+	// that API produced instead of reading them as another provider's.
+	opts.Model.API = poo.APIResponses
+	return newTestSession(t, opts), tr, sink
 }
 
 // recordedAssistant returns the assistant message record the sink kept
@@ -113,18 +51,6 @@ func recordedAssistant(t *testing.T, sink *recordingSink) *poo.MessageRecord {
 		t.Fatalf("the record holds no assistant message; the records are %v", sink.Names())
 	}
 	return assistant
-}
-
-// assistantIn returns the assistant message a request carried.
-func assistantIn(t *testing.T, messages []poo.Message) poo.Message {
-	t.Helper()
-	for _, m := range messages {
-		if m.Role == poo.RoleAssistant {
-			return m
-		}
-	}
-	t.Fatal("the request carried no assistant message")
-	return poo.Message{}
 }
 
 // wantBlock fails unless the block holds want's payload.
@@ -148,6 +74,18 @@ func blockKinds(blocks []poo.ContentBlock) []poo.ContentKind {
 	return kinds
 }
 
+// assistantIn returns the assistant message a request carried.
+func assistantIn(t *testing.T, messages []poo.Message) poo.Message {
+	t.Helper()
+	for _, m := range messages {
+		if m.Role == poo.RoleAssistant {
+			return m
+		}
+	}
+	t.Fatal("the request carried no assistant message")
+	return poo.Message{}
+}
+
 // TestTheReportedReasoningRidesWithTheThinkingBlock covers the companion:
 // the first reported block rides beside the thinking text it belongs to.
 // The rest follow as blocks of their own ahead of the text. The next
@@ -155,17 +93,10 @@ func blockKinds(blocks []poo.ContentBlock) []poo.ContentKind {
 func TestTheReportedReasoningRidesWithTheThinkingBlock(t *testing.T) {
 	first := reasoningBlock("enc_one")
 	second := reasoningBlock("enc_two")
-	tr := &providerBlockTransport{readers: []poo.StreamReader{
-		&providerBlockReader{
-			fakeReader: fakeReader{events: blockEvents("weighing", "the answer")},
-			blocks:     []poo.ProviderBlock{first, second},
-		},
-		&providerBlockReader{fakeReader: fakeReader{events: blockEvents("", "the second answer")}},
-	}}
-	sink := &recordingSink{}
-	opts := testOptions(t, tr, &echoTool{}, sink)
-	opts.Model.API = poo.APIResponses
-	s := newTestSession(t, opts)
+	s, tr, sink := blocksSession(t,
+		pootest.Turn{Thinking: "weighing", Text: "the answer", Blocks: []poo.ProviderBlock{first, second}},
+		pootest.Turn{Text: "the second answer"},
+	)
 
 	runSession(t, s, "first")
 
@@ -208,17 +139,10 @@ func TestTheReportedReasoningRidesWithTheThinkingBlock(t *testing.T) {
 func TestTheReportedBlocksStandAloneWithoutThinking(t *testing.T) {
 	first := reasoningBlock("enc_one")
 	second := reasoningBlock("enc_two")
-	tr := &providerBlockTransport{readers: []poo.StreamReader{
-		&providerBlockReader{
-			fakeReader: fakeReader{events: blockEvents("", "the answer")},
-			blocks:     []poo.ProviderBlock{first, second},
-		},
-		&providerBlockReader{fakeReader: fakeReader{events: blockEvents("", "the second answer")}},
-	}}
-	sink := &recordingSink{}
-	opts := testOptions(t, tr, &echoTool{}, sink)
-	opts.Model.API = poo.APIResponses
-	s := newTestSession(t, opts)
+	s, tr, sink := blocksSession(t,
+		pootest.Turn{Text: "the answer", Blocks: []poo.ProviderBlock{first, second}},
+		pootest.Turn{Text: "the second answer"},
+	)
 
 	runSession(t, s, "first")
 
@@ -258,17 +182,10 @@ func TestTheReportedBlocksStandAloneWithoutThinking(t *testing.T) {
 // the thinking and the answer, with no lone block.
 func TestTheOneReportedBlockRidesOnlyOnTheThinking(t *testing.T) {
 	only := reasoningBlock("enc_one")
-	tr := &providerBlockTransport{readers: []poo.StreamReader{
-		&providerBlockReader{
-			fakeReader: fakeReader{events: blockEvents("weighing", "the answer")},
-			blocks:     []poo.ProviderBlock{only},
-		},
-		&providerBlockReader{fakeReader: fakeReader{events: blockEvents("", "the second answer")}},
-	}}
-	sink := &recordingSink{}
-	opts := testOptions(t, tr, &echoTool{}, sink)
-	opts.Model.API = poo.APIResponses
-	s := newTestSession(t, opts)
+	s, tr, sink := blocksSession(t,
+		pootest.Turn{Thinking: "weighing", Text: "the answer", Blocks: []poo.ProviderBlock{only}},
+		pootest.Turn{Text: "the second answer"},
+	)
 
 	runSession(t, s, "first")
 
@@ -296,7 +213,7 @@ func TestTheOneReportedBlockRidesOnlyOnTheThinking(t *testing.T) {
 	}
 	wantBlock(t, carried.Content[0].Provider, only)
 	if carried.Content[1].Kind != poo.ContentText || carried.Content[1].Text != "the answer" {
-		t.Errorf("the second request's second block is %q %q, want the answer's text", carried.Content[1].Kind, carried.Content[1].Text)
+		t.Errorf("the second request's second block is %q, want the answer's text", carried.Content[1].Kind)
 	}
 }
 
@@ -308,20 +225,14 @@ func TestTheOneReportedBlockRidesOnlyOnTheThinking(t *testing.T) {
 func TestTheReportedBlocksSurviveABrokenStream(t *testing.T) {
 	first := reasoningBlock("enc_one")
 	second := reasoningBlock("enc_two")
-	tr := &providerBlockTransport{readers: []poo.StreamReader{
-		&providerBlockReader{
-			fakeReader: fakeReader{events: []poo.StreamItem{
-				{Kind: "delta", Delta: &poo.Delta{Kind: "thinking", Text: "weighing"}},
-			}},
-			blocks: []poo.ProviderBlock{first, second},
-			err:    &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: "the stream broke"},
+	s, tr, sink := blocksSession(t,
+		pootest.Turn{
+			Thinking: "weighing",
+			Blocks:   []poo.ProviderBlock{first, second},
+			Fail:     &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: "the stream broke"},
 		},
-		&providerBlockReader{fakeReader: fakeReader{events: blockEvents("", "the second answer")}},
-	}}
-	sink := &recordingSink{}
-	opts := testOptions(t, tr, &echoTool{}, sink)
-	opts.Model.API = poo.APIResponses
-	s := newTestSession(t, opts)
+		pootest.Turn{Text: "the second answer"},
+	)
 
 	res := runSession(t, s, "first")
 	if res.Reason != poo.ReasonProviderError {
