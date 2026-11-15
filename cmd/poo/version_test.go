@@ -74,6 +74,13 @@ func TestTheVersionComesFromTheBuildInformation(t *testing.T) {
 			display: "dev+0123456-dirty",
 		},
 		{
+			name:    "a build that names no version",
+			info:    &debug.BuildInfo{Main: debug.Module{Version: ""}, GoVersion: "go1.26.8"},
+			ok:      true,
+			want:    versionInfo{Version: "dev", GoVersion: "go1.26.8"},
+			display: "dev",
+		},
+		{
 			name:    "a build with no information",
 			info:    nil,
 			ok:      false,

@@ -62,8 +62,8 @@ func runFlagSpecs() []clicontract.Flag {
 		clicontract.Flag{Name: "log", Kind: clicontract.String, Usage: "The session log path"},
 	)
 	specs = append(specs, toolFlagSpecs()...)
+	specs = append(specs, projectPromptFlagSpecs()...)
 	return append(specs,
-		clicontract.Flag{Name: "project-prompt", Kind: clicontract.Bool, Usage: "Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt"},
 		clicontract.Flag{Name: "timeout", Kind: clicontract.Duration, Usage: "The wall-clock limit for the run, e.g. 5m"},
 		clicontract.Flag{Name: "no-wait-jobs", Kind: clicontract.Bool, Usage: "Exit at the first settle; the running jobs stop through the session's close"},
 	)

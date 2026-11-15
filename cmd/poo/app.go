@@ -148,9 +148,7 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				Name:  "prompt",
 				Short: "Print the prompt a session would send",
 				Long:  promptLong,
-				Flags: []clicontract.Flag{
-					{Name: "project-prompt", Kind: clicontract.Bool, Usage: "Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt"},
-				},
+				Flags: projectPromptFlagSpecs(),
 				Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 					return handlePrompt(inv, stdout, cmdStderr), nil
 				},
@@ -216,6 +214,15 @@ func sessionsPruneCommand(stdout io.Writer) *clicontract.Command {
 // the shared flags the child reads, then the flags it parses.
 func serverFlagSpecs() []clicontract.Flag {
 	return append(sharedFlagSpecs(), serveFlagSpecs()...)
+}
+
+// projectPromptFlagSpecs declares the flag that asks for the project's
+// instructions in the prompt. The run and the prompt command both take it,
+// and they are declared here once.
+func projectPromptFlagSpecs() []clicontract.Flag {
+	return []clicontract.Flag{
+		{Name: "project-prompt", Kind: clicontract.Bool, Usage: "Include the working directory's AGENTS.md (or CLAUDE.md) in the prompt"},
+	}
 }
 
 // serveFlagSpecs declares the flags serve and repl share: the endpoint and
