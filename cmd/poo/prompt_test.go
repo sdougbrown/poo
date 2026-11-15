@@ -29,9 +29,9 @@ func testTools() []poo.ToolSpec {
 
 // sessionPrompt runs one turn of a session assembled the way the command
 // assembles it, and returns the system prompt the request carried.
-func sessionPrompt(t *testing.T, modelID, toolsMode, project string) string {
+func sessionPrompt(t *testing.T, modelID, toolsMode string) string {
 	t.Helper()
-	return sessionPromptWith(t, modelID, testTools(), toolsMode, project)
+	return sessionPromptWith(t, modelID, testTools(), toolsMode)
 }
 
 // sessionPromptWith is sessionPrompt with the tool specs the text mode
@@ -40,7 +40,7 @@ func sessionPrompt(t *testing.T, modelID, toolsMode, project string) string {
 // The profile's own section is applied the way the build applies it:
 // the command's sessions run under the code profile, and the profile's
 // prose comes with it.
-func sessionPromptWith(t *testing.T, modelID string, toolSpecs []poo.ToolSpec, toolsMode, project string) string {
+func sessionPromptWith(t *testing.T, modelID string, toolSpecs []poo.ToolSpec, toolsMode string) string {
 	t.Helper()
 	profilePrompt := code.Profile().Prompt
 	tr := pootest.NewTransport(pootest.Turn{Text: "done"})
@@ -54,7 +54,7 @@ func sessionPromptWith(t *testing.T, modelID string, toolSpecs []poo.ToolSpec, t
 		Env:        os.Environ(),
 		ToolsMode:  toolsMode,
 	}, poo.WithPrompt(func(b *prompt.Builder) { b.Set(prompt.ProfileSection, profilePrompt) }),
-		poo.WithPrompt(systemPrompt(modelID, toolSpecs, toolsMode, project)))
+		poo.WithPrompt(systemPrompt(modelID, toolSpecs, toolsMode)))
 	if err != nil {
 		t.Fatalf("building the session: %v", err)
 	}
@@ -84,7 +84,7 @@ func sessionPromptWith(t *testing.T, modelID string, toolSpecs []poo.ToolSpec, t
 // run sends: the core's base, the bash and read sections, the core's jobs
 // section, and the command's environment.
 func TestTheNativeModePromptIsTheContract(t *testing.T) {
-	prompt := sessionPrompt(t, "gemma4", "native", "")
+	prompt := sessionPrompt(t, "gemma4", "native")
 
 	for _, want := range []string{
 		"Keep going until the task is done.",
@@ -129,7 +129,7 @@ func TestTheNativeModePromptIsTheContract(t *testing.T) {
 // TestTheTextModePromptIsTheContract covers the same prompt in the text
 // mode, which names the tools and the call format.
 func TestTheTextModePromptIsTheContract(t *testing.T) {
-	prompt := sessionPrompt(t, "gemma4", "text", "")
+	prompt := sessionPrompt(t, "gemma4", "text")
 
 	for _, want := range []string{
 		"Bash:",
@@ -159,7 +159,7 @@ func TestThePromptIsTheSameEveryTime(t *testing.T) {
 		Model:      poo.ModelInfo{ModelID: "gemma4", ContextLimit: 32768},
 		WorkingDir: t.TempDir(),
 		Env:        os.Environ(),
-	}, poo.WithPrompt(systemPrompt("gemma4", testTools(), "native", "")))
+	}, poo.WithPrompt(systemPrompt("gemma4", testTools(), "native")))
 	if err != nil {
 		t.Fatalf("building the session: %v", err)
 	}
@@ -195,35 +195,4 @@ func systemText(t *testing.T, req poo.ChatRequest) string {
 	}
 	t.Fatal("the request carries no system prompt")
 	return ""
-}
-
-// TestTheProjectSectionRendersAfterTheEnvironment covers the order of
-// the sections: the project's instructions come after the environment.
-func TestTheProjectSectionRendersAfterTheEnvironment(t *testing.T) {
-	prompt := sessionPrompt(t, "gemma4", "native", "the project's instructions")
-	environment := strings.Index(prompt, "You are running as the model gemma4.")
-	project := strings.Index(prompt, "the project's instructions")
-	if environment < 0 || project < 0 {
-		t.Fatalf("the prompt is missing a section:\n%s", prompt)
-	}
-	if project < environment {
-		t.Errorf("the project renders before the environment:\n%s", prompt)
-	}
-}
-
-// TestTheProjectSectionIsNotThereWithoutAFile covers the rule that a
-// directory with no project file holds no project section.
-func TestTheProjectSectionIsNotThereWithoutAFile(t *testing.T) {
-	if prompt := sessionPrompt(t, "gemma4", "native", ""); strings.Contains(prompt, "the project's instructions") {
-		t.Errorf("the prompt holds a project section:\n%s", prompt)
-	}
-}
-
-// TestTheProjectSectionHoldsTheInstructions covers the rule that the
-// project's instructions are the section's text.
-func TestTheProjectSectionHoldsTheInstructions(t *testing.T) {
-	prompt := sessionPrompt(t, "gemma4", "native", "the project's instructions")
-	if !strings.Contains(prompt, "the project's instructions") {
-		t.Errorf("the prompt holds no project instructions: %q", prompt)
-	}
 }

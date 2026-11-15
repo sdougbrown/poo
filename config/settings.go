@@ -400,6 +400,11 @@ type Session struct {
 	Mode *string `json:"mode,omitempty"`
 	// Dir is the directory the session files live in.
 	Dir *string `json:"dir,omitempty"`
+	// ProjectPrompt includes the working directory's project
+	// instructions — AGENTS.md, or CLAUDE.md when there is no
+	// AGENTS.md — in the prompt. The loader reads the working
+	// directory only; it never walks up to a parent.
+	ProjectPrompt *bool `json:"project_prompt,omitempty"`
 	// Retention says which sessions a prune deletes.
 	Retention Retention `json:"retention,omitempty"`
 }

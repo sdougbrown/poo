@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -16,6 +17,7 @@ import (
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/perm"
+	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/profile"
 	"github.com/sdougbrown/poo/profile/base"
 	"github.com/sdougbrown/poo/profile/code"
@@ -485,6 +487,259 @@ func TestTheSettingsPromptIsTheSessionPrompt(t *testing.T) {
 	text := poo.PromptBuilder(runtime.Options).Render()
 	if !strings.Contains(text, "the house style") {
 		t.Errorf("the prompt is %q, want the settings' section", text)
+	}
+}
+
+// TestTheProjectPromptSettingFillsTheProjectSection covers the
+// setting: the instructions of the directory a session works in fill
+// the prompt's project section, the way the --project-prompt flag does,
+// and a directory with neither file leaves the section empty.
+func TestTheProjectPromptSettingFillsTheProjectSection(t *testing.T) {
+	built := t.TempDir()
+	asked := t.TempDir()
+	if err := os.WriteFile(filepath.Join(asked, "AGENTS.md"), []byte("run the tests before you stop"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	// The runtime is built somewhere other than the directory the
+	// session works in: a session over the wire names its own.
+	runtime := buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	instructions, err := runtime.ProjectInstructions(asked)
+	if err != nil {
+		t.Fatalf("reading the instructions: %v", err)
+	}
+	if instructions == nil {
+		t.Fatal("the setting asked for no instructions")
+	}
+	builder := poo.PromptBuilder(runtime.Options)
+	instructions(builder)
+	if text := builder.Render(); !strings.Contains(text, "run the tests before you stop") {
+		t.Errorf("the prompt holds no project instructions: %q", text)
+	}
+
+	// The same directory with the setting off holds nothing: the
+	// instructions are opt-in.
+	settings, err = config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime = buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	if instructions, err := runtime.ProjectInstructions(asked); err != nil || instructions != nil {
+		t.Errorf("the settings that asked for nothing handed over a mutation (%v)", err)
+	}
+
+	// The flag asks for them without the setting.
+	runtime = buildIn(t, settings, config.Overrides{ProjectPrompt: true}, built, theExecutors())
+	if instructions, err := runtime.ProjectInstructions(asked); err != nil || instructions == nil {
+		t.Errorf("the flag asked for no instructions (%v)", err)
+	}
+
+	// A directory with neither file is not an error: the section is
+	// only ever filled from what is there.
+	empty := t.TempDir()
+	settings, err = config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime = buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	if instructions, err := runtime.ProjectInstructions(empty); err != nil || instructions != nil {
+		t.Errorf("an empty directory handed over a mutation (%v)", err)
+	}
+}
+
+// TestASessionReadsTheInstructionsOfItsOwnDirectory covers a session
+// over the wire: it works in the directory its header names, which need
+// not be the one the process was built in, and the prompt holds that
+// directory's instructions.
+func TestASessionReadsTheInstructionsOfItsOwnDirectory(t *testing.T) {
+	built := t.TempDir()
+	asked := t.TempDir()
+	for dir, text := range map[string]string{built: "the process's instructions", asked: "the session's instructions"} {
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(text), 0o644); err != nil {
+			t.Fatalf("writing the file: %v", err)
+		}
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	store, err := runtime.OpenStore("ephemeral", "")
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer store.Close()
+	transport := pootest.NewTransport(pootest.Turn{Text: "done"})
+	runtime.Options.Transport = transport
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID:  "s1",
+			Mode:       "ephemeral",
+			CreatedAt:  "2026-10-22T12:00:00Z",
+			WorkingDir: asked,
+
+			Profile: "code", Model: poo.SessionModel{ModelID: "test-model"},
+			ContextLimit: 32768},
+	}
+	sess, err := runtime.CreateSession(context.Background(), store, created)
+	if err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	defer sess.Close()
+
+	ctx := context.Background()
+	runID, err := sess.Prompt(ctx, "do the thing")
+	if err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := sess.WaitRun(ctx, runID); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	requests := transport.Requests()
+	if len(requests) == 0 {
+		t.Fatal("the endpoint got no request")
+	}
+	system := ""
+	for _, message := range requests[0].Messages {
+		if message.Role == poo.RoleSystem {
+			system = message.Text()
+		}
+	}
+	if !strings.Contains(system, "the session's instructions") {
+		t.Errorf("the prompt holds no instructions of the session's own directory")
+	}
+	if strings.Contains(system, "the process's instructions") {
+		t.Error("the prompt holds the instructions of the directory the process was built in")
+	}
+}
+
+// TestSessionsMadeAtOnceKeepTheirOwnInstructions covers what a created
+// session adds to its prompt: the runtime's slice is shared by every
+// session the process makes, and each session's instructions are its
+// own directory's.
+func TestSessionsMadeAtOnceKeepTheirOwnInstructions(t *testing.T) {
+	built := t.TempDir()
+	dirs := []string{t.TempDir(), t.TempDir()}
+	for i, dir := range dirs {
+		text := fmt.Sprintf("the instructions of directory %d", i)
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(text), 0o644); err != nil {
+			t.Fatalf("writing the file: %v", err)
+		}
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	transport := pootest.NewTransport(pootest.Turn{Text: "done"}, pootest.Turn{Text: "done"})
+	runtime.Options.Transport = transport
+
+	sessions := make([]*poo.Session, len(dirs))
+	errs := make([]error, len(dirs))
+	var creating sync.WaitGroup
+	for i, dir := range dirs {
+		creating.Add(1)
+		go func(i int, dir string) {
+			defer creating.Done()
+			store, err := runtime.OpenStore("ephemeral", "")
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer store.Close()
+			created := &poo.SessionCreatedRecord{
+				RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+					SessionID: fmt.Sprintf("s%d", i), Mode: "ephemeral", CreatedAt: "2026-10-22T12:00:00Z",
+					WorkingDir: dir, Profile: "code", Model: poo.SessionModel{ModelID: "test-model"},
+					ContextLimit: 32768},
+			}
+			sessions[i], errs[i] = runtime.CreateSession(context.Background(), store, created)
+		}(i, dir)
+	}
+	creating.Wait()
+
+	ctx := context.Background()
+	for i, sess := range sessions {
+		if errs[i] != nil {
+			t.Fatalf("creating session %d: %v", i, errs[i])
+		}
+		runID, err := sess.Prompt(ctx, "do the thing")
+		if err != nil {
+			t.Fatalf("starting run %d: %v", i, err)
+		}
+		if _, err := sess.WaitRun(ctx, runID); err != nil {
+			t.Fatalf("waiting for run %d: %v", i, err)
+		}
+		sess.Close()
+	}
+
+	requests := transport.Requests()
+	if len(requests) != len(dirs) {
+		t.Fatalf("the endpoint got %d requests, want %d", len(requests), len(dirs))
+	}
+	for i, request := range requests {
+		system := ""
+		for _, message := range request.Messages {
+			if message.Role == poo.RoleSystem {
+				system = message.Text()
+			}
+		}
+		want := fmt.Sprintf("the instructions of directory %d", i)
+		if !strings.Contains(system, want) {
+			t.Errorf("session %d's prompt holds no %q", i, want)
+		}
+		for j := range dirs {
+			if j == i {
+				continue
+			}
+			if other := fmt.Sprintf("the instructions of directory %d", j); strings.Contains(system, other) {
+				t.Errorf("session %d's prompt holds %q", i, other)
+			}
+		}
+	}
+}
+
+// TestACreatedSessionRefusesInstructionsItCannotRead covers the
+// failure a session created over the wire meets: the directory it names
+// holds an AGENTS.md that cannot be read, and the session is not built
+// rather than built without the instructions it asked for.
+func TestACreatedSessionRefusesInstructionsItCannotRead(t *testing.T) {
+	built := t.TempDir()
+	asked := t.TempDir()
+	if err := os.Mkdir(filepath.Join(asked, "AGENTS.md"), 0o755); err != nil {
+		t.Fatalf("making the directory: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	store, err := runtime.OpenStore("ephemeral", "")
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer store.Close()
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID: "s1", Mode: "ephemeral", CreatedAt: "2026-10-22T12:00:00Z", WorkingDir: asked,
+			Profile: "code", Model: poo.SessionModel{ModelID: "test-model"}, ContextLimit: 32768},
+	}
+	sess, err := runtime.CreateSession(context.Background(), store, created)
+	if err == nil {
+		_ = sess.Close()
+		t.Fatal("the session was built without the instructions it asked for")
+	}
+	if sess != nil {
+		t.Error("the failed creation returned a session")
+	}
+	if field, _ := config.FieldOf(err); field != "session.project_prompt" {
+		t.Errorf("the field is %q, want session.project_prompt", field)
+	}
+	if !strings.Contains(err.Error(), "AGENTS.md") {
+		t.Errorf("the error %q does not name the file", err)
 	}
 }
 
