@@ -46,6 +46,8 @@ type layout struct {
 	// preview is how many rows a live stream has painted under last,
 	// the rows the next delta erases and paints again.
 	preview int
+	// previewRows holds the latest rendering, including a clipped head.
+	previewRows []string
 	// active says the region is set and the footer is reserved.
 	active bool
 }
@@ -234,6 +236,12 @@ func (l *layout) scrollSeq(n int) string {
 func (l *layout) paintPreview(rows []string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.clearPreviewLocked()
+	return l.paintPreviewLocked(rows)
+}
+
+func (l *layout) paintPreviewLocked(rows []string) int {
+	l.previewRows = rows
 	if !l.active || len(rows) == 0 {
 		return 0
 	}
@@ -283,6 +291,11 @@ func (l *layout) hint(text string) {
 func (l *layout) clearPreview() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.clearPreviewLocked()
+}
+
+func (l *layout) clearPreviewLocked() {
+	l.previewRows = nil
 	if !l.active || l.preview <= 0 {
 		return
 	}
@@ -310,6 +323,23 @@ func (l *layout) sealPreview() {
 		l.last = l.regionBottom()
 	}
 	l.preview = 0
+	l.previewRows = nil
+}
+
+// commitPreview seals a fitting rendering or writes the full clipped body.
+// Geometry and the decision stay under the same lock as footer changes.
+func (l *layout) commitPreview(body string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	rows := textRows(body, l.width)
+	if len(rows) > l.preview {
+		l.clearPreviewLocked()
+		l.emit(seqSaveCursor + l.rowsSeq(rows) + seqRestoreCursor)
+	} else {
+		l.last += l.preview
+		l.preview = 0
+		l.previewRows = nil
+	}
 }
 
 // ensure makes the footer the given number of rows. The caller keeps one
@@ -330,12 +360,12 @@ func (l *layout) ensure(footer int) bool {
 	if footer == l.footer {
 		return false
 	}
-	// The footer's growth or shrink takes rows the preview stood on;
-	// the next paint lays the preview out again.
-	l.preview = 0
+	rows := l.previewRows
+	l.clearPreviewLocked()
 	delta := footer - l.footer
 	var b strings.Builder
 	b.WriteString(seqSaveCursor)
+	b.WriteString(l.footerSeq())
 	if delta > 0 {
 		// Only committed rows scroll. A pending preview row that left the
 		// region is written again when the stream repaints, and the
@@ -365,6 +395,7 @@ func (l *layout) ensure(footer int) bool {
 	}
 	l.active = true
 	l.emit(b.String())
+	l.paintPreviewLocked(rows)
 	return true
 }
 
@@ -392,6 +423,7 @@ func (l *layout) clearBelowLast() {
 	}
 	b.WriteString(seqRestoreCursor)
 	l.preview = 0
+	l.previewRows = nil
 	l.emit(b.String())
 }
 
@@ -444,6 +476,7 @@ func (l *layout) resize() bool {
 		l.last = l.regionBottom()
 	}
 	l.preview = 0
+	l.previewRows = nil
 	if l.active {
 		var b strings.Builder
 		b.WriteString(l.regionSeq())

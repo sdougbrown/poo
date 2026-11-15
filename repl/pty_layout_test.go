@@ -4,6 +4,7 @@ package repl
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -217,6 +218,54 @@ func TestTheDraftSurvivesTheStreamingAndSettlesInTheFooter(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}
+
+func TestHeldReplySurvivesFirstDraftKeyAndBackspace(t *testing.T) {
+	for _, backspace := range []bool{false, true} {
+		t.Run(fmt.Sprint("backspace=", backspace), func(t *testing.T) {
+			finish := make(chan struct{})
+			server := &fakeServer{t: t}
+			server.script = func(s *fakeServer) {
+				s.event("message.delta", map[string]any{"run_id": "r1", "message_id": "m1", "kind": "text", "text": "held reply"})
+				<-finish
+				s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+			}
+			term, code := startTerminalRepl(t, server)
+			term.press("work\n")
+			waitScreen(t, term, "held reply")
+			term.press("x")
+			waitScreen(t, term, "💩❯ x")
+			if backspace {
+				term.press("\x7f")
+				deadline := time.Now().Add(10 * time.Second)
+				for strings.Contains(term.screen(), "💩❯ x") && time.Now().Before(deadline) {
+					time.Sleep(5 * time.Millisecond)
+				}
+				if strings.Contains(term.screen(), "💩❯ x") {
+					t.Fatal("backspace did not clear the draft")
+				}
+			}
+			close(finish)
+			waitScreen(t, term, "✓ end_turn")
+			if n := strings.Count(term.screen(), "held reply"); n != 1 {
+				t.Fatalf("held reply appears %d times after settle:\n%s", n, indexedRows(term))
+			}
+			if !backspace {
+				waitScreen(t, term, "💩❯ x")
+				term.press("\x7f")
+			}
+			waitBottom(t, term)
+			term.press("/quit\n")
+			select {
+			case got := <-code:
+				if got != 0 {
+					t.Fatalf("repl exited %d", got)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("repl did not quit")
+			}
+		})
 	}
 }
 

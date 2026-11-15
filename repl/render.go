@@ -85,10 +85,6 @@ type streamBlock struct {
 	// streaming. The rows already painted wrap at the old width, so
 	// painting stops until the flush renders them again.
 	stalled bool
-	// previewRows is how many rows the uncommitted preview fills
-	// directly above the prompt's row: the rows the next delta erases
-	// before painting again.
-	previewRows int
 	// hint says the writing hint stands on the terminal, where the
 	// text will.
 	hint bool
@@ -202,7 +198,7 @@ func (r *renderer) paintPreviewBody(body string) {
 	if len(rows) == 0 {
 		return
 	}
-	r.block.previewRows = r.layout.paintPreview(rows)
+	r.layout.paintPreview(rows)
 }
 
 // terminalNewlines converts bare LF to CRLF without duplicating carriage returns.
@@ -422,15 +418,14 @@ func (r *renderer) openSegment(kind string) {
 func (r *renderer) switchKind(kind string) {
 	// The old segment's last tokens reach the screen before it seals.
 	r.paintPending()
-	if r.block.previewRows > 0 {
-		r.layout.clearPreview()
-	}
 	if body := r.chunkBody(r.live.kind, r.live.source); body != "" {
 		r.transcript.WriteString(body)
-		r.layout.write(body)
+		r.layout.commitPreview(body)
+	} else {
+		r.layout.clearPreview()
 	}
-	r.block.previewRows = 0
 	r.openSegment(kind)
+
 	if body := r.chunkBody(r.live.kind, r.live.source); body != "" {
 		r.paintPreviewBody(body)
 	}
@@ -442,10 +437,7 @@ func (r *renderer) switchKind(kind string) {
 // erased and painted on the next delta.
 func (r *renderer) paintStream() {
 	done, rest := splitStream(r.live.source)
-	if r.block.previewRows > 0 {
-		r.layout.clearPreview()
-		r.block.previewRows = 0
-	}
+	r.layout.clearPreview()
 	if done != "" {
 		if body := r.chunkBody(r.live.kind, done); body != "" {
 			r.transcript.WriteString(body)
@@ -541,30 +533,12 @@ func (r *renderer) finish() {
 			r.transcript.WriteString(body)
 			r.layout.write(body)
 		}
-		r.block.previewRows = 0
 		r.resetStream()
 		return
 	}
 	body := r.chunkBody(r.live.kind, r.live.source)
-	if body == "" {
-		r.layout.sealPreview()
-		r.block.previewRows = 0
-		r.resetStream()
-		return
-	}
 	r.transcript.WriteString(body)
-	if len(textRows(body, r.width)) > r.block.previewRows {
-		// The preview showed only the tail the region had room for. Take
-		// it back and write the final body once, so the rows the preview
-		// cannot show reach the history with it.
-		r.layout.clearPreview()
-		r.layout.write(body)
-	} else {
-		// The preview already shows this body: sealing it in the
-		// transcript and on the screen is all that is left.
-		r.layout.sealPreview()
-	}
-	r.block.previewRows = 0
+	r.layout.commitPreview(body)
 	r.resetStream()
 }
 
