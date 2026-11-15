@@ -120,8 +120,9 @@ func writeVersion(out io.Writer, info versionInfo, asJSON bool) error {
 
 // handleVersion executes `poo version`: the build information the binary
 // carries, for a person or for a script.
-func handleVersion(inv clicontract.Invocation, stdout io.Writer) exit {
+func handleVersion(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	if err := writeVersion(stdout, buildVersion(), inv.Bools["json"]); err != nil {
+		fmt.Fprintf(stderr, "poo version: %v\n", err)
 		return exit{operationalExitCode}
 	}
 	return exit{}

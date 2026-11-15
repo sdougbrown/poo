@@ -164,8 +164,8 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				Flags: []clicontract.Flag{
 					{Name: "json", Kind: clicontract.Bool, Usage: "Print the build information as JSON"},
 				},
-				Handle: func(_ context.Context, inv clicontract.Invocation, _ io.Writer) (any, error) {
-					return handleVersion(inv, stdout), nil
+				Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
+					return handleVersion(inv, stdout, cmdStderr), nil
 				},
 			},
 		},

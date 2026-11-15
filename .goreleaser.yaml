@@ -10,11 +10,11 @@ builds:
     env:
       - CGO_ENABLED=0
     # The binary answers --version from its own build information: the
-    # module version, or the version control stamp of the checkout it was
-    # built from. Nothing here stamps a version, so nothing here can go
-    # stale. The stamp has to be in the binary, so the build keeps the
-    # checkout's version control information: that is where the tag and
-    # the revision come from.
+    # module version the toolchain resolves from the checkout's tag, plus
+    # the stamped revision, time and modified flag. Nothing here stamps a
+    # version string, so nothing here can go stale. Both readings need the
+    # checkout's version control information in the binary: a build with
+    # -buildvcs=false reports "(devel)" and carries no revision.
     flags:
       - -buildvcs=true
     ldflags:

@@ -3,9 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	clicontract "github.com/sdougbrown/cli-contract"
 )
 
 // The version is answered from the binary's own build information, so
@@ -206,5 +210,28 @@ func TestTheVersionTextNamesTheBuild(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// failingWriter refuses every write, the way a closed stdout or a full
+// disk does.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+// TestTheVersionCommandReportsAWriteFailure covers the failure a script
+// hits quietly otherwise: the command exits 1 and says why on stderr.
+func TestTheVersionCommandReportsAWriteFailure(t *testing.T) {
+	var stderr bytes.Buffer
+	inv, err := clicontract.Parse(pooApp(io.Discard), []string{"version"})
+	if err != nil {
+		t.Fatalf("parsing the version command: %v", err)
+	}
+	got := handleVersion(inv, failingWriter{}, &stderr)
+	if got.code != operationalExitCode {
+		t.Errorf("the exit code is %d, want %d", got.code, operationalExitCode)
+	}
+	if !strings.Contains(stderr.String(), "poo version: disk full") {
+		t.Errorf("stderr is %q, want it to name the failure", stderr.String())
 	}
 }
