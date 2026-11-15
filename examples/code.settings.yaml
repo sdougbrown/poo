@@ -195,3 +195,18 @@ session:
   retention:
     max_age_days: 30
     max_sessions: 500
+  # The prompt carries a layer for the user's own instructions and one for
+  # the project's, and both are off until asked for. Naming a file asks for
+  # the user's; `user_prompt: true` takes the binary's default path
+  # instead, which is AGENTS.md in the user's config directory. The
+  # project's come from the directory the session works in, and the loader
+  # never walks up to a parent. A layer that is on and holds no
+  # instructions adds no section.
+  #
+  # An operator whose rules already live somewhere else — the file their
+  # other harnesses read — names that file here, so the rules stay one copy
+  # instead of one per tool:
+  #
+  #     user_prompt: true
+  #     user_prompt_file: "~/.config/poo/AGENTS.md"
+  #     project_prompt: true
