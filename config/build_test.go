@@ -702,6 +702,47 @@ func TestSessionsMadeAtOnceKeepTheirOwnInstructions(t *testing.T) {
 	}
 }
 
+// TestACreatedSessionRefusesInstructionsItCannotRead covers the
+// failure a session created over the wire meets: the directory it names
+// holds an AGENTS.md that cannot be read, and the session is not built
+// rather than built without the instructions it asked for.
+func TestACreatedSessionRefusesInstructionsItCannotRead(t *testing.T) {
+	built := t.TempDir()
+	asked := t.TempDir()
+	if err := os.Mkdir(filepath.Join(asked, "AGENTS.md"), 0o755); err != nil {
+		t.Fatalf("making the directory: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  project_prompt: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, built, theExecutors())
+	store, err := runtime.OpenStore("ephemeral", "")
+	if err != nil {
+		t.Fatalf("opening the store: %v", err)
+	}
+	defer store.Close()
+	created := &poo.SessionCreatedRecord{
+		RecordMeta: poo.NewRecordMeta("session.created"), SessionMetadata: poo.SessionMetadata{Format: poo.FormatVersion,
+			SessionID: "s1", Mode: "ephemeral", CreatedAt: "2026-10-22T12:00:00Z", WorkingDir: asked,
+			Profile: "code", Model: poo.SessionModel{ModelID: "test-model"}, ContextLimit: 32768},
+	}
+	sess, err := runtime.CreateSession(context.Background(), store, created)
+	if err == nil {
+		_ = sess.Close()
+		t.Fatal("the session was built without the instructions it asked for")
+	}
+	if sess != nil {
+		t.Error("the failed creation returned a session")
+	}
+	if field, _ := config.FieldOf(err); field != "session.project_prompt" {
+		t.Errorf("the field is %q, want session.project_prompt", field)
+	}
+	if !strings.Contains(err.Error(), "AGENTS.md") {
+		t.Errorf("the error %q does not name the file", err)
+	}
+}
+
 // TestTheBuildMakesTheStore covers the session's home: the store is
 // the settings' directory, and the ephemeral mode has none.
 func TestTheBuildMakesTheStore(t *testing.T) {
