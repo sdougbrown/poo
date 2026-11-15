@@ -36,7 +36,11 @@ type fakeServer struct {
 	cancels []string
 	// refusePrompt makes run/prompt refuse, for the refusal tests.
 	refusePrompt bool
-	askSummary   string
+	// messages are the run/message texts the client sent, in order.
+	messages []string
+	// refuseMessage makes run/message refuse, for the refusal tests.
+	refuseMessage bool
+	askSummary    string
 	// holdRun keeps the run open until the client cancels it, so a
 	// test has a run to stop.
 	holdRun bool
@@ -228,6 +232,18 @@ func (s *fakeServer) line(line []byte) {
 		}
 		s.reply(req.ID, map[string]any{"run_id": "r1"})
 		go script(s)
+	case protocol.MethodRunMessage:
+		var params protocol.MessageParams
+		json.Unmarshal(req.Params, &params)
+		s.mu.Lock()
+		s.messages = append(s.messages, params.Text)
+		refuse := s.refuseMessage
+		s.mu.Unlock()
+		if refuse {
+			s.fail(req.ID, "not_running", "the session is not running")
+			return
+		}
+		s.reply(req.ID, map[string]any{"input_id": "i1"})
 	case protocol.MethodRunCancel:
 		var params protocol.CancelParams
 		json.Unmarshal(req.Params, &params)
@@ -384,6 +400,51 @@ func (s *fakeServer) run() {
 			"usage": map[string]any{"input_tokens": 20300, "output_tokens": 1100},
 		},
 	})
+}
+
+// quietRun plays a run with no permission ask: a reply that streams, a
+// tool call and its result, the two requests' accounting, and a settle
+// the test can hold back. The hold keeps the run working, so a line
+// the test types lands while the run is still active. The tool's
+// result is what a non-streaming test waits for: it renders at once,
+// where the reply waits for the flush the settle brings.
+func quietRun(hold chan struct{}) func(*fakeServer) {
+	return func(s *fakeServer) {
+		s.event("turn.started", map[string]any{"run_id": "r1", "turn": 1})
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "Hello, world.",
+		})
+		s.event("tool.call", map[string]any{
+			"run_id": "r1", "handle": "h1", "tool": "grep", "summary": "needle",
+		})
+		s.event("tool.result", map[string]any{
+			"run_id": "r1", "handle": "h1", "tool": "grep", "outcome": "ok",
+			"text": "a find\n",
+		})
+		s.event("usage", map[string]any{
+			"run_id": "r1", "turn": 1, "request": 1,
+			"input_tokens": 8000, "output_tokens": 500,
+		})
+		s.event("turn.ended", map[string]any{"run_id": "r1", "turn": 1})
+		s.event("turn.started", map[string]any{"run_id": "r1", "turn": 2})
+		if hold != nil {
+			select {
+			case <-hold:
+			case <-time.After(10 * time.Second):
+				return
+			}
+		}
+		s.event("usage", map[string]any{
+			"run_id": "r1", "turn": 2, "request": 2,
+			"input_tokens": 12300, "output_tokens": 600,
+		})
+		s.event("run.settled", map[string]any{
+			"run_id": "r1", "reason": "end_turn", "turns": 2,
+			"detail": map[string]any{
+				"usage": map[string]any{"input_tokens": 20300, "output_tokens": 1100},
+			},
+		})
+	}
 }
 
 // cancelCount is how many cancels the client has sent.

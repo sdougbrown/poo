@@ -385,6 +385,13 @@ func (r *renderer) userPrompt(text string) {
 	r.write(ansiBold + "❯ " + text + ansiReset + "\n")
 }
 
+// steerPrompt echoes a line the person sent to the run that is
+// working. The mark says the line rode the run instead of opening one:
+// the model reads it at the run's next turn end.
+func (r *renderer) steerPrompt(text string) {
+	r.write(ansiBold + "» " + text + ansiReset + "\n")
+}
+
 // markdown renders one markdown source for the terminal.
 func (r *renderer) markdown(text string) string {
 	if r.tr == nil {

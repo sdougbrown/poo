@@ -140,6 +140,11 @@ type machine struct {
 	// not say what to stop.
 	runIDMu sync.Mutex
 	runID   string
+	// steers holds the lines this run accepted, by the input id the
+	// wire named: the settle reports undelivered inputs by id, and
+	// the transcript says what the person wrote. The map lives with
+	// the run: endRun drops it with the rest of the run's state.
+	steers map[string]string
 	// lastMatches holds the models the last listing offered, in the
 	// order it numbered them: a bare number picks out of it. It is the
 	// only state a pick keeps, and a listing replaces it whole.
@@ -321,14 +326,44 @@ func (m *machine) line(res lineResult, input input) (int, bool) {
 		return 0, false
 	case m.activeRun() != "":
 		// A run takes one prompt at a time, so a line submitted while
-		// it works is not the next one — but it is not dropped in
-		// silence either: the transcript says what was typed and which
-		// key stops the turn.
-		m.r.notice("the run is working — Esc stops it; %q was not sent", text)
-		return 0, false
+		// it works is not the next one. A line that is not a command
+		// is a steer: it rides the active run and reaches the model at
+		// the run's next turn end. A command still waits — the run is
+		// working, and the transcript says so, the way it always has.
+		if name, _ := commandName(text); name != "" {
+			m.r.notice("the run is working — Esc stops it; %q was not sent", text)
+			return 0, false
+		}
+		return m.steer(text, input)
 	default:
 		return m.command(text, input)
 	}
+}
+
+// steer sends a line to the run that is working: run/message, mode
+// steer. The core queues it, and the run's next turn end delivers it
+// to the model.
+//
+// The line's echo leads with a mark the prompt's does not carry, so
+// the person can tell a steer from a prompt at a glance. A refusal
+// keeps the session: the run that could not take the message goes on,
+// and what was typed is said to have not gone.
+func (m *machine) steer(text string, input input) (int, bool) {
+	m.r.steerPrompt(text)
+	var res protocol.MessageResult
+	if err := m.conn.call(protocol.MethodRunMessage, protocol.MessageParams{
+		SessionID: m.sessionID,
+		Text:      text,
+		Mode:      "steer",
+	}, &res); err != nil {
+		m.r.failure(err.Error())
+		return 0, false
+	}
+	if m.steers == nil {
+		m.steers = map[string]string{}
+	}
+	m.steers[res.InputID] = text
+	return 0, false
 }
 
 // prompt is the prompt the next read sits behind: the ask's when a
@@ -680,10 +715,33 @@ func (m *machine) greet() {
 	m.r.notice("poo repl — /help for the commands, /quit to leave")
 }
 
+// commandName returns the command a line names and its argument, or an
+// empty name when the line is a prompt. A command is one of the names
+// the repl knows, whole, or one of the names that takes an argument and
+// a space after it.
+//
+// One reader decides what a command is: the dispatcher below and the
+// line typed while a run works agree, so a line that would be a prompt
+// on an idle session steers a working one.
+func commandName(line string) (name, arg string) {
+	if strings.HasPrefix(line, "/model ") {
+		return "/model", strings.TrimSpace(strings.TrimPrefix(line, "/model "))
+	}
+	if strings.HasPrefix(line, "/thinking ") {
+		return "/thinking", strings.TrimSpace(strings.TrimPrefix(line, "/thinking "))
+	}
+	switch line {
+	case "/quit", "/q", "/exit", "/help", "/h", "?", "/less", "/model", "/models", "/cancel", "/thinking":
+		return line, ""
+	}
+	return "", ""
+}
+
 // command runs one input line. The bool says the repl is done, and
 // the code is the exit code it takes.
 func (m *machine) command(line string, input input) (int, bool) {
-	switch line {
+	name, arg := commandName(line)
+	switch name {
 	case "/quit", "/q", "/exit":
 		return 0, true
 	case "/help", "/h", "?":
@@ -706,21 +764,17 @@ anything else    a prompt for the session`)
 		}
 		return 0, false
 	case "/model", "/models":
-		m.listModels(m.catalogNames(), "/model <text> filters this list, /model <number> picks from it")
+		if arg == "" {
+			m.listModels(m.catalogNames(), "/model <text> filters this list, /model <number> picks from it")
+			return 0, false
+		}
+		m.switchModel(arg)
 		return 0, false
 	case "/cancel":
 		m.cancelRun(m.activeRun())
 		return 0, false
 	case "/thinking":
-		m.thinking("")
-		return 0, false
-	}
-	if name, ok := strings.CutPrefix(line, "/model "); ok {
-		m.switchModel(strings.TrimSpace(name))
-		return 0, false
-	}
-	if level, ok := strings.CutPrefix(line, "/thinking "); ok {
-		m.thinking(strings.TrimSpace(level))
+		m.thinking(arg)
 		return 0, false
 	}
 	if err := m.startRun(line); err != nil {
@@ -928,6 +982,7 @@ func (m *machine) startRun(text string) error {
 	m.runID = res.RunID
 	m.runIDMu.Unlock()
 	m.state = &runState{}
+	m.steers = nil
 	return nil
 }
 
@@ -937,6 +992,7 @@ func (m *machine) endRun(input input) (int, bool) {
 	m.runID = ""
 	m.runIDMu.Unlock()
 	m.state = nil
+	m.steers = nil
 	if m.ask != nil {
 		m.ask = nil
 	}
@@ -1025,41 +1081,58 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		if id, _ := evt.Payload["run_id"].(string); id != "" && id == runID {
 			state.flush(m.r)
 			reason, _ := evt.Payload["reason"].(string)
-			input, output := settledUsage(evt.Payload)
-			m.r.settle(reason, state.turns, input, output)
+			detail := settleDetail(evt.Payload)
 			// The settle's usage is the run's total, the sum of every
-			// request's count, and the statusline wants the last
-			// request's: the usage events already put it there. Feeding
-			// the sum in would show a context fuller than the window.
+			// request's count, and the settle line is where the run's own
+			// accounting belongs. The statusline is not: the usage events
+			// already put the last request's fill there, and feeding the
+			// sum in would show a context fuller than the window.
 			//
 			// A run whose endpoint reported no usage emits no usage
 			// event either, so the statusline keeps the last fill it
 			// measured: that is the closest estimate of the window the
 			// next request asks for, and the settle's total is not.
+			input, output := 0, 0
+			if detail.Usage != nil {
+				input, output = detail.Usage.InputTokens, detail.Usage.OutputTokens
+			}
+			m.r.settle(reason, state.turns, input, output)
+			m.reportUndelivered(detail.UndeliveredInput)
 			return true
 		}
 	}
 	return false
 }
 
-// settledUsage reads the token accounting out of a settle event's
-// detail: the payload is re-encoded and read through the protocol's own
-// shape, so a field the contract renames is a compile error here, not a
-// settle line that silently reads zero.
+// reportUndelivered says what a settle dropped: the inputs it accepted
+// but never delivered, the ones that were queued when the run stopped
+// taking turns. The notice names what the person wrote, when the
+// acceptance's answer named the input.
+func (m *machine) reportUndelivered(dropped []protocol.UndeliveredInput) {
+	for _, u := range dropped {
+		said := u.InputID
+		if text, ok := m.steers[u.InputID]; ok {
+			said = fmt.Sprintf("%q", text)
+		}
+		m.r.notice("the run settled before %s was delivered; send it again", said)
+	}
+}
+
+// settleDetail reads a settle event's detail through the protocol's
+// own shape: the payload is re-encoded and decoded, so a field the
+// contract renames is a compile error here, not a settle line and a
+// delivery notice that silently read nothing.
 //
-// The accounting is the run's total, the sum of every request's count.
-// The statusline does not read it: the per-request usage events carry
-// the last request's fill, which is what it shows.
-func settledUsage(payload map[string]any) (input, output int) {
+// A detail that will not decode is the zero detail: the settle line
+// renders the reason alone, and no notice claims an input was dropped.
+func settleDetail(payload map[string]any) protocol.SettleDetail {
+	var detail protocol.SettleDetail
 	raw, err := json.Marshal(payload["detail"])
 	if err != nil {
-		return 0, 0
+		return detail
 	}
-	var detail protocol.SettleDetail
-	if json.Unmarshal(raw, &detail) != nil || detail.Usage == nil {
-		return 0, 0
-	}
-	return detail.Usage.InputTokens, detail.Usage.OutputTokens
+	json.Unmarshal(raw, &detail)
+	return detail
 }
 
 // flushPending renders what the deltas had buffered when the session
