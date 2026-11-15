@@ -144,6 +144,19 @@ type UsageReporter interface {
 	ReportUsage() *UsageReport
 }
 
+// ProviderBlockReporter is implemented by a stream reader that can
+// report the opaque provider blocks a response produced.
+//
+// A provider that returns data the harness must give back unchanged — the
+// encrypted reasoning of a storeless Responses request — reports it here.
+// The core records the blocks with the response's message, in the order
+// they arrived, so the next request carries them back.
+type ProviderBlockReporter interface {
+	// ReportProviderBlocks returns the provider blocks the response
+	// produced, in the order it produced them.
+	ReportProviderBlocks() []ProviderBlock
+}
+
 // StreamItem is one piece of a provider response.
 type StreamItem struct {
 	// Delta is a text or thinking fragment. It is set when Kind is
