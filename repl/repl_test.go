@@ -382,6 +382,47 @@ func TestAnAskShowsEveryLineOfItsSummary(t *testing.T) {
 	<-code
 }
 
+func TestAnAskPromptSanitizesTheTool(t *testing.T) {
+	got := askPrompt(protocol.AskParams{Tool: "bash\x1b]52;c;bm90\x07\r\x00"})
+	for _, bad := range []string{"\x1b]", "\r", "\x00"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("the prompt shows a control %q:\n%q", bad, got)
+		}
+	}
+	if !strings.Contains(got, "bash") {
+		t.Errorf("the prompt lost the tool:\n%q", got)
+	}
+}
+
+func TestAnAskSanitizesTheToolAndSummaryItShows(t *testing.T) {
+	out := &bytes.Buffer{}
+	var prompt string
+	m := &machine{r: newRenderer(out), status: newStatus("")}
+	in := &plainInput{write: func(s string) { prompt = s }}
+
+	m.openAsk(askRequest{ask: protocol.AskParams{
+		Tool:    "bash\x1b]52;c;bm90\x07\r\x00",
+		Summary: "echo first\r\x00\necho second",
+	}}, in)
+
+	for name, got := range map[string]string{"body": out.String(), "prompt": prompt} {
+		for _, bad := range []string{"\x1b]", "\r", "\x00"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("%s shows a control %q:\n%q", name, bad, got)
+			}
+		}
+	}
+	if !strings.Contains(out.String(), "bash") {
+		t.Errorf("the body lost the tool:\n%q", out.String())
+	}
+	if !strings.Contains(out.String(), "echo first") || !strings.Contains(out.String(), "echo second") {
+		t.Errorf("the body lost the summary lines:\n%q", out.String())
+	}
+	if !strings.Contains(prompt, "bash") {
+		t.Errorf("the prompt lost the tool:\n%q", prompt)
+	}
+}
+
 func TestAnEmptyAnswerDeniesTheAsk(t *testing.T) {
 	server := &fakeServer{t: t}
 	out, typeLine, done := startTypedRepl(t, server)

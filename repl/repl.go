@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/chzyer/readline"
 
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -377,7 +378,7 @@ func (m *machine) prompt() string {
 
 // askPrompt is the line a permission decision is typed behind.
 func askPrompt(ask protocol.AskParams) string {
-	return ansiYellow + "  allow " + ask.Tool + "? [y/N] " + ansiReset
+	return ansiYellow + "  allow " + sanitizeLine(ask.Tool) + "? [y/N] " + ansiReset
 }
 
 // gone is the exit code a lost server carries.
@@ -1194,9 +1195,14 @@ func (m *machine) handleAsk(req askRequest, input input) (int, bool) {
 // way every other line does.
 func (m *machine) openAsk(req askRequest, input input) {
 	m.ask = &req
-	m.r.write(ansiYellow + "⚙ permission · " + req.ask.Tool + ansiReset + "\n")
-	if req.ask.Summary != "" {
-		m.r.write(ansiDim + req.ask.Summary + ansiReset + "\n")
+	m.r.write(ansiYellow + "⚙ permission · " + sanitizeLine(req.ask.Tool) + ansiReset + "\n")
+	stripped := ansi.Strip(req.ask.Summary)
+	lines := strings.Split(stripped, "\n")
+	for i, line := range lines {
+		lines[i] = sanitizeLine(line)
+	}
+	if summary := strings.Join(lines, "\n"); summary != "" {
+		m.r.write(ansiDim + summary + ansiReset + "\n")
 	}
 	if m.eof {
 		// No input is left to answer with, and the refused call is
