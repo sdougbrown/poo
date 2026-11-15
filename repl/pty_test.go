@@ -245,7 +245,7 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	if prompts := server.waitPrompts(t, 2); prompts[1] != "next" {
 		t.Fatalf("the session got %v, want \"next\" after the cancel", prompts)
 	}
-	waitTimes(t, term, "world.", 3)
+	waitTimes(t, term, "world.", 2)
 	term.press("\x1b")
 	server.waitCancels(t, 2)
 	waitTimes(t, term, "✓ cancelled", 2)

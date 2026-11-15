@@ -15,13 +15,15 @@ import (
 //
 // newRenderer reaches that state by finding a terminal behind the
 // writer, which a test has no pty for; the fields it would set are the
-// ones set here, so the streaming path is the same code either way. The
-// markdown renderer is the plain style, so a test reads the words of a
-// render without the palette the auto style picks.
+// ones set here, so the streaming path is the same code either way.
 func aTerminal(t *testing.T, out io.Writer, width int) *renderer {
 	t.Helper()
 	return aStreamingRenderer(t, out, out, width)
 }
+
+// plain returns a rendered string's words, without the style escapes: a
+// test reads what the screen shows, not how it is painted.
+func plain(s string) string { return ansi.Strip(s) }
 
 // deltaEvent is one message delta, the way the server sends it.
 func deltaEvent(id, kind, text string) protocol.Event {
@@ -35,164 +37,62 @@ func eventOf(name string, payload map[string]any) protocol.Event {
 	return protocol.Event{Type: name, Payload: payload}
 }
 
-// TestAReplyStreamsRawAndTheRenderTakesItsPlace covers the streaming
-// the repl is for: the reply prints as it arrives, raw, and the markdown
-// it renders to takes its place when the message completes.
-func TestAReplyStreamsRawAndTheRenderTakesItsPlace(t *testing.T) {
-	var out bytes.Buffer
-	r := aTerminal(t, &out, 40)
-	r.userPrompt("say hello")
-
-	r.streamText("Hello, ")
-	r.streamText("world.")
-	// Each delta paints a sealed row of its own: the first lands where
-	// the prompt stood, the second climbs back up to it and rewrites
-	// it, and the prompt's redraw takes a fresh line below either way.
-	want := "\r" + ansiBold + "❯ say hello" + ansiReset + "\r\n" +
-		"\r" + ansi.EraseDisplay(0) + "Hello, " + "\r\n" +
-		"\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0) + "Hello, world." + "\r\n"
-	if got := out.String(); got != want {
-		t.Fatalf("the streamed text is %q, want %q", got, want)
-	}
-	// The transcript holds the words once, without the cursor work.
-	if got, want := r.transcriptText(), ansiBold+"❯ say hello"+ansiReset+"\nHello, world."; got != want {
-		t.Fatalf("the transcript is %q, want %q", got, want)
-	}
-
-	r.replace(r.markdown("Hello, world."))
-	// The render takes the block's place: the cursor climbs over the
-	// row the block filled, everything below comes off, and the raw
-	// text leaves the transcript with it.
-	want = "\r" + ansiBold + "❯ say hello" + ansiReset + "\r\n" +
-		"\r" + ansi.EraseDisplay(0) + "Hello, " + "\r\n" +
-		"\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0) + "Hello, world." + "\r\n" +
-		"\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0) +
-		strings.ReplaceAll(strings.TrimLeft(r.markdown("Hello, world."), "\n"), "\n", "\r\n")
-	if got := out.String(); got != want {
-		t.Errorf("the flush left %q, want %q", got, want)
-	}
-	if got, want := r.transcriptText(), ansiBold+"❯ say hello"+ansiReset+"\n"+r.markdown("Hello, world."); got != want {
-		t.Errorf("the transcript reads %q, want the rendered message in the raw text's place", got)
-	}
-}
-
-// TestTheStreamHardWrapsAtTheWidth covers the row arithmetic the
-// streaming paints by: rows of at most width columns, each newline
-// ending a row, and a wrapped block repainting only its partial row.
-func TestTheStreamHardWrapsAtTheWidth(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		text  string
-		width int
-		rows  []string
-	}{
-		{"one line", "hello", 10, []string{"hello"}},
-		{"a wrap", "hello there", 10, []string{"hello ther", "e"}},
-		{"a line that fills the width", "0123456789", 10, []string{"0123456789"}},
-		{"a line that fills the width and goes on", "0123456789x", 10, []string{"0123456789", "x"}},
-		{"two lines", "hello\nthere", 10, []string{"hello", "there"}},
-		{"a blank line", "hello\n\nthere", 10, []string{"hello", "", "there"}},
-		{"a trailing newline", "hello\n", 10, []string{"hello", ""}},
-		{"nothing at all", "", 10, []string{""}},
-		{"wide runes that fill the width", "日本語", 6, []string{"日本語"}},
-		{"wide runes that wrap", "日本語", 5, []string{"日本", "語"}},
-		// A family emoji is one grapheme cluster two cells wide; counting
-		// its runes would wrap it early.
-		{"a family emoji", "👨‍👩", 4, []string{"👨‍👩"}},
-	} {
-		if got := hardRows(tc.text, tc.width); strings.Join(got, "|") != strings.Join(tc.rows, "|") {
-			t.Errorf("%s: hardRows(%q, %d) = %q, want %q", tc.name, tc.text, tc.width, got, tc.rows)
-		}
-	}
-
-	// A block that wraps: the first delta commits its full first row
-	// and paints the rest as the partial row; the second repaints the
-	// partial row only, and the flush climbs over the rows the block
-	// and the prompt filled.
-	var out bytes.Buffer
-	r := aTerminal(t, &out, 10)
-	r.userPrompt("wrap it")
-	r.streamText("one two three four")
-	r.streamText("\nlast")
-	want := "\r" + ansiBold + "❯ wrap it" + ansiReset + "\r\n" +
-		"\r" + ansi.EraseDisplay(0) + "one two th" + "\r\n" + "ree four" + "\r\n" +
-		"\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0) + "ree four" + "\r\n" + "last" + "\r\n"
-	if got := out.String(); got != want {
-		t.Fatalf("the wrapped stream read %q, want %q", got, want)
-	}
-
-	r.replace("")
-	want += "\r" + ansi.CursorUp(3) + ansi.EraseDisplay(0)
-	if got := out.String(); got != want {
-		t.Errorf("the flush left %q, want %q", got, want)
-	}
-}
-
-// TestTheWritingHintStandsUntilTheTextArrives covers the hint: it
-// holds a sealed row until the message's first text takes it over, once.
-func TestTheWritingHintStandsUntilTheTextArrives(t *testing.T) {
-	var out bytes.Buffer
-	r := aTerminal(t, &out, 40)
-	hint := ansiDim + "… writing" + ansiReset
-
+// TestTheWritingHintStandsUntilTheFirstDeltaArrives covers the hint: it
+// holds a sealed row from the prompt's echo until the message starts,
+// once.
+func TestTheWritingHintStandsUntilTheFirstDeltaArrives(t *testing.T) {
+	scr, r := aScreen(t, 40)
 	r.hint()
 	r.hint()
-	if got := out.String(); got != "\r"+hint+"\r\n" {
-		t.Errorf("the hint reads %q, want %q once", got, "\r"+hint+"\r\n")
+	if got := countOf(t, scr, "… writing"); got != 1 {
+		t.Fatalf("the hint shows %d time(s), want 1 once:\n%s", got, scr.text())
 	}
-	// The hint is the terminal's, not part of the conversation.
+
+	r.streamDelta("text", "Hi")
+	if rowOf(t, scr, "… writing") >= 0 {
+		t.Errorf("the hint stayed on the terminal after the text arrived:\n%s", scr.text())
+	}
+	if rowOf(t, scr, "Hi") < 0 {
+		t.Fatalf("the streamed text never showed:\n%s", scr.text())
+	}
+	// Nothing is in the transcript until the block settles: the
+	// preview is the terminal's, not the conversation's.
 	if got := r.transcriptText(); got != "" {
-		t.Errorf("the hint is in the transcript: %q", got)
+		t.Errorf("the preview entered the transcript: %q", got)
 	}
-
-	r.streamText("Hi")
-	want := "\r" + hint + "\r\n" +
-		"\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0) +
-		"\r" + ansi.EraseDisplay(0) + "Hi" + "\r\n"
-	if got, want := out.String(), want; got != want {
-		t.Errorf("the first text left %q, want %q", got, want)
-	}
-	// The text has the row now: no hint goes back on top of it.
-	r.hint()
-	if got, want := out.String(), want; got != want {
-		t.Errorf("the hint came back over the text: %q", got)
+	r.finish()
+	if !strings.Contains(plain(r.transcriptText()), "Hi") {
+		t.Errorf("the settled text is not in the transcript: %q", r.transcriptText())
 	}
 }
 
-// TestTheHintComesOffAtTheFlush covers a message that never streams: its
-// thinking arrived and its text did not, so the hint is what the flush
-// has to take back before the render lands on that line.
+// TestTheHintComesOffAtTheFlush covers a run that says nothing: the
+// hint is what the flush has to take back before the settle line lands
+// on that row.
 func TestTheHintComesOffAtTheFlush(t *testing.T) {
-	var out bytes.Buffer
-	r := aTerminal(t, &out, 40)
-	m := &machine{out: &out, r: r, status: newStatus("")}
-	state := &runState{}
-
-	m.event(deltaEvent("m1", "thinking", "weighing it"), "r1", state)
-	m.event(eventOf("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"}), "r1", state)
-
-	// The hint was taken back where it stood, and the thinking block
-	// renders from that spot.
-	want := "\r" + ansiDim + "… writing" + ansiReset + "\r\n" + "\r" + ansi.CursorUp(1) + ansi.EraseDisplay(0)
-	if got := out.String(); !strings.HasPrefix(got, want) {
-		t.Fatalf("the flush left %q, want it to start with %q", got, want)
+	scr, r := aScreen(t, 40)
+	r.hint()
+	if rowOf(t, scr, "… writing") < 0 {
+		t.Fatalf("the hint never showed:\n%s", scr.text())
 	}
-	if got := r.transcriptText(); !strings.HasPrefix(got, ansiDim+"· thinking ·\n") {
-		t.Errorf("the thinking block does not open the transcript: %q", got)
+	r.finish()
+	if rowOf(t, scr, "… writing") >= 0 {
+		t.Errorf("the flush left the hint on the screen:\n%s", scr.text())
+	}
+	if got := r.transcriptText(); got != "" {
+		t.Errorf("the empty run wrote %q to the transcript", got)
 	}
 }
 
 // TestAPipeStreamsNothing covers the writer that is not a terminal: the
-// deltas stay buffered, and the message renders whole when it completes,
-// which is what it always did.
+// deltas stay buffered, and the message renders whole when it settles.
 func TestAPipeStreamsNothing(t *testing.T) {
 	var out bytes.Buffer
 	r := newRenderer(&out)
 
 	r.hint()
-	r.streamText("Hello, ")
-	r.streamText("world.")
-	r.replace("")
+	r.streamDelta("text", "Hello, ")
+	r.streamDelta("text", "world.")
 	if got := out.String(); got != "" {
 		t.Errorf("a pipe was written %q, want nothing", got)
 	}
@@ -200,7 +100,7 @@ func TestAPipeStreamsNothing(t *testing.T) {
 		t.Errorf("a pipe's transcript reads %q, want nothing", got)
 	}
 
-	r.write(r.markdown("Hello, world."))
+	r.finish()
 	if got := out.String(); !strings.Contains(got, "Hello, world.") {
 		t.Errorf("the message did not render at the flush: %q", got)
 	}
@@ -209,10 +109,27 @@ func TestAPipeStreamsNothing(t *testing.T) {
 	}
 }
 
+// TestAPipeStripsTheEscapesAModelSends covers the pipe's sanitizing: a
+// terminal is not the only reader that must never receive a model's
+// control sequences.
+func TestAPipeStripsTheEscapesAModelSends(t *testing.T) {
+	var out bytes.Buffer
+	r := newRenderer(&out)
+
+	r.streamDelta("text", "safe\x1b[2Jtext")
+	r.finish()
+
+	if strings.Contains(out.String(), "\x1b[2J") {
+		t.Errorf("a model's erase reached the pipe: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "safetext") {
+		t.Errorf("the words around the sequence did not render: %q", out.String())
+	}
+}
+
 // TestAToolCallRendersTheStreamedMessageAboveItself covers the
-// interleaving: the message a tool call interrupts renders as markdown
-// above the call, and the reply that follows streams as a block of its
-// own.
+// interleaving: the message a tool call interrupts is sealed above the
+// call, and the reply that follows streams as a block of its own.
 func TestAToolCallRendersTheStreamedMessageAboveItself(t *testing.T) {
 	var out bytes.Buffer
 	r := aTerminal(t, &out, 40)
@@ -226,9 +143,7 @@ func TestAToolCallRendersTheStreamedMessageAboveItself(t *testing.T) {
 		t.Fatal("the settle did not end the run")
 	}
 
-	// The bytes read in the order the person saw them: the reply so
-	// far, the call, then the reply the decision released.
-	drawn := out.String()
+	drawn := plain(out.String())
 	dfirst := strings.Index(drawn, "Let me look.")
 	dcall := strings.Index(drawn, "⚙ bash")
 	dsecond := strings.Index(drawn, "All done.")
@@ -238,7 +153,7 @@ func TestAToolCallRendersTheStreamedMessageAboveItself(t *testing.T) {
 	if !(dfirst < dcall && dcall < dsecond) {
 		t.Errorf("the terminal read out of order:\n%q", drawn)
 	}
-	transcript := r.transcriptText()
+	transcript := plain(r.transcriptText())
 	first := strings.Index(transcript, "Let me look.")
 	call := strings.Index(transcript, "⚙ bash")
 	second := strings.Index(transcript, "All done.")
@@ -248,17 +163,15 @@ func TestAToolCallRendersTheStreamedMessageAboveItself(t *testing.T) {
 	if !(first < call && call < second) {
 		t.Errorf("the transcript reads out of order:\n%s", transcript)
 	}
-	// The first message is rendered where it streamed, not kept beside
-	// its own raw text.
 	if n := strings.Count(transcript, "Let me look."); n != 1 {
 		t.Errorf("the first message reads %d time(s) in the transcript, want 1:\n%s", n, transcript)
 	}
 }
 
-// TestTwoMessagesShareOneStreamedBlock covers a reply that streams in
-// two messages with nothing rendered between them: the block they both
-// wrote comes off once, and both messages render where its raw text was.
-func TestTwoMessagesShareOneStreamedBlock(t *testing.T) {
+// TestTwoMessagesReadInOrder covers a reply that arrives in two
+// messages with nothing rendered between them: each message keeps its
+// place, once.
+func TestTwoMessagesReadInOrder(t *testing.T) {
 	var out bytes.Buffer
 	r := aTerminal(t, &out, 40)
 	m := &machine{out: &out, r: r, status: newStatus("")}
@@ -268,7 +181,7 @@ func TestTwoMessagesShareOneStreamedBlock(t *testing.T) {
 	m.event(deltaEvent("m2", "text", " Second."), "r1", state)
 	m.event(eventOf("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"}), "r1", state)
 
-	transcript := r.transcriptText()
+	transcript := plain(r.transcriptText())
 	first := strings.Index(transcript, "First.")
 	second := strings.Index(transcript, "Second.")
 	if first < 0 || second < 0 || first > second {
@@ -279,44 +192,10 @@ func TestTwoMessagesShareOneStreamedBlock(t *testing.T) {
 	}
 }
 
-// TestThinkingBuffersWhileTheTextStreams covers the split between the
-// two kinds: thinking reaches the terminal dimmed at the flush, and only
-// the reply streams as it arrives.
-func TestThinkingBuffersWhileTheTextStreams(t *testing.T) {
-	var out bytes.Buffer
-	r := aTerminal(t, &out, 40)
-	m := &machine{out: &out, r: r, status: newStatus("")}
-	state := &runState{}
-
-	m.event(deltaEvent("m1", "thinking", "weighing it"), "r1", state)
-	if strings.Contains(out.String(), "weighing it") {
-		t.Errorf("a thinking delta streamed:\n%q", out.String())
-	}
-	m.event(deltaEvent("m1", "text", "The answer."), "r1", state)
-	if !strings.Contains(out.String(), "The answer.") {
-		t.Errorf("the reply did not stream:\n%q", out.String())
-	}
-	m.event(eventOf("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"}), "r1", state)
-
-	transcript := r.transcriptText()
-	think := strings.Index(transcript, "weighing it")
-	text := strings.Index(transcript, "The answer.")
-	if think < 0 || text < 0 {
-		t.Fatalf("the transcript is missing part of the message:\n%s", transcript)
-	}
-	if think > text {
-		t.Errorf("the thinking block landed after the message:\n%s", transcript)
-	}
-	if !strings.Contains(transcript, ansiDim+"· thinking ·\n") {
-		t.Errorf("the thinking block does not read dimmed:\n%s", transcript)
-	}
-}
-
 // TestAnAskRendersTheDeltasThatArrivedBeforeIt covers the ask that
-// races the deltas: the reader hands events and asks to the main loop
-// in whatever order the select finds ready, so the ask's own handler
-// drains the events that reached the connection first. The reply so
-// far renders whole, above the question — never split by it.
+// races the deltas: the ask's handler drains the events that reached
+// the connection first, so the reply so far settles above the question,
+// never split by it.
 func TestAnAskRendersTheDeltasThatArrivedBeforeIt(t *testing.T) {
 	var out bytes.Buffer
 	m := &machine{r: newRenderer(&out), status: newStatus("")}
@@ -332,7 +211,7 @@ func TestAnAskRendersTheDeltasThatArrivedBeforeIt(t *testing.T) {
 	if code, done := m.handleAsk(askRequest{ask: protocol.AskParams{SessionID: "s1", RunID: "r1", AskID: "a1", Tool: "bash"}}, in); done {
 		t.Fatalf("the ask ended the session (code %d)", code)
 	}
-	tr := m.r.transcriptText()
+	tr := plain(m.r.transcriptText())
 	whole := strings.Index(tr, "Hello, world.")
 	asked := strings.Index(tr, "permission")
 	if whole < 0 || asked < 0 || whole > asked {
@@ -364,7 +243,7 @@ func TestAnAskAfterTheSettleEndsTheRunAndStillOpens(t *testing.T) {
 	if m.ask == nil {
 		t.Fatalf("the ask did not open")
 	}
-	tr := m.r.transcriptText()
+	tr := plain(m.r.transcriptText())
 	settled := strings.Index(tr, "end_turn")
 	asked := strings.Index(tr, "permission")
 	if settled < 0 || asked < 0 || settled > asked {
@@ -374,28 +253,25 @@ func TestAnAskAfterTheSettleEndsTheRunAndStillOpens(t *testing.T) {
 
 // TestATerminalWithoutEditorRendersOnce covers the fallback: a terminal
 // the editor could not take streams nothing, and the message renders
-// once at the flush — the raw text is never on the terminal to erase.
+// once when it settles.
 func TestATerminalWithoutEditorRendersOnce(t *testing.T) {
 	var out bytes.Buffer
-	// The editor is what a terminal session has; this renderer is built
-	// without one, so it renders at the flush like a pipe.
 	r := aTerminal(t, &out, 40)
 	r.editor = false
 
 	r.userPrompt("say hello")
-	r.streamText("Hello, ")
-	r.streamText("world.")
+	r.streamDelta("text", "Hello, ")
+	r.streamDelta("text", "world.")
 	if got := out.String(); got != ansiBold+"❯ say hello"+ansiReset+"\n" {
 		t.Fatalf("the terminal was written before the flush:\n%q", out.String())
 	}
 
-	r.replace(r.markdown("Hello, world."))
-	want := ansiBold + "❯ say hello" + ansiReset + "\n" + r.markdown("Hello, world.")
-	if got := out.String(); got != want {
-		t.Errorf("the render is %q, want %q", got, want)
+	r.finish()
+	if got := strings.Count(plain(out.String()), "Hello, world."); got != 1 {
+		t.Errorf("the render reads %d time(s), want 1:\n%q", got, out.String())
 	}
-	if got := r.transcriptText(); got != want {
-		t.Errorf("the transcript reads %q, want %q", got, want)
+	if got := plain(r.transcriptText()); !strings.Contains(got, "Hello, world.") {
+		t.Errorf("the transcript lost the message: %q", got)
 	}
 }
 
@@ -407,14 +283,14 @@ func TestASessionThatEndsMidMessageRendersTheReply(t *testing.T) {
 	r := aTerminal(t, &out, 40)
 	m := &machine{r: r, status: newStatus("")}
 	m.state = &runState{}
-	m.state.delta("m1", "text", "Half a sentence")
+	m.r.streamDelta("text", "Half a sentence")
 
 	m.flushPending()
 
-	if n := strings.Count(r.transcriptText(), "Half a sentence"); n != 1 {
+	if n := strings.Count(plain(r.transcriptText()), "Half a sentence"); n != 1 {
 		t.Fatalf("the buffered reply reads %d time(s) in the transcript, want 1:\n%s", n, r.transcriptText())
 	}
-	if row := out.String(); !strings.Contains(row, "Half a sentence") {
+	if row := plain(out.String()); !strings.Contains(row, "Half a sentence") {
 		t.Errorf("the flush drew nothing:\n%q", row)
 	}
 }

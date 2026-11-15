@@ -971,11 +971,15 @@ func levelName(level string) string {
 // come to the main loop, which renders them until the settle.
 func (m *machine) startRun(text string) error {
 	m.r.userPrompt(text)
+	// The hint stands from the echo until the first delta lands: a run
+	// whose model is slow to speak still says it is working.
+	m.r.hint()
 	var res protocol.PromptResult
 	if err := m.conn.call(protocol.MethodRunPrompt, protocol.PromptParams{
 		SessionID: m.sessionID,
 		Text:      text,
 	}, &res); err != nil {
+		m.r.takeHint()
 		return err
 	}
 	m.runIDMu.Lock()
@@ -1037,22 +1041,17 @@ func (m *machine) cancelRun(runID string) {
 func (m *machine) event(evt protocol.Event, runID string, state *runState) bool {
 	switch evt.Type {
 	case "message.delta":
-		id, _ := evt.Payload["message_id"].(string)
 		kind, _ := evt.Payload["kind"].(string)
 		text, _ := evt.Payload["text"].(string)
-		state.delta(id, kind, text)
-		// The reply streams as it arrives. Thinking does not: it buffers
-		// and renders dimmed with the message it belongs to.
-		if kind == "text" {
-			m.r.streamText(text)
-		} else {
-			m.r.hint()
-		}
+		// The reply and the thinking both stream as markdown in the
+		// order they arrive. A kind the renderer does not know reads
+		// with the thinking, so it cannot join the reply's body.
+		m.r.streamDelta(kind, text)
 	case "tool.call":
 		// The message the call interrupts is done as far as the deltas
-		// go: it renders, and the call decorates the transcript below
+		// go: it settles, and the call decorates the transcript below
 		// it.
-		state.flush(m.r)
+		m.r.finish()
 		tool, _ := evt.Payload["tool"].(string)
 		summary, _ := evt.Payload["summary"].(string)
 		m.r.toolCall(tool, summary)
@@ -1079,7 +1078,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		state.turns++
 	case "run.settled":
 		if id, _ := evt.Payload["run_id"].(string); id != "" && id == runID {
-			state.flush(m.r)
+			m.r.finish()
 			reason, _ := evt.Payload["reason"].(string)
 			detail := settleDetail(evt.Payload)
 			// The settle's usage is the run's total, the sum of every
@@ -1140,7 +1139,7 @@ func settleDetail(payload map[string]any) protocol.SettleDetail {
 // ways out — a quit, a lost server, a failed read — all pass here.
 func (m *machine) flushPending() {
 	if m.state != nil {
-		m.state.flush(m.r)
+		m.r.finish()
 	}
 }
 
@@ -1179,7 +1178,7 @@ func (m *machine) handleAsk(req askRequest, input input) (int, bool) {
 			}
 		default:
 			if m.state != nil {
-				m.state.flush(m.r)
+				m.r.finish()
 			}
 			m.openAsk(req, input)
 			return 0, false
@@ -1238,58 +1237,13 @@ func (m *machine) shutdown() {
 	}
 }
 
-// runState holds the streamed messages a run has open, and the turns
-// the run took.
+// runState is the run's accounting: the turns it took. The messages
+// themselves stream through the renderer as the deltas arrive, so
+// there is nothing here to render at the end.
 type runState struct {
-	// messages are the replies, in arrival order.
-	messages []*messageBuffer
-	// byID finds a message the deltas name.
-	byID map[string]*messageBuffer
 	// turns is how many turns the run took: the wire's settle event
 	// does not carry the count, the turn events do.
 	turns int
-}
-
-// messageBuffer is one reply the deltas are still writing.
-type messageBuffer struct {
-	id       string
-	text     strings.Builder
-	thinking strings.Builder
-}
-
-// delta adds one piece of a streamed message.
-func (s *runState) delta(id, kind, text string) {
-	if s.byID == nil {
-		s.byID = map[string]*messageBuffer{}
-	}
-	m := s.byID[id]
-	if m == nil {
-		m = &messageBuffer{id: id}
-		s.byID[id] = m
-		s.messages = append(s.messages, m)
-	}
-	switch kind {
-	case "text":
-		m.text.WriteString(text)
-	default:
-		// An unknown kind buffers with the thinking: it does not join
-		// the reply's body, and the dispatch the deltas stream by
-		// agrees — text streams, everything else buffers and hints.
-		m.thinking.WriteString(text)
-	}
-}
-
-// flush renders the messages the deltas finished with, oldest first,
-// and empties the buffers.
-func (s *runState) flush(r *renderer) {
-	var rendered strings.Builder
-	for _, m := range s.messages {
-		rendered.WriteString(r.thinkingText(m.thinking.String()))
-		rendered.WriteString(r.markdown(m.text.String()))
-	}
-	r.replace(rendered.String())
-	s.messages = nil
-	s.byID = nil
 }
 
 // The errors the run loop reports to the caller.

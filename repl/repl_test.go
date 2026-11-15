@@ -243,7 +243,8 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 		"❯ say hello",
 		"· thinking ·",
 		"hmm",
-		"Hello, world.",
+		"Hello,",
+		"world.",
 		"⚙ bash",
 		"file one",
 		"file two",
@@ -260,6 +261,14 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the transcript lacks %q:\n%s", want, out)
 		}
+	}
+	// The three deltas read in the order they arrived: the reply's two
+	// halves keep their place around the thinking between them.
+	hello := strings.Index(out, "Hello,")
+	hmm := strings.Index(out, "hmm")
+	world := strings.Index(out, "world.")
+	if hello < 0 || hmm < 0 || world < 0 || !(hello < hmm && hmm < world) {
+		t.Errorf("the deltas read out of arrival order:\n%s", out)
 	}
 	// The statusline names the model and the window the usage filled.
 	if !strings.Contains(out, "gemma4") {
