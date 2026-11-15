@@ -830,6 +830,24 @@ func TestTheUserPromptDefaultFileMayBeAbsent(t *testing.T) {
 	}
 }
 
+// TestTheUserPromptSkipsAnEmptyFile covers a file that is there and
+// holds nothing: it asks for the section, and an empty section says
+// less than none.
+func TestTheUserPromptSkipsAnEmptyFile(t *testing.T) {
+	userFile := filepath.Join(t.TempDir(), "instructions.md")
+	if err := os.WriteFile(userFile, nil, 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"session:\n  user_prompt_file: "+userFile+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if names := poo.PromptBuilder(runtime.Options).Names(); slices.Contains(names, config.UserSection) {
+		t.Errorf("an empty file registered the %q section: %v", config.UserSection, names)
+	}
+}
+
 // TestTheUserPromptFlagNamesTheFile covers the flag: naming a file asks
 // for the instructions, with no setting behind it.
 func TestTheUserPromptFlagNamesTheFile(t *testing.T) {
