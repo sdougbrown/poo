@@ -126,6 +126,69 @@ func TestAVerifyBetweenTicksStillSeesOneOwner(t *testing.T) {
 	wg.Wait()
 }
 
+// TestTheKeepaliveStampsTheHeldLock covers the tick the keepalive's own
+// goroutine makes: it finds the stamp this holder left behind nearly stale,
+// which is what a tick that ran late leaves, and puts a fresh one on the
+// directory, so a writer judging the lock stale does not break a lock this
+// holder still holds.
+//
+// The tick comes at the package's own interval, so the test waits seconds for
+// it. It waits for the stamp on the filesystem, which outlives the wait,
+// rather than for a sleep to end.
+func TestTheKeepaliveStampsTheHeldLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	hold, err := acquire(context.Background(), path, time.Second)
+	if err != nil {
+		t.Fatalf("taking the lock: %v", err)
+	}
+	defer hold.release()
+
+	// The mutex makes the stale stamp a critical section of its own: no
+	// stamp is in flight, so the goroutine's next one comes after this.
+	hold.mu.Lock()
+	stale := time.Now().Add(-lockStale + time.Second)
+	hold.mtime = stale
+	if err := os.Chtimes(hold.path, stale, stale); err != nil {
+		hold.mu.Unlock()
+		t.Fatalf("aging the held lock: %v", err)
+	}
+	hold.mu.Unlock()
+
+	deadline := time.Now().Add(2*lockRefresh + time.Second)
+	for {
+		info, err := os.Stat(hold.path)
+		if err != nil {
+			t.Fatalf("stating the held lock: %v", err)
+		}
+		if info.ModTime().After(stale) {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("the held lock still carries the %v stamp, so no tick of the keepalive stamped it", stale)
+		}
+		time.Sleep(lockWaitBase)
+	}
+
+	// No tick is in flight while the mutex is held, so the stamp the
+	// holder records is the one the directory carries.
+	hold.mu.Lock()
+	recorded, lost := hold.mtime, hold.lost
+	info, err := os.Stat(hold.path)
+	hold.mu.Unlock()
+	if err != nil {
+		t.Fatalf("stating the held lock: %v", err)
+	}
+	if lost != nil {
+		t.Fatalf("the keepalive gave up a lock it holds: %v", lost)
+	}
+	if !recorded.Equal(info.ModTime()) {
+		t.Errorf("the holder records the stamp %v, want the %v it left on the directory", recorded, info.ModTime())
+	}
+	if age := time.Since(recorded); age >= lockStale {
+		t.Errorf("the held lock's stamp is %v old, so another writer would break it", age)
+	}
+}
+
 // TestReleaseLeavesATakenLockAlone covers the release of a lock another
 // writer took: the directory is the taker's, and removing it would hand the
 // file to a third writer while the taker believes it holds the lock.

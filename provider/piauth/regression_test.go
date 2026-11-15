@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -190,6 +191,56 @@ func TestARefreshDoesNotFollowARedirect(t *testing.T) {
 	}
 }
 
+// TestARefreshDoesNotFollowARedirectEvenWhenTheClientWould covers the client a
+// caller supplies: the credentials' redirect policy is the package's, so a
+// client whose own policy follows a 307, which replays the refresh body to
+// wherever it points, cannot hand the token over.
+func TestARefreshDoesNotFollowARedirectEvenWhenTheClientWould(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
+	before := readFile(t, path)
+	var replayed atomic.Bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("reading the redirect target's body: %v", err)
+		}
+		if strings.Contains(string(body), oldRefresh) {
+			replayed.Store(true)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"stolen","expires_in":3600}`))
+	}))
+	t.Cleanup(target.Close)
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/oauth/token", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(redirect.Close)
+	var consulted atomic.Int32
+	client := &http.Client{
+		// What a caller's own client would do with a 307: follow it, and
+		// let Go replay the body at the target.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			consulted.Add(1)
+			return nil
+		},
+	}
+	credentials := piauth.Credentials{Path: path, TokenURL: redirect.URL, HTTP: client, Now: clock}
+
+	_, err := credentials.Access(context.Background())
+	if !errors.Is(err, piauth.ErrRefresh) {
+		t.Fatalf("the redirect is %v, want ErrRefresh", err)
+	}
+	if replayed.Load() {
+		t.Error("the refresh token reached the redirect's target: the caller's redirect policy was used")
+	}
+	if consulted.Load() != 0 {
+		t.Errorf("the caller's redirect policy was consulted %d times, want the refresh to decide the redirect itself", consulted.Load())
+	}
+	if after := readFile(t, path); before != after {
+		t.Errorf("the file was written from a redirect's answer:\n%s", after)
+	}
+}
+
 // TestARefreshThatCannotBeStoredIsReportedAsSuch covers the outcome the
 // caller must be able to tell from a refusal: the endpoint traded the
 // refresh token, so the token in the file may be spent, and the file is not
@@ -240,6 +291,80 @@ func TestARefusalIsNotAPersistenceFailure(t *testing.T) {
 	}
 }
 
+// TestARefusalCarriesOnlyAStandardCode covers what a refusal's error takes
+// from the answer: the status, and a code the OAuth spec names. Everything
+// else in an answer is untrusted, so an answer that repeats the credential it
+// was sent, names a failure of its own, or dresses its own words up as a
+// standard code puts none of them in the caller's log.
+func TestARefusalCarriesOnlyAStandardCode(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		answer func(sent string) string
+		// carried is what the error must name, and absent what it must not:
+		// the credential's own stretches, or the answer's words.
+		carried string
+		absent  []string
+	}{
+		{
+			name:   "the answer is the refresh token",
+			answer: func(sent string) string { return fmt.Sprintf(`{"error":%q}`, sent) },
+			absent: tokenRuns(oldRefresh),
+		},
+		{
+			name: "the answer's nested code is the refresh token",
+			answer: func(sent string) string {
+				return fmt.Sprintf(`{"error":{"code":%q}}`, sent)
+			},
+			absent: tokenRuns(oldRefresh),
+		},
+		{
+			name:   "the answer names a failure of its own",
+			answer: func(string) string { return `{"error":"quota_reached_for_this_workspace"}` },
+			absent: []string{"quota"},
+		},
+		{
+			name: "the answer dresses its own words up as a standard code",
+			answer: func(sent string) string {
+				return fmt.Sprintf(`{"error":%q}`, "invalid_grant: "+sent)
+			},
+			absent: append(tokenRuns(oldRefresh), "invalid_grant"),
+		},
+		{
+			name:    "the answer names a standard code",
+			answer:  func(string) string { return `{"error":"invalid_grant"}` },
+			carried: "invalid_grant",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
+			before := readFile(t, path)
+			endpoint := newTokenEndpoint(t, func() (int, string) {
+				return http.StatusBadRequest, c.answer(oldRefresh)
+			}, nil)
+			credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+
+			_, err := credentials.Access(context.Background())
+			if !errors.Is(err, piauth.ErrRefresh) {
+				t.Fatalf("the refusal is %v, want ErrRefresh", err)
+			}
+			if !strings.Contains(err.Error(), "status 400") {
+				t.Errorf("the error is %q, want the status the endpoint refused with", err)
+			}
+			if c.carried != "" && !strings.Contains(err.Error(), c.carried) {
+				t.Errorf("the error is %q, want it to name %q", err, c.carried)
+			}
+			for _, absent := range c.absent {
+				if strings.Contains(err.Error(), absent) {
+					t.Errorf("the error carries %q of the answer: %v", absent, err)
+				}
+			}
+			if after := readFile(t, path); before != after {
+				t.Errorf("the file was written after a refusal:\n%s", after)
+			}
+		})
+	}
+}
+
 // heldEndpoint serves one refresh it holds open until the test closes
 // answer, so a test can act on the lock while a refresh is in flight.
 func heldEndpoint(t *testing.T) (entered chan struct{}, answer chan struct{}, url string) {
@@ -255,6 +380,18 @@ func heldEndpoint(t *testing.T) (entered chan struct{}, answer chan struct{}, ur
 	}))
 	t.Cleanup(server.Close)
 	return entered, answer, server.URL
+}
+
+// tokenRuns are the eight-character stretches of a token: enough of one
+// that the rest is a lookup away, and short enough that an answer which
+// repeats part of a token is not a coincidence.
+func tokenRuns(secret string) []string {
+	const run = 8
+	var runs []string
+	for i := 0; i+run <= len(secret); i++ {
+		runs = append(runs, secret[i:i+run])
+	}
+	return runs
 }
 
 // takeOver breaks the lock a test's writer holds and creates a new
