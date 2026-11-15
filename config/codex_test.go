@@ -503,12 +503,12 @@ func (l *loopbackOnly) RoundTrip(req *http.Request) (*http.Response, error) {
 // TestAPiModelsFileCannotPointCodexElsewhere covers the models file's reach.
 // pi's models file may name openai-codex itself, so a file that gives the
 // provider a foreign baseUrl would offer models whose endpoint is that host.
-// Selecting one is refused with the endpoint's config error, before pi's token
-// is read and before any request goes out.
+// Selecting one is refused with the endpoint's config error, before a token
+// refresh or any other request goes out.
 func TestAPiModelsFileCannotPointCodexElsewhere(t *testing.T) {
 	dir := t.TempDir()
 	token := fakeCodexToken(t, "acct_live")
-	writeCodexAuth(t, dir, token, "rt_live", 4102444800000)
+	writeCodexAuth(t, dir, token, "rt_live", 1)
 
 	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
