@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/provider/codex"
 )
 
 // echoTool is the tool the session test's model calls.
@@ -317,6 +319,62 @@ func TestTheRecordedUsageIsTheEndpointsOwn(t *testing.T) {
 	}
 	if usage.CacheReadTokens == nil || *usage.CacheReadTokens != 40 {
 		t.Errorf("the recorded cache read count is %v, want 40", usage.CacheReadTokens)
+	}
+}
+
+// TestTheRecordedUsageCountsEveryAttempt covers the usage a retried
+// request records: an attempt that failed before it answered still spent
+// tokens, so the record holds what the attempts spent together.
+func TestTheRecordedUsageCountsEveryAttempt(t *testing.T) {
+	sink := pootest.NewSink()
+	srv := newServer(t,
+		frame(`{"type":"response.failed","response":{"status":"failed",`+
+			`"error":{"code":"rate_limit_exceeded","message":"slow down"},`+
+			`"usage":{"input_tokens":10,"output_tokens":4}}}`),
+		frame(`{"type":"response.output_text.delta","output_index":0,"delta":"the answer"}`)+
+			frame(`{"type":"response.completed","response":{"status":"completed",`+
+				`"usage":{"input_tokens":20,"output_tokens":6}}}`),
+	)
+	opts := sessionOptions(t, srv.URL, sink)
+	tr := newTransport(srv.URL, func(o *codex.Options) {
+		o.MaxAttempts = 2
+		o.Backoff = []time.Duration{time.Millisecond}
+	})
+	opts.Transport = tr
+	session, err := poo.New(opts)
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	defer session.Close()
+
+	if _, err := session.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	result, err := session.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if result.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn", result.Reason)
+	}
+	if n := srv.count(); n != 2 {
+		t.Fatalf("the endpoint received %d requests, want the failed attempt and the one that answered", n)
+	}
+
+	var usage *poo.UsageRecord
+	for _, rec := range sink.Records() {
+		if u, ok := rec.(*poo.UsageRecord); ok {
+			usage = u
+		}
+	}
+	if usage == nil {
+		t.Fatal("the run recorded no usage")
+	}
+	if usage.InputTokens != 30 {
+		t.Errorf("the recorded input count is %d, want the 30 both attempts spent", usage.InputTokens)
+	}
+	if usage.OutputTokens != 10 {
+		t.Errorf("the recorded output count is %d, want the 10 both attempts spent", usage.OutputTokens)
 	}
 }
 

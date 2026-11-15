@@ -445,14 +445,16 @@ func TestAStreamThatEndsEarlyIsAFailure(t *testing.T) {
 }
 
 // TestAFailureBeforeTheFirstDeltaIsRetried covers the retry: the request
-// is asked again, and every attempt is reported.
+// is asked again, and every attempt is reported. The wait the endpoint
+// asked for is not the plan's own backoff, so the attempt's delay says
+// which one the request waited.
 func TestAFailureBeforeTheFirstDeltaIsRetried(t *testing.T) {
 	attempts := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		attempts++
 		if attempts == 1 {
-			w.Header().Set("Retry-After-Ms", "1")
+			w.Header().Set("Retry-After-Ms", "25")
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = io.WriteString(w, `{"error":{"message":"the backend broke"}}`)
 			return
@@ -489,8 +491,8 @@ func TestAFailureBeforeTheFirstDeltaIsRetried(t *testing.T) {
 		t.Errorf("the attempt is numbered %d and retried=%v, want attempt 1 that was retried",
 			reported[0].Number, reported[0].Retried)
 	}
-	if reported[0].Delay != time.Millisecond {
-		t.Errorf("the attempt waits %v, want the endpoint's Retry-After", reported[0].Delay)
+	if reported[0].Delay != 25*time.Millisecond {
+		t.Errorf("the attempt waits %v, want the endpoint's Retry-After of 25ms", reported[0].Delay)
 	}
 	var perr *poo.ProviderError
 	if !errors.As(reported[0].Err, &perr) || perr.Kind != poo.ProviderKindServer {
@@ -602,6 +604,70 @@ func TestAnUnknownEventIsSkipped(t *testing.T) {
 	events := read(t, reader)
 	if got := textOf(events); !strings.Contains(got, "the answer") {
 		t.Errorf("the answer is %q, want the event after the unknown ones", got)
+	}
+}
+
+// TestAFrameTheTransportCannotReadDoesNotPoisonTheStream covers a server
+// that separates its events with a single newline: a frame that is not
+// JSON is dropped rather than carried, so the events after it still
+// arrive and the stream still names its end.
+func TestAFrameTheTransportCannotReadDoesNotPoisonTheStream(t *testing.T) {
+	srv := newServer(t,
+		// Every event on its own line, and no blank line between them.
+		"data: not json at all\n"+
+			`data: {"type":"response.output_text.delta","output_index":0,"delta":"the answer"}`+"\n"+
+			`data: {"type":"response.completed","response":{"status":"completed"}}`+"\n",
+	)
+	tr := newTransport(srv.URL, func(o *codex.Options) { o.MaxAttempts = 1 })
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	events := read(t, reader)
+
+	if got := textOf(events); got != "the answer" {
+		t.Errorf("the answer is %q, want the event after the unreadable frame", got)
+	}
+	if got := finishOf(t, events); got != poo.FinishStop {
+		t.Errorf("the stream finished with %q, want stop", got)
+	}
+	if n := srv.count(); n != 1 {
+		t.Errorf("the endpoint received %d requests, want the one that answered", n)
+	}
+}
+
+// TestAMultiLineFrameIsJoinedWithoutABlankLine covers an event whose
+// payload is spread over several data lines with no blank line between
+// the events: the lines are joined, because another line may still
+// complete a payload that has not ended.
+func TestAMultiLineFrameIsJoinedWithoutABlankLine(t *testing.T) {
+	srv := newServer(t,
+		`data: {"type":"response.output_text.delta",`+"\n"+
+			`data: "output_index":0,"delta":"split"}`+"\n"+
+			`data: {"type":"response.completed","response":{"status":"completed"}}`+"\n",
+	)
+	tr := newTransport(srv.URL, func(o *codex.Options) { o.MaxAttempts = 1 })
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	events := read(t, reader)
+
+	if got := textOf(events); got != "split" {
+		t.Errorf("the answer is %q, want the payload the two lines hold", got)
+	}
+	if got := finishOf(t, events); got != poo.FinishStop {
+		t.Errorf("the stream finished with %q, want stop", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"time"
@@ -225,24 +226,68 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 
 		// A server that separates its events with a single newline
 		// never sends the blank line that ends an event, so the event
-		// is dispatched as soon as the next one starts. An event whose
-		// payload is not valid JSON yet is kept, because it may still
-		// be a payload spread over several data lines.
-		complete := len(r.data) > 0 && json.Valid([]byte(strings.Join(r.data, "\n")))
-		if complete {
+		// is dispatched as soon as it holds one. A payload another data
+		// line cannot complete is dropped rather than carried, so one
+		// frame the transport cannot read does not swallow the events
+		// after it.
+		switch payloadStateOf(r.data) {
+		case payloadComplete:
 			if err := r.dispatch(); err != nil {
 				return r.fail(err)
 			}
-			r.data = append(r.data, payload)
-			if ev, ok := r.take(); ok {
-				return ev, nil
-			}
-			if r.done {
-				return r.finishReading()
-			}
-			continue
+		case payloadBroken:
+			r.data = nil
 		}
 		r.data = append(r.data, payload)
+		if ev, ok := r.take(); ok {
+			return ev, nil
+		}
+	}
+}
+
+// payloadState says how much of an event a run of data lines holds.
+type payloadState int
+
+const (
+	// payloadIncomplete means another data line may still complete the
+	// event: the payload ran out without a syntax error, which is what a
+	// payload spread over several lines looks like.
+	payloadIncomplete payloadState = iota
+	// payloadComplete means the lines decode as one JSON value.
+	payloadComplete
+	// payloadBroken means no further data line can make the lines decode.
+	payloadBroken
+)
+
+// payloadStateOf reports how much of an event the collected data lines
+// hold.
+//
+// A payload that ended without a syntax error is kept for the next line,
+// because the event may be spread over several of them. A payload with a
+// syntax error is not: JSON has no construct a later line repairs, so the
+// frame is one the transport cannot read, and a frame it cannot read is
+// not worth failing the run over.
+func payloadStateOf(data []string) payloadState {
+	if len(data) == 0 {
+		return payloadIncomplete
+	}
+	payload := strings.Join(data, "\n")
+	if json.Valid([]byte(payload)) {
+		return payloadComplete
+	}
+	// The decoder tells a payload that ran out (what a payload spread
+	// over several lines looks like) from one that cannot be repaired.
+	// A payload that holds no value yet is one that ran out: whitespace
+	// is a prefix of JSON, not a frame to drop.
+	var raw json.RawMessage
+	err := json.NewDecoder(strings.NewReader(payload)).Decode(&raw)
+	switch {
+	case err == nil:
+		return payloadComplete
+	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.EOF):
+		return payloadIncomplete
+	default:
+		return payloadBroken
 	}
 }
 

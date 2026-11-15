@@ -949,3 +949,138 @@ func TestACredentialDeadlineIsATransientFailure(t *testing.T) {
 		t.Errorf("the failure is not retryable, want a transient one")
 	}
 }
+
+// TestACredentialResolutionCutByTheTransportTimeoutIsRetried covers the
+// transport's own bound ending the resolution while the run is alive: the
+// resolution did not finish in time, which is a transient failure and not
+// the run's cancellation, so another attempt resolves a token.
+func TestACredentialResolutionCutByTheTransportTimeoutIsRetried(t *testing.T) {
+	srv := newServer(t, completedStream)
+	asked := 0
+	tr := newTransport(srv.URL, func(o *codex.Options) {
+		o.Timeout = 50 * time.Millisecond
+		o.MaxAttempts = 2
+		o.Backoff = []time.Duration{time.Millisecond}
+		o.Credentials = func(ctx context.Context) (codex.Credential, error) {
+			asked++
+			if asked == 1 {
+				// The token store is slower than the request's bound.
+				<-ctx.Done()
+				return codex.Credential{}, fmt.Errorf("reading the token: %w", ctx.Err())
+			}
+			return codex.Credential{Token: "t", AccountID: "a"}, nil
+		}
+	})
+	var reported []poo.Attempt
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+		OnAttempt: func(a poo.Attempt) { reported = append(reported, a) },
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	if asked != 2 {
+		t.Errorf("the resolver was asked %d times, want the retry", asked)
+	}
+	if n := srv.count(); n != 1 {
+		t.Errorf("the endpoint received %d requests, want the attempt that resolved a token", n)
+	}
+	if len(reported) != 1 || !reported[0].Retried {
+		t.Fatalf("the request reported %v, want the failed attempt and its retry", reported)
+	}
+	var perr *poo.ProviderError
+	if !errors.As(reported[0].Err, &perr) || perr.Kind != poo.ProviderKindNetwork {
+		t.Errorf("the attempt failed with %v, want the transient failure the transport's bound causes", reported[0].Err)
+	}
+	if errors.Is(reported[0].Err, context.Canceled) || errors.Is(reported[0].Err, context.DeadlineExceeded) {
+		t.Errorf("the attempt reports %v, want a transient failure rather than the run stopping", reported[0].Err)
+	}
+}
+
+// TestACancelledRunDuringCredentialResolutionIsTheRuns covers the run's
+// own cancellation ending the resolution: the failure is the context's,
+// so the run settles as cancelled and no attempt is made.
+func TestACancelledRunDuringCredentialResolutionIsTheRuns(t *testing.T) {
+	srv := newServer(t, completedStream)
+	asked := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := newTransport(srv.URL, func(o *codex.Options) {
+		o.Timeout = time.Second
+		o.MaxAttempts = 3
+		o.Backoff = []time.Duration{time.Millisecond}
+		o.Credentials = func(resolveCtx context.Context) (codex.Credential, error) {
+			asked++
+			cancel()
+			<-resolveCtx.Done()
+			return codex.Credential{}, fmt.Errorf("reading the token: %w", resolveCtx.Err())
+		}
+	})
+	_, _, err := tr.Stream(ctx, poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the request failed with %v, want the run's cancellation", err)
+	}
+	if asked != 1 {
+		t.Errorf("the resolver was asked %d times, want none after the run ended", asked)
+	}
+	if n := srv.count(); n != 0 {
+		t.Errorf("the endpoint received %d requests, want none", n)
+	}
+}
+
+// TestATerminalCredentialFailureIsNotRetried covers the verdict of the
+// resolver's own failure: a refresh that traded the token and could not
+// store the new credential is terminal, and the transport hands it back
+// as it is. The transport's bound ending at the same time does not turn
+// it into a failure another attempt resolves.
+func TestATerminalCredentialFailureIsNotRetried(t *testing.T) {
+	srv := newServer(t, completedStream)
+	asked := 0
+	tr := newTransport(srv.URL, func(o *codex.Options) {
+		o.Timeout = 10 * time.Millisecond
+		o.MaxAttempts = 3
+		o.Backoff = []time.Duration{time.Millisecond}
+		o.Credentials = func(ctx context.Context) (codex.Credential, error) {
+			asked++
+			<-ctx.Done()
+			// The failure an adapter maps piauth's spent refresh onto: the
+			// token was traded and not stored, so a retry spends it again.
+			return codex.Credential{}, &poo.ProviderError{
+				Kind:    poo.ProviderKindAuthFailed,
+				Message: "piauth: the refreshed token was not stored",
+			}
+		}
+	})
+	var reported []poo.Attempt
+	_, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+		OnAttempt: func(a poo.Attempt) { reported = append(reported, a) },
+	})
+	var perr *poo.ProviderError
+	if !errors.As(err, &perr) {
+		t.Fatalf("the request failed with %v, want the failure the resolver named", err)
+	}
+	if perr.Kind != poo.ProviderKindAuthFailed {
+		t.Errorf("the failure is %q, want the auth failure the resolver named", perr.Kind)
+	}
+	if asked != 1 {
+		t.Errorf("the resolver was asked %d times, want the one attempt a terminal failure gets", asked)
+	}
+	if n := srv.count(); n != 0 {
+		t.Errorf("the endpoint received %d requests, want none", n)
+	}
+	if len(reported) != 1 || reported[0].Retried {
+		t.Errorf("the request reported %v, want one attempt that was not retried", reported)
+	}
+}

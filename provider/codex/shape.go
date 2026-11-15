@@ -425,11 +425,24 @@ func modalitiesOfQuirks(quirks []string) modalities {
 // arrives mid-conversation. The firstID is the id the first assistant
 // message item takes, so a fork numbers its appended items after the
 // snapshot's.
+//
+// Every message's provider blocks are checked in one pass of their own,
+// before the role decides what the message becomes: this transport can
+// only give a block back to the API that produced it, so a required
+// block from another API is refused wherever it rides, and an optional
+// one is left out. The pass covers the instructions, a caller-built
+// user message and a tool result as well as the assistant message the
+// endpoint returned.
 func inputItems(messages []poo.Message, reads modalities, firstID int) ([]json.RawMessage, string, error) {
 	var items []json.RawMessage
 	instructions := ""
 	next := firstID
 	for i, m := range messages {
+		for _, c := range m.Content {
+			if err := checkProviderBlock(c.Provider); err != nil {
+				return nil, "", err
+			}
+		}
 		switch m.Role {
 		case poo.RoleSystem:
 			if i == 0 && instructions == "" {
@@ -484,9 +497,6 @@ func inputItems(messages []poo.Message, reads modalities, firstID int) ([]json.R
 func assistantItems(m poo.Message, next *int) ([]json.RawMessage, error) {
 	var items []json.RawMessage
 	for _, c := range m.Content {
-		if err := checkProviderBlock(c.Provider); err != nil {
-			return nil, err
-		}
 		switch c.Kind {
 		case poo.ContentProvider:
 			raw, ok, err := providerItem(c.Provider, poo.APIResponses)

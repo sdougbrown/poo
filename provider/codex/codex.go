@@ -82,8 +82,11 @@ type Options struct {
 	// *poo.ProviderError keeps the kind it names, and a retryable kind is
 	// retried (the resolver is asked again for the next attempt), which
 	// is how a consumer says its token store failed transiently. A
-	// cancellation is reported as it is, and any other failure is an
-	// authentication failure: the request could not name its account.
+	// resolution the run's own context ended is the run's failure. The
+	// transport's Timeout ending the resolution while the run is alive is
+	// a resolution that did not finish in time, so it is transient too.
+	// Any other failure is an authentication failure: the request could
+	// not name its account.
 	//
 	// A nil resolver fails every request with a configuration error.
 	Credentials func(ctx context.Context) (Credential, error)
@@ -267,6 +270,11 @@ func (e *redirectError) Error() string {
 //
 // Stream and Fork both go through it, so the credential, the timeout,
 // the headers and the error classification mean the same thing for both.
+//
+// The credential is resolved under the request's own bound, so a token
+// store that never answers cannot hold an attempt. The bound ending while
+// the run is alive is a resolution that did not finish in time rather
+// than the run stopping, which is why the parent is kept apart from it.
 func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error) {
 	// The timeout bounds the whole request, streaming included, so the
 	// context is created before the request goes out. The parent stays
@@ -283,7 +291,7 @@ func (t *Transport) open(ctx context.Context, body []byte) (*streamReader, error
 		}
 	}
 
-	credential, err := t.credential(ctx)
+	credential, err := t.credential(parent, ctx)
 	if err != nil {
 		release()
 		return nil, err
@@ -398,14 +406,16 @@ func (t *Transport) setHeaders(req *http.Request, credential Credential) {
 // credential resolves the credential a request goes out with.
 //
 // A resolver that returns no token names no account, so the request never
-// goes out: the credential is what says which account it spends.
-func (t *Transport) credential(ctx context.Context) (Credential, error) {
+// goes out: the credential is what says which account it spends. The two
+// contexts are the request's parent and the request's own bound, which a
+// failure the resolver reports is read against.
+func (t *Transport) credential(parent, ctx context.Context) (Credential, error) {
 	if t.cfg.Credentials == nil {
 		return Credential{}, configErrorf("the Codex transport has no credential resolver")
 	}
 	credential, err := t.cfg.Credentials(ctx)
 	if err != nil {
-		return Credential{}, credentialError(ctx, err)
+		return Credential{}, credentialError(parent, ctx, err)
 	}
 	if credential.Token == "" {
 		return Credential{}, &poo.ProviderError{
@@ -427,19 +437,27 @@ func (t *Transport) credential(ctx context.Context) (Credential, error) {
 //
 // The resolver is the one that knows what its failure means, so a
 // *poo.ProviderError it returns keeps its kind and the request is retried
-// when that kind is retryable. What is left is read by what it is: a run
-// that is stopping reports its own cancellation, a resolution that was
-// cancelled is reported as such, and a resolver whose own wait ended
-// failed transiently, which another attempt resolves a token for. Any
-// other failure means the request could not name its account, which is an
-// authentication failure.
-func credentialError(ctx context.Context, err error) error {
+// when that kind is retryable, whatever ended at the same time: a
+// resolver that reports a terminal failure has traded what cannot be
+// traded twice. What is left is read by what it is: a run that is
+// stopping reports its own cancellation, the transport's own bound ending
+// while the run is alive is a resolution that did not finish in time,
+// which another attempt resolves, a resolver whose own wait ended failed
+// transiently, and any other failure means the request could not name its
+// account, which is an authentication failure.
+func credentialError(parent, request context.Context, err error) error {
 	var perr *poo.ProviderError
 	if errors.As(err, &perr) {
 		return perr
 	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return ctxErr
+	if parent != nil && parent.Err() != nil {
+		return parent.Err()
+	}
+	if request != nil && errors.Is(request.Err(), context.DeadlineExceeded) {
+		return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: request.Err().Error()}
+	}
+	if request != nil && request.Err() != nil {
+		return request.Err()
 	}
 	if errors.Is(err, context.Canceled) {
 		return err
