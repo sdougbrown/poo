@@ -1012,7 +1012,10 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 	case "usage":
 		if raw, err := json.Marshal(evt.Payload); err == nil {
 			var usage protocol.UsageEvent
-			if json.Unmarshal(raw, &usage) == nil {
+			// The run's own requests are the ones the statusline
+			// reports: a background job's request rides the same
+			// connection and counts against its own fill.
+			if json.Unmarshal(raw, &usage) == nil && usage.RunID == runID {
 				m.status.setTokens(usage.InputTokens)
 			}
 		}

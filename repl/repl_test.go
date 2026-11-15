@@ -160,7 +160,7 @@ func (s *fakeServer) waitCancels(t *testing.T, want int) []string {
 
 func TestUsageUpdatesTheStatus(t *testing.T) {
 	m := &machine{status: &status{contextLimit: 262144}}
-	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"input_tokens": 12300}}, "r1", &runState{})
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
 	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
 		t.Fatalf("the prompt lacks the run's usage: %s", prompt)
 	}
@@ -174,7 +174,7 @@ func TestUsageUpdatesTheStatus(t *testing.T) {
 func TestTheSettleDoesNotStealTheStatusline(t *testing.T) {
 	var out bytes.Buffer
 	m := &machine{status: &status{contextLimit: 262144}, r: newRenderer(&out)}
-	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"input_tokens": 12300}}, "r1", &runState{})
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
 	m.event(protocol.Event{
 		Type: "run.settled",
 		Payload: map[string]any{"run_id": "r1", "reason": "end_turn", "turns": 2,
@@ -184,6 +184,19 @@ func TestTheSettleDoesNotStealTheStatusline(t *testing.T) {
 	}, "r1", &runState{})
 	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
 		t.Errorf("the statusline does not hold the last request's fill: %s", prompt)
+	}
+}
+
+// TestAnotherRunsUsageLeavesTheStatuslineAlone covers the filter: a
+// background job's request rides the session's own connection, and its
+// count is not the conversation's fill.
+func TestAnotherRunsUsageLeavesTheStatuslineAlone(t *testing.T) {
+	var out bytes.Buffer
+	m := &machine{status: &status{contextLimit: 262144}, r: newRenderer(&out)}
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
+	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "job-7", "input_tokens": 99000}}, "r1", &runState{})
+	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
+		t.Errorf("another run's request took the statusline: %s", prompt)
 	}
 }
 
