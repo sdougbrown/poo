@@ -9,8 +9,13 @@ import (
 	"github.com/sdougbrown/poo/pootest"
 )
 
-// TestMain runs the tests the way a package under this helper does.
+// TestMain runs the tests the way a package under this helper does,
+// with the manifest overrides an operator's shell may carry already in
+// the environment, so the helper's scrub has something to remove.
 func TestMain(m *testing.M) {
+	for _, name := range pootest.ManifestOverrides() {
+		os.Setenv(name, "inherited-from-the-shell")
+	}
 	os.Exit(pootest.Main(m))
 }
 
@@ -52,5 +57,16 @@ func TestTheSuiteRunsUnderItsOwnSettings(t *testing.T) {
 func TestTheManifestScrubCoversWhatTheSettingsRead(t *testing.T) {
 	if got, want := pootest.ManifestOverrides(), config.EnvOverrideNames; !slices.Equal(got, want) {
 		t.Errorf("the suite scrubs %v, and the settings read %v", got, want)
+	}
+}
+
+// TestTheManifestOverridesDoNotReachTheSuite covers Main's scrub: the
+// shell's overrides are gone by the time the tests run, so a package
+// under this helper cannot read a manifest the operator named.
+func TestTheManifestOverridesDoNotReachTheSuite(t *testing.T) {
+	for _, name := range pootest.ManifestOverrides() {
+		if value, ok := os.LookupEnv(name); ok {
+			t.Errorf("the suite carries %s=%s from the shell", name, value)
+		}
 	}
 }
