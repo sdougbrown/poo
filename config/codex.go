@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/config/internal/piimport"
 	"github.com/sdougbrown/poo/provider/codex"
 	"github.com/sdougbrown/poo/provider/piauth"
 )
@@ -22,7 +21,7 @@ import (
 // the credential under.
 func (r *Runtime) codexModel(model poo.ModelInfo) bool {
 	entry, ok := r.Settings.Models[model.Name]
-	return ok && entry.Endpoint == piimport.CodexProvider
+	return ok && entry.Endpoint == piauth.ProviderCodex
 }
 
 // codexTransport builds the Codex transport for a model.
@@ -35,9 +34,9 @@ func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error)
 	if endpoint != codex.DefaultEndpoint {
 		return nil, &Error{
 			Code:  CodeUnsupported,
-			Field: "endpoints." + piimport.CodexProvider + ".endpoint",
+			Field: "endpoints." + piauth.ProviderCodex + ".endpoint",
 			Message: fmt.Sprintf("the %s provider is served at %s; poo sends pi's credential only to %s",
-				piimport.CodexProvider, endpoint, codex.DefaultEndpoint),
+				piauth.ProviderCodex, endpoint, codex.DefaultEndpoint),
 		}
 	}
 	path := r.Settings.piAuthFile()

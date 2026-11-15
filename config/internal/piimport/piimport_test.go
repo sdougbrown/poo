@@ -8,6 +8,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config/internal/piimport"
+	"github.com/sdougbrown/poo/provider/piauth"
 )
 
 // TestAPisFilesThatOpenWithABOMAreRead covers the files a Windows editor
@@ -31,7 +32,7 @@ func TestAPisFilesThatOpenWithABOMAreRead(t *testing.T) {
 	if err := os.WriteFile(auth, []byte("\ufeff"+`{"home": {"type": "api_key", "key": "test-key-123"}}`), 0o600); err != nil {
 		t.Fatalf("writing the auth file: %v", err)
 	}
-	file, err := piimport.Read(models)
+	file, err := piimport.Read(models, "")
 	if err != nil {
 		t.Fatalf("reading the models file: %v", err)
 	}
@@ -63,11 +64,11 @@ func TestTheCodexAPIImportsForTheCodexProvider(t *testing.T) {
 				"models": [{"id": "gpt-6.1-sol"}]
 			}
 		}
-	}`))
+	}`), "")
 	if err != nil {
 		t.Fatalf("reading the models file: %v", err)
 	}
-	provider := file.Providers[piimport.CodexProvider]
+	provider := file.Providers[piauth.ProviderCodex]
 	if provider.API != string(poo.APIResponses) {
 		t.Errorf("the provider's API is %q, want the Responses API", provider.API)
 	}
@@ -88,7 +89,7 @@ func TestTheCodexAPIIsRefusedForAnotherProvider(t *testing.T) {
 				"models": [{"id": "qwen"}]
 			}
 		}
-	}`))
+	}`), "")
 	if err == nil || !strings.Contains(err.Error(), "does not know") {
 		t.Fatalf("the import is %v, want the API refused", err)
 	}

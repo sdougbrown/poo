@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/piauth"
 )
 
 // File is a models file read into poo's vocabulary: the providers it
@@ -42,6 +43,9 @@ type Provider struct {
 	// ToolsMode is how the provider asks for tool calls. Empty means
 	// whatever the model needs.
 	ToolsMode string
+	// SkipProbe says the provider's models are declared rather than
+	// discovered, so no probe is sent to its endpoint.
+	SkipProbe bool
 	// Models are the models the provider serves.
 	Models []Model
 }
@@ -109,7 +113,12 @@ var modalities = map[string]bool{
 }
 
 // Read reads the models file at path.
-func Read(path string) (File, error) {
+//
+// authPath is the auth.json its providers' keys are read from. Empty means
+// the auth.json beside the models file, which is where pi's own layout keeps
+// it. A caller that resolved the file from the settings hands it over, so one
+// setting names pi's credential file for every reader.
+func Read(path, authPath string) (File, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return File{}, fmt.Errorf("reading %s: %w", path, err)
@@ -152,7 +161,10 @@ func Read(path string) (File, error) {
 		env, key := keyFromValue(definition.APIKey)
 		if env == "" && key == "" {
 			if !authRead {
-				keys, err = readAuth(filepath.Join(filepath.Dir(path), AuthFileName))
+				if authPath == "" {
+					authPath = filepath.Join(filepath.Dir(path), AuthFileName)
+				}
+				keys, err = readAuth(authPath)
 				if err != nil {
 					return File{}, err
 				}
@@ -206,7 +218,7 @@ func wireAPI(provider, api string) (string, error) {
 	case "", "openai-completions":
 		return "", nil
 	case "openai-codex-responses":
-		if provider == CodexProvider {
+		if provider == piauth.ProviderCodex {
 			return string(poo.APIResponses), nil
 		}
 	}

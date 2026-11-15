@@ -19,7 +19,6 @@ import (
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/compact/handoff"
 	"github.com/sdougbrown/poo/compact/summary"
-	"github.com/sdougbrown/poo/config/internal/piimport"
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/feed"
@@ -32,6 +31,7 @@ import (
 	"github.com/sdougbrown/poo/protect"
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/openai"
+	"github.com/sdougbrown/poo/provider/piauth"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/skill"
 )
@@ -1047,10 +1047,10 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			Endpoint:  endpoint.Endpoint,
 			APIKeyEnv: endpoint.APIKeyEnv,
 			APIKey:    endpoint.APIKey,
-			// The Codex provider's models are declared with the provider:
-			// the endpoint has no model list, and a probe would reach it
-			// with no credential.
-			SkipProbe: name == piimport.CodexProvider,
+			// An endpoint whose models are declared is not asked what it
+			// serves. The built-in Codex provider is one: its endpoint has
+			// no model list, and a probe would reach it with no credential.
+			SkipProbe: endpoint.SkipProbe,
 		}
 	}
 
@@ -2286,7 +2286,7 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 			Code:  CodeUnsupported,
 			Field: "roles.decider",
 			Message: fmt.Sprintf("the model %q is served by the %s provider, which does not answer decision questions",
-				model.Name, piimport.CodexProvider),
+				model.Name, piauth.ProviderCodex),
 		}
 	}
 	timeout := time.Duration(0)

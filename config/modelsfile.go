@@ -25,13 +25,21 @@ const ModelsFileName = "models.json"
 // by hand has no resolved path, and piAuthFile falls back to the setting it
 // names.
 func (s *Settings) importPi(dir string) error {
-	modelsPath, err := s.importModelsFile(dir)
+	modelsPath, err := s.modelsFilePath(dir)
 	if err != nil {
 		return err
 	}
+	// The auth file is resolved before the models file is read, so one path
+	// answers for every reader: the Codex credential the transport resolves,
+	// and the api keys the models file's providers import.
 	s.piAuthPath, err = s.resolvePiAuthFile(dir, modelsPath)
 	if err != nil {
 		return err
+	}
+	if modelsPath != "" {
+		if err := s.importModelsFile(modelsPath); err != nil {
+			return err
+		}
 	}
 	// pi's built-in providers are offered when a pi auth file is there, because
 	// they are what its credential can run. A settings file that names none of
@@ -43,18 +51,17 @@ func (s *Settings) importPi(dir string) error {
 	return nil
 }
 
-// importModelsFile imports the models file the settings name, or the one
-// beside them, and returns the path it read.
+// modelsFilePath returns the models file the settings name, or the one beside
+// them, and whether there is one.
 //
 // A named file wins over a discovered one, and a relative name resolves
 // against dir — the settings file's own directory — rather than the working
 // directory. dir is empty for a document held in memory, which is what says
 // there is nothing to discover beside it.
-func (s *Settings) importModelsFile(dir string) (string, error) {
+func (s *Settings) modelsFilePath(dir string) (string, error) {
 	path := s.ModelsFile
-	named := path != ""
 	switch {
-	case named:
+	case path != "":
 		expanded, err := expandHome(path)
 		if err != nil {
 			return "", err
@@ -62,22 +69,27 @@ func (s *Settings) importModelsFile(dir string) (string, error) {
 		if !filepath.IsAbs(expanded) && dir != "" {
 			expanded = filepath.Join(dir, expanded)
 		}
-		path = expanded
+		return expanded, nil
 	case dir != "":
 		candidate := filepath.Join(dir, ModelsFileName)
 		if !fileExists(candidate) {
 			return "", nil
 		}
-		path = candidate
+		return candidate, nil
 	default:
 		return "", nil
 	}
-	file, err := piimport.Read(path)
+}
+
+// importModelsFile imports a models file, and the keys its providers read from
+// the auth file the settings resolved.
+func (s *Settings) importModelsFile(path string) error {
+	file, err := piimport.Read(path, s.piAuthPath)
 	if err != nil {
-		if !named {
+		if s.ModelsFile == "" {
 			// The settings named no file, so no setting is at fault: the
 			// file beside them is, and the message names it.
-			return "", &Error{
+			return &Error{
 				Code:    CodeInvalid,
 				Message: "the models file beside the settings does not read",
 				Err:     err,
@@ -85,10 +97,10 @@ func (s *Settings) importModelsFile(dir string) (string, error) {
 		}
 		// The reader names the file it read; the setting that named it is
 		// what a caller branches on.
-		return "", &Error{Code: CodeInvalid, Field: "models_file", Err: err}
+		return &Error{Code: CodeInvalid, Field: "models_file", Err: err}
 	}
 	s.applyModelsFile(file)
-	return path, nil
+	return nil
 }
 
 // resolvePiAuthFile returns the auth.json the Codex provider reads.
@@ -153,6 +165,7 @@ func (s *Settings) applyModelsFile(file piimport.File) {
 				Endpoint:  provider.BaseURL,
 				APIKeyEnv: provider.APIKeyEnv,
 				APIKey:    provider.APIKey,
+				SkipProbe: provider.SkipProbe,
 			}
 		}
 		for _, model := range provider.Models {

@@ -1,12 +1,9 @@
 package piimport
 
-import "github.com/sdougbrown/poo"
-
-// CodexProvider is the provider id pi's built-in Codex provider uses.
-//
-// It is the name a Codex model is imported under — openai-codex/<id> — and
-// the key pi stores the credential under in auth.json.
-const CodexProvider = "openai-codex"
+import (
+	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/piauth"
+)
 
 // codexModel is one model pi's bundled Codex provider serves.
 type codexModel struct {
@@ -64,10 +61,11 @@ func BuiltinCodex(endpoint string) File {
 		})
 	}
 	return File{Providers: map[string]Provider{
-		CodexProvider: {
+		piauth.ProviderCodex: {
 			BaseURL:   endpoint,
 			API:       string(poo.APIResponses),
 			ToolsMode: string(poo.ToolsNative),
+			SkipProbe: true,
 			Models:    models,
 		},
 	}}

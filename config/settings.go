@@ -80,9 +80,10 @@ type Settings struct {
 	// auth.json beside the file is also the built-in Codex provider's
 	// credential.
 	ModelsFile string `json:"models_file,omitempty"`
-	// PiAuthFile names the auth.json pi keeps its credentials in. poo reads
-	// the openai-codex OAuth credential from it and writes a refreshed one
-	// back under the lock pi takes; no other endpoint ever sees it.
+	// PiAuthFile names the auth.json pi keeps its credentials in. It is the
+	// one path every reader of that file uses: the openai-codex OAuth
+	// credential poo refreshes under pi's lock, and the api keys a models
+	// file's providers import.
 	//
 	// A relative path resolves against the settings file's own directory,
 	// like models_file. With none named, an auth.json beside the models file
@@ -108,6 +109,12 @@ type Endpoint struct {
 	// environment variable is the better neighbor; the literal is
 	// what a models file written for another tool imports as.
 	APIKey string `json:"api_key,omitempty"`
+	// SkipProbe says the endpoint is not asked what models it serves.
+	//
+	// An endpoint whose models are declared — the built-in Codex provider
+	// is one — has no model list to answer with, and a probe would be a
+	// request it does not understand.
+	SkipProbe bool `json:"skip_probe,omitempty"`
 }
 
 // Model is one model in the settings.
