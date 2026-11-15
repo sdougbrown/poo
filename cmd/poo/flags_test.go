@@ -476,3 +476,45 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 		}
 	})
 }
+
+// TestEveryCommandWithItsOwnFlagsHasABindingTest covers the blind spot the
+// bind tests share: they are a list, and a command added without a subtest
+// would slip through. The commands are walked from the declaration, so a
+// new one with its own flags fails here until it is bound somewhere.
+func TestEveryCommandWithItsOwnFlagsHasABindingTest(t *testing.T) {
+	// covered names the test that binds each command's own flags. A
+	// command whose handler reads an invocation directly names the test
+	// that drives that flag instead.
+	covered := map[string]string{
+		"run":            "TestTheRunFlagsReachTheOptions",
+		"serve":          "TestEveryOtherCommandBindsItsFlags/serve",
+		"prompt":         "TestEveryOtherCommandBindsItsFlags/prompt",
+		"models":         "TestEveryOtherCommandBindsItsFlags/models",
+		"sessions list":  "TestEveryOtherCommandBindsItsFlags/sessions_list",
+		"sessions prune": "TestEveryOtherCommandBindsItsFlags/sessions_prune",
+		"version":        "TestTheVersionCommandAnswersInBothForms",
+		// The repl binds serveOptions, so the serve subtest covers its
+		// binding; this test covers the second spelling it hands the child.
+		"repl": "TestTheReplHandsItsServerTheFlagsItParsed",
+	}
+	app := pooApp(io.Discard)
+	var walk func(prefix string, commands []*clicontract.Command)
+	walk = func(prefix string, commands []*clicontract.Command) {
+		for _, command := range commands {
+			path := command.Name
+			if prefix != "" {
+				path = prefix + " " + command.Name
+			}
+			own := len(command.Flags) + len(command.PersistentFlags)
+			if own > 0 {
+				if _, ok := covered[path]; !ok {
+					t.Errorf("the command %q declares %d flag(s) and no test binds them: add a subtest and a line here", path, own)
+				}
+			}
+			walk(path, command.Subcommands)
+		}
+	}
+	// The front doors are in the tree too: the app takes their commands
+	// from the declaration, so walking it reaches them.
+	walk("", app.Commands)
+}
