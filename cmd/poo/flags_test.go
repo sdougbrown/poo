@@ -325,3 +325,154 @@ func TestTheRunFlagsReachTheOptions(t *testing.T) {
 		t.Errorf("the prompt is %q, want one word", inv.Args)
 	}
 }
+
+// TestEveryOtherCommandBindsItsFlags covers the binding the run's test
+// cannot: a flag added to serve, prompt, models or sessions has its own
+// lookup, and a lookup that names the wrong flag reads an empty value
+// without failing. Each command's whole struct is compared at once, the
+// way the run's is.
+func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
+	t.Run("serve", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"serve",
+			"--settings", "s.yaml",
+			"--system-prompt", "system.md",
+			"--append-system-prompt", "extra",
+			"--permission-unmatched", "allow",
+			"--session-dir", "sessions",
+			"--user-prompt-file", "user.md",
+			"--ephemeral",
+			"--profile", "base",
+			"--feeds-path", "feeds.yaml",
+			"--cli-registry-path", "registry.yaml",
+			"--endpoint", "http://localhost:4000/v1",
+			"--model-id", "test-model",
+			"--context-limit", "4096",
+			"--api-key-env", "POO_KEY",
+			"--tools-mode", "auto",
+			"--working-dir", "/tmp",
+			"--executor", "local",
+		})
+		if err != nil {
+			t.Fatalf("parsing the serve's flags: %v", err)
+		}
+		var o serveOptions
+		o.bind(inv)
+		want := serveOptions{
+			sharedFlags: sharedFlags{
+				settingsFile:        "s.yaml",
+				systemPrompt:        "system.md",
+				appendSystemPrompt:  "extra",
+				permissionUnmatched: "allow",
+				sessionDir:          "sessions",
+				userPromptFile:      "user.md",
+				ephemeral:           true,
+				profile:             "base",
+				feedsPaths:          []string{"feeds.yaml"},
+				cliRegistryPaths:    []string{"registry.yaml"},
+			},
+			endpointFlags: endpointFlags{
+				endpoint:     "http://localhost:4000/v1",
+				modelID:      "test-model",
+				contextLimit: 4096,
+				apiKeyEnv:    "POO_KEY",
+				toolsMode:    "auto",
+			},
+			workingDir: "/tmp",
+			executor:   "local",
+		}
+		if !reflect.DeepEqual(o, want) {
+			t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
+		}
+	})
+
+	t.Run("prompt", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"prompt",
+			"--settings", "s.yaml",
+			"--user-prompt-file", "user.md",
+			"--profile", "search",
+			"--project-prompt",
+		})
+		if err != nil {
+			t.Fatalf("parsing the prompt's flags: %v", err)
+		}
+		var o promptOptions
+		o.bind(inv)
+		want := promptOptions{
+			sharedFlags: sharedFlags{
+				settingsFile:   "s.yaml",
+				userPromptFile: "user.md",
+				profile:        "search",
+			},
+			projectPrompt: true,
+		}
+		if !reflect.DeepEqual(o, want) {
+			t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
+		}
+	})
+
+	t.Run("models", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"models",
+			"--json",
+			"--explain", "gemma4",
+			"--session-dir", "sessions",
+		})
+		if err != nil {
+			t.Fatalf("parsing the models' flags: %v", err)
+		}
+		var o modelsOptions
+		o.bind(inv)
+		want := modelsOptions{
+			sharedFlags: sharedFlags{sessionDir: "sessions"},
+			json:        true,
+			explain:     "gemma4",
+		}
+		if !reflect.DeepEqual(o, want) {
+			t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
+		}
+	})
+
+	t.Run("sessions prune", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"sessions", "prune",
+			"--older-than", "30",
+			"--keep", "5",
+			"--dry-run",
+			"--session-dir", "sessions",
+		})
+		if err != nil {
+			t.Fatalf("parsing the prune's flags: %v", err)
+		}
+		var o sessionsOptions
+		o.bind(inv)
+		want := sessionsOptions{
+			sharedFlags: sharedFlags{sessionDir: "sessions"},
+			olderThan:   30,
+			keep:        5,
+			dryRun:      true,
+		}
+		if !reflect.DeepEqual(o, want) {
+			t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
+		}
+	})
+
+	t.Run("sessions list", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"sessions", "list",
+			"--json",
+		})
+		if err != nil {
+			t.Fatalf("parsing the list's flags: %v", err)
+		}
+		var o sessionsOptions
+		o.bind(inv)
+		if !o.json {
+			t.Error("the list did not bind --json")
+		}
+		if o.olderThan != 0 || o.keep != 0 || o.dryRun {
+			t.Errorf("the list bound the prune's flags: %+v", o)
+		}
+	})
+}
