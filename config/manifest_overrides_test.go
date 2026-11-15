@@ -158,6 +158,21 @@ func TestEnvOverridesDoesNotShareCallerSlices(t *testing.T) {
 	}
 }
 
+// TestWithOverridesCarriesTheFlagPaths covers the effective settings a
+// server serves to its clients: the paths the flags name are in them, so
+// a client reads the same document the runtime was built from.
+func TestWithOverridesCarriesTheFlagPaths(t *testing.T) {
+	settings := &config.Settings{}
+	file := filepath.Join(t.TempDir(), "instructions.md")
+	effective := config.WithOverrides(settings, config.Overrides{UserPromptFile: file})
+	if effective.Session.UserPromptFile == nil || *effective.Session.UserPromptFile != file {
+		t.Errorf("the effective user prompt file is %v, want %q", effective.Session.UserPromptFile, file)
+	}
+	if settings.Session.UserPromptFile != nil {
+		t.Error("the override wrote into the caller's settings")
+	}
+}
+
 // TestWithOverridesReportsTheMergedManifestPaths covers the effective
 // settings: they hold the settings' manifest paths followed by the
 // overrides', in fresh lists, so the caller's settings stay as they were.

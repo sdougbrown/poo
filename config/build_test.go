@@ -825,8 +825,8 @@ func TestTheUserPromptDefaultFileMayBeAbsent(t *testing.T) {
 	}
 	missing := filepath.Join(t.TempDir(), "instructions.md")
 	runtime := buildWith(t, config.BuildOptions{Settings: settings, WorkingDir: t.TempDir(), UserPromptFile: missing})
-	if text := poo.PromptBuilder(runtime.Options).Render(); strings.Contains(text, "user") {
-		t.Errorf("the prompt holds a user section: %q", text)
+	if names := poo.PromptBuilder(runtime.Options).Names(); slices.Contains(names, config.UserSection) {
+		t.Errorf("the prompt holds a %q section: %v", config.UserSection, names)
 	}
 }
 
@@ -867,6 +867,45 @@ func TestTheUserPromptFailsOnAFileItCannotRead(t *testing.T) {
 	}
 	if field, _ := config.FieldOf(err); field != "session.user_prompt_file" {
 		t.Errorf("the field is %q, want session.user_prompt_file", field)
+	}
+}
+
+// TestTheUserPromptFailsOnAMissingFile covers a path that names no
+// file: the settings refuse it when they load, so a typo cannot drop the
+// instructions quietly.
+func TestTheUserPromptFailsOnAMissingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "instructions.md")
+	_, err := config.Parse([]byte(theModelSettings+"session:\n  user_prompt_file: "+missing+"\n"), config.FormatYAML)
+	if err == nil {
+		t.Fatal("the settings accepted a path with no file behind it")
+	}
+	if field, _ := config.FieldOf(err); field != "session.user_prompt_file" {
+		t.Errorf("the field is %q, want session.user_prompt_file", field)
+	}
+}
+
+// TestTheUserPromptFlagFailsOnAMissingFile covers the same path through
+// the flag: the settings check never sees it, so the build refuses it.
+func TestTheUserPromptFlagFailsOnAMissingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "instructions.md")
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		Overrides:      config.Overrides{UserPromptFile: missing},
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build accepted a flag naming no file")
+	}
+	if field, _ := config.FieldOf(err); field != "--user-prompt-file" {
+		t.Errorf("the field is %q, want --user-prompt-file", field)
 	}
 }
 

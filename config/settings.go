@@ -405,13 +405,17 @@ type Session struct {
 	// AGENTS.md — in the prompt. The loader reads the working
 	// directory only; it never walks up to a parent.
 	ProjectPrompt *bool `json:"project_prompt,omitempty"`
-	// UserPrompt includes the user's own instructions — the file
-	// UserPromptFile names, or the binary's default path — in the
-	// prompt. It is the operator's guidance, not the project's: the
-	// file is read once for the process, not once per session.
+	// UserPrompt asks for the user's own instructions from the binary's
+	// default path. It is the operator's guidance, not the project's:
+	// the file is read with the build, not once per session.
+	//
+	// Naming a file in UserPromptFile asks for the same instructions
+	// without this, the way the --user-prompt-file flag does.
 	UserPrompt *bool `json:"user_prompt,omitempty"`
 	// UserPromptFile is the file the user's instructions are read from.
-	// An empty value takes the binary's default path.
+	// Naming one asks for the instructions on its own. An empty value
+	// leaves them to the binary's default path, which UserPrompt
+	// reaches.
 	UserPromptFile *string `json:"user_prompt_file,omitempty"`
 	// Retention says which sessions a prune deletes.
 	Retention Retention `json:"retention,omitempty"`

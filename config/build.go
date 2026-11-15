@@ -318,6 +318,10 @@ func WithOverrides(settings *Settings, overrides Overrides) *Settings {
 		value := overrides.SessionMode
 		effective.Session.Mode = &value
 	}
+	if overrides.UserPromptFile != "" {
+		value := overrides.UserPromptFile
+		effective.Session.UserPromptFile = &value
+	}
 	if overrides.SystemPrompt != "" {
 		effective.SystemPrompt.BaseFile = overrides.SystemPrompt
 	}

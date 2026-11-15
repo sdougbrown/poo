@@ -270,6 +270,20 @@ func (s *Settings) checkFiles() error {
 			}
 		}
 	}
+	if value := s.Session.UserPromptFile; value != nil && *value != "" {
+		path, err := expandHome(*value)
+		if err == nil {
+			_, err = os.Stat(path)
+		}
+		if err != nil {
+			return &Error{
+				Code:    CodeInvalid,
+				Field:   "session.user_prompt_file",
+				Message: "the file is not there",
+				Err:     err,
+			}
+		}
+	}
 	if s.Finish.SchemaFile != "" {
 		data, err := os.ReadFile(s.Finish.SchemaFile)
 		if err != nil {

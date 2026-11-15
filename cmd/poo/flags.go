@@ -83,11 +83,11 @@ func (f *sharedFlags) register(fs *flag.FlagSet) {
 // UserPromptFile to its own path, and one that wants no default leaves
 // it empty.
 func defaultUserPromptFile() string {
-	dir, err := os.UserConfigDir()
+	dir, err := config.UserConfigDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "poo", "AGENTS.md")
+	return filepath.Join(dir, "AGENTS.md")
 }
 
 // settings reads the settings file and returns the settings.
