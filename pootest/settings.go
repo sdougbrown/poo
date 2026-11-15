@@ -20,9 +20,20 @@ const settingsFile = "version: 1\n"
 const settingsEnv = "POO_SETTINGS"
 
 // manifestOverrides are the environment variables a shell may carry from
-// an operator's own session, naming manifests this package's tests do
-// not load.
-var manifestOverrides = []string{"POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH"}
+// an operator's own session, naming manifests or credentials this
+// package's tests do not have. They are the ones config.EnvOverrides
+// reads, which this package cannot import: settings_test.go holds the
+// two lists together.
+var manifestOverrides = []string{"POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH", "POO_CREDENTIAL_ENV"}
+
+// ManifestOverrides returns the environment variables Main removes, in
+// the order it removes them.
+//
+// A consumer whose own TestMain scrubs by hand needs the same list, and
+// one that reads it here cannot fall behind it.
+func ManifestOverrides() []string {
+	return append([]string(nil), manifestOverrides...)
+}
 
 // Main runs a package's tests under a settings file of the tests' own,
 // and returns the code TestMain passes to os.Exit.

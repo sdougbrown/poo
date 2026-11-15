@@ -2,6 +2,7 @@ package pootest_test
 
 import (
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/sdougbrown/poo/config"
@@ -41,5 +42,15 @@ func TestTheSuiteRunsUnderItsOwnSettings(t *testing.T) {
 	}
 	if askers := settings.Permission.Askers; len(askers) > 0 {
 		t.Errorf("the suite's settings name askers: %v", askers)
+	}
+}
+
+// TestTheManifestScrubCoversWhatTheSettingsRead covers the coupling: a
+// name config.EnvOverrides learns and this package does not scrub would
+// leave the operator's manifests and credentials in the suite's
+// environment.
+func TestTheManifestScrubCoversWhatTheSettingsRead(t *testing.T) {
+	if got, want := pootest.ManifestOverrides(), config.EnvOverrideNames; !slices.Equal(got, want) {
+		t.Errorf("the suite scrubs %v, and the settings read %v", got, want)
 	}
 }

@@ -90,6 +90,22 @@ type Overrides struct {
 	CredentialEnvNames []string
 }
 
+// The environment variables a shell or a launcher names a build's
+// manifests and credentials by.
+const (
+	// EnvFeedsPath names the feed manifest paths.
+	EnvFeedsPath = "POO_FEEDS_PATH"
+	// EnvCLIRegistryPath names the cli registry manifest paths.
+	EnvCLIRegistryPath = "POO_CLI_REGISTRY_PATH"
+	// EnvCredentialEnv names the environment names a launcher declares
+	// for poo's own subsystems.
+	EnvCredentialEnv = "POO_CREDENTIAL_ENV"
+)
+
+// EnvOverrideNames are the variables EnvOverrides reads, in the order it
+// reads them. The same names are kept out of a tool's child environment.
+var EnvOverrideNames = []string{EnvFeedsPath, EnvCLIRegistryPath, EnvCredentialEnv}
+
 // EnvOverrides adds what the environment names after the caller's own values.
 //
 // POO_FEEDS_PATH and POO_CLI_REGISTRY_PATH are path lists, and
@@ -108,9 +124,9 @@ func EnvOverrides(o Overrides) Overrides {
 		}
 		return result
 	}
-	o.FeedsPaths = paths(o.FeedsPaths, "POO_FEEDS_PATH")
-	o.CLIRegistryPaths = paths(o.CLIRegistryPaths, "POO_CLI_REGISTRY_PATH")
-	o.CredentialEnvNames = paths(o.CredentialEnvNames, "POO_CREDENTIAL_ENV")
+	o.FeedsPaths = paths(o.FeedsPaths, EnvFeedsPath)
+	o.CLIRegistryPaths = paths(o.CLIRegistryPaths, EnvCLIRegistryPath)
+	o.CredentialEnvNames = paths(o.CredentialEnvNames, EnvCredentialEnv)
 	return o
 }
 
@@ -1039,7 +1055,7 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Names:       append([]string(nil), settings.Tools.Env.Scrub...),
 		Passthrough: append([]string(nil), settings.Tools.Env.Passthrough...),
 	}
-	scrub.Names = append(scrub.Names, "POO_FEEDS_PATH", "POO_CLI_REGISTRY_PATH", "POO_CREDENTIAL_ENV")
+	scrub.Names = append(scrub.Names, EnvOverrideNames...)
 	if r.Catalog != nil {
 		scrub.Names = append(scrub.Names, r.Catalog.CredentialEnvNames()...)
 	}
