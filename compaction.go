@@ -27,13 +27,13 @@ type CompactionEnv struct {
 	Budget ContextBudget
 	// Fork re-sends the last main request with messages appended. It is
 	// the cheapest way to ask the model something, and the only way to
-	// see what the model itself saw, so it is what a strategy that
-	// asks about the conversation uses.
+	// see what the model itself saw. A strategy that asks about the
+	// conversation uses it.
 	Fork ForkFunc
 	// Ask sends messages of the strategy's own, with nothing before
-	// them. It is how a strategy reads the whole current view, which a
-	// fork cannot: a fork carries the window of the last main request,
-	// and that window cannot be reshaped.
+	// them. It is how a strategy reads the whole current view. A fork
+	// cannot: it carries the window of the last main request, and that
+	// window cannot be reshaped.
 	Ask AskFunc
 }
 
@@ -52,7 +52,7 @@ type AskFunc func(ctx context.Context, messages []Message, maxTokens int) (Reply
 
 // Reply is what a request a strategy made produced.
 //
-// A strategy that records the reply needs the finish reason: a reply the
+// A strategy that records the reply needs the finish reason. A reply the
 // output limit cut short is incomplete, and recording it as if it were
 // whole hands the model a truncated note or summary.
 type Reply struct {

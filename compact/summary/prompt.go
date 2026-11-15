@@ -11,9 +11,9 @@ import (
 // The summarization request's shape.
 //
 // The prompts and the serialized conversation follow pi's compaction,
-// Claude Code's /compact and OpenHands' condensers: a conversation
-// rendered as text, a system prompt that forbids continuing it, a
-// structured checkpoint format, and an update form that carries the
+// Claude Code's /compact and OpenHands' condensers. A conversation is
+// rendered as text, and a system prompt forbids continuing it. The
+// checkpoint has a fixed structure, and an update form carries the
 // previous summary forward. The strategy ships the format those tools
 // found worth keeping rather than inventing a new one.
 
@@ -128,8 +128,8 @@ func summarizationRequest(covered []poo.Message, previous string) []poo.Message 
 
 // escapeTags defangs the tags the request uses to delimit its parts.
 //
-// A tool result is not the request's own words, and one that emits a
-// closing tag could pose as the end of the conversation or as an earlier
+// A tool result is not the request's own words. One that emits a closing
+// tag could pose as the end of the conversation, or as an earlier
 // summary. The role prefixes stay forgeable, as they are in any
 // transcript format, but the structure the request is parsed by does not.
 var escapeTags = strings.NewReplacer(
@@ -141,11 +141,11 @@ var escapeTags = strings.NewReplacer(
 
 // serialize renders the covered messages as one block of text.
 //
-// Tool results are capped: the full text of one is what the summary does
+// Tool results are capped. The full text of one is what the summary does
 // not need, and it is what would make the request larger than the window
-// it summarizes. Thinking is left out for the same reason, and because a
-// provider often drops reasoning that came from another request, so it is
-// not reliably part of the context either.
+// it summarizes. Thinking is left out for the same reason. A provider
+// also often drops reasoning that came from another request, so it is not
+// reliably part of the context either.
 func serialize(messages []poo.Message) string {
 	parts := make([]string, 0, len(messages))
 	for _, m := range messages {
@@ -210,10 +210,10 @@ func callText(c poo.ContentBlock) string {
 
 // fileList states the files the summarized work read and changed.
 //
-// The list is what the tail no longer shows, and it is the prior art's
-// answer to the re-read problem: a summary that neglects to mention a
-// file the model edited sends the model back to read it. The calls name
-// the files, so the list does not depend on the summary repeating them.
+// The list is what the tail no longer shows. It is the prior art's answer
+// to the re-read problem: a summary that neglects to mention a file the
+// model edited sends the model back to read it. The calls name the files,
+// so the list does not depend on the summary repeating them.
 func fileList(files FileOp, messages []poo.Message) string {
 	read := map[string]bool{}
 	changed := map[string]bool{}

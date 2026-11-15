@@ -1,18 +1,20 @@
 // Package summary is the summary-and-continue compaction strategy.
 //
 // The strategy replaces the oldest turns of the view with a model-written
-// summary and keeps the newest turns verbatim, so the run carries on with
-// a shorter view of the same work. It is the conventional strategy:
+// summary and keeps the newest turns verbatim. The run carries on with a
+// shorter view of the same work. It is the conventional strategy:
 // pi, Claude Code's /compact and OpenHands' condensers all read a
 // conversation and write a structured checkpoint of it.
 //
 // The summary request is the strategy's own, built from a serialization
 // of the turns the cut covers rather than from the run's conversation.
-// That is what lets it read the whole current view: a fork re-sends the
+// That is what lets it read the whole current view. A fork re-sends the
 // window of the last main request, which can be a turn older than the
-// view. It is also what keeps the request inside the window it
-// summarizes: the model is told to write a summary instead of continuing
-// the work, tool results are capped, and reasoning blocks are left out.
+// view.
+//
+// It also keeps the request inside the window it summarizes. The model is
+// told to write a summary instead of continuing the work, tool results are
+// capped, and reasoning blocks are left out.
 //
 // Every replacement the strategy writes starts with a marker line naming
 // the turns it replaced, so the model reads that its history was
@@ -125,8 +127,8 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 
 // ShouldCompact reports whether the view should be summarized.
 //
-// The strategy acts when the window is nearly full and only after the
-// run has asked the model something: a summary is about work that
+// The strategy acts when the window is nearly full, and only after the
+// run has asked the model something. A summary is about work that
 // happened.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	if budget.Turns < 1 || budget.ContextLimit <= 0 {
@@ -193,14 +195,14 @@ type cutRange struct {
 //
 // The tail is the newest turns of the view, as many as the budget keeps.
 // The cut covers everything before it. It starts at the earliest turn
-// still in the view and stops before any turn a compaction removed, so
-// the range the core is asked to replace is always one contiguous run.
+// still in the view and stops before any turn a compaction removed. The
+// range the core is asked to replace is therefore one contiguous run.
 func (c *Compactor) cut(messages []poo.Message, turns []poo.TurnSummary, budget poo.ContextBudget) (cutRange, bool) {
 	live := liveTurns(turns)
 	if len(live) < 2 {
-		// A single turn is all the view holds: there is nothing older to
-		// summarize, and replacing it would summarize the work the run
-		// is in the middle of.
+		// A single turn is all the view holds, so there is nothing older
+		// to summarize. Replacing it would summarize the work the run is
+		// in the middle of.
 		return cutRange{}, false
 	}
 	keep := c.tailTokens(budget)
@@ -226,8 +228,8 @@ func (c *Compactor) cut(messages []poo.Message, turns []poo.TurnSummary, budget 
 // liveTurns returns the run of turns the view still holds.
 //
 // A compaction removes a run of turns and leaves the rest where they
-// were, so the turns the strategy may cut are the leading removed turns
-// skipped and the contiguous run that follows.
+// were. The turns the strategy may cut are therefore the leading removed
+// turns skipped, and the contiguous run that follows them.
 func liveTurns(turns []poo.TurnSummary) []poo.TurnSummary {
 	live := make([]poo.TurnSummary, 0, len(turns))
 	started := false
