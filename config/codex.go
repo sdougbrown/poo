@@ -12,18 +12,6 @@ import (
 	"github.com/sdougbrown/poo/provider/piauth"
 )
 
-// codexModel reports whether the model is served by pi's built-in Codex
-// provider.
-//
-// The provider is the settings' endpoint name, and nothing else infers it. A
-// responses API on another endpoint is not Codex, nor is the Codex URL under
-// another name. The name is pi's provider id, which is also the key pi stores
-// the credential under.
-func (r *Runtime) codexModel(model poo.ModelInfo) bool {
-	entry, ok := r.Settings.Models[model.Name]
-	return ok && entry.Endpoint == piauth.ProviderCodex
-}
-
 // codexTransport builds the Codex transport for a model.
 //
 // The endpoint is pi's built-in one. pi's credential is an OAuth token for that

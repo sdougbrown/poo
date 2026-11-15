@@ -2216,20 +2216,42 @@ func (r *Runtime) DeciderModel() (poo.ModelInfo, error) {
 // environment variable when the environment holds it, else the literal
 // the settings carry.
 func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
-	if r.codexModel(model) {
+	// The provider the catalog resolved decides the transport, and the wire
+	// API it speaks says whether that transport can carry the model at all.
+	// A provider added later is a case here, not a name every call site
+	// recognises.
+	switch model.Provider {
+	case piauth.ProviderCodex:
 		return r.codexTransport(model)
 	}
-	apiKey := r.apiKey(model.Name)
-	transport := openai.New(openai.Options{
-		Endpoint:   model.Endpoint,
-		Model:      model.ModelID,
-		APIKey:     apiKey,
-		ToolsMode:  string(model.Tools.Mode),
-		ModelInfo:  model,
-		Sampling:   model.Sampling,
-		HTTPClient: r.httpClient,
-	})
-	return transport, nil
+	switch model.API {
+	case "", poo.APIChatCompletions:
+		return openai.New(openai.Options{
+			Endpoint:   model.Endpoint,
+			Model:      model.ModelID,
+			APIKey:     r.apiKey(model.Name),
+			ToolsMode:  string(model.Tools.Mode),
+			ModelInfo:  model,
+			Sampling:   model.Sampling,
+			HTTPClient: r.httpClient,
+		}), nil
+	default:
+		return nil, &Error{
+			Code:  CodeUnsupported,
+			Field: "models." + model.Name + ".api",
+			Message: fmt.Sprintf("no transport speaks the %s API for %s",
+				model.API, servedBy(model)),
+		}
+	}
+}
+
+// servedBy names what serves a model, for a message a reader can act on: the
+// provider when the catalog named one, else the endpoint itself.
+func servedBy(model poo.ModelInfo) string {
+	if model.Provider != "" {
+		return model.Provider
+	}
+	return model.Endpoint
 }
 
 // httpClient is the client the transports use. It is nil unless the
@@ -2281,7 +2303,7 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 	// The Codex provider serves chat turns only, so a decider built for it would
 	// ask an endpoint a question it does not answer. The settings failure names
 	// the provider, which is what the operator can act on.
-	if r.codexModel(model) {
+	if model.Provider == piauth.ProviderCodex {
 		return nil, &Error{
 			Code:  CodeUnsupported,
 			Field: "roles.decider",

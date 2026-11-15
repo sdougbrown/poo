@@ -69,6 +69,21 @@ func TestTheCuratedLayerDescribesTheLocalModel(t *testing.T) {
 	}
 }
 
+// TestAResolvedModelNamesTheProviderItIsServedBy covers the identity a
+// transport is chosen by. The provider is the endpoint the model was found
+// under, so a transport does not have to recognise an endpoint's name from the
+// settings.
+func TestAResolvedModelNamesTheProviderItIsServedBy(t *testing.T) {
+	c := catalog.New(catalog.Options{Settings: localSettings()})
+	info, err := c.Resolve("gemma4")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if info.Provider != "grace" {
+		t.Errorf("the provider is %q, want the endpoint the model is served by", info.Provider)
+	}
+}
+
 func TestTheFamilyNotesSayWhatTheModelNeeds(t *testing.T) {
 	c := catalog.New(catalog.Options{Settings: localSettings()})
 	notes := c.Notes("gemma4")
