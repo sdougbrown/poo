@@ -85,6 +85,17 @@ func Run(opts Options) int {
 	}
 
 	r := newRenderer(out)
+	// A terminal on both ends pins the input to the bottom. The
+	// transcript scrolls in a region above it, so the prompt and the
+	// draft hold still while output arrives. A pipe on either end keeps
+	// the plain stream, where a redirect or a test reads the words.
+	if termIsTerminal(in) && termIsTerminal(out) {
+		if l := newLayout(out); l != nil {
+			defer l.leave()
+			l.enter()
+			r.layout = l
+		}
+	}
 	m := &machine{
 		opts:   opts,
 		out:    out,
@@ -219,6 +230,11 @@ func (m *machine) run() int {
 	interrupts := make(chan os.Signal, 1)
 	signal.Notify(interrupts, os.Interrupt)
 	defer signal.Stop(interrupts)
+	resizes := make(chan os.Signal, 1)
+	if m.r.layout != nil {
+		resizeSignals(resizes)
+		defer signal.Stop(resizes)
+	}
 	go func() {
 		for range interrupts {
 			if runID := m.activeRun(); runID != "" {
@@ -266,6 +282,13 @@ func (m *machine) run() int {
 			}
 		case <-m.frameTick():
 			m.r.paintPending()
+		case <-resizes:
+			// The terminal changed size: reserve the footer again at
+			// the new geometry and redraw the prompt where it now
+			// belongs.
+			if m.r.layout.resize() {
+				input.prompt(m.prompt())
+			}
 		case runID := <-m.esc:
 			m.cancelRun(runID)
 		case res := <-m.lines:
@@ -306,8 +329,11 @@ func (m *machine) line(res lineResult, input input) (int, bool) {
 	switch {
 	case errors.Is(res.err, readline.ErrInterrupt):
 		// The editor has already cleared the line it held, so the
-		// interrupt cleared what was typed. An interrupt with nothing
-		// to clear is the person leaving.
+		// interrupt cleared what was typed. It erases its own line on a
+		// submit, so the ^C the prompt used to draw belongs to the
+		// transcript. An interrupt with nothing to clear is the person
+		// leaving.
+		m.r.write("^C\n")
 		if res.line == "" {
 			return 130, true
 		}
@@ -603,13 +629,27 @@ func (m *machine) newInput() input {
 			// painting and the render lays the message out again.
 			m.r.liveWidth = cfg.FuncGetWidth
 		}
+		if l := m.r.layout; l != nil {
+			// The editor draws in the footer the layout owns, and it
+			// erases its own line on Enter. The echo below belongs to
+			// the transcript, not to the row the prompt stood on.
+			cfg.Stdout = l.raw()
+			cfg.UniqueEditLine = true
+			editor.layout = l
+			cfg.Listener = editor.listener()
+			tab.setPrompt = editor.prompt
+		}
 		rl, err := readline.NewEx(cfg)
 		if err == nil {
 			editor.rl = rl
-			tab.rl = rl
-			m.r.sink = rl.Stdout()
-			m.r.editor = true
 			return editor
+		}
+		if m.r.layout != nil {
+			// The pinned layout belongs to the editor. Without it the
+			// transcript goes back to the plain stream, where a
+			// terminal without an editor reads from.
+			m.r.layout.leave()
+			m.r.layout = nil
 		}
 		// A readline that would not start falls through to plain
 		// lines: the conversation works without the editor.
@@ -678,8 +718,9 @@ func (m *machine) lineConfig(tab *backtab) *readline.Config {
 type backtab struct {
 	// m is the machine whose reasoning level the cycle moves.
 	m *machine
-	// rl is the editor the statusline is set on, once it is built.
-	rl *readline.Instance
+	// setPrompt sets the editor's prompt and redraws it, once the
+	// editor is built.
+	setPrompt func(string)
 	// stage is how much of the sequence has arrived: 1 after the ESC, 2
 	// after the '['.
 	stage int
@@ -711,14 +752,12 @@ func (b *backtab) filter(r rune) (rune, bool) {
 func (b *backtab) cycle() {
 	level, ok, notice := b.m.nextThinkingLevel()
 	if !ok {
-		fmt.Fprint(b.m.out, "\r\033[K")
 		b.m.r.notice("%s", notice)
 	} else if err := b.m.setThinking(level); err != nil {
-		fmt.Fprint(b.m.out, "\r\033[K")
 		b.m.r.failure(err.Error())
 	}
-	if b.rl != nil {
-		b.rl.SetPrompt(b.m.status.prompt())
+	if b.setPrompt != nil {
+		b.setPrompt(b.m.status.prompt())
 	}
 }
 
@@ -1297,11 +1336,105 @@ func isShutdown(err error) bool {
 // readlineInput reads lines through the readline editor.
 type readlineInput struct {
 	rl *readline.Instance
+	// layout is the pinned footer the editor draws in, nil when the
+	// session runs without one.
+	layout *layout
+	// mu guards the prompt and the draft. The editor's goroutine reports
+	// the draft, and the session's loop sets the prompt.
+	mu sync.Mutex
+	// promptText is the prompt the editor holds, and line and pos are
+	// the draft the listener last saw. Together they size the footer and
+	// place the cursor in it.
+	promptText string
+	line       []rune
+	pos        int
 }
 
 func (i *readlineInput) prompt(p string) {
+	i.mu.Lock()
+	i.promptText = p
+	draft := append([]rune(nil), i.line...)
+	pos := i.pos
+	i.mu.Unlock()
+	if i.layout != nil {
+		i.layout.ensure(i.footerRows(p, draft))
+		i.layout.place(promptRows(p, draft[:pos], i.layout.cols()) - 1)
+	}
 	i.rl.SetPrompt(p)
 	i.rl.Refresh()
+}
+
+// listener tracks the draft the editor holds. A draft that wraps grows
+// the footer before the editor needs the room, and the line's end
+// shrinks it back.
+func (i *readlineInput) listener() readline.Listener {
+	return draftListener{i}
+}
+
+// draftListener is the editor's key listener: it mirrors the draft and
+// resizes the footer, and never edits the line.
+type draftListener struct{ i *readlineInput }
+
+func (l draftListener) OnChange(line []rune, pos int, _ rune) ([]rune, int, bool) {
+	l.i.mu.Lock()
+	l.i.line = append(l.i.line[:0], line...)
+	l.i.pos = pos
+	promptText := l.i.promptText
+	l.i.mu.Unlock()
+	if l.i.layout == nil {
+		return nil, 0, false
+	}
+	before := l.i.layout.footerRows()
+	if !l.i.layout.ensure(l.i.footerRows(promptText, line)) || l.i.rl == nil {
+		return nil, 0, false
+	}
+	// A paint that needed more rows than the old footer had ran past
+	// the footer and left rows in the region. A history recall paints
+	// its whole line at once, so it is the usual case. Those rows belong
+	// to no stream; clear them so the draft is not beside a copy of
+	// itself.
+	if painted := promptRows(promptText, line, l.i.layout.cols()); painted > before {
+		l.i.layout.clearBelowLast()
+	}
+	// The footer moved, so the editor's line ends at a new row. Put the
+	// cursor there, and let the editor erase and draw the line from the
+	// new prompt row.
+	cursorAt := pos
+	if cursorAt > len(line) {
+		cursorAt = len(line)
+	}
+	l.i.layout.place(promptRows(promptText, line[:cursorAt], l.i.layout.cols()) - 1)
+	l.i.rl.Refresh()
+	return nil, 0, false
+}
+
+// footerRows is the rows the footer reserves for a prompt and a draft.
+// It covers the rows they fill and one spare while a draft is typed. The
+// spare gives the keystroke that wraps a row to wrap into before the
+// footer grows.
+func (i *readlineInput) footerRows(prompt string, draft []rune) int {
+	rows := promptRows(prompt, draft, i.layout.cols())
+	if len(draft) > 0 {
+		rows++
+	}
+	return rows
+}
+
+// promptRows is the rows a prompt and the draft before the cursor fill
+// in the footer, the editor's own line count.
+func promptRows(prompt string, draft []rune, width int) int {
+	if width <= 0 {
+		return 1
+	}
+	cells := ansi.StringWidth(prompt) + ansi.StringWidth(string(draft))
+	rows := cells / width
+	if cells%width != 0 {
+		rows++
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
 }
 
 func (i *readlineInput) read() (string, error) {

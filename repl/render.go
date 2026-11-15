@@ -40,10 +40,9 @@ const maxResultLines = 8
 type renderer struct {
 	// out is the terminal the transcript goes to.
 	out io.Writer
-	// sink is where the transcript's lines go: out, or the editor's own
-	// writer while the editor holds out, so the prompt is redrawn under
-	// each line instead of being overwritten by it.
-	sink io.Writer
+	// layout is the terminal's pinned input area, when out is a
+	// terminal and the session runs the bottom-anchored layout.
+	layout *layout
 	// term says out is a terminal.
 	term bool
 	// tr renders markdown for the terminal. It is nil for a writer
@@ -64,10 +63,6 @@ type renderer struct {
 	// width is the terminal's own width in columns. It is zero for a
 	// writer that is not a terminal, which streams nothing.
 	width int
-	// editor says the sink is the line editor's writer, whose redraws
-	// erase their own row. Streamed rows are sealed with their own
-	// newline, so the redraw passes below them.
-	editor bool
 	// liveWidth reads the terminal's width now, when the renderer has a
 	// reader for it: the streamed rows and the editor's prompt must
 	// wrap at the same width.
@@ -132,7 +127,7 @@ type streamSegment struct {
 // anything else gets plain text, so a test or a pipe reads the same
 // words without the escapes, and streams nothing.
 func newRenderer(out io.Writer) *renderer {
-	r := &renderer{out: out, sink: out, wrap: 80}
+	r := &renderer{out: out, wrap: 80}
 	r.term = termIsTerminal(out)
 	if r.term {
 		if f, ok := out.(interface{ Fd() uintptr }); ok {
@@ -170,13 +165,20 @@ func (r *renderer) write(s string) {
 // use it, so a write never re-enters the boundary that called it.
 func (r *renderer) emit(s string) {
 	r.transcript.WriteString(s)
-	if r.streams() {
-		// The editor's cursor may stand mid-row, where the person's
-		// last keystroke left it: the line starts at column zero on the
-		// terminal, and the transcript keeps the line without it.
-		s = "\r" + terminalNewlines(s)
+	if r.layout != nil {
+		r.layout.write(s)
+		return
 	}
-	fmt.Fprint(r.sink, s)
+	fmt.Fprint(r.out, s)
+}
+
+// paintPreviewBody paints one rendered body as the live preview.
+func (r *renderer) paintPreviewBody(body string) {
+	rows := textRows(body, r.width)
+	if len(rows) == 0 {
+		return
+	}
+	r.block.previewRows = r.layout.paintPreview(rows)
 }
 
 // terminalNewlines converts bare LF to CRLF without duplicating carriage returns.
@@ -225,7 +227,7 @@ func expandTabs(text string) string {
 // rendered message when it completes, so its bytes stay the same from
 // run to run.
 func (r *renderer) streams() bool {
-	return r.editor && r.width > 0
+	return r.layout != nil && r.width > 0
 }
 
 // hint shows the dim line that the model is writing, on a row of its
@@ -234,11 +236,7 @@ func (r *renderer) hint() {
 	if !r.streams() || r.block.hint || r.block.started {
 		return
 	}
-	// Through the editor's writer, so the Refresh clears the prompt's
-	// row, paints the hint, and redraws the prompt below; the newline
-	// seals the row, and a keystroke cannot take it back. The carriage
-	// return starts the row at column zero, wherever the cursor stood.
-	fmt.Fprint(r.sink, "\r"+ansiDim+"… writing"+ansiReset+"\r\n")
+	r.layout.hint(ansiDim + "… writing" + ansiReset)
 	r.block.hint = true
 }
 
@@ -247,11 +245,7 @@ func (r *renderer) takeHint() {
 	if !r.block.hint {
 		return
 	}
-	// The hint stands on a sealed row above the prompt: climb up and
-	// take the row away inside one Refresh, and the prompt's redraw
-	// fills the gap. The carriage return erases the row whole, from
-	// column zero, wherever the cursor stood.
-	fmt.Fprint(r.sink, "\r"+ansi.CursorUp(1)+ansi.EraseDisplay(0))
+	r.layout.clearPreview()
 	r.block.hint = false
 }
 
@@ -271,9 +265,9 @@ func (r *renderer) takeHint() {
 // is data, and a sequence split across deltas is held pending and
 // stripped when its tail lands.
 //
-// The editor erases its own row on every redraw. Every row the stream
-// paints is sealed with its own newline, and the prompt redraw passes
-// below it.
+// The layout keeps the editor below the region, so the stream paints
+// its rows above the footer and the prompt never shares a row with
+// them.
 func (r *renderer) streamDelta(id, kind, text string) {
 	if id != "" {
 		if r.live.kind != "" && id != r.live.id {
@@ -281,6 +275,7 @@ func (r *renderer) streamDelta(id, kind, text string) {
 		}
 		r.live.id = id
 	}
+
 	if text == "" {
 		return
 	}
@@ -387,18 +382,17 @@ func (r *renderer) openSegment(kind string) {
 func (r *renderer) switchKind(kind string) {
 	// The old segment's last tokens reach the screen before it seals.
 	r.paintPending()
-	var seq strings.Builder
 	if r.block.previewRows > 0 {
-		erasePreview(&seq, r.block.previewRows)
+		r.layout.clearPreview()
 	}
 	if body := r.chunkBody(r.live.kind, r.live.source); body != "" {
 		r.transcript.WriteString(body)
-		seq.WriteString(sealedRows(body))
+		r.layout.write(body)
 	}
 	r.block.previewRows = 0
 	r.openSegment(kind)
-	if seq.Len() > 0 {
-		fmt.Fprint(r.sink, seq.String())
+	if body := r.chunkBody(r.live.kind, r.live.source); body != "" {
+		r.paintPreviewBody(body)
 	}
 }
 
@@ -408,21 +402,20 @@ func (r *renderer) switchKind(kind string) {
 // erased and painted on the next delta.
 func (r *renderer) paintStream() {
 	done, rest := splitStream(r.live.source)
-	var seq strings.Builder
-	erasePreview(&seq, r.block.previewRows)
-	r.block.previewRows = 0
+	if r.block.previewRows > 0 {
+		r.layout.clearPreview()
+		r.block.previewRows = 0
+	}
 	if done != "" {
 		if body := r.chunkBody(r.live.kind, done); body != "" {
 			r.transcript.WriteString(body)
-			seq.WriteString(sealedRows(body))
+			r.layout.write(body)
 		}
 		r.live.source = rest
 	}
 	if body := r.chunkBody(r.live.kind, rest); body != "" {
-		seq.WriteString(sealedRows(body))
-		r.block.previewRows = strings.Count(body, "\n")
+		r.paintPreviewBody(body)
 	}
-	fmt.Fprint(r.sink, seq.String())
 }
 
 // bufferDelta adds a delta to the open segment without painting it. A
@@ -504,20 +497,34 @@ func (r *renderer) finish() {
 	}
 	if r.block.stalled {
 		if body := r.pendingBody(); body != "" {
-			var seq strings.Builder
-			erasePreview(&seq, r.block.previewRows)
-			seq.WriteString(sealedRows(body))
+			r.layout.clearPreview()
 			r.transcript.WriteString(body)
-			fmt.Fprint(r.sink, seq.String())
+			r.layout.write(body)
 		}
+		r.block.previewRows = 0
 		r.resetStream()
 		return
 	}
-	if body := r.chunkBody(r.live.kind, r.live.source); body != "" {
-		// The preview already shows this body: sealing it in the
-		// transcript is all that is left.
-		r.transcript.WriteString(body)
+	body := r.chunkBody(r.live.kind, r.live.source)
+	if body == "" {
+		r.layout.sealPreview()
+		r.block.previewRows = 0
+		r.resetStream()
+		return
 	}
+	r.transcript.WriteString(body)
+	if len(textRows(body, r.width)) > r.block.previewRows {
+		// The preview showed only the tail the region had room for.
+		// Take it back and write the final body once, so the rows the
+		// preview could not show reach the history with it.
+		r.layout.clearPreview()
+		r.layout.write(body)
+	} else {
+		// The preview already shows this body: sealing it in the
+		// transcript and on the screen is all that is left.
+		r.layout.sealPreview()
+	}
+	r.block.previewRows = 0
 	r.resetStream()
 }
 
@@ -567,30 +574,6 @@ func dimText(text string) string {
 	trailing := text[len(trimmed):]
 	trimmed = strings.ReplaceAll(trimmed, ansiReset, ansiReset+ansiDim)
 	return ansiDim + trimmed + ansiReset + trailing
-}
-
-// erasePreview moves to the first row of the preview and clears from
-// there down, including the prompt's row. The carriage return starts
-// at column zero, wherever the cursor stood.
-func erasePreview(seq *strings.Builder, rows int) {
-	seq.WriteString("\r")
-	if rows > 0 {
-		seq.WriteString(ansi.CursorUp(rows))
-	}
-	seq.WriteString(ansi.EraseDisplay(0))
-}
-
-// sealedRows writes a rendered block as rows the terminal keeps. Each
-// line ends in its own CRLF, so the editor's redraw passes below the
-// block instead of erasing the row it shares.
-func sealedRows(body string) string {
-	if body == "" {
-		return ""
-	}
-	if !strings.HasSuffix(body, "\n") {
-		body += "\n"
-	}
-	return terminalNewlines(body)
 }
 
 // streamParser reads the block structure of the open source. It is

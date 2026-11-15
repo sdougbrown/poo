@@ -226,7 +226,7 @@ func TestAnotherRunsUsageLeavesTheStatuslineAlone(t *testing.T) {
 }
 
 func TestCtrlCClearsWhitespace(t *testing.T) {
-	m := &machine{}
+	m := &machine{r: newRenderer(&bytes.Buffer{})}
 	if code, done := m.line(lineResult{line: " ", err: readline.ErrInterrupt}, nil); done {
 		t.Fatalf("Ctrl-C exited %d instead of clearing the typed space", code)
 	}
@@ -1278,7 +1278,10 @@ func TestTheShiftTabBindingReachesTheCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("starting the editor: %v", err)
 	}
-	tab.rl = rl
+	tab.setPrompt = func(p string) {
+		rl.SetPrompt(p)
+		rl.Refresh()
+	}
 	// The editor's read loop is released by the end of the pipe, which is
 	// why the writer closes before the editor does.
 	defer rl.Close()

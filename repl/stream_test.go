@@ -19,7 +19,10 @@ import (
 // way.
 func aTerminal(t *testing.T, out io.Writer, width int) *renderer {
 	t.Helper()
-	return aStreamingRenderer(t, out, out, width)
+	l := &layout{out: out, width: width, height: 24, footer: 2}
+	l.last = l.regionBottom() - 1
+	l.enter()
+	return aStreamingRenderer(t, out, width, l)
 }
 
 // plain returns a rendered string's words, without the style escapes: a
@@ -251,7 +254,11 @@ func TestAnAskAfterTheSettleEndsTheRunAndStillOpens(t *testing.T) {
 func TestATerminalWithoutEditorRendersOnce(t *testing.T) {
 	var out bytes.Buffer
 	r := aTerminal(t, &out, 40)
-	r.editor = false
+	// The editor did not start: the session runs without the pinned
+	// layout, and the transcript goes out plain.
+	r.layout.leave()
+	r.layout = nil
+	out.Reset()
 
 	r.userPrompt("say hello")
 	r.streamDelta("m1", "text", "Hello, ")

@@ -33,6 +33,9 @@ type terminal struct {
 	slave  *os.File
 	mu     sync.Mutex
 	drawn  strings.Builder
+	// vt reads the same bytes the terminal is sent, so a test asserts
+	// the screen the person sees instead of the stream that drew it.
+	vt vt10x.Terminal
 }
 
 // openTerminal opens a terminal pair and drains what is drawn on it.
@@ -59,12 +62,29 @@ func openTerminal(t *testing.T) *terminal {
 	}
 
 	term := &terminal{t: t, master: master, slave: slave}
+	term.resize(40, 12)
 	t.Cleanup(func() {
 		master.Close()
 		slave.Close()
 	})
+	term.vt = vt10x.New(vt10x.WithSize(40, 12))
 	go term.drain()
 	return term
+}
+
+// resize gives the terminal a window size, the way a terminal
+// emulator's own window does.
+func (term *terminal) resize(cols, rows int) {
+	term.t.Helper()
+	ws := struct {
+		Row, Col, Xpixel, Ypixel uint16
+	}{Row: uint16(rows), Col: uint16(cols)}
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, term.master.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws))); errno != 0 {
+		term.t.Fatalf("sizing the pty: %v", errno)
+	}
+	if term.vt != nil {
+		term.vt.Resize(cols, rows)
+	}
 }
 
 // drain holds what the repl drew.
@@ -75,6 +95,9 @@ func (term *terminal) drain() {
 		if n > 0 {
 			term.mu.Lock()
 			term.drawn.Write(buf[:n])
+			if term.vt != nil {
+				term.vt.Write(buf[:n])
+			}
 			term.mu.Unlock()
 		}
 		if err != nil {
@@ -87,6 +110,24 @@ func (term *terminal) String() string {
 	term.mu.Lock()
 	defer term.mu.Unlock()
 	return term.drawn.String()
+}
+
+// screen is what the terminal shows: the rows, trimmed.
+func (term *terminal) screen() string {
+	term.mu.Lock()
+	defer term.mu.Unlock()
+	return trimScreen(term.vt.String())
+}
+
+// rowOf returns the last row a text stands on, or -1.
+func (term *terminal) rowOf(want string) int {
+	row := -1
+	for i, line := range strings.Split(term.screen(), "\n") {
+		if strings.Contains(line, want) {
+			row = i
+		}
+	}
+	return row
 }
 
 // press types keys the way a keyboard sends them.
