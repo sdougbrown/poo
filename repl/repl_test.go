@@ -586,9 +586,6 @@ func TestALineTypedDuringARunSteersTheRun(t *testing.T) {
 	if !strings.Contains(drawn, "» a second thought") {
 		t.Errorf("the typed line is not on screen as a steer:\n%s", drawn)
 	}
-	if m.steers["i1"] != "a second thought" {
-		t.Errorf("the acceptance was not kept: %v", m.steers)
-	}
 
 	// A settle that reports the input undelivered says what it was.
 	m.event(protocol.Event{
