@@ -37,6 +37,7 @@ type frontMatter struct {
 // parse, is an error: the directory was offered on purpose.
 func Load(dirs ...string) (*Set, error) {
 	var found []Skill
+	loaded := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -45,6 +46,7 @@ func Load(dirs ...string) (*Set, error) {
 			}
 			return nil, fmt.Errorf("reading %s: %w", dir, err)
 		}
+		loaded = append(loaded, dir)
 		for _, entry := range entries {
 			// The entry is stat'd rather than asked whether it is a
 			// directory: a skills directory shared across harnesses
@@ -63,7 +65,7 @@ func Load(dirs ...string) (*Set, error) {
 			}
 		}
 	}
-	return newSet(found), nil
+	return newSet(found, loaded), nil
 }
 
 // read returns the skill a directory holds, and whether it holds one.

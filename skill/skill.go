@@ -45,6 +45,16 @@ type Skill struct {
 // Set is the skills one session offers, in name order.
 type Set struct {
 	skills []Skill
+	dirs   []string
+}
+
+// Dirs returns the directories the set was read from, in the order it
+// read them: the places a session tells its read tool it may look.
+func (s *Set) Dirs() []string {
+	if s == nil {
+		return nil
+	}
+	return append([]string(nil), s.dirs...)
 }
 
 // Len is how many skills the set holds.
@@ -92,7 +102,7 @@ type skillsData struct {
 // A name two directories define is the first one's: the paths are read
 // in the order the session offers them, so a directory read first
 // shadows the one behind it.
-func newSet(skills []Skill) *Set {
+func newSet(skills []Skill, dirs []string) *Set {
 	seen := make(map[string]bool, len(skills))
 	kept := make([]Skill, 0, len(skills))
 	for _, s := range skills {
@@ -103,7 +113,7 @@ func newSet(skills []Skill) *Set {
 		kept = append(kept, s)
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Name < kept[j].Name })
-	return &Set{skills: kept}
+	return &Set{skills: kept, dirs: append([]string(nil), dirs...)}
 }
 
 // dirName is the name a skill's directory gives it.

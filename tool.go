@@ -75,6 +75,9 @@ type PrepareEnv struct {
 	// ProtectedPaths are the paths the tool must not touch, already
 	// expanded.
 	ProtectedPaths []string
+	// ReadRoots are the directories outside the working directory the
+	// read tool may reach, already expanded.
+	ReadRoots []string
 }
 
 // ToolEnv is the environment a tool sees while running.

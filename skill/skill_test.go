@@ -177,3 +177,33 @@ func TestLoadIgnoresADirectoryThatIsNotThere(t *testing.T) {
 		t.Errorf("the set holds %d skills, want none", got)
 	}
 }
+
+// TestLoadCutsALongSingleSentence covers the catalog's width: a
+// description that is one long sentence is cut at a word, and the cut is
+// marked.
+func TestLoadCutsALongSingleSentence(t *testing.T) {
+	dir := t.TempDir()
+	long := strings.Repeat("word ", 60) + "final"
+	writeSkill(t, dir, "wide", front("description: "+long+"\n"))
+
+	set, err := skill.Load(dir)
+	if err != nil {
+		t.Fatalf("loading the skills: %v", err)
+	}
+	got := set.Skills()
+	if len(got) != 1 {
+		t.Fatalf("the set holds %d skills, want one", len(got))
+	}
+	description := got[0].Description
+	if !strings.HasSuffix(description, "\u2026") {
+		t.Errorf("the cut description does not end with an ellipsis: %q", description)
+	}
+	if runes := len([]rune(description)); runes > 201 {
+		t.Errorf("the description is %d runes, want 200 plus the ellipsis", runes)
+	}
+	// The cut lands on a word: no half word before the ellipsis.
+	trimmed := strings.TrimSuffix(description, "\u2026")
+	if strings.HasSuffix(trimmed, "wor") || !strings.HasSuffix(trimmed, "word") {
+		t.Errorf("the cut landed inside a word: %q", description)
+	}
+}

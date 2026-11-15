@@ -971,6 +971,57 @@ func TestTheSkillsSettingsFillTheSkillsSection(t *testing.T) {
 	}
 }
 
+// TestTheSkillsThatDoNotParseFailTheBuild covers a skills directory
+// that is there and holds a SKILL.md that cannot be read: the build
+// refuses the session and names the field.
+func TestTheSkillsThatDoNotParseFailTheBuild(t *testing.T) {
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatalf("making the directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, skill.SkillFileName), []byte("---\ndescription: [unclosed\n---\n"), 0o644); err != nil {
+		t.Fatalf("writing the skill: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: "+dir+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build accepted a skill that does not parse")
+	}
+	if code, ok := config.CodeOf(err); !ok || code != config.CodeInvalid {
+		t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
+	}
+	if field, _ := config.FieldOf(err); field != "skills" {
+		t.Errorf("the field is %q, want skills", field)
+	}
+}
+
+// TestTheSkillDirectoriesAreReadRoots covers the read tool's reach: the
+// catalog tells the model to read a skill, and a skill is outside the
+// tree the session works in, so the directories are offered as roots.
+func TestTheSkillDirectoriesAreReadRoots(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: "+dir+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if got := runtime.Options.ReadRoots; len(got) != 1 || got[0] != dir {
+		t.Errorf("the read roots are %v, want [%s]", got, dir)
+	}
+}
+
 // TestTheSkillsPathsAreDroppedWithAWarning covers a named path that is
 // not there: it is dropped rather than failing the build, and the
 // warning says which path.

@@ -594,6 +594,10 @@ func (r *Runtime) resolveSkills(opts BuildOptions, workingDir string) error {
 	r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
 		b.SetTemplate(skill.SectionName, set.Template())
 	})
+	// The catalog tells the model to read a skill, and a skill is not in
+	// the tree the session works in: the read tool reaches these
+	// directories, and the tools that change or search a tree do not.
+	r.Options.ReadRoots = append(r.Options.ReadRoots, set.Dirs()...)
 	return nil
 }
 
