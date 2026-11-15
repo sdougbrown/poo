@@ -22,6 +22,30 @@ func TestTheLiveStreamShowsTheMarkdownItWillSettleTo(t *testing.T) {
 	}
 }
 
+func TestAPendingFrameStopsPaintingAfterAResize(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	width := 40
+	r.liveWidth = func() int { return width }
+	r.userPrompt("go")
+	r.streamDelta("text", "first words")
+	if !strings.Contains(scr.text(), "first words") {
+		t.Fatalf("the first delta never showed:\n%s", scr.text())
+	}
+	r.streamDelta("text", " then last words")
+	before := scr.text()
+	width = 20
+	r.paintPending()
+	if got := scr.text(); got != before {
+		t.Errorf("the pending frame painted after the resize:\n%s", got)
+	}
+
+	r.finish()
+	settled := plain(r.transcriptText())
+	if got := strings.Count(settled, "first words then last words"); got != 1 {
+		t.Errorf("the transcript lost, repeated, or reordered the deltas (%d copies):\n%s", got, settled)
+	}
+}
+
 func TestTheLiveStreamRendersASplitFence(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")

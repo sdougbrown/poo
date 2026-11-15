@@ -316,6 +316,10 @@ func (r *renderer) paintPending() {
 	if !r.streams() || r.block.stalled || !r.live.dirty {
 		return
 	}
+	if r.stalledNow() {
+		r.block.stalled = true
+		return
+	}
 	r.paintStream()
 	r.live.dirty = false
 }
