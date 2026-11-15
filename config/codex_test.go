@@ -564,3 +564,255 @@ roles:
 		t.Errorf("the failure is %v, want the unsupported settings failure", err)
 	}
 }
+
+// writeAuthBeside writes pi's auth.json into dir with an api key for the home
+// provider and a live Codex credential, and returns its path.
+func writeAuthBeside(t *testing.T, dir, key, token string) string {
+	t.Helper()
+	body, err := json.MarshalIndent(map[string]any{
+		"home": map[string]any{"type": "api_key", "key": key},
+		piauth.ProviderCodex: map[string]any{
+			"type":      "oauth",
+			"access":    token,
+			"refresh":   "rt_live",
+			"expires":   4102444800000,
+			"accountId": "stored",
+		},
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("encoding pi's auth file: %v", err)
+	}
+	path := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("writing pi's auth file: %v", err)
+	}
+	return path
+}
+
+// TestAModelsFileDefinitionWinsOverTheBuiltinCodexModel covers the collision
+// on the built-in provider id: a models file that defines openai-codex is the
+// definition that runs, and the built-in models it does not name are still
+// offered. The models file names the pinned endpoint, which is the one poo
+// sends pi's credential to, so the model it defines is not refused.
+func TestAModelsFileDefinitionWinsOverTheBuiltinCodexModel(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, config.ModelsFileName), []byte(`{
+		"providers": {
+			"openai-codex": {
+				"baseUrl": "`+codex.DefaultEndpoint+`",
+				"api": "openai-codex-responses",
+				"models": [
+					{
+						"id": "gpt-6.1-sol",
+						"input": ["text", "image"],
+						"contextWindow": 111111,
+						"maxTokens": 4096,
+						"reasoning": true,
+						"compat": {"supportsReasoningEffort": true}
+					}
+				]
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	token := fakeCodexToken(t, "acct_live")
+	writeCodexAuth(t, dir, token, "rt_live", 4102444800000)
+	path := writeCodexSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+roles:
+  chat: openai-codex/gpt-6.1-sol
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+
+	if got := settings.Endpoints["openai-codex"].Endpoint; got != codex.DefaultEndpoint {
+		t.Errorf("the endpoint is %q, want the pinned %q", got, codex.DefaultEndpoint)
+	}
+	// The models file's definition of the colliding model survives.
+	if got := settings.Models["openai-codex/gpt-6.1-sol"].ContextLimit; got != 111111 {
+		t.Errorf("the colliding model's context limit is %d, want the models file's 111111", got)
+	}
+	// The built-in models the file does not name are still offered.
+	builtin, ok := settings.Models["openai-codex/gpt-5.6-luna"]
+	if !ok {
+		t.Fatalf("the built-in model did not survive the collision: %v", settings.Models)
+	}
+	if builtin.ContextLimit != 272000 || builtin.MaxOutput != 128000 {
+		t.Errorf("the surviving built-in model's limits are %d/%d, want 272000/128000", builtin.ContextLimit, builtin.MaxOutput)
+	}
+	if builtin.ToolsMode != poo.ToolsNative {
+		t.Errorf("the surviving built-in model's tools mode is %q, want native", builtin.ToolsMode)
+	}
+
+	endpoint := &codexEndpoint{accessToken: token}
+	runtime, err := buildCodex(t, settings, &http.Client{Transport: endpoint})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	model, err := runtime.ChatModel()
+	if err != nil {
+		t.Fatalf("resolving the chat model: %v", err)
+	}
+	if model.ContextLimit != 111111 || model.MaxOutput != 4096 {
+		t.Errorf("the chat model's limits are %d/%d, want the models file's 111111/4096", model.ContextLimit, model.MaxOutput)
+	}
+	// The pinned endpoint is what makes the transport build: a models file that
+	// pointed the provider elsewhere would be refused here.
+	transport, err := runtime.Transport(model)
+	if err != nil {
+		t.Fatalf("building the transport: %v", err)
+	}
+	if _, ok := transport.(*codex.Transport); !ok {
+		t.Errorf("the transport is %T, want the Codex transport", transport)
+	}
+	surviving, err := runtime.Catalog.Resolve("openai-codex/gpt-5.6-luna")
+	if err != nil {
+		t.Fatalf("resolving the surviving built-in model: %v", err)
+	}
+	if surviving.ContextLimit != 272000 || surviving.MaxOutput != 128000 {
+		t.Errorf("the surviving built-in model resolves with %d/%d, want 272000/128000", surviving.ContextLimit, surviving.MaxOutput)
+	}
+}
+
+// TestTheChatReasoningSettingReachesTheCodexRequest covers the configured
+// level: reasoning.chat is the operator's, and a Codex request goes out asking
+// for it rather than for the model's fallback.
+func TestTheChatReasoningSettingReachesTheCodexRequest(t *testing.T) {
+	dir := t.TempDir()
+	token := fakeCodexToken(t, "acct_live")
+	writeCodexAuth(t, dir, token, "rt_live", 4102444800000)
+	path := writeCodexSettings(t, dir, `version: 1
+pi_auth_file: auth.json
+reasoning:
+  chat: high
+session:
+  mode: ephemeral
+roles:
+  chat: openai-codex/gpt-6.1-sol
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+
+	endpoint := &codexEndpoint{accessToken: token}
+	runtime, err := buildCodex(t, settings, &http.Client{Transport: endpoint})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	model, err := runtime.ChatModel()
+	if err != nil {
+		t.Fatalf("resolving the chat model: %v", err)
+	}
+	transport, err := runtime.Transport(model)
+	if err != nil {
+		t.Fatalf("building the transport: %v", err)
+	}
+	reader, _, err := transport.Stream(context.Background(), poo.ChatRequest{
+		Model:     model.ModelID,
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 32,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("closing the stream: %v", err)
+	}
+
+	var request struct {
+		Reasoning struct {
+			Effort string `json:"effort"`
+		} `json:"reasoning"`
+	}
+	if err := json.Unmarshal(endpoint.body, &request); err != nil {
+		t.Fatalf("decoding the request: %v", err)
+	}
+	if request.Reasoning.Effort != "high" {
+		t.Errorf("the request asks for reasoning %q, want the configured high", request.Reasoning.Effort)
+	}
+}
+
+// TestAModelsFileInAnotherDirectoryTakesTheAuthBesideIt covers the path the
+// credential resolves against: the auth.json beside a models file in another
+// directory is the one read, not a same-named file beside the settings. Both
+// halves are observable — the imported api key and the token the Codex request
+// carries.
+func TestAModelsFileInAnotherDirectoryTakesTheAuthBesideIt(t *testing.T) {
+	root := t.TempDir()
+	settingsDir := filepath.Join(root, "settings")
+	modelsDir := filepath.Join(root, "pi")
+	for _, dir := range []string{settingsDir, modelsDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("creating %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(modelsDir, config.ModelsFileName), []byte(`{
+		"providers": {
+			"home": {
+				"baseUrl": "http://127.0.0.1:1/v1",
+				"models": [{"id": "qwen"}]
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	adjacentToken := fakeCodexToken(t, "acct_adjacent")
+	writeAuthBeside(t, modelsDir, "adjacent-key", adjacentToken)
+	settingsToken := fakeCodexToken(t, "acct_settings")
+	writeAuthBeside(t, settingsDir, "settings-key", settingsToken)
+	path := writeCodexSettings(t, settingsDir, `version: 1
+models_file: ../pi/models.json
+session:
+  mode: ephemeral
+roles:
+  chat: openai-codex/gpt-6.1-sol
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+
+	if key := settings.Endpoints["home"].APIKey; key != "adjacent-key" {
+		t.Errorf("the provider imported with the key %q, want the key beside the models file", key)
+	}
+	if _, ok := settings.Models["openai-codex/gpt-6.1-sol"]; !ok {
+		t.Fatalf("the built-in provider was not offered: %v", settings.Models)
+	}
+
+	endpoint := &codexEndpoint{accessToken: adjacentToken}
+	runtime, err := buildCodex(t, settings, &http.Client{Transport: endpoint})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	model, err := runtime.ChatModel()
+	if err != nil {
+		t.Fatalf("resolving the chat model: %v", err)
+	}
+	transport, err := runtime.Transport(model)
+	if err != nil {
+		t.Fatalf("building the transport: %v", err)
+	}
+	reader, _, err := transport.Stream(context.Background(), poo.ChatRequest{
+		Model:     model.ModelID,
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 32,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("closing the stream: %v", err)
+	}
+
+	if endpoint.authorization != "Bearer "+adjacentToken {
+		t.Errorf("the request carried %q, want the token beside the models file", endpoint.authorization)
+	}
+	if endpoint.account != "acct_adjacent" {
+		t.Errorf("the request carried account %q, want the account beside the models file", endpoint.account)
+	}
+}
