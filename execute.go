@@ -778,6 +778,7 @@ func (s *Session) prepareEnv() PrepareEnv {
 	return PrepareEnv{
 		WorkingDir:     s.opts.WorkingDir,
 		ProtectedPaths: s.opts.ProtectedPaths,
+		ReadRoots:      s.opts.ReadRoots,
 	}
 }
 

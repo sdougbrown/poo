@@ -183,7 +183,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	// The path is resolved once, so the file that is read is the file
 	// the protection check named.
 	abs := protect.Resolve(absolutePath(a.Path, env.WorkingDir))
-	if env.WorkingDir != "" && !protect.Within(protect.Resolve(env.WorkingDir), abs) {
+	if !reachable(env, abs) {
 		return nil, poo.InvalidArgsf("read: path is outside the working directory: %s", a.Path)
 	}
 	// A protected path is refused before the file is opened, so the
@@ -284,6 +284,28 @@ func imageMediaType(head []byte) (string, bool) {
 		return "image/webp", true
 	}
 	return "", false
+}
+
+// reachable reports whether the resolved path is one the read tool may
+// open: inside the working directory, or inside a root the session
+// offers.
+//
+// A session that offers skills names their directories as roots: the
+// prompt tells the model to read a skill, and the guidance lives outside
+// the tree the session works in.
+func reachable(env poo.PrepareEnv, abs string) bool {
+	if env.WorkingDir == "" {
+		return true
+	}
+	if protect.Within(protect.Resolve(env.WorkingDir), abs) {
+		return true
+	}
+	for _, root := range env.ReadRoots {
+		if protect.Within(protect.Resolve(root), abs) {
+			return true
+		}
+	}
+	return false
 }
 
 // A relative path is taken from the working directory of the run.

@@ -553,6 +553,15 @@ type Options struct {
 	ReasoningEffort string
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths []string
+	// ReadRoots are the directories outside the working directory the
+	// read tool may reach. A session that offers skills names their
+	// directories here: the catalog tells the model to read a skill,
+	// and the skill is not in the tree it is working in.
+	//
+	// The tools that change or search a tree keep to the working
+	// directory: guidance is read, not edited, and not searched across
+	// a person's whole collection.
+	ReadRoots []string
 
 	// MaxTurns is the turn limit. 0 means unlimited. A run that
 	// reaches it settles max_turns.

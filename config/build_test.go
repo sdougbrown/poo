@@ -23,6 +23,7 @@ import (
 	"github.com/sdougbrown/poo/profile/code"
 	"github.com/sdougbrown/poo/profile/search"
 	"github.com/sdougbrown/poo/prompt"
+	"github.com/sdougbrown/poo/skill"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/tool/cliregistry"
 	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
@@ -947,6 +948,311 @@ func TestTheUserPromptNeedsAFile(t *testing.T) {
 	}
 	if field, _ := config.FieldOf(err); field != "session.user_prompt" {
 		t.Errorf("the field is %q, want session.user_prompt", field)
+	}
+}
+
+// TestTheSkillsSettingsFillTheSkillsSection covers the three ways a
+// session is told where skills are: the default directory, the person's
+// own, and the paths beside them.
+func TestTheSkillsSettingsFillTheSkillsSection(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: "+dir+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want one", runtime.Skills)
+	}
+	text := poo.PromptBuilder(runtime.Options).Render()
+	if !strings.Contains(text, "review") || !strings.Contains(text, "Reviews a diff.") {
+		t.Errorf("the prompt holds no skills catalog: %q", text)
+	}
+}
+
+// TestTheSkillsThatDoNotParseFailTheBuild covers a skills directory
+// that is there and holds a SKILL.md that cannot be read: the build
+// refuses the session and names the field.
+func TestTheSkillsThatDoNotParseFailTheBuild(t *testing.T) {
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatalf("making the directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, skill.SkillFileName), []byte("---\ndescription: [unclosed\n---\n"), 0o644); err != nil {
+		t.Fatalf("writing the skill: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: "+dir+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build accepted a skill that does not parse")
+	}
+	if code, ok := config.CodeOf(err); !ok || code != config.CodeInvalid {
+		t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
+	}
+	if field, _ := config.FieldOf(err); field != "skills" {
+		t.Errorf("the field is %q, want skills", field)
+	}
+}
+
+// TestTheSkillDirectoriesAreReadRoots covers the read tool's reach: the
+// catalog tells the model to read a skill, and a skill is outside the
+// tree the session works in, so the directories are offered as roots.
+func TestTheSkillDirectoriesAreReadRoots(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: "+dir+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if got := runtime.Options.ReadRoots; len(got) != 1 || got[0] != dir {
+		t.Errorf("the read roots are %v, want [%s]", got, dir)
+	}
+}
+
+// TestTheSkillsDefaultReadsTheConventionDirectory covers `default: true`:
+// the session reads the directory the rest of the family uses, resolved
+// through the home directory rather than against the working one.
+func TestTheSkillsDefaultReadsTheConventionDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeSkillFile(t, filepath.Join(home, ".agents", "skills", "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  default: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want the home directory's", runtime.Skills)
+	}
+	if got := runtime.Skills.Skills(); got[0].Name != "review" {
+		t.Errorf("the skill is %q, want review", got[0].Name)
+	}
+}
+
+// TestPOOSkillsPathAddsADirectory covers the environment's way in: a
+// launcher that provisions the variable offers the directory, the way
+// POO_FEEDS_PATH and POO_CLI_REGISTRY_PATH offer theirs.
+func TestPOOSkillsPathAddsADirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	t.Setenv(config.EnvSkillsPath, dir)
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.EnvOverrides(config.Overrides{}), t.TempDir(), theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want the environment's", runtime.Skills)
+	}
+}
+
+// TestTheSkillsPathOverrideAddsADirectory covers the override a
+// launcher passes: the directories beside the settings', the way the cli
+// registry and the feeds take theirs.
+func TestTheSkillsPathOverrideAddsADirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{SkillsPaths: []string{dir}}, t.TempDir(), theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want the override's", runtime.Skills)
+	}
+}
+
+// TestASkillsPathThatIsAFileIsDropped covers a path that names a file
+// where a directory of skills belongs: dropped with a warning, the way a
+// directory that is not there is, rather than failing the build.
+func TestASkillsPathThatIsAFileIsDropped(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatalf("writing the file: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  paths: ["+file+"]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills != nil {
+		t.Errorf("the runtime offers %v skills, want none", runtime.Skills)
+	}
+	if !strings.Contains(runtime.Warning, "not a directory") {
+		t.Errorf("the warning is %q, want it to say the path is not a directory", runtime.Warning)
+	}
+}
+
+// TestTheSkillsUserPathThatIsMissingWarns covers a directory the
+// settings named that is not there: dropped with a warning, the rule the
+// paths follow.
+func TestTheSkillsUserPathThatIsMissingWarns(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: "+missing+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if !strings.Contains(runtime.Warning, missing) {
+		t.Errorf("the warning is %q, want it to name %s", runtime.Warning, missing)
+	}
+}
+
+// TestTheSkillsDefaultThatIsMissingIsQuiet covers the convention: a
+// person with no default directory is not warned about it every session.
+func TestTheSkillsDefaultThatIsMissingIsQuiet(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  default: true\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Warning != "" {
+		t.Errorf("the warning is %q, want none for a missing default", runtime.Warning)
+	}
+}
+
+// TestAHomeThatCannotBeResolvedFailsTheSkillsSetting covers the failure
+// the settings can cause: a ~ path with no home to resolve it against.
+func TestAHomeThatCannotBeResolvedFailsTheSkillsSetting(t *testing.T) {
+	t.Setenv("HOME", "")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: ~/skills\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	_, err = config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err == nil {
+		t.Fatal("the build resolved a home directory that is not set")
+	}
+	if code, ok := config.CodeOf(err); !ok || code != config.CodeInvalid {
+		t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
+	}
+	if field, _ := config.FieldOf(err); field != "skills.user_path" {
+		t.Errorf("the field is %q, want skills.user_path", field)
+	}
+}
+
+// TestTheSkillDirectoriesAreReadRootsEvenWhenAllAreHidden covers the
+// person's own path: a directory whose every skill sets
+// disable-model-invocation shows no catalog, and the read tool still
+// reaches the files, so the person can ask the model to follow one.
+func TestTheSkillDirectoriesAreReadRootsEvenWhenAllAreHidden(t *testing.T) {
+	dir := t.TempDir()
+	hidden := filepath.Join(dir, "private")
+	if err := os.MkdirAll(hidden, 0o755); err != nil {
+		t.Fatalf("making the directory: %v", err)
+	}
+	body := "---\ndescription: A private one\ndisable-model-invocation: true\n---\n\nThe guidance.\n"
+	if err := os.WriteFile(filepath.Join(hidden, skill.SkillFileName), []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the skill: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: "+dir+"\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills != nil {
+		t.Errorf("the runtime offers %v skills, want none in the catalog", runtime.Skills)
+	}
+	if got := runtime.Options.ReadRoots; len(got) != 1 || got[0] != dir {
+		t.Errorf("the read roots are %v, want [%s]", got, dir)
+	}
+}
+
+// TestTheSkillsPathsAreDroppedWithAWarning covers a named path that is
+// not there: it is dropped rather than failing the build, and the
+// warning says which path.
+func TestTheSkillsPathsAreDroppedWithAWarning(t *testing.T) {
+	dir := t.TempDir()
+	writeSkillFile(t, filepath.Join(dir, "review"), "Reviews a diff.\n")
+	missing := filepath.Join(t.TempDir(), "absent")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  paths: ["+missing+", "+dir+"]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want the one beside the missing path", runtime.Skills)
+	}
+	if !strings.Contains(runtime.Warning, missing) {
+		t.Errorf("the warning is %q, want it to name %s", runtime.Warning, missing)
+	}
+}
+
+// TestTheSkillsRelativePathIsTheWorkingDirectorys covers a relative
+// path: it is resolved against the working directory, the way every
+// other path a command line takes is.
+func TestTheSkillsRelativePathIsTheWorkingDirectorys(t *testing.T) {
+	workingDir := t.TempDir()
+	writeSkillFile(t, filepath.Join(workingDir, "team", "review"), "Reviews a diff.\n")
+	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  paths: [team]\n"), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, workingDir, theExecutors())
+	if runtime.Skills == nil || runtime.Skills.Len() != 1 {
+		t.Fatalf("the runtime offers %v skills, want the team's", runtime.Skills)
+	}
+}
+
+// TestSkillsOffersNothingWithoutASetting covers the opt-in: a session
+// that names no directory pays for no section.
+func TestSkillsOffersNothingWithoutASetting(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, t.TempDir(), theExecutors())
+	if runtime.Skills != nil {
+		t.Errorf("the runtime offers %v skills, want none", runtime.Skills)
+	}
+	if names := poo.PromptBuilder(runtime.Options).Names(); slices.Contains(names, skill.SectionName) {
+		t.Errorf("the prompt holds a %q section: %v", skill.SectionName, names)
+	}
+}
+
+// TestTheSkillsDefaultAndTheUserPathAreExclusive covers the settings
+// check: one names the default directory, the other the person's own,
+// and a file that names both is refused.
+func TestTheSkillsDefaultAndTheUserPathAreExclusive(t *testing.T) {
+	_, err := config.Parse([]byte(theModelSettings+"skills:\n  default: true\n  user_path: /tmp/skills\n"), config.FormatYAML)
+	if err == nil {
+		t.Fatal("the settings accepted both a default and a user path")
+	}
+	if !strings.Contains(err.Error(), "skills.default") || !strings.Contains(err.Error(), "skills.user_path") {
+		t.Errorf("the error %q does not name both fields", err)
+	}
+}
+
+// writeSkillFile puts a SKILL.md in dir.
+func writeSkillFile(t *testing.T, dir, description string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("making %s: %v", dir, err)
+	}
+	body := "---\ndescription: " + description + "---\n\nThe guidance.\n"
+	if err := os.WriteFile(filepath.Join(dir, skill.SkillFileName), []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the skill: %v", err)
 	}
 }
 

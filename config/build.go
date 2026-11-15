@@ -31,6 +31,7 @@ import (
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/session"
+	"github.com/sdougbrown/poo/skill"
 )
 
 // The names the settings and the profiles use.
@@ -90,6 +91,8 @@ type Overrides struct {
 	FeedsPaths []string
 	// CLIRegistryPaths are additional cli registry manifest paths.
 	CLIRegistryPaths []string
+	// SkillsPaths are additional directories of skills.
+	SkillsPaths []string
 	// CredentialEnvNames are environment names a launcher provisions for
 	// poo's own subsystems. They stay in the session environment, which the
 	// feed and a cli entry's bindings read, and are removed from the
@@ -113,17 +116,19 @@ const (
 	// EnvCredentialEnv names the environment names a launcher declares
 	// for poo's own subsystems.
 	EnvCredentialEnv = "POO_CREDENTIAL_ENV"
+	// EnvSkillsPath names the directories a session offers skills from.
+	EnvSkillsPath = "POO_SKILLS_PATH"
 )
 
 // EnvOverrideNames are the variables EnvOverrides reads, in the order it
 // reads them. The same names are kept out of a tool's child environment.
-var EnvOverrideNames = []string{EnvFeedsPath, EnvCLIRegistryPath, EnvCredentialEnv}
+var EnvOverrideNames = []string{EnvFeedsPath, EnvCLIRegistryPath, EnvCredentialEnv, EnvSkillsPath}
 
 // EnvOverrides adds what the environment names after the caller's own values.
 //
-// POO_FEEDS_PATH and POO_CLI_REGISTRY_PATH are path lists, and
-// POO_CREDENTIAL_ENV is a list of environment names a launcher declares for
-// poo's own subsystems. The returned overrides hold fresh slices, so appending
+// POO_FEEDS_PATH, POO_CLI_REGISTRY_PATH and POO_SKILLS_PATH are path lists,
+// and POO_CREDENTIAL_ENV is a list of environment names a launcher declares
+// for poo's own subsystems. The returned overrides hold fresh slices, so appending
 // to them never writes into the caller's.
 func EnvOverrides(o Overrides) Overrides {
 	paths := func(existing []string, name string) []string {
@@ -140,6 +145,7 @@ func EnvOverrides(o Overrides) Overrides {
 	o.FeedsPaths = paths(o.FeedsPaths, EnvFeedsPath)
 	o.CLIRegistryPaths = paths(o.CLIRegistryPaths, EnvCLIRegistryPath)
 	o.CredentialEnvNames = paths(o.CredentialEnvNames, EnvCredentialEnv)
+	o.SkillsPaths = paths(o.SkillsPaths, EnvSkillsPath)
 	return o
 }
 
@@ -213,6 +219,9 @@ type Runtime struct {
 	// earns no catalog leaves it as the manifests loaded it, and no tool or
 	// prompt section reads it.
 	Registry *cli.Catalog
+	// Skills are the skills the session offers, or nil when it offers
+	// none.
+	Skills *skill.Set
 	// loaded is the registry as the manifests loaded it, before availability
 	// narrows what a profile offers. The profiles the binary lists are judged
 	// against it, each under its own profile fact.
@@ -390,6 +399,9 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
 	}
+	if err := runtime.resolveSkills(opts, workingDir); err != nil {
+		return nil, err
+	}
 	if err := runtime.resolveFeeds(opts, workingDir); err != nil {
 		return nil, err
 	}
@@ -523,6 +535,119 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 // hasFeeds reports whether the session runs feeds.
 func (r *Runtime) hasFeeds() bool {
 	return r.Feeds.Len() > 0
+}
+
+// resolveSkills loads the skills the settings name.
+//
+// The directories are the person's own — the default one, or the one
+// they name — and then the paths beside them, resolved against the
+// working directory. A directory that is not there is dropped with a
+// warning rather than failing the build: skills are guidance a session
+// offers, and a tree without the directory is not a tree a session
+// cannot work in. A SKILL.md that is there and does not parse is an
+// error, because the directory was offered on purpose.
+func (r *Runtime) resolveSkills(opts BuildOptions, workingDir string) error {
+	settings := r.Settings.Skills
+	dirs := make([]string, 0, len(settings.Paths)+1)
+	switch {
+	case settings.UserPath != nil && *settings.UserPath != "":
+		path, err := r.skillDir("skills.user_path", *settings.UserPath, false)
+		if err != nil {
+			return err
+		}
+		if path != "" {
+			dirs = append(dirs, path)
+		}
+	case settings.Default != nil && *settings.Default:
+		// The default is a convention, not a promise: a person who has no
+		// skills directory is not told about it every session.
+		path, err := r.skillDir("skills.default", skill.DefaultDir, true)
+		if err != nil {
+			return err
+		}
+		if path != "" {
+			dirs = append(dirs, path)
+		}
+	}
+	paths := append(append([]string{}, settings.Paths...), opts.Overrides.SkillsPaths...)
+	for _, path := range againstDir(paths, workingDir) {
+		// A directory that is not there, and a file named where a
+		// directory belongs, are both dropped with a warning: skills are
+		// guidance a session offers, and a path that is not a directory
+		// of them leaves it with less to offer rather than broken.
+		info, err := os.Stat(path)
+		if err != nil {
+			r.warn(fmt.Sprintf("skills.paths: %s holds no skills: %v", path, err))
+			continue
+		}
+		if !info.IsDir() {
+			r.warn(fmt.Sprintf("skills.paths: %s is not a directory", path))
+			continue
+		}
+		dirs = append(dirs, path)
+	}
+	if len(dirs) == 0 {
+		return nil
+	}
+	set, err := skill.Load(dirs...)
+	if err != nil {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "skills",
+			Message: "the skills do not load",
+			Err:     err,
+		}
+	}
+	// The read tool reaches the directories that loaded, whatever the
+	// catalog shows: a skill the model may not invoke is still one the
+	// person may ask it to follow.
+	r.Options.ReadRoots = append(r.Options.ReadRoots, set.Dirs()...)
+	if set.Len() == 0 {
+		return nil
+	}
+	r.Skills = set
+	r.Prompt = append(r.Prompt, func(b *prompt.Builder) {
+		b.SetTemplate(skill.SectionName, set.Template())
+	})
+	return nil
+}
+
+// skillDir resolves one skills directory the settings named, and reports
+// whether it holds anything to read.
+//
+// A named directory that is not there is dropped rather than failing the
+// build, the rule the paths follow. quiet keeps a convention's absence
+// out of the warnings: the default directory is not a promise.
+func (r *Runtime) skillDir(field, named string, quiet bool) (string, error) {
+	path, err := expandHome(named)
+	if err != nil {
+		return "", &Error{
+			Code:    CodeInvalid,
+			Field:   field,
+			Message: "the skills directory cannot be read",
+			Err:     err,
+		}
+	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		if !quiet {
+			r.warn(fmt.Sprintf("%s: %s holds no skills", field, path))
+		}
+		return "", nil
+	}
+	return path, nil
+}
+
+// warn adds a warning to the runtime's own, so a command prints it with
+// the rest.
+func (r *Runtime) warn(text string) {
+	if text == "" {
+		return
+	}
+	if r.Warning == "" {
+		r.Warning = text
+		return
+	}
+	r.Warning += "; " + text
 }
 
 // resolveRegistry loads the cli registries the settings and overrides name.
@@ -1353,7 +1478,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 	}
 	r.Policy = policy
 	r.Askers = askers
-	r.Warning = perm.Warning(policy, askers)
+	r.warn(perm.Warning(policy, askers))
 	return nil
 }
 
@@ -1714,6 +1839,7 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 		"base":         nil,
 		"profile":      nil,
 		"environment":  nil,
+		"skills":       nil,
 		UserSection:    nil,
 		ProjectSection: nil,
 	}
@@ -1733,6 +1859,9 @@ func promptSources(opts BuildOptions, r *Runtime) prompt.Sources {
 		// directory that carries it loads. A session offering no catalog
 		// renders it empty, and it is removed once the directory has applied.
 		sources[cli.SectionName] = r.offeredCatalog().Template(r.offersSearch()).Data()
+	}
+	if r.Skills != nil {
+		sources[skill.SectionName] = r.Skills.Template().Data()
 	}
 	return sources
 }
