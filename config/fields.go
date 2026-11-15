@@ -43,6 +43,9 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.ContextStrategy = pointer(s.Context.Strategy)
 	f.ContextHandoffRatio = share(s.Context.Handoff.Ratio)
 	f.ContextHandoffMaxTokens = count(s.Context.Handoff.MaxTokens)
+	f.ContextSummaryRatio = share(s.Context.Summary.Ratio)
+	f.ContextSummaryKeepRecentTokens = count(s.Context.Summary.KeepRecentTokens)
+	f.ContextSummaryMaxTokens = count(s.Context.Summary.MaxTokens)
 
 	f.ToolsBashTimeoutS = count(s.Tools.Bash.TimeoutS)
 	f.ToolsBashExecutor = pointer(s.Tools.Bash.Executor)

@@ -236,10 +236,12 @@ type Context struct {
 	NoticeRatio *float64 `json:"notice_ratio,omitempty"`
 	// HardRatio is the share of the window at which the run stops.
 	HardRatio *float64 `json:"hard_ratio,omitempty"`
-	// Strategy is how the view is compacted: handoff or none.
+	// Strategy is how the view is compacted: summary, handoff or none.
 	Strategy *string `json:"strategy,omitempty"`
 	// Handoff are the handoff strategy's settings.
 	Handoff Handoff `json:"handoff,omitempty"`
+	// Summary are the summary strategy's settings.
+	Summary Summary `json:"summary,omitempty"`
 }
 
 // Handoff are the handoff strategy's settings.
@@ -247,6 +249,16 @@ type Handoff struct {
 	// Ratio is the share of the window at which the handoff happens.
 	Ratio *float64 `json:"ratio,omitempty"`
 	// MaxTokens is the handoff's configured limit, in tokens.
+	MaxTokens *int `json:"max_tokens,omitempty"`
+}
+
+// Summary are the summary strategy's settings.
+type Summary struct {
+	// Ratio is the share of the window at which the view is summarized.
+	Ratio *float64 `json:"ratio,omitempty"`
+	// KeepRecentTokens is how much of the newest history stays verbatim.
+	KeepRecentTokens *int `json:"keep_recent_tokens,omitempty"`
+	// MaxTokens is the summary request's configured limit, in tokens.
 	MaxTokens *int `json:"max_tokens,omitempty"`
 }
 

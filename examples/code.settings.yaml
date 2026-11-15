@@ -82,6 +82,13 @@ permission:
 # The context window's ratios. The notice ratio is when the model is
 # told that the context is filling up; the hard ratio is when the run
 # stops.
+#
+# The strategy decides what happens before it stops:
+#   summary — the oldest turns become a model-written summary, the newest
+#             turns stay verbatim, and the run carries on
+#   handoff — the model writes a note for whoever continues the task, and
+#             the run ends with it
+#   none    — the run ends when the window is full
 context:
   notice_ratio: 0.8
   hard_ratio: 0.97
@@ -89,6 +96,11 @@ context:
   handoff:
     ratio: 0.90
     max_tokens: 2048
+  summary:
+    ratio: 0.85
+    # How much of the newest history stays verbatim.
+    keep_recent_tokens: 20000
+    max_tokens: 4096
 
 # The tools.
 tools:

@@ -18,6 +18,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/cli"
 	"github.com/sdougbrown/poo/compact/handoff"
+	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/decide"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/feed"
@@ -1680,7 +1681,8 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	if settings.Context.Strategy != nil {
 		strategy = *settings.Context.Strategy
 	}
-	if strategy == "handoff" {
+	switch strategy {
+	case "handoff":
 		handoffOptions := handoff.Options{}
 		if settings.Context.Handoff.Ratio != nil {
 			handoffOptions.Ratio = *settings.Context.Handoff.Ratio
@@ -1689,6 +1691,18 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 			handoffOptions.MaxTokens = *settings.Context.Handoff.MaxTokens
 		}
 		r.Options.Compactor = handoff.New(handoffOptions)
+	case "summary":
+		summaryOptions := summary.Options{}
+		if settings.Context.Summary.Ratio != nil {
+			summaryOptions.Ratio = *settings.Context.Summary.Ratio
+		}
+		if settings.Context.Summary.KeepRecentTokens != nil {
+			summaryOptions.KeepRecentTokens = *settings.Context.Summary.KeepRecentTokens
+		}
+		if settings.Context.Summary.MaxTokens != nil {
+			summaryOptions.MaxTokens = *settings.Context.Summary.MaxTokens
+		}
+		r.Options.Compactor = summary.New(summaryOptions)
 	}
 	return nil
 }
