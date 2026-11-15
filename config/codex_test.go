@@ -486,9 +486,7 @@ roles:
 	}
 }
 
-// loopbackOnly is the client's transport: it records every request the build
-// asks for, and refuses any host but the loopback endpoint, so a request that
-// got past a guard fails here instead of reaching the network.
+// loopbackOnly records requests and refuses non-loopback hosts.
 type loopbackOnly struct {
 	allowed  string
 	requests []string
@@ -561,9 +559,7 @@ roles:
 	if failure.Field != "endpoints.openai-codex.endpoint" {
 		t.Errorf("the failure names %q, want the Codex endpoint", failure.Field)
 	}
-	// Neither the foreign endpoint nor pi's token endpoint was asked for
-	// anything, so the token was never offered to a host the operator did not
-	// name.
+	// No request reached either the foreign endpoint or pi's token endpoint.
 	if len(client.requests) != 0 {
 		t.Errorf("the build made %v, want no request", client.requests)
 	}
