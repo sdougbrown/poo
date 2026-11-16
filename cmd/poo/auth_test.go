@@ -291,6 +291,35 @@ func TestTheAuthImportFindsPisOwnCredential(t *testing.T) {
 	}
 }
 
+// TestTheImportKeepsTheClientTheSourceRecords covers a source that names its own grant: a
+// credential file that records the client it was granted to keeps that record through the
+// import, so poo refreshes the grant as the granting client, not poo's default.
+func TestTheImportKeepsTheClientTheSourceRecords(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "elsewhere.json")
+	body := `{"openai-codex": {"type": "oauth", "access": "a-granted-token", "refresh": "r", "expires": 4102444800000, "accountId": "acct-granted", "clientId": "app_the-grant", "tokenUrl": "https://grant.example/token"}}`
+	if err := os.WriteFile(source, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the source credential: %v", err)
+	}
+	target := filepath.Join(dir, "auth.json")
+	settings := authSettings(t, dir, target)
+
+	captureStdout(t, func() {
+		if code := run([]string{"auth", "import", "pi", "--settings", settings, "--from", source}); code != 0 {
+			t.Errorf("poo auth import pi exited with %d", code)
+		}
+	})
+	stored, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("reading poo's credential file: %v", err)
+	}
+	for _, want := range []string{"clientId: app_the-grant", "tokenUrl: https://grant.example/token"} {
+		if !strings.Contains(string(stored), want) {
+			t.Errorf("poo's file is\n%s\nwant it to carry %q", stored, want)
+		}
+	}
+}
+
 // TestTheAuthImportSaysWhenPisFileIsNotThere covers the refusal: a home with no pi
 // credential is nothing to copy, and the command says so instead of writing an empty file.
 func TestTheAuthImportSaysWhenPisFileIsNotThere(t *testing.T) {
