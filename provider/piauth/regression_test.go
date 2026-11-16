@@ -461,7 +461,7 @@ func TestTheLockIsNamedFromTheRealPath(t *testing.T) {
 	dir := filepath.Dir(path)
 	linked := filepath.Join(dir, "linked-auth.json")
 	if err := os.Symlink(path, linked); err != nil {
-		t.Fatalf("linking the auth file: %v", err)
+		t.Skipf("this filesystem has no symlinks: %v", err)
 	}
 	// pi's lock is the one the real file's path names.
 	lockPath := path + ".lock"
