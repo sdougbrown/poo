@@ -8,6 +8,24 @@ import (
 
 // TestAMessageRendersItsMarkdown covers the replies: a code fence
 // reads back as a highlighted block, and the text keeps its shape.
+// TestExpandTabsPutsTheTerminalStopsIn covers the tab expansion the
+// sanitizer runs: each tab lands on the next multiple of eight,
+// counted from the start of its own line.
+func TestExpandTabsPutsTheTerminalStopsIn(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"no tabs", "plain words", "plain words"},
+		{"at line start", "\tx", "        x"},
+		{"mid line", "ab\tx", "ab      x"},
+		{"past the first stop", "a\tb\tc", "a       b       c"},
+		{"the count restarts at a newline", "ab\ncd\tx", "ab\ncd      x"},
+	}
+	for _, c := range cases {
+		if got := expandTabs(c.in); got != c.want {
+			t.Errorf("%s: expandTabs(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
 func TestAMessageRendersItsMarkdown(t *testing.T) {
 	var out bytes.Buffer
 	r := newRenderer(&out)
@@ -139,30 +157,34 @@ func TestAStreamedSequenceNeverReachesTheTerminal(t *testing.T) {
 	r := aTerminal(t, &out, 40)
 	r.userPrompt("say hi")
 
-	r.streamText("\x1b]52;c;" + "QUJD" + "\x07clipboard" + "\x1b[2Jcleared")
+	r.streamDelta("m1", "text", "\x1b]52;c;"+"QUJD"+"\x07clipboard"+"\x1b[2Jcleared")
 	out.Reset()
-	r.streamText("safe" + "\x1b[2J" + "text")
+	r.streamDelta("m1", "text", "safe"+"\x1b[2J"+"text")
+	r.paintPending()
 	if strings.Contains(out.String(), "\x1b[2J") {
 		t.Errorf("the terminal was told to erase:\n%q", out.String())
 	}
-	if !strings.Contains(out.String(), "safetext") {
-		t.Errorf("the data did not print:\n%q", out.String())
+	if !strings.Contains(plain(out.String()), "safetext") {
+		t.Errorf("the data did not print:\n%q", plain(out.String()))
 	}
 
 	// A sequence split across deltas: the head is held pending, and
-	// the tail strips the whole sequence when it lands.
+	// the tail strips the whole sequence when it lands. Glamour paints
+	// its own 256-colour escapes, so the check names the sequence the
+	// model sent rather than any escape at all.
 	out.Reset()
-	r.replace("")
-	r.streamText("half \x1b[3")
-	if strings.Contains(out.String(), "\x1b[3") {
+	r.finish()
+	r.streamDelta("m1", "text", "half \x1b[3")
+	if strings.Contains(out.String(), "\x1b[31") {
 		t.Errorf("the pending head leaked:\n%q", out.String())
 	}
-	r.streamText("1mrest")
+	r.streamDelta("m1", "text", "1mrest")
+	r.paintPending()
 	if strings.Contains(out.String(), "\x1b[31m") {
 		t.Errorf("the split sequence reached the terminal:\n%q", out.String())
 	}
-	if !strings.Contains(out.String(), "half rest") {
-		t.Errorf("the data did not print around the split:\n%q", out.String())
+	if !strings.Contains(plain(out.String()), "half rest") {
+		t.Errorf("the data did not print around the split:\n%q", plain(out.String()))
 	}
 }
 
@@ -175,32 +197,34 @@ func TestASplitOSCStaysData(t *testing.T) {
 	r.userPrompt("say hi")
 
 	// Cut before the BEL: the head is held, not printed.
-	r.streamText("keep \x1b]0;window title")
+	r.streamDelta("m1", "text", "keep \x1b]0;window title")
 	if strings.Contains(out.String(), "window title") {
 		t.Errorf("the unfinished sequence printed:\n%q", out.String())
 	}
-	r.streamText("\x07tail")
+	r.streamDelta("m1", "text", "\x07tail")
+	r.paintPending()
 	if strings.Contains(out.String(), "window title") {
 		t.Errorf("the completed sequence reached the terminal:\n%q", out.String())
 	}
-	if !strings.Contains(out.String(), "keep tail") {
-		t.Errorf("the data around the sequence did not print:\n%q", out.String())
+	if !strings.Contains(plain(out.String()), "keep tail") {
+		t.Errorf("the data around the sequence did not print:\n%q", plain(out.String()))
 	}
 
 	// The same with the ST terminator, cut between the ESC and the
 	// backslash.
 	out.Reset()
-	r.replace("")
-	r.streamText("keep \x1b]0;title\x1b")
+	r.finish()
+	r.streamDelta("m1", "text", "keep \x1b]0;title\x1b")
 	if strings.Contains(out.String(), "title") {
 		t.Errorf("the unfinished ST sequence printed:\n%q", out.String())
 	}
-	r.streamText("\\tail")
+	r.streamDelta("m1", "text", "\\tail")
+	r.paintPending()
 	if strings.Contains(out.String(), "title") {
 		t.Errorf("the ST sequence reached the terminal:\n%q", out.String())
 	}
-	if !strings.Contains(out.String(), "keep tail") {
-		t.Errorf("the data around the ST sequence did not print:\n%q", out.String())
+	if !strings.Contains(plain(out.String()), "keep tail") {
+		t.Errorf("the data around the ST sequence did not print:\n%q", plain(out.String()))
 	}
 }
 
@@ -212,13 +236,14 @@ func TestAnEndlessEscapeIsDropped(t *testing.T) {
 	r := aTerminal(t, &out, 40)
 	r.userPrompt("say hi")
 
-	r.streamText("before \x1b]" + strings.Repeat("x", maxPending*4))
+	r.streamDelta("m1", "text", "before \x1b]"+strings.Repeat("x", maxPending*4))
 	if n := len(r.pending); n > maxPending {
 		t.Fatalf("the held tail is %d bytes, want at most %d", n, maxPending)
 	}
-	r.streamText("after")
-	if !strings.Contains(out.String(), "after") {
-		t.Errorf("the stream stopped after the endless escape:\n%q", out.String())
+	r.streamDelta("m1", "text", "after")
+	r.paintPending()
+	if !strings.Contains(plain(out.String()), "after") {
+		t.Errorf("the stream stopped after the endless escape:\n%q", plain(out.String()))
 	}
 }
 

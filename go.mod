@@ -13,6 +13,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/sdougbrown/cli-contract v0.10.0
 	github.com/sdougbrown/cli-registry v0.4.0
+	github.com/yuin/goldmark v1.8.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
 	golang.org/x/net v0.55.0
 	golang.org/x/term v0.43.0
@@ -44,7 +45,6 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/umpire-tools/umpire-go v0.1.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	github.com/yuin/goldmark v1.8.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect

@@ -2,6 +2,7 @@ package repl
 
 import (
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,13 +17,15 @@ import (
 // way readline's Refresh does around every write.
 
 // aStreamingRenderer builds the renderer a terminal session gets: the
-// markdown a test reads plain, the width the stream lays out at, and the
-// editor's writer as the sink. The three test harnesses share it so a
-// field added to the streaming shape is set in one place.
+// markdown a terminal shows, at the width the stream lays out at. The
+// editor's writer is the sink. The three test harnesses share it so a
+// field added to the streaming shape is set in one place. The dark
+// style is the one a light-on-dark terminal picks, and it is what the
+// emulator's rows show once the escapes are gone.
 func aStreamingRenderer(t *testing.T, out, sink io.Writer, width int) *renderer {
 	t.Helper()
 	tr, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("notty"),
+		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(width-2),
 	)
 	if err != nil {
@@ -116,17 +119,11 @@ func rowStandsAlone(drawn, want string) bool {
 	return false
 }
 
-// TestTheScreenKeepsTheStreamWhileTheDraftTypes covers the regression
-// the raw byte tests could not see: the streamed text shares the
-// prompt's row with the draft, and the editor's redraw erased it. The
-// sealed rows must keep the words on the screen while the person types,
-// contiguous, with the draft intact below.
 func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("say hello")
 
-	// The thinking delta draws the hint; the hint must survive typing
-	// too, on its sealed row.
+	// The hint stands on its own sealed row and survives typing too.
 	r.hint()
 	if rowOf(t, scr, "… writing") < 0 {
 		t.Fatalf("the hint never showed:\n%s", scr.text())
@@ -136,7 +133,7 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 		t.Fatalf("typing took the hint off the screen:\n%s", scr.text())
 	}
 
-	r.streamText("Hello, ")
+	r.streamDelta("m1", "text", "Hello, ")
 	if rowOf(t, scr, "Hello,") < 0 {
 		t.Fatalf("the first chunk never showed:\n%s", scr.text())
 	}
@@ -145,9 +142,10 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 		t.Fatalf("typing took the streamed words off the screen:\n%s", scr.text())
 	}
 
-	r.streamText("world.")
-	// The paragraph reads as one line, once, with the draft intact
-	// below it.
+	r.streamDelta("m1", "text", "world.")
+	r.paintPending()
+	// The paragraph reads once, with the draft intact below it, and the
+	// hint has given way to the text.
 	if got := countOf(t, scr, "Hello, world."); got != 1 {
 		t.Fatalf("the streamed text reads %d time(s) on the screen, want 1:\n%s", got, scr.text())
 	}
@@ -162,69 +160,46 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 		t.Fatalf("the stream and the prompt are out of order:\n%s", scr.text())
 	}
 
-	// The flush takes the raw text off and renders the message in its
-	// place; the draft keeps its place below.
-	r.replace(r.markdown("Hello, world."))
+	// The settle seals the paragraph where it stands; the words do not
+	// move or double, and the draft keeps its place below.
+	r.finish()
 	drawn := scr.text()
 	if got := countOf(t, scr, "Hello, world."); got != 1 {
-		t.Errorf("the rendered message reads %d time(s) on the screen, want 1:\n%s", got, drawn)
+		t.Errorf("the settled message reads %d time(s) on the screen, want 1:\n%s", got, drawn)
 	}
 	if rowOf(t, scr, promptMark+"watch") < 0 {
-		t.Errorf("the draft did not survive the flush:\n%s", drawn)
+		t.Errorf("the draft did not survive the settle:\n%s", drawn)
 	}
-	// Nothing shows twice: the raw text is gone from the screen, the
-	// render stands where it was.
 	if n := strings.Count(drawn, "Hello,"); n != 1 {
 		t.Errorf("the words show %d time(s) on the screen, want 1:\n%s", n, drawn)
 	}
 }
 
-// TestTheScreenKeepsThePriorLines covers the rows above the block: a
-// transcript line the repl printed before the run stays where it was
-// while the stream and the flush repaint below it.
 func TestTheScreenKeepsThePriorLines(t *testing.T) {
 	scr, r := aScreen(t, 30)
 	r.userPrompt("say hello")
-	r.streamText("a fairly long streaming line that wraps past the width")
+	r.streamDelta("m1", "text", "a fairly long streaming line that wraps past the width")
 	scr.typeText("draft")
-	r.replace(r.markdown("done"))
+	r.finish()
 	drawn := scr.text()
 	if !strings.Contains(drawn, "❯ say hello") {
 		t.Errorf("the echoed prompt above the run was lost:\n%s", drawn)
 	}
 	if rowOf(t, scr, promptMark+"draft") < 0 {
-		t.Errorf("the draft was lost under the flush:\n%s", drawn)
+		t.Errorf("the draft was lost under the settle:\n%s", drawn)
 	}
-	if got := countOf(t, scr, "done"); got != 1 {
-		t.Errorf("the render shows %d time(s), want 1:\n%s", got, drawn)
-	}
-}
-
-func TestStreamingTabsKeepsThePreviousLines(t *testing.T) {
-	scr, r := aScreen(t, 20)
-	r.userPrompt("history")
-	r.streamText("1234567890\tABCDEFG")
-	scr.typeText("draft")
-	r.streamText("HIJ")
-	if n := strings.Count(scr.text(), "1234567890"); n != 1 {
-		t.Fatalf("tabbed output appeared %d times:\n%s", n, scr.text())
-	}
-	r.replace(r.markdown("done"))
-	if !strings.Contains(scr.text(), "❯ history") || rowOf(t, scr, promptMark+"draft") < 0 {
-		t.Fatalf("tabbed output corrupted the screen:\n%s", scr.text())
+	if got := countOf(t, scr, "a fairly long streaming"); got != 1 {
+		t.Errorf("the stream shows %d time(s), want 1:\n%s", got, drawn)
 	}
 }
 
-// TestTheScreenHardWrapMatchesTheTerminal covers the width: a row the
-// stream commits is a row the terminal wraps the same way, so the words
-// land on one line each and nothing doubles up.
 func TestTheScreenHardWrapMatchesTheTerminal(t *testing.T) {
 	scr, r := aScreen(t, 20)
 	r.userPrompt("go")
 	long := "words that run well past the width of the terminal window and keep going"
-	r.streamText(long)
+	r.streamDelta("m1", "text", long)
 	drawn := scr.text()
-	if got := countOf(t, scr, "words that run well"); got != 1 {
+	if got := countOf(t, scr, "words that run"); got != 1 {
 		t.Errorf("the wrapped stream reads %d time(s), want 1:\n%s", got, drawn)
 	}
 	for _, word := range []string{"terminal", "window", "going"} {
@@ -272,72 +247,65 @@ func aQuietScreen(t *testing.T, width int) (*quietHarness, *renderer) {
 	return scr, aStreamingRenderer(t, vt, scr, width)
 }
 
-// TestTheStreamStartsAtColumnZero covers the start of the block: the
-// editor's cursor stands after the prompt it drew and no hint stood
-// before the text, so the rows the stream paints must begin at column
-// zero — or the row arithmetic counts one row short and the flush
-// leaves the stream's first row on the screen.
 func TestTheStreamStartsAtColumnZero(t *testing.T) {
 	scr, r := aQuietScreen(t, 40)
 	// The editor drew the prompt; the cursor stands after it, and no
-	// thinking delta drew a hint before the text arrived.
+	// hint stood before the text arrived.
 	scr.typeText("")
 
-	r.streamText("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen")
+	r.streamDelta("m1", "text", "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen")
 	if got := countOf(t, scr, "one two three"); got != 1 {
 		t.Fatalf("the stream shows %d time(s), want 1:\n%s", got, scr.text())
 	}
 	scr.typeText(" draft")
-	r.streamText(" more words here to finish the paragraph off nicely indeed yes")
-	r.replace(r.markdown("done"))
-	// The flush leaves the cursor on a fresh row; the editor's next
-	// draw — the prompt the run loop sets when the run ends — repaints
-	// the prompt and the draft below the render.
+	r.streamDelta("m1", "text", " more words here to finish the paragraph off nicely indeed yes")
+	r.finish()
 	scr.typeText("")
 
 	drawn := scr.text()
-	if got := countOf(t, scr, "one two three"); got != 0 {
-		t.Errorf("the stream's rows stayed on the screen (%d):\n%s", got, drawn)
+	if got := countOf(t, scr, "one two three"); got != 1 {
+		t.Errorf("the settled paragraph reads %d time(s), want 1:\n%s", got, drawn)
 	}
-	if got := countOf(t, scr, "done"); got != 1 {
-		t.Errorf("the render shows %d time(s), want 1:\n%s", got, drawn)
+	if got := countOf(t, scr, "paragraph off nicely"); got != 1 {
+		t.Errorf("the stream's tail reads %d time(s), want 1:\n%s", got, drawn)
 	}
 	if rowOf(t, scr, promptMark+" draft") < 0 {
-		t.Errorf("the draft was lost under the flush:\n%s", drawn)
+		t.Errorf("the draft was lost under the settle:\n%s", drawn)
 	}
-	done, draft := rowOf(t, scr, "done"), rowOf(t, scr, promptMark+" draft")
-	if done < 0 || draft < 0 || done > draft {
-		t.Errorf("the render and the draft are out of order:\n%s", drawn)
+	last := rowOf(t, scr, "paragraph off nicely")
+	draft := rowOf(t, scr, promptMark+" draft")
+	if last < 0 || draft < 0 || last > draft {
+		t.Errorf("the paragraph and the draft are out of order:\n%s", drawn)
 	}
 }
 
 // TestTheFlushKeepsTheScreenWhenTheBlockOutgrowsIt covers a block
-// taller than the screen: the rows the flush climbs stop at the screen
-// top, the erase cannot reach above the block's visible extent, and the
-// flush leaves the render, the draft and no raw text behind.
+// taller than the screen: the settle leaves the paragraph, the draft and
+// no duplicate of any line behind.
 func TestTheFlushKeepsTheScreenWhenTheBlockOutgrowsIt(t *testing.T) {
 	scr, r := aScreen(t, 30)
 	r.userPrompt("go")
 	var stream strings.Builder
-	for i := 0; i < 30; i++ {
-		stream.WriteString("line 30 of a stream taller than the screen\n")
+	for i := 0; i < 10; i++ {
+		stream.WriteString("line ")
+		stream.WriteString(strconv.Itoa(i))
+		stream.WriteString("\n\n")
 	}
-	r.streamText(stream.String())
+	r.streamDelta("m1", "text", stream.String())
 	scr.typeText("draft")
 	if rowOf(t, scr, promptMark+"draft") < 0 {
 		t.Fatalf("the draft was lost under the tall stream:\n%s", scr.text())
 	}
 
-	r.replace(r.markdown("done"))
+	r.finish()
 	drawn := scr.text()
 	if rowOf(t, scr, promptMark+"draft") < 0 {
-		t.Errorf("the draft did not survive the flush:\n%s", drawn)
+		t.Errorf("the draft did not survive the settle:\n%s", drawn)
 	}
-	if got := countOf(t, scr, "line 30"); got != 0 {
-		t.Errorf("the raw stream rows stayed on the screen (%d), want 0:\n%s", got, drawn)
-	}
-	if got := countOf(t, scr, "done"); got != 1 {
-		t.Errorf("the render shows %d time(s), want 1:\n%s", got, drawn)
+	for _, line := range []string{"line 0", "line 5", "line 9"} {
+		if got := countOf(t, scr, line); got != 1 {
+			t.Errorf("%q shows %d time(s), want 1:\n%s", line, got, drawn)
+		}
 	}
 	for i, line := range strings.Split(drawn, "\n") {
 		if n := len([]rune(line)); n > 30 {
@@ -346,30 +314,26 @@ func TestTheFlushKeepsTheScreenWhenTheBlockOutgrowsIt(t *testing.T) {
 	}
 }
 
-// TestAResizeMidBlockStopsThePainting covers the width the rows are
-// counted at: a terminal that changes width while a block streams keeps
-// its old rows on the screen, the painting stops, and the render
-// replaces them at the new width instead of climbing to the wrong row.
 func TestAResizeMidBlockStopsThePainting(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	width := 40
 	r.liveWidth = func() int { return width }
 	r.userPrompt("go")
-	r.streamText("words that wrap over more than one row at forty columns wide")
+	r.streamDelta("m1", "text", "words that wrap over more than one row at forty columns wide")
 
 	// The terminal narrows; the next delta must not paint at the old
 	// width.
 	width = 20
 	before := scr.text()
-	r.streamText(" and more words arrive after the resize")
+	r.streamDelta("m1", "text", " and more words arrive after the resize")
 	if got := scr.text(); got != before {
 		t.Errorf("the stream kept painting after the resize:\n%s", got)
 	}
 
-	r.replace(r.markdown("done"))
+	r.finish()
 	drawn := scr.text()
-	if got := countOf(t, scr, "done"); got != 1 {
-		t.Errorf("the render shows %d time(s), want 1:\n%s", got, drawn)
+	if got := countOf(t, scr, "after the resize"); got != 1 {
+		t.Errorf("the settle reads %d time(s), want 1:\n%s", got, drawn)
 	}
 	if rowOf(t, scr, strings.TrimRight(promptMark, " ")) < 0 {
 		t.Errorf("the prompt was lost after the resize:\n%s", drawn)
@@ -383,7 +347,7 @@ func TestAWidthThatCannotBeReadKeepsStreaming(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.liveWidth = func() int { return -1 }
 	r.userPrompt("go")
-	r.streamText("still streaming")
+	r.streamDelta("m1", "text", "still streaming")
 	if rowOf(t, scr, "still streaming") < 0 {
 		t.Fatalf("the stream stopped when the width could not be read:\n%s", scr.text())
 	}
@@ -417,23 +381,19 @@ func TestAMultilineToolResultStartsEachRowAtColumnZero(t *testing.T) {
 	}
 }
 
-func TestAMultilineThinkingBlockStartsEachRowAtColumnZero(t *testing.T) {
+func TestAMultilineNoticeStartsEachRowAtColumnZero(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("think about it")
-	r.hint()
 	scr.typeText("draft")
-	r.replace(r.thinkingText("step one\nstep two\nstep three"))
+	r.notice("step one\nstep two\nstep three")
 	drawn := scr.text()
 
-	for _, w := range []string{"· thinking ·", "step one", "step two", "step three"} {
+	for _, w := range []string{"step one", "step two", "step three"} {
 		if !rowStandsAlone(drawn, w) {
 			t.Errorf("the screen lacks the row %q standing at column zero:\n%s", w, drawn)
 		}
 	}
-	if rowOf(t, scr, "… writing") >= 0 {
-		t.Errorf("the hint stood over the thinking block:\n%s", drawn)
-	}
 	if rowOf(t, scr, promptMark+"draft") < 0 {
-		t.Errorf("the draft did not survive the thinking flush:\n%s", drawn)
+		t.Errorf("the draft did not survive the multiline notice:\n%s", drawn)
 	}
 }

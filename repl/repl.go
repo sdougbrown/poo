@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/chzyer/readline"
 
 	"github.com/sdougbrown/poo/wire/protocol"
@@ -127,6 +128,9 @@ type machine struct {
 	eof bool
 	// state renders the run the session is on, nil when idle.
 	state *runState
+	// frame ticks the preview a delta left dirty, while a run streams.
+	// The main goroutine owns it; nil when idle.
+	frame *time.Ticker
 	// esc carries the run an Escape asked to stop.
 	esc chan string
 	// escGen counts the keys the filter delivered: an escape is a key
@@ -162,6 +166,11 @@ type lineResult struct {
 // terminal sends a whole arrow key in one write, so the wait only has
 // to cover the reader's own scheduling.
 const escWindow = 40 * time.Millisecond
+
+// streamFrame is how often the run loop paints the preview a delta left
+// dirty: a long block coalesces its frames instead of rendering every
+// token.
+const streamFrame = 33 * time.Millisecond
 
 // input reads the lines a person types. A terminal gets the readline
 // editor with its vi mode; anything else gets plain lines, so a pipe
@@ -204,6 +213,7 @@ func (m *machine) run() int {
 	m.gate = make(chan struct{})
 	m.lines = make(chan lineResult)
 	m.esc = make(chan string, 1)
+	defer m.disarmFrame()
 
 	quit := make(chan struct{})
 	interrupts := make(chan os.Signal, 1)
@@ -254,6 +264,8 @@ func (m *machine) run() int {
 			if code, done := m.handleAsk(req, input); done {
 				return code
 			}
+		case <-m.frameTick():
+			m.r.paintPending()
 		case runID := <-m.esc:
 			m.cancelRun(runID)
 		case res := <-m.lines:
@@ -377,7 +389,7 @@ func (m *machine) prompt() string {
 
 // askPrompt is the line a permission decision is typed behind.
 func askPrompt(ask protocol.AskParams) string {
-	return ansiYellow + "  allow " + ask.Tool + "? [y/N] " + ansiReset
+	return ansiYellow + "  allow " + sanitizeLine(ask.Tool) + "? [y/N] " + ansiReset
 }
 
 // gone is the exit code a lost server carries.
@@ -967,15 +979,43 @@ func levelName(level string) string {
 	return level
 }
 
+// armFrame starts the ticker that paints the preview a delta left
+// dirty, at the stream's frame rate.
+func (m *machine) armFrame() {
+	m.frame = time.NewTicker(streamFrame)
+}
+
+// disarmFrame stops the frame ticker. The run loop reads its channel
+// through frameTick, which is nil while no run streams, so an idle
+// prompt wakes for nothing.
+func (m *machine) disarmFrame() {
+	if m.frame != nil {
+		m.frame.Stop()
+		m.frame = nil
+	}
+}
+
+// frameTick is the channel the frame ticker ticks, nil while idle.
+func (m *machine) frameTick() <-chan time.Time {
+	if m.frame == nil {
+		return nil
+	}
+	return m.frame.C
+}
+
 // startRun sends one prompt and reports the run it started. The events
 // come to the main loop, which renders them until the settle.
 func (m *machine) startRun(text string) error {
 	m.r.userPrompt(text)
+	// The hint stands from the echo until the first delta lands: a run
+	// whose model is slow to speak still says it is working.
+	m.r.hint()
 	var res protocol.PromptResult
 	if err := m.conn.call(protocol.MethodRunPrompt, protocol.PromptParams{
 		SessionID: m.sessionID,
 		Text:      text,
 	}, &res); err != nil {
+		m.r.takeHint()
 		return err
 	}
 	m.runIDMu.Lock()
@@ -983,11 +1023,13 @@ func (m *machine) startRun(text string) error {
 	m.runIDMu.Unlock()
 	m.state = &runState{}
 	m.steers = nil
+	m.armFrame()
 	return nil
 }
 
 // endRun closes the settled run and restores the prompt.
 func (m *machine) endRun(input input) (int, bool) {
+	m.disarmFrame()
 	m.runIDMu.Lock()
 	m.runID = ""
 	m.runIDMu.Unlock()
@@ -1040,19 +1082,13 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		id, _ := evt.Payload["message_id"].(string)
 		kind, _ := evt.Payload["kind"].(string)
 		text, _ := evt.Payload["text"].(string)
-		state.delta(id, kind, text)
-		// The reply streams as it arrives. Thinking does not: it buffers
-		// and renders dimmed with the message it belongs to.
-		if kind == "text" {
-			m.r.streamText(text)
-		} else {
-			m.r.hint()
-		}
+		// The renderer owns the streamed block and its boundaries: a
+		// message that leaves, or a write that interrupts, ends the
+		// block there.
+		m.r.streamDelta(id, kind, text)
 	case "tool.call":
-		// The message the call interrupts is done as far as the deltas
-		// go: it renders, and the call decorates the transcript below
-		// it.
-		state.flush(m.r)
+		// The call decorates the transcript below the message it
+		// interrupted; the call's own write settles that message first.
 		tool, _ := evt.Payload["tool"].(string)
 		summary, _ := evt.Payload["summary"].(string)
 		m.r.toolCall(tool, summary)
@@ -1079,7 +1115,6 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		state.turns++
 	case "run.settled":
 		if id, _ := evt.Payload["run_id"].(string); id != "" && id == runID {
-			state.flush(m.r)
 			reason, _ := evt.Payload["reason"].(string)
 			detail := settleDetail(evt.Payload)
 			// The settle's usage is the run's total, the sum of every
@@ -1140,7 +1175,7 @@ func settleDetail(payload map[string]any) protocol.SettleDetail {
 // ways out — a quit, a lost server, a failed read — all pass here.
 func (m *machine) flushPending() {
 	if m.state != nil {
-		m.state.flush(m.r)
+		m.r.finish()
 	}
 }
 
@@ -1178,9 +1213,6 @@ func (m *machine) handleAsk(req askRequest, input input) (int, bool) {
 				return code, true
 			}
 		default:
-			if m.state != nil {
-				m.state.flush(m.r)
-			}
 			m.openAsk(req, input)
 			return 0, false
 		}
@@ -1192,9 +1224,14 @@ func (m *machine) handleAsk(req askRequest, input input) (int, bool) {
 // way every other line does.
 func (m *machine) openAsk(req askRequest, input input) {
 	m.ask = &req
-	m.r.write(ansiYellow + "⚙ permission · " + req.ask.Tool + ansiReset + "\n")
-	if req.ask.Summary != "" {
-		m.r.write(ansiDim + req.ask.Summary + ansiReset + "\n")
+	m.r.write(ansiYellow + "⚙ permission · " + sanitizeLine(req.ask.Tool) + ansiReset + "\n")
+	stripped := ansi.Strip(req.ask.Summary)
+	lines := strings.Split(stripped, "\n")
+	for i, line := range lines {
+		lines[i] = sanitizeLine(line)
+	}
+	if summary := strings.Join(lines, "\n"); summary != "" {
+		m.r.write(ansiDim + summary + ansiReset + "\n")
 	}
 	if m.eof {
 		// No input is left to answer with, and the refused call is
@@ -1238,58 +1275,13 @@ func (m *machine) shutdown() {
 	}
 }
 
-// runState holds the streamed messages a run has open, and the turns
-// the run took.
+// runState is the run's accounting: the turns it took. The messages
+// themselves stream through the renderer as the deltas arrive, so
+// there is nothing here to render at the end.
 type runState struct {
-	// messages are the replies, in arrival order.
-	messages []*messageBuffer
-	// byID finds a message the deltas name.
-	byID map[string]*messageBuffer
 	// turns is how many turns the run took: the wire's settle event
 	// does not carry the count, the turn events do.
 	turns int
-}
-
-// messageBuffer is one reply the deltas are still writing.
-type messageBuffer struct {
-	id       string
-	text     strings.Builder
-	thinking strings.Builder
-}
-
-// delta adds one piece of a streamed message.
-func (s *runState) delta(id, kind, text string) {
-	if s.byID == nil {
-		s.byID = map[string]*messageBuffer{}
-	}
-	m := s.byID[id]
-	if m == nil {
-		m = &messageBuffer{id: id}
-		s.byID[id] = m
-		s.messages = append(s.messages, m)
-	}
-	switch kind {
-	case "text":
-		m.text.WriteString(text)
-	default:
-		// An unknown kind buffers with the thinking: it does not join
-		// the reply's body, and the dispatch the deltas stream by
-		// agrees — text streams, everything else buffers and hints.
-		m.thinking.WriteString(text)
-	}
-}
-
-// flush renders the messages the deltas finished with, oldest first,
-// and empties the buffers.
-func (s *runState) flush(r *renderer) {
-	var rendered strings.Builder
-	for _, m := range s.messages {
-		rendered.WriteString(r.thinkingText(m.thinking.String()))
-		rendered.WriteString(r.markdown(m.text.String()))
-	}
-	r.replace(rendered.String())
-	s.messages = nil
-	s.byID = nil
 }
 
 // The errors the run loop reports to the caller.

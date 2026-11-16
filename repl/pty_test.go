@@ -13,6 +13,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/chubin/vt10x"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
@@ -245,7 +246,7 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	if prompts := server.waitPrompts(t, 2); prompts[1] != "next" {
 		t.Fatalf("the session got %v, want \"next\" after the cancel", prompts)
 	}
-	waitTimes(t, term, "world.", 3)
+	waitTimes(t, term, "world.", 2)
 	term.press("\x1b")
 	server.waitCancels(t, 2)
 	waitTimes(t, term, "✓ cancelled", 2)
@@ -371,5 +372,72 @@ func TestAForeignSettleDoesNotEndTheRun(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatalf("the repl never left; it drew:\n%s", term.String())
+	}
+}
+
+// TestTheFramePaintsAQuietDeltaWithoutAnotherEvent covers the coalesced
+// frame over a real terminal: the run is held open after a later delta,
+// and the delta still reaches the screen before another event or the
+// settle, because the run loop's frame paints it.
+func TestTheFramePaintsAQuietDeltaWithoutAnotherEvent(t *testing.T) {
+	later := make(chan struct{})
+	hold := make(chan struct{})
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "First chunk ",
+		})
+		<-later
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "SECONDCHUNK",
+		})
+		<-hold
+		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
+	}
+	term, code := startTerminalRepl(t, server)
+
+	term.press("work\n")
+	waitFor(t, term, "First chunk")
+	close(later)
+	// No delta and no settle can paint it: the frame is the only writer.
+	waitFor(t, term, "SECONDCHUNK")
+	close(hold)
+	waitFor(t, term, "✓ end_turn")
+	term.press("/quit\n")
+
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl never left after /quit; it drew:\n%s", term.String())
+	}
+}
+
+// TestARefusedPromptTakesTheHintBack covers a run the server refuses
+// before its first delta: the hint the run showed comes off the
+// terminal, and the failure reads alone.
+func TestARefusedPromptTakesTheHintBack(t *testing.T) {
+	server := &fakeServer{t: t, refusePrompt: true}
+	term, code := startTerminalRepl(t, server)
+	term.press("go\n")
+	waitFor(t, term, "busy")
+	// The failure and the redraw the hint's removal drives settle in
+	// the drawn stream before the screen reads whole.
+	time.Sleep(200 * time.Millisecond)
+	emu := vt10x.New(vt10x.WithSize(80, 24))
+	emu.Write([]byte(term.String()))
+	if strings.Contains(emu.String(), "… writing") {
+		t.Errorf("the hint stood over the refusal:\n%s", emu.String())
+	}
+	if !strings.Contains(emu.String(), "✗") {
+		t.Errorf("the refusal never read:\n%s", emu.String())
+	}
+	term.press("\x03")
+	select {
+	case <-code:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the repl did not exit")
 	}
 }
