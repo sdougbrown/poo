@@ -378,3 +378,21 @@ func (s *Retrying) ReportProviderBlocks() []poo.ProviderBlock {
 	}
 	return reporter.ReportProviderBlocks()
 }
+
+// Reporter combines a transport's own attempt reporter with a request's.
+//
+// The transport's reporter is the consumer's, and the request's is the core's:
+// the core writes the attempt to the session's record. Both hear every attempt
+// that failed, in that order, and a request with no reporter of its own leaves
+// the transport's.
+func Reporter(own, request func(poo.Attempt)) func(poo.Attempt) {
+	if own == nil {
+		return request
+	}
+	return func(a poo.Attempt) {
+		own(a)
+		if request != nil {
+			request(a)
+		}
+	}
+}

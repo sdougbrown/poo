@@ -66,7 +66,8 @@ type streamChunk struct {
 
 // streamReader reads an SSE response.
 type streamReader struct {
-	body   io.ReadCloser
+	// closer releases the response and the request's bound.
+	closer support.Closer
 	frames *support.Frames
 	// filters are the text filters the quirks added, in order. The
 	// parser is the last of them, so it reads the text the others
@@ -79,16 +80,12 @@ type streamReader struct {
 	// A stream that the run's context ended reports the parent's error;
 	// a stream that the transport's timeout ended is a network failure.
 	parent context.Context
-	// cancel releases the request's context, when the transport made one.
-	cancel context.CancelFunc
 	// pending holds events the reader has decoded but not yet returned.
 	pending []poo.StreamItem
 	// done reports that the stream is finished.
 	done bool
 	// err holds the failure that ended the stream.
 	err error
-	// closed reports that the body is closed.
-	closed bool
 	// ttft is the time to the first streamed token.
 	ttft support.TTFT
 	// usageSent reports that the usage report has been produced.
@@ -109,7 +106,7 @@ type streamReader struct {
 // init makes the scanner when the reader was built without one.
 func (r *streamReader) init() {
 	if r.frames == nil {
-		r.frames = support.NewFrames(support.SSEScanner(r.body))
+		r.frames = support.NewFrames(support.SSEScanner(r.closer.Body))
 	}
 }
 
@@ -379,12 +376,5 @@ func (r *streamReader) ensureUsage() {
 
 // Close releases the response.
 func (r *streamReader) Close() error {
-	if r.closed {
-		return nil
-	}
-	r.closed = true
-	if r.cancel != nil {
-		r.cancel()
-	}
-	return r.body.Close()
+	return r.closer.Close()
 }

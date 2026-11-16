@@ -227,24 +227,6 @@ type chatTool struct {
 	} `json:"function"`
 }
 
-// reporter returns the function that hears every attempt a request makes.
-//
-// The transport's own reporter is the consumer's, and the request's own is
-// the core's: the core writes the attempt to the session's record, so both
-// hear the attempt, in that order.
-func (t *Transport) reporter(request func(poo.Attempt)) func(poo.Attempt) {
-	if t.cfg.OnAttempt == nil {
-		return request
-	}
-	own := t.cfg.OnAttempt
-	return func(a poo.Attempt) {
-		own(a)
-		if request != nil {
-			request(a)
-		}
-	}
-}
-
 // Stream starts a chat completion request and returns the response stream.
 //
 // The snapshot is the serialized request body, exactly as it went out. A
@@ -269,7 +251,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	open := func(ctx context.Context) (support.Reader, error) {
 		return t.open(ctx, body, settings)
 	}
-	report := t.reporter(req.OnAttempt)
+	report := support.Reporter(t.cfg.OnAttempt, req.OnAttempt)
 	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, report)
 	if err != nil {
 		return nil, rendered, err
@@ -311,7 +293,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 	open := func(ctx context.Context) (support.Reader, error) {
 		return t.open(ctx, body, settings)
 	}
-	report := t.reporter(nil)
+	report := support.Reporter(t.cfg.OnAttempt, nil)
 	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, report)
 	if err != nil {
 		return nil, err
@@ -342,13 +324,12 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 		},
 		Build: func(stream support.Stream) *streamReader {
 			return &streamReader{
-				body:        stream.Body,
+				closer:      support.Closer{Body: stream.Body, Cancel: stream.Cancel},
 				frames:      support.NewFrames(support.SSEScanner(stream.Reader)),
 				filters:     t.textFilters(settings),
 				deferParsed: t.sendsTools(settings),
 				ctx:         stream.Context,
 				parent:      stream.Parent,
-				cancel:      stream.Cancel,
 				ttft:        stream.TTFT,
 			}
 		},
