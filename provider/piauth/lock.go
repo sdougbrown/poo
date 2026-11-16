@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -99,10 +100,18 @@ type lock struct {
 // acquire takes the lock of an auth.json, waiting for its holder for at
 // most wait.
 //
+// The lock is named from the file's real path, because that is how pi names
+// one: proper-lockfile resolves the target with fs.realpath before it builds
+// <target>.lock. An auth.json reached through a symlink — the shape a
+// dotfiles repository leaves — therefore locks the same directory on both
+// sides only when the path is resolved first. A file that cannot be resolved
+// keeps the path it was given, since a file that is not there has no real
+// path and the read that follows reports it.
+//
 // Every deadline here is the wall clock's, not the clock a test ages a
 // credential with, because the lock's business is the filesystem's time.
 func acquire(ctx context.Context, path string, wait time.Duration) (*lock, error) {
-	lockPath := path + lockSuffix
+	lockPath := resolve(path) + lockSuffix
 	deadline := time.Now().Add(wait)
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -142,6 +151,16 @@ func acquire(ctx context.Context, path string, wait time.Duration) (*lock, error
 		case <-time.After(pause):
 		}
 	}
+}
+
+// resolve returns the path a lock is named from: the file's real path, or the
+// path itself when the filesystem cannot resolve it.
+func resolve(path string) string {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return real
 }
 
 // held starts a lock's refresh and hands the lock over. The mkdir that took

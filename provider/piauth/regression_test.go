@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -447,5 +449,68 @@ func TestARefreshFollowsTheAuthFileSymlink(t *testing.T) {
 		if len(left) != 2 {
 			t.Errorf("the directory holds %d entries (%v), want the link and its target", len(left), left)
 		}
+	}
+}
+
+// TestTheLockIsNamedFromTheRealPath covers the protocol with pi. proper-lockfile
+// resolves its target before it names <target>.lock, so a credential reached
+// through a symlink locks the same directory on both sides only when this
+// package resolves the path too.
+func TestTheLockIsNamedFromTheRealPath(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
+	dir := filepath.Dir(path)
+	linked := filepath.Join(dir, "linked-auth.json")
+	if err := os.Symlink(path, linked); err != nil {
+		t.Fatalf("linking the auth file: %v", err)
+	}
+	// pi's lock is the one the real file's path names.
+	lockPath := path + ".lock"
+	if err := os.Mkdir(lockPath, 0o700); err != nil {
+		t.Fatalf("taking the lock the way pi takes it: %v", err)
+	}
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusInternalServerError, `{"error":"the endpoint was asked while pi held the lock"}`
+	}, nil)
+	credentials := piauth.Credentials{Path: linked, TokenURL: endpoint.URL, Now: clock, Wait: 200 * time.Millisecond}
+
+	_, err := credentials.Access(context.Background())
+	if !errors.Is(err, piauth.ErrLocked) {
+		t.Fatalf("the linked path reached a lock pi holds: %v", err)
+	}
+	if _, err := os.Stat(linked + ".lock"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a lock was named from the link's own path, so the two writers do not exclude each other")
+	}
+	if endpoint.count() != 0 {
+		t.Errorf("the endpoint was asked %d times for a credential pi holds the lock on", endpoint.count())
+	}
+}
+
+// TestALockYoungerThanTheStaleBoundIsNotBroken covers the other side of the
+// staleness rule. pi's lock is fresh, so breaking it would let this package
+// write the file while pi is still refreshing it.
+func TestALockYoungerThanTheStaleBoundIsNotBroken(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
+	lockPath := path + ".lock"
+	if err := os.Mkdir(lockPath, 0o700); err != nil {
+		t.Fatalf("taking the lock the way pi takes it: %v", err)
+	}
+	young := time.Now().Add(-29 * time.Second)
+	if err := os.Chtimes(lockPath, young, young); err != nil {
+		t.Fatalf("aging the lock: %v", err)
+	}
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusInternalServerError, `{"error":"the endpoint was asked while pi held the lock"}`
+	}, nil)
+	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Wait: 200 * time.Millisecond}
+
+	_, err := credentials.Access(context.Background())
+	if !errors.Is(err, piauth.ErrLocked) {
+		t.Fatalf("a lock inside the staleness bound was broken: %v", err)
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Errorf("the holder's lock was removed: %v", err)
+	}
+	if endpoint.count() != 0 {
+		t.Errorf("the endpoint was asked %d times while the lock was held", endpoint.count())
 	}
 }
