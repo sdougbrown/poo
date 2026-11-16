@@ -128,6 +128,9 @@ type machine struct {
 	eof bool
 	// state renders the run the session is on, nil when idle.
 	state *runState
+	// frame ticks the preview a delta left dirty, while a run streams.
+	// The main goroutine owns it; nil when idle.
+	frame *time.Ticker
 	// esc carries the run an Escape asked to stop.
 	esc chan string
 	// escGen counts the keys the filter delivered: an escape is a key
@@ -210,8 +213,7 @@ func (m *machine) run() int {
 	m.gate = make(chan struct{})
 	m.lines = make(chan lineResult)
 	m.esc = make(chan string, 1)
-	frame := time.NewTicker(streamFrame)
-	defer frame.Stop()
+	defer m.disarmFrame()
 
 	quit := make(chan struct{})
 	interrupts := make(chan os.Signal, 1)
@@ -262,7 +264,7 @@ func (m *machine) run() int {
 			if code, done := m.handleAsk(req, input); done {
 				return code
 			}
-		case <-frame.C:
+		case <-m.frameTick():
 			m.r.paintPending()
 		case runID := <-m.esc:
 			m.cancelRun(runID)
@@ -977,6 +979,30 @@ func levelName(level string) string {
 	return level
 }
 
+// armFrame starts the ticker that paints the preview a delta left
+// dirty, at the stream's frame rate.
+func (m *machine) armFrame() {
+	m.frame = time.NewTicker(streamFrame)
+}
+
+// disarmFrame stops the frame ticker. The run loop reads its channel
+// through frameTick, which is nil while no run streams, so an idle
+// prompt wakes for nothing.
+func (m *machine) disarmFrame() {
+	if m.frame != nil {
+		m.frame.Stop()
+		m.frame = nil
+	}
+}
+
+// frameTick is the channel the frame ticker ticks, nil while idle.
+func (m *machine) frameTick() <-chan time.Time {
+	if m.frame == nil {
+		return nil
+	}
+	return m.frame.C
+}
+
 // startRun sends one prompt and reports the run it started. The events
 // come to the main loop, which renders them until the settle.
 func (m *machine) startRun(text string) error {
@@ -997,11 +1023,13 @@ func (m *machine) startRun(text string) error {
 	m.runIDMu.Unlock()
 	m.state = &runState{}
 	m.steers = nil
+	m.armFrame()
 	return nil
 }
 
 // endRun closes the settled run and restores the prompt.
 func (m *machine) endRun(input input) (int, bool) {
+	m.disarmFrame()
 	m.runIDMu.Lock()
 	m.runID = ""
 	m.runIDMu.Unlock()
