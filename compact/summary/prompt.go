@@ -113,8 +113,11 @@ func summarizationRequest(covered []poo.Message, previous string) []poo.Message 
 	b.WriteString(serialize(covered))
 	b.WriteString("\n</conversation>\n\n")
 	if previous != "" {
+		// The previous summary is model output, so it carries the same
+		// forgery risk as a tool result: one that emits the closing tag
+		// would end the block early and write the rest as instructions.
 		b.WriteString("<previous-summary>\n")
-		b.WriteString(previous)
+		b.WriteString(escapeTags.Replace(previous))
 		b.WriteString("\n</previous-summary>\n\n")
 		b.WriteString(updatePrompt)
 	} else {
