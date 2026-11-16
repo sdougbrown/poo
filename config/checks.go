@@ -26,10 +26,6 @@ import (
 // because the settings' leaves are not the shapes the spec's fields
 // have:
 //
-//   - the decide asker needs a decider model. The rule is a membership
-//     test in a list of names, and the generator's `in` and `notIn`
-//     operators compare a list field with a scalar, so the generated
-//     code does not compile. The rule is checked by hand.
 //   - the hard ratio is above the notice ratio. The spec's expressions
 //     compare a field with a constant, never with another field. The
 //     rule is checked by hand.
@@ -207,27 +203,17 @@ func (s *Settings) checkRules() error {
 //
 // The chain names the askers it holds, in order. A chain the settings
 // name with no askers is a chain with no askers: every ask goes to the
-// fallback. The decide asker needs a decider model: a chain that asks a
-// model that is not there would wait for an answer that cannot come.
+// fallback. What a known asker needs is a rule in the schema, on
+// permission.askers; a name with no rule at all is a typo.
 func (s *Settings) checkAskers() error {
 	for i, name := range s.Permission.Askers {
-		where := fmt.Sprintf("permission.askers[%d]", i)
-		switch name {
-		case "decide":
-			if s.Roles["decider"] == "" {
-				return &Error{
-					Code:    CodeUnavailable,
-					Field:   where,
-					Message: "the decide asker needs a decider model: roles.decider names one",
-				}
-			}
-		case "wire":
-		default:
-			return &Error{
-				Code:    CodeInvalid,
-				Field:   where,
-				Message: fmt.Sprintf("the asker %q is not one the settings know", name),
-			}
+		if name == "decide" || name == "wire" {
+			continue
+		}
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   fmt.Sprintf("permission.askers[%d]", i),
+			Message: fmt.Sprintf("the asker %q is not one the settings know", name),
 		}
 	}
 	return nil
