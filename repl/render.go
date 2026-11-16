@@ -371,6 +371,20 @@ func (r *renderer) repaintPreview() {
 	if !r.streams() || r.live.kind == "" {
 		return
 	}
+	// The closed segments the stall parked are final: seal them into
+	// the transcript in the order they arrived. Their standing rows
+	// wrap at the old width, so they are written again at the new one
+	// rather than sealed as they stand.
+	if len(r.live.parked) > 0 {
+		r.layout.clearPreview()
+		for _, seg := range r.live.parked {
+			if body := r.chunkBody(seg.kind, seg.source); body != "" {
+				r.transcript.WriteString(body)
+				r.layout.commitPreview(body)
+			}
+		}
+		r.live.parked = nil
+	}
 	r.block.stalled = false
 	if r.block.hint {
 		r.block.hint = false

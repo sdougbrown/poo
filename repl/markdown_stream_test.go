@@ -67,6 +67,47 @@ func TestAHintEndsBeforeAToolCall(t *testing.T) {
 	}
 }
 
+// TestARecoveredStallDrainsTheSegmentsItParked covers the stall that
+// outlives a kind change: the resize recovery seals the closed segments
+// the stall parked, in the order they arrived, before the open kind
+// paints again. Nothing a segment showed is lost or repeated.
+func TestARecoveredStallDrainsTheSegmentsItParked(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	width := 40
+	r.liveWidth = func() int { return width }
+	r.userPrompt("go")
+
+	r.streamDelta("text", "the answer")
+	// The width changes under the block before the resize event: the
+	// thought that arrives next parks the reply and stalls the block.
+	width = 20
+	r.streamDelta("thinking", "second thought")
+	r.streamDelta("thinking", " that grows")
+	// The resize event recovers the block at the new width.
+	r.repaintPreview()
+	r.streamDelta("thinking", " and settles.")
+	r.finish()
+
+	for _, where := range []struct{ name, text string }{
+		{"screen", scr.text()},
+		{"transcript", plain(r.transcriptText())},
+	} {
+		for _, want := range []string{"the answer", "second thought", "settles."} {
+			if n := strings.Count(where.text, want); n != 1 {
+				t.Errorf("%q reads %d time(s) on the %s, want 1:\n%s", want, n, where.name, where.text)
+			}
+		}
+		if n := strings.Count(where.text, "· thinking ·"); n != 1 {
+			t.Errorf("the %s shows %d thinking headings, want 1:\n%s", where.name, n, where.text)
+		}
+		answer := strings.Index(where.text, "the answer")
+		thought := strings.Index(where.text, "second thought")
+		if answer < 0 || thought < 0 || answer > thought {
+			t.Errorf("the %s reads out of arrival order:\n%s", where.name, where.text)
+		}
+	}
+}
+
 func TestTheLiveStreamRendersASplitFence(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
