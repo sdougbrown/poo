@@ -129,6 +129,58 @@ func TestTheStreamedBlockStaysAboveTheFooter(t *testing.T) {
 	}
 }
 
+// TestAWriteUnderAStandingPreviewKeepsThePreview covers a write from
+// outside the run loop — a server's diagnostic — that lands while a
+// preview stands on the rows it would take: the new text is written and
+// the preview is repainted below it, with the cache still matching the
+// screen.
+func TestAWriteUnderAStandingPreviewKeepsThePreview(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 24))
+	l := aLayout(t, vt, 40, 24)
+	l.write("committed row\n")
+	l.paintPreview([]string{"a standing preview"})
+
+	l.write("a diagnostic\n")
+
+	drawn := trimScreen(vt.String())
+	for _, want := range []string{"committed row", "a standing preview", "a diagnostic"} {
+		if n := strings.Count(drawn, want); n != 1 {
+			t.Errorf("%q shows %d time(s), want 1:\n%s", want, n, drawn)
+		}
+	}
+	said := strings.Index(drawn, "a diagnostic")
+	preview := strings.Index(drawn, "a standing preview")
+	if said < 0 || preview < 0 || said > preview {
+		t.Errorf("the diagnostic did not land above the preview:\n%s", drawn)
+	}
+	if l.preview <= 0 || len(l.previewRows) == 0 || !strings.Contains(l.previewRows[0], "a standing preview") {
+		t.Errorf("the preview cache no longer matches the screen: preview=%d rows=%v", l.preview, l.previewRows)
+	}
+}
+
+// TestClearingUnderTheLastRowKeepsAStandingPreview covers the draft
+// paint that outgrew the footer: the stray rows under the committed
+// rows are cleared, and the standing preview is repainted from the
+// cache rather than cleared with them.
+func TestClearingUnderTheLastRowKeepsAStandingPreview(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 24))
+	l := aLayout(t, vt, 40, 24)
+	l.write("committed row\n")
+	l.paintPreview([]string{"a standing preview"})
+
+	l.clearBelowLast()
+
+	if l.preview <= 0 || len(l.previewRows) == 0 || !strings.Contains(l.previewRows[0], "a standing preview") {
+		t.Fatalf("the standing preview lost its cache: preview=%d rows=%v", l.preview, l.previewRows)
+	}
+	drawn := trimScreen(vt.String())
+	for _, want := range []string{"committed row", "a standing preview"} {
+		if n := strings.Count(drawn, want); n != 1 {
+			t.Errorf("%q shows %d time(s), want 1:\n%s", want, n, drawn)
+		}
+	}
+}
+
 func TestTheFooterGrowsForAWrappedDraftAndShrinksBack(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(20, 12))
 	l := aLayout(t, vt, 20, 12)

@@ -148,6 +148,11 @@ func (l *layout) emit(s string) {
 // write appends transcript text to the region. Each line is laid out in
 // rows no wider than the terminal. A row the layout writes is a row the
 // terminal shows, so nothing wraps behind its back.
+//
+// A write from outside the run loop — a server's diagnostic — can land
+// while a preview stands on the rows it would take. The standing rows
+// move down: they are cleared here and repainted below the new text
+// from the cache, so the geometry and the cache stay the layout's own.
 func (l *layout) write(s string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -159,7 +164,12 @@ func (l *layout) write(s string) {
 	if len(rows) == 0 {
 		return
 	}
+	pending := l.previewRows
+	if l.preview > 0 {
+		l.clearPreviewLocked()
+	}
 	l.emit(seqSaveCursor + l.rowsSeq(rows) + seqRestoreCursor)
+	l.paintPreviewLocked(pending)
 }
 
 // wrapRows lays one line out as rows no wider than the terminal. A row
@@ -408,13 +418,16 @@ func (l *layout) footerRows() int {
 
 // clearBelowLast blanks the region under the committed rows. A paint
 // that outgrew the footer left rows there that belong to no stream, and
-// the editor's next draw starts from the committed boundary again.
+// the editor's next draw starts from the committed boundary again. The
+// standing preview is not one of the strays: it is repainted from the
+// cache once the region is clear.
 func (l *layout) clearBelowLast() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.active || l.last >= l.regionBottom() {
 		return
 	}
+	pending := l.previewRows
 	var b strings.Builder
 	b.WriteString(seqSaveCursor)
 	for row := l.last + 1; row <= l.regionBottom(); row++ {
@@ -425,6 +438,7 @@ func (l *layout) clearBelowLast() {
 	l.preview = 0
 	l.previewRows = nil
 	l.emit(b.String())
+	l.paintPreviewLocked(pending)
 }
 
 // cols is the terminal's width now.
