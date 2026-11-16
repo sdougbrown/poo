@@ -570,41 +570,98 @@ func TestTheRunSettlesEndTurnWithZero(t *testing.T) {
 	}
 }
 
-// TestTheCommandDefaultsToHandoff covers the rule: cmd/poo gives
-// a session the handoff strategy when none is configured.
-func TestTheCommandDefaultsToHandoff(t *testing.T) {
-	main := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"echo hi\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"
-	fork := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"the handoff note"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
-	endpoint := newFakeEndpointSequence(t, []string{main, fork})
+// TestTheCommandDefaultsToSummary covers the rule: cmd/poo gives a
+// session the summary strategy when the settings name none, so a run that
+// fills the window summarizes the oldest turns and carries on.
+func TestTheCommandDefaultsToSummary(t *testing.T) {
+	// Each turn carries enough text that the trigger is reached by the
+	// second gate, and its own text is more than the tail keeps.
+	call := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"` + strings.Repeat("y", 7000) + `","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":"{\"command\":\"echo hi\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"
+	secondCall := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"` + strings.Repeat("y", 7000) + `","tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"bash","arguments":"{\"command\":\"echo ho\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\ndata: [DONE]\n\n"
+	summary := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"## Goal\nfinish the task"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+	answer := "data: " + `{"choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}` + "\n\ndata: [DONE]\n\n"
+	endpoint := newFakeEndpointSequence(t, []string{call, secondCall, summary, answer})
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "run.jsonl")
+	// The settings name no strategy, so the command's default decides it.
+	// The trigger and the tail are small, so the first two turns are
+	// enough to reach a compaction.
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	settings := "version: 1\ncontext:\n  summary:\n    ratio: 0.1\n    keep_recent_tokens: 1\n"
+	if err := os.WriteFile(settingsPath, []byte(settings), 0o600); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
 
-	// The prompt, the system prompt and the tool schemas put the second
-	// request between the handoff ratio (90%) and the hard limit (97%)
-	// of the window. A larger system prompt may need a larger window.
-	runCLI(t,
+	code, stderr := runCLI(t,
 		"run",
+		"--settings", settingsPath,
 		"--endpoint", endpoint.URL+"/v1",
 		"--model-id", "test-model",
-		"--context-limit", "32000",
+		"--context-limit", "32768",
 		"--working-dir", dir,
 		"--log", logPath,
-		strings.Repeat("x", 100000),
+		"a prompt",
 	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0: %s", code, stderr)
+	}
 
 	recs := readLog(t, logPath)
-	var handoff map[string]any
+	var compaction map[string]any
 	for _, rec := range recs {
-		if rec["record"] == "handoff" {
-			handoff = rec
+		switch rec["record"] {
+		case "compaction":
+			compaction = rec
+		case "handoff":
+			t.Fatalf("the default strategy wrote a handoff: %v", rec)
 		}
 	}
-	if handoff == nil {
-		t.Fatalf("the log holds no handoff record: %v", names(recs))
+	if compaction == nil {
+		t.Fatalf("the log holds no compaction record: %v", names(recs))
 	}
-	if handoff["handoff"] != "the handoff note" {
-		t.Errorf("the handoff is %v, want the fork's text", handoff["handoff"])
+	if compaction["strategy"] != "summary" {
+		t.Errorf("the compaction's strategy is %v, want summary", compaction["strategy"])
+	}
+	if compaction["form"] != "replace" {
+		t.Errorf("the compaction's form is %v, want replace", compaction["form"])
+	}
+	replacement, _ := compaction["replacement"].([]any)
+	if len(replacement) != 1 {
+		t.Fatalf("the compaction carries %d replacement messages, want 1", len(replacement))
+	}
+	msg, _ := replacement[0].(map[string]any)
+	content, _ := msg["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("the replacement carries %d blocks, want 1", len(content))
+	}
+	block, _ := content[0].(map[string]any)
+	text, _ := block["text"].(string)
+	if !strings.Contains(text, "[Context compacted: turns 1-1 summarized below]") || !strings.Contains(text, "finish the task") {
+		t.Errorf("the replacement is %q, want the marker and the summary", text)
+	}
+
+	// The run carried on: it settled on the model's own last word, and
+	// the answer the fourth scripted turn gave is in the log.
+	answered := false
+	for _, rec := range recs {
+		switch rec["record"] {
+		case "run.settled":
+			if reason, _ := rec["reason"].(string); reason != "end_turn" {
+				t.Errorf("the run settled %q, want end_turn: the default strategy carries on", reason)
+			}
+		case "message":
+			content, _ := rec["content"].([]any)
+			for _, entry := range content {
+				block, _ := entry.(map[string]any)
+				if text, _ := block["text"].(string); text == "done" {
+					answered = true
+				}
+			}
+		}
+	}
+	if !answered {
+		t.Errorf("the log holds no final answer: %v", names(recs))
 	}
 }
 

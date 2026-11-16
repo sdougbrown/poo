@@ -14,8 +14,10 @@ import (
 // The flows that outlive a run: the jobs, the crashes, the teardown and
 // the slow client.
 
-// handoff covers the flow of a run that runs out of context: the
-// compactor asks for a handoff, and the run ends with it.
+// handoff covers the flow of a run that runs out of context under the
+// handoff strategy: the compactor asks for a handoff, and the run ends
+// with it. The flow names the strategy, so the flow tests the settle the
+// strategy produces and not whatever the binary's default is.
 func (s *suite) handoff() {
 	s.t.Helper()
 	if s.skipWithoutTool("bash") {
@@ -28,7 +30,9 @@ func (s *suite) handoff() {
 		{Text: "the handoff note"},
 	}
 	endpoint := newEndpoint(s.t, turns)
-	settings := s.settings(endpoint, handoffWindow, nil)
+	settings := s.settings(endpoint, handoffWindow, map[string]any{
+		"context": map[string]any{"strategy": "handoff"},
+	})
 	c := s.start(settings, endpoint)
 	s.handshake(c)
 	sessionID := s.create(c)
@@ -61,6 +65,78 @@ func (s *suite) handoff() {
 		s.t.Errorf("the second request does not ask for a handoff: %v", requests[1])
 	}
 }
+
+// summary covers the flow of a run that runs out of context under the
+// binary's default strategy: the oldest turns become a summary, and the
+// run carries on instead of settling. The flow names no strategy, so it
+// is the default that this proves.
+func (s *suite) summary() {
+	s.t.Helper()
+	if s.skipWithoutTool("bash") {
+		return
+	}
+	// Two turns run before the gate can compact, and the third answer
+	// is what the run finally says.
+	turns := []ScriptedAnswer{
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo hello"}}}},
+		{ToolCalls: []ToolCall{{Name: "bash", Arguments: map[string]any{"command": "echo again"}}}},
+		{Text: "## Goal\nfinish the task"},
+		{Text: "done"},
+	}
+	endpoint := newEndpoint(s.t, turns)
+	// The prompt fills the window, so the estimate crosses the ratio the
+	// strategy acts at. The tail is one turn, so the turns themselves
+	// need not be large: the flow proves the default path compacts, not
+	// how much it summarizes.
+	settings := s.settings(endpoint, summaryWindow, map[string]any{
+		"context": map[string]any{"summary": map[string]any{"keep_recent_tokens": 1}},
+	})
+	c := s.start(settings, endpoint)
+	s.handshake(c)
+	sessionID := s.create(c)
+
+	prompt := s.promptText(c, sessionID)
+	window := float64(summaryWindow)
+	fill := int(window*summaryFill*3.5) - len(prompt) - 70
+	if fill < 1 {
+		fill = 1
+	}
+	runID := s.prompt(c, sessionID, strings.Repeat(handoffFiller, fill/len(handoffFiller)))
+	settled := s.settled(c, sessionID, runID)
+	if settled.Reason != "end_turn" {
+		s.t.Errorf("the run settled %q, want end_turn: the default strategy carries on", settled.Reason)
+	}
+
+	requests := c.requests()
+	asked, carried := false, false
+	for _, request := range requests {
+		if requestHolds(request, "<conversation>") {
+			asked = true
+		}
+		if requestHolds(request, "[Context compacted:") {
+			carried = true
+		}
+	}
+	if !asked {
+		s.t.Errorf("the endpoint got no summarization request: %+v", requests)
+	}
+	if !carried {
+		s.t.Errorf("no request carries the summary the compaction wrote")
+	}
+}
+
+// summaryFill is the share of the summary flow's window the prompt fills.
+//
+// It is above the strategy's own ratio and under the hard limit, so the
+// run compacts instead of settling.
+const summaryFill = 0.88
+
+// summaryWindow is the window the summary flow runs under.
+//
+// The window is small enough that a prompt fills it, and large enough
+// that the first request has room for an answer and the view after a
+// compaction has room for the next one.
+const summaryWindow = 32768
 
 // handoffFiller is the text the handoff flow fills the window with.
 const handoffFiller = "the task is long. "
