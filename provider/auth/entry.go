@@ -73,7 +73,7 @@ var modelledFields = []string{"access", "refresh", "expires", "accountId", "key"
 // encodeEntry stores a credential in the entry a provider's credentials map
 // holds it under, and leaves every other entry as it was.
 //
-// A field the entry carries beyond the five fileEntry models is kept: pi's
+// A field the entry carries beyond the ones this package models is kept: pi's
 // credential type allows fields of its own, and they are not this package's to
 // drop.
 func encodeEntry(path, provider string, entries map[string]json.RawMessage, entry credential) error {

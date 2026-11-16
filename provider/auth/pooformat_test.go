@@ -655,7 +655,7 @@ func TestReplacingAnEntryDropsTheFieldsItsKindDoesNotCarry(t *testing.T) {
 	}
 	_, held = pooFile(t, oauthFile)
 	entry = held[auth.ProviderCodex]
-	for _, field := range []string{"access", "refresh", "expires", "accountId"} {
+	for _, field := range []string{"access", "refresh", "expires", "accountId", "clientId", "tokenUrl"} {
 		if _, ok := entry[field]; ok {
 			t.Errorf("the api key entry kept %q: %v", field, entry)
 		}
@@ -711,16 +711,21 @@ func TestACredentialKeepsTheClientItWasGrantedTo(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
 	}, nil)
-	// The recorded endpoint is what the refresh goes to; point the credential's at the fake and
-	// the provider's at a host that would fail, so the assertion is about which one was used.
-	if _, err := (auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}).Access(context.Background(), declared); err != nil {
+	// The stored record is what the refresh goes to: name the fake on the credential itself,
+	// leave the provider's declaration at a host that would fail, and pass no caller override,
+	// so only the stored rung of the ladder answers.
+	entry.TokenURL = endpoint.URL
+	if _, err := credentials.Set(context.Background(), declared, entry, true); err != nil {
+		t.Fatalf("re-storing the credential: %v", err)
+	}
+	if _, err := (auth.Credentials{Path: path, Now: clock}).Access(context.Background(), declared); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
 	if got := endpoint.form(t, 0)["client_id"]; got != "the-grant-that-was-made" {
 		t.Errorf("the refresh named the client %q, want the credential's", got)
 	}
 	// And the record survives the refresh.
-	if got, _ := credentials.Read(declared); got.ClientID != "the-grant-that-was-made" || got.TokenURL != "http://granted.invalid/token" {
+	if got, _ := credentials.Read(declared); got.ClientID != "the-grant-that-was-made" || got.TokenURL != endpoint.URL {
 		t.Errorf("the refresh rewrote the record: %+v", got)
 	}
 }
