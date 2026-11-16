@@ -100,6 +100,10 @@ type streamBlock struct {
 // segment has not committed yet, and the segments a stalled block
 // collected after the last row it could paint.
 type streamLive struct {
+	// id is the message the deltas belong to. A delta that names
+	// another message ends the open block first, so two messages never
+	// run their words together.
+	id string
 	// kind is the segment's kind: "text" for the reply, "thinking" for
 	// everything that is not the reply. Empty when no segment is open.
 	kind string
@@ -249,6 +253,19 @@ func (r *renderer) takeHint() {
 	// column zero, wherever the cursor stood.
 	fmt.Fprint(r.sink, "\r"+ansi.CursorUp(1)+ansi.EraseDisplay(0))
 	r.block.hint = false
+}
+
+// streamMessage keeps the deltas' message. A delta that names another
+// message ends the open block first, so the messages' words never run
+// together; the renderer owns the rule, beside the one for writes.
+func (r *renderer) streamMessage(id string) {
+	if id == "" {
+		return
+	}
+	if r.live.kind != "" && id != r.live.id {
+		r.finish()
+	}
+	r.live.id = id
 }
 
 // streamDelta renders one delta of a message as it arrives. The reply

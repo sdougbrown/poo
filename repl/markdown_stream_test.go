@@ -95,6 +95,11 @@ func TestThinkingStreamsAsMarkdown(t *testing.T) {
 
 	raw := out.String()
 	drawn := plain(raw)
+	// dimText re-dims after every reset the renderer's own styling
+	// put in, so the dim survives glamour's resets whole.
+	if !strings.Contains(raw, ansiReset+ansiDim) {
+		t.Fatalf("the thinking block is not dimmed:\n%q", raw)
+	}
 	if !strings.Contains(drawn, "· thinking ·") {
 		t.Fatalf("the thinking block has no heading:\n%q", drawn)
 	}

@@ -1054,14 +1054,9 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		id, _ := evt.Payload["message_id"].(string)
 		kind, _ := evt.Payload["kind"].(string)
 		text, _ := evt.Payload["text"].(string)
-		// A delta that names another message starts a block of its own:
-		// two messages cannot run their words together.
-		if id != "" && state.messageID != "" && id != state.messageID {
-			m.r.finish()
-		}
-		if id != "" {
-			state.messageID = id
-		}
+		// The renderer owns the streamed block and its boundaries: it
+		// ends a block the message left, and one a write interrupts.
+		m.r.streamMessage(id)
 		// The reply and the thinking both stream as markdown in the
 		// order they arrive. A kind the renderer does not know reads
 		// with the thinking, so it cannot join the reply's body.
@@ -1262,9 +1257,6 @@ type runState struct {
 	// turns is how many turns the run took: the wire's settle event
 	// does not carry the count, the turn events do.
 	turns int
-	// messageID is the message the deltas are writing. A delta that
-	// names another message ends the open block first.
-	messageID string
 }
 
 // The errors the run loop reports to the caller.
