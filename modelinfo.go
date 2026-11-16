@@ -10,6 +10,16 @@ import "slices"
 type ModelInfo struct {
 	// Name is the name the settings and the wire use for the model.
 	Name string `json:"name"`
+	// Provider is the provider that serves the model: the settings'
+	// endpoint name, or a built-in provider's id.
+	//
+	// The provider is a wider identity than the base URL: a built-in
+	// provider is reached at a URL the settings never spell, and two
+	// providers can serve the same wire API with different credentials. A
+	// transport is chosen by it, so adding a provider does not mean
+	// recognising its endpoint's name at every call site. Empty means the
+	// catalog named none, and the wire API alone decides.
+	Provider string `json:"provider,omitempty"`
 	// Endpoint is the base URL of the endpoint that serves the model.
 	Endpoint string `json:"endpoint"`
 	// ModelID is what the endpoint calls the model.

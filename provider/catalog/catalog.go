@@ -32,6 +32,7 @@ import (
 // parts: "sampling.temperature", "tools.mode" and "reasoning.mode".
 const (
 	fieldName            = "name"
+	fieldProvider        = "provider"
 	fieldEndpoint        = "endpoint"
 	fieldModelID         = "model_id"
 	fieldAPI             = "api"
@@ -312,6 +313,7 @@ func (c *Catalog) Explain(name string) (poo.ModelInfo, []Explanation, error) {
 	info, source := c.merge(e)
 	out := []Explanation{
 		{Field: fieldName, Value: info.Name, Layer: source[fieldName]},
+		{Field: fieldProvider, Value: info.Provider, Layer: source[fieldProvider]},
 		{Field: fieldEndpoint, Value: info.Endpoint, Layer: source[fieldEndpoint]},
 		{Field: fieldModelID, Value: info.ModelID, Layer: source[fieldModelID]},
 		{Field: fieldAPI, Value: string(info.API), Layer: source[fieldAPI]},
@@ -461,6 +463,19 @@ func (c *Catalog) merge(e *entry) (poo.ModelInfo, map[string]string) {
 	if out.Name == "" {
 		out.Name = e.name
 		source[fieldName] = LayerDefault
+	}
+	// The provider is the endpoint the model was found under, and no layer
+	// sets it as a field of its own: an entry is created for one endpoint,
+	// so the entry is what says which provider serves the model. The layer it
+	// is attributed to is the one that chose that endpoint, because that is
+	// the choice a reader of the explanation is asking about.
+	if out.Provider == "" {
+		out.Provider = e.endpoint
+		layer := source[fieldEndpoint]
+		if layer == "" {
+			layer = LayerDefault
+		}
+		source[fieldProvider] = layer
 	}
 	if len(out.Ops) == 0 {
 		// A model no layer gives ops to is a chat model: the endpoints

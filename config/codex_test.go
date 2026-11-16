@@ -17,7 +17,6 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/provider/codex"
-	"github.com/sdougbrown/poo/provider/openai"
 	"github.com/sdougbrown/poo/provider/piauth"
 )
 
@@ -565,9 +564,12 @@ roles:
 	}
 }
 
-// TestANonCodexResponsesModelStaysOnItsTransport covers the identification:
-// the Responses API alone does not make a model Codex.
-func TestANonCodexResponsesModelStaysOnItsTransport(t *testing.T) {
+// TestAResponsesModelOnAnotherProviderIsRefused covers the identification:
+// the Responses API alone does not make a model Codex, and no transport poo
+// ships speaks it for another provider. The model is refused with a message
+// naming its provider, rather than sent a Chat Completions request that
+// endpoint cannot read.
+func TestAResponsesModelOnAnotherProviderIsRefused(t *testing.T) {
 	path := writeCodexSettings(t, t.TempDir(), `version: 1
 session:
   mode: ephemeral
@@ -587,20 +589,13 @@ roles:
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
-	runtime, err := buildCodex(t, settings, nil)
-	if err != nil {
-		t.Fatalf("building the runtime: %v", err)
+	_, err = buildCodex(t, settings, nil)
+	var failure *config.Error
+	if !errors.As(err, &failure) || failure.Code != config.CodeUnsupported {
+		t.Fatalf("the build is %v, want the Responses API refused", err)
 	}
-	model, err := runtime.ChatModel()
-	if err != nil {
-		t.Fatalf("resolving the chat model: %v", err)
-	}
-	transport, err := runtime.Transport(model)
-	if err != nil {
-		t.Fatalf("building the transport: %v", err)
-	}
-	if _, ok := transport.(*openai.Transport); !ok {
-		t.Errorf("the transport is %T, want the OpenAI chat transport", transport)
+	if failure.Field != "models.local-responses.api" {
+		t.Errorf("the failure names %q, want the model's api field", failure.Field)
 	}
 }
 
