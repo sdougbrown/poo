@@ -13,8 +13,8 @@
 // reader of pi's file this codec is what stays behind.
 //
 // poo reads the file the settings name, never a pi installation's own
-// directory, so a caller hands the path over. This package does not log in:
-// pi's login writes the credential, and this package keeps it alive. Access
+// directory, so a caller hands the path over. This package owns both the
+// sign-in machinery and the store that keeps the credential alive. Access
 // uses the credential the file holds, and Refresh trades it for a new one.
 //
 // A stored access token expires, and pi and this package both refresh one by

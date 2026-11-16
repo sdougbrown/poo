@@ -280,7 +280,7 @@ func TestASignInRefusesWhatIsNotItsAttempt(t *testing.T) {
 }
 
 // TestASignInRefusesAnAnswerThatIsNotACredential covers the endpoint's own failures: an error
-// body, and an answer with no refresh token.
+// body, and an answer that carries no credential.
 func TestASignInRefusesAnAnswerThatIsNotACredential(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -290,6 +290,8 @@ func TestASignInRefusesAnAnswerThatIsNotACredential(t *testing.T) {
 	}{
 		{name: "a refusal", answer: `{"error":"invalid_grant"}`, status: http.StatusBadRequest, want: "invalid_grant"},
 		{name: "no refresh token", answer: `{"access_token":"a","expires_in":3600}`, status: http.StatusOK, want: "no credential"},
+		{name: "no access token", answer: `{"refresh_token":"r","expires_in":3600}`, status: http.StatusOK, want: "no credential"},
+		{name: "no lifetime", answer: `{"access_token":"a","refresh_token":"r","expires_in":0}`, status: http.StatusOK, want: "no credential"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			server := newSignInServer(t)
@@ -357,6 +359,7 @@ func TestParseCallback(t *testing.T) {
 		{name: "the URL the browser landed on", input: "http://localhost:1455/auth/callback?code=abc&state=xyz", code: "abc", state: "xyz"},
 		{name: "a bare code", input: "abc", code: "abc"},
 		{name: "a query fragment", input: "code=abc&state=xyz", code: "abc", state: "xyz"},
+		{name: "a pasted code with padding", input: "  abc\n", code: "abc"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got := auth.ParseCallback(c.input)
@@ -376,6 +379,27 @@ func TestAKeyFlowDoesNotSignInThroughABrowser(t *testing.T) {
 	key := auth.Flow{Name: "Ollama Cloud", Provider: auth.Provider{ID: "ollama-cloud", Kind: auth.KindAPIKey}, Method: auth.MethodKey}
 	if _, err := key.Authorize(); err == nil {
 		t.Fatal("a key flow produced an authorization attempt")
+	}
+}
+
+// TestABrowserFlowThatNamesNoEndpointClientOrRedirectCannotAuthorize covers the guard that
+// refuses a browser flow that cannot build an authorization request: an endpoint, a client and
+// a redirect are all of them needed.
+func TestABrowserFlowThatNamesNoEndpointClientOrRedirectCannotAuthorize(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		flow auth.Flow
+	}{
+		{name: "no client", flow: auth.Flow{Name: "prov", Provider: auth.Provider{ID: "prov", Kind: auth.KindOAuth}, Method: auth.MethodBrowser, AuthorizeURL: "https://prov.example/oauth/authorize", RedirectURI: "http://localhost:1455/auth/callback"}},
+		{name: "no redirect", flow: auth.Flow{Name: "prov", Provider: auth.Provider{ID: "prov", Kind: auth.KindOAuth}, Method: auth.MethodBrowser, AuthorizeURL: "https://prov.example/oauth/authorize", ClientID: "client"}},
+		{name: "no endpoint", flow: auth.Flow{Name: "prov", Provider: auth.Provider{ID: "prov", Kind: auth.KindOAuth}, Method: auth.MethodBrowser, ClientID: "client", RedirectURI: "http://localhost:1455/auth/callback"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := c.flow.Authorize()
+			if err == nil || !strings.Contains(err.Error(), "no endpoint, client or redirect") {
+				t.Fatalf("the authorization is %v, want a refusal naming the missing endpoint, client or redirect", err)
+			}
+		})
 	}
 }
 
