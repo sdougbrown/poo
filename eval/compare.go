@@ -117,6 +117,20 @@ func comparedMetrics() []metric {
 			relative:       true,
 		},
 		{
+			name:           "compaction_input_tokens",
+			get:            func(a Aggregate) float64 { return a.CompactionInputTokens },
+			spread:         func(a Aggregate) float64 { return a.CompactionInputSpread },
+			higherIsBetter: false,
+			relative:       true,
+		},
+		{
+			name:           "compaction_output_tokens",
+			get:            func(a Aggregate) float64 { return a.CompactionOutputTokens },
+			spread:         func(a Aggregate) float64 { return a.CompactionOutputSpread },
+			higherIsBetter: false,
+			relative:       true,
+		},
+		{
 			name:           "tool_error_rate",
 			get:            func(a Aggregate) float64 { return a.ToolErrorRate },
 			spread:         func(a Aggregate) float64 { return a.ToolErrorSpread },

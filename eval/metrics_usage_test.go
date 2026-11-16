@@ -125,3 +125,30 @@ func TestACompactionsCacheReadsAreCounted(t *testing.T) {
 		t.Errorf("the cached prompt tokens are %v, want the turns' and the compaction's 1000", m.CacheReadTokens)
 	}
 }
+
+// TestTheAggregateCarriesTheCompactionShare covers where the number is
+// read: a comparison aggregates runs, and the compaction's share of the
+// spend reaches the aggregate and the table it prints.
+func TestTheAggregateCarriesTheCompactionShare(t *testing.T) {
+	log, err := ParseLog(writeLog(t,
+		usageRecord(1, 1, 100, 10, 5, nil),
+		compactionUsageRecord(1, 900, 90, 50, nil),
+		settledRecord("end_turn", 1),
+	))
+	if err != nil {
+		t.Fatalf("parsing the log: %v", err)
+	}
+	runs := []CellResult{{Metrics: ComputeMetrics(log, Diff{}), Success: true}}
+	agg := aggregate(runs)
+
+	if agg.CompactionInputTokens != 900 || agg.CompactionOutputTokens != 90 {
+		t.Errorf("the aggregate's compaction share is %v in and %v out, want 900 and 90",
+			agg.CompactionInputTokens, agg.CompactionOutputTokens)
+	}
+	for _, m := range comparedMetrics() {
+		if m.name == "compaction_input_tokens" || m.name == "compaction_output_tokens" {
+			return
+		}
+	}
+	t.Error("the comparison has no compaction metric")
+}
