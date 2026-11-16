@@ -196,7 +196,31 @@ func (r *renderer) emit(s string) {
 		r.layout.write(s)
 		return
 	}
+	if r.term {
+		// A terminal whose footer could not be built still reads rows:
+		// every bare line feed gains its carriage return, and each row
+		// starts at column zero, wherever the cursor stood.
+		fmt.Fprint(r.out, "\r"+terminalLF(s))
+		return
+	}
 	fmt.Fprint(r.out, s)
+}
+
+// terminalLF converts bare LF to CRLF without duplicating the carriage
+// returns rows already carry.
+func terminalLF(s string) string {
+	if !strings.Contains(s, "\n") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' && (i == 0 || s[i-1] != '\r') {
+			b.WriteByte('\r')
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // paintPreviewBody paints one rendered body as the live preview.

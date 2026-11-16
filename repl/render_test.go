@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/glamour"
 )
 
 // TestAMessageRendersItsMarkdown covers the replies: a code fence
@@ -244,5 +246,36 @@ func TestAnEndlessEscapeIsDropped(t *testing.T) {
 	r.paintPending()
 	if !strings.Contains(plain(out.String()), "after") {
 		t.Errorf("the stream stopped after the endless escape:\n%q", plain(out.String()))
+	}
+}
+
+// TestATerminalWithoutALayoutStillReadsRows covers a terminal whose
+// footer could not be built: the transcript still reads rows — bare
+// line feeds gain their carriage return, and each row starts at
+// column zero — instead of staircasing up the screen.
+func TestATerminalWithoutALayoutStillReadsRows(t *testing.T) {
+	var out bytes.Buffer
+	newTR := func(wrap int) (*glamour.TermRenderer, error) {
+		return glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(wrap))
+	}
+	tr, err := newTR(78)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &renderer{out: &out, wrap: 78, width: 80, term: true, newTR: newTR, tr: tr}
+
+	r.userPrompt("look")
+
+	drawn := out.String()
+	for i := 0; i < len(drawn); i++ {
+		if drawn[i] == '\n' && (i == 0 || drawn[i-1] != '\r') {
+			t.Fatalf("a bare line feed staircased the transcript:\n%q", drawn)
+		}
+	}
+	if !strings.HasPrefix(drawn, "\r") {
+		t.Errorf("the row did not start at column zero:\n%q", drawn)
+	}
+	if !strings.Contains(drawn, "look") {
+		t.Errorf("the prompt never read:\n%q", drawn)
 	}
 }

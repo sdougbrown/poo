@@ -1419,7 +1419,7 @@ func (i *readlineInput) prompt(p string) {
 	pos := i.pos
 	i.mu.Unlock()
 	if i.layout != nil {
-		i.layout.ensure(i.footerRows(p, draft))
+		i.layout.ensure(i.rowsFor(p, draft))
 		i.layout.place(promptRows(p, draft[:pos], i.layout.cols()) - 1)
 	}
 	i.rl.SetPrompt(p)
@@ -1447,7 +1447,7 @@ func (l draftListener) OnChange(line []rune, pos int, _ rune) ([]rune, int, bool
 		return nil, 0, false
 	}
 	before := l.i.layout.footerRows()
-	if !l.i.layout.ensure(l.i.footerRows(promptText, line)) || l.i.rl == nil {
+	if !l.i.layout.ensure(l.i.rowsFor(promptText, line)) || l.i.rl == nil {
 		return nil, 0, false
 	}
 	// A paint that needed more rows than the old footer had ran past
@@ -1470,11 +1470,11 @@ func (l draftListener) OnChange(line []rune, pos int, _ rune) ([]rune, int, bool
 	return nil, 0, false
 }
 
-// footerRows is the rows the footer reserves for a prompt and a draft.
+// rowsFor is the rows the footer reserves for a prompt and a draft.
 // It covers the rows they fill and one spare while a draft is typed. The
 // spare gives the keystroke that wraps a row to wrap into before the
 // footer grows.
-func (i *readlineInput) footerRows(prompt string, draft []rune) int {
+func (i *readlineInput) rowsFor(prompt string, draft []rune) int {
 	rows := promptRows(prompt, draft, i.layout.cols())
 	if len(draft) > 0 {
 		rows++
