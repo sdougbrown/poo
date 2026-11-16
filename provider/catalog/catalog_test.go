@@ -773,3 +773,22 @@ func TestTheFileOverrulesWhatTheEndpointReports(t *testing.T) {
 		t.Errorf("the context limit is %d from %q, want the file's 32768", info.ContextLimit, info.Source["context_limit"])
 	}
 }
+
+// TestAnUnresolvedRoleSaysWhatIsKnown covers the message a role failure carries:
+// the name as it was written, and the models that would have served the role, so
+// a typo or an unqualified name is told apart from a file that was not read.
+func TestAnUnresolvedRoleSaysWhatIsKnown(t *testing.T) {
+	settings := localSettings()
+	settings.Roles = map[string]string{"chat": "gemma"}
+	c := catalog.New(catalog.Options{Settings: settings})
+	err := c.CheckRoles()
+	var unresolved *catalog.UnresolvedError
+	if !errors.As(err, &unresolved) {
+		t.Fatalf("the check is %v, want an UnresolvedError", err)
+	}
+	for _, want := range []string{`"gemma"`, `"chat"`, `"gemma4"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure is %q, want it to name %s", err, want)
+		}
+	}
+}

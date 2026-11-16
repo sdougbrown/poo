@@ -86,20 +86,48 @@ func (e *OpError) Error() string {
 }
 
 // UnresolvedError is a model the catalog cannot resolve.
+//
+// The message says what is known, not only what is missing: the role, the name
+// as it was written, and the models that would have served the role. A typo, an
+// unqualified name and a models file that was not read are told apart by that
+// list.
 type UnresolvedError struct {
-	// Name is the model's name.
+	// Name is the model's name, as the settings wrote it.
 	Name string
 	// Role is the role the model was assigned to. It is empty when the
 	// model is not assigned to one.
 	Role Role
+	// Known are the models in the catalog that serve the role's operations,
+	// lowest name first. It is empty for a model no role names, and for a role
+	// no model in the catalog can serve.
+	Known []string
 }
 
 func (e *UnresolvedError) Error() string {
-	if e.Role != "" {
-		return fmt.Sprintf("catalog: the model %q assigned to the %q role is not in the catalog",
-			e.Name, e.Role)
+	if e.Role == "" {
+		return fmt.Sprintf("catalog: the model %q is not in the catalog", e.Name)
 	}
-	return fmt.Sprintf("catalog: the model %q is not in the catalog", e.Name)
+	known := ""
+	switch len(e.Known) {
+	case 0:
+		known = fmt.Sprintf(", and no model in the catalog serves the %q role", e.Role)
+	default:
+		known = fmt.Sprintf(", and the models that serve the %q role are %s", e.Role, quoteList(e.Known))
+	}
+	return fmt.Sprintf("catalog: the model %q assigned to the %q role is not in the catalog%s",
+		e.Name, e.Role, known)
+}
+
+// quoteList renders names for an error, quoted and separated.
+func quoteList(names []string) string {
+	out := ""
+	for i, name := range names {
+		if i > 0 {
+			out += ", "
+		}
+		out += fmt.Sprintf("%q", name)
+	}
+	return out
 }
 
 // opsForRole returns the operations a role needs.

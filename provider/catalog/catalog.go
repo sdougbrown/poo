@@ -419,9 +419,39 @@ func (c *Catalog) Role(role Role) (poo.ModelInfo, error) {
 		return poo.ModelInfo{}, &UnresolvedError{Name: string(role), Role: role}
 	}
 	if _, ok := c.entries[name]; !ok {
-		return poo.ModelInfo{}, &UnresolvedError{Name: name, Role: role}
+		return poo.ModelInfo{}, c.unresolved(name, role)
 	}
 	return c.effective(name), nil
+}
+
+// unresolved is the error for a model the catalog does not hold, with the models
+// that would have served the role.
+func (c *Catalog) unresolved(name string, role Role) *UnresolvedError {
+	return &UnresolvedError{Name: name, Role: role, Known: c.servable(role)}
+}
+
+// servable returns the models that serve a role's operations, lowest name
+// first.
+//
+// It is the list a reader copies a name from, so it is the names the catalog
+// holds and not the ids the endpoints call them.
+func (c *Catalog) servable(role Role) []string {
+	var out []string
+	for name := range c.entries {
+		info := c.effective(name)
+		serves := true
+		for _, op := range opsForRole(role) {
+			if !info.HasOp(op) {
+				serves = false
+				break
+			}
+		}
+		if serves {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // CheckRoles checks the role assignments.
@@ -446,7 +476,7 @@ func (c *Catalog) CheckRoles() error {
 		_, found := c.entries[model]
 		if !found {
 			if role == RoleChat {
-				return &UnresolvedError{Name: model, Role: role}
+				return c.unresolved(model, role)
 			}
 			c.warn("the model assigned to a role is not in the catalog",
 				slog.String("role", name),

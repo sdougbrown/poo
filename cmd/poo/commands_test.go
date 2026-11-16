@@ -384,3 +384,80 @@ roles:
 		t.Errorf("the explanation is %q, want it to show the file's context limit", out)
 	}
 }
+
+// TestTheRolesCommandResolvesEachRole covers the check: a role is printed with
+// the model, the provider and where the key comes from, and no key value
+// appears.
+func TestTheRolesCommandResolvesEachRole(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("HOME", configDir)
+	t.Setenv("APPDATA", configDir)
+	t.Setenv("POO_ROLES_KEY", "the-key-nobody-should-see")
+
+	dir := t.TempDir()
+	settings := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settings, []byte(`version: 1
+endpoints:
+  home:
+    endpoint: http://127.0.0.1:1/v1
+    api_key_env: POO_ROLES_KEY
+models:
+  home/qwen3:
+    endpoint: home
+    model_id: qwen3
+    ops: [chat]
+roles:
+  chat: home/qwen3
+`), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"roles", "--settings", settings}); code != 0 {
+			t.Errorf("poo roles exited with %d", code)
+		}
+	})
+	for _, want := range []string{"ROLE", "chat", "home/qwen3", "home", "env:POO_ROLES_KEY"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report is %q, want it to name %q", out, want)
+		}
+	}
+	if strings.Contains(out, "the-key-nobody-should-see") {
+		t.Errorf("the report carries the key: %q", out)
+	}
+}
+
+// TestTheRolesCommandFailsOnARoleThatDoesNotResolve covers the exit code a check
+// is read by: a role whose model is not in the catalog fails, and the message
+// names the names that would have served it.
+func TestTheRolesCommandFailsOnARoleThatDoesNotResolve(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("HOME", configDir)
+	t.Setenv("APPDATA", configDir)
+
+	dir := t.TempDir()
+	settings := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settings, []byte(`version: 1
+endpoints:
+  home:
+    endpoint: http://127.0.0.1:1/v1
+models:
+  home/qwen3:
+    endpoint: home
+    model_id: qwen3
+roles:
+  chat: qwen3
+`), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	code, stderr := runCLI(t, "roles", "--settings", settings)
+	if code == 0 {
+		t.Errorf("poo roles exited 0 for a model that is not in the catalog")
+	}
+	if !strings.Contains(stderr, "home/qwen3") {
+		t.Errorf("the failure is %q, want it to name the model that would have served the role", stderr)
+	}
+}
