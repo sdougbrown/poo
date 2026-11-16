@@ -28,7 +28,9 @@ type RecordMeta struct {
 	// closed set.
 	//
 	// It is empty on the records that no one produced: the session's own
-	// header, a run's boundaries, the usage accounting.
+	// header and a run's boundaries. A usage record leaves it empty for
+	// the run's own turn and names the compaction that spent the tokens
+	// when a compaction made the request.
 	Origin Origin `json:"origin,omitempty"`
 }
 
@@ -398,7 +400,9 @@ type UsageRecord struct {
 	RunID string `json:"run_id"`
 	// Turn is the turn the request belongs to.
 	Turn int `json:"turn"`
-	// Request is the 1-based number of the request within the run.
+	// Request is the 1-based number of the request within the run. It is
+	// 0 for a request a compaction made, which is not one of the run's
+	// turns: the record's origin says what the request was for.
 	Request int `json:"request"`
 	// InputTokens is the number of prompt tokens the endpoint reported.
 	InputTokens int `json:"input_tokens"`
@@ -423,7 +427,9 @@ type ProviderAttemptRecord struct {
 	RunID string `json:"run_id"`
 	// Turn is the turn the request belongs to.
 	Turn int `json:"turn"`
-	// Request is the 1-based number of the request within the run.
+	// Request is the 1-based number of the request within the run. It is
+	// 0 for a request a compaction made, which is not one of the run's
+	// turns: the record's origin says what the request was for.
 	Request int `json:"request"`
 	// Attempt is the attempt's number, counting from one.
 	Attempt int `json:"attempt"`

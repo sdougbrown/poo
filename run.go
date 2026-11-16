@@ -1536,6 +1536,26 @@ func (s *Session) toolSpecs() []ToolSpec {
 // candidate, and the session is broken. The call reports whether the
 // record was written.
 func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
+	return s.appendUsage(run, NewRecordMeta("usage"), turn, run.requests, usage, requestChars)
+}
+
+// writeCompactionUsage writes the usage of a request a compaction made.
+//
+// The request is not one of the run's turns, so it carries no request
+// number, and the record's origin says what it was for: the token totals
+// a reader sums stay honest, and the spend that bought the compaction is
+// still its own.
+func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
+	return s.appendUsage(run, NewRecordMetaFrom("usage", OriginCompaction), turn, 0, usage, requestChars)
+}
+
+// appendUsage charges the run for a request and writes its record.
+//
+// The charge is what the endpoint reported, and it lands on the run's
+// token count, on the settle detail's accounting and on the session's
+// characters-per-token ratio, so a request a compaction made costs the
+// run exactly what a turn's request costs.
+func (s *Session) appendUsage(run *runState, meta RecordMeta, turn, request int, usage *UsageReport, requestChars int) bool {
 	s.mu.Lock()
 	run.tokens += usage.InputTokens + usage.OutputTokens
 	if run.usage == nil {
@@ -1549,10 +1569,10 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 	s.mu.Unlock()
 	s.observeUsage(usage, requestChars)
 	if err := s.write(run.ctx, &UsageRecord{
-		RecordMeta:      NewRecordMeta("usage"),
+		RecordMeta:      meta,
 		RunID:           run.id,
 		Turn:            turn,
-		Request:         run.requests,
+		Request:         request,
 		InputTokens:     usage.InputTokens,
 		OutputTokens:    usage.OutputTokens,
 		CacheReadTokens: usage.CacheReadTokens,
@@ -1561,14 +1581,20 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 		s.noteStoreError(run, err)
 		return false
 	}
-	s.events.emit(EventUsage, map[string]any{
+	payload := map[string]any{
 		"run_id":            run.id,
 		"turn":              turn,
-		"request":           run.requests,
+		"request":           request,
 		"input_tokens":      usage.InputTokens,
 		"output_tokens":     usage.OutputTokens,
 		"cache_read_tokens": usage.CacheReadTokens,
-	})
+	}
+	// A turn's request says nothing about its origin, so the event keeps
+	// the shape it had; a request a compaction made says what it was for.
+	if meta.Origin != "" {
+		payload["origin"] = meta.Origin
+	}
+	s.events.emit(EventUsage, payload)
 	return true
 }
 

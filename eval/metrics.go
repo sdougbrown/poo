@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sdougbrown/poo"
+
 	readtool "github.com/sdougbrown/poo/tool/read"
 )
 
@@ -23,9 +25,15 @@ type Metrics struct {
 	// WallMS is the run's wall time in milliseconds.
 	WallMS float64 `json:"wall_ms"`
 	// InputTokens and OutputTokens are the endpoint's own counts, summed
-	// over the run's requests.
+	// over the run's requests, the requests a compaction made included.
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+	// CompactionInputTokens and CompactionOutputTokens are the share of
+	// those counts that bought compaction: a fork's note or a summary.
+	// They are part of the totals above, and a strategy comparison reads
+	// them to say what compacting cost.
+	CompactionInputTokens  int `json:"compaction_input_tokens"`
+	CompactionOutputTokens int `json:"compaction_output_tokens"`
 	// CacheReadTokens is the number of prompt tokens the endpoint served
 	// from its cache. It is nil when the endpoint reported no cache
 	// counts at all.
@@ -118,6 +126,14 @@ func ComputeMetrics(log *Log, diff Diff) Metrics {
 		if u.CacheReadTokens != nil {
 			cacheReported = true
 			cacheRead += *u.CacheReadTokens
+		}
+		if u.Origin == string(poo.OriginCompaction) {
+			m.CompactionInputTokens += u.InputTokens
+			m.CompactionOutputTokens += u.OutputTokens
+			// A compaction is not a turn: its time to the first token
+			// says nothing about how the endpoint behaves turn by turn,
+			// so it stays out of the mean and the trend.
+			continue
 		}
 		ttfts = append(ttfts, u.TTFTMS)
 		ttftTurns = append(ttftTurns, float64(u.Turn))

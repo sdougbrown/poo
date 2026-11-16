@@ -461,14 +461,20 @@ func (s *Session) readSideReply(ctx context.Context, run *runState, reader Strea
 	// A request that finishes after the run settled does not add to the
 	// settled run's token counter.
 	s.mu.Lock()
-	if !run.committed && !run.sealed {
+	settled := run.committed || run.sealed
+	turn := run.turn
+	s.mu.Unlock()
+	if !settled {
 		if resp.usage != nil {
-			run.tokens += resp.usage.InputTokens + resp.usage.OutputTokens
+			// The endpoint's own count, recorded as what it is: a
+			// request a compaction made.
+			s.writeCompactionUsage(run, turn, resp.usage, requestChars)
 		} else {
+			s.mu.Lock()
 			run.tokens += s.tokensForCharsLocked(requestChars + estimateMessageChars(reply.Message))
+			s.mu.Unlock()
 		}
 	}
-	s.mu.Unlock()
 	if resp.usage != nil {
 		reply.Usage = *resp.usage
 	}
