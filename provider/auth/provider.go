@@ -1,5 +1,7 @@
 package auth
 
+import "fmt"
+
 // Kind is how a credential authenticates.
 type Kind string
 
@@ -44,6 +46,47 @@ var Codex = Provider{
 	TokenURL: DefaultTokenURL,
 	ClientID: DefaultClientID,
 	Account:  chatGPTAccount,
+}
+
+// validate reports what a credential is missing, or what it carries that its kind or its
+// provider does not take.
+//
+// It is the one answer to "is this a usable credential for this provider", asked by the write
+// that stores one and the read that returns one: two copies of the rule would agree until the
+// day a kind or a required field was added to one of them.
+//
+// The reasons are plain, and the caller that reports one adds the sentinel and its own
+// context: a path, for a file's entry.
+func validate(c Credential, p Provider) error {
+	kind := c.Kind
+	if kind == "" {
+		kind = KindOAuth
+	}
+	if p.Kind != "" && kind != p.Kind {
+		return fmt.Errorf("the %s provider reads a %s credential, and this is a %s one", p.ID, p.Kind, kind)
+	}
+	switch kind {
+	case KindAPIKey:
+		if c.Key == "" {
+			return fmt.Errorf("an api key credential needs a key")
+		}
+		if c.Access != "" || c.Refresh != "" || !c.Expires.IsZero() || c.AccountID != "" {
+			return fmt.Errorf("an api key credential carries tokens")
+		}
+	case KindOAuth:
+		if c.Access == "" || c.Refresh == "" {
+			return fmt.Errorf("an oauth credential needs an access token and a refresh token")
+		}
+		if c.Key != "" {
+			return fmt.Errorf("an oauth credential carries a key")
+		}
+		if p.needsAccount() && p.account(c.Access, c.AccountID) == "" {
+			return fmt.Errorf("the credential names no account")
+		}
+	default:
+		return fmt.Errorf("%q is not a credential kind this reads", kind)
+	}
+	return nil
 }
 
 // account names the account a credential belongs to, by the provider's own rule.

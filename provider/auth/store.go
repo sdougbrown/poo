@@ -95,11 +95,11 @@ const (
 
 // The failures a caller tells apart.
 var (
-	// ErrNoCredential means the auth.json holds no Codex credential that
-	// can be used. A file with no such entry, an entry that is an api key,
-	// and an entry that names no account are all this failure. The answer
-	// is pi's login, not a retry.
-	ErrNoCredential = errors.New("auth: no Codex credential")
+	// ErrNoCredential means the auth file holds no credential the provider can use. A file
+	// with no such entry, an entry of the wrong kind, and an entry its provider cannot carry
+	// — a Codex token that names no account — are all this failure. The answer is a sign-in,
+	// not a retry.
+	ErrNoCredential = errors.New("auth: no usable credential")
 
 	// ErrLocked means another writer holds the auth.json's lock, so the
 	// refresh did not start and nothing was traded. The file is exactly what
@@ -169,36 +169,10 @@ type Credential struct {
 	Key string
 }
 
-// check reports what a credential is missing, or what it carries that its kind does not use.
+// check reports what a credential is missing, as the write that stores one reports it.
 func (c Credential) check(p Provider) error {
-	kind := c.Kind
-	if kind == "" {
-		kind = KindOAuth
-	}
-	if p.Kind != "" && kind != p.Kind {
-		return fmt.Errorf("%w: the %s provider reads a %s credential, and this is a %s one",
-			ErrNoCredential, p.ID, p.Kind, kind)
-	}
-	switch kind {
-	case KindAPIKey:
-		if c.Key == "" {
-			return fmt.Errorf("%w: an api key credential needs a key", ErrNoCredential)
-		}
-		if c.Access != "" || c.Refresh != "" || !c.Expires.IsZero() || c.AccountID != "" {
-			return fmt.Errorf("%w: an api key credential carries tokens", ErrNoCredential)
-		}
-	case KindOAuth:
-		if c.Access == "" || c.Refresh == "" {
-			return fmt.Errorf("%w: an oauth credential needs an access token and a refresh token", ErrNoCredential)
-		}
-		if c.Key != "" {
-			return fmt.Errorf("%w: an oauth credential carries a key", ErrNoCredential)
-		}
-		if p.needsAccount() && p.account(c.Access, c.AccountID) == "" {
-			return fmt.Errorf("%w: the credential names no account", ErrNoCredential)
-		}
-	default:
-		return fmt.Errorf("%w: %q is not a credential kind this reads", ErrNoCredential, kind)
+	if err := validate(c, p); err != nil {
+		return fmt.Errorf("%w: %v", ErrNoCredential, err)
 	}
 	return nil
 }

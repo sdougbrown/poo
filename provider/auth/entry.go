@@ -52,26 +52,10 @@ func decodeEntry(path string, p Provider, entries map[string]json.RawMessage) (c
 		return credential{}, fmt.Errorf("%w: %s: %w", ErrStorage, path, err)
 	}
 	entry := credential(stored)
-	if p.Kind != "" && entry.Kind() != p.Kind {
-		return credential{}, fmt.Errorf("%w: %s holds a %s entry, and the %s provider reads %s",
-			ErrNoCredential, path, entry.Kind(), p.ID, p.Kind)
-	}
-	switch entry.Kind() {
-	case KindAPIKey:
-		if entry.Key == "" {
-			return credential{}, fmt.Errorf("%w: %s holds a %s entry that names no key", ErrNoCredential, path, p.ID)
-		}
-	case KindOAuth:
-		if entry.Access == "" || entry.Refresh == "" {
-			return credential{}, fmt.Errorf("%w: %s holds a %s entry that is not an oauth credential", ErrNoCredential, path, p.ID)
-		}
-		// The provider's own rule: a credential that names no account is one its requests
-		// cannot carry, and it is refused before a refresh can write another.
-		if p.needsAccount() && p.account(entry.Access, entry.AccountID) == "" {
-			return credential{}, fmt.Errorf("%w: %s names no account", ErrNoCredential, path)
-		}
-	default:
-		return credential{}, fmt.Errorf("%w: %s holds a %s entry that poo does not know", ErrNoCredential, path, p.ID)
+	// The write path asks the same question of the same rule: a credential Set stores is one
+	// Read returns, and one validator is what keeps that true.
+	if err := validate(entry.export(), p); err != nil {
+		return credential{}, fmt.Errorf("%w: %s holds an entry for %s: %v", ErrNoCredential, path, p.ID, err)
 	}
 	return entry, nil
 }

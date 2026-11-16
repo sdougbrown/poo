@@ -563,3 +563,60 @@ func TestAProviderThatNamesNoAccountTakesAnyToken(t *testing.T) {
 		t.Errorf("Codex took a token that names no account: %v", err)
 	}
 }
+
+// TestDeleteRefusesPisFile covers the guard the two writes share: neither Set nor Delete may
+// rewrite a file another tool owns. Delete is the one with no test, and a refactor that moved
+// the check would have silently rewritten pi's auth.json.
+func TestDeleteRefusesPisFile(t *testing.T) {
+	body := fmt.Sprintf(stored, expires(time.Hour))
+	path := authFile(t, body)
+	err := (auth.Credentials{Path: path}).Delete(context.Background(), auth.ProviderCodex)
+	if !errors.Is(err, auth.ErrForeignFile) {
+		t.Fatalf("the delete is %v, want ErrForeignFile", err)
+	}
+	if got := readFile(t, path); got != body {
+		t.Errorf("pi's file was written:\n%s", got)
+	}
+}
+
+// TestAProviderNamesItsTokenEndpoint covers the provider's own endpoint, with no caller
+// override: a caller that names none trades where its provider says, and only a provider that
+// names none falls back to this package's default.
+func TestAProviderNamesItsTokenEndpoint(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(pooStored, expires(-time.Hour)))
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
+	}, nil)
+	declared := auth.Provider{ID: auth.ProviderCodex, Kind: auth.KindOAuth, TokenURL: endpoint.URL}
+	credentials := auth.Credentials{Path: path, Now: clock}
+	// The caller names no endpoint of its own.
+	if _, err := credentials.Access(context.Background(), declared); err != nil {
+		t.Fatalf("the credential did not reach a token: %v", err)
+	}
+	if endpoint.count() != 1 {
+		t.Errorf("the provider's endpoint was asked %d times, want one", endpoint.count())
+	}
+}
+
+// TestAStoredCredentialReadsBack covers the round trip the two validators share: what Set
+// accepts, Read returns — for either kind.
+func TestAStoredCredentialReadsBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	credentials := auth.Credentials{Path: path, Now: clock}
+	oauth := auth.Credential{Access: codexToken(t, newAccount), Refresh: newRefresh, Expires: clock().Add(time.Hour), AccountID: newAccount}
+	key := auth.Credential{Kind: auth.KindAPIKey, Key: "an-api-key"}
+	for _, c := range []struct {
+		provider auth.Provider
+		entry    auth.Credential
+	}{
+		{auth.Codex, oauth},
+		{apiKeyProvider, key},
+	} {
+		if _, err := credentials.Set(context.Background(), c.provider, c.entry, true); err != nil {
+			t.Fatalf("storing %s: %v", c.provider.ID, err)
+		}
+		if _, err := credentials.Read(c.provider); err != nil {
+			t.Errorf("reading back %s: %v", c.provider.ID, err)
+		}
+	}
+}
