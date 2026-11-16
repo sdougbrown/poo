@@ -75,6 +75,10 @@ func handleAuthImportPi(ctx context.Context, inv clicontract.Invocation, stdout,
 	if failed {
 		return exit{operationalExitCode}
 	}
+	// The copy records the client pi's grant belongs to, so the credential says where it came
+	// from instead of relying on a default: from here poo refreshes pi's grant as pi does.
+	entry.ClientID = auth.DefaultClientID
+	entry.TokenURL = auth.DefaultTokenURL
 	status, err := poo.Set(ctx, auth.Codex, entry, replace)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth import: %v\n", err)

@@ -37,13 +37,13 @@ type tokenResponse struct {
 // else from the answer. An answer is untrusted, and a caller's log is no
 // place for its words.
 func (c Credentials) trade(ctx context.Context, p Provider, stored credential) (credential, error) {
-	endpoint := c.tokenURL(p)
+	endpoint := c.tokenURL(p, stored)
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {stored.Refresh},
-		"client_id":     {c.clientID(p)},
+		"client_id":     {c.clientID(p, stored)},
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -80,6 +80,10 @@ func (c Credentials) trade(ctx context.Context, p Provider, stored credential) (
 		Refresh:   refresh,
 		Expires:   c.now().Add(time.Duration(answer.ExpiresIn * float64(time.Second))).UnixMilli(),
 		AccountID: p.account(answer.AccessToken, stored.AccountID),
+		// The grant is the same grant: the client and the endpoint it was made with stay the
+		// credential's own, whatever the provider declares by default.
+		ClientID: stored.ClientID,
+		TokenURL: stored.TokenURL,
 	}
 	return refreshed, nil
 }
@@ -138,26 +142,33 @@ func (c Credentials) client() *http.Client {
 	}
 }
 
-// tokenURL is the endpoint a refresh token is traded at.
+// tokenURL is the endpoint a credential's refresh token is traded at.
 //
-// The caller's own override wins, then the provider's, then this package's default: the
-// caller set one because it knows something the provider declaration does not — a test's
-// fake endpoint, or an endpoint moved for this run.
-func (c Credentials) tokenURL(p Provider) string {
+// The ladder, in order: the caller's own override, the credential's record of where it was
+// granted, the provider's declaration, and this package's default. The record sits above the
+// declaration because the grant is what decides: a credential pi was signed in for is refreshed
+// where pi's client trades, whatever poo's provider declaration says. The caller's override sits
+// on top because it knows something none of the rest does — a test's fake endpoint, or an
+// endpoint moved for this run.
+func (c Credentials) tokenURL(p Provider, stored credential) string {
 	switch {
 	case c.TokenURL != "":
 		return c.TokenURL
+	case stored.TokenURL != "":
+		return stored.TokenURL
 	case p.TokenURL != "":
 		return p.TokenURL
 	}
 	return DefaultTokenURL
 }
 
-// clientID is the OAuth client the credential belongs to, by the same precedence.
-func (c Credentials) clientID(p Provider) string {
+// clientID is the OAuth client the credential belongs to, by the same ladder.
+func (c Credentials) clientID(p Provider, stored credential) string {
 	switch {
 	case c.ClientID != "":
 		return c.ClientID
+	case stored.ClientID != "":
+		return stored.ClientID
 	case p.ClientID != "":
 		return p.ClientID
 	}

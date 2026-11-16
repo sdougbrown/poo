@@ -27,6 +27,12 @@ type fileEntry struct {
 	AccountID string `json:"accountId,omitempty"`
 	// Key is the key itself, for an api_key entry.
 	Key string `json:"key,omitempty"`
+	// ClientID is the OAuth client the credential was granted to. A refresh names it, because
+	// the endpoint matches a refresh token to the client that was granted it.
+	ClientID string `json:"clientId,omitempty"`
+	// TokenURL is where that client trades its tokens. The client that granted a credential
+	// decides where the credential is refreshed.
+	TokenURL string `json:"tokenUrl,omitempty"`
 }
 
 // stripBOM drops a leading UTF-8 byte order mark, the character pi strips
@@ -62,7 +68,7 @@ func decodeEntry(path string, p Provider, entries map[string]json.RawMessage) (c
 
 // modelledFields are the entry's fields this package writes and reads. A field outside them
 // is one pi's credential type may hold and poo does not model: it is kept as it was.
-var modelledFields = []string{"access", "refresh", "expires", "accountId", "key"}
+var modelledFields = []string{"access", "refresh", "expires", "accountId", "key", "clientId", "tokenUrl"}
 
 // encodeEntry stores a credential in the entry a provider's credentials map
 // holds it under, and leaves every other entry as it was.
@@ -212,6 +218,8 @@ func (c credential) export() Credential {
 		out.Refresh = c.Refresh
 		out.Expires = time.UnixMilli(c.Expires)
 		out.AccountID = c.AccountID
+		out.ClientID = c.ClientID
+		out.TokenURL = c.TokenURL
 	}
 	return out
 }
@@ -227,5 +235,7 @@ func (c Credential) internal(p Provider) credential {
 		Refresh:   c.Refresh,
 		Expires:   c.Expires.UnixMilli(),
 		AccountID: p.account(c.Access, c.AccountID),
+		ClientID:  c.ClientID,
+		TokenURL:  c.TokenURL,
 	}
 }

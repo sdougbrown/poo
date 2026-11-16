@@ -678,3 +678,60 @@ func TestAnEntryThatNamesNoTypeIsAnOAuthOne(t *testing.T) {
 		t.Errorf("the token names the account %q, want %q", token.AccountID, oldAccount)
 	}
 }
+
+// TestACredentialKeepsTheClientItWasGrantedTo covers the record that makes a refresh right. A
+// refresh token belongs to the client that was granted it, so the credential says which client
+// that is, and a refresh names it rather than the provider's default.
+func TestACredentialKeepsTheClientItWasGrantedTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	// A provider that declares one client, and a credential granted to another — which is what
+	// an imported credential is: pi's grant, in a store whose provider says something else.
+	declared := auth.Provider{ID: "declared", Kind: auth.KindOAuth, ClientID: "poo-default", TokenURL: "http://declared.invalid/token"}
+	entry := auth.Credential{
+		Access:    codexToken(t, newAccount),
+		Refresh:   oldRefresh,
+		Expires:   clock().Add(-time.Hour),
+		AccountID: newAccount,
+		ClientID:  "the-grant-that-was-made",
+		TokenURL:  "http://granted.invalid/token",
+	}
+	credentials := auth.Credentials{Path: path, Now: clock}
+	status, err := credentials.Set(context.Background(), declared, entry, false)
+	if err != nil {
+		t.Fatalf("storing the credential: %v", err)
+	}
+	if status.ClientID != "the-grant-that-was-made" {
+		t.Errorf("the status names the client %q, want the one the credential records", status.ClientID)
+	}
+	if got, err := credentials.Read(declared); err != nil || got.ClientID != "the-grant-that-was-made" {
+		t.Errorf("the credential reads back as %+v, %v", got, err)
+	}
+
+	// The refresh names the credential's client and endpoint, not the provider's.
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
+	}, nil)
+	// The recorded endpoint is what the refresh goes to; point the credential's at the fake and
+	// the provider's at a host that would fail, so the assertion is about which one was used.
+	if _, err := (auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}).Access(context.Background(), declared); err != nil {
+		t.Fatalf("the credential did not reach a token: %v", err)
+	}
+	if got := endpoint.form(t, 0)["client_id"]; got != "the-grant-that-was-made" {
+		t.Errorf("the refresh named the client %q, want the credential's", got)
+	}
+	// And the record survives the refresh.
+	if got, _ := credentials.Read(declared); got.ClientID != "the-grant-that-was-made" || got.TokenURL != "http://granted.invalid/token" {
+		t.Errorf("the refresh rewrote the record: %+v", got)
+	}
+}
+
+// TestAnAPIKeyCarriesNoClient covers the kind that has none: a key is not granted to a client,
+// so a credential naming one is refused.
+func TestAnAPIKeyCarriesNoClient(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	_, err := (auth.Credentials{Path: path, Now: clock}).Set(context.Background(), apiKeyProvider,
+		auth.Credential{Kind: auth.KindAPIKey, Key: "k", ClientID: "a-client"}, false)
+	if !errors.Is(err, auth.ErrNoCredential) {
+		t.Fatalf("the api key with a client is %v, want ErrNoCredential", err)
+	}
+}

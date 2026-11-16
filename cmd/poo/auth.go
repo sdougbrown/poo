@@ -34,6 +34,8 @@ type authStatus struct {
 	Format string `json:"format"`
 	// Provider is the provider id the credential is stored under.
 	Provider string `json:"provider"`
+	// ClientID is the OAuth client the credential was granted to, when the file records one.
+	ClientID string `json:"client_id,omitempty"`
 	// AccountID is the ChatGPT account the token names.
 	AccountID string `json:"account_id"`
 	// Expires is when the access token stops working.
@@ -70,6 +72,7 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		File:      status.Path,
 		Format:    status.Format,
 		Provider:  status.Provider,
+		ClientID:  status.ClientID,
 		AccountID: status.AccountID,
 		Expires:   status.Expires.UTC().Format(time.RFC3339),
 		State:     credentialState(status),
@@ -93,6 +96,7 @@ func printAuthStatus(report authStatus, status auth.Status, stdout io.Writer) {
 	fmt.Fprintf(w, "FILE\t%s\n", report.File)
 	fmt.Fprintf(w, "FORMAT\t%s\n", report.Format)
 	fmt.Fprintf(w, "PROVIDER\t%s\n", report.Provider)
+	fmt.Fprintf(w, "CLIENT\t%s\n", report.ClientID)
 	fmt.Fprintf(w, "ACCOUNT\t%s\n", report.AccountID)
 	fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", report.Expires, life(status.Expires))
 	fmt.Fprintf(w, "STATE\t%s\n", report.State)

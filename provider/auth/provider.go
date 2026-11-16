@@ -73,6 +73,9 @@ func validate(c Credential, p Provider) error {
 		if c.Access != "" || c.Refresh != "" || !c.Expires.IsZero() || c.AccountID != "" {
 			return fmt.Errorf("an api key credential carries tokens")
 		}
+		if c.ClientID != "" || c.TokenURL != "" {
+			return fmt.Errorf("an api key credential carries a client, and a key is not granted to one")
+		}
 	case KindOAuth:
 		if c.Access == "" || c.Refresh == "" {
 			return fmt.Errorf("an oauth credential needs an access token and a refresh token")

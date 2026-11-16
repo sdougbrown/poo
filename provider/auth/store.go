@@ -56,9 +56,12 @@ const (
 	// DefaultTokenURL is the endpoint pi trades a Codex refresh token at.
 	DefaultTokenURL = "https://auth.openai.com/oauth/token"
 
-	// DefaultClientID is the OAuth client a Codex credential belongs to.
-	// The token endpoint matches a refresh token to the client that was
-	// granted it.
+	// DefaultClientID is the client pi's Codex grants belong to: the Codex CLI's public
+	// client, which pi reuses.
+	//
+	// It is not poo's. A credential poo signs in records the client it was granted to, and
+	// that record is what a refresh names; this is the fallback for a credential that records
+	// none, which today means one pi granted.
 	DefaultClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 	// DefaultLeeway is how much life an access token must have left to
@@ -167,6 +170,12 @@ type Credential struct {
 	AccountID string
 	// Key is the key itself, for an api key.
 	Key string
+	// ClientID is the OAuth client the credential was granted to, when the caller knows it.
+	// Empty falls back to the provider's client: a credential imported from pi belongs to pi's,
+	// which is why the fallback exists.
+	ClientID string
+	// TokenURL is where that client trades its tokens, when it is not the provider's.
+	TokenURL string
 }
 
 // check reports what a credential is missing, as the write that stores one reports it.
@@ -313,6 +322,7 @@ func (c Credentials) status(doc document, p Provider, stored credential) Status 
 		Format:    doc.format.name(),
 		Provider:  p.ID,
 		Kind:      stored.Kind(),
+		ClientID:  stored.ClientID,
 		AccountID: p.account(stored.Access, stored.AccountID),
 	}
 	// A credential with no tokens has no expiry: an api key does not stop working on its
@@ -337,6 +347,8 @@ type Status struct {
 	Provider string
 	// Kind is how the credential authenticates: an oauth token pair, or an api key.
 	Kind Kind
+	// ClientID is the OAuth client the credential was granted to, when the file records one.
+	ClientID string
 	// AccountID is the account the access token names, for a provider that names accounts.
 	AccountID string
 	// Expires is when the access token stops working.
@@ -390,6 +402,10 @@ type credential struct {
 	AccountID string
 	// Key is the key itself, for an api_key entry.
 	Key string
+	// ClientID is the OAuth client the credential was granted to.
+	ClientID string
+	// TokenURL is where that client trades its tokens.
+	TokenURL string
 }
 
 // Credentials are the credentials in one auth file, by provider id, and the protocol that
