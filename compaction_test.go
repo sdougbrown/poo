@@ -167,7 +167,7 @@ func TestInterruptDiscardsASuccessfulCompaction(t *testing.T) {
 	opts := testOptions(t, tr, &echoTool{result: "output"}, sink)
 	opts.Compactor = &scriptedCompactor{
 		should: func(v poo.View, b poo.ContextBudget) bool { return b.Turns == 1 && !used.Load() },
-		compact: func(ctx context.Context, _ poo.View, _ poo.ForkFunc) (poo.Compaction, error) {
+		compact: func(ctx context.Context, _ poo.CompactionEnv) (poo.Compaction, error) {
 			used.Store(true)
 			close(entered)
 			<-ctx.Done()
@@ -202,7 +202,7 @@ func TestInterruptDuringACompactionRechecksTheGate(t *testing.T) {
 	opts.Model.ContextLimit = 10000
 	opts.Compactor = &scriptedCompactor{
 		should: func(v poo.View, b poo.ContextBudget) bool { return b.Turns == 1 && !used.Load() },
-		compact: func(ctx context.Context, _ poo.View, _ poo.ForkFunc) (poo.Compaction, error) {
+		compact: func(ctx context.Context, _ poo.CompactionEnv) (poo.Compaction, error) {
 			used.Store(true)
 			close(entered)
 			<-ctx.Done()
@@ -574,16 +574,16 @@ func (c *compactionCompactor) ShouldCompact(view poo.View, budget poo.ContextBud
 }
 
 // Compact answers the scripted compaction.
-func (c *compactionCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+func (c *compactionCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	c.mu.Lock()
 	c.calls++
-	c.views = append(c.views, view)
+	c.views = append(c.views, in.View)
 	answer := c.compaction
 	c.mu.Unlock()
 	if answer == nil {
 		return poo.Compaction{}, nil
 	}
-	return answer(view)
+	return answer(in.View)
 }
 
 // Calls returns how many times the compactor compacted.
@@ -1657,4 +1657,243 @@ func TestTheSessionKeepsItsJobsAfterAnEnd(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// TestAReplacementThatStartsLaterKeepsTheEarlierOne covers the rule that
+// only a cut reaching back to the earliest turn in the view supersedes
+// what an earlier compaction wrote: a strategy that replaces a later
+// range leaves the earlier replacement in place, because the model still
+// needs it.
+func TestAReplacementThatStartsLaterKeepsTheEarlierOne(t *testing.T) {
+	replacement := func(cut poo.TurnRange, text string) poo.Compaction {
+		return poo.Compaction{
+			Strategy: "stepwise",
+			Replace: &poo.RangeReplacement{
+				Cut:      cut,
+				Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, text)},
+			},
+		}
+	}
+	compactor := &compactionCompactor{
+		should: func(view poo.View, budget poo.ContextBudget) bool {
+			turns := len(view.Turns())
+			return turns == 1 || turns == 3
+		},
+	}
+	compactor.compaction = func(view poo.View) (poo.Compaction, error) {
+		if compactor.Calls() == 1 {
+			return replacement(poo.TurnRange{First: 1, Last: 1}, "the first summary"), nil
+		}
+		return replacement(poo.TurnRange{First: 3, Last: 3}, "the second summary"), nil
+	}
+	tr := scripted([]fakeResponse{
+		{text: "one", calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "two", calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{text: "three", calls: []poo.ToolCall{{CallID: "c3", Name: "echo", Arguments: []byte(`{"text":"three"}`)}}},
+		{text: "the answer"},
+	})
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	if got := compactor.Calls(); got != 2 {
+		t.Fatalf("the compactor ran %d times, want 2", got)
+	}
+	reqs := tr.Requests()
+	held := 0
+	for _, m := range reqs[len(reqs)-1].Messages {
+		if m.Origin != poo.OriginCompaction {
+			continue
+		}
+		held++
+	}
+	if held != 2 {
+		t.Fatalf("the last request holds %d compaction messages, want 2", held)
+	}
+
+	// The turns the two cuts covered left the view, and the view says so.
+	// The turns that stayed still name their own messages: a replacement
+	// moves them, and a strategy sizes the next cut by those ranges.
+	removed := 0
+	for _, turn := range poo.SessionView(s).Turns() {
+		if turn.Removed {
+			removed++
+		}
+	}
+	if removed != 2 {
+		t.Errorf("the view reports %d removed turns, want 2", removed)
+	}
+	requireTurnRanges(t, s, map[int]string{2: "two", 4: "the answer"})
+}
+
+// requireTurnRanges checks that every turn still in the view names its own
+// messages: its range holds the turn's text and not another turn's.
+//
+// Comparing the range against the session's own span only catches a
+// mismatch between the view's indexes and the history's; the expected
+// text catches a span that moved.
+func requireTurnRanges(t *testing.T, s *poo.Session, want map[int]string) {
+	t.Helper()
+	view := poo.SessionView(s)
+	history := view.Messages()
+	for _, turn := range view.Turns() {
+		if turn.Removed {
+			continue
+		}
+		got := turnSpanText(history[turn.Start:turn.End])
+		span, ok := poo.TurnSpanMessages(s, turn.TurnIndex)
+		if !ok {
+			t.Fatalf("the session has no span for the turn %d", turn.TurnIndex)
+		}
+		if also := turnSpanText(span); got != also {
+			t.Errorf("the turn %d's range holds %q, want %q", turn.TurnIndex, got, also)
+		}
+		text, ok := want[turn.TurnIndex]
+		if !ok {
+			continue
+		}
+		if !strings.Contains(got, text) {
+			t.Errorf("the turn %d's range holds %q, want its own text %q", turn.TurnIndex, got, text)
+		}
+		for other, otherText := range want {
+			if other == turn.TurnIndex || !strings.Contains(got, otherText) {
+				continue
+			}
+			t.Errorf("the turn %d's range holds %q, which is the turn %d's text", turn.TurnIndex, otherText, other)
+		}
+	}
+}
+
+// turnSpanText returns every text a turn's messages show the model.
+func turnSpanText(messages []poo.Message) string {
+	var b strings.Builder
+	for _, m := range messages {
+		for _, c := range m.Content {
+			if c.Kind == poo.ContentText || c.Kind == poo.ContentToolResult {
+				b.WriteString(c.Text)
+				b.WriteString("\n")
+			}
+		}
+	}
+	return b.String()
+}
+
+// TestAReplacementLeavesProviderDataInTheView covers the rule that a
+// replacement never supersedes a provider window or the marker the core
+// wrote for it: only the provider can write a window again, and a view
+// that lost its marker would look compacted with nothing saying so.
+func TestAReplacementLeavesProviderDataInTheView(t *testing.T) {
+	compactor := &compactionCompactor{
+		should: func(view poo.View, budget poo.ContextBudget) bool { return len(view.Turns()) >= 1 },
+	}
+	compactor.compaction = func(view poo.View) (poo.Compaction, error) {
+		if compactor.Calls() == 1 {
+			return poo.Compaction{Strategy: "window", Window: &poo.ProviderWindow{}}, nil
+		}
+		return poo.Compaction{
+			Strategy: "stepwise",
+			Replace: &poo.RangeReplacement{
+				Cut:      poo.TurnRange{First: 2, Last: 2},
+				Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "the summary")},
+			},
+		}, nil
+	}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{text: "the answer"},
+	})
+	tr.SetWindow(poo.ProviderWindow{Items: []poo.ContentBlock{{
+		Kind:     poo.ContentProvider,
+		Provider: &poo.ProviderBlock{API: poo.APIChatCompletions, Required: true, Data: []byte(`{"w":1}`)},
+	}}})
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	if got := compactor.Calls(); got != 2 {
+		t.Fatalf("the compactor ran %d times, want 2", got)
+	}
+	keptWindow, keptMarker, keptSummary := false, false, false
+	for _, m := range poo.Messages(s) {
+		if m.Text() == poo.CompactionMarkerText {
+			keptMarker = true
+		}
+		if m.Text() == "the summary" {
+			keptSummary = true
+		}
+		for _, c := range m.Content {
+			if c.Provider != nil {
+				keptWindow = true
+			}
+		}
+	}
+	if !keptWindow {
+		t.Error("the view lost the provider's window")
+	}
+	if !keptMarker {
+		t.Error("the view lost the marker the core wrote for the window")
+	}
+	if !keptSummary {
+		t.Error("the view holds no replacement")
+	}
+}
+
+// TestASupersedingReplacementMovesTheTurnsBehindIt covers the shift a
+// replacement makes when it also takes out the replacement before it: the
+// turns the cut leaves keep ranges that name their own messages, which is
+// what a strategy sizes its next cut by.
+func TestASupersedingReplacementMovesTheTurnsBehindIt(t *testing.T) {
+	replacement := func(cut poo.TurnRange, text string) poo.Compaction {
+		return poo.Compaction{
+			Strategy: "stepwise",
+			Replace: &poo.RangeReplacement{
+				Cut:      cut,
+				Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, text)},
+			},
+		}
+	}
+	compactor := &compactionCompactor{
+		// The gates after the first and the third turn compact, so the
+		// second cut runs while a later turn is already in the view: the
+		// turns behind the cut move by the messages it drops.
+		should: func(view poo.View, budget poo.ContextBudget) bool {
+			turns := len(view.Turns())
+			return turns == 1 || turns == 3
+		},
+	}
+	compactor.compaction = func(view poo.View) (poo.Compaction, error) {
+		if compactor.Calls() == 1 {
+			return replacement(poo.TurnRange{First: 1, Last: 1}, "the first summary"), nil
+		}
+		// The second cut starts at the earliest turn still in the view,
+		// so it supersedes the first replacement.
+		return replacement(poo.TurnRange{First: 2, Last: 2}, "the second summary"), nil
+	}
+	tr := scripted([]fakeResponse{
+		{text: "one", calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "two", calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{text: "three", calls: []poo.ToolCall{{CallID: "c3", Name: "echo", Arguments: []byte(`{"text":"three"}`)}}},
+		{text: "the answer"},
+	})
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	if got := compactor.Calls(); got != 2 {
+		t.Fatalf("the compactor ran %d times, want 2", got)
+	}
+	summaries := 0
+	for _, m := range poo.SessionView(s).Messages() {
+		if m.Origin == poo.OriginCompaction {
+			summaries++
+		}
+	}
+	requireTurnRanges(t, s, map[int]string{3: "three", 4: "the answer"})
+	if summaries != 1 {
+		t.Errorf("the view holds %d compaction messages, want 1: the second replacement supersedes the first", summaries)
+	}
 }

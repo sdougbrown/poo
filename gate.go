@@ -241,15 +241,19 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	s.events.emit(EventCompactionStarted, map[string]any{"run_id": run.id})
 
 	tokensBefore := s.estimatedInput()
-	view := s.view()
-	fork := s.forkFunc(run)
+	env := CompactionEnv{
+		View:   s.view(),
+		Budget: s.budget(),
+		Fork:   s.forkFunc(run),
+		Ask:    s.askFunc(run),
+	}
 
 	// The compaction runs under the run's activity context, so an
 	// interrupt cancels it and no compaction is applied.
 	actCtx, _ := s.startActivity(run)
 	defer s.endActivity(run)
 
-	compaction, err := s.opts.Compactor.Compact(actCtx, view, fork)
+	compaction, err := s.opts.Compactor.Compact(actCtx, env)
 	if s.interruptPending(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
 		// A cooperative compactor may return a value while it unwinds.
 		// The activity was interrupted, so the value is discarded.
@@ -396,36 +400,79 @@ func compactionForm(c Compaction) string {
 // The fork is bound to the transport and to the last main request's
 // snapshot, so a strategy cannot build a fork request any other way.
 func (s *Session) forkFunc(run *runState) ForkFunc {
-	return func(ctx context.Context, appended []Message, maxTokens int) (Message, UsageReport, error) {
+	return func(ctx context.Context, appended []Message, maxTokens int) (Reply, error) {
 		s.mu.Lock()
 		rendered := run.lastRendered
 		has := run.hasRendered
+		// The fork's own size is the view it re-sends plus what it
+		// appends, measured the way the run's requests are.
+		chars := s.historyCharsLocked()
 		s.mu.Unlock()
 		if !has {
-			return Message{}, UsageReport{}, fmt.Errorf("poo: there is no request to fork")
+			return Reply{}, fmt.Errorf("poo: there is no request to fork")
 		}
 		reader, err := s.opts.Transport.Fork(ctx, rendered, appended, maxTokens)
 		if err != nil {
-			return Message{}, UsageReport{}, err
+			return Reply{}, err
 		}
 		defer reader.Close()
-		resp, err := readResponse(ctx, reader, nil, run.id, 0, run.requests, nil)
-		if err != nil {
-			return Message{}, UsageReport{}, err
-		}
-		msg := Message{Role: RoleAssistant, Content: resp.content, Origin: OriginModel}
-		if resp.usage != nil {
-			// A fork that finishes after the run settled does not add
-			// to the settled run's token counter.
-			s.mu.Lock()
-			if !run.committed && !run.sealed {
-				run.tokens += resp.usage.InputTokens + resp.usage.OutputTokens
-			}
-			s.mu.Unlock()
-			return msg, *resp.usage, nil
-		}
-		return msg, UsageReport{}, nil
+		return s.readSideReply(ctx, run, reader, chars+estimateHistoryChars(appended))
 	}
+}
+
+// askFunc returns the ask a compactor uses for a request of its own.
+//
+// The request carries the messages the strategy wrote and nothing else:
+// no tools, and no reasoning setting of the run's, so it is not a turn.
+func (s *Session) askFunc(run *runState) AskFunc {
+	return func(ctx context.Context, messages []Message, maxTokens int) (Reply, error) {
+		s.mu.Lock()
+		model := s.opts.Model
+		s.mu.Unlock()
+		reader, _, err := s.opts.Transport.Stream(ctx, ChatRequest{
+			Model:     model.ModelID,
+			ModelInfo: model,
+			Messages:  CloneMessages(messages),
+			MaxTokens: maxTokens,
+		})
+		if err != nil {
+			return Reply{}, err
+		}
+		defer reader.Close()
+		return s.readSideReply(ctx, run, reader, estimateHistoryChars(messages))
+	}
+}
+
+// readSideReply reads a request a compactor made and reports what it
+// produced.
+//
+// A side request is not a turn: it appends nothing to the history and
+// records no message. Its tokens still count against the run's ceiling,
+// because the endpoint charged for them. An endpoint that reports no
+// usage is charged the estimate a turn would get, measured the same way
+// and so in the same unit: a fork re-sends the whole conversation, so
+// counting it as free would hide the cost of compacting.
+func (s *Session) readSideReply(ctx context.Context, run *runState, reader StreamReader, requestChars int) (Reply, error) {
+	resp, err := readResponse(ctx, reader, nil, run.id, 0, run.requests, nil)
+	if err != nil {
+		return Reply{}, err
+	}
+	reply := Reply{Message: assistantMessage(resp), Finish: resp.finish}
+	// A request that finishes after the run settled does not add to the
+	// settled run's token counter.
+	s.mu.Lock()
+	if !run.committed && !run.sealed {
+		if resp.usage != nil {
+			run.tokens += resp.usage.InputTokens + resp.usage.OutputTokens
+		} else {
+			run.tokens += s.tokensForCharsLocked(requestChars + estimateMessageChars(reply.Message))
+		}
+	}
+	s.mu.Unlock()
+	if resp.usage != nil {
+		reply.Usage = *resp.usage
+	}
+	return reply, nil
 }
 
 // maxTokens computes the output room for the next request.

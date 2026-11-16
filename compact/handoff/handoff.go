@@ -73,32 +73,29 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 // run has asked the model something: a handoff is a note about work
 // that happened.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	if budget.Turns < 1 {
-		// The run has not asked the model anything yet, so there is
-		// nothing to hand over.
-		return false
-	}
-	if budget.ContextLimit <= 0 {
-		return false
-	}
-	return float64(budget.EstimatedInput) >= c.ratio*float64(budget.ContextLimit)
+	return budget.Reached(c.ratio)
 }
 
 // Compact asks the model to write a handoff.
 //
 // The fork sends the last main request again with the instruction
 // appended, so the model reads the same conversation it was reading.
-// A tool call in the reply is ignored: only the text is the handoff.
-func (c *Compactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
-	if fork == nil {
+// A tool call in the reply is ignored: only the text is the handoff. A
+// reply the output limit cut short is refused, because half a note
+// reads as a whole one and the continuation would follow it.
+func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
+	if in.Fork == nil {
 		return poo.Compaction{}, errors.New("handoff: there is no fork to call")
 	}
 	msg := poo.NewTextMessage(poo.RoleUser, Instruction)
-	reply, _, err := fork(ctx, []poo.Message{msg}, c.maxTokens)
+	reply, err := in.Fork(ctx, []poo.Message{msg}, c.maxTokens)
 	if err != nil {
 		return poo.Compaction{}, err
 	}
-	text := strings.TrimSpace(reply.Text())
+	if reply.Finish == poo.FinishLength {
+		return poo.Compaction{}, errors.New("handoff: the note hit the output limit and is incomplete")
+	}
+	text := strings.TrimSpace(reply.Message.Text())
 	if text == "" {
 		return poo.Compaction{}, errors.New("handoff: the model wrote no handoff")
 	}

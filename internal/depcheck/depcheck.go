@@ -119,6 +119,7 @@ func (c Checker) rules() []rule {
 				m,
 				m + "/cli",
 				m + "/compact/handoff",
+				m + "/compact/summary",
 				m + "/config",
 				// The settings package's models-file reader: one foreign
 				// format translated into the core vocabulary.

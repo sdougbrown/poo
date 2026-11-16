@@ -200,6 +200,29 @@ func TestAnEmptyReplyContinuesTheRun(t *testing.T) {
 	}
 }
 
+// TestATruncatedNoteContinuesTheRun covers the rule that a note the
+// output limit cut short is not a handoff: half a note reads as a whole
+// one, and the run it continued would follow it.
+func TestATruncatedNoteContinuesTheRun(t *testing.T) {
+	tr := script()
+	tr.SetForkTurns(pootest.Turn{Text: "what I did so far", Finish: "length"})
+	s, _ := session(t, tr, handoff.Options{Ratio: 0.001})
+
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn: the run continues below the hard limit", res.Reason)
+	}
+	if res.Detail.Handoff != "" {
+		t.Errorf("the settle detail holds the handoff %q, want none", res.Detail.Handoff)
+	}
+}
+
 // TestAnEmptyReplyAtTheHardLimitSettles covers the rule: at or
 // above the hard limit a compactor that failed settles the run as
 // context_exhausted, and there is no handoff.
@@ -337,9 +360,9 @@ func (c *forkCompactor) ShouldCompact(view poo.View, budget poo.ContextBudget) b
 }
 
 // Compact forks the last request and replaces the turn.
-func (c *forkCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+func (c *forkCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	msg := poo.NewTextMessage(poo.RoleUser, "the instruction")
-	if _, _, err := fork(ctx, []poo.Message{msg}, 128); err != nil {
+	if _, err := in.Fork(ctx, []poo.Message{msg}, 128); err != nil {
 		return poo.Compaction{}, err
 	}
 	c.forks++

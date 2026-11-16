@@ -124,7 +124,7 @@ func TestTheScriptedCompactorAnswersWithItsScript(t *testing.T) {
 	if !c.ShouldCompact(view, poo.ContextBudget{ContextLimit: 100}) {
 		t.Error("the compactor declined to compact, want the scripted answer")
 	}
-	got, err := c.Compact(context.Background(), view, nil)
+	got, err := c.Compact(context.Background(), poo.CompactionEnv{View: view})
 	if err != nil {
 		t.Fatalf("compacting: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestTheScriptedCompactorFails(t *testing.T) {
 	want := errors.New("the compaction failed")
 	c.SetError(want)
 
-	if _, err := c.Compact(context.Background(), poo.NewHistoryView(nil, nil, nil), nil); !errors.Is(err, want) {
+	if _, err := c.Compact(context.Background(), poo.CompactionEnv{View: poo.NewHistoryView(nil, nil, nil)}); !errors.Is(err, want) {
 		t.Errorf("the compaction returned %v, want %v", err, want)
 	}
 }
@@ -184,15 +184,15 @@ func TestTheScriptedCompactorForksTheCallItIsGiven(t *testing.T) {
 	c := pootest.NewCompactor(true, poo.Compaction{Strategy: "the scripted one"})
 	appended := []poo.Message{poo.NewTextMessage(poo.RoleUser, "again")}
 
-	msg, usage, err := c.Fork(context.Background(),
-		func(ctx context.Context, appended []poo.Message, maxTokens int) (poo.Message, poo.UsageReport, error) {
-			return poo.NewTextMessage(poo.RoleAssistant, "the fork"), poo.UsageReport{TTFTMS: 3}, nil
+	reply, err := c.Fork(context.Background(),
+		func(ctx context.Context, appended []poo.Message, maxTokens int) (poo.Reply, error) {
+			return poo.Reply{Message: poo.NewTextMessage(poo.RoleAssistant, "the fork"), Usage: poo.UsageReport{TTFTMS: 3}}, nil
 		}, appended, 32)
 	if err != nil {
 		t.Fatalf("forking: %v", err)
 	}
-	if msg.Text() != "the fork" || usage.TTFTMS != 3 {
-		t.Errorf("the fork returned (%q, %+v), want the fork func's answer", msg.Text(), usage)
+	if reply.Message.Text() != "the fork" || reply.Usage.TTFTMS != 3 {
+		t.Errorf("the fork returned (%q, %+v), want the fork func's answer", reply.Message.Text(), reply.Usage)
 	}
 	forks := c.Forks()
 	if len(forks) != 1 {
@@ -205,7 +205,7 @@ func TestTheScriptedCompactorForksTheCallItIsGiven(t *testing.T) {
 		t.Errorf("the fork's appended messages are %+v, want the one message", forks[0].Appended)
 	}
 
-	if _, _, err := c.Fork(context.Background(), nil, nil, 0); err == nil {
+	if _, err := c.Fork(context.Background(), nil, nil, 0); err == nil {
 		t.Error("a fork with no func returned no error, want one")
 	}
 }

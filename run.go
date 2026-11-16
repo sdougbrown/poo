@@ -368,20 +368,8 @@ func (s *Session) hasSystemMessage() bool {
 // the settle candidate, and the interrupt path ignores it, as it did
 // before the paths shared this builder.
 func (s *Session) recordAssistantResponse(run *runState, turn int, resp *response, partial bool, cause Cause) (Message, error) {
-	content := append([]ContentBlock(nil), resp.content...)
-	// The calls the model had asked for belong to the message, so the
-	// results that follow have a call to answer.
-	for _, call := range resp.calls {
-		content = append(content, ContentBlock{
-			Kind:       ContentToolCall,
-			ToolCallID: call.CallID,
-			Name:       call.Name,
-			Arguments:  recordArgs(call.Arguments),
-			Origin:     call.Origin,
-		})
-	}
-	msg := Message{Role: RoleAssistant, Content: content, Origin: OriginModel}
-	if len(content) == 0 {
+	msg := assistantMessage(resp)
+	if len(msg.Content) == 0 {
 		return msg, nil
 	}
 	if resp.messageID != "" {
@@ -407,6 +395,27 @@ func (s *Session) recordAssistantResponse(run *runState, turn int, resp *respons
 		Partial:    partial,
 		Cause:      cause,
 	})
+}
+
+// assistantMessage builds the message a response carries: the blocks the
+// model produced and the calls it asked for, so the results that follow
+// have a call to answer.
+//
+// The recorded message and a reply a compaction strategy reads are the
+// same message, so a strategy sees the calls the run would have seen and
+// a reply that asks for one is not mistaken for a summary.
+func assistantMessage(resp *response) Message {
+	content := append([]ContentBlock(nil), resp.content...)
+	for _, call := range resp.calls {
+		content = append(content, ContentBlock{
+			Kind:       ContentToolCall,
+			ToolCallID: call.CallID,
+			Name:       call.Name,
+			Arguments:  recordArgs(call.Arguments),
+			Origin:     call.Origin,
+		})
+	}
+	return Message{Role: RoleAssistant, Content: content, Origin: OriginModel}
 }
 
 // startDurationTimer starts the run's wall-clock budget.
@@ -1604,12 +1613,20 @@ func (s *Session) accountInterruptedRequest(run *runState, turn int, resp *respo
 // addEstimatedChars counts a request's estimated tokens.
 func (s *Session) addEstimatedChars(run *runState, chars int) {
 	s.mu.Lock()
+	run.tokens += s.tokensForCharsLocked(chars)
+	s.mu.Unlock()
+}
+
+// tokensForCharsLocked estimates how many tokens a request of the given
+// size cost. A request always counts at least one token.
+//
+// The caller holds the session's lock.
+func (s *Session) tokensForCharsLocked(chars int) int {
 	tokens := int(math.Ceil(float64(chars) / s.est.charsPerToken))
 	if tokens < 1 {
 		tokens = 1
 	}
-	run.tokens += tokens
-	s.mu.Unlock()
+	return tokens
 }
 
 // errRunWindingDown reports that a run settled while a step of the loop

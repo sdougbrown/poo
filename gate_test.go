@@ -237,7 +237,7 @@ func (c *holdingCompactor) ShouldCompact(poo.View, poo.ContextBudget) bool {
 }
 
 // Compact returns the scripted compaction.
-func (c *holdingCompactor) Compact(context.Context, poo.View, poo.ForkFunc) (poo.Compaction, error) {
+func (c *holdingCompactor) Compact(context.Context, poo.CompactionEnv) (poo.Compaction, error) {
 	return poo.Compaction{Strategy: "test"}, nil
 }
 
@@ -403,7 +403,7 @@ func (c *blockingCompactor) ShouldCompact(view poo.View, budget poo.ContextBudge
 }
 
 // Compact waits for its context.
-func (c *blockingCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+func (c *blockingCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	c.once.Do(func() { close(c.started) })
 	<-ctx.Done()
 	return poo.Compaction{}, ctx.Err()
@@ -427,7 +427,7 @@ func (c *releasingCompactor) ShouldCompact(view poo.View, budget poo.ContextBudg
 }
 
 // Compact waits for the release and then fails.
-func (c *releasingCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+func (c *releasingCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	c.once.Do(func() { close(c.started) })
 	<-c.release
 	return poo.Compaction{}, errors.New("the compaction failed")
@@ -549,13 +549,13 @@ func (c *forkCaptureCompactor) ShouldCompact(view poo.View, budget poo.ContextBu
 //
 // The compaction replaces the first turn with the handoff the fork
 // wrote, so it is a compaction the session accepts and records.
-func (c *forkCaptureCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+func (c *forkCaptureCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	c.compactions++
-	msg, usage, err := fork(ctx, []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "write the handoff"}}}}, 0)
+	reply, err := in.Fork(ctx, []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{{Kind: poo.ContentText, Text: "write the handoff"}}}}, 0)
 	if err != nil {
 		return poo.Compaction{}, err
 	}
-	c.msg, c.usage = msg, usage
+	c.msg, c.usage = reply.Message, reply.Usage
 	return poo.Compaction{
 		Strategy: "forky",
 		Replace: &poo.RangeReplacement{
@@ -677,7 +677,7 @@ func (c *failingGateCompactor) ShouldCompact(view poo.View, budget poo.ContextBu
 }
 
 // Compact fails.
-func (c *failingGateCompactor) Compact(ctx context.Context, view poo.View, fork poo.ForkFunc) (poo.Compaction, error) {
+func (c *failingGateCompactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	return poo.Compaction{}, c.err
 }
 

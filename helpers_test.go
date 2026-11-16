@@ -426,15 +426,15 @@ func windowCompaction() poo.Compaction {
 // scriptedCompactor is a compactor whose two decisions the test scripts.
 type scriptedCompactor struct {
 	should  func(poo.View, poo.ContextBudget) bool
-	compact func(context.Context, poo.View, poo.ForkFunc) (poo.Compaction, error)
+	compact func(context.Context, poo.CompactionEnv) (poo.Compaction, error)
 }
 
 func (c *scriptedCompactor) ShouldCompact(v poo.View, b poo.ContextBudget) bool {
 	return c.should(v, b)
 }
 
-func (c *scriptedCompactor) Compact(ctx context.Context, v poo.View, f poo.ForkFunc) (poo.Compaction, error) {
-	return c.compact(ctx, v, f)
+func (c *scriptedCompactor) Compact(ctx context.Context, v poo.CompactionEnv) (poo.Compaction, error) {
+	return c.compact(ctx, v)
 }
 
 // heldToolCallReader yields one complete tool call and then waits for the

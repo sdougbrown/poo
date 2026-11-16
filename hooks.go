@@ -38,6 +38,16 @@ type TurnSummary struct {
 	Calls []ToolCallSummary
 	// Interrupted reports that the turn was cut short by an interrupt.
 	Interrupted bool
+	// Start and End are the turn's message range in the view: Start is
+	// the index of its first message and End the index after its last.
+	//
+	// They index View.Messages(), so a strategy that sizes a turn, or
+	// reads what one turn said, needs no other walk of the view.
+	Start int
+	End   int
+	// Removed reports that a compaction removed the turn's messages.
+	// A removed turn's range is empty.
+	Removed bool
 }
 
 // ToolCallSummary describes one tool call of a turn.
@@ -73,6 +83,20 @@ type ContextBudget struct {
 	// replay applies a recorded compaction after the same number of
 	// requests.
 	Turns int
+}
+
+// Reached reports that the estimated input is at or above the share of
+// the window the ratio names, and that the run has asked the model
+// something.
+//
+// It is the trigger every compaction strategy acts on: a strategy picks
+// the ratio, and the rule that turns a ratio into a decision lives here,
+// where the budget does.
+func (b ContextBudget) Reached(ratio float64) bool {
+	if b.Turns < 1 || b.ContextLimit <= 0 {
+		return false
+	}
+	return float64(b.EstimatedInput) >= ratio*float64(b.ContextLimit)
 }
 
 // HookContext is what a hook is given.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sdougbrown/poo"
@@ -764,5 +765,99 @@ func TestTheHeaderTheRunCommandWritesCanBeRestored(t *testing.T) {
 	_, _, err := poo.Restore(opts, records)
 	if err != nil {
 		t.Fatalf("the restore of a session this binary wrote failed: %v", err)
+	}
+}
+
+// TestTheRestoreNumbersTheTurnsAcrossRuns covers the rule that a
+// restored session keeps the turn numbers the records were written
+// with: a compaction names a range of turns, so a number that shifts
+// with the run a turn is in cuts the wrong work.
+func TestTheRestoreNumbersTheTurnsAcrossRuns(t *testing.T) {
+	original := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: json.RawMessage(`{"text":"one"}`)}}},
+		{text: "done"},
+		{text: "ok"},
+	})
+	sink := &recordingSink{}
+	s := newTestSession(t, testOptions(t, original, &echoTool{}, sink))
+	runSession(t, s, "do the thing")
+	runSession(t, s, "again")
+
+	records := append([]poo.Record{header("s1")}, sink.allRecords()...)
+	session, _, err := poo.Restore(restoreOptions(t, scripted(nil), &recordingSink{}), records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+
+	turns := poo.SessionView(session).Turns()
+	if len(turns) != 3 {
+		t.Fatalf("the restored session holds %d turns, want 3", len(turns))
+	}
+	for i, turn := range turns {
+		if turn.TurnIndex != i+1 {
+			t.Errorf("the restored turn %d is numbered %d, want %d", i+1, turn.TurnIndex, i+1)
+		}
+	}
+}
+
+// TestARestoredWindowLeavesTheTurnsAfterItInTheView covers the rule that a
+// replayed window compaction marks the turns it swallowed and not the ones
+// recorded after it. The summary strategy reads that flag to decide what it
+// may cut, so a restored session has to be able to compact the turns the
+// window never saw.
+func TestARestoredWindowLeavesTheTurnsAfterItInTheView(t *testing.T) {
+	// One window compaction once a turn has happened, and then the
+	// strategy leaves the run alone, so the turns after the window are
+	// recorded.
+	var fired atomic.Bool
+	compactor := &compactionCompactor{
+		should: func(view poo.View, budget poo.ContextBudget) bool {
+			if len(view.Turns()) < 1 || fired.Load() {
+				return false
+			}
+			fired.Store(true)
+			return true
+		},
+		compaction: func(view poo.View) (poo.Compaction, error) {
+			return poo.Compaction{Strategy: "window", Window: &poo.ProviderWindow{}}, nil
+		},
+	}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{text: "the answer"},
+	})
+	tr.SetWindow(poo.ProviderWindow{Items: []poo.ContentBlock{{
+		Kind:     poo.ContentProvider,
+		Provider: &poo.ProviderBlock{API: poo.APIChatCompletions, Required: true, Data: []byte(`{"w":1}`)},
+	}}})
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	records := append([]poo.Record{header("s1")}, sink.allRecords()...)
+	session, restored, err := poo.Restore(restoreOptions(t, scripted(nil), &recordingSink{}), records)
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { session.Close() })
+	if restored.Compactions != 1 {
+		t.Fatalf("the restore applied %d compactions, want 1", restored.Compactions)
+	}
+
+	turns := poo.SessionView(session).Turns()
+	if len(turns) != 3 {
+		t.Fatalf("the restored session holds %d turns, want 3", len(turns))
+	}
+	if !turns[0].Removed {
+		t.Error("the turn the window swallowed is not marked removed")
+	}
+	for _, turn := range turns[1:] {
+		if turn.Removed {
+			t.Errorf("the turn %d, recorded after the window, is marked removed", turn.TurnIndex)
+		}
 	}
 }

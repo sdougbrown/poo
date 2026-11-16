@@ -14,6 +14,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
+	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/perm"
@@ -2036,5 +2037,71 @@ func TestTheCatalogSettingsCarryTheModelFields(t *testing.T) {
 	}
 	if model.Reasoning == nil || model.Reasoning.Mode != poo.ReasoningEffort || model.Reasoning.Param != poo.ReasoningPathEffort {
 		t.Errorf("the model's reasoning imported as %+v", model.Reasoning)
+	}
+}
+
+// TestTheSettingsChooseTheCompactionStrategy covers the settings' choice
+// of strategy: the name in the settings is the compactor the session
+// gets, and its own fields are the ones configured.
+func TestTheSettingsChooseTheCompactionStrategy(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+context:
+  strategy: summary
+  summary:
+    ratio: 0.7
+    keep_recent_tokens: 4096
+    max_tokens: 1024
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	strategy, ok := runtime.Options.Compactor.(*summary.Compactor)
+	if !ok {
+		t.Fatalf("the session's compactor is %T, want the summary strategy", runtime.Options.Compactor)
+	}
+	for _, field := range []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"ratio", int(strategy.Ratio() * 100), 70},
+		{"keep_recent_tokens", strategy.KeepRecentTokens(), 4096},
+		{"max_tokens", strategy.MaxTokens(), 1024},
+	} {
+		if field.got != field.want {
+			t.Errorf("context.summary.%s reached the strategy as %d, want %d", field.name, field.got, field.want)
+		}
+	}
+}
+
+// TestTheSummaryStrategyDefaults covers a settings document that names
+// the strategy and nothing else: the compactor gets the strategy's own
+// defaults, not a zeroed one that never fires.
+func TestTheSummaryStrategyDefaults(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+context:
+  strategy: summary
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	strategy, ok := runtime.Options.Compactor.(*summary.Compactor)
+	if !ok {
+		t.Fatalf("the session's compactor is %T, want the summary strategy", runtime.Options.Compactor)
+	}
+	for _, field := range []struct {
+		name string
+		got  float64
+		want float64
+	}{
+		{"ratio", strategy.Ratio(), summary.DefaultRatio},
+		{"keep_recent_tokens", float64(strategy.KeepRecentTokens()), float64(summary.DefaultKeepRecentTokens)},
+		{"max_tokens", float64(strategy.MaxTokens()), float64(summary.DefaultMaxTokens)},
+	} {
+		if field.got != field.want {
+			t.Errorf("context.summary.%s is %v, want the default %v", field.name, field.got, field.want)
+		}
 	}
 }

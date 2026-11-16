@@ -27,6 +27,9 @@
     "context.strategy": { "isEmpty": "string" },
     "context.handoff.ratio": { "isEmpty": "number" },
     "context.handoff.max_tokens": { "isEmpty": "number" },
+    "context.summary.ratio": { "isEmpty": "number" },
+    "context.summary.keep_recent_tokens": { "isEmpty": "number" },
+    "context.summary.max_tokens": { "isEmpty": "number" },
     "tools.bash.timeout_s": { "isEmpty": "number" },
     "tools.bash.executor": { "isEmpty": "string" },
     "tools.bwrap.network": { "isEmpty": "boolean" },
@@ -172,8 +175,8 @@
       "type": "check",
       "field": "context.strategy",
       "op": "matches",
-      "pattern": "^(handoff|none)$",
-      "reason": "context.strategy must be handoff or none"
+      "pattern": "^(summary|handoff|none)$",
+      "reason": "context.strategy must be summary, handoff or none"
     },
     {
       "type": "check",
@@ -333,6 +336,28 @@
       "op": "min",
       "value": 0,
       "reason": "context.handoff.max_tokens must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "context.summary.ratio",
+      "op": "range",
+      "min": 0,
+      "max": 1,
+      "reason": "context.summary.ratio must be between 0 and 1"
+    },
+    {
+      "type": "check",
+      "field": "context.summary.keep_recent_tokens",
+      "op": "min",
+      "value": 0,
+      "reason": "context.summary.keep_recent_tokens must not be negative"
+    },
+    {
+      "type": "check",
+      "field": "context.summary.max_tokens",
+      "op": "min",
+      "value": 0,
+      "reason": "context.summary.max_tokens must not be negative"
     },
     {
       "type": "check",
