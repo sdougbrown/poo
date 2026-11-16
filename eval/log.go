@@ -59,14 +59,9 @@ type LogRecord struct {
 		Name       string          `json:"name"`
 		Arguments  json.RawMessage `json:"arguments"`
 		IsError    bool            `json:"is_error"`
-		// Provider is the block's opaque provider companion, when it
-		// has one. The runner does not interpret it.
-		Provider *struct {
-			API      string          `json:"api"`
-			Type     string          `json:"type"`
-			Data     json.RawMessage `json:"data"`
-			Required bool            `json:"required"`
-		} `json:"provider"`
+		// Provider is the block's opaque provider data, when it has
+		// one. The runner does not interpret it.
+		Provider *poo.ProviderBlock `json:"provider"`
 	} `json:"content"`
 
 	// The tool call's and tool result's fields.

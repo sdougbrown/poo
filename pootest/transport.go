@@ -56,8 +56,17 @@ type Turn struct {
 	// CacheReadTokens is the number of prompt tokens the endpoint
 	// served from its cache, when it reported one.
 	CacheReadTokens *int `json:"cache_read_tokens,omitempty"`
+	// Blocks are the opaque provider blocks the response produced, in
+	// the order the transport reports them. The first block is the
+	// thinking block's companion, the way a storeless Responses
+	// request reports its reasoning.
+	Blocks []poo.ProviderBlock `json:"blocks,omitempty"`
 	// Err is the failure the request returns, when it fails.
 	Err error `json:"-"`
+	// Fail is the failure the stream reports after its events, so a
+	// turn can break part way through. Err fails the request before it
+	// opens a stream.
+	Fail error `json:"-"`
 }
 
 // Script is a recorded provider conversation.
@@ -383,6 +392,8 @@ type reader struct {
 	// started handing them out. The reader drains the calls as it goes,
 	// so the count is what says whether the turn asked for any.
 	callCount int
+	// failed reports that the reader already gave its failure out.
+	failed bool
 }
 
 // newReader returns a reader for a scripted turn.
@@ -465,9 +476,24 @@ func (r *reader) Next() (poo.StreamItem, error) {
 				},
 			}, nil
 		default:
+			if r.turn.Fail != nil && !r.failed {
+				r.failed = true
+				return poo.StreamItem{}, r.turn.Fail
+			}
 			return poo.StreamItem{}, io.EOF
 		}
 	}
+}
+
+// ReportProviderBlocks returns the blocks the turn scripted.
+//
+// A turn with none reports none, so a test that does not script blocks
+// reads the same as a transport that produces none.
+func (r *reader) ReportProviderBlocks() []poo.ProviderBlock {
+	if len(r.turn.Blocks) == 0 {
+		return nil
+	}
+	return append([]poo.ProviderBlock(nil), r.turn.Blocks...)
 }
 
 // Close releases the response.

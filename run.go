@@ -1833,6 +1833,7 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 		}
 		if err != nil {
 			resp.collect(text.String(), thinking.String(), calls, order)
+			resp.collectProviderBlocks(reader)
 			return resp, err
 		}
 		switch ev.Kind {
@@ -1940,5 +1941,44 @@ func readResponse(ctx context.Context, reader StreamReader, ids *MessageIDs, run
 	}
 
 	resp.collect(text.String(), thinking.String(), calls, order)
+	resp.collectProviderBlocks(reader)
 	return resp, nil
+}
+
+// collectProviderBlocks records the opaque blocks the response produced.
+//
+// The blocks join the assistant message in the order the response produced
+// them. If there is a thinking block, the first becomes its companion.
+// The rest follow ahead of the response's text and tool calls. The
+// next request gives them back, which is what a storeless endpoint needs
+// to keep its reasoning across turns.
+func (r *response) collectProviderBlocks(reader StreamReader) {
+	reporter, ok := reader.(ProviderBlockReporter)
+	if !ok {
+		return
+	}
+	blocks := reporter.ReportProviderBlocks()
+	if len(blocks) == 0 {
+		return
+	}
+	// The transport reports the thinking block's companion first, so it
+	// attaches to that block rather than riding on its own.
+	split := 0
+	if len(r.content) > 0 && r.content[0].Kind == ContentThinking && r.content[0].Provider == nil {
+		block := blocks[0]
+		r.content[0].Provider = &block
+		blocks = blocks[1:]
+		split = 1
+	}
+	if len(blocks) == 0 {
+		return
+	}
+	ordered := make([]ContentBlock, 0, len(r.content)+len(blocks))
+	ordered = append(ordered, r.content[:split]...)
+	for _, block := range blocks {
+		companion := block
+		ordered = append(ordered, ContentBlock{Kind: ContentProvider, Provider: &companion})
+	}
+	ordered = append(ordered, r.content[split:]...)
+	r.content = ordered
 }
