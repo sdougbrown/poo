@@ -80,3 +80,23 @@ func TestARunWithoutCompactionHasNoCompactionTokens(t *testing.T) {
 			m.CompactionInputTokens, m.CompactionOutputTokens)
 	}
 }
+
+// TestATornLogCountsTurnsWithoutTheCompactions covers the fallback: a log
+// whose run was killed has no settle record, so the turns come from the
+// usage records, and a request a compaction made is not one of them.
+func TestATornLogCountsTurnsWithoutTheCompactions(t *testing.T) {
+	log, err := ParseLog(writeLog(t,
+		usageRecord(1, 1, 100, 10, 5, nil),
+		compactionUsageRecord(1, 900, 90, 50),
+		usageRecord(2, 2, 200, 20, 6, nil),
+	))
+	if err != nil {
+		t.Fatalf("parsing the log: %v", err)
+	}
+	if got := log.Turns(); got != 2 {
+		t.Errorf("the log counts %d turns, want the run's 2: the compaction is not one", got)
+	}
+	if got := ComputeMetrics(log, Diff{}).Turns; got != 2 {
+		t.Errorf("the metrics count %d turns, want 2", got)
+	}
+}

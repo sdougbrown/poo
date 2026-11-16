@@ -387,11 +387,23 @@ func (l *Log) TranscriptSegments() []TranscriptSegment {
 // The settle record counts them, and the usage records count them
 // independently: the settle record is missing when the process died
 // mid-run, and the usage records are what survived.
+//
+// A request a compaction made is not a turn. It has a usage record of its
+// own, so the fallback skips the ones whose origin says they bought a
+// compaction; a log without a settle record then counts the same turns the
+// settle record would have.
 func (l *Log) Turns() int {
 	if s := l.Settle(); s != nil && s.Turns > 0 {
 		return s.Turns
 	}
-	return len(l.Usages())
+	turns := 0
+	for _, u := range l.Usages() {
+		if u.Origin == string(poo.OriginCompaction) {
+			continue
+		}
+		turns++
+	}
+	return turns
 }
 
 // WallMS returns the run's wall time in milliseconds.
