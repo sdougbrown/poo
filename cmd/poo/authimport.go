@@ -83,6 +83,12 @@ func handleAuthImportPi(ctx context.Context, inv clicontract.Invocation, stdout,
 	}
 	fmt.Fprintf(stdout, "Copied the %s credential from %s to %s.\n", status.Provider, source, status.Path)
 	fmt.Fprintf(stdout, "It is signed in as %s and expires %s.\n", status.AccountID, status.Expires.UTC().Format("2006-01-02 15:04 MST"))
+	// The copy is only worth making if poo reads it. A settings file that names no
+	// auth_file still resolves to whatever credential file was there first, and that
+	// is the file the copy was taken from.
+	if reads := settings.CredentialFile(); reads != "" && !sameFile(reads, status.Path) {
+		fmt.Fprintf(stdout, "\nThe settings still resolve the credential to %s. Point poo at the copy:\n  auth_file: %s\n", reads, status.Path)
+	}
 	fmt.Fprint(stdout, `
 From here poo owns the refresh. A refresh rotates the refresh token, so:
   - pi's copy is stale from poo's first refresh, and

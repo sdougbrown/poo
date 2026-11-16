@@ -386,3 +386,32 @@ func TestSetKeepsTheOtherEntries(t *testing.T) {
 		t.Errorf("the file holds %v, want the stored credential", after[piauth.ProviderCodex])
 	}
 }
+
+// TestSetCreatesTheDirectoryItWritesInto covers the first write of all: poo's file in
+// a config directory that does not exist yet. The lock is a directory beside the file,
+// so the file's own directory has to be there before the lock is taken.
+func TestSetCreatesTheDirectoryItWritesInto(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "poo", "auth.json")
+	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the test's directory already exists: %v", err)
+	}
+	entry := piauth.Credential{
+		Access:    codexToken(t, newAccount),
+		Refresh:   newRefresh,
+		Expires:   clock().Add(time.Hour),
+		AccountID: newAccount,
+	}
+	if _, err := (piauth.Credentials{Path: path, Now: clock}).Set(context.Background(), entry, false); err != nil {
+		t.Fatalf("the first write failed: %v", err)
+	}
+	info, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("stating the directory the write created: %v", err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Errorf("the directory's mode is %v, want 0700", info.Mode().Perm())
+	}
+	if _, held := pooFile(t, path); held[piauth.ProviderCodex]["access"] == "" {
+		t.Errorf("the file holds no credential: %v", held)
+	}
+}

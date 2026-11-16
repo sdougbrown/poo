@@ -219,3 +219,35 @@ func TestTheAuthImportRefusesTheOneFile(t *testing.T) {
 		t.Error("the import copied a file onto itself")
 	}
 }
+
+// TestTheAuthImportSaysWherePoosReadPoints covers the mismatch an operator can land
+// in: the copy is in poo's file, and the settings still resolve the credential to the
+// file it was copied from. The command names the setting that fixes it.
+func TestTheAuthImportSaysWherePoosReadPoints(t *testing.T) {
+	dir := t.TempDir()
+	pi := piCredential(t, dir, "an-access-token-from-pi", 4102444800000)
+	// The settings name pi's file, so that is what poo resolves and reads.
+	settings := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settings, []byte(`version: 1
+pi_auth_file: `+pi+`
+session:
+  mode: ephemeral
+`), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	configDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("HOME", configDir)
+	t.Setenv("APPDATA", configDir)
+
+	code, _, out := runCLIWithStdout(t, "auth", "import", "pi", "--settings", settings)
+	if code != 0 {
+		t.Fatalf("poo auth import pi exited with %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "auth_file:") {
+		t.Errorf("the report is %q, want it to name the setting that points poo at the copy", out)
+	}
+	if !strings.Contains(out, pi) {
+		t.Errorf("the report is %q, want it to name the file poo still reads", out)
+	}
+}

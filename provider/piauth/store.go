@@ -171,6 +171,12 @@ func (c Credentials) Set(ctx context.Context, entry Credential, replace bool) (S
 	if accountID(entry.Access, entry.AccountID) == "" {
 		return Status{}, fmt.Errorf("%w: the credential names no account", ErrNoCredential)
 	}
+	// The lock is a directory beside the file, so a file in a directory that is not
+	// there yet has nowhere to take one. The write creates the directory it writes
+	// into; the lock needs it first.
+	if err := os.MkdirAll(filepath.Dir(c.Path), 0o700); err != nil {
+		return Status{}, fmt.Errorf("%w: %s: %w", ErrPersist, filepath.Dir(c.Path), err)
+	}
 	hold, err := acquire(ctx, c.Path, c.wait())
 	if err != nil {
 		return Status{}, err
