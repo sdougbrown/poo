@@ -88,6 +88,15 @@ type Options struct {
 	HTTPClient *http.Client
 	// ProbeTimeout bounds one probe. Zero means DefaultProbeTimeout.
 	ProbeTimeout time.Duration
+	// Cached says the catalog holds what the endpoints last reported, read from the
+	// discovery cache when it is built. It is how a model an endpoint served is a model a
+	// session can name without a probe: the build never reaches the network, and the cache
+	// is local.
+	//
+	// A cached result is the endpoint's own report, so it sits above the curated layer and
+	// below the models file: what a server says is a fact about the server, and what the
+	// operator writes is the operator's word on it.
+	Cached bool
 }
 
 // Catalog is the effective catalog: the merged models, the endpoints
@@ -152,8 +161,48 @@ func New(opts Options) *Catalog {
 	c.addFileModels()
 	c.addSettingsModels()
 	c.addCuratedModels()
+	if opts.Cached {
+		c.applyCached()
+	}
 	c.addRoles()
 	return c
+}
+
+// applyCached merges what the endpoints last reported, without asking them again.
+//
+// The cache is the one place a session learns what an endpoint serves, because a build does
+// not probe: it is local, it is TTL'd, and a cache that cannot be read is a catalog without
+// this layer rather than a failed build.
+func (c *Catalog) applyCached() {
+	cache := c.cache()
+	cached, err := cache.load()
+	if err != nil {
+		c.warn("the discovery cache could not be read", slog.Any("error", err))
+		return
+	}
+	if cached == nil {
+		return
+	}
+	c.applyDiscovery(cached.discovery())
+}
+
+// discovery turns a cached file into the layer it holds.
+func (f cacheFile) discovery() *discovery {
+	found := &discovery{
+		models:    map[string]map[string]Discovered{},
+		shapes:    map[string]string{},
+		fetched:   map[string]time.Time{},
+		fetchedAt: f.FetchedAt,
+	}
+	for name, endpoint := range f.Endpoints {
+		if len(endpoint.Models) == 0 {
+			continue
+		}
+		found.models[name] = endpoint.Models
+		found.shapes[name] = endpoint.Shape
+		found.fetched[name] = endpoint.FetchedAt
+	}
+	return found
 }
 
 // addFileModels adds the models the models file declares.

@@ -333,3 +333,71 @@ func TestAFailedProbeFallsBackToTheCuratedCatalog(t *testing.T) {
 		t.Errorf("the log is %q, want it to name the failed probe", log.String())
 	}
 }
+
+// TestACachedDiscoveryIsAModelASessionCanName covers the composition this refactor is for: an
+// endpoint's own report reaches the catalog without a probe, so a model nobody declared is a
+// model a role can name — and the models file still gets the last word on it.
+func TestACachedDiscoveryIsAModelASessionCanName(t *testing.T) {
+	server := vllmServer(t, "qwen3", 32768)
+	stateDir := t.TempDir()
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"local": {Endpoint: server.URL + "/v1"}},
+	}
+
+	// One refresh writes the cache: what the endpoint serves, once.
+	probed := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir})
+	if err := probed.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	server.Close()
+
+	// The session's build reads the cache and never asks the closed endpoint.
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true})
+	info, err := built.Resolve("local/qwen3")
+	if err != nil {
+		t.Fatalf("a model the endpoint reported is not resolvable: %v", err)
+	}
+	if info.ContextLimit != 32768 {
+		t.Errorf("the model's context limit is %d, want the reported 32768", info.ContextLimit)
+	}
+	if info.Source["context_limit"] != catalog.LayerDiscovery {
+		t.Errorf("the context limit comes from %q, want discovery", info.Source["context_limit"])
+	}
+
+	// A models file overrules the report, field by field.
+	override := catalog.New(catalog.Options{
+		Settings: settings,
+		File: catalog.FileSettings{
+			Models: map[string]catalog.ModelSettings{
+				"local/qwen3": {Endpoint: "local", ModelID: "qwen3", ContextLimit: 4096},
+			},
+		},
+		StateDir: stateDir,
+		Cached:   true,
+	})
+	info, err = override.Resolve("local/qwen3")
+	if err != nil {
+		t.Fatalf("the overridden model: %v", err)
+	}
+	if info.ContextLimit != 4096 || info.Source["context_limit"] != catalog.LayerModelsFile {
+		t.Errorf("the context limit is %d from %q, want the models file's 4096",
+			info.ContextLimit, info.Source["context_limit"])
+	}
+}
+
+// TestACatalogWithoutTheCacheAsksNoEndpoint covers the default: a catalog that did not ask for
+// the cached layer holds what its layers declare, and a discovered-only model is not one of them.
+func TestACatalogWithoutTheCacheAsksNoEndpoint(t *testing.T) {
+	server := vllmServer(t, "qwen3", 32768)
+	stateDir := t.TempDir()
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"local": {Endpoint: server.URL + "/v1"}},
+	}
+	if err := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir}).Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir})
+	if _, err := built.Resolve("local/qwen3"); err == nil {
+		t.Fatal("a catalog without the cached layer resolved a model only discovery knows")
+	}
+}
