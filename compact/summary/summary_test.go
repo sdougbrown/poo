@@ -9,6 +9,8 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/compact/summary"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/tool/edit"
+	"github.com/sdougbrown/poo/tool/read"
 )
 
 // The summary strategy: the oldest turns become a model-written summary,
@@ -616,4 +618,78 @@ func requestText(req poo.ChatRequest) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// TestTheDefaultFileListNamesTheToolsPooShips covers the default file
+// operation against the tools themselves: the strategy holds the two
+// names and the argument key as literals, so the test reads them from the
+// tools' own specs. A renamed tool or a renamed argument key fails here
+// instead of quietly emptying the summary's file list.
+func TestTheDefaultFileListNamesTheToolsPooShips(t *testing.T) {
+	for _, tc := range []struct {
+		// tool is the tool the default must recognize.
+		tool poo.Tool
+		// changed reports whether the default counts a call to it as a
+		// change.
+		changed bool
+	}{
+		{read.New(), false},
+		{edit.New(), true},
+	} {
+		spec := tc.tool.Spec()
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(spec.Schema, &schema); err != nil {
+			t.Fatalf("reading the %s tool's schema: %v", spec.Name, err)
+		}
+		if _, ok := schema.Properties["path"]; !ok {
+			t.Fatalf("the %s tool's schema has no path argument: %s", spec.Name, spec.Schema)
+		}
+		if spec.Name != "read" && spec.Name != "edit" {
+			t.Fatalf("the tool is named %q, and the default knows read and edit", spec.Name)
+		}
+
+		path := "internal/" + spec.Name + ".go"
+		args, err := json.Marshal(map[string]string{"path": path})
+		if err != nil {
+			t.Fatalf("building the call's arguments: %v", err)
+		}
+		messages := []poo.Message{
+			poo.NewTextMessage(poo.RoleSystem, "the system prompt"),
+			{Role: poo.RoleAssistant, Content: []poo.ContentBlock{
+				{Kind: poo.ContentText, Text: "the call"},
+				{Kind: poo.ContentToolCall, ToolCallID: "c1", Name: spec.Name, Arguments: args},
+			}},
+			poo.NewTextMessage(poo.RoleAssistant, "the newest turn"),
+		}
+		view := poo.NewHistoryView(messages, nil, []poo.TurnSummary{
+			{TurnIndex: 1, Start: 1, End: 2},
+			{TurnIndex: 2, Start: 2, End: 3},
+		})
+		var got []poo.Message
+		c := summary.New(summary.Options{KeepRecentTokens: 1})
+		compaction, err := c.Compact(context.Background(), poo.CompactionEnv{
+			View:   view,
+			Budget: poo.ContextBudget{ContextLimit: 100000, CharsPerToken: 4},
+			Ask: func(ctx context.Context, messages []poo.Message, maxTokens int) (poo.Reply, error) {
+				got = messages
+				return poo.Reply{Message: poo.NewTextMessage(poo.RoleAssistant, "## Goal\nthe task"), Finish: poo.FinishStop}, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("compacting: %v", err)
+		}
+		if len(got) == 0 {
+			t.Fatal("the strategy made no request")
+		}
+		text := compaction.Replace.Messages[0].Text()
+		section := "Files read:"
+		if tc.changed {
+			section = "Files modified:"
+		}
+		if !strings.Contains(text, section+"\n- "+path) {
+			t.Errorf("the replacement is %q, want %q for %s", text, section+"\n- "+path, path)
+		}
+	}
 }

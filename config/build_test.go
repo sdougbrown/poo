@@ -2074,3 +2074,34 @@ context:
 		}
 	}
 }
+
+// TestTheSummaryStrategyDefaults covers a settings document that names
+// the strategy and nothing else: the compactor gets the strategy's own
+// defaults, not a zeroed one that never fires.
+func TestTheSummaryStrategyDefaults(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings+`
+context:
+  strategy: summary
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	strategy, ok := runtime.Options.Compactor.(*summary.Compactor)
+	if !ok {
+		t.Fatalf("the session's compactor is %T, want the summary strategy", runtime.Options.Compactor)
+	}
+	for _, field := range []struct {
+		name string
+		got  float64
+		want float64
+	}{
+		{"ratio", strategy.Ratio(), summary.DefaultRatio},
+		{"keep_recent_tokens", float64(strategy.KeepRecentTokens()), float64(summary.DefaultKeepRecentTokens)},
+		{"max_tokens", float64(strategy.MaxTokens()), float64(summary.DefaultMaxTokens)},
+	} {
+		if field.got != field.want {
+			t.Errorf("context.summary.%s is %v, want the default %v", field.name, field.got, field.want)
+		}
+	}
+}

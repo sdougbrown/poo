@@ -1716,22 +1716,52 @@ func TestAReplacementThatStartsLaterKeepsTheEarlierOne(t *testing.T) {
 	// The turns that stayed still name their own messages: a replacement
 	// moves them, and a strategy sizes the next cut by those ranges.
 	removed := 0
-	history := poo.SessionView(s).Messages()
 	for _, turn := range poo.SessionView(s).Turns() {
 		if turn.Removed {
 			removed++
-			continue
-		}
-		span, ok := poo.TurnSpanMessages(s, turn.TurnIndex)
-		if !ok {
-			t.Fatalf("the session has no span for the turn %d", turn.TurnIndex)
-		}
-		if got, want := turnSpanText(history[turn.Start:turn.End]), turnSpanText(span); got != want {
-			t.Errorf("the turn %d's range holds %q, want %q", turn.TurnIndex, got, want)
 		}
 	}
 	if removed != 2 {
 		t.Errorf("the view reports %d removed turns, want 2", removed)
+	}
+	requireTurnRanges(t, s, map[int]string{2: "two", 4: "the answer"})
+}
+
+// requireTurnRanges checks that every turn still in the view names its own
+// messages: its range holds the turn's text and not another turn's.
+//
+// Comparing the range against the session's own span only catches a
+// mismatch between the view's indexes and the history's; the expected
+// text catches a span that moved.
+func requireTurnRanges(t *testing.T, s *poo.Session, want map[int]string) {
+	t.Helper()
+	view := poo.SessionView(s)
+	history := view.Messages()
+	for _, turn := range view.Turns() {
+		if turn.Removed {
+			continue
+		}
+		got := turnSpanText(history[turn.Start:turn.End])
+		span, ok := poo.TurnSpanMessages(s, turn.TurnIndex)
+		if !ok {
+			t.Fatalf("the session has no span for the turn %d", turn.TurnIndex)
+		}
+		if also := turnSpanText(span); got != also {
+			t.Errorf("the turn %d's range holds %q, want %q", turn.TurnIndex, got, also)
+		}
+		text, ok := want[turn.TurnIndex]
+		if !ok {
+			continue
+		}
+		if !strings.Contains(got, text) {
+			t.Errorf("the turn %d's range holds %q, want its own text %q", turn.TurnIndex, got, text)
+		}
+		for other, otherText := range want {
+			if other == turn.TurnIndex || !strings.Contains(got, otherText) {
+				continue
+			}
+			t.Errorf("the turn %d's range holds %q, which is the turn %d's text", turn.TurnIndex, otherText, other)
+		}
 	}
 }
 
@@ -1808,5 +1838,62 @@ func TestAReplacementLeavesProviderDataInTheView(t *testing.T) {
 	}
 	if !keptSummary {
 		t.Error("the view holds no replacement")
+	}
+}
+
+// TestASupersedingReplacementMovesTheTurnsBehindIt covers the shift a
+// replacement makes when it also takes out the replacement before it: the
+// turns the cut leaves keep ranges that name their own messages, which is
+// what a strategy sizes its next cut by.
+func TestASupersedingReplacementMovesTheTurnsBehindIt(t *testing.T) {
+	replacement := func(cut poo.TurnRange, text string) poo.Compaction {
+		return poo.Compaction{
+			Strategy: "stepwise",
+			Replace: &poo.RangeReplacement{
+				Cut:      cut,
+				Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, text)},
+			},
+		}
+	}
+	compactor := &compactionCompactor{
+		// The gates after the first and the third turn compact, so the
+		// second cut runs while a later turn is already in the view: the
+		// turns behind the cut move by the messages it drops.
+		should: func(view poo.View, budget poo.ContextBudget) bool {
+			turns := len(view.Turns())
+			return turns == 1 || turns == 3
+		},
+	}
+	compactor.compaction = func(view poo.View) (poo.Compaction, error) {
+		if compactor.Calls() == 1 {
+			return replacement(poo.TurnRange{First: 1, Last: 1}, "the first summary"), nil
+		}
+		// The second cut starts at the earliest turn still in the view,
+		// so it supersedes the first replacement.
+		return replacement(poo.TurnRange{First: 2, Last: 2}, "the second summary"), nil
+	}
+	tr := scripted([]fakeResponse{
+		{text: "one", calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "two", calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}},
+		{text: "three", calls: []poo.ToolCall{{CallID: "c3", Name: "echo", Arguments: []byte(`{"text":"three"}`)}}},
+		{text: "the answer"},
+	})
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	if got := compactor.Calls(); got != 2 {
+		t.Fatalf("the compactor ran %d times, want 2", got)
+	}
+	summaries := 0
+	for _, m := range poo.SessionView(s).Messages() {
+		if m.Origin == poo.OriginCompaction {
+			summaries++
+		}
+	}
+	requireTurnRanges(t, s, map[int]string{3: "three", 4: "the answer"})
+	if summaries != 1 {
+		t.Errorf("the view holds %d compaction messages, want 1: the second replacement supersedes the first", summaries)
 	}
 }

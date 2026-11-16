@@ -416,6 +416,14 @@ func (s *Session) windowViewLocked(w ProviderWindow) (compactionView, error) {
 	marker.Origin = OriginCompaction
 	spans := append([]turnSpan(nil), s.spans...)
 	for i := range spans {
+		if spans[i].end <= spans[i].start {
+			// The turn holds no message, so the window has nothing of
+			// it to replace. A replay builds the spans of every turn
+			// before it applies the records, so the turns recorded
+			// after the window are here and still empty: they stay in
+			// the view.
+			continue
+		}
 		spans[i].removed = true
 		spans[i].start = 0
 		spans[i].end = 0
