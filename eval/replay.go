@@ -26,6 +26,11 @@ type ScriptedTurn struct {
 	Calls []ScriptedCall `json:"calls,omitempty"`
 	// Finish is why the provider stopped: "stop" or "tool_calls".
 	Finish string `json:"finish,omitempty"`
+	// Blocks are the opaque provider blocks the response produced, in the
+	// order the transport reports them. A storeless endpoint's reasoning
+	// rides here, and a replay that dropped them would send a different
+	// next request than the recording did.
+	Blocks []poo.ProviderBlock `json:"blocks,omitempty"`
 	// InputTokens and OutputTokens are the token counts the endpoint
 	// reported.
 	InputTokens  int `json:"input_tokens,omitempty"`
@@ -57,12 +62,24 @@ func ScriptFromLog(log *Log) (*Script, error) {
 	script := &Script{}
 	for _, r := range log.ModelMessages() {
 		turn := ScriptedTurn{Finish: "stop"}
+		// A block the response carried beside a visible one is reported
+		// first, the way the transport reported it, and the rest follow in
+		// the order the message holds them.
+		for _, c := range r.Content {
+			if c.Kind == "thinking" && c.Provider != nil {
+				turn.Blocks = append(turn.Blocks, *c.Provider)
+			}
+		}
 		for _, c := range r.Content {
 			switch c.Kind {
 			case "text":
 				turn.Text += c.Text
 			case "thinking":
 				turn.Thinking += c.Text
+			case "provider":
+				if c.Provider != nil {
+					turn.Blocks = append(turn.Blocks, *c.Provider)
+				}
 			case "tool_call":
 				turn.Calls = append(turn.Calls, ScriptedCall{Name: c.Name, Arguments: c.Arguments})
 				turn.Finish = "tool_calls"
@@ -86,6 +103,7 @@ func (s *Script) ToScript() pootest.Script {
 		turn := pootest.Turn{
 			Text:         t.Text,
 			Thinking:     t.Thinking,
+			Blocks:       append([]poo.ProviderBlock(nil), t.Blocks...),
 			Finish:       t.Finish,
 			InputTokens:  t.InputTokens,
 			OutputTokens: t.OutputTokens,
