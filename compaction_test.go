@@ -2023,3 +2023,41 @@ func TestAWindowWithoutRequiredDataIsRejected(t *testing.T) {
 		t.Errorf("the run settled %q, want end_turn: the refused window leaves the run alive", res.Reason)
 	}
 }
+
+// TestAReplacementKeepsTheRunsInstructions covers the sibling of the
+// window's rule: a replacement rewrites the conversation, and the
+// instructions the model works under are not part of it.
+func TestAReplacementKeepsTheRunsInstructions(t *testing.T) {
+	compactor := &compactionCompactor{
+		should: afterTurns(1),
+		compaction: func(view poo.View) (poo.Compaction, error) {
+			return poo.Compaction{
+				Strategy: "stepwise",
+				Replace: &poo.RangeReplacement{
+					Cut:      poo.TurnRange{First: 1, Last: 1},
+					Messages: []poo.Message{poo.NewTextMessage(poo.RoleUser, "the summary")},
+				},
+			}, nil
+		},
+	}
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer"},
+	})
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	reqs := tr.Requests()
+	if len(reqs) < 2 {
+		t.Fatalf("the transport got %d requests, want 2", len(reqs))
+	}
+	second := reqs[1].Messages
+	if len(second) == 0 || second[0].Role != poo.RoleSystem {
+		t.Fatalf("the second request starts at %+v, want the run's instructions", second)
+	}
+	if second[0].Text() != "the system prompt" {
+		t.Errorf("the instructions are %q, want the session's system prompt", second[0].Text())
+	}
+}
