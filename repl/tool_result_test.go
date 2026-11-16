@@ -49,9 +49,30 @@ func TestABashObservationReadsAsItsOutput(t *testing.T) {
 			t.Errorf("the result lacks %q:\n%s", want, rendered)
 		}
 	}
-	for _, unwanted := range []string{"returncode", `\n`, "timed_out", "{"} {
+	for _, unwanted := range []string{"returncode", `\n`, "timed_out", "{", "exit"} {
 		if strings.Contains(rendered, unwanted) {
 			t.Errorf("the result kept the envelope's %q:\n%s", unwanted, rendered)
+		}
+	}
+}
+
+// TestACallCliResultReadsAsItsOutput covers the registry's calls: the
+// envelope the cli tools return is the bash one, whatever the tool is
+// named.
+func TestACallCliResultReadsAsItsOutput(t *testing.T) {
+	var out bytes.Buffer
+	r := newRenderer(&out)
+	r.toolResult("call_cli", "ok", aBashObservation(t, map[string]any{
+		"returncode": 0, "timed_out": false, "output": "listed\n",
+	}), 0)
+
+	rendered := ansi.Strip(out.String())
+	if !strings.Contains(rendered, "listed") {
+		t.Errorf("the call's output never read:\n%s", rendered)
+	}
+	for _, unwanted := range []string{"returncode", "timed_out", "{"} {
+		if strings.Contains(rendered, unwanted) {
+			t.Errorf("the call kept the envelope's %q:\n%s", unwanted, rendered)
 		}
 	}
 }
@@ -175,6 +196,25 @@ func TestAWireElidedCountReadsAsCharacters(t *testing.T) {
 	}
 	if strings.Contains(rendered, "250 more lines") {
 		t.Errorf("the character count is labelled as lines:\n%s", rendered)
+	}
+}
+
+// TestTheElidedCountsSum covers both counters: the wire's character
+// count and the envelope's own add up, so a doubly elided result says
+// what it elided twice.
+func TestTheElidedCountsSum(t *testing.T) {
+	var out bytes.Buffer
+	m := &machine{out: &out, r: newRenderer(&out), status: newStatus("")}
+	m.event(protocol.Event{Type: "tool.result", Payload: map[string]any{
+		"run_id": "r1", "tool": "bash", "outcome": "ok",
+		"text": aBashObservation(t, map[string]any{
+			"returncode": 0, "timed_out": false, "output": "head\n", "elided_chars": float64(40),
+		}), "elided_chars": float64(250),
+	}}, "r1", &runState{})
+
+	rendered := ansi.Strip(out.String())
+	if !strings.Contains(rendered, "290 characters elided") {
+		t.Errorf("the summed character count does not read:\n%s", rendered)
 	}
 }
 

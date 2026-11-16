@@ -12,7 +12,6 @@ import (
 // The repl reads a bash result's observation off the wire by the
 // envelope's own field names, without importing the tool that built it.
 const (
-	bashToolName     = "bash"
 	bashElidedMarker = "… elided …"
 	resultIndent     = "  "
 	clipTail         = "…"
@@ -64,7 +63,7 @@ type bashObservation struct {
 // text is what the model saw, so its text is what the person sees.
 func previewResult(tool, text string, elided, width, rows int) resultPreview {
 	handle, rest := splitHandle(text)
-	obs, ok := decodeBashObservation(tool, rest)
+	obs, ok := decodeBashObservation(rest)
 	if !ok {
 		return textPreview(text, elided, width, rows)
 	}
@@ -118,10 +117,9 @@ func splitHandle(text string) (handle, rest string) {
 // decodeBashObservation reads a bash result's envelope. The envelope
 // names the return code, the timeout and an output stream. A text that
 // does not is another tool's result, and a malformed field falls back.
-func decodeBashObservation(tool, text string) (bashObservation, bool) {
-	if tool != bashToolName {
-		return bashObservation{}, false
-	}
+// The tool's name is not part of the decision: the cli registry's
+// calls return the same envelope the bash tool does.
+func decodeBashObservation(text string) (bashObservation, bool) {
 	var obs bashObservation
 	if err := json.Unmarshal([]byte(text), &obs); err != nil {
 		return bashObservation{}, false
