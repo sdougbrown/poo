@@ -192,7 +192,7 @@ func takeOverStdio(t *testing.T, slave *os.File) (restore func()) {
 func endReplCleanup(t *testing.T, term *terminal) {
 	t.Helper()
 	if t.Failed() {
-		fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.drawn.String())
+		fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.String())
 	}
 	term.press("\x03")
 	time.Sleep(150 * time.Millisecond)

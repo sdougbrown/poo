@@ -79,7 +79,7 @@ func waitScreen(t *testing.T, term *terminal, want string) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.drawn.String())
+	fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.String())
 	t.Fatalf("the screen never showed %q", want)
 }
 
