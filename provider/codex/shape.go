@@ -371,10 +371,11 @@ func modalitiesOfInputs(inputs []poo.Modality) modalities {
 //
 // Every message's provider blocks are checked in one pass of their own, before
 // the role decides what the message becomes. This transport can only give a
-// block back to the API that produced it. A required block from another API is
-// therefore refused wherever it rides, and an optional one is left out. The
-// pass covers the instructions, a caller-built user message and a tool result,
-// as well as the assistant message the endpoint returned.
+// block back to the API that produced it. A required block is therefore
+// refused wherever it rides, whether another API produced it or it has no
+// payload to give back. An optional one is left out. The pass covers the
+// instructions, a caller-built user message and a tool result, as well as the
+// assistant message the endpoint returned.
 func inputItems(messages []poo.Message, reads modalities, firstID int) ([]json.RawMessage, string, error) {
 	var items []json.RawMessage
 	instructions := ""
@@ -404,15 +405,11 @@ func inputItems(messages []poo.Message, reads modalities, firstID int) ([]json.R
 			}
 			items = append(items, raw)
 		case poo.RoleUser:
-			parts := inputParts(m.Content, reads)
-			if len(parts) == 0 {
-				continue
-			}
-			raw, err := json.Marshal(inputMessage{Type: "message", Role: "user", Content: parts})
+			converted, err := userItems(m, reads)
 			if err != nil {
-				return nil, "", encodeError("a user message")
+				return nil, "", err
 			}
-			items = append(items, raw)
+			items = append(items, converted...)
 		case poo.RoleAssistant:
 			converted, err := assistantItems(m, &next)
 			if err != nil {
@@ -428,6 +425,51 @@ func inputItems(messages []poo.Message, reads modalities, firstID int) ([]json.R
 		}
 	}
 	return items, instructions, nil
+}
+
+// userItems turns a user message into the items the API takes.
+//
+// The text and the attachments ride in one message item. A provider block this
+// API produced rides as the top-level item it came from. The parts around it
+// stay on either side, in the order the history holds them. A block this API
+// cannot carry leaves the message's parts unchanged. The core's provider window
+// is this shape with no parts.
+func userItems(m poo.Message, reads modalities) ([]json.RawMessage, error) {
+	var items []json.RawMessage
+	var parts []inputPart
+	flush := func() error {
+		if len(parts) == 0 {
+			return nil
+		}
+		raw, err := json.Marshal(inputMessage{Type: "message", Role: "user", Content: parts})
+		if err != nil {
+			return encodeError("a user message")
+		}
+		parts = nil
+		items = append(items, raw)
+		return nil
+	}
+	for _, c := range m.Content {
+		if c.Kind == poo.ContentProvider {
+			raw, ok, err := providerItem(c.Provider, poo.APIResponses)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			items = append(items, raw)
+			continue
+		}
+		parts = append(parts, inputParts([]poo.ContentBlock{c}, reads)...)
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 // assistantItems turns an assistant message into the items the API takes.
@@ -611,7 +653,8 @@ func inputParts(blocks []poo.ContentBlock, reads modalities) []inputPart {
 // verbatim, and whether there is one to send.
 //
 // The payload is opaque: the transport never interprets it, it only gives
-// it back to the API that produced it.
+// it back to the API that produced it. An empty payload leaves nothing to
+// send.
 func providerItem(p *poo.ProviderBlock, api poo.API) (json.RawMessage, bool, error) {
 	if p == nil || p.API != api || len(p.Data) == 0 {
 		return nil, false, nil
