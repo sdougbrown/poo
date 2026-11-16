@@ -92,6 +92,18 @@
       "reason": "the decide timeout needs a decider model: roles.decider names one"
     },
     {
+      "type": "requires",
+      "field": "permission.askers",
+      "when": {
+        "op": "or",
+        "exprs": [
+          { "op": "cond", "condition": "has_decider" },
+          { "op": "not", "expr": { "op": "contains", "field": "permission.askers", "value": "decide" } }
+        ]
+      },
+      "reason": "the decide asker needs a decider model: roles.decider names one"
+    },
+    {
       "type": "fairWhen",
       "field": "permission.askers",
       "when": {

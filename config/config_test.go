@@ -380,9 +380,10 @@ func TestThePromptFieldsAreMutuallyExclusive(t *testing.T) {
 	}
 }
 
-// TestTheDecideAskerNeedsADecider covers the rule the umpire schema
-// cannot carry: the asker chain names the decide asker, and a decider
-// model has to be there to answer it.
+// TestTheDecideAskerNeedsADecider covers the rule the schema carries:
+// the asker chain names the decide asker, and a decider model has to be
+// there to answer it. It is the field set but unavailable, the way the
+// decide thresholds without a decider are.
 func TestTheDecideAskerNeedsADecider(t *testing.T) {
 	_, err := config.Parse([]byte("version: 1\npermission:\n  askers: [decide]\n"), config.FormatYAML)
 	if err == nil {
@@ -392,9 +393,16 @@ func TestTheDecideAskerNeedsADecider(t *testing.T) {
 	if !ok || code != config.CodeUnavailable {
 		t.Fatalf("the failure is %v, want an unavailable field", err)
 	}
-	field, _ := config.FieldOf(err)
-	if !strings.HasPrefix(field, "permission.askers") {
-		t.Errorf("the failure names %q, want the askers", field)
+	field, ok := config.FieldOf(err)
+	if !ok || field != "permission.askers" {
+		t.Errorf("the failure names %q, want permission.askers", field)
+	}
+	var settingsErr *config.Error
+	if !asError(err, &settingsErr) {
+		t.Fatalf("the failure is %T, want a settings failure", err)
+	}
+	if joined := strings.Join(settingsErr.Challenge, "\n"); !strings.Contains(joined, "decider") {
+		t.Errorf("the challenge does not mention the decider: %q", joined)
 	}
 }
 
@@ -419,7 +427,7 @@ func TestTheGeneratedFileIsFresh(t *testing.T) {
 	}
 	dir := t.TempDir()
 	out := filepath.Join(dir, "settings_gen.go")
-	cmd := exec.Command("go", "run", "github.com/umpire-tools/umpire-go-gen@v0.3.0",
+	cmd := exec.Command("go", "run", "github.com/umpire-tools/umpire-go-gen@v0.3.1",
 		"-i", "schema/settings.umpire.json", "-output-file", out, "-pkg", "config")
 	cmd.Dir = "."
 	if output, err := cmd.CombinedOutput(); err != nil {

@@ -1508,12 +1508,17 @@ func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]per
 			if deciderErr != nil {
 				if permission.AskersNamed() {
 					// The settings name the decide asker and no
-					// decider model is configured: the ask would
-					// wait for an answer that cannot come.
+					// decider model resolves: the ask would wait for
+					// an answer that cannot come. The schema's rule
+					// reports a settings file with no decider role;
+					// here the role may name a model the catalog does
+					// not hold, so the failure carries what the
+					// catalog said.
 					return nil, &Error{
 						Code:    CodeUnavailable,
 						Field:   "permission.askers",
-						Message: "the decide asker needs a decider model: roles.decider names one",
+						Message: "the decide asker has no decider model to ask",
+						Err:     deciderErr,
 					}
 				}
 				// The binary's own chain asks the decider, and there
@@ -1540,7 +1545,7 @@ func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]per
 		}
 	}
 	if droppedWire {
-		r.warn(r.droppedWireWarning(names))
+		r.warn(r.droppedWireWarning())
 	}
 	return askers, nil
 }
@@ -1549,20 +1554,18 @@ func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]per
 // out of the chain.
 //
 // The settings schema owns the wording: its fairWhen rule names the
-// capability the chain needs, and the check reports that rule against
-// the chain this build resolved, whether the settings named it or the
-// binary did. The caller asks only when the runtime has no wire client,
-// which is the condition the rule reads.
-func (r *Runtime) droppedWireWarning(chain []string) string {
+// capability the asker needs, and the check reports that rule for the asker
+// this build dropped. The chain judged here is that one name, so the reason
+// is the wire rule's alone: a chain the binary names itself may hold other
+// askers the same build leaves out for other reasons.
+func (r *Runtime) droppedWireWarning() string {
 	fields := fieldsOf(r.Settings)
-	fields.PermissionAskers = chain
+	fields.PermissionAskers = []string{"wire"}
 	status := Check(fields, conditionsOf(r.Settings), SettingsFields{}).PermissionAskers
-	for _, reason := range status.Reasons {
-		if reason != "" {
-			return reason
-		}
+	if len(status.Reasons) == 0 {
+		return ""
 	}
-	return ""
+	return status.Reasons[0]
 }
 
 // newDeciderAsker builds the asker that asks a decision model.

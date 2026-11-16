@@ -15,7 +15,7 @@ package config
 
 import "github.com/sdougbrown/poo"
 
-//go:generate go run github.com/umpire-tools/umpire-go-gen@v0.3.0 -i schema/settings.umpire.json -output-file settings_gen.go -pkg config
+//go:generate go run github.com/umpire-tools/umpire-go-gen@v0.3.1 -i schema/settings.umpire.json -output-file settings_gen.go -pkg config
 
 // Settings are the settings a configuration file holds.
 //
