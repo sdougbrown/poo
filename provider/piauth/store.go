@@ -311,8 +311,9 @@ func (c Credentials) write(doc document, entry credential) error {
 
 // format is the shape the credential file is written with.
 //
-// pi's auth.json is the one file a credential lives in today, so the path is
-// what selects it.
+// pi's auth.json is the one shape this package reads, so the answer does not depend
+// on the path. The method is where a second shape is chosen once there is one; until
+// then every file is pi's.
 func (c Credentials) format() format {
 	return piFormat{}
 }
