@@ -179,7 +179,6 @@ func TestTheAuthImportRefusesToReplaceACredential(t *testing.T) {
 	dir := t.TempDir()
 	pi := piCredential(t, dir, "an-access-token-from-pi", 4102444800000)
 	target := filepath.Join(dir, "auth.json")
-	codexCredential(t, dir, 4102444800000)
 	if err := os.WriteFile(target, []byte(`{
   "version": 1,
   "credentials": {
@@ -190,9 +189,11 @@ func TestTheAuthImportRefusesToReplaceACredential(t *testing.T) {
 	}
 	settings := authSettings(t, dir, target)
 
+	stdin := withoutATerminal(t)
 	if code := run([]string{"auth", "import", "pi", "--settings", settings, "--from", pi}); code == 0 {
 		t.Error("the import exited 0 for a credential it was not asked to replace")
 	}
+	_ = stdin
 	stored, _ := os.ReadFile(target)
 	if !strings.Contains(string(stored), "already-there") {
 		t.Errorf("the credential was replaced without being asked:\n%s", stored)
@@ -367,4 +368,26 @@ func TestTheConfirmationReadsAnAnswer(t *testing.T) {
 			}
 		})
 	}
+}
+
+// withoutATerminal points os.Stdin at a pipe for the rest of the test.
+//
+// A terminal on stdin makes a command that asks before replacing wait for an answer, so a
+// test that leaves the operator's stdin in place blocks in a terminal and passes in a pipe.
+// The pipe is not a terminal, so the branch these tests describe is the one that runs
+// everywhere.
+func withoutATerminal(t *testing.T) *os.File {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating the pipe: %v", err)
+	}
+	old := os.Stdin
+	os.Stdin = reader
+	t.Cleanup(func() {
+		os.Stdin = old
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	return reader
 }

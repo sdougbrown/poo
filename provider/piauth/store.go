@@ -154,6 +154,22 @@ type Credential struct {
 	AccountID string
 }
 
+// Holds reports whether the file holds an entry for the provider, whatever kind it is.
+//
+// It is the question the replace rule asks: an entry this package cannot decode is still an
+// entry, so replacing it is still a decision, and Status is the wrong question to ask of it.
+func (c Credentials) Holds() (bool, error) {
+	if c.Path == "" {
+		return false, errors.New("piauth: no auth.json path")
+	}
+	doc, err := c.load()
+	if err != nil {
+		return false, err
+	}
+	_, ok := doc.entries[ProviderCodex]
+	return ok, nil
+}
+
 // Read returns the credential the file holds, without trading it.
 //
 // It is the read a caller that copies a credential makes: no refresh, no write and no
@@ -215,7 +231,9 @@ func (c Credentials) Set(ctx context.Context, entry Credential, replace bool) (S
 	if _, ok := doc.format.(pooFormat); !ok {
 		return Status{}, fmt.Errorf("%w: %s is pi's file, and poo writes its own", ErrForeignFile, doc.path)
 	}
-	if _, err := decodeEntry(doc.path, ProviderCodex, doc.entries); err == nil && !replace {
+	// Presence, not decodability: an entry of a kind this package cannot read is still an
+	// entry, and replacing it without being asked is the thing ErrExists exists to prevent.
+	if _, held := doc.entries[ProviderCodex]; held && !replace {
 		return Status{}, fmt.Errorf("%w: %s holds a %s credential", ErrExists, doc.path, ProviderCodex)
 	}
 	stored := credential{

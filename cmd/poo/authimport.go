@@ -12,6 +12,7 @@ import (
 	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/internal/term"
 	"github.com/sdougbrown/poo/provider/piauth"
 )
 
@@ -104,13 +105,9 @@ Run one of them, not both. `+"`poo auth status`"+` says which file poo reads.
 // file. The import writes poo's.
 func pooCredentialFile(settingsPath string, settings *config.Settings) (string, error) {
 	if settings.AuthFile != "" {
-		return resolveNamed(settingsPath, settings.AuthFile)
+		return config.ResolveSettingPath(settingsPath, settings.AuthFile)
 	}
-	dir, err := config.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("the user's config directory cannot be resolved: %w", err)
-	}
-	return filepath.Join(dir, config.AuthFileName), nil
+	return config.DefaultAuthFile()
 }
 
 // piCredentialFile is the file pi's credential is read from: the one --from names,
@@ -121,7 +118,7 @@ func piCredentialFile(settingsPath string, settings *config.Settings, from strin
 		named = settings.PiAuthFile
 	}
 	if named != "" {
-		path, err := resolveNamed(settingsPath, named)
+		path, err := config.ResolveSettingPath(settingsPath, named)
 		if err != nil {
 			return "", err
 		}
@@ -141,26 +138,6 @@ func piCredentialFile(settingsPath string, settings *config.Settings, from strin
 	return path, nil
 }
 
-// resolveNamed resolves a path a flag or a setting names: the home shortcut first,
-// then the settings file's own directory for a relative one.
-func resolveNamed(settingsPath, named string) (string, error) {
-	path, err := config.ExpandPath(named)
-	if err != nil {
-		return "", err
-	}
-	if filepath.IsAbs(path) {
-		return path, nil
-	}
-	if settingsPath == "" {
-		base, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(base, path), nil
-	}
-	return filepath.Join(filepath.Dir(settingsPath), path), nil
-}
-
 // readPiCredential reads the Codex credential out of pi's auth.json.
 //
 // The package that keeps a credential reads it: the entry's fields and its oauth rule are
@@ -177,20 +154,31 @@ func readPiCredential(path string) (piauth.Credential, error) {
 // action. --force is one; answering the prompt is the other. A run with no
 // terminal to ask on has neither, so it refuses.
 func (o *authImportOptions) replacement(poo piauth.Credentials, stdout, stderr io.Writer) (replace bool, failed bool) {
-	status, err := poo.Status()
+	// Whether the file holds an entry is the question the replace rule asks, and it is
+	// not the same as whether the entry decodes: an entry poo cannot read is still an
+	// entry, and replacing it is still a decision.
+	held, err := poo.Holds()
 	if err != nil {
-		// Nothing usable to replace: this is the first credential poo holds.
+		fmt.Fprintf(stderr, "poo auth import: %v\n", err)
+		return false, true
+	}
+	if !held {
 		return false, false
 	}
 	if o.force {
 		return true, false
 	}
-	if status.AccountID == "" || !interactive() {
+	status, err := poo.Status()
+	signedIn := ""
+	if err == nil && status.AccountID != "" {
+		signedIn = " as " + status.AccountID
+	}
+	if !interactive() {
 		fmt.Fprintf(stderr, "poo auth import: %s already holds a credential for %s: pass --force to replace it\n",
-			status.Path, status.Provider)
+			poo.Path, piauth.ProviderCodex)
 		return false, true
 	}
-	fmt.Fprintf(stderr, "%s already holds a credential for %s, signed in as %s.\n", status.Path, status.Provider, status.AccountID)
+	fmt.Fprintf(stderr, "%s already holds a credential for %s%s.\n", poo.Path, piauth.ProviderCodex, signedIn)
 	fmt.Fprint(stderr, "Replace it? [y/N] ")
 	if !confirmed(os.Stdin) {
 		fmt.Fprintln(stderr, "poo auth import: the credential was left as it was")
@@ -200,12 +188,10 @@ func (o *authImportOptions) replacement(poo piauth.Credentials, stdout, stderr i
 }
 
 // interactive reports whether there is a terminal to ask on.
+//
+// The question is internal/term's, so this and the repl answer it the same way.
 func interactive() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(os.Stdin)
 }
 
 // confirmed reads one answer, and reads anything but yes as no.

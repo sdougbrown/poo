@@ -415,3 +415,32 @@ func TestSetCreatesTheDirectoryItWritesInto(t *testing.T) {
 		t.Errorf("the file holds no credential: %v", held)
 	}
 }
+
+// TestSetRefusesAnEntryItCannotRead covers the replace rule's real question. An entry poo
+// cannot decode — an api_key for the Codex provider, say — is still an entry, so replacing
+// it is still a decision, and Set must not take it on its own.
+func TestSetRefusesAnEntryItCannotRead(t *testing.T) {
+	body := `{"version": 1, "credentials": {"openai-codex": {"type": "api_key", "key": "sk-written-by-hand"}}}`
+	path := authFile(t, body)
+	credentials := piauth.Credentials{Path: path, Now: clock}
+
+	held, err := credentials.Holds()
+	if err != nil {
+		t.Fatalf("asking whether the file holds an entry: %v", err)
+	}
+	if !held {
+		t.Fatal("the file holds an entry, and Holds says it does not")
+	}
+	_, err = credentials.Set(context.Background(), piauth.Credential{
+		Access:    codexToken(t, newAccount),
+		Refresh:   newRefresh,
+		Expires:   clock().Add(time.Hour),
+		AccountID: newAccount,
+	}, false)
+	if !errors.Is(err, piauth.ErrExists) {
+		t.Fatalf("the write is %v, want ErrExists", err)
+	}
+	if got := readFile(t, path); got != body {
+		t.Errorf("the file was written:\n%s", got)
+	}
+}
