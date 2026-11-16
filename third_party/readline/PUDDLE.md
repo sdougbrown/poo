@@ -20,4 +20,6 @@ needs exactly that, so the copy carries three small patches:
 
 The patch is meant for upstream: the two exported hooks and the probe
 fix are general, and this copy goes away once a release carries them.
-Keep the diff against v1.3.0 exactly the four changes above.
+Keep the diff against v1.3.0 exactly the four changes above, plus
+`inputrc/bind.go`'s three-line gofmt repair — upstream's own file is not
+gofmt-clean, and the CI's Format step reads the whole module.
