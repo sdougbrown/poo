@@ -24,8 +24,9 @@ const (
 	ansiCyan   = "\x1b[36m"
 )
 
-// maxResultLines is how many lines of a tool result the transcript
-// shows. A longer result keeps its head and says what was cut.
+// maxResultLines is how many body lines of a tool result the
+// transcript shows. A longer result keeps its head and says what was
+// cut.
 const maxResultLines = 8
 
 // renderer writes the transcript: the rendered replies, the tool
@@ -263,6 +264,17 @@ func (r *renderer) streamText(text string) {
 	r.block.tail = tail
 }
 
+// contentWidth is the columns the terminal has now: the live width
+// when the terminal says one, the renderer's own otherwise.
+func (r *renderer) contentWidth() int {
+	if r.liveWidth != nil {
+		if live := r.liveWidth(); live > 0 {
+			return live
+		}
+	}
+	return r.width
+}
+
 // stalledNow reports that the terminal's width has changed under a
 // block that is painting: the rows it committed wrap at the old width,
 // and counting them at the new one would climb to the wrong row.
@@ -431,31 +443,57 @@ func (r *renderer) thinkingText(text string) string {
 
 // toolCall renders one tool call.
 func (r *renderer) toolCall(tool, summary string) {
+	tool = clipLine(sanitizeLine(tool), max(1, r.previewContentWidth()-4))
 	line := ansiCyan + "⚙ " + tool + ansiReset
 	if summary != "" {
-		line += " " + ansiDim + firstLine(summary) + ansiReset
+		// The summary is one line of the model's own text: it reads
+		// to the terminal's edge, and no further.
+		budget := r.previewContentWidth() - ansi.StringWidth(tool) - 3
+		if budget > 0 {
+			line += " " + ansiDim + clipLine(sanitizeLine(firstLine(summary)), budget) + ansiReset
+		}
 	}
 	r.write(line + "\n")
 }
 
 // toolResult renders one tool result.
 func (r *renderer) toolResult(tool, outcome, text string, elided int) {
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	shown := lines
-	if len(lines) > maxResultLines {
-		shown = lines[:maxResultLines]
-	}
+	p := previewResult(text, elided, r.previewContentWidth(), maxResultLines)
 	var b strings.Builder
-	for _, line := range shown {
-		b.WriteString("  " + ansiDim + line + ansiReset + "\n")
+	if p.handle != "" {
+		b.WriteString(resultIndent + ansiDim + p.handle + ansiReset + "\n")
 	}
-	if rest := len(lines) - len(shown) + elided; rest > 0 {
-		b.WriteString(fmt.Sprintf("  %s… +%d more lines%s\n", ansiDim, rest, ansiReset))
+	for _, line := range p.body {
+		b.WriteString(resultIndent + ansiDim + line + ansiReset + "\n")
+	}
+	if p.moreLines > 0 {
+		b.WriteString(fmt.Sprintf("%s%s… +%d more lines%s\n", resultIndent, ansiDim, p.moreLines, ansiReset))
+	}
+	if p.elidedChars > 0 {
+		b.WriteString(fmt.Sprintf("%s%s… %d characters elided%s\n", resultIndent, ansiDim, p.elidedChars, ansiReset))
+	}
+	if p.hint != "" {
+		b.WriteString(resultIndent + ansiDim + p.hint + ansiReset + "\n")
+	}
+	if p.status != "" {
+		b.WriteString(resultIndent + ansiYellow + p.status + ansiReset + "\n")
 	}
 	if outcome != "ok" && outcome != "" {
-		b.WriteString(fmt.Sprintf("  %s%s: %s%s\n", ansiRed, tool, outcome, ansiReset))
+		outcome = sanitizeLine(outcome)
+		name := clipLine(sanitizeLine(tool), max(1, r.previewContentWidth()-ansi.StringWidth(outcome)-3))
+		b.WriteString(fmt.Sprintf("%s%s%s: %s%s\n", resultIndent, ansiRed, name, outcome, ansiReset))
 	}
 	r.write(b.String())
+}
+
+// previewContentWidth is the columns a tool result's line has after the
+// transcript's indent, at the terminal's width now.
+func (r *renderer) previewContentWidth() int {
+	width := r.contentWidth()
+	if width <= 0 {
+		width = r.wrap
+	}
+	return max(1, width-ansi.StringWidth(resultIndent))
 }
 
 // settle renders a run's outcome and what it cost.
