@@ -8,20 +8,24 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
 // aBashObservation renders one bash tool result the way the wire
-// carries it: the model-facing handle line, then the observation
-// envelope.
+// carries it: the handle line the tool result itself starts with, then
+// the observation envelope. The line comes from the handles' own
+// producer, so a format change there fails here rather than in a
+// terminal.
 func aBashObservation(t *testing.T, fields map[string]any) string {
 	t.Helper()
 	raw, err := json.Marshal(fields)
 	if err != nil {
 		t.Fatalf("encoding the observation: %v", err)
 	}
-	return "[r1 · bash]\n" + string(raw)
+	handle := poo.HandleLine("r1", "bash")
+	return handle + "\n" + string(raw)
 }
 
 // plainLines is what a rendered preview reads after the ANSI the
@@ -54,7 +58,7 @@ func TestTheEnvelopeMatchesItsProducer(t *testing.T) {
 	for _, shape := range shapes {
 		var out bytes.Buffer
 		r := newRenderer(&out)
-		r.toolResult("bash", "ok", "[r1 · bash]\n"+shape.text, 0)
+		r.toolResult("bash", "ok", poo.HandleLine("r1", "bash")+"\n"+shape.text, 0)
 		rendered := ansi.Strip(out.String())
 		if !strings.Contains(rendered, "line") && !strings.Contains(rendered, "whole") {
 			t.Errorf("%s: the produced output never read:\n%s", shape.name, rendered)
