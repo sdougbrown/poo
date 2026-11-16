@@ -2,6 +2,8 @@ package auth_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -118,8 +120,10 @@ func TestTheCodexSignInAsksForWhatItsClientIsRegisteredWith(t *testing.T) {
 			t.Errorf("%s is %q, want %q", name, got, want)
 		}
 	}
-	if challenge := query.Get("code_challenge"); challenge == "" || challenge == attempt.Verifier {
-		t.Error("the challenge is missing, or it is the verifier itself")
+	digest := sha256.Sum256([]byte(attempt.Verifier))
+	wantChallenge := base64.RawURLEncoding.EncodeToString(digest[:])
+	if got := query.Get("code_challenge"); got != wantChallenge {
+		t.Errorf("the challenge is %q, want the S256 of the verifier %q", got, wantChallenge)
 	}
 }
 
@@ -200,8 +204,44 @@ func TestASignInFallsBackThroughTheLadder(t *testing.T) {
 	if got := server.exchange(t, 0).Get("client_id"); got != "prov-client" {
 		t.Errorf("the trade sent client_id=%q, want the provider's", got)
 	}
+	if credential.ClientID != "prov-client" {
+		t.Errorf("the credential records the client %q, want the provider's", credential.ClientID)
+	}
 	if credential.TokenURL != server.URL+"/token" {
 		t.Errorf("the credential records the endpoint %q, want the provider's", credential.TokenURL)
+	}
+}
+
+// TestASignInFallsBackToTheDefaultClient covers the ladder's last rung on the sign-in side: a
+// provider that declares no client sends, and records, the package's default client.
+func TestASignInFallsBackToTheDefaultClient(t *testing.T) {
+	server := newSignInServer(t)
+	flow := auth.Flow{
+		Name:         "prov",
+		Provider:     auth.Provider{ID: "prov", Kind: auth.KindOAuth, TokenURL: server.URL + "/token", Account: func(access, stored string) string { return "acct_prov" }},
+		Method:       auth.MethodBrowser,
+		AuthorizeURL: server.URL + "/authorize",
+		ClientID:     "flow-client",
+		RedirectURI:  "http://127.0.0.1:1455/auth/callback",
+	}
+	attempt, err := flow.Authorize()
+	if err != nil {
+		t.Fatalf("the attempt: %v", err)
+	}
+	// The attempt's flow is a value: clear the client so neither the flow nor the provider
+	// names one, and the default answers.
+	attempt.Flow.ClientID = ""
+	server.answerWith(credentialAnswer(codexToken(t, "acct_prov"), "a-new-refresh", time.Hour))
+
+	credential, err := attempt.Exchange(context.Background(), server.Client(), auth.Callback{Code: "the-code", State: attempt.State})
+	if err != nil {
+		t.Fatalf("the exchange: %v", err)
+	}
+	if got := server.exchange(t, 0).Get("client_id"); got != auth.DefaultClientID {
+		t.Errorf("the trade sent client_id=%q, want the default", got)
+	}
+	if credential.ClientID != auth.DefaultClientID {
+		t.Errorf("the credential records the client %q, want the default", credential.ClientID)
 	}
 }
 

@@ -210,11 +210,12 @@ func (a Attempt) Exchange(ctx context.Context, client *http.Client, callback Cal
 	}
 	flow := a.Flow
 	endpoint := endpointFor(flow.TokenURL, flow.Provider, DefaultTokenURL)
+	clientID := clientFor(flow.ClientID, flow.Provider, DefaultClientID)
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 	answer, err := postForm(ctx, ErrSignIn, client, endpoint, url.Values{
 		"grant_type":    {"authorization_code"},
-		"client_id":     {clientFor(flow.ClientID, flow.Provider, DefaultClientID)},
+		"client_id":     {clientID},
 		"code":          {callback.Code},
 		"code_verifier": {a.Verifier},
 		"redirect_uri":  {flow.RedirectURI},
@@ -231,7 +232,7 @@ func (a Attempt) Exchange(ctx context.Context, client *http.Client, callback Cal
 		Refresh:   answer.RefreshToken,
 		Expires:   time.Now().Add(time.Duration(answer.ExpiresIn * float64(time.Second))),
 		AccountID: flow.Provider.account(answer.AccessToken, ""),
-		ClientID:  flow.ClientID,
+		ClientID:  clientID,
 		TokenURL:  endpoint,
 	}
 	if err := validate(credential, flow.Provider); err != nil {
