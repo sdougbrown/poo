@@ -63,7 +63,7 @@ func TestAnExpiredPooCredentialIsRefreshedInPooShape(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	token, err := credentials.Access(context.Background())
+	token, err := credentials.Access(context.Background(), auth.Codex)
 	if err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestARefreshKeepsPisFileInPisShape(t *testing.T) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-	if _, err := credentials.Access(context.Background()); err != nil {
+	if _, err := credentials.Access(context.Background(), auth.Codex); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
 
@@ -133,7 +133,7 @@ func TestPooFileOfAnotherVersionIsRefused(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrStorage) {
 		t.Fatalf("the other version is %v, want ErrStorage", err)
 	}
@@ -190,7 +190,7 @@ func TestStatusReportsTheCredentialWithoutTradingIt(t *testing.T) {
 			}, nil)
 			credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-			status, err := credentials.Status()
+			status, err := credentials.Status(auth.Codex)
 			if err != nil {
 				t.Fatalf("the status failed: %v", err)
 			}
@@ -238,7 +238,7 @@ func TestStatusOfAFileWithoutACredentialIsReported(t *testing.T) {
 					t.Fatalf("writing the auth file: %v", err)
 				}
 			}
-			if _, err := (auth.Credentials{Path: path}).Status(); !errors.Is(err, auth.ErrNoCredential) {
+			if _, err := (auth.Credentials{Path: path}).Status(auth.Codex); !errors.Is(err, auth.ErrNoCredential) {
 				t.Fatalf("the status is %v, want ErrNoCredential", err)
 			}
 		})
@@ -270,7 +270,7 @@ credentials:
 				return http.StatusInternalServerError, `{"error":"the endpoint was asked"}`
 			}, nil)
 			credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-			token, err := credentials.Access(context.Background())
+			token, err := credentials.Access(context.Background(), auth.Codex)
 			if err != nil {
 				t.Fatalf("the credential did not reach a token: %v", err)
 			}
@@ -293,7 +293,7 @@ func TestPooFileWritesWholeNumbersWhole(t *testing.T) {
 		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-	if _, err := credentials.Access(context.Background()); err != nil {
+	if _, err := credentials.Access(context.Background(), auth.Codex); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
 	data := readFile(t, path)
@@ -321,7 +321,7 @@ func TestSetKeepsACredentialAndRefusesToReplaceOne(t *testing.T) {
 		AccountID: newAccount,
 	}
 
-	status, err := credentials.Set(context.Background(), entry, false)
+	status, err := credentials.Set(context.Background(), auth.Codex, entry, false)
 	if err != nil {
 		t.Fatalf("the credential was not stored: %v", err)
 	}
@@ -333,10 +333,10 @@ func TestSetKeepsACredentialAndRefusesToReplaceOne(t *testing.T) {
 	}
 
 	// A second write is the one a command must not make on its own.
-	if _, err := credentials.Set(context.Background(), entry, false); !errors.Is(err, auth.ErrExists) {
+	if _, err := credentials.Set(context.Background(), auth.Codex, entry, false); !errors.Is(err, auth.ErrExists) {
 		t.Fatalf("a second write is %v, want ErrExists", err)
 	}
-	if _, err := credentials.Set(context.Background(), entry, true); err != nil {
+	if _, err := credentials.Set(context.Background(), auth.Codex, entry, true); err != nil {
 		t.Fatalf("the replaced write failed: %v", err)
 	}
 }
@@ -346,7 +346,7 @@ func TestSetKeepsACredentialAndRefusesToReplaceOne(t *testing.T) {
 func TestSetRefusesPisFile(t *testing.T) {
 	body := fmt.Sprintf(stored, expires(time.Hour))
 	path := authFile(t, body)
-	_, err := (auth.Credentials{Path: path}).Set(context.Background(), auth.Credential{
+	_, err := (auth.Credentials{Path: path}).Set(context.Background(), auth.Codex, auth.Credential{
 		Access:    codexToken(t, newAccount),
 		Refresh:   newRefresh,
 		Expires:   clock().Add(time.Hour),
@@ -367,7 +367,7 @@ func TestSetKeepsTheOtherEntries(t *testing.T) {
 	_, before := pooFile(t, path)
 	credentials := auth.Credentials{Path: path, Now: clock}
 	access := codexToken(t, newAccount)
-	if _, err := credentials.Set(context.Background(), auth.Credential{
+	if _, err := credentials.Set(context.Background(), auth.Codex, auth.Credential{
 		Access:    access,
 		Refresh:   newRefresh,
 		Expires:   clock().Add(time.Hour),
@@ -401,7 +401,7 @@ func TestSetCreatesTheDirectoryItWritesInto(t *testing.T) {
 		Expires:   clock().Add(time.Hour),
 		AccountID: newAccount,
 	}
-	if _, err := (auth.Credentials{Path: path, Now: clock}).Set(context.Background(), entry, false); err != nil {
+	if _, err := (auth.Credentials{Path: path, Now: clock}).Set(context.Background(), auth.Codex, entry, false); err != nil {
 		t.Fatalf("the first write failed: %v", err)
 	}
 	info, err := os.Stat(filepath.Dir(path))
@@ -424,14 +424,14 @@ func TestSetRefusesAnEntryItCannotRead(t *testing.T) {
 	path := authFile(t, body)
 	credentials := auth.Credentials{Path: path, Now: clock}
 
-	held, err := credentials.Holds()
+	held, err := credentials.Holds(auth.Codex.ID)
 	if err != nil {
 		t.Fatalf("asking whether the file holds an entry: %v", err)
 	}
 	if !held {
 		t.Fatal("the file holds an entry, and Holds says it does not")
 	}
-	_, err = credentials.Set(context.Background(), auth.Credential{
+	_, err = credentials.Set(context.Background(), auth.Codex, auth.Credential{
 		Access:    codexToken(t, newAccount),
 		Refresh:   newRefresh,
 		Expires:   clock().Add(time.Hour),
@@ -442,5 +442,124 @@ func TestSetRefusesAnEntryItCannotRead(t *testing.T) {
 	}
 	if got := readFile(t, path); got != body {
 		t.Errorf("the file was written:\n%s", got)
+	}
+}
+
+// apiKeyProvider is a provider that has no tokens and no account: what an api key needs.
+var apiKeyProvider = auth.Provider{ID: "ollama-cloud", Kind: auth.KindAPIKey}
+
+// TestTwoProvidersShareOneFile covers the store as a store: one file, a credential per
+// provider, and each one read, replaced and deleted without touching the other.
+func TestTwoProvidersShareOneFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	credentials := auth.Credentials{Path: path, Now: clock}
+	ctx := context.Background()
+
+	codex, err := credentials.Set(ctx, auth.Codex, auth.Credential{
+		Access:    codexToken(t, newAccount),
+		Refresh:   newRefresh,
+		Expires:   clock().Add(time.Hour),
+		AccountID: newAccount,
+	}, false)
+	if err != nil {
+		t.Fatalf("storing the Codex credential: %v", err)
+	}
+	key, err := credentials.Set(ctx, apiKeyProvider, auth.Credential{Kind: auth.KindAPIKey, Key: "an-api-key"}, false)
+	if err != nil {
+		t.Fatalf("storing the api key: %v", err)
+	}
+	if codex.Provider != auth.ProviderCodex || key.Provider != "ollama-cloud" {
+		t.Errorf("the reports name %q and %q", codex.Provider, key.Provider)
+	}
+	if key.Kind != auth.KindAPIKey || key.Expires != (time.Time{}) || key.AccountID != "" {
+		t.Errorf("the api key reports %+v, want no expiry and no account", key)
+	}
+
+	// Both are read back by their own provider, and only by it.
+	if got, err := credentials.Read(apiKeyProvider); err != nil || got.Key != "an-api-key" {
+		t.Errorf("reading the api key is %+v, %v", got, err)
+	}
+	if _, err := credentials.Read(auth.Codex); err != nil {
+		t.Errorf("reading the Codex credential: %v", err)
+	}
+	// A provider reads the kind it accepts, and refuses another.
+	if _, err := credentials.Status(apiKeyProvider); err != nil {
+		t.Errorf("the api key's status: %v", err)
+	}
+	if _, err := credentials.Status(auth.Provider{ID: "ollama-cloud", Kind: auth.KindOAuth}); err == nil {
+		t.Error("the Codex-kind read accepted an api key entry")
+	}
+
+	// Deleting one leaves the other.
+	if err := credentials.Delete(ctx, "ollama-cloud"); err != nil {
+		t.Fatalf("deleting the api key: %v", err)
+	}
+	if held, err := credentials.Holds("ollama-cloud"); err != nil || held {
+		t.Errorf("the api key is still held (%t, %v)", held, err)
+	}
+	if held, err := credentials.Holds(auth.ProviderCodex); err != nil || !held {
+		t.Errorf("the Codex credential was deleted with it (%t, %v)", held, err)
+	}
+	// Deleting what is not there is the state the caller asked for, not a failure.
+	if err := credentials.Delete(ctx, "ollama-cloud"); err != nil {
+		t.Errorf("deleting an entry that is not there: %v", err)
+	}
+}
+
+// TestAnAPIKeyIsNotAToken covers the wrong question asked of the wrong kind: a token from an
+// api key, and an api key from a provider that trades tokens.
+func TestAnAPIKeyIsNotAToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	credentials := auth.Credentials{Path: path, Now: clock}
+	if _, err := credentials.Set(context.Background(), apiKeyProvider, auth.Credential{Kind: auth.KindAPIKey, Key: "an-api-key"}, false); err != nil {
+		t.Fatalf("storing the api key: %v", err)
+	}
+	if _, err := credentials.Access(context.Background(), apiKeyProvider); !errors.Is(err, auth.ErrNoCredential) {
+		t.Errorf("Access on an api key is %v, want ErrNoCredential", err)
+	}
+}
+
+// TestACredentialKindIsChecked covers what a credential must and must not carry. An oauth
+// credential with no tokens, an api key with no key, and either kind carrying the other's
+// fields are all refused before anything is written.
+func TestACredentialKindIsChecked(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		p     auth.Provider
+		entry auth.Credential
+	}{
+		{name: "an oauth credential with no tokens", p: auth.Codex, entry: auth.Credential{}},
+		{name: "an api key with no key", p: apiKeyProvider, entry: auth.Credential{Kind: auth.KindAPIKey}},
+		{name: "an api key carrying tokens", p: apiKeyProvider, entry: auth.Credential{Kind: auth.KindAPIKey, Key: "k", Access: "a"}},
+		{name: "an oauth credential carrying a key", p: auth.Codex, entry: auth.Credential{Access: "a", Refresh: "r", Key: "k", AccountID: newAccount}},
+		{name: "an api key for a provider that reads oauth", p: auth.Codex, entry: auth.Credential{Kind: auth.KindAPIKey, Key: "k"}},
+		{name: "an unknown kind", p: apiKeyProvider, entry: auth.Credential{Kind: "sigv4", Key: "k"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "auth.json")
+			if _, err := (auth.Credentials{Path: path, Now: clock}).Set(context.Background(), c.p, c.entry, false); err == nil {
+				t.Fatal("the credential was stored")
+			}
+			if _, err := os.Stat(path); err == nil {
+				t.Error("the file was written for a credential that was refused")
+			}
+		})
+	}
+}
+
+// TestAProviderThatNamesNoAccountTakesAnyToken covers the rule being the provider's: an
+// oauth provider with no account rule accepts a token that names no account, and Codex,
+// which has one, does not.
+func TestAProviderThatNamesNoAccountTakesAnyToken(t *testing.T) {
+	noAccount := auth.Provider{ID: "another-oauth", Kind: auth.KindOAuth}
+	path := filepath.Join(t.TempDir(), "auth.json")
+	credentials := auth.Credentials{Path: path, Now: clock}
+	entry := auth.Credential{Access: "an-opaque-token", Refresh: newRefresh, Expires: clock().Add(time.Hour)}
+	if _, err := credentials.Set(context.Background(), noAccount, entry, false); err != nil {
+		t.Fatalf("a provider with no account rule refused the token: %v", err)
+	}
+	codex := auth.Credential{Access: "an-opaque-token", Refresh: newRefresh, Expires: clock().Add(time.Hour)}
+	if _, err := credentials.Set(context.Background(), auth.Codex, codex, true); !errors.Is(err, auth.ErrNoCredential) {
+		t.Errorf("Codex took a token that names no account: %v", err)
 	}
 }

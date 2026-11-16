@@ -233,7 +233,7 @@ func TestAnExpiredTokenIsRefreshedAndWrittenBack(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	token, err := credentials.Access(context.Background())
+	token, err := credentials.Access(context.Background(), auth.Codex)
 	if err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestALiveTokenIsUsedWithoutAskingTheEndpoint(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	token, err := credentials.Access(context.Background())
+	token, err := credentials.Access(context.Background(), auth.Codex)
 	if err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestATokenInsidePisLeewayIsRefreshed(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	token, err := credentials.Access(context.Background())
+	token, err := credentials.Access(context.Background(), auth.Codex)
 	if err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestATokenAtTheLeewayBoundaryIsRefreshed(t *testing.T) {
 			}, nil)
 			credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-			token, err := credentials.Access(context.Background())
+			token, err := credentials.Access(context.Background(), auth.Codex)
 			if err != nil {
 				t.Fatalf("the credential did not reach a token: %v", err)
 			}
@@ -357,7 +357,7 @@ func TestARefreshKeepsEveryOtherCredential(t *testing.T) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-	if _, err := credentials.Access(context.Background()); err != nil {
+	if _, err := credentials.Access(context.Background(), auth.Codex); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
 
@@ -397,7 +397,7 @@ func TestARefreshHoldsPisLock(t *testing.T) {
 		held.Store(err == nil)
 	})
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-	if _, err := credentials.Access(context.Background()); err != nil {
+	if _, err := credentials.Access(context.Background(), auth.Codex); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
 
@@ -426,7 +426,7 @@ func TestASecondCallerWaitsForTheFirstRefresh(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			tokens[i], errs[i] = credentials.Access(context.Background())
+			tokens[i], errs[i] = credentials.Access(context.Background(), auth.Codex)
 		}(i)
 	}
 	wg.Wait()
@@ -455,7 +455,7 @@ func TestARefreshThatFailsLeavesTheFileAlone(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("the refusal is %v, want ErrRefresh", err)
 	}
@@ -487,7 +487,7 @@ func TestARefreshThatOmitsTheRefreshTokenKeepsTheStoredOne(t *testing.T) {
 		return http.StatusOK, fmt.Sprintf(`{"access_token":%q,"expires_in":3600}`, access)
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-	if _, err := credentials.Access(context.Background()); err != nil {
+	if _, err := credentials.Access(context.Background(), auth.Codex); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
 
@@ -533,7 +533,7 @@ func TestTheAccountComesFromTheNewAccessToken(t *testing.T) {
 				return http.StatusOK, traded(t, access, time.Hour)
 			}, nil)
 			credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-			token, err := credentials.Access(context.Background())
+			token, err := credentials.Access(context.Background(), auth.Codex)
 			if err != nil {
 				t.Fatalf("the credential did not reach a token: %v", err)
 			}
@@ -565,7 +565,7 @@ func TestAForeignLockIsWaitedOut(t *testing.T) {
 	waiting := make(chan auth.Token, 1)
 	failed := make(chan error, 1)
 	go func() {
-		token, err := credentials.Access(context.Background())
+		token, err := credentials.Access(context.Background(), auth.Codex)
 		if err != nil {
 			failed <- err
 			return
@@ -608,7 +608,7 @@ func TestAForeignLockTheWaitCannotOutlastIsReported(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Wait: 100 * time.Millisecond}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrLocked) {
 		t.Fatalf("the held lock is %v, want ErrLocked", err)
 	}
@@ -639,7 +639,7 @@ func TestAStaleLockIsBroken(t *testing.T) {
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	started := time.Now()
-	token, err := credentials.Access(context.Background())
+	token, err := credentials.Access(context.Background(), auth.Codex)
 	if err != nil {
 		t.Fatalf("the stale lock was not broken: %v", err)
 	}
@@ -680,7 +680,7 @@ func TestAnAuthFileWithoutACodexCredentialIsReported(t *testing.T) {
 				}
 			}
 			credentials := auth.Credentials{Path: path}
-			if _, err := credentials.Access(context.Background()); !errors.Is(err, auth.ErrNoCredential) {
+			if _, err := credentials.Access(context.Background(), auth.Codex); !errors.Is(err, auth.ErrNoCredential) {
 				t.Fatalf("the file is %v, want ErrNoCredential", err)
 			}
 			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
@@ -707,7 +707,7 @@ func TestAMalformedAuthFileIsNotWrittenOver(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrStorage) {
 		t.Fatalf("the malformed file is %v, want ErrStorage", err)
 	}
@@ -734,7 +734,7 @@ func TestARefreshAnswerWithoutATokenIsReported(t *testing.T) {
 			return http.StatusOK, answer
 		}, nil)
 		credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-		if _, err := credentials.Access(context.Background()); !errors.Is(err, auth.ErrRefresh) {
+		if _, err := credentials.Access(context.Background(), auth.Codex); !errors.Is(err, auth.ErrRefresh) {
 			t.Errorf("the answer %s is %v, want ErrRefresh", answer, err)
 		}
 		if after := readFile(t, path); before != after {
@@ -760,7 +760,7 @@ func TestACancelledWaitLeavesTheLockAlone(t *testing.T) {
 	time.AfterFunc(50*time.Millisecond, cancel)
 
 	started := time.Now()
-	_, err := credentials.Access(ctx)
+	_, err := credentials.Access(ctx, auth.Codex)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("the cancelled wait is %v, want context.Canceled", err)
 	}
@@ -789,7 +789,7 @@ func TestAnAnswerLargerThanTheBoundIsRefused(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("an answer over the bound is %v, want ErrRefresh", err)
 	}
@@ -809,7 +809,7 @@ func TestAnAnswerThatIsNotJSONIsRefused(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("an answer that is not JSON is %v, want ErrRefresh", err)
 	}
@@ -842,7 +842,7 @@ func TestACancelledRefreshWritesNothing(t *testing.T) {
 	}()
 	defer close(release)
 
-	_, err := credentials.Access(ctx)
+	_, err := credentials.Access(ctx, auth.Codex)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("the cancelled refresh is %v, want context.Canceled", err)
 	}
@@ -862,7 +862,7 @@ func TestACancelledRefreshWritesNothing(t *testing.T) {
 // must not take a lock in the working directory, and it must not report a
 // storage failure that a retry would.
 func TestAnEmptyPathIsRefused(t *testing.T) {
-	_, err := auth.Credentials{}.Access(context.Background())
+	_, err := auth.Credentials{}.Access(context.Background(), auth.Codex)
 	if err == nil {
 		t.Fatal("a credential with no path reached a token")
 	}
@@ -884,7 +884,7 @@ func TestTheClientIDOverrideIsSent(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, ClientID: "client-under-test"}
 
-	if _, err := credentials.Access(context.Background()); err != nil {
+	if _, err := credentials.Access(context.Background(), auth.Codex); err != nil {
 		t.Fatalf("the refresh: %v", err)
 	}
 	if got := endpoint.form(t, 0)["client_id"]; got != "client-under-test" {
@@ -902,7 +902,7 @@ func TestTheLeewayOverrideTakesALiveToken(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Leeway: 2 * time.Minute}
 
-	token, err := credentials.Access(context.Background())
+	token, err := credentials.Access(context.Background(), auth.Codex)
 	if err != nil {
 		t.Fatalf("the live token was not used: %v", err)
 	}

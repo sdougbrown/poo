@@ -61,7 +61,7 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		fmt.Fprintln(stderr, "poo auth status: the credential file cannot be resolved: set auth_file")
 		return exit{usageExitCode}
 	}
-	status, err := auth.Credentials{Path: path}.Status()
+	status, err := auth.Credentials{Path: path}.Status(auth.Codex)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth status: %v\n", err)
 		return exit{operationalExitCode}

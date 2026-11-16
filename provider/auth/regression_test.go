@@ -33,7 +33,7 @@ func TestALockTakenDuringARefreshIsNotWrittenUnder(t *testing.T) {
 
 	failed := make(chan error, 1)
 	go func() {
-		_, err := credentials.Access(context.Background())
+		_, err := credentials.Access(context.Background(), auth.Codex)
 		failed <- err
 	}()
 	<-entered
@@ -64,7 +64,7 @@ func TestALockTakenWithTheHeldMtimeIsDetected(t *testing.T) {
 
 	failed := make(chan error, 1)
 	go func() {
-		_, err := credentials.Access(context.Background())
+		_, err := credentials.Access(context.Background(), auth.Codex)
 		failed <- err
 	}()
 	<-entered
@@ -94,7 +94,7 @@ func TestABomFileRefreshesLikeAPiFile(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	if _, err := credentials.Access(context.Background()); err != nil {
+	if _, err := credentials.Access(context.Background(), auth.Codex); err != nil {
 		t.Fatalf("the BOM file did not reach a token: %v", err)
 	}
 	data := readFile(t, path)
@@ -127,7 +127,7 @@ func TestARefreshKeepsTheFieldsOfTheEntryItDoesNotOwn(t *testing.T) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-	if _, err := credentials.Access(context.Background()); err != nil {
+	if _, err := credentials.Access(context.Background(), auth.Codex); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestARefreshDoesNotFollowARedirect(t *testing.T) {
 	t.Cleanup(redirect.Close)
 	credentials := auth.Credentials{Path: path, TokenURL: redirect.URL, Now: clock}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("the redirect is %v, want ErrRefresh", err)
 	}
@@ -227,7 +227,7 @@ func TestARefreshDoesNotFollowARedirectEvenWhenTheClientWould(t *testing.T) {
 	}
 	credentials := auth.Credentials{Path: path, TokenURL: redirect.URL, HTTP: client, Now: clock}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("the redirect is %v, want ErrRefresh", err)
 	}
@@ -262,7 +262,7 @@ func TestARefreshThatCannotBeStoredIsReportedAsSuch(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrPersist) {
 		t.Fatalf("the failed write is %v, want ErrPersist", err)
 	}
@@ -286,7 +286,7 @@ func TestARefusalIsNotAPersistenceFailure(t *testing.T) {
 		return http.StatusBadRequest, `{"error":"invalid_grant"}`
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrRefresh) || errors.Is(err, auth.ErrPersist) {
 		t.Fatalf("the refusal is %v, want ErrRefresh and not ErrPersist", err)
 	}
@@ -345,7 +345,7 @@ func TestARefusalCarriesOnlyAStandardCode(t *testing.T) {
 			}, nil)
 			credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-			_, err := credentials.Access(context.Background())
+			_, err := credentials.Access(context.Background(), auth.Codex)
 			if !errors.Is(err, auth.ErrRefresh) {
 				t.Fatalf("the refusal is %v, want ErrRefresh", err)
 			}
@@ -431,7 +431,7 @@ func TestARefreshFollowsTheAuthFileSymlink(t *testing.T) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
 	credentials := auth.Credentials{Path: link, TokenURL: endpoint.URL, Now: clock}
-	if _, err := credentials.Access(context.Background()); err != nil {
+	if _, err := credentials.Access(context.Background(), auth.Codex); err != nil {
 		t.Fatalf("the linked credential did not reach a token: %v", err)
 	}
 
@@ -473,7 +473,7 @@ func TestTheLockIsNamedFromTheRealPath(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: linked, TokenURL: endpoint.URL, Now: clock, Wait: 200 * time.Millisecond}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrLocked) {
 		t.Fatalf("the linked path reached a lock pi holds: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestALockYoungerThanTheStaleBoundIsNotBroken(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Wait: 200 * time.Millisecond}
 
-	_, err := credentials.Access(context.Background())
+	_, err := credentials.Access(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrLocked) {
 		t.Fatalf("a lock inside the staleness bound was broken: %v", err)
 	}

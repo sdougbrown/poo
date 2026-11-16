@@ -75,7 +75,7 @@ func handleAuthImportPi(ctx context.Context, inv clicontract.Invocation, stdout,
 	if failed {
 		return exit{operationalExitCode}
 	}
-	status, err := poo.Set(ctx, entry, replace)
+	status, err := poo.Set(ctx, auth.Codex, entry, replace)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth import: %v\n", err)
 		return exit{operationalExitCode}
@@ -144,7 +144,7 @@ func piCredentialFile(settingsPath string, settings *config.Settings, from strin
 // one thing, and a second decoder here would be a copy that a field added to the format
 // would not reach.
 func readPiCredential(path string) (auth.Credential, error) {
-	return auth.Credentials{Path: path}.Read()
+	return auth.Credentials{Path: path}.Read(auth.Codex)
 }
 
 // replacement decides whether a credential poo's file already holds may be
@@ -157,7 +157,7 @@ func (o *authImportOptions) replacement(poo auth.Credentials, stdout, stderr io.
 	// Whether the file holds an entry is the question the replace rule asks, and it is
 	// not the same as whether the entry decodes: an entry poo cannot read is still an
 	// entry, and replacing it is still a decision.
-	held, err := poo.Holds()
+	held, err := poo.Holds(auth.Codex.ID)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth import: %v\n", err)
 		return false, true
@@ -168,7 +168,7 @@ func (o *authImportOptions) replacement(poo auth.Credentials, stdout, stderr io.
 	if o.force {
 		return true, false
 	}
-	status, err := poo.Status()
+	status, err := poo.Status(auth.Codex)
 	signedIn := ""
 	if err == nil && status.AccountID != "" {
 		signedIn = " as " + status.AccountID

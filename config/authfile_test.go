@@ -63,7 +63,7 @@ func TestBothReadersOfPisAuthFileAgree(t *testing.T) {
 
 			// The credential reader: the Codex entry, by the account it names. The
 			// token is live until 2100, so no refresh is asked for.
-			token, err := auth.Credentials{Path: authPath}.Access(context.Background())
+			token, err := auth.Credentials{Path: authPath}.Access(context.Background(), auth.Codex)
 			if err != nil {
 				t.Fatalf("the credential reader: %v", err)
 			}

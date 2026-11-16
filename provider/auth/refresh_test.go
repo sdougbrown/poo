@@ -25,7 +25,7 @@ func TestAForcedRefreshTradesALiveCredentialOnce(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	token, err := credentials.Refresh(context.Background())
+	token, err := credentials.Refresh(context.Background(), auth.Codex)
 	if err != nil {
 		t.Fatalf("the forced refresh did not reach a token: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestAForcedRefreshTradesALiveCredentialOnce(t *testing.T) {
 		t.Errorf("the file holds the refresh token %q, want the rotated %q", entry.Refresh, newRefresh)
 	}
 
-	again, err := credentials.Access(context.Background())
+	again, err := credentials.Access(context.Background(), auth.Codex)
 	if err != nil {
 		t.Fatalf("the credential did not reach a token after the forced refresh: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestAFailedForcedRefreshReturnsNoLiveCredential(t *testing.T) {
 	}, nil)
 	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	token, err := credentials.Refresh(context.Background())
+	token, err := credentials.Refresh(context.Background(), auth.Codex)
 	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("the refusal is %v, want ErrRefresh: a failed forced refresh is not the stored credential", err)
 	}
@@ -110,7 +110,7 @@ func TestConcurrentForcedRefreshesTradeInTurn(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			_, errs[i] = credentials.Refresh(context.Background())
+			_, errs[i] = credentials.Refresh(context.Background(), auth.Codex)
 		}(i)
 	}
 	close(start)
