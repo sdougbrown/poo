@@ -388,10 +388,20 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	waitFor(t, term, promptMark)
 	term.press("work\r")
 	// The editor dispatches a bare escape once its key buffer holds no
-	// more keys, and an arrow the moment its last byte lands, so a
-	// short settle is enough to tell them apart.
+	// more keys, and an arrow the moment its last byte lands, so a poll
+	// through the dispatch window is enough to tell them apart: an
+	// editor that reads the arrow's escape as Escape cancels inside it.
 	term.press("\x1b[B")
-	time.Sleep(100 * time.Millisecond)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		server.mu.Lock()
+		cancels := len(server.cancels)
+		server.mu.Unlock()
+		if cancels != 0 {
+			t.Fatalf("an arrow key cancelled the run: %d cancel(s)", cancels)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	server.mu.Lock()
 	cancels := append([]string(nil), server.cancels...)
