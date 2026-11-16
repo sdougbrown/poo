@@ -1549,16 +1549,19 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 // a reader sums stay honest, and the spend that bought the compaction is
 // still its own.
 //
-// A request that finishes after the run settled is not charged. The check
-// and the charge share one lock, so a settle that lands between them
-// cannot leave a settled run with a charge it never reports.
+// A request that finishes after the run settled is not charged: its tokens
+// would land on a run whose accounting is already fixed. The check and the
+// charge share one lock, so a settle between them cannot slip through.
+//
+// The record is written anyway. The endpoint billed the request, and the
+// log is where a run's real spend survives; the store refuses it once the
+// run is sealed, like every other late record, so what this buys is the
+// window between the commit and the seal.
 func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
 	s.mu.Lock()
-	if run.committed || run.sealed {
-		s.mu.Unlock()
-		return true
+	if !run.committed && !run.sealed {
+		s.chargeUsageLocked(run, usage)
 	}
-	s.chargeUsageLocked(run, usage)
 	s.mu.Unlock()
 	return s.recordUsage(run, NewRecordMetaFrom("usage", OriginCompaction), turn, 0, usage, requestChars)
 }

@@ -398,7 +398,7 @@ func (l *Log) Turns() int {
 	}
 	turns := 0
 	for _, u := range l.Usages() {
-		if u.Origin == string(poo.OriginCompaction) {
+		if poo.IsCompactionRequest(poo.Origin(u.Origin)) {
 			continue
 		}
 		turns++

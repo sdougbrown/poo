@@ -127,7 +127,7 @@ func ComputeMetrics(log *Log, diff Diff) Metrics {
 			cacheReported = true
 			cacheRead += *u.CacheReadTokens
 		}
-		if u.Origin == string(poo.OriginCompaction) {
+		if poo.IsCompactionRequest(poo.Origin(u.Origin)) {
 			m.CompactionInputTokens += u.InputTokens
 			m.CompactionOutputTokens += u.OutputTokens
 			// A compaction is not a turn: its time to the first token
