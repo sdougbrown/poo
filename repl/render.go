@@ -160,6 +160,13 @@ func (r *renderer) rewrap(width int) bool {
 	if width <= 4 || width == r.width {
 		return false
 	}
+	return r.setWidth(width)
+}
+
+// setWidth moves the width, the wrap, and the markdown renderer
+// together, so a render never lays out at one width and paints its rows
+// at another.
+func (r *renderer) setWidth(width int) bool {
 	r.width = width
 	r.wrap = width - 2
 	if r.newTR == nil {
@@ -199,22 +206,6 @@ func (r *renderer) paintPreviewBody(body string) {
 		return
 	}
 	r.layout.paintPreview(rows)
-}
-
-// terminalNewlines converts bare LF to CRLF without duplicating carriage returns.
-func terminalNewlines(s string) string {
-	if !strings.Contains(s, "\n") {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' && (i == 0 || s[i-1] != '\r') {
-			b.WriteByte('\r')
-		}
-		b.WriteByte(s[i])
-	}
-	return b.String()
 }
 
 // expandTabs puts the spaces a terminal's tab stops would, counting from
@@ -396,7 +387,9 @@ func (r *renderer) repaintPreview() {
 
 // stalledNow reports that the terminal's width has changed under a
 // block that is painting. The rows already painted wrap at the old
-// width, so painting stops until the flush lays them out again.
+// width, so painting stops until the flush lays them out again. The
+// width moves here, wrap and markdown renderer with it, so the resize
+// event's rewrap finds nothing left to do.
 func (r *renderer) stalledNow() bool {
 	if r.liveWidth == nil {
 		return false
@@ -405,7 +398,7 @@ func (r *renderer) stalledNow() bool {
 	if width <= 0 || width == r.width {
 		return false
 	}
-	r.width = width
+	r.setWidth(width)
 	return true
 }
 
