@@ -115,7 +115,11 @@ func (s *Settings) modelsFilePath(dir string) (string, error) {
 // models-file layer, or pi's, whose providers are imported into the settings
 // and the keys read from the credential file the settings resolved.
 func (s *Settings) importModelsFile(path string) error {
-	shaped, err := modelsFileShape(path)
+	document, err := readModelsDocument(path)
+	if err != nil {
+		return s.modelsFileError(err)
+	}
+	shaped, err := modelsFileShape(path, document)
 	if err != nil {
 		return s.modelsFileError(err)
 	}
@@ -127,7 +131,7 @@ func (s *Settings) importModelsFile(path string) error {
 		s.applyModelsFile(file)
 		return nil
 	}
-	layer, err := readModelsFile(path)
+	layer, err := modelsLayer(path, document)
 	if err != nil {
 		return s.modelsFileError(err)
 	}
@@ -166,11 +170,7 @@ const (
 // The file says which one it is: pi's declares its providers, and poo's
 // declares its endpoints. A file that neither declares is read as poo's, which
 // is the shape that says what the models are.
-func modelsFileShape(path string) (shape, error) {
-	document, err := readModelsDocument(path)
-	if err != nil {
-		return shapePoo, err
-	}
+func modelsFileShape(path string, document []byte) (shape, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(document, &top); err != nil {
 		return shapePoo, fmt.Errorf("%s: %w", path, err)
@@ -421,12 +421,8 @@ type modelsModel struct {
 	Sampling poo.Sampling `json:"sampling,omitempty"`
 }
 
-// readModelsFile reads poo's own models file and returns the layer it declares.
-func readModelsFile(path string) (catalog.FileSettings, error) {
-	document, err := readModelsDocument(path)
-	if err != nil {
-		return catalog.FileSettings{}, err
-	}
+// modelsLayer reads poo's own models file and returns the layer it declares.
+func modelsLayer(path string, document []byte) (catalog.FileSettings, error) {
 	var file modelsFile
 	decoder := json.NewDecoder(bytes.NewReader(document))
 	decoder.DisallowUnknownFields()
