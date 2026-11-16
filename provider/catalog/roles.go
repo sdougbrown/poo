@@ -67,22 +67,49 @@ type Endpoint struct {
 	Credential Credential
 }
 
-// OpError is a model that does not serve the operation its role needs.
+// OpError is a model that does not serve what its role needs.
 //
-// The error names the role and the operation, so the reader knows what
-// the model cannot do.
+// The error names the role and the operations, so the reader knows what the model
+// cannot do.
 type OpError struct {
 	// Role is the role the model was assigned to.
 	Role Role
 	// Model is the model's name.
 	Model string
-	// Op is the operation the role needs.
-	Op poo.Op
+	// Ops are the operations the role accepts: a model serves the role with any
+	// one of them.
+	Ops []poo.Op
 }
 
 func (e *OpError) Error() string {
-	return fmt.Sprintf("catalog: the model %q does not serve the %q operation the %q role needs",
-		e.Model, e.Op, e.Role)
+	if len(e.Ops) == 1 {
+		return fmt.Sprintf("catalog: the model %q does not serve the %q operation the %q role needs",
+			e.Model, e.Ops[0], e.Role)
+	}
+	names := make([]string, 0, len(e.Ops))
+	for _, op := range e.Ops {
+		names = append(names, fmt.Sprintf("%q", op))
+	}
+	return fmt.Sprintf("catalog: the model %q does not serve any of the %s operations the %q role needs",
+		e.Model, quoteList(names), e.Role)
+}
+
+// servesRole reports whether a model serves what a role needs.
+//
+// A role with no operations needs nothing. A role that names several is served by a
+// model that serves any one of them, which is what the decider does: it answers
+// through the systemone API or through chat, whichever the model has.
+func servesRole(info poo.ModelInfo, role Role) bool {
+	ops := opsForRole(role)
+	if len(ops) == 0 {
+		return true
+	}
+	for _, op := range ops {
+		if info.HasOp(op) {
+			return true
+		}
+	}
+	return false
 }
 
 // UnresolvedError is a model the catalog cannot resolve.

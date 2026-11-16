@@ -423,11 +423,8 @@ func (c *Catalog) Role(role Role) (poo.ModelInfo, error) {
 		return poo.ModelInfo{}, c.unresolved(name, role)
 	}
 	info := c.effective(name)
-	for _, op := range opsForRole(role) {
-		if info.HasOp(op) {
-			continue
-		}
-		return poo.ModelInfo{}, &OpError{Role: role, Model: name, Op: op}
+	if !servesRole(info, role) {
+		return poo.ModelInfo{}, &OpError{Role: role, Model: name, Ops: opsForRole(role)}
 	}
 	return info, nil
 }
@@ -460,14 +457,7 @@ func (c *Catalog) servable(role Role) []string {
 	var out []string
 	for name := range c.entries {
 		info := c.effective(name)
-		serves := true
-		for _, op := range opsForRole(role) {
-			if !info.HasOp(op) {
-				serves = false
-				break
-			}
-		}
-		if serves {
+		if servesRole(info, role) {
 			out = append(out, name)
 		}
 	}
@@ -505,11 +495,8 @@ func (c *Catalog) CheckRoles() error {
 			continue
 		}
 		info := c.effective(model)
-		for _, op := range opsForRole(role) {
-			if info.HasOp(op) {
-				continue
-			}
-			return &OpError{Role: role, Model: model, Op: op}
+		if !servesRole(info, role) {
+			return &OpError{Role: role, Model: model, Ops: opsForRole(role)}
 		}
 	}
 	return nil

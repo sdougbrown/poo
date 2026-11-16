@@ -287,8 +287,8 @@ func TestARoleNeedsTheOperation(t *testing.T) {
 	if opErr.Role != catalog.RoleDecider {
 		t.Errorf("the error names the %q role, want decider", opErr.Role)
 	}
-	if opErr.Op != poo.OpSystemOne {
-		t.Errorf("the error names the %q operation, want systemone", opErr.Op)
+	if len(opErr.Ops) != 2 || opErr.Ops[0] != poo.OpSystemOne || opErr.Ops[1] != poo.OpDecisions {
+		t.Errorf("the error names the operations %v, want systemone and decisions", opErr.Ops)
 	}
 }
 
@@ -306,8 +306,8 @@ func TestTheChatRoleNeedsTheChatOperation(t *testing.T) {
 	if !errors.As(err, &opErr) {
 		t.Fatalf("the error is %v, want an operation error", err)
 	}
-	if opErr.Op != poo.OpChat {
-		t.Errorf("the error names the %q operation, want chat", opErr.Op)
+	if len(opErr.Ops) != 1 || opErr.Ops[0] != poo.OpChat {
+		t.Errorf("the error names the operations %v, want chat", opErr.Ops)
 	}
 }
 
@@ -827,7 +827,41 @@ func TestARoleNeedsTheModelToServeIt(t *testing.T) {
 	if !errors.As(err, &op) {
 		t.Fatalf("the role is %v, want an OpError", err)
 	}
-	if op.Op != poo.OpChat {
-		t.Errorf("the operation is %q, want chat", op.Op)
+	if len(op.Ops) != 1 || op.Ops[0] != poo.OpChat {
+		t.Errorf("the operations are %v, want chat", op.Ops)
+	}
+}
+
+// TestADeciderServesTheRoleWithEitherOperation covers the rule the decider itself
+// applies: it answers through the systemone API or through chat, so a model that
+// serves one of them is the role's model. Requiring both refused a model the decider
+// would run.
+func TestADeciderServesTheRoleWithEitherOperation(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		ops  []poo.Op
+		want bool
+	}{
+		{name: "systemone", ops: []poo.Op{poo.OpSystemOne}, want: true},
+		{name: "decisions through chat", ops: []poo.Op{poo.OpDecisions}, want: true},
+		{name: "chat alone", ops: []poo.Op{poo.OpChat}, want: false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			settings := localSettings()
+			settings.Models["gemma4"] = catalog.ModelSettings{
+				Endpoint: "grace",
+				ModelID:  "gemma4",
+				Ops:      c.ops,
+			}
+			settings.Roles = map[string]string{"decider": "gemma4"}
+			catalogOf := catalog.New(catalog.Options{Settings: settings})
+			_, err := catalogOf.Role(catalog.RoleDecider)
+			if c.want && err != nil {
+				t.Fatalf("the decider role refused the model: %v", err)
+			}
+			if !c.want && err == nil {
+				t.Fatal("the decider role accepted a model that serves neither operation")
+			}
+		})
 	}
 }
