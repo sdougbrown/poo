@@ -343,7 +343,7 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 		Build: func(stream support.Stream) *streamReader {
 			return &streamReader{
 				body:        stream.Body,
-				scanner:     support.SSEScanner(stream.Reader),
+				frames:      support.NewFrames(support.SSEScanner(stream.Reader)),
 				filters:     t.textFilters(settings),
 				deferParsed: t.sendsTools(settings),
 				ctx:         stream.Context,

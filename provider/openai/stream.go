@@ -1,11 +1,10 @@
 package openai
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
-	"strings"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/provider/internal/support"
@@ -67,8 +66,8 @@ type streamChunk struct {
 
 // streamReader reads an SSE response.
 type streamReader struct {
-	body    io.ReadCloser
-	scanner *bufio.Scanner
+	body   io.ReadCloser
+	frames *support.Frames
 	// filters are the text filters the quirks added, in order. The
 	// parser is the last of them, so it reads the text the others
 	// passed on.
@@ -84,10 +83,6 @@ type streamReader struct {
 	cancel context.CancelFunc
 	// pending holds events the reader has decoded but not yet returned.
 	pending []poo.StreamItem
-	// data holds the `data:` lines of the event being read. An event's
-	// payload may span several lines, which the SSE grammar joins with a
-	// newline.
-	data []string
 	// done reports that the stream is finished.
 	done bool
 	// err holds the failure that ended the stream.
@@ -113,8 +108,8 @@ type streamReader struct {
 
 // init makes the scanner when the reader was built without one.
 func (r *streamReader) init() {
-	if r.scanner == nil {
-		r.scanner = support.SSEScanner(r.body)
+	if r.frames == nil {
+		r.frames = support.NewFrames(support.SSEScanner(r.body))
 	}
 }
 
@@ -135,58 +130,23 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 	}
 
 	for {
-		if !r.scanner.Scan() {
-			r.done = true
-			if err := r.scanner.Err(); err != nil {
-				return r.fail(support.ContextError(r.parent, r.ctx, r.ttft.Arrived(), err))
+		payload, err := r.frames.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				r.done = true
+				// The stream ended. Whatever the parser still holds is
+				// flushed, so a text-mode tool call that arrived without a
+				// trailing newline is not lost.
+				return r.close()
 			}
-			// The stream ended without a [DONE] marker. Whatever the
-			// parser still holds is flushed, so a text-mode tool call
-			// that arrived without a trailing newline is not lost.
-			return r.close()
+			return r.fail(support.ContextError(r.parent, r.ctx, r.ttft.Arrived(), err))
 		}
-
-		line := r.scanner.Text()
-		if line == "" {
-			// A blank line ends the event.
-			if err := r.dispatch(); err != nil {
-				return r.fail(err)
-			}
-			if ev, ok := support.Take(&r.pending); ok {
-				return ev, nil
-			}
-			continue
+		if err := r.dispatch(payload); err != nil {
+			return r.fail(err)
 		}
-		if !strings.HasPrefix(line, "data:") {
-			// Comments and other SSE fields carry no payload.
-			continue
+		if ev, ok := support.Take(&r.pending); ok {
+			return ev, nil
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" {
-			continue
-		}
-		if payload == "[DONE]" {
-			r.done = true
-			return r.close()
-		}
-
-		// A server that separates its events with a single newline
-		// never sends the blank line that ends an event, so the event
-		// is dispatched as soon as the next one starts. An event whose
-		// payload is not valid JSON yet is kept, because it may still
-		// be a payload spread over several data lines.
-		complete := len(r.data) > 0 && json.Valid([]byte(strings.Join(r.data, "\n")))
-		if complete {
-			if err := r.dispatch(); err != nil {
-				return r.fail(err)
-			}
-			r.data = append(r.data, payload)
-			if ev, ok := support.Take(&r.pending); ok {
-				return ev, nil
-			}
-			continue
-		}
-		r.data = append(r.data, payload)
 	}
 }
 
@@ -196,13 +156,7 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 // endpoint sent them. An event whose payload does not parse is skipped,
 // because a chunk the transport cannot read is not worth failing the run
 // over.
-func (r *streamReader) dispatch() error {
-	if len(r.data) == 0 {
-		return nil
-	}
-	payload := strings.Join(r.data, "\n")
-	r.data = nil
-
+func (r *streamReader) dispatch(payload []byte) error {
 	var chunk streamChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return nil
@@ -230,10 +184,6 @@ func (r *streamReader) dispatch() error {
 // trailing newline is not lost, and the usage report is produced, so every
 // request has one.
 func (r *streamReader) close() (poo.StreamItem, error) {
-	if err := r.dispatch(); err != nil {
-		// The event ended the stream. The usage is still reported.
-		return r.fail(err)
-	}
 	// The calls the model wrote as text wait for a native call that
 	// would win over them. The endpoint sent one, so the calls the
 	// model wrote are not the ones it made.
@@ -272,15 +222,10 @@ func withoutToolCalls(events []poo.StreamItem) []poo.StreamItem {
 
 // fail ends the stream with a failure.
 //
-// A complete event still waiting for its dispatch is queued first, so
-// it is not lost with the connection. An in-band error it carries is the
-// more specific failure and replaces the read error. The usage report
-// follows, so a consumer sees the request's accounting even when the
-// stream broke. The failure itself is returned by the next call.
+// The usage report follows the failure, so a consumer sees the request's
+// accounting even when the stream broke. The failure itself is returned by the
+// next call.
 func (r *streamReader) fail(err error) (poo.StreamItem, error) {
-	if derr := r.dispatch(); derr != nil {
-		err = derr
-	}
 	r.done = true
 	r.err = err
 	r.pending = r.appendUsage(r.pending)
