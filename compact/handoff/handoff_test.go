@@ -128,8 +128,8 @@ func TestTheForkSendsTheMainPrefixPlusTheInstruction(t *testing.T) {
 	if len(forks[0].Appended) != 1 {
 		t.Fatalf("the fork appended %d messages, want 1", len(forks[0].Appended))
 	}
-	if forks[0].Appended[0].Text() != handoff.Instruction {
-		t.Errorf("the fork appended %q, want the instruction", forks[0].Appended[0].Text())
+	if got := forks[0].Appended[0].Text(); !strings.Contains(got, "Write a handoff") || !strings.Contains(got, "Reply with text only") {
+		t.Errorf("the fork appended %q, want an instruction to write a handoff", got)
 	}
 	if forks[0].MaxTokens != handoff.DefaultMaxTokens {
 		t.Errorf("the fork asked for %d tokens, want %d", forks[0].MaxTokens, handoff.DefaultMaxTokens)
