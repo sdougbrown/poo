@@ -427,6 +427,23 @@ roles:
 	if strings.Contains(out, "the-key-nobody-should-see") {
 		t.Errorf("the report carries the key: %q", out)
 	}
+	// A role the settings do not assign is listed with no model, no provider and no
+	// credential: a session does without it.
+	if row := rowOf(out, "decider"); row != "decider - - -" {
+		t.Errorf("the unassigned role's row is %q, want it empty", row)
+	}
+}
+
+// rowOf returns the table row a role is printed on, its cells joined by single spaces.
+func rowOf(out, role string) string {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] != role {
+			continue
+		}
+		return strings.Join(fields, " ")
+	}
+	return ""
 }
 
 // TestTheRolesCommandFailsOnARoleThatDoesNotResolve covers the exit code a check
@@ -454,12 +471,17 @@ roles:
 		t.Fatalf("writing the settings: %v", err)
 	}
 
-	code, stderr := runCLI(t, "roles", "--settings", settings)
+	code, stderr, out := runCLIWithStdout(t, "roles", "--settings", settings)
 	if code == 0 {
 		t.Errorf("poo roles exited 0 for a model that is not in the catalog")
 	}
 	if !strings.Contains(stderr, "home/qwen3") {
 		t.Errorf("the failure is %q, want it to name the model that would have served the role", stderr)
+	}
+	// The row says what the settings wrote, and claims no provider or credential for a
+	// model that did not resolve.
+	if row := rowOf(out, "chat"); row != "chat qwen3 - -" {
+		t.Errorf("the failed role's row is %q, want the name as written and no provider", row)
 	}
 }
 
@@ -489,12 +511,15 @@ roles:
 `), 0o644); err != nil {
 		t.Fatalf("writing the settings: %v", err)
 	}
-	code, stderr := runCLI(t, "roles", "--settings", settings)
+	code, stderr, out := runCLIWithStdout(t, "roles", "--settings", settings)
 	if code == 0 {
 		t.Error("poo roles exited 0 for a model that cannot serve the role")
 	}
 	if !strings.Contains(stderr, "chat") || !strings.Contains(stderr, "does not serve") {
 		t.Errorf("the failure is %q, want it to name the operation the role needs", stderr)
+	}
+	if row := rowOf(out, "chat"); row != "chat home/qwen3 - -" {
+		t.Errorf("the failed role's row is %q, want the name as written and no provider", row)
 	}
 }
 
