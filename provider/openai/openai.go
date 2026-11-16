@@ -7,13 +7,11 @@
 package openai
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -327,91 +325,34 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 // error classification and the time to the first token mean the same
 // thing for both.
 func (t *Transport) open(ctx context.Context, body []byte, settings requestSettings) (*streamReader, error) {
-	// The timeout bounds the whole request, streaming included, so the
-	// context is created before the request goes out. The parent stays
-	// apart, so a timeout the transport imposed is told from the run's
-	// own cancellation.
-	parent := ctx
-	var cancel context.CancelFunc
-	if t.cfg.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
-	}
-	release := func() {
-		if cancel != nil {
-			cancel()
-		}
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.Endpoint), bytes.NewReader(body))
-	if err != nil {
-		release()
-		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
-	if t.cfg.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
-	}
-
-	// The request is timed from the moment it goes out, so the time to
-	// the first token includes the endpoint's own latency.
-	started := time.Now()
-
-	resp, err := t.http.Do(httpReq)
-	if err != nil {
-		// The failure is classified before the request's context is
-		// released, because releasing it would replace the failure with
-		// the context's own error.
-		perr := support.ClassifyTransportError(parent, ctx, err)
-		release()
-		return nil, perr
-	}
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		// The body is read under the request's timeout, so the context is
-		// released after it.
-		defer release()
-		return nil, support.ClassifyStatus(resp)
-	}
-
-	// Some servers answer a failed request with a 200 and a JSON error
-	// body instead of the SSE stream. The first byte tells the two apart,
-	// so the stream is not buffered and the time to the first token
-	// measures the endpoint's latency rather than the reader's.
-	br := bufio.NewReader(resp.Body)
-	first, err := support.PeekFirstByte(br)
-	if err != nil {
-		resp.Body.Close()
-		release()
-		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
-	}
-	if first == '{' {
-		defer resp.Body.Close()
-		defer release()
-		errBody, err := io.ReadAll(io.LimitReader(br, 1<<20))
-		if err != nil {
-			return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
-		}
-		if perr, ok := support.ErrorInBody(errBody, resp.StatusCode, resp.Header); ok {
-			return nil, perr
-		}
-		return nil, &poo.ProviderError{
-			Kind:    poo.ProviderKindServer,
-			Message: "the endpoint returned a body that is not a stream",
-			Status:  resp.StatusCode,
-		}
-	}
-
-	return &streamReader{
-		body:        resp.Body,
-		scanner:     support.SSEScanner(br),
-		filters:     t.textFilters(settings),
-		deferParsed: t.sendsTools(settings),
-		ctx:         ctx,
-		parent:      parent,
-		cancel:      cancel,
-		ttft:        support.NewTTFT(started),
-	}, nil
+	return support.OpenStream(ctx, support.OpenOptions[*streamReader]{
+		Client:  t.http,
+		Timeout: t.cfg.Timeout,
+		Request: func(ctx context.Context) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, ChatURL(t.cfg.Endpoint), bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "text/event-stream")
+			if t.cfg.APIKey != "" {
+				req.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
+			}
+			return req, nil
+		},
+		Build: func(stream support.Stream) *streamReader {
+			return &streamReader{
+				body:        stream.Body,
+				scanner:     support.SSEScanner(stream.Reader),
+				filters:     t.textFilters(settings),
+				deferParsed: t.sendsTools(settings),
+				ctx:         stream.Context,
+				parent:      stream.Parent,
+				cancel:      stream.Cancel,
+				ttft:        stream.TTFT,
+			}
+		},
+	})
 }
 
 // forkBody appends messages to a serialized request body.
