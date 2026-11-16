@@ -45,27 +45,9 @@ func (c Credentials) trade(ctx context.Context, p Provider, stored credential) (
 		"refresh_token": {stored.Refresh},
 		"client_id":     {c.clientID(p, stored)},
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	answer, err := postForm(ctx, c.client(), endpoint, form)
 	if err != nil {
-		return credential{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Accept", "application/json")
-	response, err := c.client().Do(request)
-	if err != nil {
-		return credential{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxTokenResponse))
-	if err != nil {
-		return credential{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
-	}
-	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return credential{}, fmt.Errorf("%w: %s: status %d%s", ErrRefresh, endpoint, response.StatusCode, errorCode(body))
-	}
-	var answer tokenResponse
-	if err := json.Unmarshal(body, &answer); err != nil {
-		return credential{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
+		return credential{}, err
 	}
 	if answer.AccessToken == "" || answer.ExpiresIn <= 0 {
 		return credential{}, fmt.Errorf("%w: %s: the answer carries no token or no lifetime", ErrRefresh, endpoint)
@@ -173,4 +155,43 @@ func (c Credentials) clientID(p Provider, stored credential) string {
 		return p.ClientID
 	}
 	return DefaultClientID
+}
+
+// postForm posts a form to a token endpoint and reads its answer.
+//
+// A redirect is refused rather than followed: a token request's body carries a code or a
+// refresh token, and Go would replay it wherever the redirect pointed. The answer is bounded,
+// and a failure reports the status and a standard OAuth error code, and nothing else the
+// answer said.
+func postForm(ctx context.Context, client *http.Client, endpoint string, form url.Values) (tokenResponse, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return tokenResponse{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	refusing := &http.Client{
+		Transport: client.Transport,
+		Timeout:   client.Timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := refusing.Do(request)
+	if err != nil {
+		return tokenResponse{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxTokenResponse))
+	if err != nil {
+		return tokenResponse{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
+	}
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return tokenResponse{}, fmt.Errorf("%w: %s: status %d%s", ErrRefresh, endpoint, response.StatusCode, errorCode(body))
+	}
+	var answer tokenResponse
+	if err := json.Unmarshal(body, &answer); err != nil {
+		return tokenResponse{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
+	}
+	return answer, nil
 }
