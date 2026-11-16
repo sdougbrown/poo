@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/poo/config"
 )
 
 // The commands that read the settings and the store: the catalog the
@@ -333,5 +335,52 @@ func TestTheEphemeralModeWritesNothing(t *testing.T) {
 			names = append(names, entry.Name())
 		}
 		t.Errorf("the directory holds %v, want nothing", names)
+	}
+}
+
+// TestTheModelsCommandExplainsTheModelsFile covers the layer the catalog reads
+// below the settings: a model the models file declares is listed and explained,
+// and its fields are attributed to the file.
+func TestTheModelsCommandExplainsTheModelsFile(t *testing.T) {
+	// The user's config directory is the settings' last resort, and the
+	// credential file's default: a directory of the test's own keeps both out
+	// of the developer's own config.
+	configDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("HOME", configDir)
+	t.Setenv("APPDATA", configDir)
+
+	dir := t.TempDir()
+	models := filepath.Join(dir, config.ModelsFileName)
+	if err := os.WriteFile(models, []byte(`endpoints:
+  home:
+    endpoint: http://127.0.0.1:1/v1
+    models:
+      qwen3:
+        context_limit: 32768
+`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	settings := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settings, []byte(`version: 1
+models_file: models.yaml
+session:
+  mode: ephemeral
+roles:
+  chat: home/qwen3
+`), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"models", "--settings", settings, "--explain", "home/qwen3"}); code != 0 {
+			t.Errorf("poo models --explain exited with %d", code)
+		}
+	})
+	if !strings.Contains(out, "models_file") {
+		t.Errorf("the explanation is %q, want it to name the models file's layer", out)
+	}
+	if !strings.Contains(out, "32768") {
+		t.Errorf("the explanation is %q, want it to show the file's context limit", out)
 	}
 }

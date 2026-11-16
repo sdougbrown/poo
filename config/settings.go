@@ -13,7 +13,10 @@
 // session gets the same pieces a Go consumer would build by hand.
 package config
 
-import "github.com/sdougbrown/poo"
+import (
+	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/catalog"
+)
 
 //go:generate go run github.com/umpire-tools/umpire-go-gen@v0.3.1 -i schema/settings.umpire.json -output-file settings_gen.go -pkg config
 
@@ -66,19 +69,15 @@ type Settings struct {
 	// binary launches. The name is one the binary links; a binary
 	// without the named interface shows its usage.
 	UI string `json:"ui,omitempty"`
-	// ModelsFile names a models file — providers, each with its models —
-	// that the settings import under names of the form provider/id. The
-	// file's shape is the one pi writes, and that shape is the whole
-	// compatibility: poo reads the file the settings name, and no pi
-	// installation. The settings' own endpoints and models win on a name
-	// collision. A provider whose apiKey the file leaves no usable key for
-	// takes the key out of the auth.json beside that file, when the file
-	// holds an api credential for the provider.
+	// ModelsFile names a models file — the endpoints that can be reached, each
+	// with the models it serves — that the catalog reads as a layer below these
+	// settings. A field the file sets is overridden field by field by the
+	// settings, and a model in it is named provider/id, so a role can name one
+	// the settings never mention.
 	//
 	// A relative path resolves against the settings file's own directory. With
-	// none named, a models.json beside the settings file is imported. The
-	// auth.json beside the file is also the built-in Codex provider's
-	// credential.
+	// none named, a models.yaml beside the settings file is read, and a
+	// models.json beside it is imported: that is the file pi writes.
 	ModelsFile string `json:"models_file,omitempty"`
 	// AuthFile names poo's own credential file: a version, and the credential
 	// of each provider under it. It is the file poo writes a credential to, and
@@ -99,6 +98,10 @@ type Settings struct {
 	// credentialPath is the resolved path of the file the Codex credential is
 	// read from, empty when a Settings built by hand named none.
 	credentialPath string
+	// modelsFileLayer is what the models file declared, as the catalog's layer
+	// below the settings. It is empty when the settings named no models file, or
+	// named one in pi's shape, which is imported into the settings instead.
+	modelsFileLayer catalog.FileSettings
 }
 
 // Endpoint is one endpoint in the settings.

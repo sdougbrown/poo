@@ -850,7 +850,7 @@ func TestAModelsFileInAnotherDirectoryTakesTheAuthBesideIt(t *testing.T) {
 			t.Fatalf("creating %s: %v", dir, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(modelsDir, config.ModelsFileName), []byte(`{
+	if err := os.WriteFile(filepath.Join(modelsDir, config.PiModelsFileName), []byte(`{
 		"providers": {
 			"home": {
 				"baseUrl": "http://127.0.0.1:1/v1",

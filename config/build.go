@@ -1030,17 +1030,28 @@ func (r *Runtime) resolveProfiles(opts BuildOptions) ([]poo.Profile, error) {
 	return out, nil
 }
 
+// CatalogOptions are the catalog options the settings describe: the settings'
+// own layer, and the models file's layer below it.
+//
+// One caller builds a catalog from the settings, so the layers a catalog merges
+// are the settings' own answer rather than something each caller reassembles.
+func (s *Settings) CatalogOptions() catalog.Options {
+	return catalog.Options{
+		Settings: s.CatalogSettings(),
+		File:     s.modelsFileLayer,
+	}
+}
+
 // CatalogSettings returns the catalog's view of the settings.
 //
-// The catalog reads the endpoints, the models, the roles and the
-// sampling overrides from the settings, and the settings say nothing
-// else about the models.
+// The catalog reads the endpoints, the models and the roles from the settings,
+// and each model's sampling override with it. The settings say nothing else
+// about the models.
 func (s *Settings) CatalogSettings() catalog.Settings {
 	settings := catalog.Settings{
 		Endpoints: map[string]catalog.EndpointSettings{},
 		Models:    map[string]catalog.ModelSettings{},
 		Roles:     map[string]string{},
-		Sampling:  map[string]poo.Sampling{},
 	}
 	for name, endpoint := range s.Endpoints {
 		settings.Endpoints[name] = catalog.EndpointSettings{
@@ -1067,6 +1078,7 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			Reasoning:       model.Reasoning,
 			ReasoningLevels: model.ReasoningLevels,
 			Quirks:          model.Quirks,
+			Sampling:        sampling(s.Sampling[name]),
 		}
 	}
 	for role, model := range s.Roles {
@@ -1075,28 +1087,19 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 	if s.Reasoning.Chat != nil {
 		settings.Reasoning = *s.Reasoning.Chat
 	}
-	for name, sampling := range s.Sampling {
-		settings.Sampling[name] = poo.Sampling{
-			Temperature: sampling.Temperature,
-			TopP:        sampling.TopP,
-			TopK:        sampling.TopK,
-			MinP:        sampling.MinP,
-		}
-	}
 	return settings
 }
 
 // resolveModels builds the catalog and resolves the roles.
 //
-// The catalog is built from the settings' endpoints, models, roles and
-// sampling overrides. The chat model is the one a session cannot run
-// without, so a chat role the catalog cannot resolve is a failure.
+// The catalog is built from the settings and the models file, as the settings
+// describe them. The chat model is the one a session cannot run without, so a
+// chat role the catalog cannot resolve is a failure.
 func (r *Runtime) resolveModels(opts BuildOptions) error {
-	cat := catalog.New(catalog.Options{
-		Settings:   r.Settings.CatalogSettings(),
-		Logger:     opts.Logger,
-		HTTPClient: opts.HTTPClient,
-	})
+	catalogOptions := r.Settings.CatalogOptions()
+	catalogOptions.Logger = opts.Logger
+	catalogOptions.HTTPClient = opts.HTTPClient
+	cat := catalog.New(catalogOptions)
 	if err := cat.CheckRoles(); err != nil {
 		if !opts.NoChatModel || !isChatRole(err) {
 			return fmt.Errorf("config: %w", err)
@@ -1171,6 +1174,16 @@ func ops(names []string) []poo.Op {
 		out = append(out, poo.Op(name))
 	}
 	return out
+}
+
+// sampling returns the settings' sampling override as the catalog reads one.
+func sampling(override Sampling) poo.Sampling {
+	return poo.Sampling{
+		Temperature: override.Temperature,
+		TopP:        override.TopP,
+		TopK:        override.TopK,
+		MinP:        override.MinP,
+	}
 }
 
 // modalities returns the modalities the settings name.

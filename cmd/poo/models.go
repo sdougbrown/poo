@@ -43,7 +43,7 @@ func handleModels(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		fmt.Fprintf(stderr, "poo models: %v\n", err)
 		return exit{usageExitCode}
 	}
-	cat := catalog.New(catalog.Options{Settings: settings.CatalogSettings()})
+	cat := catalog.New(settings.CatalogOptions())
 	// A probe that fails falls back to the cache and then to the
 	// curated catalog, with a warning: the list is still the list.
 	if err := cat.Refresh(context.Background()); err != nil {

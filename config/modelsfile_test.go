@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/catalog"
 )
 
 // writePIModels writes a models file in pi's format and returns its
@@ -866,5 +867,163 @@ func TestADiscoveredModelsFileThatDoesNotReadNamesTheFile(t *testing.T) {
 	}
 	if !strings.Contains(failure.Error(), ModelsFileName) {
 		t.Errorf("the failure %q does not name the file", failure.Error())
+	}
+}
+
+// writePooModels writes poo's own models file into dir and returns its path.
+func writePooModels(t *testing.T, dir, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, ModelsFileName)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	return path
+}
+
+// pooModels is a models file of one endpoint serving one model.
+const pooModels = `endpoints:
+  home:
+    endpoint: http://127.0.0.1:1/v1
+    api_key_env: HOME_KEY
+    models:
+      qwen3:
+        context_limit: 32768
+        max_output: 4096
+        inputs: [text, image]
+        sampling:
+          temperature: 0.3
+`
+
+// TestAModelsFileDeclaresWhatRuns covers the layer: a model written in the
+// models file is a model a role can name, with no settings entry at all.
+func TestAModelsFileDeclaresWhatRuns(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	writePooModels(t, dir, pooModels)
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+roles:
+  chat: home/qwen3
+`)
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	cat := catalog.New(settings.CatalogOptions())
+	if err := cat.CheckRoles(); err != nil {
+		t.Fatalf("the role does not resolve: %v", err)
+	}
+	model, err := cat.Role(catalog.RoleChat)
+	if err != nil {
+		t.Fatalf("the chat model: %v", err)
+	}
+	if model.Name != "home/qwen3" || model.ModelID != "qwen3" {
+		t.Errorf("the model is %q for %q, want home/qwen3 for qwen3", model.Name, model.ModelID)
+	}
+	if model.Provider != "home" || model.Endpoint != "http://127.0.0.1:1/v1" {
+		t.Errorf("the model is served by %q at %q, want the file's endpoint", model.Provider, model.Endpoint)
+	}
+	if model.ContextLimit != 32768 || model.MaxOutput != 4096 {
+		t.Errorf("the model's limits are %d and %d, want the file's", model.ContextLimit, model.MaxOutput)
+	}
+	if !model.Reads(poo.ModalityImage) {
+		t.Error("the model does not read images, which the file says it does")
+	}
+	if model.Sampling.Temperature == nil || *model.Sampling.Temperature != 0.3 {
+		t.Errorf("the temperature is %v, want the file's 0.3", model.Sampling.Temperature)
+	}
+	if model.Source["context_limit"] != catalog.LayerModelsFile {
+		t.Errorf("the context limit comes from %q, want models_file", model.Source["context_limit"])
+	}
+}
+
+// TestTheSettingsOverruleTheModelsFile covers the composition: the file
+// declares what runs, and the settings adjust it one field at a time.
+func TestTheSettingsOverruleTheModelsFile(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	writePooModels(t, dir, pooModels)
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+endpoints:
+  home:
+    endpoint: http://127.0.0.1:2/v1
+models:
+  home/qwen3:
+    endpoint: home
+    model_id: qwen3
+    context_limit: 65536
+roles:
+  chat: home/qwen3
+`)
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	cat := catalog.New(settings.CatalogOptions())
+	model, err := cat.Role(catalog.RoleChat)
+	if err != nil {
+		t.Fatalf("the chat model: %v", err)
+	}
+	if model.ContextLimit != 65536 || model.Source["context_limit"] != catalog.LayerSettings {
+		t.Errorf("the context limit is %d from %q, want the settings' 65536", model.ContextLimit, model.Source["context_limit"])
+	}
+	if model.Endpoint != "http://127.0.0.1:2/v1" {
+		t.Errorf("the endpoint is %q, want the settings' URL", model.Endpoint)
+	}
+	// The fields the settings leave alone are still the file's.
+	if model.MaxOutput != 4096 || model.Source["max_output"] != catalog.LayerModelsFile {
+		t.Errorf("the max output is %d from %q, want the file's 4096", model.MaxOutput, model.Source["max_output"])
+	}
+}
+
+// TestAModelsFileRefusesALiteralKey covers the one key the file does not take. A
+// models file is the one an operator shares or checks in, so a key written in it
+// is refused rather than read, and the message names what to use instead.
+func TestAModelsFileRefusesALiteralKey(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	writePooModels(t, dir, `endpoints:
+  home:
+    endpoint: http://127.0.0.1:1/v1
+    api_key: sk-written-in-the-file
+    models:
+      qwen3: {}
+`)
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("the settings loaded with a literal key in the models file")
+	}
+	for _, want := range []string{"api_key", "api_key_env", "auth file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure is %q, want it to name %q", err, want)
+		}
+	}
+}
+
+// TestBothModelsFilesBesideTheSettingsAreRefused covers the two names a models
+// file goes by. Both are read as the models file, so a settings directory that
+// holds one of each is refused rather than half read.
+func TestBothModelsFilesBesideTheSettingsAreRefused(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	writePooModels(t, dir, pooModels)
+	if err := os.WriteFile(filepath.Join(dir, PiModelsFileName), []byte(`{"providers": {}}`), 0o644); err != nil {
+		t.Fatalf("writing pi's models file: %v", err)
+	}
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("the settings loaded with two models files beside them")
+	}
+	for _, want := range []string{ModelsFileName, PiModelsFileName} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure is %q, want it to name %q", err, want)
+		}
 	}
 }
