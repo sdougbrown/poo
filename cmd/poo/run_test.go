@@ -593,7 +593,7 @@ func TestTheCommandDefaultsToSummary(t *testing.T) {
 		t.Fatalf("writing the settings: %v", err)
 	}
 
-	runCLI(t,
+	code, stderr := runCLI(t,
 		"run",
 		"--settings", settingsPath,
 		"--endpoint", endpoint.URL+"/v1",
@@ -603,6 +603,9 @@ func TestTheCommandDefaultsToSummary(t *testing.T) {
 		"--log", logPath,
 		"a prompt",
 	)
+	if code != 0 {
+		t.Fatalf("the exit code is %d, want 0: %s", code, stderr)
+	}
 
 	recs := readLog(t, logPath)
 	var compaction map[string]any
@@ -636,6 +639,29 @@ func TestTheCommandDefaultsToSummary(t *testing.T) {
 	text, _ := block["text"].(string)
 	if !strings.Contains(text, "[Context compacted: turns 1-1 summarized below]") || !strings.Contains(text, "finish the task") {
 		t.Errorf("the replacement is %q, want the marker and the summary", text)
+	}
+
+	// The run carried on: it settled on the model's own last word, and
+	// the answer the fourth scripted turn gave is in the log.
+	answered := false
+	for _, rec := range recs {
+		switch rec["record"] {
+		case "run.settled":
+			if reason, _ := rec["reason"].(string); reason != "end_turn" {
+				t.Errorf("the run settled %q, want end_turn: the default strategy carries on", reason)
+			}
+		case "message":
+			content, _ := rec["content"].([]any)
+			for _, entry := range content {
+				block, _ := entry.(map[string]any)
+				if text, _ := block["text"].(string); text == "done" {
+					answered = true
+				}
+			}
+		}
+	}
+	if !answered {
+		t.Errorf("the log holds no final answer: %v", names(recs))
 	}
 }
 

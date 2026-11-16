@@ -119,8 +119,9 @@ an essay. Each source records exactly what was read and when.
   request prefix.
 - **A handoff note as the end of a run.** pi-durable's `reset(note)` starts a
   new context from a note, keeping the old messages searchable. Poo's
-  `handoff` compaction strategy is the same shape, and it is the v1 default
-  for `cmd/poo`.
+  `handoff` compaction strategy is the same shape. It shipped as the v1
+  default for `cmd/poo` and is opt-in now: `summary` is the default, and a
+  consumer names `handoff` to end a run with a note instead.
 
 ### Rejected
 
@@ -150,11 +151,12 @@ an essay. Each source records exactly what was read and when.
   todos, plans and sandboxes is a nice idea, but v1 has no application state
   layer, and adding one would be a new locked-decision surface.
 - **Compaction as a background task that summarizes older messages.** Poo's
-  governing rule is that nothing rewrites the model's history silently. The
-  `handoff` strategy that ships in v1 forks the request and ends the run with
-  a note; it never rewrites or summarizes the history it leaves behind. No
-  strategy that rewrites or summarizes older messages ships in v1; only the
-  seam, and the `handoff` strategy on top of it.
+  governing rule is that nothing rewrites the model's history silently. A
+  strategy that compacts writes a visible replacement, records it, and leaves
+  the store's history whole. The v1 seam shipped with the `handoff` strategy
+  alone, which forks the request, ends the run with a note, and rewrites
+  nothing. `summary` came later and is the default: it replaces the oldest
+  turns with a summary the model reads in their place.
 
 ### FSM state changes adopted from pi-durable
 

@@ -130,6 +130,7 @@ func TestAReadOnlyBinarySpeaksTheProtocol(t *testing.T) {
 		"follow-up message",
 		"typed result",
 		"handoff",
+		"summary",
 		"kill",
 		"jobs",
 		"feeds",
