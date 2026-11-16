@@ -2,12 +2,14 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -83,11 +85,8 @@ func flowFor(server *signInServer) auth.Flow {
 // credentialAnswer is what a token endpoint answers a traded code with.
 func credentialAnswer(access, refresh string, lifetime time.Duration) string {
 	return `{"access_token":"` + access + `","refresh_token":"` + refresh + `","expires_in":` +
-		itoa(int(lifetime.Seconds())) + `}`
+		strconv.Itoa(int(lifetime.Seconds())) + `}`
 }
-
-// itoa renders an int.
-func itoa(v int) string { return strconv.Itoa(v) }
 
 // TestTheCodexSignInAsksForWhatItsClientIsRegisteredWith covers the authorization request: the
 // Codex CLI's client, its own redirect, PKCE, a state, and the two parameters its flow expects.
@@ -166,6 +165,44 @@ func TestTheCodexSignInTradesItsCode(t *testing.T) {
 	if credential.Kind != auth.KindOAuth {
 		t.Errorf("the credential is %q, want an oauth one", credential.Kind)
 	}
+	want := time.Now().Add(time.Hour)
+	if d := credential.Expires.Sub(want); d < -5*time.Second || d > 5*time.Second {
+		t.Errorf("the credential expires at %v, want within a few seconds of %v", credential.Expires, want)
+	}
+}
+
+// TestASignInFallsBackThroughTheLadder covers the rungs a sign-in takes when the flow names
+// neither endpoint nor client: the provider's declaration answers both, and the credential
+// records what it was granted by.
+func TestASignInFallsBackThroughTheLadder(t *testing.T) {
+	server := newSignInServer(t)
+	flow := auth.Flow{
+		Name:         "prov",
+		Provider:     auth.Provider{ID: "prov", Kind: auth.KindOAuth, TokenURL: server.URL + "/token", ClientID: "prov-client", Account: func(access, stored string) string { return "acct_prov" }},
+		Method:       auth.MethodBrowser,
+		AuthorizeURL: server.URL + "/authorize",
+		ClientID:     "prov-client",
+		RedirectURI:  "http://127.0.0.1:1455/auth/callback",
+	}
+	attempt, err := flow.Authorize()
+	if err != nil {
+		t.Fatalf("the attempt: %v", err)
+	}
+	// The attempt's flow is a value: clear the client so the trade takes the provider's
+	// declaration, not the flow's own name.
+	attempt.Flow.ClientID = ""
+	server.answerWith(credentialAnswer(codexToken(t, "acct_prov"), "a-new-refresh", time.Hour))
+
+	credential, err := attempt.Exchange(context.Background(), server.Client(), auth.Callback{Code: "the-code", State: attempt.State})
+	if err != nil {
+		t.Fatalf("the exchange: %v", err)
+	}
+	if got := server.exchange(t, 0).Get("client_id"); got != "prov-client" {
+		t.Errorf("the trade sent client_id=%q, want the provider's", got)
+	}
+	if credential.TokenURL != server.URL+"/token" {
+		t.Errorf("the credential records the endpoint %q, want the provider's", credential.TokenURL)
+	}
 }
 
 // TestASignInRefusesWhatIsNotItsAttempt covers the callbacks that must not be traded: a refusal,
@@ -188,9 +225,15 @@ func TestASignInRefusesWhatIsNotItsAttempt(t *testing.T) {
 		{name: "no code", callback: auth.Callback{State: attempt.State}, want: "no authorization code"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := attempt.Exchange(context.Background(), server.Client(), c.callback); err == nil ||
-				!strings.Contains(err.Error(), c.want) {
+			_, err := attempt.Exchange(context.Background(), server.Client(), c.callback)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("the exchange is %v, want a refusal naming %q", err, c.want)
+			}
+			if !errors.Is(err, auth.ErrSignIn) {
+				t.Errorf("the refusal is %v, want ErrSignIn", err)
+			}
+			if errors.Is(err, auth.ErrRefresh) {
+				t.Errorf("the refusal is %v, and it carries ErrRefresh", err)
 			}
 		})
 	}
@@ -218,17 +261,33 @@ func TestASignInRefusesAnAnswerThatIsNotACredential(t *testing.T) {
 			server.mu.Lock()
 			server.answer, server.status = c.answer, c.status
 			server.mu.Unlock()
-			if _, err := attempt.Exchange(context.Background(), server.Client(), auth.Callback{Code: "c", State: attempt.State}); err == nil ||
-				!strings.Contains(err.Error(), c.want) {
+			_, err = attempt.Exchange(context.Background(), server.Client(), auth.Callback{Code: "c", State: attempt.State})
+			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("the exchange is %v, want a refusal naming %q", err, c.want)
+			}
+			if !errors.Is(err, auth.ErrSignIn) {
+				t.Errorf("the refusal is %v, want ErrSignIn", err)
+			}
+			if errors.Is(err, auth.ErrRefresh) {
+				t.Errorf("the refusal is %v, and it carries ErrRefresh", err)
 			}
 		})
 	}
 }
 
-// TestASignInRefusesARedirect covers the trade that is pointed elsewhere: Go would replay the
-// request body — which carries the code — wherever the redirect led, so a redirect is refused.
+// TestASignInRefusesARedirect covers the trade that is pointed elsewhere. Go would replay the
+// request body — which carries the code — wherever the redirect led, so a redirect is refused:
+// the target receives nothing, and the failure is a sign-in failure, not a refresh failure.
 func TestASignInRefusesARedirect(t *testing.T) {
+	var leaked atomic.Bool
+	var leakedHost atomic.Value
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked.Store(true)
+		leakedHost.Store(r.Host)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"stolen","refresh_token":"stolen","expires_in":3600}`))
+	}))
+	t.Cleanup(target.Close)
 	server := newSignInServer(t)
 	flow := flowFor(server)
 	attempt, err := flow.Authorize()
@@ -236,10 +295,14 @@ func TestASignInRefusesARedirect(t *testing.T) {
 		t.Fatalf("the attempt: %v", err)
 	}
 	server.mu.Lock()
-	server.redirect = "http://elsewhere.invalid/token"
+	server.redirect = target.URL + "/token"
 	server.mu.Unlock()
-	if _, err := attempt.Exchange(context.Background(), server.Client(), auth.Callback{Code: "c", State: attempt.State}); err == nil {
-		t.Fatal("a redirect from the token endpoint was followed")
+	_, err = attempt.Exchange(context.Background(), server.Client(), auth.Callback{Code: "c", State: attempt.State})
+	if !errors.Is(err, auth.ErrSignIn) {
+		t.Fatalf("the redirect is %v, want ErrSignIn", err)
+	}
+	if leaked.Load() {
+		t.Errorf("the sign-in was replayed at the redirect's target %v", leakedHost.Load())
 	}
 }
 

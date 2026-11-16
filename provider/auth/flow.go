@@ -119,7 +119,7 @@ func (f Flow) Authorize() (Attempt, error) {
 	digest := sha256.Sum256([]byte(verifier))
 	endpoint, err := url.Parse(f.AuthorizeURL)
 	if err != nil {
-		return Attempt{}, fmt.Errorf("%w: %s: %w", ErrRefresh, f.AuthorizeURL, err)
+		return Attempt{}, fmt.Errorf("%w: %s: %w", ErrSignIn, f.AuthorizeURL, err)
 	}
 	query := endpoint.Query()
 	query.Set("response_type", "code")
@@ -200,27 +200,21 @@ func callbackOf(query url.Values) Callback {
 // (#219) instead of a default.
 func (a Attempt) Exchange(ctx context.Context, client *http.Client, callback Callback) (Credential, error) {
 	if callback.Error != "" {
-		return Credential{}, fmt.Errorf("%w: the sign-in was refused: %s", ErrRefresh, describeRefusal(callback))
+		return Credential{}, fmt.Errorf("%w: the sign-in was refused: %s", ErrSignIn, describeRefusal(callback))
 	}
 	if callback.Code == "" {
-		return Credential{}, fmt.Errorf("%w: no authorization code came back", ErrRefresh)
+		return Credential{}, fmt.Errorf("%w: no authorization code came back", ErrSignIn)
 	}
 	if callback.State != a.State {
-		return Credential{}, fmt.Errorf("%w: the callback's state is not this sign-in's", ErrRefresh)
+		return Credential{}, fmt.Errorf("%w: the callback's state is not this sign-in's", ErrSignIn)
 	}
 	flow := a.Flow
-	endpoint := flow.TokenURL
-	if endpoint == "" {
-		endpoint = flow.Provider.TokenURL
-	}
-	if endpoint == "" {
-		endpoint = DefaultTokenURL
-	}
+	endpoint := endpointFor(flow.TokenURL, flow.Provider, DefaultTokenURL)
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
-	answer, err := postForm(ctx, client, endpoint, url.Values{
+	answer, err := postForm(ctx, ErrSignIn, client, endpoint, url.Values{
 		"grant_type":    {"authorization_code"},
-		"client_id":     {flow.ClientID},
+		"client_id":     {clientFor(flow.ClientID, flow.Provider, DefaultClientID)},
 		"code":          {callback.Code},
 		"code_verifier": {a.Verifier},
 		"redirect_uri":  {flow.RedirectURI},
@@ -229,13 +223,9 @@ func (a Attempt) Exchange(ctx context.Context, client *http.Client, callback Cal
 		return Credential{}, err
 	}
 	if answer.AccessToken == "" || answer.RefreshToken == "" || answer.ExpiresIn <= 0 {
-		return Credential{}, fmt.Errorf("%w: %s: the answer carries no credential", ErrRefresh, endpoint)
+		return Credential{}, fmt.Errorf("%w: %s: the answer carries no credential", ErrSignIn, endpoint)
 	}
-	if flow.Provider.Kind == KindOAuth && flow.Provider.needsAccount() &&
-		flow.Provider.account(answer.AccessToken, "") == "" {
-		return Credential{}, fmt.Errorf("%w: %s: the token names no account", ErrRefresh, endpoint)
-	}
-	return Credential{
+	credential := Credential{
 		Kind:      KindOAuth,
 		Access:    answer.AccessToken,
 		Refresh:   answer.RefreshToken,
@@ -243,16 +233,18 @@ func (a Attempt) Exchange(ctx context.Context, client *http.Client, callback Cal
 		AccountID: flow.Provider.account(answer.AccessToken, ""),
 		ClientID:  flow.ClientID,
 		TokenURL:  endpoint,
-	}, nil
+	}
+	if err := validate(credential, flow.Provider); err != nil {
+		return Credential{}, fmt.Errorf("%w: %s: %v", ErrSignIn, endpoint, err)
+	}
+	return credential, nil
 }
 
-// describeRefusal renders a refused sign-in. The endpoint's own words are kept short: they are
-// untrusted, and a caller's log is no place for them.
+// describeRefusal renders a refused sign-in. The endpoint's error_description is untrusted,
+// and a caller's log is no place for an answer's words, so the standard OAuth error code
+// alone reports the refusal.
 func describeRefusal(callback Callback) string {
-	if callback.Description == "" {
-		return callback.Error
-	}
-	return callback.Error + ": " + callback.Description
+	return callback.Error
 }
 
 // randomValue returns a base64url value from n random bytes.

@@ -117,6 +117,12 @@ var (
 	// the file holds, so a retry most likely fails the same way.
 	ErrRefresh = errors.New("auth: the token refresh failed")
 
+	// ErrSignIn means a sign-in failed: the authorization was refused, the
+	// callback did not answer, or the token endpoint would not trade the code.
+	// It is not a refresh failure: the credential being signed in for does not
+	// exist yet.
+	ErrSignIn = errors.New("auth: the sign-in failed")
+
 	// ErrStorage means the auth.json could not be read, or could not be made ready to
 	// write, before anything was traded. Nothing was written either.
 	ErrStorage = errors.New("auth: the auth.json could not be read")
@@ -418,10 +424,10 @@ type Credentials struct {
 	TokenURL string
 	// ClientID overrides the OAuth client the credential belongs to.
 	ClientID string
-	// HTTP supplies the transport and the timeout the refresh goes
-	// through. Its redirect policy is not used: a redirect is refused
-	// whatever the client says, because a refresh body holds the refresh
-	// token. The refresh's own bound is the context's, so a client
+	// HTTP supplies the transport and the timeout the token paths go
+	// through. Its redirect policy is not used: refusingClient's is, shared
+	// by every token path, because a token request's body holds a code or a
+	// refresh token. The request's own bound is the context's, so a client
 	// without a timeout is fine.
 	HTTP *http.Client
 	// Now overrides the clock that ages an access token.
