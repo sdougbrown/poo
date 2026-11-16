@@ -64,12 +64,16 @@ func (s *Settings) addLayer(layer catalog.FileSettings) {
 	}
 }
 
-// importPiKeys keeps in the settings the keys pi's file writes literally, which
-// is where a literal key lives.
+// importPiKeys keeps in the settings the keys pi's file writes literally, which is
+// where a literal key lives.
 //
-// A settings endpoint of the same name is the operator's own declaration, and it
-// wins: the key the file carries is then not read.
-func (s *Settings) importPiKeys(file piimport.File) {
+// The endpoint's own fields are the ones the layer already declares, so a field pi's
+// provider grows is added once, in piLayer. The key is the only thing here, because a
+// models file never carries one.
+//
+// A settings endpoint of the same name is the operator's own declaration, and it wins:
+// the key the file carries is then not read.
+func (s *Settings) importPiKeys(file piimport.File, layer catalog.FileSettings) {
 	for name, provider := range file.Providers {
 		if provider.APIKey == "" {
 			continue
@@ -77,14 +81,15 @@ func (s *Settings) importPiKeys(file piimport.File) {
 		if _, ok := s.Endpoints[name]; ok {
 			continue
 		}
+		declared := layer.Endpoints[name]
 		if s.Endpoints == nil {
 			s.Endpoints = map[string]Endpoint{}
 		}
 		s.Endpoints[name] = Endpoint{
-			Endpoint:  provider.BaseURL,
-			APIKeyEnv: provider.APIKeyEnv,
+			Endpoint:  declared.Endpoint,
+			APIKeyEnv: declared.APIKeyEnv,
 			APIKey:    provider.APIKey,
-			SkipProbe: provider.SkipProbe,
+			SkipProbe: declared.SkipProbe,
 		}
 	}
 }

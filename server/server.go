@@ -158,6 +158,17 @@ type Server struct {
 	decorate func(*config.Runtime) error
 }
 
+// servesModel reports whether a model name is one a session can name.
+//
+// The catalog answers, not the settings: a model the models file declares is a model a
+// session runs, and the settings' own map does not hold it. The default runtime is where
+// the server keeps the catalog, and the catalog is the same whichever profile a session
+// is built from.
+func (f *Server) servesModel(name string) bool {
+	_, ok := f.runtime.Models[name]
+	return ok
+}
+
 // runtimeFor returns the runtime a session runs under.
 //
 // A session names the profile it is built from and the model it talks
@@ -168,10 +179,8 @@ func (f *Server) runtimeFor(profile, model string) (*config.Runtime, error) {
 	if profile != "" && !hasProfile(f.build.Profiles, profile) {
 		return nil, poo.ErrUnknownProfile
 	}
-	if model != "" {
-		if _, ok := f.settings.Models[model]; !ok {
-			return nil, poo.ErrUnknownModel
-		}
+	if model != "" && !f.servesModel(model) {
+		return nil, poo.ErrUnknownModel
 	}
 	key := profile + "\x00" + model
 	f.mu.Lock()
@@ -349,7 +358,7 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	var deciderModel poo.ModelInfo
 	var decider decide.Decider
 	if deciderName != "" {
-		if _, ok := f.settings.Models[deciderName]; !ok {
+		if !f.servesModel(deciderName) {
 			return nil, nil, poo.ErrUnknownModel
 		}
 		deciderModel, decider, err = runtime.DeciderFor(deciderName)
@@ -516,10 +525,8 @@ func (f *Server) runtimeForLoad(meta session.Metadata) (*config.Runtime, error) 
 	if meta.Roles.Chat != nil {
 		model = meta.Roles.Chat.Name
 	}
-	if model != "" {
-		if _, ok := f.settings.Models[model]; !ok {
-			model = ""
-		}
+	if model != "" && !f.servesModel(model) {
+		model = ""
 	}
 	return f.runtimeFor(meta.Profile, model)
 }
@@ -567,7 +574,7 @@ func (f *Server) Configure(ctx context.Context, sess *poo.Session, params protoc
 		roles.Chat = changed.To
 	}
 	if params.Models != nil && params.Models.Decider != "" {
-		if _, ok := f.settings.Models[params.Models.Decider]; !ok {
+		if !f.servesModel(params.Models.Decider) {
 			return protocol.ConfigureResult{}, poo.ErrUnknownModel
 		}
 		model, decider, err := runtime.DeciderFor(params.Models.Decider)

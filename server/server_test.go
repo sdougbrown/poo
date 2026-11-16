@@ -895,3 +895,45 @@ func TestTheSettingsDocNamesTheModelsFileEndpoints(t *testing.T) {
 		t.Errorf("the settings document carries the endpoint's credentials:\n%s", encoded)
 	}
 }
+
+// TestASessionNamesAModelTheModelsFileDeclares covers the gate a session passes through:
+// a model the models file declares is a model a session runs, so naming it must not be
+// answered with ErrUnknownModel. The gate reads the catalog, which merges the file,
+// rather than the settings' own map, which does not hold it.
+func TestASessionNamesAModelTheModelsFileDeclares(t *testing.T) {
+	dir := t.TempDir()
+	models := filepath.Join(dir, "models.yaml")
+	if err := os.WriteFile(models, []byte(`endpoints:
+  away:
+    endpoint: http://127.0.0.1:1/v1
+    api_key_env: AWAY_KEY
+    models:
+      spark:
+        context_limit: 4096
+`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	settings, err := config.Parse([]byte(`{
+  "version": 1,
+  "profile": "`+search.Name+`",
+  "session": {"mode": "logged"},
+  "models_file": "`+models+`",
+  "endpoints": {"grace": {"endpoint": "http://grace:4000/v1"}},
+  "models": {"chat-model": {"endpoint": "grace", "model_id": "chat-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "inputs": ["text"], "context_limit": 32768}},
+  "roles": {"chat": "chat-model"}
+}`), config.FormatJSON)
+	if err != nil {
+		t.Fatalf("parsing the settings: %v", err)
+	}
+	srv := newServer(t, settings)
+	sess, info, err := srv.Create(context.Background(), protocol.CreateParams{
+		Mode:       "ephemeral",
+		Models:     &protocol.ModelRoles{Chat: "away/spark"},
+		SessionDir: t.TempDir(),
+	}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("a session naming the models file's model was refused: %v", err)
+	}
+	defer func() { _ = sess.Close() }()
+	_ = info.Release()
+}

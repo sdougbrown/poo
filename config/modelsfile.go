@@ -126,8 +126,9 @@ func (s *Settings) importModelsFile(path string) error {
 		if err != nil {
 			return s.modelsFileError(err)
 		}
-		s.addLayer(piLayer(file))
-		s.importPiKeys(file)
+		layer := piLayer(file)
+		s.addLayer(layer)
+		s.importPiKeys(file, layer)
 		return nil
 	}
 	layer, err := modelsLayer(path, document)
