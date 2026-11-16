@@ -1058,9 +1058,10 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			Endpoint:  endpoint.Endpoint,
 			APIKeyEnv: endpoint.APIKeyEnv,
 			APIKey:    endpoint.APIKey,
-			// An endpoint whose models are declared is not asked what it
-			// serves. The built-in Codex provider is one: its endpoint has
-			// no model list, and a probe would reach it with no credential.
+			// An endpoint whose models are declared is not asked what it serves:
+			// it has no model list, and a probe would reach it with no
+			// credential. The models file declares its own, and the built-in
+			// Codex provider is one of them.
 			SkipProbe: endpoint.SkipProbe,
 		}
 	}

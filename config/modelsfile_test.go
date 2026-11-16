@@ -66,6 +66,9 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 	if key := settings.Endpoints["home"].APIKey; key != "dummy" {
 		t.Errorf("the provider's literal key imported as %q", key)
 	}
+	if key := settings.modelsFileLayer.Endpoints["home"].APIKey; key != "" {
+		t.Errorf("the layer carries the literal key %q, and a models file never does", key)
+	}
 	model, ok := settings.modelsFileLayer.Models["home/qwen"]
 	if !ok {
 		t.Fatalf("the model imported under no name; the models are %v", settings.Models)

@@ -656,24 +656,30 @@ func (f *Server) Models(ctx context.Context, refresh bool) ([]protocol.ModelInfo
 func (f *Server) Settings(ctx context.Context) (map[string]any, error) {
 	settings := f.effective
 	redacted := *settings
-	redacted.Endpoints = make(map[string]config.Endpoint, len(settings.Endpoints))
+	// The endpoints the catalog serves are the settings' own and the ones the models file
+	// declares. A name both declare is the settings', which is the declaration that wins.
+	layer := settings.CatalogOptions().File
+	redacted.Endpoints = make(map[string]config.Endpoint, len(settings.Endpoints)+len(layer.Endpoints))
 	for name, endpoint := range settings.Endpoints {
-		endpoint.Endpoint = session.LoggedEndpoint(endpoint.Endpoint)
-		endpoint.APIKey = ""
 		redacted.Endpoints[name] = endpoint
 	}
-	// The models file declares endpoints too, and they are what the catalog serves: the
-	// document names them, redacted the same way. A name the settings declare is the
-	// settings' own, which is the declaration that wins.
-	for name, endpoint := range settings.CatalogOptions().File.Endpoints {
+	for name, endpoint := range layer.Endpoints {
 		if _, ok := redacted.Endpoints[name]; ok {
 			continue
 		}
 		redacted.Endpoints[name] = config.Endpoint{
-			Endpoint:  session.LoggedEndpoint(endpoint.Endpoint),
+			Endpoint:  endpoint.Endpoint,
 			APIKeyEnv: endpoint.APIKeyEnv,
+			APIKey:    endpoint.APIKey,
 			SkipProbe: endpoint.SkipProbe,
 		}
+	}
+	// One redaction, over everything the document names: two loops that each redact a
+	// field would drift the day one of them learns about a new one.
+	for name, endpoint := range redacted.Endpoints {
+		endpoint.Endpoint = session.LoggedEndpoint(endpoint.Endpoint)
+		endpoint.APIKey = ""
+		redacted.Endpoints[name] = endpoint
 	}
 	encoded, err := json.Marshal(&redacted)
 	if err != nil {
