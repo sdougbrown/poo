@@ -21,10 +21,12 @@ version: 1
 # sandbox or a container.
 profile: code
 
-# pi's Codex provider is built in: name pi's auth file to run one of its
-# models, and assign `openai-codex/<id>` to a role. The OAuth token is
-# sent only to the built-in Codex endpoint.
-# pi_auth_file: ~/.pi/agent/auth.json
+# pi's Codex provider is built in: name the credential file to run one of
+# its models, and assign `openai-codex/<id>` to a role. The OAuth token is
+# sent only to the built-in Codex endpoint. With no file named, poo reads
+# the auth.json beside the models file, else its own in the user's config
+# directory. `pi_auth_file` names pi's auth.json, in pi's shape.
+# auth_file: ~/.config/poo/auth.json
 
 # The endpoints the models are served by, and the models themselves.
 endpoints:

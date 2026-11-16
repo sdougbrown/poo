@@ -42,13 +42,13 @@ func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error)
 				piauth.ProviderCodex, endpoint, codex.DefaultEndpoint),
 		}
 	}
-	path := r.Settings.piAuthFile()
+	path := r.Settings.CredentialFile()
 	if path == "" {
 		return nil, &Error{
 			Code:  CodeUnavailable,
-			Field: "pi_auth_file",
-			Message: "the Codex provider reads pi's auth.json, and the settings name none: " +
-				"set pi_auth_file, or put auth.json beside the models file",
+			Field: "auth_file",
+			Message: "the Codex provider reads a credential file, and the settings name none: " +
+				"set auth_file, or pi_auth_file for pi's auth.json",
 		}
 	}
 	return codex.New(codex.Options{

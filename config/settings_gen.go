@@ -10,6 +10,7 @@ import (
 
 // SettingsFields holds the fields for Settings availability checks.
 type SettingsFields struct {
+	AuthFile                        *string  "json:\"auth_file,omitempty\""
 	CliRegistryPaths                []string "json:\"cli_registry.paths,omitempty\""
 	ContextHandoffMaxTokens         *float64 "json:\"context.handoff.max_tokens,omitempty\""
 	ContextHandoffRatio             *float64 "json:\"context.handoff.ratio,omitempty\""
@@ -90,6 +91,7 @@ type SettingsConditions struct {
 
 // SettingsAvailability holds the availability status for each field.
 type SettingsAvailability struct {
+	AuthFile                        FieldStatus
 	CliRegistryPaths                FieldStatus
 	ContextHandoffMaxTokens         FieldStatus
 	ContextHandoffRatio             FieldStatus
@@ -203,6 +205,8 @@ func isTruthy(v any) bool {
 }
 func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) SettingsAvailability {
 	var _ = prev
+	AuthFileEnabled := true
+	AuthFileSatisfied := func() bool { v := f.AuthFile; return v != nil && *v != "" }()
 	CliRegistryPathsEnabled := true
 	CliRegistryPathsSatisfied := len(f.CliRegistryPaths) > 0
 	ContextHandoffMaxTokensEnabled := true
@@ -343,6 +347,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	VersionSatisfied := f.Version != nil
 
 	return SettingsAvailability{
+		AuthFile: FieldStatus{
+			Required:  AuthFileEnabled && false,
+			Enabled:   AuthFileEnabled,
+			Satisfied: AuthFileSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		CliRegistryPaths: FieldStatus{
 			Required:  CliRegistryPathsEnabled && false,
 			Enabled:   CliRegistryPathsEnabled,
@@ -2113,6 +2139,9 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 // depSatisfied reports whether a field value is satisfied.
 func depSatisfied(f SettingsFields, name string) bool {
 	switch name {
+	case "AuthFile":
+		v := f.AuthFile
+		return v != nil && *v != ""
 	case "CliRegistryPaths":
 		return len(f.CliRegistryPaths) > 0
 	case "ContextHandoffMaxTokens":
@@ -2442,6 +2471,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	var found bool
 	var explanations []string
 	switch fieldName {
+	case "AuthFile", "auth_file":
+		found = true
+		status = avail.AuthFile
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "CliRegistryPaths", "cli_registry.paths":
 		found = true
 		status = avail.CliRegistryPaths

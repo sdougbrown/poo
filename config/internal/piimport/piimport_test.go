@@ -94,3 +94,43 @@ func TestTheCodexAPIIsRefusedForAnotherProvider(t *testing.T) {
 		t.Fatalf("the import is %v, want the API refused", err)
 	}
 }
+
+// TestPooOwnCredentialFileNamesTheKeysToo covers the shape of the credential
+// file the settings resolve. It is one file whichever shape it is written with:
+// the keys a models file's providers import come out of pi's top-level entries,
+// and out of the entries poo's own versioned file holds under its credentials
+// field.
+func TestPooOwnCredentialFileNamesTheKeysToo(t *testing.T) {
+	models := writeModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen"}]
+			}
+		}
+	}`)
+	for _, c := range []struct {
+		name string
+		body string
+	}{
+		{name: "poo's own file", body: `{
+			"version": 1,
+			"credentials": {"home": {"type": "api_key", "key": "test-key-123"}}
+		}`},
+		{name: "pi's file", body: `{"home": {"type": "api_key", "key": "test-key-123"}}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			auth := filepath.Join(t.TempDir(), "auth.json")
+			if err := os.WriteFile(auth, []byte(c.body), 0o600); err != nil {
+				t.Fatalf("writing the credential file: %v", err)
+			}
+			file, err := piimport.Read(models, auth)
+			if err != nil {
+				t.Fatalf("reading the models file: %v", err)
+			}
+			if key := file.Providers["home"].APIKey; key != "test-key-123" {
+				t.Errorf("the provider imported with the key %q, want the one the file holds", key)
+			}
+		})
+	}
+}

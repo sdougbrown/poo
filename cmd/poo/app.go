@@ -69,6 +69,12 @@ the models the binary knows about, and what the endpoints report.
 const promptLong = `The command prints the prompt a session would send, with the sections
 marked, so an operator can see what the model is told.`
 
+// authLong is the help body of `poo auth`.
+const authLong = `The credential poo reads, reported rather than traded: the file the settings
+resolve, the shape it is written with, the provider, the account the token
+names, and whether the token is one poo would use. No token value is printed,
+and nothing is refreshed, so a report leaves the credential as it found it.`
+
 // sessionsLong is the help body of `poo sessions`.
 const sessionsLong = `The sessions the store holds. list reads the store, and prune trims it by
 the settings' retention policy or by the flags.`
@@ -154,6 +160,12 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				},
 			},
 			{
+				Name:        "auth",
+				Short:       "Report the credential the settings' credential file holds",
+				Long:        authLong,
+				Subcommands: []*clicontract.Command{authStatusCommand(stdout)},
+			},
+			{
 				Name:        "sessions",
 				Short:       "List and prune the stored sessions",
 				Long:        sessionsLong,
@@ -178,6 +190,20 @@ func pooApp(stdout io.Writer) *clicontract.App {
 		app.Commands = append(app.Commands, door(stdout))
 	}
 	return app
+}
+
+// authStatusCommand declares `poo auth status`.
+func authStatusCommand(stdout io.Writer) *clicontract.Command {
+	return &clicontract.Command{
+		Name:  "status",
+		Short: "Report the credential file, the provider and whether the token is live",
+		Flags: []clicontract.Flag{
+			{Name: "json", Kind: clicontract.Bool, Usage: "Print the report as JSON"},
+		},
+		Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
+			return handleAuthStatus(inv, stdout, cmdStderr), nil
+		},
+	}
 }
 
 // sessionsListCommand declares `poo sessions list`.

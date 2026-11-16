@@ -80,19 +80,25 @@ type Settings struct {
 	// auth.json beside the file is also the built-in Codex provider's
 	// credential.
 	ModelsFile string `json:"models_file,omitempty"`
-	// PiAuthFile names the auth.json pi keeps its credentials in. It is the
-	// one path every reader of that file uses: the openai-codex OAuth
-	// credential poo refreshes under pi's lock, and the api keys a models
-	// file's providers import.
+	// AuthFile names poo's own credential file: a version, and the credential
+	// of each provider under it. It is the file poo writes a credential to, and
+	// the one it reads.
 	//
-	// A relative path resolves against the settings file's own directory,
-	// like models_file. With none named, an auth.json beside the models file
-	// is used, and pi's built-in Codex provider is offered when that file is
-	// there.
+	// A relative path resolves against the settings file's own directory, like
+	// models_file. With neither this nor pi_auth_file named, an auth.json beside
+	// the models file is used when it is there, and poo's own file in the user's
+	// config directory otherwise.
+	AuthFile string `json:"auth_file,omitempty"`
+	// PiAuthFile names the auth.json pi keeps its credentials in. It is the
+	// compat spelling of AuthFile: pi's file, read and written in pi's shape,
+	// which is a file pi is still reading.
+	//
+	// A relative path resolves against the settings file's own directory, like
+	// models_file.
 	PiAuthFile string `json:"pi_auth_file,omitempty"`
-	// piAuthPath is the resolved path of pi's auth.json, empty when neither
-	// the settings nor a models file name one.
-	piAuthPath string
+	// credentialPath is the resolved path of the file the Codex credential is
+	// read from, empty when a Settings built by hand named none.
+	credentialPath string
 }
 
 // Endpoint is one endpoint in the settings.

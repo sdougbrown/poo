@@ -80,9 +80,9 @@ credentials. A discovered `models.json` that does not read fails the
 load, as a settings file that does not decode does. A file the
 operator put there is never skipped in silence.
 
-`models_file` and `pi_auth_file` resolve relative paths against the
-settings file's directory. `cli_registry.paths` and `feeds.paths`
-answer to the working directory.
+`models_file`, `auth_file` and `pi_auth_file` resolve relative paths
+against the settings file's directory. `cli_registry.paths` and
+`feeds.paths` answer to the working directory.
 
 **Models.** The settings define the models: `endpoints` name the
 servers (with `api_key_env` for the credential's environment
@@ -92,19 +92,54 @@ role. `roles.chat` that names an imported model runs it like any
 other.
 
 **pi's Codex provider.** The pi provider `openai-codex` is built in.
-Its models are named `openai-codex/<id>`, and its credential is pi's
-OAuth entry in an `auth.json`. Name the file with `pi_auth_file` — a
-relative path resolves against the settings file's own directory, like
-`models_file` — or let poo read the `auth.json` beside the models file:
+Its models are named `openai-codex/<id>`, and its credential is an
+OAuth entry in a credential file. `auth_file` names poo's own file, and
+a relative path resolves against the settings file's own directory,
+like `models_file`:
 
 ```yaml
-pi_auth_file: ~/.pi/agent/auth.json
+auth_file: ~/.config/poo/auth.json
 roles:
   chat: openai-codex/gpt-6.1-sol
 ```
 
-No provider in `models.json` is needed for this. When a pi auth file is
-there, the built-in provider adds the Codex models pi bundles; a
+With no `auth_file` named, poo reads an `auth.json` beside the models
+file when that file is there — the arrangement pi's own files already
+have — and otherwise its own `~/.config/poo/auth.json`. Naming both
+`auth_file` and `pi_auth_file` is refused: poo reads one credential at
+a time.
+
+poo's own file is versioned, and holds the credentials under it. The
+entry keeps pi's field names, so one file of either shape is one
+credential:
+
+```json
+{
+  "version": 1,
+  "credentials": {
+    "openai-codex": {
+      "type": "oauth",
+      "access": "…",
+      "refresh": "…",
+      "expires": 1767225600000,
+      "accountId": "…"
+    }
+  }
+}
+```
+
+The shape is the file's own, not a setting: poo writes back the shape
+it read. `pi_auth_file` names pi's `auth.json` instead, which poo reads
+and writes in pi's shape so pi keeps working.
+
+`poo auth status` reports the file the settings resolved, the shape it
+is written with, the provider, the account the token names, and whether
+the token is one poo would use or would trade first. It prints no token
+value and trades none, so a report leaves the credential as it found
+it. `--json` prints the same report for a script.
+
+No provider in `models.json` is needed for this. When a credential file
+is there, the built-in provider adds the Codex models pi bundles; a
 `models_file` or the settings' own `models` still win on a name
 collision, and a model pi adds later can be named under the same
 provider. The built-in list is a snapshot, so a newer id is a `models`

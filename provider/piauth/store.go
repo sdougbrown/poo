@@ -3,9 +3,10 @@
 //
 // The file's shape and the store that keeps the credential alive are two
 // things, and they are two things here. The store owns the lock, the read, the
-// refresh and the write; a format owns what one file's bytes look like. pi's
-// auth.json is the format this package reads, so the store speaks poo's words
-// and the file speaks pi's.
+// refresh and the write; a format owns what one file's bytes look like. There
+// are two shapes: pi's auth.json, which holds its providers at the top level,
+// and poo's own, which holds a version and the credentials under it. The file
+// itself says which one it is, so a caller hands over a path and nothing else.
 //
 // poo reads the file the settings name, never a pi installation's own
 // directory, so a caller hands the path over. This package does not log in:
@@ -79,6 +80,15 @@ const (
 	maxTokenResponse = 1 << 20
 )
 
+// The names a file's shape is reported by: pi's auth.json, and poo's own.
+const (
+	// FormatPi is pi's auth.json: its providers at the file's top level.
+	FormatPi = "pi"
+	// FormatPoo is poo's own auth file: a version, and the credentials under
+	// it.
+	FormatPoo = "poo"
+)
+
 // The failures a caller tells apart.
 var (
 	// ErrNoCredential means the auth.json holds no Codex credential that
@@ -122,26 +132,47 @@ type Token struct {
 	AccountID string
 }
 
-// format is one auth file's shape: the bytes it is written with, and where a
-// provider's credential sits in what they parse to.
-type format interface {
-	// parse returns the document the file holds. missing says the file is not
-	// there, which is a document without credentials rather than a failure: it
-	// is how pi reads an absent auth.json. path names the file in what a
-	// failure reports.
-	parse(path string, data []byte, missing bool) (document, error)
-	// credential returns the credential the document holds for a provider.
-	credential(doc document, provider string) (credential, error)
-	// encode returns the file's bytes with the provider's credential stored,
-	// and every other part of the document as it was.
-	encode(doc document, provider string, entry credential) ([]byte, error)
+// Status is what a credential file holds, as read: the credential, and never
+// the token. A caller that reports on the credential asks for this; a caller
+// that sends it asks for Access.
+type Status struct {
+	// Path is the file the credential was read from.
+	Path string
+	// Format is the shape that file is written with: FormatPi or FormatPoo.
+	Format string
+	// Provider is the id the credential is stored under.
+	Provider string
+	// AccountID is the ChatGPT account the access token names.
+	AccountID string
+	// Expires is when the access token stops working.
+	Expires time.Time
+	// Live reports whether the access token has the life left that Access
+	// requires before it uses one as it is.
+	Live bool
 }
 
-// document is one auth file parsed into the entries it holds, so a write puts
-// everything the file carried back as it was.
+// format is one auth file's envelope: where its credentials sit in the object
+// the file parses to, and the version it names.
+//
+// The entry both files spell the same way is not the format's business: an
+// entry is decoded and encoded once, for both.
+type format interface {
+	// name is the shape's own name, for a report to say which file it read.
+	name() string
+	// credentials returns the credentials the file's object holds, or what is
+	// wrong with the object.
+	credentials(top map[string]json.RawMessage) (map[string]json.RawMessage, error)
+	// envelope returns the object to write the credentials into.
+	envelope(entries map[string]json.RawMessage) (map[string]json.RawMessage, error)
+}
+
+// document is one auth file: the shape it is written with, and the entries it
+// holds, so a write puts everything the file carried back as it was.
 type document struct {
 	// path is the file the document was read from.
 	path string
+	// format is the shape the file is written with, the one it was read as.
+	format format
 	// entries are the credentials, by provider id, as the bytes the file
 	// carried for each: a write keeps every field this package does not model.
 	entries map[string]json.RawMessage
@@ -254,32 +285,82 @@ func (c Credentials) token(ctx context.Context, force bool) (Token, error) {
 	}, nil
 }
 
+// Status reports the credential the file holds, without trading it.
+//
+// A status is a report, so it writes nothing and refreshes nothing: a refresh
+// would rotate the credential under whoever is using it. It takes no lock
+// either, because a report should not wait on a refresh that is in flight.
+func (c Credentials) Status() (Status, error) {
+	if c.Path == "" {
+		return Status{}, errors.New("piauth: no auth.json path")
+	}
+	stored, doc, err := c.read()
+	if err != nil {
+		return Status{}, err
+	}
+	return Status{
+		Path:      doc.path,
+		Format:    doc.format.name(),
+		Provider:  ProviderCodex,
+		AccountID: accountID(stored.Access, stored.AccountID),
+		Expires:   time.UnixMilli(stored.Expires),
+		Live:      stored.live(c.now(), c.leeway()),
+	}, nil
+}
+
 // read returns the credential the file holds, and the document it came from.
 //
-// The document is what a write puts back, so a refresh keeps every other
-// entry and field the file carried.
+// The document is what a write puts back, so a refresh keeps every other entry
+// and field the file carried.
 func (c Credentials) read() (credential, document, error) {
 	doc, err := c.load()
 	if err != nil {
 		return credential{}, document{}, err
 	}
-	stored, err := c.format().credential(doc, ProviderCodex)
+	stored, err := decodeEntry(doc.path, ProviderCodex, doc.entries)
 	if err != nil {
 		return credential{}, document{}, err
 	}
 	return stored, doc, nil
 }
 
-// load reads the file and parses it with the format its path names. A file
-// that is not there is parsed as a file without credentials, the way pi reads
-// one.
+// load reads the file and parses it with the shape it is written with.
+//
+// A file that is not there is a file without credentials, the way pi reads one,
+// and it is read as poo's own shape: that is the file poo creates.
 func (c Credentials) load() (document, error) {
+	doc := document{path: c.Path, entries: map[string]json.RawMessage{}}
 	data, err := os.ReadFile(c.Path)
-	missing := errors.Is(err, fs.ErrNotExist)
-	if err != nil && !missing {
+	if errors.Is(err, fs.ErrNotExist) {
+		doc.format = pooFormat{}
+		return doc, nil
+	}
+	if err != nil {
 		return document{}, fmt.Errorf("%w: reading %s: %w", ErrStorage, c.Path, err)
 	}
-	return c.format().parse(c.Path, data, missing)
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(stripBOM(data), &top); err != nil {
+		return document{}, fmt.Errorf("%w: %s: %w", ErrStorage, c.Path, err)
+	}
+	doc.format = shapeOf(top)
+	entries, err := doc.format.credentials(top)
+	if err != nil {
+		return document{}, fmt.Errorf("%w: %s: %w", ErrStorage, c.Path, err)
+	}
+	doc.entries = entries
+	return doc, nil
+}
+
+// shapeOf returns the shape a file's object is written with.
+//
+// The file itself says which one it is: poo's own names a version, and pi's
+// holds its providers at the top level. A file that says neither is pi's,
+// which is the shape with nothing to name.
+func shapeOf(top map[string]json.RawMessage) format {
+	if _, ok := top[versionField]; ok {
+		return pooFormat{}
+	}
+	return piFormat{}
 }
 
 // write stores a credential under the provider, and leaves the rest of the
@@ -296,7 +377,14 @@ func (c Credentials) load() (document, error) {
 // bytes atomic. It would also replace a symlinked auth.json with a regular
 // file, dropping the mode, ACLs and extended attributes the operator gave it.
 func (c Credentials) write(doc document, entry credential) error {
-	body, err := c.format().encode(doc, ProviderCodex, entry)
+	if err := encodeEntry(doc.path, ProviderCodex, doc.entries, entry); err != nil {
+		return err
+	}
+	object, err := doc.format.envelope(doc.entries)
+	if err != nil {
+		return fmt.Errorf("%s: %v", doc.path, err)
+	}
+	body, err := marshalFile(doc.path, object)
 	if err != nil {
 		return err
 	}
@@ -307,15 +395,6 @@ func (c Credentials) write(doc document, entry credential) error {
 		return fmt.Errorf("writing %s: %w", c.Path, err)
 	}
 	return nil
-}
-
-// format is the shape the credential file is written with.
-//
-// pi's auth.json is the one shape this package reads, so the answer does not depend
-// on the path. The method is where a second shape is chosen once there is one; until
-// then every file is pi's.
-func (c Credentials) format() format {
-	return piFormat{}
 }
 
 // live reports whether an access token has enough life left to be used

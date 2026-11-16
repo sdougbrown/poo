@@ -16,23 +16,27 @@ import (
 // models file with models_file, and one they do not name is read from here.
 const ModelsFileName = "models.json"
 
+// AuthFileName is the name a credential file goes by: poo's own, in the user's
+// config directory, and pi's beside pi's models file.
+const AuthFileName = "auth.json"
+
 // importPi imports what pi's files hold: the models file the settings name or
 // the one beside them, and the auth.json the Codex provider reads. pi's
 // built-in providers are offered when that auth file is there.
 //
 // The auth path is resolved here, where the settings load, because the models
 // file's own directory is what a sibling auth.json answers to. A Settings built
-// by hand has no resolved path, and piAuthFile falls back to the setting it
+// by hand has no resolved path, and CredentialFile falls back to the setting it
 // names.
 func (s *Settings) importPi(dir string) error {
 	modelsPath, err := s.modelsFilePath(dir)
 	if err != nil {
 		return err
 	}
-	// The auth file is resolved before the models file is read, so one path
-	// answers for every reader: the Codex credential the transport resolves,
-	// and the api keys the models file's providers import.
-	s.piAuthPath, err = s.resolvePiAuthFile(dir, modelsPath)
+	// The credential file is resolved before the models file is read, so one path
+	// answers for every reader: the Codex credential the transport resolves, and
+	// the api keys the models file's providers import.
+	s.credentialPath, err = s.resolveCredentialFile(dir, modelsPath)
 	if err != nil {
 		return err
 	}
@@ -41,11 +45,12 @@ func (s *Settings) importPi(dir string) error {
 			return err
 		}
 	}
-	// pi's built-in providers are offered when a pi auth file is there, because
-	// they are what its credential can run. A settings file that names none of
-	// pi's files gains no models it did not ask for. The models file and the
-	// settings' own entries still win on a collision.
-	if s.piAuthPath != "" && fileExists(s.piAuthPath) {
+	// pi's built-in providers are offered when a credential file is there,
+	// because they are what its credential can run. A settings file that names
+	// no credential file, and has none at the default path, gains no models it
+	// did not ask for. The models file and the settings' own entries still win
+	// on a collision.
+	if s.credentialPath != "" && fileExists(s.credentialPath) {
 		s.applyModelsFile(piimport.BuiltinCodex(codex.DefaultEndpoint))
 	}
 	return nil
@@ -84,7 +89,7 @@ func (s *Settings) modelsFilePath(dir string) (string, error) {
 // importModelsFile imports a models file, and the keys its providers read from
 // the auth file the settings resolved.
 func (s *Settings) importModelsFile(path string) error {
-	file, err := piimport.Read(path, s.piAuthPath)
+	file, err := piimport.Read(path, s.credentialPath)
 	if err != nil {
 		if s.ModelsFile == "" {
 			// The settings named no file, so no setting is at fault: the
@@ -103,50 +108,112 @@ func (s *Settings) importModelsFile(path string) error {
 	return nil
 }
 
-// resolvePiAuthFile returns the auth.json the Codex provider reads.
+// resolveCredentialFile returns the file the Codex credential is read from, and
+// that poo writes it to.
 //
-// An explicit pi_auth_file wins, and a relative one answers to the settings
-// file's directory the way models_file does. A named file that is not there is
-// a settings failure: an explicit path is a promise. With none named, auth.json
-// beside the models file is the file, whether or not it exists yet. The Codex
-// transport reports a credential that is missing, with the path it looked in.
-func (s *Settings) resolvePiAuthFile(dir, modelsPath string) (string, error) {
-	if s.PiAuthFile == "" {
-		if modelsPath == "" {
-			return "", nil
+// The operator's own words come first, then the arrangement pi's files already
+// have, then poo's own file:
+//
+//  1. auth_file names poo's file. A relative path answers to the settings file's
+//     directory, like models_file. A file that is not there yet is not a
+//     failure: it is the file a login creates.
+//  2. pi_auth_file names pi's file. A relative path answers the same way, and a
+//     file that is not there is a settings failure, because an explicit path is
+//     a promise.
+//  3. An auth.json beside the models file, when that file is there, is what pi
+//     wrote beside its own models. This is where poo has always looked for pi's
+//     credential, so a pi setup keeps working without naming the file.
+//  4. poo's own file in the user's config directory, which is where poo creates
+//     a credential of its own.
+//
+// Naming both files is refused: poo reads one credential at a time, and two
+// settings naming one apiece is a question the file cannot answer.
+func (s *Settings) resolveCredentialFile(dir, modelsPath string) (string, error) {
+	if s.AuthFile != "" && s.PiAuthFile != "" {
+		return "", &Error{
+			Code:    CodeInvalid,
+			Field:   "auth_file",
+			Message: "auth_file and pi_auth_file both name a credential file, and poo reads one",
 		}
-		return filepath.Join(filepath.Dir(modelsPath), piimport.AuthFileName), nil
 	}
-	path, err := expandHome(s.PiAuthFile)
+	if s.AuthFile != "" {
+		return s.resolveCredentialPath(dir, "auth_file", s.AuthFile, false)
+	}
+	if s.PiAuthFile != "" {
+		return s.resolveCredentialPath(dir, "pi_auth_file", s.PiAuthFile, true)
+	}
+	if modelsPath != "" {
+		if beside := filepath.Join(filepath.Dir(modelsPath), piimport.AuthFileName); fileExists(beside) {
+			return beside, nil
+		}
+	}
+	return defaultCredentialFile(), nil
+}
+
+// resolveCredentialPath resolves the path a setting names: ~ first, then the
+// settings file's own directory for a relative one. mustExist is for the
+// setting that promised a file there.
+func (s *Settings) resolveCredentialPath(dir, field, named string, mustExist bool) (string, error) {
+	path, err := expandHome(named)
 	if err != nil {
-		return "", &Error{Code: CodeInvalid, Field: "pi_auth_file", Message: "the pi auth file cannot be resolved", Err: err}
+		return "", &Error{Code: CodeInvalid, Field: field, Message: "the credential file cannot be resolved", Err: err}
 	}
 	if !filepath.IsAbs(path) && dir != "" {
 		path = filepath.Join(dir, path)
 	}
-	if _, err := os.Stat(path); err != nil {
-		return "", &Error{Code: CodeInvalid, Field: "pi_auth_file", Message: "the file is not there", Err: err}
+	if mustExist {
+		if _, err := os.Stat(path); err != nil {
+			return "", &Error{Code: CodeInvalid, Field: field, Message: "the file is not there", Err: err}
+		}
 	}
 	return path, nil
 }
 
-// piAuthFile returns the auth file the Codex provider reads.
+// defaultCredentialFile is poo's own credential file in the user's config
+// directory.
+//
+// A machine whose config directory cannot be resolved has no default file, and
+// the Codex provider reports the credential it could not find. The settings are
+// not a failure over a file only one provider reads.
+func defaultCredentialFile() string {
+	dir, err := UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, AuthFileName)
+}
+
+// CredentialFile returns the file the Codex credential is read from: the one
+// auth_file or pi_auth_file named, else the auth.json beside the models file,
+// else poo's own file in the user's config directory.
 //
 // A Settings that was loaded has the path resolved. One built by hand names it,
 // and the path answers to the working directory the way every other hand-built
-// path does.
-func (s *Settings) piAuthFile() string {
-	if s.piAuthPath != "" {
-		return s.piAuthPath
+// path does, with the default file as the answer when it names none.
+func (s *Settings) CredentialFile() string {
+	if s.credentialPath != "" {
+		return s.credentialPath
 	}
-	if s.PiAuthFile == "" {
-		return ""
+	if s.AuthFile != "" {
+		return s.expandSetting(s.AuthFile)
 	}
-	path, err := expandHome(s.PiAuthFile)
+	if s.PiAuthFile != "" {
+		return s.expandSetting(s.PiAuthFile)
+	}
+	return defaultCredentialFile()
+}
+
+// expandSetting resolves the leading ~ of a path a hand-built settings names.
+//
+// The other rules a loaded settings resolves — the settings file's directory,
+// and the default file — need a file the settings were loaded from, and a
+// Settings built by hand has none.
+func (s *Settings) expandSetting(path string) string {
+	expanded, err := expandHome(path)
 	if err != nil {
-		return s.PiAuthFile
+		return path
 	}
-	return path
+	return expanded
 }
 
 // applyModelsFile fills the providers and models a models file names,

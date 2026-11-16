@@ -247,8 +247,17 @@ type credential struct {
 // models file.
 const AuthFileName = "auth.json"
 
-// readAuth reads pi's auth.json: credentials by provider name. A file
-// that is not there is a file without credentials, not a failure.
+// credentialsField is the field poo's own credential file holds its entries
+// under, below its version.
+const credentialsField = "credentials"
+
+// readAuth reads the credential file a models file's providers take their keys
+// from: credentials by provider name.
+//
+// A file that is not there is a file without credentials, not a failure. The
+// file is read in either shape poo reads one in: pi's, which holds the
+// providers at its top level, and poo's own, which holds them under a
+// credentials field below a version.
 func readAuth(path string) (map[string]credential, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -257,9 +266,24 @@ func readAuth(path string) (map[string]credential, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	var credentials map[string]credential
-	if err := json.Unmarshal(stripBOM(data), &credentials); err != nil {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(stripBOM(data), &top); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	entries := top
+	if raw, ok := top[credentialsField]; ok {
+		entries = nil
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil, fmt.Errorf("%s: %s is not a map of credentials: %w", path, credentialsField, err)
+		}
+	}
+	credentials := make(map[string]credential, len(entries))
+	for name, raw := range entries {
+		var entry credential
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			return nil, fmt.Errorf("%s: the %s entry is not a credential: %v", path, name, err)
+		}
+		credentials[name] = entry
 	}
 	return credentials, nil
 }
