@@ -794,6 +794,9 @@ func TestThePIModelsFileKeyStillLoads(t *testing.T) {
 // TestASettingsFileWithNoModelsFileIsUnchanged covers the absence: a settings
 // file with no models file beside it and none named reads as it always did.
 func TestASettingsFileWithNoModelsFileIsUnchanged(t *testing.T) {
+	// A credential file in the user's config directory would offer the built-in
+	// provider's models, so the directory is one of the test's own.
+	tempUserConfigDir(t)
 	dir := t.TempDir()
 	path := writeSettingsWith(t, dir, `{"version":1,"roles":{"chat":"m"}}`)
 	settings, err := Load(path)
@@ -808,6 +811,7 @@ func TestASettingsFileWithNoModelsFileIsUnchanged(t *testing.T) {
 // TestParseDiscoversNoModelsFile covers the other reader's contract: a
 // document held in memory has no directory, so nothing is imported beside it.
 func TestParseDiscoversNoModelsFile(t *testing.T) {
+	tempUserConfigDir(t)
 	dir := t.TempDir()
 	writeModelsFile(t, dir, ModelsFileName)
 	t.Chdir(dir)
