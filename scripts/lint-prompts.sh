@@ -3,9 +3,9 @@
 # Lint the prompt prose as agent instructions.
 #
 # The paths are where a session's markdown prompt text lives: the prompt
-# package's base and environment sections, each tool's own section, the
-# catalog, the command's own sections, the jobs section, and the
-# read-only conformance fixture. A prompt file added under one of them
+# package's base and environment sections, each tool's own section, each
+# compaction strategy's request prompts, the catalog, the command's own
+# sections, the jobs section, and the read-only conformance fixture. A prompt file added under one of them
 # is linted without a workflow edit, and untracked files are linted
 # before their first commit. Agent-facing prose in Go source — a tool's
 # description, for example — is not in the lint's scope: the rules here
@@ -23,6 +23,7 @@ version=v0.14.3
 mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   'prompt/*.md' \
   'tool/*/*.md' \
+  'compact/*/prompts/*.md' \
   'cli/*.md' \
   'cmd/poo/*.md' \
   'jobs.md' \

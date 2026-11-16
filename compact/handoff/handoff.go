@@ -7,6 +7,10 @@
 // The handoff is written by a fork of the last main request, so the
 // model sees exactly what it saw before, and the run's own view is
 // never changed.
+//
+// The instruction the fork appends is a markdown file under prompts/, so
+// it is edited and reviewed as prose. scripts/lint-prompts.sh lints it
+// with the rest of the session's prompt text.
 package handoff
 
 import (
@@ -27,8 +31,6 @@ const (
 	DefaultMaxTokens = 2048
 	// Strategy is the name the compaction carries.
 	Strategy = "handoff"
-	// Instruction is the message the fork appends to the last request.
-	Instruction = "[Context limit reached. Write a handoff for whoever continues this task: what you did, what you learned, what remains, and the next concrete step. Reply with text only.]"
 )
 
 // Options configure the strategy.
@@ -87,7 +89,7 @@ func (c *Compactor) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Comp
 	if in.Fork == nil {
 		return poo.Compaction{}, errors.New("handoff: there is no fork to call")
 	}
-	msg := poo.NewTextMessage(poo.RoleUser, Instruction)
+	msg := poo.NewTextMessage(poo.RoleUser, instruction)
 	reply, err := in.Fork(ctx, []poo.Message{msg}, c.maxTokens)
 	if err != nil {
 		return poo.Compaction{}, err

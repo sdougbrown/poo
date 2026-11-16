@@ -20,6 +20,10 @@
 // the turns it replaced, so the model reads that its history was
 // compacted. The store keeps the original turns: a compaction changes
 // what the model sees, not what the session did.
+//
+// The prompts the request carries are markdown files under prompts/, so
+// they are edited and reviewed as prose. scripts/lint-prompts.sh lints
+// them as agent instructions with the rest of the session's prompt text.
 package summary
 
 import (
