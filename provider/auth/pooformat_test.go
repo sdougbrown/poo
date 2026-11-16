@@ -245,6 +245,24 @@ func TestStatusOfAFileWithoutACredentialIsReported(t *testing.T) {
 	}
 }
 
+// TestTheStatusOfAnAPIKeyNamesNoClient covers the report of an entry a foreign
+// writer left with a client on a key: the read drops the client fields a key
+// does not carry, and the report must agree with what the read answers.
+func TestTheStatusOfAnAPIKeyNamesNoClient(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	body := `{"version": 1, "credentials": {"ollama-cloud": {"type": "api_key", "key": "sk-test", "clientId": "app_a-key-never-has"}}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the auth file: %v", err)
+	}
+	status, err := (auth.Credentials{Path: path}).Status(apiKeyProvider)
+	if err != nil {
+		t.Fatalf("the status failed: %v", err)
+	}
+	if status.ClientID != "" {
+		t.Errorf("the status names the client %q for an api key, want none", status.ClientID)
+	}
+}
+
 // TestAPooFileInEitherEncodingIsRead covers the two spellings of one file. poo
 // writes YAML, and a file an operator wrote as JSON is the same document: the
 // shape is the version field, not the punctuation.
@@ -731,12 +749,16 @@ func TestACredentialKeepsTheClientItWasGrantedTo(t *testing.T) {
 }
 
 // TestAnAPIKeyCarriesNoClient covers the kind that has none: a key is not granted to a client,
-// so a credential naming one is refused.
+// so a credential naming one — a client, or the endpoint that client trades at — is refused.
 func TestAnAPIKeyCarriesNoClient(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.json")
-	_, err := (auth.Credentials{Path: path, Now: clock}).Set(context.Background(), apiKeyProvider,
-		auth.Credential{Kind: auth.KindAPIKey, Key: "k", ClientID: "a-client"}, false)
-	if !errors.Is(err, auth.ErrNoCredential) {
-		t.Fatalf("the api key with a client is %v, want ErrNoCredential", err)
+	for name, credential := range map[string]auth.Credential{
+		"a client":    {Kind: auth.KindAPIKey, Key: "k", ClientID: "a-client"},
+		"an endpoint": {Kind: auth.KindAPIKey, Key: "k", TokenURL: "https://grant.example/token"},
+	} {
+		_, err := (auth.Credentials{Path: path, Now: clock}).Set(context.Background(), apiKeyProvider, credential, false)
+		if !errors.Is(err, auth.ErrNoCredential) {
+			t.Fatalf("the api key with %s is %v, want ErrNoCredential", name, err)
+		}
 	}
 }

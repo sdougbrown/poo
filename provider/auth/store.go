@@ -171,8 +171,8 @@ type Credential struct {
 	// Key is the key itself, for an api key.
 	Key string
 	// ClientID is the OAuth client the credential was granted to, when the caller knows it.
-	// Empty falls back to the provider's client: a credential imported from pi belongs to pi's,
-	// which is why the fallback exists.
+	// Empty falls back to the provider's client, which covers entries that record none —
+	// older files, and pi's own credential format, which carries no client.
 	ClientID string
 	// TokenURL is where that client trades its tokens, when it is not the provider's.
 	TokenURL string
@@ -322,13 +322,13 @@ func (c Credentials) status(doc document, p Provider, stored credential) Status 
 		Format:    doc.format.name(),
 		Provider:  p.ID,
 		Kind:      stored.Kind(),
-		ClientID:  stored.ClientID,
 		AccountID: p.account(stored.Access, stored.AccountID),
 	}
 	// A credential with no tokens has no expiry: an api key does not stop working on its
 	// own, and a report that said it expired in 1969 would be worse than one that said
 	// nothing.
 	if status.Kind == KindOAuth {
+		status.ClientID = stored.ClientID
 		status.Expires = time.UnixMilli(stored.Expires)
 		status.Live = stored.live(c.now(), c.leeway())
 	}
