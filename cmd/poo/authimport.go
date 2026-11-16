@@ -13,7 +13,7 @@ import (
 
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/internal/term"
-	"github.com/sdougbrown/poo/provider/piauth"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // authImportOptions are the flags of `poo auth import`.
@@ -70,7 +70,7 @@ func handleAuthImportPi(ctx context.Context, inv clicontract.Invocation, stdout,
 		fmt.Fprintf(stderr, "poo auth import: %v\n", err)
 		return exit{operationalExitCode}
 	}
-	poo := piauth.Credentials{Path: target}
+	poo := auth.Credentials{Path: target}
 	replace, failed := o.replacement(poo, stdout, stderr)
 	if failed {
 		return exit{operationalExitCode}
@@ -143,8 +143,8 @@ func piCredentialFile(settingsPath string, settings *config.Settings, from strin
 // The package that keeps a credential reads it: the entry's fields and its oauth rule are
 // one thing, and a second decoder here would be a copy that a field added to the format
 // would not reach.
-func readPiCredential(path string) (piauth.Credential, error) {
-	return piauth.Credentials{Path: path}.Read()
+func readPiCredential(path string) (auth.Credential, error) {
+	return auth.Credentials{Path: path}.Read()
 }
 
 // replacement decides whether a credential poo's file already holds may be
@@ -153,7 +153,7 @@ func readPiCredential(path string) (piauth.Credential, error) {
 // The store's rule is that nothing replaces a credential without an explicit
 // action. --force is one; answering the prompt is the other. A run with no
 // terminal to ask on has neither, so it refuses.
-func (o *authImportOptions) replacement(poo piauth.Credentials, stdout, stderr io.Writer) (replace bool, failed bool) {
+func (o *authImportOptions) replacement(poo auth.Credentials, stdout, stderr io.Writer) (replace bool, failed bool) {
 	// Whether the file holds an entry is the question the replace rule asks, and it is
 	// not the same as whether the entry decodes: an entry poo cannot read is still an
 	// entry, and replacing it is still a decision.
@@ -175,10 +175,10 @@ func (o *authImportOptions) replacement(poo piauth.Credentials, stdout, stderr i
 	}
 	if !interactive() {
 		fmt.Fprintf(stderr, "poo auth import: %s already holds a credential for %s: pass --force to replace it\n",
-			poo.Path, piauth.ProviderCodex)
+			poo.Path, auth.ProviderCodex)
 		return false, true
 	}
-	fmt.Fprintf(stderr, "%s already holds a credential for %s%s.\n", poo.Path, piauth.ProviderCodex, signedIn)
+	fmt.Fprintf(stderr, "%s already holds a credential for %s%s.\n", poo.Path, auth.ProviderCodex, signedIn)
 	fmt.Fprint(stderr, "Replace it? [y/N] ")
 	if !confirmed(os.Stdin) {
 		fmt.Fprintln(stderr, "poo auth import: the credential was left as it was")

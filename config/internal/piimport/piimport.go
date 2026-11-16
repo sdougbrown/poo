@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/provider/piauth"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // File is a models file read into poo's vocabulary: the providers it
@@ -210,7 +210,7 @@ func wireAPI(provider, api string) (string, error) {
 	case "", "openai-completions":
 		return "", nil
 	case "openai-codex-responses":
-		if provider == piauth.ProviderCodex {
+		if provider == auth.ProviderCodex {
 			return string(poo.APIResponses), nil
 		}
 	}
@@ -246,7 +246,7 @@ const AuthFileName = "auth.json"
 // shape and the encoding it is written with. A file that is not there holds no
 // keys.
 func readAuth(path string) (map[string]credential, error) {
-	entries, err := piauth.Entries(path)
+	entries, err := auth.Entries(path)
 	if err != nil {
 		return nil, err
 	}

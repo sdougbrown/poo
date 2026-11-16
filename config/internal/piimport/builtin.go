@@ -2,7 +2,7 @@ package piimport
 
 import (
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/provider/piauth"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // codexModel is one model pi's bundled Codex provider serves.
@@ -61,7 +61,7 @@ func BuiltinCodex(endpoint string) File {
 		})
 	}
 	return File{Providers: map[string]Provider{
-		piauth.ProviderCodex: {
+		auth.ProviderCodex: {
 			BaseURL:   endpoint,
 			API:       string(poo.APIResponses),
 			ToolsMode: string(poo.ToolsNative),

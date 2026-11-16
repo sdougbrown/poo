@@ -9,7 +9,7 @@ import (
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
-	"github.com/sdougbrown/poo/provider/piauth"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // authOptions are the flags of `poo auth status`.
@@ -61,7 +61,7 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		fmt.Fprintln(stderr, "poo auth status: the credential file cannot be resolved: set auth_file")
 		return exit{usageExitCode}
 	}
-	status, err := piauth.Credentials{Path: path}.Status()
+	status, err := auth.Credentials{Path: path}.Status()
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth status: %v\n", err)
 		return exit{operationalExitCode}
@@ -88,7 +88,7 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 }
 
 // printAuthStatus prints the report as the fields an operator reads.
-func printAuthStatus(report authStatus, status piauth.Status, stdout io.Writer) {
+func printAuthStatus(report authStatus, status auth.Status, stdout io.Writer) {
 	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "FILE\t%s\n", report.File)
 	fmt.Fprintf(w, "FORMAT\t%s\n", report.Format)
@@ -101,7 +101,7 @@ func printAuthStatus(report authStatus, status piauth.Status, stdout io.Writer) 
 
 // credentialState is the word a report gives a credential's state: a token poo
 // would use as it is, or one it trades before using it.
-func credentialState(status piauth.Status) string {
+func credentialState(status auth.Status) string {
 	if status.Live {
 		return "live"
 	}

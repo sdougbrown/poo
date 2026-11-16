@@ -1083,11 +1083,11 @@ func TestATerminalCredentialFailureIsNotRetried(t *testing.T) {
 		o.Credentials = func(ctx context.Context) (codex.Credential, error) {
 			asked++
 			<-ctx.Done()
-			// The failure an adapter maps piauth's spent refresh onto: the
+			// The failure an adapter maps the store's spent refresh onto: the
 			// token was traded and not stored, so a retry spends it again.
 			return codex.Credential{}, &poo.ProviderError{
 				Kind:    poo.ProviderKindAuthFailed,
-				Message: "piauth: the refreshed token was not stored",
+				Message: "auth: the refreshed token was not stored",
 			}
 		}
 	})

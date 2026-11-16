@@ -151,7 +151,7 @@ func (c Checker) rules() []rule {
 				// both through the build.
 				m + "/provider/codex",
 				m + "/provider/openai",
-				m + "/provider/piauth",
+				m + "/provider/auth",
 				m + "/session",
 				m + "/wire",
 				m + "/wire/protocol",
