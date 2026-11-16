@@ -264,6 +264,17 @@ func (r *renderer) streamText(text string) {
 	r.block.tail = tail
 }
 
+// contentWidth is the columns the terminal has now: the live width
+// when the terminal says one, the renderer's own otherwise.
+func (r *renderer) contentWidth() int {
+	if r.liveWidth != nil {
+		if live := r.liveWidth(); live > 0 {
+			return live
+		}
+	}
+	return r.width
+}
+
 // stalledNow reports that the terminal's width has changed under a
 // block that is painting: the rows it committed wrap at the old width,
 // and counting them at the new one would climb to the wrong row.
@@ -478,12 +489,7 @@ func (r *renderer) toolResult(tool, outcome, text string, elided int) {
 // previewContentWidth is the columns a tool result's line has after the
 // transcript's indent, at the terminal's width now.
 func (r *renderer) previewContentWidth() int {
-	width := r.width
-	if r.liveWidth != nil {
-		if live := r.liveWidth(); live > 0 {
-			width = live
-		}
-	}
+	width := r.contentWidth()
 	if width <= 0 {
 		width = r.wrap
 	}

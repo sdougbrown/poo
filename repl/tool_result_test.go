@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sdougbrown/poo/tool/bash"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
@@ -31,6 +32,39 @@ func plainLines(rendered string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
+}
+
+// TestTheEnvelopeMatchesItsProducer covers the contract with the tool
+// that builds the envelope: the repl's mirror reads what tool/bash
+// emits, whether the output arrived whole or clipped to head and tail,
+// so a field the producer renames fails here and not in a terminal.
+func TestTheEnvelopeMatchesItsProducer(t *testing.T) {
+	code := 0
+	envelope := func(o bash.Observation) string {
+		text, _ := bash.Envelope(o)
+		return text
+	}
+	shapes := []struct {
+		name string
+		text string
+	}{
+		{"whole output", envelope(bash.Observation{ExitCode: &code, TimedOut: false, Output: "whole\n"})},
+		{"head and tail", envelope(bash.Observation{ExitCode: &code, TimedOut: false, Output: strings.Repeat("line\n", 100), Cap: 10})},
+	}
+	for _, shape := range shapes {
+		var out bytes.Buffer
+		r := newRenderer(&out)
+		r.toolResult("bash", "ok", "[r1 · bash]\n"+shape.text, 0)
+		rendered := ansi.Strip(out.String())
+		if !strings.Contains(rendered, "line") && !strings.Contains(rendered, "whole") {
+			t.Errorf("%s: the produced output never read:\n%s", shape.name, rendered)
+		}
+		for _, unwanted := range []string{"returncode", "timed_out", "{"} {
+			if strings.Contains(rendered, unwanted) {
+				t.Errorf("%s: the transcript kept the envelope's %q:\n%s", shape.name, unwanted, rendered)
+			}
+		}
+	}
 }
 
 // TestABashObservationReadsAsItsOutput covers the decode: the
