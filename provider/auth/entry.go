@@ -60,6 +60,10 @@ func decodeEntry(path string, p Provider, entries map[string]json.RawMessage) (c
 	return entry, nil
 }
 
+// modelledFields are the entry's fields this package writes and reads. A field outside them
+// is one pi's credential type may hold and poo does not model: it is kept as it was.
+var modelledFields = []string{"access", "refresh", "expires", "accountId", "key"}
+
 // encodeEntry stores a credential in the entry a provider's credentials map
 // holds it under, and leaves every other entry as it was.
 //
@@ -83,6 +87,15 @@ func encodeEntry(path, provider string, entries map[string]json.RawMessage, entr
 	}
 	for name, value := range written {
 		fields[name] = value
+	}
+	// A field this kind does not carry is not part of this credential any more: replacing an
+	// api key with an oauth credential must not leave the key behind, or the next read finds a
+	// credential that carries both and refuses it. A field beyond the model stays as it was,
+	// because it is not this package's to drop.
+	for _, name := range modelledFields {
+		if _, ok := written[name]; !ok {
+			delete(fields, name)
+		}
 	}
 	encoded, err := json.Marshal(fields)
 	if err != nil {
@@ -181,7 +194,15 @@ func (c credential) fileEntry() fileEntry {
 }
 
 // Kind is how the entry authenticates, as the file spells it.
-func (c credential) Kind() Kind { return Kind(c.Type) }
+//
+// An entry that names no type is an oauth one: that is what a credential with tokens is, and
+// it is the same answer validate gives, so the read and the write agree.
+func (c credential) Kind() Kind {
+	if c.Type == "" {
+		return KindOAuth
+	}
+	return Kind(c.Type)
+}
 
 // export turns the stored entry into the credential a caller hands over or copies.
 func (c credential) export() Credential {

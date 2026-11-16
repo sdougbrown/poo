@@ -620,3 +620,61 @@ func TestAStoredCredentialReadsBack(t *testing.T) {
 		}
 	}
 }
+
+// TestReplacingAnEntryDropsTheFieldsItsKindDoesNotCarry covers the merge that had to learn to
+// delete: replacing an api key with an oauth credential left the old key behind, so the next
+// read found a credential carrying both and refused it — a write that reports success and leaves
+// a credential nothing can use.
+func TestReplacingAnEntryDropsTheFieldsItsKindDoesNotCarry(t *testing.T) {
+	dir := t.TempDir()
+	oauthFile := filepath.Join(dir, "auth.json")
+	both := auth.Provider{ID: "both", Kind: ""}
+	credentials := auth.Credentials{Path: oauthFile, Now: clock}
+	ctx := context.Background()
+
+	if _, err := credentials.Set(ctx, apiKeyProvider, auth.Credential{Kind: auth.KindAPIKey, Key: "an-api-key"}, false); err != nil {
+		t.Fatalf("storing the api key: %v", err)
+	}
+	// The same entry, replaced by an oauth credential of another provider that reads either kind.
+	oauth := auth.Credential{Access: codexToken(t, newAccount), Refresh: newRefresh, Expires: clock().Add(time.Hour), AccountID: newAccount}
+	if _, err := credentials.Set(ctx, both, oauth, true); err != nil {
+		t.Fatalf("replacing the api key: %v", err)
+	}
+	_, held := pooFile(t, oauthFile)
+	entry := held["both"]
+	if _, ok := entry["key"]; ok {
+		t.Errorf("the oauth entry kept the api key's field: %v", entry)
+	}
+	if _, err := credentials.Read(both); err != nil {
+		t.Errorf("the replaced credential does not read back: %v", err)
+	}
+
+	// And back again: an api key over an oauth entry keeps no token fields.
+	if _, err := credentials.Set(ctx, apiKeyProvider, auth.Credential{Kind: auth.KindAPIKey, Key: "another-key"}, true); err != nil {
+		t.Fatalf("replacing the oauth credential: %v", err)
+	}
+	_, held = pooFile(t, oauthFile)
+	entry = held[auth.ProviderCodex]
+	for _, field := range []string{"access", "refresh", "expires", "accountId"} {
+		if _, ok := entry[field]; ok {
+			t.Errorf("the api key entry kept %q: %v", field, entry)
+		}
+	}
+}
+
+// TestAnEntryThatNamesNoTypeIsAnOAuthOne covers an entry with tokens and no type: a hand-written
+// file, or one from a tool that leaves the type out. It reads as an oauth credential, which is
+// what Kind documents and what validate expects.
+func TestAnEntryThatNamesNoTypeIsAnOAuthOne(t *testing.T) {
+	body := fmt.Sprintf(`{"version": 1, "credentials": {"openai-codex": {"access": %q, "refresh": "r", "expires": %d, "accountId": %q}}}`,
+		codexToken(t, oldAccount), expires(time.Hour), oldAccount)
+	path := authFile(t, body)
+	credentials := auth.Credentials{Path: path, Now: clock}
+	token, err := credentials.Access(context.Background(), auth.Codex)
+	if err != nil {
+		t.Fatalf("a typed-less oauth entry did not read: %v", err)
+	}
+	if token.AccountID != oldAccount {
+		t.Errorf("the token names the account %q, want %q", token.AccountID, oldAccount)
+	}
+}
