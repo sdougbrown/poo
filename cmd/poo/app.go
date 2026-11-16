@@ -65,6 +65,25 @@ const modelsLong = `The command lists the effective catalog: the models the sett
 the models the binary knows about, and what the endpoints report.
 --explain names one model and prints the layer that set each field.`
 
+// loginLong is the help body of `poo login`.
+const loginLong = `The command signs in to a provider and stores the credential in the file auth_file names, or
+the one poo resolves without it. A bare poo login offers the list; a name picks one:
+
+  poo login codex         OpenAI Codex, through a browser
+  poo login ollama-cloud  Ollama Cloud, with a key
+
+The Codex sign-in is the legacy flow: it names the Codex CLI's public client, not poo's own, and
+the credential records it so a refresh keeps working. A future first-party sign-in is another
+entry in the same list.
+
+The browser sign-in comes back to a loopback callback on the port its client is registered with.
+When the browser cannot reach this machine, paste the code or the URL it landed on instead. A key
+comes from --key, the terminal's prompt, or stdin — in that order, so a key need not enter your
+shell's history.
+
+An existing credential is not replaced without an explicit action: --force replaces it, and a
+terminal is asked first. No token is printed.`
+
 // rolesLong is the help body of `poo roles`.
 const rolesLong = `The check an operator runs without starting a session. Each role the settings
 assign is resolved against the catalog — the settings, and the models file below
@@ -170,6 +189,21 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				},
 				Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 					return handleModels(inv, stdout, cmdStderr), nil
+				},
+			},
+			{
+				Name:        "login",
+				Short:       "Sign in to a provider and store the credential",
+				Long:        loginLong,
+				Positionals: []clicontract.Positional{{Name: "provider"}},
+				Flags: []clicontract.Flag{
+					{Name: "force", Kind: clicontract.Bool, Usage: "Replace a credential the file already holds, without asking"},
+					{Name: "no-browser", Kind: clicontract.Bool, Usage: "Print the sign-in URL instead of opening a browser"},
+					{Name: "wait", Kind: clicontract.Int, Usage: "Seconds to wait for a browser sign-in to come back (default: 300)"},
+					{Name: "key", Kind: clicontract.String, Usage: "The key a key sign-in uses"},
+				},
+				Handle: func(ctx context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
+					return handleLogin(ctx, inv, stdout, cmdStderr), nil
 				},
 			},
 			{
