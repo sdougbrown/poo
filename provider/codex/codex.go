@@ -539,9 +539,10 @@ const maxSessionIDLength = 64
 // clampSessionID cuts a session identifier to the length the endpoint takes,
 // counted in characters rather than bytes.
 //
-// The identifier names the endpoint's prompt cache, so one longer than the
-// endpoint accepts is cut rather than sent: a request that carries one is
-// refused outright.
+// The identifier names the endpoint's prompt cache, and the endpoint refuses a
+// request whose identifier is longer than it accepts. Cutting it keeps the
+// request sendable. poo's own session ids are far shorter than the limit, so
+// the cut guards an id a consumer supplied.
 func clampSessionID(id string) string {
 	chars := []rune(id)
 	if len(chars) <= maxSessionIDLength {
