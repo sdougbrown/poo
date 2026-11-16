@@ -46,6 +46,27 @@ func TestAPendingFrameStopsPaintingAfterAResize(t *testing.T) {
 	}
 }
 
+// TestAHintEndsBeforeAToolCall covers a run whose model calls a tool
+// before speaking: the hint that stood for the run ends before the
+// call decorates the transcript.
+func TestAHintEndsBeforeAToolCall(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.userPrompt("go")
+	r.hint()
+	if rowOf(t, scr, "… writing") < 0 {
+		t.Fatalf("the hint never showed:\n%s", scr.text())
+	}
+	r.toolCall("bash", "ls")
+
+	drawn := scr.text()
+	if rowOf(t, scr, "… writing") >= 0 {
+		t.Errorf("the hint stood over the tool call:\n%s", drawn)
+	}
+	if rowOf(t, scr, "⚙ bash") < 0 {
+		t.Errorf("the tool call never showed:\n%s", drawn)
+	}
+}
+
 func TestTheLiveStreamRendersASplitFence(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")

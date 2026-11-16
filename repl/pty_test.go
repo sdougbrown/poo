@@ -13,6 +13,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/chubin/vt10x"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
@@ -411,5 +412,32 @@ func TestTheFramePaintsAQuietDeltaWithoutAnotherEvent(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatalf("the repl never left after /quit; it drew:\n%s", term.String())
+	}
+}
+
+// TestARefusedPromptTakesTheHintBack covers a run the server refuses
+// before its first delta: the hint the run showed comes off the
+// terminal, and the failure reads alone.
+func TestARefusedPromptTakesTheHintBack(t *testing.T) {
+	server := &fakeServer{t: t, refusePrompt: true}
+	term, code := startTerminalRepl(t, server)
+	term.press("go\n")
+	waitFor(t, term, "busy")
+	// The failure and the redraw the hint's removal drives settle in
+	// the drawn stream before the screen reads whole.
+	time.Sleep(200 * time.Millisecond)
+	emu := vt10x.New(vt10x.WithSize(80, 24))
+	emu.Write([]byte(term.String()))
+	if strings.Contains(emu.String(), "… writing") {
+		t.Errorf("the hint stood over the refusal:\n%s", emu.String())
+	}
+	if !strings.Contains(emu.String(), "✗") {
+		t.Errorf("the refusal never read:\n%s", emu.String())
+	}
+	term.press("\x03")
+	select {
+	case <-code:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the repl did not exit")
 	}
 }

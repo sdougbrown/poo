@@ -355,6 +355,18 @@ func (r *renderer) stalledNow() bool {
 // the heading the same way.
 const thinkingIntro = "· thinking ·\n\n"
 
+// openSegment starts one kind's segment: the kind is set, the source
+// starts empty, and a thinking segment opens with its heading. Both
+// the live screen and the buffered paths open segments here, so the
+// kinds read the same however the block is rendered.
+func (r *renderer) openSegment(kind string) {
+	r.live.kind = kind
+	r.live.source = ""
+	if kind == "thinking" {
+		r.live.source = thinkingIntro
+	}
+}
+
 // switchKind closes the segment the deltas were writing and opens one
 // of another kind. The closed segment's preview is already its final
 // rendering, so it is sealed rather than rendered again.
@@ -370,11 +382,7 @@ func (r *renderer) switchKind(kind string) {
 		seq.WriteString(sealedRows(body))
 	}
 	r.block.previewRows = 0
-	r.live.kind = kind
-	r.live.source = ""
-	if kind == "thinking" {
-		r.live.source = thinkingIntro
-	}
+	r.openSegment(kind)
 	if seq.Len() > 0 {
 		fmt.Fprint(r.sink, seq.String())
 	}
@@ -411,11 +419,7 @@ func (r *renderer) bufferDelta(kind, text string) {
 		if r.live.kind != "" {
 			r.live.parked = append(r.live.parked, streamSegment{kind: r.live.kind, source: r.live.source})
 		}
-		r.live.kind = kind
-		r.live.source = ""
-		if kind == "thinking" {
-			r.live.source = thinkingIntro
-		}
+		r.openSegment(kind)
 	}
 	r.live.source += text
 }
