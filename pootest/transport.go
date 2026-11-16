@@ -105,6 +105,8 @@ type Transport struct {
 	windowErr error
 	// compacts counts the native compactions the transport served.
 	compacts int
+	// native holds the views the native compactions were given.
+	native []poo.NativeCompaction
 	// err is the failure the transport returns when it is set.
 	err error
 }
@@ -118,6 +120,10 @@ type Fork struct {
 	// MaxTokens is the output limit the fork asked for.
 	MaxTokens int
 }
+
+// The transport is the session's own chat transport, and it can compact
+// the provider's own state.
+var _ poo.NativeCompactor = (*Transport)(nil)
 
 // NewTransport returns a transport that serves a script.
 func NewTransport(turns ...Turn) *Transport {
@@ -160,6 +166,14 @@ func (t *Transport) SetWindowError(err error) {
 	t.windowErr = err
 }
 
+// NativeCompactions returns what the transport's native compactions were
+// given, in order.
+func (t *Transport) NativeCompactions() []poo.NativeCompaction {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]poo.NativeCompaction(nil), t.native...)
+}
+
 // Compactions returns how many native compactions the transport served.
 func (t *Transport) Compactions() int {
 	t.mu.Lock()
@@ -171,11 +185,14 @@ func (t *Transport) Compactions() int {
 //
 // It is the transport's native compaction capability: a provider window
 // is the provider's own compacted state, so it can only come from the
-// session's own transport.
-func (t *Transport) Compact(ctx context.Context, prev poo.Rendered) (poo.ProviderWindow, error) {
+// session's own transport. It records what it was given, so a test can
+// assert that the view is the one the run has, not the one the last
+// request carried.
+func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.ProviderWindow, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.compacts++
+	t.native = append(t.native, in)
 	if t.windowErr != nil {
 		return poo.ProviderWindow{}, t.windowErr
 	}

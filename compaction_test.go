@@ -996,11 +996,7 @@ func TestTheWindowBecomesTheViewPlusTheMarker(t *testing.T) {
 	compactor := &compactionCompactor{
 		should: afterTurns(1),
 		compaction: func(view poo.View) (poo.Compaction, error) {
-			window, err := tr.Compact(context.Background(), poo.Rendered{})
-			if err != nil {
-				return poo.Compaction{}, err
-			}
-			return poo.Compaction{Strategy: "window", Window: &window}, nil
+			return poo.Compaction{Strategy: "window", Window: &poo.ProviderWindow{}}, nil
 		},
 	}
 	sink := &recordingSink{}
@@ -1015,14 +1011,19 @@ func TestTheWindowBecomesTheViewPlusTheMarker(t *testing.T) {
 		t.Fatalf("the transport got %d requests, want 2", len(reqs))
 	}
 	second := reqs[1].Messages
-	if len(second) != 2 {
-		t.Fatalf("the second request holds %d messages, want the window and the marker", len(second))
+	// The run's instructions, the window and the marker: a window
+	// replaces the conversation, not the contract the model works under.
+	if len(second) != 3 {
+		t.Fatalf("the second request holds %d messages, want the instructions, the window and the marker", len(second))
 	}
-	if second[0].Content[0].Provider == nil {
-		t.Error("the first message holds no provider block")
+	if second[0].Role != poo.RoleSystem {
+		t.Errorf("the first message's role is %q, want the run's instructions", second[0].Role)
 	}
-	if second[1].Text() != poo.CompactionMarkerText {
-		t.Errorf("the second message holds %q, want the marker", second[1].Text())
+	if second[1].Content[0].Provider == nil {
+		t.Error("the window holds no provider block")
+	}
+	if second[2].Text() != poo.CompactionMarkerText {
+		t.Errorf("the last message holds %q, want the marker", second[2].Text())
 	}
 	if sink.count("compaction") != 1 {
 		t.Errorf("the log holds %d compaction records, want 1", sink.count("compaction"))
@@ -1895,5 +1896,130 @@ func TestASupersedingReplacementMovesTheTurnsBehindIt(t *testing.T) {
 	requireTurnRanges(t, s, map[int]string{3: "three", 4: "the answer"})
 	if summaries != 1 {
 		t.Errorf("the view holds %d compaction messages, want 1: the second replacement supersedes the first", summaries)
+	}
+}
+
+// TestTheNativeCompactorSeesTheCurrentView covers the reason the native
+// compactor is handed a view: the last request's snapshot is a turn
+// behind it, so a provider that compacted the snapshot would drop the
+// reply and the results the run has since produced.
+func TestTheNativeCompactorSeesTheCurrentView(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{text: "the first reply", calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer"},
+	})
+	tr.SetWindow(poo.ProviderWindow{Items: []poo.ContentBlock{{
+		Kind:     poo.ContentProvider,
+		Provider: &poo.ProviderBlock{API: poo.APIChatCompletions, Required: true, Data: []byte(`{"encrypted_content":"abc"}`)},
+	}}})
+	compactor := &compactionCompactor{
+		should: afterTurns(1),
+		compaction: func(view poo.View) (poo.Compaction, error) {
+			// The strategy asks for a native compaction; the core asks
+			// the transport for the window.
+			return poo.Compaction{Strategy: "window", Window: &poo.ProviderWindow{}}, nil
+		},
+	}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	given := tr.NativeCompactions()
+	if len(given) != 1 {
+		t.Fatalf("the transport compacted %d times, want 1", len(given))
+	}
+	// The turn that just finished is in the view the compactor was given.
+	// The last request went out before that turn existed.
+	var text strings.Builder
+	for _, m := range given[0].View.Messages() {
+		text.WriteString(turnSpanText([]poo.Message{m}))
+	}
+	for _, want := range []string{"the first reply", "echoed"} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("the view the compactor was given holds %q, want the finished turn's %q", text.String(), want)
+		}
+	}
+	if given[0].Model.ModelID != "test-model" {
+		t.Errorf("the compaction was given the model %q, want the session's", given[0].Model.ModelID)
+	}
+}
+
+// TestAWindowMayCarryRetainedText covers the shape a provider returns: the
+// opaque items it cannot rebuild and the visible text the model must go on
+// reading, installed in the order the provider sent them.
+func TestAWindowMayCarryRetainedText(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer"},
+	})
+	tr.SetWindow(poo.ProviderWindow{Items: []poo.ContentBlock{
+		{Kind: poo.ContentText, Text: "the request the user made"},
+		{Kind: poo.ContentProvider, Provider: &poo.ProviderBlock{API: poo.APIChatCompletions, Required: true, Data: []byte(`{"encrypted_content":"abc"}`)}},
+		{Kind: poo.ContentProvider, Provider: &poo.ProviderBlock{API: poo.APIChatCompletions, Type: "retained", Data: []byte(`{"dropped":true}`)}},
+	}})
+	compactor := &compactionCompactor{
+		should: afterTurns(1),
+		compaction: func(view poo.View) (poo.Compaction, error) {
+			return poo.Compaction{Strategy: "window", Window: &poo.ProviderWindow{}}, nil
+		},
+	}
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	runSession(t, s, "do the thing")
+
+	if sink.count("compaction") != 1 {
+		t.Fatalf("the log holds %d compaction records, want 1", sink.count("compaction"))
+	}
+	reqs := tr.Requests()
+	last := reqs[len(reqs)-1].Messages
+	// The instructions, the window and the marker.
+	if len(last) != 3 {
+		t.Fatalf("the last request holds %d messages, want 3", len(last))
+	}
+	window := last[1].Content
+	if len(window) != 3 {
+		t.Fatalf("the window holds %d items, want the provider's 3", len(window))
+	}
+	if window[0].Kind != poo.ContentText || window[0].Text != "the request the user made" {
+		t.Errorf("the window's first item is %+v, want the retained text", window[0])
+	}
+	for i, item := range window[1:] {
+		if item.Provider == nil {
+			t.Errorf("the window's item %d is %+v, want provider data", i+1, item)
+		}
+	}
+}
+
+// TestAWindowWithoutRequiredDataIsRejected covers the rule: a window
+// carries at least one item the provider cannot rebuild, so a window of
+// retained text alone is not a compaction.
+func TestAWindowWithoutRequiredDataIsRejected(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+		{text: "the answer"},
+	})
+	tr.SetWindow(poo.ProviderWindow{Items: []poo.ContentBlock{
+		{Kind: poo.ContentText, Text: "the request the user made"},
+	}})
+	compactor := &compactionCompactor{
+		should: afterTurns(1),
+		compaction: func(view poo.View) (poo.Compaction, error) {
+			return poo.Compaction{Strategy: "window", Window: &poo.ProviderWindow{}}, nil
+		},
+	}
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+
+	if sink.count("compaction") != 0 {
+		t.Errorf("the log holds %d compaction records, want none", sink.count("compaction"))
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn: the refused window leaves the run alive", res.Reason)
 	}
 }

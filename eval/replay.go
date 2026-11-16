@@ -312,7 +312,7 @@ func (t *replayNativeTransport) setWindow(w *poo.ProviderWindow) {
 }
 
 // Compact returns the recorded window.
-func (t *replayNativeTransport) Compact(ctx context.Context, prev poo.Rendered) (poo.ProviderWindow, error) {
+func (t *replayNativeTransport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.ProviderWindow, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.window == nil {

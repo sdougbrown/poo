@@ -1052,6 +1052,15 @@ func (s *Session) hookContextFor(ctx context.Context, runID, job string, turn in
 func (s *Session) view() View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.viewLocked()
+}
+
+// viewLocked returns the model's history as a read-only view.
+//
+// The caller holds the session's lock. A caller that already holds it
+// reads the view through this rather than taking the lock twice: the
+// native compactor is asked for a window while the compaction holds it.
+func (s *Session) viewLocked() View {
 	messages, index := s.modelViewLocked()
 	return NewHistoryView(messages, s.results, s.turnsWithRangesLocked(index))
 }
@@ -1759,6 +1768,9 @@ func estimateMessageChars(m Message) int {
 			chars += len(c.Arguments)
 		}
 		if c.Provider != nil {
+			// A payload the harness cannot read is priced by its size.
+			// An encrypted provider item costs what it carries, and the
+			// endpoint's usage report is what corrects the ratio for it.
 			chars += len(c.Provider.Data)
 		}
 		chars += attachmentChars(c)
