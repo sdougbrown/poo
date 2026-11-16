@@ -36,21 +36,27 @@ func cursorRow(term *terminal) int {
 	return term.vt.Cursor().Y
 }
 
-// waitBottom waits for the input cursor on the footer's own rows: the
-// line the prompt or the draft reads on, or the spare row under it that
-// the editor's erases spend. The prompt, the draft or an ask all end
-// there while the line is read.
+// waitBottom waits for the input cursor on the prompt's own row, with
+// an empty line being read: exactly one live prompt, the cursor on it,
+// no stranded copy below. Wrapped drafts read their cursor elsewhere;
+// those tests assert the draft's own position instead.
 func waitBottom(t *testing.T, term *terminal) {
 	t.Helper()
-	_, rows := term.vt.Size()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if row := cursorRow(term); row >= rows-2 {
+		screen := physicalRows(term)
+		promptRow := -1
+		for i, r := range screen {
+			if strings.Contains(r, promptMark) || strings.Contains(r, "allow bash?") {
+				promptRow = i
+			}
+		}
+		if promptRow >= 0 && cursorRow(term) == promptRow {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("the input cursor is not on the footer's rows; rows:\n%s", indexedRows(term))
+	t.Fatalf("the input cursor is not on the prompt's row; rows:\n%s", indexedRows(term))
 }
 
 // indexedRows is the terminal's rows with their numbers, for a failure
@@ -688,12 +694,19 @@ func TestARecalledHistoryLineTakesTheFooter(t *testing.T) {
 	if got := strings.Count(term.screen(), "recalled"); got != 1 {
 		t.Fatalf("the recalled draft reads %d time(s) on the screen, want 1:\n%s", got, indexedRows(term))
 	}
+	// The recalled block keeps the newline its storage carries: the
+	// draft fills three rows (the prompt's indent rides on the first),
+	// the cursor reads on the row the trailing newline opens, and the
+	// spare row sits under that. The wrapped tail is whole.
 	head, tail := term.rowOf("recalled"), term.rowOf(strings.Repeat("h", 20))
-	if head < rows-4 || tail < rows-3 || tail > rows-2 {
-		t.Fatalf("the draft stands on rows %d..%d, want the footer's rows above %d:\n%s", head, tail, rows-4, indexedRows(term))
+	if head < rows-5 || head > rows-4 {
+		t.Fatalf("the draft's head stands on row %d, want the footer's top rows:\n%s", head, indexedRows(term))
 	}
-	if row := cursorRow(term); row < rows-2 {
-		t.Errorf("the recalled draft's cursor stands on row %d, want the footer's last rows:\n%s", row, indexedRows(term))
+	if tail != head+2 {
+		t.Fatalf("the draft's wrapped tail stands on row %d, want the row two under the head:\n%s", tail, indexedRows(term))
+	}
+	if row := cursorRow(term); row < head+2 || row > head+3 {
+		t.Errorf("the recalled draft's cursor stands on row %d, want the rows under the draft:\n%s", row, indexedRows(term))
 	}
 
 	// A real Enter is CR: after the recall's ESC, vim is in normal mode.

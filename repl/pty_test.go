@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/chubin/vt10x"
+	"github.com/reeflective/readline"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
@@ -169,11 +170,17 @@ func takeOverStdio(t *testing.T, slave *os.File) (restore func()) {
 		syscall.Close(savedOut)
 		t.Fatalf("duping the terminal over stdout: %v", err)
 	}
+	// The editor's terminal queries read stderr by default, which is
+	// this process's test log, not the terminal under test. The query
+	// override points them at the slave, so the engine sizes and probes
+	// the same terminal its frames render on.
+	readline.SetQueryFile(slave)
 	return func() {
 		syscall.Dup2(savedIn, 0)
 		syscall.Dup2(savedOut, 1)
 		syscall.Close(savedIn)
 		syscall.Close(savedOut)
+		readline.SetQueryFile(nil)
 	}
 }
 

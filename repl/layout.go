@@ -356,15 +356,41 @@ func (l *layout) commitPreview(body string) {
 	}
 }
 
-// ensure makes the footer the given number of rows. The caller keeps one
-// spare row while a draft is typed, so the keystroke that wraps has
-// somewhere to go.
+// prepare gets the footer ready for the editor's frame: the rows the
+// draft fills plus its spare, no stray rows, and the cursor anchored at
+// the footer's first row — the origin the editor's frame renders from.
+// It runs before every frame, on the editor's own goroutine, and it is
+// the only writer of cursor-geometry sequences there: transcript writes
+// save and restore the cursor, so they interleave safely with the
+// anchored frame.
+func (l *layout) prepare(footer int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.active {
+		return
+	}
+	l.ensureLocked(footer)
+	l.anchorLocked()
+}
+
+// ensure makes the footer the given number of rows, without touching the
+// cursor: a redraw the editor computes from where it stands sizes the
+// footer this way. The caller keeps one spare row while a draft is
+// typed, so the keystroke that wraps has somewhere to go.
 //
 // Growing scrolls the region first, so the last transcript rows move up
 // into the scrollback and the cursor keeps its offset.
 func (l *layout) ensure(footer int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.ensureLocked(footer)
+}
+
+// ensureLocked is the sizing half of a frame's preparation. It never
+// moves the cursor by a delta: the frame's anchor decides where the
+// cursor reads from, and a delta computed from the engine's row model
+// is the arithmetic that stranded it.
+func (l *layout) ensureLocked(footer int) bool {
 	if footer < 1 {
 		footer = 1
 	}
@@ -376,15 +402,14 @@ func (l *layout) ensure(footer int) bool {
 	}
 	rows := l.previewRows
 	l.clearPreviewLocked()
-	delta := footer - l.footer
 	var b strings.Builder
 	b.WriteString(seqSaveCursor)
 	b.WriteString(l.footerSeq())
-	if delta > 0 {
-		// Only committed rows scroll. A pending preview row that left the
-		// region is written again when the stream repaints, and the
-		// footer's growth covers the rest.
-		k := delta
+	if footer > l.footer {
+		// Only committed rows scroll. A pending preview row that left
+		// the region is written again when the stream repaints, and
+		// the footer's growth covers the rest.
+		k := footer - l.footer
 		if committed := l.last - (l.regionTop() - 1); k > committed {
 			k = committed
 		}
@@ -396,11 +421,6 @@ func (l *layout) ensure(footer int) bool {
 	b.WriteString(l.regionSeq())
 	b.WriteString(l.footerSeq())
 	b.WriteString(seqRestoreCursor)
-	if delta > 0 {
-		b.WriteString(ansi.CursorUp(delta))
-	} else {
-		b.WriteString(ansi.CursorDown(-delta))
-	}
 	if l.last > l.regionBottom() {
 		l.last = l.regionBottom()
 	}
@@ -413,36 +433,45 @@ func (l *layout) ensure(footer int) bool {
 	return true
 }
 
+// anchor finishes a frame's preparation on its own: no rows under the
+// committed boundary, the cursor on the footer's first row.
+func (l *layout) anchor() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.active {
+		return
+	}
+	l.anchorLocked()
+}
+
+// anchorLocked is the anchoring half of a frame's preparation. Rows
+// under the committed boundary belong to no stream: a paint that
+// outgrew the footer left its rows there, and the editor's frame starts
+// from the committed boundary again. The standing preview is not one of
+// the strays; it is repainted from the cache. The footer's own sequence
+// then anchors the frame: the engine renders from the footer's first
+// row, and the erase below spends the rows the frame is about to fill,
+// the spare included.
+func (l *layout) anchorLocked() {
+	var b strings.Builder
+	b.WriteString(seqSaveCursor)
+	pending := l.previewRows
+	l.preview = 0
+	l.previewRows = nil
+	for row := l.last + 1; row <= l.regionBottom(); row++ {
+		b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", row))
+		b.WriteString(seqEraseLine)
+	}
+	b.WriteString(l.footerSeq())
+	l.emit(b.String())
+	l.paintPreviewLocked(pending)
+}
+
 // footerRows is the rows reserved for the editor now.
 func (l *layout) footerRows() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.footer
-}
-
-// clearBelowLast blanks the region under the committed rows. A paint
-// that outgrew the footer left rows there that belong to no stream, and
-// the editor's next draw starts from the committed boundary again. The
-// standing preview is not one of the strays: it is repainted from the
-// cache once the region is clear.
-func (l *layout) clearBelowLast() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !l.active || l.last >= l.regionBottom() {
-		return
-	}
-	pending := l.previewRows
-	var b strings.Builder
-	b.WriteString(seqSaveCursor)
-	for row := l.last + 1; row <= l.regionBottom(); row++ {
-		b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", row))
-		b.WriteString(seqEraseLine)
-	}
-	b.WriteString(seqRestoreCursor)
-	l.preview = 0
-	l.previewRows = nil
-	l.emit(b.String())
-	l.paintPreviewLocked(pending)
 }
 
 // cols is the terminal's width now.
@@ -454,24 +483,6 @@ func (l *layout) cols() int {
 
 // regionTop is the region's first row.
 func (l *layout) regionTop() int { return 1 }
-
-// place puts the cursor at the given row of the footer. It is for a
-// redraw the editor cannot compute from where it stands: a prompt that
-// wraps differently, or a terminal that just changed size.
-func (l *layout) place(row int) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !l.active {
-		return
-	}
-	if row < 0 {
-		row = 0
-	}
-	if row > l.footer-1 {
-		row = l.footer - 1
-	}
-	l.emit(fmt.Sprintf("\x1b[%d;1H", l.footerTop()+row))
-}
 
 // resize takes the terminal's new size. A transcript row the terminal
 // held keeps the row it was on, as far as the new region reaches. The

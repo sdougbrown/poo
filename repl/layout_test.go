@@ -12,10 +12,10 @@ import (
 )
 
 // showPrompt draws the prompt the way the editor does: its own row,
-// erased first.
+// erased first, from the footer's anchored origin.
 func showPrompt(l *layout, prompt string) {
-	l.place(0)
-	l.raw().Write([]byte("\x1b[J" + prompt))
+	l.anchor()
+	l.raw().Write([]byte(prompt))
 }
 
 // mark is the prompt mark as the screen shows it: the harness trims
@@ -168,7 +168,7 @@ func TestClearingUnderTheLastRowKeepsAStandingPreview(t *testing.T) {
 	l.write("committed row\n")
 	l.paintPreview([]string{"a standing preview"})
 
-	l.clearBelowLast()
+	l.anchor()
 
 	if l.preview <= 0 || len(l.previewRows) == 0 || !strings.Contains(l.previewRows[0], "a standing preview") {
 		t.Fatalf("the standing preview lost its cache: preview=%d rows=%v", l.preview, l.previewRows)

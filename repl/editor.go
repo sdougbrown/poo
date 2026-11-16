@@ -27,17 +27,19 @@ type editorInput struct {
 	// restores the state captured at construction.
 	restore func() error
 
-	// mu guards the prompt and the draft. The editor's goroutine reports
-	// the draft, and the session's loop sets the prompt.
-	mu         sync.Mutex
-	promptText string
-	line       []rune
-	pos        int
+	// mu guards the prompt and the draft. The session's loop sets the
+	// prompt and the editor's goroutine mirrors it into the frame
+	// snapshot the frame renders; the editor's goroutine reports the
+	// draft.
+	mu          sync.Mutex
+	promptText  string
+	framePrompt string
+	line        []rune
 }
 
 // newEditor builds the line editor for the session.
 func newEditor(m *machine) *editorInput {
-	i := &editorInput{m: m, promptText: promptMark}
+	i := &editorInput{m: m, promptText: promptMark, framePrompt: promptMark}
 
 	sh := readline.NewShell()
 	i.rl = sh
@@ -47,7 +49,7 @@ func newEditor(m *machine) *editorInput {
 	sh.Prompt.Primary(func() string {
 		i.mu.Lock()
 		defer i.mu.Unlock()
-		return i.promptText
+		return i.framePrompt
 	})
 	sh.Prompt.Secondary(func() string {
 		return ansiDim + "  ⋯ " + ansiReset
@@ -172,35 +174,19 @@ func newEditor(m *machine) *editorInput {
 // it back.
 func (i *editorInput) refresh() {
 	line := []rune(*i.rl.Line())
-	pos := i.rl.Cursor().Pos()
 	i.mu.Lock()
 	i.line = append(i.line[:0], line...)
-	i.pos = pos
-	promptText := i.promptText
+	// The frame renders one prompt for the whole frame: snapshot the
+	// pending text here, where the footer is sized for it, so the
+	// sizing and the primary printing read the same text.
+	i.framePrompt = i.promptText
+	promptText := i.framePrompt
 	i.mu.Unlock()
 	l := i.m.r.layout
 	if l == nil {
 		return
 	}
-	before := l.footerRows()
-	if !l.ensure(i.rowsFor(promptText, line)) {
-		return
-	}
-	// A paint that needed more rows than the old footer had ran past
-	// the footer and left rows in the region. A history recall paints
-	// its whole line at once, so it is the usual case. Those rows belong
-	// to no stream; clear them so the draft is not beside a copy of
-	// itself.
-	if painted := promptRows(promptText, line, l.cols()); painted > before {
-		l.clearBelowLast()
-	}
-	// The footer moved, so the editor's line ends at a new row. Put the
-	// cursor there, and let the editor erase and draw the line from the
-	// new prompt row.
-	// The cursor is left where the editor's own frame put it: the
-	// layout's writes save and restore it, and the editor's repaint
-	// math moves it relative to itself. Placing it here would fight
-	// that arithmetic.
+	l.prepare(i.rowsFor(promptText, line))
 }
 
 // rowsFor is the rows the footer reserves for a prompt and a draft.
@@ -211,16 +197,19 @@ func (i *editorInput) rowsFor(prompt string, draft []rune) int {
 	return promptRows(prompt, draft, i.m.r.layout.cols()) + 1
 }
 
-// promptRows is the rows a prompt and the draft before the cursor fill
-// in the footer, the editor's own line count.
+// promptRows is the rows a prompt and a draft fill in the footer, the
+// editor's own line count: every explicit input line starts at the
+// prompt's indent, and an exact width multiple still puts the cursor on
+// a row of its own, the way the editor's own span math counts.
 func promptRows(prompt string, draft []rune, width int) int {
 	if width <= 0 {
 		return 1
 	}
-	cells := ansi.StringWidth(prompt) + ansi.StringWidth(string(draft))
-	rows := cells / width
-	if cells%width != 0 {
-		rows++
+	indent := ansi.StringWidth(prompt)
+	rows := 0
+	for _, line := range strings.Split(string(draft), "\n") {
+		cells := indent + ansi.StringWidth(line)
+		rows += cells/width + 1
 	}
 	if rows < 1 {
 		rows = 1
@@ -228,25 +217,14 @@ func promptRows(prompt string, draft []rune, width int) int {
 	return rows
 }
 
-// prompt shows the prompt here and for the next read. A read in flight
-// repaints on the request; otherwise the next read opens behind it.
+// prompt shows the prompt here and for the next read. It only publishes
+// the text and wakes the editor: the refresh hook owns the terminal
+// work — sizing, clearing, anchoring — on the editor's own goroutine,
+// before the frame renders.
 func (i *editorInput) prompt(p string) {
 	i.mu.Lock()
 	i.promptText = p
-	draft := append([]rune(nil), i.line...)
-	pos := i.pos
 	i.mu.Unlock()
-	if l := i.m.r.layout; l != nil {
-		l.ensure(i.rowsFor(p, draft))
-		// The layout may have moved the terminal's rows under the
-		// editor (a resize, a footer that grew): anchor the cursor on
-		// the row the draft's own cursor reads on, and let the editor
-		// repaint from there.
-		if pos > len(draft) {
-			pos = len(draft)
-		}
-		l.place(promptRows(p, draft[:pos], l.cols()) - 1)
-	}
 	i.rl.Keys.RequestRefresh()
 }
 
