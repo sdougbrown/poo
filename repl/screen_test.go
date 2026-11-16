@@ -409,7 +409,7 @@ func TestATallLivePreviewCommitsEachRowOnce(t *testing.T) {
 		fence.WriteString("line " + strconv.Itoa(i) + "|\n")
 	}
 	fence.WriteString("```\n")
-	r.streamDelta("text", fence.String())
+	r.streamDelta("m1", "text", fence.String())
 	// A second block keeps the fence pending and repaints the preview.
 	var more strings.Builder
 	more.WriteString("\n```\n")
@@ -417,7 +417,7 @@ func TestATallLivePreviewCommitsEachRowOnce(t *testing.T) {
 		more.WriteString("tail " + strconv.Itoa(i) + "|\n")
 	}
 	more.WriteString("```\n")
-	r.streamDelta("text", more.String())
+	r.streamDelta("m1", "text", more.String())
 
 	// The first paint shows the fence's tail, the repaint shows the tail
 	// of both blocks: the fence's head is never on the screen.
@@ -478,8 +478,8 @@ func TestAFenceSplitAcrossDeltasCommitsItsRowsOnce(t *testing.T) {
 	// and the tail of both chunks together both start below it.
 	rows := []string{"SCROLLROW000|", "SCROLLROW005|", "SCROLLROW010|"}
 
-	r.streamDelta("text", "```text\n"+fence(0, 40))
-	r.streamDelta("text", fence(40, 80))
+	r.streamDelta("m1", "text", "```text\n"+fence(0, 40))
+	r.streamDelta("m1", "text", fence(40, 80))
 	raw := rec.take()
 	for _, row := range rows {
 		if n := strings.Count(raw, row); n != 0 {
@@ -490,7 +490,7 @@ func TestAFenceSplitAcrossDeltasCommitsItsRowsOnce(t *testing.T) {
 	// The closing fence and two paragraphs; the coalesced frame holds
 	// them until the flush, whose first paragraph makes the block safe
 	// to commit.
-	r.streamDelta("text", "```\n\nThe tall block is finished.\n\nEverything is done.")
+	r.streamDelta("m1", "text", "```\n\nThe tall block is finished.\n\nEverything is done.")
 	if raw := rec.take(); strings.Count(raw, rows[0]) != 0 {
 		t.Errorf("the coalesced frame wrote the pending block before the flush")
 	}

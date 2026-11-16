@@ -17,7 +17,7 @@ func TestHeldPreviewSurvivesFooterChangesAndSettlesOnce(t *testing.T) {
 			l := aLayout(t, rec, 40, 12)
 			r := aStreamingRenderer(t, rec, 40, l)
 			showPrompt(l, promptMark)
-			r.streamDelta("text", "held reply")
+			r.streamDelta("m1", "text", "held reply")
 			for _, footer := range footers {
 				l.ensure(footer)
 				showPrompt(l, promptMark+"draft")

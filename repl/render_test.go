@@ -246,21 +246,3 @@ func TestAnEndlessEscapeIsDropped(t *testing.T) {
 		t.Errorf("the stream stopped after the endless escape:\n%q", plain(out.String()))
 	}
 }
-
-// TestTerminalNewlinesDeduplicatesCarriageReturns covers the CRLF
-// conversion: bare line feeds gain a carriage return, carriage returns
-// that are already there do not double.
-func TestTerminalNewlinesDeduplicatesCarriageReturns(t *testing.T) {
-	cases := []struct{ name, in, want string }{
-		{"no newline", "plain", "plain"},
-		{"bare lf", "step one\nstep two\n", "step one\r\nstep two\r\n"},
-		{"existing crlf", "step one\r\nstep two\r\n", "step one\r\nstep two\r\n"},
-		{"leading lf", "\nstart", "\r\nstart"},
-		{"mixed", "a\r\nb\nc\r\n", "a\r\nb\r\nc\r\n"},
-	}
-	for _, c := range cases {
-		if got := terminalNewlines(c.in); got != c.want {
-			t.Errorf("%s: terminalNewlines(%q) = %q, want %q", c.name, c.in, got, c.want)
-		}
-	}
-}

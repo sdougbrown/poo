@@ -80,15 +80,15 @@ func TestARecoveredStallDrainsTheSegmentsItParked(t *testing.T) {
 	r.liveWidth = func() int { return width }
 	r.userPrompt("go")
 
-	r.streamDelta("text", "the answer")
+	r.streamDelta("m1", "text", "the answer")
 	// The width changes under the block before the resize event: the
 	// thought that arrives next parks the reply and stalls the block.
 	width = 20
-	r.streamDelta("thinking", "second thought")
-	r.streamDelta("thinking", " that grows")
+	r.streamDelta("m1", "thinking", "second thought")
+	r.streamDelta("m1", "thinking", " that grows")
 	// The resize event recovers the block at the new width.
 	r.repaintPreview()
-	r.streamDelta("thinking", " and settles.")
+	r.streamDelta("m1", "thinking", " and settles.")
 	r.finish()
 
 	for _, where := range []struct{ name, text string }{
@@ -121,11 +121,11 @@ func TestAStallMovesTheMarkdownWrapWithTheWidth(t *testing.T) {
 	r.liveWidth = func() int { return width }
 	r.userPrompt("go")
 
-	r.streamDelta("text", "first words")
+	r.streamDelta("m1", "text", "first words")
 	// The delta that notices the width stalls the block: the width is
 	// already the new one when the resize event arrives.
 	width = 20
-	r.streamDelta("text", " more words")
+	r.streamDelta("m1", "text", " more words")
 	r.rewrap(20)
 	r.repaintPreview()
 
