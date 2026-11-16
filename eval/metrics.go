@@ -20,7 +20,9 @@ import (
 // Every field comes from the session log. The runner never looks at the
 // model's own claims about what it did; it reads what actually happened.
 type Metrics struct {
-	// Turns is the number of provider requests the run made.
+	// Turns is the number of provider requests the run made. A request a
+	// compaction made is not one of them, so a run that compacted reports
+	// the turns it took and the compaction's spend separately.
 	Turns int `json:"turns"`
 	// WallMS is the run's wall time in milliseconds.
 	WallMS float64 `json:"wall_ms"`

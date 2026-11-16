@@ -427,9 +427,10 @@ type ProviderAttemptRecord struct {
 	RunID string `json:"run_id"`
 	// Turn is the turn the request belongs to.
 	Turn int `json:"turn"`
-	// Request is the 1-based number of the request within the run. It is
-	// 0 for a request a compaction made, which is not one of the run's
-	// turns: the record's origin says what the request was for.
+	// Request is the 1-based number of the request within the run.
+	//
+	// Every attempt record belongs to a turn's request: a request a
+	// compaction makes reports no attempts.
 	Request int `json:"request"`
 	// Attempt is the attempt's number, counting from one.
 	Attempt int `json:"attempt"`

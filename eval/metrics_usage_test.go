@@ -11,10 +11,14 @@ import "testing"
 
 // compactionUsageRecord builds the usage record of a request a compaction
 // made.
-func compactionUsageRecord(turn, input, output int, ttft float64) string {
+func compactionUsageRecord(turn, input, output int, ttft float64, cache *int) string {
+	cacheField := ""
+	if cache != nil {
+		cacheField = `,"cache_read_tokens":` + itoa(*cache)
+	}
 	return `{"record":"usage","seq":1,"ts":"2026-10-20T00:00:00Z","origin":"compaction","run_id":"r","turn":` +
 		itoa(turn) + `,"request":0,"input_tokens":` + itoa(input) +
-		`,"output_tokens":` + itoa(output) + `,"ttft_ms":` + ftoa(ttft) + `}`
+		`,"output_tokens":` + itoa(output) + cacheField + `,"ttft_ms":` + ftoa(ttft) + `}`
 }
 
 // TestTheCompactionTokensAreCounted covers the split: the totals hold
@@ -22,7 +26,7 @@ func compactionUsageRecord(turn, input, output int, ttft float64) string {
 func TestTheCompactionTokensAreCounted(t *testing.T) {
 	log, err := ParseLog(writeLog(t,
 		usageRecord(1, 1, 100, 10, 5, nil),
-		compactionUsageRecord(1, 900, 90, 50),
+		compactionUsageRecord(1, 900, 90, 50, nil),
 		usageRecord(2, 2, 200, 20, 6, nil),
 		settledRecord("end_turn", 2),
 	))
@@ -47,7 +51,7 @@ func TestTheCompactionTokensAreCounted(t *testing.T) {
 func TestACompactionIsNotATurnToTheTTFT(t *testing.T) {
 	log, err := ParseLog(writeLog(t,
 		usageRecord(1, 1, 100, 10, 4, nil),
-		compactionUsageRecord(1, 900, 90, 80),
+		compactionUsageRecord(1, 900, 90, 80, nil),
 		usageRecord(2, 2, 200, 20, 6, nil),
 		settledRecord("end_turn", 2),
 	))
@@ -87,7 +91,7 @@ func TestARunWithoutCompactionHasNoCompactionTokens(t *testing.T) {
 func TestATornLogCountsTurnsWithoutTheCompactions(t *testing.T) {
 	log, err := ParseLog(writeLog(t,
 		usageRecord(1, 1, 100, 10, 5, nil),
-		compactionUsageRecord(1, 900, 90, 50),
+		compactionUsageRecord(1, 900, 90, 50, nil),
 		usageRecord(2, 2, 200, 20, 6, nil),
 	))
 	if err != nil {
@@ -98,5 +102,26 @@ func TestATornLogCountsTurnsWithoutTheCompactions(t *testing.T) {
 	}
 	if got := ComputeMetrics(log, Diff{}).Turns; got != 2 {
 		t.Errorf("the metrics count %d turns, want 2", got)
+	}
+}
+
+// TestACompactionsCacheReadsAreCounted covers the cache total's boundary:
+// a compaction's cached prompt tokens are prompt tokens, so they are in
+// the total, and the record that adds them is the same one the turn
+// count skips.
+func TestACompactionsCacheReadsAreCounted(t *testing.T) {
+	cached := 500
+	log, err := ParseLog(writeLog(t,
+		usageRecord(1, 1, 100, 10, 5, &cached),
+		compactionUsageRecord(1, 900, 90, 50, &cached),
+		settledRecord("end_turn", 1),
+	))
+	if err != nil {
+		t.Fatalf("parsing the log: %v", err)
+	}
+	m := ComputeMetrics(log, Diff{})
+
+	if m.CacheReadTokens == nil || *m.CacheReadTokens != 1000 {
+		t.Errorf("the cached prompt tokens are %v, want the turns' and the compaction's 1000", m.CacheReadTokens)
 	}
 }

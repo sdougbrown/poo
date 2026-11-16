@@ -574,7 +574,7 @@ and what each attempt failed with.
 |---|---|---|
 | `run_id` | string | The run the request belongs to. |
 | `turn` | integer | The turn the request belongs to. |
-| `request` | integer | The request's number within the run, starting at 1. `0` for a request a compaction made, which is not one of the run's turns. |
+| `request` | integer | The request's number within the run, starting at 1. Every attempt record belongs to a turn's request. |
 | `attempt` | integer | The attempt's number, counting from 1. |
 | `error` | string | The failure's message. |
 | `kind` | string | The provider error kind, when the failure is one. **Absent** when it is not. |
