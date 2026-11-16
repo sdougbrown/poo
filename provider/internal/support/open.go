@@ -3,6 +3,7 @@ package support
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -90,6 +91,14 @@ func OpenStream[T Reader](parent context.Context, opts OpenOptions[T]) (T, error
 	req, err := opts.Request(ctx)
 	if err != nil {
 		release()
+		// A request builder that already classified its failure keeps what
+		// it said: a credential that could not be resolved, or a run that
+		// stopped while the credential was being read. A plain construction
+		// failure is a network failure, because no request went out.
+		var classified *poo.ProviderError
+		if errors.As(err, &classified) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return zero, err
+		}
 		return zero, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 
