@@ -162,6 +162,14 @@ func (t *Transport) openWithRetry(ctx context.Context, body []byte, report func(
 	}
 }
 
+// attemptReader is one attempt's reader, as the wrapper holds it: the core's
+// stream, the usage report the transport forwards, and whatever reporting seam
+// the attempt's own reader implements.
+type attemptReader interface {
+	poo.StreamReader
+	ReportUsage() *poo.UsageReport
+}
+
 // streamWithRetry reads a response whose attempt may be retried.
 //
 // A failure before the response carried a delta is retried within the
@@ -184,7 +192,7 @@ type streamWithRetry struct {
 	// same way the first one did.
 	settings requestSettings
 	// current is the reader of the attempt in flight.
-	current *streamReader
+	current attemptReader
 	// seen reports that the attempt in flight has carried something the
 	// model has seen: a delta or a tool call. Such an attempt is not
 	// repeated, because the core assembles the calls by their index and
@@ -339,4 +347,21 @@ func (s *streamWithRetry) ReportUsage() *poo.UsageReport {
 		}
 	}
 	return cloneUsage(s.usage)
+}
+
+// ReportProviderBlocks forwards the blocks the attempt produced.
+//
+// The core asks the reader the transport handed it, so a wrapper that did not
+// forward the report would lose a response's provider data. This transport's
+// reader reports none of its own, and the wrapper forwards whatever a reader
+// under it produces, the way it forwards the usage.
+func (s *streamWithRetry) ReportProviderBlocks() []poo.ProviderBlock {
+	if s.current == nil {
+		return nil
+	}
+	reporter, ok := s.current.(poo.ProviderBlockReporter)
+	if !ok {
+		return nil
+	}
+	return reporter.ReportProviderBlocks()
 }
