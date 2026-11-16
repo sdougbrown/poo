@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
+	"gopkg.in/yaml.v3"
 )
 
 // fileEntry is one provider's credential as both auth files spell it.
@@ -92,16 +94,43 @@ func encodeEntry(path, provider string, entries map[string]json.RawMessage, entr
 	return nil
 }
 
-// marshalFile returns an auth file's bytes: two space indents, and no trailing
-// newline, the shape pi writes its own file in. The fields come out in the
-// order Go marshals a map, sorted; the values are what has to match.
-func marshalFile(path string, object map[string]json.RawMessage) ([]byte, error) {
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(object); err != nil {
-		return nil, fmt.Errorf("%s: %v", path, err)
+// readObject parses an auth file's top-level object.
+//
+// A file is JSON or YAML: pi writes JSON, and poo writes YAML, which is what an
+// operator edits. JSON is a subset of YAML, so the JSON reader answers for both
+// files and a YAML file falls through to the YAML one.
+func readObject(data []byte) (map[string]json.RawMessage, error) {
+	document := stripBOM(data)
+	if len(document) == 0 {
+		return nil, fmt.Errorf("the file is empty")
 	}
-	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(document, &top); err == nil {
+		return top, nil
+	}
+	var value any
+	if err := yaml.Unmarshal(document, &value); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(encoded, &top); err != nil {
+		return nil, err
+	}
+	return top, nil
+}
+
+// yamlObject returns an object's fields as the values a YAML writer takes.
+func yamlObject(object map[string]json.RawMessage) (map[string]any, error) {
+	fields := make(map[string]any, len(object))
+	for field, raw := range object {
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, err
+		}
+		fields[field] = value
+	}
+	return fields, nil
 }

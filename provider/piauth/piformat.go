@@ -1,6 +1,10 @@
 package piauth
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+)
 
 // piFormat is the shape pi's auth.json is written with: every provider's
 // credential at the file's top level, under the provider id.
@@ -19,4 +23,17 @@ func (piFormat) credentials(top map[string]json.RawMessage) (map[string]json.Raw
 // top level, and nothing else.
 func (piFormat) envelope(entries map[string]json.RawMessage) (map[string]json.RawMessage, error) {
 	return entries, nil
+}
+
+// marshal writes the bytes pi writes: two space indents, and no trailing
+// newline. pi reads this file too, so the bytes stay the ones it wrote.
+func (piFormat) marshal(path string, object map[string]json.RawMessage) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(object); err != nil {
+		return nil, fmt.Errorf("%s: %v", path, err)
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }

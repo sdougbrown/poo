@@ -164,6 +164,8 @@ type format interface {
 	credentials(top map[string]json.RawMessage) (map[string]json.RawMessage, error)
 	// envelope returns the object to write the credentials into.
 	envelope(entries map[string]json.RawMessage) (map[string]json.RawMessage, error)
+	// marshal returns the file's bytes for an object the envelope built.
+	marshal(path string, object map[string]json.RawMessage) ([]byte, error)
 }
 
 // document is one auth file: the shape it is written with, and the entries it
@@ -308,6 +310,28 @@ func (c Credentials) Status() (Status, error) {
 	}, nil
 }
 
+// Entries reads an auth file of either shape and encoding and returns the
+// credentials it holds, by provider id, as the bytes each entry carries.
+//
+// It is the reader for a caller that reads the file and is not the store: the
+// models file's providers take their api keys from the same file, and one reader
+// means one answer for which shape and which encoding the file is written with. A
+// file that is not there holds no credentials.
+func Entries(path string) (map[string]json.RawMessage, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: reading %s: %w", ErrStorage, path, err)
+	}
+	doc, err := documentOf(path, data)
+	if err != nil {
+		return nil, err
+	}
+	return doc.entries, nil
+}
+
 // read returns the credential the file holds, and the document it came from.
 //
 // The document is what a write puts back, so a refresh keeps every other entry
@@ -338,14 +362,21 @@ func (c Credentials) load() (document, error) {
 	if err != nil {
 		return document{}, fmt.Errorf("%w: reading %s: %w", ErrStorage, c.Path, err)
 	}
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(stripBOM(data), &top); err != nil {
-		return document{}, fmt.Errorf("%w: %s: %w", ErrStorage, c.Path, err)
+	return documentOf(c.Path, data)
+}
+
+// documentOf parses a file that is there: the shape it says it is, and the
+// credentials that shape holds.
+func documentOf(path string, data []byte) (document, error) {
+	doc := document{path: path}
+	top, err := readObject(data)
+	if err != nil {
+		return document{}, fmt.Errorf("%w: %s: %w", ErrStorage, path, err)
 	}
 	doc.format = shapeOf(top)
 	entries, err := doc.format.credentials(top)
 	if err != nil {
-		return document{}, fmt.Errorf("%w: %s: %w", ErrStorage, c.Path, err)
+		return document{}, fmt.Errorf("%w: %s: %w", ErrStorage, path, err)
 	}
 	doc.entries = entries
 	return doc, nil
@@ -384,7 +415,7 @@ func (c Credentials) write(doc document, entry credential) error {
 	if err != nil {
 		return fmt.Errorf("%s: %v", doc.path, err)
 	}
-	body, err := marshalFile(doc.path, object)
+	body, err := doc.format.marshal(doc.path, object)
 	if err != nil {
 		return err
 	}

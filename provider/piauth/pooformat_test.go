@@ -2,15 +2,17 @@ package piauth_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/sdougbrown/poo/provider/piauth"
 )
@@ -35,17 +37,18 @@ const pooStored = `{
   }
 }`
 
-// credentialEntries reads the credentials poo's own file holds, by provider id,
-// as the file wrote them.
-func credentialEntries(t *testing.T, path string) map[string]json.RawMessage {
+// pooFile reads poo's own auth file as the YAML it is written with: the version,
+// and each credential's fields.
+func pooFile(t *testing.T, path string) (int, map[string]map[string]any) {
 	t.Helper()
 	var file struct {
-		Credentials map[string]json.RawMessage `json:"credentials"`
+		Version     int                       `yaml:"version"`
+		Credentials map[string]map[string]any `yaml:"credentials"`
 	}
-	if err := json.Unmarshal([]byte(readFile(t, path)), &file); err != nil {
+	if err := yaml.Unmarshal([]byte(readFile(t, path)), &file); err != nil {
 		t.Fatalf("the auth file is not poo's: %v", err)
 	}
-	return file.Credentials
+	return file.Version, file.Credentials
 }
 
 // TestAnExpiredPooCredentialIsRefreshedInPooShape covers the file poo owns: the
@@ -53,7 +56,7 @@ func credentialEntries(t *testing.T, path string) map[string]json.RawMessage {
 // else the file carried keeps what it had.
 func TestAnExpiredPooCredentialIsRefreshedInPooShape(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(pooStored, expires(-time.Hour)))
-	before := credentialEntries(t, path)
+	_, before := pooFile(t, path)
 	access := codexToken(t, newAccount)
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
@@ -68,39 +71,28 @@ func TestAnExpiredPooCredentialIsRefreshedInPooShape(t *testing.T) {
 		t.Errorf("the token is %q for %q, want the traded one for %q", token.Access, token.AccountID, newAccount)
 	}
 
-	var held struct {
-		Version     int                        `json:"version"`
-		Credentials map[string]json.RawMessage `json:"credentials"`
+	version, held := pooFile(t, path)
+	if version != 1 {
+		t.Errorf("the file's version is %d, want 1", version)
 	}
-	if err := json.Unmarshal([]byte(readFile(t, path)), &held); err != nil {
-		t.Fatalf("the file is not JSON: %v", err)
+	entry := held[piauth.ProviderCodex]
+	if entry["access"] != access {
+		t.Errorf("the file holds %q, want the traded %q", entry["access"], access)
 	}
-	if held.Version != 1 {
-		t.Errorf("the file's version is %d, want 1", held.Version)
+	if entry["refresh"] != newRefresh {
+		t.Errorf("the file holds the refresh token %q, want the traded %q", entry["refresh"], newRefresh)
 	}
-	var entry struct {
-		Access    string `json:"access"`
-		Refresh   string `json:"refresh"`
-		AccountID string `json:"accountId"`
+	if entry["accountId"] != newAccount {
+		t.Errorf("the file names the account %q, want the traded %q", entry["accountId"], newAccount)
 	}
-	if err := json.Unmarshal(held.Credentials[piauth.ProviderCodex], &entry); err != nil {
-		t.Fatalf("the credential entry is not JSON: %v", err)
+	if !reflect.DeepEqual(before["anthropic"], held["anthropic"]) {
+		t.Errorf("the anthropic credential was rewritten:\n before %v\n after  %v",
+			before["anthropic"], held["anthropic"])
 	}
-	if entry.Access != access {
-		t.Errorf("the file holds %q, want the traded %q", entry.Access, access)
-	}
-	if entry.Refresh != newRefresh {
-		t.Errorf("the file holds the refresh token %q, want the traded %q", entry.Refresh, newRefresh)
-	}
-	if entry.AccountID != newAccount {
-		t.Errorf("the file names the account %q, want the traded %q", entry.AccountID, newAccount)
-	}
-	if string(before["anthropic"]) != string(held.Credentials["anthropic"]) {
-		t.Errorf("the anthropic credential was rewritten:\n before %s\n after  %s",
-			before["anthropic"], held.Credentials["anthropic"])
-	}
-	if data := readFile(t, path); strings.HasSuffix(data, "\n") {
-		t.Error("the file ends with a newline, which the bytes this package writes do not")
+	// The file is the one an operator edits, so it is written as YAML.
+	data := readFile(t, path)
+	if !strings.HasPrefix(data, "version: 1\ncredentials:\n") {
+		t.Errorf("the file is not the YAML poo writes:\n%s", data)
 	}
 }
 
@@ -248,6 +240,45 @@ func TestStatusOfAFileWithoutACredentialIsReported(t *testing.T) {
 			}
 			if _, err := (piauth.Credentials{Path: path}).Status(); !errors.Is(err, piauth.ErrNoCredential) {
 				t.Fatalf("the status is %v, want ErrNoCredential", err)
+			}
+		})
+	}
+}
+
+// TestAPooFileInEitherEncodingIsRead covers the two spellings of one file. poo
+// writes YAML, and a file an operator wrote as JSON is the same document: the
+// shape is the version field, not the punctuation.
+func TestAPooFileInEitherEncodingIsRead(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		body string
+	}{
+		{name: "YAML", body: `version: 1
+credentials:
+  openai-codex:
+    type: oauth
+    access: ` + oldAccess + `
+    refresh: ` + oldRefresh + `
+    expires: ` + fmt.Sprint(expires(time.Hour)) + `
+    accountId: ` + oldAccount + `
+`},
+		{name: "JSON", body: fmt.Sprintf(pooStored, expires(time.Hour))},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := authFile(t, c.body)
+			endpoint := newTokenEndpoint(t, func() (int, string) {
+				return http.StatusInternalServerError, `{"error":"the endpoint was asked"}`
+			}, nil)
+			credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+			token, err := credentials.Access(context.Background())
+			if err != nil {
+				t.Fatalf("the credential did not reach a token: %v", err)
+			}
+			if token.Access != oldAccess || token.AccountID != oldAccount {
+				t.Errorf("the token is %q for %q, want the stored one", token.Access, token.AccountID)
+			}
+			if endpoint.count() != 0 {
+				t.Errorf("a live token asked the endpoint %d times", endpoint.count())
 			}
 		})
 	}

@@ -109,28 +109,28 @@ have — and otherwise its own `~/.config/poo/auth.json`. Naming both
 `auth_file` and `pi_auth_file` is refused: poo reads one credential at
 a time.
 
-poo's own file is versioned, and holds the credentials under it. The
-entry keeps pi's field names, so one file of either shape is one
-credential:
+poo's own file is versioned, holds the credentials under it, and is written as
+YAML — the format an operator edits, and the one the models file is written with.
+The entry keeps pi's field names, so one file of either shape is one credential:
 
-```json
-{
-  "version": 1,
-  "credentials": {
-    "openai-codex": {
-      "type": "oauth",
-      "access": "…",
-      "refresh": "…",
-      "expires": 1767225600000,
-      "accountId": "…"
-    }
-  }
-}
+```yaml
+version: 1
+credentials:
+  openai-codex:
+    type: oauth
+    access: …
+    refresh: …
+    expires: 1767225600000
+    accountId: …
 ```
 
-The shape is the file's own, not a setting: poo writes back the shape
-it read. `pi_auth_file` names pi's `auth.json` instead, which poo reads
-and writes in pi's shape so pi keeps working.
+The shape is the file's own, not a setting's: poo writes back the shape it read,
+so pi's `auth.json` stays a file pi can read, and a refresh of it never gains a
+version. poo's own file is written as YAML; a JSON file of that shape is read as
+the same document, and the first write leaves it YAML.
+
+`pi_auth_file` names pi's `auth.json` instead, which poo reads and writes in pi's
+shape and encoding so pi keeps working.
 
 `poo auth status` reports the file the settings resolved, the shape it
 is written with, the provider, the account the token names, and whether

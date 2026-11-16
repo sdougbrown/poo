@@ -1,9 +1,12 @@
 package piauth
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
+
+	"gopkg.in/yaml.v3"
 )
 
 // The fields poo's own auth file is written with.
@@ -51,6 +54,36 @@ func (pooFormat) credentials(top map[string]json.RawMessage) (map[string]json.Ra
 		return nil, fmt.Errorf("%s is not a map of credentials", credentialsField)
 	}
 	return entries, nil
+}
+
+// pooDocument is poo's file as it is written: the version first, and the
+// credentials under it.
+type pooDocument struct {
+	Version     int            `yaml:"version"`
+	Credentials map[string]any `yaml:"credentials"`
+}
+
+// marshal writes poo's file as YAML: the format an operator edits, and the one
+// poo's models file is written with too.
+func (pooFormat) marshal(path string, object map[string]json.RawMessage) ([]byte, error) {
+	fields, err := yamlObject(object)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", path, err)
+	}
+	credentials, _ := fields[credentialsField].(map[string]any)
+	if credentials == nil {
+		credentials = map[string]any{}
+	}
+	var buf bytes.Buffer
+	encoder := yaml.NewEncoder(&buf)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(pooDocument{Version: pooVersion, Credentials: credentials}); err != nil {
+		return nil, fmt.Errorf("%s: %v", path, err)
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, fmt.Errorf("%s: %v", path, err)
+	}
+	return buf.Bytes(), nil
 }
 
 // envelope returns the object to write: this version, and the credentials under
