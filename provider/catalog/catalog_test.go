@@ -149,6 +149,7 @@ func TestTheExplainAttributesEveryField(t *testing.T) {
 	}
 	want := map[string]string{
 		"name":           catalog.LayerSettings,
+		"provider":       catalog.LayerSettings,
 		"endpoint":       catalog.LayerSettings,
 		"model_id":       catalog.LayerSettings,
 		"api":            catalog.LayerDefault,

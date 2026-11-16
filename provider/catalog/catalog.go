@@ -466,10 +466,16 @@ func (c *Catalog) merge(e *entry) (poo.ModelInfo, map[string]string) {
 	}
 	// The provider is the endpoint the model was found under, and no layer
 	// sets it as a field of its own: an entry is created for one endpoint,
-	// so the entry is what says which provider serves the model.
+	// so the entry is what says which provider serves the model. The layer it
+	// is attributed to is the one that chose that endpoint, because that is
+	// the choice a reader of the explanation is asking about.
 	if out.Provider == "" {
 		out.Provider = e.endpoint
-		source[fieldProvider] = LayerDefault
+		layer := source[fieldEndpoint]
+		if layer == "" {
+			layer = LayerDefault
+		}
+		source[fieldProvider] = layer
 	}
 	if len(out.Ops) == 0 {
 		// A model no layer gives ops to is a chat model: the endpoints
