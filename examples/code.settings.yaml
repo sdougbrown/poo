@@ -92,7 +92,7 @@ permission:
 context:
   notice_ratio: 0.8
   hard_ratio: 0.97
-  strategy: handoff
+  strategy: summary
   handoff:
     ratio: 0.90
     max_tokens: 2048

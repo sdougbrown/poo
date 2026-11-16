@@ -14,8 +14,10 @@ import (
 // The flows that outlive a run: the jobs, the crashes, the teardown and
 // the slow client.
 
-// handoff covers the flow of a run that runs out of context: the
-// compactor asks for a handoff, and the run ends with it.
+// handoff covers the flow of a run that runs out of context under the
+// handoff strategy: the compactor asks for a handoff, and the run ends
+// with it. The flow names the strategy, so the flow tests the settle the
+// strategy produces and not whatever the binary's default is.
 func (s *suite) handoff() {
 	s.t.Helper()
 	if s.skipWithoutTool("bash") {
@@ -28,7 +30,9 @@ func (s *suite) handoff() {
 		{Text: "the handoff note"},
 	}
 	endpoint := newEndpoint(s.t, turns)
-	settings := s.settings(endpoint, handoffWindow, nil)
+	settings := s.settings(endpoint, handoffWindow, map[string]any{
+		"context": map[string]any{"strategy": "handoff"},
+	})
 	c := s.start(settings, endpoint)
 	s.handshake(c)
 	sessionID := s.create(c)

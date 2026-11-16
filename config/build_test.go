@@ -2105,3 +2105,17 @@ context:
 		}
 	}
 }
+
+// TestTheDefaultStrategyIsSummary covers the default: a session built
+// without a strategy in its settings summarizes the oldest turns and
+// carries on, and handoff is opt-in.
+func TestTheDefaultStrategyIsSummary(t *testing.T) {
+	settings, err := config.Parse([]byte(theModelSettings), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if _, ok := runtime.Options.Compactor.(*summary.Compactor); !ok {
+		t.Fatalf("the session's compactor is %T, want the summary strategy", runtime.Options.Compactor)
+	}
+}
