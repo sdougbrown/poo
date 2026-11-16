@@ -35,6 +35,12 @@ func (r *renderer) page(in io.Reader) error {
 	}
 	f.Close()
 
+	// The pager takes the whole terminal: the region and the footer come
+	// off first, and the next prompt reserves them again.
+	if r.layout != nil {
+		r.layout.suspend()
+		defer r.layout.resume()
+	}
 	cmd := exec.Command(less, "-R", f.Name())
 	cmd.Stdin = in
 	cmd.Stdout = r.out

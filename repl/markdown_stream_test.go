@@ -40,7 +40,10 @@ func TestAPendingFrameStopsPaintingAfterAResize(t *testing.T) {
 	}
 
 	r.finish()
-	settled := plain(r.transcriptText())
+	// The stalled flush renders at the width the stall saw, so the
+	// joined text may wrap: the words must survive once, in the order
+	// they arrived, whatever row the wrap put them on.
+	settled := strings.Join(strings.Fields(plain(r.transcriptText())), " ")
 	if got := strings.Count(settled, "first words then last words"); got != 1 {
 		t.Errorf("the transcript lost, repeated, or reordered the deltas (%d copies):\n%s", got, settled)
 	}
@@ -49,6 +52,33 @@ func TestAPendingFrameStopsPaintingAfterAResize(t *testing.T) {
 // TestAHintEndsBeforeAToolCall covers a run whose model calls a tool
 // before speaking: the hint that stood for the run ends before the
 // call decorates the transcript.
+// TestAResizeKeepsTheHintBeforeTheFirstDelta covers the resize that
+// lands between the hint and the first delta: the hint's row was
+// cleared with the preview, and the recovery repaints it — nothing
+// else is open to repaint.
+func TestAResizeKeepsTheHintBeforeTheFirstDelta(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	width := 40
+	r.liveWidth = func() int { return width }
+	r.userPrompt("go")
+	r.hint()
+	if rowOf(t, scr, "… writing") < 0 {
+		t.Fatalf("the hint never showed:\n%s", scr.text())
+	}
+
+	// The resize erases the rows the preview stood on before the
+	// recovery repaints them; the emulator's size cannot change under
+	// the test, so the erase stands in for it.
+	width = 20
+	r.layout.clearPreview()
+	r.rewrap(width)
+	r.repaintPreview()
+
+	if rowOf(t, scr, "… writing") < 0 {
+		t.Errorf("the hint was lost to the resize:\n%s", scr.text())
+	}
+}
+
 func TestAHintEndsBeforeAToolCall(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
@@ -64,6 +94,76 @@ func TestAHintEndsBeforeAToolCall(t *testing.T) {
 	}
 	if rowOf(t, scr, "⚙ bash") < 0 {
 		t.Errorf("the tool call never showed:\n%s", drawn)
+	}
+}
+
+// TestARecoveredStallDrainsTheSegmentsItParked covers the stall that
+// outlives a kind change: the resize recovery seals the closed segments
+// the stall parked, in the order they arrived, before the open kind
+// paints again. Nothing a segment showed is lost or repeated.
+func TestARecoveredStallDrainsTheSegmentsItParked(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	width := 40
+	r.liveWidth = func() int { return width }
+	r.userPrompt("go")
+
+	r.streamDelta("m1", "text", "the answer")
+	// The width changes under the block before the resize event: the
+	// thought that arrives next parks the reply and stalls the block.
+	width = 20
+	r.streamDelta("m1", "thinking", "second thought")
+	r.streamDelta("m1", "thinking", " that grows")
+	// The resize event recovers the block at the new width.
+	r.repaintPreview()
+	r.streamDelta("m1", "thinking", " and settles.")
+	r.finish()
+
+	for _, where := range []struct{ name, text string }{
+		{"screen", scr.text()},
+		{"transcript", plain(r.transcriptText())},
+	} {
+		for _, want := range []string{"the answer", "second thought", "settles."} {
+			if n := strings.Count(where.text, want); n != 1 {
+				t.Errorf("%q reads %d time(s) on the %s, want 1:\n%s", want, n, where.name, where.text)
+			}
+		}
+		if n := strings.Count(where.text, "· thinking ·"); n != 1 {
+			t.Errorf("the %s shows %d thinking headings, want 1:\n%s", where.name, n, where.text)
+		}
+		answer := strings.Index(where.text, "the answer")
+		thought := strings.Index(where.text, "second thought")
+		if answer < 0 || thought < 0 || answer > thought {
+			t.Errorf("the %s reads out of arrival order:\n%s", where.name, where.text)
+		}
+	}
+}
+
+// TestAStallMovesTheMarkdownWrapWithTheWidth covers the stall that
+// notices the new width before the resize event: the width, the wrap,
+// and the markdown renderer move together, so the render after the
+// recovery wraps where the rows do.
+func TestAStallMovesTheMarkdownWrapWithTheWidth(t *testing.T) {
+	_, r := aScreen(t, 40)
+	width := 40
+	r.liveWidth = func() int { return width }
+	r.userPrompt("go")
+
+	r.streamDelta("m1", "text", "first words")
+	// The delta that notices the width stalls the block: the width is
+	// already the new one when the resize event arrives.
+	width = 20
+	r.streamDelta("m1", "text", " more words")
+	r.rewrap(20)
+	r.repaintPreview()
+
+	rows := strings.Split(strings.TrimRight(r.markdown("abcdefghij abcdefghij abcdefghij"), "\n"), "\n")
+	if len(rows) < 2 {
+		t.Fatalf("the markdown still wraps at the old width:\n%q", rows)
+	}
+	for _, row := range rows {
+		if n := len([]rune(strings.TrimSpace(plain(row)))); n > 20 {
+			t.Errorf("a rendered row is %d columns wide, want the new wrap or less:\n%q", n, rows)
+		}
 	}
 }
 

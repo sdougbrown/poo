@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -17,43 +18,52 @@ import (
 // way readline's Refresh does around every write.
 
 // aStreamingRenderer builds the renderer a terminal session gets: the
-// markdown a terminal shows, at the width the stream lays out at. The
-// editor's writer is the sink. The three test harnesses share it so a
+// markdown a terminal shows, at the width the stream lays out at, and
+// the layout that writes the terminal. The harnesses share it so a
 // field added to the streaming shape is set in one place. The dark
-// style is the one a light-on-dark terminal picks, and it is what the
-// emulator's rows show once the escapes are gone.
-func aStreamingRenderer(t *testing.T, out, sink io.Writer, width int) *renderer {
+// style is what the emulator's rows show once the escapes are gone.
+func aStreamingRenderer(t *testing.T, out io.Writer, width int, l *layout) *renderer {
 	t.Helper()
-	tr, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
-		glamour.WithWordWrap(width-2),
-	)
+	newTR := func(wrap int) (*glamour.TermRenderer, error) {
+		return glamour.NewTermRenderer(
+			glamour.WithStandardStyle("dark"),
+			glamour.WithWordWrap(wrap),
+		)
+	}
+	tr, err := newTR(width - 2)
 	if err != nil {
 		t.Fatalf("building the markdown renderer: %v", err)
 	}
-	return &renderer{out: out, sink: sink, tr: tr, wrap: width - 2, width: width, editor: true}
+	return &renderer{out: out, tr: tr, wrap: width - 2, width: width, layout: l, newTR: newTR}
 }
 
-// screenHarness is the editor around an emulator: every write the
-// renderer sends is wrapped in the erase of the prompt's own row and
-// the redraw of the prompt and draft below it. typeText plays
-// keystrokes: an erase and a redraw, no payload.
+// screenHarness is the editor around an emulator. The renderer writes
+// through the layout, and typeText redraws the prompt and the draft in
+// the footer the way readline's Refresh does.
 type screenHarness struct {
-	vt    vt10x.Terminal
-	draft string
+	vt     vt10x.Terminal
+	layout *layout
+	prompt string
+	draft  string
 }
 
-func (s *screenHarness) Write(p []byte) (int, error) {
-	s.vt.Write([]byte("\x1b[J\x1b[2K\r"))
-	n, err := s.vt.Write(p)
-	s.vt.Write([]byte(promptMark + s.draft))
-	return n, err
+// paint draws the prompt and the draft from the footer's top row,
+// erasing the footer first.
+func (s *screenHarness) paint() {
+	rows := promptRows(s.prompt, []rune(s.draft), s.layout.width)
+	if s.draft != "" {
+		// A draft keeps a spare row so the keystroke that wraps it has
+		// somewhere to go.
+		rows++
+	}
+	s.layout.ensure(rows)
+	s.layout.place(0)
+	s.layout.raw().Write([]byte("\x1b[J" + s.prompt + s.draft))
 }
 
 func (s *screenHarness) typeText(text string) {
-	s.vt.Write([]byte("\x1b[J\x1b[2K\r"))
 	s.draft += text
-	s.vt.Write([]byte(promptMark + s.draft))
+	s.paint()
 }
 
 // text returns what the screen shows: the rows, trimmed, with the
@@ -75,11 +85,24 @@ func trimScreen(raw string) string {
 	return strings.Join(lines, "\n")
 }
 
+// aLayout is the layout over a writer, the way a terminal session has
+// one: it starts with the prompt's row reserved.
+func aLayout(t *testing.T, out io.Writer, cols, rows int) *layout {
+	t.Helper()
+	l := &layout{out: out, width: cols, height: rows, footer: 1}
+	l.last = l.regionBottom() - 1
+	l.enter()
+	return l
+}
+
 func aScreen(t *testing.T, width int) (*screenHarness, *renderer) {
 	t.Helper()
 	vt := vt10x.New(vt10x.WithSize(width, 24))
-	scr := &screenHarness{vt: vt}
-	return scr, aStreamingRenderer(t, vt, scr, width)
+	l := aLayout(t, vt, width, 24)
+	scr := &screenHarness{vt: vt, layout: l, prompt: promptMark}
+	r := aStreamingRenderer(t, vt, width, l)
+	scr.paint()
+	return scr, r
 }
 
 // screen is what the row helpers read: either harness's view of the
@@ -219,36 +242,8 @@ func TestTheScreenHardWrapMatchesTheTerminal(t *testing.T) {
 	}
 }
 
-// quietHarness is the editor between keystrokes: the renderer's writes
-// reach the terminal untouched, the way readline passes them through,
-// and a keystroke redraws the prompt and the draft at the cursor's row.
-type quietHarness struct {
-	vt    vt10x.Terminal
-	draft string
-}
-
-func (s *quietHarness) Write(p []byte) (int, error) { return s.vt.Write(p) }
-
-func (s *quietHarness) typeText(text string) {
-	s.vt.Write([]byte("\r\x1b[2K" + promptMark + s.draft))
-	s.draft += text
-	s.vt.Write([]byte("\r\x1b[2K" + promptMark + s.draft))
-}
-
-// text returns what the screen shows, the screenHarness's way.
-func (s *quietHarness) text() string {
-	return trimScreen(s.vt.String())
-}
-
-func aQuietScreen(t *testing.T, width int) (*quietHarness, *renderer) {
-	t.Helper()
-	vt := vt10x.New(vt10x.WithSize(width, 24))
-	scr := &quietHarness{vt: vt}
-	return scr, aStreamingRenderer(t, vt, scr, width)
-}
-
 func TestTheStreamStartsAtColumnZero(t *testing.T) {
-	scr, r := aQuietScreen(t, 40)
+	scr, r := aScreen(t, 40)
 	// The editor drew the prompt; the cursor stands after it, and no
 	// hint stood before the text arrived.
 	scr.typeText("")
@@ -324,6 +319,7 @@ func TestAResizeMidBlockStopsThePainting(t *testing.T) {
 	// The terminal narrows; the next delta must not paint at the old
 	// width.
 	width = 20
+	scr.layout.width = 20
 	before := scr.text()
 	r.streamDelta("m1", "text", " and more words arrive after the resize")
 	if got := scr.text(); got != before {
@@ -332,8 +328,8 @@ func TestAResizeMidBlockStopsThePainting(t *testing.T) {
 
 	r.finish()
 	drawn := scr.text()
-	if got := countOf(t, scr, "after the resize"); got != 1 {
-		t.Errorf("the settle reads %d time(s), want 1:\n%s", got, drawn)
+	if got := strings.Count(drawn, "resize"); got != 1 {
+		t.Errorf("the settled text reads %d time(s), want 1:\n%s", got, drawn)
 	}
 	if rowOf(t, scr, strings.TrimRight(promptMark, " ")) < 0 {
 		t.Errorf("the prompt was lost after the resize:\n%s", drawn)
@@ -395,5 +391,121 @@ func TestAMultilineNoticeStartsEachRowAtColumnZero(t *testing.T) {
 	}
 	if rowOf(t, scr, promptMark+"draft") < 0 {
 		t.Errorf("the draft did not survive the multiline notice:\n%s", drawn)
+	}
+}
+
+func TestATallLivePreviewCommitsEachRowOnce(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 24))
+	rec := &recordingScreen{vt: vt}
+	l := aLayout(t, rec, 40, 24)
+	scr := &screenHarness{vt: vt, layout: l, prompt: promptMark}
+	r := aStreamingRenderer(t, rec, 40, l)
+	scr.paint()
+	r.userPrompt("go")
+
+	var fence strings.Builder
+	fence.WriteString("```\n")
+	for i := 0; i < 100; i++ {
+		fence.WriteString("line " + strconv.Itoa(i) + "|\n")
+	}
+	fence.WriteString("```\n")
+	r.streamDelta("m1", "text", fence.String())
+	// A second block keeps the fence pending and repaints the preview.
+	var more strings.Builder
+	more.WriteString("\n```\n")
+	for i := 0; i < 20; i++ {
+		more.WriteString("tail " + strconv.Itoa(i) + "|\n")
+	}
+	more.WriteString("```\n")
+	r.streamDelta("m1", "text", more.String())
+
+	// The first paint shows the fence's tail, the repaint shows the tail
+	// of both blocks: the fence's head is never on the screen.
+	raw := rec.take()
+	for _, row := range []string{"line 0|", "line 20|", "line 40|"} {
+		if n := strings.Count(raw, row); n != 0 {
+			t.Errorf("the clipped row %q was written %d time(s) before the commit, want 0", row, n)
+		}
+	}
+
+	r.finish()
+	scr.paint()
+	raw = rec.take()
+	for _, row := range []string{"line 0|", "line 20|", "line 40|"} {
+		if n := strings.Count(raw, row); n != 1 {
+			t.Errorf("the clipped row %q was written %d time(s) at the commit, want 1", row, n)
+		}
+	}
+	for _, row := range []string{"line 0|", "line 20|", "line 40|"} {
+		if n := strings.Count(r.transcriptText(), row); n != 1 {
+			t.Errorf("the clipped row %q reads %d time(s) in the transcript, want 1", row, n)
+		}
+	}
+	if !strings.Contains(strings.Join(screenRows(vt), "\n"), "tail 19|") {
+		t.Errorf("the committed tail is not on the screen:\n%s", vt.String())
+	}
+	if row := vt.Cursor().Y; row != 23 {
+		t.Errorf("the prompt stands on row %d, want the bottom row 23:\n%s", row, indexedScreen(vt))
+	}
+}
+
+// indexedScreen is the emulator's rows with their numbers.
+func indexedScreen(vt vt10x.Terminal) string {
+	var b strings.Builder
+	for i, row := range screenRows(vt) {
+		b.WriteString(strconv.Itoa(i) + "|" + row + "|\n")
+	}
+	return b.String()
+}
+
+func TestAFenceSplitAcrossDeltasCommitsItsRowsOnce(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 24))
+	rec := &recordingScreen{vt: vt}
+	l := aLayout(t, rec, 40, 24)
+	scr := &screenHarness{vt: vt, layout: l, prompt: promptMark}
+	r := aStreamingRenderer(t, rec, 40, l)
+	scr.paint()
+	r.userPrompt("go")
+
+	fence := func(from, to int) string {
+		var b strings.Builder
+		for i := from; i < to; i++ {
+			b.WriteString("SCROLLROW" + fmt.Sprintf("%03d", i) + "|\n")
+		}
+		return b.String()
+	}
+	// The block's head never reaches the region. The first chunk's tail
+	// and the tail of both chunks together both start below it.
+	rows := []string{"SCROLLROW000|", "SCROLLROW005|", "SCROLLROW010|"}
+
+	r.streamDelta("m1", "text", "```text\n"+fence(0, 40))
+	r.streamDelta("m1", "text", fence(40, 80))
+	raw := rec.take()
+	for _, row := range rows {
+		if n := strings.Count(raw, row); n != 0 {
+			t.Errorf("the pending row %q was written %d time(s) before the commit, want 0", row, n)
+		}
+	}
+
+	// The closing fence and two paragraphs; the coalesced frame holds
+	// them until the flush, whose first paragraph makes the block safe
+	// to commit.
+	r.streamDelta("m1", "text", "```\n\nThe tall block is finished.\n\nEverything is done.")
+	if raw := rec.take(); strings.Count(raw, rows[0]) != 0 {
+		t.Errorf("the coalesced frame wrote the pending block before the flush")
+	}
+
+	r.finish()
+	scr.paint()
+	raw = rec.take()
+	for _, row := range rows {
+		if n := strings.Count(raw, row); n != 1 {
+			t.Errorf("the committed row %q was written %d time(s) at the flush, want 1", row, n)
+		}
+	}
+	for _, row := range rows {
+		if n := strings.Count(r.transcriptText(), row); n != 1 {
+			t.Errorf("the row %q reads %d time(s) in the transcript, want 1", row, n)
+		}
 	}
 }
