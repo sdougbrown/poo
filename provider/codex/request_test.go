@@ -1233,3 +1233,115 @@ func TestAForkReportsItsAttempts(t *testing.T) {
 		t.Error("the reported attempt says no retry followed it, want the retry the fork made")
 	}
 }
+
+// TestAForkThatAppendsASystemMessageFirst covers the appended instruction a
+// fork cannot fold into the snapshot. The first system message a request
+// carries becomes its instructions, and those are part of the prefix a fork
+// re-sends, so a system message the fork appends rides as the developer item a
+// later system message rides as.
+func TestAForkThatAppendsASystemMessageFirst(t *testing.T) {
+	srv := newServer(t, completedStream, completedStream)
+	tr := newTransport(srv.URL)
+	reader, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleSystem, "the prompt"), poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	read(t, reader)
+	reader.Close()
+
+	fork, err := tr.Fork(context.Background(), rendered, []poo.Message{
+		poo.NewTextMessage(poo.RoleSystem, "stay in the repository"),
+		poo.NewTextMessage(poo.RoleUser, "more"),
+	}, 0)
+	if err != nil {
+		t.Fatalf("forking: %v", err)
+	}
+	defer fork.Close()
+	read(t, fork)
+
+	body := string(srv.request(t, 1).body)
+	if !strings.Contains(body, `"role":"developer"`) {
+		t.Errorf("the fork carries no developer item: %s", body)
+	}
+	if !strings.Contains(body, "stay in the repository") {
+		t.Errorf("the appended instruction was lost: %s", body)
+	}
+	if strings.Contains(body, `"instructions":"stay in the repository"`) {
+		t.Errorf("the appended instruction became the request's instructions, which are the snapshot's prefix: %s", body)
+	}
+}
+
+// TestAnAudioAttachmentReachesTheRequest covers the audio part. The model's
+// inputs decide whether the recording is carried at all, the part carries the
+// bytes base64-encoded, and the format is the name the API takes for the media
+// type. A media type the API has no name for is not sent.
+func TestAnAudioAttachmentReachesTheRequest(t *testing.T) {
+	cases := []struct {
+		name       string
+		reads      []poo.Modality
+		mediaType  string
+		wantPart   bool
+		wantFormat string
+	}{
+		{
+			name:       "a model that reads audio",
+			reads:      []poo.Modality{poo.ModalityText, poo.ModalityAudio},
+			mediaType:  "audio/wav",
+			wantPart:   true,
+			wantFormat: "wav",
+		},
+		{
+			name:      "a model that reads no audio",
+			reads:     []poo.Modality{poo.ModalityText},
+			mediaType: "audio/wav",
+			wantPart:  false,
+		},
+		{
+			name:      "a format the API has no name for",
+			reads:     []poo.Modality{poo.ModalityText, poo.ModalityAudio},
+			mediaType: "audio/ogg",
+			wantPart:  false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := newServer(t, completedStream)
+			tr := newTransport(srv.URL, func(o *codex.Options) {
+				o.ModelInfo = poo.ModelInfo{ModelID: "gpt-6.1-sol", Inputs: c.reads}
+			})
+			audio := poo.ContentBlock{Kind: poo.ContentAudio, MediaType: c.mediaType, Data: []byte("sound")}
+			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+				Model: "gpt-6.1-sol",
+				Messages: []poo.Message{{Role: poo.RoleUser, Content: []poo.ContentBlock{
+					{Kind: poo.ContentText, Text: "listen"},
+					audio,
+				}}},
+				MaxTokens: 64,
+			})
+			if err != nil {
+				t.Fatalf("starting the request: %v", err)
+			}
+			read(t, reader)
+			reader.Close()
+
+			body := string(srv.request(t, 0).body)
+			carries := strings.Contains(body, `"type":"input_audio"`)
+			if carries != c.wantPart {
+				t.Fatalf("the request carries an audio part: %v, want %v: %s", carries, c.wantPart, body)
+			}
+			if !c.wantPart {
+				return
+			}
+			if !strings.Contains(body, `"data":"`+base64.StdEncoding.EncodeToString(audio.Data)+`"`) {
+				t.Errorf("the part's bytes are not the attachment's: %s", body)
+			}
+			if !strings.Contains(body, `"format":"`+c.wantFormat+`"`) {
+				t.Errorf("the part's format is not %q: %s", c.wantFormat, body)
+			}
+		})
+	}
+}

@@ -305,6 +305,17 @@ func TestATerminalEventNamesTheFailure(t *testing.T) {
 			wantCode: "usage_limit_reached",
 		},
 		{
+			name:     "an error event that names the failure in its own body",
+			stream:   frame(`{"type":"error","error":{"code":"rate_limit_exceeded","message":"slow down"}}`),
+			wantKind: poo.ProviderKindRateLimited,
+			wantCode: "rate_limit_exceeded",
+		},
+		{
+			name:     "an error event that names nothing",
+			stream:   frame(`{"type":"error"}`),
+			wantKind: poo.ProviderKindServer,
+		},
+		{
 			name:     "a failed response",
 			stream:   frame(`{"type":"response.failed","response":{"status":"failed","error":{"code":"server_error","message":"the backend broke"}}}`),
 			wantKind: poo.ProviderKindServer,

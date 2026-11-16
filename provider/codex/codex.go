@@ -536,11 +536,12 @@ func forkBody(body []byte, appended []poo.Message, reads modalities) ([]byte, er
 // maxSessionIDLength is the longest session identifier the endpoint takes.
 const maxSessionIDLength = 64
 
-// clampSessionID cuts a session identifier to the length the endpoint
-// takes, counted in characters rather than bytes.
+// clampSessionID cuts a session identifier to the length the endpoint takes,
+// counted in characters rather than bytes.
 //
-// The identifier names the endpoint's prompt cache, so a request that
-// carries one longer than the endpoint accepts is refused.
+// The identifier names the endpoint's prompt cache, so one longer than the
+// endpoint accepts is cut rather than sent: a request that carries one is
+// refused outright.
 func clampSessionID(id string) string {
 	chars := []rune(id)
 	if len(chars) <= maxSessionIDLength {
