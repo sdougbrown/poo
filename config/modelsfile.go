@@ -134,7 +134,10 @@ func (s *Settings) importModelsFile(path string) error {
 	if err != nil {
 		return s.modelsFileError(err)
 	}
-	s.modelsFileLayer = layer
+	// The file folds over what is already there, name by name: the built-in provider
+	// was layered first, and a model the file names is the file's word on that model,
+	// not a reason to drop the ones it does not name.
+	s.addLayer(layer)
 	return nil
 }
 

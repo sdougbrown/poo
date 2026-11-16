@@ -821,6 +821,12 @@ func TestASettingsFileWithNoModelsFileIsUnchanged(t *testing.T) {
 	if len(settings.Models) != 0 || len(settings.Endpoints) != 0 {
 		t.Errorf("the settings gained %v and %v", settings.Models, settings.Endpoints)
 	}
+	// No credential file is there either, so the built-in provider adds nothing to the
+	// layer. Without this the guard could be lost and every load would gain its models.
+	if len(settings.modelsFileLayer.Endpoints) != 0 || len(settings.modelsFileLayer.Models) != 0 {
+		t.Errorf("the layer gained %v and %v, and no file contributed",
+			settings.modelsFileLayer.Endpoints, settings.modelsFileLayer.Models)
+	}
 }
 
 // TestParseDiscoversNoModelsFile covers the other reader's contract: a
@@ -837,6 +843,10 @@ func TestParseDiscoversNoModelsFile(t *testing.T) {
 	}
 	if len(settings.Models) != 0 || len(settings.Endpoints) != 0 {
 		t.Errorf("Parse imported %v and %v, and it discovers nothing", settings.Models, settings.Endpoints)
+	}
+	if len(settings.modelsFileLayer.Endpoints) != 0 || len(settings.modelsFileLayer.Models) != 0 {
+		t.Errorf("Parse layered %v and %v, and it discovers nothing",
+			settings.modelsFileLayer.Endpoints, settings.modelsFileLayer.Models)
 	}
 }
 
@@ -1155,5 +1165,47 @@ func TestAPIImportIsTheModelsFileLayer(t *testing.T) {
 	}
 	if model.MaxOutput != 8192 || model.Source["max_output"] != catalog.LayerModelsFile {
 		t.Errorf("the max output is %d from %q, want the file's 8192", model.MaxOutput, model.Source["max_output"])
+	}
+}
+
+// TestAPooModelsFileKeepsTheBuiltinProvider covers the two layers meeting. A credential
+// file offers the built-in Codex provider, and a models file of poo's own shape says what
+// else runs: the file folds over the built-in, so it overrules a model it names and keeps
+// the ones it does not.
+func TestAPooModelsFileKeepsTheBuiltinProvider(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	// The credential file the settings resolve to, beside the models file, so the
+	// built-in provider is offered.
+	if err := os.WriteFile(filepath.Join(dir, AuthFileName), []byte(`{"openai-codex": {"type": "oauth", "access": "a", "refresh": "r", "expires": 4102444800000, "accountId": "acct"}}`), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	// A models file that names one built-in model, and nothing else.
+	writePooModels(t, dir, `endpoints:
+  openai-codex:
+    endpoint: https://chatgpt.com/backend-api
+    api: responses
+    skip_probe: true
+    models:
+      gpt-6.1-sol:
+        context_limit: 111111
+`)
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	// The model the file named is the file's.
+	if got := settings.modelsFileLayer.Models["openai-codex/gpt-6.1-sol"].ContextLimit; got != 111111 {
+		t.Errorf("the named model's context limit is %d, want the file's 111111", got)
+	}
+	// And the built-in models it did not name are still offered.
+	if _, ok := settings.modelsFileLayer.Models["openai-codex/gpt-5.6-luna"]; !ok {
+		t.Errorf("the built-in provider was dropped by the models file: %d models left", len(settings.modelsFileLayer.Models))
+	}
+	if _, ok := settings.modelsFileLayer.Endpoints["openai-codex"]; !ok {
+		t.Error("the built-in endpoint was dropped by the models file")
 	}
 }
