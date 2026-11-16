@@ -21,6 +21,7 @@ import (
 // neither, so they are here.
 const (
 	ioctlPtyUnlock = 0x40045431 // TIOCSPTLCK: 0 unlocks the slave
+	ioctlWinsize   = 0x5414     // TIOCSWINSZ: 0 sets the pty's size
 	ioctlPtyNumber = 0x80045430 // TIOCGPTN: the slave's number
 )
 

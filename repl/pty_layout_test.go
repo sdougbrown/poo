@@ -3,6 +3,7 @@
 package repl
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -312,6 +314,53 @@ func waitBottomRows(t *testing.T, term *terminal, rowsWant int) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("the input cursor is not on row %d; rows:\n%s", rowsWant, indexedRows(term))
+}
+
+// TestAnInactiveLayoutDoesNotDoubleTheCarriageReturns covers the
+// plain writes of a layout the repl left: a line that already ends in
+// CRLF does not gain a second carriage return.
+func TestAnInactiveLayoutDoesNotDoubleTheCarriageReturns(t *testing.T) {
+	var record bytes.Buffer
+	l := &layout{out: &record, width: 40, height: 12, footer: 1}
+
+	l.write("a\r\nb\r\n")
+
+	drawn := record.String()
+	if strings.Contains(drawn, "\r\r") {
+		t.Fatalf("a CRLF line gained a second carriage return:\n%q", drawn)
+	}
+	if !strings.Contains(drawn, "a\r\nb\r\n") {
+		t.Fatalf("the plain write read wrong:\n%q", drawn)
+	}
+}
+
+// TestATooSmallTerminalHasNoLayout covers the size guard of the real
+// constructor: a terminal that cannot hold a region and a footer
+// builds no layout, and the full one does.
+func TestATooSmallTerminalHasNoLayout(t *testing.T) {
+	term := openTerminal(t)
+	setSize(t, term.master, 80, 3)
+	if l := newLayout(term.slave); l != nil {
+		t.Fatalf("a 3-row terminal built a layout")
+	}
+	setSize(t, term.master, 80, 24)
+	l := newLayout(term.slave)
+	if l == nil {
+		t.Fatal("a full terminal built no layout")
+	}
+	if l.height != 24 {
+		t.Fatalf("the layout read %d rows, want 24", l.height)
+	}
+}
+
+// setSize gives the pty its geometry, the way a terminal emulator
+// would.
+func setSize(t *testing.T, f *os.File, cols, rows int) {
+	t.Helper()
+	ws := struct{ row, col, x, y uint16 }{uint16(rows), uint16(cols), 0, 0}
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), ioctlWinsize, uintptr(unsafe.Pointer(&ws))); errno != 0 {
+		t.Fatalf("sizing the pty: %v", errno)
+	}
 }
 
 func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {

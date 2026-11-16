@@ -157,7 +157,7 @@ func (l *layout) write(s string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.active {
-		l.emit(strings.ReplaceAll(s, "\n", "\r\n"))
+		l.emit(terminalLF(s))
 		return
 	}
 	rows := textRows(s, l.width)
