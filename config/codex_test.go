@@ -16,6 +16,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/codex"
 	"github.com/sdougbrown/poo/provider/piauth"
 )
@@ -199,7 +200,7 @@ roles:
 	}
 	// The built-in endpoint's models are declared, so discovery must leave it
 	// alone rather than ask a chat endpoint for a model list.
-	if !settings.CatalogSettings().Endpoints[piauth.ProviderCodex].SkipProbe {
+	if !catalogEndpoint(t, settings, piauth.ProviderCodex).SkipProbe {
 		t.Error("the Codex endpoint is probed, want it declared")
 	}
 
@@ -298,9 +299,7 @@ roles:
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
-	if _, ok := settings.Models["openai-codex/gpt-6.1-sol"]; !ok {
-		t.Fatalf("the built-in provider was not offered: %v", settings.Models)
-	}
+	catalogModel(t, settings, "openai-codex/gpt-6.1-sol")
 
 	endpoint := &codexEndpoint{accessToken: token}
 	runtime, err := buildCodex(t, settings, &http.Client{Transport: endpoint})
@@ -411,6 +410,27 @@ roles:
 	if _, ok := settings.Models["openai-codex/gpt-6.1-sol"]; ok {
 		t.Fatal("the built-in Codex models were offered without pi's auth file")
 	}
+}
+
+// catalogModel resolves a model the settings' catalog holds, for the tests that
+// read what a models file contributed.
+func catalogModel(t *testing.T, settings *config.Settings, name string) poo.ModelInfo {
+	t.Helper()
+	model, err := catalog.New(settings.CatalogOptions()).Resolve(name)
+	if err != nil {
+		t.Fatalf("the catalog resolves no %s: %v", name, err)
+	}
+	return model
+}
+
+// catalogEndpoint returns the endpoint the settings' catalog holds.
+func catalogEndpoint(t *testing.T, settings *config.Settings, name string) catalog.Endpoint {
+	t.Helper()
+	endpoint, ok := catalog.New(settings.CatalogOptions()).Endpoints()[name]
+	if !ok {
+		t.Fatalf("the catalog holds no %s endpoint", name)
+	}
+	return endpoint
 }
 
 // isolatedConfigDir points the user's config directory where poo resolves its
@@ -560,10 +580,10 @@ roles:
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
-	if got := settings.Endpoints["openai-codex"].Endpoint; got != foreign.URL {
+	if got := catalogEndpoint(t, settings, "openai-codex").Endpoint; got != foreign.URL {
 		t.Fatalf("the endpoint is %q, want the models file's %q", got, foreign.URL)
 	}
-	if got := settings.Models["openai-codex/gpt-6.1-sol"].ContextLimit; got != 111111 {
+	if got := catalogModel(t, settings, "openai-codex/gpt-6.1-sol").ContextLimit; got != 111111 {
 		t.Fatalf("the model's context limit is %d, want the models file's 111111", got)
 	}
 
@@ -728,23 +748,20 @@ roles:
 		t.Fatalf("loading the settings: %v", err)
 	}
 
-	if got := settings.Endpoints["openai-codex"].Endpoint; got != codex.DefaultEndpoint {
+	if got := catalogEndpoint(t, settings, "openai-codex").Endpoint; got != codex.DefaultEndpoint {
 		t.Errorf("the endpoint is %q, want the pinned %q", got, codex.DefaultEndpoint)
 	}
 	// The models file's definition of the colliding model survives.
-	if got := settings.Models["openai-codex/gpt-6.1-sol"].ContextLimit; got != 111111 {
+	if got := catalogModel(t, settings, "openai-codex/gpt-6.1-sol").ContextLimit; got != 111111 {
 		t.Errorf("the colliding model's context limit is %d, want the models file's 111111", got)
 	}
 	// The built-in models the file does not name are still offered.
-	builtin, ok := settings.Models["openai-codex/gpt-5.6-luna"]
-	if !ok {
-		t.Fatalf("the built-in model did not survive the collision: %v", settings.Models)
-	}
+	builtin := catalogModel(t, settings, "openai-codex/gpt-5.6-luna")
 	if builtin.ContextLimit != 272000 || builtin.MaxOutput != 128000 {
 		t.Errorf("the surviving built-in model's limits are %d/%d, want 272000/128000", builtin.ContextLimit, builtin.MaxOutput)
 	}
-	if builtin.ToolsMode != poo.ToolsNative {
-		t.Errorf("the surviving built-in model's tools mode is %q, want native", builtin.ToolsMode)
+	if builtin.Tools.Mode != poo.ToolsNative {
+		t.Errorf("the surviving built-in model's tools mode is %q, want native", builtin.Tools.Mode)
 	}
 
 	endpoint := &codexEndpoint{accessToken: token}
@@ -879,9 +896,7 @@ roles:
 	if key := settings.Endpoints["home"].APIKey; key != "adjacent-key" {
 		t.Errorf("the provider imported with the key %q, want the key beside the models file", key)
 	}
-	if _, ok := settings.Models["openai-codex/gpt-6.1-sol"]; !ok {
-		t.Fatalf("the built-in provider was not offered: %v", settings.Models)
-	}
+	catalogModel(t, settings, "openai-codex/gpt-6.1-sol")
 
 	endpoint := &codexEndpoint{accessToken: adjacentToken}
 	runtime, err := buildCodex(t, settings, &http.Client{Transport: endpoint})

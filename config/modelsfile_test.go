@@ -57,11 +57,16 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 		t.Fatalf("the settings did not load: %v", err)
 	}
 
-	endpoint, ok := settings.Endpoints["home"]
-	if !ok || endpoint.Endpoint != "http://grace:4000/v1" || endpoint.APIKey != "dummy" {
+	endpoint, ok := settings.modelsFileLayer.Endpoints["home"]
+	if !ok || endpoint.Endpoint != "http://grace:4000/v1" {
 		t.Errorf("the provider imported as %+v", endpoint)
 	}
-	model, ok := settings.Models["home/qwen"]
+	// A key written in pi's file is a literal, and a literal key lives in the
+	// settings: the layer never carries one.
+	if key := settings.Endpoints["home"].APIKey; key != "dummy" {
+		t.Errorf("the provider's literal key imported as %q", key)
+	}
+	model, ok := settings.modelsFileLayer.Models["home/qwen"]
 	if !ok {
 		t.Fatalf("the model imported under no name; the models are %v", settings.Models)
 	}
@@ -85,7 +90,7 @@ func TestASettingsFileImportsPIModels(t *testing.T) {
 	if model.API != "" {
 		t.Errorf("the default wire API imported as %q, want the empty default", model.API)
 	}
-	away, ok := settings.Models["away/spark"]
+	away, ok := settings.modelsFileLayer.Models["away/spark"]
 	if !ok {
 		t.Fatalf("the remote model imported under no name; the models are %v", settings.Models)
 	}
@@ -114,6 +119,8 @@ func TestTheSettingsOwnEntriesWinOverAnImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
+	// The settings' own declarations are the settings', and they are what the
+	// catalog reads over the file's layer.
 	if settings.Endpoints["home"].Endpoint != "http://mine:4000/v1" {
 		t.Errorf("the import took the endpoint: %+v", settings.Endpoints["home"])
 	}
@@ -169,20 +176,20 @@ func TestAThinkingLevelMapBecomesTheModelSLevels(t *testing.T) {
 	}
 
 	// The order is pi's, and the null off is not a level the model takes.
-	mapped := settings.Models["home/qwen"].ReasoningLevels
+	mapped := settings.modelsFileLayer.Models["home/qwen"].ReasoningLevels
 	want := []string{"minimal", "low", "high", "max"}
 	if strings.Join(mapped, ",") != strings.Join(want, ",") {
 		t.Errorf("the thinkingLevelMap imported as %v, want %v", mapped, want)
 	}
 	// A reasoning model with no map is the effort default.
-	plain := settings.Models["home/plain"].ReasoningLevels
+	plain := settings.modelsFileLayer.Models["home/plain"].ReasoningLevels
 	want = []string{"off", "low", "medium", "high"}
 	if strings.Join(plain, ",") != strings.Join(want, ",") {
 		t.Errorf("the model without a map imported as %v, want %v", plain, want)
 	}
 	// A map that is all nulls takes none of pi's levels: the model
 	// declares nothing rather than inheriting the default.
-	if got := settings.Models["home/none"].ReasoningLevels; len(got) != 0 {
+	if got := settings.modelsFileLayer.Models["home/none"].ReasoningLevels; len(got) != 0 {
 		t.Errorf("the all-null map imported as %v, want no levels", got)
 	}
 }
@@ -247,7 +254,7 @@ func TestAModelThatDoesNotReasonTakesNoControl(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
-	if got := settings.Models["home/plain"].Reasoning; got != nil {
+	if got := settings.modelsFileLayer.Models["home/plain"].Reasoning; got != nil {
 		t.Errorf("a model that does not reason imported with the control %+v", got)
 	}
 }
@@ -269,8 +276,8 @@ func TestAnImportWithoutTheEffortCompatStaysDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
-	if settings.Models["home/qwen"].Reasoning != nil {
-		t.Errorf("the model imported with a reasoning control it never asked for: %+v", settings.Models["home/qwen"].Reasoning)
+	if settings.modelsFileLayer.Models["home/qwen"].Reasoning != nil {
+		t.Errorf("the model imported with a reasoning control it never asked for: %+v", settings.modelsFileLayer.Models["home/qwen"].Reasoning)
 	}
 }
 
@@ -320,7 +327,7 @@ func TestAModelsFileUnderHomeLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a models file under ~ did not load: %v", err)
 	}
-	if _, ok := settings.Models["home/qwen"]; !ok {
+	if _, ok := settings.modelsFileLayer.Models["home/qwen"]; !ok {
 		t.Errorf("the import did not take the model: %+v", settings.Models)
 	}
 }
@@ -379,7 +386,7 @@ func TestAnImportedModelJoinsASettingsEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
-	model, ok := settings.Models["home/qwen"]
+	model, ok := settings.modelsFileLayer.Models["home/qwen"]
 	if !ok {
 		t.Fatalf("the settings' endpoint cost the file its models: %v", settings.Models)
 	}
@@ -493,7 +500,7 @@ func TestAnAuthKeyInTheEnvironmentNamesTheEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
-	endpoint := settings.Endpoints["home"]
+	endpoint := settings.modelsFileLayer.Endpoints["home"]
 	if endpoint.APIKeyEnv != "HOME_KEY" || endpoint.APIKey != "" {
 		t.Errorf("the provider imported with env %q and key %q, want HOME_KEY and none", endpoint.APIKeyEnv, endpoint.APIKey)
 	}
@@ -523,18 +530,19 @@ func TestAModelsFileKeyFollowsTheSameRules(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the settings did not load: %v", err)
 			}
-			endpoint := settings.Endpoints["away"]
-			var env, literal string
+			endpoint := settings.modelsFileLayer.Endpoints["away"]
+			literal := settings.Endpoints["away"].APIKey
+			var env, wantLiteral string
 			switch test {
 			case "environment":
-				env, literal = "AWAY_KEY", ""
+				env, wantLiteral = "AWAY_KEY", ""
 			case "command":
-				env, literal = "", ""
+				env, wantLiteral = "", ""
 			case "literal":
-				env, literal = "", "file-key-456"
+				env, wantLiteral = "", "file-key-456"
 			}
-			if endpoint.APIKeyEnv != env || endpoint.APIKey != literal {
-				t.Errorf("the %s key imported as env %q and key %q", test, endpoint.APIKeyEnv, endpoint.APIKey)
+			if endpoint.APIKeyEnv != env || literal != wantLiteral {
+				t.Errorf("the %s key imported as env %q and key %q", test, endpoint.APIKeyEnv, literal)
 			}
 		})
 	}
@@ -609,9 +617,15 @@ func TestTheSettingsOwnEndpointWinsOverPIAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the settings did not load: %v", err)
 	}
-	endpoint := settings.Endpoints["home"]
-	if endpoint.Endpoint != "http://mine:4000/v1" || endpoint.APIKey != "settings-key-789" {
+	// The settings' own endpoint is the declaration the catalog reads, and its
+	// key is the one the settings carry: the auth file's key was not imported
+	// over it.
+	if endpoint := settings.Endpoints["home"]; endpoint.APIKey != "settings-key-789" {
 		t.Errorf("the import took the endpoint: %+v", endpoint)
+	}
+	served := catalog.New(settings.CatalogOptions()).Endpoints()["home"]
+	if served.Endpoint != "http://mine:4000/v1" || served.Credential.Source != catalog.CredentialStatic {
+		t.Errorf("the endpoint is served as %+v, want the settings'", served)
 	}
 }
 
@@ -643,7 +657,7 @@ func TestACredentialPooCannotUseIsSkipped(t *testing.T) {
 			if key := settings.Endpoints["home"].APIKey; key != "" {
 				t.Errorf("the provider imported with the key %q", key)
 			}
-			if _, ok := settings.Models["home/qwen"]; !ok {
+			if _, ok := settings.modelsFileLayer.Models["home/qwen"]; !ok {
 				t.Errorf("the model imported under no name; the models are %v", settings.Models)
 			}
 		})
@@ -723,7 +737,7 @@ func TestAModelsFileBesideTheSettingsIsImported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
-	if _, ok := settings.Models["home/gemma4"]; !ok {
+	if _, ok := settings.modelsFileLayer.Models["home/gemma4"]; !ok {
 		t.Errorf("the settings hold %v, and not the discovered provider's model", settings.Models)
 	}
 }
@@ -743,10 +757,10 @@ func TestANamedModelsFileWinsOverTheOneBeside(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
-	if _, ok := settings.Models["chosen/m"]; !ok {
+	if _, ok := settings.modelsFileLayer.Models["chosen/m"]; !ok {
 		t.Errorf("the settings hold %v, and not the named file's model", settings.Models)
 	}
-	if _, ok := settings.Models["home/gemma4"]; ok {
+	if _, ok := settings.modelsFileLayer.Models["home/gemma4"]; ok {
 		t.Error("the discovered models file was read as well as the named one")
 	}
 }
@@ -764,7 +778,7 @@ func TestARelativeModelsFileResolvesAgainstTheSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading the settings from %s: %v", models, err)
 	}
-	if _, ok := settings.Models["home/gemma4"]; !ok {
+	if _, ok := settings.modelsFileLayer.Models["home/gemma4"]; !ok {
 		t.Errorf("the settings hold %v, and not the relative file's model", settings.Models)
 	}
 }
@@ -778,7 +792,7 @@ func TestThePIModelsFileKeyStillLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a settings file with the old key was refused: %v", err)
 	}
-	if _, ok := settings.Models["home/gemma4"]; !ok {
+	if _, ok := settings.modelsFileLayer.Models["home/gemma4"]; !ok {
 		t.Errorf("the old key imported %v", settings.Models)
 	}
 
@@ -1109,5 +1123,37 @@ roles:
 	}
 	if model.ContextLimit != 32768 {
 		t.Errorf("the model's context limit is %d, want the file's 32768", model.ContextLimit)
+	}
+}
+
+// TestAPIImportIsTheModelsFileLayer covers where an imported pi model comes
+// from: the models file's layer, not the settings, so `--explain` names
+// models_file and the settings overrule it one field at a time.
+func TestAPIImportIsTheModelsFileLayer(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen", "contextWindow": 196608, "maxTokens": 8192}]
+			}
+		}
+	}`)
+	settings, err := Parse([]byte(`{
+		"version":1,
+		"models_file":"`+modelsFile+`",
+		"models":{"home/qwen":{"endpoint":"home","model_id":"qwen","context_limit":1024}}
+	}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	model, err := catalog.New(settings.CatalogOptions()).Resolve("home/qwen")
+	if err != nil {
+		t.Fatalf("the catalog resolves no home/qwen: %v", err)
+	}
+	if model.ContextLimit != 1024 || model.Source["context_limit"] != catalog.LayerSettings {
+		t.Errorf("the context limit is %d from %q, want the settings' 1024", model.ContextLimit, model.Source["context_limit"])
+	}
+	if model.MaxOutput != 8192 || model.Source["max_output"] != catalog.LayerModelsFile {
+		t.Errorf("the max output is %d from %q, want the file's 8192", model.MaxOutput, model.Source["max_output"])
 	}
 }
