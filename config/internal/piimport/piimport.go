@@ -112,7 +112,7 @@ func Read(path string) (File, error) {
 		return File{}, fmt.Errorf("reading %s: %w", path, err)
 	}
 	var file piFile
-	if err := json.Unmarshal(data, &file); err != nil {
+	if err := json.Unmarshal(stripBOM(data), &file); err != nil {
 		return File{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if len(file.Providers) == 0 {
@@ -241,7 +241,9 @@ func readAuth(path string) (map[string]credential, error) {
 }
 
 // stripBOM drops a leading UTF-8 byte order mark, the character pi strips
-// before parsing its own files. A file a Windows editor wrote opens with one.
+// before parsing its own files. A file a Windows editor wrote opens with one,
+// and every file this package reads is one pi reads: the models file, and the
+// auth file beside it.
 func stripBOM(data []byte) []byte {
 	return bytes.TrimPrefix(data, []byte("\ufeff"))
 }
