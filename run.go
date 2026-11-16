@@ -1537,6 +1537,42 @@ func (s *Session) toolSpecs() []ToolSpec {
 // record was written.
 func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
 	s.mu.Lock()
+	s.chargeUsageLocked(run, usage)
+	s.mu.Unlock()
+	return s.recordUsage(run, NewRecordMeta("usage"), turn, run.requests, usage, requestChars)
+}
+
+// writeCompactionUsage writes the usage of a request a compaction made.
+//
+// The request is not one of the run's turns, so it carries no request
+// number, and the record's origin says what it was for: the token totals
+// a reader sums stay honest, and the spend that bought the compaction is
+// still its own.
+//
+// A request that finishes after the run settled is not charged: its tokens
+// would land on a run whose accounting is already fixed. The check and the
+// charge share one lock, so a settle between them cannot slip through.
+//
+// The record is written anyway. The endpoint billed the request, and the
+// log is where a run's real spend survives. The finalization seals the run
+// before it commits, so the charge stops at the seal, and the record
+// written after it is one the sink still takes: the seal refuses a record
+// a run's in-flight work claims, not the append itself.
+func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
+	s.mu.Lock()
+	if !run.committed && !run.sealed {
+		s.chargeUsageLocked(run, usage)
+	}
+	s.mu.Unlock()
+	return s.recordUsage(run, NewRecordMetaFrom("usage", OriginCompaction), turn, 0, usage, requestChars)
+}
+
+// chargeUsageLocked adds a request's tokens to the run: its ceiling, the
+// accounting its settle detail reports, and the ratio the estimator
+// calibrates from.
+//
+// The caller holds the session's lock.
+func (s *Session) chargeUsageLocked(run *runState, usage *UsageReport) {
 	run.tokens += usage.InputTokens + usage.OutputTokens
 	if run.usage == nil {
 		run.usage = &SettleUsage{}
@@ -1546,13 +1582,20 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 	if usage.CacheReadTokens != nil {
 		run.usage.CacheReadTokens += *usage.CacheReadTokens
 	}
-	s.mu.Unlock()
+}
+
+// recordUsage writes a request's usage record and emits its event.
+//
+// The charge has already landed; this is what a reader and a subscriber
+// see. A turn's request says nothing about its origin, so the event keeps
+// the shape it had, and a request a compaction made says what it was for.
+func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int, usage *UsageReport, requestChars int) bool {
 	s.observeUsage(usage, requestChars)
 	if err := s.write(run.ctx, &UsageRecord{
-		RecordMeta:      NewRecordMeta("usage"),
+		RecordMeta:      meta,
 		RunID:           run.id,
 		Turn:            turn,
-		Request:         run.requests,
+		Request:         request,
 		InputTokens:     usage.InputTokens,
 		OutputTokens:    usage.OutputTokens,
 		CacheReadTokens: usage.CacheReadTokens,
@@ -1561,14 +1604,18 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 		s.noteStoreError(run, err)
 		return false
 	}
-	s.events.emit(EventUsage, map[string]any{
+	payload := map[string]any{
 		"run_id":            run.id,
 		"turn":              turn,
-		"request":           run.requests,
+		"request":           request,
 		"input_tokens":      usage.InputTokens,
 		"output_tokens":     usage.OutputTokens,
 		"cache_read_tokens": usage.CacheReadTokens,
-	})
+	}
+	if meta.Origin != "" {
+		payload["origin"] = meta.Origin
+	}
+	s.events.emit(EventUsage, payload)
 	return true
 }
 

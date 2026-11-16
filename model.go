@@ -85,6 +85,16 @@ func FeedName(o Origin) (string, bool) {
 	return name, true
 }
 
+// IsCompactionRequest reports that a usage record's origin names a
+// request a compaction made rather than one of the run's turns.
+//
+// A reader that counts turns, or measures how the endpoint behaves turn by
+// turn, asks this rather than spelling the origin itself: a compaction is
+// a request, and it is not a turn.
+func IsCompactionRequest(origin Origin) bool {
+	return origin == OriginCompaction
+}
+
 // IsFeedOrigin reports that the origin belongs to a feed.
 //
 // A reader that recognizes a feed's message, record or input id uses

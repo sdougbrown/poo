@@ -543,11 +543,12 @@ even when the endpoint reports no token counts.
 |---|---|---|
 | `run_id` | string | The run the request belongs to. |
 | `turn` | integer | The turn the request belongs to. |
-| `request` | integer | The request's number within the run, starting at 1. |
+| `request` | integer | The request's number within the run, starting at 1. `0` for a request a compaction made, which is not one of the run's turns. |
 | `input_tokens` | integer | The prompt tokens the endpoint reported. `0` when it reported none. |
 | `output_tokens` | integer | The completion tokens the endpoint reported. `0` when it reported none. |
 | `cache_read_tokens` | integer | The prompt tokens served from the provider's cache. **Absent** when the endpoint does not report it. |
 | `ttft_ms` | number | The time to the first streamed token, in milliseconds. Measured by the transport, not reported by the endpoint. |
+| `origin` | string | Absent for the run's own turn. `compaction` when a compaction strategy made the request: a fork that wrote a handoff, or the request that wrote a summary. |
 
 The time to the first token is the time to the first *token*: a non-empty
 text delta, a thinking delta or a tool call. A chunk that only announces
@@ -556,8 +557,12 @@ the assistant's role carries no token, so it does not start the clock.
 Every provider request whose stream started gets a `usage` record,
 including a request whose stream failed part way through: the request
 still cost tokens, and the record is what a consumer reads to account for
-it. A request that failed before the endpoint's stream started has no
-usage record: no token was spent on it.
+it. That includes the requests a compaction made, which carry the
+compaction's origin so their share of the spend stays its own. A request
+that failed before the endpoint's stream started has no usage record: no
+token was spent on it. An endpoint that reports no usage for a request
+writes no record either: the charge is an estimate, and the log holds
+what the endpoint said.
 
 ## `provider.attempt`
 
@@ -569,7 +574,7 @@ and what each attempt failed with.
 |---|---|---|
 | `run_id` | string | The run the request belongs to. |
 | `turn` | integer | The turn the request belongs to. |
-| `request` | integer | The request's number within the run, starting at 1. |
+| `request` | integer | The request's number within the run, starting at 1. Every attempt record belongs to a turn's request. |
 | `attempt` | integer | The attempt's number, counting from 1. |
 | `error` | string | The failure's message. |
 | `kind` | string | The provider error kind, when the failure is one. **Absent** when it is not. |

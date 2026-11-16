@@ -2115,3 +2115,82 @@ func TestAWindowWithAnUnknownItemIsRejected(t *testing.T) {
 		})
 	}
 }
+
+// TestACompactionsUsageIsRecorded covers the rule: a request a compaction
+// made is charged to the run and written to the log as what it was, so
+// the cost of compacting is a number a comparison can read rather than a
+// counter nobody sees.
+func TestACompactionsUsageIsRecorded(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 1}},
+		{text: "the answer", usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 1}},
+	})
+	tr.SetForkTurns(pootest.Turn{Text: "the summary", InputTokens: 60, OutputTokens: 40})
+	compactor := &forkCaptureCompactor{}
+	sink := &recordingSink{}
+	observer := &collectingObserver{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = compactor
+	s := newTestSession(t, opts, poo.WithObserver(observer))
+	res := runSession(t, s, "do the thing")
+
+	var compactionUsage *poo.UsageRecord
+	for _, rec := range sink.allRecords() {
+		usage, ok := rec.(*poo.UsageRecord)
+		if !ok || usage.Origin != poo.OriginCompaction {
+			continue
+		}
+		compactionUsage = usage
+	}
+	if compactionUsage == nil {
+		t.Fatal("the log holds no usage record for the compaction's request")
+	}
+	if compactionUsage.InputTokens != 60 || compactionUsage.OutputTokens != 40 {
+		t.Errorf("the compaction's usage is %d in and %d out, want the endpoint's 60 and 40",
+			compactionUsage.InputTokens, compactionUsage.OutputTokens)
+	}
+	if compactionUsage.Request != 0 {
+		t.Errorf("the compaction's usage names the request %d, want none: it is not a turn", compactionUsage.Request)
+	}
+	if compactionUsage.Turn < 1 {
+		t.Errorf("the compaction's usage names the turn %d, want the run's own", compactionUsage.Turn)
+	}
+	// The spend is part of what the run reports having cost: the two
+	// turns' 20 in and 2 out, and the compaction's 60 and 40.
+	if res.Detail.Usage == nil || res.Detail.Usage.InputTokens != 80 || res.Detail.Usage.OutputTokens != 42 {
+		t.Errorf("the settle detail's usage is %+v, want 80 in and 42 out", res.Detail.Usage)
+	}
+
+	// The event says what the log says, and a turn's event does not: a
+	// subscriber sees the same distinction a reader of the log does. The
+	// delivery is asynchronous, so the observer is waited for.
+	waitFor(t, "the observer to see the compaction's usage event", func() bool {
+		for _, ev := range observer.snapshot() {
+			if ev.Name == poo.EventUsage && ev.Payload["origin"] == poo.OriginCompaction {
+				return true
+			}
+		}
+		return false
+	})
+	compactionEvents, turnEvents := 0, 0
+	for _, ev := range observer.snapshot() {
+		if ev.Name != poo.EventUsage {
+			continue
+		}
+		origin, named := ev.Payload["origin"]
+		if named && origin == poo.OriginCompaction {
+			compactionEvents++
+			continue
+		}
+		if named {
+			t.Errorf("a turn's usage event names the origin %v, want none", origin)
+		}
+		turnEvents++
+	}
+	if compactionEvents != 1 {
+		t.Errorf("the observer saw %d compaction usage events, want 1", compactionEvents)
+	}
+	if turnEvents == 0 {
+		t.Error("the observer saw no turn's usage event")
+	}
+}

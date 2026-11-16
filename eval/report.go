@@ -36,8 +36,16 @@ type Aggregate struct {
 	InputSpread  float64 `json:"input_tokens_spread"`
 	OutputTokens float64 `json:"output_tokens"`
 	OutputSpread float64 `json:"output_tokens_spread"`
-	WallMS       float64 `json:"wall_ms"`
-	WallSpread   float64 `json:"wall_ms_spread"`
+	// CompactionInputTokens and CompactionOutputTokens are the means of
+	// the share of those tokens that bought compaction. They are part of
+	// the totals above, and they are what a comparison of strategies
+	// reads to say what compacting cost.
+	CompactionInputTokens  float64 `json:"compaction_input_tokens"`
+	CompactionInputSpread  float64 `json:"compaction_input_tokens_spread"`
+	CompactionOutputTokens float64 `json:"compaction_output_tokens"`
+	CompactionOutputSpread float64 `json:"compaction_output_tokens_spread"`
+	WallMS                 float64 `json:"wall_ms"`
+	WallSpread             float64 `json:"wall_ms_spread"`
 	// TTFTMS is the mean time to the first token.
 	TTFTMS     float64 `json:"ttft_ms"`
 	TTFTSpread float64 `json:"ttft_ms_spread"`
@@ -184,7 +192,7 @@ func aggregate(runs []CellResult) Aggregate {
 		return stdev(perSeed)
 	}
 
-	var turns, input, output, wall, ttft, trend, toolErr, parse, reread, diffLines []float64
+	var turns, input, output, compactionInput, compactionOutput, wall, ttft, trend, toolErr, parse, reread, diffLines []float64
 	var cacheRatios []float64
 	cacheReported := false
 
@@ -192,6 +200,8 @@ func aggregate(runs []CellResult) Aggregate {
 		turns = append(turns, float64(r.Metrics.Turns))
 		input = append(input, float64(r.Metrics.InputTokens))
 		output = append(output, float64(r.Metrics.OutputTokens))
+		compactionInput = append(compactionInput, float64(r.Metrics.CompactionInputTokens))
+		compactionOutput = append(compactionOutput, float64(r.Metrics.CompactionOutputTokens))
 		wall = append(wall, r.Metrics.WallMS)
 		ttft = append(ttft, r.Metrics.TTFTMS)
 		trend = append(trend, r.Metrics.TTFTTrend)
@@ -232,6 +242,10 @@ func aggregate(runs []CellResult) Aggregate {
 	agg.InputSpread = round2(spreadOf(func(r CellResult) float64 { return float64(r.Metrics.InputTokens) }))
 	agg.OutputTokens = round2(mean(output))
 	agg.OutputSpread = round2(spreadOf(func(r CellResult) float64 { return float64(r.Metrics.OutputTokens) }))
+	agg.CompactionInputTokens = round2(mean(compactionInput))
+	agg.CompactionInputSpread = round2(spreadOf(func(r CellResult) float64 { return float64(r.Metrics.CompactionInputTokens) }))
+	agg.CompactionOutputTokens = round2(mean(compactionOutput))
+	agg.CompactionOutputSpread = round2(spreadOf(func(r CellResult) float64 { return float64(r.Metrics.CompactionOutputTokens) }))
 	agg.WallMS = round2(mean(wall))
 	agg.WallSpread = round2(spreadOf(func(r CellResult) float64 { return r.Metrics.WallMS }))
 	agg.TTFTMS = round2(mean(ttft))

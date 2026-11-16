@@ -379,6 +379,13 @@ func (o *collectingObserver) Observe(ev poo.Event) error {
 	return nil
 }
 
+// snapshot returns the events the observer saw.
+func (o *collectingObserver) snapshot() []poo.Event {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]poo.Event(nil), o.events...)
+}
+
 // failingObserver is an observer that always fails.
 type failingObserver struct{}
 
