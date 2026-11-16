@@ -850,3 +850,45 @@ func TestASideRequestWithoutUsageCountsAgainstTheRunBudget(t *testing.T) {
 		t.Fatalf("the run settled %q (%s), want budget_exhausted from max_run_tokens", res.Reason, res.Detail.Source)
 	}
 }
+
+// TestAFileReadAndThenChangedIsListedOnce covers the file list's dedupe:
+// a file the summarized turns read and then edited is a file the work
+// changed, so it appears under "Files modified" and not under "Files
+// read" as well.
+func TestAFileReadAndThenChangedIsListedOnce(t *testing.T) {
+	call := func(name, path string) poo.ContentBlock {
+		args, err := json.Marshal(map[string]string{"path": path})
+		if err != nil {
+			t.Fatalf("building the call's arguments: %v", err)
+		}
+		return poo.ContentBlock{Kind: poo.ContentToolCall, ToolCallID: "c1", Name: name, Arguments: args}
+	}
+	messages := []poo.Message{
+		poo.NewTextMessage(poo.RoleSystem, "the system prompt"),
+		{Role: poo.RoleAssistant, Content: []poo.ContentBlock{call("read", "internal/same.go")}},
+		{Role: poo.RoleAssistant, Content: []poo.ContentBlock{call("edit", "internal/same.go")}},
+		poo.NewTextMessage(poo.RoleAssistant, "the newest turn"),
+	}
+	view := poo.NewHistoryView(messages, nil, []poo.TurnSummary{
+		{TurnIndex: 1, Start: 1, End: 3},
+		{TurnIndex: 2, Start: 3, End: 4},
+	})
+	c := summary.New(summary.Options{KeepRecentTokens: 1})
+	compaction, err := c.Compact(context.Background(), poo.CompactionEnv{
+		View:   view,
+		Budget: poo.ContextBudget{ContextLimit: 100000, CharsPerToken: 4},
+		Ask: func(ctx context.Context, messages []poo.Message, maxTokens int) (poo.Reply, error) {
+			return poo.Reply{Message: poo.NewTextMessage(poo.RoleAssistant, "## Goal\nthe task"), Finish: poo.FinishStop}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("compacting: %v", err)
+	}
+	text := compaction.Replace.Messages[0].Text()
+	if !strings.Contains(text, "Files modified:\n- internal/same.go") {
+		t.Errorf("the replacement is %q, want the file under Files modified", text)
+	}
+	if strings.Contains(text, "Files read:") {
+		t.Errorf("the replacement is %q, want the changed file not listed as read", text)
+	}
+}
