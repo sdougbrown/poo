@@ -590,7 +590,15 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 	}
 	cmd := exec.Command(exe, args...)
 	ownProcessGroup(cmd)
-	cmd.Stderr = m.serverStderr()
+	// A layout receives the server's diagnostics through a writer that
+	// holds partial lines; the plain path keeps the process's stderr.
+	var diagnostics *layoutStderr
+	if m.r != nil && m.r.layout != nil {
+		diagnostics = &layoutStderr{l: m.r.layout}
+		cmd.Stderr = diagnostics
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, nil, nil, err
@@ -602,18 +610,18 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 	if err := cmd.Start(); err != nil {
 		return nil, nil, nil, fmt.Errorf("repl: starting %s: %w", exe, err)
 	}
-	return stdin, stdout, cmd.Wait, nil
-}
-
-// serverStderr picks where the server's diagnostics go. A layout owns
-// the terminal when the footer runs, so the diagnostics go through its
-// locked writer and land above the footer; anything else keeps the
-// process's own stderr.
-func (m *machine) serverStderr() io.Writer {
-	if m.r != nil && m.r.layout != nil {
-		return &layoutStderr{l: m.r.layout}
+	wait := cmd.Wait
+	if diagnostics != nil {
+		procWait := wait
+		wait = func() error {
+			// The copy goroutine is done once Wait returns, so the line
+			// it held is final here, newline or not.
+			err := procWait()
+			diagnostics.flush()
+			return err
+		}
 	}
-	return os.Stderr
+	return stdin, stdout, wait, nil
 }
 
 // layoutStderr writes through a layout, so a writer outside the run
@@ -637,6 +645,17 @@ func (w *layoutStderr) Write(p []byte) (int, error) {
 		w.held = w.held[i+1:]
 	}
 	return len(p), nil
+}
+
+// flush writes the line the pipe ended without: a server's last
+// diagnostic may carry no newline. The waiter calls it, after the copy
+// goroutine is done, so no write races the hold.
+func (w *layoutStderr) flush() {
+	if w.held == "" {
+		return
+	}
+	w.l.write(w.held)
+	w.held = ""
 }
 
 // newInput builds the line reader for the session.

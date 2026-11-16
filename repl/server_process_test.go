@@ -74,6 +74,7 @@ func TestServerStderrRidesTheLayout(t *testing.T) {
 	if os.Getenv("POO_TEST_SERVER_STDERR") == "1" {
 		fmt.Println("ready")
 		fmt.Fprintln(os.Stderr, "a server diagnostic")
+		fmt.Fprint(os.Stderr, "a final word")
 		return
 	}
 	t.Setenv("POO_TEST_SERVER_STDERR", "1")
@@ -97,8 +98,10 @@ func TestServerStderrRidesTheLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	drawn := scr.text()
-	if n := strings.Count(drawn, "a server diagnostic"); n != 1 {
-		t.Fatalf("the diagnostic shows %d time(s) on the screen, want 1:\n%s", n, drawn)
+	for _, want := range []string{"a server diagnostic", "a final word"} {
+		if n := strings.Count(drawn, want); n != 1 {
+			t.Errorf("%q shows %d time(s) on the screen, want 1:\n%s", want, n, drawn)
+		}
 	}
 	said := rowOf(t, scr, "a server diagnostic")
 	footer := rowOf(t, scr, promptMark+"a draft")
