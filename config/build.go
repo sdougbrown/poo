@@ -2242,7 +2242,7 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 		return openai.New(openai.Options{
 			Endpoint:   model.Endpoint,
 			Model:      model.ModelID,
-			APIKey:     r.apiKey(model.Name),
+			APIKey:     r.apiKey(model),
 			ToolsMode:  string(model.Tools.Mode),
 			ModelInfo:  model,
 			Sampling:   model.Sampling,
@@ -2329,7 +2329,7 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 		timeout = time.Duration(*r.Settings.Decider.TimeoutMS) * time.Millisecond
 	}
 	decider, err := openai.NewSystemOneDeciderFor(model, openai.SystemOneConfig{
-		APIKey:     r.apiKey(model.Name),
+		APIKey:     r.apiKey(model),
 		Timeout:    timeout,
 		HTTPClient: r.httpClient,
 	})
@@ -2339,28 +2339,29 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 	return decider, nil
 }
 
-// apiKey returns the key the settings' endpoint for a model names.
+// apiKey returns the key the endpoint that serves a model names.
 //
-// The endpoint's credential is the environment variable the settings
-// name, when it holds a key, and the key the settings carry when it
-// does not: a variable is the better neighbor, and a literal is what a
-// models file written for another tool imports as. An endpoint that
-// names neither sends no key.
-func (r *Runtime) apiKey(model string) string {
-	settings, ok := r.Settings.Models[model]
+// The endpoint is the model's provider, as the catalog resolved it: a model the
+// settings never named is served by the endpoint the models file declared for
+// it, and its key is that endpoint's. The source is the catalog's own
+// credential rule — the environment variable, then the literal the settings
+// carry when that variable holds nothing — so one rule answers for a model
+// whichever layer declared it. The catalog holds no secret, so the literal is
+// read where it is written.
+func (r *Runtime) apiKey(model poo.ModelInfo) string {
+	endpoint, ok := r.Catalog.Endpoints()[model.Provider]
 	if !ok {
 		return ""
 	}
-	endpoint, ok := r.Settings.Endpoints[settings.Endpoint]
-	if !ok {
-		return ""
-	}
-	if endpoint.APIKeyEnv != "" {
-		if key := os.Getenv(endpoint.APIKeyEnv); key != "" {
+	if endpoint.Credential.Source == catalog.CredentialEnv {
+		if key := os.Getenv(endpoint.Credential.Env); key != "" {
 			return key
 		}
 	}
-	return endpoint.APIKey
+	if settings, ok := r.Settings.Endpoints[model.Provider]; ok {
+		return settings.APIKey
+	}
+	return ""
 }
 
 // expandHome expands the leading ~ of a path.

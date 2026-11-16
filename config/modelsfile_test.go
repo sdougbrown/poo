@@ -971,9 +971,16 @@ roles:
 	if model.Endpoint != "http://127.0.0.1:2/v1" {
 		t.Errorf("the endpoint is %q, want the settings' URL", model.Endpoint)
 	}
-	// The fields the settings leave alone are still the file's.
+	// The fields the settings leave alone are still the file's, sampling included:
+	// a model's own temperature belongs with the model, whichever layer declared it.
 	if model.MaxOutput != 4096 || model.Source["max_output"] != catalog.LayerModelsFile {
 		t.Errorf("the max output is %d from %q, want the file's 4096", model.MaxOutput, model.Source["max_output"])
+	}
+	if model.Sampling.Temperature == nil || *model.Sampling.Temperature != 0.3 {
+		t.Errorf("the temperature is %v, want the file's 0.3", model.Sampling.Temperature)
+	}
+	if model.Source["sampling.temperature"] != catalog.LayerModelsFile {
+		t.Errorf("the temperature comes from %q, want models_file", model.Source["sampling.temperature"])
 	}
 }
 

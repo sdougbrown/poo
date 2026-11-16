@@ -2119,3 +2119,51 @@ func TestTheDefaultStrategyIsSummary(t *testing.T) {
 		t.Fatalf("the session's compactor is %T, want the summary strategy", runtime.Options.Compactor)
 	}
 }
+
+// TestAModelTheModelsFileDeclaresSendsTheEndpointsKey covers the credential of a
+// model no settings entry names. The provider is the model's own, as the catalog
+// resolved it, and the key is that endpoint's: the environment variable it names,
+// and the literal the settings carry when that variable holds nothing.
+func TestAModelTheModelsFileDeclaresSendsTheEndpointsKey(t *testing.T) {
+	cases := map[string]struct {
+		endpoint string
+		env      string
+		want     string
+	}{
+		"the environment":   {"    api_key_env: POO_FILE_KEY\n", "from-the-environment", "from-the-environment"},
+		"the settings' key": {"    api_key_env: POO_FILE_KEY\n    api_key: literal-in-settings\n", "", "literal-in-settings"},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("POO_FILE_KEY", test.env)
+			dir := t.TempDir()
+			models := filepath.Join(dir, config.ModelsFileName)
+			if err := os.WriteFile(models, []byte(`endpoints:
+  home:
+    endpoint: http://127.0.0.1:1/v1
+    models:
+      qwen3: {}
+`), 0o644); err != nil {
+				t.Fatalf("writing the models file: %v", err)
+			}
+			document := fmt.Sprintf(`version: 1
+models_file: %s
+endpoints:
+  home:
+%s
+session:
+  mode: ephemeral
+roles:
+  chat: home/qwen3
+`, models, test.endpoint)
+			settings, err := config.Parse([]byte(document), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			runtime := build(t, settings, config.Overrides{})
+			if key := runtime.ModelAPIKey("home/qwen3"); key != test.want {
+				t.Errorf("the model resolved to the key %q, want %q", key, test.want)
+			}
+		})
+	}
+}
