@@ -298,6 +298,26 @@ func TestALongResultIsBoundedByTheTerminalWidth(t *testing.T) {
 	}
 }
 
+// TestATinyTerminalDropsTheToolSummary covers a terminal too narrow
+// for a summary: the name clips to the edge and the summary drops
+// rather than pushing the call past it.
+func TestATinyTerminalDropsTheToolSummary(t *testing.T) {
+	var out bytes.Buffer
+	r := newRenderer(&out)
+	r.width = 5
+	r.toolCall("aVeryLongToolName", "a summary that is far too long")
+
+	drawn := ansi.Strip(out.String())
+	for _, row := range plainLines(drawn) {
+		if width := ansi.StringWidth(row); width > 5 {
+			t.Errorf("the call's row is %d columns wide, want 5 or less:\n%s", width, drawn)
+		}
+	}
+	if strings.Contains(drawn, "a summary") {
+		t.Errorf("the summary survived a terminal too narrow for it:\n%s", drawn)
+	}
+}
+
 // TestALongToolSummaryIsBounded covers the call's decoration: a
 // summary on one long line ends at the terminal's edge.
 func TestALongToolSummaryIsBounded(t *testing.T) {

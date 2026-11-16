@@ -61,7 +61,7 @@ type bashObservation struct {
 // status; anything else reads as the text it came as, bounded and
 // sanitized. A result that does not decode is never guessed at: its
 // text is what the model saw, so its text is what the person sees.
-func previewResult(tool, text string, elided, width, rows int) resultPreview {
+func previewResult(text string, elided, width, rows int) resultPreview {
 	handle, rest := splitHandle(text)
 	obs, ok := decodeBashObservation(rest)
 	if !ok {

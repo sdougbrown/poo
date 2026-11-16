@@ -458,7 +458,7 @@ func (r *renderer) toolCall(tool, summary string) {
 
 // toolResult renders one tool result.
 func (r *renderer) toolResult(tool, outcome, text string, elided int) {
-	p := previewResult(tool, text, elided, r.previewContentWidth(), maxResultLines)
+	p := previewResult(text, elided, r.previewContentWidth(), maxResultLines)
 	var b strings.Builder
 	if p.handle != "" {
 		b.WriteString(resultIndent + ansiDim + p.handle + ansiReset + "\n")
