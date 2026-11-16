@@ -467,13 +467,6 @@ func (l *layout) anchorLocked() {
 	l.paintPreviewLocked(pending)
 }
 
-// footerRows is the rows reserved for the editor now.
-func (l *layout) footerRows() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.footer
-}
-
 // cols is the terminal's width now.
 func (l *layout) cols() int {
 	l.mu.Lock()
