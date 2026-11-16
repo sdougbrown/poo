@@ -448,10 +448,11 @@ func (l *layout) anchor() {
 // under the committed boundary belong to no stream: a paint that
 // outgrew the footer left its rows there, and the editor's frame starts
 // from the committed boundary again. The standing preview is not one of
-// the strays; it is repainted from the cache. The footer's own sequence
-// then anchors the frame: the engine renders from the footer's first
-// row, and the erase below spends the rows the frame is about to fill,
-// the spare included.
+// the strays; it is repainted from the cache. The anchor itself only
+// positions the cursor: an erase below the footer's first row on every
+// frame would open a window where a reader sees the draft gone, between
+// this write and the frame that refills it. The erase rides the footer's
+// size change instead, where the vacated rows actually exist.
 func (l *layout) anchorLocked() {
 	var b strings.Builder
 	b.WriteString(seqSaveCursor)
@@ -462,7 +463,7 @@ func (l *layout) anchorLocked() {
 		b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", row))
 		b.WriteString(seqEraseLine)
 	}
-	b.WriteString(l.footerSeq())
+	b.WriteString(fmt.Sprintf("\x1b[%d;1H", l.footerTop()))
 	l.emit(b.String())
 	l.paintPreviewLocked(pending)
 }
