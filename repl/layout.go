@@ -328,6 +328,12 @@ func (l *layout) clearPreviewLocked() {
 func (l *layout) sealPreview() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.sealPreviewLocked()
+}
+
+// sealPreviewLocked seals the standing preview without the lock: the
+// committed boundary moves past the rows, which stay as they stand.
+func (l *layout) sealPreviewLocked() {
 	l.last += l.preview
 	if l.last > l.regionBottom() {
 		l.last = l.regionBottom()
@@ -346,9 +352,7 @@ func (l *layout) commitPreview(body string) {
 		l.clearPreviewLocked()
 		l.emit(seqSaveCursor + l.rowsSeq(rows) + seqRestoreCursor)
 	} else {
-		l.last += l.preview
-		l.preview = 0
-		l.previewRows = nil
+		l.sealPreviewLocked()
 	}
 }
 
