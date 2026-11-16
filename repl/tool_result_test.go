@@ -217,6 +217,27 @@ func TestACappedBashObservationKeepsItsStatusOverTheRowCap(t *testing.T) {
 	}
 }
 
+// TestAStderrOnlyResultSkipsItsLabel covers a command that wrote
+// nothing to stdout: its stderr reads, and the label that names a
+// stdout's stderr section has nothing to name.
+func TestAStderrOnlyResultSkipsItsLabel(t *testing.T) {
+	var out bytes.Buffer
+	r := newRenderer(&out)
+	r.toolResult("bash", "error", aBashObservation(t, map[string]any{
+		"returncode": 2, "timed_out": false, "output": "", "stderr": "ls: cannot access '/x'\n",
+	}), 0)
+
+	rendered := ansi.Strip(out.String())
+	if !strings.Contains(rendered, "ls: cannot access '/x'") {
+		t.Errorf("the stderr never read:\n%s", rendered)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.TrimSpace(line) == "stderr:" {
+			t.Errorf("the label stands over an empty stdout:\n%s", rendered)
+		}
+	}
+}
+
 // TestAWireElidedCountReadsAsCharacters covers the event's own
 // elided_chars: the wire counts characters, so the transcript says
 // characters rather than calling the count lines.
