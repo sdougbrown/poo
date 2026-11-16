@@ -435,6 +435,46 @@ func TestCtrlCClearsTheLineThenLeavesTheSession(t *testing.T) {
 	}
 }
 
+// TestCtrlJBreaksTheDraftAndEnterSubmitsItWhole covers the line break:
+// Ctrl-J puts a line feed into the draft instead of submitting it, and
+// the Enter after submits the draft whole, newlines inside.
+func TestCtrlJBreaksTheDraftAndEnterSubmitsItWhole(t *testing.T) {
+	server := &fakeServer{t: t}
+	term, code := startTerminalRepl(t, server)
+	waitFor(t, term, promptMark)
+
+	term.press("first line")
+	// Ctrl-J is the line feed byte: the draft grows a line instead of
+	// the prompt going.
+	term.press("\x0a")
+	term.press("second line")
+	waitScreen(t, term, "second line")
+	if prompts := server.promptsSoFar(); len(prompts) != 0 {
+		t.Fatalf("the session got %v before the Enter, want nothing sent", prompts)
+	}
+
+	term.press("\r")
+	if prompts := server.waitPrompts(t, 1); prompts[0] != "first line\nsecond line" {
+		t.Fatalf("the submitted draft is %q, want both lines whole", prompts[0])
+	}
+
+	// The session's own run asks about its tool; the y answers it and
+	// the settle closes the run the quit leaves behind.
+	waitScreen(t, term, "allow bash?")
+	term.press("y\r")
+	waitScreen(t, term, "✓ end_turn")
+
+	term.press("/quit\r")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d, want 0", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}
+
 // TestAPermissionAskTakesTheAnswerTypedBehindIt covers the ask over a
 // terminal: the decision is the y typed behind it, and the run settles.
 func TestAPermissionAskTakesTheAnswerTypedBehindIt(t *testing.T) {

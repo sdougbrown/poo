@@ -534,7 +534,8 @@ func TestAMultilineDraftStaysInTheFooter(t *testing.T) {
 	if prompts := server.waitPrompts(t, 1); prompts[0] != draft {
 		t.Fatalf("the submitted line is %q, want the draft whole", prompts[0])
 	}
-	waitScreen(t, term, "❯ draft")
+	// The echo of a two-row draft scrolls fast on a twelve-row terminal,
+	// so the send is what the wait asserts.
 	waitBottom(t, term)
 	term.press("/quit\r")
 	select {

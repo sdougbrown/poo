@@ -126,6 +126,13 @@ func waitTimes(t *testing.T, drawn interface{ String() string }, want string, co
 
 // waitPrompts waits until the server has want prompts from the
 // session, and returns them.
+// promptsSoFar returns the prompts the session has received so far.
+func (s *fakeServer) promptsSoFar() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.prompts...)
+}
+
 func (s *fakeServer) waitPrompts(t *testing.T, want int) []string {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
