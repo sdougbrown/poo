@@ -116,11 +116,16 @@ type ToolResultRewrite struct {
 // ProviderWindow is a provider-native compaction: the model's own
 // compacted state.
 //
-// Every item is a `provider` content block, and every one of them is
-// required: the window cannot be rebuilt from anything else. The core
-// checks this before it accepts a window.
+// The items are the provider's own, in the order it returned them, and
+// the core installs them as they are. A window may retain visible text
+// alongside the opaque items, because a provider that compacts a
+// conversation keeps the parts of it the model must go on reading; the
+// opaque items are what cannot be rebuilt from anything else.
+//
+// At least one item is required: the compacted state itself. A window
+// without one is a window the provider did not produce.
 type ProviderWindow struct {
-	// Items are the window's blocks.
+	// Items are the window's blocks, in the provider's order.
 	Items []ContentBlock `json:"items"`
 }
 
@@ -142,5 +147,22 @@ type EndRun struct {
 type NativeCompactor interface {
 	// Compact asks the provider to compact its own state and returns the
 	// window it produced.
-	Compact(ctx context.Context, prev Rendered) (ProviderWindow, error)
+	Compact(ctx context.Context, in NativeCompaction) (ProviderWindow, error)
+}
+
+// NativeCompaction is what a native compactor is given.
+//
+// The view is the model's history as it stands now, and that is the point
+// of the call: the last request's snapshot can be a turn behind it, so a
+// provider that compacts the snapshot drops the work done since. A
+// transport that has to re-encode the window encodes this view; one that
+// can compact the same wire prefix it just sent may compare the two and
+// reuse it.
+type NativeCompaction struct {
+	// Model is the model the session is speaking to.
+	Model ModelInfo
+	// View is the model's history, as it stands now.
+	View View
+	// Budget is the run's context budget.
+	Budget ContextBudget
 }

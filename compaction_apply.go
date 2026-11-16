@@ -119,18 +119,29 @@ func (s *Session) validateRewrite(rewrites []ToolResultRewrite) error {
 //
 // The window is the provider's own compacted state, so the core asks the
 // session's own transport for it: the items a strategy hands back are
-// never trusted. Every item is required provider data.
+// never trusted. At least one item is required provider data; the rest
+// are optional provider items or non-empty visible text.
 func (s *Session) validateWindow(w ProviderWindow) error {
 	if len(w.Items) == 0 {
 		return fmt.Errorf("%w: the window carries no items", ErrInvalidCompaction)
 	}
+	required := 0
 	for _, item := range w.Items {
-		if item.Provider == nil {
-			return fmt.Errorf("%w: the window holds an item that is not provider data", ErrInvalidCompaction)
+		if item.Provider != nil {
+			if item.Provider.Required {
+				required++
+			}
+			continue
 		}
-		if !item.Provider.Required {
-			return fmt.Errorf("%w: the window holds an item that is not required", ErrInvalidCompaction)
+		// A window may retain the visible part of the conversation: a
+		// provider that compacts keeps the text the model must go on
+		// reading. Anything else it returns is not a window.
+		if item.Kind != ContentText || strings.TrimSpace(item.Text) == "" {
+			return fmt.Errorf("%w: the window holds an item that is neither provider data nor visible text", ErrInvalidCompaction)
 		}
+	}
+	if required == 0 {
+		return fmt.Errorf("%w: the window holds no required item", ErrInvalidCompaction)
 	}
 	return nil
 }
@@ -141,19 +152,19 @@ func (s *Session) validateWindow(w ProviderWindow) error {
 // core-bound call to the transport's NativeCompactor capability can
 // produce one. A strategy's Window is a request for this call, not the
 // data that is applied.
-func (s *Session) nativeWindow(ctx context.Context, run *runState) (ProviderWindow, error) {
+func (s *Session) nativeWindow(ctx context.Context) (ProviderWindow, error) {
 	compactor, ok := s.opts.Transport.(NativeCompactor)
 	if !ok {
 		return ProviderWindow{}, fmt.Errorf("%w: the session's transport cannot compact", ErrInvalidCompaction)
 	}
+	// The view is the authority: it holds the reply and the results the
+	// last request could not carry, and those are what a compaction must
+	// not lose. A session that has asked nothing has no view to compact.
 	s.mu.Lock()
-	rendered := run.lastRendered
-	has := run.hasRendered
+	model := s.opts.Model
+	view := s.viewLocked()
 	s.mu.Unlock()
-	if !has {
-		return ProviderWindow{}, fmt.Errorf("%w: the session's transport has no request to compact", ErrInvalidCompaction)
-	}
-	return compactor.Compact(ctx, rendered)
+	return compactor.Compact(ctx, NativeCompaction{Model: model, View: view, Budget: s.budget()})
 }
 
 // compactionView is the state a compaction would install.
@@ -168,9 +179,6 @@ type compactionView struct {
 	spans []turnSpan
 	// results are the tool results the compaction changed, by handle.
 	results map[string]ToolResult
-	// clearSystemPrompt reports that the window replaces the frozen
-	// run prompt too.
-	clearSystemPrompt bool
 }
 
 // buildCompactionView computes the view a compaction installs.
@@ -207,9 +215,6 @@ func (s *Session) commitCompactionView(run *runState, view compactionView) bool 
 	s.spans = view.spans
 	for handle, result := range view.results {
 		s.results[handle] = result
-	}
-	if view.clearSystemPrompt && s.run != nil {
-		s.run.systemMessage = nil
 	}
 	s.est.rebase(view.history)
 	return true
@@ -405,9 +410,15 @@ func (s *Session) resultMessageIndexLocked(handle string) int {
 
 // windowViewLocked computes a provider window's view.
 //
-// The window is the model's own compacted state, so the view becomes
-// it, and the marker message tells the model that its history was
-// compacted.
+// The window is the model's own compacted state, so the view becomes its
+// items in the provider's order, and the marker message tells the model
+// that its history was compacted.
+//
+// The run's own instructions stay. A window replaces the conversation, and
+// the instructions are not part of it: a provider that compacts a
+// conversation asks for the base instructions again rather than carrying
+// them in the window, so dropping them here would leave the model without
+// the contract it is working under.
 //
 // The caller holds the session's lock.
 func (s *Session) windowViewLocked(w ProviderWindow) (compactionView, error) {
@@ -429,9 +440,8 @@ func (s *Session) windowViewLocked(w ProviderWindow) (compactionView, error) {
 		spans[i].end = 0
 	}
 	return compactionView{
-		history:           []Message{window, marker},
-		spans:             spans,
-		clearSystemPrompt: true,
+		history: []Message{window, marker},
+		spans:   spans,
 	}, nil
 }
 
