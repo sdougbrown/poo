@@ -383,6 +383,7 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	// The editor dispatches a bare escape once its key buffer holds no
 	// more keys, and an arrow the moment its last byte lands, so a
 	// short settle is enough to tell them apart.
+	term.press("\x1b[B")
 	time.Sleep(100 * time.Millisecond)
 
 	server.mu.Lock()

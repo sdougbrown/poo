@@ -90,6 +90,10 @@ func newEditor(m *machine) *editorInput {
 		if sh.Keymap.Main() == "vi-insert" && !sh.Cursor().AtBeginningOfLine() {
 			sh.Cursor().Dec()
 		}
+		// A draft with a line feed in it ends at an append position the
+		// command keymap's char targets cannot act on; the builtin's
+		// own check lands the cursor on the last real character.
+		sh.Cursor().CheckCommand()
 		sh.Keymap.SetLocal("")
 		sh.Keymap.SetMain("vi-command")
 	}
@@ -136,14 +140,6 @@ func newEditor(m *machine) *editorInput {
 		sh.Config.Bind(keymapName, inputrc.Unescape(`\C-j`), "poo-newline", false)
 	}
 
-	// The editor's frames render through the layout's own writer, so a
-	// frame and the transcript never split a row, and the layout is
-	// resized for the draft before every frame renders.
-	if l := m.r.layout; l != nil {
-		readline.SetRenderOutput(l.raw())
-		sh.SetRefreshHook(i.refresh)
-	}
-
 	// The editor reads the process's stdin; raw mode is on from
 	// construction, so keys typed before the first read wait in the
 	// terminal as typed instead of cooked. The state captured here is
@@ -158,6 +154,15 @@ func newEditor(m *machine) *editorInput {
 			// the plain reader: the conversation works without the
 			// editor's key handling.
 			return nil
+		}
+		// The editor's frames render through the layout's own writer, so
+		// a frame and the transcript never split a row, and the layout
+		// is resized for the draft before every frame renders. Set only
+		// once the editor is certain to run: the render output is
+		// process-wide, and close is the only thing that clears it.
+		if l := m.r.layout; l != nil {
+			readline.SetRenderOutput(l.raw())
+			sh.SetRefreshHook(i.refresh)
 		}
 		// The streamed rows and the editor's prompt wrap at the same
 		// width, so the renderer reads it from the same place, live.
@@ -240,6 +245,7 @@ func (i *editorInput) prompt(p string) {
 	i.mu.Lock()
 	i.promptText = p
 	draft := append([]rune(nil), i.line...)
+	pos := i.pos
 	i.mu.Unlock()
 	if l := i.m.r.layout; l != nil {
 		l.ensure(i.rowsFor(p, draft))
@@ -247,7 +253,6 @@ func (i *editorInput) prompt(p string) {
 		// editor (a resize, a footer that grew): anchor the cursor on
 		// the row the draft's own cursor reads on, and let the editor
 		// repaint from there.
-		pos := i.pos
 		if pos > len(draft) {
 			pos = len(draft)
 		}
