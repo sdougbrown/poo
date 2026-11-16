@@ -1,14 +1,13 @@
 package openai
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
-	"strings"
-	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
 // streamChunk is the wire shape of one SSE data payload.
@@ -62,13 +61,14 @@ type streamChunk struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
-	Error *errorBody `json:"error"`
+	Error *support.ErrorBody `json:"error"`
 }
 
 // streamReader reads an SSE response.
 type streamReader struct {
-	body    io.ReadCloser
-	scanner *bufio.Scanner
+	// closer releases the response and the request's bound.
+	closer support.Closer
+	frames *support.Frames
 	// filters are the text filters the quirks added, in order. The
 	// parser is the last of them, so it reads the text the others
 	// passed on.
@@ -80,27 +80,14 @@ type streamReader struct {
 	// A stream that the run's context ended reports the parent's error;
 	// a stream that the transport's timeout ended is a network failure.
 	parent context.Context
-	// cancel releases the request's context, when the transport made one.
-	cancel context.CancelFunc
 	// pending holds events the reader has decoded but not yet returned.
 	pending []poo.StreamItem
-	// data holds the `data:` lines of the event being read. An event's
-	// payload may span several lines, which the SSE grammar joins with a
-	// newline.
-	data []string
 	// done reports that the stream is finished.
 	done bool
 	// err holds the failure that ended the stream.
 	err error
-	// closed reports that the body is closed.
-	closed bool
-	// started is when the request was sent, for the time to the first
-	// token.
-	started time.Time
 	// ttft is the time to the first streamed token.
-	ttft time.Duration
-	// ttftSet reports that the first token has arrived.
-	ttftSet bool
+	ttft support.TTFT
 	// usageSent reports that the usage report has been produced.
 	usageSent bool
 	// usage holds the usage report, so a stream that fails before its
@@ -116,18 +103,10 @@ type streamReader struct {
 	deferred []poo.StreamItem
 }
 
-// newSSEScanner returns a scanner for SSE lines. A single event line can
-// be large, so the line limit is 16 MiB.
-func newSSEScanner(r io.Reader) *bufio.Scanner {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	return sc
-}
-
 // init makes the scanner when the reader was built without one.
 func (r *streamReader) init() {
-	if r.scanner == nil {
-		r.scanner = newSSEScanner(r.body)
+	if r.frames == nil {
+		r.frames = support.NewFrames(support.SSEScanner(r.closer.Body))
 	}
 }
 
@@ -148,69 +127,24 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 	}
 
 	for {
-		if !r.scanner.Scan() {
-			r.done = true
-			if err := r.scanner.Err(); err != nil {
-				return r.fail(r.contextError(err))
+		payload, err := r.frames.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				r.done = true
+				// The stream ended. Whatever the parser still holds is
+				// flushed, so a text-mode tool call that arrived without a
+				// trailing newline is not lost.
+				return r.close()
 			}
-			// The stream ended without a [DONE] marker. Whatever the
-			// parser still holds is flushed, so a text-mode tool call
-			// that arrived without a trailing newline is not lost.
-			return r.close()
+			return r.fail(support.ContextError(r.parent, r.ctx, r.ttft.Arrived(), err))
 		}
-
-		line := r.scanner.Text()
-		if line == "" {
-			// A blank line ends the event.
-			if err := r.dispatch(); err != nil {
-				return r.fail(err)
-			}
-			if ev, ok := r.take(); ok {
-				return ev, nil
-			}
-			continue
+		if err := r.dispatch(payload); err != nil {
+			return r.fail(err)
 		}
-		if !strings.HasPrefix(line, "data:") {
-			// Comments and other SSE fields carry no payload.
-			continue
+		if ev, ok := support.Take(&r.pending); ok {
+			return ev, nil
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" {
-			continue
-		}
-		if payload == "[DONE]" {
-			r.done = true
-			return r.close()
-		}
-
-		// A server that separates its events with a single newline
-		// never sends the blank line that ends an event, so the event
-		// is dispatched as soon as the next one starts. An event whose
-		// payload is not valid JSON yet is kept, because it may still
-		// be a payload spread over several data lines.
-		complete := len(r.data) > 0 && json.Valid([]byte(strings.Join(r.data, "\n")))
-		if complete {
-			if err := r.dispatch(); err != nil {
-				return r.fail(err)
-			}
-			r.data = append(r.data, payload)
-			if ev, ok := r.take(); ok {
-				return ev, nil
-			}
-			continue
-		}
-		r.data = append(r.data, payload)
 	}
-}
-
-// take removes the next queued event and reports whether there was one.
-func (r *streamReader) take() (poo.StreamItem, bool) {
-	if len(r.pending) == 0 {
-		return poo.StreamItem{}, false
-	}
-	ev := r.pending[0]
-	r.pending = r.pending[1:]
-	return ev, true
 }
 
 // dispatch turns the event the reader has collected into events.
@@ -219,13 +153,7 @@ func (r *streamReader) take() (poo.StreamItem, bool) {
 // endpoint sent them. An event whose payload does not parse is skipped,
 // because a chunk the transport cannot read is not worth failing the run
 // over.
-func (r *streamReader) dispatch() error {
-	if len(r.data) == 0 {
-		return nil
-	}
-	payload := strings.Join(r.data, "\n")
-	r.data = nil
-
+func (r *streamReader) dispatch(payload []byte) error {
 	var chunk streamChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return nil
@@ -253,10 +181,6 @@ func (r *streamReader) dispatch() error {
 // trailing newline is not lost, and the usage report is produced, so every
 // request has one.
 func (r *streamReader) close() (poo.StreamItem, error) {
-	if err := r.dispatch(); err != nil {
-		// The event ended the stream. The usage is still reported.
-		return r.fail(err)
-	}
 	// The calls the model wrote as text wait for a native call that
 	// would win over them. The endpoint sent one, so the calls the
 	// model wrote are not the ones it made.
@@ -269,7 +193,7 @@ func (r *streamReader) close() (poo.StreamItem, error) {
 	r.deferred = nil
 	r.pending = append(r.pending, flushed...)
 	r.pending = r.appendUsage(r.pending)
-	if ev, ok := r.take(); ok {
+	if ev, ok := support.Take(&r.pending); ok {
 		return ev, nil
 	}
 	if r.err != nil {
@@ -295,19 +219,14 @@ func withoutToolCalls(events []poo.StreamItem) []poo.StreamItem {
 
 // fail ends the stream with a failure.
 //
-// A complete event still waiting for its dispatch is queued first, so
-// it is not lost with the connection. An in-band error it carries is the
-// more specific failure and replaces the read error. The usage report
-// follows, so a consumer sees the request's accounting even when the
-// stream broke. The failure itself is returned by the next call.
+// The usage report follows the failure, so a consumer sees the request's
+// accounting even when the stream broke. The failure itself is returned by the
+// next call.
 func (r *streamReader) fail(err error) (poo.StreamItem, error) {
-	if derr := r.dispatch(); derr != nil {
-		err = derr
-	}
 	r.done = true
 	r.err = err
 	r.pending = r.appendUsage(r.pending)
-	if ev, ok := r.take(); ok {
+	if ev, ok := support.Take(&r.pending); ok {
 		return ev, nil
 	}
 	return poo.StreamItem{}, err
@@ -321,43 +240,18 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 	return r.usage
 }
 
-// contextError turns a read failure into the context's error when the
-// context is what ended the request.
-//
-// A stream that already carried a delta cannot be retried: the model has
-// seen part of the answer. The failure says so, so the settle reason
-// names it, and the kind the failure had before the reclassification
-// stays in the error's code, where the plan keeps it.
-func (r *streamReader) contextError(err error) error {
-	if r.parent != nil && r.parent.Err() != nil {
-		return r.parent.Err()
-	}
-	if r.ctx != nil && r.ctx.Err() != nil {
-		kind := poo.ProviderKindNetwork
-		if r.ttftSet {
-			return &poo.ProviderError{
-				Kind:    poo.ProviderKindInterruptedStream,
-				Code:    string(kind),
-				Message: r.ctx.Err().Error(),
-			}
-		}
-		return &poo.ProviderError{Kind: kind, Message: r.ctx.Err().Error()}
-	}
-	return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
-}
-
 // providerError turns an error chunk into a provider error.
 //
 // The chunk carries no status, so its class comes from the code and the
 // message, and the server's own failure is the default.
-func (r *streamReader) providerError(body *errorBody) error {
-	code := codeString(body.Code)
+func (r *streamReader) providerError(body *support.ErrorBody) error {
+	code := support.CodeString(body.Code)
 	message := body.Message
 	if message == "" {
 		message = "the endpoint returned an error"
 	}
 	return &poo.ProviderError{
-		Kind:    failureKind(0, code, body.Type, message, poo.ProviderKindServer),
+		Kind:    support.FailureKind(0, code, body.Type, message, poo.ProviderKindServer),
 		Message: message,
 		Code:    code,
 	}
@@ -378,13 +272,13 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 		}
 
 		if thinking := delta.ReasoningContent; thinking != "" {
-			r.markFirstToken()
+			r.ttft.Mark()
 			out = append(out, poo.StreamItem{
 				Kind:  "delta",
 				Delta: &poo.Delta{Kind: "thinking", Text: thinking},
 			})
 		} else if thinking := delta.Reasoning; thinking != "" {
-			r.markFirstToken()
+			r.ttft.Mark()
 			out = append(out, poo.StreamItem{
 				Kind:  "delta",
 				Delta: &poo.Delta{Kind: "thinking", Text: thinking},
@@ -392,7 +286,7 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 		}
 
 		if delta.Content != "" {
-			r.markFirstToken()
+			r.ttft.Mark()
 			// The filters own the text: they strip the call markup and
 			// the thinking tags, and they emit the prose themselves.
 			// Emitting the raw delta as well would double the prose and
@@ -411,12 +305,12 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 		for _, tc := range delta.ToolCalls {
 			// A tool call is the first token too: a turn that only asks
 			// for a tool call still has a time to its first token.
-			r.markFirstToken()
+			r.ttft.Mark()
 			r.sawToolCall = true
 			// The native call wins over the calls the model wrote as
 			// text, so the parsed ones are dropped.
 			r.deferred = nil
-			complete := isCompleteJSON(tc.Function.Arguments)
+			complete := support.IsCompleteJSON(tc.Function.Arguments)
 			out = append(out, poo.StreamItem{
 				Kind: "tool_call",
 				ToolCall: &poo.ToolCallDelta{
@@ -443,7 +337,7 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 		u := &poo.UsageReport{
 			InputTokens:  chunk.Usage.PromptTokens,
 			OutputTokens: chunk.Usage.CompletionTokens,
-			TTFTMS:       r.ttftMS(),
+			TTFTMS:       r.ttft.MS(),
 		}
 		if d := chunk.Usage.PromptTokensDetails; d != nil {
 			cached := d.CachedTokens
@@ -455,27 +349,6 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 	}
 
 	return out, nil
-}
-
-// markFirstToken records the time the first token arrived.
-//
-// A token is a non-empty text or thinking delta, or a tool call. A chunk
-// that only announces the assistant's role carries no token, so it does
-// not start the clock.
-func (r *streamReader) markFirstToken() {
-	if r.ttftSet {
-		return
-	}
-	r.ttftSet = true
-	r.ttft = time.Since(r.started)
-}
-
-// ttftMS returns the time to the first token in milliseconds.
-func (r *streamReader) ttftMS() float64 {
-	if !r.ttftSet {
-		return 0
-	}
-	return float64(r.ttft.Microseconds()) / 1000
 }
 
 // appendUsage adds the usage report to a list of events.
@@ -497,27 +370,11 @@ func (r *streamReader) ensureUsage() {
 	if r.usage != nil {
 		return
 	}
-	r.usage = &poo.UsageReport{TTFTMS: r.ttftMS()}
+	r.usage = &poo.UsageReport{TTFTMS: r.ttft.MS()}
 	r.usageSent = true
 }
 
 // Close releases the response.
 func (r *streamReader) Close() error {
-	if r.closed {
-		return nil
-	}
-	r.closed = true
-	if r.cancel != nil {
-		r.cancel()
-	}
-	return r.body.Close()
-}
-
-// isCompleteJSON reports whether a string is a complete JSON object.
-func isCompleteJSON(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	return json.Valid([]byte(s))
+	return r.closer.Close()
 }

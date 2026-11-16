@@ -1,7 +1,10 @@
-package openai
+package support
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,13 +20,33 @@ import (
 // class decides two things: whether the request is worth another
 // attempt, and which reason the run settles with.
 
-// failureKind names the failure class a provider failure carries.
+// ErrorBody is the wire shape of an error payload, without the envelope.
+//
+// A stream event carries the error directly rather than in the envelope,
+// so both shapes decode into this one.
+type ErrorBody struct {
+	// Message is the endpoint's own words for the failure.
+	Message string `json:"message"`
+	// Type is the endpoint's own failure type.
+	Type string `json:"type"`
+	// Code is the endpoint's own code, which a server may send as a
+	// string or as a number.
+	Code any `json:"code"`
+}
+
+// ErrorResponse is the payload of a failed request.
+type ErrorResponse struct {
+	// Error is the failure the endpoint reported.
+	Error ErrorBody `json:"error"`
+}
+
+// FailureKind names the failure class a provider failure carries.
 //
 // The status gives the class, and the provider's own code and type
 // refine it. A quota code is a usage limit whatever the status, a
 // billing code is an inactive plan, and a context-length code is a
 // context-length failure. A failure that came without a status — an
-// error chunk in a stream — takes its class from its code, and the
+// error event in a stream — takes its class from its code, and the
 // server's own failure is the default.
 //
 // The table, one row at a time:
@@ -35,7 +58,7 @@ import (
 //	401, 403                        → auth_failed
 //	other 4xx                       → invalid_request
 //	5xx                             → server
-func failureKind(status int, code, errType, message string, fallback poo.ProviderKind) poo.ProviderKind {
+func FailureKind(status int, code, errType, message string, fallback poo.ProviderKind) poo.ProviderKind {
 	switch {
 	case isContextLength(code, message):
 		return poo.ProviderKindContextLength
@@ -66,17 +89,25 @@ func failureKind(status int, code, errType, message string, fallback poo.Provide
 
 // isQuota reports whether a failure means the account is out of quota.
 //
-// The plan's row: a 429 whose code is one of the quota codes is a
-// usage limit, and every other 429 is a rate limit. A failure that
-// names no code is read from its message, because a server that says
-// only "quota exceeded" means the same thing.
+// The plan's row: a 429 whose code is one of the quota codes is a usage
+// limit, and every other 429 is a rate limit. A failure that names no
+// code is read from its message, because a server that says only "quota
+// exceeded" means the same thing. The Codex endpoint words its plan
+// limit as a usage limit or a balance.
 func isQuota(code, message string) bool {
 	if code != "" {
 		lower := strings.ToLower(code)
-		return strings.Contains(lower, "quota") || strings.Contains(lower, "usage_limit")
+		return strings.Contains(lower, "quota") ||
+			strings.Contains(lower, "usage_limit") ||
+			strings.Contains(lower, "usage_not_included")
 	}
 	lower := strings.ToLower(message)
-	return strings.Contains(lower, "quota") || strings.Contains(lower, "usage limit")
+	for _, needle := range []string{"quota", "usage limit", "usage_limit", "available balance", "out of budget"} {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // isBilling reports whether a failure means the account's plan does not
@@ -101,9 +132,9 @@ func isRateLimit(code, message string) bool {
 
 // isContextLength reports whether an error means the request was too long.
 //
-// The message is read as well as the code, because a server that
-// reports an overflow with a plain 400 and no code still means the
-// request was too long.
+// The message is read as well as the code, because a server that reports
+// an overflow with a plain 400 and no code still means the request was
+// too long.
 func isContextLength(code, message string) bool {
 	text := strings.ToLower(code + " " + message)
 	for _, needle := range []string{
@@ -124,12 +155,18 @@ func isContextLength(code, message string) bool {
 	return false
 }
 
-// retryAfter returns how long the endpoint asked the client to wait.
+// RetryAfter returns how long the endpoint asked the client to wait.
 //
-// The header is either a number of seconds or an HTTP date, and the
-// plan reads a Retry-After over thirty seconds as a provider limit
-// rather than a failure to retry.
-func retryAfter(resp *http.Response) time.Duration {
+// The endpoint spells the wait either in milliseconds or in the standard
+// header, which is a number of seconds or an HTTP date. The plan reads a
+// wait over thirty seconds as a provider limit rather than a failure to
+// retry.
+func RetryAfter(resp *http.Response) time.Duration {
+	if raw := strings.TrimSpace(resp.Header.Get("Retry-After-Ms")); raw != "" {
+		if ms, err := strconv.ParseFloat(raw, 64); err == nil && ms > 0 {
+			return time.Duration(ms * float64(time.Millisecond))
+		}
+	}
 	raw := strings.TrimSpace(resp.Header.Get("Retry-After"))
 	if raw == "" {
 		return 0
@@ -176,8 +213,8 @@ func resetAt(header http.Header, body []byte) time.Time {
 
 // resetsAtField reads the resets_at field out of an error body.
 //
-// The field is a unix time in seconds, or a time the endpoint wrote as
-// a string.
+// The field is a unix time in seconds, or a time the endpoint wrote as a
+// string.
 func resetsAtField(body []byte) (time.Time, bool) {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" || trimmed[0] != '{' {
@@ -238,16 +275,16 @@ func parseReset(raw string, now time.Time) (time.Time, bool) {
 	return now.Add(time.Duration(secs * float64(time.Second))), true
 }
 
-// classifyStatus turns a non-200 response into a provider error.
+// ClassifyStatus turns a non-200 response into a provider error.
 //
 // The status gives the class, the payload refines it, and the headers
 // say how long the client was asked to wait and when the limit resets.
-func classifyStatus(resp *http.Response) error {
+func ClassifyStatus(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	er := errorResponse{}
+	er := ErrorResponse{}
 	_ = json.Unmarshal(body, &er)
 
-	code := codeString(er.Error.Code)
+	code := CodeString(er.Error.Code)
 
 	message := er.Error.Message
 	if message == "" {
@@ -258,11 +295,70 @@ func classifyStatus(resp *http.Response) error {
 	}
 
 	return &poo.ProviderError{
-		Kind:       failureKind(resp.StatusCode, code, er.Error.Type, message, poo.ProviderKindServer),
+		Kind:       FailureKind(resp.StatusCode, code, er.Error.Type, message, poo.ProviderKindServer),
 		Message:    message,
 		Status:     resp.StatusCode,
 		Code:       code,
-		RetryAfter: retryAfter(resp),
+		RetryAfter: RetryAfter(resp),
 		ResetsAt:   resetAt(resp.Header, body),
 	}
+}
+
+// ErrorInBody reports whether a response body is a JSON error rather than
+// an SSE stream.
+//
+// A body that names no failure is not one: the endpoint answered with
+// something the transport cannot read, and the caller says so.
+func ErrorInBody(body []byte, status int, header http.Header) (*poo.ProviderError, bool) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, false
+	}
+	var payload struct {
+		Error *ErrorBody `json:"error"`
+	}
+	if err := json.Unmarshal(trimmed, &payload); err != nil || payload.Error == nil {
+		return nil, false
+	}
+	code := CodeString(payload.Error.Code)
+	message := payload.Error.Message
+	if message == "" {
+		message = "the endpoint returned an error"
+	}
+	return &poo.ProviderError{
+		Kind:     FailureKind(status, code, payload.Error.Type, message, poo.ProviderKindInvalidRequest),
+		Message:  message,
+		Code:     code,
+		Status:   status,
+		ResetsAt: resetAt(header, body),
+	}, true
+}
+
+// CodeString renders an error code, which a server may send as a string
+// or as a number.
+func CodeString(v any) string {
+	switch c := v.(type) {
+	case string:
+		return c
+	case float64:
+		return fmt.Sprintf("%v", c)
+	default:
+		return ""
+	}
+}
+
+// ClassifyTransportError turns a request failure into a provider error.
+//
+// The parent is the context the transport's own timeout was applied to,
+// and the request is the one that carries it. A failure the run's
+// context ended is the run's, and one the transport's timeout ended is a
+// network failure.
+func ClassifyTransportError(parent, request context.Context, err error) error {
+	if parent != nil && parent.Err() != nil {
+		return parent.Err()
+	}
+	if request != nil && request.Err() != nil {
+		return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: request.Err().Error()}
+	}
+	return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 }

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+
+	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
 // The quirk framework.
@@ -229,7 +231,7 @@ func init() {
 					parts[j] = chatContentPart{
 						Type: "audio_url",
 						AudioURL: &chatAudioURL{
-							URL: "data:" + audioMediaType(parts[j].InputAudio.Format) + ";base64," + parts[j].InputAudio.Data,
+							URL: "data:" + support.AudioMediaType(parts[j].InputAudio.Format) + ";base64," + parts[j].InputAudio.Data,
 						},
 					}
 					changed = true
@@ -283,7 +285,7 @@ func (t *Transport) textFilters(settings requestSettings) []textFilter {
 		}
 	}
 	filters := repair.filters
-	mode := t.toolsMode(settings.info)
+	mode := support.ToolsMode(settings.info, t.cfg.ToolsMode)
 	if repair.textCalls && mode != "text" && mode != "auto" {
 		// The model writes its tool calls as text, whatever its mode
 		// says.
@@ -300,7 +302,7 @@ func (t *Transport) textFilters(settings requestSettings) []textFilter {
 // A request that carries them may also carry native tool calls, and a
 // native call wins over one the model wrote as text.
 func (t *Transport) sendsTools(settings requestSettings) bool {
-	mode := t.toolsMode(settings.info)
+	mode := support.ToolsMode(settings.info, t.cfg.ToolsMode)
 	return mode == "native" || mode == "auto"
 }
 

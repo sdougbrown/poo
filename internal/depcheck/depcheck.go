@@ -104,6 +104,7 @@ func (c Checker) rules() []rule {
 		{path: m + "/wire", allowed: []string{m, m + "/perm", m + "/session", m + "/wire/protocol"}},
 		{path: m + "/wire/conformance", allowed: []string{m + "/wire/protocol"}},
 		{path: m + "/provider/catalog", allowed: []string{m}},
+		{path: m + "/provider/internal/support", allowed: []string{m}},
 		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
@@ -141,6 +142,10 @@ func (c Checker) rules() []rule {
 				m + "/skill",
 				m + "/protect",
 				m + "/provider/catalog",
+				// The wire-agnostic half of an HTTP transport: the
+				// failure table, the retry policy and the SSE scanner a
+				// transport composes.
+				m + "/provider/internal/support",
 				m + "/provider/openai",
 				m + "/session",
 				m + "/wire",

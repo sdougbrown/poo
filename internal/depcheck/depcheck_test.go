@@ -150,46 +150,11 @@ func TestFixtures(t *testing.T) {
 	}
 }
 
-// TestSkippedPackages checks that a checked package whose directory is
-// missing, or holds only test files, is skipped rather than reported.
-func TestSkippedPackages(t *testing.T) {
-	const m = "example.com/poo/depcheck/onlytests"
-	res := checkModule(t, filepath.Join("testdata", "onlytests"), m)
-	want := []string{
-		m + "/cli (does not exist yet)",
-		m + "/decide (no non-test Go files)",
-		m + "/exec (does not exist yet)",
-		m + "/exec/bwrap (does not exist yet)",
-		m + "/feed (does not exist yet)",
-		m + "/internal/caps (does not exist yet)",
-		m + "/perm (does not exist yet)",
-		m + "/perm/decide (does not exist yet)",
-		m + "/prompt (does not exist yet)",
-		m + "/prompt/agentsmd (does not exist yet)",
-		m + "/protect (does not exist yet)",
-		m + "/provider/catalog (does not exist yet)",
-		m + "/server (does not exist yet)",
-		m + "/session (does not exist yet)",
-		m + "/skill (does not exist yet)",
-		m + "/tool/cliregistry (does not exist yet)",
-		m + "/tool/fetch (does not exist yet)",
-		m + "/wire (does not exist yet)",
-		m + "/wire/conformance (does not exist yet)",
-		m + "/wire/protocol (does not exist yet)",
-	}
-	if !slices.Equal(res.Skipped, want) {
-		t.Errorf("skipped %q, want %q", res.Skipped, want)
-	}
-}
-
-// TestABuildIgnoredFileIsSkipped covers the dot/underscore exemption: a
-// package whose only Go file is build-ignored by an underscore prefix is
-// skipped, not reported and not treated as an error.
-func TestABuildIgnoredFileIsSkipped(t *testing.T) {
-	const m = "example.com/poo/depcheck/ignored"
-	res := checkModule(t, filepath.Join("testdata", "ignored"), m)
-	want := []string{
-		m + " (no non-test Go files)",
+// wantSkipped is the skipped-package list every fixture shares: the rule
+// table's packages, none of which the fixture's testdata holds. A fixture adds
+// the entry its own directory produces.
+func wantSkipped(m string, extra ...string) []string {
+	return append([]string{
 		m + "/cli (does not exist yet)",
 		m + "/decide (does not exist yet)",
 		m + "/exec (does not exist yet)",
@@ -202,6 +167,7 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 		m + "/prompt/agentsmd (does not exist yet)",
 		m + "/protect (does not exist yet)",
 		m + "/provider/catalog (does not exist yet)",
+		m + "/provider/internal/support (does not exist yet)",
 		m + "/server (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/skill (does not exist yet)",
@@ -210,7 +176,31 @@ func TestABuildIgnoredFileIsSkipped(t *testing.T) {
 		m + "/wire (does not exist yet)",
 		m + "/wire/conformance (does not exist yet)",
 		m + "/wire/protocol (does not exist yet)",
+	}, extra...)
+}
+
+// TestSkippedPackages checks that a checked package whose directory is
+// missing, or holds only test files, is skipped rather than reported.
+func TestSkippedPackages(t *testing.T) {
+	const m = "example.com/poo/depcheck/onlytests"
+	res := checkModule(t, filepath.Join("testdata", "onlytests"), m)
+	// The only-tests package holds test files and nothing else.
+	want := wantSkipped(m)
+	want[1] = m + "/decide (no non-test Go files)"
+	if !slices.Equal(res.Skipped, want) {
+		t.Errorf("skipped %q, want %q", res.Skipped, want)
 	}
+}
+
+// TestABuildIgnoredFileIsSkipped covers the dot/underscore exemption: a
+// package whose only Go file is build-ignored by an underscore prefix is
+// skipped, not reported and not treated as an error.
+func TestABuildIgnoredFileIsSkipped(t *testing.T) {
+	const m = "example.com/poo/depcheck/ignored"
+	res := checkModule(t, filepath.Join("testdata", "ignored"), m)
+	// The root package holds only a build-ignored file.
+	want := wantSkipped(m)
+	want = append([]string{m + " (no non-test Go files)"}, want...)
 	if !slices.Equal(res.Skipped, want) {
 		t.Errorf("skipped %q, want %q", res.Skipped, want)
 	}
@@ -228,28 +218,8 @@ func TestAFileWithTheIgnoreBuildTagIsNotSeen(t *testing.T) {
 	if len(res.Findings) != 0 {
 		t.Errorf("findings:\n%s\nwant none", strings.Join(res.Findings, "\n"))
 	}
-	want := []string{
-		m + "/cli (does not exist yet)",
-		m + "/decide (does not exist yet)",
-		m + "/exec (does not exist yet)",
-		m + "/exec/bwrap (does not exist yet)",
-		m + "/feed (does not exist yet)",
-		m + "/internal/caps (does not exist yet)",
-		m + "/perm (does not exist yet)",
-		m + "/perm/decide (does not exist yet)",
-		m + "/prompt (does not exist yet)",
-		m + "/prompt/agentsmd (does not exist yet)",
-		m + "/protect (does not exist yet)",
-		m + "/provider/catalog (does not exist yet)",
-		m + "/server (does not exist yet)",
-		m + "/session (does not exist yet)",
-		m + "/skill (does not exist yet)",
-		m + "/tool/cliregistry (does not exist yet)",
-		m + "/tool/fetch (does not exist yet)",
-		m + "/wire (does not exist yet)",
-		m + "/wire/conformance (does not exist yet)",
-		m + "/wire/protocol (does not exist yet)",
-	}
+	// The ignore-only fixture carries a normal-named ignored file.
+	want := wantSkipped(m)
 	if !slices.Equal(res.Skipped, want) {
 		t.Errorf("skipped %q, want %q", res.Skipped, want)
 	}

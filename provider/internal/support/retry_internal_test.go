@@ -1,4 +1,4 @@
-package openai
+package support
 
 import (
 	"errors"
@@ -17,9 +17,9 @@ import (
 
 // TestTheBackoffIsOneSecondThenTwo covers the backoff.
 func TestTheBackoffIsOneSecondThenTwo(t *testing.T) {
-	policy := defaultRetryPolicy()
-	if policy.attempts != 3 {
-		t.Errorf("the budget is %d attempts, want 3", policy.attempts)
+	policy := DefaultPolicy()
+	if policy.Attempts != 3 {
+		t.Errorf("the budget is %d attempts, want 3", policy.Attempts)
 	}
 	server := &poo.ProviderError{Kind: poo.ProviderKindServer, Message: "boom"}
 	for _, c := range []struct {
@@ -29,7 +29,7 @@ func TestTheBackoffIsOneSecondThenTwo(t *testing.T) {
 		{1, time.Second},
 		{2, 2 * time.Second},
 	} {
-		wait, ok := policy.delay(c.attempt, server)
+		wait, ok := policy.Delay(c.attempt, server)
 		if !ok {
 			t.Errorf("attempt %d is not retried, want a wait", c.attempt)
 			continue
@@ -43,9 +43,9 @@ func TestTheBackoffIsOneSecondThenTwo(t *testing.T) {
 // TestTheBudgetRunsOut covers the budget: the third attempt is the last
 // one, so a failure after it has no wait.
 func TestTheBudgetRunsOut(t *testing.T) {
-	policy := defaultRetryPolicy()
+	policy := DefaultPolicy()
 	server := &poo.ProviderError{Kind: poo.ProviderKindServer, Message: "boom"}
-	if _, ok := policy.delay(3, server); ok {
+	if _, ok := policy.Delay(3, server); ok {
 		t.Error("the third attempt is retried, want the budget to be spent")
 	}
 }
@@ -54,7 +54,7 @@ func TestTheBudgetRunsOut(t *testing.T) {
 // limit, a server failure and a network failure are worth another
 // attempt, and a rejection is not.
 func TestOnlyTheWorthwhileFailuresAreRetried(t *testing.T) {
-	policy := defaultRetryPolicy()
+	policy := DefaultPolicy()
 	cases := []struct {
 		name string
 		err  error
@@ -72,7 +72,7 @@ func TestOnlyTheWorthwhileFailuresAreRetried(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, ok := policy.delay(1, c.err)
+			_, ok := policy.Delay(1, c.err)
 			if ok != c.want {
 				t.Errorf("the failure is retried=%t, want %t", ok, c.want)
 			}
@@ -84,9 +84,9 @@ func TestOnlyTheWorthwhileFailuresAreRetried(t *testing.T) {
 // asks for a long wait is not retried at all, and one that asks for a
 // short one waits no longer than the cap.
 func TestTheWaitIsCappedAtThirtySeconds(t *testing.T) {
-	policy := defaultRetryPolicy()
+	policy := DefaultPolicy()
 	short := &poo.ProviderError{Kind: poo.ProviderKindRateLimited, RetryAfter: 5 * time.Second}
-	wait, ok := policy.delay(1, short)
+	wait, ok := policy.Delay(1, short)
 	if !ok {
 		t.Fatal("the rate limit is not retried, want a wait")
 	}
@@ -94,7 +94,7 @@ func TestTheWaitIsCappedAtThirtySeconds(t *testing.T) {
 		t.Errorf("the wait is %v, want the endpoint's five seconds", wait)
 	}
 	long := &poo.ProviderError{Kind: poo.ProviderKindRateLimited, RetryAfter: 120 * time.Second}
-	if _, ok := policy.delay(1, long); ok {
+	if _, ok := policy.Delay(1, long); ok {
 		t.Error("the rate limit is retried, want the wait to be over the budget")
 	}
 }
