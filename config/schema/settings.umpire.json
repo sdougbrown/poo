@@ -92,7 +92,7 @@
       "reason": "the decide timeout needs a decider model: roles.decider names one"
     },
     {
-      "type": "fairWhen",
+      "type": "requires",
       "field": "permission.askers",
       "when": {
         "op": "or",

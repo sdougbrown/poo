@@ -32,6 +32,9 @@ import (
 //   - a permission rule matches exactly one of a tool and a class, and
 //     a command prefix names the tool it matches. A rule is an object in
 //     a list, not a leaf, so the rules are checked by hand.
+//   - the asker names are the ones the settings know. The spec's
+//     `contains` tests a chain for one name, never every entry against a
+//     set of names, so the rule is checked by hand.
 //   - the roles are the ones the settings know. The roles are a map,
 //     not a leaf, so the rule is checked by hand.
 //   - the protected paths compile, and the files the settings name are

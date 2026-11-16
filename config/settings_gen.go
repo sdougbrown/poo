@@ -231,7 +231,7 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	LimitsMaxTurnsSatisfied := f.LimitsMaxTurns != nil
 	ModelsFileEnabled := true
 	ModelsFileSatisfied := func() bool { v := f.ModelsFile; return v != nil && *v != "" }()
-	PermissionAskersEnabled := true
+	PermissionAskersEnabled := (c.HasDecider || !(contains(f.PermissionAskers, "decide")))
 	PermissionAskersSatisfied := len(f.PermissionAskers) > 0
 	PermissionChainTimeoutSEnabled := true
 	PermissionChainTimeoutSSatisfied := f.PermissionChainTimeoutS != nil
@@ -811,15 +811,7 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  PermissionAskersEnabled && false,
 			Enabled:   PermissionAskersEnabled,
 			Satisfied: PermissionAskersSatisfied,
-			Fair: func() bool {
-				if !(c.HasDecider || !(contains(f.PermissionAskers, "decide"))) {
-					return false
-				}
-				if !(c.HasWireClient || !(contains(f.PermissionAskers, "wire"))) {
-					return false
-				}
-				return true
-			}(),
+			Fair:      (c.HasWireClient || !(contains(f.PermissionAskers, "wire"))),
 			Reason: func() *string {
 				var reasons []string
 				if !(c.HasDecider || !(contains(f.PermissionAskers, "decide"))) && "the decide asker needs a decider model: roles.decider names one" != "" {
@@ -2277,7 +2269,7 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "LimitsMaxDurationS", RuleType: "check", Expr: "f.LimitsMaxDurationS != nil && *f.LimitsMaxDurationS >= 0", Reason: "limits.max_duration_s must not be negative"},
 	{Field: "LimitsMaxTokensPerRun", RuleType: "check", Expr: "f.LimitsMaxTokensPerRun != nil && *f.LimitsMaxTokensPerRun >= 0", Reason: "limits.max_tokens_per_run must not be negative"},
 	{Field: "LimitsMaxTurns", RuleType: "check", Expr: "f.LimitsMaxTurns != nil && *f.LimitsMaxTurns >= 0", Reason: "limits.max_turns must not be negative"},
-	{Field: "PermissionAskers", RuleType: "fairWhen", Expr: "(c.HasDecider || !(contains(f.PermissionAskers, \"decide\")))", Reason: "the decide asker needs a decider model: roles.decider names one"},
+	{Field: "", RuleType: "enabledWhen", Expr: "(c.HasDecider || !(contains(f.PermissionAskers, \"decide\")))", Reason: "the decide asker needs a decider model: roles.decider names one"},
 	{Field: "PermissionAskers", RuleType: "fairWhen", Expr: "(c.HasWireClient || !(contains(f.PermissionAskers, \"wire\")))", Reason: "the wire asker needs a wire client, and this runtime has none: the chain runs without it"},
 	{Field: "PermissionChainTimeoutS", RuleType: "check", Expr: "f.PermissionChainTimeoutS != nil && *f.PermissionChainTimeoutS >= 1", Reason: "permission.chain_timeout_s must be at least a second"},
 	{Field: "", RuleType: "enabledWhen", Expr: "c.HasDecider", Reason: "the decide threshold needs a decider model: roles.decider names one"},
@@ -2444,7 +2436,7 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
-		explanations = append(explanations, "* fairWhen: the decide asker needs a decider model: roles.decider names one")
+		explanations = append(explanations, "* enabledWhen: the decide asker needs a decider model: roles.decider names one")
 		explanations = append(explanations, "* fairWhen: the wire asker needs a wire client, and this runtime has none: the chain runs without it")
 	case "PermissionChainTimeoutS", "permission.chain_timeout_s":
 		found = true

@@ -1540,7 +1540,7 @@ func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]per
 		}
 	}
 	if droppedWire {
-		r.warn(r.droppedWireWarning(names))
+		r.warn(r.droppedWireWarning())
 	}
 	return askers, nil
 }
@@ -1549,20 +1549,18 @@ func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]per
 // out of the chain.
 //
 // The settings schema owns the wording: its fairWhen rule names the
-// capability the chain needs, and the check reports that rule against
-// the chain this build resolved, whether the settings named it or the
-// binary did. The caller asks only when the runtime has no wire client,
-// which is the condition the rule reads.
-func (r *Runtime) droppedWireWarning(chain []string) string {
+// capability the asker needs, and the check reports that rule for the asker
+// this build dropped. The chain judged here is that one name, so the reason
+// is the wire rule's alone: a chain the binary names itself may hold other
+// askers the same build leaves out for other reasons.
+func (r *Runtime) droppedWireWarning() string {
 	fields := fieldsOf(r.Settings)
-	fields.PermissionAskers = chain
+	fields.PermissionAskers = []string{"wire"}
 	status := Check(fields, conditionsOf(r.Settings), SettingsFields{}).PermissionAskers
-	for _, reason := range status.Reasons {
-		if reason != "" {
-			return reason
-		}
+	if len(status.Reasons) == 0 {
+		return ""
 	}
-	return ""
+	return status.Reasons[0]
 }
 
 // newDeciderAsker builds the asker that asks a decision model.

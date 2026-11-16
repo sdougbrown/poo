@@ -382,15 +382,16 @@ func TestThePromptFieldsAreMutuallyExclusive(t *testing.T) {
 
 // TestTheDecideAskerNeedsADecider covers the rule the schema carries:
 // the asker chain names the decide asker, and a decider model has to be
-// there to answer it.
+// there to answer it. It is the field set but unavailable, the way the
+// decide thresholds without a decider are.
 func TestTheDecideAskerNeedsADecider(t *testing.T) {
 	_, err := config.Parse([]byte("version: 1\npermission:\n  askers: [decide]\n"), config.FormatYAML)
 	if err == nil {
 		t.Fatal("the settings decoded, want a failure")
 	}
 	code, ok := config.CodeOf(err)
-	if !ok || code != config.CodeInvalid {
-		t.Fatalf("the failure is %v, want an invalid value", err)
+	if !ok || code != config.CodeUnavailable {
+		t.Fatalf("the failure is %v, want an unavailable field", err)
 	}
 	field, ok := config.FieldOf(err)
 	if !ok || field != "permission.askers" {
