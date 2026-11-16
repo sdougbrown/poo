@@ -848,3 +848,50 @@ func TestTheCatalogAnnouncesTheReasoningLevels(t *testing.T) {
 		t.Errorf("the catalog announces the mode %q for a toggle model, want toggle", got)
 	}
 }
+
+// TestTheSettingsDocNamesTheModelsFileEndpoints covers what the document describes: the
+// endpoints the catalog serves. A models file declares endpoints of its own, and they are
+// part of the effective configuration — a client that reads the document to learn where
+// this session can send a request must see them, redacted the way the settings' are.
+func TestTheSettingsDocNamesTheModelsFileEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	models := filepath.Join(dir, "models.yaml")
+	if err := os.WriteFile(models, []byte(`endpoints:
+  away:
+    endpoint: http://user:secret@away:4000/v1
+    api_key_env: AWAY_KEY
+    models:
+      spark:
+        context_limit: 4096
+`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	document := `{
+  "version": 1,
+  "profile": "` + search.Name + `",
+  "session": {"mode": "logged"},
+  "models_file": "` + models + `",
+  "endpoints": {"grace": {"endpoint": "http://grace:4000/v1"}},
+  "models": {"chat-model": {"endpoint": "grace", "model_id": "chat-model", "api": "chat_completions", "tools_mode": "native", "ops": ["chat"], "inputs": ["text"], "context_limit": 32768}},
+  "roles": {"chat": "chat-model"}
+}`
+	settings, err := config.Parse([]byte(document), config.FormatJSON)
+	if err != nil {
+		t.Fatalf("parsing the settings: %v", err)
+	}
+	srv := newServer(t, settings)
+	doc, err := srv.Settings(context.Background())
+	if err != nil {
+		t.Fatalf("the settings document failed: %v", err)
+	}
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("encoding the settings: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"away"`) {
+		t.Errorf("the settings document does not name the models file's endpoint:\n%s", encoded)
+	}
+	if strings.Contains(string(encoded), "secret") || strings.Contains(string(encoded), "user:") {
+		t.Errorf("the settings document carries the endpoint's credentials:\n%s", encoded)
+	}
+}

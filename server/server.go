@@ -655,6 +655,19 @@ func (f *Server) Settings(ctx context.Context) (map[string]any, error) {
 		endpoint.APIKey = ""
 		redacted.Endpoints[name] = endpoint
 	}
+	// The models file declares endpoints too, and they are what the catalog serves: the
+	// document names them, redacted the same way. A name the settings declare is the
+	// settings' own, which is the declaration that wins.
+	for name, endpoint := range settings.CatalogOptions().File.Endpoints {
+		if _, ok := redacted.Endpoints[name]; ok {
+			continue
+		}
+		redacted.Endpoints[name] = config.Endpoint{
+			Endpoint:  session.LoggedEndpoint(endpoint.Endpoint),
+			APIKeyEnv: endpoint.APIKeyEnv,
+			SkipProbe: endpoint.SkipProbe,
+		}
+	}
 	encoded, err := json.Marshal(&redacted)
 	if err != nil {
 		return nil, err

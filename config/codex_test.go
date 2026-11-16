@@ -407,8 +407,17 @@ roles:
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
-	if _, ok := settings.Models["openai-codex/gpt-6.1-sol"]; ok {
-		t.Fatal("the built-in Codex models were offered without pi's auth file")
+	// The built-in provider is the models file's layer, not the settings' own maps, so
+	// the check is on what the layer offers without pi's auth file: the file's own
+	// provider is there, and the built-in one is not.
+	layer := settings.CatalogOptions().File
+	if _, ok := layer.Endpoints[piauth.ProviderCodex]; ok {
+		t.Fatal("the built-in Codex endpoint was offered without pi's auth file")
+	}
+	for name := range layer.Models {
+		if strings.HasPrefix(name, piauth.ProviderCodex+"/") {
+			t.Fatalf("the built-in Codex model %s was offered without pi's auth file", name)
+		}
 	}
 }
 
