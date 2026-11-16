@@ -330,12 +330,12 @@ func (t *Transport) open(ctx context.Context, body []byte, session string) (*str
 		},
 		Build: func(stream support.Stream) *streamReader {
 			return &streamReader{
-				body:    stream.Body,
-				scanner: support.SSEScanner(stream.Reader),
-				ctx:     stream.Context,
-				parent:  stream.Parent,
-				cancel:  stream.Cancel,
-				ttft:    stream.TTFT,
+				body:   stream.Body,
+				frames: support.NewFrames(support.SSEScanner(stream.Reader)),
+				ctx:    stream.Context,
+				parent: stream.Parent,
+				cancel: stream.Cancel,
+				ttft:   stream.TTFT,
 			}
 		},
 	})

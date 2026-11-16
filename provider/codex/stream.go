@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -106,8 +105,8 @@ type itemSlot struct {
 
 // streamReader reads a Codex SSE response.
 type streamReader struct {
-	body    io.ReadCloser
-	scanner *bufio.Scanner
+	body   io.ReadCloser
+	frames *support.Frames
 	// ctx is the request's context. A stream that ends because the
 	// context ended reports the context's error, not a network failure.
 	ctx context.Context
@@ -119,10 +118,6 @@ type streamReader struct {
 	cancel context.CancelFunc
 	// pending holds the events the reader has decoded but not returned.
 	pending []poo.StreamItem
-	// data holds the `data:` lines of the event being read. An event's
-	// payload may span several lines, which the SSE grammar joins with a
-	// newline.
-	data []string
 	// slots maps an output index and a kind to what it has produced so
 	// far.
 	slots map[slotKey]*itemSlot
@@ -150,8 +145,8 @@ type streamReader struct {
 
 // init makes the scanner when the reader was built without one.
 func (r *streamReader) init() {
-	if r.scanner == nil {
-		r.scanner = support.SSEScanner(r.body)
+	if r.frames == nil {
+		r.frames = support.NewFrames(support.SSEScanner(r.body))
 	}
 	if r.slots == nil {
 		r.slots = map[slotKey]*itemSlot{}
@@ -170,104 +165,24 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 	}
 
 	for {
-		if !r.scanner.Scan() {
-			if err := r.scanner.Err(); err != nil {
-				return r.fail(support.ContextError(r.parent, r.ctx, r.ttft.Arrived(), err))
+		payload, err := r.frames.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				// The stream ended. A stream that never named its end fails,
+				// because the run cannot know whether the answer was whole.
+				return r.close()
 			}
-			// The stream ended. Whatever event is still buffered is
-			// dispatched, and a stream that never named its end fails.
-			return r.close()
+			return r.fail(support.ContextError(r.parent, r.ctx, r.ttft.Arrived(), err))
 		}
-
-		line := r.scanner.Text()
-		if line == "" {
-			// A blank line ends the event.
-			if err := r.dispatch(); err != nil {
-				return r.fail(err)
-			}
-			if ev, ok := support.Take(&r.pending); ok {
-				return ev, nil
-			}
-			if r.done {
-				return r.finishReading()
-			}
-			continue
+		if err := r.dispatch(payload); err != nil {
+			return r.fail(err)
 		}
-		if !strings.HasPrefix(line, "data:") {
-			// Comments and other SSE fields carry no payload.
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" {
-			continue
-		}
-		if payload == "[DONE]" {
-			return r.close()
-		}
-
-		// A server that separates its events with a single newline
-		// never sends the blank line that ends an event. The event is
-		// therefore dispatched as soon as it holds one. A payload another
-		// data line cannot complete is dropped rather than carried, so one
-		// unreadable frame does not swallow the events after it.
-		switch payloadStateOf(r.data) {
-		case payloadComplete:
-			if err := r.dispatch(); err != nil {
-				return r.fail(err)
-			}
-		case payloadBroken:
-			r.data = nil
-		}
-		r.data = append(r.data, payload)
 		if ev, ok := support.Take(&r.pending); ok {
 			return ev, nil
 		}
-	}
-}
-
-// payloadState says how much of an event a run of data lines holds.
-type payloadState int
-
-const (
-	// payloadIncomplete means another data line may still complete the
-	// event. The payload ran out without a syntax error, which is what a
-	// payload spread over several lines looks like.
-	payloadIncomplete payloadState = iota
-	// payloadComplete means the lines decode as one JSON value.
-	payloadComplete
-	// payloadBroken means no further data line can make the lines decode.
-	payloadBroken
-)
-
-// payloadStateOf reports how much of an event the collected data lines
-// hold.
-//
-// A payload that ended without a syntax error is kept for the next line,
-// because the event may be spread over several of them. A payload with a
-// syntax error is not. JSON has no construct a later line repairs, so the
-// frame is one the transport cannot read. Such a frame is not worth failing
-// the run over.
-func payloadStateOf(data []string) payloadState {
-	if len(data) == 0 {
-		return payloadIncomplete
-	}
-	payload := strings.Join(data, "\n")
-	if json.Valid([]byte(payload)) {
-		return payloadComplete
-	}
-	// The decoder tells a payload that ran out (what a payload spread
-	// over several lines looks like) from one that cannot be repaired.
-	// A payload that holds no value yet is one that ran out: whitespace
-	// is a prefix of JSON, not a frame to drop.
-	var raw json.RawMessage
-	err := json.NewDecoder(strings.NewReader(payload)).Decode(&raw)
-	switch {
-	case err == nil:
-		return payloadComplete
-	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.EOF):
-		return payloadIncomplete
-	default:
-		return payloadBroken
+		if r.done {
+			return r.finishReading()
+		}
 	}
 }
 
@@ -284,13 +199,7 @@ func (r *streamReader) finishReading() (poo.StreamItem, error) {
 // An event whose payload does not parse is skipped. A chunk the transport
 // cannot read is not worth failing the run over, and the endpoint's own error
 // event is what fails it.
-func (r *streamReader) dispatch() error {
-	if len(r.data) == 0 {
-		return nil
-	}
-	payload := strings.Join(r.data, "\n")
-	r.data = nil
-
+func (r *streamReader) dispatch(payload []byte) error {
 	var ev codexEvent
 	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 		return nil
@@ -313,9 +222,6 @@ func (r *streamReader) dispatch() error {
 // whether the answer was complete, and the retry layer decides whether it may
 // be asked for again.
 func (r *streamReader) close() (poo.StreamItem, error) {
-	if err := r.dispatch(); err != nil {
-		return r.fail(err)
-	}
 	if !r.sawTerminal {
 		return r.fail(&poo.ProviderError{
 			Kind:    poo.ProviderKindServer,
