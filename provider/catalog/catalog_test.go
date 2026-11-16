@@ -734,11 +734,19 @@ func TestTheSettingsOverruleTheFileFieldByField(t *testing.T) {
 	}
 }
 
-// TestTheFileOverrulesWhatTheEndpointReports covers the order of the layers: the
-// models file is the operator's declaration, and what an endpoint reports is a
-// hint below it. The settings still win over both.
 func TestTheFileOverrulesWhatTheEndpointReports(t *testing.T) {
-	server := vllmServer(t, "qwen", 131072)
+	probes := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		probes++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]any{{"id": "qwen", "max_model_len": 131072}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
 	c := catalog.New(catalog.Options{
 		File: catalog.FileSettings{
 			Endpoints: map[string]catalog.EndpointSettings{
@@ -753,14 +761,15 @@ func TestTheFileOverrulesWhatTheEndpointReports(t *testing.T) {
 	if err := c.Refresh(context.Background()); err != nil {
 		t.Fatalf("the refresh: %v", err)
 	}
+	if probes == 0 {
+		t.Fatal("the endpoint was never probed, so the file overruling it proves nothing")
+	}
 	info, err := c.Resolve("local/qwen")
 	if err != nil {
 		t.Fatalf("the model: %v", err)
 	}
-	if info.ContextLimit != 32768 {
-		t.Errorf("the context limit is %d, want the file's 32768", info.ContextLimit)
-	}
-	if info.Source["context_limit"] != catalog.LayerModelsFile {
-		t.Errorf("the context limit comes from %q, want models_file", info.Source["context_limit"])
+	// The probe reported 131072, and the file's 32768 is what the catalog holds.
+	if info.ContextLimit != 32768 || info.Source["context_limit"] != catalog.LayerModelsFile {
+		t.Errorf("the context limit is %d from %q, want the file's 32768", info.ContextLimit, info.Source["context_limit"])
 	}
 }

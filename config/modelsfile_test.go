@@ -1034,3 +1034,30 @@ session:
 		}
 	}
 }
+
+// TestAModelsFileRefusesAnUnknownInput covers the one thing a model's `inputs` can say
+// that poo cannot act on. A modality nothing reads would be a model that says it takes
+// images while nothing sends it one, so the name is refused where it is written.
+func TestAModelsFileRefusesAnUnknownInput(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	writePooModels(t, dir, `endpoints:
+  home:
+    endpoint: http://127.0.0.1:1/v1
+    models:
+      qwen3:
+        inputs: [text, smoke-signals]
+`)
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("the settings loaded with a modality poo does not read")
+	}
+	for _, want := range []string{"qwen3", "smoke-signals"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure is %q, want it to name %q", err, want)
+		}
+	}
+}

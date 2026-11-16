@@ -95,6 +95,19 @@ const (
 	ModalityAudio Modality = "audio"
 )
 
+// ModalityNames returns every modality poo reads.
+//
+// It is the one list: a reader that refuses a name it does not know asks this, so a
+// modality poo learns to read is learned in one place.
+func ModalityNames() []Modality {
+	return []Modality{ModalityText, ModalityImage, ModalityAudio}
+}
+
+// ModalityKnown reports whether a name is a modality poo reads.
+func ModalityKnown(name string) bool {
+	return slices.Contains(ModalityNames(), Modality(name))
+}
+
 // Sampling holds sampling parameters. A nil field is not sent.
 type Sampling struct {
 	Temperature *float64 `json:"temperature,omitempty"`

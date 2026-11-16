@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config/internal/piimport"
 	"github.com/sdougbrown/poo/provider/catalog"
@@ -183,23 +181,16 @@ func modelsFileShape(path string, document []byte) (shape, error) {
 
 // readModelsDocument reads a models file and returns it as JSON.
 //
-// One codec over two encodings: the file is YAML, which is what an operator
-// edits, and JSON is YAML that an operator may also write. Both parse here, so
-// one decoder reads either.
+// One codec over two encodings: the file is YAML, which is what an operator edits,
+// and JSON is YAML that an operator may also write. The document normalizes through
+// the pipeline the settings use, so a change to how a document is read reaches both.
 func readModelsDocument(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	var value any
-	if err := yaml.Unmarshal(stripDocumentBOM(data), &value); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	canonical, err := canonicalValue(value)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	document, err := json.Marshal(canonical)
+	// YAML reads JSON too, so one format answers for both spellings of the file.
+	document, err := normalize(stripDocumentBOM(data), FormatYAML, "the models file")
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -510,13 +501,10 @@ func (f modelsFile) layer() (catalog.FileSettings, error) {
 func modalitiesNamed(endpoint, modelID string, names []string) ([]poo.Modality, error) {
 	out := make([]poo.Modality, 0, len(names))
 	for _, name := range names {
-		modality := poo.Modality(name)
-		switch modality {
-		case poo.ModalityText, poo.ModalityImage, poo.ModalityAudio:
-		default:
+		if !poo.ModalityKnown(name) {
 			return nil, fmt.Errorf("the model %s/%s reads %q, which poo does not know", endpoint, modelID, name)
 		}
-		out = append(out, modality)
+		out = append(out, poo.Modality(name))
 	}
 	return out, nil
 }

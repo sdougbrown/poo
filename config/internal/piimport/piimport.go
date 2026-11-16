@@ -104,14 +104,6 @@ type piModel struct {
 	} `json:"compat"`
 }
 
-// modalities are the input modalities pi names that poo reads. A
-// modality outside the map is a refusal.
-var modalities = map[string]bool{
-	string(poo.ModalityText):  true,
-	string(poo.ModalityImage): true,
-	string(poo.ModalityAudio): true,
-}
-
 // Read reads the models file at path.
 //
 // authPath is the auth.json its providers' keys are read from. Empty means
@@ -228,7 +220,7 @@ func wireAPI(provider, api string) (string, error) {
 // inputs checks a model's input modalities.
 func inputs(provider, id string, names []string) ([]string, error) {
 	for _, name := range names {
-		if !modalities[name] {
+		if !poo.ModalityKnown(name) {
 			return nil, fmt.Errorf("the model %s/%s reads %q, which poo does not know", provider, id, name)
 		}
 	}
