@@ -65,9 +65,10 @@ func newEditor(m *machine) *editorInput {
 	sh.Config.Set("cursor-position-probe", false)
 
 	if m.opts.HistoryFile != "" {
-		if hist, err := readline.NewHistoryFromFile(m.opts.HistoryFile); err == nil {
-			sh.History.Add("poo", hist)
-		}
+		// AddFromFile registers the source even when the file is new:
+		// the first accepted line creates it, and an unreadable one
+		// reads as an empty history, not a failure.
+		sh.History.AddFromFile("poo", m.opts.HistoryFile)
 	}
 
 	// Escape stops a run, and idle it is the vim command keymap: the
