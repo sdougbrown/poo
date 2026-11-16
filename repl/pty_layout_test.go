@@ -554,19 +554,7 @@ func startPipedRepl(t *testing.T, server *fakeServer, input string) (*terminal, 
 		},
 	}
 	go func() { code <- Run(opts) }()
-	t.Cleanup(func() {
-		if t.Failed() {
-			fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.drawn.String())
-		}
-		// A read still blocked at session end holds the editor's keys:
-		// interrupts end it, so the next test's keystrokes are its own
-		// and its terminal restore is the cooked one. A second interrupt
-		// covers one the editor consumed mid-sequence.
-		term.press("\x03")
-		time.Sleep(150 * time.Millisecond)
-		term.press("\x03")
-		time.Sleep(150 * time.Millisecond)
-	})
+	t.Cleanup(func() { endReplCleanup(t, term) })
 	return term, code
 }
 
@@ -671,10 +659,7 @@ func startTerminalReplWith(t *testing.T, server *fakeServer, history string) (*t
 		},
 	}
 	go func() { code <- Run(opts) }()
-	t.Cleanup(func() {
-		term.press("\x03")
-		time.Sleep(100 * time.Millisecond)
-	})
+	t.Cleanup(func() { endReplCleanup(t, term) })
 	return term, code
 }
 

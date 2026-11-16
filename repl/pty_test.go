@@ -177,6 +177,22 @@ func takeOverStdio(t *testing.T, slave *os.File) (restore func()) {
 	}
 }
 
+// endReplCleanup ends a test's repl: the failure dump goes to stderr —
+// stdout is the terminal under test — and interrupts end any read still
+// blocked at session end, so the next test's keystrokes are its own and
+// the terminal restore lands on the cooked one. A second interrupt
+// covers one the editor consumed mid-sequence.
+func endReplCleanup(t *testing.T, term *terminal) {
+	t.Helper()
+	if t.Failed() {
+		fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.drawn.String())
+	}
+	term.press("\x03")
+	time.Sleep(150 * time.Millisecond)
+	term.press("\x03")
+	time.Sleep(150 * time.Millisecond)
+}
+
 // startTerminalRepl runs a repl on the terminal. The exit code arrives
 // on the returned channel once the repl leaves.
 func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int) {
@@ -202,16 +218,7 @@ func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int)
 		},
 	}
 	go func() { code <- Run(opts) }()
-	t.Cleanup(func() {
-		if t.Failed() {
-			fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.drawn.String())
-		}
-		// A read still blocked at session end holds the editor's keys:
-		// an interrupt ends it, so the next test's keystrokes are its
-		// own and its terminal restore is the cooked one.
-		term.press("\x03")
-		time.Sleep(100 * time.Millisecond)
-	})
+	t.Cleanup(func() { endReplCleanup(t, term) })
 	return term, code
 }
 

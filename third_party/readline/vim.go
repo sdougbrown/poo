@@ -166,6 +166,11 @@ func (rl *Shell) viCommandMode() {
 	rl.Keymap.SetMain(keymap.ViCommand)
 }
 
+// ViCommandMode enters Vim's command keymap the way the
+// vi-movement-mode command does: a host whose own command handles bare
+// Escape delegates the idle case here.
+func (rl *Shell) ViCommandMode() { rl.viCommandMode() }
+
 // Enter Vim visual mode.
 func (rl *Shell) viVisualMode() {
 	rl.History.SkipSave()

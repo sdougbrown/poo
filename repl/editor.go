@@ -73,8 +73,8 @@ func newEditor(m *machine) *editorInput {
 	// Escape stops a run, and idle it is the vim command keymap: the
 	// editor itself dispatches bare Escape through the bind named
 	// vi-movement-mode, so the session's own command takes that name
-	// and does both jobs. Without a run working, it hands the editor
-	// back its command keymap the way the builtin did.
+	// and does both jobs. Without a run working, the builtin's switch
+	// to the command keymap runs unchanged.
 	escape := func() {
 		if runID := m.activeRun(); runID != "" {
 			select {
@@ -83,19 +83,7 @@ func newEditor(m *machine) *editorInput {
 			}
 			return
 		}
-		sh.Selection().Reset()
-		sh.Iterations.Reset()
-		sh.Buffers.Reset()
-		sh.Hint.Reset()
-		if sh.Keymap.Main() == "vi-insert" && !sh.Cursor().AtBeginningOfLine() {
-			sh.Cursor().Dec()
-		}
-		// A draft with a line feed in it ends at an append position the
-		// command keymap's char targets cannot act on; the builtin's
-		// own check lands the cursor on the last real character.
-		sh.Cursor().CheckCommand()
-		sh.Keymap.SetLocal("")
-		sh.Keymap.SetMain("vi-command")
+		sh.ViCommandMode()
 	}
 
 	// Ctrl-J is a line break: a newline into the buffer, on any keymap

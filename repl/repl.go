@@ -584,12 +584,22 @@ func (w *layoutStderr) flush() {
 
 // newInput builds the line reader for the session. The editor is
 // hardwired to the process's own stdio, so it only runs when the repl's
-// input is exactly that terminal; anything else reads plain lines.
+// input is exactly that terminal and the output is a terminal too —
+// frames would land in a redirect otherwise; anything else reads plain
+// lines.
 func (m *machine) newInput() input {
 	if f, ok := m.in.(interface{ Fd() uintptr }); ok &&
-		term.IsTerminal(int(f.Fd())) && f.Fd() == os.Stdin.Fd() {
+		term.IsTerminal(int(f.Fd())) && f.Fd() == os.Stdin.Fd() &&
+		termIsTerminal(m.out) {
 		if e := newEditor(m); e != nil {
 			return e
+		}
+		if m.r.layout != nil {
+			// The pinned layout belongs to the editor. Without it the
+			// transcript goes back to the plain stream, where a
+			// terminal without an editor reads from.
+			m.r.layout.leave()
+			m.r.layout = nil
 		}
 	}
 	return &plainInput{scanner: bufio.NewScanner(m.in), write: m.r.write}

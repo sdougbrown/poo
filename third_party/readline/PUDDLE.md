@@ -12,6 +12,8 @@ needs exactly that, so the copy carries three small patches:
 - `readline.go`, `shell.go` — `Shell.SetRefreshHook(f)` runs a function
   before every UI refresh: the repl sizes the footer for the draft
   before the frame renders.
+- `vim.go` — `Shell.ViCommandMode()` exports the builtin keymap switch, so
+  a host whose own Escape command delegates the idle case to it.
 - `internal/display/refresh.go` — with the cursor-position probe off,
   the editor does not know its start row, and the erase it makes below
   the input line spent the rows the footer owns. When the probe is off,

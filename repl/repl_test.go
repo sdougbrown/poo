@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -116,16 +115,10 @@ func waitTimes(t *testing.T, drawn interface{ String() string }, want string, co
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	// Stdout is the terminal under test, so the failure goes to stderr,
-	// where the log can read it.
-	fmt.Fprintf(os.Stderr, "DEBUG the repl drew %q %d times, want %d:\n%q\n",
-		want, strings.Count(drawn.String(), want), count, drawn.String())
-	t.Fatalf("the repl drew %q %d times, want %d", want,
-		strings.Count(drawn.String(), want), count)
+	t.Fatalf("the repl drew %q %d times, want %d:\n%s", want,
+		strings.Count(drawn.String(), want), count, drawn.String())
 }
 
-// waitPrompts waits until the server has want prompts from the
-// session, and returns them.
 // promptsSoFar returns the prompts the session has received so far.
 func (s *fakeServer) promptsSoFar() []string {
 	s.mu.Lock()
@@ -133,6 +126,8 @@ func (s *fakeServer) promptsSoFar() []string {
 	return append([]string(nil), s.prompts...)
 }
 
+// waitPrompts waits until the server has want prompts from the
+// session, and returns them.
 func (s *fakeServer) waitPrompts(t *testing.T, want int) []string {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
