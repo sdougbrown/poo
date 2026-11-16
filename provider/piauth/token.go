@@ -26,7 +26,7 @@ type tokenResponse struct {
 	ExpiresIn float64 `json:"expires_in"`
 }
 
-// refresh trades the credential's refresh token for a new access token.
+// trade trades the credential's refresh token for a new access token.
 //
 // The request is the one pi sends: a form POST carrying the refresh grant,
 // the refresh token and the client id. The answer carries the new pair and
@@ -36,7 +36,7 @@ type tokenResponse struct {
 // A failure reports the status and a standard OAuth error code, and nothing
 // else from the answer. An answer is untrusted, and a caller's log is no
 // place for its words.
-func (c Credentials) refresh(ctx context.Context, stored credential) (credential, error) {
+func (c Credentials) trade(ctx context.Context, stored credential) (credential, error) {
 	endpoint := c.tokenURL()
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
