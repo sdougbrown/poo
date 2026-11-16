@@ -317,3 +317,69 @@ func TestTheReportedBlocksStandAloneWithoutVisibleContent(t *testing.T) {
 		wantBlock(t, carried.Content[i].Provider, want)
 	}
 }
+
+// TestTheReportedBlocksRideAheadOfTheToolCalls covers the order a response
+// that reasoned, called a tool and reported blocks records: the blocks follow
+// ahead of the text and the call, so the next request gives them back before
+// the call they reasoned about. The call is appended last, which is what an
+// API matching calls by position reads.
+func TestTheReportedBlocksRideAheadOfTheToolCalls(t *testing.T) {
+	companion := reasoningBlock("enc_one")
+	lone := reasoningBlock("enc_two")
+	s, tr, sink := blocksSession(t,
+		pootest.Turn{
+			Thinking: "weighing",
+			Text:     "calling",
+			Blocks:   []poo.ProviderBlock{companion, lone},
+			Calls:    []pootest.Call{{Name: "echo", Arguments: json.RawMessage(`"ping"`), ID: "call_1"}},
+		},
+		pootest.Turn{Text: "the answer"},
+	)
+
+	runSession(t, s, "first")
+
+	// The first assistant message is the turn that called the tool.
+	var first *poo.MessageRecord
+	for _, rec := range sink.messages() {
+		if rec.Role == poo.RoleAssistant {
+			first = rec
+			break
+		}
+	}
+	if first == nil {
+		t.Fatalf("the record holds no assistant message; the records are %v", sink.Names())
+	}
+	if got := blockKinds(first.Content); len(got) != 4 {
+		t.Fatalf("the recorded message holds %v, want thinking, a block, text and the call", got)
+	} else if got[0] != poo.ContentThinking || first.Content[0].Kind != poo.ContentThinking {
+		t.Errorf("the first block is %q, want the thinking", got[0])
+	} else if got[1] != poo.ContentProvider || first.Content[1].Provider == nil {
+		t.Errorf("the second block is %q, want the lone reported block", got[1])
+	} else if got[2] != poo.ContentText || got[3] != poo.ContentToolCall {
+		t.Errorf("the last two blocks are %q and %q, want the text and the call", got[2], got[3])
+	}
+	wantBlock(t, first.Content[0].Provider, companion)
+	wantBlock(t, first.Content[1].Provider, lone)
+
+	requests := tr.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("the transport got %d requests, want the call's turn and the answer's", len(requests))
+	}
+	carried := assistantIn(t, requests[1].Messages)
+	var providerAt, callAt = -1, -1
+	for i, c := range carried.Content {
+		switch c.Kind {
+		case poo.ContentProvider:
+			providerAt = i
+		case poo.ContentToolCall:
+			callAt = i
+		}
+	}
+	if providerAt < 0 || callAt < 0 {
+		t.Fatalf("the second request's message holds %v, want a block and the call", blockKinds(carried.Content))
+	}
+	if providerAt > callAt {
+		t.Errorf("the block is at %d and the call at %d, want the block ahead of the call", providerAt, callAt)
+	}
+	wantBlock(t, carried.Content[providerAt].Provider, lone)
+}
