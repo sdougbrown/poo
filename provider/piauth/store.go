@@ -1,11 +1,16 @@
-// Package piauth reads and refreshes the OpenAI Codex OAuth credential
-// pi keeps in an auth.json.
+// Package piauth reads, refreshes and writes the OpenAI Codex OAuth credential
+// poo keeps in an auth.json.
 //
-// The file is pi's: credentials by provider id, one entry each. poo reads the
-// file the settings name, never a pi installation's own directory, so a
-// caller hands the path over. This package does not log in: pi's login writes
-// the credential, and this package keeps it alive. Access uses the credential
-// the file holds, and Refresh trades it for a new one.
+// The file's shape and the store that keeps the credential alive are two
+// things, and they are two things here. The store owns the lock, the read, the
+// refresh and the write; a format owns what one file's bytes look like. pi's
+// auth.json is the format this package reads, so the store speaks poo's words
+// and the file speaks pi's.
+//
+// poo reads the file the settings name, never a pi installation's own
+// directory, so a caller hands the path over. This package does not log in:
+// pi's login writes the credential, and this package keeps it alive. Access
+// uses the credential the file holds, and Refresh trades it for a new one.
 //
 // A stored access token expires, and pi and this package both refresh one by
 // trading the refresh token at the same endpoint. Two refreshes of one
@@ -25,7 +30,6 @@
 package piauth
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -118,20 +122,44 @@ type Token struct {
 	AccountID string
 }
 
-// credential is one provider's entry in pi's auth.json, in the shape the
-// oauth type is written with. Expires is milliseconds since the epoch,
-// the number pi stores.
+// format is one auth file's shape: the bytes it is written with, and where a
+// provider's credential sits in what they parse to.
+type format interface {
+	// parse returns the document the file holds. missing says the file is not
+	// there, which is a document without credentials rather than a failure: it
+	// is how pi reads an absent auth.json. path names the file in what a
+	// failure reports.
+	parse(path string, data []byte, missing bool) (document, error)
+	// credential returns the credential the document holds for a provider.
+	credential(doc document, provider string) (credential, error)
+	// encode returns the file's bytes with the provider's credential stored,
+	// and every other part of the document as it was.
+	encode(doc document, provider string, entry credential) ([]byte, error)
+}
+
+// document is one auth file parsed into the entries it holds, so a write puts
+// everything the file carried back as it was.
+type document struct {
+	// path is the file the document was read from.
+	path string
+	// entries are the credentials, by provider id, as the bytes the file
+	// carried for each: a write keeps every field this package does not model.
+	entries map[string]json.RawMessage
+}
+
+// credential is one provider's credential in poo's own words. A format
+// projects its file's entry into it, and writes it back out in the file's.
 type credential struct {
 	// Type is how the entry authenticates: "oauth" here.
-	Type string `json:"type"`
+	Type string
 	// Access is the access token.
-	Access string `json:"access"`
+	Access string
 	// Refresh is the refresh token.
-	Refresh string `json:"refresh"`
-	// Expires is when Access stops working.
-	Expires int64 `json:"expires"`
+	Refresh string
+	// Expires is when Access stops working, in milliseconds since the epoch.
+	Expires int64
 	// AccountID is the ChatGPT account Access belongs to.
-	AccountID string `json:"accountId"`
+	AccountID string
 }
 
 // Credentials are the Codex credential in one auth.json.
@@ -202,7 +230,7 @@ func (c Credentials) token(ctx context.Context, force bool) (Token, error) {
 		return Token{}, err
 	}
 	defer hold.release()
-	stored, entries, err := readCredential(c.Path)
+	stored, doc, err := c.read()
 	if err != nil {
 		return Token{}, err
 	}
@@ -214,7 +242,7 @@ func (c Credentials) token(ctx context.Context, force bool) (Token, error) {
 		if err := hold.verify(); err != nil {
 			return Token{}, fmt.Errorf("%w: another writer took the lock before the write: %w", ErrPersist, err)
 		}
-		if err := writeCredential(c.Path, entries, refreshed); err != nil {
+		if err := c.write(doc, refreshed); err != nil {
 			return Token{}, fmt.Errorf("%w: %w", ErrPersist, err)
 		}
 		stored = refreshed
@@ -226,120 +254,67 @@ func (c Credentials) token(ctx context.Context, force bool) (Token, error) {
 	}, nil
 }
 
-// readCredential reads pi's auth.json: the Codex credential, and every
-// provider's entry as it was read. A write then puts the other entries back
-// as it found them.
-func readCredential(path string) (credential, map[string]json.RawMessage, error) {
-	entries, err := readEntries(path)
-	if err != nil {
-		return credential{}, nil, err
-	}
-	raw, ok := entries[ProviderCodex]
-	if !ok {
-		return credential{}, nil, fmt.Errorf("%w: %s holds no %s entry", ErrNoCredential, path, ProviderCodex)
-	}
-	var stored credential
-	if err := json.Unmarshal(raw, &stored); err != nil {
-		return credential{}, nil, fmt.Errorf("%w: %s: %w", ErrStorage, path, err)
-	}
-	if stored.Type != "oauth" || stored.Access == "" || stored.Refresh == "" {
-		return credential{}, nil, fmt.Errorf("%w: %s holds a %s entry that is not an oauth credential", ErrNoCredential, path, ProviderCodex)
-	}
-	// A Codex request names the account its token belongs to, so a
-	// credential that names none cannot be used. It is refused before a
-	// refresh can write a credential that still names none.
-	if accountID(stored.Access, stored.AccountID) == "" {
-		return credential{}, nil, fmt.Errorf("%w: %s names no account", ErrNoCredential, path)
-	}
-	return stored, entries, nil
-}
-
-// readEntries reads pi's auth.json: providers by id.
+// read returns the credential the file holds, and the document it came from.
 //
-// A file that is not there is a file without credentials, the way pi reads
-// one. A leading byte order mark does not count against the file. pi strips
-// it before parsing, so a BOM file is a file pi reads. A file that does not
-// parse is a failure, not an empty file. A write over a file this package did
-// not understand would drop what it holds.
-func readEntries(path string) (map[string]json.RawMessage, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return map[string]json.RawMessage{}, nil
-	}
+// The document is what a write puts back, so a refresh keeps every other
+// entry and field the file carried.
+func (c Credentials) read() (credential, document, error) {
+	doc, err := c.load()
 	if err != nil {
-		return nil, fmt.Errorf("%w: reading %s: %w", ErrStorage, path, err)
+		return credential{}, document{}, err
 	}
-	var entries map[string]json.RawMessage
-	if err := json.Unmarshal(stripBOM(data), &entries); err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrStorage, path, err)
+	stored, err := c.format().credential(doc, ProviderCodex)
+	if err != nil {
+		return credential{}, document{}, err
 	}
-	if entries == nil {
-		entries = map[string]json.RawMessage{}
-	}
-	return entries, nil
+	return stored, doc, nil
 }
 
-// stripBOM drops a leading UTF-8 byte order mark, the character pi strips
-// before parsing its own file.
-func stripBOM(data []byte) []byte {
-	return bytes.TrimPrefix(data, []byte("\ufeff"))
+// load reads the file and parses it with the format its path names. A file
+// that is not there is parsed as a file without credentials, the way pi reads
+// one.
+func (c Credentials) load() (document, error) {
+	data, err := os.ReadFile(c.Path)
+	missing := errors.Is(err, fs.ErrNotExist)
+	if err != nil && !missing {
+		return document{}, fmt.Errorf("%w: reading %s: %w", ErrStorage, c.Path, err)
+	}
+	return c.format().parse(c.Path, data, missing)
 }
 
-// writeCredential writes pi's auth.json back with the Codex entry refreshed,
-// and the other providers' entries keeping their values. A field the entry
-// carries beyond the five this package models is kept too. pi's credential
-// type allows fields of its own, and they are not this package's to drop. The
-// fields come out in the order Go marshals a map, sorted; the values are what
-// has to match.
+// write stores a credential under the provider, and leaves the rest of the
+// file as the document found it.
 //
-// The bytes are the ones pi writes: two space indents, no trailing newline,
-// and a mode of 0600 on a file created here. A file that already exists keeps
-// its own mode and follows its own symlinks, as it does through pi's own
-// write. The write is in place, not a temporary file renamed over it.
+// A file created here gets mode 0600 and a directory created here 0700. A file
+// that already exists keeps its own mode and follows its own symlinks, as it
+// does through pi's own write. The write is in place, not a temporary file
+// renamed over it.
 //
 // Writing in place is the trade pi makes too: a process that dies mid-write
 // leaves a truncated file. The next read reports that as ErrStorage, and pi's
 // login repairs it. A temporary file renamed over the path would make the
 // bytes atomic. It would also replace a symlinked auth.json with a regular
 // file, dropping the mode, ACLs and extended attributes the operator gave it.
-func writeCredential(path string, entries map[string]json.RawMessage, entry credential) error {
-	fields := map[string]json.RawMessage{}
-	if raw, ok := entries[ProviderCodex]; ok {
-		if err := json.Unmarshal(raw, &fields); err != nil {
-			return fmt.Errorf("%s: the %s entry is not an object: %v", path, ProviderCodex, err)
-		}
-	}
-	own, err := json.Marshal(entry)
+func (c Credentials) write(doc document, entry credential) error {
+	body, err := c.format().encode(doc, ProviderCodex, entry)
 	if err != nil {
-		return fmt.Errorf("%s: %v", path, err)
+		return err
 	}
-	var written map[string]json.RawMessage
-	if err := json.Unmarshal(own, &written); err != nil {
-		return fmt.Errorf("%s: %v", path, err)
+	if err := os.MkdirAll(filepath.Dir(c.Path), 0o700); err != nil {
+		return fmt.Errorf("%s: %v", c.Path, err)
 	}
-	for name, value := range written {
-		fields[name] = value
-	}
-	encoded, err := json.Marshal(fields)
-	if err != nil {
-		return fmt.Errorf("%s: %v", path, err)
-	}
-	entries[ProviderCodex] = encoded
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(entries); err != nil {
-		return fmt.Errorf("%s: %v", path, err)
-	}
-	body := bytes.TrimRight(buf.Bytes(), "\n")
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("%s: %v", path, err)
-	}
-	if err := os.WriteFile(path, body, 0o600); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+	if err := os.WriteFile(c.Path, body, 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", c.Path, err)
 	}
 	return nil
+}
+
+// format is the shape the credential file is written with.
+//
+// pi's auth.json is the one file a credential lives in today, so the path is
+// what selects it.
+func (c Credentials) format() format {
+	return piFormat{}
 }
 
 // live reports whether an access token has enough life left to be used
