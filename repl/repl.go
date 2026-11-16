@@ -699,8 +699,8 @@ func (m *machine) newInput() input {
 			cfg.UniqueEditLine = true
 			editor.layout = l
 			cfg.Listener = editor.listener()
-			tab.setPrompt = editor.prompt
 		}
+		tab.setPrompt = editor.prompt
 		rl, err := readline.NewEx(cfg)
 		if err == nil {
 			editor.rl = rl

@@ -52,6 +52,33 @@ func TestAPendingFrameStopsPaintingAfterAResize(t *testing.T) {
 // TestAHintEndsBeforeAToolCall covers a run whose model calls a tool
 // before speaking: the hint that stood for the run ends before the
 // call decorates the transcript.
+// TestAResizeKeepsTheHintBeforeTheFirstDelta covers the resize that
+// lands between the hint and the first delta: the hint's row was
+// cleared with the preview, and the recovery repaints it — nothing
+// else is open to repaint.
+func TestAResizeKeepsTheHintBeforeTheFirstDelta(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	width := 40
+	r.liveWidth = func() int { return width }
+	r.userPrompt("go")
+	r.hint()
+	if rowOf(t, scr, "… writing") < 0 {
+		t.Fatalf("the hint never showed:\n%s", scr.text())
+	}
+
+	// The resize erases the rows the preview stood on before the
+	// recovery repaints them; the emulator's size cannot change under
+	// the test, so the erase stands in for it.
+	width = 20
+	r.layout.clearPreview()
+	r.rewrap(width)
+	r.repaintPreview()
+
+	if rowOf(t, scr, "… writing") < 0 {
+		t.Errorf("the hint was lost to the resize:\n%s", scr.text())
+	}
+}
+
 func TestAHintEndsBeforeAToolCall(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")

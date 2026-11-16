@@ -383,7 +383,12 @@ func (r *renderer) contentWidth() int {
 // wrapped at the old width, and the resize cleared them. The preview
 // paints from the new wrap, and the next delta carries on.
 func (r *renderer) repaintPreview() {
-	if !r.streams() || r.live.kind == "" {
+	if !r.streams() {
+		return
+	}
+	// A hint that stands before the first delta is a preview row of its
+	// own: the resize cleared it, and this is where it comes back.
+	if r.live.kind == "" && !r.block.hint {
 		return
 	}
 	// The closed segments the stall parked are final: seal them into
@@ -468,6 +473,11 @@ func (r *renderer) switchKind(kind string) {
 // erased and painted on the next delta.
 func (r *renderer) paintStream() {
 	done, rest := splitStream(r.live.source)
+	// Nothing is open and nothing is pending: the only rows standing
+	// are a hint's, which the repaint has just laid back down.
+	if r.live.kind == "" && rest == "" {
+		return
+	}
 	r.layout.clearPreview()
 	if done != "" {
 		if body := r.chunkBody(r.live.kind, done); body != "" {
