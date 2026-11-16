@@ -49,7 +49,7 @@ func TestTheWritingHintStandsUntilTheFirstDeltaArrives(t *testing.T) {
 		t.Fatalf("the hint shows %d time(s), want 1 once:\n%s", got, scr.text())
 	}
 
-	r.streamDelta("text", "Hi")
+	r.streamDelta("m1", "text", "Hi")
 	if rowOf(t, scr, "… writing") >= 0 {
 		t.Errorf("the hint stayed on the terminal after the text arrived:\n%s", scr.text())
 	}
@@ -92,8 +92,8 @@ func TestAPipeStreamsNothing(t *testing.T) {
 	r := newRenderer(&out)
 
 	r.hint()
-	r.streamDelta("text", "Hello, ")
-	r.streamDelta("text", "world.")
+	r.streamDelta("m1", "text", "Hello, ")
+	r.streamDelta("m1", "text", "world.")
 	if got := out.String(); got != "" {
 		t.Errorf("a pipe was written %q, want nothing", got)
 	}
@@ -117,7 +117,7 @@ func TestAPipeStripsTheEscapesAModelSends(t *testing.T) {
 	var out bytes.Buffer
 	r := newRenderer(&out)
 
-	r.streamDelta("text", "safe\x1b[2Jtext")
+	r.streamDelta("m1", "text", "safe\x1b[2Jtext")
 	r.finish()
 
 	if strings.Contains(out.String(), "\x1b[2J") {
@@ -254,8 +254,8 @@ func TestATerminalWithoutEditorRendersOnce(t *testing.T) {
 	r.editor = false
 
 	r.userPrompt("say hello")
-	r.streamDelta("text", "Hello, ")
-	r.streamDelta("text", "world.")
+	r.streamDelta("m1", "text", "Hello, ")
+	r.streamDelta("m1", "text", "world.")
 	if got := out.String(); got != ansiBold+"❯ say hello"+ansiReset+"\n" {
 		t.Fatalf("the terminal was written before the flush:\n%q", out.String())
 	}
@@ -277,7 +277,7 @@ func TestASessionThatEndsMidMessageRendersTheReply(t *testing.T) {
 	r := aTerminal(t, &out, 40)
 	m := &machine{r: r, status: newStatus("")}
 	m.state = &runState{}
-	m.r.streamDelta("text", "Half a sentence")
+	m.r.streamDelta("m1", "text", "Half a sentence")
 
 	m.flushPending()
 

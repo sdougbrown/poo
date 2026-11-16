@@ -133,7 +133,7 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 		t.Fatalf("typing took the hint off the screen:\n%s", scr.text())
 	}
 
-	r.streamDelta("text", "Hello, ")
+	r.streamDelta("m1", "text", "Hello, ")
 	if rowOf(t, scr, "Hello,") < 0 {
 		t.Fatalf("the first chunk never showed:\n%s", scr.text())
 	}
@@ -142,7 +142,7 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 		t.Fatalf("typing took the streamed words off the screen:\n%s", scr.text())
 	}
 
-	r.streamDelta("text", "world.")
+	r.streamDelta("m1", "text", "world.")
 	r.paintPending()
 	// The paragraph reads once, with the draft intact below it, and the
 	// hint has given way to the text.
@@ -178,7 +178,7 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 func TestTheScreenKeepsThePriorLines(t *testing.T) {
 	scr, r := aScreen(t, 30)
 	r.userPrompt("say hello")
-	r.streamDelta("text", "a fairly long streaming line that wraps past the width")
+	r.streamDelta("m1", "text", "a fairly long streaming line that wraps past the width")
 	scr.typeText("draft")
 	r.finish()
 	drawn := scr.text()
@@ -197,7 +197,7 @@ func TestTheScreenHardWrapMatchesTheTerminal(t *testing.T) {
 	scr, r := aScreen(t, 20)
 	r.userPrompt("go")
 	long := "words that run well past the width of the terminal window and keep going"
-	r.streamDelta("text", long)
+	r.streamDelta("m1", "text", long)
 	drawn := scr.text()
 	if got := countOf(t, scr, "words that run"); got != 1 {
 		t.Errorf("the wrapped stream reads %d time(s), want 1:\n%s", got, drawn)
@@ -253,12 +253,12 @@ func TestTheStreamStartsAtColumnZero(t *testing.T) {
 	// hint stood before the text arrived.
 	scr.typeText("")
 
-	r.streamDelta("text", "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen")
+	r.streamDelta("m1", "text", "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen")
 	if got := countOf(t, scr, "one two three"); got != 1 {
 		t.Fatalf("the stream shows %d time(s), want 1:\n%s", got, scr.text())
 	}
 	scr.typeText(" draft")
-	r.streamDelta("text", " more words here to finish the paragraph off nicely indeed yes")
+	r.streamDelta("m1", "text", " more words here to finish the paragraph off nicely indeed yes")
 	r.finish()
 	scr.typeText("")
 
@@ -291,7 +291,7 @@ func TestTheFlushKeepsTheScreenWhenTheBlockOutgrowsIt(t *testing.T) {
 		stream.WriteString(strconv.Itoa(i))
 		stream.WriteString("\n\n")
 	}
-	r.streamDelta("text", stream.String())
+	r.streamDelta("m1", "text", stream.String())
 	scr.typeText("draft")
 	if rowOf(t, scr, promptMark+"draft") < 0 {
 		t.Fatalf("the draft was lost under the tall stream:\n%s", scr.text())
@@ -319,13 +319,13 @@ func TestAResizeMidBlockStopsThePainting(t *testing.T) {
 	width := 40
 	r.liveWidth = func() int { return width }
 	r.userPrompt("go")
-	r.streamDelta("text", "words that wrap over more than one row at forty columns wide")
+	r.streamDelta("m1", "text", "words that wrap over more than one row at forty columns wide")
 
 	// The terminal narrows; the next delta must not paint at the old
 	// width.
 	width = 20
 	before := scr.text()
-	r.streamDelta("text", " and more words arrive after the resize")
+	r.streamDelta("m1", "text", " and more words arrive after the resize")
 	if got := scr.text(); got != before {
 		t.Errorf("the stream kept painting after the resize:\n%s", got)
 	}
@@ -347,7 +347,7 @@ func TestAWidthThatCannotBeReadKeepsStreaming(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.liveWidth = func() int { return -1 }
 	r.userPrompt("go")
-	r.streamDelta("text", "still streaming")
+	r.streamDelta("m1", "text", "still streaming")
 	if rowOf(t, scr, "still streaming") < 0 {
 		t.Fatalf("the stream stopped when the width could not be read:\n%s", scr.text())
 	}

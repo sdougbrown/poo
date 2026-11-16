@@ -1054,13 +1054,10 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		id, _ := evt.Payload["message_id"].(string)
 		kind, _ := evt.Payload["kind"].(string)
 		text, _ := evt.Payload["text"].(string)
-		// The renderer owns the streamed block and its boundaries: it
-		// ends a block the message left, and one a write interrupts.
-		m.r.streamMessage(id)
-		// The reply and the thinking both stream as markdown in the
-		// order they arrive. A kind the renderer does not know reads
-		// with the thinking, so it cannot join the reply's body.
-		m.r.streamDelta(kind, text)
+		// The renderer owns the streamed block and its boundaries: a
+		// message that leaves, or a write that interrupts, ends the
+		// block there.
+		m.r.streamDelta(id, kind, text)
 	case "tool.call":
 		// The call decorates the transcript below the message it
 		// interrupted; the call's own write settles that message first.

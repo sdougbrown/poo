@@ -11,7 +11,7 @@ import (
 func TestTheLiveStreamShowsTheMarkdownItWillSettleTo(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
-	r.streamDelta("text", "I can check **both tools**.")
+	r.streamDelta("m1", "text", "I can check **both tools**.")
 
 	drawn := scr.text()
 	if strings.Contains(drawn, "**both tools**") {
@@ -27,11 +27,11 @@ func TestAPendingFrameStopsPaintingAfterAResize(t *testing.T) {
 	width := 40
 	r.liveWidth = func() int { return width }
 	r.userPrompt("go")
-	r.streamDelta("text", "first words")
+	r.streamDelta("m1", "text", "first words")
 	if !strings.Contains(scr.text(), "first words") {
 		t.Fatalf("the first delta never showed:\n%s", scr.text())
 	}
-	r.streamDelta("text", " then last words")
+	r.streamDelta("m1", "text", " then last words")
 	before := scr.text()
 	width = 20
 	r.paintPending()
@@ -70,8 +70,8 @@ func TestAHintEndsBeforeAToolCall(t *testing.T) {
 func TestTheLiveStreamRendersASplitFence(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
-	r.streamDelta("text", "```go\nfunc main() {\n")
-	r.streamDelta("text", "}\n```\n")
+	r.streamDelta("m1", "text", "```go\nfunc main() {\n")
+	r.streamDelta("m1", "text", "}\n```\n")
 
 	drawn := scr.text()
 	if strings.Contains(drawn, "```") {
@@ -146,13 +146,13 @@ func TestThinkingAndReplyKeepTheirArrivalOrder(t *testing.T) {
 func TestACompletedParagraphKeepsItsRows(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
-	r.streamDelta("text", "First paragraph is finished.\n\nSecond paragraph is still being typed")
+	r.streamDelta("m1", "text", "First paragraph is finished.\n\nSecond paragraph is still being typed")
 	if rowOf(t, scr, "First paragraph is finished.") < 0 {
 		t.Fatalf("the finished paragraph never showed:\n%s", scr.text())
 	}
 	first := rowOf(t, scr, "First paragraph is finished.")
 
-	r.streamDelta("text", " and grows.")
+	r.streamDelta("m1", "text", " and grows.")
 	r.finish()
 	drawn := scr.text()
 	if got := rowOf(t, scr, "First paragraph is finished."); got != first {
@@ -172,8 +172,8 @@ func TestACompletedParagraphKeepsItsRows(t *testing.T) {
 func TestASplitFenceCommitsAsOneBlock(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
-	r.streamDelta("text", "```go\nfunc main() {")
-	r.streamDelta("text", "\n}\n```\n\nAfter the fence.")
+	r.streamDelta("m1", "text", "```go\nfunc main() {")
+	r.streamDelta("m1", "text", "\n}\n```\n\nAfter the fence.")
 	r.paintPending()
 	r.finish()
 
@@ -250,12 +250,12 @@ func TestAThinkingParagraphDoesNotRepeatWhenTheReplyStarts(t *testing.T) {
 	scr, r := aScreen(t, 100)
 	r.userPrompt("look at both tools")
 	r.hint()
-	r.streamDelta("thinking", "I will inspect **the source** and use `printf`.\n\n")
+	r.streamDelta("m1", "thinking", "I will inspect **the source** and use `printf`.\n\n")
 	if got := countOf(t, scr, "I will inspect the source"); got != 1 {
 		t.Fatalf("the thinking paragraph reads %d time(s), want 1:\n%s", got, scr.text())
 	}
 
-	r.streamDelta("text", "I can check **both tools**.\n\n")
+	r.streamDelta("m1", "text", "I can check **both tools**.\n\n")
 	drawn := scr.text()
 	if got := countOf(t, scr, "I will inspect the source"); got != 1 {
 		t.Errorf("the thinking paragraph reads %d time(s) after the reply starts, want 1:\n%s", got, drawn)
@@ -276,8 +276,8 @@ func TestAStreamingFenceMatchesItsFinalRender(t *testing.T) {
 	source := "Intro paragraph.\n\n```go\nfunc main() {\n"
 	want := rowFrom(plain(r.markdown(source)), "func main() {")
 
-	r.streamDelta("text", "Intro paragraph.\n\n```go\n")
-	r.streamDelta("text", "func main() {\n")
+	r.streamDelta("m1", "text", "Intro paragraph.\n\n```go\n")
+	r.streamDelta("m1", "text", "func main() {\n")
 	r.paintPending()
 	// The intro above the fence may already be committed, but the
 	// unclosed fence must not be: its code is still being typed.
@@ -302,8 +302,8 @@ func TestAnEmptyFirstListItemKeepsItsNumbering(t *testing.T) {
 	source := "Intro paragraph.\n\n1.\n\n2. second item\n"
 	want := rowFrom(plain(r.markdown(source)), "2. second item")
 
-	r.streamDelta("text", "Intro paragraph.\n\n1.\n\n")
-	r.streamDelta("text", "2. second item\n")
+	r.streamDelta("m1", "text", "Intro paragraph.\n\n1.\n\n")
+	r.streamDelta("m1", "text", "2. second item\n")
 	r.paintPending()
 	drawn := scr.text()
 	if got := renderedRow(t, r, drawn, "second item"); got != want {
@@ -347,11 +347,11 @@ func TestAnUnrelatedLineEndsTheOpenBlockFirst(t *testing.T) {
 	r.userPrompt("go")
 	scr.typeText("draft")
 
-	r.streamDelta("text", "Half a reply")
+	r.streamDelta("m1", "text", "Half a reply")
 	r.steerPrompt("steer this")
 	r.notice("a notice")
 	r.failure("a failure")
-	r.streamDelta("text", " and the rest.")
+	r.streamDelta("m1", "text", " and the rest.")
 	r.finish()
 
 	drawn := scr.text()
@@ -420,11 +420,11 @@ func TestTheStreamPaintsItsFirstDeltaAndCoalescesTheRest(t *testing.T) {
 	var out bytes.Buffer
 	r := aTerminal(t, &out, 40)
 	r.userPrompt("go")
-	r.streamDelta("text", "one ")
+	r.streamDelta("m1", "text", "one ")
 	first := out.String()
 
-	r.streamDelta("text", "two ")
-	r.streamDelta("text", "three")
+	r.streamDelta("m1", "text", "two ")
+	r.streamDelta("m1", "text", "three")
 	if got := out.String(); got != first {
 		t.Fatalf("the stream painted before its frame:\n%q", got)
 	}
@@ -449,10 +449,10 @@ func TestTheFinishPaintsTheDirtyTailWithoutATick(t *testing.T) {
 	var out bytes.Buffer
 	r := aTerminal(t, &out, 40)
 	r.userPrompt("go")
-	r.streamDelta("text", "tail one ")
+	r.streamDelta("m1", "text", "tail one ")
 	first := out.String()
 
-	r.streamDelta("text", "tail two")
+	r.streamDelta("m1", "text", "tail two")
 	r.finish()
 	if got := out.String(); got == first {
 		t.Fatal("the finish painted nothing")

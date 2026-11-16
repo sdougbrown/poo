@@ -255,20 +255,11 @@ func (r *renderer) takeHint() {
 	r.block.hint = false
 }
 
-// streamMessage keeps the deltas' message. A delta that names another
-// message ends the open block first, so the messages' words never run
-// together; the renderer owns the rule, beside the one for writes.
-func (r *renderer) streamMessage(id string) {
-	if id == "" {
-		return
-	}
-	if r.live.kind != "" && id != r.live.id {
-		r.finish()
-	}
-	r.live.id = id
-}
-
-// streamDelta renders one delta of a message as it arrives. The reply
+// streamDelta renders one delta of a message as it arrives. The id
+// says which message the delta belongs to: one that names another
+// message ends the open block first, so two messages never run their
+// words together; the renderer owns the rule, beside the one for
+// writes. The reply
 // streams as markdown paragraphs, committed one block at a time. The
 // unfinished tail is a preview rendered by the same markdown renderer,
 // so the words do not move or change style when the block settles.
@@ -283,7 +274,13 @@ func (r *renderer) streamMessage(id string) {
 // The editor erases its own row on every redraw. Every row the stream
 // paints is sealed with its own newline, and the prompt redraw passes
 // below it.
-func (r *renderer) streamDelta(kind, text string) {
+func (r *renderer) streamDelta(id, kind, text string) {
+	if id != "" {
+		if r.live.kind != "" && id != r.live.id {
+			r.finish()
+		}
+		r.live.id = id
+	}
 	if text == "" {
 		return
 	}
