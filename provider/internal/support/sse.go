@@ -116,20 +116,15 @@ func Take(pending *[]poo.StreamItem) (poo.StreamItem, bool) {
 // seen part of the answer. The failure says so, so the settle reason names
 // it, and the kind the failure had before the reclassification stays in the
 // error's code, where the plan keeps it.
+//
+// The two rules it applies are this package's own: which context a failure
+// belongs to, and what a failure after the first delta is called. They are
+// composed here rather than restated, so a run whose request failed at open
+// time and one whose stream broke settle with the same kind.
 func ContextError(parent, request context.Context, arrived bool, err error) error {
-	if parent != nil && parent.Err() != nil {
-		return parent.Err()
+	failure := ClassifyTransportError(parent, request, err)
+	if !arrived {
+		return failure
 	}
-	if request != nil && request.Err() != nil {
-		kind := poo.ProviderKindNetwork
-		if arrived {
-			return &poo.ProviderError{
-				Kind:    poo.ProviderKindInterruptedStream,
-				Code:    string(kind),
-				Message: request.Err().Error(),
-			}
-		}
-		return &poo.ProviderError{Kind: kind, Message: request.Err().Error()}
-	}
-	return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
+	return InterruptedStreamError(failure)
 }

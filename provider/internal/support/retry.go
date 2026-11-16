@@ -121,22 +121,12 @@ func WaitFor(ctx context.Context, d time.Duration) error {
 //
 // A transport's own reader is one: it hands out the API's events, its
 // close, and its usage. The retry wrapper composes it so a retried
-// request and a watched one report the same things.
+// request and a watched one report the same things. The seams are the
+// core's, embedded rather than restated: a member the core's interfaces
+// grow is a member here too.
 type Reader interface {
-	// Next returns the next event of the response.
-	Next() (poo.StreamItem, error)
-	// Close releases the response.
-	Close() error
-	// ReportUsage returns the usage the response reported, or nil.
-	ReportUsage() *poo.UsageReport
-}
-
-// BlockReader is a Reader that also reports the opaque blocks the
-// response produced.
-type BlockReader interface {
-	Reader
-	// ReportProviderBlocks returns the blocks the response produced.
-	ReportProviderBlocks() []poo.ProviderBlock
+	poo.StreamReader
+	poo.UsageReporter
 }
 
 // ReportAttempt tells the request's reporter about an attempt that
@@ -379,7 +369,10 @@ func (s *Retrying) ReportUsage() *poo.UsageReport {
 // The core asks the reader the transport handed it, so a wrapper that
 // did not forward the report would lose the response's reasoning.
 func (s *Retrying) ReportProviderBlocks() []poo.ProviderBlock {
-	reporter, ok := s.current.(BlockReader)
+	if s.current == nil {
+		return nil
+	}
+	reporter, ok := s.current.(poo.ProviderBlockReporter)
 	if !ok {
 		return nil
 	}
