@@ -1508,12 +1508,17 @@ func (r *Runtime) resolveAskers(opts BuildOptions, permission Permission) ([]per
 			if deciderErr != nil {
 				if permission.AskersNamed() {
 					// The settings name the decide asker and no
-					// decider model is configured: the ask would
-					// wait for an answer that cannot come.
+					// decider model resolves: the ask would wait for
+					// an answer that cannot come. The schema's rule
+					// reports a settings file with no decider role;
+					// here the role may name a model the catalog does
+					// not hold, so the failure carries what the
+					// catalog said.
 					return nil, &Error{
 						Code:    CodeUnavailable,
 						Field:   "permission.askers",
-						Message: "the decide asker needs a decider model: roles.decider names one",
+						Message: "the decide asker has no decider model to ask",
+						Err:     deciderErr,
 					}
 				}
 				// The binary's own chain asks the decider, and there

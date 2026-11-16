@@ -386,3 +386,34 @@ func TestTheWarningNamesTheAskerTheBuildDropped(t *testing.T) {
 		t.Errorf("the warning is %q, want nothing about the decider: that asker was skipped, not dropped", runtime.Warning)
 	}
 }
+
+// TestAMissingDeciderModelNamesTheModel covers the chain naming the decide
+// asker while roles.decider points at a model the catalog does not hold. The
+// schema's rule speaks for settings with no decider role at all, so the build
+// names the model it could not resolve rather than repeating that reason.
+func TestAMissingDeciderModelNamesTheModel(t *testing.T) {
+	document := withoutDeciderModel + "permission:\n  askers: [decide]\n"
+	settings := parseSettings(t, document, config.FormatYAML)
+	_, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+		Askers:         []string{"decide"},
+	})
+	if err == nil {
+		t.Fatal("the runtime built, want a failure")
+	}
+	code, ok := config.CodeOf(err)
+	if !ok || code != config.CodeUnavailable {
+		t.Fatalf("the failure is %v, want an unavailable field", err)
+	}
+	if field, ok := config.FieldOf(err); !ok || field != "permission.askers" {
+		t.Errorf("the failure names %q, want permission.askers", field)
+	}
+	if !strings.Contains(err.Error(), "missing-model") {
+		t.Errorf("the failure is %q, want it to name the model it could not resolve", err)
+	}
+}
