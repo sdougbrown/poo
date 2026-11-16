@@ -162,17 +162,26 @@ func ParseCallback(input string) Callback {
 	if value == "" {
 		return Callback{}
 	}
-	query := url.Values{}
-	if parsed, err := url.Parse(value); err == nil && parsed.Scheme != "" {
-		query = parsed.Query()
-	} else if strings.Contains(value, "=") {
-		if parsed, err := url.ParseQuery(strings.TrimPrefix(value, "?")); err == nil {
-			query = parsed
+	// A paste is usually a URL with a query, and the loopback handler's request URL is a path
+	// with one: the query is what carries the answer either way, so it is read first.
+	if at := strings.Index(value, "?"); at >= 0 {
+		if parsed, err := url.ParseQuery(value[at+1:]); err == nil {
+			return callbackOf(parsed)
 		}
 	}
-	if len(query) == 0 {
-		return Callback{Code: value}
+	if parsed, err := url.Parse(value); err == nil && parsed.Scheme != "" {
+		return callbackOf(parsed.Query())
 	}
+	if strings.Contains(value, "=") {
+		if parsed, err := url.ParseQuery(strings.TrimPrefix(value, "?")); err == nil {
+			return callbackOf(parsed)
+		}
+	}
+	return Callback{Code: value}
+}
+
+// callbackOf reads the answer a query carries.
+func callbackOf(query url.Values) Callback {
 	return Callback{
 		Code:        query.Get("code"),
 		State:       query.Get("state"),

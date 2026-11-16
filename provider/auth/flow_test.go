@@ -275,3 +275,12 @@ func TestAKeyFlowDoesNotSignInThroughABrowser(t *testing.T) {
 		t.Fatal("a key flow produced an authorization attempt")
 	}
 }
+
+// TestParseCallbackReadsAPathWithAQuery covers the shape the loopback handler sees: a request URL
+// is a path with a query, not an absolute URL, and the answer is in the query either way.
+func TestParseCallbackReadsAPathWithAQuery(t *testing.T) {
+	got := auth.ParseCallback("/auth/callback?code=abc&state=xyz")
+	if got.Code != "abc" || got.State != "xyz" {
+		t.Errorf("the callback is %+v, want code abc state xyz", got)
+	}
+}
