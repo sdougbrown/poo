@@ -107,3 +107,37 @@ session:
 		t.Errorf("the credential file is %q, want poo's own at %q", got, want)
 	}
 }
+
+// TestTheCredentialFileBesideTheModelsFileIsAnsweredBeforeItExists covers the file
+// that is not there yet. A settings load resolves the path once, and a server keeps
+// that answer: if it were pinned to poo's default because pi's file happened to be
+// missing at load, a credential pi writes afterwards would never be read.
+func TestTheCredentialFileBesideTheModelsFileIsAnsweredBeforeItExists(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	models := filepath.Join(dir, ModelsFileName)
+	if err := os.WriteFile(models, []byte(`{"providers": {"home": {"baseUrl": "http://127.0.0.1:1/v1", "models": [{"id": "qwen"}]}}}`), 0o644); err != nil {
+		t.Fatalf("writing the models file: %v", err)
+	}
+	beside := filepath.Join(dir, AuthFileName)
+	if _, err := os.Stat(beside); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the test's credential file already exists: %v", err)
+	}
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	if got := settings.CredentialFile(); got != beside {
+		t.Errorf("the credential file is %q, want the one beside the models file at %q", got, beside)
+	}
+	// The file arrives afterwards, and the answer already pointed at it.
+	if err := os.WriteFile(beside, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	if got := settings.CredentialFile(); got != beside {
+		t.Errorf("the credential file is %q after the file arrived, want %q", got, beside)
+	}
+}

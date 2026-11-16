@@ -283,3 +283,25 @@ credentials:
 		})
 	}
 }
+
+// TestPooFileWritesWholeNumbersWhole covers the file an operator reads. A millisecond
+// epoch is whole, and a whole number written as 1.76e+12 is a timestamp nobody can
+// check or edit by hand.
+func TestPooFileWritesWholeNumbersWhole(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(pooStored, expires(-time.Hour)))
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
+	}, nil)
+	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	if _, err := credentials.Access(context.Background()); err != nil {
+		t.Fatalf("the credential did not reach a token: %v", err)
+	}
+	data := readFile(t, path)
+	want := fmt.Sprintf("expires: %d", expires(time.Hour))
+	if !strings.Contains(data, want) {
+		t.Errorf("the file writes the expiry as something else than %q:\n%s", want, data)
+	}
+	if strings.Contains(data, "e+") {
+		t.Errorf("the file writes a number in exponent form:\n%s", data)
+	}
+}

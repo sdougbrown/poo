@@ -126,11 +126,53 @@ func readObject(data []byte) (map[string]json.RawMessage, error) {
 func yamlObject(object map[string]json.RawMessage) (map[string]any, error) {
 	fields := make(map[string]any, len(object))
 	for field, raw := range object {
-		var value any
-		if err := json.Unmarshal(raw, &value); err != nil {
+		value, err := yamlValue(raw)
+		if err != nil {
 			return nil, err
 		}
 		fields[field] = value
 	}
 	return fields, nil
+}
+
+// yamlValue reads one field for the YAML writer.
+//
+// A JSON number decodes into a float by default, and a float is written as 1.76e+12:
+// a millisecond epoch nobody can read or edit, in the one file an operator is meant
+// to be able to edit. A number that is whole stays whole.
+func yamlValue(raw json.RawMessage) (any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	return whole(value), nil
+}
+
+// whole walks a decoded value and turns a whole number back into an integer.
+func whole(value any) any {
+	switch v := value.(type) {
+	case json.Number:
+		if integer, err := v.Int64(); err == nil {
+			return integer
+		}
+		if fraction, err := v.Float64(); err == nil {
+			return fraction
+		}
+		return v.String()
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for field, item := range v {
+			out[field] = whole(item)
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(v))
+		for _, item := range v {
+			out = append(out, whole(item))
+		}
+		return out
+	}
+	return value
 }

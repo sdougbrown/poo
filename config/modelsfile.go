@@ -120,11 +120,12 @@ func (s *Settings) importModelsFile(path string) error {
 //  2. pi_auth_file names pi's file. A relative path answers the same way, and a
 //     file that is not there is a settings failure, because an explicit path is
 //     a promise.
-//  3. An auth.json beside the models file, when that file is there, is what pi
-//     wrote beside its own models. This is where poo has always looked for pi's
-//     credential, so a pi setup keeps working without naming the file.
-//  4. poo's own file in the user's config directory, which is where poo creates
-//     a credential of its own.
+//  3. An auth.json beside the models file is what pi writes beside its own models,
+//     so a pi setup keeps working without naming the file. The path is answered
+//     whether or not the file is there yet: a long-lived process that resolved it
+//     before pi's first login must still find the credential pi wrote after.
+//  4. poo's own file in the user's config directory, when there is no models file
+//     for a credential to sit beside. It is where poo creates one of its own.
 //
 // Naming both files is refused: poo reads one credential at a time, and two
 // settings naming one apiece is a question the file cannot answer.
@@ -143,9 +144,7 @@ func (s *Settings) resolveCredentialFile(dir, modelsPath string) (string, error)
 		return s.resolveCredentialPath(dir, "pi_auth_file", s.PiAuthFile, true)
 	}
 	if modelsPath != "" {
-		if beside := filepath.Join(filepath.Dir(modelsPath), piimport.AuthFileName); fileExists(beside) {
-			return beside, nil
-		}
+		return filepath.Join(filepath.Dir(modelsPath), piimport.AuthFileName), nil
 	}
 	return defaultCredentialFile(), nil
 }
