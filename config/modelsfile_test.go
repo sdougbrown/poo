@@ -422,6 +422,59 @@ func TestAProviderWithoutAKeyTakesPiAuthsKey(t *testing.T) {
 	}
 }
 
+// TestAPisAuthFileThatOpensWithABOMIsRead covers the file a Windows editor
+// writes. pi strips the byte order mark before parsing, and so does poo: the
+// models file and the Codex credential are read from a file the other tool
+// reads too, so one reader refusing it would be a file pi can use and poo
+// cannot.
+func TestAPisAuthFileThatOpensWithABOMIsRead(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen"}]
+			}
+		}
+	}`)
+	writePIAuth(t, modelsFile, "\ufeff"+`{"home": {"type": "api_key", "key": "test-key-123"}}`)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	if key := settings.Endpoints["home"].APIKey; key != "test-key-123" {
+		t.Errorf("the provider imported with the key %q", key)
+	}
+}
+
+// TestPiAuthFileNamesTheKeyFileToo covers the one setting for pi's credential
+// file. A models file whose provider names no key reads it from the auth file
+// the settings resolved, not from the one beside the models file: a settings
+// file that names the file has named it for every reader.
+func TestPiAuthFileNamesTheKeyFileToo(t *testing.T) {
+	modelsFile := writePIModels(t, `{
+		"providers": {
+			"home": {
+				"baseUrl": "http://grace:4000/v1",
+				"models": [{"id": "qwen"}]
+			}
+		}
+	}`)
+	// The file beside the models file holds a different key, and the
+	// setting names the one that counts.
+	writePIAuth(t, modelsFile, `{"home": {"type": "api_key", "key": "beside-the-models"}}`)
+	named := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(named, []byte(`{"home": {"type": "api_key", "key": "named-by-the-settings"}}`), 0o600); err != nil {
+		t.Fatalf("writing the named auth file: %v", err)
+	}
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`","pi_auth_file":"`+named+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	if key := settings.Endpoints["home"].APIKey; key != "named-by-the-settings" {
+		t.Errorf("the provider imported with the key %q, want the one the setting named", key)
+	}
+}
+
 // TestAnAuthKeyInTheEnvironmentNamesTheEnvironment covers a credential
 // whose key names the environment with pi's $ spelling: the endpoint
 // imports holding the environment variable, not the spelling itself.

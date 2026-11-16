@@ -41,6 +41,7 @@ type SettingsFields struct {
 	PermissionDoomLoopThreshold     *float64 "json:\"permission.doom_loop.threshold,omitempty\""
 	PermissionFallback              *string  "json:\"permission.fallback,omitempty\""
 	PermissionUnmatched             *string  "json:\"permission.unmatched,omitempty\""
+	PiAuthFile                      *string  "json:\"pi_auth_file,omitempty\""
 	Profile                         *string  "json:\"profile,omitempty\""
 	ReasoningChat                   *string  "json:\"reasoning.chat,omitempty\""
 	RolesChat                       *string  "json:\"roles.chat,omitempty\""
@@ -120,6 +121,7 @@ type SettingsAvailability struct {
 	PermissionDoomLoopThreshold     FieldStatus
 	PermissionFallback              FieldStatus
 	PermissionUnmatched             FieldStatus
+	PiAuthFile                      FieldStatus
 	Profile                         FieldStatus
 	ReasoningChat                   FieldStatus
 	RolesChat                       FieldStatus
@@ -263,6 +265,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	PermissionFallbackSatisfied := func() bool { v := f.PermissionFallback; return v != nil && *v != "" }()
 	PermissionUnmatchedEnabled := true
 	PermissionUnmatchedSatisfied := func() bool { v := f.PermissionUnmatched; return v != nil && *v != "" }()
+	PiAuthFileEnabled := true
+	PiAuthFileSatisfied := func() bool { v := f.PiAuthFile; return v != nil && *v != "" }()
 	ProfileEnabled := true
 	ProfileSatisfied := func() bool { v := f.Profile; return v != nil && *v != "" }()
 	ReasoningChatEnabled := true
@@ -1199,6 +1203,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 				if !(f.PermissionUnmatched != nil && isValidRegexMatch(*f.PermissionUnmatched, "^(allow|ask|deny)$")) && "permission.unmatched must be allow, ask or deny" != "" {
 					reasons = append(reasons, "permission.unmatched must be allow, ask or deny")
 				}
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		PiAuthFile: FieldStatus{
+			Required:  PiAuthFileEnabled && false,
+			Enabled:   PiAuthFileEnabled,
+			Satisfied: PiAuthFileSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
 				if reasons == nil {
 					reasons = []string{}
 				}
@@ -2156,6 +2182,9 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "PermissionUnmatched":
 		v := f.PermissionUnmatched
 		return v != nil && *v != ""
+	case "PiAuthFile":
+		v := f.PiAuthFile
+		return v != nil && *v != ""
 	case "Profile":
 		v := f.Profile
 		return v != nil && *v != ""
@@ -2630,6 +2659,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 			explanations = append(explanations, "* "+*status.Reason)
 		}
 		explanations = append(explanations, "* check: permission.unmatched must be allow, ask or deny")
+	case "PiAuthFile", "pi_auth_file":
+		found = true
+		status = avail.PiAuthFile
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "Profile", "profile":
 		found = true
 		status = avail.Profile

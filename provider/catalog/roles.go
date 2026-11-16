@@ -60,6 +60,9 @@ type Endpoint struct {
 	Name string
 	// Endpoint is the endpoint's base URL.
 	Endpoint string
+	// SkipProbe says the endpoint is not probed for its models, because its
+	// models are declared rather than discovered.
+	SkipProbe bool
 	// Credential is how the endpoint's key is read.
 	Credential Credential
 }

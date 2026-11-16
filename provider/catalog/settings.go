@@ -29,6 +29,10 @@ type EndpointSettings struct {
 	APIKeyEnv string
 	// APIKey is a key written in the settings themselves.
 	APIKey string
+	// SkipProbe says the endpoint is not asked what it serves: its models are
+	// declared by the settings or the curated layer. A request to the endpoint
+	// would send nothing it understands.
+	SkipProbe bool
 }
 
 // ModelSettings is one model in the settings.
@@ -111,7 +115,7 @@ func (m ModelSettings) layer(name, endpointURL string, sampling poo.Sampling) po
 // the transport resolves by too. An endpoint that names neither needs
 // no key.
 func (e EndpointSettings) endpoint(name string) Endpoint {
-	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint}
+	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint, SkipProbe: e.SkipProbe}
 	switch {
 	case e.APIKeyEnv != "":
 		endpoint.Credential = Credential{Source: CredentialEnv, Env: e.APIKeyEnv}
