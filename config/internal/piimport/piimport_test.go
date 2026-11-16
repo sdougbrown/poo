@@ -8,14 +8,14 @@ import (
 	"github.com/sdougbrown/poo/config/internal/piimport"
 )
 
-// TestAPiAuthFileThatOpensWithABOMIsRead covers the file a Windows editor
-// writes. pi strips the byte order mark before parsing, and so does this
-// reader: poo's Codex credential reader strips it too, and one file must not be
-// readable on one path and refused on the other.
-func TestAPiAuthFileThatOpensWithABOMIsRead(t *testing.T) {
+// TestAPisFilesThatOpenWithABOMAreRead covers the files a Windows editor
+// writes. pi strips the byte order mark before parsing, and this reader strips
+// it from the models file and from the auth file: one file must not be readable
+// by pi and refused by poo, on either path.
+func TestAPisFilesThatOpenWithABOMAreRead(t *testing.T) {
 	dir := t.TempDir()
 	models := filepath.Join(dir, "models.json")
-	if err := os.WriteFile(models, []byte(`{
+	if err := os.WriteFile(models, []byte("\ufeff"+`{
 		"providers": {
 			"home": {
 				"baseUrl": "http://grace:4000/v1",
