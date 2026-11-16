@@ -1943,6 +1943,14 @@ func TestTheNativeCompactorSeesTheCurrentView(t *testing.T) {
 	if given[0].Model.ModelID != "test-model" {
 		t.Errorf("the compaction was given the model %q, want the session's", given[0].Model.ModelID)
 	}
+	// The budget travels with the view: a transport that has to decide
+	// how much room the window leaves needs the run's own numbers.
+	if given[0].Budget.ContextLimit != 32768 {
+		t.Errorf("the compaction was given the window %d, want the session's 32768", given[0].Budget.ContextLimit)
+	}
+	if given[0].Budget.Turns < 1 {
+		t.Errorf("the compaction was given %d turns, want the run's own count", given[0].Budget.Turns)
+	}
 }
 
 // TestAWindowMayCarryRetainedText covers the shape a provider returns: the
@@ -2059,5 +2067,51 @@ func TestAReplacementKeepsTheRunsInstructions(t *testing.T) {
 	}
 	if second[0].Text() != "the system prompt" {
 		t.Errorf("the instructions are %q, want the session's system prompt", second[0].Text())
+	}
+}
+
+// TestAWindowWithAnUnknownItemIsRejected covers the other half of the
+// window's rule: an item that is neither provider data nor visible text,
+// and a text item with nothing in it, are both refused. Either would
+// install something in the model's view the provider never compacted.
+func TestAWindowWithAnUnknownItemIsRejected(t *testing.T) {
+	provider := poo.ContentBlock{
+		Kind:     poo.ContentProvider,
+		Provider: &poo.ProviderBlock{API: poo.APIChatCompletions, Required: true, Data: []byte(`{"w":1}`)},
+	}
+	for _, tc := range []struct {
+		// name is the item the window carries beside the required one.
+		name string
+		item poo.ContentBlock
+	}{
+		{"an image", poo.ContentBlock{Kind: poo.ContentImage, MediaType: "image/png", Data: []byte("x")}},
+		{"a blank text", poo.ContentBlock{Kind: poo.ContentText, Text: "   "}},
+		{"a tool result", poo.ContentBlock{Kind: poo.ContentToolResult, ToolCallID: "c1", Text: "the result"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := scripted([]fakeResponse{
+				{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}},
+				{text: "the answer"},
+			})
+			tr.SetWindow(poo.ProviderWindow{Items: []poo.ContentBlock{provider, tc.item}})
+			compactor := &compactionCompactor{
+				should: afterTurns(1),
+				compaction: func(view poo.View) (poo.Compaction, error) {
+					return poo.Compaction{Strategy: "window", Window: &poo.ProviderWindow{}}, nil
+				},
+			}
+			sink := &recordingSink{}
+			opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+			opts.Compactor = compactor
+			s := newTestSession(t, opts)
+			res := runSession(t, s, "do the thing")
+
+			if sink.count("compaction") != 0 {
+				t.Errorf("the log holds %d compaction records, want none", sink.count("compaction"))
+			}
+			if res.Reason != poo.ReasonEndTurn {
+				t.Errorf("the run settled %q, want end_turn: the refused window leaves the run alive", res.Reason)
+			}
+		})
 	}
 }

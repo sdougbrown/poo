@@ -119,7 +119,8 @@ func (s *Session) validateRewrite(rewrites []ToolResultRewrite) error {
 //
 // The window is the provider's own compacted state, so the core asks the
 // session's own transport for it: the items a strategy hands back are
-// never trusted. Every item is required provider data.
+// never trusted. At least one item is required provider data; the rest
+// are optional provider items or non-empty visible text.
 func (s *Session) validateWindow(w ProviderWindow) error {
 	if len(w.Items) == 0 {
 		return fmt.Errorf("%w: the window carries no items", ErrInvalidCompaction)
@@ -151,7 +152,7 @@ func (s *Session) validateWindow(w ProviderWindow) error {
 // core-bound call to the transport's NativeCompactor capability can
 // produce one. A strategy's Window is a request for this call, not the
 // data that is applied.
-func (s *Session) nativeWindow(ctx context.Context, run *runState) (ProviderWindow, error) {
+func (s *Session) nativeWindow(ctx context.Context) (ProviderWindow, error) {
 	compactor, ok := s.opts.Transport.(NativeCompactor)
 	if !ok {
 		return ProviderWindow{}, fmt.Errorf("%w: the session's transport cannot compact", ErrInvalidCompaction)

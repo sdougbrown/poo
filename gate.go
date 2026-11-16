@@ -276,7 +276,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	// core asks the transport for it. A strategy's items are never
 	// applied: it can only ask for the native compaction.
 	if compaction.Window != nil && compaction.Replace == nil && len(compaction.Rewrite) == 0 && compaction.End == nil {
-		window, werr := s.nativeWindow(actCtx, run)
+		window, werr := s.nativeWindow(actCtx)
 		if s.interruptPending(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
 			if !s.runWindingDown(run) {
 				s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": errCompactionInterrupted.Error()})
