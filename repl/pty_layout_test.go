@@ -29,15 +29,6 @@ func physicalRows(term *terminal) []string {
 	return strings.Split(raw, "\n")[:rows]
 }
 
-// lastPhysicalRow is the terminal's bottom row.
-func lastPhysicalRow(term *terminal) string {
-	rows := physicalRows(term)
-	if len(rows) == 0 {
-		return ""
-	}
-	return strings.TrimRight(rows[len(rows)-1], " ")
-}
-
 // cursorRow is the row the terminal's cursor stands on.
 func cursorRow(term *terminal) int {
 	term.mu.Lock()
