@@ -127,14 +127,15 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 
 // ShouldCompact reports whether the view should be summarized.
 //
-// The strategy acts when the window is nearly full, and only after the
-// run has asked the model something. A summary is about work that
-// happened.
+// The strategy acts when the window is nearly full and the view holds a
+// turn older than the newest one. A single turn has nothing older to
+// summarize, so starting a compaction would only fail: the same guard
+// Compact applies belongs here, before the run is told one started.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	if budget.Turns < 1 || budget.ContextLimit <= 0 {
+	if len(liveTurns(view.Turns())) < 2 {
 		return false
 	}
-	return float64(budget.EstimatedInput) >= c.ratio*float64(budget.ContextLimit)
+	return budget.Reached(c.ratio)
 }
 
 // Compact summarizes the turns the view can spare and replaces them with

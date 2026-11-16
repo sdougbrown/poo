@@ -85,6 +85,20 @@ type ContextBudget struct {
 	Turns int
 }
 
+// Reached reports that the estimated input is at or above the share of
+// the window the ratio names, and that the run has asked the model
+// something.
+//
+// It is the trigger every compaction strategy acts on: a strategy picks
+// the ratio, and the rule that turns a ratio into a decision lives here,
+// where the budget does.
+func (b ContextBudget) Reached(ratio float64) bool {
+	if b.Turns < 1 || b.ContextLimit <= 0 {
+		return false
+	}
+	return float64(b.EstimatedInput) >= ratio*float64(b.ContextLimit)
+}
+
 // HookContext is what a hook is given.
 //
 // The context carries the run's identity, the turn, the model's history

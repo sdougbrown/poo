@@ -693,3 +693,41 @@ func TestTheDefaultFileListNamesTheToolsPooShips(t *testing.T) {
 		}
 	}
 }
+
+// TestASingleTurnIsNotWorthCompacting covers the trigger: a view with one
+// live turn has nothing older to summarize, so the strategy does not start
+// a compaction the core would refuse.
+func TestASingleTurnIsNotWorthCompacting(t *testing.T) {
+	budget := poo.ContextBudget{ContextLimit: 100, EstimatedInput: 95, Turns: 2}
+	oneTurn := poo.NewHistoryView([]poo.Message{
+		poo.NewTextMessage(poo.RoleSystem, "the system prompt"),
+		poo.NewTextMessage(poo.RoleAssistant, "the answer"),
+	}, nil, []poo.TurnSummary{{TurnIndex: 1, Start: 1, End: 2}})
+	twoTurns := poo.NewHistoryView([]poo.Message{
+		poo.NewTextMessage(poo.RoleSystem, "the system prompt"),
+		poo.NewTextMessage(poo.RoleAssistant, "the first answer"),
+		poo.NewTextMessage(poo.RoleAssistant, "the second answer"),
+	}, nil, []poo.TurnSummary{
+		{TurnIndex: 1, Start: 1, End: 2},
+		{TurnIndex: 2, Start: 2, End: 3},
+	})
+	c := summary.New(summary.Options{Ratio: 0.85})
+	if c.ShouldCompact(oneTurn, budget) {
+		t.Error("the strategy started a compaction with one turn in the view")
+	}
+	if !c.ShouldCompact(twoTurns, budget) {
+		t.Error("the strategy declined with two turns in the view and the window nearly full")
+	}
+	// A turn a compaction removed holds nothing to summarize, so it does
+	// not count towards the two the strategy needs.
+	compacted := poo.NewHistoryView([]poo.Message{
+		poo.NewTextMessage(poo.RoleSystem, "the system prompt"),
+		poo.NewTextMessage(poo.RoleAssistant, "the second answer"),
+	}, nil, []poo.TurnSummary{
+		{TurnIndex: 1, Removed: true},
+		{TurnIndex: 2, Start: 1, End: 2},
+	})
+	if c.ShouldCompact(compacted, budget) {
+		t.Error("the strategy started a compaction with one turn left in the view")
+	}
+}

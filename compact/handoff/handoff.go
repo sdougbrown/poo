@@ -73,15 +73,7 @@ func (c *Compactor) MaxTokens() int { return c.maxTokens }
 // run has asked the model something: a handoff is a note about work
 // that happened.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
-	if budget.Turns < 1 {
-		// The run has not asked the model anything yet, so there is
-		// nothing to hand over.
-		return false
-	}
-	if budget.ContextLimit <= 0 {
-		return false
-	}
-	return float64(budget.EstimatedInput) >= c.ratio*float64(budget.ContextLimit)
+	return budget.Reached(c.ratio)
 }
 
 // Compact asks the model to write a handoff.
