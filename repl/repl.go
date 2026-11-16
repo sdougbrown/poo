@@ -590,7 +590,7 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 	}
 	cmd := exec.Command(exe, args...)
 	ownProcessGroup(cmd)
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = m.serverStderr()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, nil, nil, err
@@ -603,6 +603,28 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 		return nil, nil, nil, fmt.Errorf("repl: starting %s: %w", exe, err)
 	}
 	return stdin, stdout, cmd.Wait, nil
+}
+
+// serverStderr picks where the server's diagnostics go. A layout owns
+// the terminal when the footer runs, so the diagnostics go through its
+// locked writer and land above the footer; anything else keeps the
+// process's own stderr.
+func (m *machine) serverStderr() io.Writer {
+	if m.r != nil && m.r.layout != nil {
+		return layoutStderr{m.r.layout}
+	}
+	return os.Stderr
+}
+
+// layoutStderr writes through a layout, so a writer outside the run
+// loop lands above the footer without touching the renderer's state.
+type layoutStderr struct {
+	l *layout
+}
+
+func (w layoutStderr) Write(p []byte) (int, error) {
+	w.l.write(string(p))
+	return len(p), nil
 }
 
 // newInput builds the line reader for the session.
