@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/chubin/vt10x"
 )
 
 func TestServerHasItsOwnProcessGroup(t *testing.T) {
@@ -37,6 +39,30 @@ func TestServerHasItsOwnProcessGroup(t *testing.T) {
 	}
 	if group == syscall.Getpgrp() {
 		t.Fatal("the server shares the terminal's process group and receives its interrupts")
+	}
+}
+
+// TestAServerStderrHoldsAPartialLine covers the stderr pipe's chunks:
+// a write is not a row, so a diagnostic split across chunks reads as
+// one line when its newline lands.
+func TestAServerStderrHoldsAPartialLine(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(40, 24))
+	l := aLayout(t, vt, 40, 24)
+	w := &layoutStderr{l: l}
+
+	n, err := w.Write([]byte("a partial "))
+	if n != len("a partial ") || err != nil {
+		t.Fatalf("the partial chunk wrote %d bytes, err %v", n, err)
+	}
+	if drawn := trimScreen(vt.String()); strings.Contains(drawn, "a partial") {
+		t.Fatalf("the partial chunk painted a row:\n%s", drawn)
+	}
+	if _, err := w.Write([]byte("line\n")); err != nil {
+		t.Fatal(err)
+	}
+	drawn := trimScreen(vt.String())
+	if n := strings.Count(drawn, "a partial line"); n != 1 {
+		t.Errorf("the split diagnostic reads %d time(s), want 1:\n%s", n, drawn)
 	}
 }
 

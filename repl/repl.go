@@ -611,19 +611,31 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 // process's own stderr.
 func (m *machine) serverStderr() io.Writer {
 	if m.r != nil && m.r.layout != nil {
-		return layoutStderr{m.r.layout}
+		return &layoutStderr{l: m.r.layout}
 	}
 	return os.Stderr
 }
 
 // layoutStderr writes through a layout, so a writer outside the run
-// loop lands above the footer without touching the renderer's state.
+// loop lands above the footer without touching the renderer's state. A
+// pipe's write is not a row: a line split across chunks is held until
+// its newline lands, so one diagnostic reads as one row.
 type layoutStderr struct {
 	l *layout
+	// held is the partial line the pipe has not finished.
+	held string
 }
 
-func (w layoutStderr) Write(p []byte) (int, error) {
-	w.l.write(string(p))
+func (w *layoutStderr) Write(p []byte) (int, error) {
+	w.held += string(p)
+	for {
+		i := strings.IndexByte(w.held, '\n')
+		if i < 0 {
+			break
+		}
+		w.l.write(w.held[:i+1])
+		w.held = w.held[i+1:]
+	}
 	return len(p), nil
 }
 
