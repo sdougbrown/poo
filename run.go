@@ -1554,9 +1554,10 @@ func (s *Session) writeUsage(run *runState, turn int, usage *UsageReport, reques
 // charge share one lock, so a settle between them cannot slip through.
 //
 // The record is written anyway. The endpoint billed the request, and the
-// log is where a run's real spend survives; the store refuses it once the
-// run is sealed, like every other late record, so what this buys is the
-// window between the commit and the seal.
+// log is where a run's real spend survives. The finalization seals the run
+// before it commits, so the charge stops at the seal, and the record
+// written after it is one the sink still takes: the seal refuses a record
+// a run's in-flight work claims, not the append itself.
 func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageReport, requestChars int) bool {
 	s.mu.Lock()
 	if !run.committed && !run.sealed {

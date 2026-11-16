@@ -145,10 +145,37 @@ func TestTheAggregateCarriesTheCompactionShare(t *testing.T) {
 		t.Errorf("the aggregate's compaction share is %v in and %v out, want 900 and 90",
 			agg.CompactionInputTokens, agg.CompactionOutputTokens)
 	}
+	names := map[string]bool{}
 	for _, m := range comparedMetrics() {
-		if m.name == "compaction_input_tokens" || m.name == "compaction_output_tokens" {
-			return
+		names[m.name] = true
+	}
+	for _, want := range []string{"compaction_input_tokens", "compaction_output_tokens"} {
+		if !names[want] {
+			t.Errorf("the comparison has no %s metric", want)
 		}
 	}
-	t.Error("the comparison has no compaction metric")
+}
+
+// TestTheComparisonSeesACompactionRegression covers the rows' effect: a
+// candidate whose only difference is what compacting cost is one
+// regression, and it is the compaction's own metric that names it.
+func TestTheComparisonSeesACompactionRegression(t *testing.T) {
+	baseline := comparisonReport("b",
+		comparisonRun("m", 1, true, 1000, 500),
+		comparisonRun("m", 2, true, 1000, 500))
+	candidate := comparisonReport("c",
+		comparisonRun("m", 1, true, 1000, 500),
+		comparisonRun("m", 2, true, 1000, 500))
+	for i := range candidate.Results {
+		candidate.Results[i].Metrics.CompactionInputTokens = 900
+	}
+
+	cmp := Compare(baseline, candidate)
+	if len(cmp.Regressions) != 1 {
+		t.Fatalf("the comparison found %d regressions, want the compaction's 1: %+v",
+			len(cmp.Regressions), cmp.Regressions)
+	}
+	if got := cmp.Regressions[0].Metric; got != "compaction_input_tokens" {
+		t.Errorf("the regression names %q, want compaction_input_tokens", got)
+	}
 }
