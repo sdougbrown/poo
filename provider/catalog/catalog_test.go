@@ -792,3 +792,42 @@ func TestAnUnresolvedRoleSaysWhatIsKnown(t *testing.T) {
 		}
 	}
 }
+
+// TestAnUnassignedRoleSaysWhatIsKnown covers the message for a role nothing is assigned
+// to: it must not claim that no model serves the role, because it did not look. The
+// models that would serve it are named, so an operator sees what to assign.
+func TestAnUnassignedRoleSaysWhatIsKnown(t *testing.T) {
+	c := catalog.New(catalog.Options{Settings: localSettings()})
+	_, err := c.Role(catalog.RoleChat)
+	var unresolved *catalog.UnresolvedError
+	if !errors.As(err, &unresolved) {
+		t.Fatalf("the role is %v, want an UnresolvedError", err)
+	}
+	if strings.Contains(err.Error(), "no model") {
+		t.Errorf("the failure is %q, and it claims nothing serves the role", err)
+	}
+	if !strings.Contains(err.Error(), `"gemma4"`) {
+		t.Errorf("the failure is %q, want it to name the models that would serve the role", err)
+	}
+}
+
+// TestARoleNeedsTheModelToServeIt covers the check a session applies: a model in the
+// catalog that cannot serve the role is not that role's model.
+func TestARoleNeedsTheModelToServeIt(t *testing.T) {
+	settings := localSettings()
+	settings.Models["gemma4"] = catalog.ModelSettings{
+		Endpoint: "grace",
+		ModelID:  "gemma4",
+		Ops:      []poo.Op{poo.OpSystemOne},
+	}
+	settings.Roles = map[string]string{"chat": "gemma4"}
+	c := catalog.New(catalog.Options{Settings: settings})
+	_, err := c.Role(catalog.RoleChat)
+	var op *catalog.OpError
+	if !errors.As(err, &op) {
+		t.Fatalf("the role is %v, want an OpError", err)
+	}
+	if op.Op != poo.OpChat {
+		t.Errorf("the operation is %q, want chat", op.Op)
+	}
+}

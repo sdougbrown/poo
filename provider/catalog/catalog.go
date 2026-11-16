@@ -409,19 +409,40 @@ func (c *Catalog) Notes(name string) []string {
 	return e.notes
 }
 
-// Role returns the model assigned to a role.
+// Role returns the model assigned to a role, checked the way a session checks it.
 //
-// A role that no model is assigned to is an error: the caller asked for
-// a model that does not exist.
+// A role that no model is assigned to is an error, and so is a model that is in the
+// catalog but does not serve what the role needs: a caller that asks a role for its
+// model is asking what a session would run, and a session refuses the second.
 func (c *Catalog) Role(role Role) (poo.ModelInfo, error) {
 	name, ok := c.roles[role]
 	if !ok {
-		return poo.ModelInfo{}, &UnresolvedError{Name: string(role), Role: role}
+		return poo.ModelInfo{}, c.unresolved(string(role), role)
 	}
 	if _, ok := c.entries[name]; !ok {
 		return poo.ModelInfo{}, c.unresolved(name, role)
 	}
-	return c.effective(name), nil
+	info := c.effective(name)
+	for _, op := range opsForRole(role) {
+		if info.HasOp(op) {
+			continue
+		}
+		return poo.ModelInfo{}, &OpError{Role: role, Model: name, Op: op}
+	}
+	return info, nil
+}
+
+// Roles returns the model assigned to each role, by role name.
+//
+// It is the roles the settings assigned, which is the set the session enforces: a
+// caller that reports on the roles reports on these, and adds the roles no one
+// assigned for itself.
+func (c *Catalog) Roles() map[Role]string {
+	out := make(map[Role]string, len(c.roles))
+	for role, name := range c.roles {
+		out[role] = name
+	}
+	return out
 }
 
 // unresolved is the error for a model the catalog does not hold, with the models

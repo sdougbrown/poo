@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/provider/catalog"
 )
 
 // The commands that read the settings and the store: the catalog the
@@ -459,5 +460,61 @@ roles:
 	}
 	if !strings.Contains(stderr, "home/qwen3") {
 		t.Errorf("the failure is %q, want it to name the model that would have served the role", stderr)
+	}
+}
+
+// TestTheRolesCommandFailsOnAModelThatDoesNotServeTheRole covers the half of the check
+// that a name lookup misses: the model is in the catalog, and the role needs an
+// operation it does not serve, so a session would refuse it. The command must refuse
+// too, or it is not the check it says it is.
+func TestTheRolesCommandFailsOnAModelThatDoesNotServeTheRole(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("HOME", configDir)
+	t.Setenv("APPDATA", configDir)
+
+	dir := t.TempDir()
+	settings := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settings, []byte(`version: 1
+endpoints:
+  home:
+    endpoint: http://127.0.0.1:1/v1
+models:
+  home/qwen3:
+    endpoint: home
+    model_id: qwen3
+    ops: [systemone]
+roles:
+  chat: home/qwen3
+`), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	code, stderr := runCLI(t, "roles", "--settings", settings)
+	if code == 0 {
+		t.Error("poo roles exited 0 for a model that cannot serve the role")
+	}
+	if !strings.Contains(stderr, "chat") || !strings.Contains(stderr, "does not serve") {
+		t.Errorf("the failure is %q, want it to name the operation the role needs", stderr)
+	}
+}
+
+// TestTheRoleCredentialSourceIsRendered covers the three sources a key has. Only one of
+// them was exercised by the command's own test, so a regression in the others would show
+// the wrong source with nothing to catch it.
+func TestTheRoleCredentialSourceIsRendered(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		credential catalog.Credential
+		want       string
+	}{
+		{name: "the environment", credential: catalog.Credential{Source: catalog.CredentialEnv, Env: "HOME_KEY"}, want: "env:HOME_KEY"},
+		{name: "the settings", credential: catalog.Credential{Source: catalog.CredentialStatic}, want: "static"},
+		{name: "none", credential: catalog.Credential{Source: catalog.CredentialNone}, want: "none"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := credential(c.credential); got != c.want {
+				t.Errorf("the source renders as %q, want %q", got, c.want)
+			}
+		})
 	}
 }

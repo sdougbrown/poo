@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"sort"
 	"text/tabwriter"
 
 	clicontract "github.com/sdougbrown/cli-contract"
@@ -40,24 +41,39 @@ func handleRoles(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ROLE\tMODEL\tPROVIDER\tCREDENTIAL")
 	failed := false
+	// The roles the catalog holds are the ones a session answers to, and they are what
+	// this reports on: a role assigned in the settings but unknown to the catalog would
+	// be enforced by neither.
+	assigned := cat.Roles()
+	names := make([]string, 0, len(assigned)+2)
+	for role := range assigned {
+		names = append(names, string(role))
+	}
 	for _, role := range []catalog.Role{catalog.RoleChat, catalog.RoleDecider} {
-		name, assigned := settings.Roles[string(role)]
-		if !assigned {
+		if _, ok := assigned[role]; !ok {
+			names = append(names, string(role))
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		role := catalog.Role(name)
+		chosen, ok := assigned[role]
+		if !ok {
 			// A role the settings do not assign is a role a session does
 			// without: the run's flags may name the chat model instead, and the
 			// decider is optional.
 			fmt.Fprintf(w, "%s\t-\t-\t-\n", role)
 			continue
 		}
-		model, err := cat.Role(role)
+		resolved, err := cat.Role(role)
 		if err != nil {
-			fmt.Fprintf(w, "%s\t%s\t-\t-\n", role, name)
+			fmt.Fprintf(w, "%s\t%s\t-\t-\n", role, chosen)
 			fmt.Fprintf(stderr, "poo roles: %v\n", err)
 			failed = true
 			continue
 		}
-		endpoint := cat.Endpoints()[model.Provider]
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", role, model.Name, model.Provider, credential(endpoint.Credential))
+		endpoint := cat.Endpoints()[resolved.Provider]
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", role, resolved.Name, resolved.Provider, credential(endpoint.Credential))
 	}
 	_ = w.Flush()
 	if failed {
