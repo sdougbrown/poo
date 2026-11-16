@@ -111,6 +111,14 @@ settings, where a literal key lives, and the layer never carries one.
 against the settings file's directory. `cli_registry.paths` and
 `feeds.paths` answer to the working directory.
 
+`poo auth import pi` copies the Codex credential pi's `auth.json` holds into poo's
+file, once. It reads the file `--from` names, then the one `pi_auth_file` names,
+then pi's own `~/.pi/agent/auth.json`. It is a one-way door: a refresh rotates the
+refresh token, so two tools cannot both keep one credential alive. After the copy,
+pi's is stale from poo's first refresh, and a refresh pi makes first would
+invalidate poo's. Run one of them. Nothing pi's file holds is changed, and an
+existing credential is replaced only by `--force` or by answering the prompt.
+
 `poo roles` is the check to run before a session: each role the settings assign
 is resolved against the catalog, and printed with the provider that serves it
 and where that provider's key comes from. No key is printed and no credential is

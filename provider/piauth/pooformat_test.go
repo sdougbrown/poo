@@ -305,3 +305,84 @@ func TestPooFileWritesWholeNumbersWhole(t *testing.T) {
 		t.Errorf("the file writes a number in exponent form:\n%s", data)
 	}
 }
+
+// TestSetKeepsACredentialAndRefusesToReplaceOne covers the store's write for a
+// credential that did not come from a refresh: a file is created with the entry,
+// every other entry kept, and a second write is refused until it is asked for.
+func TestSetKeepsACredentialAndRefusesToReplaceOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	access := codexToken(t, newAccount)
+	credentials := piauth.Credentials{Path: path, Now: clock}
+	entry := piauth.Credential{
+		Access:    access,
+		Refresh:   newRefresh,
+		Expires:   clock().Add(time.Hour),
+		AccountID: newAccount,
+	}
+
+	status, err := credentials.Set(context.Background(), entry, false)
+	if err != nil {
+		t.Fatalf("the credential was not stored: %v", err)
+	}
+	if status.AccountID != newAccount || !status.Live || status.Format != piauth.FormatPoo {
+		t.Errorf("the status is %+v, want the stored credential, live, in poo's file", status)
+	}
+	if _, held := pooFile(t, path); held[piauth.ProviderCodex]["access"] != access {
+		t.Errorf("the file holds %v, want the credential", held)
+	}
+
+	// A second write is the one a command must not make on its own.
+	if _, err := credentials.Set(context.Background(), entry, false); !errors.Is(err, piauth.ErrExists) {
+		t.Fatalf("a second write is %v, want ErrExists", err)
+	}
+	if _, err := credentials.Set(context.Background(), entry, true); err != nil {
+		t.Fatalf("the replaced write failed: %v", err)
+	}
+}
+
+// TestSetRefusesPisFile covers the file a write must not touch: pi's, which
+// another tool owns.
+func TestSetRefusesPisFile(t *testing.T) {
+	body := fmt.Sprintf(stored, expires(time.Hour))
+	path := authFile(t, body)
+	_, err := (piauth.Credentials{Path: path}).Set(context.Background(), piauth.Credential{
+		Access:    codexToken(t, newAccount),
+		Refresh:   newRefresh,
+		Expires:   clock().Add(time.Hour),
+		AccountID: newAccount,
+	}, true)
+	if !errors.Is(err, piauth.ErrStorage) {
+		t.Fatalf("the write is %v, want ErrStorage", err)
+	}
+	if got := readFile(t, path); got != body {
+		t.Errorf("pi's file was written:\n%s", got)
+	}
+}
+
+// TestSetKeepsTheOtherEntries covers the neighbours: a file that already holds
+// another provider's credential keeps it.
+func TestSetKeepsTheOtherEntries(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(pooStored, expires(-time.Hour)))
+	_, before := pooFile(t, path)
+	credentials := piauth.Credentials{Path: path, Now: clock}
+	access := codexToken(t, newAccount)
+	if _, err := credentials.Set(context.Background(), piauth.Credential{
+		Access:    access,
+		Refresh:   newRefresh,
+		Expires:   clock().Add(time.Hour),
+		AccountID: newAccount,
+	}, true); err != nil {
+		t.Fatalf("the credential was not stored: %v", err)
+	}
+	version, after := pooFile(t, path)
+	if version != 1 {
+		t.Errorf("the file's version is %d, want 1", version)
+	}
+	if !reflect.DeepEqual(before["anthropic"], after["anthropic"]) {
+		t.Errorf("the anthropic credential was rewritten:\n before %v\n after  %v", before["anthropic"], after["anthropic"])
+	}
+	if after[piauth.ProviderCodex]["access"] != access {
+		t.Errorf("the file holds %v, want the stored credential", after[piauth.ProviderCodex])
+	}
+}

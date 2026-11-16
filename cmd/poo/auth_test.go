@@ -123,3 +123,99 @@ func TestTheAuthStatusOfAMissingCredentialIsAFailure(t *testing.T) {
 		t.Errorf("poo auth status exited 0 for a credential that is not there")
 	}
 }
+
+// piCredential is a pi auth.json holding one Codex credential.
+func piCredential(t *testing.T, dir, access string, expires int64) string {
+	t.Helper()
+	path := filepath.Join(dir, "pi-auth.json")
+	body := `{"openai-codex": {"type": "oauth", "access": "` + access + `", "refresh": "a-refresh-token", "expires": ` + itoa64(expires) + `, "accountId": "acct-from-pi"}, "anthropic": {"type": "api_key", "key": "$ANTHROPIC_API_KEY"}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing pi's credential file: %v", err)
+	}
+	return path
+}
+
+// TestTheAuthImportCopiesPisCredentialIntoPoosFile covers the import: the entry
+// pi's file holds is written into poo's own file, in poo's shape, and the message
+// says what the copy costs.
+func TestTheAuthImportCopiesPisCredentialIntoPoosFile(t *testing.T) {
+	dir := t.TempDir()
+	pi := piCredential(t, dir, "an-access-token-from-pi", 4102444800000)
+	target := filepath.Join(dir, "auth.json")
+	settings := authSettings(t, dir, target)
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"auth", "import", "pi", "--settings", settings, "--from", pi}); code != 0 {
+			t.Errorf("poo auth import pi exited with %d", code)
+		}
+	})
+	for _, want := range []string{"acct-from-pi", pi, target, "pi's copy is stale"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report is %q, want it to name %q", out, want)
+		}
+	}
+	stored, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("reading poo's credential file: %v", err)
+	}
+	for _, want := range []string{"version: 1", "openai-codex:", "an-access-token-from-pi", "acct-from-pi"} {
+		if !strings.Contains(string(stored), want) {
+			t.Errorf("poo's file is\n%s\nwant it to hold %q", stored, want)
+		}
+	}
+	if strings.Contains(string(stored), "ANTHROPIC_API_KEY") {
+		t.Errorf("the import copied pi's other providers:\n%s", stored)
+	}
+	// pi's file is not touched: it is another tool's.
+	before, _ := os.ReadFile(pi)
+	if !strings.Contains(string(before), "ANTHROPIC_API_KEY") {
+		t.Error("pi's file was rewritten")
+	}
+}
+
+// TestTheAuthImportRefusesToReplaceACredential covers the replace rule: a file that
+// already holds a credential keeps it unless the operator asks.
+func TestTheAuthImportRefusesToReplaceACredential(t *testing.T) {
+	dir := t.TempDir()
+	pi := piCredential(t, dir, "an-access-token-from-pi", 4102444800000)
+	target := filepath.Join(dir, "auth.json")
+	codexCredential(t, dir, 4102444800000)
+	if err := os.WriteFile(target, []byte(`{
+  "version": 1,
+  "credentials": {
+    "openai-codex": {"type": "oauth", "access": "already-there", "refresh": "r", "expires": 4102444800000, "accountId": "acct-already"}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("writing poo's credential file: %v", err)
+	}
+	settings := authSettings(t, dir, target)
+
+	if code := run([]string{"auth", "import", "pi", "--settings", settings, "--from", pi}); code == 0 {
+		t.Error("the import exited 0 for a credential it was not asked to replace")
+	}
+	stored, _ := os.ReadFile(target)
+	if !strings.Contains(string(stored), "already-there") {
+		t.Errorf("the credential was replaced without being asked:\n%s", stored)
+	}
+	if code := run([]string{"auth", "import", "pi", "--settings", settings, "--from", pi, "--force"}); code != 0 {
+		t.Error("the forced import failed")
+	}
+	stored, _ = os.ReadFile(target)
+	if !strings.Contains(string(stored), "an-access-token-from-pi") {
+		t.Errorf("the forced import did not replace the credential:\n%s", stored)
+	}
+}
+
+// TestTheAuthImportRefusesTheOneFile covers a copy that would write a file onto
+// itself: there is nothing to import.
+func TestTheAuthImportRefusesTheOneFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "auth.json")
+	settings := authSettings(t, dir, target)
+	if err := os.WriteFile(target, []byte(`{"openai-codex": {"type": "oauth", "access": "a", "refresh": "r", "expires": 4102444800000, "accountId": "acct"}}`), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	if code := run([]string{"auth", "import", "pi", "--settings", settings, "--from", target}); code == 0 {
+		t.Error("the import copied a file onto itself")
+	}
+}

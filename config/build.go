@@ -2366,6 +2366,12 @@ func (r *Runtime) apiKey(model poo.ModelInfo) string {
 }
 
 // expandHome expands the leading ~ of a path.
+// ExpandPath resolves the leading ~ of a path, the way a settings value that names
+// one resolves it: a path a command is handed is one an operator wrote.
+func ExpandPath(path string) (string, error) {
+	return expandHome(path)
+}
+
 func expandHome(path string) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()

@@ -114,6 +114,11 @@ var (
 	// was traded. Nothing was written either.
 	ErrStorage = errors.New("piauth: the auth.json could not be read")
 
+	// ErrExists means the file already holds a credential for the provider, and
+	// the caller did not ask for it to be replaced. A command that replaced a
+	// working credential without being asked is a logout nobody wanted.
+	ErrExists = errors.New("piauth: the auth file already holds a credential")
+
 	// ErrPersist means the endpoint traded the refresh token and the new
 	// credential could not be stored. The file still holds the refresh token
 	// that was traded, so it may no longer work. The caller's next step is
@@ -130,6 +135,83 @@ type Token struct {
 	// AccountID is the ChatGPT account Access belongs to. Codex takes it
 	// as the chatgpt-account-id header.
 	AccountID string
+}
+
+// Credential is a credential to store: what a sign-in or an import hands over, in
+// poo's own words.
+type Credential struct {
+	// Access is the access token.
+	Access string
+	// Refresh is the refresh token.
+	Refresh string
+	// Expires is when Access stops working.
+	Expires time.Time
+	// AccountID is the ChatGPT account Access belongs to.
+	AccountID string
+}
+
+// Set stores a credential under the provider.
+//
+// The write is a refresh's write — the same lock, the same file, every other entry
+// kept — so a login and a refresh cannot interleave. replace says the caller has
+// decided to replace a credential the file already holds; without it, a file that
+// holds one is ErrExists and nothing is written.
+//
+// A credential that cannot be used is refused here rather than stored: an entry
+// with no token, or one whose access token names no account, is one the next read
+// would refuse anyway. Only poo's own file takes a write: pi's is pi's, and a
+// command that rewrote it would be changing a file another tool owns.
+func (c Credentials) Set(ctx context.Context, entry Credential, replace bool) (Status, error) {
+	if c.Path == "" {
+		return Status{}, errors.New("piauth: no auth.json path")
+	}
+	if entry.Access == "" || entry.Refresh == "" {
+		return Status{}, errors.New("piauth: a credential needs an access token and a refresh token")
+	}
+	if accountID(entry.Access, entry.AccountID) == "" {
+		return Status{}, fmt.Errorf("%w: the credential names no account", ErrNoCredential)
+	}
+	hold, err := acquire(ctx, c.Path, c.wait())
+	if err != nil {
+		return Status{}, err
+	}
+	defer hold.release()
+	doc, err := c.load()
+	if err != nil {
+		return Status{}, err
+	}
+	if _, ok := doc.format.(pooFormat); !ok {
+		return Status{}, fmt.Errorf("%w: %s is pi's file, and poo writes its own", ErrStorage, doc.path)
+	}
+	if _, err := decodeEntry(doc.path, ProviderCodex, doc.entries); err == nil && !replace {
+		return Status{}, fmt.Errorf("%w: %s holds a %s credential", ErrExists, doc.path, ProviderCodex)
+	}
+	stored := credential{
+		Type:      "oauth",
+		Access:    entry.Access,
+		Refresh:   entry.Refresh,
+		Expires:   entry.Expires.UnixMilli(),
+		AccountID: accountID(entry.Access, entry.AccountID),
+	}
+	if err := hold.verify(); err != nil {
+		return Status{}, fmt.Errorf("%w: another writer took the lock before the write: %w", ErrPersist, err)
+	}
+	if err := c.write(doc, stored); err != nil {
+		return Status{}, fmt.Errorf("%w: %w", ErrPersist, err)
+	}
+	return c.status(doc, stored), nil
+}
+
+// status is the report of one credential in the document it was read from.
+func (c Credentials) status(doc document, stored credential) Status {
+	return Status{
+		Path:      doc.path,
+		Format:    doc.format.name(),
+		Provider:  ProviderCodex,
+		AccountID: accountID(stored.Access, stored.AccountID),
+		Expires:   time.UnixMilli(stored.Expires),
+		Live:      stored.live(c.now(), c.leeway()),
+	}
 }
 
 // Status is what a credential file holds, as read: the credential, and never
@@ -300,14 +382,7 @@ func (c Credentials) Status() (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	return Status{
-		Path:      doc.path,
-		Format:    doc.format.name(),
-		Provider:  ProviderCodex,
-		AccountID: accountID(stored.Access, stored.AccountID),
-		Expires:   time.UnixMilli(stored.Expires),
-		Live:      stored.live(c.now(), c.leeway()),
-	}, nil
+	return c.status(doc, stored), nil
 }
 
 // Entries reads an auth file of either shape and encoding and returns the
