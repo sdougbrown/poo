@@ -22,11 +22,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/chzyer/readline"
+	"github.com/reeflective/readline"
 
 	"github.com/sdougbrown/poo/wire/protocol"
 	"golang.org/x/term"
@@ -146,12 +145,6 @@ type machine struct {
 	frame *time.Ticker
 	// esc carries the run an Escape asked to stop.
 	esc chan string
-	// escGen counts the keys the filter delivered: an escape is a key
-	// of its own only when no key follows it inside escWindow.
-	escGen atomic.Int64
-	// escState is where the escape the filter is holding has got to.
-	// The filter is the only writer, on the reader's goroutine.
-	escState escState
 	// runID is the run the session is working on, empty when idle.
 	// The cancel names it: the wire refuses a run/cancel that does
 	// not say what to stop.
@@ -173,12 +166,6 @@ type lineResult struct {
 	line string
 	err  error
 }
-
-// escWindow is how long an escape byte waits for the rest of its
-// sequence before the repl reads it as Escape pressed on its own. A
-// terminal sends a whole arrow key in one write, so the wait only has
-// to cover the reader's own scheduling.
-const escWindow = 40 * time.Millisecond
 
 // streamFrame is how often the run loop paints the preview a delta left
 // dirty: a long block coalesces its frames instead of rendering every
@@ -437,69 +424,6 @@ func (m *machine) gone() int {
 	return 1
 }
 
-// escState is where the escape the filter is holding has got to. The
-// escape byte begins every arrow, Home, Delete and function key, so a
-// run cannot act on it until it knows what followed.
-type escState int
-
-const (
-	// escIdle holds no escape.
-	escIdle escState = iota
-	// escOpen holds an escape that has not said what it is yet.
-	escOpen
-	// escSequence holds the escape of a key that has more bytes.
-	escSequence
-)
-
-// filterRune reads the escape byte before the editor does, and only
-// while a run works: there Escape stops the run, and nothing else the
-// run needs. Idle, every key is the editor's.
-func (m *machine) filterRune(r rune) (rune, bool) {
-	runID := m.activeRun()
-	if runID == "" {
-		m.escState = escIdle
-		return r, true
-	}
-	switch {
-	case r == readline.CharEsc:
-		// The escape is a key of its own unless the rest of an arrow,
-		// Home or function key follows it, and the window tells which.
-		m.escState = escOpen
-		seen := m.escGen.Add(1)
-		time.AfterFunc(escWindow, func() {
-			if m.escGen.Load() != seen {
-				return
-			}
-			select {
-			case m.esc <- runID:
-			default:
-			}
-		})
-		return r, false
-	case m.escState == escIdle:
-		return r, true
-	}
-	// Something followed the escape after all: it was a prefix.
-	m.escGen.Add(1)
-	if m.escState == escOpen {
-		if r == '[' || r == 'O' {
-			m.escState = escSequence
-			return r, false
-		}
-		m.escState = escIdle
-		return r, true
-	}
-	// The rest of the key goes too, so an arrow leaves no text behind.
-	if r >= 0x20 && r <= 0x7e {
-		if isFinalByte(r) {
-			m.escState = escIdle
-		}
-		return r, false
-	}
-	m.escState = escIdle
-	return r, true
-}
-
 // start starts the server, does the handshake, opens the session and
 // reads the model's window for the statusline.
 func (m *machine) start() error {
@@ -658,169 +582,17 @@ func (w *layoutStderr) flush() {
 	w.held = ""
 }
 
-// newInput builds the line reader for the session.
+// newInput builds the line reader for the session. The editor is
+// hardwired to the process's own stdio, so it only runs when the repl's
+// input is exactly that terminal; anything else reads plain lines.
 func (m *machine) newInput() input {
-	if termIsTerminal(m.in) {
-		editor := &readlineInput{}
-		tab := &backtab{m: m}
-		cfg := m.lineConfig(tab)
-		if rc, ok := m.in.(io.ReadCloser); ok {
-			cfg.Stdin = rc
+	if f, ok := m.in.(interface{ Fd() uintptr }); ok &&
+		term.IsTerminal(int(f.Fd())) && f.Fd() == os.Stdin.Fd() {
+		if e := newEditor(m); e != nil {
+			return e
 		}
-		if f, ok := m.in.(interface{ Fd() uintptr }); ok {
-			fd := int(f.Fd())
-			cfg.FuncMakeRaw, cfg.FuncExitRaw = rawMode(fd)
-			// The editor decides whether to draw from the terminal it
-			// holds, which is the input's, not the process's stdin.
-			cfg.FuncIsTerminal = func() bool {
-				return term.IsTerminal(fd) && termIsTerminal(m.out)
-			}
-		}
-		if f, ok := m.out.(interface{ Fd() uintptr }); ok {
-			// The editor's erase arithmetic wraps at the width of the
-			// terminal the prompt is drawn on, not the process's stdout.
-			outFD := int(f.Fd())
-			cfg.FuncGetWidth = func() int {
-				if w, _, err := term.GetSize(outFD); err == nil {
-					return w
-				}
-				return -1
-			}
-			// The streamed rows wrap at the editor's width, so they read
-			// it from the same place, live: a resize mid-block stops the
-			// painting and the render lays the message out again.
-			m.r.liveWidth = cfg.FuncGetWidth
-		}
-		if l := m.r.layout; l != nil {
-			// The editor draws in the footer the layout owns, and it
-			// erases its own line on Enter. The echo below belongs to
-			// the transcript, not to the row the prompt stood on.
-			cfg.Stdout = l.raw()
-			cfg.UniqueEditLine = true
-			editor.layout = l
-			cfg.Listener = editor.listener()
-		}
-		tab.setPrompt = editor.prompt
-		rl, err := readline.NewEx(cfg)
-		if err == nil {
-			editor.rl = rl
-			return editor
-		}
-		if m.r.layout != nil {
-			// The pinned layout belongs to the editor. Without it the
-			// transcript goes back to the plain stream, where a
-			// terminal without an editor reads from.
-			m.r.layout.leave()
-			m.r.layout = nil
-		}
-		// A readline that would not start falls through to plain
-		// lines: the conversation works without the editor.
 	}
 	return &plainInput{scanner: bufio.NewScanner(m.in), write: m.r.write}
-}
-
-// rawMode puts the terminal behind fd into raw mode and back. The
-// editor assumes its terminal is the process's own stdin, which is only
-// true when the repl's input is.
-func rawMode(fd int) (enter, exit func() error) {
-	var state *term.State
-	enter = func() error {
-		var err error
-		state, err = term.MakeRaw(fd)
-		return err
-	}
-	exit = func() error {
-		if state == nil {
-			return nil
-		}
-		return term.Restore(fd, state)
-	}
-	return enter, exit
-}
-
-// lineConfig is the editor's configuration: a readline in vi mode, whose
-// key filter dispatches between the running turn's Escape and the
-// prompt's Shift+Tab.
-func (m *machine) lineConfig(tab *backtab) *readline.Config {
-	return &readline.Config{
-		Prompt:      promptMark,
-		HistoryFile: m.opts.HistoryFile,
-		VimMode:     true,
-		Stdout:      m.out,
-		// A run in flight reads Escape as "stop the turn"; the prompt
-		// reads the Shift+Tab sequence, one rune at a time; see backtab.
-		FuncFilterInputRune: func(r rune) (rune, bool) {
-			if m.activeRun() != "" {
-				return m.filterRune(r)
-			}
-			return tab.filter(r)
-		},
-	}
-}
-
-// backtab binds Shift+Tab to the reasoning cycle, the way pi cycles its
-// thinking level.
-//
-// A terminal sends Shift+Tab as ESC, '[', 'Z', and readline's escape
-// decoder reads that kind of sequence itself: a key it does not know is
-// dropped, so the filter never sees it. The vim mode, which this repl
-// reads in, forwards the ESC as a bare rune instead of looking ahead, so
-// the three runes do reach the filter, one call each. This is the state
-// that recognizes them.
-//
-// The ESC passes on, because it is the key that leaves the insert mode,
-// and the '[' is held until the 'Z' decides. Holding it costs nothing: the
-// ESC has just put readline in the normal mode, where a lone '[' only
-// rings the bell. A run that completes is the cycle, and both of its
-// runes are swallowed, so the vim handler never sees them.
-//
-// The cycle is a wire call, and it runs while the prompt is being read:
-// the session has no run going then, so the server has nothing else to
-// answer.
-type backtab struct {
-	// m is the machine whose reasoning level the cycle moves.
-	m *machine
-	// setPrompt sets the editor's prompt and redraws it, once the
-	// editor is built.
-	setPrompt func(string)
-	// stage is how much of the sequence has arrived: 1 after the ESC, 2
-	// after the '['.
-	stage int
-}
-
-// filter sees every rune the editor reads, before the vim handler does.
-func (b *backtab) filter(r rune) (rune, bool) {
-	switch {
-	case r == readline.CharEsc:
-		b.stage = 1
-		return r, true
-	case b.stage == 1 && r == readline.CharEscapeEx:
-		b.stage = 2
-		return r, false
-	case b.stage == 2 && r == 'Z':
-		b.stage = 0
-		b.cycle()
-		return r, false
-	}
-	b.stage = 0
-	return r, true
-}
-
-// cycle moves the session to its next level and sets the prompt again, so
-// the statusline shows the level the next line is read at.
-//
-// A refused level is a line of the transcript, and the prompt is taken back
-// first because the editor has already painted it.
-func (b *backtab) cycle() {
-	level, ok, notice := b.m.nextThinkingLevel()
-	if !ok {
-		b.m.r.notice("%s", notice)
-	} else if err := b.m.setThinking(level); err != nil {
-		b.m.r.failure(err.Error())
-	}
-	if b.setPrompt != nil {
-		b.setPrompt(b.m.status.prompt())
-	}
 }
 
 // greet says the session is open.
@@ -1393,124 +1165,6 @@ var (
 // isShutdown says whether a failure means the server is gone.
 func isShutdown(err error) bool {
 	return errors.Is(err, errServerClosed)
-}
-
-// readlineInput reads lines through the readline editor.
-type readlineInput struct {
-	rl *readline.Instance
-	// layout is the pinned footer the editor draws in, nil when the
-	// session runs without one.
-	layout *layout
-	// mu guards the prompt and the draft. The editor's goroutine reports
-	// the draft, and the session's loop sets the prompt.
-	mu sync.Mutex
-	// promptText is the prompt the editor holds, and line and pos are
-	// the draft the listener last saw. Together they size the footer and
-	// place the cursor in it.
-	promptText string
-	line       []rune
-	pos        int
-}
-
-func (i *readlineInput) prompt(p string) {
-	i.mu.Lock()
-	i.promptText = p
-	draft := append([]rune(nil), i.line...)
-	pos := i.pos
-	i.mu.Unlock()
-	if i.layout != nil {
-		i.layout.ensure(i.rowsFor(p, draft))
-		i.layout.place(promptRows(p, draft[:pos], i.layout.cols()) - 1)
-	}
-	i.rl.SetPrompt(p)
-	i.rl.Refresh()
-}
-
-// listener tracks the draft the editor holds. A draft that wraps grows
-// the footer before the editor needs the room, and the line's end
-// shrinks it back.
-func (i *readlineInput) listener() readline.Listener {
-	return draftListener{i}
-}
-
-// draftListener is the editor's key listener: it mirrors the draft and
-// resizes the footer, and never edits the line.
-type draftListener struct{ i *readlineInput }
-
-func (l draftListener) OnChange(line []rune, pos int, _ rune) ([]rune, int, bool) {
-	l.i.mu.Lock()
-	l.i.line = append(l.i.line[:0], line...)
-	l.i.pos = pos
-	promptText := l.i.promptText
-	l.i.mu.Unlock()
-	if l.i.layout == nil {
-		return nil, 0, false
-	}
-	before := l.i.layout.footerRows()
-	if !l.i.layout.ensure(l.i.rowsFor(promptText, line)) || l.i.rl == nil {
-		return nil, 0, false
-	}
-	// A paint that needed more rows than the old footer had ran past
-	// the footer and left rows in the region. A history recall paints
-	// its whole line at once, so it is the usual case. Those rows belong
-	// to no stream; clear them so the draft is not beside a copy of
-	// itself.
-	if painted := promptRows(promptText, line, l.i.layout.cols()); painted > before {
-		l.i.layout.clearBelowLast()
-	}
-	// The footer moved, so the editor's line ends at a new row. Put the
-	// cursor there, and let the editor erase and draw the line from the
-	// new prompt row.
-	cursorAt := pos
-	if cursorAt > len(line) {
-		cursorAt = len(line)
-	}
-	l.i.layout.place(promptRows(promptText, line[:cursorAt], l.i.layout.cols()) - 1)
-	l.i.rl.Refresh()
-	return nil, 0, false
-}
-
-// rowsFor is the rows the footer reserves for a prompt and a draft.
-// It covers the rows they fill and one spare while a draft is typed. The
-// spare gives the keystroke that wraps a row to wrap into before the
-// footer grows.
-func (i *readlineInput) rowsFor(prompt string, draft []rune) int {
-	rows := promptRows(prompt, draft, i.layout.cols())
-	if len(draft) > 0 {
-		rows++
-	}
-	return rows
-}
-
-// promptRows is the rows a prompt and the draft before the cursor fill
-// in the footer, the editor's own line count.
-func promptRows(prompt string, draft []rune, width int) int {
-	if width <= 0 {
-		return 1
-	}
-	cells := ansi.StringWidth(prompt) + ansi.StringWidth(string(draft))
-	rows := cells / width
-	if cells%width != 0 {
-		rows++
-	}
-	if rows < 1 {
-		rows = 1
-	}
-	return rows
-}
-
-func (i *readlineInput) read() (string, error) {
-	line, err := i.rl.Readline()
-	return strings.TrimSuffix(line, "\n"), err
-}
-
-func (i *readlineInput) close() {
-	// The editor's own Close waits on a read it cannot interrupt: its
-	// stdin wrapper closes the fill pipe and leaves the read below it
-	// parked. The terminal goes back and the history is saved; the
-	// editor's goroutines end with the process.
-	_ = i.rl.Terminal.ExitRawMode()
-	i.rl.Operation.Close()
 }
 
 // plainInput reads lines without an editor.

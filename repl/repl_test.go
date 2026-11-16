@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/chzyer/readline"
+	"github.com/reeflective/readline"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
 
@@ -116,8 +116,12 @@ func waitTimes(t *testing.T, drawn interface{ String() string }, want string, co
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("the repl drew %q %d times, want %d:\n%s",
+	// Stdout is the terminal under test, so the failure goes to stderr,
+	// where the log can read it.
+	fmt.Fprintf(os.Stderr, "DEBUG the repl drew %q %d times, want %d:\n%q\n",
 		want, strings.Count(drawn.String(), want), count, drawn.String())
+	t.Fatalf("the repl drew %q %d times, want %d", want,
+		strings.Count(drawn.String(), want), count)
 }
 
 // waitPrompts waits until the server has want prompts from the
@@ -1184,141 +1188,6 @@ func TestTheLevellessModelClimbsTheProtocolLevels(t *testing.T) {
 	m.status.level = "xhigh"
 	if got, ok, _ := m.nextThinkingLevel(); !ok || got != "off" {
 		t.Errorf("the level after xhigh is %q (ok %v), want off", got, ok)
-	}
-}
-
-// TestTheBacktabFilterCyclesTheLevel covers the key binding: the editor
-// hands Shift+Tab to the filter one rune at a time, and the run that
-// completes it moves the level while the others pass through.
-func TestTheBacktabFilterCyclesTheLevel(t *testing.T) {
-	server := &fakeServer{t: t}
-	stdin, stdout := pipeUp(t, server)
-	m := &machine{
-		out:       io.Discard,
-		r:         newRenderer(io.Discard),
-		conn:      startConn(stdout, stdin),
-		sessionID: "s1",
-		status:    newStatus(""),
-		catalog: map[string]protocol.ModelInfo{
-			"gemma4": {Name: "gemma4", ReasoningLevels: []string{"off", "low", "high"}},
-		},
-	}
-	m.status.model = "gemma4"
-	tab := &backtab{m: m}
-
-	// A rune that is not the sequence passes through and starts over.
-	if r, process := tab.filter('a'); r != 'a' || !process {
-		t.Errorf("the filter ate the rune %q (process %v)", r, process)
-	}
-	// The ESC is the vim mode's own key, and it passes on.
-	if r, process := tab.filter(readline.CharEsc); r != readline.CharEsc || !process {
-		t.Errorf("the filter ate the ESC (process %v)", process)
-	}
-	// An escape that starts no sequence aborts: the next rune is a key
-	// again, and the sequence still works after it.
-	if r, process := tab.filter('x'); r != 'x' || !process {
-		t.Errorf("the rune after an aborted escape was eaten (process %v)", process)
-	}
-	if r, process := tab.filter(readline.CharEsc); r != readline.CharEsc || !process {
-		t.Errorf("the filter ate the ESC of the retried sequence (process %v)", process)
-	}
-	// The '[' and the 'Z' are the sequence, and neither reaches the vim
-	// handler.
-	if _, process := tab.filter(readline.CharEscapeEx); process {
-		t.Error("the filter passed the '[' of a Shift+Tab on")
-	}
-	if _, process := tab.filter('Z'); process {
-		t.Error("the filter passed the 'Z' of a Shift+Tab on")
-	}
-	if m.status.level != "off" {
-		t.Errorf("the cycle left the level at %q, want off", m.status.level)
-	}
-
-	// The sequence completes once: the next rune is a key again.
-	if r, process := tab.filter('b'); r != 'b' || !process {
-		t.Errorf("the rune after the cycle was eaten (process %v)", process)
-	}
-}
-
-// TestTheShiftTabBindingReachesTheCycle covers the binding end to end: a
-// terminal sends Shift+Tab as ESC, '[', 'Z', the editor reads the three and
-// hands them to the filter, and the filter cycles the level. The editor's
-// own escape decoding is what must not see them, so the test drives the
-// real editor over a pipe.
-func TestTheShiftTabBindingReachesTheCycle(t *testing.T) {
-	server := &fakeServer{t: t}
-	in, out := pipeUp(t, server)
-	// The editor writes the statusline from its own goroutine, so the test
-	// reads the screen through the same lock it writes behind.
-	screen := &syncBuffer{}
-	m := &machine{
-		out:       screen,
-		r:         newRenderer(screen),
-		conn:      startConn(out, in),
-		sessionID: "s1",
-		status:    newStatus(""),
-		catalog: map[string]protocol.ModelInfo{
-			"gemma4": {Name: "gemma4", ReasoningLevels: []string{"off", "low", "high"}},
-		},
-	}
-	m.status.model = "gemma4"
-	tab := &backtab{m: m}
-
-	stdin, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("opening the pipe: %v", err)
-	}
-	cfg := m.lineConfig(tab)
-	cfg.Stdin = stdin
-	cfg.Stdout = screen
-	cfg.FuncIsTerminal = func() bool { return true }
-	cfg.FuncMakeRaw = func() error { return nil }
-	cfg.FuncExitRaw = func() error { return nil }
-	rl, err := readline.NewEx(cfg)
-	if err != nil {
-		t.Fatalf("starting the editor: %v", err)
-	}
-	tab.setPrompt = func(p string) {
-		rl.SetPrompt(p)
-		rl.Refresh()
-	}
-	// The editor's read loop is released by the end of the pipe, which is
-	// why the writer closes before the editor does.
-	defer rl.Close()
-	defer writer.Close()
-
-	go func() {
-		writer.Write([]byte("\x1b[Z\r"))
-	}()
-	// The line is read in the test's own goroutine, so a sequence the
-	// editor never hands over fails the test instead of hanging it.
-	type result struct {
-		line string
-		err  error
-	}
-	done := make(chan result, 1)
-	go func() {
-		line, err := rl.Readline()
-		done <- result{line, err}
-	}()
-	select {
-	case got := <-done:
-		if got.err != nil {
-			t.Fatalf("reading the line: %v", got.err)
-		}
-		if got.line != "" {
-			t.Errorf("the line is %q, want the sequence to leave no text", got.line)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("the editor did not return a line")
-	}
-	if m.status.level != "off" {
-		t.Errorf("the level is %q, want off", m.status.level)
-	}
-	// The prompt was set again, so the statusline the next line is read
-	// behind names the level the cycle reached.
-	if !strings.Contains(screen.String(), "🧠 off") {
-		t.Errorf("the statusline names no level:\n%s", screen.String())
 	}
 }
 

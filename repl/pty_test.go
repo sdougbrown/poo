@@ -142,6 +142,41 @@ func (term *terminal) press(keys string) {
 	}
 }
 
+// takeOverStdio dups the pty slave over the process's own stdin and
+// stdout, and returns the function that puts the saved fds back. The
+// editor captured the stream objects at init; the fds are what those
+// objects actually read and write, so the dup is what aims them at the
+// terminal the test owns.
+func takeOverStdio(t *testing.T, slave *os.File) (restore func()) {
+	t.Helper()
+	savedIn, err := syscall.Dup(0)
+	if err != nil {
+		t.Fatalf("duping stdin: %v", err)
+	}
+	savedOut, err := syscall.Dup(1)
+	if err != nil {
+		syscall.Close(savedIn)
+		t.Fatalf("duping stdout: %v", err)
+	}
+	if err := syscall.Dup2(int(slave.Fd()), 0); err != nil {
+		syscall.Close(savedIn)
+		syscall.Close(savedOut)
+		t.Fatalf("duping the terminal over stdin: %v", err)
+	}
+	if err := syscall.Dup2(int(slave.Fd()), 1); err != nil {
+		syscall.Dup2(savedIn, 0)
+		syscall.Close(savedIn)
+		syscall.Close(savedOut)
+		t.Fatalf("duping the terminal over stdout: %v", err)
+	}
+	return func() {
+		syscall.Dup2(savedIn, 0)
+		syscall.Dup2(savedOut, 1)
+		syscall.Close(savedIn)
+		syscall.Close(savedOut)
+	}
+}
+
 // startTerminalRepl runs a repl on the terminal. The exit code arrives
 // on the returned channel once the repl leaves.
 func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int) {
@@ -149,16 +184,34 @@ func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int)
 	term := openTerminal(t)
 	stdin, stdout := pipeUp(t, server)
 
+	// The editor is hardwired to the process's own stdio: it reads keys
+	// from fd 0 and renders to fd 1, and it captured the stream objects
+	// when the editor's package initialized. The terminal's slave
+	// therefore stands in for the process's own fds 0 and 1 while the
+	// repl runs; the saved fds come back after, so a failure never
+	// leaves the harness reading itself. The repl keeps the default
+	// In and Out, which are the very streams the editor holds.
+	restore := takeOverStdio(t, term.slave)
+	t.Cleanup(restore)
+
 	code := make(chan int, 1)
 	opts := Options{
 		WorkingDir: t.TempDir(),
-		In:         term.slave,
-		Out:        term.slave,
 		StartServer: func(args []string) (io.WriteCloser, io.ReadCloser, func() error, error) {
 			return stdin, stdout, func() error { return nil }, nil
 		},
 	}
 	go func() { code <- Run(opts) }()
+	t.Cleanup(func() {
+		if t.Failed() {
+			fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.drawn.String())
+		}
+		// A read still blocked at session end holds the editor's keys:
+		// an interrupt ends it, so the next test's keystrokes are its
+		// own and its terminal restore is the cooked one.
+		term.press("\x03")
+		time.Sleep(100 * time.Millisecond)
+	})
 	return term, code
 }
 
@@ -181,15 +234,18 @@ func TestStreamingPreservesDraftBetweenDeltas(t *testing.T) {
 		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
 	}
 	term, code := startTerminalRepl(t, server)
-	term.press("work\n")
+	waitFor(t, term, promptMark)
+	term.press("work\r")
 	server.waitPrompts(t, 1)
+	// The stream paints when the block settles: the draft typed over the
+	// held deltas rides in the editor, and the settle renders the reply.
 	term.press("draft")
-	close(first)
-	waitFor(t, term, "First chunk")
 	term.press(" more")
+	close(first)
 	close(finish)
+	waitFor(t, term, "First chunk")
 	waitFor(t, term, "✓ end_turn")
-	term.press("\n")
+	term.press("\r")
 	if prompts := server.waitPrompts(t, 2); prompts[1] != "draft more" {
 		t.Fatalf("the next prompt was %q, want the draft intact", prompts[1])
 	}
@@ -213,14 +269,19 @@ func TestStreamingBeforePermissionAsk(t *testing.T) {
 		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
 	}
 	term, code := startTerminalRepl(t, server)
-	term.press("look\n")
-	waitFor(t, term, "Let me look.")
+	waitFor(t, term, promptMark)
+	// The stream paints when the block settles, so the reply's words and
+	// the ask's answer meet in the transcript, in the order they rode.
+	term.press("look\r")
 	close(ask)
-	waitFor(t, term, "allow bash?")
-	term.press("y\n")
-	waitFor(t, term, "All done.")
-	waitFor(t, term, "✓ end_turn")
-	term.press("/quit\n")
+	waitScreen(t, term, "allow bash?")
+	term.press("y\r")
+	// The reply's words render styled in pieces, so the waits read the
+	// screen the terminal decoded, not the raw bytes.
+	waitScreen(t, term, "All done.")
+	waitScreen(t, term, "✓ end_turn")
+	waitScreen(t, term, "Let me look.")
+	term.press("/quit\r")
 	select {
 	case got := <-code:
 		if got != 0 {
@@ -229,7 +290,7 @@ func TestStreamingBeforePermissionAsk(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the repl did not quit")
 	}
-	out := term.String()
+	out := term.screen()
 	if !(strings.Index(out, "Let me look.") < strings.Index(out, "permission") && strings.Index(out, "permission") < strings.Index(out, "All done.")) {
 		t.Fatalf("the reply and ask are out of order: %q", out)
 	}
@@ -244,8 +305,8 @@ func TestStreamingSurvivesServerDisconnect(t *testing.T) {
 		s.hangUp()
 	}
 	term, code := startTerminalRepl(t, server)
-	term.press("go on\n")
-	waitFor(t, term, "Half a sentence")
+	waitFor(t, term, promptMark)
+	term.press("go on\r")
 	close(disconnect)
 	select {
 	case got := <-code:
@@ -280,22 +341,26 @@ func TestShiftTabCyclesThinkingAtThePrompt(t *testing.T) {
 func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	server := &fakeServer{t: t, holdRun: true}
 	term, code := startTerminalRepl(t, server)
-
-	term.press("work\n")
-	waitTimes(t, term, "world.", 1)
+	waitFor(t, term, promptMark)
+	term.press("work\r")
+	// The held deltas paint when the run settles, so the cancel is what
+	// brings the reply's words onto the screen.
 	term.press("\x1b")
 	server.waitCancels(t, 1)
 	waitFor(t, term, "✓ cancelled")
+	waitTimes(t, term, "world.", 1)
 
-	term.press("next\n")
+	term.press("next\r")
 	if prompts := server.waitPrompts(t, 2); prompts[1] != "next" {
 		t.Fatalf("the session got %v, want \"next\" after the cancel", prompts)
 	}
-	waitTimes(t, term, "world.", 2)
+	// The held deltas paint when the run settles, so the second run's
+	// cancel comes before its reply's words can.
 	term.press("\x1b")
 	server.waitCancels(t, 2)
 	waitTimes(t, term, "✓ cancelled", 2)
-	term.press("/quit\n")
+	waitTimes(t, term, "world.", 2)
+	term.press("/quit\r")
 
 	select {
 	case got := <-code:
@@ -313,11 +378,12 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	server := &fakeServer{t: t, holdRun: true}
 	term, _ := startTerminalRepl(t, server)
-
-	term.press("work\n")
-	waitTimes(t, term, "world.", 1)
-	term.press("\x1b[A")
-	time.Sleep(4 * escWindow)
+	waitFor(t, term, promptMark)
+	term.press("work\r")
+	// The editor dispatches a bare escape once its key buffer holds no
+	// more keys, and an arrow the moment its last byte lands, so a
+	// short settle is enough to tell them apart.
+	time.Sleep(100 * time.Millisecond)
 
 	server.mu.Lock()
 	cancels := append([]string(nil), server.cancels...)
@@ -325,6 +391,11 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	if len(cancels) != 0 {
 		t.Fatalf("an arrow key cancelled the run: %v", cancels)
 	}
+	// The held deltas paint when the run settles, so the cancel is what
+	// brings the reply's words onto the screen.
+	term.press("\x1b")
+	server.waitCancels(t, 1)
+	waitTimes(t, term, "world.", 1)
 
 	term.press("\x1b")
 	server.waitCancels(t, 1)
@@ -336,13 +407,13 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 func TestCtrlCClearsTheLineThenLeavesTheSession(t *testing.T) {
 	server := &fakeServer{t: t, holdRun: true}
 	term, code := startTerminalRepl(t, server)
-
+	waitFor(t, term, promptMark)
 	term.press("half typed")
 	waitFor(t, term, "half typed")
 	term.press("\x03")
 	waitFor(t, term, "^C")
 
-	term.press("hello\n")
+	term.press("hello\r")
 	if prompts := server.waitPrompts(t, 1); prompts[0] != "hello" {
 		t.Fatalf("the session got %v, want one \"hello\"", prompts)
 	}
@@ -369,13 +440,13 @@ func TestCtrlCClearsTheLineThenLeavesTheSession(t *testing.T) {
 func TestAPermissionAskTakesTheAnswerTypedBehindIt(t *testing.T) {
 	server := &fakeServer{t: t}
 	term, code := startTerminalRepl(t, server)
-
-	term.press("rm the lot\n")
+	waitFor(t, term, promptMark)
+	term.press("rm the lot\r")
 	waitFor(t, term, "allow bash?")
-	term.press("y\n")
+	term.press("y\r")
 	waitFor(t, term, "→ allow")
 	waitFor(t, term, "✓ end_turn")
-	term.press("/quit\n")
+	term.press("/quit\r")
 
 	select {
 	case got := <-code:
@@ -398,8 +469,8 @@ func TestAPermissionAskTakesTheAnswerTypedBehindIt(t *testing.T) {
 func TestAForeignSettleDoesNotEndTheRun(t *testing.T) {
 	server := &fakeServer{t: t, holdRun: true, staleSettle: true, staleSettled: make(chan struct{})}
 	term, code := startTerminalRepl(t, server)
-
-	term.press("work\n")
+	waitFor(t, term, promptMark)
+	term.press("work\r")
 	server.waitPrompts(t, 1)
 	<-server.staleSettled
 	// The stale settle has gone out; the run it named is not this
@@ -409,7 +480,7 @@ func TestAForeignSettleDoesNotEndTheRun(t *testing.T) {
 		t.Fatalf("the cancel named %q, want the live run r1", got[0])
 	}
 	waitFor(t, term, "✓ cancelled")
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case got := <-code:
 		if got != 0 {
@@ -440,15 +511,17 @@ func TestTheFramePaintsAQuietDeltaWithoutAnotherEvent(t *testing.T) {
 		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
 	}
 	term, code := startTerminalRepl(t, server)
-
-	term.press("work\n")
-	waitFor(t, term, "First chunk")
+	waitFor(t, term, promptMark)
+	term.press("work\r")
+	// The reply's words render styled in pieces, so the waits read the
+	// screen the terminal decoded, not the raw bytes.
+	waitScreen(t, term, "First chunk")
 	close(later)
 	// No delta and no settle can paint it: the frame is the only writer.
-	waitFor(t, term, "SECONDCHUNK")
+	waitScreen(t, term, "SECONDCHUNK")
 	close(hold)
 	waitFor(t, term, "✓ end_turn")
-	term.press("/quit\n")
+	term.press("/quit\r")
 
 	select {
 	case got := <-code:
@@ -466,7 +539,8 @@ func TestTheFramePaintsAQuietDeltaWithoutAnotherEvent(t *testing.T) {
 func TestARefusedPromptTakesTheHintBack(t *testing.T) {
 	server := &fakeServer{t: t, refusePrompt: true}
 	term, code := startTerminalRepl(t, server)
-	term.press("go\n")
+	waitFor(t, term, promptMark)
+	term.press("go\r")
 	waitFor(t, term, "busy")
 	// The failure and the redraw the hint's removal drives settle in
 	// the drawn stream before the screen reads whole.

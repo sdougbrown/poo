@@ -47,7 +47,7 @@ func historyPath() string {
 	if err != nil {
 		return ""
 	}
-	history := filepath.Join(cache, "poo", "repl-history")
+	history := filepath.Join(cache, "poo", "repl-history-v2")
 	// readline's history save does not create directories: the parent
 	// is here, once, or the save fails quietly every session.
 	if err := os.MkdirAll(filepath.Dir(history), 0o755); err != nil {
