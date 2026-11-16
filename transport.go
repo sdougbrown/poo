@@ -28,6 +28,12 @@ type ChatRequest struct {
 	// MaxTokens is the output-token limit for this request. It is always
 	// computed by the caller, never left to the endpoint default.
 	MaxTokens int
+	// SessionID is the session the request belongs to. Empty sends none.
+	//
+	// The id is the session's, not the model's, so it travels with the
+	// request: a transport that keys an endpoint's prompt cache by it stays
+	// one key per session when one transport serves several.
+	SessionID string
 	// Reasoning is the reasoning level this request asks the model to run
 	// at: one of the named levels, or a token budget. Empty leaves the
 	// transport's own configuration in charge.
@@ -242,6 +248,13 @@ type Rendered struct {
 	// Messages is the number of messages the body carried, so a fork
 	// knows where the appended messages go.
 	Messages int
+	// Inputs are the attachments the body was shaped for. A fork appends
+	// its messages the way the request was shaped, and the model info that
+	// shaped it is not part of the body.
+	Inputs []Modality
+	// SessionID is the session the request was sent in, so a fork keeps
+	// the endpoint's cache key.
+	SessionID string
 	// Quirks are the profiles the body was shaped with, in the order they
 	// applied.
 	//
