@@ -29,7 +29,22 @@ func (r *Runtime) codexModel(model poo.ModelInfo) bool {
 // The endpoint is pi's built-in one. pi's credential is an OAuth token for that
 // endpoint, and sending it elsewhere would hand it to a host the operator did
 // not name. A model that points the provider elsewhere is refused, not sent.
+//
+// The model has to say it speaks the Responses API. The session reads the API
+// for two things a Codex model depends on — whether the history's provider
+// blocks stay in a request, and whether the response's reasoning is recorded
+// with the message — so a model declared under this endpoint without the API
+// would run on this transport while the session stripped the reasoning the
+// endpoint cannot do without.
 func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error) {
+	if model.API != poo.APIResponses {
+		return nil, &Error{
+			Code:  CodeUnsupported,
+			Field: "models." + model.Name + ".api",
+			Message: fmt.Sprintf("the %s provider speaks the %s API, and the model declares %s: set api: %s",
+				piauth.ProviderCodex, poo.APIResponses, model.API, poo.APIResponses),
+		}
+	}
 	endpoint := strings.TrimRight(strings.TrimSpace(model.Endpoint), "/")
 	if endpoint != codex.DefaultEndpoint {
 		return nil, &Error{

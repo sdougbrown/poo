@@ -378,3 +378,30 @@ func TestTheCodexTransportDoesNotRetryAnUncertainRefresh(t *testing.T) {
 		t.Errorf("the token endpoint received %d refreshes, want one", got)
 	}
 }
+
+// TestAHandBuiltSettingsResolvesItsAuthFile covers the fallback a Settings built
+// without Load reaches. A settings value assembled in code names the file, and
+// the path it answers to is the one the working directory gives it — the rule
+// every other hand-built path follows. The expanded home shortcut is the same
+// one a loaded settings gets.
+func TestAHandBuiltSettingsResolvesItsAuthFile(t *testing.T) {
+	handBuilt := &Settings{PiAuthFile: filepath.Join("relative", "auth.json")}
+	if got := handBuilt.piAuthFile(); got != filepath.Join("relative", "auth.json") {
+		t.Errorf("the path is %q, want the setting as the working directory reads it", got)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("this environment has no home directory: %v", err)
+	}
+	expanded := &Settings{PiAuthFile: "~/pi/auth.json"}
+	if got, want := expanded.piAuthFile(), filepath.Join(home, "pi", "auth.json"); got != want {
+		t.Errorf("the path is %q, want the home shortcut expanded to %q", got, want)
+	}
+
+	// A settings that names no file has none: the transport reports the
+	// missing setting rather than reading a directory.
+	if got := (&Settings{}).piAuthFile(); got != "" {
+		t.Errorf("the path is %q, want none", got)
+	}
+}

@@ -177,8 +177,10 @@ func (c *Catalog) applyDiscovery(found *discovery) {
 // the endpoint has no list to answer.
 func (c *Catalog) endpointNames() []string {
 	var names []string
-	for name, endpoint := range c.opts.Settings.Endpoints {
-		if endpoint.SkipProbe {
+	for name := range c.opts.Settings.Endpoints {
+		// The flag is read from the endpoint the catalog built, which is
+		// where the settings and a built-in provider's own declaration meet.
+		if c.endpoints[name].SkipProbe {
 			continue
 		}
 		names = append(names, name)

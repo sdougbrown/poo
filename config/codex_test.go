@@ -896,3 +896,39 @@ roles:
 		t.Errorf("the request carried account %q, want the account beside the models file", endpoint.account)
 	}
 }
+
+// TestACodexModelWithoutTheResponsesAPIIsRefused covers the API the session
+// reads. A model declared under the Codex endpoint without the Responses API
+// would run on the Codex transport while the session treated it as
+// chat-completions, stripping the reasoning blocks the storeless endpoint
+// depends on. The setting is refused, and the refusal names what to add.
+func TestACodexModelWithoutTheResponsesAPIIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexAuth(t, dir, fakeCodexToken(t, "acct_live"), "rt_live", 4102444800000)
+	path := writeCodexSettings(t, dir, `version: 1
+pi_auth_file: auth.json
+session:
+  mode: ephemeral
+endpoints:
+  openai-codex:
+    endpoint: https://chatgpt.com/backend-api
+models:
+  codex-without-api:
+    endpoint: openai-codex
+    model_id: gpt-6.1-sol
+roles:
+  chat: codex-without-api
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	_, err = buildCodex(t, settings, nil)
+	var failure *config.Error
+	if !errors.As(err, &failure) || failure.Code != config.CodeUnsupported {
+		t.Fatalf("the build is %v, want the missing API refused", err)
+	}
+	if failure.Field != "models.codex-without-api.api" {
+		t.Errorf("the failure names %q, want the model's api field", failure.Field)
+	}
+}
