@@ -591,21 +591,18 @@ func shapeOf(top map[string]json.RawMessage) format {
 	return piFormat{}
 }
 
-// write stores a credential under the provider, and leaves the rest of the
-// file as the document found it.
+// persist writes the document back: the entries as they are now, in the shape the file was
+// read with.
 //
-// A file created here gets mode 0600 and a directory created here 0700. A file
-// that already exists keeps its own mode and follows its own symlinks, as it
-// does through pi's own write. The write is in place, not a temporary file
-// renamed over it.
+// A file created here gets mode 0600 and a directory created here 0700. A file that already
+// exists keeps its own mode and follows its own symlinks, as it does through pi's own write.
+// The write is in place, not a temporary file renamed over it.
 //
-// Writing in place is the trade pi makes too: a process that dies mid-write
-// leaves a truncated file. The next read reports that as ErrStorage, and pi's
-// login repairs it. A temporary file renamed over the path would make the
-// bytes atomic. It would also replace a symlinked auth.json with a regular
-// file, dropping the mode, ACLs and extended attributes the operator gave it.
-
-// persist writes the document's entries back as they are.
+// Writing in place is the trade pi makes too: a process that dies mid-write leaves a
+// truncated file. The next read reports that as ErrStorage, and pi's login repairs it. A
+// temporary file renamed over the path would make the bytes atomic. It would also replace a
+// symlinked auth.json with a regular file, dropping the mode, ACLs and extended attributes
+// the operator gave it.
 func (c Credentials) persist(doc document) error {
 	object, err := doc.format.envelope(doc.entries)
 	if err != nil {
