@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -771,5 +772,144 @@ func TestACancelledWaitLeavesTheLockAlone(t *testing.T) {
 	}
 	if endpoint.count() != 0 {
 		t.Errorf("the endpoint was asked %d times for a wait that was cancelled, want none", endpoint.count())
+	}
+}
+
+// TestAnAnswerLargerThanTheBoundIsRefused covers the bound on an untrusted
+// answer. An endpoint that answers more than the bound is not read to the end:
+// the answer cannot be one this package parses, and the file is left alone.
+func TestAnAnswerLargerThanTheBoundIsRefused(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
+	before := entries(t, path)
+	// The answer parses only when it is read whole: the access token is the
+	// padding itself, so a truncated read is not a token this package takes.
+	padding := strings.Repeat("a", (1<<20)+1024)
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusOK, `{"access_token":"` + padding + `","expires_in":3600}`
+	}, nil)
+	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+
+	_, err := credentials.Access(context.Background())
+	if !errors.Is(err, piauth.ErrRefresh) {
+		t.Fatalf("an answer over the bound is %v, want ErrRefresh", err)
+	}
+	after := entries(t, path)
+	if string(after[piauth.ProviderCodex]) != string(before[piauth.ProviderCodex]) {
+		t.Errorf("the file changed under a refused answer: %s", after[piauth.ProviderCodex])
+	}
+}
+
+// TestAnAnswerThatIsNotJSONIsRefused covers an endpoint that answers 200 with
+// something that is not a token answer at all.
+func TestAnAnswerThatIsNotJSONIsRefused(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
+	before := entries(t, path)
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusOK, "the token endpoint is a captive portal today"
+	}, nil)
+	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+
+	_, err := credentials.Access(context.Background())
+	if !errors.Is(err, piauth.ErrRefresh) {
+		t.Fatalf("an answer that is not JSON is %v, want ErrRefresh", err)
+	}
+	after := entries(t, path)
+	if string(after[piauth.ProviderCodex]) != string(before[piauth.ProviderCodex]) {
+		t.Errorf("the file changed under an unreadable answer: %s", after[piauth.ProviderCodex])
+	}
+}
+
+// TestACancelledRefreshWritesNothing covers the caller's cancellation while the
+// endpoint is asked. The trade is the caller's, so the failure keeps both
+// identities, and nothing is written under a refresh that was abandoned.
+func TestACancelledRefreshWritesNothing(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
+	before := entries(t, path)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		once.Do(func() { close(started) })
+		<-release
+		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
+	}, nil)
+	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-started
+		cancel()
+	}()
+	defer close(release)
+
+	_, err := credentials.Access(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the cancelled refresh is %v, want context.Canceled", err)
+	}
+	if !errors.Is(err, piauth.ErrRefresh) {
+		t.Errorf("the cancelled refresh is %v, want the refresh's own failure too", err)
+	}
+	after := entries(t, path)
+	if string(after[piauth.ProviderCodex]) != string(before[piauth.ProviderCodex]) {
+		t.Errorf("the file changed under a cancelled refresh: %s", after[piauth.ProviderCodex])
+	}
+	if _, err := os.Stat(path + ".lock"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the lock was left behind: %v", err)
+	}
+}
+
+// TestAnEmptyPathIsRefused covers the guard a caller with no path reaches. It
+// must not take a lock in the working directory, and it must not report a
+// storage failure that a retry would.
+func TestAnEmptyPathIsRefused(t *testing.T) {
+	_, err := piauth.Credentials{}.Access(context.Background())
+	if err == nil {
+		t.Fatal("a credential with no path reached a token")
+	}
+	if errors.Is(err, piauth.ErrStorage) || errors.Is(err, piauth.ErrLocked) {
+		t.Errorf("the failure is %v, want neither a storage nor a lock failure", err)
+	}
+	if _, err := os.Stat(".lock"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a lock was taken in the working directory: %v", err)
+	}
+}
+
+// TestTheClientIDOverrideIsSent covers the documented override. The endpoint
+// matches a refresh token to the client it was granted to, so a caller that
+// names one must reach the endpoint's form.
+func TestTheClientIDOverrideIsSent(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(stored, expires(-time.Hour)))
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
+	}, nil)
+	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, ClientID: "client-under-test"}
+
+	if _, err := credentials.Access(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if got := endpoint.form(t, 0)["client_id"]; got != "client-under-test" {
+		t.Errorf("the form names the client %q, want the one the caller named", got)
+	}
+}
+
+// TestTheLeewayOverrideTakesALiveToken covers the leeway override. A token
+// with three minutes left is used as it is under a two-minute leeway, and the
+// endpoint is not asked.
+func TestTheLeewayOverrideTakesALiveToken(t *testing.T) {
+	path := authFile(t, fmt.Sprintf(stored, expires(3*time.Minute)))
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusInternalServerError, `{"error":"the endpoint was asked for a live token"}`
+	}, nil)
+	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Leeway: 2 * time.Minute}
+
+	token, err := credentials.Access(context.Background())
+	if err != nil {
+		t.Fatalf("the live token was not used: %v", err)
+	}
+	if token.Access != oldAccess {
+		t.Errorf("the caller got %q, want the stored token", token.Access)
+	}
+	if endpoint.count() != 0 {
+		t.Errorf("the endpoint was asked %d times for a token with three minutes left", endpoint.count())
 	}
 }

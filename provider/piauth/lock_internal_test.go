@@ -185,13 +185,24 @@ func TestTheKeepaliveStampsTheHeldLock(t *testing.T) {
 
 	// The mutex makes the stale stamp a critical section of its own: no
 	// stamp is in flight, so the goroutine's next one comes after this.
+	//
+	// The holder records what the filesystem kept, not what it asked for: a
+	// filesystem with a coarse mtime granularity truncates the stamp, and a
+	// record that disagrees with the directory is what a takeover looks like
+	// to the holder's own check.
 	hold.mu.Lock()
 	stale := time.Now().Add(-lockStale + time.Second)
-	hold.mtime = stale
 	if err := os.Chtimes(hold.path, stale, stale); err != nil {
 		hold.mu.Unlock()
 		t.Fatalf("aging the held lock: %v", err)
 	}
+	information, err := os.Stat(hold.path)
+	if err != nil {
+		hold.mu.Unlock()
+		t.Fatalf("stating the aged lock: %v", err)
+	}
+	stale = information.ModTime()
+	hold.mtime = stale
 	hold.mu.Unlock()
 
 	deadline := time.Now().Add(2*lockRefresh + time.Second)
@@ -243,5 +254,32 @@ func TestReleaseLeavesATakenLockAlone(t *testing.T) {
 	hold.release()
 	if _, err := os.Stat(lockPath); err != nil {
 		t.Errorf("release removed the taker's lock directory: %v", err)
+	}
+}
+
+// TestTheKeepaliveStaysUnderPIsBound covers the interval pi's synchronous path
+// judges a lock by. pi breaks a lock ten seconds old, so the holder's stamp
+// must never age that far while it holds the lock.
+func TestTheKeepaliveStaysUnderPIsBound(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	hold, err := acquire(context.Background(), path, time.Second)
+	if err != nil {
+		t.Fatalf("taking the lock: %v", err)
+	}
+	defer hold.release()
+
+	// pi's synchronous staleness bound, as the plan states it. A stamp older
+	// than this is one pi may break under this holder.
+	const piBound = 10 * time.Second
+	deadline := time.Now().Add(piBound + time.Second)
+	for time.Now().Before(deadline) {
+		info, err := os.Stat(hold.path)
+		if err != nil {
+			t.Fatalf("stating the held lock: %v", err)
+		}
+		if age := time.Since(info.ModTime()); age >= piBound {
+			t.Fatalf("the held lock's stamp is %v old, past the %v pi breaks it at", age, piBound)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 }
