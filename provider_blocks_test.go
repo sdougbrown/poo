@@ -277,3 +277,43 @@ func TestTheReportedBlocksSurviveABrokenStream(t *testing.T) {
 	}
 	wantBlock(t, carried.Content[1].Provider, second)
 }
+
+// TestTheReportedBlocksStandAloneWithoutVisibleContent covers a response that
+// produced provider blocks and nothing a person reads: no thinking text and no
+// answer. Every block rides on its own, and the next request carries them back
+// ahead of the message's text.
+func TestTheReportedBlocksStandAloneWithoutVisibleContent(t *testing.T) {
+	first := reasoningBlock("enc_one")
+	second := reasoningBlock("enc_two")
+	s, tr, sink := blocksSession(t,
+		pootest.Turn{Blocks: []poo.ProviderBlock{first, second}},
+		pootest.Turn{Text: "the second answer"},
+	)
+
+	runSession(t, s, "first")
+
+	msg := recordedAssistant(t, sink)
+	if len(msg.Content) != 2 {
+		t.Fatalf("the recorded message holds %v, want the two lone blocks", blockKinds(msg.Content))
+	}
+	for i, want := range []poo.ProviderBlock{first, second} {
+		if msg.Content[i].Kind != poo.ContentProvider {
+			t.Errorf("block %d is %q, want a lone provider block", i, msg.Content[i].Kind)
+		}
+		wantBlock(t, msg.Content[i].Provider, want)
+	}
+
+	runSession(t, s, "second")
+
+	requests := tr.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("the transport got %d requests, want two", len(requests))
+	}
+	carried := assistantIn(t, requests[1].Messages)
+	if len(carried.Content) != 2 {
+		t.Fatalf("the second request's assistant message holds %v, want the two lone blocks", blockKinds(carried.Content))
+	}
+	for i, want := range []poo.ProviderBlock{first, second} {
+		wantBlock(t, carried.Content[i].Provider, want)
+	}
+}
