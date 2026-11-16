@@ -194,6 +194,7 @@ func TestLongOutputScrollsAboveTheFooter(t *testing.T) {
 
 	term.press("go\r")
 	waitScreen(t, term, "result 9 row 2")
+	waitScreen(t, term, "✓ end_turn")
 	waitBottom(t, term)
 
 	// The newest result row is above the settle, which is above the
