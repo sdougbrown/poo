@@ -22,13 +22,11 @@
 package codex
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -140,6 +138,14 @@ type Options struct {
 	// Backoff is the wait before the second and the third attempt.
 	// Empty means the plan's one second and then two.
 	Backoff []time.Duration
+	// OnAttempt is called for every attempt that failed, so a consumer can
+	// write the attempt to the log.
+	//
+	// The request's own reporter is the core's channel: it hears the
+	// attempts of one request. This one is the consumer's, and it hears the
+	// attempts of the transport's own work — a fork's attempts included,
+	// where no request carries a reporter.
+	OnAttempt func(poo.Attempt)
 }
 
 // Transport is the ChatGPT Codex Responses transport.
@@ -172,6 +178,24 @@ func New(cfg Options) *Transport {
 	return &Transport{cfg: cfg, http: client, policy: policy}
 }
 
+// reporter returns the function that hears every attempt a request makes.
+//
+// The transport's own reporter is the consumer's, and the request's own is the
+// core's: the core writes the attempt to the session's record, so both hear the
+// attempt, in that order. A fork has no request, so it carries the transport's.
+func (t *Transport) reporter(request func(poo.Attempt)) func(poo.Attempt) {
+	if t.cfg.OnAttempt == nil {
+		return request
+	}
+	own := t.cfg.OnAttempt
+	return func(a poo.Attempt) {
+		own(a)
+		if request != nil {
+			request(a)
+		}
+	}
+}
+
 // Stream starts a request and returns the response stream along with the
 // snapshot of the request that was sent.
 //
@@ -196,11 +220,12 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 	open := func(ctx context.Context) (support.Reader, error) {
 		return t.open(ctx, body, session)
 	}
-	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, req.OnAttempt)
+	report := t.reporter(req.OnAttempt)
+	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, report)
 	if err != nil {
 		return nil, rendered, err
 	}
-	return support.NewRetrying(ctx, t.policy, open, req.OnAttempt, reader, attempt), rendered, nil
+	return support.NewRetrying(ctx, t.policy, open, report, reader, attempt), rendered, nil
 }
 
 // Fork sends a body that is byte-identical to the snapshot, apart from
@@ -232,11 +257,12 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 	open := func(ctx context.Context) (support.Reader, error) {
 		return t.open(ctx, body, prev.SessionID)
 	}
-	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, nil)
+	report := t.reporter(nil)
+	reader, attempt, err := support.OpenWithRetry(ctx, t.policy, open, report)
 	if err != nil {
 		return nil, err
 	}
-	return support.NewRetrying(ctx, t.policy, open, nil, reader, attempt), nil
+	return support.NewRetrying(ctx, t.policy, open, report, reader, attempt), nil
 }
 
 // redirectError is the refusal a redirect turns into.
@@ -266,106 +292,53 @@ func (e *redirectError) Error() string {
 // the run is alive is a resolution that did not finish in time, not the
 // run stopping. That is why the parent is kept apart from it.
 func (t *Transport) open(ctx context.Context, body []byte, session string) (*streamReader, error) {
-	// The timeout bounds the whole request, streaming included, so the
-	// context is created before the request goes out. The parent stays
-	// apart, so a timeout the transport imposed is told from the run's
-	// own cancellation.
-	parent := ctx
-	var cancel context.CancelFunc
-	if t.cfg.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, t.cfg.Timeout)
-	}
-	release := func() {
-		if cancel != nil {
-			cancel()
-		}
-	}
-
-	credential, err := t.credential(parent, ctx)
-	if err != nil {
-		release()
-		return nil, err
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, ResponsesURL(t.cfg.Endpoint), bytes.NewReader(body))
-	if err != nil {
-		release()
-		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
-	}
-	t.setHeaders(httpReq, credential, session)
-
-	// The request is timed from the moment it goes out, so the time to
-	// the first token includes the endpoint's own latency.
-	started := time.Now()
-
-	resp, err := t.http.Do(httpReq)
-	if err != nil {
-		// The failure is classified before the request's context is
-		// released, because releasing it would replace the failure with
-		// the context's own error.
-		var redirect *redirectError
-		if errors.As(err, &redirect) {
-			// The client hands back the response it refused to follow,
-			// and its body is the transport's to close.
+	return support.OpenStream(ctx, support.OpenOptions[*streamReader]{
+		Client:  t.http,
+		Timeout: t.cfg.Timeout,
+		Classify: func(parent, request context.Context, resp *http.Response, err error) error {
+			// A redirect is refused with a message that says why: the
+			// request carries the conversation and the account, so it goes
+			// only to the endpoint the transport was configured with.
+			var redirect *redirectError
+			if !errors.As(err, &redirect) {
+				return support.ClassifyTransportError(parent, request, err)
+			}
 			failure := &poo.ProviderError{
 				Kind:    poo.ProviderKindInvalidRequest,
 				Message: redirect.Error(),
 			}
 			if resp != nil {
 				failure.Status = resp.StatusCode
-				_ = resp.Body.Close()
 			}
-			release()
-			return nil, failure
-		}
-		perr := support.ClassifyTransportError(parent, ctx, err)
-		release()
-		return nil, perr
-	}
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		// The body is read under the request's timeout, so the context is
-		// released after it.
-		defer release()
-		return nil, support.ClassifyStatus(resp)
-	}
-
-	// A failed request answered with 200 and a JSON body is not a stream.
-	// The first byte tells the two apart. The stream is therefore not
-	// buffered, and the time to the first token measures the endpoint's
-	// latency rather than the reader's.
-	br := bufio.NewReader(resp.Body)
-	first, err := support.PeekFirstByte(br)
-	if err != nil {
-		resp.Body.Close()
-		release()
-		return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
-	}
-	if first == '{' {
-		defer resp.Body.Close()
-		defer release()
-		errBody, err := io.ReadAll(io.LimitReader(br, 1<<20))
-		if err != nil {
-			return nil, &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
-		}
-		if perr, ok := support.ErrorInBody(errBody, resp.StatusCode, resp.Header); ok {
-			return nil, perr
-		}
-		return nil, &poo.ProviderError{
-			Kind:    poo.ProviderKindServer,
-			Message: "the endpoint returned a body that is not a stream",
-			Status:  resp.StatusCode,
-		}
-	}
-
-	return &streamReader{
-		body:    resp.Body,
-		scanner: support.SSEScanner(br),
-		ctx:     ctx,
-		parent:  parent,
-		cancel:  cancel,
-		ttft:    support.NewTTFT(started),
-	}, nil
+			return failure
+		},
+		Request: func(requestCtx context.Context) (*http.Request, error) {
+			// The credential is resolved under the request's own bound, so
+			// a token store that never answers cannot hold an attempt. The
+			// caller's context stays apart from that bound, so a resolution
+			// the bound ended is told from the run stopping.
+			credential, err := t.credential(ctx, requestCtx)
+			if err != nil {
+				return nil, err
+			}
+			req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, ResponsesURL(t.cfg.Endpoint), bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			t.setHeaders(req, credential, session)
+			return req, nil
+		},
+		Build: func(stream support.Stream) *streamReader {
+			return &streamReader{
+				body:    stream.Body,
+				scanner: support.SSEScanner(stream.Reader),
+				ctx:     stream.Context,
+				parent:  stream.Parent,
+				cancel:  stream.Cancel,
+				ttft:    stream.TTFT,
+			}
+		},
+	})
 }
 
 // sessionID returns the session a request names, clamped to the length the
@@ -549,74 +522,15 @@ func forkBody(body []byte, appended []poo.Message, reads modalities) ([]byte, er
 		payload["input"] = raw
 	}
 
-	order, err := jsonKeyOrder(body)
+	order, err := support.JSONKeyOrder(body)
 	if err != nil {
 		return nil, err
 	}
-	var b bytes.Buffer
-	b.WriteByte('{')
-	for i, k := range order {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		// A string always encodes.
-		key, _ := json.Marshal(k)
-		b.Write(key)
-		b.WriteByte(':')
-		b.Write(payload[k])
-	}
-	b.WriteByte('}')
-	return b.Bytes(), nil
-}
-
-// jsonKeyOrder returns the top-level keys of a JSON object, in the order
-// the object holds them.
-//
-// The order matters for a fork. The forked body has to be byte-identical to
-// the body it came from, apart from the fields that changed. A JSON object
-// decoded into a map loses its order.
-func jsonKeyOrder(body []byte) ([]string, error) {
-	dec := json.NewDecoder(bytes.NewReader(body))
-	tok, err := dec.Token()
-	if err != nil {
-		return nil, &poo.ProviderError{
-			Kind:    poo.ProviderKindInvalidRequest,
-			Message: "the request snapshot does not hold a JSON body",
-		}
-	}
-	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		return nil, &poo.ProviderError{
-			Kind:    poo.ProviderKindInvalidRequest,
-			Message: "the request snapshot does not hold a JSON object",
-		}
-	}
-	var order []string
-	for dec.More() {
-		keyTok, err := dec.Token()
-		if err != nil {
-			return nil, &poo.ProviderError{
-				Kind:    poo.ProviderKindInvalidRequest,
-				Message: "the request snapshot's keys do not decode",
-			}
-		}
-		key, ok := keyTok.(string)
-		if !ok {
-			return nil, &poo.ProviderError{
-				Kind:    poo.ProviderKindInvalidRequest,
-				Message: "the request snapshot's keys are not strings",
-			}
-		}
-		order = append(order, key)
-		// The value is skipped: the payload map already holds it.
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
-			return nil, &poo.ProviderError{
-				Kind:    poo.ProviderKindInvalidRequest,
-				Message: "the request snapshot's values do not decode",
-			}
-		}
-	}
-	return order, nil
+	// The body a direct consumer shaped always carries its input. A snapshot
+	// that does not is one the fork is adding the field to, so the field goes
+	// last and the appended items are written rather than dropped.
+	order = support.WithKeys(order, payload, []string{"input"})
+	return support.EncodeObject(payload, order), nil
 }
 
 // maxSessionIDLength is the longest session identifier the endpoint takes.

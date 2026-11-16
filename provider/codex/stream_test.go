@@ -879,3 +879,80 @@ func TestAnInterruptedStreamKeepsOnlyReplayableReasoning(t *testing.T) {
 		t.Fatalf("the reader reports %d blocks, want the reasoning item it can replay", len(blocks))
 	}
 }
+
+// TestTheFinishedCallCarriesOnlyTheArgumentsTheDeltasMissed covers the event
+// that repeats a call's whole argument string. The core assembles a call by
+// appending, so only the part it has not seen is emitted, and a string that
+// disagrees with the fragments is left alone rather than replacing what the
+// core already holds.
+func TestTheFinishedCallCarriesOnlyTheArgumentsTheDeltasMissed(t *testing.T) {
+	srv := newServer(t,
+		frame(`{"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","call_id":"call_1","name":"bash"}}`)+
+			frame(`{"type":"response.function_call_arguments.delta","output_index":2,"delta":"{\"comm"}`)+
+			// The endpoint repeats the whole string: only the tail is new.
+			frame(`{"type":"response.function_call_arguments.done","output_index":2,"arguments":"{\"command\":\"ls\"}"}`)+
+			frame(`{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":10,"output_tokens":4}}}`),
+	)
+	tr := newTransport(srv.URL)
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	events := read(t, reader)
+
+	var arguments string
+	complete := false
+	for _, ev := range events {
+		if ev.ToolCall == nil {
+			continue
+		}
+		arguments += string(ev.ToolCall.Arguments)
+		complete = complete || ev.ToolCall.Complete
+	}
+	if arguments != `{"command":"ls"}` {
+		t.Errorf("the call's arguments are %q, want the fragments and the tail once", arguments)
+	}
+	if !complete {
+		t.Error("the call never became complete, so the core cannot run it")
+	}
+}
+
+// TestAFinishedCallThatDisagreesIsLeftAlone covers the string that is not the
+// fragments plus a tail. Replacing what the core holds is not possible, so the
+// disagreement is ignored rather than emitted as a second call.
+func TestAFinishedCallThatDisagreesIsLeftAlone(t *testing.T) {
+	srv := newServer(t,
+		frame(`{"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","call_id":"call_1","name":"bash"}}`)+
+			frame(`{"type":"response.function_call_arguments.delta","output_index":2,"delta":"{\"command\":\"ls\"}"}`)+
+			frame(`{"type":"response.function_call_arguments.done","output_index":2,"arguments":"{\"command\":\"rm -rf /\"}"}`)+
+			frame(`{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":10,"output_tokens":4}}}`),
+	)
+	tr := newTransport(srv.URL)
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	events := read(t, reader)
+
+	var arguments string
+	for _, ev := range events {
+		if ev.ToolCall != nil {
+			arguments += string(ev.ToolCall.Arguments)
+		}
+	}
+	if arguments != `{"command":"ls"}` {
+		t.Errorf("the call's arguments are %q, want the fragments the core already assembled", arguments)
+	}
+}

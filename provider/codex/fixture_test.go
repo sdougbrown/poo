@@ -47,12 +47,16 @@ type streamServer struct {
 	streams []string
 	// requests are the requests the endpoint received, in order.
 	requests []captured
+	// failures are the answers that are a status instead of a stream, by
+	// the request's index.
+	failures map[int]int
 }
 
 // newServer starts an endpoint that serves the streams.
 func newServer(t *testing.T, streams ...string) *streamServer {
 	t.Helper()
 	s := &streamServer{streams: streams}
+	s.failures = map[int]int{}
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		fields := map[string]json.RawMessage{}
@@ -69,14 +73,29 @@ func newServer(t *testing.T, streams ...string) *streamServer {
 		if index < len(s.streams) {
 			stream = s.streams[index]
 		}
+		status, fails := s.failures[index]
 		s.mu.Unlock()
 
+		if fails {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, `{"error":{"message":"the endpoint is busy","type":"server_error"}}`)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, stream)
 	}))
 	t.Cleanup(s.Close)
 	return s
+}
+
+// failRequest makes the request at an index answer with a status instead of a
+// stream, so a test can drive a failure the retry policy repeats.
+func (s *streamServer) failRequest(index, status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failures[index] = status
 }
 
 // request returns the request the endpoint received at an index.

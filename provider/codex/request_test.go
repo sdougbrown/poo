@@ -1115,3 +1115,121 @@ func TestATerminalCredentialFailureIsNotRetried(t *testing.T) {
 		t.Errorf("the request reported %v, want one attempt that was not retried", reported)
 	}
 }
+
+// TestAToolResultCarriesItsAttachmentInsideTheOutput covers the result a tool
+// returns with a picture beside it. The API carries an attachment inside the
+// result's own output rather than in a message of its own, a model that reads
+// the picture gets the parts, and a model that does not is told there is one
+// instead of being sent bytes it cannot read.
+func TestAToolResultCarriesItsAttachmentInsideTheOutput(t *testing.T) {
+	image := poo.ContentBlock{Kind: poo.ContentImage, MediaType: "image/png", Data: []byte("png")}
+	history := func(result poo.ContentBlock) []poo.Message {
+		return []poo.Message{
+			poo.NewTextMessage(poo.RoleUser, "look at the build"),
+			{Role: poo.RoleAssistant, Content: []poo.ContentBlock{
+				{Kind: poo.ContentToolCall, ToolCallID: "call_1", Name: "screenshot"},
+			}},
+			{Role: poo.RoleTool, Content: []poo.ContentBlock{result, image}},
+		}
+	}
+	withText := poo.ContentBlock{Kind: poo.ContentToolResult, ToolCallID: "call_1", Text: "the screenshot"}
+	noText := poo.ContentBlock{Kind: poo.ContentToolResult, ToolCallID: "call_1"}
+
+	cases := []struct {
+		name    string
+		reads   []poo.Modality
+		history []poo.Message
+		want    string
+		absent  string
+	}{
+		{
+			name:    "a model that reads images",
+			reads:   []poo.Modality{poo.ModalityText, poo.ModalityImage},
+			history: history(withText),
+			want:    `"type":"input_image"`,
+		},
+		{
+			name:    "a model that reads no image keeps the text",
+			reads:   []poo.Modality{poo.ModalityText},
+			history: history(withText),
+			want:    `"output":"the screenshot"`,
+			absent:  `"type":"input_image"`,
+		},
+		{
+			name:    "a model that reads no image and has no text",
+			reads:   []poo.Modality{poo.ModalityText},
+			history: history(noText),
+			want:    "(see attached attachment)",
+			absent:  `"type":"input_image"`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := newServer(t, completedStream)
+			tr := newTransport(srv.URL, func(o *codex.Options) {
+				o.ModelInfo = poo.ModelInfo{ModelID: "gpt-6.1-sol", Inputs: c.reads}
+			})
+			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{
+				Model:     "gpt-6.1-sol",
+				Messages:  c.history,
+				MaxTokens: 64,
+			})
+			if err != nil {
+				t.Fatalf("starting the request: %v", err)
+			}
+			read(t, reader)
+			reader.Close()
+
+			body := string(srv.request(t, 0).body)
+			if !strings.Contains(body, `"type":"function_call_output"`) {
+				t.Fatalf("the request carries no tool result: %s", body)
+			}
+			if !strings.Contains(body, c.want) {
+				t.Errorf("the result's output is missing %q: %s", c.want, body)
+			}
+			if c.absent != "" && strings.Contains(body, c.absent) {
+				t.Errorf("the result carries %q, which the model cannot read: %s", c.absent, body)
+			}
+		})
+	}
+}
+
+// TestAForkReportsItsAttempts covers the consumer's reporter on the fork path.
+// A fork has no request of its own to report through, so a retried fork would
+// be invisible without the transport's reporter hearing it.
+func TestAForkReportsItsAttempts(t *testing.T) {
+	srv := newServer(t, completedStream, completedStream)
+	var attempts []poo.Attempt
+	tr := newTransport(srv.URL, func(o *codex.Options) {
+		o.MaxAttempts = 2
+		o.Backoff = []time.Duration{0}
+		o.OnAttempt = func(a poo.Attempt) { attempts = append(attempts, a) }
+	})
+
+	reader, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	read(t, reader)
+	reader.Close()
+
+	// The fork's first attempt fails a status the retry policy repeats.
+	srv.failRequest(1, http.StatusInternalServerError)
+	fork, err := tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 0)
+	if err != nil {
+		t.Fatalf("forking: %v", err)
+	}
+	defer fork.Close()
+	read(t, fork)
+
+	if len(attempts) != 1 {
+		t.Fatalf("the transport reported %d attempts, want the fork's one retried attempt", len(attempts))
+	}
+	if !attempts[0].Retried {
+		t.Error("the reported attempt says no retry followed it, want the retry the fork made")
+	}
+}
