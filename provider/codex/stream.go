@@ -105,7 +105,8 @@ type itemSlot struct {
 
 // streamReader reads a Codex SSE response.
 type streamReader struct {
-	body   io.ReadCloser
+	// closer releases the response and the request's bound.
+	closer support.Closer
 	frames *support.Frames
 	// ctx is the request's context. A stream that ends because the
 	// context ended reports the context's error, not a network failure.
@@ -114,8 +115,6 @@ type streamReader struct {
 	// A stream the run's context ended reports the parent's error; a
 	// stream the transport's timeout ended is a network failure.
 	parent context.Context
-	// cancel releases the request's context, when the transport made one.
-	cancel context.CancelFunc
 	// pending holds the events the reader has decoded but not returned.
 	pending []poo.StreamItem
 	// slots maps an output index and a kind to what it has produced so
@@ -130,8 +129,6 @@ type streamReader struct {
 	sawTerminal bool
 	// err holds the failure that ended the stream.
 	err error
-	// closed reports that the body is closed.
-	closed bool
 	// ttft is the time to the first streamed token.
 	ttft support.TTFT
 	// usageSent reports that the usage report has been produced.
@@ -146,7 +143,7 @@ type streamReader struct {
 // init makes the scanner when the reader was built without one.
 func (r *streamReader) init() {
 	if r.frames == nil {
-		r.frames = support.NewFrames(support.SSEScanner(r.body))
+		r.frames = support.NewFrames(support.SSEScanner(r.closer.Body))
 	}
 	if r.slots == nil {
 		r.slots = map[slotKey]*itemSlot{}
@@ -272,14 +269,7 @@ func (r *streamReader) ReportProviderBlocks() []poo.ProviderBlock {
 
 // Close releases the response.
 func (r *streamReader) Close() error {
-	if r.closed {
-		return nil
-	}
-	r.closed = true
-	if r.cancel != nil {
-		r.cancel()
-	}
-	return r.body.Close()
+	return r.closer.Close()
 }
 
 // events turns one event into the events the reader queues.
