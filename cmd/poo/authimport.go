@@ -3,13 +3,11 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
@@ -164,34 +162,12 @@ func resolveNamed(settingsPath, named string) (string, error) {
 }
 
 // readPiCredential reads the Codex credential out of pi's auth.json.
+//
+// The package that keeps a credential reads it: the entry's fields and its oauth rule are
+// one thing, and a second decoder here would be a copy that a field added to the format
+// would not reach.
 func readPiCredential(path string) (piauth.Credential, error) {
-	entries, err := piauth.Entries(path)
-	if err != nil {
-		return piauth.Credential{}, err
-	}
-	raw, ok := entries[piauth.ProviderCodex]
-	if !ok {
-		return piauth.Credential{}, fmt.Errorf("%s holds no %s credential", path, piauth.ProviderCodex)
-	}
-	var entry struct {
-		Type      string `json:"type"`
-		Access    string `json:"access"`
-		Refresh   string `json:"refresh"`
-		Expires   int64  `json:"expires"`
-		AccountID string `json:"accountId"`
-	}
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		return piauth.Credential{}, fmt.Errorf("%s: the %s entry is not a credential: %v", path, piauth.ProviderCodex, err)
-	}
-	if entry.Type != "oauth" || entry.Access == "" || entry.Refresh == "" {
-		return piauth.Credential{}, fmt.Errorf("%s holds a %s entry that is not an oauth credential", path, piauth.ProviderCodex)
-	}
-	return piauth.Credential{
-		Access:    entry.Access,
-		Refresh:   entry.Refresh,
-		Expires:   timeFromMilli(entry.Expires),
-		AccountID: entry.AccountID,
-	}, nil
+	return piauth.Credentials{Path: path}.Read()
 }
 
 // replacement decides whether a credential poo's file already holds may be
@@ -257,6 +233,3 @@ func sameFile(first, second string) bool {
 	}
 	return os.SameFile(one, two)
 }
-
-// timeFromMilli is a credential's expiry from the milliseconds the file stores.
-func timeFromMilli(ms int64) time.Time { return time.UnixMilli(ms) }

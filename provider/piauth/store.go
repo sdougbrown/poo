@@ -110,9 +110,13 @@ var (
 	// the file holds, so a retry most likely fails the same way.
 	ErrRefresh = errors.New("piauth: the Codex token refresh failed")
 
-	// ErrStorage means the auth.json could not be read, before anything
-	// was traded. Nothing was written either.
+	// ErrStorage means the auth.json could not be read, or could not be made ready to
+	// write, before anything was traded. Nothing was written either.
 	ErrStorage = errors.New("piauth: the auth.json could not be read")
+
+	// ErrForeignFile means the file is another tool's: pi's, in pi's shape. poo writes
+	// its own, and a command that rewrote pi's file would be changing a file pi reads.
+	ErrForeignFile = errors.New("piauth: the auth file belongs to another tool")
 
 	// ErrExists means the file already holds a credential for the provider, and
 	// the caller did not ask for it to be replaced. A command that replaced a
@@ -150,6 +154,27 @@ type Credential struct {
 	AccountID string
 }
 
+// Read returns the credential the file holds, without trading it.
+//
+// It is the read a caller that copies a credential makes: no refresh, no write and no
+// lock. A caller that needs a live token asks Access, and one that reports on the
+// credential asks Status.
+func (c Credentials) Read() (Credential, error) {
+	if c.Path == "" {
+		return Credential{}, errors.New("piauth: no auth.json path")
+	}
+	stored, _, err := c.read()
+	if err != nil {
+		return Credential{}, err
+	}
+	return Credential{
+		Access:    stored.Access,
+		Refresh:   stored.Refresh,
+		Expires:   time.UnixMilli(stored.Expires),
+		AccountID: stored.AccountID,
+	}, nil
+}
+
 // Set stores a credential under the provider.
 //
 // The write is a refresh's write — the same lock, the same file, every other entry
@@ -175,7 +200,8 @@ func (c Credentials) Set(ctx context.Context, entry Credential, replace bool) (S
 	// there yet has nowhere to take one. The write creates the directory it writes
 	// into; the lock needs it first.
 	if err := os.MkdirAll(filepath.Dir(c.Path), 0o700); err != nil {
-		return Status{}, fmt.Errorf("%w: %s: %w", ErrPersist, filepath.Dir(c.Path), err)
+		// Nothing was traded: the file could not be made ready to write.
+		return Status{}, fmt.Errorf("%w: %s: %w", ErrStorage, filepath.Dir(c.Path), err)
 	}
 	hold, err := acquire(ctx, c.Path, c.wait())
 	if err != nil {
@@ -187,7 +213,7 @@ func (c Credentials) Set(ctx context.Context, entry Credential, replace bool) (S
 		return Status{}, err
 	}
 	if _, ok := doc.format.(pooFormat); !ok {
-		return Status{}, fmt.Errorf("%w: %s is pi's file, and poo writes its own", ErrStorage, doc.path)
+		return Status{}, fmt.Errorf("%w: %s is pi's file, and poo writes its own", ErrForeignFile, doc.path)
 	}
 	if _, err := decodeEntry(doc.path, ProviderCodex, doc.entries); err == nil && !replace {
 		return Status{}, fmt.Errorf("%w: %s holds a %s credential", ErrExists, doc.path, ProviderCodex)

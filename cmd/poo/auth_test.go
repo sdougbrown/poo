@@ -215,8 +215,9 @@ func TestTheAuthImportRefusesTheOneFile(t *testing.T) {
 	if err := os.WriteFile(target, []byte(`{"openai-codex": {"type": "oauth", "access": "a", "refresh": "r", "expires": 4102444800000, "accountId": "acct"}}`), 0o600); err != nil {
 		t.Fatalf("writing the credential file: %v", err)
 	}
-	if code := run([]string{"auth", "import", "pi", "--settings", settings, "--from", target}); code == 0 {
-		t.Error("the import copied a file onto itself")
+	code, _ := runCLI(t, "auth", "import", "pi", "--settings", settings, "--from", target)
+	if code != usageExitCode {
+		t.Errorf("the exit code is %d, want %d for a copy onto the same file", code, usageExitCode)
 	}
 }
 
@@ -249,5 +250,121 @@ session:
 	}
 	if !strings.Contains(out, pi) {
 		t.Errorf("the report is %q, want it to name the file poo still reads", out)
+	}
+}
+
+// TestTheAuthImportFindsPisOwnCredential covers the source nothing names: pi keeps its
+// credential in its own directory, and a bare `poo auth import pi` must find it there. A
+// wrong path or an inverted check would tell a signed-in operator there is nothing to
+// copy.
+func TestTheAuthImportFindsPisOwnCredential(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HOME", home)
+	t.Setenv("APPDATA", home)
+	piDir := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(piDir, 0o700); err != nil {
+		t.Fatalf("creating pi's directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(piDir, "auth.json"), []byte(`{"openai-codex": {"type": "oauth", "access": "an-access-token-from-pi", "refresh": "r", "expires": 4102444800000, "accountId": "acct-from-pi"}}`), 0o600); err != nil {
+		t.Fatalf("writing pi's credential: %v", err)
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "auth.json")
+	settings := authSettings(t, dir, target)
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"auth", "import", "pi", "--settings", settings}); code != 0 {
+			t.Errorf("poo auth import pi exited with %d", code)
+		}
+	})
+	if !strings.Contains(out, "acct-from-pi") {
+		t.Errorf("the report is %q, want the credential pi holds", out)
+	}
+	stored, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("reading poo's credential file: %v", err)
+	}
+	if !strings.Contains(string(stored), "an-access-token-from-pi") {
+		t.Errorf("poo's file is\n%s\nwant pi's credential", stored)
+	}
+}
+
+// TestTheAuthImportSaysWhenPisFileIsNotThere covers the refusal: a home with no pi
+// credential is nothing to copy, and the command says so instead of writing an empty file.
+func TestTheAuthImportSaysWhenPisFileIsNotThere(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HOME", home)
+	t.Setenv("APPDATA", home)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "auth.json")
+	settings := authSettings(t, dir, target)
+
+	code, stderr := runCLI(t, "auth", "import", "pi", "--settings", settings)
+	if code != usageExitCode {
+		t.Errorf("the exit code is %d, want %d", code, usageExitCode)
+	}
+	if !strings.Contains(stderr, "not found") {
+		t.Errorf("the failure is %q, want it to say pi's file was not found", stderr)
+	}
+	if _, err := os.Stat(target); err == nil {
+		t.Error("poo's credential file was written with nothing to copy")
+	}
+}
+
+// TestTheAuthImportRefusesANamedFileThatIsNotThere covers the promise an explicit path
+// makes: a --from that names a missing file fails, rather than falling through to pi's own
+// directory and importing a file the operator did not name.
+//
+// A pi_auth_file that is missing is refused earlier, when the settings load: an explicit
+// path is a promise there too.
+func TestTheAuthImportRefusesANamedFileThatIsNotThere(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HOME", home)
+	t.Setenv("APPDATA", home)
+	piDir := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(piDir, 0o700); err != nil {
+		t.Fatalf("creating pi's directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(piDir, "auth.json"), []byte(`{"openai-codex": {"type": "oauth", "access": "another-file", "refresh": "r", "expires": 4102444800000, "accountId": "acct-other"}}`), 0o600); err != nil {
+		t.Fatalf("writing pi's credential: %v", err)
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "auth.json")
+	settings := authSettings(t, dir, target)
+	code, stderr := runCLI(t, "auth", "import", "pi", "--settings", settings, "--from", filepath.Join(dir, "typo.json"))
+	if code != usageExitCode {
+		t.Errorf("the exit code is %d, want %d", code, usageExitCode)
+	}
+	if !strings.Contains(stderr, "not there") {
+		t.Errorf("the failure is %q, want it to say the named file is not there", stderr)
+	}
+	if _, err := os.Stat(target); err == nil {
+		t.Error("poo's credential file was written from a file the settings did not name")
+	}
+}
+
+// TestTheConfirmationReadsAnAnswer covers the prompt's parsing. An inverted answer would
+// replace a credential the operator declined to replace, which is the one thing the
+// ErrExists rule exists to prevent.
+func TestTheConfirmationReadsAnAnswer(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "yes", input: "y\n", want: true},
+		{name: "the whole word", input: "YES\n", want: true},
+		{name: "no", input: "n\n"},
+		{name: "nothing at all", input: "\n"},
+		{name: "no input", input: ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := confirmed(strings.NewReader(c.input)); got != c.want {
+				t.Errorf("the answer %q reads as %t, want %t", c.input, got, c.want)
+			}
+		})
 	}
 }

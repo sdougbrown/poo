@@ -352,8 +352,8 @@ func TestSetRefusesPisFile(t *testing.T) {
 		Expires:   clock().Add(time.Hour),
 		AccountID: newAccount,
 	}, true)
-	if !errors.Is(err, piauth.ErrStorage) {
-		t.Fatalf("the write is %v, want ErrStorage", err)
+	if !errors.Is(err, piauth.ErrForeignFile) {
+		t.Fatalf("the write is %v, want ErrForeignFile", err)
 	}
 	if got := readFile(t, path); got != body {
 		t.Errorf("pi's file was written:\n%s", got)
