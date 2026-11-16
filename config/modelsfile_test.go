@@ -1061,3 +1061,53 @@ session:
 		}
 	}
 }
+
+// TestAModelsFileRefusesAKeyItDoesNotHave covers the contract the README promises: a
+// key this file does not have is a failure that names it, rather than a setting with no
+// effect. The strict decode is what makes that true, so a typo'd key is the test.
+func TestAModelsFileRefusesAKeyItDoesNotHave(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	writePooModels(t, dir, `endpoints:
+  home:
+    endpoint: http://127.0.0.1:1/v1
+    models:
+      qwen3:
+        contxt_limit: 32768
+`)
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("the settings loaded with a key the models file does not have")
+	}
+	if !strings.Contains(err.Error(), "contxt_limit") {
+		t.Errorf("the failure is %q, want it to name the key", err)
+	}
+}
+
+// TestAModelsFileThatOpensWithABOMIsRead covers the file a Windows editor writes. The
+// models file poo writes is YAML, and a BOM in front of it is a byte neither YAML nor
+// JSON takes: the reader drops it, so a file an editor touched is a file poo reads.
+func TestAModelsFileThatOpensWithABOMIsRead(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	writePooModels(t, dir, "\ufeff"+pooModels)
+	path := writeSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+roles:
+  chat: home/qwen3
+`)
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("a models file with a byte order mark did not load: %v", err)
+	}
+	model, err := catalog.New(settings.CatalogOptions()).Resolve("home/qwen3")
+	if err != nil {
+		t.Fatalf("the catalog resolves no home/qwen3: %v", err)
+	}
+	if model.ContextLimit != 32768 {
+		t.Errorf("the model's context limit is %d, want the file's 32768", model.ContextLimit)
+	}
+}
