@@ -14,9 +14,8 @@ import (
 //
 // The request's input is the model's history turned into the API's items. The
 // leading system message becomes the request's instructions, because the API
-// carries the prompt in a field of its own. Everything else becomes an item:
-// a user message, an assistant message, the calls it made, the results they
-// returned, and the provider blocks the endpoint produced.
+// carries the prompt in a field of its own. Everything else becomes an item.
+// These include messages, calls, results, and provider blocks.
 
 // inputMessage is one message item of the request's input.
 //

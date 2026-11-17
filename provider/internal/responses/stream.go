@@ -13,10 +13,9 @@ import (
 
 // The response stream.
 //
-// The endpoint sends the API's events, and the terminal ones arrive in either
-// spelling: response.completed is the API's, and response.done is what a
-// backend of its own sends instead. response.incomplete stopped early, and a
-// failed response carries the failure the run settles with.
+// Terminal events use either response.completed or response.done.
+// response.incomplete stopped early, and a failed response carries the failure
+// the run settles with.
 
 // event is one SSE data payload.
 type event struct {

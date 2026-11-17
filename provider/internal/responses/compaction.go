@@ -11,10 +11,9 @@ import (
 // The compaction items.
 //
 // A compaction request is a normal request whose last input item is the
-// trigger. Its answer holds the compacted state as an item this package cannot
-// read: only the endpoint can, and a later request gives the item back
-// verbatim. Turning that answer into the window the core installs is here,
-// because the items are the API's.
+// trigger. Its answer holds opaque state that only the endpoint can read.
+// A later request returns that item verbatim. This package turns the answer
+// into the window the core installs.
 
 // compactionTrigger is the input item that asks the endpoint to compact.
 //

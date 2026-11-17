@@ -67,9 +67,8 @@ func AppendInput(body []byte, appended []poo.Message, reads Modalities) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	// The body a direct consumer shaped always carries its input. A snapshot
-	// that does not is one the fork is adding the field to, so the field goes
-	// last and the appended items are written rather than dropped.
+	// A snapshot can lack input. Put the added field last so the fork
+	// retains the appended items.
 	order = support.WithKeys(order, payload, []string{"input"})
 	return support.EncodeObject(payload, order), nil
 }

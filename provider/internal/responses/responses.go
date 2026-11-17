@@ -1,11 +1,8 @@
 // Package responses holds the Responses API's wire half.
 //
-// The request's shape, the conversion between the model's history and the
-// request's input items, the answer's event stream, and the compaction items
-// are here: they are what the API says, not what one endpoint or one account
-// needs. A transport that speaks the API composes them. It decides which
-// endpoint to reach, how a request authenticates, which headers ride with it
-// and which policy its body follows, and hands the rest to this package.
+// This package holds request shapes, history conversion, event streams, and
+// compaction items. A transport composes them and chooses the endpoint,
+// authentication, headers, and request policy.
 //
 // Nothing here resolves a credential, chooses a URL or sets a header. That is
 // the dividing line: this package never says where a request goes or who pays
