@@ -59,11 +59,15 @@ func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.N
 	if err != nil {
 		return poo.NativeCompactionResult{}, err
 	}
+	// The session being compacted names the request's identity, the way a
+	// turn's does: the headers and the cache key are the same id, so the
+	// window is cached under its own session and not the transport's.
+	session := t.sessionID(in.SessionID)
 	// The opened reader is kept whole because the window is read from the
 	// response's own items, which the stream interface does not carry.
 	var stream *streamReader
 	open := func(ctx context.Context) (support.Reader, error) {
-		reader, err := t.open(ctx, body, t.sessionID(""))
+		reader, err := t.open(ctx, body, session)
 		if err != nil {
 			return nil, err
 		}
@@ -95,7 +99,8 @@ func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.N
 // The view is encoded as a normal request's history: its system message
 // becomes the instructions, and every message becomes the input items the
 // endpoint takes. No tools are offered, because a compaction is the endpoint's
-// own work and a call in its answer would not be the window.
+// own work and a call in its answer would not be the window. The request names
+// the session being compacted, so its cache key is that session's.
 func (t *Transport) compactionBody(in poo.NativeCompaction) ([]byte, error) {
 	if in.View == nil {
 		return nil, support.ConfigErrorf("the compaction was given no view to encode")
@@ -104,6 +109,7 @@ func (t *Transport) compactionBody(in poo.NativeCompaction) ([]byte, error) {
 		Model:     in.Model.ModelID,
 		ModelInfo: in.Model,
 		Messages:  in.View.Messages(),
+		SessionID: in.SessionID,
 	})
 	if err != nil {
 		return nil, err

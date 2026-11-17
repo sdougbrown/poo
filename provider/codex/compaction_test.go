@@ -53,9 +53,17 @@ func compact(t *testing.T, compactor poo.NativeCompactor, view poo.View) (poo.Pr
 // everything a compaction produced.
 func compactResult(t *testing.T, compactor poo.NativeCompactor, view poo.View) (poo.NativeCompactionResult, error) {
 	t.Helper()
+	return compactFor(t, compactor, view, "")
+}
+
+// compactFor asks a transport's native compaction capability to compact a
+// view on behalf of a session.
+func compactFor(t *testing.T, compactor poo.NativeCompactor, view poo.View, session string) (poo.NativeCompactionResult, error) {
+	t.Helper()
 	return compactor.Compact(context.Background(), poo.NativeCompaction{
-		Model: poo.ModelInfo{ModelID: "gpt-6.1-sol"},
-		View:  view,
+		Model:     poo.ModelInfo{ModelID: "gpt-6.1-sol"},
+		View:      view,
+		SessionID: session,
 	})
 }
 
@@ -123,6 +131,71 @@ func TestACompactionRequestCarriesTheCurrentViewAndTheTrigger(t *testing.T) {
 	}
 	if string(item.Data) != compactionItem {
 		t.Errorf("the payload is %s, want the response's item verbatim", item.Data)
+	}
+}
+
+// TestACompactionNamesTheSessionItCompactsFor covers the identity a
+// compaction request carries. A transport may serve several sessions, and
+// each one's compaction names its own id: the endpoint's cache key and the
+// request's session headers are that id, so no session's compaction is
+// charged to another's prompt cache. A call that names no session falls back
+// to the transport's configured id.
+func TestACompactionNamesTheSessionItCompactsFor(t *testing.T) {
+	srv := newServer(t, compactionStream(compactionItem))
+	tr := newTransport(srv.URL, func(o *codex.Options) { o.SessionID = "configured" })
+
+	for _, session := range []string{"s1", "s2", ""} {
+		if _, err := compactFor(t, tr, compactView(), session); err != nil {
+			t.Fatalf("compacting the view for the session %q: %v", session, err)
+		}
+	}
+
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"the first session", "s1"},
+		{"the second session", "s2"},
+		{"a call that names no session", "configured"},
+	}
+	if n := srv.count(); n != len(cases) {
+		t.Fatalf("the endpoint received %d requests, want one per compaction", n)
+	}
+	for i, tc := range cases {
+		req := srv.request(t, i)
+		if got := req.header.Get("session-id"); got != tc.want {
+			t.Errorf("%s: the session header is %q, want %q", tc.name, got, tc.want)
+		}
+		if got := req.header.Get("x-client-request-id"); got != tc.want {
+			t.Errorf("%s: the client request header is %q, want %q", tc.name, got, tc.want)
+		}
+		if got := field[string](t, req, "prompt_cache_key"); got != tc.want {
+			t.Errorf("%s: the prompt cache key is %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestACompactionClampsTheSessionItCompactsFor covers the session identifier
+// the endpoint accepts. The id a compaction names is cut the way a turn's is,
+// and the headers carry the same cut as the cache key.
+func TestACompactionClampsTheSessionItCompactsFor(t *testing.T) {
+	srv := newServer(t, compactionStream(compactionItem))
+	tr := newTransport(srv.URL)
+	long := strings.Repeat("s", 60) + strings.Repeat("é", 10)
+	want := strings.Repeat("s", 60) + strings.Repeat("é", 4)
+
+	if _, err := compactFor(t, tr, compactView(), long); err != nil {
+		t.Fatalf("compacting the view: %v", err)
+	}
+
+	req := srv.request(t, 0)
+	if got := field[string](t, req, "prompt_cache_key"); got != want {
+		t.Errorf("the prompt cache key is %q, want the first %d characters", got, len([]rune(want)))
+	}
+	for _, name := range []string{"Session-Id", "X-Client-Request-Id"} {
+		if got := req.header.Get(name); got != want {
+			t.Errorf("%s is %q, want the same cut", name, got)
+		}
 	}
 }
 

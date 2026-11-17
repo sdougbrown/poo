@@ -187,4 +187,9 @@ type NativeCompaction struct {
 	View View
 	// Budget is the run's context budget.
 	Budget ContextBudget
+	// SessionID is the id of the session being compacted, and is empty
+	// when the session has none. A transport keys the request's identity
+	// by it, so the window the endpoint produces is cached under the
+	// session it belongs to.
+	SessionID string
 }

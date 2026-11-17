@@ -162,6 +162,7 @@ func (s *Session) nativeWindow(ctx context.Context) (NativeCompactionResult, err
 	s.mu.Lock()
 	model := s.opts.Model
 	transport := s.opts.Transport
+	sessionID := s.opts.SessionID
 	view := s.viewLocked()
 	s.mu.Unlock()
 	// The model is checked before the transport. A switch to a model without
@@ -178,7 +179,12 @@ func (s *Session) nativeWindow(ctx context.Context) (NativeCompactionResult, err
 			"provider's own state: use a provider that serves native compaction (openai-codex), or the summary strategy",
 			ErrInvalidCompaction, modelLabel(model))
 	}
-	result, err := compactor.Compact(ctx, NativeCompaction{Model: model, View: view, Budget: s.budget()})
+	result, err := compactor.Compact(ctx, NativeCompaction{
+		Model:     model,
+		View:      view,
+		Budget:    s.budget(),
+		SessionID: sessionID,
+	})
 	if err == nil {
 		// A window the transport handed back is the endpoint's answer, so
 		// the request was billed even if the transport does not say so.

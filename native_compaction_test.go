@@ -124,6 +124,32 @@ func TestNativeCompactionRunsAtTheThresholdAndRestores(t *testing.T) {
 	}
 }
 
+// TestANativeCompactionNamesTheSessionItCompactsFor covers the identity the
+// core hands the transport. A compaction runs inside one session, and only
+// the core knows which: the transport can name the session's own id as the
+// endpoint's cache key only when the compaction carries it.
+func TestANativeCompactionNamesTheSessionItCompactsFor(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 3600, OutputTokens: 5}},
+		{text: "the answer"},
+	})
+	tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
+	opts := nativeOptions(t, tr, "echoed", &recordingSink{})
+	opts.SessionID = "the-session-being-compacted"
+	s := newTestSession(t, opts)
+
+	if res := runSession(t, s, "do the thing"); res.Reason != poo.ReasonEndTurn {
+		t.Fatalf("the run settled %q, want end_turn", res.Reason)
+	}
+	native := tr.NativeCompactions()
+	if len(native) != 1 {
+		t.Fatalf("the transport was given %d native compactions, want 1", len(native))
+	}
+	if got := native[0].SessionID; got != opts.SessionID {
+		t.Errorf("the compaction was given the session %q, want the session's own id %q", got, opts.SessionID)
+	}
+}
+
 // TestNativeCompactionWaitsBelowTheThreshold covers the other side of the
 // boundary: a window under the strategy's share is not compacted.
 func TestNativeCompactionWaitsBelowTheThreshold(t *testing.T) {
