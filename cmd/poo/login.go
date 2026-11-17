@@ -241,6 +241,12 @@ func (o *loginOptions) waitDuration() time.Duration {
 	return 5 * time.Minute
 }
 
+// listenOn opens the listener a callback wait holds.
+//
+// The var is the test's seam: a test that already holds the listener open hands it back here, so
+// nothing sits between the kernel handing out a port and the wait binding it.
+var listenOn = net.Listen
+
 // waitForCallback waits for the sign-in to come back: on the loopback the flow's redirect names,
 // or as a value the operator pastes in.
 //
@@ -254,7 +260,7 @@ func waitForCallback(ctx context.Context, attempt auth.Attempt, wait time.Durati
 	if err != nil {
 		return auth.Callback{}, fmt.Errorf("the redirect URI %q does not parse: %w", attempt.Flow.RedirectURI, err)
 	}
-	listener, err := net.Listen("tcp", redirect.Host)
+	listener, err := listenOn("tcp", redirect.Host)
 	if err != nil {
 		return auth.Callback{}, fmt.Errorf("the callback cannot listen on %s: %w. Paste the code instead", redirect.Host, err)
 	}

@@ -421,10 +421,7 @@ func TestALoginSaysWhereTheSettingsStillPoint(t *testing.T) {
 // TestTheCallbackComesBackOnTheFlowsRedirect covers the wait: a request to the path the flow's
 // redirect names ends it, and the callback it carries is what the exchange is given.
 func TestTheCallbackComesBackOnTheFlowsRedirect(t *testing.T) {
-	attempt, err := codexAttemptForTest()
-	if err != nil {
-		t.Fatalf("the attempt: %v", err)
-	}
+	attempt := codexAttemptForTest(t)
 	ready := make(chan struct{})
 	done := make(chan auth.Callback, 1)
 	failed := make(chan error, 1)
@@ -498,13 +495,8 @@ func TestTheCodexBrowserSignInStoresTheCredential(t *testing.T) {
 	// port 1455, which a test cannot count on.
 	old := auth.CodexLogin
 	defer func() { auth.CodexLogin = old }()
-	port, err := freePort()
-	if err != nil {
-		t.Fatalf("asking the kernel for a port: %v", err)
-	}
-	flow := old
+	flow := codexFlowForTest(t)
 	flow.TokenURL = endpoint.URL
-	flow.RedirectURI = fmt.Sprintf("http://127.0.0.1:%d/auth/callback", port)
 	auth.CodexLogin = flow
 
 	stderr := streamTo(t, &os.Stderr)
@@ -575,12 +567,9 @@ func TestTheCodexBrowserSignInStoresTheCredential(t *testing.T) {
 // answers returns an error that says so instead of blocking.
 func TestTheWaitGivesUpWhenTheSignInDoesNotComeBack(t *testing.T) {
 	withoutATerminal(t)
-	attempt, err := codexAttemptForTest()
-	if err != nil {
-		t.Fatalf("the attempt: %v", err)
-	}
+	attempt := codexAttemptForTest(t)
 	started := time.Now()
-	_, err = waitForCallback(context.Background(), attempt, 50*time.Millisecond, nil, io.Discard)
+	_, err := waitForCallback(context.Background(), attempt, 50*time.Millisecond, nil, io.Discard)
 	if err == nil {
 		t.Fatal("the wait came back with no error and no callback")
 	}
@@ -596,10 +585,7 @@ func TestTheWaitGivesUpWhenTheSignInDoesNotComeBack(t *testing.T) {
 // handler that answers, so the requests go to its listener.
 func TestTheCallbackPageReportsTheAnswer(t *testing.T) {
 	withoutATerminal(t)
-	attempt, err := codexAttemptForTest()
-	if err != nil {
-		t.Fatalf("the attempt: %v", err)
-	}
+	attempt := codexAttemptForTest(t)
 	ready := make(chan struct{})
 	done := make(chan auth.Callback, 1)
 	failed := make(chan error, 1)

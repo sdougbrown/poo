@@ -14,16 +14,6 @@ import (
 	"github.com/sdougbrown/poo/provider/auth"
 )
 
-// freePort asks the kernel for a port nothing is listening on.
-func freePort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port, nil
-}
-
 // isolatedConfigHome points the default credential paths at directories of the test's, so a
 // command cannot read or write the operator's own.
 func isolatedConfigHome(t *testing.T) {
@@ -57,15 +47,45 @@ func withStdin(t *testing.T, content string) {
 	})
 }
 
-// codexAttemptForTest is a sign-in whose redirect is on a free port, so the wait can listen.
-func codexAttemptForTest() (auth.Attempt, error) {
-	port, err := freePort()
+// holdCallbackListener opens the listener a callback wait will hold, and hands it to the wait.
+//
+// The wait binds this listener, not a port that was free a moment ago: the kernel hands out the
+// port and the test keeps it bound until the wait has it, so nothing can take it in between.
+func holdCallbackListener(t *testing.T) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return auth.Attempt{}, err
+		t.Fatalf("opening the callback's listener: %v", err)
 	}
+	listened := listenOn
+	listenOn = func(string, string) (net.Listener, error) {
+		return listener, nil
+	}
+	t.Cleanup(func() {
+		listenOn = listened
+		_ = listener.Close()
+	})
+	return listener
+}
+
+// codexFlowForTest is the Codex sign-in on a loopback the test holds open, so the wait binds the
+// listener its redirect names.
+func codexFlowForTest(t *testing.T) auth.Flow {
+	t.Helper()
+	listener := holdCallbackListener(t)
 	flow := auth.CodexLogin
-	flow.RedirectURI = fmt.Sprintf("http://127.0.0.1:%d/auth/callback", port)
-	return flow.Authorize()
+	flow.RedirectURI = fmt.Sprintf("http://%s/auth/callback", listener.Addr())
+	return flow
+}
+
+// codexAttemptForTest is a sign-in whose redirect is on a listener the test holds open.
+func codexAttemptForTest(t *testing.T) auth.Attempt {
+	t.Helper()
+	attempt, err := codexFlowForTest(t).Authorize()
+	if err != nil {
+		t.Fatalf("the attempt: %v", err)
+	}
+	return attempt
 }
 
 // streamTo points one of the process's streams at a file, and returns what the file holds so
