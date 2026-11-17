@@ -2239,9 +2239,9 @@ func compactionUsageRecords(sink *recordingSink) []*poo.UsageRecord {
 }
 
 // TestANativeCompactionsUsageIsRecorded covers the accounting of a
-// provider-native request: the endpoint billed it, so its usage is
-// recorded as a compaction's, names no request because it is not a turn,
-// and counts against the run's token ceiling.
+// provider-native request. The endpoint billed it, so its usage is recorded as
+// a compaction's and names no request. It counts against the run's token
+// ceiling.
 func TestANativeCompactionsUsageIsRecorded(t *testing.T) {
 	tr := scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}})
 	tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
@@ -2291,17 +2291,15 @@ func TestANativeCompactionsUsageIsRecorded(t *testing.T) {
 	})
 }
 
-// TestANativeCompactionWithoutUsageIsChargedTheEstimate covers the rule:
-// an endpoint that reports no usage is charged the estimate a side
-// request gets, measured from the request and the window it produced. A
-// compacted conversation would otherwise be free, and the ceiling would
-// count a compaction as nothing.
+// TestANativeCompactionWithoutUsageIsChargedTheEstimate covers the rule. An
+// endpoint that reports no usage is charged the estimate a side request gets,
+// measured from the request and the window it produced. A compacted
+// conversation would otherwise be free.
 func TestANativeCompactionWithoutUsageIsChargedTheEstimate(t *testing.T) {
 	tr := scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}})
-	// The window's payload is what the estimate prices: four thousand
-	// characters are about eleven hundred tokens, so the ceiling below
-	// sits between the two turns' own estimates and those estimates plus
-	// the compaction's.
+	// The window's payload is what the estimate prices. Four thousand characters
+	// are about eleven hundred tokens. The ceiling below sits between the two
+	// turns' estimates and those estimates plus the compaction's.
 	tr.SetWindow(nativeWindowOf(strings.Repeat("x", 4000)))
 	sink := &recordingSink{}
 	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
@@ -2322,10 +2320,10 @@ func TestANativeCompactionWithoutUsageIsChargedTheEstimate(t *testing.T) {
 // unbilledSuccessNativeTransport is a transport whose native compaction
 // answers with a window and never sets Billed.
 //
-// That is the shape a third party writes: the replay transport returns the
-// window it read back and nothing else, because a recording says nothing
-// about what the endpoint charged. A result the transport handed back without
-// an error is the endpoint's answer whatever the flag says.
+// That is the shape a third party writes. The replay transport returns the
+// window it read back and nothing else, because a recording says nothing about
+// what the endpoint charged. A result the transport handed back without an
+// error is the endpoint's answer whatever the flag says.
 type unbilledSuccessNativeTransport struct {
 	*pootest.Transport
 	// result is what the compaction answers.
@@ -2338,10 +2336,9 @@ func (t *unbilledSuccessNativeTransport) Compact(ctx context.Context, in poo.Nat
 }
 
 // TestASuccessfulNativeCompactionWithoutABilledFlagIsStillCharged covers a
-// successful native compaction from a transport that reports no bill: the run
+// successful native compaction from a transport that reports no bill. The run
 // is charged the counts the answer reported, or the estimate a side request
-// gets when it reported none, because the endpoint read the request and
-// answered it.
+// gets when it reported none. The endpoint read the request and answered it.
 func TestASuccessfulNativeCompactionWithoutABilledFlagIsStillCharged(t *testing.T) {
 	t.Run("reported usage", func(t *testing.T) {
 		tr := &unbilledSuccessNativeTransport{
@@ -2382,10 +2379,9 @@ func TestASuccessfulNativeCompactionWithoutABilledFlagIsStillCharged(t *testing.
 	t.Run("no reported usage", func(t *testing.T) {
 		tr := &unbilledSuccessNativeTransport{
 			Transport: scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}}),
-			// The window's payload is what the estimate prices: four
-			// thousand characters are about eleven hundred tokens, so the
-			// ceiling sits between the two turns' own estimates and those
-			// estimates plus the compaction's.
+			// The window's payload is what the estimate prices. Four thousand
+			// characters are about eleven hundred tokens. The ceiling sits between
+			// the two turns' estimates and those estimates plus the compaction's.
 			result: poo.NativeCompactionResult{
 				Window: nativeWindowOf(strings.Repeat("x", 4000)),
 			},
@@ -2410,9 +2406,9 @@ func TestASuccessfulNativeCompactionWithoutABilledFlagIsStillCharged(t *testing.
 }
 
 // TestAFailedNativeCompactionInstallsNothing covers a native request the
-// endpoint did not answer: the view keeps the turn the window would have
-// replaced, no compaction record is written, and the request costs
-// nothing because there is no answer to charge.
+// endpoint did not answer. The view keeps the turn the window would have
+// replaced, and no compaction record is written. The request costs nothing,
+// because there is no answer to charge.
 func TestAFailedNativeCompactionInstallsNothing(t *testing.T) {
 	tr := scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}})
 	tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
@@ -2478,9 +2474,9 @@ func (t *blockedNativeTransport) Compact(ctx context.Context, in poo.NativeCompa
 }
 
 // interruptedNativeRun starts a run whose native compaction waits for the
-// run's interrupt, interrupts it once the compaction is inside the transport,
-// and returns what the run settled as. The run is left for the caller to read
-// the log of, so its accounting can be asserted.
+// interrupt. It interrupts once the compaction is inside the transport, and
+// returns what the run settled as. The run is left for the caller to read the
+// log of, so its accounting can be asserted.
 func interruptedNativeRun(t *testing.T, opts poo.Options, tr *blockedNativeTransport) poo.Result {
 	t.Helper()
 	s := newTestSession(t, opts)
@@ -2499,9 +2495,9 @@ func interruptedNativeRun(t *testing.T, opts poo.Options, tr *blockedNativeTrans
 }
 
 // TestAnInterruptedNativeCompactionStillCostsItsTokens covers the order the
-// accounting runs in: the endpoint billed the request before the interrupt
-// arrived, so the compaction's tokens are recorded even though the window
-// it produced is discarded.
+// accounting runs in. The endpoint billed the request before the interrupt
+// arrived, so the compaction's tokens are recorded even though the window it
+// produced is discarded.
 func TestAnInterruptedNativeCompactionStillCostsItsTokens(t *testing.T) {
 	tr := &blockedNativeTransport{
 		Transport: scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}}),
@@ -2540,9 +2536,9 @@ func spentTurn(input, output int) fakeResponse {
 }
 
 // TestANativeCompactionThatAnsweredWithoutAWindowIsStillCharged covers the
-// answer the run could not install: the endpoint read the prompt and billed it
-// before the window was judged, so the counts it reported are recorded and
-// count against the run's ceiling. A failed window is not a free request.
+// answer the run could not install. The endpoint read the prompt and billed it
+// before the window was judged, so the counts it reported are recorded. They
+// count against the run's ceiling: a failed window is not a free request.
 func TestANativeCompactionThatAnsweredWithoutAWindowIsStillCharged(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 10, OutputTokens: 5}},
@@ -2580,9 +2576,9 @@ func TestANativeCompactionThatAnsweredWithoutAWindowIsStillCharged(t *testing.T)
 }
 
 // TestAnInterruptedNativeCompactionWithoutUsageIsChargedTheEstimate covers the
-// request an interrupt cut off before the endpoint reported anything: it was
+// request an interrupt cut off before the endpoint reported anything. It was
 // billed, so the run is charged the estimate a side request gets, measured from
-// the view the compaction encoded: a request an interrupt cut off costs the run
+// the view the compaction encoded. A request an interrupt cut off costs the run
 // what any other request does.
 func TestAnInterruptedNativeCompactionWithoutUsageIsChargedTheEstimate(t *testing.T) {
 	tr := &blockedNativeTransport{
@@ -2595,7 +2591,7 @@ func TestAnInterruptedNativeCompactionWithoutUsageIsChargedTheEstimate(t *testin
 		err:     context.Canceled,
 	}
 	sink := &recordingSink{}
-	// The echo result is what the view's estimate prices: four thousand
+	// The echo result is what the view's estimate prices. Four thousand
 	// characters are hundreds of tokens, so the ceiling sits above the two
 	// turns' twenty and below what the compaction's estimate adds.
 	opts := testOptions(t, tr, &echoTool{result: strings.Repeat("x", 4000)}, sink)

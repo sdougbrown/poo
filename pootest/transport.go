@@ -210,15 +210,12 @@ func (t *Transport) Compactions() int {
 
 // Compact returns the window the transport was scripted with.
 //
-// It is the transport's native compaction capability: a provider window
-// is the provider's own compacted state, so it can only come from the
-// session's own transport. It records what it was given, so a test can
-// assert that the view is the one the run has, not the one the last
-// request carried. The result carries the usage the test scripted, and
-// none when it scripted none, so the core's estimate path is reachable
-// through this fake. A scripted failure reports the usage too, and whether
-// the request was billed, so the core's accounting of a failed compaction is
-// reachable as well.
+// A provider window is the provider's own compacted state, so it can only
+// come from the session's own transport. The transport records what it was
+// given, so a test can assert the view the run has. The result carries the
+// usage the test scripted, and none when it scripted none. A scripted failure
+// reports the usage too, and whether the request was billed, so the core's
+// accounting of a failed compaction is reachable here.
 func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.NativeCompactionResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

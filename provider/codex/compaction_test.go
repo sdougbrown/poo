@@ -76,9 +76,9 @@ func wantCompactionFailure(t *testing.T, window poo.ProviderWindow, err error) e
 	return err
 }
 
-// TestACompactionRequestCarriesTheCurrentViewAndTheTrigger covers the request:
-// the view is encoded as the run's history, not the last request's snapshot,
-// the trigger follows the view's last item, and the request authenticates the
+// TestACompactionRequestCarriesTheCurrentViewAndTheTrigger covers the request.
+// The view is encoded as the run's history, not the last request's snapshot.
+// The trigger follows the view's last item, and the request authenticates the
 // way every other request this transport makes does.
 func TestACompactionRequestCarriesTheCurrentViewAndTheTrigger(t *testing.T) {
 	srv := newServer(t, compactionStream(compactionItem))
@@ -127,8 +127,8 @@ func TestACompactionRequestCarriesTheCurrentViewAndTheTrigger(t *testing.T) {
 }
 
 // TestACompactionWindowKeepsTheResponsesOrder covers the items beside the
-// compacted state: the window is the response's items in the order the
-// endpoint sent them, and the text it kept visible rides as text.
+// compacted state. The window is the response's items in the order the endpoint
+// sent them, and the text it kept visible rides as text.
 func TestACompactionWindowKeepsTheResponsesOrder(t *testing.T) {
 	srv := newServer(t,
 		compactionStream(summaryItem("the summary"), compactionItem),
@@ -215,7 +215,7 @@ func TestAMalformedCompactionItemFails(t *testing.T) {
 }
 
 // TestACompactionThatFailsAfterAnItemHasNoWindow covers a stream that ends in a
-// failure after it carried items: the response never named its answer whole,
+// failure after it carried items. The response never named its answer whole,
 // so there is no window to install.
 func TestACompactionThatFailsAfterAnItemHasNoWindow(t *testing.T) {
 	stream := frame(`{"type":"response.output_item.done","output_index":0,"item":`+compactionItem+`}`) +
@@ -229,7 +229,7 @@ func TestACompactionThatFailsAfterAnItemHasNoWindow(t *testing.T) {
 }
 
 // TestACompactionWindowInstallsTheTerminalItemsOnce covers an answer whose
-// terminal event repeats the items the stream already sent: the terminal items
+// terminal event repeats the items the stream already sent. The terminal items
 // are the response whole, so the window holds them once.
 func TestACompactionWindowInstallsTheTerminalItemsOnce(t *testing.T) {
 	stream := frame(`{"type":"response.output_item.done","output_index":0,"item":`+compactionItem+`}`) +
@@ -275,7 +275,7 @@ func TestACompactionResponseWithTwoCompactionItemsFails(t *testing.T) {
 }
 
 // TestACompactionItemWithoutAPayloadFails covers an item the endpoint could
-// not take back: the payload is what the next request gives it, and an item
+// not take back. The payload is what the next request gives it, and an item
 // without one is not the compacted state.
 func TestACompactionItemWithoutAPayloadFails(t *testing.T) {
 	srv := newServer(t, compactionStream(`{"type":"compaction","id":"cmp_1"}`))
@@ -302,9 +302,9 @@ func TestACompactionResponseWithAnItemAWindowCannotHoldFails(t *testing.T) {
 	}
 }
 
-// TestACompactionWindowIsBounded covers the guard on the answer's size: a
-// response that keeps far more items than a window can hold is refused rather
-// than installed without bound.
+// TestACompactionWindowIsBounded covers the guard on the answer's size. A
+// response that keeps far more items than a window can hold is refused, not
+// installed without bound.
 func TestACompactionWindowIsBounded(t *testing.T) {
 	const kept = 1000
 	items := make([]string, 0, kept+1)
@@ -401,7 +401,7 @@ func compactionStreamWithUsage(usage string, items ...string) string {
 }
 
 // TestACompactionReportsWhatTheRequestCost covers the accounting a
-// compaction hands the core: the endpoint's own counts ride with the window,
+// compaction hands the core. The endpoint's own counts ride with the window,
 // because compacting costs the same prompt and completion a turn does.
 func TestACompactionReportsWhatTheRequestCost(t *testing.T) {
 	srv := newServer(t, compactionStreamWithUsage(
@@ -428,9 +428,9 @@ func TestACompactionReportsWhatTheRequestCost(t *testing.T) {
 	}
 }
 
-// TestACompactionThatReportsNoUsageHasNone covers the other half: an endpoint
-// that reports no token counts hands the core no report, so the core charges
-// the estimate a side request gets rather than a zero-cost request.
+// TestACompactionThatReportsNoUsageHasNone covers the other half. An endpoint
+// that reports no token counts hands the core no report. The core then charges
+// the estimate a side request gets, not a zero-cost request.
 func TestACompactionThatReportsNoUsageHasNone(t *testing.T) {
 	srv := newServer(t, compactionStream(compactionItem))
 	tr := newTransport(srv.URL)
@@ -448,7 +448,7 @@ func TestACompactionThatReportsNoUsageHasNone(t *testing.T) {
 }
 
 // TestACompactionThatCannotBeInstalledStillReportsWhatItCost covers the answer
-// the transport refuses: the endpoint read the prompt and billed it before the
+// the transport refuses. The endpoint read the prompt and billed it before the
 // window was judged, so the failure carries the counts it reported. Dropping
 // them would let a request that spent the run's tokens cost the run nothing.
 func TestACompactionThatCannotBeInstalledStillReportsWhatItCost(t *testing.T) {
@@ -472,8 +472,8 @@ func TestACompactionThatCannotBeInstalledStillReportsWhatItCost(t *testing.T) {
 }
 
 // TestACompactionThatEndsWithoutAnAnswerStillReportsTheRequest covers a stream
-// the endpoint answered and then cut, before it reported any token counts: the
-// request opened, so it was billed, and the core has to estimate what it cost.
+// the endpoint answered and then cut, before it reported any token counts. The
+// request opened, so it was billed. The core has to estimate what it cost.
 func TestACompactionThatEndsWithoutAnAnswerStillReportsTheRequest(t *testing.T) {
 	srv := newServer(t, frame(`{"type":"response.created","response":{"status":"in_progress"}}`))
 	tr := newTransport(srv.URL)
@@ -489,7 +489,7 @@ func TestACompactionThatEndsWithoutAnAnswerStillReportsTheRequest(t *testing.T) 
 }
 
 // TestACompactionThatNeverReachedTheEndpointIsNotBilled covers the failures that
-// never reach the endpoint's own work: a credential that could not be resolved
+// never reach the endpoint's own work. A credential that could not be resolved
 // sends no request, so there is nothing to charge for.
 func TestACompactionThatNeverReachedTheEndpointIsNotBilled(t *testing.T) {
 	srv := newServer(t, compactionStream(compactionItem))

@@ -280,10 +280,10 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 		requestChars := s.historyCharsLocked()
 		s.mu.Unlock()
 		result, werr := s.nativeWindow(actCtx)
-		// The endpoint billed the answer it gave, so what the request cost
-		// is accounted before the window is judged: a window this run goes
-		// on to discard still spent the tokens it spent, and an answer that
-		// carried no window at all was billed for what it did carry.
+		// The endpoint billed the answer it gave, so the cost is accounted
+		// before the window is judged. A window this run discards still
+		// spent the tokens it spent. An answer that carried no window was
+		// billed all the same for what it did carry.
 		s.accountNativeCompaction(run, result, requestChars)
 		if s.interruptPending(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
 			if !s.runWindingDown(run) {

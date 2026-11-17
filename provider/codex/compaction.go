@@ -30,30 +30,30 @@ var compactionTrigger = json.RawMessage(`{"type":"compaction_trigger"}`)
 //
 // A compaction answer holds the compacted state, and at most the visible text
 // the endpoint keeps beside it. An answer with more items than that is not a
-// window this transport can install, and refusing it keeps a faulty endpoint
-// from growing the window without bound.
+// window this transport can install. Refusing it keeps a faulty endpoint from
+// growing the window without bound.
 const maxCompactionItems = 32
 
 // Compact asks the endpoint to compact the view and returns the window it
 // produced.
 //
 // The request is shaped from the view as it stands now, not from the last
-// request's snapshot: the snapshot can be a turn behind, and the reply and the
-// results the run has since produced are exactly what a compaction must keep.
-// The trigger follows the view's last item, and the endpoint's answer becomes
-// the window verbatim.
+// request's snapshot. The snapshot can be a turn behind, and the reply and
+// results the run has since produced are what a compaction must keep. The
+// trigger follows the view's last item, and the endpoint's answer becomes the
+// window verbatim.
 //
-// The request goes through the same opening as a turn, so the credential, the
+// The request goes through the same opening as a turn. The credential, the
 // headers, the run's cancellation, the transport's timeout and the failure
 // classification mean what they mean there. A failure that arrives before the
 // endpoint answered is retried. One that arrives mid-stream settles this call,
 // and the run asks for a new window at a later boundary.
 //
-// Whatever the answer turns out to hold, the request was billed the moment the
-// endpoint answered it, so a failure still reports what the endpoint said the
-// request cost. Only a failure before the answer opened reports nothing: a
-// credential, a configuration or a refused request never reached the work the
-// endpoint charges for.
+// Whatever the answer holds, the request was billed the moment the endpoint
+// answered it. A failure still reports what the endpoint said the request cost.
+// Only a failure before the answer opened reports nothing: a credential, a
+// configuration or a refused request never reached the work the endpoint
+// charges for.
 func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.NativeCompactionResult, error) {
 	body, err := t.compactionBody(in)
 	if err != nil {
@@ -77,9 +77,9 @@ func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.N
 	}
 	defer stream.Close()
 	// The endpoint answered, so the request is accounted for whatever its
-	// answer turned out to be: an interrupted stream and an answer this
-	// transport refuses both cost what the endpoint reported, and the core
-	// charges the estimate when the endpoint reported nothing.
+	// answer holds. An interrupted stream and an answer this transport refuses
+	// both cost what the endpoint reported. When the endpoint reported nothing,
+	// the core charges the estimate.
 	if err := drainCompaction(stream); err != nil {
 		return poo.NativeCompactionResult{Billed: true, Usage: stream.reportedUsage()}, err
 	}
@@ -118,7 +118,7 @@ func (t *Transport) compactionBody(in poo.NativeCompaction) ([]byte, error) {
 // arrive whole in the terminal event, or in an item event before it. Reading
 // them through is what releases the response, and a stream that failed carries
 // its failure out. A response the endpoint cut at its output limit is refused
-// the same way: the state it carries is the part the endpoint reached, not the
+// the same way. The state it carries is the part the endpoint reached, not the
 // compacted view.
 func drainCompaction(reader *streamReader) error {
 	for {
@@ -140,11 +140,11 @@ func drainCompaction(reader *streamReader) error {
 // window the core installs.
 //
 // The endpoint's items keep their order. A compaction item is the compacted
-// state itself, so it is required and travels back verbatim: only the endpoint
+// state itself, so it is required and travels back verbatim. Only the endpoint
 // can read it, and nothing else can take its place. A message item is text the
 // endpoint kept visible beside it. An item of any other type is data this
-// transport cannot install, and dropping it would lose context the endpoint
-// meant to keep, so the whole window is refused instead.
+// transport cannot install. Dropping it would lose context the endpoint meant
+// to keep, so the whole window is refused.
 func compactionWindow(items []json.RawMessage) (poo.ProviderWindow, error) {
 	if len(items) > maxCompactionItems {
 		return poo.ProviderWindow{}, compactionFailure(

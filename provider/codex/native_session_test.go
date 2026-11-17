@@ -11,9 +11,9 @@ import (
 )
 
 // TestASessionCompactsNativelyOverTheCodexEndpoint covers the strategy
-// through the real transport and a fake endpoint: the turn fills the window,
-// the compaction request asks the endpoint for its own state, and the next
-// request gives the state back verbatim.
+// through the real transport and a fake endpoint. The turn fills the window,
+// the compaction request asks the endpoint for its own state. The next request
+// gives the state back verbatim.
 func TestASessionCompactsNativelyOverTheCodexEndpoint(t *testing.T) {
 	srv := newServer(t,
 		frame(`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"echo"}}`)+

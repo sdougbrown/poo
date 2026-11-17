@@ -270,10 +270,9 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 // when it reported none.
 //
 // ReportUsage answers with a report once the stream ended even when the
-// endpoint gave no counts, because the time to the first token is still
-// worth having. A compaction's accounting needs the counts: a request
-// whose usage the endpoint withheld is charged the estimate a side
-// request gets, not zero.
+// endpoint gave no counts. The time to the first token is still worth having.
+// A compaction's accounting needs the counts. A request whose usage the
+// endpoint withheld is charged the estimate a side request gets, not zero.
 func (r *streamReader) reportedUsage() *poo.UsageReport {
 	if !r.usageReported {
 		return nil
@@ -296,7 +295,7 @@ func (r *streamReader) ReportProviderBlocks() []poo.ProviderBlock {
 // response's items whole.
 //
 // Every item a done event carries is kept, including one the reader cannot
-// decode: the window refuses an item it cannot read, rather than installing
+// decode. The window refuses an item it cannot read, rather than installing
 // the items around it as if the response held nothing else.
 func (r *streamReader) capture(item json.RawMessage) {
 	if !r.captureOutput {

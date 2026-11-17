@@ -1770,15 +1770,14 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 // checkNativeCompaction reports that the resolved model and transport cannot
 // serve the native strategy.
 //
-// Both are known at build time, so a settings document that asks for native
-// compaction without the capability fails here rather than at the first
-// window. A model switch is the session's business: the core refuses a native
-// compaction for a model that does not declare the operation, so a run that
-// switched to one fails safely there.
+// Both are known at build time, so a request for native compaction without
+// the capability fails here, not at the first window. A model switch is the
+// session's business. The core refuses a native compaction for a model that
+// does not declare the operation, so a run that switched fails safely there.
 func (r *Runtime) checkNativeCompaction() error {
-	// A build that resolved no transport has no model to check: a command
-	// that only renders the prompt does not need one, and the session that
-	// runs later is what compacts.
+	// A build that resolved no transport has no model to check. A command
+	// that only renders the prompt needs none, and the later session is what
+	// compacts.
 	if r.Options.Transport == nil {
 		return nil
 	}

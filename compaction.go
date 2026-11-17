@@ -163,13 +163,12 @@ type NativeCompactionResult struct {
 	// Billed reports that the endpoint answered the request, so it
 	// charged for it whether or not the answer carried a window.
 	//
-	// A result that holds a window is an answer, and the core charges it
-	// without reading this field. The failure paths are where it
-	// decides: an answer the transport could not turn into a window was
-	// billed all the same, and only the transport can say so. A
-	// credential, configuration, connection or status failure never
-	// reached the endpoint's own work, so it leaves the field unset and
-	// costs the run nothing.
+	// A result that holds a window is an answer, so the core charges it
+	// without reading this field. The failure paths are where the field
+	// decides. An answer the transport could not turn into a window was
+	// still billed, and only the transport can say so. A credential,
+	// configuration, connection or status failure never reached the
+	// endpoint's own work: it leaves the field unset and costs nothing.
 	Billed bool
 }
 

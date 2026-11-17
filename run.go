@@ -1569,14 +1569,14 @@ func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageRepo
 
 // accountNativeCompaction charges the request a native compaction made.
 //
-// The request is a side request like the ones a strategy sends: it appends
+// The request is a side request like the ones a strategy sends. It appends
 // nothing to the history, and the endpoint charged for it all the same. A
-// usage the endpoint reported is written as the compaction's own, and one it
-// withheld is charged the estimate of the request and the window it
-// produced, so a compaction is never free.
+// usage the endpoint reported is written as the compaction's own. One it
+// withheld is charged the estimate of the request and the window it produced,
+// so a compaction is never free.
 //
 // A compaction that failed still charged the run, because the endpoint billed
-// the answer whatever became of it: a window the transport refused, or a
+// the answer whatever became of it. A window the transport refused, or a
 // request an interrupt cut off, is a request the run made. Only a request the
 // endpoint never answered costs nothing, and the transport is what says so.
 func (s *Session) accountNativeCompaction(run *runState, result NativeCompactionResult, requestChars int) {
@@ -1590,9 +1590,9 @@ func (s *Session) accountNativeCompaction(run *runState, result NativeCompaction
 		s.writeCompactionUsage(run, turn, result.Usage, requestChars)
 		return
 	}
-	// An answer that produced no window produced nothing to measure beside
-	// the request, and the estimate is the request's own size: what an
-	// interrupted turn is charged when the endpoint reports nothing.
+	// An answer that produced no window leaves only the request to measure,
+	// so the estimate is the request's own size. That is what an interrupted
+	// turn is charged when the endpoint reports nothing.
 	s.mu.Lock()
 	if !run.committed && !run.sealed {
 		produced := Message{Role: RoleAssistant, Content: result.Window.Items}

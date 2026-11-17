@@ -21,8 +21,8 @@
 // an item the endpoint cannot match.
 //
 // The transport also implements poo.NativeCompactor. A compaction request is a
-// normal request whose last input item is the compaction trigger, and the
-// compaction items it answers with are the window the core installs, verbatim.
+// normal request whose last input item is the compaction trigger. Its
+// compaction items are the window the core installs, verbatim.
 package codex
 
 import (

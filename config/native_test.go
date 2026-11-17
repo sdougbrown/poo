@@ -101,9 +101,9 @@ context:
 }
 
 // TestTheNativeStrategyRefusesACodexModelWithoutTheCompactOperation covers the
-// model check on its own: the Codex transport can compact the provider's own
-// state, so the missing model operation is the only thing that can refuse this
-// build, and the failure names the setting to change.
+// model check on its own. The Codex transport can compact the provider's own
+// state, so only the missing model operation can refuse this build. The failure
+// names the setting to change.
 func TestTheNativeStrategyRefusesACodexModelWithoutTheCompactOperation(t *testing.T) {
 	dir := t.TempDir()
 	token := fakeCodexToken(t, "acct_live")

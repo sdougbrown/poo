@@ -57,9 +57,9 @@ func compactionEndedError(t *testing.T, observer *collectingObserver) string {
 }
 
 // TestNativeCompactionRunsAtTheThresholdAndRestores covers the supported
-// path: the window reaches the strategy's share, the transport produces a
-// provider window, the next request carries it, and a restored session holds
-// the same compacted view.
+// path. The window reaches the strategy's share, the transport produces a
+// provider window, the next request carries it. A restored session holds the
+// same compacted view.
 func TestNativeCompactionRunsAtTheThresholdAndRestores(t *testing.T) {
 	tr := scripted([]fakeResponse{
 		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 3600, OutputTokens: 5}},
@@ -151,7 +151,7 @@ func TestNativeCompactionWaitsBelowTheThreshold(t *testing.T) {
 }
 
 // TestNativeCompactionRefusesAModelWithoutTheCompactOperation covers a model
-// that does not declare the operation: the run does not ask the transport to
+// that does not declare the operation. The run does not ask the transport to
 // compact, and the failure names the missing declaration.
 func TestNativeCompactionRefusesAModelWithoutTheCompactOperation(t *testing.T) {
 	tr := scripted([]fakeResponse{
@@ -181,9 +181,9 @@ func TestNativeCompactionRefusesAModelWithoutTheCompactOperation(t *testing.T) {
 }
 
 // TestNativeCompactionRefusesATransportWithoutNativeCompaction covers a model
-// that declares the operation on a transport that cannot carry it: the
-// failure names the unsupported transport and what to use instead, and the
-// transport is never asked.
+// that declares the operation on a transport that cannot carry it. The failure
+// names the unsupported transport and what to use instead. The transport is
+// never asked.
 func TestNativeCompactionRefusesATransportWithoutNativeCompaction(t *testing.T) {
 	inner := scripted([]fakeResponse{
 		{calls: toolCallTurn().calls, usage: &poo.UsageReport{InputTokens: 3400, OutputTokens: 5}},

@@ -1,10 +1,9 @@
 // Package native is the provider-native compaction strategy.
 //
 // The strategy does not write a summary. It asks the session's own transport
-// to compact the provider's conversation and installs the state the provider
-// returns as the model's window. The provider is the one that can read that
-// state back, so the window is the provider's own and nothing else can stand
-// in for it.
+// to compact the provider's conversation, and installs what comes back as the
+// model's window. Only the provider can read that state back, so the window is
+// the provider's own and nothing else can stand in for it.
 //
 // A native compaction costs a request, and the core charges it the way it
 // charges any other request a strategy makes. The strategy acts at the same
@@ -53,11 +52,12 @@ func New(opts Options) *Compactor {
 // Ratio returns the share of the window at which the strategy acts.
 func (c *Compactor) Ratio() float64 { return c.ratio }
 
-// ShouldCompact reports whether the provider should compact its state.
+// ShouldCompact reports that the run has reached the point that compacts
+// the provider's state.
 //
-// The strategy waits for the same share of the window as summary, and for
-// the run to have asked the model something: there is no conversation to
-// compact before the first request.
+// The strategy waits for the same share of the window as summary. It also
+// waits for the run to have asked the model something: there is no
+// conversation to compact before the first request.
 func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool {
 	return budget.Reached(c.ratio)
 }

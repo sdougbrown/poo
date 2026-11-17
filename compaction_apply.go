@@ -154,7 +154,7 @@ func (s *Session) validateWindow(w ProviderWindow) error {
 // data that is applied. The result carries what the request cost, so the
 // core charges it the way it charges a request a strategy made. A model that
 // does not declare the operation, or a transport that cannot compact, is
-// refused here rather than asked for a window it cannot produce.
+// refused here. Neither is asked for a window it cannot produce.
 func (s *Session) nativeWindow(ctx context.Context) (NativeCompactionResult, error) {
 	// The view is the authority: it holds the reply and the results the
 	// last request could not carry, and those are what a compaction must
@@ -164,9 +164,9 @@ func (s *Session) nativeWindow(ctx context.Context) (NativeCompactionResult, err
 	transport := s.opts.Transport
 	view := s.viewLocked()
 	s.mu.Unlock()
-	// The model is checked before the transport: a switch to a model that
-	// does not declare compaction asks no transport for a window, even one
-	// that compacted the previous model's state.
+	// The model is checked before the transport. A switch to a model without
+	// compaction asks no transport for a window, even one that compacted the
+	// previous model's state.
 	if !model.HasOp(OpCompact) {
 		return NativeCompactionResult{}, fmt.Errorf("%w: the model %q does not declare the %q operation, "+
 			"so it cannot compact its own state: add compact to its ops, or use the summary strategy",

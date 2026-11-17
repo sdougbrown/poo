@@ -9,8 +9,8 @@ import (
 )
 
 // TestTheNativeStrategyActsAtSummaryRatio covers when the strategy asks for
-// a provider window: the same share of the window summary uses, and only
-// after the run has asked the model something.
+// a provider window. It waits for the same share of the window summary uses,
+// and only after the run has asked the model something.
 func TestTheNativeStrategyActsAtSummaryRatio(t *testing.T) {
 	strategy := native.New(native.Options{})
 	if got := strategy.Ratio(); got != native.DefaultRatio {
