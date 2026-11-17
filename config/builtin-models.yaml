@@ -1,0 +1,79 @@
+# The built-in providers' record: the models the upstream endpoints do not
+# list, declared in poo's own models-file vocabulary. A provider without
+# discoverability is a data entry here, and a model the record does not name
+# can still be declared in the settings or a models file under the same
+# endpoint.
+#
+# POO_BUILTIN_MODELS names a file read instead of this one, in the same
+# vocabulary. The credential the openai-codex endpoint runs on is not an api
+# key, so none is declared here, and poo sends its credential only to the
+# endpoint the transport pins.
+endpoints:
+  openai-codex:
+    endpoint: https://chatgpt.com/backend-api
+    api: responses
+    skip_probe: true
+    models:
+      gpt-5.6-luna:
+        inputs: [text, image]
+        context_limit: 272000
+        max_output: 128000
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [off, low, medium, high, xhigh, max]
+      gpt-5.6-sol:
+        inputs: [text, image]
+        context_limit: 272000
+        max_output: 128000
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [off, low, medium, high, xhigh, max]
+      gpt-5.6-terra:
+        inputs: [text, image]
+        context_limit: 272000
+        max_output: 128000
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [off, low, medium, high, xhigh, max]
+      gpt-6-astra:
+        inputs: [text, image]
+        context_limit: 272000
+        max_output: 128000
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [low, medium, high, xhigh, max]
+      gpt-6-luna:
+        inputs: [text, image]
+        context_limit: 272000
+        max_output: 128000
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [off, low, medium, high, xhigh, max]
+      gpt-6-sol:
+        inputs: [text, image]
+        context_limit: 272000
+        max_output: 128000
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [off, low, medium, high, xhigh, max]
+      gpt-6.1-sol:
+        inputs: [text, image]
+        context_limit: 500000
+        max_output: 128000
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [low, medium, high, xhigh, max]

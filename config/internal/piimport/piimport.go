@@ -85,17 +85,10 @@ type piFile struct {
 // does not is ignored, the way the wire's forward-compatibility rule
 // reads a later server's events.
 type piProvider struct {
-	BaseURL string `json:"baseUrl"`
-	API     string `json:"api"`
-	APIKey  string `json:"apiKey"`
-	// ToolsMode is how the provider asks for tool calls. The files pi
-	// writes name none, and an empty value leaves the model's own
-	// needs to decide.
-	ToolsMode string `json:"toolsMode"`
-	// SkipProbe says the provider's models are declared rather than
-	// discovered, so no probe is sent to its endpoint.
-	SkipProbe bool      `json:"skipProbe"`
-	Models    []piModel `json:"models"`
+	BaseURL string    `json:"baseUrl"`
+	API     string    `json:"api"`
+	APIKey  string    `json:"apiKey"`
+	Models  []piModel `json:"models"`
 }
 
 // piModel is one model in pi's models file.
@@ -214,8 +207,6 @@ func decode(source string, data []byte, auth authLookup) (File, error) {
 			API:       api,
 			APIKeyEnv: env,
 			APIKey:    key,
-			ToolsMode: definition.ToolsMode,
-			SkipProbe: definition.SkipProbe,
 		}
 		for _, model := range definition.Models {
 			if model.ID == "" {

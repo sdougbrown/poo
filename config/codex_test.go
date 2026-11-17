@@ -803,26 +803,27 @@ roles:
 	}
 }
 
-// TestAReplacementReplacesTheBuiltinCodexModels covers the built-in list
+// TestAReplacementReplacesTheBuiltinCodexModels covers the built-in record
 // being data: the file POO_BUILTIN_MODELS names is read instead of the
-// built-in providers' own data, so a binary that ships without the newer
+// built-in providers' own record, so a binary that ships without the newer
 // list still serves the models the replacement declares. The replaced list's
-// models are gone, and a key the replacement writes literally lands in the
-// settings, where a literal key lives.
+// models are gone.
 func TestAReplacementReplacesTheBuiltinCodexModels(t *testing.T) {
 	dir := t.TempDir()
-	replacement := filepath.Join(dir, "replacement.json")
-	if err := os.WriteFile(replacement, []byte(`{
-		"providers": {
-			"openai-codex": {
-				"baseUrl": "`+codex.DefaultEndpoint+`",
-				"api": "openai-codex-responses",
-				"skipProbe": true,
-				"apiKey": "replacement-key",
-				"models": [{"id": "gpt-fresh", "contextWindow": 400000}]
-			}
-		}
-	}`), 0o644); err != nil {
+	replacement := filepath.Join(dir, "replacement.yaml")
+	if err := os.WriteFile(replacement, []byte(`endpoints:
+  openai-codex:
+    endpoint: `+codex.DefaultEndpoint+`
+    api: responses
+    skip_probe: true
+    models:
+      gpt-fresh:
+        context_limit: 400000
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [off, low, medium, high]
+`), 0o644); err != nil {
 		t.Fatalf("writing the replacement: %v", err)
 	}
 	writeCodexAuth(t, dir, fakeCodexToken(t, "acct_live"), "rt_live", 4102444800000)
@@ -844,10 +845,7 @@ roles:
 		t.Errorf("the replacement's model has a context limit of %d, want 400000", fresh.ContextLimit)
 	}
 	if _, err := catalog.New(settings.CatalogOptions()).Resolve("openai-codex/gpt-5.6-luna"); err == nil {
-		t.Errorf("the replaced list's model is still offered")
-	}
-	if got := settings.Endpoints[auth.ProviderCodex].APIKey; got != "replacement-key" {
-		t.Errorf("the replacement's literal key is %q, want it kept in the settings", got)
+		t.Errorf("the replaced record's model is still offered")
 	}
 }
 
@@ -858,8 +856,8 @@ roles:
 func TestAReplacementIsReadEvenWhereTheModelsAreNotOffered(t *testing.T) {
 	isolatedConfigDir(t)
 	dir := t.TempDir()
-	replacement := filepath.Join(dir, "replacement.json")
-	if err := os.WriteFile(replacement, []byte(`{"providers": {}}`), 0o644); err != nil {
+	replacement := filepath.Join(dir, "replacement.yaml")
+	if err := os.WriteFile(replacement, []byte(`endpoints: {}`), 0o644); err != nil {
 		t.Fatalf("writing the replacement: %v", err)
 	}
 	path := writeCodexSettings(t, dir, `version: 1
@@ -869,7 +867,7 @@ session:
 	t.Setenv(config.EnvBuiltinModels, replacement)
 
 	_, err := config.Load(path)
-	if err == nil || !strings.Contains(err.Error(), "replacement.json") {
+	if err == nil || !strings.Contains(err.Error(), "replacement.yaml") {
 		t.Fatalf("the load is %v, want the replacement's refusal", err)
 	}
 }
@@ -882,24 +880,28 @@ session:
 func TestAValidReplacementOffersNoModelsWhereTheCredentialIsMissing(t *testing.T) {
 	isolatedConfigDir(t)
 	dir := t.TempDir()
-	replacement := filepath.Join(dir, "replacement.json")
-	if err := os.WriteFile(replacement, []byte(`{
-		"providers": {
-			"openai-codex": {
-				"baseUrl": "`+codex.DefaultEndpoint+`",
-				"api": "openai-codex-responses",
-				"skipProbe": true,
-				"models": [{"id": "gpt-fresh"}]
-			}
-		}
-	}`), 0o644); err != nil {
+	override := filepath.Join(dir, "replacement.yaml")
+	if err := os.WriteFile(override, []byte(`endpoints:
+  openai-codex:
+    endpoint: `+codex.DefaultEndpoint+`
+    api: responses
+    skip_probe: true
+    models:
+      gpt-fresh:
+        inputs: [text, image]
+        context_limit: 400000
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [low, medium, high]
+`), 0o644); err != nil {
 		t.Fatalf("writing the replacement: %v", err)
 	}
 	path := writeCodexSettings(t, dir, `version: 1
 session:
   mode: ephemeral
 `)
-	t.Setenv(config.EnvBuiltinModels, replacement)
+	t.Setenv(config.EnvBuiltinModels, override)
 
 	settings, err := config.Load(path)
 	if err != nil {
