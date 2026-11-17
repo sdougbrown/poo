@@ -434,6 +434,32 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 		}
 	})
 
+	t.Run("login", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"login", "codex",
+			"--force",
+			"--no-browser",
+			"--wait", "60",
+			"--settings", "s.yaml",
+		})
+		if err != nil {
+			t.Fatalf("parsing the login's flags: %v", err)
+		}
+		var o loginOptions
+		o.bind(inv)
+		want := loginOptions{
+			sharedFlags: sharedFlags{settingsFile: "s.yaml"},
+			force:       true,
+			noBrowser:   true,
+			wait:        60,
+			waitSet:     true,
+			provider:    "codex",
+		}
+		if !reflect.DeepEqual(o, want) {
+			t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
+		}
+	})
+
 	t.Run("auth import pi", func(t *testing.T) {
 		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
 			"auth", "import", "pi",
@@ -519,6 +545,32 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 	})
 }
 
+// TestTheWaitFlagKnowsWhetherItWasTyped covers the flag's presence, not its value: a key
+// sign-in refuses --wait because it was asked for, so the default the operator never typed is
+// not a request.
+func TestTheWaitFlagKnowsWhetherItWasTyped(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"typed", []string{"login", "codex", "--wait", "60"}, true},
+		{"not typed", []string{"login", "codex"}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			inv, err := clicontract.Parse(pooApp(io.Discard), c.args)
+			if err != nil {
+				t.Fatalf("parsing the login's flags: %v", err)
+			}
+			var o loginOptions
+			o.bind(inv)
+			if o.waitSet != c.want {
+				t.Errorf("waitSet is %t for %v, want %t", o.waitSet, c.args, c.want)
+			}
+		})
+	}
+}
+
 // TestEveryCommandWithItsOwnFlagsHasABindingTest covers the blind spot the
 // bind tests share: they are a list, and a command added without a subtest
 // would slip through. The commands are walked from the declaration, so a
@@ -534,6 +586,7 @@ func TestEveryCommandWithItsOwnFlagsHasABindingTest(t *testing.T) {
 		"models":         "TestEveryOtherCommandBindsItsFlags/models",
 		"auth status":    "TestEveryOtherCommandBindsItsFlags/auth_status",
 		"auth import pi": "TestEveryOtherCommandBindsItsFlags/auth_import_pi",
+		"login":          "TestEveryOtherCommandBindsItsFlags/login",
 		"sessions list":  "TestEveryOtherCommandBindsItsFlags/sessions_list",
 		"sessions prune": "TestEveryOtherCommandBindsItsFlags/sessions_prune",
 		"version":        "TestTheVersionCommandAnswersInBothForms",

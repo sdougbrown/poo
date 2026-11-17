@@ -153,10 +153,12 @@ type Callback struct {
 }
 
 // ParseCallback reads what an operator pasted back: the redirect URL the browser landed on, or a
-// `code=...&state=...` fragment, or the code alone.
+// `code=...&state=...` fragment.
 //
 // A paste is how a sign-in completes on a machine whose loopback the browser cannot reach, so
-// the shapes a browser produces and a person copies are both read.
+// the shapes a browser produces and a person copies are both read. The state is the half the
+// sign-in is checked against, so a paste that carries none — a code on its own — cannot complete
+// it.
 func ParseCallback(input string) Callback {
 	value := strings.TrimSpace(input)
 	if value == "" {
@@ -196,6 +198,9 @@ func callbackOf(query url.Values) Callback {
 // verifier the challenge was made from. A callback that carries an error, or a state that is
 // not this attempt's, is refused before anything is traded.
 //
+// A nil client is the package's own, with its bound on the answer and its refusal of a
+// redirect.
+//
 // The credential records the client and the endpoint it was granted by, so a refresh names them
 // (#219) instead of a default.
 func (a Attempt) Exchange(ctx context.Context, client *http.Client, callback Callback) (Credential, error) {
@@ -204,6 +209,9 @@ func (a Attempt) Exchange(ctx context.Context, client *http.Client, callback Cal
 	}
 	if callback.Code == "" {
 		return Credential{}, fmt.Errorf("%w: no authorization code came back", ErrSignIn)
+	}
+	if callback.State == "" {
+		return Credential{}, fmt.Errorf("%w: the answer carries no state: paste the URL the browser landed on, not the code on its own", ErrSignIn)
 	}
 	if callback.State != a.State {
 		return Credential{}, fmt.Errorf("%w: the callback's state is not this sign-in's", ErrSignIn)

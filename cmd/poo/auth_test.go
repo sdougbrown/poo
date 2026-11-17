@@ -158,6 +158,120 @@ func TestTheAuthStatusNamesTheClientTheFileRecords(t *testing.T) {
 	}
 }
 
+// TestTheAuthStatusReportsAStoredKey covers the credential that has no tokens: the key poo's
+// file holds for Ollama Cloud is reported as it is — live, with no expiry, and without the key.
+func TestTheAuthStatusReportsAStoredKey(t *testing.T) {
+	isolatedConfigHome(t)
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+	withoutATerminal(t)
+	withStdin(t, "the-stored-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--force", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"auth", "status", "--settings", settings}); code != 0 {
+			t.Errorf("poo auth status exited with %d", code)
+		}
+	})
+	for _, want := range []string{
+		"FILE", filepath.Join(dir, "auth.json"),
+		"PROVIDER", "ollama-cloud",
+		"STATE", "live",
+		"does not expire",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report is %q, want it to name %q", out, want)
+		}
+	}
+	if strings.Contains(out, "expired") {
+		t.Errorf("the report gives a key an expiry: %q", out)
+	}
+	if strings.Contains(out, "the-stored-key") {
+		t.Errorf("the report carries the key: %q", out)
+	}
+
+	out = captureStdout(t, func() {
+		if code := run([]string{"auth", "status", "--settings", settings, "--json"}); code != 0 {
+			t.Errorf("poo auth status --json exited with %d", code)
+		}
+	})
+	var report authStatus
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the report is not JSON: %v\n%s", err, out)
+	}
+	if report.Provider != "ollama-cloud" || report.State != "live" {
+		t.Errorf("the report is %+v, want the Ollama Cloud key, live", report)
+	}
+	if report.Expires != "" {
+		t.Errorf("the report gives a key the expiry %q, want none", report.Expires)
+	}
+}
+
+// TestTheAuthStatusReportsACorruptEntryInsteadOfAKeyBesideIt covers a file holding two entries:
+// a Codex entry that does not read, and a key that does. The entry poo cannot use is the failure
+// the report is for — a key found past it would report a file that works, and drop the one thing
+// the operator has to fix.
+func TestTheAuthStatusReportsACorruptEntryInsteadOfAKeyBesideIt(t *testing.T) {
+	dir := t.TempDir()
+	credential := filepath.Join(dir, "auth.json")
+	body := `{
+  "version": 1,
+  "credentials": {
+    "openai-codex": {"type": "oauth", "accountId": "acct-1234"},
+    "ollama-cloud": {"type": "api_key", "key": "a-key-beside-it"}
+  }
+}`
+	if err := os.WriteFile(credential, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := authSettings(t, dir, credential)
+
+	code, stderr := runCLI(t, "auth", "status", "--settings", settings)
+	if code == 0 {
+		t.Error("poo auth status exited 0 for a file whose Codex entry does not read")
+	}
+	for _, want := range []string{"holds an entry for openai-codex", "access token"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("the failure is %q, want it to name %q", stderr, want)
+		}
+	}
+	if strings.Contains(stderr, "a-key-beside-it") {
+		t.Errorf("the failure carries the key: %q", stderr)
+	}
+}
+
+// TestTheAuthStatusReportsACorruptKeyInsteadOfASignIn covers a file whose only entry is the key:
+// the Codex read finds no entry, and the key read finds one that carries no key. The key is the
+// credential the file holds, so the failure the operator can act on is the key's; naming the
+// Codex entry would send them to a sign-in that is not the problem.
+func TestTheAuthStatusReportsACorruptKeyInsteadOfASignIn(t *testing.T) {
+	dir := t.TempDir()
+	credential := filepath.Join(dir, "auth.json")
+	body := `{
+  "version": 1,
+  "credentials": {
+    "ollama-cloud": {"type": "api_key"}
+  }
+}`
+	if err := os.WriteFile(credential, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := authSettings(t, dir, credential)
+
+	code, stderr := runCLI(t, "auth", "status", "--settings", settings)
+	if code == 0 {
+		t.Error("poo auth status exited 0 for a key entry that carries no key")
+	}
+	if !strings.Contains(stderr, "an api key credential needs a key") {
+		t.Errorf("the failure is %q, want it to say the key entry carries no key", stderr)
+	}
+	if strings.Contains(stderr, "holds no openai-codex entry") {
+		t.Errorf("the failure names a Codex entry the report was not asked about: %q", stderr)
+	}
+}
+
 // TestTheAuthStatusOfAMissingCredentialIsAFailure covers the report with nothing
 // to report on: a command that names no credential is a failure, so a script
 // can tell.

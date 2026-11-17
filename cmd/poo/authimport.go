@@ -1,18 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo/config"
-	"github.com/sdougbrown/poo/internal/term"
 	"github.com/sdougbrown/poo/provider/auth"
 )
 
@@ -71,7 +68,7 @@ func handleAuthImportPi(ctx context.Context, inv clicontract.Invocation, stdout,
 		return exit{operationalExitCode}
 	}
 	poo := auth.Credentials{Path: target}
-	replace, failed := o.replacement(poo, stdout, stderr)
+	mayReplace, failed := replace(poo, auth.Codex, o.force, "poo auth import", stderr)
 	if failed {
 		return exit{operationalExitCode}
 	}
@@ -84,7 +81,7 @@ func handleAuthImportPi(ctx context.Context, inv clicontract.Invocation, stdout,
 	if entry.TokenURL == "" {
 		entry.TokenURL = auth.DefaultTokenURL
 	}
-	status, err := poo.Set(ctx, auth.Codex, entry, replace)
+	status, err := poo.Set(ctx, auth.Codex, entry, mayReplace)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth import: %v\n", err)
 		return exit{operationalExitCode}
@@ -154,63 +151,6 @@ func piCredentialFile(settingsPath string, settings *config.Settings, from strin
 // would not reach.
 func readPiCredential(path string) (auth.Credential, error) {
 	return auth.Credentials{Path: path}.Read(auth.Codex)
-}
-
-// replacement decides whether a credential poo's file already holds may be
-// replaced.
-//
-// The store's rule is that nothing replaces a credential without an explicit
-// action. --force is one; answering the prompt is the other. A run with no
-// terminal to ask on has neither, so it refuses.
-func (o *authImportOptions) replacement(poo auth.Credentials, stdout, stderr io.Writer) (replace bool, failed bool) {
-	// Whether the file holds an entry is the question the replace rule asks, and it is
-	// not the same as whether the entry decodes: an entry poo cannot read is still an
-	// entry, and replacing it is still a decision.
-	held, err := poo.Holds(auth.Codex.ID)
-	if err != nil {
-		fmt.Fprintf(stderr, "poo auth import: %v\n", err)
-		return false, true
-	}
-	if !held {
-		return false, false
-	}
-	if o.force {
-		return true, false
-	}
-	status, err := poo.Status(auth.Codex)
-	signedIn := ""
-	if err == nil && status.AccountID != "" {
-		signedIn = " as " + status.AccountID
-	}
-	if !interactive() {
-		fmt.Fprintf(stderr, "poo auth import: %s already holds a credential for %s: pass --force to replace it\n",
-			poo.Path, auth.ProviderCodex)
-		return false, true
-	}
-	fmt.Fprintf(stderr, "%s already holds a credential for %s%s.\n", poo.Path, auth.ProviderCodex, signedIn)
-	fmt.Fprint(stderr, "Replace it? [y/N] ")
-	if !confirmed(os.Stdin) {
-		fmt.Fprintln(stderr, "poo auth import: the credential was left as it was")
-		return false, true
-	}
-	return true, false
-}
-
-// interactive reports whether there is a terminal to ask on.
-//
-// The question is internal/term's, so this and the repl answer it the same way.
-func interactive() bool {
-	return term.IsTerminal(os.Stdin)
-}
-
-// confirmed reads one answer, and reads anything but yes as no.
-func confirmed(in io.Reader) bool {
-	scanner := bufio.NewScanner(in)
-	if !scanner.Scan() {
-		return false
-	}
-	answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
-	return answer == "y" || answer == "yes"
 }
 
 // sameFile reports whether two paths name one file.

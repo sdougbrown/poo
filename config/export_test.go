@@ -14,5 +14,5 @@ func (r *Runtime) ModelAPIKey(name string) string {
 	if err != nil {
 		return ""
 	}
-	return r.apiKey(model)
+	return r.EndpointKey(model)
 }

@@ -18,8 +18,10 @@ const (
 
 // CredentialSource names where an endpoint's key comes from.
 //
-// A key is read from the environment or it is written in the settings.
-// There is no other source in v1.
+// A key is read from the environment or it is written in the settings. An
+// endpoint that reads an environment variable also takes the credential the
+// operator stored for the provider declaring that variable, and config's
+// EndpointKey is the one place that order is applied.
 type CredentialSource string
 
 const (

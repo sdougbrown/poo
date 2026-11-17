@@ -11,17 +11,24 @@ import (
 	"time"
 )
 
-// defaultHTTP is the client a refresh goes through when a caller names
+// defaultHTTP is the client a token request goes through when a caller names
 // none.
 var defaultHTTP = &http.Client{Timeout: DefaultTimeout}
 
-// refusingClient is the redirect policy every token path uses: a copy of
-// base's transport and timeout, with a redirect refused rather than
-// followed. Go replays a 307 or 308 request body to wherever the redirect
-// points, and a token request's body is a code or a refresh token. A
-// redirect is answered as the refusal it is, with the status the error
-// names.
+// refusingClient is the client every token path goes through: a copy of base's
+// transport and timeout, with a redirect refused rather than followed. Go
+// replays a 307 or 308 request body to wherever the redirect points, and a
+// token request's body is a code or a refresh token. A redirect is answered as
+// the refusal it is, with the status the error names.
+//
+// A caller that names no client gets this package's own. The redirect policy is
+// the part this decides, and a token path has no business picking a transport:
+// one that had to remember to pass a client would crash the first time it
+// forgot.
 func refusingClient(base *http.Client) *http.Client {
+	if base == nil {
+		base = defaultHTTP
+	}
 	return &http.Client{
 		Transport: base.Transport,
 		Timeout:   base.Timeout,
@@ -61,7 +68,7 @@ func (c Credentials) trade(ctx context.Context, p Provider, stored credential) (
 		"refresh_token": {stored.Refresh},
 		"client_id":     {c.clientID(p, stored)},
 	}
-	answer, err := postForm(ctx, ErrRefresh, c.client(), endpoint, form)
+	answer, err := postForm(ctx, ErrRefresh, c.HTTP, endpoint, form)
 	if err != nil {
 		return credential{}, err
 	}
@@ -117,21 +124,6 @@ func errorCode(body []byte) string {
 		return " (" + code + ")"
 	}
 	return ""
-}
-
-// client is the client a refresh goes through.
-//
-// The redirect policy is refusingClient's, shared by every token path, even
-// when a caller supplies the client. Go replays a 307 or 308 request body to
-// wherever the redirect points, and a refresh's body is the refresh token. A
-// redirect is answered as the refusal it is, with the status the error names.
-// The transport and the timeout are the caller's.
-func (c Credentials) client() *http.Client {
-	base := c.HTTP
-	if base == nil {
-		base = defaultHTTP
-	}
-	return refusingClient(base)
 }
 
 // tokenURL is the endpoint a credential's refresh token is traded at.

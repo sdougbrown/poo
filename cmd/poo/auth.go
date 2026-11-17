@@ -47,9 +47,12 @@ type authStatus struct {
 // handleAuthStatus executes `poo auth status`.
 //
 // The command reports the credential the settings' file holds: the file, the
-// shape it is written with, the provider, the account and whether the token is
-// live. It prints no token, and it trades none: a report leaves the credential
-// exactly as it found it.
+// shape it is written with, the provider, the account and whether the credential
+// is live. It prints no secret, and it trades none: a report leaves the
+// credential exactly as it found it.
+//
+// The credential is the one the file holds, whichever sign-in stored it: Codex's
+// token pair, or a provider's key.
 func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o authOptions
 	o.bind(inv)
@@ -63,7 +66,26 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		fmt.Fprintln(stderr, "poo auth status: the credential file cannot be resolved: set auth_file")
 		return exit{usageExitCode}
 	}
-	status, err := auth.Credentials{Path: path}.Status(auth.Codex)
+	credentials := auth.Credentials{Path: path}
+	status, err := credentials.Status(auth.Codex)
+	if err != nil {
+		// The file's entry may be a provider's key instead of Codex's token pair, which has no
+		// tokens and no account. The question the fallback asks is whether an entry is there, not
+		// whether it reads: an entry that is there and does not decode is the failure to report,
+		// and looking past it would drop what the operator needs to know.
+		if held, heldErr := credentials.Holds(auth.Codex.ID); heldErr == nil && !held {
+			key, keyErr := credentials.Status(auth.OllamaCloud)
+			if keyErr == nil {
+				status, err = key, nil
+			} else if heldKey, heldErr := credentials.Holds(auth.OllamaCloud.ID); heldErr == nil && heldKey {
+				// The key's entry is there and does not read, so it is the failure to report: the
+				// operator has a credential in the file, and what is wrong with it is the one thing
+				// the report can act on. The Codex error would name an entry that was never meant to
+				// be there.
+				err = keyErr
+			}
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth status: %v\n", err)
 		return exit{operationalExitCode}
@@ -74,8 +96,12 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		Provider:  status.Provider,
 		ClientID:  status.ClientID,
 		AccountID: status.AccountID,
-		Expires:   status.Expires.UTC().Format(time.RFC3339),
 		State:     credentialState(status),
+	}
+	// A credential with no expiry has no time to report: a key is sent as it is, and a time
+	// rendered for it would be a time nothing enforces.
+	if !status.Expires.IsZero() {
+		report.Expires = status.Expires.UTC().Format(time.RFC3339)
 	}
 	if o.json {
 		encoded, err := json.MarshalIndent(report, "", "  ")
@@ -98,15 +124,21 @@ func printAuthStatus(report authStatus, status auth.Status, stdout io.Writer) {
 	fmt.Fprintf(w, "PROVIDER\t%s\n", report.Provider)
 	fmt.Fprintf(w, "CLIENT\t%s\n", report.ClientID)
 	fmt.Fprintf(w, "ACCOUNT\t%s\n", report.AccountID)
-	fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", report.Expires, life(status.Expires))
+	if status.Expires.IsZero() {
+		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", "none", "it does not expire")
+	} else {
+		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", report.Expires, life(status.Expires))
+	}
 	fmt.Fprintf(w, "STATE\t%s\n", report.State)
 	_ = w.Flush()
 }
 
-// credentialState is the word a report gives a credential's state: a token poo
+// credentialState is the word a report gives a credential's state: a credential poo
 // would use as it is, or one it trades before using it.
 func credentialState(status auth.Status) string {
-	if status.Live {
+	// A key is sent as it is: nothing trades it, so there is nothing to refresh and nothing
+	// that can be stale.
+	if status.Kind == auth.KindAPIKey || status.Live {
 		return "live"
 	}
 	return "refresh needed"

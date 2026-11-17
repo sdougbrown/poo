@@ -28,6 +28,9 @@ type Provider struct {
 	// TokenURL is where a refresh token is traded, and where a sign-in's code would be.
 	// Empty means the credential has no tokens to trade: an api key.
 	TokenURL string
+	// Env names the environment variable a key credential can be read from. Empty means the
+	// provider reads none.
+	Env string
 	// ClientID is the OAuth client the credential belongs to. Empty means DefaultClientID.
 	ClientID string
 	// Account names the account a credential belongs to, given its access token and the id
@@ -47,6 +50,10 @@ var Codex = Provider{
 	ClientID: DefaultClientID,
 	Account:  chatGPTAccount,
 }
+
+// OllamaCloud is the Ollama Cloud provider: a key, read from the environment or from the
+// credential `poo login` stores. It has no token endpoint and no account.
+var OllamaCloud = Provider{ID: "ollama-cloud", Kind: KindAPIKey, Env: "OLLAMA_API_KEY"}
 
 // validate reports what a credential is missing, or what it carries that its kind or its
 // provider does not take.

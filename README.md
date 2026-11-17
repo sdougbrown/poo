@@ -173,10 +173,11 @@ the same document, and the first write leaves it YAML.
 `pi_auth_file` names pi's `auth.json` instead, which poo reads and writes in pi's
 shape and encoding so pi keeps working.
 
-`poo auth status` reports the file the settings resolved, the shape it
-is written with, the provider, the account the token names, and whether
-the token is one poo would use or would trade first. It prints no token
-value and trades none, so a report leaves the credential as it found
+`poo auth status` reports the credential the file holds: the file, the
+shape it is written with, the provider, the account the token names, and
+whether the credential is one poo would use or would trade first. A key
+entry has no account and no expiry, and poo sends it as it is. The report
+prints no secret and trades none, so it leaves the credential as it found
 it. `--json` prints the same report for a script.
 
 No provider in `models.json` is needed for this. When a credential file
@@ -186,7 +187,7 @@ collision, and a model pi adds later can be named under the same
 provider. The built-in list is a snapshot, so a newer id is a `models`
 entry away.
 
-poo reads the credential only for the provider id `openai-codex`, and
+poo reads the Codex entry for the provider id `openai-codex` only, and
 sends it only to the built-in `https://chatgpt.com/backend-api`
 endpoint: the provider pointed anywhere else is refused, so an OAuth
 token cannot reach an endpoint the operator did not name. A token that
@@ -194,6 +195,10 @@ pi would refresh is refreshed under the lock pi takes, and pi's file is
 written back with the refreshed Codex entry and every other provider's
 entry as it was found. The Codex models serve chat turns, so they cannot
 be the decider, and the Codex endpoint is not probed for a model list.
+
+A key entry is read by the endpoint that declares the same environment
+variable: an endpoint reading `OLLAMA_API_KEY` takes the `ollama-cloud`
+key after the variable itself and ahead of a literal the settings carry.
 
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as

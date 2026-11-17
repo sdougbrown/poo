@@ -262,6 +262,9 @@ func TestASignInRefusesWhatIsNotItsAttempt(t *testing.T) {
 	}{
 		{name: "the operator refused", callback: auth.Callback{Error: "access_denied", State: attempt.State}, want: "access_denied"},
 		{name: "another attempt's state", callback: auth.Callback{Code: "c", State: "another-state"}, want: "state"},
+		// A bare code is a paste the sign-in cannot check: the state is what says the code came
+		// back to this attempt, so a callback without one is refused with that said.
+		{name: "a code with no state", callback: auth.Callback{Code: "c"}, want: "carries no state"},
 		{name: "no code", callback: auth.Callback{State: attempt.State}, want: "no authorization code"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
