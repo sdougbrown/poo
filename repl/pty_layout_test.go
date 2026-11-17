@@ -246,6 +246,14 @@ func TestTheDraftSurvivesTheStreamingAndSettlesInTheFooter(t *testing.T) {
 	close(finish)
 	waitScreen(t, term, "First chunk and second.")
 	waitScreen(t, term, "✓ end_turn")
+	// A single-line draft stays on the prompt's own row: the cursor
+	// reads after it on that row, and no footer row grew for the typed
+	// line.
+	waitScreen(t, term, "draft more")
+	waitBottom(t, term)
+	if row := term.rowOf("draft more"); row != cursorRow(term) {
+		t.Fatalf("the typed draft stands on row %d with the cursor on %d, want the prompt's own row:\n%s", row, cursorRow(term), indexedRows(term))
+	}
 
 	term.press("\r")
 	if prompts := server.waitPrompts(t, 2); prompts[1] != "draft more" {

@@ -98,9 +98,12 @@ func newEditor(m *machine) *editorInput {
 
 	cycle := func() {
 		// The Shift+Tab reasoning cycle, the way pi cycles its thinking
-		// level; the cycle is a wire call, and it runs while the prompt
-		// is being read: the session has no run going then, so the
-		// server has nothing else to answer.
+		// level: a wire call, so it runs only while the session reads.
+		// A run in flight takes the key, the way the filter gate the
+		// plain reader used to.
+		if m.activeRun() != "" {
+			return
+		}
 		level, ok, notice := m.nextThinkingLevel()
 		if !ok {
 			m.r.notice("%s", notice)

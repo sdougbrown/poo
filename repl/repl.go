@@ -133,8 +133,10 @@ type machine struct {
 	// reading says a read is in flight. Only the main loop sets it.
 	reading bool
 	// ask is the permission ask that waits for an answer, nil when
-	// none does.
-	ask *askRequest
+	// none does. askMu guards it: the main loop writes it, and the
+	// editor's key dispatch reads it through prompt().
+	ask   *askRequest
+	askMu sync.Mutex
 	// eof says the input ended: the session ends once the run that
 	// was streaming settles.
 	eof bool
@@ -406,8 +408,11 @@ func (m *machine) steer(text string, input input) (int, bool) {
 // prompt is the prompt the next read sits behind: the ask's when a
 // decision waits, the statusline's otherwise.
 func (m *machine) prompt() string {
-	if m.ask != nil {
-		return askPrompt(m.ask.ask)
+	m.askMu.Lock()
+	ask := m.ask
+	m.askMu.Unlock()
+	if ask != nil {
+		return askPrompt(ask.ask)
 	}
 	return m.status.prompt()
 }
@@ -922,7 +927,9 @@ func (m *machine) endRun(input input) (int, bool) {
 	m.state = nil
 	m.steers = nil
 	if m.ask != nil {
+		m.askMu.Lock()
 		m.ask = nil
+		m.askMu.Unlock()
 	}
 	input.prompt(m.prompt())
 	if m.eof {
@@ -1109,7 +1116,9 @@ func (m *machine) handleAsk(req askRequest, input input) (int, bool) {
 // answer is typed behind, so the y or n reaches the session the same
 // way every other line does.
 func (m *machine) openAsk(req askRequest, input input) {
+	m.askMu.Lock()
 	m.ask = &req
+	m.askMu.Unlock()
 	m.r.write(ansiYellow + "⚙ permission · " + sanitizeLine(req.ask.Tool) + ansiReset + "\n")
 	stripped := ansi.Strip(req.ask.Summary)
 	lines := strings.Split(stripped, "\n")
@@ -1134,7 +1143,9 @@ func (m *machine) openAsk(req askRequest, input input) {
 // refused one.
 func (m *machine) answer(text string, input input) {
 	req := m.ask
+	m.askMu.Lock()
 	m.ask = nil
+	m.askMu.Unlock()
 	decision := protocol.AskResult{Decision: protocol.DecisionDeny}
 	switch strings.ToLower(text) {
 	case "y", "yes":
