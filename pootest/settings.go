@@ -56,6 +56,14 @@ func Main(m *testing.M) int {
 		return 1
 	}
 	defer os.RemoveAll(dir)
+	// The commands read and write the discovery cache under the state root, and a
+	// build resolves the state root before the config root: a developer's own
+	// discovery.json must not merge into a test's catalog, and a test's refresh
+	// must not overwrite it.
+	if err := os.Setenv("XDG_STATE_HOME", dir); err != nil {
+		println("poo tests: pointing the state root at the test directory:", err.Error())
+		return 1
+	}
 	path := filepath.Join(dir, "settings.yaml")
 	if err := os.WriteFile(path, []byte(settingsFile), 0o644); err != nil {
 		println("poo tests: writing the test settings:", err.Error())

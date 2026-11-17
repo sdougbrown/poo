@@ -494,3 +494,90 @@ func TestTheCachedLayerAndARefreshReadTheCacheTheSame(t *testing.T) {
 		t.Error("the stale live/qwen3 entry did not reach either catalog")
 	}
 }
+
+// TestACorruptCacheIsABuildWithoutTheLayer covers the degradation path: a cache that
+// cannot be read is a catalog without the cached layer, not a failed build — the models
+// the layers declared still resolve, and the build says why.
+func TestACorruptCacheIsABuildWithoutTheLayer(t *testing.T) {
+	stateDir := t.TempDir()
+	cachePath := filepath.Join(stateDir, "poo", "discovery.json")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("making the state directory: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("writing the discovery cache: %v", err)
+	}
+	var log bytes.Buffer
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"local": {Endpoint: "http://127.0.0.1:1/v1"}},
+		Models:    map[string]catalog.ModelSettings{"local/m3": {Endpoint: "local", ModelID: "m3", ContextLimit: 1024}},
+		Roles:     map[string]string{"chat": "local/m3"},
+	}
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true, Logger: slog.New(slog.NewTextHandler(&log, nil))})
+	if _, err := built.Resolve("local/m3"); err != nil {
+		t.Errorf("a model the settings declared did not resolve without the cache: %v", err)
+	}
+	if !strings.Contains(log.String(), "the discovery cache could not be read") {
+		t.Errorf("the log is %q, want it to name the unreadable cache", log.String())
+	}
+}
+
+// TestAnUnprobedEndpointKeepsItsCacheToItself covers the SkipProbe exclusion: an endpoint
+// the operator marked unprobed is not read from the cached layer either — its models are
+// declared, and a cache entry for it is not a session model.
+func TestAnUnprobedEndpointKeepsItsCacheToItself(t *testing.T) {
+	stateDir := t.TempDir()
+	body := `{"version":1,"fetched_at":"2026-11-17T00:00:00Z","endpoints":{"frozen":` +
+		`{"fetched_at":"2026-11-17T00:00:00Z","shape":"vllm","models":{"qwen3":{"model_id":"qwen3","context_limit":32768}}}}}`
+	cachePath := filepath.Join(stateDir, "poo", "discovery.json")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("making the state directory: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the discovery cache: %v", err)
+	}
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"frozen": {Endpoint: "http://127.0.0.1:1/v1", SkipProbe: true}},
+	}
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true})
+	if _, err := built.Resolve("frozen/qwen3"); err == nil {
+		t.Error("a skipped endpoint's cached model resolved")
+	}
+	for _, info := range built.List() {
+		if strings.HasPrefix(info.Name, "frozen/") {
+			t.Errorf("the catalog lists %q, whose endpoint is not read from the cache", info.Name)
+		}
+	}
+}
+
+// TestAProbeThatFollowsTheCachedLayerWarnsOnce covers the layer's ownership: a path that
+// probes after building gets the discovery layer from Refresh, so an unreadable cache is
+// reported once, not once per reader.
+func TestAProbeThatFollowsTheCachedLayerWarnsOnce(t *testing.T) {
+	stateDir := t.TempDir()
+	cachePath := filepath.Join(stateDir, "poo", "discovery.json")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("making the state directory: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("writing the discovery cache: %v", err)
+	}
+	var log bytes.Buffer
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"local": {Endpoint: "http://127.0.0.1:1/v1"}},
+		Models:    map[string]catalog.ModelSettings{"local/m3": {Endpoint: "local", ModelID: "m3", ContextLimit: 1024}},
+		Roles:     map[string]string{"chat": "local/m3"},
+	}
+	built, err := catalog.Build(context.Background(), catalog.Options{
+		Settings: settings, StateDir: stateDir, Cached: true, Logger: slog.New(slog.NewTextHandler(&log, nil)),
+	})
+	if err != nil {
+		t.Fatalf("the build: %v", err)
+	}
+	if _, err := built.Resolve("local/m3"); err != nil {
+		t.Errorf("the declared model did not resolve: %v", err)
+	}
+	if got := strings.Count(log.String(), "the discovery cache could not be read"); got != 1 {
+		t.Errorf("the unreadable cache is reported %d times, want once:\n%s", got, log.String())
+	}
+}

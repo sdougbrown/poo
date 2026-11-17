@@ -1034,6 +1034,11 @@ func (r *Runtime) resolveProfiles(opts BuildOptions) ([]poo.Profile, error) {
 // models file's layer below it, and what the endpoints last reported below that — read from the
 // cache, never probed, because a build does not reach the network.
 //
+// The cached layer is for the build-only paths — a session's runtime, and a report on what
+// resolves. A path that probes after building (catalog.Build, `poo models`) strips Cached:
+// the refresh applies the layer itself, and reading it twice warns twice when the cache is
+// unreadable.
+//
 // One caller builds a catalog from the settings, so the layers a catalog merges
 // are the settings' own answer rather than something each caller reassembles.
 func (s *Settings) CatalogOptions() catalog.Options {

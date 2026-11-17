@@ -88,6 +88,10 @@ func (c *cache) load() (*cacheFile, error) {
 }
 
 // save writes the cache.
+//
+// The file is written beside its target and renamed into place, the way the codebase's
+// other durable files are written: a reader on another goroutine — a session build reading
+// while a reprobe saves — sees the old file or the new one, never a torn one.
 func (c *cache) save(found discovery) error {
 	file := cacheFile{
 		Version:   cacheVersion,
@@ -112,7 +116,27 @@ func (c *cache) save(found discovery) error {
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
 		return fmt.Errorf("catalog: creating the state directory: %w", err)
 	}
-	if err := os.WriteFile(c.path, data, 0o600); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(c.path), ".discovery-*")
+	if err != nil {
+		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
+	}
+	if err := os.Rename(tmp, c.path); err != nil {
+		os.Remove(tmp)
 		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
 	}
 	return nil

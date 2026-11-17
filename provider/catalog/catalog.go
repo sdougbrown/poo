@@ -123,8 +123,8 @@ type modelRef struct {
 
 // entry is one model in the catalog, with the layers that built it.
 type entry struct {
-	// name is the model's name: the settings' name, or the model's id
-	// for a model no layer named.
+	// name is the model's name: the settings' name, the model's id for a curated
+	// model no layer named, or endpoint/id for a discovered one.
 	name string
 	// endpoint is the endpoint's name, empty when no layer named one.
 	endpoint string
@@ -242,6 +242,10 @@ func (c *Catalog) addFileModels() {
 // run without, so a chat model the catalog cannot resolve is an error.
 // Every other model the catalog cannot resolve is a warning.
 func Build(ctx context.Context, opts Options) (*Catalog, error) {
+	// Build probes, so the discovery layer comes from Refresh, which reads the cache
+	// itself. Building the cached layer too would apply it twice — and warn twice when
+	// the cache is unreadable.
+	opts.Cached = false
 	c := New(opts)
 	if err := c.Refresh(ctx); err != nil {
 		return nil, err

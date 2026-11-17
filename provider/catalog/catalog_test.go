@@ -606,9 +606,10 @@ func TestDiscoveryKeepsTheSettingsModel(t *testing.T) {
 	}
 	// The other endpoint also serves it, and the model is still listed
 	// once under its own name plus the discovered one: the discovered
-	// entry must not take the name the settings use.
-	if _, err := c.Resolve("shared"); err != nil {
-		t.Logf("the discovered entry is not resolvable: %v", err)
+	// entry must not take the name the settings use: the discovered model is
+	// not keyed by the bare id.
+	if _, err := c.Resolve("shared"); err == nil {
+		t.Error("the catalog resolved the discovered model keyed by the bare id")
 	}
 }
 
