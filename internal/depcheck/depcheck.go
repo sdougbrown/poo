@@ -105,6 +105,10 @@ func (c Checker) rules() []rule {
 		{path: m + "/wire/conformance", allowed: []string{m + "/wire/protocol"}},
 		{path: m + "/provider/catalog", allowed: []string{m}},
 		{path: m + "/provider/internal/support", allowed: []string{m}},
+		// The Responses API's wire half composes the failure table, the
+		// SSE framing and the fork's body rewrite, and nothing but the
+		// core beyond them.
+		{path: m + "/provider/internal/responses", allowed: []string{m, m + "/provider/internal/support"}},
 		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
@@ -147,6 +151,10 @@ func (c Checker) rules() []rule {
 				// failure table, the retry policy and the SSE scanner a
 				// transport composes.
 				m + "/provider/internal/support",
+				// The Responses API's wire half: the request shape, the
+				// input items, the event stream and the compaction
+				// items the Codex transport composes.
+				m + "/provider/internal/responses",
 				// The settings package builds a Codex transport and
 				// reads pi's credential for it, so the server reaches
 				// both through the build.

@@ -23,12 +23,16 @@
 // The transport also implements poo.NativeCompactor. A compaction request is a
 // normal request whose last input item is the compaction trigger. Its
 // compaction items are the window the core installs, verbatim.
+//
+// What the Responses API says is not here: the request's shape, the history's
+// items and the answer's events are the provider/internal/responses package's.
+// What is here is what this endpoint needs: the credential, the URL, the
+// headers and the policy the body follows.
 package codex
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -37,6 +41,7 @@ import (
 	"time"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/responses"
 	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
@@ -199,7 +204,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		API:       poo.APIResponses,
 		Body:      body,
 		Messages:  len(req.Messages),
-		Inputs:    modalitiesOf(t.modelInfo(req)).inputs(),
+		Inputs:    responses.ModalitiesOf(t.modelInfo(req)).Inputs(),
 		SessionID: session,
 	}
 
@@ -236,7 +241,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 			Message: "the request snapshot holds no body to fork",
 		}
 	}
-	body, err := forkBody(prev.Body, appended, modalitiesOfInputs(prev.Inputs))
+	body, err := responses.AppendInput(prev.Body, appended, responses.ModalitiesFrom(prev.Inputs))
 	if err != nil {
 		return nil, err
 	}
@@ -277,8 +282,8 @@ func (e *redirectError) Error() string {
 // store that never answers cannot hold an attempt. The bound ending while
 // the run is alive is a resolution that did not finish in time, not the
 // run stopping. That is why the parent is kept apart from it.
-func (t *Transport) open(ctx context.Context, body []byte, session string) (*streamReader, error) {
-	return support.OpenStream(ctx, support.OpenOptions[*streamReader]{
+func (t *Transport) open(ctx context.Context, body []byte, session string) (*responses.Reader, error) {
+	return support.OpenStream(ctx, support.OpenOptions[*responses.Reader]{
 		Client:  t.http,
 		Timeout: t.cfg.Timeout,
 		Classify: func(parent, request context.Context, resp *http.Response, err error) error {
@@ -314,15 +319,7 @@ func (t *Transport) open(ctx context.Context, body []byte, session string) (*str
 			t.setHeaders(req, credential, session)
 			return req, nil
 		},
-		Build: func(stream support.Stream) *streamReader {
-			return &streamReader{
-				closer: support.Closer{Body: stream.Body, Cancel: stream.Cancel},
-				frames: support.NewFrames(support.SSEScanner(stream.Reader)),
-				ctx:    stream.Context,
-				parent: stream.Parent,
-				ttft:   stream.TTFT,
-			}
-		},
+		Build: responses.NewReader,
 	})
 }
 
@@ -449,73 +446,6 @@ func ResponsesURL(baseURL string) string {
 	default:
 		return base + "/codex/responses"
 	}
-}
-
-// forkBody appends messages to a serialized request body.
-//
-// The body is decoded, and the converted messages are appended after the
-// last input item. The result is serialized again in the order the body
-// already had its keys. Every other byte is the body's own, so the fork's
-// prefix is the one the endpoint has already cached.
-func forkBody(body []byte, appended []poo.Message, reads modalities) ([]byte, error) {
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, &poo.ProviderError{
-			Kind:    poo.ProviderKindInvalidRequest,
-			Message: "the request snapshot does not hold a JSON body",
-		}
-	}
-
-	if len(appended) > 0 {
-		var items []json.RawMessage
-		if raw, ok := payload["input"]; ok {
-			if err := json.Unmarshal(raw, &items); err != nil {
-				return nil, &poo.ProviderError{
-					Kind:    poo.ProviderKindInvalidRequest,
-					Message: "the request snapshot's input does not decode",
-				}
-			}
-		}
-		converted, instructions, err := inputItems(appended, reads, len(items))
-		if err != nil {
-			return nil, err
-		}
-		// A system message the fork appends cannot become the request's
-		// instructions: those are part of the snapshot's prefix. It rides
-		// as the instruction item a later system message rides as.
-		if instructions != "" {
-			raw, err := json.Marshal(inputMessage{
-				Role:    "developer",
-				Content: []inputPart{{Type: "input_text", Text: instructions}},
-			})
-			if err != nil {
-				return nil, &poo.ProviderError{
-					Kind:    poo.ProviderKindInvalidRequest,
-					Message: "the appended instruction does not encode",
-				}
-			}
-			items = append(items, raw)
-		}
-		items = append(items, converted...)
-		raw, err := json.Marshal(items)
-		if err != nil {
-			return nil, &poo.ProviderError{
-				Kind:    poo.ProviderKindInvalidRequest,
-				Message: "the input items do not encode",
-			}
-		}
-		payload["input"] = raw
-	}
-
-	order, err := support.JSONKeyOrder(body)
-	if err != nil {
-		return nil, err
-	}
-	// The body a direct consumer shaped always carries its input. A snapshot
-	// that does not is one the fork is adding the field to, so the field goes
-	// last and the appended items are written rather than dropped.
-	order = support.WithKeys(order, payload, []string{"input"})
-	return support.EncodeObject(payload, order), nil
 }
 
 // maxSessionIDLength is the longest session identifier the endpoint takes.

@@ -1,4 +1,4 @@
-package codex
+package responses
 
 import (
 	"context"
@@ -11,53 +11,54 @@ import (
 	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
-// The response side.
+// The response stream.
 //
-// The endpoint sends the Responses API's events, with the Codex backend's
-// own spelling of the terminal ones. response.done is response.completed, and
-// response.failed carries the failure the run settles with.
+// The endpoint sends the API's events, and the terminal ones arrive in either
+// spelling: response.completed is the API's, and response.done is what a
+// backend of its own sends instead. response.incomplete stopped early, and a
+// failed response carries the failure the run settles with.
 
-// codexEvent is one SSE data payload.
-type codexEvent struct {
+// event is one SSE data payload.
+type event struct {
 	Type        string             `json:"type"`
 	OutputIndex int                `json:"output_index"`
 	Delta       string             `json:"delta"`
 	Arguments   string             `json:"arguments"`
 	Item        json.RawMessage    `json:"item"`
-	Response    *codexResponse     `json:"response"`
+	Response    *response          `json:"response"`
 	Code        string             `json:"code"`
 	Message     string             `json:"message"`
 	Error       *support.ErrorBody `json:"error"`
 }
 
-// codexItem is the output item an event adds or completes.
-type codexItem struct {
-	Type             string      `json:"type"`
-	CallID           string      `json:"call_id"`
-	Name             string      `json:"name"`
-	Arguments        string      `json:"arguments"`
-	Content          []codexPart `json:"content"`
-	Summary          []codexPart `json:"summary"`
-	EncryptedContent string      `json:"encrypted_content"`
+// item is the output item an event adds or completes.
+type item struct {
+	Type             string `json:"type"`
+	CallID           string `json:"call_id"`
+	Name             string `json:"name"`
+	Arguments        string `json:"arguments"`
+	Content          []part `json:"content"`
+	Summary          []part `json:"summary"`
+	EncryptedContent string `json:"encrypted_content"`
 }
 
-// codexPart is one part of an item's content or summary.
-type codexPart struct {
+// part is one part of an item's content or summary.
+type part struct {
 	Text    string `json:"text"`
 	Refusal string `json:"refusal"`
 }
 
 // text is the part's text, whether it is a summary part or a content
 // part, and whether it holds an answer or a refusal.
-func (p codexPart) text() string {
+func (p part) text() string {
 	if p.Text != "" {
 		return p.Text
 	}
 	return p.Refusal
 }
 
-// codexResponse is the response a terminal event carries.
-type codexResponse struct {
+// response is the response a terminal event carries.
+type response struct {
 	Status string `json:"status"`
 	// Output is the response's items, whole. The encrypted reasoning
 	// payload may arrive only here.
@@ -66,11 +67,11 @@ type codexResponse struct {
 	IncompleteDetails *struct {
 		Reason string `json:"reason"`
 	} `json:"incomplete_details"`
-	Usage *codexUsage `json:"usage"`
+	Usage *usage `json:"usage"`
 }
 
-// codexUsage is the token accounting a terminal event carries.
-type codexUsage struct {
+// usage is the token accounting a terminal event carries.
+type usage struct {
 	InputTokens        int `json:"input_tokens"`
 	OutputTokens       int `json:"output_tokens"`
 	InputTokensDetails *struct {
@@ -103,8 +104,8 @@ type itemSlot struct {
 	arguments strings.Builder
 }
 
-// streamReader reads a Codex SSE response.
-type streamReader struct {
+// Reader reads a Responses SSE answer.
+type Reader struct {
 	// closer releases the response and the request's bound.
 	closer support.Closer
 	frames *support.Frames
@@ -150,20 +151,35 @@ type streamReader struct {
 	sawToolCall bool
 }
 
-// init makes the scanner when the reader was built without one.
-func (r *streamReader) init() {
-	if r.frames == nil {
-		r.frames = support.NewFrames(support.SSEScanner(r.closer.Body))
-	}
-	if r.slots == nil {
-		r.slots = map[slotKey]*itemSlot{}
+// NewReader returns a reader over the answer a request opened.
+func NewReader(stream support.Stream) *Reader {
+	return &Reader{
+		closer: support.Closer{Body: stream.Body, Cancel: stream.Cancel},
+		frames: support.NewFrames(support.SSEScanner(stream.Reader)),
+		ctx:    stream.Context,
+		parent: stream.Parent,
+		ttft:   stream.TTFT,
+		slots:  map[slotKey]*itemSlot{},
 	}
 }
 
-// Next returns the next event.
-func (r *streamReader) Next() (poo.StreamItem, error) {
-	r.init()
+// Capture asks the reader to keep the response's output items whole.
+//
+// Only a caller that reads the answer's items back needs them: a compaction
+// does, because the window is the response's own items. A turn's reader is
+// left out of it, so it does not hold a second copy of its answer.
+func (r *Reader) Capture() {
+	r.captureOutput = true
+}
 
+// Output returns the response's output items, whole and in the order the
+// endpoint sent them, for a reader that captured them.
+func (r *Reader) Output() []json.RawMessage {
+	return r.output
+}
+
+// Next returns the next event.
+func (r *Reader) Next() (poo.StreamItem, error) {
 	if ev, ok := support.Take(&r.pending); ok {
 		return ev, nil
 	}
@@ -194,7 +210,7 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 }
 
 // finishReading returns what is left of a stream that has ended.
-func (r *streamReader) finishReading() (poo.StreamItem, error) {
+func (r *Reader) finishReading() (poo.StreamItem, error) {
 	if r.err != nil {
 		return poo.StreamItem{}, r.err
 	}
@@ -206,8 +222,8 @@ func (r *streamReader) finishReading() (poo.StreamItem, error) {
 // An event whose payload does not parse is skipped. A chunk the transport
 // cannot read is not worth failing the run over, and the endpoint's own error
 // event is what fails it.
-func (r *streamReader) dispatch(payload []byte) error {
-	var ev codexEvent
+func (r *Reader) dispatch(payload []byte) error {
+	var ev event
 	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 		return nil
 	}
@@ -228,7 +244,7 @@ func (r *streamReader) dispatch(payload []byte) error {
 // its terminal response event is a protocol failure. The run cannot know
 // whether the answer was complete, and the retry layer decides whether it may
 // be asked for again.
-func (r *streamReader) close() (poo.StreamItem, error) {
+func (r *Reader) close() (poo.StreamItem, error) {
 	if !r.sawTerminal {
 		return r.fail(&poo.ProviderError{
 			Kind:    poo.ProviderKindServer,
@@ -246,7 +262,7 @@ func (r *streamReader) close() (poo.StreamItem, error) {
 // The usage report follows, so a consumer sees the request's accounting
 // even when the stream broke; the failure itself is returned by the next
 // call.
-func (r *streamReader) fail(err error) (poo.StreamItem, error) {
+func (r *Reader) fail(err error) (poo.StreamItem, error) {
 	r.done = true
 	r.err = err
 	if !r.usageSent {
@@ -262,18 +278,18 @@ func (r *streamReader) fail(err error) (poo.StreamItem, error) {
 //
 // A stream that failed before its terminal event still produced tokens,
 // so the transport reports what it knows.
-func (r *streamReader) ReportUsage() *poo.UsageReport {
+func (r *Reader) ReportUsage() *poo.UsageReport {
 	return r.usage
 }
 
-// reportedUsage returns the usage the endpoint itself reported, and nil
+// ReportedUsage returns the usage the endpoint itself reported, and nil
 // when it reported none.
 //
 // ReportUsage answers with a report once the stream ended even when the
 // endpoint gave no counts. The time to the first token is still worth having.
 // A compaction's accounting needs the counts. A request whose usage the
 // endpoint withheld is charged the estimate a side request gets, not zero.
-func (r *streamReader) reportedUsage() *poo.UsageReport {
+func (r *Reader) ReportedUsage() *poo.UsageReport {
 	if !r.usageReported {
 		return nil
 	}
@@ -287,7 +303,7 @@ func (r *streamReader) reportedUsage() *poo.UsageReport {
 // opaque to the harness. The item's summary is what the model wrote, and its
 // encrypted payload has to travel back with the next request. The core records
 // them with the response's message, so the next request gives them back.
-func (r *streamReader) ReportProviderBlocks() []poo.ProviderBlock {
+func (r *Reader) ReportProviderBlocks() []poo.ProviderBlock {
 	return r.reasoning
 }
 
@@ -297,20 +313,20 @@ func (r *streamReader) ReportProviderBlocks() []poo.ProviderBlock {
 // Every item a done event carries is kept, including one the reader cannot
 // decode. The window refuses an item it cannot read, rather than installing
 // the items around it as if the response held nothing else.
-func (r *streamReader) capture(item json.RawMessage) {
+func (r *Reader) capture(raw json.RawMessage) {
 	if !r.captureOutput {
 		return
 	}
-	r.output = append(r.output, item)
+	r.output = append(r.output, raw)
 }
 
 // Close releases the response.
-func (r *streamReader) Close() error {
+func (r *Reader) Close() error {
 	return r.closer.Close()
 }
 
 // events turns one event into the events the reader queues.
-func (r *streamReader) events(ev codexEvent) ([]poo.StreamItem, error) {
+func (r *Reader) events(ev event) ([]poo.StreamItem, error) {
 	switch ev.Type {
 	case "response.output_item.added":
 		return r.itemAdded(ev), nil
@@ -345,12 +361,12 @@ func (r *streamReader) events(ev codexEvent) ([]poo.StreamItem, error) {
 // A tool call's slot carries the call on its first fragment. The core creates
 // a call from the fragment that names it, and appends the arguments the later
 // fragments carry.
-func (r *streamReader) itemAdded(ev codexEvent) []poo.StreamItem {
-	item, ok := decodeItem(ev.Item)
+func (r *Reader) itemAdded(ev event) []poo.StreamItem {
+	it, ok := decodeItem(ev.Item)
 	if !ok {
 		return nil
 	}
-	switch item.Type {
+	switch it.Type {
 	case "reasoning":
 		r.slotFor(ev.OutputIndex, "thinking")
 	case "message":
@@ -363,8 +379,8 @@ func (r *streamReader) itemAdded(ev codexEvent) []poo.StreamItem {
 			Kind: "tool_call",
 			ToolCall: &poo.ToolCallDelta{
 				Index:  ev.OutputIndex,
-				ID:     item.CallID,
-				Name:   item.Name,
+				ID:     it.CallID,
+				Name:   it.Name,
 				Origin: poo.CallOriginWire,
 			},
 		}}
@@ -373,7 +389,7 @@ func (r *streamReader) itemAdded(ev codexEvent) []poo.StreamItem {
 }
 
 // textDelta emits a text or thinking fragment.
-func (r *streamReader) textDelta(ev codexEvent, kind string) []poo.StreamItem {
+func (r *Reader) textDelta(ev event, kind string) []poo.StreamItem {
 	if ev.Delta == "" {
 		return nil
 	}
@@ -390,7 +406,7 @@ func (r *streamReader) textDelta(ev codexEvent, kind string) []poo.StreamItem {
 }
 
 // thinkingGap emits the break between two reasoning summary parts.
-func (r *streamReader) thinkingGap(ev codexEvent) []poo.StreamItem {
+func (r *Reader) thinkingGap(ev event) []poo.StreamItem {
 	slot := r.slotFor(ev.OutputIndex, "thinking")
 	if slot == nil || slot.text.Len() == 0 {
 		return nil
@@ -403,7 +419,7 @@ func (r *streamReader) thinkingGap(ev codexEvent) []poo.StreamItem {
 }
 
 // callDelta emits a tool call's argument fragment.
-func (r *streamReader) callDelta(ev codexEvent) []poo.StreamItem {
+func (r *Reader) callDelta(ev event) []poo.StreamItem {
 	slot := r.slots[slotKey{ev.OutputIndex, "tool_call"}]
 	if slot == nil || ev.Delta == "" {
 		return nil
@@ -422,7 +438,7 @@ func (r *streamReader) callDelta(ev codexEvent) []poo.StreamItem {
 // assembles a call by appending its fragments. An argument string that
 // disagrees with the fragments is left alone for the same reason. There
 // is no way to replace what the core already holds.
-func (r *streamReader) callDone(ev codexEvent) []poo.StreamItem {
+func (r *Reader) callDone(ev event) []poo.StreamItem {
 	slot := r.slots[slotKey{ev.OutputIndex, "tool_call"}]
 	if slot == nil {
 		return nil
@@ -445,24 +461,24 @@ func (r *streamReader) callDone(ev codexEvent) []poo.StreamItem {
 // here. The item's own text is emitted as the one delta the answer has. A
 // reasoning item is held as a provider block, so the reasoning the endpoint
 // encrypted can travel back with the next request.
-func (r *streamReader) itemDone(ev codexEvent) []poo.StreamItem {
+func (r *Reader) itemDone(ev event) []poo.StreamItem {
 	r.capture(ev.Item)
-	item, ok := decodeItem(ev.Item)
+	it, ok := decodeItem(ev.Item)
 	if !ok {
 		return nil
 	}
-	switch item.Type {
+	switch it.Type {
 	case "reasoning":
-		if block, ok := reasoningBlock(ev.Item, item); ok {
+		if block, ok := reasoningBlock(ev.Item, it); ok {
 			r.reasoning = append(r.reasoning, block)
 		}
 		slot := r.slotFor(ev.OutputIndex, "thinking")
 		if slot == nil || slot.text.Len() > 0 {
 			return nil
 		}
-		text := partsText(item.Summary)
+		text := partsText(it.Summary)
 		if text == "" {
-			text = partsText(item.Content)
+			text = partsText(it.Content)
 		}
 		if text == "" {
 			return nil
@@ -477,7 +493,7 @@ func (r *streamReader) itemDone(ev codexEvent) []poo.StreamItem {
 		if slot == nil || slot.text.Len() > 0 {
 			return nil
 		}
-		text := partsText(item.Content)
+		text := partsText(it.Content)
 		if text == "" {
 			return nil
 		}
@@ -487,7 +503,7 @@ func (r *streamReader) itemDone(ev codexEvent) []poo.StreamItem {
 			Delta: &poo.Delta{Kind: "text", Text: text},
 		}}
 	case "function_call":
-		return r.finishCall(ev.OutputIndex, item)
+		return r.finishCall(ev.OutputIndex, it)
 	}
 	return nil
 }
@@ -496,7 +512,7 @@ func (r *streamReader) itemDone(ev codexEvent) []poo.StreamItem {
 //
 // A call the endpoint never announced is announced here: the item names
 // it, and the core needs the name before it can run anything.
-func (r *streamReader) finishCall(index int, item codexItem) []poo.StreamItem {
+func (r *Reader) finishCall(index int, it item) []poo.StreamItem {
 	key := slotKey{index, "tool_call"}
 	var items []poo.StreamItem
 	if _, announced := r.slots[key]; !announced {
@@ -506,15 +522,15 @@ func (r *streamReader) finishCall(index int, item codexItem) []poo.StreamItem {
 			Kind: "tool_call",
 			ToolCall: &poo.ToolCallDelta{
 				Index:  index,
-				ID:     item.CallID,
-				Name:   item.Name,
+				ID:     it.CallID,
+				Name:   it.Name,
 				Origin: poo.CallOriginWire,
 			},
 		})
 	}
 	slot := r.slotFor(index, "tool_call")
 	defer delete(r.slots, key)
-	arguments := item.Arguments
+	arguments := it.Arguments
 	have := slot.arguments.String()
 	switch {
 	case arguments == "" && have == "":
@@ -554,9 +570,9 @@ func argumentFragment(slot *itemSlot, index int, text string) *poo.ToolCallDelta
 // The response's status says why it stopped. A completed response is the
 // model's answer. An incomplete one stopped on its output limit or on a reason
 // the run has to know, and a failed one carries the failure. A status this
-// transport does not know is read as an answer, because a provider that adds
-// one has still said the response ended.
-func (r *streamReader) terminal(ev codexEvent) ([]poo.StreamItem, error) {
+// reader does not know is read as an answer, because a provider that adds one
+// has still said the response ended.
+func (r *Reader) terminal(ev event) ([]poo.StreamItem, error) {
 	resp := ev.Response
 	r.sawTerminal = true
 	r.done = true
@@ -608,7 +624,7 @@ func (r *streamReader) terminal(ev codexEvent) ([]poo.StreamItem, error) {
 //
 // A response that called a tool stopped to have it run; every other
 // response that ended is the model's answer.
-func (r *streamReader) finishReason(resp *codexResponse) poo.FinishReason {
+func (r *Reader) finishReason(resp *response) poo.FinishReason {
 	if r.sawToolCall {
 		return poo.FinishToolCalls
 	}
@@ -616,7 +632,7 @@ func (r *streamReader) finishReason(resp *codexResponse) poo.FinishReason {
 }
 
 // responseFailure is the failure a failed terminal event names.
-func (r *streamReader) responseFailure(ev codexEvent) error {
+func (r *Reader) responseFailure(ev event) error {
 	resp := ev.Response
 	if resp != nil && resp.Usage != nil {
 		r.setUsage(resp.Usage)
@@ -643,7 +659,7 @@ func (r *streamReader) responseFailure(ev codexEvent) error {
 }
 
 // eventFailure is the failure an in-band error event names.
-func (r *streamReader) eventFailure(ev codexEvent) error {
+func (r *Reader) eventFailure(ev event) error {
 	code, message := ev.Code, ev.Message
 	if ev.Error != nil {
 		if named := support.CodeString(ev.Error.Code); named != "" {
@@ -670,7 +686,7 @@ func (r *streamReader) eventFailure(ev codexEvent) error {
 // run's budget counts the prompt it sent. The cached tokens ride beside it,
 // because a reader that wants the cache hit rate asks for them and not for a
 // subtraction.
-func (r *streamReader) setUsage(u *codexUsage) {
+func (r *Reader) setUsage(u *usage) {
 	var cacheRead *int
 	if details := u.InputTokensDetails; details != nil {
 		value := details.CachedTokens
@@ -688,7 +704,7 @@ func (r *streamReader) setUsage(u *codexUsage) {
 //
 // Every request gets one, so a consumer can see the time to the first
 // token even when the endpoint reported no token counts.
-func (r *streamReader) usageItem() poo.StreamItem {
+func (r *Reader) usageItem() poo.StreamItem {
 	if r.usage == nil {
 		r.usage = &poo.UsageReport{}
 	}
@@ -703,7 +719,7 @@ func (r *streamReader) usageItem() poo.StreamItem {
 // The kinds are separate slots on one index because the wire separates them.
 // An event that names no index lands on an index another kind took, and it is
 // still the item it says it is.
-func (r *streamReader) slotFor(index int, kind string) *itemSlot {
+func (r *Reader) slotFor(index int, kind string) *itemSlot {
 	key := slotKey{index, kind}
 	if slot, ok := r.slots[key]; ok {
 		return slot
@@ -724,11 +740,11 @@ func (r *streamReader) slotFor(index int, kind string) *itemSlot {
 func terminalReasoning(output []json.RawMessage) ([]poo.ProviderBlock, bool) {
 	var blocks []poo.ProviderBlock
 	for _, raw := range output {
-		item, ok := decodeItem(raw)
-		if !ok || item.Type != "reasoning" {
+		it, ok := decodeItem(raw)
+		if !ok || it.Type != "reasoning" {
 			continue
 		}
-		if block, keep := reasoningBlock(raw, item); keep {
+		if block, keep := reasoningBlock(raw, it); keep {
 			blocks = append(blocks, block)
 		}
 	}
@@ -743,8 +759,8 @@ func terminalReasoning(output []json.RawMessage) ([]poo.ProviderBlock, bool) {
 // payload cannot be given back. The next request would name a reasoning
 // item the endpoint cannot match, so such an item is not a block at all. Its
 // summary already travelled as the thinking text.
-func reasoningBlock(raw json.RawMessage, item codexItem) (poo.ProviderBlock, bool) {
-	if item.EncryptedContent == "" {
+func reasoningBlock(raw json.RawMessage, it item) (poo.ProviderBlock, bool) {
+	if it.EncryptedContent == "" {
 		return poo.ProviderBlock{}, false
 	}
 	return poo.ProviderBlock{
@@ -755,19 +771,19 @@ func reasoningBlock(raw json.RawMessage, item codexItem) (poo.ProviderBlock, boo
 }
 
 // decodeItem decodes the item an event carries.
-func decodeItem(raw json.RawMessage) (codexItem, bool) {
-	var item codexItem
+func decodeItem(raw json.RawMessage) (item, bool) {
+	var it item
 	if len(raw) == 0 {
-		return item, false
+		return it, false
 	}
-	if err := json.Unmarshal(raw, &item); err != nil {
-		return item, false
+	if err := json.Unmarshal(raw, &it); err != nil {
+		return it, false
 	}
-	return item, true
+	return it, true
 }
 
 // partsText joins an item's parts into the text they carry.
-func partsText(parts []codexPart) string {
+func partsText(parts []part) string {
 	var b strings.Builder
 	for _, part := range parts {
 		b.WriteString(part.text())

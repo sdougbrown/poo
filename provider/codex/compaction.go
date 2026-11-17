@@ -10,29 +10,13 @@ package codex
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"strings"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/responses"
 	"github.com/sdougbrown/poo/provider/internal/support"
 )
-
-// compactionTrigger is the input item that asks the endpoint to compact.
-//
-// It is the request's last item: the endpoint compacts the input that came
-// before it.
-var compactionTrigger = json.RawMessage(`{"type":"compaction_trigger"}`)
-
-// maxCompactionItems bounds the output items one compaction may install.
-//
-// A compaction answer holds the compacted state, and at most the visible text
-// the endpoint keeps beside it. An answer with more items than that is not a
-// window this transport can install. Refusing it keeps a faulty endpoint from
-// growing the window without bound.
-const maxCompactionItems = 32
 
 // Compact asks the endpoint to compact the view and returns the window it
 // produced.
@@ -65,13 +49,13 @@ func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.N
 	session := t.sessionID(in.SessionID)
 	// The opened reader is kept whole because the window is read from the
 	// response's own items, which the stream interface does not carry.
-	var stream *streamReader
+	var stream *responses.Reader
 	open := func(ctx context.Context) (support.Reader, error) {
 		reader, err := t.open(ctx, body, session)
 		if err != nil {
 			return nil, err
 		}
-		reader.captureOutput = true
+		reader.Capture()
 		stream = reader
 		return reader, nil
 	}
@@ -85,13 +69,13 @@ func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.N
 	// both cost what the endpoint reported. When the endpoint reported nothing,
 	// the core charges the estimate.
 	if err := drainCompaction(stream); err != nil {
-		return poo.NativeCompactionResult{Billed: true, Usage: stream.reportedUsage()}, err
+		return poo.NativeCompactionResult{Billed: true, Usage: stream.ReportedUsage()}, err
 	}
-	window, err := compactionWindow(stream.output)
+	window, err := responses.CompactionWindow(stream.Output())
 	if err != nil {
-		return poo.NativeCompactionResult{Billed: true, Usage: stream.reportedUsage()}, err
+		return poo.NativeCompactionResult{Billed: true, Usage: stream.ReportedUsage()}, err
 	}
-	return poo.NativeCompactionResult{Window: window, Usage: stream.reportedUsage(), Billed: true}, nil
+	return poo.NativeCompactionResult{Window: window, Usage: stream.ReportedUsage(), Billed: true}, nil
 }
 
 // compactionBody turns a native compaction into the wire payload.
@@ -114,8 +98,8 @@ func (t *Transport) compactionBody(in poo.NativeCompaction) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out.Input = append(out.Input, compactionTrigger)
-	return encodeBody(out)
+	out.Input = responses.AppendCompactionTrigger(out.Input)
+	return responses.Encode(out)
 }
 
 // drainCompaction reads a compaction response to its end.
@@ -126,7 +110,7 @@ func (t *Transport) compactionBody(in poo.NativeCompaction) ([]byte, error) {
 // its failure out. A response the endpoint cut at its output limit is refused
 // the same way. The state it carries is the part the endpoint reached, not the
 // compacted view.
-func drainCompaction(reader *streamReader) error {
+func drainCompaction(reader *responses.Reader) error {
 	for {
 		ev, err := reader.Next()
 		if err != nil {
@@ -136,73 +120,10 @@ func drainCompaction(reader *streamReader) error {
 			return err
 		}
 		if ev.Kind == "finish" && ev.FinishReason == poo.FinishLength {
-			return compactionFailure(
-				"the compaction response stopped on its output limit, so the state it carries is short")
-		}
-	}
-}
-
-// compactionWindow turns the items a compaction response carried into the
-// window the core installs.
-//
-// The endpoint's items keep their order. A compaction item is the compacted
-// state itself, so it is required and travels back verbatim. Only the endpoint
-// can read it, and nothing else can take its place. A message item is text the
-// endpoint kept visible beside it. An item of any other type is data this
-// transport cannot install. Dropping it would lose context the endpoint meant
-// to keep, so the whole window is refused.
-func compactionWindow(items []json.RawMessage) (poo.ProviderWindow, error) {
-	if len(items) > maxCompactionItems {
-		return poo.ProviderWindow{}, compactionFailure(
-			"the compaction response carries %d items, more than the %d a window holds",
-			len(items), maxCompactionItems)
-	}
-	var window poo.ProviderWindow
-	compactions := 0
-	for _, raw := range items {
-		item, ok := decodeItem(raw)
-		if !ok {
-			return poo.ProviderWindow{}, compactionFailure("the compaction response carries an item that does not decode")
-		}
-		switch item.Type {
-		case "compaction":
-			if item.EncryptedContent == "" {
-				return poo.ProviderWindow{}, compactionFailure(
-					"the compaction item carries no encrypted content to give back")
+			return &poo.ProviderError{
+				Kind:    poo.ProviderKindServer,
+				Message: "the compaction response stopped on its output limit, so the state it carries is short",
 			}
-			compactions++
-			window.Items = append(window.Items, poo.ContentBlock{
-				Kind: poo.ContentProvider,
-				Provider: &poo.ProviderBlock{
-					API:      poo.APIResponses,
-					Type:     "compaction",
-					Data:     append(json.RawMessage(nil), raw...),
-					Required: true,
-				},
-			})
-		case "message":
-			if text := partsText(item.Content); strings.TrimSpace(text) != "" {
-				window.Items = append(window.Items, poo.ContentBlock{Kind: poo.ContentText, Text: text})
-			}
-		default:
-			return poo.ProviderWindow{}, compactionFailure(
-				"the compaction response carries a %q item, which a window cannot hold", item.Type)
 		}
 	}
-	switch {
-	case compactions == 0:
-		return poo.ProviderWindow{}, compactionFailure("the compaction response carries no compaction item")
-	case compactions > 1:
-		return poo.ProviderWindow{}, compactionFailure(
-			"the compaction response carries %d compaction items, want one", compactions)
-	}
-	return window, nil
-}
-
-// compactionFailure is a failure a compaction response reports.
-//
-// The endpoint answered, and what it answered cannot be installed. The
-// failure is the endpoint's, so the run may ask again at a later boundary.
-func compactionFailure(format string, args ...any) error {
-	return &poo.ProviderError{Kind: poo.ProviderKindServer, Message: fmt.Sprintf(format, args...)}
 }
