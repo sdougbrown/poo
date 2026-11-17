@@ -256,6 +256,103 @@ func TestTheKeyPromptReadsTheKey(t *testing.T) {
 	}
 }
 
+// TestTheReplacePromptReplacesTheKeyWhenTheOperatorSaysYes covers the other way to replace a
+// credential: the operator answers the prompt, and the run goes on to take the key they type.
+func TestTheReplacePromptReplacesTheKeyWhenTheOperatorSaysYes(t *testing.T) {
+	isolatedConfigHome(t)
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+	target := filepath.Join(dir, "auth.json")
+	seeded := "version: 1\ncredentials:\n  ollama-cloud:\n    type: api_key\n    key: already-there\n"
+	if err := os.WriteFile(target, []byte(seeded), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+
+	const typed = "the-new-key"
+	master := withATerminal(t)
+	stderr := streamTo(t, &os.Stderr)
+	stdout := streamTo(t, &os.Stdout)
+	exited := make(chan int, 1)
+	go func() {
+		exited <- run([]string{"login", "ollama-cloud", "--settings", settings})
+	}()
+
+	waitForOutput(t, stderr, "Replace it? [y/N]")
+	if _, err := fmt.Fprint(master, "y\n"); err != nil {
+		t.Fatalf("answering the prompt: %v", err)
+	}
+	// Each answer is one line read on its own, so the key is typed only once the key's prompt
+	// is up: a line written before that read starts is the confirmation's to read.
+	waitForOutput(t, stderr, "Ollama Cloud key:")
+	if _, err := fmt.Fprintf(master, "%s\n", typed); err != nil {
+		t.Fatalf("typing the key: %v", err)
+	}
+
+	select {
+	case code := <-exited:
+		if code != 0 {
+			t.Fatalf("poo login exited %d; its stderr is\n%s", code, stderr())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatalf("poo login did not finish; its stderr is\n%s", stderr())
+	}
+	if printed := stdout(); !strings.Contains(printed, "Signed in to ollama-cloud") {
+		t.Errorf("the report is %q, want it to say which provider signed in", printed)
+	}
+	entry, err := (auth.Credentials{Path: target}).Read(auth.OllamaCloud)
+	if err != nil {
+		t.Fatalf("reading the credential back: %v", err)
+	}
+	if entry.Key != typed {
+		t.Errorf("the credential is %+v, want the key the operator answered for", entry)
+	}
+}
+
+// TestTheReplacePromptLeavesTheCredentialWhenTheOperatorSaysNo covers the answer that is not
+// yes: the run stops there, and the credential is the bytes it already had.
+func TestTheReplacePromptLeavesTheCredentialWhenTheOperatorSaysNo(t *testing.T) {
+	isolatedConfigHome(t)
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+	target := filepath.Join(dir, "auth.json")
+	seeded := "version: 1\ncredentials:\n  ollama-cloud:\n    type: api_key\n    key: already-there\n"
+	if err := os.WriteFile(target, []byte(seeded), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+
+	master := withATerminal(t)
+	stderr := streamTo(t, &os.Stderr)
+	streamTo(t, &os.Stdout)
+	exited := make(chan int, 1)
+	go func() {
+		exited <- run([]string{"login", "ollama-cloud", "--settings", settings})
+	}()
+
+	waitForOutput(t, stderr, "Replace it? [y/N]")
+	if _, err := fmt.Fprint(master, "n\n"); err != nil {
+		t.Fatalf("answering the prompt: %v", err)
+	}
+
+	select {
+	case code := <-exited:
+		if code != operationalExitCode {
+			t.Errorf("the exit code is %d, want %d", code, operationalExitCode)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatalf("poo login did not finish; its stderr is\n%s", stderr())
+	}
+	if printed := stderr(); !strings.Contains(printed, "the credential was left as it was") {
+		t.Errorf("the failure is %q, want it to say the credential was left as it was", printed)
+	}
+	stored, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("reading the credential file: %v", err)
+	}
+	if string(stored) != seeded {
+		t.Errorf("the file is\n%s\nwant it untouched:\n%s", stored, seeded)
+	}
+}
+
 // TestTheKeyPromptWithNothingTypedIsAFailure covers the terminal's prompt answered with nothing:
 // the key is not there, and the read that would ask again on the same terminal has no prompt to
 // ask on, so the run refuses instead of falling through to it.
