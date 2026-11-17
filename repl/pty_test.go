@@ -184,14 +184,12 @@ func takeOverStdio(t *testing.T, slave *os.File) (restore func()) {
 	}
 }
 
-// endReplCleanup ends a test's repl: the failure dump goes to stderr —
-// stdout is the terminal under test — and interrupts end any read still
-// blocked at session end, so the next test's keystrokes are its own and
-// the terminal restore lands on the cooked one. The interrupts repeat
-// until the repl actually leaves — the first clears a draft, the second
-// leaves an empty prompt, and one the editor consumed mid-sequence asks
-// for another — bounded, so a repl that will not leave fails here
-// instead of reading the next test's keystrokes forever.
+// endReplCleanup ends a test's repl. The failure dump goes to stderr —
+// stdout is the terminal under test. The interrupts repeat until the
+// repl actually leaves. The first clears a draft, the second leaves an
+// empty prompt, and one the editor consumed mid-sequence asks for
+// another. The loop is bounded, so a repl that will not leave fails
+// here instead of reading the next test's keystrokes forever.
 func endReplCleanup(t *testing.T, term *terminal, exited <-chan struct{}) {
 	t.Helper()
 	if t.Failed() {
@@ -234,10 +232,9 @@ func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int)
 	}
 	go func() { code <- Run(opts); close(exited) }()
 	// The repl must be gone before the terminal moves on: a repl still
-	// running holds the editor on fd 0, and the next test's keystrokes
-	// would land in whatever draft it has. The wait runs after the
-	// interrupts (cleanups unwind last registered first) and before the
-	// stdio restore.
+	// running holds the editor on fd 0 and reads the next test's
+	// keystrokes. The wait runs after the interrupts (cleanups unwind
+	// last registered first) and before the stdio restore.
 	t.Cleanup(func() {
 		select {
 		case <-exited:
@@ -377,7 +374,7 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	term, code := startTerminalRepl(t, server)
 	waitFor(t, term, promptMark)
 	term.press("work\r")
-	// The run must be on before the escape: an escape that arrives while
+	// The run must be on before the escape. An escape that arrives while
 	// the editor still holds the draft is one the editor eats under
 	// load. The echo is the machine's receipt for the line, so the keys
 	// after it reach the run. The held deltas paint when the run settles,
@@ -419,7 +416,7 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	term, _ := startTerminalRepl(t, server)
 	waitFor(t, term, promptMark)
 	term.press("work\r")
-	// The run must be on before the keys: an escape that arrives while
+	// The run must be on before the keys. An escape that arrives while
 	// the editor still holds the draft is one the editor eats under
 	// load. The echo is the machine's receipt for the line, so the keys
 	// after it reach the run.

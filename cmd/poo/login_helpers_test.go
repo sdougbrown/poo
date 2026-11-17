@@ -153,9 +153,8 @@ func askCallback(t *testing.T, redirectURI, path, query string) *http.Response {
 	}
 	target := fmt.Sprintf("%s://%s%s%s", redirect.Scheme, redirect.Host, path, query)
 	var last error
-	// The window bounds the whole retry, not the count: a listener that
-	// accepts but never answers costs one 2s request per window, not a
-	// count of them.
+	// The window bounds the whole retry, not the count. A listener that
+	// accepts but never answers costs one 2s request at a time.
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)

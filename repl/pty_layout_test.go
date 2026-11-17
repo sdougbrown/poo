@@ -588,9 +588,9 @@ func startPipedRepl(t *testing.T, server *fakeServer, input string) (*terminal, 
 	}
 	go func() { code <- Run(opts); close(exited) }()
 	// The repl must be gone before the terminal moves on: a repl still
-	// running draws to the shared output stream, and the next test's
-	// drawing would share it. The wait runs after the interrupts
-	// (cleanups unwind last registered first).
+	// running draws to the output stream the next test also draws to.
+	// The wait runs after the interrupts (cleanups unwind last
+	// registered first).
 	t.Cleanup(func() {
 		select {
 		case <-exited:
@@ -712,10 +712,9 @@ func startTerminalReplWith(t *testing.T, server *fakeServer, history string) (*t
 	}
 	go func() { code <- Run(opts); close(exited) }()
 	// The repl must be gone before the terminal moves on: a repl still
-	// running holds the editor on fd 0, and the next test's keystrokes
-	// would land in whatever draft it has. The wait runs after the
-	// interrupts (cleanups unwind last registered first) and before the
-	// stdio restore.
+	// running holds the editor on fd 0 and reads the next test's
+	// keystrokes. The wait runs after the interrupts (cleanups unwind
+	// last registered first) and before the stdio restore.
 	t.Cleanup(func() {
 		select {
 		case <-exited:
