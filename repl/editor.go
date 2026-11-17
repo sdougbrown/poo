@@ -240,9 +240,12 @@ func (i *editorInput) read() (string, error) {
 
 // close puts the terminal back. A read still blocked at session end
 // holds raw mode; the state captured at construction is what a cooked
-// terminal was.
+// terminal was. The blocked read is aborted first: without it, a session
+// that ended while the editor held the read leaves the reader parked on
+// the terminal, where it reads the next session's keystrokes.
 func (i *editorInput) close() {
 	readline.SetRenderOutput(nil)
+	i.rl.Keys.Abort()
 	if i.restore != nil {
 		_ = i.restore()
 	}
