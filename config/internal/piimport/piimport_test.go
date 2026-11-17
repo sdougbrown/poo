@@ -8,7 +8,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config/internal/piimport"
-	"github.com/sdougbrown/poo/provider/piauth"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // TestAPisFilesThatOpenWithABOMAreRead covers the files a Windows editor
@@ -68,7 +68,7 @@ func TestTheCodexAPIImportsForTheCodexProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the models file: %v", err)
 	}
-	provider := file.Providers[piauth.ProviderCodex]
+	provider := file.Providers[auth.ProviderCodex]
 	if provider.API != string(poo.APIResponses) {
 		t.Errorf("the provider's API is %q, want the Responses API", provider.API)
 	}

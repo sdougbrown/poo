@@ -18,8 +18,8 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config/internal/piimport"
+	"github.com/sdougbrown/poo/provider/auth"
 	"github.com/sdougbrown/poo/provider/codex"
-	"github.com/sdougbrown/poo/provider/piauth"
 )
 
 // writeCodexAuthFile writes pi's auth.json with a live Codex credential and
@@ -45,7 +45,7 @@ func TestCodexCredentialsRetryWhenTheAuthFileIsLocked(t *testing.T) {
 	if err := os.Mkdir(lockPath, 0o700); err != nil {
 		t.Fatalf("taking the lock: %v", err)
 	}
-	resolve := codexCredentials(piauth.Credentials{Path: path, Wait: 50 * time.Millisecond})
+	resolve := codexCredentials(auth.Credentials{Path: path, Wait: 50 * time.Millisecond})
 	_, err := resolve(context.Background())
 	var failure *poo.ProviderError
 	if !errors.As(err, &failure) {
@@ -64,13 +64,13 @@ func TestCodexCredentialsRetryWhenTheAuthFileIsLocked(t *testing.T) {
 // returned as it came rather than retried.
 func TestCodexCredentialsKeepAnUnreadableAuthFileTerminal(t *testing.T) {
 	path := writeCodexAuthFile(t, `{"openai-codex":`)
-	resolve := codexCredentials(piauth.Credentials{Path: path, Wait: time.Millisecond})
+	resolve := codexCredentials(auth.Credentials{Path: path, Wait: time.Millisecond})
 	_, err := resolve(context.Background())
 	var failure *poo.ProviderError
 	if errors.As(err, &failure) {
 		t.Fatalf("the malformed file was mapped to a provider failure: %+v", failure)
 	}
-	if !errors.Is(err, piauth.ErrStorage) {
+	if !errors.Is(err, auth.ErrStorage) {
 		t.Errorf("the failure is %v, want the storage failure it came from", err)
 	}
 }
@@ -82,7 +82,7 @@ func TestCodexCredentialsPreserveCancellation(t *testing.T) {
 	if err := os.Mkdir(path+".lock", 0o700); err != nil {
 		t.Fatalf("taking the lock: %v", err)
 	}
-	resolve := codexCredentials(piauth.Credentials{Path: path, Wait: time.Second})
+	resolve := codexCredentials(auth.Credentials{Path: path, Wait: time.Second})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := resolve(ctx)
@@ -106,7 +106,7 @@ func TestTheCodexTransportRetriesALockedAuthFile(t *testing.T) {
 	transport := codex.New(codex.Options{
 		Endpoint:    codex.DefaultEndpoint,
 		Model:       "gpt-6.1-sol",
-		Credentials: codexCredentials(piauth.Credentials{Path: path, Wait: 20 * time.Millisecond}),
+		Credentials: codexCredentials(auth.Credentials{Path: path, Wait: 20 * time.Millisecond}),
 		MaxAttempts: 3,
 		Backoff:     []time.Duration{0},
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -143,7 +143,7 @@ func TestTheCodexTransportDoesNotRetryAnUnreadableAuthFile(t *testing.T) {
 	transport := codex.New(codex.Options{
 		Endpoint:    codex.DefaultEndpoint,
 		Model:       "gpt-6.1-sol",
-		Credentials: codexCredentials(piauth.Credentials{Path: path, Wait: 20 * time.Millisecond}),
+		Credentials: codexCredentials(auth.Credentials{Path: path, Wait: 20 * time.Millisecond}),
 		MaxAttempts: 3,
 		Backoff:     []time.Duration{0},
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -179,7 +179,7 @@ const expiredCodexAuth = `{"openai-codex":{"type":"oauth","access":"expired-toke
 // that was not stored. The failure is terminal even with a lock in its chain,
 // because another attempt would trade a refresh token that is already spent.
 func TestCodexCredentialErrorKeepsATradedTokenTerminal(t *testing.T) {
-	err := fmt.Errorf("%w: another writer took the lock: %w", piauth.ErrPersist, piauth.ErrLocked)
+	err := fmt.Errorf("%w: another writer took the lock: %w", auth.ErrPersist, auth.ErrLocked)
 	mapped := codexCredentialError(context.Background(), err)
 	var failure *poo.ProviderError
 	if !errors.As(mapped, &failure) {
@@ -194,7 +194,7 @@ func TestCodexCredentialErrorKeepsATradedTokenTerminal(t *testing.T) {
 // whose answer was lost. The endpoint may have traded the token, so the
 // failure is terminal even when the transport error is a network one.
 func TestCodexCredentialErrorKeepsAnUncertainRefreshTerminal(t *testing.T) {
-	err := fmt.Errorf("%w: %w", piauth.ErrRefresh, &net.DNSError{Err: "i/o timeout", IsTimeout: true})
+	err := fmt.Errorf("%w: %w", auth.ErrRefresh, &net.DNSError{Err: "i/o timeout", IsTimeout: true})
 	mapped := codexCredentialError(context.Background(), err)
 	var failure *poo.ProviderError
 	if !errors.As(mapped, &failure) {
@@ -211,7 +211,7 @@ func TestCodexCredentialErrorKeepsAnUncertainRefreshTerminal(t *testing.T) {
 func TestCodexCredentialErrorPreservesCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := fmt.Errorf("%w: another writer took the lock: %w", piauth.ErrPersist, piauth.ErrLocked)
+	err := fmt.Errorf("%w: another writer took the lock: %w", auth.ErrPersist, auth.ErrLocked)
 	mapped := codexCredentialError(ctx, err)
 	var failure *poo.ProviderError
 	if errors.As(mapped, &failure) {
@@ -275,7 +275,7 @@ func TestTheCodexTransportStopsAfterATradedTokenIsNotStored(t *testing.T) {
 	transport := codex.New(codex.Options{
 		Endpoint: codex.DefaultEndpoint,
 		Model:    "gpt-6.1-sol",
-		Credentials: codexCredentials(piauth.Credentials{
+		Credentials: codexCredentials(auth.Credentials{
 			Path:     path,
 			TokenURL: endpoint.URL,
 			Wait:     20 * time.Millisecond,
@@ -353,7 +353,7 @@ func TestTheCodexTransportDoesNotRetryAnUncertainRefresh(t *testing.T) {
 	transport := codex.New(codex.Options{
 		Endpoint: codex.DefaultEndpoint,
 		Model:    "gpt-6.1-sol",
-		Credentials: codexCredentials(piauth.Credentials{
+		Credentials: codexCredentials(auth.Credentials{
 			Path:     path,
 			TokenURL: endpoint.URL,
 			Wait:     20 * time.Millisecond,

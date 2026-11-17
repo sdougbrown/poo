@@ -1,4 +1,4 @@
-package piauth_test
+package auth_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sdougbrown/poo/provider/piauth"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // TestAForcedRefreshTradesALiveCredentialOnce covers the job of the forced
@@ -23,7 +23,7 @@ func TestAForcedRefreshTradesALiveCredentialOnce(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	token, err := credentials.Refresh(context.Background())
 	if err != nil {
@@ -48,7 +48,7 @@ func TestAForcedRefreshTradesALiveCredentialOnce(t *testing.T) {
 	var entry struct {
 		Refresh string `json:"refresh"`
 	}
-	if err := json.Unmarshal(entries(t, path)[piauth.ProviderCodex], &entry); err != nil {
+	if err := json.Unmarshal(entries(t, path)[auth.ProviderCodex], &entry); err != nil {
 		t.Fatalf("the entry is not an oauth credential: %v", err)
 	}
 	if entry.Refresh != newRefresh {
@@ -77,10 +77,10 @@ func TestAFailedForcedRefreshReturnsNoLiveCredential(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusBadRequest, `{"error":"invalid_grant"}`
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	token, err := credentials.Refresh(context.Background())
-	if !errors.Is(err, piauth.ErrRefresh) {
+	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("the refusal is %v, want ErrRefresh: a failed forced refresh is not the stored credential", err)
 	}
 	if token.Access != "" {
@@ -100,7 +100,7 @@ func TestConcurrentForcedRefreshesTradeInTurn(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	start := make(chan struct{})
 	errs := make([]error, 2)

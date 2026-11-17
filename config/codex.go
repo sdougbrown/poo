@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/auth"
 	"github.com/sdougbrown/poo/provider/codex"
-	"github.com/sdougbrown/poo/provider/piauth"
 )
 
 // codexTransport builds the Codex transport for a model.
@@ -30,16 +30,16 @@ func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error)
 			Code:  CodeUnsupported,
 			Field: "models." + model.Name + ".api",
 			Message: fmt.Sprintf("the %s provider speaks the %s API, and the model declares %s: set api: %s",
-				piauth.ProviderCodex, poo.APIResponses, model.API, poo.APIResponses),
+				auth.ProviderCodex, poo.APIResponses, model.API, poo.APIResponses),
 		}
 	}
 	endpoint := strings.TrimRight(strings.TrimSpace(model.Endpoint), "/")
 	if endpoint != codex.DefaultEndpoint {
 		return nil, &Error{
 			Code:  CodeUnsupported,
-			Field: "endpoints." + piauth.ProviderCodex + ".endpoint",
+			Field: "endpoints." + auth.ProviderCodex + ".endpoint",
 			Message: fmt.Sprintf("the %s provider is served at %s; poo sends pi's credential only to %s",
-				piauth.ProviderCodex, endpoint, codex.DefaultEndpoint),
+				auth.ProviderCodex, endpoint, codex.DefaultEndpoint),
 		}
 	}
 	path := r.Settings.CredentialFile()
@@ -54,7 +54,7 @@ func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error)
 	return codex.New(codex.Options{
 		Endpoint:    endpoint,
 		Model:       model.ModelID,
-		Credentials: codexCredentials(piauth.Credentials{Path: path, HTTP: r.httpClient}),
+		Credentials: codexCredentials(auth.Credentials{Path: path, HTTP: r.httpClient}),
 		ModelInfo:   model,
 		ToolsMode:   string(model.Tools.Mode),
 		Reasoning:   r.codexReasoning(model),
@@ -85,9 +85,9 @@ func (r *Runtime) codexReasoning(model poo.ModelInfo) string {
 // attempt, so a token that expires between attempts is refreshed rather than
 // failing the run.
 //
-// piauth owns the read, the refresh and the write under pi's lock; this only
+// The auth store owns the read, the refresh and the write under pi's lock; this only
 // hands the transport the token and the account the token names.
-func codexCredentials(credentials piauth.Credentials) func(context.Context) (codex.Credential, error) {
+func codexCredentials(credentials auth.Credentials) func(context.Context) (codex.Credential, error) {
 	return func(ctx context.Context) (codex.Credential, error) {
 		token, err := credentials.Access(ctx)
 		if err != nil {
@@ -111,10 +111,10 @@ func codexCredentialError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return err
 	}
-	if errors.Is(err, piauth.ErrPersist) || errors.Is(err, piauth.ErrRefresh) {
+	if errors.Is(err, auth.ErrPersist) || errors.Is(err, auth.ErrRefresh) {
 		return &poo.ProviderError{Kind: poo.ProviderKindAuthFailed, Message: err.Error()}
 	}
-	if errors.Is(err, piauth.ErrLocked) {
+	if errors.Is(err, auth.ErrLocked) {
 		return &poo.ProviderError{Kind: poo.ProviderKindNetwork, Message: err.Error()}
 	}
 	return err

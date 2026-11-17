@@ -1,4 +1,4 @@
-package piauth
+package auth
 
 import (
 	"context"

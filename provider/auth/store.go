@@ -1,12 +1,16 @@
-// Package piauth reads, refreshes and writes the OpenAI Codex OAuth credential
-// poo keeps in an auth.json.
+// Package auth reads, refreshes and writes the credentials poo keeps in its own
+// auth file.
 //
-// The file's shape and the store that keeps the credential alive are two
-// things, and they are two things here. The store owns the lock, the read, the
-// refresh and the write; a format owns what one file's bytes look like. There
-// are two shapes: pi's auth.json, which holds its providers at the top level,
-// and poo's own, which holds a version and the credentials under it. The file
-// itself says which one it is, so a caller hands over a path and nothing else.
+// The file's shape and the store that keeps the credential alive are two things, and
+// they are two things here. The store owns the lock, the read, the refresh and the
+// write; a format owns what one file's bytes look like. There are two shapes: poo's
+// own, which holds a version and the credentials under it, and pi's auth.json, which
+// holds its providers at the top level. The file itself says which one it is, so a
+// caller hands over a path and nothing else.
+//
+// pi's shape is the compat one: poo reads it and writes it back as it found it, so pi
+// keeps working with the same file, and the day poo's own import path is the only
+// reader of pi's file this codec is what stays behind.
 //
 // poo reads the file the settings name, never a pi installation's own
 // directory, so a caller hands the path over. This package does not log in:
@@ -28,7 +32,7 @@
 //
 // An error wraps what failed underneath it, so a caller can tell a
 // refused grant from a network failure with errors.Is.
-package piauth
+package auth
 
 import (
 	"context"
@@ -95,39 +99,39 @@ var (
 	// can be used. A file with no such entry, an entry that is an api key,
 	// and an entry that names no account are all this failure. The answer
 	// is pi's login, not a retry.
-	ErrNoCredential = errors.New("piauth: no Codex credential")
+	ErrNoCredential = errors.New("auth: no Codex credential")
 
 	// ErrLocked means another writer holds the auth.json's lock, so the
 	// refresh did not start and nothing was traded. The file is exactly what
 	// it was, and a caller may retry. pi holds the lock while it refreshes,
 	// so this is what a pi refresh in flight looks like.
-	ErrLocked = errors.New("piauth: the auth.json's lock is held by another writer")
+	ErrLocked = errors.New("auth: the auth.json's lock is held by another writer")
 
 	// ErrRefresh means the token endpoint would not trade the refresh
 	// token. It refused the grant, answered with something that is not one,
 	// or could not be reached. The file is unchanged, which is not to say
 	// its credential still works. The grant the endpoint refused is the one
 	// the file holds, so a retry most likely fails the same way.
-	ErrRefresh = errors.New("piauth: the Codex token refresh failed")
+	ErrRefresh = errors.New("auth: the Codex token refresh failed")
 
 	// ErrStorage means the auth.json could not be read, or could not be made ready to
 	// write, before anything was traded. Nothing was written either.
-	ErrStorage = errors.New("piauth: the auth.json could not be read")
+	ErrStorage = errors.New("auth: the auth.json could not be read")
 
 	// ErrForeignFile means the file is another tool's: pi's, in pi's shape. poo writes
 	// its own, and a command that rewrote pi's file would be changing a file pi reads.
-	ErrForeignFile = errors.New("piauth: the auth file belongs to another tool")
+	ErrForeignFile = errors.New("auth: the auth file belongs to another tool")
 
 	// ErrExists means the file already holds a credential for the provider, and
 	// the caller did not ask for it to be replaced. A command that replaced a
 	// working credential without being asked is a logout nobody wanted.
-	ErrExists = errors.New("piauth: the auth file already holds a credential")
+	ErrExists = errors.New("auth: the auth file already holds a credential")
 
 	// ErrPersist means the endpoint traded the refresh token and the new
 	// credential could not be stored. The file still holds the refresh token
 	// that was traded, so it may no longer work. The caller's next step is
 	// pi's login, not a retry of the same credential.
-	ErrPersist = errors.New("piauth: the refreshed token was not stored")
+	ErrPersist = errors.New("auth: the refreshed token was not stored")
 )
 
 // Token is a live Codex access token.
@@ -160,7 +164,7 @@ type Credential struct {
 // entry, so replacing it is still a decision, and Status is the wrong question to ask of it.
 func (c Credentials) Holds() (bool, error) {
 	if c.Path == "" {
-		return false, errors.New("piauth: no auth.json path")
+		return false, errors.New("auth: no auth.json path")
 	}
 	doc, err := c.load()
 	if err != nil {
@@ -177,7 +181,7 @@ func (c Credentials) Holds() (bool, error) {
 // credential asks Status.
 func (c Credentials) Read() (Credential, error) {
 	if c.Path == "" {
-		return Credential{}, errors.New("piauth: no auth.json path")
+		return Credential{}, errors.New("auth: no auth.json path")
 	}
 	stored, _, err := c.read()
 	if err != nil {
@@ -204,10 +208,10 @@ func (c Credentials) Read() (Credential, error) {
 // command that rewrote it would be changing a file another tool owns.
 func (c Credentials) Set(ctx context.Context, entry Credential, replace bool) (Status, error) {
 	if c.Path == "" {
-		return Status{}, errors.New("piauth: no auth.json path")
+		return Status{}, errors.New("auth: no auth.json path")
 	}
 	if entry.Access == "" || entry.Refresh == "" {
-		return Status{}, errors.New("piauth: a credential needs an access token and a refresh token")
+		return Status{}, errors.New("auth: a credential needs an access token and a refresh token")
 	}
 	if accountID(entry.Access, entry.AccountID) == "" {
 		return Status{}, fmt.Errorf("%w: the credential names no account", ErrNoCredential)
@@ -388,7 +392,7 @@ func (c Credentials) Refresh(ctx context.Context) (Token, error) {
 // section under pi's lock.
 func (c Credentials) token(ctx context.Context, force bool) (Token, error) {
 	if c.Path == "" {
-		return Token{}, errors.New("piauth: no auth.json path")
+		return Token{}, errors.New("auth: no auth.json path")
 	}
 	hold, err := acquire(ctx, c.Path, c.wait())
 	if err != nil {
@@ -426,7 +430,7 @@ func (c Credentials) token(ctx context.Context, force bool) (Token, error) {
 // either, because a report should not wait on a refresh that is in flight.
 func (c Credentials) Status() (Status, error) {
 	if c.Path == "" {
-		return Status{}, errors.New("piauth: no auth.json path")
+		return Status{}, errors.New("auth: no auth.json path")
 	}
 	stored, doc, err := c.read()
 	if err != nil {

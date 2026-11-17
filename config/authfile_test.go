@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo/config/internal/piimport"
-	"github.com/sdougbrown/poo/provider/piauth"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // piAuthFile is one auth.json of pi's: a Codex oauth credential, a provider whose
@@ -36,7 +36,7 @@ const piModelsFile = `{
 
 // TestBothReadersOfPisAuthFileAgree covers the one file two readers read.
 //
-// piauth reads the Codex credential out of pi's auth.json, and a models file's
+// The auth store reads the Codex credential out of pi's auth.json, and a models file's
 // providers read their api keys out of the same file. They are two readers on
 // purpose — they answer different questions, and a missing api key is not a missing
 // credential — so what they must agree on is the file's shape. This is the fixture
@@ -63,7 +63,7 @@ func TestBothReadersOfPisAuthFileAgree(t *testing.T) {
 
 			// The credential reader: the Codex entry, by the account it names. The
 			// token is live until 2100, so no refresh is asked for.
-			token, err := piauth.Credentials{Path: authPath}.Access(context.Background())
+			token, err := auth.Credentials{Path: authPath}.Access(context.Background())
 			if err != nil {
 				t.Fatalf("the credential reader: %v", err)
 			}

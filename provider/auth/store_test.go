@@ -1,4 +1,4 @@
-package piauth_test
+package auth_test
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sdougbrown/poo/provider/piauth"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // The stored credential, and the token the fake endpoint trades it for.
@@ -189,7 +189,7 @@ func entries(t *testing.T, path string) map[string]json.RawMessage {
 }
 
 // storedCredential reads one provider's entry as pi would read it.
-func storedCredential(t *testing.T, path string) piauth.Token {
+func storedCredential(t *testing.T, path string) auth.Token {
 	t.Helper()
 	var entry struct {
 		Type      string `json:"type"`
@@ -198,13 +198,13 @@ func storedCredential(t *testing.T, path string) piauth.Token {
 		Expires   int64  `json:"expires"`
 		AccountID string `json:"accountId"`
 	}
-	if err := json.Unmarshal(entries(t, path)[piauth.ProviderCodex], &entry); err != nil {
-		t.Fatalf("the %s entry is not an oauth credential: %v", piauth.ProviderCodex, err)
+	if err := json.Unmarshal(entries(t, path)[auth.ProviderCodex], &entry); err != nil {
+		t.Fatalf("the %s entry is not an oauth credential: %v", auth.ProviderCodex, err)
 	}
 	if entry.Type != "oauth" {
-		t.Fatalf("the %s entry is a %s credential", piauth.ProviderCodex, entry.Type)
+		t.Fatalf("the %s entry is a %s credential", auth.ProviderCodex, entry.Type)
 	}
-	return piauth.Token{
+	return auth.Token{
 		Access:    entry.Access,
 		Expires:   time.UnixMilli(entry.Expires),
 		AccountID: entry.AccountID,
@@ -231,7 +231,7 @@ func TestAnExpiredTokenIsRefreshedAndWrittenBack(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	token, err := credentials.Access(context.Background())
 	if err != nil {
@@ -253,7 +253,7 @@ func TestAnExpiredTokenIsRefreshedAndWrittenBack(t *testing.T) {
 	if form := endpoint.form(t, 0); form["grant_type"] != "refresh_token" || form["refresh_token"] != oldRefresh {
 		t.Errorf("the refresh carried the form %v, want the stored refresh token", form)
 	}
-	if form := endpoint.form(t, 0); form["client_id"] != piauth.DefaultClientID {
+	if form := endpoint.form(t, 0); form["client_id"] != auth.DefaultClientID {
 		t.Errorf("the refresh carried the client %q, want pi's", form["client_id"])
 	}
 }
@@ -267,7 +267,7 @@ func TestALiveTokenIsUsedWithoutAskingTheEndpoint(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusInternalServerError, `{"error":"the endpoint was asked"}`
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	token, err := credentials.Access(context.Background())
 	if err != nil {
@@ -297,7 +297,7 @@ func TestATokenInsidePisLeewayIsRefreshed(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	token, err := credentials.Access(context.Background())
 	if err != nil {
@@ -321,8 +321,8 @@ func TestATokenAtTheLeewayBoundaryIsRefreshed(t *testing.T) {
 		life   time.Duration
 		traded bool
 	}{
-		{name: "exactly the leeway", life: piauth.DefaultLeeway, traded: true},
-		{name: "a millisecond past it", life: piauth.DefaultLeeway + time.Millisecond, traded: false},
+		{name: "exactly the leeway", life: auth.DefaultLeeway, traded: true},
+		{name: "a millisecond past it", life: auth.DefaultLeeway + time.Millisecond, traded: false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			path := authFile(t, fmt.Sprintf(stored, expires(c.life)))
@@ -330,7 +330,7 @@ func TestATokenAtTheLeewayBoundaryIsRefreshed(t *testing.T) {
 			endpoint := newTokenEndpoint(t, func() (int, string) {
 				return http.StatusOK, traded(t, access, time.Hour)
 			}, nil)
-			credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+			credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 			token, err := credentials.Access(context.Background())
 			if err != nil {
@@ -356,7 +356,7 @@ func TestARefreshKeepsEveryOtherCredential(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 	if _, err := credentials.Access(context.Background()); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestARefreshHoldsPisLock(t *testing.T) {
 		_, err := os.Stat(lockPath)
 		held.Store(err == nil)
 	})
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 	if _, err := credentials.Access(context.Background()); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
@@ -418,8 +418,8 @@ func TestASecondCallerWaitsForTheFirstRefresh(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-	tokens := make([]piauth.Token, 2)
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	tokens := make([]auth.Token, 2)
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
 	for i := range tokens {
@@ -453,10 +453,10 @@ func TestARefreshThatFailsLeavesTheFileAlone(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusBadRequest, `{"error":"invalid_grant","error_description":"the refresh token is not valid"}`
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	_, err := credentials.Access(context.Background())
-	if !errors.Is(err, piauth.ErrRefresh) {
+	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("the refusal is %v, want ErrRefresh", err)
 	}
 	for _, secret := range []string{oldAccess, oldRefresh} {
@@ -486,7 +486,7 @@ func TestARefreshThatOmitsTheRefreshTokenKeepsTheStoredOne(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, fmt.Sprintf(`{"access_token":%q,"expires_in":3600}`, access)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 	if _, err := credentials.Access(context.Background()); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestARefreshThatOmitsTheRefreshTokenKeepsTheStoredOne(t *testing.T) {
 		Refresh string `json:"refresh"`
 		Access  string `json:"access"`
 	}
-	if err := json.Unmarshal(entries(t, path)[piauth.ProviderCodex], &entry); err != nil {
+	if err := json.Unmarshal(entries(t, path)[auth.ProviderCodex], &entry); err != nil {
 		t.Fatalf("the entry is not an oauth credential: %v", err)
 	}
 	if entry.Refresh != oldRefresh {
@@ -532,7 +532,7 @@ func TestTheAccountComesFromTheNewAccessToken(t *testing.T) {
 			endpoint := newTokenEndpoint(t, func() (int, string) {
 				return http.StatusOK, traded(t, access, time.Hour)
 			}, nil)
-			credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+			credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 			token, err := credentials.Access(context.Background())
 			if err != nil {
 				t.Fatalf("the credential did not reach a token: %v", err)
@@ -560,9 +560,9 @@ func TestAForeignLockIsWaitedOut(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
-	waiting := make(chan piauth.Token, 1)
+	waiting := make(chan auth.Token, 1)
 	failed := make(chan error, 1)
 	go func() {
 		token, err := credentials.Access(context.Background())
@@ -606,10 +606,10 @@ func TestAForeignLockTheWaitCannotOutlastIsReported(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusInternalServerError, `{"error":"the endpoint was asked"}`
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Wait: 100 * time.Millisecond}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Wait: 100 * time.Millisecond}
 
 	_, err := credentials.Access(context.Background())
-	if !errors.Is(err, piauth.ErrLocked) {
+	if !errors.Is(err, auth.ErrLocked) {
 		t.Fatalf("the held lock is %v, want ErrLocked", err)
 	}
 	if endpoint.count() != 0 {
@@ -636,7 +636,7 @@ func TestAStaleLockIsBroken(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	started := time.Now()
 	token, err := credentials.Access(context.Background())
@@ -679,8 +679,8 @@ func TestAnAuthFileWithoutACodexCredentialIsReported(t *testing.T) {
 					t.Fatalf("writing the auth file: %v", err)
 				}
 			}
-			credentials := piauth.Credentials{Path: path}
-			if _, err := credentials.Access(context.Background()); !errors.Is(err, piauth.ErrNoCredential) {
+			credentials := auth.Credentials{Path: path}
+			if _, err := credentials.Access(context.Background()); !errors.Is(err, auth.ErrNoCredential) {
 				t.Fatalf("the file is %v, want ErrNoCredential", err)
 			}
 			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
@@ -705,10 +705,10 @@ func TestAMalformedAuthFileIsNotWrittenOver(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusInternalServerError, `{"error":"the endpoint was asked"}`
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	_, err := credentials.Access(context.Background())
-	if !errors.Is(err, piauth.ErrStorage) {
+	if !errors.Is(err, auth.ErrStorage) {
 		t.Fatalf("the malformed file is %v, want ErrStorage", err)
 	}
 	if got := readFile(t, path); got != body {
@@ -733,8 +733,8 @@ func TestARefreshAnswerWithoutATokenIsReported(t *testing.T) {
 		endpoint := newTokenEndpoint(t, func() (int, string) {
 			return http.StatusOK, answer
 		}, nil)
-		credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
-		if _, err := credentials.Access(context.Background()); !errors.Is(err, piauth.ErrRefresh) {
+		credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+		if _, err := credentials.Access(context.Background()); !errors.Is(err, auth.ErrRefresh) {
 			t.Errorf("the answer %s is %v, want ErrRefresh", answer, err)
 		}
 		if after := readFile(t, path); before != after {
@@ -755,7 +755,7 @@ func TestACancelledWaitLeavesTheLockAlone(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusInternalServerError, `{"error":"the endpoint was asked"}`
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Wait: time.Minute}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Wait: time.Minute}
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(50*time.Millisecond, cancel)
 
@@ -787,15 +787,15 @@ func TestAnAnswerLargerThanTheBoundIsRefused(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, `{"access_token":"` + padding + `","expires_in":3600}`
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	_, err := credentials.Access(context.Background())
-	if !errors.Is(err, piauth.ErrRefresh) {
+	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("an answer over the bound is %v, want ErrRefresh", err)
 	}
 	after := entries(t, path)
-	if string(after[piauth.ProviderCodex]) != string(before[piauth.ProviderCodex]) {
-		t.Errorf("the file changed under a refused answer: %s", after[piauth.ProviderCodex])
+	if string(after[auth.ProviderCodex]) != string(before[auth.ProviderCodex]) {
+		t.Errorf("the file changed under a refused answer: %s", after[auth.ProviderCodex])
 	}
 }
 
@@ -807,15 +807,15 @@ func TestAnAnswerThatIsNotJSONIsRefused(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, "the token endpoint is a captive portal today"
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	_, err := credentials.Access(context.Background())
-	if !errors.Is(err, piauth.ErrRefresh) {
+	if !errors.Is(err, auth.ErrRefresh) {
 		t.Fatalf("an answer that is not JSON is %v, want ErrRefresh", err)
 	}
 	after := entries(t, path)
-	if string(after[piauth.ProviderCodex]) != string(before[piauth.ProviderCodex]) {
-		t.Errorf("the file changed under an unreadable answer: %s", after[piauth.ProviderCodex])
+	if string(after[auth.ProviderCodex]) != string(before[auth.ProviderCodex]) {
+		t.Errorf("the file changed under an unreadable answer: %s", after[auth.ProviderCodex])
 	}
 }
 
@@ -833,7 +833,7 @@ func TestACancelledRefreshWritesNothing(t *testing.T) {
 		<-release
 		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -846,12 +846,12 @@ func TestACancelledRefreshWritesNothing(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("the cancelled refresh is %v, want context.Canceled", err)
 	}
-	if !errors.Is(err, piauth.ErrRefresh) {
+	if !errors.Is(err, auth.ErrRefresh) {
 		t.Errorf("the cancelled refresh is %v, want the refresh's own failure too", err)
 	}
 	after := entries(t, path)
-	if string(after[piauth.ProviderCodex]) != string(before[piauth.ProviderCodex]) {
-		t.Errorf("the file changed under a cancelled refresh: %s", after[piauth.ProviderCodex])
+	if string(after[auth.ProviderCodex]) != string(before[auth.ProviderCodex]) {
+		t.Errorf("the file changed under a cancelled refresh: %s", after[auth.ProviderCodex])
 	}
 	if _, err := os.Stat(path + ".lock"); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("the lock was left behind: %v", err)
@@ -862,11 +862,11 @@ func TestACancelledRefreshWritesNothing(t *testing.T) {
 // must not take a lock in the working directory, and it must not report a
 // storage failure that a retry would.
 func TestAnEmptyPathIsRefused(t *testing.T) {
-	_, err := piauth.Credentials{}.Access(context.Background())
+	_, err := auth.Credentials{}.Access(context.Background())
 	if err == nil {
 		t.Fatal("a credential with no path reached a token")
 	}
-	if errors.Is(err, piauth.ErrStorage) || errors.Is(err, piauth.ErrLocked) {
+	if errors.Is(err, auth.ErrStorage) || errors.Is(err, auth.ErrLocked) {
 		t.Errorf("the failure is %v, want neither a storage nor a lock failure", err)
 	}
 	if _, err := os.Stat(".lock"); !errors.Is(err, fs.ErrNotExist) {
@@ -882,7 +882,7 @@ func TestTheClientIDOverrideIsSent(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, ClientID: "client-under-test"}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, ClientID: "client-under-test"}
 
 	if _, err := credentials.Access(context.Background()); err != nil {
 		t.Fatalf("the refresh: %v", err)
@@ -900,7 +900,7 @@ func TestTheLeewayOverrideTakesALiveToken(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusInternalServerError, `{"error":"the endpoint was asked for a live token"}`
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Leeway: 2 * time.Minute}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock, Leeway: 2 * time.Minute}
 
 	token, err := credentials.Access(context.Background())
 	if err != nil {

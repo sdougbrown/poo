@@ -1,4 +1,4 @@
-package piauth_test
+package auth_test
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/sdougbrown/poo/provider/piauth"
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // pooStored is poo's own auth file: a version, and the credentials under it.
@@ -61,7 +61,7 @@ func TestAnExpiredPooCredentialIsRefreshedInPooShape(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	token, err := credentials.Access(context.Background())
 	if err != nil {
@@ -75,7 +75,7 @@ func TestAnExpiredPooCredentialIsRefreshedInPooShape(t *testing.T) {
 	if version != 1 {
 		t.Errorf("the file's version is %d, want 1", version)
 	}
-	entry := held[piauth.ProviderCodex]
+	entry := held[auth.ProviderCodex]
 	if entry["access"] != access {
 		t.Errorf("the file holds %q, want the traded %q", entry["access"], access)
 	}
@@ -105,7 +105,7 @@ func TestARefreshKeepsPisFileInPisShape(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, access, time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 	if _, err := credentials.Access(context.Background()); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
@@ -117,8 +117,8 @@ func TestARefreshKeepsPisFileInPisShape(t *testing.T) {
 	if _, ok := written["credentials"]; ok {
 		t.Error("the file gained a credentials envelope, so pi cannot read it any more")
 	}
-	if _, ok := written[piauth.ProviderCodex]; !ok {
-		t.Errorf("the file holds no %s entry at its top level, which is where pi reads one", piauth.ProviderCodex)
+	if _, ok := written[auth.ProviderCodex]; !ok {
+		t.Errorf("the file holds no %s entry at its top level, which is where pi reads one", auth.ProviderCodex)
 	}
 }
 
@@ -131,10 +131,10 @@ func TestPooFileOfAnotherVersionIsRefused(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusInternalServerError, `{"error":"the endpoint was asked"}`
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 	_, err := credentials.Access(context.Background())
-	if !errors.Is(err, piauth.ErrStorage) {
+	if !errors.Is(err, auth.ErrStorage) {
 		t.Fatalf("the other version is %v, want ErrStorage", err)
 	}
 	if !strings.Contains(err.Error(), "version 2") {
@@ -162,24 +162,24 @@ func TestStatusReportsTheCredentialWithoutTradingIt(t *testing.T) {
 		{
 			name:   "poo's file, a live token",
 			body:   fmt.Sprintf(pooStored, expires(time.Hour)),
-			format: piauth.FormatPoo,
+			format: auth.FormatPoo,
 			live:   true,
 		},
 		{
 			name:   "pi's file, a live token",
 			body:   fmt.Sprintf(stored, expires(time.Hour)),
-			format: piauth.FormatPi,
+			format: auth.FormatPi,
 			live:   true,
 		},
 		{
 			name:   "poo's file, a token inside the leeway",
 			body:   fmt.Sprintf(pooStored, expires(time.Minute)),
-			format: piauth.FormatPoo,
+			format: auth.FormatPoo,
 		},
 		{
 			name:   "pi's file, an expired token",
 			body:   fmt.Sprintf(stored, expires(-time.Hour)),
-			format: piauth.FormatPi,
+			format: auth.FormatPi,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -188,7 +188,7 @@ func TestStatusReportsTheCredentialWithoutTradingIt(t *testing.T) {
 			endpoint := newTokenEndpoint(t, func() (int, string) {
 				return http.StatusInternalServerError, `{"error":"the endpoint was asked"}`
 			}, nil)
-			credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+			credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 
 			status, err := credentials.Status()
 			if err != nil {
@@ -200,8 +200,8 @@ func TestStatusReportsTheCredentialWithoutTradingIt(t *testing.T) {
 			if status.Format != c.format {
 				t.Errorf("the status names the shape %q, want %q", status.Format, c.format)
 			}
-			if status.Provider != piauth.ProviderCodex {
-				t.Errorf("the status names the provider %q, want %q", status.Provider, piauth.ProviderCodex)
+			if status.Provider != auth.ProviderCodex {
+				t.Errorf("the status names the provider %q, want %q", status.Provider, auth.ProviderCodex)
 			}
 			if status.AccountID != oldAccount {
 				t.Errorf("the status names the account %q, want %q", status.AccountID, oldAccount)
@@ -238,7 +238,7 @@ func TestStatusOfAFileWithoutACredentialIsReported(t *testing.T) {
 					t.Fatalf("writing the auth file: %v", err)
 				}
 			}
-			if _, err := (piauth.Credentials{Path: path}).Status(); !errors.Is(err, piauth.ErrNoCredential) {
+			if _, err := (auth.Credentials{Path: path}).Status(); !errors.Is(err, auth.ErrNoCredential) {
 				t.Fatalf("the status is %v, want ErrNoCredential", err)
 			}
 		})
@@ -269,7 +269,7 @@ credentials:
 			endpoint := newTokenEndpoint(t, func() (int, string) {
 				return http.StatusInternalServerError, `{"error":"the endpoint was asked"}`
 			}, nil)
-			credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+			credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 			token, err := credentials.Access(context.Background())
 			if err != nil {
 				t.Fatalf("the credential did not reach a token: %v", err)
@@ -292,7 +292,7 @@ func TestPooFileWritesWholeNumbersWhole(t *testing.T) {
 	endpoint := newTokenEndpoint(t, func() (int, string) {
 		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
 	}, nil)
-	credentials := piauth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
+	credentials := auth.Credentials{Path: path, TokenURL: endpoint.URL, Now: clock}
 	if _, err := credentials.Access(context.Background()); err != nil {
 		t.Fatalf("the credential did not reach a token: %v", err)
 	}
@@ -313,8 +313,8 @@ func TestSetKeepsACredentialAndRefusesToReplaceOne(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.json")
 	access := codexToken(t, newAccount)
-	credentials := piauth.Credentials{Path: path, Now: clock}
-	entry := piauth.Credential{
+	credentials := auth.Credentials{Path: path, Now: clock}
+	entry := auth.Credential{
 		Access:    access,
 		Refresh:   newRefresh,
 		Expires:   clock().Add(time.Hour),
@@ -325,15 +325,15 @@ func TestSetKeepsACredentialAndRefusesToReplaceOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the credential was not stored: %v", err)
 	}
-	if status.AccountID != newAccount || !status.Live || status.Format != piauth.FormatPoo {
+	if status.AccountID != newAccount || !status.Live || status.Format != auth.FormatPoo {
 		t.Errorf("the status is %+v, want the stored credential, live, in poo's file", status)
 	}
-	if _, held := pooFile(t, path); held[piauth.ProviderCodex]["access"] != access {
+	if _, held := pooFile(t, path); held[auth.ProviderCodex]["access"] != access {
 		t.Errorf("the file holds %v, want the credential", held)
 	}
 
 	// A second write is the one a command must not make on its own.
-	if _, err := credentials.Set(context.Background(), entry, false); !errors.Is(err, piauth.ErrExists) {
+	if _, err := credentials.Set(context.Background(), entry, false); !errors.Is(err, auth.ErrExists) {
 		t.Fatalf("a second write is %v, want ErrExists", err)
 	}
 	if _, err := credentials.Set(context.Background(), entry, true); err != nil {
@@ -346,13 +346,13 @@ func TestSetKeepsACredentialAndRefusesToReplaceOne(t *testing.T) {
 func TestSetRefusesPisFile(t *testing.T) {
 	body := fmt.Sprintf(stored, expires(time.Hour))
 	path := authFile(t, body)
-	_, err := (piauth.Credentials{Path: path}).Set(context.Background(), piauth.Credential{
+	_, err := (auth.Credentials{Path: path}).Set(context.Background(), auth.Credential{
 		Access:    codexToken(t, newAccount),
 		Refresh:   newRefresh,
 		Expires:   clock().Add(time.Hour),
 		AccountID: newAccount,
 	}, true)
-	if !errors.Is(err, piauth.ErrForeignFile) {
+	if !errors.Is(err, auth.ErrForeignFile) {
 		t.Fatalf("the write is %v, want ErrForeignFile", err)
 	}
 	if got := readFile(t, path); got != body {
@@ -365,9 +365,9 @@ func TestSetRefusesPisFile(t *testing.T) {
 func TestSetKeepsTheOtherEntries(t *testing.T) {
 	path := authFile(t, fmt.Sprintf(pooStored, expires(-time.Hour)))
 	_, before := pooFile(t, path)
-	credentials := piauth.Credentials{Path: path, Now: clock}
+	credentials := auth.Credentials{Path: path, Now: clock}
 	access := codexToken(t, newAccount)
-	if _, err := credentials.Set(context.Background(), piauth.Credential{
+	if _, err := credentials.Set(context.Background(), auth.Credential{
 		Access:    access,
 		Refresh:   newRefresh,
 		Expires:   clock().Add(time.Hour),
@@ -382,8 +382,8 @@ func TestSetKeepsTheOtherEntries(t *testing.T) {
 	if !reflect.DeepEqual(before["anthropic"], after["anthropic"]) {
 		t.Errorf("the anthropic credential was rewritten:\n before %v\n after  %v", before["anthropic"], after["anthropic"])
 	}
-	if after[piauth.ProviderCodex]["access"] != access {
-		t.Errorf("the file holds %v, want the stored credential", after[piauth.ProviderCodex])
+	if after[auth.ProviderCodex]["access"] != access {
+		t.Errorf("the file holds %v, want the stored credential", after[auth.ProviderCodex])
 	}
 }
 
@@ -395,13 +395,13 @@ func TestSetCreatesTheDirectoryItWritesInto(t *testing.T) {
 	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the test's directory already exists: %v", err)
 	}
-	entry := piauth.Credential{
+	entry := auth.Credential{
 		Access:    codexToken(t, newAccount),
 		Refresh:   newRefresh,
 		Expires:   clock().Add(time.Hour),
 		AccountID: newAccount,
 	}
-	if _, err := (piauth.Credentials{Path: path, Now: clock}).Set(context.Background(), entry, false); err != nil {
+	if _, err := (auth.Credentials{Path: path, Now: clock}).Set(context.Background(), entry, false); err != nil {
 		t.Fatalf("the first write failed: %v", err)
 	}
 	info, err := os.Stat(filepath.Dir(path))
@@ -411,7 +411,7 @@ func TestSetCreatesTheDirectoryItWritesInto(t *testing.T) {
 	if info.Mode().Perm() != 0o700 {
 		t.Errorf("the directory's mode is %v, want 0700", info.Mode().Perm())
 	}
-	if _, held := pooFile(t, path); held[piauth.ProviderCodex]["access"] == "" {
+	if _, held := pooFile(t, path); held[auth.ProviderCodex]["access"] == "" {
 		t.Errorf("the file holds no credential: %v", held)
 	}
 }
@@ -422,7 +422,7 @@ func TestSetCreatesTheDirectoryItWritesInto(t *testing.T) {
 func TestSetRefusesAnEntryItCannotRead(t *testing.T) {
 	body := `{"version": 1, "credentials": {"openai-codex": {"type": "api_key", "key": "sk-written-by-hand"}}}`
 	path := authFile(t, body)
-	credentials := piauth.Credentials{Path: path, Now: clock}
+	credentials := auth.Credentials{Path: path, Now: clock}
 
 	held, err := credentials.Holds()
 	if err != nil {
@@ -431,13 +431,13 @@ func TestSetRefusesAnEntryItCannotRead(t *testing.T) {
 	if !held {
 		t.Fatal("the file holds an entry, and Holds says it does not")
 	}
-	_, err = credentials.Set(context.Background(), piauth.Credential{
+	_, err = credentials.Set(context.Background(), auth.Credential{
 		Access:    codexToken(t, newAccount),
 		Refresh:   newRefresh,
 		Expires:   clock().Add(time.Hour),
 		AccountID: newAccount,
 	}, false)
-	if !errors.Is(err, piauth.ErrExists) {
+	if !errors.Is(err, auth.ErrExists) {
 		t.Fatalf("the write is %v, want ErrExists", err)
 	}
 	if got := readFile(t, path); got != body {

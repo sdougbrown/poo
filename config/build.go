@@ -29,9 +29,9 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/prompt/agentsmd"
 	"github.com/sdougbrown/poo/protect"
+	"github.com/sdougbrown/poo/provider/auth"
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/openai"
-	"github.com/sdougbrown/poo/provider/piauth"
 	"github.com/sdougbrown/poo/session"
 	"github.com/sdougbrown/poo/skill"
 )
@@ -2235,7 +2235,7 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	// A provider added later is a case here, not a name every call site
 	// recognises.
 	switch model.Provider {
-	case piauth.ProviderCodex:
+	case auth.ProviderCodex:
 		return r.codexTransport(model)
 	}
 	switch model.API {
@@ -2317,12 +2317,12 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 	// The Codex provider serves chat turns only, so a decider built for it would
 	// ask an endpoint a question it does not answer. The settings failure names
 	// the provider, which is what the operator can act on.
-	if model.Provider == piauth.ProviderCodex {
+	if model.Provider == auth.ProviderCodex {
 		return nil, &Error{
 			Code:  CodeUnsupported,
 			Field: "roles.decider",
 			Message: fmt.Sprintf("the model %q is served by the %s provider, which does not answer decision questions",
-				model.Name, piauth.ProviderCodex),
+				model.Name, auth.ProviderCodex),
 		}
 	}
 	timeout := time.Duration(0)

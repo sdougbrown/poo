@@ -16,9 +16,9 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
+	"github.com/sdougbrown/poo/provider/auth"
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/codex"
-	"github.com/sdougbrown/poo/provider/piauth"
 )
 
 // writeCodexSettings writes a settings file and returns its path.
@@ -51,7 +51,7 @@ func writeCodexAuth(t *testing.T, dir, access, refresh string, expires int64) st
 	t.Helper()
 	body, err := json.MarshalIndent(map[string]any{
 		"other": map[string]any{"type": "api_key", "key": "keep-me"},
-		piauth.ProviderCodex: map[string]any{
+		auth.ProviderCodex: map[string]any{
 			"type":      "oauth",
 			"access":    access,
 			"refresh":   refresh,
@@ -200,7 +200,7 @@ roles:
 	}
 	// The built-in endpoint's models are declared, so discovery must leave it
 	// alone rather than ask a chat endpoint for a model list.
-	if !catalogEndpoint(t, settings, piauth.ProviderCodex).SkipProbe {
+	if !catalogEndpoint(t, settings, auth.ProviderCodex).SkipProbe {
 		t.Error("the Codex endpoint is probed, want it declared")
 	}
 
@@ -269,7 +269,7 @@ roles:
 		Access  string `json:"access"`
 		Refresh string `json:"refresh"`
 	}
-	if err := json.Unmarshal(entries[piauth.ProviderCodex], &stored); err != nil {
+	if err := json.Unmarshal(entries[auth.ProviderCodex], &stored); err != nil {
 		t.Fatalf("decoding the refreshed credential: %v", err)
 	}
 	if stored.Access != freshToken || stored.Refresh != "rt_fresh" {
@@ -411,11 +411,11 @@ roles:
 	// the check is on what the layer offers without pi's auth file: the file's own
 	// provider is there, and the built-in one is not.
 	layer := settings.CatalogOptions().File
-	if _, ok := layer.Endpoints[piauth.ProviderCodex]; ok {
+	if _, ok := layer.Endpoints[auth.ProviderCodex]; ok {
 		t.Fatal("the built-in Codex endpoint was offered without pi's auth file")
 	}
 	for name := range layer.Models {
-		if strings.HasPrefix(name, piauth.ProviderCodex+"/") {
+		if strings.HasPrefix(name, auth.ProviderCodex+"/") {
 			t.Fatalf("the built-in Codex model %s was offered without pi's auth file", name)
 		}
 	}
@@ -699,7 +699,7 @@ func writeAuthBeside(t *testing.T, dir, key, token string) string {
 	t.Helper()
 	body, err := json.MarshalIndent(map[string]any{
 		"home": map[string]any{"type": "api_key", "key": key},
-		piauth.ProviderCodex: map[string]any{
+		auth.ProviderCodex: map[string]any{
 			"type":      "oauth",
 			"access":    token,
 			"refresh":   "rt_live",
