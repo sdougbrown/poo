@@ -1574,7 +1574,15 @@ func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageRepo
 // usage the endpoint reported is written as the compaction's own, and one it
 // withheld is charged the estimate of the request and the window it
 // produced, so a compaction is never free.
+//
+// A compaction that failed still charged the run, because the endpoint billed
+// the answer whatever became of it: a window the transport refused, or a
+// request an interrupt cut off, is a request the run made. Only a request the
+// endpoint never answered costs nothing, and the transport is what says so.
 func (s *Session) accountNativeCompaction(run *runState, result NativeCompactionResult, requestChars int) {
+	if !result.Billed {
+		return
+	}
 	s.mu.Lock()
 	turn := run.turn
 	s.mu.Unlock()
@@ -1582,6 +1590,9 @@ func (s *Session) accountNativeCompaction(run *runState, result NativeCompaction
 		s.writeCompactionUsage(run, turn, result.Usage, requestChars)
 		return
 	}
+	// An answer that produced no window produced nothing to measure beside
+	// the request, and the estimate is the request's own size: what an
+	// interrupted turn is charged when the endpoint reports nothing.
 	s.mu.Lock()
 	if !run.committed && !run.sealed {
 		produced := Message{Role: RoleAssistant, Content: result.Window.Items}

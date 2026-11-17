@@ -48,6 +48,12 @@ const maxCompactionItems = 32
 // classification mean what they mean there. A failure that arrives before the
 // endpoint answered is retried. One that arrives mid-stream settles this call,
 // and the run asks for a new window at a later boundary.
+//
+// Whatever the answer turns out to hold, the request was billed the moment the
+// endpoint answered it, so a failure still reports what the endpoint said the
+// request cost. Only a failure before the answer opened reports nothing: a
+// credential, a configuration or a refused request never reached the work the
+// endpoint charges for.
 func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.NativeCompactionResult, error) {
 	body, err := t.compactionBody(in)
 	if err != nil {
@@ -70,18 +76,18 @@ func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.N
 		return poo.NativeCompactionResult{}, err
 	}
 	defer stream.Close()
+	// The endpoint answered, so the request is accounted for whatever its
+	// answer turned out to be: an interrupted stream and an answer this
+	// transport refuses both cost what the endpoint reported, and the core
+	// charges the estimate when the endpoint reported nothing.
 	if err := drainCompaction(stream); err != nil {
-		return poo.NativeCompactionResult{}, err
+		return poo.NativeCompactionResult{Billed: true, Usage: stream.reportedUsage()}, err
 	}
 	window, err := compactionWindow(stream.output)
 	if err != nil {
-		return poo.NativeCompactionResult{}, err
+		return poo.NativeCompactionResult{Billed: true, Usage: stream.reportedUsage()}, err
 	}
-	// The request is billed like any other, so the core gets the
-	// endpoint's own counts with the window. An answer that reported
-	// none is left without a report, and the core charges the estimate a
-	// side request gets.
-	return poo.NativeCompactionResult{Window: window, Usage: stream.reportedUsage()}, nil
+	return poo.NativeCompactionResult{Window: window, Usage: stream.reportedUsage(), Billed: true}, nil
 }
 
 // compactionBody turns a native compaction into the wire payload.

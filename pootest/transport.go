@@ -106,6 +106,9 @@ type Transport struct {
 	// windowUsage is the accounting the native compaction reports, when
 	// it is set.
 	windowUsage *poo.UsageReport
+	// windowBilled reports that the native compaction's failure still
+	// reached the endpoint, so the core charges it.
+	windowBilled bool
 	// compacts counts the native compactions the transport served.
 	compacts int
 	// native holds the views the native compactions were given.
@@ -169,6 +172,17 @@ func (t *Transport) SetWindowError(err error) {
 	t.windowErr = err
 }
 
+// SetWindowBilled makes a failed native compaction report that the endpoint
+// answered its request.
+//
+// A failure that never reached the endpoint leaves it unset, which is what the
+// transport does by default: the core charges such a request nothing.
+func (t *Transport) SetWindowBilled(billed bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.windowBilled = billed
+}
+
 // SetWindowUsage sets the accounting the native compaction reports.
 //
 // A transport that reports none leaves it unset, so the core charges
@@ -202,19 +216,21 @@ func (t *Transport) Compactions() int {
 // assert that the view is the one the run has, not the one the last
 // request carried. The result carries the usage the test scripted, and
 // none when it scripted none, so the core's estimate path is reachable
-// through this fake.
+// through this fake. A scripted failure reports the usage too, and whether
+// the request was billed, so the core's accounting of a failed compaction is
+// reachable as well.
 func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.NativeCompactionResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.compacts++
 	t.native = append(t.native, in)
 	if t.windowErr != nil {
-		return poo.NativeCompactionResult{}, t.windowErr
+		return poo.NativeCompactionResult{Billed: t.windowBilled, Usage: t.windowUsage}, t.windowErr
 	}
 	if len(t.window.Items) == 0 {
 		return poo.NativeCompactionResult{}, errors.New("pootest: the transport has no window")
 	}
-	return poo.NativeCompactionResult{Window: t.window, Usage: t.windowUsage}, nil
+	return poo.NativeCompactionResult{Window: t.window, Usage: t.windowUsage, Billed: true}, nil
 }
 
 // Requests returns the requests the transport received, in order.

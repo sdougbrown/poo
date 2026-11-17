@@ -178,7 +178,15 @@ func (s *Session) nativeWindow(ctx context.Context) (NativeCompactionResult, err
 			"provider's own state: use a provider that serves native compaction (openai-codex), or the summary strategy",
 			ErrInvalidCompaction, modelLabel(model))
 	}
-	return compactor.Compact(ctx, NativeCompaction{Model: model, View: view, Budget: s.budget()})
+	result, err := compactor.Compact(ctx, NativeCompaction{Model: model, View: view, Budget: s.budget()})
+	if err == nil {
+		// A window the transport handed back is the endpoint's answer, so
+		// the request was billed even if the transport does not say so.
+		// Only a failure needs the transport's own word on whether the
+		// request went out.
+		result.Billed = true
+	}
+	return result, err
 }
 
 // compactionView is the state a compaction would install.

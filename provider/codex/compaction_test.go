@@ -338,19 +338,22 @@ func TestACompactionWithoutAViewFails(t *testing.T) {
 
 // TestACompactionRequestTheEndpointRefusesFails covers the failure path: the
 // compaction is a request like any other, and the endpoint's refusal is
-// classified the way a turn's is.
+// classified the way a turn's is. A refusal is no answer to charge for.
 func TestACompactionRequestTheEndpointRefusesFails(t *testing.T) {
 	srv := newServer(t, compactionStream(compactionItem))
 	srv.failRequest(0, http.StatusInternalServerError)
 	tr := newTransport(srv.URL, func(o *codex.Options) { o.MaxAttempts = 1 })
 
-	window, err := compact(t, tr, compactView())
+	res, err := compactResult(t, tr, compactView())
 	var perr *poo.ProviderError
 	if !errors.As(err, &perr) || perr.Kind != poo.ProviderKindServer {
 		t.Fatalf("the compaction failed with %v, want a server failure", err)
 	}
-	if len(window.Items) != 0 {
-		t.Errorf("the failed compaction returned %+v, want no window", window)
+	if len(res.Window.Items) != 0 {
+		t.Errorf("the failed compaction returned %+v, want no window", res.Window)
+	}
+	if res.Billed || res.Usage != nil {
+		t.Errorf("the refused compaction reports %+v, want an unbilled request with no usage", res)
 	}
 }
 
@@ -441,5 +444,73 @@ func TestACompactionThatReportsNoUsageHasNone(t *testing.T) {
 	}
 	if len(res.Window.Items) != 1 || res.Window.Items[0].Provider == nil {
 		t.Errorf("the window holds %+v, want the response's compaction item", res.Window.Items)
+	}
+}
+
+// TestACompactionThatCannotBeInstalledStillReportsWhatItCost covers the answer
+// the transport refuses: the endpoint read the prompt and billed it before the
+// window was judged, so the failure carries the counts it reported. Dropping
+// them would let a request that spent the run's tokens cost the run nothing.
+func TestACompactionThatCannotBeInstalledStillReportsWhatItCost(t *testing.T) {
+	srv := newServer(t, compactionStreamWithUsage(
+		`{"input_tokens":60,"output_tokens":40}`,
+		summaryItem("the summary")))
+	tr := newTransport(srv.URL)
+
+	res, err := compactResult(t, tr, compactView())
+	wantCompactionFailure(t, res.Window, err)
+	if !res.Billed {
+		t.Error("the failed compaction reports an unbilled request, want it billed: the endpoint answered it")
+	}
+	if res.Usage == nil {
+		t.Fatal("the failed compaction reported no usage, want the endpoint's 60 in and 40 out")
+	}
+	if res.Usage.InputTokens != 60 || res.Usage.OutputTokens != 40 {
+		t.Errorf("the failed compaction's usage is %d in and %d out, want the endpoint's 60 and 40",
+			res.Usage.InputTokens, res.Usage.OutputTokens)
+	}
+}
+
+// TestACompactionThatEndsWithoutAnAnswerStillReportsTheRequest covers a stream
+// the endpoint answered and then cut, before it reported any token counts: the
+// request opened, so it was billed, and the core has to estimate what it cost.
+func TestACompactionThatEndsWithoutAnAnswerStillReportsTheRequest(t *testing.T) {
+	srv := newServer(t, frame(`{"type":"response.created","response":{"status":"in_progress"}}`))
+	tr := newTransport(srv.URL)
+
+	res, err := compactResult(t, tr, compactView())
+	wantCompactionFailure(t, res.Window, err)
+	if !res.Billed {
+		t.Error("the cut compaction reports an unbilled request, want it billed: the endpoint opened it")
+	}
+	if res.Usage != nil {
+		t.Errorf("the cut compaction reported the usage %+v, want none: the endpoint reported none", res.Usage)
+	}
+}
+
+// TestACompactionThatNeverReachedTheEndpointIsNotBilled covers the failures that
+// never reach the endpoint's own work: a credential that could not be resolved
+// sends no request, so there is nothing to charge for.
+func TestACompactionThatNeverReachedTheEndpointIsNotBilled(t *testing.T) {
+	srv := newServer(t, compactionStream(compactionItem))
+	tr := newTransport(srv.URL, func(o *codex.Options) {
+		o.MaxAttempts = 1
+		o.Credentials = func(context.Context) (codex.Credential, error) {
+			return codex.Credential{}, errors.New("the token store holds nothing")
+		}
+	})
+
+	res, err := compactResult(t, tr, compactView())
+	if err == nil {
+		t.Fatalf("the compaction returned %+v, want a failure", res.Window)
+	}
+	if n := srv.count(); n != 0 {
+		t.Fatalf("the endpoint received %d requests, want none", n)
+	}
+	if res.Billed {
+		t.Error("the compaction reports a billed request, want it unbilled: no request went out")
+	}
+	if res.Usage != nil {
+		t.Errorf("the compaction reported the usage %+v, want none", res.Usage)
 	}
 }
