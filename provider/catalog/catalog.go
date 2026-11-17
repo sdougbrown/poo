@@ -94,7 +94,8 @@ type Options struct {
 	// Cached says the catalog holds what the endpoints last reported, read from the
 	// discovery cache when it is built. It is how a model an endpoint served is a model a
 	// session can name without a probe: the build never reaches the network, and the cache
-	// is local.
+	// is local. The layer is read through the same rule the refresh's stale fallback uses
+	// (cache.stale), so the two readers cannot disagree about what the cache holds.
 	//
 	// A cached result is the endpoint's own report, so it sits above the curated layer and
 	// below the models file: what a server says is a fact about the server, and what the
@@ -179,10 +180,10 @@ func New(opts Options) *Catalog {
 // The cache is the one place a session learns what an endpoint serves, because a build does
 // not probe. Entries apply however old they are — an entry that went stale still describes
 // what a session may be using, and a model disappearing because the cache aged out would be
-// a failure nobody asked for; freshness is Refresh's decision, not the build's. Only the
-// endpoints the catalog still declares are read, matching the refresh path: a cache entry
-// for an endpoint the operator removed is not a model anymore. A cache that cannot be read
-// is a catalog without this layer rather than a failed build.
+// a failure nobody asked for; freshness is Refresh's decision, not the build's. The layer is
+// read through the same per-endpoint rule Refresh's stale fallback uses (cache.stale), so
+// the two readers cannot disagree; only the endpoints the catalog still declares are asked.
+// A cache that cannot be read is a catalog without this layer rather than a failed build.
 func (c *Catalog) applyCached() {
 	cache := c.cache()
 	cached, err := cache.load()
@@ -193,33 +194,7 @@ func (c *Catalog) applyCached() {
 	if cached == nil {
 		return
 	}
-	kept := *cached
-	kept.Endpoints = map[string]cacheEndpoint{}
-	for _, name := range c.endpointNames() {
-		if endpoint, ok := cached.Endpoints[name]; ok {
-			kept.Endpoints[name] = endpoint
-		}
-	}
-	c.applyDiscovery(kept.discovery())
-}
-
-// discovery turns a cached file into the layer it holds.
-func (f cacheFile) discovery() *discovery {
-	found := &discovery{
-		models:    map[string]map[string]Discovered{},
-		shapes:    map[string]string{},
-		fetched:   map[string]time.Time{},
-		fetchedAt: f.FetchedAt,
-	}
-	for name, endpoint := range f.Endpoints {
-		if len(endpoint.Models) == 0 {
-			continue
-		}
-		found.models[name] = endpoint.Models
-		found.shapes[name] = endpoint.Shape
-		found.fetched[name] = endpoint.FetchedAt
-	}
-	return found
+	c.applyDiscovery(cache.layer(cached, c.endpointNames()))
 }
 
 // addFileModels adds the models the models file declares.

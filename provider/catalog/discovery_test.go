@@ -438,3 +438,59 @@ func TestACatalogWithoutTheCacheAsksNoEndpoint(t *testing.T) {
 		t.Fatal("a catalog without the cached layer resolved a model only discovery knows")
 	}
 }
+
+// TestTheCachedLayerAndARefreshReadTheCacheTheSame pins the one-reader rule: the build's
+// cached layer and a refresh-built catalog answer the same set of models from one cache.
+// The cache holds an entry for a removed endpoint, an entry with no models, and a stale
+// entry with models; the live endpoint answers nothing, so both readers must take
+// live/qwen3 from the stale cache — the refresh's fallback is what the agreement is about.
+func TestTheCachedLayerAndARefreshReadTheCacheTheSame(t *testing.T) {
+	stateDir := t.TempDir()
+	old := time.Now().Add(-30 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	body := `{"version":1,"fetched_at":"` + old + `","endpoints":{` +
+		`"gone":{"fetched_at":"` + old + `","shape":"vllm","models":{"ghost":{"model_id":"ghost","context_limit":1}}},` +
+		`"empty":{"fetched_at":"` + old + `","models":{}},` +
+		`"live":{"fetched_at":"` + old + `","shape":"vllm","models":{"qwen3":{"model_id":"qwen3","context_limit":32768}}}}}`
+	cachePath := filepath.Join(stateDir, "poo", "discovery.json")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("making the state directory: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the discovery cache: %v", err)
+	}
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"live":  {Endpoint: "http://127.0.0.1:2/v1"},
+			"empty": {Endpoint: "http://127.0.0.1:1/v1"},
+		},
+	}
+
+	names := func(c *catalog.Catalog) map[string]bool {
+		set := map[string]bool{}
+		for _, m := range c.List() {
+			set[m.Name] = true
+		}
+		return set
+	}
+	built := names(catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true}))
+	refreshed := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir})
+	if err := refreshed.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	got := names(refreshed)
+
+	if len(built) != len(got) {
+		t.Fatalf("the build lists %v, the refresh lists %v: the two readers disagree", built, got)
+	}
+	for name := range got {
+		if !built[name] {
+			t.Errorf("the build does not list %q, the refresh does: the two readers disagree", name)
+		}
+	}
+	if built["gone/ghost"] || got["gone/ghost"] {
+		t.Error("the removed endpoint's cached model reached a catalog")
+	}
+	if !built["live/qwen3"] {
+		t.Error("the stale live/qwen3 entry did not reach either catalog")
+	}
+}
