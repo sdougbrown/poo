@@ -2319,6 +2319,96 @@ func TestANativeCompactionWithoutUsageIsChargedTheEstimate(t *testing.T) {
 	}
 }
 
+// unbilledSuccessNativeTransport is a transport whose native compaction
+// answers with a window and never sets Billed.
+//
+// That is the shape a third party writes: the replay transport returns the
+// window it read back and nothing else, because a recording says nothing
+// about what the endpoint charged. A result the transport handed back without
+// an error is the endpoint's answer whatever the flag says.
+type unbilledSuccessNativeTransport struct {
+	*pootest.Transport
+	// result is what the compaction answers.
+	result poo.NativeCompactionResult
+}
+
+// Compact answers with the window it was built with and no bill.
+func (t *unbilledSuccessNativeTransport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.NativeCompactionResult, error) {
+	return t.result, nil
+}
+
+// TestASuccessfulNativeCompactionWithoutABilledFlagIsStillCharged covers a
+// successful native compaction from a transport that reports no bill: the run
+// is charged the counts the answer reported, or the estimate a side request
+// gets when it reported none, because the endpoint read the request and
+// answered it.
+func TestASuccessfulNativeCompactionWithoutABilledFlagIsStillCharged(t *testing.T) {
+	t.Run("reported usage", func(t *testing.T) {
+		tr := &unbilledSuccessNativeTransport{
+			Transport: scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}}),
+			result: poo.NativeCompactionResult{
+				Window: nativeWindowOf(`{"encrypted_content":"abc"}`),
+				Usage:  &poo.UsageReport{InputTokens: 60, OutputTokens: 40},
+			},
+		}
+		sink := &recordingSink{}
+		opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+		opts.Compactor = nativeWindowRequest()
+		// The compaction's own tokens are the whole of what exhausts the
+		// ceiling: the two turns report no usage, and their estimates are a
+		// few tokens.
+		opts.MaxRunTokens = 100
+		res := runSession(t, newTestSession(t, opts), "do the thing")
+
+		if got := sink.count("compaction"); got != 1 {
+			t.Fatalf("the log holds %d compaction records, want 1: the window was applied", got)
+		}
+		records := compactionUsageRecords(sink)
+		if len(records) != 1 {
+			t.Fatalf("the log holds %d usage records for the native compaction, want 1", len(records))
+		}
+		if records[0].InputTokens != 60 || records[0].OutputTokens != 40 {
+			t.Errorf("the native compaction's usage is %d in and %d out, want the endpoint's 60 and 40",
+				records[0].InputTokens, records[0].OutputTokens)
+		}
+		if res.Detail.Usage == nil || res.Detail.Usage.InputTokens != 60 || res.Detail.Usage.OutputTokens != 40 {
+			t.Errorf("the settle detail's usage is %+v, want the native compaction's 60 in and 40 out", res.Detail.Usage)
+		}
+		if res.Reason != poo.ReasonBudgetExhausted {
+			t.Errorf("the run settled %q, want budget_exhausted from the native compaction's tokens", res.Reason)
+		}
+	})
+
+	t.Run("no reported usage", func(t *testing.T) {
+		tr := &unbilledSuccessNativeTransport{
+			Transport: scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}}),
+			// The window's payload is what the estimate prices: four
+			// thousand characters are about eleven hundred tokens, so the
+			// ceiling sits between the two turns' own estimates and those
+			// estimates plus the compaction's.
+			result: poo.NativeCompactionResult{
+				Window: nativeWindowOf(strings.Repeat("x", 4000)),
+			},
+		}
+		sink := &recordingSink{}
+		opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+		opts.Compactor = nativeWindowRequest()
+		opts.MaxRunTokens = 1500
+		res := runSession(t, newTestSession(t, opts), "do the thing")
+
+		if got := sink.count("compaction"); got != 1 {
+			t.Fatalf("the log holds %d compaction records, want 1: the window was applied", got)
+		}
+		if records := compactionUsageRecords(sink); len(records) != 0 {
+			t.Errorf("the log holds %d usage records for the native compaction, want none: "+
+				"the estimate is not a report", len(records))
+		}
+		if res.Reason != poo.ReasonBudgetExhausted {
+			t.Errorf("the run settled %q, want budget_exhausted from the estimated compaction", res.Reason)
+		}
+	})
+}
+
 // TestAFailedNativeCompactionInstallsNothing covers a native request the
 // endpoint did not answer: the view keeps the turn the window would have
 // replaced, no compaction record is written, and the request costs
