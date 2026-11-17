@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	clicontract "github.com/sdougbrown/cli-contract"
@@ -270,9 +272,7 @@ func waitForCallback(ctx context.Context, attempt auth.Attempt, wait time.Durati
 	}
 	listener, err := listenOn("tcp", redirect.Host)
 	if err != nil {
-		return auth.Callback{}, fmt.Errorf(
-			"the callback cannot listen on %s: %w: the port is already taken, so free it and run the sign-in again",
-			redirect.Host, err)
+		return auth.Callback{}, listenerFailure(redirect.Host, err)
 	}
 	defer listener.Close()
 	if ready != nil {
@@ -327,6 +327,21 @@ func waitForCallback(ctx context.Context, attempt auth.Attempt, wait time.Durati
 	case <-ctx.Done():
 		return auth.Callback{}, fmt.Errorf("the sign-in did not come back in time: run it again, or open the URL yourself")
 	}
+}
+
+// listenerFailure is what the wait says when it cannot bind its callback port.
+//
+// The advice to free the port is the held port's alone. A bind fails for other reasons too — a
+// host that does not resolve, an address this machine does not have — and telling the operator
+// to free a port that was never taken sends them after nothing. The wrapped error names what did
+// happen either way.
+func listenerFailure(host string, err error) error {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return fmt.Errorf(
+			"the callback cannot listen on %s: %w: the port is already taken, so free it and run the sign-in again",
+			host, err)
+	}
+	return fmt.Errorf("the callback cannot listen on %s: %w", host, err)
 }
 
 // writeCallbackPage answers the browser with what it should see.

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -586,49 +587,78 @@ func TestTheWaitGivesUpWhenTheSignInDoesNotComeBack(t *testing.T) {
 // another process holds it, so the browser has nowhere to come back to. The paste is read by a
 // goroutine the wait starts once it holds the listener, so a failed bind has no paste to offer:
 // the failure names the port, says it is taken, and the command returns.
+//
+// The advice to free the port is the held port's alone: a bind that failed for another reason — a
+// host that does not resolve, an address this machine does not have — has no port to free, so
+// the failure names what happened and nothing more.
 func TestAListenerFailureSaysHowToGetThePort(t *testing.T) {
-	isolatedConfigHome(t)
-	dir := t.TempDir()
-	settings := loginSettings(t, dir)
-	withoutATerminal(t)
+	for _, c := range []struct {
+		name string
+		// failure is what the bind answers with, in the shape net.Listen fails in.
+		failure error
+		// want are the words the failure must carry, and refuse the ones a cause it did not
+		// find would put there.
+		want   []string
+		refuse []string
+	}{
+		{
+			name:    "the port is held by another process",
+			failure: &net.OpError{Op: "listen", Net: "tcp", Err: os.NewSyscallError("bind", syscall.EADDRINUSE)},
+			want:    []string{"localhost:1455", "the port is already taken", "free it and run the sign-in again"},
+		},
+		{
+			name:    "the redirect's host does not resolve",
+			failure: &net.OpError{Op: "listen", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "localhost"}},
+			want:    []string{"localhost:1455", "no such host"},
+			refuse:  []string{"already taken", "free it"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolatedConfigHome(t)
+			dir := t.TempDir()
+			settings := loginSettings(t, dir)
+			withoutATerminal(t)
 
-	listened := listenOn
-	listenOn = func(network, address string) (net.Listener, error) {
-		return nil, fmt.Errorf("%s %s: bind: address already in use", network, address)
-	}
-	t.Cleanup(func() { listenOn = listened })
-
-	type result struct {
-		code   int
-		stderr string
-	}
-	exited := make(chan result, 1)
-	go func() {
-		code, stderr := runCLI(t, "login", "codex", "--settings", settings, "--no-browser")
-		exited <- result{code: code, stderr: stderr}
-	}()
-
-	select {
-	case got := <-exited:
-		if got.code != operationalExitCode {
-			t.Errorf("the exit code is %d, want %d", got.code, operationalExitCode)
-		}
-		for _, want := range []string{
-			"localhost:1455",
-			"the port is already taken",
-			"free it and run the sign-in again",
-		} {
-			if !strings.Contains(got.stderr, want) {
-				t.Errorf("the failure is %q, want it to name %q", got.stderr, want)
+			listened := listenOn
+			listenOn = func(string, string) (net.Listener, error) {
+				return nil, c.failure
 			}
-		}
-		// The failure must not send the operator to a paste: the goroutine that reads one
-		// starts only after the listener is held.
-		if strings.Contains(got.stderr, "paste") {
-			t.Errorf("the failure offers a paste this run does not read: %q", got.stderr)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("the sign-in did not return after the listener failed")
+			t.Cleanup(func() { listenOn = listened })
+
+			type result struct {
+				code   int
+				stderr string
+			}
+			exited := make(chan result, 1)
+			go func() {
+				code, stderr := runCLI(t, "login", "codex", "--settings", settings, "--no-browser")
+				exited <- result{code: code, stderr: stderr}
+			}()
+
+			select {
+			case got := <-exited:
+				if got.code != operationalExitCode {
+					t.Errorf("the exit code is %d, want %d", got.code, operationalExitCode)
+				}
+				for _, want := range c.want {
+					if !strings.Contains(got.stderr, want) {
+						t.Errorf("the failure is %q, want it to name %q", got.stderr, want)
+					}
+				}
+				for _, refuse := range c.refuse {
+					if strings.Contains(got.stderr, refuse) {
+						t.Errorf("the failure is %q, want it not to claim %q", got.stderr, refuse)
+					}
+				}
+				// The failure must not send the operator to a paste: the goroutine that reads one
+				// starts only after the listener is held.
+				if strings.Contains(got.stderr, "paste") {
+					t.Errorf("the failure offers a paste this run does not read: %q", got.stderr)
+				}
+			case <-time.After(30 * time.Second):
+				t.Fatal("the sign-in did not return after the listener failed")
+			}
+		})
 	}
 }
 

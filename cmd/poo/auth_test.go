@@ -242,6 +242,36 @@ func TestTheAuthStatusReportsACorruptEntryInsteadOfAKeyBesideIt(t *testing.T) {
 	}
 }
 
+// TestTheAuthStatusReportsACorruptKeyInsteadOfASignIn covers a file whose only entry is the key:
+// the Codex read finds no entry, and the key read finds one that carries no key. The key is the
+// credential the file holds, so the failure the operator can act on is the key's; naming the
+// Codex entry would send them to a sign-in that is not the problem.
+func TestTheAuthStatusReportsACorruptKeyInsteadOfASignIn(t *testing.T) {
+	dir := t.TempDir()
+	credential := filepath.Join(dir, "auth.json")
+	body := `{
+  "version": 1,
+  "credentials": {
+    "ollama-cloud": {"type": "api_key"}
+  }
+}`
+	if err := os.WriteFile(credential, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := authSettings(t, dir, credential)
+
+	code, stderr := runCLI(t, "auth", "status", "--settings", settings)
+	if code == 0 {
+		t.Error("poo auth status exited 0 for a key entry that carries no key")
+	}
+	if !strings.Contains(stderr, "an api key credential needs a key") {
+		t.Errorf("the failure is %q, want it to say the key entry carries no key", stderr)
+	}
+	if strings.Contains(stderr, "holds no openai-codex entry") {
+		t.Errorf("the failure names a Codex entry the report was not asked about: %q", stderr)
+	}
+}
+
 // TestTheAuthStatusOfAMissingCredentialIsAFailure covers the report with nothing
 // to report on: a command that names no credential is a failure, so a script
 // can tell.
