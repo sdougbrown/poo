@@ -24,6 +24,16 @@ func freePort() (int, error) {
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
+// isolatedConfigHome points the default credential paths at directories of the test's, so a
+// command cannot read or write the operator's own.
+func isolatedConfigHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	t.Setenv("APPDATA", filepath.Join(home, "appdata"))
+}
+
 // withStdin points os.Stdin at a pipe holding content, for the rest of the test.
 func withStdin(t *testing.T, content string) {
 	t.Helper()

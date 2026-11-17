@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/provider/auth"
 )
@@ -202,6 +203,107 @@ func TestABrowserSignInTakesTheBrowsersFlags(t *testing.T) {
 	if err := o.refuseBrowserFlags(auth.CodexLogin); err != nil {
 		t.Errorf("the browser sign-in refused its own flags: %v", err)
 	}
+}
+
+// TestTheStoredKeyReachesTheModel covers the whole of the key sign-in: the key `poo login`
+// stores for Ollama Cloud is the key a request to the model its endpoint serves carries.
+func TestTheStoredKeyReachesTheModel(t *testing.T) {
+	isolatedConfigHome(t)
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+	withoutATerminal(t)
+	withStdin(t, "the-stored-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--force", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+	stored, err := os.ReadFile(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatalf("reading poo's credential file: %v", err)
+	}
+	if !strings.Contains(string(stored), "key: the-stored-key") {
+		t.Fatalf("poo's file is\n%s\nwant it to hold the key the sign-in was given", stored)
+	}
+
+	runtime := loginRuntime(t, settings)
+	if key := runtime.EndpointKey(ollamaModel(t, runtime)); key != "the-stored-key" {
+		t.Errorf("the model resolves to the key %q, want the key the sign-in stored", key)
+	}
+
+	// The environment is the most explicit answer there is: a key set there is not silently
+	// overridden by the stored copy.
+	t.Setenv("OLLAMA_API_KEY", "the-env-key")
+	if key := runtime.EndpointKey(ollamaModel(t, runtime)); key != "the-env-key" {
+		t.Errorf("the model resolves to the key %q, want the environment's", key)
+	}
+}
+
+// TestTheStoredKeyOutranksTheSettingsLiteral covers the ladder's last two rungs: a literal the
+// settings carry answers while no credential is stored, and the credential the operator signs in
+// with outranks it once one is.
+func TestTheStoredKeyOutranksTheSettingsLiteral(t *testing.T) {
+	isolatedConfigHome(t)
+	dir := t.TempDir()
+	settings := filepath.Join(dir, "settings.yaml")
+	body := `version: 1
+auth_file: ` + filepath.Join(dir, "auth.json") + `
+endpoints:
+  ollama:
+    endpoint: https://ollama.com/v1
+    api_key_env: OLLAMA_API_KEY
+    api_key: the-literal
+session:
+  mode: ephemeral
+`
+	if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	runtime := loginRuntime(t, settings)
+	if key := runtime.EndpointKey(ollamaModel(t, runtime)); key != "the-literal" {
+		t.Fatalf("the model resolves to the key %q before a sign-in, want the settings' literal", key)
+	}
+
+	withoutATerminal(t)
+	withStdin(t, "the-stored-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--force", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+	if key := runtime.EndpointKey(ollamaModel(t, runtime)); key != "the-stored-key" {
+		t.Errorf("the model resolves to the key %q, want the key the sign-in stored", key)
+	}
+}
+
+// loginRuntime builds the runtime a command builds from the settings file, so a test can ask
+// what the credential poo stores resolves to.
+func loginRuntime(t *testing.T, settingsPath string) *config.Runtime {
+	t.Helper()
+	settings, err := config.Load(settingsPath)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		NoChatModel:    true,
+		DefaultProfile: defaultProfile,
+		Tools:          linkedTools(),
+		Profiles:       linkedProfiles(),
+		Executors:      executorRegistry(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	return runtime
+}
+
+// ollamaModel is the curated model the Ollama Cloud endpoint serves.
+func ollamaModel(t *testing.T, runtime *config.Runtime) poo.ModelInfo {
+	t.Helper()
+	model, err := runtime.Catalog.Resolve("minimax-m3.1-flash")
+	if err != nil {
+		t.Fatalf("resolving the Ollama model: %v", err)
+	}
+	return model
 }
 
 // TestAKeyLoginDoesNotReplaceAnExistingCredential covers the replace rule at the command that

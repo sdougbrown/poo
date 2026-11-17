@@ -24,7 +24,7 @@ import (
 // ollamaCloud is the second way in: a key, with no browser and no redirect.
 var ollamaCloud = auth.Flow{
 	Name:     "Ollama Cloud",
-	Provider: auth.Provider{ID: "ollama-cloud", Kind: auth.KindAPIKey},
+	Provider: auth.OllamaCloud,
 	Method:   auth.MethodKey,
 }
 

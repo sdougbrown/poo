@@ -158,6 +158,57 @@ func TestTheAuthStatusNamesTheClientTheFileRecords(t *testing.T) {
 	}
 }
 
+// TestTheAuthStatusReportsAStoredKey covers the credential that has no tokens: the key poo's
+// file holds for Ollama Cloud is reported as it is — live, with no expiry, and without the key.
+func TestTheAuthStatusReportsAStoredKey(t *testing.T) {
+	isolatedConfigHome(t)
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+	withoutATerminal(t)
+	withStdin(t, "the-stored-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--force", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"auth", "status", "--settings", settings}); code != 0 {
+			t.Errorf("poo auth status exited with %d", code)
+		}
+	})
+	for _, want := range []string{
+		"FILE", filepath.Join(dir, "auth.json"),
+		"PROVIDER", "ollama-cloud",
+		"STATE", "live",
+		"does not expire",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report is %q, want it to name %q", out, want)
+		}
+	}
+	if strings.Contains(out, "expired") {
+		t.Errorf("the report gives a key an expiry: %q", out)
+	}
+	if strings.Contains(out, "the-stored-key") {
+		t.Errorf("the report carries the key: %q", out)
+	}
+
+	out = captureStdout(t, func() {
+		if code := run([]string{"auth", "status", "--settings", settings, "--json"}); code != 0 {
+			t.Errorf("poo auth status --json exited with %d", code)
+		}
+	})
+	var report authStatus
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the report is not JSON: %v\n%s", err, out)
+	}
+	if report.Provider != "ollama-cloud" || report.State != "live" {
+		t.Errorf("the report is %+v, want the Ollama Cloud key, live", report)
+	}
+	if report.Expires != "" {
+		t.Errorf("the report gives a key the expiry %q, want none", report.Expires)
+	}
+}
+
 // TestTheAuthStatusOfAMissingCredentialIsAFailure covers the report with nothing
 // to report on: a command that names no credential is a failure, so a script
 // can tell.

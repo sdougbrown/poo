@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -47,9 +48,12 @@ type authStatus struct {
 // handleAuthStatus executes `poo auth status`.
 //
 // The command reports the credential the settings' file holds: the file, the
-// shape it is written with, the provider, the account and whether the token is
-// live. It prints no token, and it trades none: a report leaves the credential
-// exactly as it found it.
+// shape it is written with, the provider, the account and whether the credential
+// is live. It prints no secret, and it trades none: a report leaves the
+// credential exactly as it found it.
+//
+// The credential is the one the file holds, whichever sign-in stored it: Codex's
+// token pair, or a provider's key.
 func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o authOptions
 	o.bind(inv)
@@ -64,6 +68,14 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		return exit{usageExitCode}
 	}
 	status, err := auth.Credentials{Path: path}.Status(auth.Codex)
+	if errors.Is(err, auth.ErrNoCredential) {
+		// The file's entry may be a provider's key instead of Codex's token pair, which has no
+		// tokens and no account. A failure there is not reported: the first read already said
+		// what the file holds.
+		if key, keyErr := (auth.Credentials{Path: path}).Status(auth.OllamaCloud); keyErr == nil {
+			status, err = key, nil
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "poo auth status: %v\n", err)
 		return exit{operationalExitCode}
@@ -74,8 +86,12 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		Provider:  status.Provider,
 		ClientID:  status.ClientID,
 		AccountID: status.AccountID,
-		Expires:   status.Expires.UTC().Format(time.RFC3339),
 		State:     credentialState(status),
+	}
+	// A credential with no expiry has no time to report: a key is sent as it is, and a time
+	// rendered for it would be a time nothing enforces.
+	if !status.Expires.IsZero() {
+		report.Expires = status.Expires.UTC().Format(time.RFC3339)
 	}
 	if o.json {
 		encoded, err := json.MarshalIndent(report, "", "  ")
@@ -98,15 +114,21 @@ func printAuthStatus(report authStatus, status auth.Status, stdout io.Writer) {
 	fmt.Fprintf(w, "PROVIDER\t%s\n", report.Provider)
 	fmt.Fprintf(w, "CLIENT\t%s\n", report.ClientID)
 	fmt.Fprintf(w, "ACCOUNT\t%s\n", report.AccountID)
-	fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", report.Expires, life(status.Expires))
+	if status.Expires.IsZero() {
+		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", "none", "it does not expire")
+	} else {
+		fmt.Fprintf(w, "EXPIRES\t%s (%s)\n", report.Expires, life(status.Expires))
+	}
 	fmt.Fprintf(w, "STATE\t%s\n", report.State)
 	_ = w.Flush()
 }
 
-// credentialState is the word a report gives a credential's state: a token poo
+// credentialState is the word a report gives a credential's state: a credential poo
 // would use as it is, or one it trades before using it.
 func credentialState(status auth.Status) string {
-	if status.Live {
+	// A key is sent as it is: nothing trades it, so there is nothing to refresh and nothing
+	// that can be stale.
+	if status.Kind == auth.KindAPIKey || status.Live {
 		return "live"
 	}
 	return "refresh needed"
