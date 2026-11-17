@@ -1,13 +1,14 @@
 // Package catalog resolves the models the harness can use.
 //
-// The catalog has three layers, and the later ones win, field by field.
+// The catalog has four layers, and the later ones win, field by field.
 //
 //  1. The curated layer is embedded in the binary: the family rules in
 //     families.go describe the local models, and the hosted entries in
 //     modelsdev_gen.go are generated from the models.dev data.
 //  2. The discovery layer holds what the endpoints report about the
 //     models they serve.
-//  3. The settings layer is the user's own configuration.
+//  3. The models file layer is what the operator's models file declares.
+//  4. The settings layer is the user's own configuration.
 //
 // Every model in the catalog is a poo.ModelInfo whose Source map names
 // the layer that set each field, so `poo models --explain` can say
@@ -57,6 +58,8 @@ const (
 	LayerCurated = "curated"
 	// LayerDiscovery is what the endpoints reported.
 	LayerDiscovery = "discovery"
+	// LayerModelsFile is what the operator's models file declares.
+	LayerModelsFile = "models_file"
 	// LayerSettings is the user's own configuration.
 	LayerSettings = "settings"
 	// LayerDefault is a value no layer set and the catalog filled in.
@@ -65,10 +68,12 @@ const (
 
 // Options configure a catalog.
 type Options struct {
-	// Settings are the user's settings. The catalog reads the
-	// endpoints, the models, the roles and the sampling overrides from
-	// them.
+	// Settings are the user's settings. The catalog reads the endpoints, the
+	// models and the roles from them, and each model's sampling with it.
 	Settings Settings
+	// File is the models file the settings name or the one beside them.
+	// Its endpoints and models are the layer the settings win over.
+	File FileSettings
 	// Logger receives the catalog's warnings. A nil logger drops them.
 	Logger *slog.Logger
 	// StateDir is the state root the poo directory lives under. The
@@ -114,9 +119,10 @@ type entry struct {
 	modelID string
 	// notes are the curated notes about the model's family.
 	notes []string
-	// curated, discovery and settings hold the fields each layer set.
+	// curated, discovery, file and settings hold the fields each layer set.
 	curated   poo.ModelInfo
 	discovery poo.ModelInfo
+	file      poo.ModelInfo
 	settings  poo.ModelInfo
 }
 
@@ -137,13 +143,55 @@ func New(opts Options) *Catalog {
 	for name, endpoint := range c.curated.endpoints {
 		c.endpoints[name] = endpoint
 	}
+	for name, endpoint := range opts.File.Endpoints {
+		c.endpoints[name] = endpoint.endpoint(name)
+	}
 	for name, endpoint := range opts.Settings.Endpoints {
 		c.endpoints[name] = endpoint.endpoint(name)
 	}
+	c.addFileModels()
 	c.addSettingsModels()
 	c.addCuratedModels()
 	c.addRoles()
 	return c
+}
+
+// addFileModels adds the models the models file declares.
+//
+// A model the settings name too is one entry with both layers: the file's
+// fields are what the settings overrule, one field at a time.
+func (c *Catalog) addFileModels() {
+	names := make([]string, 0, len(c.opts.File.Models))
+	for name := range c.opts.File.Models {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		model := c.opts.File.Models[name]
+		if model.ModelID == "" {
+			c.warn("the models file does not name the model the endpoint calls it",
+				slog.String("model", name))
+			continue
+		}
+		endpoint, ok := c.endpoints[model.Endpoint]
+		if !ok {
+			c.warn("the models file names an endpoint it does not declare",
+				slog.String("model", name),
+				slog.String("endpoint", model.Endpoint))
+			continue
+		}
+		e := &entry{
+			name:     name,
+			endpoint: model.Endpoint,
+			modelID:  model.ModelID,
+		}
+		e.file = model.layer(name, endpoint.Endpoint)
+		curated, _, notes := c.curated.forModel(model.ModelID)
+		e.curated = curated
+		e.notes = notes
+		c.entries[name] = e
+		c.modelIndex[modelRef{endpoint: model.Endpoint, modelID: model.ModelID}] = e
+	}
 }
 
 // Build resolves the catalog and checks the roles.
@@ -184,16 +232,25 @@ func (c *Catalog) addSettingsModels() {
 				slog.String("endpoint", model.Endpoint))
 			continue
 		}
-		e := &entry{
-			name:     name,
-			endpoint: model.Endpoint,
-			modelID:  model.ModelID,
+		// A model the models file declared is one entry with both layers, so
+		// the settings' fields are merged over the file's rather than added
+		// beside them.
+		e, ok := c.entries[name]
+		if !ok {
+			e = &entry{name: name}
+			c.entries[name] = e
+		} else if e.endpoint != model.Endpoint || e.modelID != model.ModelID {
+			// The settings serve the model the file named from somewhere else,
+			// or under another id: the entry moves with them, so the discovery
+			// layer still finds it under the id it reports.
+			delete(c.modelIndex, modelRef{endpoint: e.endpoint, modelID: e.modelID})
 		}
-		e.settings = model.layer(name, endpoint.Endpoint, c.opts.Settings.Sampling[name])
+		e.endpoint = model.Endpoint
+		e.modelID = model.ModelID
+		e.settings = model.layer(name, endpoint.Endpoint)
 		curated, _, notes := c.curated.forModel(model.ModelID)
 		e.curated = curated
 		e.notes = notes
-		c.entries[name] = e
 		c.modelIndex[modelRef{endpoint: model.Endpoint, modelID: model.ModelID}] = e
 	}
 }
@@ -455,6 +512,7 @@ func (c *Catalog) merge(e *entry) (poo.ModelInfo, map[string]string) {
 	source := map[string]string{}
 	applyLayer(&out, source, LayerCurated, e.curated)
 	applyLayer(&out, source, LayerDiscovery, e.discovery)
+	applyLayer(&out, source, LayerModelsFile, e.file)
 	applyLayer(&out, source, LayerSettings, e.settings)
 	if out.API == "" {
 		out.API = poo.APIChatCompletions

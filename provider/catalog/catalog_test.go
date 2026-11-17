@@ -121,7 +121,9 @@ func TestTheSettingsLayerWinsFieldByField(t *testing.T) {
 func TestTheSamplingOverrideReachesTheModel(t *testing.T) {
 	settings := localSettings()
 	temperature := 0.2
-	settings.Sampling = map[string]poo.Sampling{"gemma4": {Temperature: &temperature}}
+	model := settings.Models["gemma4"]
+	model.Sampling = poo.Sampling{Temperature: &temperature}
+	settings.Models["gemma4"] = model
 	c := catalog.New(catalog.Options{Settings: settings})
 	info, err := c.Resolve("gemma4")
 	if err != nil {
@@ -648,5 +650,126 @@ func TestAFamilyModelKeepsItsOps(t *testing.T) {
 	}
 	if !info.HasOp(poo.OpChat) || !info.HasOp(poo.OpSystemOne) {
 		t.Errorf("the model serves %v, want the family's chat and systemone", info.Ops)
+	}
+}
+
+// fileSettings returns the layer a models file declares for a model the
+// settings do not name.
+func fileSettings() catalog.FileSettings {
+	return catalog.FileSettings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"grace": {Endpoint: "http://grace:4000/v1", APIKeyEnv: "GRACE_KEY"},
+		},
+		Models: map[string]catalog.ModelSettings{
+			"grace/qwen": {
+				Endpoint:     "grace",
+				ModelID:      "qwen",
+				ContextLimit: 32768,
+				MaxOutput:    4096,
+			},
+		},
+	}
+}
+
+// TestAModelTheFileDeclaresResolves covers the layer's job: a model the models
+// file declares is a model a role can name, with no settings entry at all.
+func TestAModelTheFileDeclaresResolves(t *testing.T) {
+	c := catalog.New(catalog.Options{File: fileSettings()})
+	info, err := c.Resolve("grace/qwen")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if info.ContextLimit != 32768 || info.MaxOutput != 4096 {
+		t.Errorf("the model is %+v, want the file's limits", info)
+	}
+	if info.Endpoint != "http://grace:4000/v1" {
+		t.Errorf("the endpoint is %q, want the file's base URL", info.Endpoint)
+	}
+	if info.Provider != "grace" {
+		t.Errorf("the provider is %q, want the endpoint the file declares", info.Provider)
+	}
+	for _, field := range []string{"context_limit", "max_output", "endpoint", "model_id"} {
+		if info.Source[field] != catalog.LayerModelsFile {
+			t.Errorf("%s comes from %q, want %q", field, info.Source[field], catalog.LayerModelsFile)
+		}
+	}
+}
+
+// TestTheSettingsOverruleTheFileFieldByField covers the composition: one model
+// with two layers, and each field from the last layer that set it.
+func TestTheSettingsOverruleTheFileFieldByField(t *testing.T) {
+	settings := catalog.Settings{
+		Models: map[string]catalog.ModelSettings{
+			"grace/qwen": {Endpoint: "grace", ModelID: "qwen", ContextLimit: 65536},
+		},
+	}
+	c := catalog.New(catalog.Options{Settings: settings, File: fileSettings()})
+	info, err := c.Resolve("grace/qwen")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if info.ContextLimit != 65536 {
+		t.Errorf("the context limit is %d, want the settings' 65536", info.ContextLimit)
+	}
+	if info.Source["context_limit"] != catalog.LayerSettings {
+		t.Errorf("the context limit comes from %q, want settings", info.Source["context_limit"])
+	}
+	if info.MaxOutput != 4096 {
+		t.Errorf("the max output is %d, want the file's 4096 kept", info.MaxOutput)
+	}
+	if info.Source["max_output"] != catalog.LayerModelsFile {
+		t.Errorf("the max output comes from %q, want models_file", info.Source["max_output"])
+	}
+
+	// The model is one entry, not two: a name collision must not list the model
+	// twice.
+	count := 0
+	for _, model := range c.List() {
+		if model.Name == "grace/qwen" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("the catalog lists the model %d times, want once", count)
+	}
+}
+
+func TestTheFileOverrulesWhatTheEndpointReports(t *testing.T) {
+	probes := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		probes++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]any{{"id": "qwen", "max_model_len": 131072}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	c := catalog.New(catalog.Options{
+		File: catalog.FileSettings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"local": {Endpoint: server.URL + "/v1"},
+			},
+			Models: map[string]catalog.ModelSettings{
+				"local/qwen": {Endpoint: "local", ModelID: "qwen", ContextLimit: 32768},
+			},
+		},
+		StateDir: t.TempDir(),
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if probes == 0 {
+		t.Fatal("the endpoint was never probed, so the file overruling it proves nothing")
+	}
+	info, err := c.Resolve("local/qwen")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	// The probe reported 131072, and the file's 32768 is what the catalog holds.
+	if info.ContextLimit != 32768 || info.Source["context_limit"] != catalog.LayerModelsFile {
+		t.Errorf("the context limit is %d from %q, want the file's 32768", info.ContextLimit, info.Source["context_limit"])
 	}
 }

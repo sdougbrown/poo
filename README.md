@@ -61,24 +61,48 @@ information: the module version for one installed with
 a build from a checkout. `poo version --json` prints the fields a
 script pins it by.
 
-**A models file.** `models_file` names a models file: providers with
-`baseUrl`, `api` and `apiKey`, each with its models. It imports them
-under names of the form `provider/id`. The file's shape is the one pi
-writes, and that shape is the whole compatibility. poo reads the file
-the settings name, the credential file beside it, and never a pi
-installation's own directory.
+**A models file.** `models_file` names a models file: what can be run, and how
+to reach it. It declares endpoints, each with the models it serves, and poo
+reads it as a catalog layer below the settings: a field the file sets is
+overridden by the settings one field at a time, and `poo models --explain` names
+the file's layer `models_file`.
 
-A relative path resolves against the settings file's own directory.
-With no `models_file` named, a `models.json` beside the settings file
-is imported, so `~/.config/poo/settings.yaml` and
-`~/.config/poo/models.json` set up providers without the settings
-naming the file. The settings' own entries win on a name collision.
+```yaml
+endpoints:
+  home:
+    endpoint: http://localhost:4000/v1
+    api_key_env: HOME_KEY
+    models:
+      qwen3:
+        context_limit: 32768
+        max_output: 4096
+        inputs: [text, image]
+        tools_mode: auto
+        sampling:
+          temperature: 0.7
+```
 
-A provider whose models file carries no `apiKey` takes the key from an
-`auth.json` beside that file, in the same shape pi keeps its
-credentials. A discovered `models.json` that does not read fails the
-load, as a settings file that does not decode does. A file the
-operator put there is never skipped in silence.
+The file is YAML, and JSON is read as an alternative spelling of it. Its
+vocabulary is the settings' own: `endpoint`, `api`, `api_key_env`,
+`skip_probe` and `models` on an endpoint, and `model_id`, `inputs`,
+`context_limit`, `max_output`, `reasoning`, `reasoning_levels`, `tools_mode`,
+`quirks` and `sampling` on a model. A model's name is `endpoint/id`, so
+`roles.chat: home/qwen3` runs a model the settings never mention. A key this
+file does not have is a failure that names it.
+
+A literal `api_key` is refused: a models file is the one an operator shares or
+checks in. Name `api_key_env` for the environment variable that holds the key,
+or the credential in the auth file.
+
+A relative path resolves against the settings file's own directory. With no
+`models_file` named, a `models.yaml` beside the settings file is read, so
+`~/.config/poo/settings.yaml` and `~/.config/poo/models.yaml` set up providers
+without the settings naming the file. A `models.json` beside the settings is
+read as well: it is the file pi writes, its providers are imported, and a
+provider whose entry carries no `apiKey` takes the key from the credential file
+the settings resolved. A settings directory holding one of each is refused
+rather than half read, and a models file that does not read fails the load. A
+file the operator put there is never skipped in silence.
 
 `models_file`, `auth_file` and `pi_auth_file` resolve relative paths
 against the settings file's directory. `cli_registry.paths` and

@@ -244,22 +244,31 @@ func decodeError(err error) error {
 // same JSON: the keys are sorted, and a number is a number whatever
 // format it came in.
 func Normalize(data []byte, format Format) ([]byte, error) {
+	return normalize(data, format, "the settings")
+}
+
+// normalize converts a document of any of the formats to JSON.
+//
+// what names the document in a failure, because the same pipeline reads more than
+// the settings: a models file is YAML too, and a message about the settings would be
+// a message about a file the operator did not write.
+func normalize(data []byte, format Format, what string) ([]byte, error) {
 	var value any
 	switch format {
 	case FormatTOML:
 		if err := toml.Unmarshal(data, &value); err != nil {
-			return nil, &Error{Code: CodeDecode, Message: "the settings are not TOML", Err: err}
+			return nil, &Error{Code: CodeDecode, Message: what + " are not TOML", Err: err}
 		}
 	case FormatYAML:
 		if err := yaml.Unmarshal(data, &value); err != nil {
-			return nil, &Error{Code: CodeDecode, Message: "the settings are not YAML", Err: err}
+			return nil, &Error{Code: CodeDecode, Message: what + " are not YAML", Err: err}
 		}
 	case FormatJSON:
 		if err := json.Unmarshal(data, &value); err != nil {
-			return nil, &Error{Code: CodeDecode, Message: "the settings are not JSON", Err: err}
+			return nil, &Error{Code: CodeDecode, Message: what + " are not JSON", Err: err}
 		}
 	default:
-		return nil, &Error{Code: CodeDecode, Message: fmt.Sprintf("the settings format %q is not known", format)}
+		return nil, &Error{Code: CodeDecode, Message: fmt.Sprintf("%s format %q is not known", what, format)}
 	}
 	canonical, err := canonicalValue(value)
 	if err != nil {
@@ -267,7 +276,7 @@ func Normalize(data []byte, format Format) ([]byte, error) {
 	}
 	out, err := json.Marshal(canonical)
 	if err != nil {
-		return nil, &Error{Code: CodeDecode, Message: "the settings do not normalize to JSON", Err: err}
+		return nil, &Error{Code: CodeDecode, Message: what + " do not normalize to JSON", Err: err}
 	}
 	return out, nil
 }

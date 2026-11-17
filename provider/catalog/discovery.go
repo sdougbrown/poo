@@ -175,11 +175,14 @@ func (c *Catalog) applyDiscovery(found *discovery) {
 // provider's models are. An endpoint the settings mark unprobed is not
 // asked either. Its models are declared, and a probe would send a request
 // the endpoint has no list to answer.
+// The endpoints a probe asks are the ones the operator declared: the models
+// file's, and the settings'. The curated layer's hosted providers are not
+// asked, because the operator named no credential for them.
 func (c *Catalog) endpointNames() []string {
 	var names []string
-	for name := range c.opts.Settings.Endpoints {
+	for name := range c.declared() {
 		// The flag is read from the endpoint the catalog built, which is
-		// where the settings and a built-in provider's own declaration meet.
+		// where the settings and the models file meet.
 		if c.endpoints[name].SkipProbe {
 			continue
 		}
@@ -189,20 +192,34 @@ func (c *Catalog) endpointNames() []string {
 	return names
 }
 
-// modelsForEndpoint returns the ids of the models the settings name for
-// an endpoint.
+// declared returns the endpoints the operator declared, by name.
+func (c *Catalog) declared() map[string]bool {
+	names := make(map[string]bool, len(c.opts.Settings.Endpoints)+len(c.opts.File.Endpoints))
+	for name := range c.opts.Settings.Endpoints {
+		names[name] = true
+	}
+	for name := range c.opts.File.Endpoints {
+		names[name] = true
+	}
+	return names
+}
+
+// modelsForEndpoint returns the ids of the models the operator named for an
+// endpoint, in the settings or in the models file.
 func (c *Catalog) modelsForEndpoint(endpoint string) []string {
 	var ids []string
 	seen := map[string]bool{}
-	for _, model := range c.opts.Settings.Models {
-		if model.Endpoint != endpoint || model.ModelID == "" {
-			continue
+	for _, declared := range []map[string]ModelSettings{c.opts.Settings.Models, c.opts.File.Models} {
+		for _, model := range declared {
+			if model.Endpoint != endpoint || model.ModelID == "" {
+				continue
+			}
+			if seen[model.ModelID] {
+				continue
+			}
+			seen[model.ModelID] = true
+			ids = append(ids, model.ModelID)
 		}
-		if seen[model.ModelID] {
-			continue
-		}
-		seen[model.ModelID] = true
-		ids = append(ids, model.ModelID)
 	}
 	sort.Strings(ids)
 	return ids

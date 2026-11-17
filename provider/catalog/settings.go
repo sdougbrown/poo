@@ -17,8 +17,19 @@ type Settings struct {
 	Roles map[string]string
 	// Reasoning is the reasoning.chat setting.
 	Reasoning string
-	// Sampling holds the per-model sampling overrides, by model name.
-	Sampling map[string]poo.Sampling
+}
+
+// FileSettings are the endpoints and models a models file declares.
+//
+// They are the settings' own words, so a field the file sets is overridden
+// field by field by the settings, and a field only one of them sets keeps the
+// value that one gave it.
+type FileSettings struct {
+	// Endpoints are the endpoints the file declares, by name.
+	Endpoints map[string]EndpointSettings
+	// Models are the models the file declares, by the name the catalog holds
+	// them under.
+	Models map[string]ModelSettings
 }
 
 // EndpointSettings is one endpoint in the settings.
@@ -74,14 +85,15 @@ type ModelSettings struct {
 	PromptVariant string
 	// Quirks are the named quirk profiles the transport applies.
 	Quirks []string
+	// Sampling are the model's own sampling defaults. A model that names none
+	// takes whatever the request asks for.
+	Sampling poo.Sampling
 }
 
-// layer turns the settings' model into the fields of the settings
-// layer.
+// layer turns a model into the fields of one layer.
 //
-// A field the settings leave empty is left out, so the curated and the
-// discovery layers keep it.
-func (m ModelSettings) layer(name, endpointURL string, sampling poo.Sampling) poo.ModelInfo {
+// A field the model leaves empty is left out, so the earlier layers keep it.
+func (m ModelSettings) layer(name, endpointURL string) poo.ModelInfo {
 	info := poo.ModelInfo{
 		Name:            name,
 		Endpoint:        endpointURL,
@@ -96,7 +108,7 @@ func (m ModelSettings) layer(name, endpointURL string, sampling poo.Sampling) po
 		PromptCache:     m.PromptCache,
 		PromptVariant:   m.PromptVariant,
 		Quirks:          m.Quirks,
-		Sampling:        sampling,
+		Sampling:        m.Sampling,
 		ReasoningLevels: m.ReasoningLevels,
 	}
 	if m.ToolsMode != "" {
