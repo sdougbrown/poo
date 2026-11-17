@@ -434,6 +434,28 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 		}
 	})
 
+	t.Run("auth import pi", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"auth", "import", "pi",
+			"--force",
+			"--from", "pi-auth.json",
+			"--settings", "s.yaml",
+		})
+		if err != nil {
+			t.Fatalf("parsing the import's flags: %v", err)
+		}
+		var o authImportOptions
+		o.bind(inv)
+		want := authImportOptions{
+			sharedFlags: sharedFlags{settingsFile: "s.yaml"},
+			force:       true,
+			from:        "pi-auth.json",
+		}
+		if !reflect.DeepEqual(o, want) {
+			t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
+		}
+	})
+
 	t.Run("auth status", func(t *testing.T) {
 		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
 			"auth", "status",
@@ -511,6 +533,7 @@ func TestEveryCommandWithItsOwnFlagsHasABindingTest(t *testing.T) {
 		"prompt":         "TestEveryOtherCommandBindsItsFlags/prompt",
 		"models":         "TestEveryOtherCommandBindsItsFlags/models",
 		"auth status":    "TestEveryOtherCommandBindsItsFlags/auth_status",
+		"auth import pi": "TestEveryOtherCommandBindsItsFlags/auth_import_pi",
 		"sessions list":  "TestEveryOtherCommandBindsItsFlags/sessions_list",
 		"sessions prune": "TestEveryOtherCommandBindsItsFlags/sessions_prune",
 		"version":        "TestTheVersionCommandAnswersInBothForms",

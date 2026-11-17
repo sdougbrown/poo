@@ -10,6 +10,10 @@
 package repl
 
 import (
+	"golang.org/x/term"
+
+	termpkg "github.com/sdougbrown/poo/internal/term"
+
 	"bufio"
 	"encoding/json"
 	"errors"
@@ -28,7 +32,6 @@ import (
 	"github.com/reeflective/readline"
 
 	"github.com/sdougbrown/poo/wire/protocol"
-	"golang.org/x/term"
 )
 
 // promptMark is the mark the repl reads its lines behind.
@@ -192,12 +195,11 @@ type input interface {
 }
 
 // termIsTerminal reports whether the file behind f is a terminal.
+//
+// The question and its answer are internal/term's, so a command that asks it and the repl
+// that asks it agree on every input.
 func termIsTerminal(f any) bool {
-	fd, ok := f.(interface{ Fd() uintptr })
-	if !ok {
-		return false
-	}
-	return term.IsTerminal(int(fd.Fd()))
+	return termpkg.IsTerminal(f)
 }
 
 // run starts the server, opens the session and loops until the person

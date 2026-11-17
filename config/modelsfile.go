@@ -249,6 +249,42 @@ func (s *Settings) resolveCredentialFile(dir, modelsPath string) (string, error)
 	return defaultCredentialFile(), nil
 }
 
+// ResolveSettingPath resolves a path a setting or a flag names: the home shortcut first,
+// then the settings file's own directory for a relative one.
+//
+// A document held in memory has no directory, so a relative path answers to the working
+// directory the way every other path a hand-built settings resolves does.
+func ResolveSettingPath(settingsPath, named string) (string, error) {
+	path, err := expandHome(named)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	dir := ""
+	if settingsPath != "" {
+		dir = filepath.Dir(settingsPath)
+	}
+	if dir == "" {
+		working, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		dir = working
+	}
+	return filepath.Join(dir, path), nil
+}
+
+// DefaultAuthFile is poo's own credential file in the user's config directory.
+func DefaultAuthFile() (string, error) {
+	dir, err := UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("the user's config directory cannot be resolved: %w", err)
+	}
+	return filepath.Join(dir, AuthFileName), nil
+}
+
 // resolveCredentialPath resolves the path a setting names: ~ first, then the
 // settings file's own directory for a relative one. mustExist is for the
 // setting that promised a file there.

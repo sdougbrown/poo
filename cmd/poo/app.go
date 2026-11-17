@@ -78,11 +78,24 @@ resolve.`
 const promptLong = `The command prints the prompt a session would send, with the sections
 marked, so an operator can see what the model is told.`
 
+// authImportLong is the help body of `poo auth import`.
+const authImportLong = `The command copies the Codex credential pi's auth.json holds into poo's own file,
+once. It reads the file --from names, then the one pi_auth_file names, then pi's own
+~/.pi/agent/auth.json, and it writes the file auth_file names, or poo's own.
+
+It is a one-way door, and it prints what it costs. A refresh rotates the refresh
+token, so two tools cannot both keep one credential alive: pi's copy is stale from
+poo's first refresh, and a refresh pi makes first would invalidate poo's. Run one
+of them.
+
+An existing credential is not replaced without an explicit action: --force
+replaces it, and a terminal is asked first. Nothing pi's file holds is changed.`
+
 // authLong is the help body of `poo auth`.
-const authLong = `The credential poo reads, reported rather than traded: the file the settings
-resolve, the shape it is written with, the provider, the account the token
-names, and whether the token is one poo would use. No token value is printed,
-and nothing is refreshed, so a report leaves the credential as it found it.`
+const authLong = `The credential poo reads, reported rather than traded. The commands here look at
+the file the settings resolve and report what it holds, and copy a credential
+another tool holds into it. No token value is printed, and nothing is refreshed,
+so a command here leaves the credential as it found it.`
 
 // sessionsLong is the help body of `poo sessions`.
 const sessionsLong = `The sessions the store holds. list reads the store, and prune trims it by
@@ -180,7 +193,7 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				Name:        "auth",
 				Short:       "Report the credential the settings' credential file holds",
 				Long:        authLong,
-				Subcommands: []*clicontract.Command{authStatusCommand(stdout)},
+				Subcommands: []*clicontract.Command{authStatusCommand(stdout), authImportCommand(stdout)},
 			},
 			{
 				Name:        "sessions",
@@ -219,6 +232,28 @@ func authStatusCommand(stdout io.Writer) *clicontract.Command {
 		},
 		Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 			return handleAuthStatus(inv, stdout, cmdStderr), nil
+		},
+	}
+}
+
+// authImportCommand declares `poo auth import`.
+func authImportCommand(stdout io.Writer) *clicontract.Command {
+	return &clicontract.Command{
+		Name:  "import",
+		Short: "Copy a credential another tool holds into poo's file",
+		Long:  authImportLong,
+		Subcommands: []*clicontract.Command{
+			{
+				Name:  "pi",
+				Short: "Copy the Codex credential pi's auth.json holds",
+				Flags: []clicontract.Flag{
+					{Name: "from", Kind: clicontract.String, Usage: "The auth.json to copy out of (default: pi_auth_file, then pi's own)"},
+					{Name: "force", Kind: clicontract.Bool, Usage: "Replace a credential poo's file already holds, without asking"},
+				},
+				Handle: func(ctx context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
+					return handleAuthImportPi(ctx, inv, stdout, cmdStderr), nil
+				},
+			},
 		},
 	}
 }
