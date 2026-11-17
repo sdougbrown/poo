@@ -440,7 +440,6 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 			"--force",
 			"--no-browser",
 			"--wait", "60",
-			"--key", "a-key",
 			"--settings", "s.yaml",
 		})
 		if err != nil {
@@ -453,7 +452,6 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 			force:       true,
 			noBrowser:   true,
 			wait:        60,
-			key:         "a-key",
 			provider:    "codex",
 		}
 		if !reflect.DeepEqual(o, want) {

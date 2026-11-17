@@ -42,8 +42,6 @@ type loginOptions struct {
 	noBrowser bool
 	// wait bounds how long a browser sign-in waits for its callback, in seconds.
 	wait int
-	// key is the key a key flow signs in with. Empty reads it from the prompt or stdin.
-	key string
 	// provider is the sign-in named on the command line, if one was.
 	provider string
 }
@@ -54,7 +52,6 @@ func (o *loginOptions) bind(inv clicontract.Invocation) {
 	o.force = inv.Bools["force"]
 	o.noBrowser = inv.Bools["no-browser"]
 	o.wait = inv.Ints["wait"]
-	o.key = inv.Flags["key"]
 	if len(inv.Args) > 0 {
 		o.provider = inv.Args[0]
 	}
@@ -66,8 +63,8 @@ func (o *loginOptions) bind(inv clicontract.Invocation) {
 // and how, is a choice: a bare `poo login` offers the list, and a name picks one. An existing
 // credential is replaced only when asked — by --force, or by answering the prompt.
 //
-// A key typed into the prompt, or read from stdin, is the path that keeps it out of a shell's
-// history and the process list. --key is for a script that has accepted a key in its argv.
+// A key is typed into the terminal's prompt, or read from stdin. There is no flag for it: an
+// argument is visible in the process list and stays in the shell's history.
 func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o loginOptions
 	o.bind(inv)
@@ -153,7 +150,7 @@ func (o *loginOptions) choose(in io.Reader, stderr io.Writer) (auth.Flow, bool) 
 // signIn runs the flow the operator chose.
 func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stderr io.Writer) (auth.Credential, bool) {
 	if flow.Method == auth.MethodKey {
-		return o.keyCredential(flow, stderr)
+		return keyCredential(flow, os.Stdin, stderr)
 	}
 	attempt, err := flow.Authorize()
 	if err != nil {
@@ -185,20 +182,20 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stder
 
 // keyCredential reads the key a key flow signs in with.
 //
-// The key comes from --key, then the terminal's prompt, then stdin: a key typed into a shell's
-// history or left in its process list is the one place it should not be, which is why --key is
-// the last resort rather than the first.
-func (o *loginOptions) keyCredential(flow auth.Flow, stderr io.Writer) (auth.Credential, bool) {
-	key := o.key
-	if key == "" && interactive() {
+// The key comes from the terminal's prompt, then stdin, and from nowhere else. An argument
+// would be visible in the process list and would stay in the shell's history, so a key is never
+// written on the command line.
+func keyCredential(flow auth.Flow, stdin *os.File, stderr io.Writer) (auth.Credential, bool) {
+	key := ""
+	if interactive() {
 		fmt.Fprintf(stderr, "%s key: ", flow.Name)
-		if read, err := term.ReadPassword(os.Stdin); err == nil {
+		if read, err := term.ReadPassword(stdin); err == nil {
 			key = read
 			fmt.Fprintln(stderr)
 		}
 	}
 	if key == "" {
-		scanner := bufio.NewScanner(os.Stdin)
+		scanner := bufio.NewScanner(stdin)
 		if scanner.Scan() {
 			key = strings.TrimSpace(scanner.Text())
 		}

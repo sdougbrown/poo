@@ -98,7 +98,8 @@ func TestAKeyLoginStoresAnAPIKey(t *testing.T) {
 	withoutATerminal(t)
 
 	out := captureStdout(t, func() {
-		if code := run([]string{"login", "ollama-cloud", "--key", "an-api-key", "--settings", settings}); code != 0 {
+		withStdin(t, "an-api-key\n")
+		if code := run([]string{"login", "ollama-cloud", "--settings", settings}); code != 0 {
 			t.Errorf("poo login exited with %d", code)
 		}
 	})
@@ -171,13 +172,15 @@ func TestAKeyLoginDoesNotReplaceAnExistingCredential(t *testing.T) {
 		t.Fatalf("writing the credential file: %v", err)
 	}
 
-	if code := run([]string{"login", "ollama-cloud", "--key", "a-new-key", "--settings", settings}); code == 0 {
+	withStdin(t, "a-new-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--settings", settings}); code == 0 {
 		t.Error("the sign-in exited 0 for a credential it was not asked to replace")
 	}
 	if stored, _ := os.ReadFile(target); string(stored) != body {
 		t.Errorf("the credential was replaced without being asked:\n%s", stored)
 	}
-	if code := run([]string{"login", "ollama-cloud", "--key", "a-new-key", "--force", "--settings", settings}); code != 0 {
+	withStdin(t, "a-new-key\n")
+	if code := run([]string{"login", "ollama-cloud", "--force", "--settings", settings}); code != 0 {
 		t.Errorf("the forced sign-in exited with %d", code)
 	}
 	if stored, _ := os.ReadFile(target); !strings.Contains(string(stored), "a-new-key") {
@@ -214,8 +217,9 @@ func TestALoginWritesPoosOwnFileWhenTheSettingsPointAtPis(t *testing.T) {
 	}
 	settings := piAuthSettings(t, dir, pi)
 	withoutATerminal(t)
+	withStdin(t, "testkey\n")
 
-	if code := run([]string{"login", "ollama-cloud", "--key", "testkey", "--force", "--settings", settings}); code != 0 {
+	if code := run([]string{"login", "ollama-cloud", "--force", "--settings", settings}); code != 0 {
 		t.Fatalf("poo login exited with %d", code)
 	}
 	want, err := config.DefaultAuthFile()
@@ -247,9 +251,10 @@ func TestALoginSaysWhereTheSettingsStillPoint(t *testing.T) {
 	}
 	settings := piAuthSettings(t, dir, pi)
 	withoutATerminal(t)
+	withStdin(t, "testkey\n")
 
 	out := captureStdout(t, func() {
-		if code := run([]string{"login", "ollama-cloud", "--key", "testkey", "--force", "--settings", settings}); code != 0 {
+		if code := run([]string{"login", "ollama-cloud", "--force", "--settings", settings}); code != 0 {
 			t.Fatalf("poo login exited with %d", code)
 		}
 	})
