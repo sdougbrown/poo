@@ -348,6 +348,24 @@ func TestAResizeMovesTheInputToTheNewBottomRow(t *testing.T) {
 	}
 }
 
+// waitEcho waits for the transcript's echo of a submitted line: the
+// row reads "❯ work" and carries no prompt mark, so the draft's own
+// "💩❯ work" row cannot satisfy it. The echo is what the machine draws
+// when it takes the line, so the keys typed after it reach the run.
+func waitEcho(t *testing.T, term *terminal, text string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, line := range strings.Split(term.screen(), "\n") {
+			if strings.Contains(line, "❯ "+text) && !strings.Contains(line, promptMark) {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the echo of %q never read:\n%s", text, term.screen())
+}
+
 // waitBottomRows waits for the prompt to stand on the footer's line row
 // of a terminal that is rows tall: the bottom row holds the spare the
 // editor's erases spend.
@@ -570,10 +588,9 @@ func startPipedRepl(t *testing.T, server *fakeServer, input string) (*terminal, 
 	}
 	go func() { code <- Run(opts); close(exited) }()
 	// The repl must be gone before the terminal moves on: a repl still
-	// running holds the editor on the output fd, and the next test's
+	// running draws to the shared output stream, and the next test's
 	// drawing would share it. The wait runs after the interrupts
-	// (cleanups unwind last registered first) and before the stdio
-	// restore.
+	// (cleanups unwind last registered first).
 	t.Cleanup(func() {
 		select {
 		case <-exited:
