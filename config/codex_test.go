@@ -856,6 +856,7 @@ roles:
 // that does not read fails the load even on a machine whose credential file
 // is not there and offers no built-in providers at all.
 func TestAReplacementIsReadEvenWhereTheModelsAreNotOffered(t *testing.T) {
+	isolatedConfigDir(t)
 	dir := t.TempDir()
 	replacement := filepath.Join(dir, "replacement.json")
 	if err := os.WriteFile(replacement, []byte(`{"providers": {}}`), 0o644); err != nil {
@@ -870,6 +871,47 @@ session:
 	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "replacement.json") {
 		t.Fatalf("the load is %v, want the replacement's refusal", err)
+	}
+}
+
+// TestAValidReplacementOffersNoModelsWhereTheCredentialIsMissing covers the
+// gate: the replacement is read wherever it is named, but the built-in
+// providers are offered only when a credential file is there. A load with a
+// valid replacement and no credential file succeeds, and the provider's
+// models are not offered.
+func TestAValidReplacementOffersNoModelsWhereTheCredentialIsMissing(t *testing.T) {
+	isolatedConfigDir(t)
+	dir := t.TempDir()
+	replacement := filepath.Join(dir, "replacement.json")
+	if err := os.WriteFile(replacement, []byte(`{
+		"providers": {
+			"openai-codex": {
+				"baseUrl": "`+codex.DefaultEndpoint+`",
+				"api": "openai-codex-responses",
+				"skipProbe": true,
+				"models": [{"id": "gpt-fresh"}]
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("writing the replacement: %v", err)
+	}
+	path := writeCodexSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	t.Setenv(config.EnvBuiltinModels, replacement)
+
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	for name := range catalog.New(settings.CatalogOptions()).Endpoints() {
+		if name == auth.ProviderCodex {
+			t.Fatalf("the provider was offered without a credential file")
+		}
+	}
+	if _, err := catalog.New(settings.CatalogOptions()).Resolve("openai-codex/gpt-fresh"); err == nil {
+		t.Errorf("the replacement's model was offered without a credential file")
 	}
 }
 
