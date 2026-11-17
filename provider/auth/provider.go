@@ -38,8 +38,8 @@ type Provider struct {
 	Account func(access, stored string) string
 }
 
-// Codex is the OpenAI Codex provider: pi's client, the endpoint its refresh token is traded
-// at, and the ChatGPT account its access tokens name.
+// Codex is the OpenAI Codex provider: pi's client, the endpoint its refresh token is traded at,
+// and the ChatGPT account its access tokens name. How a person signs in to it is CodexLogin.
 var Codex = Provider{
 	ID:       ProviderCodex,
 	Kind:     KindOAuth,

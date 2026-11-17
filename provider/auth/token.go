@@ -15,6 +15,22 @@ import (
 // none.
 var defaultHTTP = &http.Client{Timeout: DefaultTimeout}
 
+// refusingClient is the redirect policy every token path uses: a copy of
+// base's transport and timeout, with a redirect refused rather than
+// followed. Go replays a 307 or 308 request body to wherever the redirect
+// points, and a token request's body is a code or a refresh token. A
+// redirect is answered as the refusal it is, with the status the error
+// names.
+func refusingClient(base *http.Client) *http.Client {
+	return &http.Client{
+		Transport: base.Transport,
+		Timeout:   base.Timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 // tokenResponse is the token endpoint's answer to a refresh.
 type tokenResponse struct {
 	// AccessToken is the new bearer token.
@@ -45,27 +61,9 @@ func (c Credentials) trade(ctx context.Context, p Provider, stored credential) (
 		"refresh_token": {stored.Refresh},
 		"client_id":     {c.clientID(p, stored)},
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	answer, err := postForm(ctx, ErrRefresh, c.client(), endpoint, form)
 	if err != nil {
-		return credential{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Accept", "application/json")
-	response, err := c.client().Do(request)
-	if err != nil {
-		return credential{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxTokenResponse))
-	if err != nil {
-		return credential{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
-	}
-	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return credential{}, fmt.Errorf("%w: %s: status %d%s", ErrRefresh, endpoint, response.StatusCode, errorCode(body))
-	}
-	var answer tokenResponse
-	if err := json.Unmarshal(body, &answer); err != nil {
-		return credential{}, fmt.Errorf("%w: %s: %w", ErrRefresh, endpoint, err)
+		return credential{}, err
 	}
 	if answer.AccessToken == "" || answer.ExpiresIn <= 0 {
 		return credential{}, fmt.Errorf("%w: %s: the answer carries no token or no lifetime", ErrRefresh, endpoint)
@@ -123,23 +121,17 @@ func errorCode(body []byte) string {
 
 // client is the client a refresh goes through.
 //
-// The redirect policy is this package's even when a caller supplies the
-// client. Go replays a 307 or 308 request body to wherever the redirect
-// points, and a refresh's body is the refresh token. A redirect is answered
-// as the refusal it is, with the status the error names. The transport and
-// the timeout are the caller's.
+// The redirect policy is refusingClient's, shared by every token path, even
+// when a caller supplies the client. Go replays a 307 or 308 request body to
+// wherever the redirect points, and a refresh's body is the refresh token. A
+// redirect is answered as the refusal it is, with the status the error names.
+// The transport and the timeout are the caller's.
 func (c Credentials) client() *http.Client {
 	base := c.HTTP
 	if base == nil {
 		base = defaultHTTP
 	}
-	return &http.Client{
-		Transport: base.Transport,
-		Timeout:   base.Timeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	return refusingClient(base)
 }
 
 // tokenURL is the endpoint a credential's refresh token is traded at.
@@ -151,26 +143,71 @@ func (c Credentials) client() *http.Client {
 // on top because it knows something none of the rest does — a test's fake endpoint, or an
 // endpoint moved for this run.
 func (c Credentials) tokenURL(p Provider, stored credential) string {
-	switch {
-	case c.TokenURL != "":
+	if c.TokenURL != "" {
 		return c.TokenURL
-	case stored.TokenURL != "":
-		return stored.TokenURL
-	case p.TokenURL != "":
-		return p.TokenURL
 	}
-	return DefaultTokenURL
+	return endpointFor(stored.TokenURL, p, DefaultTokenURL)
 }
 
 // clientID is the OAuth client the credential belongs to, by the same ladder.
 func (c Credentials) clientID(p Provider, stored credential) string {
-	switch {
-	case c.ClientID != "":
+	if c.ClientID != "" {
 		return c.ClientID
-	case stored.ClientID != "":
-		return stored.ClientID
+	}
+	return clientFor(stored.ClientID, p, DefaultClientID)
+}
+
+// endpointFor answers the token endpoint by the ladder: the override, then
+// the provider's declaration, then the fallback.
+func endpointFor(override string, p Provider, fallback string) string {
+	switch {
+	case override != "":
+		return override
+	case p.TokenURL != "":
+		return p.TokenURL
+	}
+	return fallback
+}
+
+// clientFor answers the OAuth client by the same ladder.
+func clientFor(override string, p Provider, fallback string) string {
+	switch {
+	case override != "":
+		return override
 	case p.ClientID != "":
 		return p.ClientID
 	}
-	return DefaultClientID
+	return fallback
+}
+
+// postForm posts a form to a token endpoint and reads its answer.
+//
+// A redirect is refused rather than followed: a token request's body carries a code or a
+// refresh token, and Go would replay it wherever the redirect pointed. The answer is bounded,
+// and a failure reports the status and a standard OAuth error code, and nothing else the
+// answer said.
+func postForm(ctx context.Context, refused error, client *http.Client, endpoint string, form url.Values) (tokenResponse, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return tokenResponse{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	response, err := refusingClient(client).Do(request)
+	if err != nil {
+		return tokenResponse{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxTokenResponse))
+	if err != nil {
+		return tokenResponse{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
+	}
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return tokenResponse{}, fmt.Errorf("%w: %s: status %d%s", refused, endpoint, response.StatusCode, errorCode(body))
+	}
+	var answer tokenResponse
+	if err := json.Unmarshal(body, &answer); err != nil {
+		return tokenResponse{}, fmt.Errorf("%w: %s: %w", refused, endpoint, err)
+	}
+	return answer, nil
 }
