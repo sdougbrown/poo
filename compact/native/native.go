@@ -6,9 +6,8 @@
 // the provider's own and nothing else can stand in for it.
 //
 // A native compaction costs a request, and the core charges it the way it
-// charges any other request a strategy makes. The strategy acts at the same
-// share of the window as summary, so switching strategies does not move the
-// point at which a run compacts.
+// charges any other request a strategy makes. Its default threshold matches
+// summary's, but native can compact after the first request.
 package native
 
 import (
