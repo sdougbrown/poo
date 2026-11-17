@@ -379,11 +379,10 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	term.press("work\r")
 	// The run must be on before the escape: an escape that arrives while
 	// the editor still holds the draft is one the editor eats under
-	// load. The echoed prompt is the submit's receipt — the repl drew it
-	// when the editor handed the draft over, so the keys after it reach
-	// the run. The held deltas paint when the run settles, so the cancel
-	// is what brings the reply's words onto the screen.
-	waitScreen(t, term, "❯ work")
+	// load. The echo is the machine's receipt for the line, so the keys
+	// after it reach the run. The held deltas paint when the run settles,
+	// so the cancel is what brings the reply's words onto the screen.
+	waitEcho(t, term, "work")
 	term.press("\x1b")
 	server.waitCancels(t, 1)
 	waitFor(t, term, "✓ cancelled")
@@ -395,7 +394,7 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	}
 	// The held deltas paint when the run settles, so the second run's
 	// cancel comes before its reply's words can.
-	waitScreen(t, term, "❯ next")
+	waitEcho(t, term, "next")
 	term.press("\x1b")
 	server.waitCancels(t, 2)
 	waitTimes(t, term, "✓ cancelled", 2)
@@ -422,9 +421,9 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	term.press("work\r")
 	// The run must be on before the keys: an escape that arrives while
 	// the editor still holds the draft is one the editor eats under
-	// load. The echoed prompt is the submit's receipt, so the keys
+	// load. The echo is the machine's receipt for the line, so the keys
 	// after it reach the run.
-	waitScreen(t, term, "❯ work")
+	waitEcho(t, term, "work")
 	// The editor dispatches a bare escape once its key buffer holds no
 	// more keys, and an arrow the moment its last byte lands, so a poll
 	// through the dispatch window is enough to tell them apart: an
