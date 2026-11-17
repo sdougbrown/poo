@@ -34,6 +34,31 @@ func TestTheNativeStrategyActsAtSummaryRatio(t *testing.T) {
 	}
 }
 
+// TestTheNativeStrategyHonoursACustomRatio covers a configured ratio: the
+// strategy acts at the share it was given, and not at the summary ratio.
+func TestTheNativeStrategyHonoursACustomRatio(t *testing.T) {
+	strategy := native.New(native.Options{Ratio: 0.5})
+	if got := strategy.Ratio(); got != 0.5 {
+		t.Errorf("the ratio is %v, want the configured 0.5", got)
+	}
+	for _, test := range []struct {
+		name  string
+		limit int
+		input int
+		want  bool
+	}{
+		{"below the ratio", 1000, 499, false},
+		{"at the ratio", 1000, 500, true},
+		{"below the ratio of a wider window", 2000, 999, false},
+		{"at the ratio of a wider window", 2000, 1000, true},
+	} {
+		budget := poo.ContextBudget{ContextLimit: test.limit, EstimatedInput: test.input, Turns: 1}
+		if got := strategy.ShouldCompact(nil, budget); got != test.want {
+			t.Errorf("%s: the strategy compacts %v, want %v", test.name, got, test.want)
+		}
+	}
+}
+
 // TestTheNativeStrategyRequestsAProviderWindow covers what the strategy hands
 // back: a window request, and no form the strategy could apply itself.
 func TestTheNativeStrategyRequestsAProviderWindow(t *testing.T) {
