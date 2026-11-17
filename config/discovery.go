@@ -17,6 +17,10 @@ const (
 	// EnvSettings is the environment variable a settings file is
 	// pointed at by.
 	EnvSettings = "POO_SETTINGS"
+	// EnvBuiltinModels is the environment variable naming the file that
+	// replaces the built-in providers' data. An empty value reads the
+	// data the binary carries.
+	EnvBuiltinModels = "POO_BUILTIN_MODELS"
 	// ProjectDirName is the directory a project's settings live in.
 	ProjectDirName = ".poo"
 	// SettingsFileName is the name a settings file is discovered by, and

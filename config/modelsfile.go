@@ -11,7 +11,6 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config/internal/piimport"
 	"github.com/sdougbrown/poo/provider/catalog"
-	"github.com/sdougbrown/poo/provider/codex"
 )
 
 // ModelsFileName is the name poo's own models file is discovered by, beside a
@@ -56,8 +55,24 @@ func (s *Settings) importPi(dir string) error {
 	// no credential file, and has none at the default path, gains no models it
 	// did not ask for. They are the layer's fallback: the models file is the
 	// operator's word and overrules them by name.
-	if s.credentialPath != "" && fileExists(s.credentialPath) {
-		s.addLayer(piLayer(piimport.BuiltinCodex(codex.DefaultEndpoint)))
+	//
+	// A replacement the environment names is read wherever it is named, gate
+	// or not: an explicit name is a promise, and a file that does not read
+	// fails the load.
+	offered := s.credentialPath != "" && fileExists(s.credentialPath)
+	override := os.Getenv(EnvBuiltinModels)
+	if override != "" || offered {
+		builtin, err := piimport.Builtin(override)
+		if err != nil {
+			return &Error{Code: CodeInvalid, Message: "the built-in providers do not read", Err: err}
+		}
+		if offered {
+			layer := piLayer(builtin)
+			s.addLayer(layer)
+			// A literal key the file writes lives in the settings, where a
+			// literal key lives; the layer never carries one.
+			s.importPiKeys(builtin, layer)
+		}
 	}
 	if modelsPath != "" {
 		if err := s.importModelsFile(modelsPath); err != nil {

@@ -52,6 +52,88 @@ func writeModels(t *testing.T, body string) string {
 	return path
 }
 
+// TestTheBuiltinProvidersReadThroughTheModelsFileShape covers the built-in
+// providers' data: it is read through the same shape a file on disk takes, so
+// a provider declared there imports with the API the endpoint speaks, no key
+// it does not carry, and the levels its models declare — with minimal in none
+// of them, for the level the endpoint does not take.
+func TestTheBuiltinProvidersReadThroughTheModelsFileShape(t *testing.T) {
+	file, err := piimport.Builtin("")
+	if err != nil {
+		t.Fatalf("reading the built-in providers: %v", err)
+	}
+	provider, ok := file.Providers[auth.ProviderCodex]
+	if !ok {
+		t.Fatalf("the built-in providers hold no %s provider: %v", auth.ProviderCodex, file.Providers)
+	}
+	if provider.API != string(poo.APIResponses) {
+		t.Errorf("the provider's API is %q, want the Responses API", provider.API)
+	}
+	if !provider.SkipProbe {
+		t.Errorf("the provider is probed, want its models taken as declared")
+	}
+	if provider.APIKeyEnv != "" || provider.APIKey != "" {
+		t.Errorf("the provider carries a key %q/%q, want none: its credential is not an api key", provider.APIKeyEnv, provider.APIKey)
+	}
+	if len(provider.Models) == 0 {
+		t.Fatalf("the provider serves no models")
+	}
+	withOff, withoutOff := 0, 0
+	for _, model := range provider.Models {
+		for _, level := range model.Levels {
+			if level == "minimal" {
+				t.Errorf("the model %s takes minimal, a level the endpoint does not spell", model.ID)
+			}
+			if level == "off" {
+				withOff++
+			}
+		}
+		if len(model.Levels) > 0 && model.Levels[0] != "off" {
+			withoutOff++
+		}
+	}
+	if withOff == 0 || withoutOff == 0 {
+		t.Errorf("the models take levels in one shape only: %d with an off level, %d without", withOff, withoutOff)
+	}
+}
+
+// TestAReplacementReplacesTheBuiltinProviders covers the override: a file
+// named instead of the built-in data is read whole, so a binary that ships
+// without the newer list can still serve the models it names.
+func TestAReplacementReplacesTheBuiltinProviders(t *testing.T) {
+	file, err := piimport.Builtin(writeModels(t, `{
+		"providers": {
+			"openai-codex": {
+				"baseUrl": "https://chatgpt.com/backend-api",
+				"api": "openai-codex-responses",
+				"skipProbe": true,
+				"models": [{"id": "gpt-test"}]
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("reading the replacement: %v", err)
+	}
+	provider, ok := file.Providers[auth.ProviderCodex]
+	if !ok {
+		t.Fatalf("the replacement holds no %s provider: %v", auth.ProviderCodex, file.Providers)
+	}
+	if len(provider.Models) != 1 || provider.Models[0].ID != "gpt-test" {
+		t.Errorf("the provider's models are %+v, want the replacement's alone", provider.Models)
+	}
+}
+
+// TestAReplacementThatIsNotThereIsRefused covers the override's promise: a
+// path named for the built-in data is read or the load fails, never skipped
+// in silence.
+func TestAReplacementThatIsNotThereIsRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "absent.json")
+	_, err := piimport.Builtin(path)
+	if err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("the import is %v, want the absent replacement refused", err)
+	}
+}
+
 // TestTheCodexAPIImportsForTheCodexProvider covers pi's own name for the
 // Codex wire. The Codex provider is read as the Responses API, so a models file
 // that names it imports into a model poo can run.

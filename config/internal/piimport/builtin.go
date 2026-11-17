@@ -1,72 +1,37 @@
 package piimport
 
 import (
-	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/provider/auth"
+	_ "embed"
+	"fmt"
+	"os"
 )
 
-// codexModel is one model pi's bundled Codex provider serves.
-type codexModel struct {
-	// ID is what the endpoint calls the model.
-	ID string
-	// ContextWindow is the model's context window.
-	ContextWindow int
-	// NoOff says the model has no level that turns reasoning off.
-	NoOff bool
-}
-
-// codexModels are the models pi's bundled openai-codex provider serves, with
-// the limits and the effort levels that provider gives them.
+// builtin.json is the built-in providers' data, in the shape a models
+// file takes. A provider without discoverability is declared here
+// rather than asked of its endpoint, so the file carries what the
+// endpoint cannot enumerate: the models, their limits, and the levels
+// each one takes. A model the data does not name is still selectable:
+// the settings' models, or a models file, may name it under the same
+// provider.
 //
-// The list is a snapshot of pi's own catalog. A model pi adds later is still
-// selectable: the settings' models, or a models file, may name it under the
-// same provider.
-var codexModels = []codexModel{
-	{ID: "gpt-5.6-luna", ContextWindow: 272000},
-	{ID: "gpt-5.6-sol", ContextWindow: 272000},
-	{ID: "gpt-5.6-terra", ContextWindow: 272000},
-	{ID: "gpt-6-astra", ContextWindow: 272000, NoOff: true},
-	{ID: "gpt-6-luna", ContextWindow: 272000},
-	{ID: "gpt-6-sol", ContextWindow: 272000},
-	{ID: "gpt-6.1-sol", ContextWindow: 500000, NoOff: true},
-}
+//go:embed builtin.json
+var builtinData []byte
 
-// codexLevels are the reasoning levels a Codex model takes.
+// Builtin returns the built-in providers, decoded through the same
+// read a models file on disk takes.
 //
-// pi maps its own minimal level onto the endpoint's low, so poo names the
-// levels the endpoint takes, and minimal is not one of them.
-var codexLevels = []string{"low", "medium", "high", "xhigh", "max"}
-
-// BuiltinCodex returns pi's built-in Codex provider in the shape a models
-// file names providers, so the settings import it through the same path.
-//
-// endpoint is the base the Codex requests go to. The provider carries no key:
-// its credential is pi's OAuth entry in auth.json, which the transport
-// resolves, not an api key the settings store.
-func BuiltinCodex(endpoint string) File {
-	models := make([]Model, 0, len(codexModels))
-	for _, model := range codexModels {
-		levels := append([]string(nil), codexLevels...)
-		if !model.NoOff {
-			levels = append([]string{"off"}, levels...)
+// override names a file read instead of the embedded data, so a binary
+// that ships without the newer list can serve the models a newer file
+// declares. An empty name reads the data this package carries. The
+// providers import with no keys: a built-in provider's credential is
+// resolved by its transport, not an api key the settings store.
+func Builtin(override string) (File, error) {
+	if override != "" {
+		data, err := os.ReadFile(override)
+		if err != nil {
+			return File{}, fmt.Errorf("reading %s: %w", override, err)
 		}
-		models = append(models, Model{
-			ID:                      model.ID,
-			Inputs:                  []string{string(poo.ModalityText), string(poo.ModalityImage)},
-			ContextWindow:           model.ContextWindow,
-			MaxTokens:               128000,
-			Reasoning:               true,
-			SupportsReasoningEffort: true,
-			Levels:                  levels,
-		})
+		return decode(override, data, nil)
 	}
-	return File{Providers: map[string]Provider{
-		auth.ProviderCodex: {
-			BaseURL:   endpoint,
-			API:       string(poo.APIResponses),
-			ToolsMode: string(poo.ToolsNative),
-			SkipProbe: true,
-			Models:    models,
-		},
-	}}
+	return decode("builtin.json", builtinData, nil)
 }

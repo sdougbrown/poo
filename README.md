@@ -107,6 +107,11 @@ fails the load. A file the operator put there is never skipped in silence.
 The one exception is a literal key: a key pi's file writes is copied into the
 settings, where a literal key lives, and the layer never carries one.
 
+A provider in pi's file whose models are declared rather than discovered adds
+`skipProbe: true`, and `toolsMode` when it asks for tool calls one way for
+every model — the two fields the built-in data carries, which any file may
+use as well.
+
 `models_file`, `auth_file` and `pi_auth_file` resolve relative paths
 against the settings file's directory. `cli_registry.paths` and
 `feeds.paths` answer to the working directory.
@@ -181,11 +186,17 @@ prints no secret and trades none, so it leaves the credential as it found
 it. `--json` prints the same report for a script.
 
 No provider in `models.json` is needed for this. When a credential file
-is there, the built-in provider adds the Codex models pi bundles; a
+is there, the built-in provider adds the Codex models the built-in data
+declares; a
 `models_file` or the settings' own `models` still win on a name
-collision, and a model pi adds later can be named under the same
-provider. The built-in list is a snapshot, so a newer id is a `models`
-entry away.
+collision, and a model the data does not name can be named under the
+same provider. The built-in list is a snapshot, so a newer id is a
+`models` entry away.
+
+The built-in data is a file, not code: `POO_BUILTIN_MODELS` names one
+read instead of it, in the same shape a models file takes. A binary
+that ships without the newer list points the variable at a file that
+holds it, and a file that does not read fails the load.
 
 poo reads the Codex entry for the provider id `openai-codex` only, and
 sends it only to the built-in `https://chatgpt.com/backend-api`

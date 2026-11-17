@@ -803,6 +803,76 @@ roles:
 	}
 }
 
+// TestAReplacementReplacesTheBuiltinCodexModels covers the built-in list
+// being data: the file POO_BUILTIN_MODELS names is read instead of the
+// built-in providers' own data, so a binary that ships without the newer
+// list still serves the models the replacement declares. The replaced list's
+// models are gone, and a key the replacement writes literally lands in the
+// settings, where a literal key lives.
+func TestAReplacementReplacesTheBuiltinCodexModels(t *testing.T) {
+	dir := t.TempDir()
+	replacement := filepath.Join(dir, "replacement.json")
+	if err := os.WriteFile(replacement, []byte(`{
+		"providers": {
+			"openai-codex": {
+				"baseUrl": "`+codex.DefaultEndpoint+`",
+				"api": "openai-codex-responses",
+				"skipProbe": true,
+				"apiKey": "replacement-key",
+				"models": [{"id": "gpt-fresh", "contextWindow": 400000}]
+			}
+		}
+	}`), 0o644); err != nil {
+		t.Fatalf("writing the replacement: %v", err)
+	}
+	writeCodexAuth(t, dir, fakeCodexToken(t, "acct_live"), "rt_live", 4102444800000)
+	path := writeCodexSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+pi_auth_file: auth.json
+roles:
+  chat: openai-codex/gpt-fresh
+`)
+	t.Setenv(config.EnvBuiltinModels, replacement)
+
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	fresh := catalogModel(t, settings, "openai-codex/gpt-fresh")
+	if fresh.ContextLimit != 400000 {
+		t.Errorf("the replacement's model has a context limit of %d, want 400000", fresh.ContextLimit)
+	}
+	if _, err := catalog.New(settings.CatalogOptions()).Resolve("openai-codex/gpt-5.6-luna"); err == nil {
+		t.Errorf("the replaced list's model is still offered")
+	}
+	if got := settings.Endpoints[auth.ProviderCodex].APIKey; got != "replacement-key" {
+		t.Errorf("the replacement's literal key is %q, want it kept in the settings", got)
+	}
+}
+
+// TestAReplacementIsReadEvenWhereTheModelsAreNotOffered covers the promise:
+// a file POO_BUILTIN_MODELS names is read wherever it is named, so a file
+// that does not read fails the load even on a machine whose credential file
+// is not there and offers no built-in providers at all.
+func TestAReplacementIsReadEvenWhereTheModelsAreNotOffered(t *testing.T) {
+	dir := t.TempDir()
+	replacement := filepath.Join(dir, "replacement.json")
+	if err := os.WriteFile(replacement, []byte(`{"providers": {}}`), 0o644); err != nil {
+		t.Fatalf("writing the replacement: %v", err)
+	}
+	path := writeCodexSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	t.Setenv(config.EnvBuiltinModels, replacement)
+
+	_, err := config.Load(path)
+	if err == nil || !strings.Contains(err.Error(), "replacement.json") {
+		t.Fatalf("the load is %v, want the replacement's refusal", err)
+	}
+}
+
 // TestTheChatReasoningSettingReachesTheCodexRequest covers the configured
 // level: reasoning.chat is the operator's, and a Codex request goes out asking
 // for it rather than for the model's fallback.

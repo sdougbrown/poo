@@ -79,12 +79,23 @@ type piFile struct {
 	Providers map[string]piProvider `json:"providers"`
 }
 
-// piProvider is one provider in pi's models file.
+// piProvider is one provider in a models file.
+//
+// Only the fields poo maps are here; a field the file carries that poo
+// does not is ignored, the way the wire's forward-compatibility rule
+// reads a later server's events.
 type piProvider struct {
-	BaseURL string    `json:"baseUrl"`
-	API     string    `json:"api"`
-	APIKey  string    `json:"apiKey"`
-	Models  []piModel `json:"models"`
+	BaseURL string `json:"baseUrl"`
+	API     string `json:"api"`
+	APIKey  string `json:"apiKey"`
+	// ToolsMode is how the provider asks for tool calls. The files pi
+	// writes name none, and an empty value leaves the model's own
+	// needs to decide.
+	ToolsMode string `json:"toolsMode"`
+	// SkipProbe says the provider's models are declared rather than
+	// discovered, so no probe is sent to its endpoint.
+	SkipProbe bool      `json:"skipProbe"`
+	Models    []piModel `json:"models"`
 }
 
 // piModel is one model in pi's models file.
@@ -104,6 +115,10 @@ type piModel struct {
 	} `json:"compat"`
 }
 
+// authLookup returns the credential the provider name reads from an
+// auth file: the environment name and the literal key, either empty.
+type authLookup func(name string) (env, key string, err error)
+
 // Read reads the models file at path.
 //
 // authPath is the auth.json its providers' keys are read from. Empty means
@@ -115,12 +130,51 @@ func Read(path, authPath string) (File, error) {
 	if err != nil {
 		return File{}, fmt.Errorf("reading %s: %w", path, err)
 	}
+	return decode(path, data, authFromFile(path, authPath))
+}
+
+// authFromFile returns the lookup that reads a models file's keys from
+// its auth file.
+//
+// The auth file is read once, on the first provider the models file
+// leaves no usable key for: a file that is not there reads as no keys,
+// and the flag — not a nil map — keeps it from being read again for
+// every keyless provider after it.
+func authFromFile(modelsPath, authPath string) authLookup {
+	read := false
+	var keys map[string]credential
+	return func(name string) (string, string, error) {
+		if !read {
+			read = true
+			path := authPath
+			if path == "" {
+				path = filepath.Join(filepath.Dir(modelsPath), AuthFileName)
+			}
+			var err error
+			keys, err = readAuth(path)
+			if err != nil {
+				return "", "", err
+			}
+		}
+		env, key := storedKey(keys[name])
+		return env, key, nil
+	}
+}
+
+// decode maps a models file's bytes into poo's vocabulary: the
+// providers it names, in name order, each with the models its endpoint
+// serves.
+//
+// source is what the bytes are called in an error. auth is consulted
+// for a provider the file leaves no usable key for, and nil means no
+// key is read for any of them.
+func decode(source string, data []byte, auth authLookup) (File, error) {
 	var file piFile
 	if err := json.Unmarshal(stripBOM(data), &file); err != nil {
-		return File{}, fmt.Errorf("%s: %w", path, err)
+		return File{}, fmt.Errorf("%s: %w", source, err)
 	}
 	if len(file.Providers) == 0 {
-		return File{}, fmt.Errorf("%s holds no providers", path)
+		return File{}, fmt.Errorf("%s holds no providers", source)
 	}
 	names := make([]string, 0, len(file.Providers))
 	for name := range file.Providers {
@@ -128,12 +182,6 @@ func Read(path, authPath string) (File, error) {
 	}
 	sort.Strings(names)
 
-	// The auth file beside the models file is read once, on the first
-	// provider the models file leaves no usable key for: a file that is
-	// not there reads as no keys, and the flag — not a nil map — keeps
-	// it from being read again for every keyless provider after it.
-	authRead := false
-	var keys map[string]credential
 	out := File{Providers: make(map[string]Provider, len(names))}
 	for _, name := range names {
 		definition := file.Providers[name]
@@ -151,18 +199,11 @@ func Read(path, authPath string) (File, error) {
 			return File{}, err
 		}
 		env, key := keyFromValue(definition.APIKey)
-		if env == "" && key == "" {
-			if !authRead {
-				if authPath == "" {
-					authPath = filepath.Join(filepath.Dir(path), AuthFileName)
-				}
-				keys, err = readAuth(authPath)
-				if err != nil {
-					return File{}, err
-				}
-				authRead = true
+		if env == "" && key == "" && auth != nil {
+			authEnv, authKey, err := auth(name)
+			if err != nil {
+				return File{}, err
 			}
-			authEnv, authKey := storedKey(keys[name])
 			if authEnv != "" {
 				env = authEnv
 			}
@@ -173,6 +214,8 @@ func Read(path, authPath string) (File, error) {
 			API:       api,
 			APIKeyEnv: env,
 			APIKey:    key,
+			ToolsMode: definition.ToolsMode,
+			SkipProbe: definition.SkipProbe,
 		}
 		for _, model := range definition.Models {
 			if model.ID == "" {
