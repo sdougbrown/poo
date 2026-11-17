@@ -2226,9 +2226,7 @@ func (r *Runtime) DeciderModel() (poo.ModelInfo, error) {
 // Transport returns the transport for a model.
 //
 // The transport talks to the endpoint the model is served by, with the
-// key the settings' endpoint names. The key is the endpoint's
-// environment variable when the environment holds it, else the literal
-// the settings carry.
+// key EndpointKey resolves for it.
 func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	// The provider the catalog resolved decides the transport, and the wire
 	// API it speaks says whether that transport can carry the model at all.
