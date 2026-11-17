@@ -153,10 +153,11 @@ func askCallback(t *testing.T, redirectURI, path, query string) *http.Response {
 	}
 	target := fmt.Sprintf("%s://%s%s%s", redirect.Scheme, redirect.Host, path, query)
 	var last error
-	for i := 0; i < 400; i++ {
-		// The request itself is bounded, so a listener that accepts but
-		// never answers cannot eat the whole window: the retries are what
-		// ride out a slow start under load.
+	// The window bounds the whole retry, not the count: a listener that
+	// accepts but never answers costs one 2s request per window, not a
+	// count of them.
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
 		request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
 		if err != nil {
 			t.Fatalf("building the callback request: %v", err)
