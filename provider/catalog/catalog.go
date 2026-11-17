@@ -80,8 +80,11 @@ type Options struct {
 	// discovery cache is <StateDir>/poo/discovery.json. Empty means the
 	// user's state directory.
 	StateDir string
-	// DiscoveryTTL is how long a cached discovery result stays fresh.
-	// Zero means DefaultDiscoveryTTL.
+	// DiscoveryTTL is how long a cached discovery result stays fresh. It decides when
+	// Refresh probes an endpoint again instead of reading the cache; it does not bound the
+	// build's cached layer, which applies what the endpoints last reported however old it
+	// is — a build never probes, and a model that vanishes with age is not a world a
+	// session can hold. Zero means DefaultDiscoveryTTL.
 	DiscoveryTTL time.Duration
 	// HTTPClient is the client the probes use. A nil client means a
 	// default one.
@@ -138,7 +141,10 @@ type entry struct {
 // New returns a catalog with the curated and the settings layers
 // merged.
 //
-// The catalog holds no discovery results yet: call Refresh to probe the
+// With Cached, the catalog also holds what the endpoints last reported, read from the
+// discovery cache: the endpoints the catalog still declares, and nothing else.
+//
+// Without it, the catalog holds no discovery results yet: call Refresh to probe the
 // endpoints, or Build to do both and to check the roles.
 func New(opts Options) *Catalog {
 	c := &Catalog{
@@ -171,8 +177,12 @@ func New(opts Options) *Catalog {
 // applyCached merges what the endpoints last reported, without asking them again.
 //
 // The cache is the one place a session learns what an endpoint serves, because a build does
-// not probe: it is local, it is TTL'd, and a cache that cannot be read is a catalog without
-// this layer rather than a failed build.
+// not probe. Entries apply however old they are — an entry that went stale still describes
+// what a session may be using, and a model disappearing because the cache aged out would be
+// a failure nobody asked for; freshness is Refresh's decision, not the build's. Only the
+// endpoints the catalog still declares are read, matching the refresh path: a cache entry
+// for an endpoint the operator removed is not a model anymore. A cache that cannot be read
+// is a catalog without this layer rather than a failed build.
 func (c *Catalog) applyCached() {
 	cache := c.cache()
 	cached, err := cache.load()
@@ -183,7 +193,14 @@ func (c *Catalog) applyCached() {
 	if cached == nil {
 		return
 	}
-	c.applyDiscovery(cached.discovery())
+	kept := *cached
+	kept.Endpoints = map[string]cacheEndpoint{}
+	for _, name := range c.endpointNames() {
+		if endpoint, ok := cached.Endpoints[name]; ok {
+			kept.Endpoints[name] = endpoint
+		}
+	}
+	c.applyDiscovery(kept.discovery())
 }
 
 // discovery turns a cached file into the layer it holds.

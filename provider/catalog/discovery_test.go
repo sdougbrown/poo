@@ -385,6 +385,43 @@ func TestACachedDiscoveryIsAModelASessionCanName(t *testing.T) {
 	}
 }
 
+// TestACachedEndpointTheCatalogNoLongerDeclaresIsNotAModel covers the operator's removal: a
+// cache entry whose endpoint the catalog no longer declares is not a model a session can
+// name or list, even though the cache still holds it. The endpoint that stayed keeps its
+// cached models.
+func TestACachedEndpointTheCatalogNoLongerDeclaresIsNotAModel(t *testing.T) {
+	first := vllmServer(t, "qwen3", 32768)
+	second := vllmServer(t, "qwen2", 8192)
+	stateDir := t.TempDir()
+	both := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"aaa": {Endpoint: first.URL + "/v1"},
+			"zzz": {Endpoint: second.URL + "/v1"},
+		},
+	}
+	probed := catalog.New(catalog.Options{Settings: both, StateDir: stateDir})
+	if err := probed.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+
+	// The operator removes the zzz endpoint; the cache still holds what it reported.
+	remaining := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"aaa": {Endpoint: first.URL + "/v1"}},
+	}
+	built := catalog.New(catalog.Options{Settings: remaining, StateDir: stateDir, Cached: true})
+	if _, err := built.Resolve("zzz/qwen2"); err == nil {
+		t.Error("a cached model whose endpoint the catalog no longer declares resolved")
+	}
+	for _, info := range built.List() {
+		if strings.HasPrefix(info.Name, "zzz/") {
+			t.Errorf("the catalog still lists %q, whose endpoint was removed", info.Name)
+		}
+	}
+	if _, err := built.Resolve("aaa/qwen3"); err != nil {
+		t.Errorf("the endpoint that stayed lost its cached model: %v", err)
+	}
+}
+
 // TestACatalogWithoutTheCacheAsksNoEndpoint covers the default: a catalog that did not ask for
 // the cached layer holds what its layers declare, and a discovered-only model is not one of them.
 func TestACatalogWithoutTheCacheAsksNoEndpoint(t *testing.T) {
