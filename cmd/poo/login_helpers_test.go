@@ -118,8 +118,8 @@ func streamTo(t *testing.T, target **os.File) func() string {
 
 // signInURL waits for a command's stderr to print the authorization URL, and returns it.
 //
-// The URL is printed before the wait listens, so a test that answers the callback asks the port
-// until the listener takes it rather than trusting the print.
+// The URL is printed before the wait serves the callback, so a test that answers it asks until
+// the answer comes rather than trusting the print.
 func signInURL(t *testing.T, printed func() string) *url.URL {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)

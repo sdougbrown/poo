@@ -67,12 +67,13 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		fmt.Fprintln(stderr, "poo auth status: the credential file cannot be resolved: set auth_file")
 		return exit{usageExitCode}
 	}
-	status, err := auth.Credentials{Path: path}.Status(auth.Codex)
+	credentials := auth.Credentials{Path: path}
+	status, err := credentials.Status(auth.Codex)
 	if errors.Is(err, auth.ErrNoCredential) {
 		// The file's entry may be a provider's key instead of Codex's token pair, which has no
 		// tokens and no account. A failure there is not reported: the first read already said
 		// what the file holds.
-		if key, keyErr := (auth.Credentials{Path: path}).Status(auth.OllamaCloud); keyErr == nil {
+		if key, keyErr := credentials.Status(auth.OllamaCloud); keyErr == nil {
 			status, err = key, nil
 		}
 	}
