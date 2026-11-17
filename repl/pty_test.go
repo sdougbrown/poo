@@ -189,7 +189,10 @@ func takeOverStdio(t *testing.T, slave *os.File) (restore func()) {
 // repl actually leaves. The first clears a draft, the second leaves an
 // empty prompt, and one the editor consumed mid-sequence asks for
 // another. The loop is bounded, so a repl that will not leave fails
-// here instead of reading the next test's keystrokes forever.
+// here instead of reading the next test's keystrokes forever. After
+// the interrupts, the wait holds the terminal until Run has returned:
+// a repl still running holds the editor on fd 0 and reads the next
+// test's keystrokes.
 func endReplCleanup(t *testing.T, term *terminal, exited <-chan struct{}) {
 	t.Helper()
 	if t.Failed() {
@@ -202,6 +205,11 @@ func endReplCleanup(t *testing.T, term *terminal, exited <-chan struct{}) {
 		case <-time.After(300 * time.Millisecond):
 		}
 		term.press("\x03")
+	}
+	select {
+	case <-exited:
+	case <-time.After(10 * time.Second):
+		t.Error("the repl did not leave within 10s")
 	}
 }
 
@@ -231,17 +239,10 @@ func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int)
 		},
 	}
 	go func() { code <- Run(opts); close(exited) }()
-	// The repl must be gone before the terminal moves on: a repl still
-	// running holds the editor on fd 0 and reads the next test's
-	// keystrokes. The wait runs after the interrupts (cleanups unwind
-	// last registered first) and before the stdio restore.
-	t.Cleanup(func() {
-		select {
-		case <-exited:
-		case <-time.After(10 * time.Second):
-			t.Error("the repl did not leave within 10s")
-		}
-	})
+	// endReplCleanup owns the teardown contract: interrupts until the
+	// repl leaves, then the wait that holds the terminal until Run has
+	// returned. It runs after the interrupts and before the stdio
+	// restore (cleanups unwind last registered first).
 	t.Cleanup(func() { endReplCleanup(t, term, exited) })
 	return term, code
 }
