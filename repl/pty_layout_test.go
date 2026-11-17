@@ -621,8 +621,15 @@ func TestAPromptChangeKeepsATypedDraft(t *testing.T) {
 	waitScreen(t, term, "a draft")
 	term.press("\x1b[Z")
 	waitScreen(t, term, "🧠 off")
+	// The draft and its cursor settle together: the frame that shows
+	// the tail also lands the cursor under it, and a read between the
+	// two sees the cursor still on the prompt's row.
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && !strings.Contains(term.screen(), strings.Repeat("d", 20)) {
+	for time.Now().Before(deadline) {
+		screen := term.screen()
+		if strings.Contains(screen, strings.Repeat("d", 20)) && cursorRow(term) >= len(physicalRows(term))-2 {
+			break
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	if !strings.Contains(term.screen(), strings.Repeat("d", 20)) {
@@ -761,6 +768,10 @@ func TestAResizeDuringAHeldPreviewKeepsTheInputAtTheBottom(t *testing.T) {
 		t.Fatalf("signalling the resize: %v", err)
 	}
 	waitBottomRows(t, term, 16)
+	// The held preview comes back when the resize response repaints the
+	// region at the new width; the frame that anchors the response may
+	// land first.
+	waitScreen(t, term, "preview row")
 	if term.rowOf("preview row") < 0 {
 		t.Errorf("the resize took the held preview off the screen:\n%s", indexedRows(term))
 	}

@@ -48,6 +48,10 @@ type layout struct {
 	preview int
 	// previewRows holds the latest rendering, including a clipped head.
 	previewRows []string
+	// resizing marks a resize response in flight: the region is stale
+	// and the preview cache is cleared for a rebuild, so a frame that
+	// lands before the rebuild only anchors.
+	resizing bool
 	// active says the region is set and the footer is reserved.
 	active bool
 }
@@ -373,6 +377,13 @@ func (l *layout) prepare(footer int) {
 	l.anchorLocked()
 }
 
+// endResize lifts the mark once the caller repainted the region.
+func (l *layout) endResize() {
+	l.mu.Lock()
+	l.resizing = false
+	l.mu.Unlock()
+}
+
 // ensure makes the footer the given number of rows, without touching the
 // cursor: a redraw the editor computes from where it stands sizes the
 // footer this way. The caller keeps one spare row while a draft is
@@ -454,6 +465,13 @@ func (l *layout) anchor() {
 // this write and the frame that refills it. The erase rides the footer's
 // size change instead, where the vacated rows actually exist.
 func (l *layout) anchorLocked() {
+	// A frame that lands mid-resize-response only anchors: the resize
+	// path owns the region this round, and repainting the preview cache
+	// here would read it while it is cleared for the rebuild.
+	if l.resizing {
+		l.emit(fmt.Sprintf("\x1b[%d;1H", l.footerTop()))
+		return
+	}
 	var b strings.Builder
 	b.WriteString(seqSaveCursor)
 	pending := l.previewRows
@@ -489,6 +507,7 @@ func (l *layout) resize() bool {
 		l.width, l.height = w, h
 		return false
 	}
+	l.resizing = true
 	if l.footer > l.height-2 {
 		l.footer = l.height - 2
 	}

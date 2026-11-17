@@ -279,10 +279,13 @@ func (m *machine) run() int {
 		case <-resizes:
 			// The terminal changed size: reserve the footer again at
 			// the new geometry and redraw the prompt where it now
-			// belongs.
+			// belongs. The response brackets the frames: a frame that
+			// lands mid-response anchors only, since the region is
+			// cleared for its rebuild and the preview cache is empty.
 			if m.r.layout.resize() {
 				m.r.rewrap(m.r.layout.cols())
 				m.r.repaintPreview()
+				m.r.layout.endResize()
 				input.prompt(m.prompt())
 			}
 		case runID := <-m.esc:
