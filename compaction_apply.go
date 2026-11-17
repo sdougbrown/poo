@@ -152,19 +152,32 @@ func (s *Session) validateWindow(w ProviderWindow) error {
 // core-bound call to the transport's NativeCompactor capability can
 // produce one. A strategy's Window is a request for this call, not the
 // data that is applied. The result carries what the request cost, so the
-// core charges it the way it charges a request a strategy made.
+// core charges it the way it charges a request a strategy made. A model that
+// does not declare the operation, or a transport that cannot compact, is
+// refused here rather than asked for a window it cannot produce.
 func (s *Session) nativeWindow(ctx context.Context) (NativeCompactionResult, error) {
-	compactor, ok := s.opts.Transport.(NativeCompactor)
-	if !ok {
-		return NativeCompactionResult{}, fmt.Errorf("%w: the session's transport cannot compact", ErrInvalidCompaction)
-	}
 	// The view is the authority: it holds the reply and the results the
 	// last request could not carry, and those are what a compaction must
 	// not lose. A session that has asked nothing has no view to compact.
 	s.mu.Lock()
 	model := s.opts.Model
+	transport := s.opts.Transport
 	view := s.viewLocked()
 	s.mu.Unlock()
+	// The model is checked before the transport: a switch to a model that
+	// does not declare compaction asks no transport for a window, even one
+	// that compacted the previous model's state.
+	if !model.HasOp(OpCompact) {
+		return NativeCompactionResult{}, fmt.Errorf("%w: the model %q does not declare the %q operation, "+
+			"so it cannot compact its own state: add compact to its ops, or use the summary strategy",
+			ErrInvalidCompaction, modelLabel(model), OpCompact)
+	}
+	compactor, ok := transport.(NativeCompactor)
+	if !ok {
+		return NativeCompactionResult{}, fmt.Errorf("%w: the transport for the model %q cannot compact the "+
+			"provider's own state: use a provider that serves native compaction (openai-codex), or the summary strategy",
+			ErrInvalidCompaction, modelLabel(model))
+	}
 	return compactor.Compact(ctx, NativeCompaction{Model: model, View: view, Budget: s.budget()})
 }
 

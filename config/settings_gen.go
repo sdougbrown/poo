@@ -507,11 +507,11 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  ContextStrategyEnabled && false,
 			Enabled:   ContextStrategyEnabled,
 			Satisfied: ContextStrategySatisfied,
-			Fair:      f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|handoff|none)$"),
+			Fair:      f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|handoff|native|none)$"),
 			Reason: func() *string {
 				var reasons []string
-				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|handoff|none)$")) && "context.strategy must be summary, handoff or none" != "" {
-					reasons = append(reasons, "context.strategy must be summary, handoff or none")
+				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|handoff|native|none)$")) && "context.strategy must be summary, handoff, native or none" != "" {
+					reasons = append(reasons, "context.strategy must be summary, handoff, native or none")
 				}
 				if len(reasons) == 0 {
 					return nil
@@ -520,8 +520,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			}(),
 			Reasons: func() []string {
 				var reasons []string
-				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|handoff|none)$")) && "context.strategy must be summary, handoff or none" != "" {
-					reasons = append(reasons, "context.strategy must be summary, handoff or none")
+				if !(f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, "^(summary|handoff|native|none)$")) && "context.strategy must be summary, handoff, native or none" != "" {
+					reasons = append(reasons, "context.strategy must be summary, handoff, native or none")
 				}
 				if reasons == nil {
 					reasons = []string{}
@@ -2419,7 +2419,7 @@ var ruleMeta = []RuleMetaEntry{
 	{Field: "ContextHandoffRatio", RuleType: "check", Expr: "f.ContextHandoffRatio != nil && *f.ContextHandoffRatio >= 0 && *f.ContextHandoffRatio <= 1", Reason: "context.handoff.ratio must be between 0 and 1"},
 	{Field: "ContextHardRatio", RuleType: "check", Expr: "f.ContextHardRatio != nil && *f.ContextHardRatio >= 0 && *f.ContextHardRatio <= 1", Reason: "context.hard_ratio must be between 0 and 1"},
 	{Field: "ContextNoticeRatio", RuleType: "check", Expr: "f.ContextNoticeRatio != nil && *f.ContextNoticeRatio >= 0 && *f.ContextNoticeRatio <= 1", Reason: "context.notice_ratio must be between 0 and 1"},
-	{Field: "ContextStrategy", RuleType: "check", Expr: "f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, \"^(summary|handoff|none)$\")", Reason: "context.strategy must be summary, handoff or none"},
+	{Field: "ContextStrategy", RuleType: "check", Expr: "f.ContextStrategy != nil && isValidRegexMatch(*f.ContextStrategy, \"^(summary|handoff|native|none)$\")", Reason: "context.strategy must be summary, handoff, native or none"},
 	{Field: "ContextSummaryKeepRecentTokens", RuleType: "check", Expr: "f.ContextSummaryKeepRecentTokens != nil && *f.ContextSummaryKeepRecentTokens >= 0", Reason: "context.summary.keep_recent_tokens must not be negative"},
 	{Field: "ContextSummaryMaxTokens", RuleType: "check", Expr: "f.ContextSummaryMaxTokens != nil && *f.ContextSummaryMaxTokens >= 0", Reason: "context.summary.max_tokens must not be negative"},
 	{Field: "ContextSummaryRatio", RuleType: "check", Expr: "f.ContextSummaryRatio != nil && *f.ContextSummaryRatio >= 0 && *f.ContextSummaryRatio <= 1", Reason: "context.summary.ratio must be between 0 and 1"},
@@ -2517,7 +2517,7 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
-		explanations = append(explanations, "* check: context.strategy must be summary, handoff or none")
+		explanations = append(explanations, "* check: context.strategy must be summary, handoff, native or none")
 	case "ContextSummaryKeepRecentTokens", "context.summary.keep_recent_tokens":
 		found = true
 		status = avail.ContextSummaryKeepRecentTokens

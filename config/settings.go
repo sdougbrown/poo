@@ -267,7 +267,8 @@ type Context struct {
 	NoticeRatio *float64 `json:"notice_ratio,omitempty"`
 	// HardRatio is the share of the window at which the run stops.
 	HardRatio *float64 `json:"hard_ratio,omitempty"`
-	// Strategy is how the view is compacted: summary, handoff or none.
+	// Strategy is how the view is compacted: summary, handoff, native or
+	// none.
 	Strategy *string `json:"strategy,omitempty"`
 	// Handoff are the handoff strategy's settings.
 	Handoff Handoff `json:"handoff,omitempty"`

@@ -177,8 +177,8 @@
       "type": "check",
       "field": "context.strategy",
       "op": "matches",
-      "pattern": "^(summary|handoff|none)$",
-      "reason": "context.strategy must be summary, handoff or none"
+      "pattern": "^(summary|handoff|native|none)$",
+      "reason": "context.strategy must be summary, handoff, native or none"
     },
     {
       "type": "check",

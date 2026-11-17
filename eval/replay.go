@@ -232,6 +232,9 @@ func Replay(path string, opts ReplayOptions) (*ReplayResult, error) {
 			ModelID:      "replay",
 			API:          poo.APIChatCompletions,
 			ContextLimit: contextLimit,
+			// The replay model applies the provider windows the recording
+			// holds, so it declares the operation a window needs.
+			Ops: []poo.Op{poo.OpChat, poo.OpCompact},
 		},
 		MaxTurns:   maxTurns,
 		WorkingDir: opts.WorkingDir,
