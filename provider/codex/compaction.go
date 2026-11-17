@@ -48,10 +48,10 @@ const maxCompactionItems = 32
 // classification mean what they mean there. A failure that arrives before the
 // endpoint answered is retried. One that arrives mid-stream settles this call,
 // and the run asks for a new window at a later boundary.
-func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.ProviderWindow, error) {
+func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.NativeCompactionResult, error) {
 	body, err := t.compactionBody(in)
 	if err != nil {
-		return poo.ProviderWindow{}, err
+		return poo.NativeCompactionResult{}, err
 	}
 	// The opened reader is kept whole because the window is read from the
 	// response's own items, which the stream interface does not carry.
@@ -67,13 +67,21 @@ func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.P
 	}
 	report := support.Reporter(t.cfg.OnAttempt, nil)
 	if _, _, err := support.OpenWithRetry(ctx, t.policy, open, report); err != nil {
-		return poo.ProviderWindow{}, err
+		return poo.NativeCompactionResult{}, err
 	}
 	defer stream.Close()
 	if err := drainCompaction(stream); err != nil {
-		return poo.ProviderWindow{}, err
+		return poo.NativeCompactionResult{}, err
 	}
-	return compactionWindow(stream.output)
+	window, err := compactionWindow(stream.output)
+	if err != nil {
+		return poo.NativeCompactionResult{}, err
+	}
+	// The request is billed like any other, so the core gets the
+	// endpoint's own counts with the window. An answer that reported
+	// none is left without a report, and the core charges the estimate a
+	// side request gets.
+	return poo.NativeCompactionResult{Window: window, Usage: stream.reportedUsage()}, nil
 }
 
 // compactionBody turns a native compaction into the wire payload.

@@ -151,11 +151,12 @@ func (s *Session) validateWindow(w ProviderWindow) error {
 // The window is the provider's own compacted state, and only the
 // core-bound call to the transport's NativeCompactor capability can
 // produce one. A strategy's Window is a request for this call, not the
-// data that is applied.
-func (s *Session) nativeWindow(ctx context.Context) (ProviderWindow, error) {
+// data that is applied. The result carries what the request cost, so the
+// core charges it the way it charges a request a strategy made.
+func (s *Session) nativeWindow(ctx context.Context) (NativeCompactionResult, error) {
 	compactor, ok := s.opts.Transport.(NativeCompactor)
 	if !ok {
-		return ProviderWindow{}, fmt.Errorf("%w: the session's transport cannot compact", ErrInvalidCompaction)
+		return NativeCompactionResult{}, fmt.Errorf("%w: the session's transport cannot compact", ErrInvalidCompaction)
 	}
 	// The view is the authority: it holds the reply and the results the
 	// last request could not carry, and those are what a compaction must

@@ -2194,3 +2194,235 @@ func TestACompactionsUsageIsRecorded(t *testing.T) {
 		t.Error("the observer saw no turn's usage event")
 	}
 }
+
+// The native request's accounting: a request the transport makes for a
+// provider window is billed like any other, and the run's token ceiling
+// counts it.
+
+// nativeWindowOf returns the window the fake native transport returns,
+// with a required payload of the given content.
+func nativeWindowOf(data string) poo.ProviderWindow {
+	return poo.ProviderWindow{Items: []poo.ContentBlock{{
+		Kind: poo.ContentProvider,
+		Provider: &poo.ProviderBlock{
+			API:      poo.APIChatCompletions,
+			Type:     "compaction",
+			Required: true,
+			Data:     []byte(data),
+		},
+	}}}
+}
+
+// nativeWindowRequest is a compactor that asks the core for a native
+// compaction, and nothing else.
+func nativeWindowRequest() *compactionCompactor {
+	return &compactionCompactor{
+		should: afterTurns(1),
+		compaction: func(poo.View) (poo.Compaction, error) {
+			return poo.Compaction{Strategy: "native", Window: &poo.ProviderWindow{}}, nil
+		},
+	}
+}
+
+// compactionUsageRecords returns the usage records the requests a
+// compaction made wrote.
+func compactionUsageRecords(sink *recordingSink) []*poo.UsageRecord {
+	var out []*poo.UsageRecord
+	for _, rec := range sink.allRecords() {
+		usage, ok := rec.(*poo.UsageRecord)
+		if !ok || usage.Origin != poo.OriginCompaction {
+			continue
+		}
+		out = append(out, usage)
+	}
+	return out
+}
+
+// TestANativeCompactionsUsageIsRecorded covers the accounting of a
+// provider-native request: the endpoint billed it, so its usage is
+// recorded as a compaction's, names no request because it is not a turn,
+// and counts against the run's token ceiling.
+func TestANativeCompactionsUsageIsRecorded(t *testing.T) {
+	tr := scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}})
+	tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
+	tr.SetWindowUsage(&poo.UsageReport{InputTokens: 60, OutputTokens: 40})
+	observer := &collectingObserver{}
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = nativeWindowRequest()
+	// The compaction's own tokens are the whole of what exhausts the
+	// ceiling: the two turns report no usage, and their estimates are a
+	// few tokens.
+	opts.MaxRunTokens = 100
+	s := newTestSession(t, opts, poo.WithObserver(observer))
+	res := runSession(t, s, "do the thing")
+
+	records := compactionUsageRecords(sink)
+	if len(records) != 1 {
+		t.Fatalf("the log holds %d usage records for the native compaction, want 1", len(records))
+	}
+	usage := records[0]
+	if usage.InputTokens != 60 || usage.OutputTokens != 40 {
+		t.Errorf("the native compaction's usage is %d in and %d out, want the endpoint's 60 and 40",
+			usage.InputTokens, usage.OutputTokens)
+	}
+	if usage.Request != 0 {
+		t.Errorf("the native compaction's usage names the request %d, want none: it is not a turn", usage.Request)
+	}
+	if usage.Turn < 1 {
+		t.Errorf("the native compaction's usage names the turn %d, want the run's own", usage.Turn)
+	}
+	if res.Detail.Usage == nil || res.Detail.Usage.InputTokens != 60 || res.Detail.Usage.OutputTokens != 40 {
+		t.Errorf("the settle detail's usage is %+v, want the native compaction's 60 in and 40 out", res.Detail.Usage)
+	}
+	// The charge reaches the run's ceiling: 100 tokens is the whole
+	// limit, and the compaction is what spent it.
+	if res.Reason != poo.ReasonBudgetExhausted {
+		t.Errorf("the run settled %q, want budget_exhausted from the native compaction's tokens", res.Reason)
+	}
+
+	waitFor(t, "the observer to see the native compaction's usage event", func() bool {
+		for _, ev := range observer.snapshot() {
+			if ev.Name == poo.EventUsage && ev.Payload["origin"] == poo.OriginCompaction {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// TestANativeCompactionWithoutUsageIsChargedTheEstimate covers the rule:
+// an endpoint that reports no usage is charged the estimate a side
+// request gets, measured from the request and the window it produced. A
+// compacted conversation would otherwise be free, and the ceiling would
+// count a compaction as nothing.
+func TestANativeCompactionWithoutUsageIsChargedTheEstimate(t *testing.T) {
+	tr := scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}})
+	// The window's payload is what the estimate prices: four thousand
+	// characters are about eleven hundred tokens, so the ceiling below
+	// sits between the two turns' own estimates and those estimates plus
+	// the compaction's.
+	tr.SetWindow(nativeWindowOf(strings.Repeat("x", 4000)))
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = nativeWindowRequest()
+	opts.MaxRunTokens = 1500
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+
+	if records := compactionUsageRecords(sink); len(records) != 0 {
+		t.Errorf("the log holds %d usage records for the native compaction, want none: the estimate is not a report",
+			len(records))
+	}
+	if res.Reason != poo.ReasonBudgetExhausted {
+		t.Errorf("the run settled %q, want budget_exhausted from the estimated compaction", res.Reason)
+	}
+}
+
+// TestAFailedNativeCompactionInstallsNothing covers a native request the
+// endpoint did not answer: the view keeps the turn the window would have
+// replaced, no compaction record is written, and the request costs
+// nothing because there is no answer to charge.
+func TestAFailedNativeCompactionInstallsNothing(t *testing.T) {
+	tr := scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}})
+	tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
+	tr.SetWindowError(errors.New("the endpoint broke"))
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = nativeWindowRequest()
+	s := newTestSession(t, opts)
+	res := runSession(t, s, "do the thing")
+
+	if sink.count("compaction") != 0 {
+		t.Errorf("the log holds %d compaction records, want none: the window was never produced", sink.count("compaction"))
+	}
+	if records := compactionUsageRecords(sink); len(records) != 0 {
+		t.Errorf("the log holds %d usage records for the failed native compaction, want none", len(records))
+	}
+	reqs := tr.Requests()
+	if len(reqs) < 2 {
+		t.Fatalf("the transport got %d requests, want the failed compaction and the turn after it", len(reqs))
+	}
+	last := reqs[len(reqs)-1].Messages
+	var text strings.Builder
+	for _, m := range last {
+		text.WriteString(turnSpanText([]poo.Message{m}))
+		for _, c := range m.Content {
+			if c.Provider != nil {
+				t.Fatalf("the request after the failed compaction carries provider data: %+v", c)
+			}
+		}
+	}
+	for _, want := range []string{"do the thing", "echoed"} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("the request after the failed compaction holds %q, want the run's own history with %q",
+				text.String(), want)
+		}
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn: a failed compaction leaves the run alive", res.Reason)
+	}
+}
+
+// blockedNativeTransport is the scripted transport whose native compaction
+// waits for the run's interrupt and then answers anyway, the way a
+// cooperative transport may.
+type blockedNativeTransport struct {
+	*pootest.Transport
+	// entered closes when the compaction is inside the transport.
+	entered chan struct{}
+	// once closes entered once.
+	once sync.Once
+}
+
+// Compact waits for the run's interrupt, then reports a window and what
+// the request cost.
+func (t *blockedNativeTransport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.NativeCompactionResult, error) {
+	t.once.Do(func() { close(t.entered) })
+	<-ctx.Done()
+	return poo.NativeCompactionResult{
+		Window: nativeWindowOf(`{"encrypted_content":"abc"}`),
+		Usage:  &poo.UsageReport{InputTokens: 60, OutputTokens: 40},
+	}, nil
+}
+
+// TestAnInterruptedNativeCompactionStillCostsItsTokens covers the order the
+// accounting runs in: the endpoint billed the request before the interrupt
+// arrived, so the compaction's tokens are recorded even though the window
+// it produced is discarded.
+func TestAnInterruptedNativeCompactionStillCostsItsTokens(t *testing.T) {
+	tr := &blockedNativeTransport{
+		Transport: scripted([]fakeResponse{toolCallTurn(), {text: "the answer"}}),
+		entered:   make(chan struct{}),
+	}
+	sink := &recordingSink{}
+	opts := testOptions(t, tr, &echoTool{result: "echoed"}, sink)
+	opts.Compactor = nativeWindowRequest()
+	s := newTestSession(t, opts)
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	<-tr.entered
+	if _, err := s.Send("interrupt", poo.Interrupt); err != nil {
+		t.Fatalf("interrupting the run: %v", err)
+	}
+	res, err := s.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+
+	if sink.count("compaction") != 0 {
+		t.Errorf("the log holds %d compaction records, want none: the window was discarded", sink.count("compaction"))
+	}
+	records := compactionUsageRecords(sink)
+	if len(records) != 1 {
+		t.Fatalf("the log holds %d usage records for the interrupted compaction, want 1", len(records))
+	}
+	if records[0].InputTokens != 60 || records[0].OutputTokens != 40 {
+		t.Errorf("the interrupted compaction's usage is %d in and %d out, want the endpoint's 60 and 40",
+			records[0].InputTokens, records[0].OutputTokens)
+	}
+	if res.Reason != poo.ReasonEndTurn {
+		t.Errorf("the run settled %q, want end_turn after the discarded compaction", res.Reason)
+	}
+}

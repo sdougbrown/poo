@@ -312,13 +312,13 @@ func (t *replayNativeTransport) setWindow(w *poo.ProviderWindow) {
 }
 
 // Compact returns the recorded window.
-func (t *replayNativeTransport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.ProviderWindow, error) {
+func (t *replayNativeTransport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.NativeCompactionResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.window == nil {
-		return poo.ProviderWindow{}, fmt.Errorf("eval: the recording holds no window to apply")
+		return poo.NativeCompactionResult{}, fmt.Errorf("eval: the recording holds no window to apply")
 	}
-	return *t.window, nil
+	return poo.NativeCompactionResult{Window: *t.window}, nil
 }
 
 // replayJobResults returns the results a recording holds that never

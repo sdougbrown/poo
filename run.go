@@ -1567,6 +1567,29 @@ func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageRepo
 	return s.recordUsage(run, NewRecordMetaFrom("usage", OriginCompaction), turn, 0, usage, requestChars)
 }
 
+// accountNativeCompaction charges the request a native compaction made.
+//
+// The request is a side request like the ones a strategy sends: it appends
+// nothing to the history, and the endpoint charged for it all the same. A
+// usage the endpoint reported is written as the compaction's own, and one it
+// withheld is charged the estimate of the request and the window it
+// produced, so a compaction is never free.
+func (s *Session) accountNativeCompaction(run *runState, result NativeCompactionResult, requestChars int) {
+	s.mu.Lock()
+	turn := run.turn
+	s.mu.Unlock()
+	if result.Usage != nil {
+		s.writeCompactionUsage(run, turn, result.Usage, requestChars)
+		return
+	}
+	s.mu.Lock()
+	if !run.committed && !run.sealed {
+		produced := Message{Role: RoleAssistant, Content: result.Window.Items}
+		run.tokens += s.tokensForCharsLocked(requestChars + estimateMessageChars(produced))
+	}
+	s.mu.Unlock()
+}
+
 // chargeUsageLocked adds a request's tokens to the run: its ceiling, the
 // accounting its settle detail reports, and the ratio the estimator
 // calibrates from.

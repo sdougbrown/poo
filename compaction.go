@@ -146,8 +146,20 @@ type EndRun struct {
 // can stand in for it.
 type NativeCompactor interface {
 	// Compact asks the provider to compact its own state and returns the
-	// window it produced.
-	Compact(ctx context.Context, in NativeCompaction) (ProviderWindow, error)
+	// window it produced and what the request cost. A failure returns
+	// neither: there is no window to install and nothing to charge.
+	Compact(ctx context.Context, in NativeCompaction) (NativeCompactionResult, error)
+}
+
+// NativeCompactionResult is what a native compaction produced.
+type NativeCompactionResult struct {
+	// Window is the provider's compacted state.
+	Window ProviderWindow
+	// Usage is the accounting the endpoint reported for the request.
+	//
+	// It is nil when the endpoint reported none, and the core then
+	// charges the request the estimate a side request gets.
+	Usage *UsageReport
 }
 
 // NativeCompaction is what a native compactor is given.

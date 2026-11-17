@@ -140,6 +140,9 @@ type streamReader struct {
 	ttft support.TTFT
 	// usageSent reports that the usage report has been produced.
 	usageSent bool
+	// usageReported reports that the endpoint itself reported token
+	// counts for the response.
+	usageReported bool
 	// usage holds the usage report, so a stream that fails before its
 	// terminal event arrives can still report what it knows.
 	usage *poo.UsageReport
@@ -260,6 +263,21 @@ func (r *streamReader) fail(err error) (poo.StreamItem, error) {
 // A stream that failed before its terminal event still produced tokens,
 // so the transport reports what it knows.
 func (r *streamReader) ReportUsage() *poo.UsageReport {
+	return r.usage
+}
+
+// reportedUsage returns the usage the endpoint itself reported, and nil
+// when it reported none.
+//
+// ReportUsage answers with a report once the stream ended even when the
+// endpoint gave no counts, because the time to the first token is still
+// worth having. A compaction's accounting needs the counts: a request
+// whose usage the endpoint withheld is charged the estimate a side
+// request gets, not zero.
+func (r *streamReader) reportedUsage() *poo.UsageReport {
+	if !r.usageReported {
+		return nil
+	}
 	return r.usage
 }
 
@@ -664,6 +682,7 @@ func (r *streamReader) setUsage(u *codexUsage) {
 		OutputTokens:    u.OutputTokens,
 		CacheReadTokens: cacheRead,
 	}
+	r.usageReported = true
 }
 
 // usageItem returns the event that reports the request's usage.

@@ -45,6 +45,14 @@ func compactView() poo.View {
 // same way.
 func compact(t *testing.T, compactor poo.NativeCompactor, view poo.View) (poo.ProviderWindow, error) {
 	t.Helper()
+	res, err := compactResult(t, compactor, view)
+	return res.Window, err
+}
+
+// compactResult asks a transport's native compaction capability for
+// everything a compaction produced.
+func compactResult(t *testing.T, compactor poo.NativeCompactor, view poo.View) (poo.NativeCompactionResult, error) {
+	t.Helper()
 	return compactor.Compact(context.Background(), poo.NativeCompaction{
 		Model: poo.ModelInfo{ModelID: "gpt-6.1-sol"},
 		View:  view,
@@ -377,5 +385,61 @@ func TestCancellingTheRunEndsTheCompaction(t *testing.T) {
 	cancel()
 	if err := <-result; !errors.Is(err, context.Canceled) {
 		t.Fatalf("the compaction ended with %v, want the run's cancellation", err)
+	}
+}
+
+// The compaction's accounting: the request is billed, so its answer carries
+// what the endpoint reported, and nothing when it reported nothing.
+
+// compactionStreamWithUsage renders the stream of a compaction response whose
+// terminal event carries the request's token counts.
+func compactionStreamWithUsage(usage string, items ...string) string {
+	return frame(`{"type":"response.completed","response":{"status":"completed","usage":`+usage+`,"output":[`+strings.Join(items, ",")+`]}}`) + done
+}
+
+// TestACompactionReportsWhatTheRequestCost covers the accounting a
+// compaction hands the core: the endpoint's own counts ride with the window,
+// because compacting costs the same prompt and completion a turn does.
+func TestACompactionReportsWhatTheRequestCost(t *testing.T) {
+	srv := newServer(t, compactionStreamWithUsage(
+		`{"input_tokens":60,"output_tokens":40,"input_tokens_details":{"cached_tokens":10}}`,
+		compactionItem))
+	tr := newTransport(srv.URL)
+
+	res, err := compactResult(t, tr, compactView())
+	if err != nil {
+		t.Fatalf("compacting the view: %v", err)
+	}
+	if res.Usage == nil {
+		t.Fatalf("the compaction reported no usage, want the endpoint's 60 in and 40 out")
+	}
+	if res.Usage.InputTokens != 60 || res.Usage.OutputTokens != 40 {
+		t.Errorf("the compaction's usage is %d in and %d out, want the endpoint's 60 and 40",
+			res.Usage.InputTokens, res.Usage.OutputTokens)
+	}
+	if res.Usage.CacheReadTokens == nil || *res.Usage.CacheReadTokens != 10 {
+		t.Errorf("the compaction's cache read is %v, want the endpoint's 10", res.Usage.CacheReadTokens)
+	}
+	if len(res.Window.Items) != 1 || res.Window.Items[0].Provider == nil {
+		t.Errorf("the window holds %+v, want the response's compaction item", res.Window.Items)
+	}
+}
+
+// TestACompactionThatReportsNoUsageHasNone covers the other half: an endpoint
+// that reports no token counts hands the core no report, so the core charges
+// the estimate a side request gets rather than a zero-cost request.
+func TestACompactionThatReportsNoUsageHasNone(t *testing.T) {
+	srv := newServer(t, compactionStream(compactionItem))
+	tr := newTransport(srv.URL)
+
+	res, err := compactResult(t, tr, compactView())
+	if err != nil {
+		t.Fatalf("compacting the view: %v", err)
+	}
+	if res.Usage != nil {
+		t.Errorf("the compaction reported the usage %+v, want none: the endpoint reported none", res.Usage)
+	}
+	if len(res.Window.Items) != 1 || res.Window.Items[0].Provider == nil {
+		t.Errorf("the window holds %+v, want the response's compaction item", res.Window.Items)
 	}
 }

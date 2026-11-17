@@ -276,7 +276,16 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	// core asks the transport for it. A strategy's items are never
 	// applied: it can only ask for the native compaction.
 	if compaction.Window != nil && compaction.Replace == nil && len(compaction.Rewrite) == 0 && compaction.End == nil {
-		window, werr := s.nativeWindow(actCtx)
+		s.mu.Lock()
+		requestChars := s.historyCharsLocked()
+		s.mu.Unlock()
+		result, werr := s.nativeWindow(actCtx)
+		// The endpoint billed the request, so what it cost is accounted
+		// before the window is judged: a window this run goes on to
+		// discard still spent the tokens it spent.
+		if werr == nil {
+			s.accountNativeCompaction(run, result, requestChars)
+		}
 		if s.interruptPending(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
 			if !s.runWindingDown(run) {
 				s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": errCompactionInterrupted.Error()})
@@ -287,7 +296,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 			s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": werr.Error()})
 			return compactionOutcome{}, werr
 		}
-		compaction.Window = &window
+		compaction.Window = &result.Window
 	}
 	if err := s.validateCompaction(compaction); err != nil {
 		s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
