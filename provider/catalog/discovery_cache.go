@@ -207,13 +207,20 @@ func cachePath(stateDir string) string {
 	return filepath.Join(stateDir, "poo", "discovery.json")
 }
 
+// StateRootEnv is the environment variable the state root is read from.
+//
+// The discovery cache lives under the state root, so a test that isolates the root must
+// spell this name the way this package reads it: pootest holds the same name beside this
+// one, and settings_test.go there holds the two together.
+const StateRootEnv = "XDG_STATE_HOME"
+
 // defaultStateDir returns the user's state directory.
 //
 // The state directory is the one the XDG specification names, and the
 // cache directory is the fallback: a system without a state directory
 // still has one.
 func defaultStateDir() string {
-	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
+	if dir := os.Getenv(StateRootEnv); dir != "" {
 		return dir
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {

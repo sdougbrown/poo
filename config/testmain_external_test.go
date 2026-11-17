@@ -3,6 +3,8 @@ package config_test
 import (
 	"os"
 	"testing"
+
+	"github.com/sdougbrown/poo/pootest"
 )
 
 // TestMain points the state root at a directory of the tests' own: building a
@@ -15,7 +17,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	defer os.RemoveAll(dir)
-	if err := os.Setenv("XDG_STATE_HOME", dir); err != nil {
+	if err := pootest.IsolateStateRoot(dir); err != nil {
 		println("config tests: pointing the state root at the test directory:", err.Error())
 		os.Exit(1)
 	}
