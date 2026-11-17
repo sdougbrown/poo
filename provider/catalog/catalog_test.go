@@ -287,8 +287,8 @@ func TestARoleNeedsTheOperation(t *testing.T) {
 	if opErr.Role != catalog.RoleDecider {
 		t.Errorf("the error names the %q role, want decider", opErr.Role)
 	}
-	if opErr.Op != poo.OpSystemOne {
-		t.Errorf("the error names the %q operation, want systemone", opErr.Op)
+	if len(opErr.Ops) != 2 || opErr.Ops[0] != poo.OpSystemOne || opErr.Ops[1] != poo.OpDecisions {
+		t.Errorf("the error names the operations %v, want systemone and decisions", opErr.Ops)
 	}
 }
 
@@ -306,8 +306,8 @@ func TestTheChatRoleNeedsTheChatOperation(t *testing.T) {
 	if !errors.As(err, &opErr) {
 		t.Fatalf("the error is %v, want an operation error", err)
 	}
-	if opErr.Op != poo.OpChat {
-		t.Errorf("the error names the %q operation, want chat", opErr.Op)
+	if len(opErr.Ops) != 1 || opErr.Ops[0] != poo.OpChat {
+		t.Errorf("the error names the operations %v, want chat", opErr.Ops)
 	}
 }
 
@@ -771,5 +771,97 @@ func TestTheFileOverrulesWhatTheEndpointReports(t *testing.T) {
 	// The probe reported 131072, and the file's 32768 is what the catalog holds.
 	if info.ContextLimit != 32768 || info.Source["context_limit"] != catalog.LayerModelsFile {
 		t.Errorf("the context limit is %d from %q, want the file's 32768", info.ContextLimit, info.Source["context_limit"])
+	}
+}
+
+// TestAnUnresolvedRoleSaysWhatIsKnown covers the message a role failure carries:
+// the name as it was written, and the models that would have served the role, so
+// a typo or an unqualified name is told apart from a file that was not read.
+func TestAnUnresolvedRoleSaysWhatIsKnown(t *testing.T) {
+	settings := localSettings()
+	settings.Roles = map[string]string{"chat": "gemma"}
+	c := catalog.New(catalog.Options{Settings: settings})
+	err := c.CheckRoles()
+	var unresolved *catalog.UnresolvedError
+	if !errors.As(err, &unresolved) {
+		t.Fatalf("the check is %v, want an UnresolvedError", err)
+	}
+	for _, want := range []string{`"gemma"`, `"chat"`, `"gemma4"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the failure is %q, want it to name %s", err, want)
+		}
+	}
+}
+
+// TestAnUnassignedRoleSaysWhatIsKnown covers the message for a role nothing is assigned
+// to: it must not claim that no model serves the role, because it did not look. The
+// models that would serve it are named, so an operator sees what to assign.
+func TestAnUnassignedRoleSaysWhatIsKnown(t *testing.T) {
+	c := catalog.New(catalog.Options{Settings: localSettings()})
+	_, err := c.Role(catalog.RoleChat)
+	var unresolved *catalog.UnresolvedError
+	if !errors.As(err, &unresolved) {
+		t.Fatalf("the role is %v, want an UnresolvedError", err)
+	}
+	if strings.Contains(err.Error(), "no model") {
+		t.Errorf("the failure is %q, and it claims nothing serves the role", err)
+	}
+	if !strings.Contains(err.Error(), `"gemma4"`) {
+		t.Errorf("the failure is %q, want it to name the models that would serve the role", err)
+	}
+}
+
+// TestARoleNeedsTheModelToServeIt covers the check a session applies: a model in the
+// catalog that cannot serve the role is not that role's model.
+func TestARoleNeedsTheModelToServeIt(t *testing.T) {
+	settings := localSettings()
+	settings.Models["gemma4"] = catalog.ModelSettings{
+		Endpoint: "grace",
+		ModelID:  "gemma4",
+		Ops:      []poo.Op{poo.OpSystemOne},
+	}
+	settings.Roles = map[string]string{"chat": "gemma4"}
+	c := catalog.New(catalog.Options{Settings: settings})
+	_, err := c.Role(catalog.RoleChat)
+	var op *catalog.OpError
+	if !errors.As(err, &op) {
+		t.Fatalf("the role is %v, want an OpError", err)
+	}
+	if len(op.Ops) != 1 || op.Ops[0] != poo.OpChat {
+		t.Errorf("the operations are %v, want chat", op.Ops)
+	}
+}
+
+// TestADeciderServesTheRoleWithEitherOperation covers the rule the decider itself
+// applies: it answers through the systemone API or through chat, so a model that
+// serves one of them is the role's model. Requiring both refused a model the decider
+// would run.
+func TestADeciderServesTheRoleWithEitherOperation(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		ops  []poo.Op
+		want bool
+	}{
+		{name: "systemone", ops: []poo.Op{poo.OpSystemOne}, want: true},
+		{name: "decisions through chat", ops: []poo.Op{poo.OpDecisions}, want: true},
+		{name: "chat alone", ops: []poo.Op{poo.OpChat}, want: false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			settings := localSettings()
+			settings.Models["gemma4"] = catalog.ModelSettings{
+				Endpoint: "grace",
+				ModelID:  "gemma4",
+				Ops:      c.ops,
+			}
+			settings.Roles = map[string]string{"decider": "gemma4"}
+			catalogOf := catalog.New(catalog.Options{Settings: settings})
+			_, err := catalogOf.Role(catalog.RoleDecider)
+			if c.want && err != nil {
+				t.Fatalf("the decider role refused the model: %v", err)
+			}
+			if !c.want && err == nil {
+				t.Fatal("the decider role accepted a model that serves neither operation")
+			}
+		})
 	}
 }

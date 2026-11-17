@@ -108,6 +108,12 @@ file the operator put there is never skipped in silence.
 against the settings file's directory. `cli_registry.paths` and
 `feeds.paths` answer to the working directory.
 
+`poo roles` is the check to run before a session: each role the settings assign
+is resolved against the catalog, and printed with the provider that serves it
+and where that provider's key comes from. No key is printed and no credential is
+traded, and a role that does not resolve exits non-zero, naming the models that
+would have served it.
+
 **Models.** The settings define the models: `endpoints` name the
 servers (with `api_key_env` for the credential's environment
 variable, or `api_key` for a key written in the settings), `models`

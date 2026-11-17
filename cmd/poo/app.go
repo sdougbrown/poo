@@ -65,6 +65,15 @@ const modelsLong = `The command lists the effective catalog: the models the sett
 the models the binary knows about, and what the endpoints report.
 --explain names one model and prints the layer that set each field.`
 
+// rolesLong is the help body of `poo roles`.
+const rolesLong = `The check an operator runs without starting a session. Each role the settings
+assign is resolved against the catalog — the settings, and the models file below
+them — and printed with the provider that serves it and where that provider's
+key comes from. A role that does not resolve says what is known: the name as it
+was written, and the models that would have served it. No key is printed and no
+credential is traded, and the command exits non-zero when a role does not
+resolve.`
+
 // promptLong is the help body of `poo prompt`.
 const promptLong = `The command prints the prompt a session would send, with the sections
 marked, so an operator can see what the model is told.`
@@ -148,6 +157,14 @@ func pooApp(stdout io.Writer) *clicontract.App {
 				},
 				Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 					return handleModels(inv, stdout, cmdStderr), nil
+				},
+			},
+			{
+				Name:  "roles",
+				Short: "Resolve each role to its model, provider and credential source",
+				Long:  rolesLong,
+				Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
+					return handleRoles(inv, stdout, cmdStderr), nil
 				},
 			},
 			{
