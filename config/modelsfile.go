@@ -11,7 +11,6 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config/internal/piimport"
 	"github.com/sdougbrown/poo/provider/catalog"
-	"github.com/sdougbrown/poo/provider/codex"
 )
 
 // ModelsFileName is the name poo's own models file is discovered by, beside a
@@ -51,13 +50,11 @@ func (s *Settings) importPi(dir string) error {
 	if err != nil {
 		return err
 	}
-	// pi's built-in providers are offered when a credential file is there,
-	// because they are what its credential can run. A settings file that names
-	// no credential file, and has none at the default path, gains no models it
-	// did not ask for. They are the layer's fallback: the models file is the
+	// The built-in providers are the models' fallback layer: what the upstream
+	// endpoints do not list, in poo's own vocabulary. The models file is the
 	// operator's word and overrules them by name.
-	if s.credentialPath != "" && fileExists(s.credentialPath) {
-		s.addLayer(piLayer(piimport.BuiltinCodex(codex.DefaultEndpoint)))
+	if err := s.applyBuiltinProviders(os.Getenv(EnvBuiltinModels)); err != nil {
+		return err
 	}
 	if modelsPath != "" {
 		if err := s.importModelsFile(modelsPath); err != nil {

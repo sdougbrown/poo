@@ -803,6 +803,120 @@ roles:
 	}
 }
 
+// TestAReplacementReplacesTheBuiltinCodexModels covers the built-in record
+// being data: the file POO_BUILTIN_MODELS names is read instead of the
+// built-in providers' own record, so a binary that ships without the newer
+// list still serves the models the replacement declares. The replaced list's
+// models are gone.
+func TestAReplacementReplacesTheBuiltinCodexModels(t *testing.T) {
+	dir := t.TempDir()
+	replacement := filepath.Join(dir, "replacement.yaml")
+	if err := os.WriteFile(replacement, []byte(`endpoints:
+  openai-codex:
+    endpoint: `+codex.DefaultEndpoint+`
+    api: responses
+    skip_probe: true
+    models:
+      gpt-fresh:
+        context_limit: 400000
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [off, low, medium, high]
+`), 0o644); err != nil {
+		t.Fatalf("writing the replacement: %v", err)
+	}
+	writeCodexAuth(t, dir, fakeCodexToken(t, "acct_live"), "rt_live", 4102444800000)
+	path := writeCodexSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+pi_auth_file: auth.json
+roles:
+  chat: openai-codex/gpt-fresh
+`)
+	t.Setenv(config.EnvBuiltinModels, replacement)
+
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	fresh := catalogModel(t, settings, "openai-codex/gpt-fresh")
+	if fresh.ContextLimit != 400000 {
+		t.Errorf("the replacement's model has a context limit of %d, want 400000", fresh.ContextLimit)
+	}
+	if _, err := catalog.New(settings.CatalogOptions()).Resolve("openai-codex/gpt-5.6-luna"); err == nil {
+		t.Errorf("the replaced record's model is still offered")
+	}
+}
+
+// TestAReplacementIsReadEvenWhereTheModelsAreNotOffered covers the promise:
+// a file POO_BUILTIN_MODELS names is read wherever it is named, so a file
+// that does not read fails the load even on a machine whose credential file
+// is not there and offers no built-in providers at all.
+func TestAReplacementIsReadEvenWhereTheModelsAreNotOffered(t *testing.T) {
+	isolatedConfigDir(t)
+	dir := t.TempDir()
+	replacement := filepath.Join(dir, "replacement.yaml")
+	if err := os.WriteFile(replacement, []byte(`endpoints: {}`), 0o644); err != nil {
+		t.Fatalf("writing the replacement: %v", err)
+	}
+	path := writeCodexSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	t.Setenv(config.EnvBuiltinModels, replacement)
+
+	_, err := config.Load(path)
+	if err == nil || !strings.Contains(err.Error(), "replacement.yaml") {
+		t.Fatalf("the load is %v, want the replacement's refusal", err)
+	}
+}
+
+// TestAValidReplacementOffersNoModelsWhereTheCredentialIsMissing covers the
+// gate: the replacement is read wherever it is named, but the built-in
+// providers are offered only when a credential file is there. A load with a
+// valid replacement and no credential file succeeds, and the provider's
+// models are not offered.
+func TestAValidReplacementOffersNoModelsWhereTheCredentialIsMissing(t *testing.T) {
+	isolatedConfigDir(t)
+	dir := t.TempDir()
+	override := filepath.Join(dir, "replacement.yaml")
+	if err := os.WriteFile(override, []byte(`endpoints:
+  openai-codex:
+    endpoint: `+codex.DefaultEndpoint+`
+    api: responses
+    skip_probe: true
+    models:
+      gpt-fresh:
+        inputs: [text, image]
+        context_limit: 400000
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [low, medium, high]
+`), 0o644); err != nil {
+		t.Fatalf("writing the replacement: %v", err)
+	}
+	path := writeCodexSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+`)
+	t.Setenv(config.EnvBuiltinModels, override)
+
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	for name := range catalog.New(settings.CatalogOptions()).Endpoints() {
+		if name == auth.ProviderCodex {
+			t.Fatalf("the provider was offered without a credential file")
+		}
+	}
+	if _, err := catalog.New(settings.CatalogOptions()).Resolve("openai-codex/gpt-fresh"); err == nil {
+		t.Errorf("the replacement's model was offered without a credential file")
+	}
+}
+
 // TestTheChatReasoningSettingReachesTheCodexRequest covers the configured
 // level: reasoning.chat is the operator's, and a Codex request goes out asking
 // for it rather than for the model's fallback.

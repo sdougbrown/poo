@@ -181,11 +181,18 @@ prints no secret and trades none, so it leaves the credential as it found
 it. `--json` prints the same report for a script.
 
 No provider in `models.json` is needed for this. When a credential file
-is there, the built-in provider adds the Codex models pi bundles; a
+is there, the built-in provider adds the Codex models the built-in record
+declares; a
 `models_file` or the settings' own `models` still win on a name
-collision, and a model pi adds later can be named under the same
-provider. The built-in list is a snapshot, so a newer id is a `models`
+collision, and a model the record does not name can be named under the
+same provider. The record is a snapshot, so a newer id is a `models`
 entry away.
+
+The record is a data file, not code: `builtin-models.yaml`, in poo's own
+models-file vocabulary. `POO_BUILTIN_MODELS` names a file read instead of
+it, in the same vocabulary. A binary that ships without the newer list
+points the variable at a file that holds it, and a file that does not read
+fails the load.
 
 poo reads the Codex entry for the provider id `openai-codex` only, and
 sends it only to the built-in `https://chatgpt.com/backend-api`
