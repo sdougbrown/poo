@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -578,6 +579,76 @@ func TestTheWaitGivesUpWhenTheSignInDoesNotComeBack(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Errorf("the wait took %s, want it to give up on the bound it was given", elapsed)
+	}
+}
+
+// TestAListenerFailureSaysHowToGetThePort covers the wait that cannot bind its callback port:
+// another process holds it, so the browser has nowhere to come back to. The paste is read by a
+// goroutine the wait starts once it holds the listener, so a failed bind has no paste to offer:
+// the failure names the port, says it is taken, and the command returns.
+func TestAListenerFailureSaysHowToGetThePort(t *testing.T) {
+	isolatedConfigHome(t)
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+	withoutATerminal(t)
+
+	listened := listenOn
+	listenOn = func(network, address string) (net.Listener, error) {
+		return nil, fmt.Errorf("%s %s: bind: address already in use", network, address)
+	}
+	t.Cleanup(func() { listenOn = listened })
+
+	type result struct {
+		code   int
+		stderr string
+	}
+	exited := make(chan result, 1)
+	go func() {
+		code, stderr := runCLI(t, "login", "codex", "--settings", settings, "--no-browser")
+		exited <- result{code: code, stderr: stderr}
+	}()
+
+	select {
+	case got := <-exited:
+		if got.code != operationalExitCode {
+			t.Errorf("the exit code is %d, want %d", got.code, operationalExitCode)
+		}
+		for _, want := range []string{
+			"localhost:1455",
+			"the port is already taken",
+			"free it and run the sign-in again",
+		} {
+			if !strings.Contains(got.stderr, want) {
+				t.Errorf("the failure is %q, want it to name %q", got.stderr, want)
+			}
+		}
+		// The failure must not send the operator to a paste: the goroutine that reads one
+		// starts only after the listener is held.
+		if strings.Contains(got.stderr, "paste") {
+			t.Errorf("the failure offers a paste this run does not read: %q", got.stderr)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the sign-in did not return after the listener failed")
+	}
+}
+
+// TestTheWaitIsTheValueThatWasTyped covers the flag against its default: a --wait that was typed
+// is used as it was typed, zero included, and only an absent flag gets the five minutes.
+func TestTheWaitIsTheValueThatWasTyped(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		o    loginOptions
+		want time.Duration
+	}{
+		{name: "not typed", o: loginOptions{}, want: 5 * time.Minute},
+		{name: "typed zero", o: loginOptions{wait: 0, waitSet: true}, want: 0},
+		{name: "typed seconds", o: loginOptions{wait: 30, waitSet: true}, want: 30 * time.Second},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.o.waitDuration(); got != c.want {
+				t.Errorf("the wait is %s, want %s", got, c.want)
+			}
+		})
 	}
 }
 

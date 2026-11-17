@@ -77,7 +77,8 @@ the credential records it so a refresh keeps working. A future first-party sign-
 entry in the same list.
 
 The browser sign-in comes back to a loopback callback on the port its client is registered with.
-When the browser cannot reach this machine, paste the code or the URL it landed on instead.
+When the browser cannot reach this machine, paste the URL it landed on: the state in its query is
+what the sign-in is checked against, so the code on its own is not enough.
 
 A key is typed into the terminal's prompt, or read from stdin. Neither leaves the key in your
 shell's history or in the process list, which is why there is no flag that takes one.

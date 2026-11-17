@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -69,12 +68,15 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 	}
 	credentials := auth.Credentials{Path: path}
 	status, err := credentials.Status(auth.Codex)
-	if errors.Is(err, auth.ErrNoCredential) {
+	if err != nil {
 		// The file's entry may be a provider's key instead of Codex's token pair, which has no
-		// tokens and no account. A failure there is not reported: the first read already said
-		// what the file holds.
-		if key, keyErr := credentials.Status(auth.OllamaCloud); keyErr == nil {
-			status, err = key, nil
+		// tokens and no account. The question the fallback asks is whether an entry is there, not
+		// whether it reads: an entry that is there and does not decode is the failure to report,
+		// and looking past it would drop what the operator needs to know.
+		if held, heldErr := credentials.Holds(auth.Codex.ID); heldErr == nil && !held {
+			if key, keyErr := credentials.Status(auth.OllamaCloud); keyErr == nil {
+				status, err = key, nil
+			}
 		}
 	}
 	if err != nil {

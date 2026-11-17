@@ -190,8 +190,9 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stder
 		}
 	}
 	if interactive() {
-		fmt.Fprintln(stderr, "Waiting for the sign-in to come back. Paste the code or the URL here if")
-		fmt.Fprintln(stderr, "the browser cannot reach this machine.")
+		fmt.Fprintln(stderr, "Waiting for the sign-in to come back. If the browser cannot reach this machine,")
+		fmt.Fprintln(stderr, "paste the URL it landed on: the state in its query is what the sign-in is")
+		fmt.Fprintln(stderr, "checked against, and a code on its own carries none.")
 	}
 	callback, err := waitForCallback(ctx, attempt, o.waitDuration(), nil, stderr)
 	if err != nil {
@@ -208,9 +209,13 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stder
 
 // keyCredential reads the key a key flow signs in with.
 //
-// The key comes from the terminal's prompt, then stdin, and from nowhere else. An argument
+// The key comes from the terminal's prompt, or from stdin, and from nowhere else. An argument
 // would be visible in the process list and would stay in the shell's history, so a key is never
 // written on the command line.
+//
+// The two reads are exclusive: one input is one of them. A terminal that ends its prompt with
+// nothing typed has given no key, and asking the same terminal again would sit on a prompt that
+// is not there.
 func keyCredential(flow auth.Flow, stdin *os.File, stderr io.Writer) (auth.Credential, bool) {
 	key := ""
 	if interactive() {
@@ -219,8 +224,7 @@ func keyCredential(flow auth.Flow, stdin *os.File, stderr io.Writer) (auth.Crede
 			key = read
 			fmt.Fprintln(stderr)
 		}
-	}
-	if key == "" {
+	} else {
 		scanner := bufio.NewScanner(stdin)
 		if scanner.Scan() {
 			key = strings.TrimSpace(scanner.Text())
@@ -234,8 +238,12 @@ func keyCredential(flow auth.Flow, stdin *os.File, stderr io.Writer) (auth.Crede
 }
 
 // waitDuration is how long a browser sign-in waits for its callback.
+//
+// A --wait that was typed is used as it was typed, zero included: 0 asks for no wait at all. The
+// default is for a run that asked for nothing, so a typed value and the flag's absence do not
+// read the same.
 func (o *loginOptions) waitDuration() time.Duration {
-	if o.wait > 0 {
+	if o.waitSet {
 		return time.Duration(o.wait) * time.Second
 	}
 	return 5 * time.Minute
@@ -262,7 +270,9 @@ func waitForCallback(ctx context.Context, attempt auth.Attempt, wait time.Durati
 	}
 	listener, err := listenOn("tcp", redirect.Host)
 	if err != nil {
-		return auth.Callback{}, fmt.Errorf("the callback cannot listen on %s: %w. Paste the code instead", redirect.Host, err)
+		return auth.Callback{}, fmt.Errorf(
+			"the callback cannot listen on %s: %w: the port is already taken, so free it and run the sign-in again",
+			redirect.Host, err)
 	}
 	defer listener.Close()
 	if ready != nil {

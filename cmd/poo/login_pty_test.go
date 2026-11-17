@@ -74,9 +74,48 @@ func waitForOutput(t *testing.T, printed func() string, want string) {
 	t.Fatalf("the command never printed %q; its output is\n%s", want, printed())
 }
 
-// TestAPastedCodeCompletesTheSignIn covers the way back for a machine the browser cannot reach:
-// the operator pastes the code into the terminal the wait is reading, and it is traded.
-func TestAPastedCodeCompletesTheSignIn(t *testing.T) {
+// terminalAnswer returns what the terminal sent back to the master, waiting a moment for it.
+//
+// What the master receives is what a person would see on the screen: the echo of their typing.
+// The command's own output does not reach it, because the test points the command's streams at
+// files, so anything here is the terminal answering a read.
+func terminalAnswer(t *testing.T, master *os.File) string {
+	t.Helper()
+	var collected strings.Builder
+	buffer := make([]byte, 256)
+	fd := int(master.Fd())
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var readable syscall.FdSet
+		if fd/64 >= len(readable.Bits) {
+			t.Fatalf("the terminal's descriptor %d is past the set select reads", fd)
+		}
+		readable.Bits[fd/64] |= 1 << (uint(fd) % 64)
+		timeout := syscall.NsecToTimeval(int64(250 * time.Millisecond))
+		ready, err := syscall.Select(fd+1, &readable, nil, nil, &timeout)
+		if err != nil {
+			if err == syscall.EINTR {
+				continue
+			}
+			t.Fatalf("waiting for the terminal to answer: %v", err)
+		}
+		// Nothing came back inside the window, so the terminal answered nothing at all.
+		if ready == 0 {
+			return collected.String()
+		}
+		got, err := master.Read(buffer)
+		if err != nil {
+			return collected.String()
+		}
+		collected.Write(buffer[:got])
+	}
+	return collected.String()
+}
+
+// TestAPastedURLCompletesTheSignIn covers the way back for a machine the browser cannot reach:
+// the operator pastes the URL the browser landed on into the terminal the wait is reading, and
+// the code its query carries is traded against the state beside it.
+func TestAPastedURLCompletesTheSignIn(t *testing.T) {
 	isolatedConfigHome(t)
 	dir := t.TempDir()
 	settings := loginSettings(t, dir)
@@ -104,10 +143,10 @@ func TestAPastedCodeCompletesTheSignIn(t *testing.T) {
 	// The code comes back to the browser, and the operator hands the URL it landed on to the
 	// terminal.
 	authorization := signInURL(t, stderr)
-	waitForOutput(t, stderr, "Paste the code")
+	waitForOutput(t, stderr, "paste the URL")
 	pasted := fmt.Sprintf("%s?code=the-code&state=%s", flow.RedirectURI, url.QueryEscape(authorization.Query().Get("state")))
 	if _, err := fmt.Fprintf(master, "%s\n", pasted); err != nil {
-		t.Fatalf("pasting the code: %v", err)
+		t.Fatalf("pasting the URL: %v", err)
 	}
 
 	select {
@@ -150,7 +189,7 @@ func TestAPasteWithNothingInItFailsTheSignIn(t *testing.T) {
 	}()
 
 	signInURL(t, stderr)
-	waitForOutput(t, stderr, "Paste the code")
+	waitForOutput(t, stderr, "paste the URL")
 	if _, err := fmt.Fprint(master, "\n"); err != nil {
 		t.Fatalf("pasting an empty line: %v", err)
 	}
@@ -178,6 +217,7 @@ func TestTheKeyPromptReadsTheKey(t *testing.T) {
 	dir := t.TempDir()
 	settings := loginSettings(t, dir)
 
+	const typed = "the-typed-key"
 	master := withATerminal(t)
 	stderr := streamTo(t, &os.Stderr)
 	stdout := streamTo(t, &os.Stdout)
@@ -187,7 +227,7 @@ func TestTheKeyPromptReadsTheKey(t *testing.T) {
 	}()
 
 	waitForOutput(t, stderr, "Ollama Cloud key:")
-	if _, err := fmt.Fprintf(master, "the-typed-key\n"); err != nil {
+	if _, err := fmt.Fprintf(master, "%s\n", typed); err != nil {
 		t.Fatalf("typing the key: %v", err)
 	}
 
@@ -206,7 +246,49 @@ func TestTheKeyPromptReadsTheKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the credential back: %v", err)
 	}
-	if entry.Kind != auth.KindAPIKey || entry.Key != "the-typed-key" {
+	if entry.Kind != auth.KindAPIKey || entry.Key != typed {
 		t.Errorf("the credential is %+v, want the key that was typed", entry)
+	}
+	// The read is the hidden one, so the terminal put nothing on the screen: an echoed read
+	// would have left the key on the master's side of the pair.
+	if echoed := terminalAnswer(t, master); strings.Contains(echoed, typed) {
+		t.Errorf("the terminal echoed the key: %q", echoed)
+	}
+}
+
+// TestTheKeyPromptWithNothingTypedIsAFailure covers the terminal's prompt answered with nothing:
+// the key is not there, and the read that would ask again on the same terminal has no prompt to
+// ask on, so the run refuses instead of falling through to it.
+func TestTheKeyPromptWithNothingTypedIsAFailure(t *testing.T) {
+	isolatedConfigHome(t)
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+
+	master := withATerminal(t)
+	stderr := streamTo(t, &os.Stderr)
+	streamTo(t, &os.Stdout)
+	exited := make(chan int, 1)
+	go func() {
+		exited <- run([]string{"login", "ollama-cloud", "--settings", settings})
+	}()
+
+	waitForOutput(t, stderr, "Ollama Cloud key:")
+	if _, err := fmt.Fprint(master, "\n"); err != nil {
+		t.Fatalf("pressing enter at the prompt: %v", err)
+	}
+
+	select {
+	case code := <-exited:
+		if code != operationalExitCode {
+			t.Errorf("the exit code is %d, want %d", code, operationalExitCode)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatalf("poo login waited on an empty prompt; its stderr is\n%s", stderr())
+	}
+	if printed := stderr(); !strings.Contains(printed, "no key was given") {
+		t.Errorf("the failure is %q, want it to say no key was given", printed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "auth.json")); err == nil {
+		t.Error("the failed sign-in stored a credential")
 	}
 }
