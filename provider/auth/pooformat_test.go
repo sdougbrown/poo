@@ -245,6 +245,24 @@ func TestStatusOfAFileWithoutACredentialIsReported(t *testing.T) {
 	}
 }
 
+// TestTheStatusOfAnAPIKeyNamesNoClient covers the report of an entry a foreign
+// writer left with a client on a key: the read drops the client fields a key
+// does not carry, and the report must agree with what the read answers.
+func TestTheStatusOfAnAPIKeyNamesNoClient(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	body := `{"version": 1, "credentials": {"ollama-cloud": {"type": "api_key", "key": "sk-test", "clientId": "app_a-key-never-has"}}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the auth file: %v", err)
+	}
+	status, err := (auth.Credentials{Path: path}).Status(apiKeyProvider)
+	if err != nil {
+		t.Fatalf("the status failed: %v", err)
+	}
+	if status.ClientID != "" {
+		t.Errorf("the status names the client %q for an api key, want none", status.ClientID)
+	}
+}
+
 // TestAPooFileInEitherEncodingIsRead covers the two spellings of one file. poo
 // writes YAML, and a file an operator wrote as JSON is the same document: the
 // shape is the version field, not the punctuation.
@@ -655,7 +673,7 @@ func TestReplacingAnEntryDropsTheFieldsItsKindDoesNotCarry(t *testing.T) {
 	}
 	_, held = pooFile(t, oauthFile)
 	entry = held[auth.ProviderCodex]
-	for _, field := range []string{"access", "refresh", "expires", "accountId"} {
+	for _, field := range []string{"access", "refresh", "expires", "accountId", "clientId", "tokenUrl"} {
 		if _, ok := entry[field]; ok {
 			t.Errorf("the api key entry kept %q: %v", field, entry)
 		}
@@ -676,5 +694,71 @@ func TestAnEntryThatNamesNoTypeIsAnOAuthOne(t *testing.T) {
 	}
 	if token.AccountID != oldAccount {
 		t.Errorf("the token names the account %q, want %q", token.AccountID, oldAccount)
+	}
+}
+
+// TestACredentialKeepsTheClientItWasGrantedTo covers the record that makes a refresh right. A
+// refresh token belongs to the client that was granted it, so the credential says which client
+// that is, and a refresh names it rather than the provider's default.
+func TestACredentialKeepsTheClientItWasGrantedTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	// A provider that declares one client, and a credential granted to another — which is what
+	// an imported credential is: pi's grant, in a store whose provider says something else.
+	declared := auth.Provider{ID: "declared", Kind: auth.KindOAuth, ClientID: "poo-default", TokenURL: "http://declared.invalid/token"}
+	entry := auth.Credential{
+		Access:    codexToken(t, newAccount),
+		Refresh:   oldRefresh,
+		Expires:   clock().Add(-time.Hour),
+		AccountID: newAccount,
+		ClientID:  "the-grant-that-was-made",
+		TokenURL:  "http://granted.invalid/token",
+	}
+	credentials := auth.Credentials{Path: path, Now: clock}
+	status, err := credentials.Set(context.Background(), declared, entry, false)
+	if err != nil {
+		t.Fatalf("storing the credential: %v", err)
+	}
+	if status.ClientID != "the-grant-that-was-made" {
+		t.Errorf("the status names the client %q, want the one the credential records", status.ClientID)
+	}
+	if got, err := credentials.Read(declared); err != nil || got.ClientID != "the-grant-that-was-made" {
+		t.Errorf("the credential reads back as %+v, %v", got, err)
+	}
+
+	// The refresh names the credential's client and endpoint, not the provider's.
+	endpoint := newTokenEndpoint(t, func() (int, string) {
+		return http.StatusOK, traded(t, codexToken(t, newAccount), time.Hour)
+	}, nil)
+	// The stored record is what the refresh goes to: name the fake on the credential itself,
+	// leave the provider's declaration at a host that would fail, and pass no caller override,
+	// so only the stored rung of the ladder answers.
+	entry.TokenURL = endpoint.URL
+	if _, err := credentials.Set(context.Background(), declared, entry, true); err != nil {
+		t.Fatalf("re-storing the credential: %v", err)
+	}
+	if _, err := (auth.Credentials{Path: path, Now: clock}).Access(context.Background(), declared); err != nil {
+		t.Fatalf("the credential did not reach a token: %v", err)
+	}
+	if got := endpoint.form(t, 0)["client_id"]; got != "the-grant-that-was-made" {
+		t.Errorf("the refresh named the client %q, want the credential's", got)
+	}
+	// And the record survives the refresh.
+	if got, _ := credentials.Read(declared); got.ClientID != "the-grant-that-was-made" || got.TokenURL != endpoint.URL {
+		t.Errorf("the refresh rewrote the record: %+v", got)
+	}
+}
+
+// TestAnAPIKeyCarriesNoClient covers the kind that has none: a key is not granted to a client,
+// so a credential naming one — a client, or the endpoint that client trades at — is refused.
+func TestAnAPIKeyCarriesNoClient(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	for name, credential := range map[string]auth.Credential{
+		"a client":    {Kind: auth.KindAPIKey, Key: "k", ClientID: "a-client"},
+		"an endpoint": {Kind: auth.KindAPIKey, Key: "k", TokenURL: "https://grant.example/token"},
+	} {
+		_, err := (auth.Credentials{Path: path, Now: clock}).Set(context.Background(), apiKeyProvider, credential, false)
+		if !errors.Is(err, auth.ErrNoCredential) {
+			t.Fatalf("the api key with %s is %v, want ErrNoCredential", name, err)
+		}
 	}
 }

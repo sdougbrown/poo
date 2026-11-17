@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/poo/provider/auth"
 )
 
 // codexCredential is a poo-format credential file holding one Codex entry whose
@@ -109,6 +111,50 @@ func TestTheAuthStatusAnswersInJSON(t *testing.T) {
 	}
 	if report.AccountID != "acct-1234" {
 		t.Errorf("the report names the account %q, want acct-1234", report.AccountID)
+	}
+	if report.ClientID != "" {
+		t.Errorf("the report names the client %q for a file that records none, want the field omitted", report.ClientID)
+	}
+	if strings.Contains(out, "client_id") {
+		t.Errorf("the report carries client_id for a file that records none:\n%s", out)
+	}
+}
+
+// TestTheAuthStatusNamesTheClientTheFileRecords covers the report of a
+// credential that records the client it was granted to: the CLIENT line names
+// it, and the JSON report carries client_id, so an operator can tell whose
+// grant the file holds without opening it.
+func TestTheAuthStatusNamesTheClientTheFileRecords(t *testing.T) {
+	dir := t.TempDir()
+	credential := filepath.Join(dir, "auth.json")
+	body := `{"version": 1, "credentials": {"openai-codex": {"type": "oauth", "access": "an-access-token", "refresh": "r", "expires": 4102444800000, "accountId": "acct-1234", "clientId": "app_the-grant"}}}`
+	if err := os.WriteFile(credential, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := authSettings(t, dir, credential)
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"auth", "status", "--settings", settings}); code != 0 {
+			t.Errorf("poo auth status exited with %d", code)
+		}
+	})
+	for _, want := range []string{"CLIENT", "app_the-grant"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report is %q, want it to name %q", out, want)
+		}
+	}
+
+	out = captureStdout(t, func() {
+		if code := run([]string{"auth", "status", "--settings", settings, "--json"}); code != 0 {
+			t.Errorf("poo auth status --json exited with %d", code)
+		}
+	})
+	var report authStatus
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the report is not JSON: %v\n%s", err, out)
+	}
+	if report.ClientID != "app_the-grant" {
+		t.Errorf("the report names the client %q, want app_the-grant", report.ClientID)
 	}
 }
 
@@ -288,6 +334,43 @@ func TestTheAuthImportFindsPisOwnCredential(t *testing.T) {
 	}
 	if !strings.Contains(string(stored), "an-access-token-from-pi") {
 		t.Errorf("poo's file is\n%s\nwant pi's credential", stored)
+	}
+	for _, want := range []string{
+		"clientId: " + auth.DefaultClientID,
+		"tokenUrl: " + auth.DefaultTokenURL,
+	} {
+		if !strings.Contains(string(stored), want) {
+			t.Errorf("poo's file is\n%s\nwant it to carry the stamped default %q", stored, want)
+		}
+	}
+}
+
+// TestTheImportKeepsTheClientTheSourceRecords covers a source that names its own grant: a
+// credential file that records the client it was granted to keeps that record through the
+// import, so poo refreshes the grant as the granting client, not poo's default.
+func TestTheImportKeepsTheClientTheSourceRecords(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "elsewhere.json")
+	body := `{"openai-codex": {"type": "oauth", "access": "a-granted-token", "refresh": "r", "expires": 4102444800000, "accountId": "acct-granted", "clientId": "app_the-grant", "tokenUrl": "https://grant.example/token"}}`
+	if err := os.WriteFile(source, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the source credential: %v", err)
+	}
+	target := filepath.Join(dir, "auth.json")
+	settings := authSettings(t, dir, target)
+
+	captureStdout(t, func() {
+		if code := run([]string{"auth", "import", "pi", "--settings", settings, "--from", source}); code != 0 {
+			t.Errorf("poo auth import pi exited with %d", code)
+		}
+	})
+	stored, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("reading poo's credential file: %v", err)
+	}
+	for _, want := range []string{"clientId: app_the-grant", "tokenUrl: https://grant.example/token"} {
+		if !strings.Contains(string(stored), want) {
+			t.Errorf("poo's file is\n%s\nwant it to carry %q", stored, want)
+		}
 	}
 }
 
