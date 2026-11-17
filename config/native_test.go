@@ -174,3 +174,38 @@ context:
 		t.Errorf("the failure is %q, want it to name native compaction and the provider that supports it", failure.Message)
 	}
 }
+
+// TestTheNativeStrategyBuildsAPromptWithoutAChatModel covers the prompt-only
+// build: a command that renders the prompt resolves no chat model, so it
+// resolves no transport either, and the native strategy is the session's
+// business. The build keeps the strategy the settings asked for instead of
+// refusing a capability check it has no model to answer.
+func TestTheNativeStrategyBuildsAPromptWithoutAChatModel(t *testing.T) {
+	settings, err := config.Parse([]byte(`
+version: 1
+roles:
+  chat: absent-model
+context:
+  strategy: native
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := buildWith(t, config.BuildOptions{
+		Settings:    settings,
+		WorkingDir:  t.TempDir(),
+		NoChatModel: true,
+	})
+	if runtime.Options.Transport != nil {
+		t.Errorf("the runtime's transport is %T, want none for a build that resolved no chat model",
+			runtime.Options.Transport)
+	}
+	if _, ok := runtime.Options.Compactor.(*native.Compactor); !ok {
+		t.Errorf("the runtime's compactor is %T, want the native strategy", runtime.Options.Compactor)
+	}
+	// The prompt is what the build exists for here, and it renders with no
+	// model and no transport.
+	if text := poo.PromptBuilder(runtime.Options).Render(); text == "" {
+		t.Error("the prompt is empty, want the rendered prompt a prompt-only build produces")
+	}
+}
