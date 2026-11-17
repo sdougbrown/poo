@@ -196,6 +196,9 @@ func callbackOf(query url.Values) Callback {
 // verifier the challenge was made from. A callback that carries an error, or a state that is
 // not this attempt's, is refused before anything is traded.
 //
+// A nil client is the package's own, with its bound on the answer and its refusal of a
+// redirect.
+//
 // The credential records the client and the endpoint it was granted by, so a refresh names them
 // (#219) instead of a default.
 func (a Attempt) Exchange(ctx context.Context, client *http.Client, callback Callback) (Credential, error) {

@@ -17,6 +17,7 @@ import (
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
+	"github.com/sdougbrown/poo/internal/term"
 	"github.com/sdougbrown/poo/provider/auth"
 )
 
@@ -64,10 +65,19 @@ func (o *loginOptions) bind(inv clicontract.Invocation) {
 // The command signs in to a provider and stores the credential in poo's own file. Which provider,
 // and how, is a choice: a bare `poo login` offers the list, and a name picks one. An existing
 // credential is replaced only when asked — by --force, or by answering the prompt.
+//
+// A key typed into the prompt, or read from stdin, is the path that keeps it out of a shell's
+// history and the process list. --key is for a script that has accepted a key in its argv.
 func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	var o loginOptions
 	o.bind(inv)
-	flow, ok := o.choose(stderr)
+	// The list is the question, and a run with no terminal to ask on has no answer to it, so it
+	// says what to type instead of guessing.
+	if o.provider == "" && !interactive() {
+		fmt.Fprintf(stderr, "poo login: name a provider: %s\n", strings.Join(loginNames(), ", "))
+		return exit{usageExitCode}
+	}
+	flow, ok := o.choose(os.Stdin, stderr)
 	if !ok {
 		return exit{usageExitCode}
 	}
@@ -109,8 +119,9 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 	return exit{}
 }
 
-// choose returns the sign-in the request names, or the one an operator picks from the list.
-func (o *loginOptions) choose(stderr io.Writer) (auth.Flow, bool) {
+// choose returns the sign-in the request names, or the one an operator picks from the list it
+// reads the answer on in.
+func (o *loginOptions) choose(in io.Reader, stderr io.Writer) (auth.Flow, bool) {
 	if o.provider != "" {
 		for _, flow := range logins() {
 			if slices.Contains(providerNames(flow), o.provider) || flow.Name == o.provider {
@@ -120,16 +131,12 @@ func (o *loginOptions) choose(stderr io.Writer) (auth.Flow, bool) {
 		fmt.Fprintf(stderr, "poo login: %q is not a sign-in poo knows: %s\n", o.provider, strings.Join(loginNames(), ", "))
 		return auth.Flow{}, false
 	}
-	if !interactive() {
-		fmt.Fprintf(stderr, "poo login: name a provider: %s\n", strings.Join(loginNames(), ", "))
-		return auth.Flow{}, false
-	}
 	fmt.Fprintln(stderr, "Sign in with:")
 	for i, flow := range logins() {
 		fmt.Fprintf(stderr, "  %d. %s\n", i+1, flow.Name)
 	}
 	fmt.Fprintf(stderr, "Which one? [1-%d] ", len(logins()))
-	scanner := bufio.NewScanner(os.Stdin)
+	scanner := bufio.NewScanner(in)
 	if !scanner.Scan() {
 		fmt.Fprintln(stderr, "poo login: nothing was chosen")
 		return auth.Flow{}, false
@@ -159,8 +166,10 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stder
 			fmt.Fprintf(stderr, "poo login: %v\n", err)
 		}
 	}
-	fmt.Fprintln(stderr, "Waiting for the sign-in to come back. Paste the code or the URL here if")
-	fmt.Fprintln(stderr, "the browser cannot reach this machine.")
+	if interactive() {
+		fmt.Fprintln(stderr, "Waiting for the sign-in to come back. Paste the code or the URL here if")
+		fmt.Fprintln(stderr, "the browser cannot reach this machine.")
+	}
 	callback, err := waitForCallback(ctx, attempt, o.waitDuration(), nil, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo login: %v\n", err)
@@ -177,12 +186,13 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stder
 // keyCredential reads the key a key flow signs in with.
 //
 // The key comes from --key, then the terminal's prompt, then stdin: a key typed into a shell's
-// history is the one place it should not be.
+// history or left in its process list is the one place it should not be, which is why --key is
+// the last resort rather than the first.
 func (o *loginOptions) keyCredential(flow auth.Flow, stderr io.Writer) (auth.Credential, bool) {
 	key := o.key
 	if key == "" && interactive() {
 		fmt.Fprintf(stderr, "%s key: ", flow.Name)
-		if read, err := readPassword(); err == nil {
+		if read, err := term.ReadPassword(os.Stdin); err == nil {
 			key = read
 			fmt.Fprintln(stderr)
 		}
@@ -198,22 +208,6 @@ func (o *loginOptions) keyCredential(flow auth.Flow, stderr io.Writer) (auth.Cre
 		return auth.Credential{}, true
 	}
 	return auth.Credential{Kind: auth.KindAPIKey, Key: key}, false
-}
-
-// readPassword reads a line from the terminal without echoing it.
-func readPassword() (string, error) {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeCharDevice == 0 {
-		return "", fmt.Errorf("not a terminal")
-	}
-	hidden, err := hiddenLine(int(os.Stdin.Fd()))
-	if err != nil {
-		return "", err
-	}
-	return hidden, nil
 }
 
 // waitDuration is how long a browser sign-in waits for its callback.

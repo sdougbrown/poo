@@ -2,11 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/provider/auth"
@@ -33,7 +40,7 @@ func TestChooseAnswersToEveryNameTheFlowCarries(t *testing.T) {
 	for _, name := range []string{"codex", "openai-codex"} {
 		t.Run(name, func(t *testing.T) {
 			o := loginOptions{provider: name}
-			flow, ok := o.choose(io.Discard)
+			flow, ok := o.choose(strings.NewReader(""), io.Discard)
 			if !ok {
 				t.Fatalf("choose did not answer to %q", name)
 			}
@@ -44,7 +51,7 @@ func TestChooseAnswersToEveryNameTheFlowCarries(t *testing.T) {
 	}
 	t.Run("a name it does not know", func(t *testing.T) {
 		o := loginOptions{provider: "nope"}
-		if _, ok := o.choose(io.Discard); ok {
+		if _, ok := o.choose(strings.NewReader(""), io.Discard); ok {
 			t.Error("choose answered to a name it does not know")
 		}
 	})
@@ -280,15 +287,11 @@ func TestTheCallbackComesBackOnTheFlowsRedirect(t *testing.T) {
 	}()
 	// The listener is up by the time the wait says it is.
 	<-ready
-	var response error
-	for i := 0; i < 10; i++ {
-		response = getCallback(attempt)
-		if response == nil {
-			break
-		}
-	}
-	if response != nil {
-		t.Fatalf("the callback could not be delivered: %v", response)
+	response := askCallback(t, attempt.Flow.RedirectURI, "",
+		fmt.Sprintf("?code=the-code&state=%s", url.QueryEscape(attempt.State)))
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the callback page is answered %d, want %d", response.StatusCode, http.StatusOK)
 	}
 	select {
 	case callback := <-done:
@@ -297,5 +300,246 @@ func TestTheCallbackComesBackOnTheFlowsRedirect(t *testing.T) {
 		}
 	case err := <-failed:
 		t.Fatalf("the wait failed: %v", err)
+	}
+}
+
+// codexAccessToken is an access token that names an account, in the shape the token endpoint
+// answers with.
+func codexAccessToken(t *testing.T, account string) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+	claims, err := json.Marshal(map[string]any{
+		"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": account},
+	})
+	if err != nil {
+		t.Fatalf("encoding the token's claims: %v", err)
+	}
+	return header + "." + base64.RawURLEncoding.EncodeToString(claims) + ".signature"
+}
+
+// TestTheCodexBrowserSignInStoresTheCredential covers the whole browser sign-in: the command
+// prints the URL, the callback comes back on the flow's loopback, the code it carries is traded
+// at the flow's token endpoint, and the credential it answers with is written to the file.
+func TestTheCodexBrowserSignInStoresTheCredential(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg"))
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+	withoutATerminal(t)
+
+	// The code is traded at an endpoint of the test's: the Codex one is OpenAI's.
+	access := codexAccessToken(t, "the-account")
+	traded := make(chan url.Values, 1)
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		select {
+		case traded <- r.PostForm:
+		default:
+		}
+		fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"the-refresh-token","expires_in":3600}`, access)
+	}))
+	defer endpoint.Close()
+
+	// The flow is the sign-in's, on endpoints of the test's: the Codex client's redirect is on
+	// port 1455, which a test cannot count on.
+	old := auth.CodexLogin
+	defer func() { auth.CodexLogin = old }()
+	port, err := freePort()
+	if err != nil {
+		t.Fatalf("asking the kernel for a port: %v", err)
+	}
+	flow := old
+	flow.TokenURL = endpoint.URL
+	flow.RedirectURI = fmt.Sprintf("http://127.0.0.1:%d/auth/callback", port)
+	auth.CodexLogin = flow
+
+	stderr := streamTo(t, &os.Stderr)
+	stdout := streamTo(t, &os.Stdout)
+	exited := make(chan int, 1)
+	go func() {
+		exited <- run([]string{"login", "codex", "--settings", settings, "--no-browser", "--force"})
+	}()
+
+	// The callback has to come from another goroutine: the command is waiting for it.
+	authorization := signInURL(t, stderr)
+	response := askCallback(t, flow.RedirectURI, "",
+		fmt.Sprintf("?code=the-code&state=%s", url.QueryEscape(authorization.Query().Get("state"))))
+	body, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatalf("reading the callback page: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the callback page is %d: %s", response.StatusCode, body)
+	}
+
+	select {
+	case code := <-exited:
+		if code != 0 {
+			t.Fatalf("poo login exited %d; its stderr is\n%s", code, stderr())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatalf("poo login did not finish; its stderr is\n%s", stderr())
+	}
+	if printed := stderr(); !strings.Contains(printed, "Open this URL to sign in") {
+		t.Errorf("the report is %q, want it to name the sign-in", printed)
+	}
+	if printed := stdout(); !strings.Contains(printed, "Signed in to openai-codex") {
+		t.Errorf("the report is %q, want it to say which provider signed in", printed)
+	}
+	select {
+	case form := <-traded:
+		for name, want := range map[string]string{
+			"grant_type": "authorization_code",
+			"code":       "the-code",
+			// The client the trade names is the one the URL was built for.
+			"client_id": authorization.Query().Get("client_id"),
+			// The redirect the trade names is the one the code came back on.
+			"redirect_uri": flow.RedirectURI,
+		} {
+			if got := form.Get(name); got != want {
+				t.Errorf("the trade sent %s=%q, want %q", name, got, want)
+			}
+		}
+	default:
+		t.Error("the code the callback carried was never traded")
+	}
+	credentials := auth.Credentials{Path: filepath.Join(dir, "auth.json")}
+	entry, err := credentials.Read(auth.Codex)
+	if err != nil {
+		t.Fatalf("reading the credential back: %v", err)
+	}
+	if entry.Access != access || entry.Refresh != "the-refresh-token" {
+		t.Errorf("the credential is %+v, want the token the endpoint answered", entry)
+	}
+	if entry.AccountID != "the-account" {
+		t.Errorf("the credential names the account %q, want the one its token claims", entry.AccountID)
+	}
+}
+
+// TestTheWaitGivesUpWhenTheSignInDoesNotComeBack covers the bound on a sign-in: a wait nothing
+// answers returns an error that says so instead of blocking.
+func TestTheWaitGivesUpWhenTheSignInDoesNotComeBack(t *testing.T) {
+	withoutATerminal(t)
+	attempt, err := codexAttemptForTest()
+	if err != nil {
+		t.Fatalf("the attempt: %v", err)
+	}
+	started := time.Now()
+	_, err = waitForCallback(context.Background(), attempt, 50*time.Millisecond, nil, io.Discard)
+	if err == nil {
+		t.Fatal("the wait came back with no error and no callback")
+	}
+	if !strings.Contains(err.Error(), "did not come back in time") {
+		t.Errorf("the wait is %v, want it to say the sign-in did not come back in time", err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Errorf("the wait took %s, want it to give up on the bound it was given", elapsed)
+	}
+}
+
+// TestTheCallbackPageReportsTheAnswer covers the page the browser lands on. It is the wait's own
+// handler that answers, so the requests go to its listener.
+func TestTheCallbackPageReportsTheAnswer(t *testing.T) {
+	withoutATerminal(t)
+	attempt, err := codexAttemptForTest()
+	if err != nil {
+		t.Fatalf("the attempt: %v", err)
+	}
+	ready := make(chan struct{})
+	done := make(chan auth.Callback, 1)
+	failed := make(chan error, 1)
+	go func() {
+		callback, err := waitForCallback(context.Background(), attempt, 5*time.Second, func() { close(ready) }, io.Discard)
+		if err != nil {
+			failed <- err
+			return
+		}
+		done <- callback
+	}()
+	<-ready
+
+	// A path the flow's redirect does not name is not the sign-in coming back.
+	response := askCallback(t, attempt.Flow.RedirectURI, "/not-the-callback", "")
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Errorf("a request to another path is answered %d, want %d", response.StatusCode, http.StatusNotFound)
+	}
+
+	// The endpoint's refusal is reported on the page, on the path the flow names.
+	response = askCallback(t, attempt.Flow.RedirectURI, "",
+		fmt.Sprintf("?error=access_denied&state=%s", url.QueryEscape(attempt.State)))
+	page, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatalf("reading the callback page: %v", err)
+	}
+	if response.StatusCode != http.StatusBadRequest {
+		t.Errorf("a refused sign-in is answered %d, want %d", response.StatusCode, http.StatusBadRequest)
+	}
+	if !strings.Contains(string(page), "refused") {
+		t.Errorf("the page is %q, want it to say the sign-in was refused", page)
+	}
+	select {
+	case callback := <-done:
+		if callback.Error != "access_denied" {
+			t.Errorf("the callback is %+v, want the refusal the page reported", callback)
+		}
+	case err := <-failed:
+		t.Fatalf("the wait failed: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the wait did not come back after the refusal")
+	}
+}
+
+// TestThePickerTakesTheNumberOfASignIn covers the list a bare `poo login` prints: a number
+// names its sign-in, in the order the list shows them.
+func TestThePickerTakesTheNumberOfASignIn(t *testing.T) {
+	for _, c := range []struct {
+		input string
+		want  string
+	}{
+		{"1\n", auth.CodexLogin.Provider.ID},
+		{"2\n", ollamaCloud.Provider.ID},
+	} {
+		t.Run(c.want, func(t *testing.T) {
+			var o loginOptions
+			var stderr strings.Builder
+			flow, ok := o.choose(strings.NewReader(c.input), &stderr)
+			if !ok {
+				t.Fatalf("the picker refused %q: %s", c.input, stderr.String())
+			}
+			if flow.Provider.ID != c.want {
+				t.Errorf("the picker answered %q with %q, want %q", c.input, flow.Provider.ID, c.want)
+			}
+		})
+	}
+}
+
+// TestThePickerRefusesWhatIsNotASignIn covers the answers the list does not take: a number
+// outside it, a word, and no answer at all.
+func TestThePickerRefusesWhatIsNotASignIn(t *testing.T) {
+	for _, c := range []struct {
+		input string
+		want  string
+	}{
+		{"3\n", "that is not one of the sign-ins"},
+		{"0\n", "that is not one of the sign-ins"},
+		{"abc\n", "that is not one of the sign-ins"},
+		{"", "nothing was chosen"},
+	} {
+		t.Run(c.input, func(t *testing.T) {
+			var o loginOptions
+			var stderr strings.Builder
+			if flow, ok := o.choose(strings.NewReader(c.input), &stderr); ok {
+				t.Fatalf("the picker answered %q with %q", c.input, flow.Provider.ID)
+			}
+			if !strings.Contains(stderr.String(), c.want) {
+				t.Errorf("the refusal is %q, want it to say %q", stderr.String(), c.want)
+			}
+		})
 	}
 }

@@ -77,9 +77,11 @@ the credential records it so a refresh keeps working. A future first-party sign-
 entry in the same list.
 
 The browser sign-in comes back to a loopback callback on the port its client is registered with.
-When the browser cannot reach this machine, paste the code or the URL it landed on instead. A key
-comes from --key, the terminal's prompt, or stdin — in that order, so a key need not enter your
-shell's history.
+When the browser cannot reach this machine, paste the code or the URL it landed on instead.
+
+A key is safe when the terminal prompts for it, or when it arrives on stdin. Either keeps it out
+of your shell's history and out of the process list. --key puts the key in this command's argv,
+so pass it only from a script that has already accepted the key being visible there.
 
 An existing credential is not replaced without an explicit action: --force replaces it, and a
 terminal is asked first. No token is printed.`
@@ -200,7 +202,7 @@ func pooApp(stdout io.Writer) *clicontract.App {
 					{Name: "force", Kind: clicontract.Bool, Usage: "Replace a credential the file already holds, without asking"},
 					{Name: "no-browser", Kind: clicontract.Bool, Usage: "Print the sign-in URL instead of opening a browser"},
 					{Name: "wait", Kind: clicontract.Int, Usage: "Seconds to wait for a browser sign-in to come back (default: 300)"},
-					{Name: "key", Kind: clicontract.String, Usage: "The key a key sign-in uses"},
+					{Name: "key", Kind: clicontract.String, Usage: "The key a key sign-in uses: it is visible in the process list, so the prompt or stdin is the safe path"},
 				},
 				Handle: func(ctx context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 					return handleLogin(ctx, inv, stdout, cmdStderr), nil
