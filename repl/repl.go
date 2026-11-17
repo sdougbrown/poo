@@ -178,8 +178,10 @@ const streamFrame = 33 * time.Millisecond
 // editor with its vi mode; anything else gets plain lines, so a pipe
 // or a test drives the repl too.
 //
-// Only read runs on the reader's goroutine; prompt and close are the
-// main loop's.
+// Only read runs on the reader's goroutine. The main loop calls close,
+// and prompt is called from the main loop and from the editor's key
+// dispatch: it only publishes the text and wakes the editor, so the
+// key goroutine may republish a changed prompt mid-read.
 type input interface {
 	// prompt shows the prompt, here and for the next read.
 	prompt(p string)
