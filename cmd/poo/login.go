@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,17 +71,17 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 	if !ok {
 		return exit{usageExitCode}
 	}
-	settings, err := o.settings("")
+	settingsPath, settings, err := resolveSettings(o.settingsFile, "")
 	if err != nil {
 		fmt.Fprintf(stderr, "poo login: %v\n", err)
 		return exit{usageExitCode}
 	}
-	path := settings.CredentialFile()
-	if path == "" {
-		fmt.Fprintln(stderr, "poo login: the credential file cannot be resolved: set auth_file")
+	target, err := pooCredentialFile(settingsPath, settings)
+	if err != nil {
+		fmt.Fprintf(stderr, "poo login: %v\n", err)
 		return exit{usageExitCode}
 	}
-	credentials := auth.Credentials{Path: path}
+	credentials := auth.Credentials{Path: target}
 	mayReplace, failed := replace(credentials, flow.Provider, o.force, "poo login", stderr)
 	if failed {
 		return exit{operationalExitCode}
@@ -100,6 +101,11 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 		fmt.Fprintf(stdout, " as %s", status.AccountID)
 	}
 	fmt.Fprintf(stdout, ".\nThe credential is in %s.\n", status.Path)
+	// The sign-in is only worth making if poo reads it. A settings file that resolves the
+	// credential to another tool's file still points at that file after the write.
+	if reads := settings.CredentialFile(); reads != "" && !sameFile(reads, status.Path) {
+		fmt.Fprintf(stdout, "\nThe settings still resolve the credential to %s. Point poo at the copy:\n  auth_file: %s\n", reads, status.Path)
+	}
 	return exit{}
 }
 
@@ -107,7 +113,7 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 func (o *loginOptions) choose(stderr io.Writer) (auth.Flow, bool) {
 	if o.provider != "" {
 		for _, flow := range logins() {
-			if providerNames(flow)[0] == o.provider || flow.Name == o.provider {
+			if slices.Contains(providerNames(flow), o.provider) || flow.Name == o.provider {
 				return flow, true
 			}
 		}
@@ -155,7 +161,7 @@ func (o *loginOptions) signIn(ctx context.Context, flow auth.Flow, stdout, stder
 	}
 	fmt.Fprintln(stderr, "Waiting for the sign-in to come back. Paste the code or the URL here if")
 	fmt.Fprintln(stderr, "the browser cannot reach this machine.")
-	callback, err := waitForCallback(ctx, attempt, o.waitDuration(), stderr)
+	callback, err := waitForCallback(ctx, attempt, o.waitDuration(), nil, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo login: %v\n", err)
 		return auth.Credential{}, true
@@ -223,7 +229,7 @@ func (o *loginOptions) waitDuration() time.Duration {
 //
 // The two are one wait: whichever arrives first ends it. A machine whose loopback the browser
 // cannot reach is the reason the paste exists.
-func waitForCallback(ctx context.Context, attempt auth.Attempt, wait time.Duration, stderr io.Writer) (auth.Callback, error) {
+func waitForCallback(ctx context.Context, attempt auth.Attempt, wait time.Duration, ready func(), stderr io.Writer) (auth.Callback, error) {
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 
@@ -236,6 +242,9 @@ func waitForCallback(ctx context.Context, attempt auth.Attempt, wait time.Durati
 		return auth.Callback{}, fmt.Errorf("the callback cannot listen on %s: %w. Paste the code instead", redirect.Host, err)
 	}
 	defer listener.Close()
+	if ready != nil {
+		ready()
+	}
 
 	arrived := make(chan auth.Callback, 1)
 	failed := make(chan error, 1)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/provider/auth"
 )
 
@@ -23,6 +24,30 @@ session:
 		t.Fatalf("writing the settings: %v", err)
 	}
 	return path
+}
+
+// TestChooseAnswersToEveryNameTheFlowCarries covers the name the operator types: the short
+// name and the provider's id both name the same sign-in, and a name that is not one of
+// them is refused.
+func TestChooseAnswersToEveryNameTheFlowCarries(t *testing.T) {
+	for _, name := range []string{"codex", "openai-codex"} {
+		t.Run(name, func(t *testing.T) {
+			o := loginOptions{provider: name}
+			flow, ok := o.choose(io.Discard)
+			if !ok {
+				t.Fatalf("choose did not answer to %q", name)
+			}
+			if flow.Provider.ID != auth.CodexLogin.Provider.ID {
+				t.Errorf("choose answered %q with %q, want the Codex sign-in", name, flow.Provider.ID)
+			}
+		})
+	}
+	t.Run("a name it does not know", func(t *testing.T) {
+		o := loginOptions{provider: "nope"}
+		if _, ok := o.choose(io.Discard); ok {
+			t.Error("choose answered to a name it does not know")
+		}
+	})
 }
 
 // TestALoginWithNoProviderNamesTheOnesItOffers covers the bare command with no terminal to ask
@@ -153,6 +178,88 @@ func TestAKeyLoginDoesNotReplaceAnExistingCredential(t *testing.T) {
 	}
 }
 
+// piAuthSettings is a settings file that names pi's credential file, so the settings resolve
+// the credential to a file that is not poo's.
+func piAuthSettings(t *testing.T, dir, pi string) string {
+	t.Helper()
+	path := filepath.Join(dir, "settings.yaml")
+	body := `version: 1
+pi_auth_file: ` + pi + `
+session:
+  mode: ephemeral
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+	return path
+}
+
+// TestALoginWritesPoosOwnFileWhenTheSettingsPointAtPis covers the file the sign-in writes:
+// a settings that resolves the credential to pi's file still writes poo's own, because the
+// credential is poo's to keep.
+func TestALoginWritesPoosOwnFileWhenTheSettingsPointAtPis(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg"))
+	dir := t.TempDir()
+	pi := filepath.Join(dir, "pi-auth.json")
+	if err := os.WriteFile(pi, []byte(`{"openai-codex": {}}`), 0o600); err != nil {
+		t.Fatalf("writing pi's file: %v", err)
+	}
+	settings := piAuthSettings(t, dir, pi)
+	withoutATerminal(t)
+
+	if code := run([]string{"login", "ollama-cloud", "--key", "testkey", "--force", "--settings", settings}); code != 0 {
+		t.Fatalf("poo login exited with %d", code)
+	}
+	want, err := config.DefaultAuthFile()
+	if err != nil {
+		t.Fatalf("resolving poo's credential file: %v", err)
+	}
+	stored, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("reading poo's credential file: %v", err)
+	}
+	if !strings.Contains(string(stored), "key: testkey") {
+		t.Errorf("poo's file is\n%s\nwant it to hold the key", stored)
+	}
+	if stored, _ := os.ReadFile(pi); strings.Contains(string(stored), "testkey") {
+		t.Errorf("the credential landed in the file the settings point at:\n%s", stored)
+	}
+}
+
+// TestALoginSaysWhereTheSettingsStillPoint covers the hint: the credential is in poo's file,
+// and the settings still resolve it to the other file, so the report names the setting that
+// points poo at the copy.
+func TestALoginSaysWhereTheSettingsStillPoint(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg"))
+	dir := t.TempDir()
+	pi := filepath.Join(dir, "pi-auth.json")
+	if err := os.WriteFile(pi, []byte(`{"openai-codex": {}}`), 0o600); err != nil {
+		t.Fatalf("writing pi's file: %v", err)
+	}
+	settings := piAuthSettings(t, dir, pi)
+	withoutATerminal(t)
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"login", "ollama-cloud", "--key", "testkey", "--force", "--settings", settings}); code != 0 {
+			t.Fatalf("poo login exited with %d", code)
+		}
+	})
+	poo, err := config.DefaultAuthFile()
+	if err != nil {
+		t.Fatalf("poo's own file: %v", err)
+	}
+	for _, want := range []string{
+		"The settings still resolve the credential to " + pi,
+		"auth_file: " + poo,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report is %q, want it to name %q", out, want)
+		}
+	}
+}
+
 // TestTheCallbackComesBackOnTheFlowsRedirect covers the wait: a request to the path the flow's
 // redirect names ends it, and the callback it carries is what the exchange is given.
 func TestTheCallbackComesBackOnTheFlowsRedirect(t *testing.T) {
@@ -160,19 +267,21 @@ func TestTheCallbackComesBackOnTheFlowsRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the attempt: %v", err)
 	}
+	ready := make(chan struct{})
 	done := make(chan auth.Callback, 1)
 	failed := make(chan error, 1)
 	go func() {
-		callback, err := waitForCallback(context.Background(), attempt, 5e9, io.Discard)
+		callback, err := waitForCallback(context.Background(), attempt, 5e9, func() { close(ready) }, io.Discard)
 		if err != nil {
 			failed <- err
 			return
 		}
 		done <- callback
 	}()
-	// The listener is up by the time the connection succeeds.
+	// The listener is up by the time the wait says it is.
+	<-ready
 	var response error
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		response = getCallback(attempt)
 		if response == nil {
 			break
