@@ -335,7 +335,10 @@ func TestAResizeMovesTheInputToTheNewBottomRow(t *testing.T) {
 	}
 	waitBottomRows(t, term, 20)
 
-	term.press("work\r")
+	// The submit waits for its own echo: an Enter that lands while the
+	// winch redraw is still running can clear the draft without
+	// submitting, and the echo is what says the line was taken.
+	pressSubmitted(t, term, "work")
 	waitScreen(t, term, "world.")
 	waitBottomRows(t, term, 20)
 	waitScreen(t, term, "✓ end_turn")
@@ -348,22 +351,49 @@ func TestAResizeMovesTheInputToTheNewBottomRow(t *testing.T) {
 	}
 }
 
-// waitEcho waits for the transcript's echo of a submitted line: the
-// row reads "❯ work" and carries no prompt mark, so the draft's own
-// "💩❯ work" row cannot satisfy it. The echo is what the machine draws
-// when it takes the line, so the keys typed after it reach the run.
+// echoOnScreen says whether the transcript's echo of a submitted line
+// stands on the screen: the row reads "❯ work" and carries no prompt
+// mark, so the draft's own "💩❯ work" row does not count.
+func echoOnScreen(term *terminal, text string) bool {
+	for _, line := range strings.Split(term.screen(), "\n") {
+		if strings.Contains(line, "❯ "+text) && !strings.Contains(line, promptMark) {
+			return true
+		}
+	}
+	return false
+}
+
+// waitEcho waits for the transcript's echo of a submitted line.
 func waitEcho(t *testing.T, term *terminal, text string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, line := range strings.Split(term.screen(), "\n") {
-			if strings.Contains(line, "❯ "+text) && !strings.Contains(line, promptMark) {
-				return
-			}
+		if echoOnScreen(term, text) {
+			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("the echo of %q never read:\n%s", text, term.screen())
+}
+
+// pressSubmitted types a line and waits for the machine's echo of it. An
+// Enter that lands mid-winch-redraw can clear the draft without
+// submitting, so the echo says whether the line was taken; until it
+// shows, the line is typed again — the cleared draft is empty, so the
+// retyped line is whole.
+func pressSubmitted(t *testing.T, term *terminal, text string) {
+	t.Helper()
+	for attempt := 0; attempt < 3; attempt++ {
+		term.press(text + "\r")
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			if echoOnScreen(term, text) {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	t.Fatalf("the line %q never took; the screen reads:\n%s", text, term.screen())
 }
 
 // waitBottomRows waits for the prompt to stand on the footer's line row
@@ -587,17 +617,10 @@ func startPipedRepl(t *testing.T, server *fakeServer, input string) (*terminal, 
 		},
 	}
 	go func() { code <- Run(opts); close(exited) }()
-	// The repl must be gone before the terminal moves on: a repl still
-	// running draws to the output stream the next test also draws to.
-	// The wait runs after the interrupts (cleanups unwind last
-	// registered first).
-	t.Cleanup(func() {
-		select {
-		case <-exited:
-		case <-time.After(10 * time.Second):
-			t.Error("the repl did not leave within 10s")
-		}
-	})
+	// endReplCleanup owns the teardown contract: interrupts until the
+	// repl leaves, then the wait that holds the terminal until Run has
+	// returned. It runs after the interrupts and before the stdio
+	// restore (cleanups unwind last registered first).
 	t.Cleanup(func() { endReplCleanup(t, term, exited) })
 	return term, code
 }
@@ -711,17 +734,10 @@ func startTerminalReplWith(t *testing.T, server *fakeServer, history string) (*t
 		},
 	}
 	go func() { code <- Run(opts); close(exited) }()
-	// The repl must be gone before the terminal moves on: a repl still
-	// running holds the editor on fd 0 and reads the next test's
-	// keystrokes. The wait runs after the interrupts (cleanups unwind
-	// last registered first) and before the stdio restore.
-	t.Cleanup(func() {
-		select {
-		case <-exited:
-		case <-time.After(10 * time.Second):
-			t.Error("the repl did not leave within 10s")
-		}
-	})
+	// endReplCleanup owns the teardown contract: interrupts until the
+	// repl leaves, then the wait that holds the terminal until Run has
+	// returned. It runs after the interrupts and before the stdio
+	// restore (cleanups unwind last registered first).
 	t.Cleanup(func() { endReplCleanup(t, term, exited) })
 	return term, code
 }
