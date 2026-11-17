@@ -15,6 +15,7 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.Version = number(float64(s.Version))
 	f.Ui = text(s.UI)
 	f.ModelsFile = text(s.ModelsFile)
+	f.AuthFile = text(s.AuthFile)
 	f.PiAuthFile = text(s.PiAuthFile)
 	f.Profile = text(s.Profile)
 

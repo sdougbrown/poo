@@ -386,7 +386,7 @@ func TestTheCodexTransportDoesNotRetryAnUncertainRefresh(t *testing.T) {
 // one a loaded settings gets.
 func TestAHandBuiltSettingsResolvesItsAuthFile(t *testing.T) {
 	handBuilt := &Settings{PiAuthFile: filepath.Join("relative", "auth.json")}
-	if got := handBuilt.piAuthFile(); got != filepath.Join("relative", "auth.json") {
+	if got := handBuilt.CredentialFile(); got != filepath.Join("relative", "auth.json") {
 		t.Errorf("the path is %q, want the setting as the working directory reads it", got)
 	}
 
@@ -395,13 +395,21 @@ func TestAHandBuiltSettingsResolvesItsAuthFile(t *testing.T) {
 		t.Skipf("this environment has no home directory: %v", err)
 	}
 	expanded := &Settings{PiAuthFile: "~/pi/auth.json"}
-	if got, want := expanded.piAuthFile(), filepath.Join(home, "pi", "auth.json"); got != want {
+	if got, want := expanded.CredentialFile(), filepath.Join(home, "pi", "auth.json"); got != want {
 		t.Errorf("the path is %q, want the home shortcut expanded to %q", got, want)
 	}
 
-	// A settings that names no file has none: the transport reports the
-	// missing setting rather than reading a directory.
-	if got := (&Settings{}).piAuthFile(); got != "" {
-		t.Errorf("the path is %q, want none", got)
+	// A settings that names no file takes poo's own, in the user's config
+	// directory.
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	t.Setenv("APPDATA", config)
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Skipf("this environment has no config directory: %v", err)
+	}
+	if got, want := (&Settings{}).CredentialFile(), filepath.Join(dir, "poo", AuthFileName); got != want {
+		t.Errorf("the path is %q, want poo's own at %q", got, want)
 	}
 }

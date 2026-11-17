@@ -434,6 +434,26 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 		}
 	})
 
+	t.Run("auth status", func(t *testing.T) {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"auth", "status",
+			"--json",
+			"--settings", "s.yaml",
+		})
+		if err != nil {
+			t.Fatalf("parsing the status' flags: %v", err)
+		}
+		var o authOptions
+		o.bind(inv)
+		want := authOptions{
+			sharedFlags: sharedFlags{settingsFile: "s.yaml"},
+			json:        true,
+		}
+		if !reflect.DeepEqual(o, want) {
+			t.Errorf("the bound options are\n%+v\nwant\n%+v", o, want)
+		}
+	})
+
 	t.Run("sessions prune", func(t *testing.T) {
 		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
 			"sessions", "prune",
@@ -490,6 +510,7 @@ func TestEveryCommandWithItsOwnFlagsHasABindingTest(t *testing.T) {
 		"serve":          "TestEveryOtherCommandBindsItsFlags/serve",
 		"prompt":         "TestEveryOtherCommandBindsItsFlags/prompt",
 		"models":         "TestEveryOtherCommandBindsItsFlags/models",
+		"auth status":    "TestEveryOtherCommandBindsItsFlags/auth_status",
 		"sessions list":  "TestEveryOtherCommandBindsItsFlags/sessions_list",
 		"sessions prune": "TestEveryOtherCommandBindsItsFlags/sessions_prune",
 		"version":        "TestTheVersionCommandAnswersInBothForms",

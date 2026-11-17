@@ -391,6 +391,7 @@ roles:
 // on its own is a provider list, not a pi login, so pi's Codex models need
 // pi's auth.json beside it.
 func TestABuiltinProviderNeedsTheAuthFileItReads(t *testing.T) {
+	isolatedConfigDir(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, config.ModelsFileName), []byte(`{
 		"providers": {"home": {"baseUrl": "http://127.0.0.1:1/v1", "models": [{"id": "qwen"}]}}
@@ -412,11 +413,35 @@ roles:
 	}
 }
 
-// TestACodexModelWithoutPisAuthFileIsRefused covers the explicit credential.
-// A Codex model the settings define has no credential unless a pi auth file is
-// named or found beside the models file.
-func TestACodexModelWithoutPisAuthFileIsRefused(t *testing.T) {
-	dir := t.TempDir()
+// isolatedConfigDir points the user's config directory where poo resolves its
+// own default files at a directory of the test's own, and returns the
+// directory the platform answered with.
+//
+// Each platform reads its own variable, so all of them are pointed at the same
+// place. The skip is the guard: a platform that answers elsewhere skips rather
+// than reading the developer's own config.
+func isolatedConfigDir(t *testing.T) string {
+	t.Helper()
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", config)
+	t.Setenv("APPDATA", config)
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Skipf("the user config directory is not resolvable here: %v", err)
+	}
+	if !strings.HasPrefix(dir, config) {
+		t.Skipf("this platform's user config directory is outside the test's directory: %s", dir)
+	}
+	return dir
+}
+
+// TestACodexModelWithoutANamedCredentialTakesTheDefaultFile covers the file a
+// Codex model reads when no setting names one. poo resolves its own credential
+// file, and a model built from it is not refused before a run: the credential's
+// absence is what a request reports.
+func TestACodexModelWithoutANamedCredentialTakesTheDefaultFile(t *testing.T) {
+	dir := isolatedConfigDir(t)
 	path := writeCodexSettings(t, dir, `version: 1
 session:
   mode: ephemeral
@@ -436,13 +461,12 @@ roles:
 	if err != nil {
 		t.Fatalf("loading the settings: %v", err)
 	}
-	_, err = buildCodex(t, settings, nil)
-	var failure *config.Error
-	if !errors.As(err, &failure) {
-		t.Fatalf("the build is %v, want a settings failure", err)
+	want := filepath.Join(dir, "poo", config.AuthFileName)
+	if got := settings.CredentialFile(); got != want {
+		t.Errorf("the credential file is %q, want poo's own at %q", got, want)
 	}
-	if failure.Field != "pi_auth_file" {
-		t.Errorf("the failure names %q, want pi_auth_file", failure.Field)
+	if _, err := buildCodex(t, settings, nil); err != nil {
+		t.Fatalf("the model was refused for a credential file a login creates: %v", err)
 	}
 }
 

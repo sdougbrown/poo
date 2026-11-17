@@ -4,6 +4,7 @@
     "version": { "required": true, "isEmpty": "number" },
     "ui": { "isEmpty": "string" },
     "models_file": { "isEmpty": "string" },
+    "auth_file": { "isEmpty": "string" },
     "pi_auth_file": { "isEmpty": "string" },
     "profile": { "isEmpty": "string" },
     "roles.chat": { "isEmpty": "string" },
