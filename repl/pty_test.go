@@ -184,20 +184,33 @@ func takeOverStdio(t *testing.T, slave *os.File) (restore func()) {
 	}
 }
 
-// endReplCleanup ends a test's repl: the failure dump goes to stderr —
-// stdout is the terminal under test — and interrupts end any read still
-// blocked at session end, so the next test's keystrokes are its own and
-// the terminal restore lands on the cooked one. A second interrupt
-// covers one the editor consumed mid-sequence.
-func endReplCleanup(t *testing.T, term *terminal) {
+// endReplCleanup ends a test's repl. The failure dump goes to stderr —
+// stdout is the terminal under test. The interrupts repeat until the
+// repl actually leaves. The first clears a draft, the second leaves an
+// empty prompt, and one the editor consumed mid-sequence asks for
+// another. The loop is bounded, so a repl that will not leave fails
+// here instead of reading the next test's keystrokes forever. After
+// the interrupts, the wait holds the terminal until Run has returned:
+// a repl still running holds the editor on fd 0 and reads the next
+// test's keystrokes.
+func endReplCleanup(t *testing.T, term *terminal, exited <-chan struct{}) {
 	t.Helper()
 	if t.Failed() {
 		fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.String())
 	}
-	term.press("\x03")
-	time.Sleep(150 * time.Millisecond)
-	term.press("\x03")
-	time.Sleep(150 * time.Millisecond)
+	for i := 0; i < 5; i++ {
+		select {
+		case <-exited:
+			return
+		case <-time.After(300 * time.Millisecond):
+		}
+		term.press("\x03")
+	}
+	select {
+	case <-exited:
+	case <-time.After(10 * time.Second):
+		t.Error("the repl did not leave within 10s")
+	}
 }
 
 // startTerminalRepl runs a repl on the terminal. The exit code arrives
@@ -218,14 +231,19 @@ func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int)
 	t.Cleanup(restore)
 
 	code := make(chan int, 1)
+	exited := make(chan struct{})
 	opts := Options{
 		WorkingDir: t.TempDir(),
 		StartServer: func(args []string) (io.WriteCloser, io.ReadCloser, func() error, error) {
 			return stdin, stdout, func() error { return nil }, nil
 		},
 	}
-	go func() { code <- Run(opts) }()
-	t.Cleanup(func() { endReplCleanup(t, term) })
+	go func() { code <- Run(opts); close(exited) }()
+	// endReplCleanup owns the teardown contract: interrupts until the
+	// repl leaves, then the wait that holds the terminal until Run has
+	// returned. It runs after the interrupts and before the stdio
+	// restore (cleanups unwind last registered first).
+	t.Cleanup(func() { endReplCleanup(t, term, exited) })
 	return term, code
 }
 
@@ -357,8 +375,12 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	term, code := startTerminalRepl(t, server)
 	waitFor(t, term, promptMark)
 	term.press("work\r")
-	// The held deltas paint when the run settles, so the cancel is what
-	// brings the reply's words onto the screen.
+	// The run must be on before the escape. An escape that arrives while
+	// the editor still holds the draft is one the editor eats under
+	// load. The echo is the machine's receipt for the line, so the keys
+	// after it reach the run. The held deltas paint when the run settles,
+	// so the cancel is what brings the reply's words onto the screen.
+	waitEcho(t, term, "work")
 	term.press("\x1b")
 	server.waitCancels(t, 1)
 	waitFor(t, term, "✓ cancelled")
@@ -370,6 +392,7 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	}
 	// The held deltas paint when the run settles, so the second run's
 	// cancel comes before its reply's words can.
+	waitEcho(t, term, "next")
 	term.press("\x1b")
 	server.waitCancels(t, 2)
 	waitTimes(t, term, "✓ cancelled", 2)
@@ -394,6 +417,11 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	term, _ := startTerminalRepl(t, server)
 	waitFor(t, term, promptMark)
 	term.press("work\r")
+	// The run must be on before the keys. An escape that arrives while
+	// the editor still holds the draft is one the editor eats under
+	// load. The echo is the machine's receipt for the line, so the keys
+	// after it reach the run.
+	waitEcho(t, term, "work")
 	// The editor dispatches a bare escape once its key buffer holds no
 	// more keys, and an arrow the moment its last byte lands, so a poll
 	// through the dispatch window is enough to tell them apart: an
