@@ -100,6 +100,53 @@ context:
 	}
 }
 
+// TestTheNativeStrategyRefusesACodexModelWithoutTheCompactOperation covers the
+// model check on its own: the Codex transport can compact the provider's own
+// state, so the missing model operation is the only thing that can refuse this
+// build, and the failure names the setting to change.
+func TestTheNativeStrategyRefusesACodexModelWithoutTheCompactOperation(t *testing.T) {
+	dir := t.TempDir()
+	token := fakeCodexToken(t, "acct_live")
+	writeCodexAuth(t, dir, token, "rt_live", 4102444800000)
+	path := writeCodexSettings(t, dir, `version: 1
+pi_auth_file: auth.json
+session:
+  mode: ephemeral
+models:
+  openai-codex/gpt-6.1-sol:
+    endpoint: openai-codex
+    model_id: gpt-6.1-sol
+    api: responses
+    ops: [chat]
+roles:
+  chat: openai-codex/gpt-6.1-sol
+context:
+  strategy: native
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	runtime, err := buildCodex(t, settings, &http.Client{Transport: &codexEndpoint{accessToken: token}})
+	if err == nil {
+		t.Fatalf("the build accepted the native strategy on %T, a transport that can compact natively, "+
+			"for a model that does not declare compaction", runtime.Options.Transport)
+	}
+	var failure *config.Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("the failure is %T, want a settings failure", err)
+	}
+	if failure.Field != "context.strategy" {
+		t.Errorf("the failure names %q, want context.strategy", failure.Field)
+	}
+	// The transport's capability check has its own failure; this build has to
+	// fail on the model's operation, naming the field that would add it.
+	if !strings.Contains(failure.Message, "does not declare") ||
+		!strings.Contains(failure.Message, "models.openai-codex/gpt-6.1-sol.ops") {
+		t.Errorf("the failure is %q, want it to name the model's missing compact operation", failure.Message)
+	}
+}
+
 // TestTheNativeStrategyRefusesATransportWithoutTheCapability covers the other
 // half: a model that declares compaction is still refused when its transport
 // cannot produce a provider window.
