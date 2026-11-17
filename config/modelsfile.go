@@ -51,18 +51,18 @@ func (s *Settings) importPi(dir string) error {
 	if err != nil {
 		return err
 	}
+	// pi's built-in providers are offered when a credential file is there,
+	// because they are what its credential can run. A settings file that names
+	// no credential file, and has none at the default path, gains no models it
+	// did not ask for. They are the layer's fallback: the models file is the
+	// operator's word and overrules them by name.
+	if s.credentialPath != "" && fileExists(s.credentialPath) {
+		s.addLayer(piLayer(piimport.BuiltinCodex(codex.DefaultEndpoint)))
+	}
 	if modelsPath != "" {
 		if err := s.importModelsFile(modelsPath); err != nil {
 			return err
 		}
-	}
-	// pi's built-in providers are offered when a credential file is there,
-	// because they are what its credential can run. A settings file that names
-	// no credential file, and has none at the default path, gains no models it
-	// did not ask for. The models file and the settings' own entries still win
-	// on a collision.
-	if s.credentialPath != "" && fileExists(s.credentialPath) {
-		s.applyModelsFile(piimport.BuiltinCodex(codex.DefaultEndpoint))
 	}
 	return nil
 }
@@ -109,9 +109,9 @@ func (s *Settings) modelsFilePath(dir string) (string, error) {
 	}
 }
 
-// importModelsFile reads a models file: poo's own shape, which is the catalog's
-// models-file layer, or pi's, whose providers are imported into the settings
-// and the keys read from the credential file the settings resolved.
+// importModelsFile reads a models file: poo's own shape, or pi's, which is
+// translated into the same layer and whose providers' keys are read from the
+// credential file the settings resolved.
 func (s *Settings) importModelsFile(path string) error {
 	document, err := readModelsDocument(path)
 	if err != nil {
@@ -126,14 +126,19 @@ func (s *Settings) importModelsFile(path string) error {
 		if err != nil {
 			return s.modelsFileError(err)
 		}
-		s.applyModelsFile(file)
+		layer := piLayer(file)
+		s.addLayer(layer)
+		s.importPiKeys(file, layer)
 		return nil
 	}
 	layer, err := modelsLayer(path, document)
 	if err != nil {
 		return s.modelsFileError(err)
 	}
-	s.modelsFileLayer = layer
+	// The file folds over what is already there, name by name: the built-in provider
+	// was layered first, and a model the file names is the file's word on that model,
+	// not a reason to drop the ones it does not name.
+	s.addLayer(layer)
 	return nil
 }
 
@@ -308,54 +313,6 @@ func (s *Settings) expandSetting(path string) string {
 		return path
 	}
 	return expanded
-}
-
-// applyModelsFile fills the providers and models a models file names,
-// where the settings do not already hold them.
-//
-// A model is named by its provider and id together: provider/id, the
-// name the file's own tool answers to. The settings' entries win on a
-// collision, so a models file is an addition, never a takeover.
-func (s *Settings) applyModelsFile(file piimport.File) {
-	for name, provider := range file.Providers {
-		if _, ok := s.Endpoints[name]; !ok {
-			if s.Endpoints == nil {
-				s.Endpoints = map[string]Endpoint{}
-			}
-			s.Endpoints[name] = Endpoint{
-				Endpoint:  provider.BaseURL,
-				APIKeyEnv: provider.APIKeyEnv,
-				APIKey:    provider.APIKey,
-				SkipProbe: provider.SkipProbe,
-			}
-		}
-		for _, model := range provider.Models {
-			key := name + "/" + model.ID
-			if _, ok := s.Models[key]; ok {
-				continue
-			}
-			entry := Model{
-				Endpoint:     name,
-				ModelID:      model.ID,
-				API:          provider.API,
-				ToolsMode:    poo.ToolsMode(provider.ToolsMode),
-				Inputs:       model.Inputs,
-				ContextLimit: model.ContextWindow,
-				MaxOutput:    model.MaxTokens,
-			}
-			if model.Reasoning && model.SupportsReasoningEffort {
-				entry.Reasoning = &poo.ReasoningControl{
-					Mode:  poo.ReasoningEffort,
-					Param: poo.ReasoningPathEffort,
-				}
-				entry.ReasoningLevels = model.Levels
-			}
-			if s.Models == nil {
-				s.Models = map[string]Model{}
-			}
-			s.Models[key] = entry
-		}
-	}
 }
 
 // modelsFile is poo's own models file: the endpoints it declares, and the

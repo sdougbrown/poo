@@ -98,11 +98,14 @@ A relative path resolves against the settings file's own directory. With no
 `models_file` named, a `models.yaml` beside the settings file is read, so
 `~/.config/poo/settings.yaml` and `~/.config/poo/models.yaml` set up providers
 without the settings naming the file. A `models.json` beside the settings is
-read as well: it is the file pi writes, its providers are imported, and a
-provider whose entry carries no `apiKey` takes the key from the credential file
-the settings resolved. A settings directory holding one of each is refused
-rather than half read, and a models file that does not read fails the load. A
-file the operator put there is never skipped in silence.
+read as well: it is the file pi writes, its providers are translated into the
+same layer, and a provider whose entry carries no `apiKey` takes the key from
+the credential file the settings resolved. A settings directory holding one of
+each is refused rather than half read, and a models file that does not read
+fails the load. A file the operator put there is never skipped in silence.
+
+The one exception is a literal key: a key pi's file writes is copied into the
+settings, where a literal key lives, and the layer never carries one.
 
 `models_file`, `auth_file` and `pi_auth_file` resolve relative paths
 against the settings file's directory. `cli_registry.paths` and
