@@ -1569,11 +1569,10 @@ func (s *Session) writeCompactionUsage(run *runState, turn int, usage *UsageRepo
 
 // accountNativeCompaction charges the request a native compaction made.
 //
-// The request is a side request like the ones a strategy sends. It appends
-// nothing to the history, and the endpoint charged for it all the same. A
-// usage the endpoint reported is written as the compaction's own. One it
-// withheld is charged the estimate of the request and the window it produced,
-// so a compaction is never free.
+// The request is a side request like the ones a strategy sends: it appends
+// nothing to the history, and the endpoint charged for it all the same. What
+// it produced is the window, which is what the estimate measures when the
+// endpoint withholds a usage.
 //
 // A compaction that failed still charged the run, because the endpoint billed
 // the answer whatever became of it. A window the transport refused, or a
@@ -1583,19 +1582,32 @@ func (s *Session) accountNativeCompaction(run *runState, result NativeCompaction
 	if !result.Billed {
 		return
 	}
-	s.mu.Lock()
-	turn := run.turn
-	s.mu.Unlock()
-	if result.Usage != nil {
-		s.writeCompactionUsage(run, turn, result.Usage, requestChars)
-		return
-	}
 	// An answer that produced no window leaves only the request to measure,
 	// so the estimate is the request's own size. That is what an interrupted
 	// turn is charged when the endpoint reports nothing.
+	produced := Message{Role: RoleAssistant, Content: result.Window.Items}
+	s.chargeSideRequest(run, result.Usage, produced, requestChars)
+}
+
+// chargeSideRequest charges a request the run did not make as a turn.
+//
+// A usage the endpoint reported is written as the compaction's own. One it
+// withheld is charged the estimate of the request and what it produced,
+// measured the way a turn's is, so a side request is never free.
+//
+// A request that finishes after the run settled does not add to the settled
+// run's token counter. Each path enforces that under the same lock that
+// charges, so a settle between the check and the charge cannot slip through.
+func (s *Session) chargeSideRequest(run *runState, usage *UsageReport, produced Message, requestChars int) {
+	s.mu.Lock()
+	turn := run.turn
+	s.mu.Unlock()
+	if usage != nil {
+		s.writeCompactionUsage(run, turn, usage, requestChars)
+		return
+	}
 	s.mu.Lock()
 	if !run.committed && !run.sealed {
-		produced := Message{Role: RoleAssistant, Content: result.Window.Items}
 		run.tokens += s.tokensForCharsLocked(requestChars + estimateMessageChars(produced))
 	}
 	s.mu.Unlock()

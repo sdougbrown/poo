@@ -466,27 +466,12 @@ func (s *Session) readSideReply(ctx context.Context, run *runState, reader Strea
 		return Reply{}, err
 	}
 	reply := Reply{Message: assistantMessage(resp), Finish: resp.finish}
-	// A request that finishes after the run settled does not add to the
-	// settled run's token counter. Each path enforces that under the same
-	// lock that charges, so a settle between the check and the charge
-	// cannot slip through.
-	s.mu.Lock()
-	turn := run.turn
-	s.mu.Unlock()
 	if resp.usage != nil {
-		// The endpoint's own count, recorded as what it is: a request a
-		// compaction made.
-		s.writeCompactionUsage(run, turn, resp.usage, requestChars)
-	} else {
-		s.mu.Lock()
-		if !run.committed && !run.sealed {
-			run.tokens += s.tokensForCharsLocked(requestChars + estimateMessageChars(reply.Message))
-		}
-		s.mu.Unlock()
-	}
-	if resp.usage != nil {
+		// The endpoint's own count, reported to the caller as what it is: a
+		// request a compaction made.
 		reply.Usage = *resp.usage
 	}
+	s.chargeSideRequest(run, resp.usage, reply.Message, requestChars)
 	return reply, nil
 }
 
