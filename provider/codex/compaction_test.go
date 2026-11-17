@@ -178,6 +178,72 @@ func TestACompactionItemStreamedOnlyAsAnItemIsRead(t *testing.T) {
 	}
 }
 
+// TestATruncatedCompactionResponseFails covers an answer the endpoint cut at
+// its output limit. The state it carries is only the part the endpoint reached,
+// so installing it would drop the context the compaction never got to.
+func TestATruncatedCompactionResponseFails(t *testing.T) {
+	stream := frame(`{"type":"response.output_item.done","output_index":0,"item":`+compactionItem+`}`) +
+		frame(`{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}`) +
+		done
+	srv := newServer(t, stream)
+	tr := newTransport(srv.URL)
+
+	window, err := compact(t, tr, compactView())
+	wantCompactionFailure(t, window, err)
+}
+
+// TestAMalformedCompactionItemFails covers an item the transport cannot read.
+// Dropping it would install the items around it as if the response held
+// nothing else, so the window is refused instead.
+func TestAMalformedCompactionItemFails(t *testing.T) {
+	stream := frame(`{"type":"response.output_item.done","output_index":0,"item":`+compactionItem+`}`) +
+		frame(`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","content":[{"type":"output_text","text":7}]}}`) +
+		frame(`{"type":"response.completed","response":{"status":"completed"}}`) + done
+	srv := newServer(t, stream)
+	tr := newTransport(srv.URL)
+
+	window, err := compact(t, tr, compactView())
+	wantCompactionFailure(t, window, err)
+}
+
+// TestACompactionThatFailsAfterAnItemHasNoWindow covers a stream that ends in a
+// failure after it carried items: the response never named its answer whole,
+// so there is no window to install.
+func TestACompactionThatFailsAfterAnItemHasNoWindow(t *testing.T) {
+	stream := frame(`{"type":"response.output_item.done","output_index":0,"item":`+compactionItem+`}`) +
+		frame(`{"type":"response.failed","response":{"status":"failed","error":{"code":"server_error","message":"the endpoint broke"}}}`) +
+		done
+	srv := newServer(t, stream)
+	tr := newTransport(srv.URL)
+
+	window, err := compact(t, tr, compactView())
+	wantCompactionFailure(t, window, err)
+}
+
+// TestACompactionWindowInstallsTheTerminalItemsOnce covers an answer whose
+// terminal event repeats the items the stream already sent: the terminal items
+// are the response whole, so the window holds them once.
+func TestACompactionWindowInstallsTheTerminalItemsOnce(t *testing.T) {
+	stream := frame(`{"type":"response.output_item.done","output_index":0,"item":`+compactionItem+`}`) +
+		compactionStream(summaryItem("the summary"), compactionItem)
+	srv := newServer(t, stream)
+	tr := newTransport(srv.URL)
+
+	window, err := compact(t, tr, compactView())
+	if err != nil {
+		t.Fatalf("compacting the view: %v", err)
+	}
+	if len(window.Items) != 2 {
+		t.Fatalf("the window holds %d items, want the response's 2: %+v", len(window.Items), window.Items)
+	}
+	if window.Items[0].Kind != poo.ContentText || window.Items[0].Text != "the summary" {
+		t.Errorf("the window's first item is %+v, want the summary text", window.Items[0])
+	}
+	if window.Items[1].Provider == nil || string(window.Items[1].Provider.Data) != compactionItem {
+		t.Errorf("the window's second item is %+v, want the compaction item", window.Items[1])
+	}
+}
+
 // TestACompactionResponseWithoutACompactionItemFails covers an answer that
 // holds no compacted state: a window of visible text alone is not a
 // compaction, and none is installed.

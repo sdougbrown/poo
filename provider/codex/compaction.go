@@ -103,14 +103,21 @@ func (t *Transport) compactionBody(in poo.NativeCompaction) ([]byte, error) {
 // The stream's events are not the answer: the items the window installs
 // arrive whole in the terminal event, or in an item event before it. Reading
 // them through is what releases the response, and a stream that failed carries
-// its failure out.
+// its failure out. A response the endpoint cut at its output limit is refused
+// the same way: the state it carries is the part the endpoint reached, not the
+// compacted view.
 func drainCompaction(reader *streamReader) error {
 	for {
-		if _, err := reader.Next(); err != nil {
+		ev, err := reader.Next()
+		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
+		}
+		if ev.Kind == "finish" && ev.FinishReason == poo.FinishLength {
+			return compactionFailure(
+				"the compaction response stopped on its output limit, so the state it carries is short")
 		}
 	}
 }

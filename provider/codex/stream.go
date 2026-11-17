@@ -276,8 +276,12 @@ func (r *streamReader) ReportProviderBlocks() []poo.ProviderBlock {
 
 // capture records an output item when the reader was asked to keep the
 // response's items whole.
+//
+// Every item a done event carries is kept, including one the reader cannot
+// decode: the window refuses an item it cannot read, rather than installing
+// the items around it as if the response held nothing else.
 func (r *streamReader) capture(item json.RawMessage) {
-	if !r.captureOutput || len(item) == 0 {
+	if !r.captureOutput {
 		return
 	}
 	r.output = append(r.output, item)
@@ -425,11 +429,11 @@ func (r *streamReader) callDone(ev codexEvent) []poo.StreamItem {
 // reasoning item is held as a provider block, so the reasoning the endpoint
 // encrypted can travel back with the next request.
 func (r *streamReader) itemDone(ev codexEvent) []poo.StreamItem {
+	r.capture(ev.Item)
 	item, ok := decodeItem(ev.Item)
 	if !ok {
 		return nil
 	}
-	r.capture(ev.Item)
 	switch item.Type {
 	case "reasoning":
 		if block, ok := reasoningBlock(ev.Item, item); ok {
