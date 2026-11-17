@@ -42,6 +42,9 @@ type loginOptions struct {
 	noBrowser bool
 	// wait bounds how long a browser sign-in waits for its callback, in seconds.
 	wait int
+	// waitSet reports whether --wait was typed, which a key flow refuses: the value alone
+	// cannot tell a request from the default.
+	waitSet bool
 	// provider is the sign-in named on the command line, if one was.
 	provider string
 }
@@ -52,6 +55,7 @@ func (o *loginOptions) bind(inv clicontract.Invocation) {
 	o.force = inv.Bools["force"]
 	o.noBrowser = inv.Bools["no-browser"]
 	o.wait = inv.Ints["wait"]
+	o.waitSet = inv.Supplied["wait"]
 	if len(inv.Args) > 0 {
 		o.provider = inv.Args[0]
 	}
@@ -76,6 +80,10 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 	}
 	flow, ok := o.choose(os.Stdin, stderr)
 	if !ok {
+		return exit{usageExitCode}
+	}
+	if err := o.refuseBrowserFlags(flow); err != nil {
+		fmt.Fprintf(stderr, "poo login: %v\n", err)
 		return exit{usageExitCode}
 	}
 	settingsPath, settings, err := resolveSettings(o.settingsFile, "")
@@ -114,6 +122,24 @@ func handleLogin(ctx context.Context, inv clicontract.Invocation, stdout, stderr
 		fmt.Fprintf(stdout, "\nThe settings still resolve the credential to %s. Point poo at the copy:\n  auth_file: %s\n", reads, status.Path)
 	}
 	return exit{}
+}
+
+// refuseBrowserFlags refuses the flags a browser sign-in takes when the chosen sign-in is not one.
+//
+// --no-browser and --wait are the browser flow's: a key flow opens no browser, so there is
+// nothing to suppress and nothing to wait for. A flag accepted and ignored tells the operator it
+// did something, so it is refused where it is read.
+func (o *loginOptions) refuseBrowserFlags(flow auth.Flow) error {
+	if flow.Method != auth.MethodKey {
+		return nil
+	}
+	if o.noBrowser {
+		return fmt.Errorf("--no-browser does not apply to the %s sign-in: it takes a key, and no browser opens", flow.Name)
+	}
+	if o.waitSet {
+		return fmt.Errorf("--wait does not apply to the %s sign-in: it takes a key, and it is not waiting for a browser to come back", flow.Name)
+	}
+	return nil
 }
 
 // choose returns the sign-in the request names, or the one an operator picks from the list it

@@ -452,6 +452,7 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 			force:       true,
 			noBrowser:   true,
 			wait:        60,
+			waitSet:     true,
 			provider:    "codex",
 		}
 		if !reflect.DeepEqual(o, want) {
@@ -542,6 +543,32 @@ func TestEveryOtherCommandBindsItsFlags(t *testing.T) {
 			t.Errorf("the list bound the prune's flags: %+v", o)
 		}
 	})
+}
+
+// TestTheWaitFlagKnowsWhetherItWasTyped covers the flag's presence, not its value: a key
+// sign-in refuses --wait because it was asked for, so the default the operator never typed is
+// not a request.
+func TestTheWaitFlagKnowsWhetherItWasTyped(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"typed", []string{"login", "codex", "--wait", "60"}, true},
+		{"not typed", []string{"login", "codex"}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			inv, err := clicontract.Parse(pooApp(io.Discard), c.args)
+			if err != nil {
+				t.Fatalf("parsing the login's flags: %v", err)
+			}
+			var o loginOptions
+			o.bind(inv)
+			if o.waitSet != c.want {
+				t.Errorf("waitSet is %t for %v, want %t", o.waitSet, c.args, c.want)
+			}
+		})
+	}
 }
 
 // TestEveryCommandWithItsOwnFlagsHasABindingTest covers the blind spot the

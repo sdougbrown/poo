@@ -160,6 +160,50 @@ func TestAKeyLoginWithNoKeyIsAFailure(t *testing.T) {
 	}
 }
 
+// TestAKeySignInRefusesTheBrowsersFlags covers the flags only a browser sign-in takes: a key flow
+// opens no browser and waits for nothing, so a flag that says otherwise is refused instead of
+// accepted and ignored.
+func TestAKeySignInRefusesTheBrowsersFlags(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no-browser", []string{"--no-browser"}, "--no-browser"},
+		{"wait", []string{"--wait", "5"}, "--wait"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			settings := loginSettings(t, dir)
+			withoutATerminal(t)
+			withStdin(t, "an-api-key\n")
+
+			code, stderr := runCLI(t, append([]string{"login", "ollama-cloud", "--settings", settings}, c.args...)...)
+			if code != usageExitCode {
+				t.Errorf("the exit code is %d, want %d", code, usageExitCode)
+			}
+			for _, want := range []string{c.want, "Ollama Cloud", "takes a key"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("the refusal is %q, want it to name %q", stderr, want)
+				}
+			}
+			// The refusal comes before the sign-in, so nothing was read and nothing was written.
+			if _, err := os.Stat(filepath.Join(dir, "auth.json")); err == nil {
+				t.Error("the refused sign-in stored a credential")
+			}
+		})
+	}
+}
+
+// TestABrowserSignInTakesTheBrowsersFlags covers the other side: the refusal is the key flow's
+// alone, so a browser sign-in still takes both flags.
+func TestABrowserSignInTakesTheBrowsersFlags(t *testing.T) {
+	o := loginOptions{noBrowser: true, wait: 5, waitSet: true}
+	if err := o.refuseBrowserFlags(auth.CodexLogin); err != nil {
+		t.Errorf("the browser sign-in refused its own flags: %v", err)
+	}
+}
+
 // TestAKeyLoginDoesNotReplaceAnExistingCredential covers the replace rule at the command that
 // signs in: an entry that is there stays until the operator asks.
 func TestAKeyLoginDoesNotReplaceAnExistingCredential(t *testing.T) {
