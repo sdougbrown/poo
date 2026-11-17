@@ -43,7 +43,11 @@ func handleModels(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		fmt.Fprintf(stderr, "poo models: %v\n", err)
 		return exit{usageExitCode}
 	}
-	cat := catalog.New(settings.CatalogOptions())
+	// The command probes, so the discovery layer comes from Refresh: building the cached
+	// layer too would apply it twice, and warn twice when the cache is unreadable.
+	options := settings.CatalogOptions()
+	options.Cached = false
+	cat := catalog.New(options)
 	// A probe that fails falls back to the cache and then to the
 	// curated catalog, with a warning: the list is still the list.
 	if err := cat.Refresh(context.Background()); err != nil {

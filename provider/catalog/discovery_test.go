@@ -333,3 +333,251 @@ func TestAFailedProbeFallsBackToTheCuratedCatalog(t *testing.T) {
 		t.Errorf("the log is %q, want it to name the failed probe", log.String())
 	}
 }
+
+// TestACachedDiscoveryIsAModelASessionCanName covers the composition this refactor is for: an
+// endpoint's own report reaches the catalog without a probe, so a model nobody declared is a
+// model a role can name — and the models file still gets the last word on it.
+func TestACachedDiscoveryIsAModelASessionCanName(t *testing.T) {
+	server := vllmServer(t, "qwen3", 32768)
+	stateDir := t.TempDir()
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"local": {Endpoint: server.URL + "/v1"}},
+	}
+
+	// One refresh writes the cache: what the endpoint serves, once.
+	probed := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir})
+	if err := probed.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	server.Close()
+
+	// The session's build reads the cache and never asks the closed endpoint.
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true})
+	info, err := built.Resolve("local/qwen3")
+	if err != nil {
+		t.Fatalf("a model the endpoint reported is not resolvable: %v", err)
+	}
+	if info.ContextLimit != 32768 {
+		t.Errorf("the model's context limit is %d, want the reported 32768", info.ContextLimit)
+	}
+	if info.Source["context_limit"] != catalog.LayerDiscovery {
+		t.Errorf("the context limit comes from %q, want discovery", info.Source["context_limit"])
+	}
+
+	// A models file overrules the report, field by field.
+	override := catalog.New(catalog.Options{
+		Settings: settings,
+		File: catalog.FileSettings{
+			Models: map[string]catalog.ModelSettings{
+				"local/qwen3": {Endpoint: "local", ModelID: "qwen3", ContextLimit: 4096},
+			},
+		},
+		StateDir: stateDir,
+		Cached:   true,
+	})
+	info, err = override.Resolve("local/qwen3")
+	if err != nil {
+		t.Fatalf("the overridden model: %v", err)
+	}
+	if info.ContextLimit != 4096 || info.Source["context_limit"] != catalog.LayerModelsFile {
+		t.Errorf("the context limit is %d from %q, want the models file's 4096",
+			info.ContextLimit, info.Source["context_limit"])
+	}
+}
+
+// TestACachedEndpointTheCatalogNoLongerDeclaresIsNotAModel covers the operator's removal: a
+// cache entry whose endpoint the catalog no longer declares is not a model a session can
+// name or list, even though the cache still holds it. The endpoint that stayed keeps its
+// cached models.
+func TestACachedEndpointTheCatalogNoLongerDeclaresIsNotAModel(t *testing.T) {
+	first := vllmServer(t, "qwen3", 32768)
+	second := vllmServer(t, "qwen2", 8192)
+	stateDir := t.TempDir()
+	both := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"aaa": {Endpoint: first.URL + "/v1"},
+			"zzz": {Endpoint: second.URL + "/v1"},
+		},
+	}
+	probed := catalog.New(catalog.Options{Settings: both, StateDir: stateDir})
+	if err := probed.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+
+	// The operator removes the zzz endpoint; the cache still holds what it reported.
+	remaining := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"aaa": {Endpoint: first.URL + "/v1"}},
+	}
+	built := catalog.New(catalog.Options{Settings: remaining, StateDir: stateDir, Cached: true})
+	if _, err := built.Resolve("zzz/qwen2"); err == nil {
+		t.Error("a cached model whose endpoint the catalog no longer declares resolved")
+	}
+	for _, info := range built.List() {
+		if strings.HasPrefix(info.Name, "zzz/") {
+			t.Errorf("the catalog still lists %q, whose endpoint was removed", info.Name)
+		}
+	}
+	if _, err := built.Resolve("aaa/qwen3"); err != nil {
+		t.Errorf("the endpoint that stayed lost its cached model: %v", err)
+	}
+}
+
+// TestACatalogWithoutTheCacheAsksNoEndpoint covers the default: a catalog that did not ask for
+// the cached layer holds what its layers declare, and a discovered-only model is not one of them.
+func TestACatalogWithoutTheCacheAsksNoEndpoint(t *testing.T) {
+	server := vllmServer(t, "qwen3", 32768)
+	stateDir := t.TempDir()
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"local": {Endpoint: server.URL + "/v1"}},
+	}
+	if err := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir}).Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir})
+	if _, err := built.Resolve("local/qwen3"); err == nil {
+		t.Fatal("a catalog without the cached layer resolved a model only discovery knows")
+	}
+}
+
+// TestTheCachedLayerAndARefreshReadTheCacheTheSame pins the one-reader rule: the build's
+// cached layer and a refresh-built catalog answer the same set of models from one cache.
+// The cache holds an entry for a removed endpoint, an entry with no models, and a stale
+// entry with models; the live endpoint answers nothing, so both readers must take
+// live/qwen3 from the stale cache — the refresh's fallback is what the agreement is about.
+func TestTheCachedLayerAndARefreshReadTheCacheTheSame(t *testing.T) {
+	stateDir := t.TempDir()
+	old := time.Now().Add(-30 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	body := `{"version":1,"fetched_at":"` + old + `","endpoints":{` +
+		`"gone":{"fetched_at":"` + old + `","shape":"vllm","models":{"ghost":{"model_id":"ghost","context_limit":1}}},` +
+		`"empty":{"fetched_at":"` + old + `","models":{}},` +
+		`"live":{"fetched_at":"` + old + `","shape":"vllm","models":{"qwen3":{"model_id":"qwen3","context_limit":32768}}}}}`
+	cachePath := filepath.Join(stateDir, "poo", "discovery.json")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("making the state directory: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the discovery cache: %v", err)
+	}
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"live":  {Endpoint: "http://127.0.0.1:2/v1"},
+			"empty": {Endpoint: "http://127.0.0.1:1/v1"},
+		},
+	}
+
+	names := func(c *catalog.Catalog) map[string]bool {
+		set := map[string]bool{}
+		for _, m := range c.List() {
+			set[m.Name] = true
+		}
+		return set
+	}
+	built := names(catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true}))
+	refreshed := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir})
+	if err := refreshed.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	got := names(refreshed)
+
+	if len(built) != len(got) {
+		t.Fatalf("the build lists %v, the refresh lists %v: the two readers disagree", built, got)
+	}
+	for name := range got {
+		if !built[name] {
+			t.Errorf("the build does not list %q, the refresh does: the two readers disagree", name)
+		}
+	}
+	if built["gone/ghost"] || got["gone/ghost"] {
+		t.Error("the removed endpoint's cached model reached a catalog")
+	}
+	if !built["live/qwen3"] {
+		t.Error("the stale live/qwen3 entry did not reach either catalog")
+	}
+}
+
+// TestACorruptCacheIsABuildWithoutTheLayer covers the degradation path: a cache that
+// cannot be read is a catalog without the cached layer, not a failed build — the models
+// the layers declared still resolve, and the build says why.
+func TestACorruptCacheIsABuildWithoutTheLayer(t *testing.T) {
+	stateDir := t.TempDir()
+	cachePath := filepath.Join(stateDir, "poo", "discovery.json")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("making the state directory: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("writing the discovery cache: %v", err)
+	}
+	var log bytes.Buffer
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"local": {Endpoint: "http://127.0.0.1:1/v1"}},
+		Models:    map[string]catalog.ModelSettings{"local/m3": {Endpoint: "local", ModelID: "m3", ContextLimit: 1024}},
+		Roles:     map[string]string{"chat": "local/m3"},
+	}
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true, Logger: slog.New(slog.NewTextHandler(&log, nil))})
+	if _, err := built.Resolve("local/m3"); err != nil {
+		t.Errorf("a model the settings declared did not resolve without the cache: %v", err)
+	}
+	if !strings.Contains(log.String(), "the discovery cache could not be read") {
+		t.Errorf("the log is %q, want it to name the unreadable cache", log.String())
+	}
+}
+
+// TestAnUnprobedEndpointKeepsItsCacheToItself covers the SkipProbe exclusion: an endpoint
+// the operator marked unprobed is not read from the cached layer either — its models are
+// declared, and a cache entry for it is not a session model.
+func TestAnUnprobedEndpointKeepsItsCacheToItself(t *testing.T) {
+	stateDir := t.TempDir()
+	body := `{"version":1,"fetched_at":"2026-11-17T00:00:00Z","endpoints":{"frozen":` +
+		`{"fetched_at":"2026-11-17T00:00:00Z","shape":"vllm","models":{"qwen3":{"model_id":"qwen3","context_limit":32768}}}}}`
+	cachePath := filepath.Join(stateDir, "poo", "discovery.json")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("making the state directory: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the discovery cache: %v", err)
+	}
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"frozen": {Endpoint: "http://127.0.0.1:1/v1", SkipProbe: true}},
+	}
+	built := catalog.New(catalog.Options{Settings: settings, StateDir: stateDir, Cached: true})
+	if _, err := built.Resolve("frozen/qwen3"); err == nil {
+		t.Error("a skipped endpoint's cached model resolved")
+	}
+	for _, info := range built.List() {
+		if strings.HasPrefix(info.Name, "frozen/") {
+			t.Errorf("the catalog lists %q, whose endpoint is not read from the cache", info.Name)
+		}
+	}
+}
+
+// TestAProbeThatFollowsTheCachedLayerWarnsOnce covers the layer's ownership: a path that
+// probes after building gets the discovery layer from Refresh, so an unreadable cache is
+// reported once, not once per reader.
+func TestAProbeThatFollowsTheCachedLayerWarnsOnce(t *testing.T) {
+	stateDir := t.TempDir()
+	cachePath := filepath.Join(stateDir, "poo", "discovery.json")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("making the state directory: %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("writing the discovery cache: %v", err)
+	}
+	var log bytes.Buffer
+	settings := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{"local": {Endpoint: "http://127.0.0.1:1/v1"}},
+		Models:    map[string]catalog.ModelSettings{"local/m3": {Endpoint: "local", ModelID: "m3", ContextLimit: 1024}},
+		Roles:     map[string]string{"chat": "local/m3"},
+	}
+	built, err := catalog.Build(context.Background(), catalog.Options{
+		Settings: settings, StateDir: stateDir, Cached: true, Logger: slog.New(slog.NewTextHandler(&log, nil)),
+	})
+	if err != nil {
+		t.Fatalf("the build: %v", err)
+	}
+	if _, err := built.Resolve("local/m3"); err != nil {
+		t.Errorf("the declared model did not resolve: %v", err)
+	}
+	if got := strings.Count(log.String(), "the discovery cache could not be read"); got != 1 {
+		t.Errorf("the unreadable cache is reported %d times, want once:\n%s", got, log.String())
+	}
+}

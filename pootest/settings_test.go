@@ -7,6 +7,7 @@ import (
 
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/provider/catalog"
 )
 
 // TestMain runs the tests the way a package under this helper does,
@@ -68,5 +69,15 @@ func TestTheManifestOverridesDoNotReachTheSuite(t *testing.T) {
 		if value, ok := os.LookupEnv(name); ok {
 			t.Errorf("the suite carries %s=%s from the shell", name, value)
 		}
+	}
+}
+
+// TestTheStateRootNameIsTheCatalogs covers the name two test binaries set by hand: this
+// package spells it, provider/catalog reads it, and a rename on either side would leave
+// every test binary that isolates the root pointing at a variable nothing reads — so the
+// tests would quietly run against a developer's own discovery cache.
+func TestTheStateRootNameIsTheCatalogs(t *testing.T) {
+	if pootest.StateRootEnv != catalog.StateRootEnv {
+		t.Errorf("the state root is %q here and %q in the catalog", pootest.StateRootEnv, catalog.StateRootEnv)
 	}
 }

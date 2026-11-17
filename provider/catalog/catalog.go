@@ -80,14 +80,27 @@ type Options struct {
 	// discovery cache is <StateDir>/poo/discovery.json. Empty means the
 	// user's state directory.
 	StateDir string
-	// DiscoveryTTL is how long a cached discovery result stays fresh.
-	// Zero means DefaultDiscoveryTTL.
+	// DiscoveryTTL is how long a cached discovery result stays fresh. It decides when
+	// Refresh probes an endpoint again instead of reading the cache; it does not bound the
+	// build's cached layer, which applies what the endpoints last reported however old it
+	// is — a build never probes, and a model that vanishes with age is not a world a
+	// session can hold. Zero means DefaultDiscoveryTTL.
 	DiscoveryTTL time.Duration
 	// HTTPClient is the client the probes use. A nil client means a
 	// default one.
 	HTTPClient *http.Client
 	// ProbeTimeout bounds one probe. Zero means DefaultProbeTimeout.
 	ProbeTimeout time.Duration
+	// Cached says the catalog holds what the endpoints last reported, read from the
+	// discovery cache when it is built. It is how a model an endpoint served is a model a
+	// session can name without a probe: the build never reaches the network, and the cache
+	// is local. The layer is read through the same rule the refresh's stale fallback uses
+	// (cache.stale), so the two readers cannot disagree about what the cache holds.
+	//
+	// A cached result is the endpoint's own report, so it sits above the curated layer and
+	// below the models file: what a server says is a fact about the server, and what the
+	// operator writes is the operator's word on it.
+	Cached bool
 }
 
 // Catalog is the effective catalog: the merged models, the endpoints
@@ -110,8 +123,8 @@ type modelRef struct {
 
 // entry is one model in the catalog, with the layers that built it.
 type entry struct {
-	// name is the model's name: the settings' name, or the model's id
-	// for a model no layer named.
+	// name is the model's name: the settings' name, the model's id for a curated
+	// model no layer named, or endpoint/id for a discovered one.
 	name string
 	// endpoint is the endpoint's name, empty when no layer named one.
 	endpoint string
@@ -129,7 +142,10 @@ type entry struct {
 // New returns a catalog with the curated and the settings layers
 // merged.
 //
-// The catalog holds no discovery results yet: call Refresh to probe the
+// With Cached, the catalog also holds what the endpoints last reported, read from the
+// discovery cache: the endpoints the catalog still declares, and nothing else.
+//
+// Without it, the catalog holds no discovery results yet: call Refresh to probe the
 // endpoints, or Build to do both and to check the roles.
 func New(opts Options) *Catalog {
 	c := &Catalog{
@@ -152,8 +168,33 @@ func New(opts Options) *Catalog {
 	c.addFileModels()
 	c.addSettingsModels()
 	c.addCuratedModels()
+	if opts.Cached {
+		c.applyCached()
+	}
 	c.addRoles()
 	return c
+}
+
+// applyCached merges what the endpoints last reported, without asking them again.
+//
+// The cache is the one place a session learns what an endpoint serves, because a build does
+// not probe. Entries apply however old they are — an entry that went stale still describes
+// what a session may be using, and a model disappearing because the cache aged out would be
+// a failure nobody asked for; freshness is Refresh's decision, not the build's. The layer is
+// read through the same per-endpoint rule Refresh's stale fallback uses (cache.stale), so
+// the two readers cannot disagree; only the endpoints the catalog still declares are asked.
+// A cache that cannot be read is a catalog without this layer rather than a failed build.
+func (c *Catalog) applyCached() {
+	cache := c.cache()
+	cached, err := cache.load()
+	if err != nil {
+		c.warn("the discovery cache could not be read", slog.Any("error", err))
+		return
+	}
+	if cached == nil {
+		return
+	}
+	c.applyDiscovery(cache.layer(cached, c.endpointNames()))
 }
 
 // addFileModels adds the models the models file declares.
@@ -201,6 +242,10 @@ func (c *Catalog) addFileModels() {
 // run without, so a chat model the catalog cannot resolve is an error.
 // Every other model the catalog cannot resolve is a warning.
 func Build(ctx context.Context, opts Options) (*Catalog, error) {
+	// Build probes, so the discovery layer comes from Refresh, which reads the cache
+	// itself. Building the cached layer too would apply it twice — and warn twice when
+	// the cache is unreadable.
+	opts.Cached = false
 	c := New(opts)
 	if err := c.Refresh(ctx); err != nil {
 		return nil, err

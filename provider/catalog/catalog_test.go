@@ -529,13 +529,11 @@ func vllmFixture(t *testing.T, modelID string, maxModelLen int) *httptest.Server
 	return server
 }
 
-// TestAModelThatTwoEndpointsServeIsListedOnce covers the catalog's
-// note: "A model that two endpoints serve is listed once, under the
-// first endpoint by name."
-//
-// applyDiscovery keys the entry by the model id, so the second endpoint
-// that serves the same id overwrites the first one's entry.
-func TestAModelThatTwoEndpointsServeIsListedOnce(t *testing.T) {
+// TestAModelThatTwoEndpointsServeIsNamedForEach covers the naming rule: a model no layer
+// declared is named for where it came from, so two endpoints that serve one id are two
+// entries a role can tell apart. Naming it by the bare id would make one endpoint's report
+// overwrite the other's, and a role could not say which it meant.
+func TestAModelThatTwoEndpointsServeIsNamedForEach(t *testing.T) {
 	first := vllmFixture(t, "shared", 32768)
 	second := vllmFixture(t, "shared", 8192)
 
@@ -552,21 +550,26 @@ func TestAModelThatTwoEndpointsServeIsListedOnce(t *testing.T) {
 		t.Fatalf("building the catalog: %v", err)
 	}
 
-	var found int
-	var endpoint string
+	limits := map[string]int{}
 	for _, info := range c.List() {
 		if info.ModelID != "shared" {
 			continue
 		}
-		found++
-		endpoint = info.Endpoint
+		limits[info.Name] = info.ContextLimit
 	}
-	if found != 1 {
-		t.Fatalf("the catalog lists the shared model %d times, want once", found)
+	want := map[string]int{"aaa/shared": 32768, "zzz/shared": 8192}
+	for name, limit := range want {
+		got, ok := limits[name]
+		if !ok {
+			t.Errorf("the catalog does not hold %q: %v", name, limits)
+			continue
+		}
+		if got != limit {
+			t.Errorf("%s reports %d, want the limit its own endpoint reported: %d", name, got, limit)
+		}
 	}
-	if endpoint != first.URL {
-		t.Errorf("the shared model is attributed to %q, want the first endpoint by name %q",
-			endpoint, first.URL)
+	if len(limits) != len(want) {
+		t.Errorf("the catalog holds %v, want one entry per endpoint", limits)
 	}
 }
 
@@ -603,9 +606,10 @@ func TestDiscoveryKeepsTheSettingsModel(t *testing.T) {
 	}
 	// The other endpoint also serves it, and the model is still listed
 	// once under its own name plus the discovered one: the discovered
-	// entry must not take the name the settings use.
-	if _, err := c.Resolve("shared"); err != nil {
-		t.Logf("the discovered entry is not resolvable: %v", err)
+	// entry must not take the name the settings use: the discovered model is
+	// not keyed by the bare id.
+	if _, err := c.Resolve("shared"); err == nil {
+		t.Error("the catalog resolved the discovered model keyed by the bare id")
 	}
 }
 

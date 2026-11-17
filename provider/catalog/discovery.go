@@ -147,19 +147,19 @@ func (c *Catalog) applyDiscovery(found *discovery) {
 			model := models[id]
 			e := c.entryForModel(endpoint, id)
 			if e == nil {
-				if _, taken := c.entries[id]; taken {
-					// An earlier endpoint already serves this id
-					// under its name: the catalog lists the model
-					// once, as its note says, and the first endpoint
-					// by name keeps it.
+				// A model no layer declared is named for where it is served from, the way a
+				// models file names one: two endpoints can serve one id, and a role that names
+				// the bare id could not say which it meant.
+				name := endpoint + "/" + id
+				if _, taken := c.entries[name]; taken {
 					continue
 				}
 				e = &entry{
-					name:     id,
+					name:     name,
 					endpoint: endpoint,
 					modelID:  id,
 				}
-				c.entries[id] = e
+				c.entries[name] = e
 				c.modelIndex[modelRef{endpoint: endpoint, modelID: id}] = e
 			}
 			e.discovery = discoveredLayer(model, c.endpoints[endpoint].Endpoint)

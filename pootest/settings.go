@@ -35,6 +35,27 @@ func ManifestOverrides() []string {
 	return append([]string(nil), manifestOverrides...)
 }
 
+// StateRootEnv is the variable a test points at a directory of its own.
+//
+// It spells the name provider/catalog holds in catalog.StateRootEnv rather than importing
+// it: this package is reached by the session package's tests, and the catalog reaches the
+// session package. settings_test.go holds the two names together, so a rename on either
+// side fails there instead of leaving a test binary reading a developer's own discovery
+// cache.
+const StateRootEnv = "XDG_STATE_HOME"
+
+// IsolateStateRoot points the state root at dir.
+//
+// The commands read and write the discovery cache under the state root, and the build
+// resolves the root before any other directory: without this, a developer's own
+// discovery.json merges into a test's catalog and a test's refresh overwrites it.
+//
+// It is the one place a package's TestMain asks for that, so the rule cannot drift
+// between the binaries that need it.
+func IsolateStateRoot(dir string) error {
+	return os.Setenv(StateRootEnv, dir)
+}
+
 // Main runs a package's tests under a settings file of the tests' own,
 // and returns the code TestMain passes to os.Exit.
 //
@@ -56,6 +77,14 @@ func Main(m *testing.M) int {
 		return 1
 	}
 	defer os.RemoveAll(dir)
+	// The commands read and write the discovery cache under the state root, and a
+	// build resolves the state root before the config root: a developer's own
+	// discovery.json must not merge into a test's catalog, and a test's refresh
+	// must not overwrite it.
+	if err := IsolateStateRoot(dir); err != nil {
+		println("poo tests: pointing the state root at the test directory:", err.Error())
+		return 1
+	}
 	path := filepath.Join(dir, "settings.yaml")
 	if err := os.WriteFile(path, []byte(settingsFile), 0o644); err != nil {
 		println("poo tests: writing the test settings:", err.Error())

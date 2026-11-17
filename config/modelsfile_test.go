@@ -1212,3 +1212,40 @@ session:
 		t.Error("the built-in endpoint was dropped by the models file")
 	}
 }
+
+// TestCatalogOptionsReadTheCachedLayer covers the settings' answer on the cached layer:
+// CatalogOptions asks for it, so a model only the endpoint's last report knows is a model a
+// build resolves. A regression that drops Cached from CatalogOptions fails this test — the
+// discovered-only model stops resolving.
+func TestCatalogOptionsReadTheCachedLayer(t *testing.T) {
+	dir := tempUserConfigDir(t)
+	state := filepath.Join(dir, "state")
+	t.Setenv("XDG_STATE_HOME", state)
+	cachePath := filepath.Join(state, "poo", "discovery.json")
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatalf("making the state directory: %v", err)
+	}
+	cache := `{"version":1,"fetched_at":"2026-11-17T00:00:00Z","endpoints":{"home":` +
+		`{"fetched_at":"2026-11-17T00:00:00Z","shape":"vllm","models":{"qwen3":` +
+		`{"model_id":"qwen3","context_limit":32768}}}}}`
+	if err := os.WriteFile(cachePath, []byte(cache), 0o600); err != nil {
+		t.Fatalf("writing the discovery cache: %v", err)
+	}
+
+	settings, err := Parse([]byte(`{
+		"version":1,
+		"endpoints":{"home":{"endpoint":"http://home.invalid:4000/v1"}},
+		"roles":{"chat":"home/qwen3"}
+	}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not load: %v", err)
+	}
+	model, err := catalog.New(settings.CatalogOptions()).Resolve("home/qwen3")
+	if err != nil {
+		t.Fatalf("a model only the cache knows did not resolve: %v", err)
+	}
+	if model.ContextLimit != 32768 || model.Source["context_limit"] != catalog.LayerDiscovery {
+		t.Errorf("the context limit is %d from %q, want the cache's 32768 from discovery",
+			model.ContextLimit, model.Source["context_limit"])
+	}
+}

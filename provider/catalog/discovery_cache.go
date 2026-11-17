@@ -88,6 +88,10 @@ func (c *cache) load() (*cacheFile, error) {
 }
 
 // save writes the cache.
+//
+// The file is written beside its target and renamed into place, the way the codebase's
+// other durable files are written: a reader on another goroutine — a session build reading
+// while a reprobe saves — sees the old file or the new one, never a torn one.
 func (c *cache) save(found discovery) error {
 	file := cacheFile{
 		Version:   cacheVersion,
@@ -112,7 +116,27 @@ func (c *cache) save(found discovery) error {
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
 		return fmt.Errorf("catalog: creating the state directory: %w", err)
 	}
-	if err := os.WriteFile(c.path, data, 0o600); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(c.path), ".discovery-*")
+	if err != nil {
+		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
+	}
+	if err := os.Rename(tmp, c.path); err != nil {
+		os.Remove(tmp)
 		return fmt.Errorf("catalog: writing the discovery cache: %w", err)
 	}
 	return nil
@@ -136,8 +160,9 @@ func (c *cache) fresh(cached *cacheFile, endpoint string) (map[string]Discovered
 
 // stale returns an endpoint's cached models, however old they are.
 //
-// The cache is the fallback of a probe that failed, and a stale answer
-// beats no answer at all.
+// This is the one rule both readers use — the build's whole-cache layer (cache.layer) and
+// a refresh's fallback for a probe that failed — so an entry with no models is no answer
+// to either.
 func (c *cache) stale(cached *cacheFile, endpoint string) (map[string]Discovered, string, time.Time, bool) {
 	if cached == nil {
 		return nil, "", time.Time{}, false
@@ -147,6 +172,28 @@ func (c *cache) stale(cached *cacheFile, endpoint string) (map[string]Discovered
 		return nil, "", time.Time{}, false
 	}
 	return entry.Models, entry.Shape, entry.FetchedAt, true
+}
+
+// layer returns the layer the cache holds for the named endpoints.
+//
+// It is the build's whole-cache read, built by asking stale per endpoint — the one
+// "what does the cache hold for this endpoint" rule — so the empty-result skip and the
+// bookkeeping live in one place, and a build and a refresh cannot read the cache
+// differently.
+func (c *cache) layer(cached *cacheFile, endpoints []string) *discovery {
+	found := &discovery{
+		models:  map[string]map[string]Discovered{},
+		shapes:  map[string]string{},
+		fetched: map[string]time.Time{},
+	}
+	for _, name := range endpoints {
+		if models, shape, fetchedAt, ok := c.stale(cached, name); ok {
+			found.models[name] = models
+			found.shapes[name] = shape
+			found.fetched[name] = fetchedAt
+		}
+	}
+	return found
 }
 
 // cachePath returns the path of the discovery cache.
@@ -160,13 +207,20 @@ func cachePath(stateDir string) string {
 	return filepath.Join(stateDir, "poo", "discovery.json")
 }
 
+// StateRootEnv is the environment variable the state root is read from.
+//
+// The discovery cache lives under the state root, so a test that isolates the root must
+// spell this name the way this package reads it: pootest holds the same name beside this
+// one, and settings_test.go there holds the two together.
+const StateRootEnv = "XDG_STATE_HOME"
+
 // defaultStateDir returns the user's state directory.
 //
 // The state directory is the one the XDG specification names, and the
 // cache directory is the fallback: a system without a state directory
 // still has one.
 func defaultStateDir() string {
-	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
+	if dir := os.Getenv(StateRootEnv); dir != "" {
 		return dir
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
