@@ -559,6 +559,7 @@ func startPipedRepl(t *testing.T, server *fakeServer, input string) (*terminal, 
 	stdin, stdout := pipeUp(t, server)
 
 	code := make(chan int, 1)
+	exited := make(chan struct{})
 	opts := Options{
 		WorkingDir: t.TempDir(),
 		In:         strings.NewReader(input),
@@ -567,8 +568,20 @@ func startPipedRepl(t *testing.T, server *fakeServer, input string) (*terminal, 
 			return stdin, stdout, func() error { return nil }, nil
 		},
 	}
-	go func() { code <- Run(opts) }()
-	t.Cleanup(func() { endReplCleanup(t, term) })
+	go func() { code <- Run(opts); close(exited) }()
+	// The repl must be gone before the terminal moves on: a repl still
+	// running holds the editor on the output fd, and the next test's
+	// drawing would share it. The wait runs after the interrupts
+	// (cleanups unwind last registered first) and before the stdio
+	// restore.
+	t.Cleanup(func() {
+		select {
+		case <-exited:
+		case <-time.After(10 * time.Second):
+			t.Error("the repl did not leave within 10s")
+		}
+	})
+	t.Cleanup(func() { endReplCleanup(t, term, exited) })
 	return term, code
 }
 
@@ -672,6 +685,7 @@ func startTerminalReplWith(t *testing.T, server *fakeServer, history string) (*t
 	restore := takeOverStdio(t, term.slave)
 	t.Cleanup(restore)
 	code := make(chan int, 1)
+	exited := make(chan struct{})
 	opts := Options{
 		WorkingDir:  t.TempDir(),
 		HistoryFile: history,
@@ -679,8 +693,20 @@ func startTerminalReplWith(t *testing.T, server *fakeServer, history string) (*t
 			return stdin, stdout, func() error { return nil }, nil
 		},
 	}
-	go func() { code <- Run(opts) }()
-	t.Cleanup(func() { endReplCleanup(t, term) })
+	go func() { code <- Run(opts); close(exited) }()
+	// The repl must be gone before the terminal moves on: a repl still
+	// running holds the editor on fd 0, and the next test's keystrokes
+	// would land in whatever draft it has. The wait runs after the
+	// interrupts (cleanups unwind last registered first) and before the
+	// stdio restore.
+	t.Cleanup(func() {
+		select {
+		case <-exited:
+		case <-time.After(10 * time.Second):
+			t.Error("the repl did not leave within 10s")
+		}
+	})
+	t.Cleanup(func() { endReplCleanup(t, term, exited) })
 	return term, code
 }
 

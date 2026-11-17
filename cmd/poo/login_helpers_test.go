@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -152,13 +153,22 @@ func askCallback(t *testing.T, redirectURI, path, query string) *http.Response {
 	}
 	target := fmt.Sprintf("%s://%s%s%s", redirect.Scheme, redirect.Host, path, query)
 	var last error
-	for i := 0; i < 200; i++ {
-		response, err := http.Get(target)
+	for i := 0; i < 400; i++ {
+		// The request itself is bounded, so a listener that accepts but
+		// never answers cannot eat the whole window: the retries are what
+		// ride out a slow start under load.
+		request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
+		if err != nil {
+			t.Fatalf("building the callback request: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		response, err := http.DefaultClient.Do(request.WithContext(ctx))
+		cancel()
 		if err == nil {
 			return response
 		}
 		last = err
-		time.Sleep(25 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("the callback listener never answered %s: %v", target, last)
 	return nil

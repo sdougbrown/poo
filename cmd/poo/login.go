@@ -275,9 +275,6 @@ func waitForCallback(ctx context.Context, attempt auth.Attempt, wait time.Durati
 		return auth.Callback{}, listenerFailure(redirect.Host, err)
 	}
 	defer listener.Close()
-	if ready != nil {
-		ready()
-	}
 
 	arrived := make(chan auth.Callback, 1)
 	failed := make(chan error, 1)
@@ -302,6 +299,12 @@ func waitForCallback(ctx context.Context, attempt auth.Attempt, wait time.Durati
 			}
 		}
 	}()
+	// Ready means an accept loop is serving the listener, not merely
+	// that the socket is bound: the caller may connect the moment the
+	// wait says so.
+	if ready != nil {
+		ready()
+	}
 	defer server.Close()
 
 	pasted := make(chan auth.Callback, 1)
