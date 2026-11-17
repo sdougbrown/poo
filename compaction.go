@@ -146,8 +146,30 @@ type EndRun struct {
 // can stand in for it.
 type NativeCompactor interface {
 	// Compact asks the provider to compact its own state and returns the
-	// window it produced.
-	Compact(ctx context.Context, in NativeCompaction) (ProviderWindow, error)
+	// window it produced and what the request cost. A failure installs no
+	// window, and it still reports the request it was billed for.
+	Compact(ctx context.Context, in NativeCompaction) (NativeCompactionResult, error)
+}
+
+// NativeCompactionResult is what a native compaction produced.
+type NativeCompactionResult struct {
+	// Window is the provider's compacted state.
+	Window ProviderWindow
+	// Usage is the accounting the endpoint reported for the request.
+	//
+	// It is nil when the endpoint reported none, and the core then
+	// charges the request the estimate a side request gets.
+	Usage *UsageReport
+	// Billed reports that the endpoint answered the request, so it
+	// charged for it whether or not the answer carried a window.
+	//
+	// A result that holds a window is an answer, so the core charges it
+	// without reading this field. The failure paths are where the field
+	// decides. An answer the transport could not turn into a window was
+	// still billed, and only the transport can say so. A credential,
+	// configuration, connection or status failure never reached the
+	// endpoint's own work: it leaves the field unset and costs nothing.
+	Billed bool
 }
 
 // NativeCompaction is what a native compactor is given.
@@ -165,4 +187,9 @@ type NativeCompaction struct {
 	View View
 	// Budget is the run's context budget.
 	Budget ContextBudget
+	// SessionID is the id of the session being compacted, and is empty
+	// when the session has none. A transport keys the request's identity
+	// by it, so the window the endpoint produces is cached under the
+	// session it belongs to.
+	SessionID string
 }

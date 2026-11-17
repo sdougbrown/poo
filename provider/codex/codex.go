@@ -19,6 +19,10 @@
 // endpoint cut short before it carried that payload is not a block. Its
 // summary already travelled as the thinking text, and replaying it would name
 // an item the endpoint cannot match.
+//
+// The transport also implements poo.NativeCompactor. A compaction request is a
+// normal request whose last input item is the compaction trigger. Its
+// compaction items are the window the core installs, verbatim.
 package codex
 
 import (

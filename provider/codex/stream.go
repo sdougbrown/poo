@@ -123,6 +123,13 @@ type streamReader struct {
 	// reasoning holds the reasoning items the response produced, in
 	// order, so the core records them with the response's message.
 	reasoning []poo.ProviderBlock
+	// captureOutput reports that the reader keeps the response's output
+	// items whole. A compaction reads them back; a turn's reader does not
+	// hold a second copy of its answer.
+	captureOutput bool
+	// output holds the response's output items, whole and in the order
+	// the endpoint sent them, when the reader captures them.
+	output []json.RawMessage
 	// done reports that the stream is finished.
 	done bool
 	// sawTerminal reports that a terminal response event arrived.
@@ -133,6 +140,9 @@ type streamReader struct {
 	ttft support.TTFT
 	// usageSent reports that the usage report has been produced.
 	usageSent bool
+	// usageReported reports that the endpoint itself reported token
+	// counts for the response.
+	usageReported bool
 	// usage holds the usage report, so a stream that fails before its
 	// terminal event arrives can still report what it knows.
 	usage *poo.UsageReport
@@ -256,6 +266,20 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 	return r.usage
 }
 
+// reportedUsage returns the usage the endpoint itself reported, and nil
+// when it reported none.
+//
+// ReportUsage answers with a report once the stream ended even when the
+// endpoint gave no counts. The time to the first token is still worth having.
+// A compaction's accounting needs the counts. A request whose usage the
+// endpoint withheld is charged the estimate a side request gets, not zero.
+func (r *streamReader) reportedUsage() *poo.UsageReport {
+	if !r.usageReported {
+		return nil
+	}
+	return r.usage
+}
+
 // ReportProviderBlocks returns the reasoning items the response
 // produced, in order.
 //
@@ -265,6 +289,19 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 // them with the response's message, so the next request gives them back.
 func (r *streamReader) ReportProviderBlocks() []poo.ProviderBlock {
 	return r.reasoning
+}
+
+// capture records an output item when the reader was asked to keep the
+// response's items whole.
+//
+// Every item a done event carries is kept, including one the reader cannot
+// decode. The window refuses an item it cannot read, rather than installing
+// the items around it as if the response held nothing else.
+func (r *streamReader) capture(item json.RawMessage) {
+	if !r.captureOutput {
+		return
+	}
+	r.output = append(r.output, item)
 }
 
 // Close releases the response.
@@ -409,6 +446,7 @@ func (r *streamReader) callDone(ev codexEvent) []poo.StreamItem {
 // reasoning item is held as a provider block, so the reasoning the endpoint
 // encrypted can travel back with the next request.
 func (r *streamReader) itemDone(ev codexEvent) []poo.StreamItem {
+	r.capture(ev.Item)
 	item, ok := decodeItem(ev.Item)
 	if !ok {
 		return nil
@@ -533,8 +571,12 @@ func (r *streamReader) terminal(ev codexEvent) ([]poo.StreamItem, error) {
 	if resp.Usage != nil {
 		r.setUsage(resp.Usage)
 	}
-	// The terminal response carries its items whole, and the reasoning
-	// item's encrypted payload rides only there.
+	// The terminal response carries its items whole. A captured item is
+	// recorded once, not again from the events before it, and the reasoning
+	// item's encrypted payload rides only here.
+	if r.captureOutput && len(resp.Output) > 0 {
+		r.output = resp.Output
+	}
 	if blocks, ok := terminalReasoning(resp.Output); ok {
 		r.reasoning = blocks
 	}
@@ -639,6 +681,7 @@ func (r *streamReader) setUsage(u *codexUsage) {
 		OutputTokens:    u.OutputTokens,
 		CacheReadTokens: cacheRead,
 	}
+	r.usageReported = true
 }
 
 // usageItem returns the event that reports the request's usage.

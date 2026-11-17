@@ -207,6 +207,36 @@ A key entry is read by the endpoint that declares the same environment
 variable: an endpoint reading `OLLAMA_API_KEY` takes the `ollama-cloud`
 key after the variable itself and ahead of a literal the settings carry.
 
+**Native compaction.** `context.strategy: native` asks the provider to compact
+its own conversation and gives the model the provider's compacted state back.
+It is opt-in: the default stays `summary`, which writes its own summary of the
+oldest turns.
+
+A model must declare the `compact` operation, and its provider must have a
+transport that can ask for the state. Neither is an assumption about a built-in
+model: declare the operation in the model's settings.
+
+```yaml
+models:
+  openai-codex/gpt-6.1-sol:
+    endpoint: openai-codex
+    model_id: gpt-6.1-sol
+    api: responses
+    ops: [chat, compact]
+roles:
+  chat: openai-codex/gpt-6.1-sol
+context:
+  strategy: native
+```
+
+The pi Codex provider is the only transport in this repository that implements
+native compaction. A model reached over Chat Completions has no transport that
+can produce the state, so a build that asks for `context.strategy: native`
+refuses the settings and names the missing capability. A model switch is
+checked when a compaction happens: a session that moved to a model without the
+`compact` operation refuses to compact natively rather than asking a provider
+that cannot serve it.
+
 **The repl.** `poo repl [flags]` takes the serve flags, starts a `poo
 serve` with them, and renders the session in the terminal: replies as
 markdown with highlighted code blocks, tool calls and results as

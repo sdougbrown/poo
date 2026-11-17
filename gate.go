@@ -276,7 +276,15 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 	// core asks the transport for it. A strategy's items are never
 	// applied: it can only ask for the native compaction.
 	if compaction.Window != nil && compaction.Replace == nil && len(compaction.Rewrite) == 0 && compaction.End == nil {
-		window, werr := s.nativeWindow(actCtx)
+		s.mu.Lock()
+		requestChars := s.historyCharsLocked()
+		s.mu.Unlock()
+		result, werr := s.nativeWindow(actCtx)
+		// The endpoint billed the answer it gave, so the cost is accounted
+		// before the window is judged. A window this run discards still
+		// spent the tokens it spent. An answer that carried no window was
+		// billed all the same for what it did carry.
+		s.accountNativeCompaction(run, result, requestChars)
 		if s.interruptPending(run) || errors.Is(context.Cause(actCtx), errInterrupted) {
 			if !s.runWindingDown(run) {
 				s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": errCompactionInterrupted.Error()})
@@ -287,7 +295,7 @@ func (s *Session) compact(run *runState) (compactionOutcome, error) {
 			s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": werr.Error()})
 			return compactionOutcome{}, werr
 		}
-		compaction.Window = &window
+		compaction.Window = &result.Window
 	}
 	if err := s.validateCompaction(compaction); err != nil {
 		s.events.emit(EventCompactionEnded, map[string]any{"run_id": run.id, "error": err.Error()})
@@ -458,27 +466,12 @@ func (s *Session) readSideReply(ctx context.Context, run *runState, reader Strea
 		return Reply{}, err
 	}
 	reply := Reply{Message: assistantMessage(resp), Finish: resp.finish}
-	// A request that finishes after the run settled does not add to the
-	// settled run's token counter. Each path enforces that under the same
-	// lock that charges, so a settle between the check and the charge
-	// cannot slip through.
-	s.mu.Lock()
-	turn := run.turn
-	s.mu.Unlock()
 	if resp.usage != nil {
-		// The endpoint's own count, recorded as what it is: a request a
-		// compaction made.
-		s.writeCompactionUsage(run, turn, resp.usage, requestChars)
-	} else {
-		s.mu.Lock()
-		if !run.committed && !run.sealed {
-			run.tokens += s.tokensForCharsLocked(requestChars + estimateMessageChars(reply.Message))
-		}
-		s.mu.Unlock()
-	}
-	if resp.usage != nil {
+		// The endpoint's own count, reported to the caller as what it is: a
+		// request a compaction made.
 		reply.Usage = *resp.usage
 	}
+	s.chargeSideRequest(run, resp.usage, reply.Message, requestChars)
 	return reply, nil
 }
 

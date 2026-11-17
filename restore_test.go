@@ -26,7 +26,7 @@ func header(sessionID string) *poo.SessionCreatedRecord {
 			CreatedAt:    "2026-01-01T00:00:00Z",
 			WorkingDir:   "/tmp",
 			Profile:      "code",
-			Roles:        poo.ModelRoles{Chat: &poo.ModelInfo{Name: "fast", ModelID: "test-model", ContextLimit: 32768}},
+			Roles:        poo.ModelRoles{Chat: &poo.ModelInfo{Name: "fast", ModelID: "test-model", ContextLimit: 32768, Ops: []poo.Op{poo.OpChat, poo.OpCompact}}},
 			Tools:        []poo.ToolInfo{{Name: "echo", Class: poo.ClassReadOnly, Background: poo.BackgroundNever}},
 			SettingsHash: "settings-1", Build: poo.BuildInfo{Name: "poo", Version: "test"}},
 	}
@@ -41,7 +41,7 @@ func restoreOptions(t *testing.T, tr poo.ChatTransport, sink poo.RecordSink) poo
 	opts := testOptions(t, tr, &echoTool{}, sink)
 	opts.Profiles = []poo.Profile{{Name: "code", Tools: []poo.ToolInfo{{Name: "echo", Class: poo.ClassReadOnly}}}}
 	opts.Models = map[string]poo.ModelInfo{
-		"fast": {Name: "fast", ModelID: "test-model", ContextLimit: 32768},
+		"fast": {Name: "fast", ModelID: "test-model", ContextLimit: 32768, Ops: []poo.Op{poo.OpChat, poo.OpCompact}},
 	}
 	opts.SettingsHash = "settings-1"
 	opts.Build = poo.BuildInfo{Name: "poo", Version: "test"}

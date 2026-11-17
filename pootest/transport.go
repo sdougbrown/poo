@@ -103,6 +103,12 @@ type Transport struct {
 	// windowErr is the failure the native compaction returns, when it
 	// is set.
 	windowErr error
+	// windowUsage is the accounting the native compaction reports, when
+	// it is set.
+	windowUsage *poo.UsageReport
+	// windowBilled reports that the native compaction's failure still
+	// reached the endpoint, so the core charges it.
+	windowBilled bool
 	// compacts counts the native compactions the transport served.
 	compacts int
 	// native holds the views the native compactions were given.
@@ -166,6 +172,27 @@ func (t *Transport) SetWindowError(err error) {
 	t.windowErr = err
 }
 
+// SetWindowBilled makes a failed native compaction report that the endpoint
+// answered its request.
+//
+// A failure that never reached the endpoint leaves it unset, which is what the
+// transport does by default: the core charges such a request nothing.
+func (t *Transport) SetWindowBilled(billed bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.windowBilled = billed
+}
+
+// SetWindowUsage sets the accounting the native compaction reports.
+//
+// A transport that reports none leaves it unset, so the core charges
+// the estimate a side request gets.
+func (t *Transport) SetWindowUsage(usage *poo.UsageReport) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.windowUsage = usage
+}
+
 // NativeCompactions returns what the transport's native compactions were
 // given, in order.
 func (t *Transport) NativeCompactions() []poo.NativeCompaction {
@@ -183,23 +210,24 @@ func (t *Transport) Compactions() int {
 
 // Compact returns the window the transport was scripted with.
 //
-// It is the transport's native compaction capability: a provider window
-// is the provider's own compacted state, so it can only come from the
-// session's own transport. It records what it was given, so a test can
-// assert that the view is the one the run has, not the one the last
-// request carried.
-func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.ProviderWindow, error) {
+// A provider window is the provider's own compacted state, so it can only
+// come from the session's own transport. The transport records what it was
+// given, so a test can assert the view the run has. The result carries the
+// usage the test scripted, and none when it scripted none. A scripted failure
+// reports the usage too, and whether the request was billed, so the core's
+// accounting of a failed compaction is reachable here.
+func (t *Transport) Compact(ctx context.Context, in poo.NativeCompaction) (poo.NativeCompactionResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.compacts++
 	t.native = append(t.native, in)
 	if t.windowErr != nil {
-		return poo.ProviderWindow{}, t.windowErr
+		return poo.NativeCompactionResult{Billed: t.windowBilled, Usage: t.windowUsage}, t.windowErr
 	}
 	if len(t.window.Items) == 0 {
-		return poo.ProviderWindow{}, errors.New("pootest: the transport has no window")
+		return poo.NativeCompactionResult{}, errors.New("pootest: the transport has no window")
 	}
-	return t.window, nil
+	return poo.NativeCompactionResult{Window: t.window, Usage: t.windowUsage, Billed: true}, nil
 }
 
 // Requests returns the requests the transport received, in order.

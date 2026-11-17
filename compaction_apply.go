@@ -151,20 +151,48 @@ func (s *Session) validateWindow(w ProviderWindow) error {
 // The window is the provider's own compacted state, and only the
 // core-bound call to the transport's NativeCompactor capability can
 // produce one. A strategy's Window is a request for this call, not the
-// data that is applied.
-func (s *Session) nativeWindow(ctx context.Context) (ProviderWindow, error) {
-	compactor, ok := s.opts.Transport.(NativeCompactor)
-	if !ok {
-		return ProviderWindow{}, fmt.Errorf("%w: the session's transport cannot compact", ErrInvalidCompaction)
-	}
+// data that is applied. The result carries what the request cost, so the
+// core charges it the way it charges a request a strategy made. A model that
+// does not declare the operation, or a transport that cannot compact, is
+// refused here. Neither is asked for a window it cannot produce.
+func (s *Session) nativeWindow(ctx context.Context) (NativeCompactionResult, error) {
 	// The view is the authority: it holds the reply and the results the
 	// last request could not carry, and those are what a compaction must
 	// not lose. A session that has asked nothing has no view to compact.
 	s.mu.Lock()
 	model := s.opts.Model
+	transport := s.opts.Transport
+	sessionID := s.opts.SessionID
 	view := s.viewLocked()
 	s.mu.Unlock()
-	return compactor.Compact(ctx, NativeCompaction{Model: model, View: view, Budget: s.budget()})
+	// The model is checked before the transport. A switch to a model without
+	// compaction asks no transport for a window, even one that compacted the
+	// previous model's state.
+	if !model.HasOp(OpCompact) {
+		return NativeCompactionResult{}, fmt.Errorf("%w: the model %q does not declare the %q operation, "+
+			"so it cannot compact its own state: add compact to its ops, or use the summary strategy",
+			ErrInvalidCompaction, modelLabel(model), OpCompact)
+	}
+	compactor, ok := transport.(NativeCompactor)
+	if !ok {
+		return NativeCompactionResult{}, fmt.Errorf("%w: the transport for the model %q cannot compact the "+
+			"provider's own state: use a provider that serves native compaction (openai-codex), or the summary strategy",
+			ErrInvalidCompaction, modelLabel(model))
+	}
+	result, err := compactor.Compact(ctx, NativeCompaction{
+		Model:     model,
+		View:      view,
+		Budget:    s.budget(),
+		SessionID: sessionID,
+	})
+	if err == nil {
+		// A window the transport handed back is the endpoint's answer, so
+		// the request was billed even if the transport does not say so.
+		// Only a failure needs the transport's own word on whether the
+		// request went out.
+		result.Billed = true
+	}
+	return result, err
 }
 
 // compactionView is the state a compaction would install.
