@@ -36,14 +36,14 @@ type tokenResponse struct {
 // A failure reports the status and a standard OAuth error code, and nothing
 // else from the answer. An answer is untrusted, and a caller's log is no
 // place for its words.
-func (c Credentials) trade(ctx context.Context, stored credential) (credential, error) {
-	endpoint := c.tokenURL()
+func (c Credentials) trade(ctx context.Context, p Provider, stored credential) (credential, error) {
+	endpoint := c.tokenURL(p)
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {stored.Refresh},
-		"client_id":     {c.clientID()},
+		"client_id":     {c.clientID(p)},
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -75,11 +75,11 @@ func (c Credentials) trade(ctx context.Context, stored credential) (credential, 
 		refresh = stored.Refresh
 	}
 	refreshed := credential{
-		Type:      "oauth",
+		Type:      string(KindOAuth),
 		Access:    answer.AccessToken,
 		Refresh:   refresh,
 		Expires:   c.now().Add(time.Duration(answer.ExpiresIn * float64(time.Second))).UnixMilli(),
-		AccountID: accountID(answer.AccessToken, stored.AccountID),
+		AccountID: p.account(answer.AccessToken, stored.AccountID),
 	}
 	return refreshed, nil
 }
@@ -139,17 +139,27 @@ func (c Credentials) client() *http.Client {
 }
 
 // tokenURL is the endpoint a refresh token is traded at.
-func (c Credentials) tokenURL() string {
-	if c.TokenURL != "" {
+//
+// The caller's own override wins, then the provider's, then this package's default: the
+// caller set one because it knows something the provider declaration does not — a test's
+// fake endpoint, or an endpoint moved for this run.
+func (c Credentials) tokenURL(p Provider) string {
+	switch {
+	case c.TokenURL != "":
 		return c.TokenURL
+	case p.TokenURL != "":
+		return p.TokenURL
 	}
 	return DefaultTokenURL
 }
 
-// clientID is the OAuth client the credential belongs to.
-func (c Credentials) clientID() string {
-	if c.ClientID != "" {
+// clientID is the OAuth client the credential belongs to, by the same precedence.
+func (c Credentials) clientID(p Provider) string {
+	switch {
+	case c.ClientID != "":
 		return c.ClientID
+	case p.ClientID != "":
+		return p.ClientID
 	}
 	return DefaultClientID
 }

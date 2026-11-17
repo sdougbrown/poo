@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,16 +15,18 @@ import (
 // same credential whichever file holds it, so one importer reads either. Only
 // the envelope around it differs, and each format owns its own.
 type fileEntry struct {
-	// Type is how the entry authenticates: "oauth" here.
+	// Type is how the entry authenticates: KindOAuth or KindAPIKey.
 	Type string `json:"type"`
-	// Access is the access token.
-	Access string `json:"access"`
-	// Refresh is the refresh token.
-	Refresh string `json:"refresh"`
+	// Access is the access token, for an oauth entry.
+	Access string `json:"access,omitempty"`
+	// Refresh is the refresh token, for an oauth entry.
+	Refresh string `json:"refresh,omitempty"`
 	// Expires is when Access stops working, in milliseconds since the epoch.
-	Expires int64 `json:"expires"`
-	// AccountID is the ChatGPT account Access belongs to.
-	AccountID string `json:"accountId"`
+	Expires int64 `json:"expires,omitempty"`
+	// AccountID is the account the access token names, for a provider that names one.
+	AccountID string `json:"accountId,omitempty"`
+	// Key is the key itself, for an api_key entry.
+	Key string `json:"key,omitempty"`
 }
 
 // stripBOM drops a leading UTF-8 byte order mark, the character pi strips
@@ -35,32 +38,31 @@ func stripBOM(data []byte) []byte {
 
 // decodeEntry returns the credential a provider's entry holds.
 //
-// The check is the same for both files, because both spell an entry the same
-// way. A field the entry carries beyond the five modelled here is not lost: a
-// write puts the entry back from the bytes it read.
-func decodeEntry(path, provider string, entries map[string]json.RawMessage) (credential, error) {
-	raw, ok := entries[provider]
+// The check is the same for both files, because both spell an entry the same way. What a
+// provider needs beyond the entry's shape — an account its tokens must name — is the
+// provider's, and arrives with it. A field the entry carries beyond the ones modelled here
+// is not lost: a write puts the entry back from the bytes it read.
+func decodeEntry(path string, p Provider, entries map[string]json.RawMessage) (credential, error) {
+	raw, ok := entries[p.ID]
 	if !ok {
-		return credential{}, fmt.Errorf("%w: %s holds no %s entry", ErrNoCredential, path, provider)
+		return credential{}, fmt.Errorf("%w: %s holds no %s entry", ErrNoCredential, path, p.ID)
 	}
 	var stored fileEntry
 	if err := json.Unmarshal(raw, &stored); err != nil {
 		return credential{}, fmt.Errorf("%w: %s: %w", ErrStorage, path, err)
 	}
-	if stored.Type != "oauth" || stored.Access == "" || stored.Refresh == "" {
-		return credential{}, fmt.Errorf("%w: %s holds a %s entry that is not an oauth credential", ErrNoCredential, path, provider)
+	entry := credential(stored)
+	// The write path asks the same question of the same rule: a credential Set stores is one
+	// Read returns, and one validator is what keeps that true.
+	if err := validate(entry.export(), p); err != nil {
+		return credential{}, fmt.Errorf("%w: %s holds an entry for %s: %v", ErrNoCredential, path, p.ID, err)
 	}
-	// A Codex request names the account its token belongs to, so a credential
-	// that names none cannot be used. It is refused before a refresh can write
-	// a credential that still names none.
-	if accountID(stored.Access, stored.AccountID) == "" {
-		return credential{}, fmt.Errorf("%w: %s names no account", ErrNoCredential, path)
-	}
-	// The two shapes are the same fields, so one is the other without the
-	// file's tags. A field added to either is a compile error here until it is
-	// added to both.
-	return credential(stored), nil
+	return entry, nil
 }
+
+// modelledFields are the entry's fields this package writes and reads. A field outside them
+// is one pi's credential type may hold and poo does not model: it is kept as it was.
+var modelledFields = []string{"access", "refresh", "expires", "accountId", "key"}
 
 // encodeEntry stores a credential in the entry a provider's credentials map
 // holds it under, and leaves every other entry as it was.
@@ -75,7 +77,7 @@ func encodeEntry(path, provider string, entries map[string]json.RawMessage, entr
 			return fmt.Errorf("%s: the %s entry is not an object: %v", path, provider, err)
 		}
 	}
-	own, err := json.Marshal(fileEntry(entry))
+	own, err := json.Marshal(entry.fileEntry())
 	if err != nil {
 		return fmt.Errorf("%s: %v", path, err)
 	}
@@ -85,6 +87,15 @@ func encodeEntry(path, provider string, entries map[string]json.RawMessage, entr
 	}
 	for name, value := range written {
 		fields[name] = value
+	}
+	// A field this kind does not carry is not part of this credential any more: replacing an
+	// api key with an oauth credential must not leave the key behind, or the next read finds a
+	// credential that carries both and refuses it. A field beyond the model stays as it was,
+	// because it is not this package's to drop.
+	for _, name := range modelledFields {
+		if _, ok := written[name]; !ok {
+			delete(fields, name)
+		}
 	}
 	encoded, err := json.Marshal(fields)
 	if err != nil {
@@ -175,4 +186,46 @@ func whole(value any) any {
 		return out
 	}
 	return value
+}
+
+// fileEntry is the entry as both files spell it.
+func (c credential) fileEntry() fileEntry {
+	return fileEntry(c)
+}
+
+// Kind is how the entry authenticates, as the file spells it.
+//
+// An entry that names no type is an oauth one: that is what a credential with tokens is, and
+// it is the same answer validate gives, so the read and the write agree.
+func (c credential) Kind() Kind {
+	if c.Type == "" {
+		return KindOAuth
+	}
+	return Kind(c.Type)
+}
+
+// export turns the stored entry into the credential a caller hands over or copies.
+func (c credential) export() Credential {
+	out := Credential{Kind: c.Kind(), Key: c.Key}
+	if out.Kind == KindOAuth {
+		out.Access = c.Access
+		out.Refresh = c.Refresh
+		out.Expires = time.UnixMilli(c.Expires)
+		out.AccountID = c.AccountID
+	}
+	return out
+}
+
+// internal turns a caller's credential into the entry the file holds.
+func (c Credential) internal(p Provider) credential {
+	if c.Kind == KindAPIKey {
+		return credential{Type: string(KindAPIKey), Key: c.Key}
+	}
+	return credential{
+		Type:      string(KindOAuth),
+		Access:    c.Access,
+		Refresh:   c.Refresh,
+		Expires:   c.Expires.UnixMilli(),
+		AccountID: p.account(c.Access, c.AccountID),
+	}
 }

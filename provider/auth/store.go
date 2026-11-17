@@ -95,11 +95,11 @@ const (
 
 // The failures a caller tells apart.
 var (
-	// ErrNoCredential means the auth.json holds no Codex credential that
-	// can be used. A file with no such entry, an entry that is an api key,
-	// and an entry that names no account are all this failure. The answer
-	// is pi's login, not a retry.
-	ErrNoCredential = errors.New("auth: no Codex credential")
+	// ErrNoCredential means the auth file holds no credential the provider can use. A file
+	// with no such entry, an entry of the wrong kind, and an entry its provider cannot carry
+	// — a Codex token that names no account — are all this failure. The answer is a sign-in,
+	// not a retry.
+	ErrNoCredential = errors.New("auth: no usable credential")
 
 	// ErrLocked means another writer holds the auth.json's lock, so the
 	// refresh did not start and nothing was traded. The file is exactly what
@@ -107,12 +107,12 @@ var (
 	// so this is what a pi refresh in flight looks like.
 	ErrLocked = errors.New("auth: the auth.json's lock is held by another writer")
 
-	// ErrRefresh means the token endpoint would not trade the refresh
+	// ErrRefresh means a provider's token endpoint would not trade the refresh
 	// token. It refused the grant, answered with something that is not one,
 	// or could not be reached. The file is unchanged, which is not to say
 	// its credential still works. The grant the endpoint refused is the one
 	// the file holds, so a retry most likely fails the same way.
-	ErrRefresh = errors.New("auth: the Codex token refresh failed")
+	ErrRefresh = errors.New("auth: the token refresh failed")
 
 	// ErrStorage means the auth.json could not be read, or could not be made ready to
 	// write, before anything was traded. Nothing was written either.
@@ -145,24 +145,43 @@ type Token struct {
 	AccountID string
 }
 
-// Credential is a credential to store: what a sign-in or an import hands over, in
-// poo's own words.
+// Credential is a credential to store: what a sign-in or an import hands over, in poo's own
+// words.
+//
+// One kind uses one set of fields: an oauth credential has tokens, and an api key has a key.
+// A field the kind does not use is refused rather than stored, so a credential that names
+// two kinds at once cannot be written.
 type Credential struct {
-	// Access is the access token.
+	// Kind is how the credential authenticates. Empty is an oauth credential: a caller
+	// that has a token pair in hand has the common case, and the file's entry spells the
+	// kind it was written with.
+	Kind Kind
+	// Access is the access token, for an oauth credential.
 	Access string
-	// Refresh is the refresh token.
+	// Refresh is the refresh token, for an oauth credential.
 	Refresh string
-	// Expires is when Access stops working.
+	// Expires is when Access stops working, for an oauth credential.
 	Expires time.Time
-	// AccountID is the ChatGPT account Access belongs to.
+	// AccountID is the account the access token names, for an oauth credential of a
+	// provider that names accounts.
 	AccountID string
+	// Key is the key itself, for an api key.
+	Key string
+}
+
+// check reports what a credential is missing, as the write that stores one reports it.
+func (c Credential) check(p Provider) error {
+	if err := validate(c, p); err != nil {
+		return fmt.Errorf("%w: %v", ErrNoCredential, err)
+	}
+	return nil
 }
 
 // Holds reports whether the file holds an entry for the provider, whatever kind it is.
 //
 // It is the question the replace rule asks: an entry this package cannot decode is still an
 // entry, so replacing it is still a decision, and Status is the wrong question to ask of it.
-func (c Credentials) Holds() (bool, error) {
+func (c Credentials) Holds(provider string) (bool, error) {
 	if c.Path == "" {
 		return false, errors.New("auth: no auth.json path")
 	}
@@ -170,7 +189,7 @@ func (c Credentials) Holds() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, ok := doc.entries[ProviderCodex]
+	_, ok := doc.entries[provider]
 	return ok, nil
 }
 
@@ -179,20 +198,15 @@ func (c Credentials) Holds() (bool, error) {
 // It is the read a caller that copies a credential makes: no refresh, no write and no
 // lock. A caller that needs a live token asks Access, and one that reports on the
 // credential asks Status.
-func (c Credentials) Read() (Credential, error) {
+func (c Credentials) Read(p Provider) (Credential, error) {
 	if c.Path == "" {
 		return Credential{}, errors.New("auth: no auth.json path")
 	}
-	stored, _, err := c.read()
+	stored, _, err := c.read(p)
 	if err != nil {
 		return Credential{}, err
 	}
-	return Credential{
-		Access:    stored.Access,
-		Refresh:   stored.Refresh,
-		Expires:   time.UnixMilli(stored.Expires),
-		AccountID: stored.AccountID,
-	}, nil
+	return stored.export(), nil
 }
 
 // Set stores a credential under the provider.
@@ -206,19 +220,58 @@ func (c Credentials) Read() (Credential, error) {
 // with no token, or one whose access token names no account, is one the next read
 // would refuse anyway. Only poo's own file takes a write: pi's is pi's, and a
 // command that rewrote it would be changing a file another tool owns.
-func (c Credentials) Set(ctx context.Context, entry Credential, replace bool) (Status, error) {
+func (c Credentials) Set(ctx context.Context, p Provider, entry Credential, replace bool) (Status, error) {
 	if c.Path == "" {
 		return Status{}, errors.New("auth: no auth.json path")
 	}
-	if entry.Access == "" || entry.Refresh == "" {
-		return Status{}, errors.New("auth: a credential needs an access token and a refresh token")
+	if err := entry.check(p); err != nil {
+		return Status{}, err
 	}
-	if accountID(entry.Access, entry.AccountID) == "" {
-		return Status{}, fmt.Errorf("%w: the credential names no account", ErrNoCredential)
+	return c.writeLocked(ctx, true, func(doc document) (Status, bool, error) {
+		// Presence, not decodability: an entry of a kind this package cannot read is still an
+		// entry, and replacing it without being asked is the thing ErrExists exists to prevent.
+		if _, held := doc.entries[p.ID]; held && !replace {
+			return Status{}, false, fmt.Errorf("%w: %s holds a %s credential", ErrExists, doc.path, p.ID)
+		}
+		stored := entry.internal(p)
+		if err := encodeEntry(doc.path, p.ID, doc.entries, stored); err != nil {
+			return Status{}, false, err
+		}
+		return c.status(doc, p, stored), true, nil
+	})
+}
+
+// Delete removes the provider's entry, and leaves every other entry as it was.
+//
+// A provider the file does not hold is not a failure: the caller asked for a state, and the
+// file is in it.
+func (c Credentials) Delete(ctx context.Context, provider string) error {
+	if c.Path == "" {
+		return errors.New("auth: no auth.json path")
 	}
-	// The lock is a directory beside the file, so a file in a directory that is not
-	// there yet has nowhere to take one. The write creates the directory it writes
-	// into; the lock needs it first.
+	_, err := c.writeLocked(ctx, true, func(doc document) (Status, bool, error) {
+		if _, held := doc.entries[provider]; !held {
+			return Status{}, false, nil
+		}
+		delete(doc.entries, provider)
+		return Status{}, true, nil
+	})
+	return err
+}
+
+// writeLocked runs one write under the lock: the directory, the lock, the file, the refusal of a
+// file another tool owns, the change, the lock's last word, and the write.
+//
+// Every write this package makes goes through it, because a check added to one path and not
+// another is a write into pi's file, or one under a lock another writer took. mutate gets the
+// document under the lock and returns what the caller reports and whether the document changed;
+// an error writes nothing, and so does changed false — an access that found a live token must
+// not rewrite the file.
+//
+// own says the write is poo's: a sign-in, an import, a logout. Those refuse a file another tool
+// owns. A refresh is not one of them — it writes back the shape it read, which is how pi keeps
+// working with a credential poo refreshed — so it passes false.
+func (c Credentials) writeLocked(ctx context.Context, own bool, mutate func(document) (Status, bool, error)) (Status, error) {
 	if err := os.MkdirAll(filepath.Dir(c.Path), 0o700); err != nil {
 		// Nothing was traded: the file could not be made ready to write.
 		return Status{}, fmt.Errorf("%w: %s: %w", ErrStorage, filepath.Dir(c.Path), err)
@@ -232,40 +285,44 @@ func (c Credentials) Set(ctx context.Context, entry Credential, replace bool) (S
 	if err != nil {
 		return Status{}, err
 	}
-	if _, ok := doc.format.(pooFormat); !ok {
-		return Status{}, fmt.Errorf("%w: %s is pi's file, and poo writes its own", ErrForeignFile, doc.path)
+	if own {
+		if _, ok := doc.format.(pooFormat); !ok {
+			return Status{}, fmt.Errorf("%w: %s is pi's file, and poo writes its own", ErrForeignFile, doc.path)
+		}
 	}
-	// Presence, not decodability: an entry of a kind this package cannot read is still an
-	// entry, and replacing it without being asked is the thing ErrExists exists to prevent.
-	if _, held := doc.entries[ProviderCodex]; held && !replace {
-		return Status{}, fmt.Errorf("%w: %s holds a %s credential", ErrExists, doc.path, ProviderCodex)
+	status, changed, err := mutate(doc)
+	if err != nil {
+		return Status{}, err
 	}
-	stored := credential{
-		Type:      "oauth",
-		Access:    entry.Access,
-		Refresh:   entry.Refresh,
-		Expires:   entry.Expires.UnixMilli(),
-		AccountID: accountID(entry.Access, entry.AccountID),
+	if !changed {
+		return status, nil
 	}
 	if err := hold.verify(); err != nil {
 		return Status{}, fmt.Errorf("%w: another writer took the lock before the write: %w", ErrPersist, err)
 	}
-	if err := c.write(doc, stored); err != nil {
+	if err := c.persist(doc); err != nil {
 		return Status{}, fmt.Errorf("%w: %w", ErrPersist, err)
 	}
-	return c.status(doc, stored), nil
+	return status, nil
 }
 
 // status is the report of one credential in the document it was read from.
-func (c Credentials) status(doc document, stored credential) Status {
-	return Status{
+func (c Credentials) status(doc document, p Provider, stored credential) Status {
+	status := Status{
 		Path:      doc.path,
 		Format:    doc.format.name(),
-		Provider:  ProviderCodex,
-		AccountID: accountID(stored.Access, stored.AccountID),
-		Expires:   time.UnixMilli(stored.Expires),
-		Live:      stored.live(c.now(), c.leeway()),
+		Provider:  p.ID,
+		Kind:      stored.Kind(),
+		AccountID: p.account(stored.Access, stored.AccountID),
 	}
+	// A credential with no tokens has no expiry: an api key does not stop working on its
+	// own, and a report that said it expired in 1969 would be worse than one that said
+	// nothing.
+	if status.Kind == KindOAuth {
+		status.Expires = time.UnixMilli(stored.Expires)
+		status.Live = stored.live(c.now(), c.leeway())
+	}
+	return status
 }
 
 // Status is what a credential file holds, as read: the credential, and never
@@ -278,7 +335,9 @@ type Status struct {
 	Format string
 	// Provider is the id the credential is stored under.
 	Provider string
-	// AccountID is the ChatGPT account the access token names.
+	// Kind is how the credential authenticates: an oauth token pair, or an api key.
+	Kind Kind
+	// AccountID is the account the access token names, for a provider that names accounts.
 	AccountID string
 	// Expires is when the access token stops working.
 	Expires time.Time
@@ -319,19 +378,22 @@ type document struct {
 // credential is one provider's credential in poo's own words. A format
 // projects its file's entry into it, and writes it back out in the file's.
 type credential struct {
-	// Type is how the entry authenticates: "oauth" here.
+	// Type is how the entry authenticates: KindOAuth or KindAPIKey, as the file spells it.
 	Type string
-	// Access is the access token.
+	// Access is the access token, for an oauth entry.
 	Access string
-	// Refresh is the refresh token.
+	// Refresh is the refresh token, for an oauth entry.
 	Refresh string
 	// Expires is when Access stops working, in milliseconds since the epoch.
 	Expires int64
-	// AccountID is the ChatGPT account Access belongs to.
+	// AccountID is the account the access token names, for a provider that names one.
 	AccountID string
+	// Key is the key itself, for an api_key entry.
+	Key string
 }
 
-// Credentials are the Codex credential in one auth.json.
+// Credentials are the credentials in one auth file, by provider id, and the protocol that
+// keeps them alive.
 type Credentials struct {
 	// Path is the auth.json to read and write. It is the one field a
 	// caller must set.
@@ -356,8 +418,8 @@ type Credentials struct {
 	Wait time.Duration
 }
 
-// Access returns the credential's access token, refreshing one that has
-// expired or is close enough to expiry that pi would refresh it too.
+// Access returns the credential's access token, refreshing one that has expired or is close
+// enough to expiry that pi would refresh it too.
 //
 // The read, the refresh and the write are one critical section under pi's
 // lock. Two callers that need a token at once, and pi itself, trade the
@@ -371,8 +433,8 @@ type Credentials struct {
 // be spent. A retry cannot be expected to work, and pi's login is the way
 // back. A caller that gets ErrPersist gets no token either, because the traded
 // token would go into a session the next process cannot reload.
-func (c Credentials) Access(ctx context.Context) (Token, error) {
-	return c.token(ctx, false)
+func (c Credentials) Access(ctx context.Context, p Provider) (Token, error) {
+	return c.token(ctx, p, false)
 }
 
 // Refresh trades the credential's refresh token for a new one, whether the
@@ -383,44 +445,50 @@ func (c Credentials) Access(ctx context.Context) (Token, error) {
 // write that keeps every other entry and field. The failures are the same.
 // Concurrent calls each refresh in turn. The second uses the refresh token
 // stored by the first.
-func (c Credentials) Refresh(ctx context.Context) (Token, error) {
-	return c.token(ctx, true)
+func (c Credentials) Refresh(ctx context.Context, p Provider) (Token, error) {
+	return c.token(ctx, p, true)
 }
 
 // token reads the credential, trades it when force says so or when it is not
 // live, and writes the traded one back. The whole of it is one critical
 // section under pi's lock.
-func (c Credentials) token(ctx context.Context, force bool) (Token, error) {
+func (c Credentials) token(ctx context.Context, p Provider, force bool) (Token, error) {
 	if c.Path == "" {
 		return Token{}, errors.New("auth: no auth.json path")
 	}
-	hold, err := acquire(ctx, c.Path, c.wait())
-	if err != nil {
-		return Token{}, err
-	}
-	defer hold.release()
-	stored, doc, err := c.read()
-	if err != nil {
-		return Token{}, err
-	}
-	if force || !stored.live(c.now(), c.leeway()) {
-		refreshed, err := c.trade(ctx, stored)
+	var token Token
+	_, err := c.writeLocked(ctx, false, func(doc document) (Status, bool, error) {
+		stored, err := decodeEntry(doc.path, p, doc.entries)
 		if err != nil {
-			return Token{}, err
+			return Status{}, false, err
 		}
-		if err := hold.verify(); err != nil {
-			return Token{}, fmt.Errorf("%w: another writer took the lock before the write: %w", ErrPersist, err)
+		if stored.Kind() != KindOAuth {
+			return Status{}, false, fmt.Errorf("%w: %s holds a %s credential, and a token is not what it has",
+				ErrNoCredential, p.ID, stored.Kind())
 		}
-		if err := c.write(doc, refreshed); err != nil {
-			return Token{}, fmt.Errorf("%w: %w", ErrPersist, err)
+		changed := false
+		if force || !stored.live(c.now(), c.leeway()) {
+			refreshed, err := c.trade(ctx, p, stored)
+			if err != nil {
+				return Status{}, false, err
+			}
+			if err := encodeEntry(doc.path, p.ID, doc.entries, refreshed); err != nil {
+				return Status{}, false, fmt.Errorf("%w: %w", ErrPersist, err)
+			}
+			stored = refreshed
+			changed = true
 		}
-		stored = refreshed
+		token = Token{
+			Access:    stored.Access,
+			Expires:   time.UnixMilli(stored.Expires),
+			AccountID: p.account(stored.Access, stored.AccountID),
+		}
+		return c.status(doc, p, stored), changed, nil
+	})
+	if err != nil {
+		return Token{}, err
 	}
-	return Token{
-		Access:    stored.Access,
-		Expires:   time.UnixMilli(stored.Expires),
-		AccountID: accountID(stored.Access, stored.AccountID),
-	}, nil
+	return token, nil
 }
 
 // Status reports the credential the file holds, without trading it.
@@ -428,15 +496,15 @@ func (c Credentials) token(ctx context.Context, force bool) (Token, error) {
 // A status is a report, so it writes nothing and refreshes nothing: a refresh
 // would rotate the credential under whoever is using it. It takes no lock
 // either, because a report should not wait on a refresh that is in flight.
-func (c Credentials) Status() (Status, error) {
+func (c Credentials) Status(p Provider) (Status, error) {
 	if c.Path == "" {
 		return Status{}, errors.New("auth: no auth.json path")
 	}
-	stored, doc, err := c.read()
+	stored, doc, err := c.read(p)
 	if err != nil {
 		return Status{}, err
 	}
-	return c.status(doc, stored), nil
+	return c.status(doc, p, stored), nil
 }
 
 // Entries reads an auth file of either shape and encoding and returns the
@@ -465,12 +533,12 @@ func Entries(path string) (map[string]json.RawMessage, error) {
 //
 // The document is what a write puts back, so a refresh keeps every other entry
 // and field the file carried.
-func (c Credentials) read() (credential, document, error) {
+func (c Credentials) read(p Provider) (credential, document, error) {
 	doc, err := c.load()
 	if err != nil {
 		return credential{}, document{}, err
 	}
-	stored, err := decodeEntry(doc.path, ProviderCodex, doc.entries)
+	stored, err := decodeEntry(doc.path, p, doc.entries)
 	if err != nil {
 		return credential{}, document{}, err
 	}
@@ -523,23 +591,19 @@ func shapeOf(top map[string]json.RawMessage) format {
 	return piFormat{}
 }
 
-// write stores a credential under the provider, and leaves the rest of the
-// file as the document found it.
+// persist writes the document back: the entries as they are now, in the shape the file was
+// read with.
 //
-// A file created here gets mode 0600 and a directory created here 0700. A file
-// that already exists keeps its own mode and follows its own symlinks, as it
-// does through pi's own write. The write is in place, not a temporary file
-// renamed over it.
+// A file created here gets mode 0600 and a directory created here 0700. A file that already
+// exists keeps its own mode and follows its own symlinks, as it does through pi's own write.
+// The write is in place, not a temporary file renamed over it.
 //
-// Writing in place is the trade pi makes too: a process that dies mid-write
-// leaves a truncated file. The next read reports that as ErrStorage, and pi's
-// login repairs it. A temporary file renamed over the path would make the
-// bytes atomic. It would also replace a symlinked auth.json with a regular
-// file, dropping the mode, ACLs and extended attributes the operator gave it.
-func (c Credentials) write(doc document, entry credential) error {
-	if err := encodeEntry(doc.path, ProviderCodex, doc.entries, entry); err != nil {
-		return err
-	}
+// Writing in place is the trade pi makes too: a process that dies mid-write leaves a
+// truncated file. The next read reports that as ErrStorage, and pi's login repairs it. A
+// temporary file renamed over the path would make the bytes atomic. It would also replace a
+// symlinked auth.json with a regular file, dropping the mode, ACLs and extended attributes
+// the operator gave it.
+func (c Credentials) persist(doc document) error {
 	object, err := doc.format.envelope(doc.entries)
 	if err != nil {
 		return fmt.Errorf("%s: %v", doc.path, err)
@@ -561,15 +625,6 @@ func (c Credentials) write(doc document, entry credential) error {
 // as it is.
 func (c credential) live(now time.Time, leeway time.Duration) bool {
 	return c.Access != "" && time.UnixMilli(c.Expires).After(now.Add(leeway))
-}
-
-// accountID names the account a token belongs to: the claim in the
-// access token, and the accountId pi stored when the token carries none.
-func accountID(access, stored string) string {
-	if claim := claimAccountID(access); claim != "" {
-		return claim
-	}
-	return stored
 }
 
 // claimAccountID reads the account out of a Codex access token.

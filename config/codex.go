@@ -89,7 +89,7 @@ func (r *Runtime) codexReasoning(model poo.ModelInfo) string {
 // hands the transport the token and the account the token names.
 func codexCredentials(credentials auth.Credentials) func(context.Context) (codex.Credential, error) {
 	return func(ctx context.Context) (codex.Credential, error) {
-		token, err := credentials.Access(ctx)
+		token, err := credentials.Access(ctx, auth.Codex)
 		if err != nil {
 			return codex.Credential{}, codexCredentialError(ctx, err)
 		}
