@@ -56,9 +56,8 @@ func (s *screenHarness) paint() {
 		// somewhere to go.
 		rows++
 	}
-	s.layout.ensure(rows)
-	s.layout.place(0)
-	s.layout.raw().Write([]byte("\x1b[J" + s.prompt + s.draft))
+	s.layout.prepare(rows)
+	s.layout.raw().Write([]byte(s.prompt + s.draft))
 }
 
 func (s *screenHarness) typeText(text string) {

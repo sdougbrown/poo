@@ -9,8 +9,8 @@ require (
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/chubin/vt10x v0.0.0-20231112153020-ef4f56837bf1
-	github.com/chzyer/readline v1.5.1
 	github.com/pelletier/go-toml/v2 v2.4.3
+	github.com/reeflective/readline v1.3.0
 	github.com/sdougbrown/cli-contract v0.10.0
 	github.com/sdougbrown/cli-registry v0.4.0
 	github.com/yuin/goldmark v1.8.2
@@ -49,3 +49,5 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )
+
+replace github.com/reeflective/readline => github.com/sdougbrown/readline v1.3.0-poo.4

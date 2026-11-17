@@ -325,6 +325,12 @@ func (s *fakeServer) acceptsLocked(level string) bool {
 // run plays the scripted run: a reply that streams, a tool call whose
 // permission the client must answer, and the settle.
 func (s *fakeServer) run() {
+	// The cancel the hold waits for is one that arrives after the run
+	// started, not one the count already answered: under load the
+	// Escape's cancel can land while the run's own deltas are still
+	// going out, and a hold that wants count+1 from the hold point
+	// waits for a second cancel nobody sends.
+	wantCancels := s.cancelCount() + 1
 	s.event("turn.started", map[string]any{"run_id": "r1", "turn": 1})
 	s.event("message.delta", map[string]any{
 		"run_id": "r1", "message_id": "m1", "kind": "text", "text": "Hello, ",
@@ -352,7 +358,7 @@ func (s *fakeServer) run() {
 	if s.holdRun {
 		// The run waits for a cancel of its own: an earlier run's
 		// cancel is not an answer.
-		s.waitCancel(s.cancelCount() + 1)
+		s.waitCancel(wantCancels)
 		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "cancelled", "turns": 1})
 		return
 	}

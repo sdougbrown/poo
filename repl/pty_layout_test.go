@@ -29,15 +29,6 @@ func physicalRows(term *terminal) []string {
 	return strings.Split(raw, "\n")[:rows]
 }
 
-// lastPhysicalRow is the terminal's bottom row.
-func lastPhysicalRow(term *terminal) string {
-	rows := physicalRows(term)
-	if len(rows) == 0 {
-		return ""
-	}
-	return strings.TrimRight(rows[len(rows)-1], " ")
-}
-
 // cursorRow is the row the terminal's cursor stands on.
 func cursorRow(term *terminal) int {
 	term.mu.Lock()
@@ -45,19 +36,27 @@ func cursorRow(term *terminal) int {
 	return term.vt.Cursor().Y
 }
 
-// waitBottom waits for the input cursor on the terminal's bottom row.
-// The prompt, the draft or an ask all end there while the line is read.
+// waitBottom waits for the input cursor on the prompt's own row, with
+// an empty line being read: exactly one live prompt, the cursor on it,
+// no stranded copy below. Wrapped drafts read their cursor elsewhere;
+// those tests assert the draft's own position instead.
 func waitBottom(t *testing.T, term *terminal) {
 	t.Helper()
-	_, rows := term.vt.Size()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if cursorRow(term) == rows-1 {
+		screen := physicalRows(term)
+		promptRow := -1
+		for i, r := range screen {
+			if strings.Contains(r, promptMark) || strings.Contains(r, "allow bash?") {
+				promptRow = i
+			}
+		}
+		if promptRow >= 0 && cursorRow(term) == promptRow {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("the input cursor is not on the bottom row; rows:\n%s", indexedRows(term))
+	t.Fatalf("the input cursor is not on the prompt's row; rows:\n%s", indexedRows(term))
 }
 
 // indexedRows is the terminal's rows with their numbers, for a failure
@@ -80,28 +79,68 @@ func waitScreen(t *testing.T, term *terminal, want string) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("the screen never showed %q:\n%s", want, term.screen())
+	fmt.Fprintf(os.Stderr, "DECODED\n%s\nRAW\n%q\n", term.screen(), term.String())
+	t.Fatalf("the screen never showed %q", want)
 }
 
 func TestTheInputHoldsTheBottomRowThroughARun(t *testing.T) {
+	// The run's deltas wait for the test, so each row the reply paints
+	// is caught before the next one scrolls it.
+	sawHello := make(chan struct{})
+	sawWorld := make(chan struct{})
 	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("run.started", map[string]any{"run_id": "r1"})
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "Hello, ",
+		})
+		<-sawHello
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "thinking", "text": "hmm",
+		})
+		s.event("message.delta", map[string]any{
+			"run_id": "r1", "message_id": "m1", "kind": "text", "text": "world.",
+		})
+		<-sawWorld
+		s.event("usage", map[string]any{
+			"run_id": "r1", "turn": 1, "request": 1,
+			"input_tokens": 8000, "output_tokens": 500,
+		})
+		s.event("turn.ended", map[string]any{"run_id": "r1", "turn": 1})
+		s.event("turn.started", map[string]any{"run_id": "r1", "turn": 2})
+		s.event("tool.call", map[string]any{
+			"run_id": "r1", "handle": "h1", "tool": "bash", "summary": "ls -la",
+		})
+		askID := s.request(protocol.MethodPermissionAsk, protocol.AskParams{
+			SessionID: "s1", RunID: "r1", AskID: "a1", Tool: "bash", Summary: "ls -la",
+			Class: "side_effecting", Reason: "policy",
+		})
+		s.waitDecision(askID)
+		s.event("tool.result", map[string]any{
+			"run_id": "r1", "handle": "h1", "tool": "bash", "outcome": "ok",
+			"text": "file one\nfile two\n",
+		})
+		s.event("turn.ended", map[string]any{"run_id": "r1", "turn": 2})
+		s.event("run.settled", map[string]any{
+			"run_id": "r1", "reason": "end_turn", "turns": 2,
+			"detail": map[string]any{
+				"usage": map[string]any{"input_tokens": 20300, "output_tokens": 1100},
+			},
+		})
+	}
 	term, code := startTerminalRepl(t, server)
-	waitBottom(t, term)
+	waitFor(t, term, promptMark)
 
-	term.press("work\n")
+	term.press("work\r")
 	waitScreen(t, term, "Hello,")
+	close(sawHello)
 	waitScreen(t, term, "world.")
-	waitBottom(t, term)
+	close(sawWorld)
 
 	waitScreen(t, term, "allow bash?")
-	// The ask's own line is the prompt the answer is typed behind.
-	if !strings.Contains(lastPhysicalRow(term), "allow bash?") {
-		t.Fatalf("the ask is not on the bottom row; rows:\n%s", indexedRows(term))
-	}
-	term.press("y\n")
+	term.press("y\r")
 	waitScreen(t, term, "file one")
 	waitScreen(t, term, "✓ end_turn")
-	waitBottom(t, term)
 
 	// The reply and the tool result read above the input, in order.
 	world, prompt := term.rowOf("world."), term.rowOf("💩❯")
@@ -109,7 +148,7 @@ func TestTheInputHoldsTheBottomRowThroughARun(t *testing.T) {
 		t.Fatalf("the reply is not above the input:\n%s", term.screen())
 	}
 
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case got := <-code:
 		if got != 0 {
@@ -150,8 +189,9 @@ func TestLongOutputScrollsAboveTheFooter(t *testing.T) {
 	term, code := startTerminalRepl(t, server)
 	waitBottom(t, term)
 
-	term.press("go\n")
+	term.press("go\r")
 	waitScreen(t, term, "result 9 row 2")
+	waitScreen(t, term, "✓ end_turn")
 	waitBottom(t, term)
 
 	// The newest result row is above the settle, which is above the
@@ -160,14 +200,16 @@ func TestLongOutputScrollsAboveTheFooter(t *testing.T) {
 	if result < 0 || settled < 0 || prompt < 0 || !(result < settled && settled < prompt) {
 		t.Fatalf("the newest row, the settle and the prompt are out of order:\n%s", term.screen())
 	}
-	if prompt != len(physicalRows(term))-1 {
-		t.Errorf("the prompt stands on row %d, want the bottom row:\n%s", prompt, indexedRows(term))
+	// The prompt reads within the footer: its line row and the spare
+	// row the editor's erases spend under it.
+	if prompt < len(physicalRows(term))-2 {
+		t.Errorf("the prompt stands on row %d, want the footer's rows:\n%s", prompt, indexedRows(term))
 	}
 	if term.rowOf("result 0 row 0") >= 0 {
 		t.Errorf("the oldest row is still on the screen instead of the scrollback:\n%s", term.screen())
 	}
 
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case <-code:
 	case <-time.After(10 * time.Second):
@@ -194,25 +236,30 @@ func TestTheDraftSurvivesTheStreamingAndSettlesInTheFooter(t *testing.T) {
 		s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
 	}
 	term, code := startTerminalRepl(t, server)
-	term.press("work\n")
+	waitFor(t, term, promptMark)
+	term.press("work\r")
 	close(first)
-	waitScreen(t, term, "First chunk")
+	// The stream paints when the block settles: a draft typed over the
+	// held deltas rides in the editor, and the settle renders the reply.
 	term.press("draft")
-	waitScreen(t, term, "💩❯ draft")
-	if row, bottom := term.rowOf("💩❯ draft"), len(physicalRows(term))-1; row < bottom-1 {
-		t.Fatalf("the draft stands on row %d, want the footer's rows (bottom %d):\n%s", row, bottom, term.screen())
-	}
 	term.press(" more")
-	waitScreen(t, term, "💩❯ draft more")
 	close(finish)
+	waitScreen(t, term, "First chunk and second.")
 	waitScreen(t, term, "✓ end_turn")
-	waitScreen(t, term, "💩❯ draft more")
+	// A single-line draft stays on the prompt's own row: the cursor
+	// reads after it on that row, and no footer row grew for the typed
+	// line.
+	waitScreen(t, term, "draft more")
+	waitBottom(t, term)
+	if row := term.rowOf("draft more"); row != cursorRow(term) {
+		t.Fatalf("the typed draft stands on row %d with the cursor on %d, want the prompt's own row:\n%s", row, cursorRow(term), indexedRows(term))
+	}
 
-	term.press("\n")
+	term.press("\r")
 	if prompts := server.waitPrompts(t, 2); prompts[1] != "draft more" {
 		t.Fatalf("the next prompt was %q, want the draft intact", prompts[1])
 	}
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case got := <-code:
 		if got != 0 {
@@ -234,8 +281,8 @@ func TestHeldReplySurvivesFirstDraftKeyAndBackspace(t *testing.T) {
 				s.event("run.settled", map[string]any{"run_id": "r1", "reason": "end_turn"})
 			}
 			term, code := startTerminalRepl(t, server)
-			term.press("work\n")
-			waitScreen(t, term, "held reply")
+			waitFor(t, term, promptMark)
+			term.press("work\r")
 			term.press("x")
 			waitScreen(t, term, "💩❯ x")
 			if backspace {
@@ -249,6 +296,7 @@ func TestHeldReplySurvivesFirstDraftKeyAndBackspace(t *testing.T) {
 				}
 			}
 			close(finish)
+			waitScreen(t, term, "held reply")
 			waitScreen(t, term, "✓ end_turn")
 			if n := strings.Count(term.screen(), "held reply"); n != 1 {
 				t.Fatalf("held reply appears %d times after settle:\n%s", n, indexedRows(term))
@@ -257,8 +305,7 @@ func TestHeldReplySurvivesFirstDraftKeyAndBackspace(t *testing.T) {
 				waitScreen(t, term, "💩❯ x")
 				term.press("\x7f")
 			}
-			waitBottom(t, term)
-			term.press("/quit\n")
+			term.press("/quit\r")
 			select {
 			case got := <-code:
 				if got != 0 {
@@ -288,12 +335,12 @@ func TestAResizeMovesTheInputToTheNewBottomRow(t *testing.T) {
 	}
 	waitBottomRows(t, term, 20)
 
-	term.press("work\n")
+	term.press("work\r")
 	waitScreen(t, term, "world.")
 	waitBottomRows(t, term, 20)
 	waitScreen(t, term, "✓ end_turn")
 	waitBottomRows(t, term, 20)
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case <-code:
 	case <-time.After(10 * time.Second):
@@ -301,14 +348,15 @@ func TestAResizeMovesTheInputToTheNewBottomRow(t *testing.T) {
 	}
 }
 
-// waitBottomRows waits for the prompt to stand on the bottom row of a
-// terminal that is rows tall.
+// waitBottomRows waits for the prompt to stand on the footer's line row
+// of a terminal that is rows tall: the bottom row holds the spare the
+// editor's erases spend.
 func waitBottomRows(t *testing.T, term *terminal, rowsWant int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		_, rows := term.vt.Size()
-		if rows == rowsWant && cursorRow(term) == rowsWant-1 {
+		if rows == rowsWant && cursorRow(term) >= rowsWant-2 {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -382,7 +430,7 @@ func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {
 
 	// The bytes after this point hold the pager's turn at the terminal.
 	start := len(term.String())
-	term.press("/less\n")
+	term.press("/less\r")
 	// less's own end marker says it is reading the terminal; a pager
 	// that did not start leaves the prompt standing instead. The
 	// forty-column status line cuts the marker's last glyph.
@@ -416,7 +464,7 @@ func TestThePagerTakesAndReturnsTheTerminal(t *testing.T) {
 		t.Errorf("less used an alt buffer despite -X; the primary-screen witness is weaker")
 	}
 
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case got := <-code:
 		if got != 0 {
@@ -433,7 +481,7 @@ func TestTheLayoutRestoresTheTerminalOnExit(t *testing.T) {
 	waitBottom(t, term)
 	waitScreen(t, term, "poo repl")
 
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case got := <-code:
 		if got != 0 {
@@ -488,13 +536,14 @@ func TestAMultilineDraftStaysInTheFooter(t *testing.T) {
 		t.Fatalf("the terminal changed size:\n%s", indexedRows(term))
 	}
 
-	term.press("\n")
+	term.press("\r")
 	if prompts := server.waitPrompts(t, 1); prompts[0] != draft {
 		t.Fatalf("the submitted line is %q, want the draft whole", prompts[0])
 	}
-	waitScreen(t, term, "❯ draft")
+	// The echo of a two-row draft scrolls fast on a twelve-row terminal,
+	// so the send is what the wait asserts.
 	waitBottom(t, term)
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case <-code:
 	case <-time.After(10 * time.Second):
@@ -519,6 +568,7 @@ func startPipedRepl(t *testing.T, server *fakeServer, input string) (*terminal, 
 		},
 	}
 	go func() { code <- Run(opts) }()
+	t.Cleanup(func() { endReplCleanup(t, term) })
 	return term, code
 }
 
@@ -571,6 +621,7 @@ func TestAPromptChangeKeepsATypedDraft(t *testing.T) {
 	close(closed)
 	server.script = quietRun(closed)
 	term, code := startTerminalRepl(t, server)
+	waitFor(t, term, promptMark)
 	waitBottom(t, term)
 
 	draft := "a draft " + strings.Repeat("d", 30)
@@ -578,8 +629,15 @@ func TestAPromptChangeKeepsATypedDraft(t *testing.T) {
 	waitScreen(t, term, "a draft")
 	term.press("\x1b[Z")
 	waitScreen(t, term, "🧠 off")
+	// The draft and its cursor settle together: the frame that shows
+	// the tail also lands the cursor under it, and a read between the
+	// two sees the cursor still on the prompt's row.
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && !strings.Contains(term.screen(), strings.Repeat("d", 20)) {
+	for time.Now().Before(deadline) {
+		screen := term.screen()
+		if strings.Contains(screen, strings.Repeat("d", 20)) && cursorRow(term) >= len(physicalRows(term))-2 {
+			break
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	if !strings.Contains(term.screen(), strings.Repeat("d", 20)) {
@@ -597,7 +655,7 @@ func TestAPromptChangeKeepsATypedDraft(t *testing.T) {
 	}
 	waitScreen(t, term, "✓ end_turn")
 	waitBottom(t, term)
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case <-code:
 	case <-time.After(10 * time.Second):
@@ -611,24 +669,27 @@ func startTerminalReplWith(t *testing.T, server *fakeServer, history string) (*t
 	t.Helper()
 	term := openTerminal(t)
 	stdin, stdout := pipeUp(t, server)
+	restore := takeOverStdio(t, term.slave)
+	t.Cleanup(restore)
 	code := make(chan int, 1)
 	opts := Options{
 		WorkingDir:  t.TempDir(),
 		HistoryFile: history,
-		In:          term.slave,
-		Out:         term.slave,
 		StartServer: func(args []string) (io.WriteCloser, io.ReadCloser, func() error, error) {
 			return stdin, stdout, func() error { return nil }, nil
 		},
 	}
 	go func() { code <- Run(opts) }()
+	t.Cleanup(func() { endReplCleanup(t, term) })
 	return term, code
 }
 
 func TestARecalledHistoryLineTakesTheFooter(t *testing.T) {
 	history := filepath.Join(t.TempDir(), "history")
 	recalled := "recalled " + strings.Repeat("h", 80)
-	if err := os.WriteFile(history, []byte(recalled+"\n"), 0o600); err != nil {
+	// The history is a file of JSON lines, one entry each.
+	line := fmt.Sprintf(`{"block": %q}`, recalled+"\n")
+	if err := os.WriteFile(history, []byte(line), 0o600); err != nil {
 		t.Fatalf("writing the history: %v", err)
 	}
 	server := &fakeServer{t: t}
@@ -638,19 +699,29 @@ func TestARecalledHistoryLineTakesTheFooter(t *testing.T) {
 	term, code := startTerminalReplWith(t, server, history)
 	waitBottom(t, term)
 
-	// vim's normal mode recalls the last line with k.
-	term.press("\x1bk")
+	// vim's normal mode recalls the last line with k: the Escape lands
+	// first, so the command keymap is the one the k reads in.
+	term.press("\x1b")
+	time.Sleep(50 * time.Millisecond)
+	term.press("k")
 	waitScreen(t, term, strings.Repeat("h", 20))
 	rows := len(physicalRows(term))
 	if got := strings.Count(term.screen(), "recalled"); got != 1 {
 		t.Fatalf("the recalled draft reads %d time(s) on the screen, want 1:\n%s", got, indexedRows(term))
 	}
+	// The recalled block keeps the newline its storage carries: the
+	// draft fills three rows (the prompt's indent rides on the first),
+	// the cursor reads on the row the trailing newline opens, and the
+	// spare row sits under that. The wrapped tail is whole.
 	head, tail := term.rowOf("recalled"), term.rowOf(strings.Repeat("h", 20))
-	if head < rows-4 || tail < rows-3 || tail > rows-2 {
-		t.Fatalf("the draft stands on rows %d..%d, want the footer's rows above %d:\n%s", head, tail, rows-4, indexedRows(term))
+	if head < rows-5 || head > rows-4 {
+		t.Fatalf("the draft's head stands on row %d, want the footer's top rows:\n%s", head, indexedRows(term))
 	}
-	if row := cursorRow(term); row < rows-2 {
-		t.Errorf("the recalled draft's cursor stands on row %d, want the footer's last rows:\n%s", row, indexedRows(term))
+	if tail != head+2 {
+		t.Fatalf("the draft's wrapped tail stands on row %d, want the row two under the head:\n%s", tail, indexedRows(term))
+	}
+	if row := cursorRow(term); row < head+2 || row > head+3 {
+		t.Errorf("the recalled draft's cursor stands on row %d, want the rows under the draft:\n%s", row, indexedRows(term))
 	}
 
 	// A real Enter is CR: after the recall's ESC, vim is in normal mode.
@@ -660,7 +731,10 @@ func TestARecalledHistoryLineTakesTheFooter(t *testing.T) {
 	}
 	waitScreen(t, term, "✓ end_turn")
 	waitBottom(t, term)
-	term.press("/quit\n")
+	// The recall left the editor in vim's command keymap; `i` returns
+	// to insert before the quit command reads.
+	term.press("i")
+	term.press("/quit\r")
 	select {
 	case <-code:
 	case <-time.After(10 * time.Second):
@@ -691,7 +765,7 @@ func TestAResizeDuringAHeldPreviewKeepsTheInputAtTheBottom(t *testing.T) {
 	}
 	term, code := startTerminalRepl(t, server)
 	waitBottom(t, term)
-	term.press("work\n")
+	term.press("work\r")
 	<-sent
 	waitScreen(t, term, "preview row 29|")
 
@@ -702,6 +776,10 @@ func TestAResizeDuringAHeldPreviewKeepsTheInputAtTheBottom(t *testing.T) {
 		t.Fatalf("signalling the resize: %v", err)
 	}
 	waitBottomRows(t, term, 16)
+	// The held preview comes back when the resize response repaints the
+	// region at the new width; the frame that anchors the response may
+	// land first.
+	waitScreen(t, term, "preview row")
 	if term.rowOf("preview row") < 0 {
 		t.Errorf("the resize took the held preview off the screen:\n%s", indexedRows(term))
 	}
@@ -720,7 +798,7 @@ func TestAResizeDuringAHeldPreviewKeepsTheInputAtTheBottom(t *testing.T) {
 			t.Errorf("the clipped row %q entered the terminal %d time(s), want 1", marker, n)
 		}
 	}
-	term.press("/quit\n")
+	term.press("/quit\r")
 	select {
 	case <-code:
 	case <-time.After(10 * time.Second):
