@@ -123,6 +123,13 @@ type streamReader struct {
 	// reasoning holds the reasoning items the response produced, in
 	// order, so the core records them with the response's message.
 	reasoning []poo.ProviderBlock
+	// captureOutput reports that the reader keeps the response's output
+	// items whole. A compaction reads them back; a turn's reader does not
+	// hold a second copy of its answer.
+	captureOutput bool
+	// output holds the response's output items, whole and in the order
+	// the endpoint sent them, when the reader captures them.
+	output []json.RawMessage
 	// done reports that the stream is finished.
 	done bool
 	// sawTerminal reports that a terminal response event arrived.
@@ -265,6 +272,15 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 // them with the response's message, so the next request gives them back.
 func (r *streamReader) ReportProviderBlocks() []poo.ProviderBlock {
 	return r.reasoning
+}
+
+// capture records an output item when the reader was asked to keep the
+// response's items whole.
+func (r *streamReader) capture(item json.RawMessage) {
+	if !r.captureOutput || len(item) == 0 {
+		return
+	}
+	r.output = append(r.output, item)
 }
 
 // Close releases the response.
@@ -413,6 +429,7 @@ func (r *streamReader) itemDone(ev codexEvent) []poo.StreamItem {
 	if !ok {
 		return nil
 	}
+	r.capture(ev.Item)
 	switch item.Type {
 	case "reasoning":
 		if block, ok := reasoningBlock(ev.Item, item); ok {
@@ -533,8 +550,12 @@ func (r *streamReader) terminal(ev codexEvent) ([]poo.StreamItem, error) {
 	if resp.Usage != nil {
 		r.setUsage(resp.Usage)
 	}
-	// The terminal response carries its items whole, and the reasoning
-	// item's encrypted payload rides only there.
+	// The terminal response carries its items whole. A captured item is
+	// recorded once, not again from the events before it, and the reasoning
+	// item's encrypted payload rides only here.
+	if r.captureOutput && len(resp.Output) > 0 {
+		r.output = resp.Output
+	}
 	if blocks, ok := terminalReasoning(resp.Output); ok {
 		r.reasoning = blocks
 	}

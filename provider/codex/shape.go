@@ -164,10 +164,19 @@ func (t *Transport) textVerbosity() string {
 }
 
 // buildBody turns a core request into the wire payload.
+func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
+	out, err := t.shapeRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	return encodeBody(out)
+}
+
+// shapeRequest shapes a core request into the request's wire fields.
 //
 // The payload is shaped in three passes: the request's own fields, the
 // model info's reasoning control, and the tools in their stable order.
-func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
+func (t *Transport) shapeRequest(req poo.ChatRequest) (responsesRequest, error) {
 	info := t.modelInfo(req)
 	model := req.Model
 	if model == "" {
@@ -177,7 +186,7 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 		model = info.ModelID
 	}
 	if model == "" {
-		return nil, support.ConfigErrorf("the request names no model")
+		return responsesRequest{}, support.ConfigErrorf("the request names no model")
 	}
 
 	out := responsesRequest{
@@ -195,7 +204,7 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 
 	items, instructions, err := inputItems(req.Messages, modalitiesOf(info), 0)
 	if err != nil {
-		return nil, err
+		return responsesRequest{}, err
 	}
 	out.Input = items
 	if out.Input == nil {
@@ -208,14 +217,19 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 
 	tools, err := t.tools(info, req.Tools)
 	if err != nil {
-		return nil, err
+		return responsesRequest{}, err
 	}
 	out.Tools = tools
 
 	if err := t.shapeReasoning(req, info, &out); err != nil {
-		return nil, err
+		return responsesRequest{}, err
 	}
 
+	return out, nil
+}
+
+// encodeBody serializes a request's wire fields.
+func encodeBody(out responsesRequest) ([]byte, error) {
 	body, err := json.Marshal(out)
 	if err != nil {
 		return nil, encodeError(err.Error())
