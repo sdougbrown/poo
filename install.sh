@@ -53,14 +53,31 @@ info "latest release: ${TAG}"
 
 # goreleaser archive naming: poo_linux_amd64.tar.gz, poo_darwin_arm64.tar.gz
 ASSET="poo_${OS}_${ARCH}.tar.gz"
-URL="https://github.com/${OWNER}/${REPO}/releases/download/${TAG}/${ASSET}"
+BASE="https://github.com/${OWNER}/${REPO}/releases/download/${TAG}"
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
 printf '  downloading %s...\n' "$ASSET"
-curl -fsSL -o "${TMPDIR}/${ASSET}" "$URL" \
-  || err "download failed: $URL"
+curl -fsSL -o "${TMPDIR}/${ASSET}" "${BASE}/${ASSET}" \
+  || err "download failed: ${BASE}/${ASSET}"
+
+# --- verify checksum ------------------------------------------------------
+
+printf '  verifying checksum...\n'
+curl -fsSL -o "${TMPDIR}/checksums.txt" "${BASE}/checksums.txt" \
+  || err "could not download ${BASE}/checksums.txt"
+
+EXPECT="$(grep " ${ASSET}\$" "${TMPDIR}/checksums.txt" | awk '{print $1}')"
+[ -n "$EXPECT" ] || err "checksums.txt has no entry for ${ASSET}"
+
+case "$OS" in
+  darwin) SHASUM="shasum -a 256" ;;
+  linux)  SHASUM="sha256sum"   ;;
+esac
+ACTUAL="$($SHASUM "${TMPDIR}/${ASSET}" | awk '{print $1}')"
+[ "$ACTUAL" = "$EXPECT" ] \
+  || err "checksum mismatch for ${ASSET}: expected ${EXPECT}, got ${ACTUAL}"
 
 # --- extract & install ----------------------------------------------------
 
