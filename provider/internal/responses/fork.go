@@ -67,8 +67,8 @@ func AppendInput(body []byte, appended []poo.Message, reads Modalities) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	// A snapshot can lack input. Put the added field last so the fork
-	// retains the appended items.
+	// A snapshot can lack input. Include the added field in the order so
+	// encoding retains the appended items.
 	order = support.WithKeys(order, payload, []string{"input"})
 	return support.EncodeObject(payload, order), nil
 }
