@@ -123,8 +123,9 @@ fails the load. A file the operator put there is never skipped in silence.
 The one exception is a literal key: a key pi's file writes is copied into the
 settings, where a literal key lives, and the layer never carries one.
 
-`models_file`, `auth_file` and `pi_auth_file` resolve relative paths
-against the settings file's directory. `cli_registry.paths`,
+`models_file`, `auth_file`, `pi_auth_file`, `system_prompt.base_file` and
+`finish.schema_file` resolve relative paths against the settings file's
+directory. `cli_registry.paths`,
 `feeds.paths` and `skills.paths` answer to the working directory, and a
 path in them that starts with `~/` resolves under the home directory.
 

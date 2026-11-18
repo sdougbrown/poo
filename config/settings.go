@@ -248,7 +248,9 @@ type Decide struct {
 // The base file and the replacement text are mutually exclusive: the
 // prompt is either the file's text or the replacement, never both.
 type PromptSettings struct {
-	// BaseFile is the file holding the prompt's base section.
+	// BaseFile is the file holding the prompt's base section. A relative
+	// path is beside the settings file, and a leading ~/ is under the
+	// home directory.
 	BaseFile string `json:"base_file,omitempty"`
 	// Replace is the text that takes the place of the whole prompt.
 	Replace string `json:"replace,omitempty"`
@@ -434,7 +436,8 @@ type Sampling struct {
 // Finish are the typed result's settings.
 type Finish struct {
 	// SchemaFile is the file holding the JSON schema the result is
-	// validated against.
+	// validated against. A relative path is beside the settings file,
+	// and a leading ~/ is under the home directory.
 	SchemaFile string `json:"schema_file,omitempty"`
 }
 

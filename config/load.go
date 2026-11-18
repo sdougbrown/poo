@@ -47,9 +47,10 @@ func FormatFor(path string) Format {
 // The file's name says its format. A file that does not decode, or
 // that holds a key the settings do not have, is a failure.
 //
-// The file's own directory answers for its relative paths: a models_file
-// resolves against it, and a models.json beside the settings file is imported
-// when the settings name none.
+// The file's own directory answers for its relative paths: a models_file,
+// a system_prompt.base_file and a finish.schema_file resolve against it,
+// and a models.json beside the settings file is imported when the
+// settings name none.
 func Load(path string) (*Settings, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -101,6 +102,12 @@ func parse(data []byte, format Format, dir string) (*Settings, error) {
 		return nil, decodeError(err)
 	}
 	settings.Permission.askersNamed = namesAskers(normalized)
+	// The prompt and schema files are resolved here, where the document's
+	// directory is known: a relative name is beside the settings file, and
+	// every reader — the check and the build — sees one path.
+	if err := settings.resolveNamedFiles(dir); err != nil {
+		return nil, err
+	}
 	if err := settings.importPi(dir); err != nil {
 		return nil, err
 	}

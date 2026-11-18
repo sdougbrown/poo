@@ -75,14 +75,7 @@ func (s *Settings) modelsFilePath(dir string) (string, error) {
 	path := s.ModelsFile
 	switch {
 	case path != "":
-		expanded, err := expandHome(path)
-		if err != nil {
-			return "", err
-		}
-		if !filepath.IsAbs(expanded) && dir != "" {
-			expanded = filepath.Join(dir, expanded)
-		}
-		return expanded, nil
+		return resolveBeside(path, dir)
 	case dir != "":
 		own := filepath.Join(dir, ModelsFileName)
 		pi := filepath.Join(dir, PiModelsFileName)
@@ -104,6 +97,45 @@ func (s *Settings) modelsFilePath(dir string) (string, error) {
 	default:
 		return "", nil
 	}
+}
+
+// resolveBeside resolves a file path a settings file names. ~ and a
+// leading ~/ are under the home directory, and a relative path is
+// beside the settings file. A document held in memory has no directory
+// to answer for its relative paths, so they keep as they are.
+func resolveBeside(path, dir string) (string, error) {
+	expanded, err := expandHome(path)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(expanded) && dir != "" {
+		expanded = filepath.Join(dir, expanded)
+	}
+	return expanded, nil
+}
+
+// resolveNamedFiles resolves the files the settings name beside
+// themselves: the system prompt's base file and the finish schema. Each
+// is resolved once, where the settings load, so the check and the build
+// read the same path.
+func (s *Settings) resolveNamedFiles(dir string) error {
+	for _, named := range []struct {
+		field string
+		path  *string
+	}{
+		{"system_prompt.base_file", &s.SystemPrompt.BaseFile},
+		{"finish.schema_file", &s.Finish.SchemaFile},
+	} {
+		if *named.path == "" {
+			continue
+		}
+		resolved, err := resolveBeside(*named.path, dir)
+		if err != nil {
+			return &Error{Code: CodeInvalid, Field: named.field, Err: err}
+		}
+		*named.path = resolved
+	}
+	return nil
 }
 
 // importModelsFile reads a models file: poo's own shape, or pi's, which is

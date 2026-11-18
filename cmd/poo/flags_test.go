@@ -116,6 +116,52 @@ func TestAnEmptyManifestPathFlagIsSkipped(t *testing.T) {
 	}
 }
 
+// TestTheSystemPromptFlagResolvesAgainstTheWorkingDirectory covers the
+// flag: a relative file is beside the working directory it was typed
+// in, and a leading ~ is the home directory.
+func TestTheSystemPromptFlagResolvesAgainstTheWorkingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("the base section"), 0o644); err != nil {
+		t.Fatalf("writing the base file: %v", err)
+	}
+	t.Chdir(dir)
+
+	inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+		"run",
+		"--system-prompt", "prompt.md",
+	})
+	if err != nil {
+		t.Fatalf("parsing the flags: %v", err)
+	}
+	var f sharedFlags
+	f.bind(inv)
+	overrides, err := f.overrides()
+	if err != nil {
+		t.Fatalf("reading the overrides: %v", err)
+	}
+	if got := overrides.SystemPrompt; got != filepath.Join(dir, "prompt.md") {
+		t.Errorf("the system prompt is %q, want the file beside the working directory", got)
+	}
+
+	inv, err = clicontract.Parse(pooApp(io.Discard), []string{
+		"run",
+		"--system-prompt", "~/flagged.md",
+	})
+	if err != nil {
+		t.Fatalf("parsing the flags: %v", err)
+	}
+	t.Setenv("HOME", dir)
+	f = sharedFlags{}
+	f.bind(inv)
+	overrides, err = f.overrides()
+	if err != nil {
+		t.Fatalf("reading the overrides: %v", err)
+	}
+	if got := overrides.SystemPrompt; got != filepath.Join(dir, "flagged.md") {
+		t.Errorf("the system prompt is %q, want the file under the home directory", got)
+	}
+}
+
 // TestThePermissionFallbackFlagIsApplied covers the one-shot's
 // --permission-fallback flag: a side-effecting call no rule covers is
 // decided by the fallback, and the flag overrides the settings' or the

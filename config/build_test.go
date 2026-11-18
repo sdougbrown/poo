@@ -484,6 +484,58 @@ func TestTheBuildMakesThePrompt(t *testing.T) {
 	}
 }
 
+// TestARelativeBaseFileResolvesAgainstTheSettings covers the file: a
+// settings file that names a relative base file reads it from beside
+// the settings, not beside the working directory.
+func TestARelativeBaseFileResolvesAgainstTheSettings(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("the base section"), 0o644); err != nil {
+		t.Fatalf("writing the base file: %v", err)
+	}
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settingsPath, []byte(theModelSettings+`system_prompt:
+  base_file: prompt.md
+`), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	// The process runs somewhere else: the relative name is beside the
+	// settings file, not beside the working directory.
+	t.Chdir(t.TempDir())
+	settings, err := config.Load(settingsPath)
+	if err != nil {
+		t.Fatalf("loading the settings from %s: %v", settingsPath, err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	builder := prompt.New(prompt.Env{})
+	for _, edit := range runtime.Prompt {
+		edit(builder)
+	}
+	if text := builder.Render(); !strings.Contains(text, "the base section") {
+		t.Errorf("the prompt is %q, want the base file's text", text)
+	}
+}
+
+// TestAFinishSchemaUnderHomeResolves covers the ~: a schema file named
+// under the home directory is read from there.
+func TestAFinishSchemaUnderHomeResolves(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "schema.json"), []byte(`{"type":"object"}`), 0o644); err != nil {
+		t.Fatalf("writing the schema: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+`finish:
+  schema_file: ~/schema.json
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if string(runtime.FinishSchema) != `{"type":"object"}` {
+		t.Errorf("the schema is %s, want the home file's", runtime.FinishSchema)
+	}
+}
+
 // TestTheSettingsPromptIsTheSessionPrompt covers the prompt the
 // session carries: the settings' sections are in it, and not only in
 // the build's own account of them.
