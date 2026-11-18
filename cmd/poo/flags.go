@@ -118,19 +118,6 @@ func (f *sharedFlags) settings(workingDir string) (*config.Settings, error) {
 	return settings, err
 }
 
-// runsEphemeral reports whether the session writes nothing: the
-// --ephemeral flag, or a settings' session.mode that says ephemeral.
-func runsEphemeral(settings *config.Settings, ephemeral bool) bool {
-	if ephemeral {
-		return true
-	}
-	mode := config.DefaultSessionMode
-	if settings.Session.Mode != nil {
-		mode = *settings.Session.Mode
-	}
-	return mode == "ephemeral"
-}
-
 // resolveSettings finds and loads the settings a command runs under:
 // the explicit file a flag or the environment names, then discovery
 // walking up from the working directory, then the defaults. The path

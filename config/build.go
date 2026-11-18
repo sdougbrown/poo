@@ -1651,21 +1651,8 @@ func (r *Runtime) newDeciderAsker(model poo.ModelInfo) (perm.Asker, error) {
 // none in the ephemeral mode: an ephemeral session writes nothing.
 func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	settings := r.Settings
-	mode := DefaultSessionMode
-	if settings.Session.Mode != nil {
-		mode = *settings.Session.Mode
-	}
-	if opts.Overrides.SessionMode != "" {
-		mode = opts.Overrides.SessionMode
-	}
-	dir := DefaultSessionDir
-	if settings.Session.Dir != nil {
-		dir = *settings.Session.Dir
-	}
-	if opts.Overrides.SessionDir != "" {
-		dir = opts.Overrides.SessionDir
-	}
-	expanded, err := expandHome(dir)
+	mode := SessionMode(settings, opts.Overrides)
+	expanded, err := SessionDirectory(settings, opts.Overrides)
 	if err != nil {
 		return &Error{Code: CodeInvalid, Field: "session.dir", Message: "the session directory cannot be resolved", Err: err}
 	}
@@ -2489,6 +2476,21 @@ func SessionDirectory(settings *Settings, overrides Overrides) (string, error) {
 		dir = overrides.SessionDir
 	}
 	return expandHome(dir)
+}
+
+// SessionMode returns the mode a session runs in: whether it writes a
+// session file or nothing at all.
+//
+// The settings' mode, with the command line's override.
+func SessionMode(settings *Settings, overrides Overrides) string {
+	mode := DefaultSessionMode
+	if settings.Session.Mode != nil {
+		mode = *settings.Session.Mode
+	}
+	if overrides.SessionMode != "" {
+		mode = overrides.SessionMode
+	}
+	return mode
 }
 
 // RetentionPolicy returns the prune policy the settings name.

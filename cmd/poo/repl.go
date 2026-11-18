@@ -10,6 +10,7 @@ import (
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/repl"
 	"github.com/sdougbrown/poo/session"
 )
@@ -96,7 +97,11 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if runsEphemeral(settings, o.ephemeral) {
+	overrides, err := o.overrides()
+	if err != nil {
+		return "", err
+	}
+	if config.SessionMode(settings, overrides) == "ephemeral" {
 		return "", errors.New("--continue and --resume open a logged session, and this command runs without one: drop --ephemeral, or the settings' session.mode")
 	}
 	store, err := o.openStore(workingDir)
