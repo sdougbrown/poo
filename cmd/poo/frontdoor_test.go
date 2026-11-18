@@ -323,8 +323,10 @@ func TestTheContinueAliasIsTheFrontDoor(t *testing.T) {
 		// settings file and the working directory.
 		settings string
 		dir      string
-		// argv is the line the interface is started with, beside the
-		// settings file the command resolved.
+		// argv is the line a parsed line starts the interface with,
+		// beside the settings file the command resolved. A refused line
+		// goes to the repl as it stands, which
+		// TestTheFrontDoorReadsTheFlagsOnItsLine covers end to end.
 		argv []string
 	}{
 		{
@@ -377,7 +379,6 @@ func TestTheContinueAliasIsTheFrontDoor(t *testing.T) {
 		{
 			name: "a word after the terminator is not a flag",
 			args: []string{"--continue", "--", "--settings", "/mine/settings.json"},
-			argv: []string{"repl", "--settings", "/project/settings.yaml", "--continue", "--", "--settings", "/mine/settings.json"},
 			door: true,
 		},
 		{
@@ -407,6 +408,9 @@ func TestTheContinueAliasIsTheFrontDoor(t *testing.T) {
 			if o.settingsFile != c.settings || o.workingDir != c.dir {
 				t.Errorf("the line %q names the settings %q in %q, want %q in %q",
 					extra, o.settingsFile, o.workingDir, c.settings, c.dir)
+			}
+			if !parsed {
+				return
 			}
 			if got := frontDoorLine("repl", "/project/settings.yaml", o.settingsFile != "", extra); !slices.Equal(got, c.argv) {
 				t.Errorf("the argv is %q, want %q", got, c.argv)
