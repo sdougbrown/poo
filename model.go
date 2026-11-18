@@ -49,6 +49,10 @@ const (
 	// range of the history. The replacement is visible: the model sees
 	// that its history was replaced.
 	OriginCompaction Origin = "compaction"
+	// OriginNotice is a notice the session wrote into the model's
+	// view: the context window's approach, or a condition the model
+	// must know. It is the session's, not the person's.
+	OriginNotice Origin = "notice"
 )
 
 // HookOrigin returns the origin a hook's appended messages carry.

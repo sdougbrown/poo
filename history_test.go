@@ -357,6 +357,7 @@ func TestTheHistoryProjectionCarriesTheOrigin(t *testing.T) {
 		message(poo.OriginJob, "[job j1 · bash]\ndone"),
 		message(poo.FeedOrigin("ticker"), "a commit landed"),
 		message(poo.HookOrigin("cleanup"), "the step's output"),
+		message(poo.OriginNotice, "the context window is nearly full"),
 		message("", "a record older than the origin"),
 		stamp(&poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started"), RunID: "run-1"}),
 	}
@@ -366,6 +367,7 @@ func TestTheHistoryProjectionCarriesTheOrigin(t *testing.T) {
 		poo.OriginJob,
 		poo.FeedOrigin("ticker"),
 		poo.HookOrigin("cleanup"),
+		poo.OriginNotice,
 		"",
 		"",
 	}
@@ -386,12 +388,12 @@ func TestTheHistoryProjectionCarriesTheOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encoding the page: %v", err)
 	}
-	for _, held := range []string{`"origin":"user"`, `"origin":"steer"`, `"origin":"job"`, `"origin":"feed:ticker"`, `"origin":"hook:cleanup"`} {
+	for _, held := range []string{`"origin":"user"`, `"origin":"steer"`, `"origin":"job"`, `"origin":"feed:ticker"`, `"origin":"hook:cleanup"`, `"origin":"notice"`} {
 		if !strings.Contains(string(encoded), held) {
 			t.Errorf("the encoded page does not hold %s: %s", held, encoded)
 		}
 	}
-	if got := strings.Count(string(encoded), `"origin"`); got != 5 {
-		t.Errorf("the encoded page holds %d origins, want the 5 records that carried one: %s", got, encoded)
+	if got := strings.Count(string(encoded), `"origin"`); got != 6 {
+		t.Errorf("the encoded page holds %d origins, want the 6 records that carried one: %s", got, encoded)
 	}
 }

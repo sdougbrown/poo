@@ -174,7 +174,7 @@ func (s *Session) maybeNotice(run *runState) {
 	// consumer that fires the notice at 60% does not tell the model
 	// the window is ~80% used.
 	msg := NewTextMessage(RoleUser, fmt.Sprintf("[Context notice: ~%d%% of the context window used. Prefer narrow reads; finish or report soon.]", int(s.opts.NoticeRatio*100)))
-	msg.Origin = OriginUser
+	msg.Origin = OriginNotice
 	s.appendMessages(msg)
 	if err := s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),

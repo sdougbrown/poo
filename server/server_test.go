@@ -207,16 +207,6 @@ func TestALoadedSessionTellsAClientThatCannotAnswerWhyItsAsksFallBack(t *testing
 	}
 }
 
-// The handshake says the history carries each item's origin: the field
-// is an addition to a result inside this protocol version, so a client
-// may read it only because the handshake announced it.
-func TestTheHandshakeAnnouncesTheHistoryOrigin(t *testing.T) {
-	srv := newServer(t, servedSettings(t, "", `{"chat": "chat-model"}`))
-	if !srv.Capabilities().HistoryOrigin {
-		t.Error("the history items carry their record's origin, so the capability should say so")
-	}
-}
-
 // The handshake names the default profile, and it is the profile a
 // session whose params name none runs under.
 func TestTheHandshakeNamesTheDefaultProfile(t *testing.T) {

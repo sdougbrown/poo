@@ -632,11 +632,12 @@ func (m *machine) replayItem(item protocol.HistoryItem) {
 // A line the person typed is the prompt the session ran; a line that
 // rode a run — a steer, an interrupt or a follow-up — is the steer's
 // echo, which is how the live path draws the one of them it sends. Any
-// other origin is a line nobody typed: a job's result, a feed's message
-// or a hook's step, and the live transcript draws none of them, so the
-// replay draws none either. An item with no origin at all is a record
-// older than the origin or a binary that does not report it, and it
-// reads as the prompt it always did.
+// other origin is a line nobody typed — a job's result, a feed's
+// message, a hook's step, the session's own notice — and the live
+// transcript draws none of them, so the replay draws none either. An
+// item with no origin at all is a record older than the origin or a
+// binary that does not report it, and it reads as the prompt it always
+// did.
 func (m *machine) replayUser(item protocol.HistoryItem) {
 	switch item.Origin {
 	case "", "user":

@@ -56,8 +56,8 @@ func TestAResumedSessionLoadsInsteadOfCreating(t *testing.T) {
 		{Seq: 1, Type: "run_started", RunID: "r0"},
 		{Seq: 2, Type: "message", RunID: "r0", Role: "user", Text: "what is in the directory?"},
 		{Seq: 3, Type: "message", RunID: "r0", Role: "assistant", Text: "Three files."},
-		{Seq: 4, Type: "tool_call", RunID: "r0", Tool: "bash", Summary: "ls"},
-		{Seq: 5, Type: "tool_result", RunID: "r0", Tool: "bash", Outcome: "ok", Text: "one\n"},
+		{Seq: 4, Type: "tool_call", RunID: "r0", Tool: "bash", Summary: "ls", Origin: "model"},
+		{Seq: 5, Type: "tool_result", RunID: "r0", Tool: "bash", Outcome: "ok", Text: "one\n", Origin: "tool"},
 		{Seq: 6, Type: "permission", RunID: "r0", Tool: "bash", Decision: "allow"},
 		{Seq: 7, Type: "compaction", RunID: "r0", Text: "summary"},
 		{Seq: 8, Type: "run_settled", RunID: "r0", Reason: "end_turn"},
@@ -310,7 +310,7 @@ func TestTheReplayWarnsWhenTheHistoryWillNotBeRead(t *testing.T) {
 // rendering a replayed user-role message gets: a line the person typed is
 // the prompt's mark, a line that rode the run is the steer's, and a line
 // the live transcript never drew — a job's result, a feed's message, a
-// hook's step — is not drawn at all.
+// hook's step or a notice the session wrote — is not drawn at all.
 func TestTheReplayDrawsEachOriginTheWayTheLiveTranscriptDoes(t *testing.T) {
 	server := &fakeServer{t: t}
 	server.history = []protocol.HistoryItem{
@@ -321,10 +321,16 @@ func TestTheReplayDrawsEachOriginTheWayTheLiveTranscriptDoes(t *testing.T) {
 		{Seq: 5, Type: "message", Role: "user", Origin: "job", Text: "the job's result"},
 		{Seq: 6, Type: "message", Role: "user", Origin: "feed:ticker", Text: "a feed's message"},
 		{Seq: 7, Type: "message", Role: "user", Origin: "hook:cleanup", Text: "a step's output"},
-		{Seq: 8, Type: "message", Role: "assistant", Text: "Three files."},
+		// A notice the session wrote into the model's view is not a line
+		// anyone typed: the live transcript draws none of them, and the
+		// replay draws none either.
+		{Seq: 8, Type: "message", Role: "user", Origin: "notice", Text: "the context window is nearly full"},
+		// The reply's origin is the model's, and the reply is drawn
+		// whatever it is: the transcript shows the model's lines.
+		{Seq: 9, Type: "message", Role: "assistant", Origin: "model", Text: "Three files."},
 		// A record older than the origin says nothing about who put the
 		// message there, and it reads as the prompt it always did.
-		{Seq: 9, Type: "message", Role: "user", Text: "a line from an older log"},
+		{Seq: 10, Type: "message", Role: "user", Text: "a line from an older log"},
 	}
 
 	drawn := ansi.Strip(resumeRepl(t, server, "s9"))
@@ -335,6 +341,7 @@ func TestTheReplayDrawsEachOriginTheWayTheLiveTranscriptDoes(t *testing.T) {
 		"» then summarize it",
 		"❯ a line from an older log",
 		"Three files.",
+		"poo repl — /help for the commands",
 	} {
 		if !strings.Contains(drawn, want) {
 			t.Errorf("the transcript does not hold %q:\n%s", want, drawn)
@@ -342,7 +349,7 @@ func TestTheReplayDrawsEachOriginTheWayTheLiveTranscriptDoes(t *testing.T) {
 	}
 	// Nothing the live transcript does not draw is drawn, and no line
 	// is echoed as the prompt when nobody typed it.
-	for _, unwanted := range []string{"the job's result", "a feed's message", "a step's output"} {
+	for _, unwanted := range []string{"the job's result", "a feed's message", "a step's output", "the context window is nearly full"} {
 		if strings.Contains(drawn, unwanted) {
 			t.Errorf("the transcript holds %q, which the live path does not draw:\n%s", unwanted, drawn)
 		}
