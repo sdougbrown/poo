@@ -1,4 +1,4 @@
-package openai
+package chat
 
 import (
 	"encoding/json"
@@ -75,8 +75,8 @@ func formatsFor(format string) callFormats {
 	}
 }
 
-// parser reads tool calls from a text stream.
-type parser struct {
+// Parser reads tool calls from a text stream.
+type Parser struct {
 	// enabled reports whether the parser runs at all.
 	enabled bool
 	// buf holds text seen so far that has not been emitted or consumed.
@@ -112,21 +112,21 @@ type parser struct {
 	lastReason string
 }
 
-// newParser returns a parser for a tools mode and a text format.
+// NewParser returns a parser for a tools mode and a text format.
 //
-// The mode decides whether the parser runs at all, and the format
-// decides which shapes it reads.
-func newParser(mode, format string) *parser {
-	p := &parser{enabled: mode == "text" || mode == "auto"}
+// The mode decides whether the parser runs at all, and the format decides
+// which shapes it reads.
+func NewParser(mode, format string) *Parser {
+	p := &Parser{enabled: mode == "text" || mode == "auto"}
 	p.formats = formatsFor(format)
 	return p
 }
 
 // on reports whether the parser runs.
 //
-// A disabled parser leaves the text alone, so the transport emits the raw
-// content delta itself.
-func (p *parser) on() bool { return p != nil && p.enabled }
+// A disabled parser leaves the text alone, so the reader emits the raw content
+// delta itself.
+func (p *Parser) on() bool { return p != nil && p.enabled }
 
 // ToolCallOpen and ToolCallClose are the tags that mark a tool call
 // block in text mode.
@@ -147,8 +147,8 @@ const MistralCallsOpen = "[TOOL_CALLS]"
 // in the auto mode, where both are read.
 const textCallIndexBase = 1000
 
-// feed takes a text delta and returns the events it produced.
-func (p *parser) feed(text string) []poo.StreamItem {
+// Feed takes a text delta and returns the events it produced.
+func (p *Parser) Feed(text string) []poo.StreamItem {
 	if !p.on() {
 		return nil
 	}
@@ -156,12 +156,12 @@ func (p *parser) feed(text string) []poo.StreamItem {
 	return p.drain()
 }
 
-// flush returns the events the parser holds at the end of a stream.
+// Flush returns the events the parser holds at the end of a stream.
 //
 // A call that arrived without its closing marker is still a call, as long
 // as its body parses. A body that does not parse stays in the model's
 // prose, exactly as the model wrote it.
-func (p *parser) flush() []poo.StreamItem {
+func (p *Parser) Flush() []poo.StreamItem {
 	if !p.on() {
 		return nil
 	}
@@ -202,7 +202,7 @@ func (p *parser) flush() []poo.StreamItem {
 }
 
 // drain consumes the buffer, returning the events it produced.
-func (p *parser) drain() []poo.StreamItem {
+func (p *Parser) drain() []poo.StreamItem {
 	var out []poo.StreamItem
 	for {
 		if p.inCall {
@@ -253,7 +253,7 @@ func (p *parser) drain() []poo.StreamItem {
 // so the buffer starts at the call's own text. The opening itself is
 // kept, so a block that turns out not to be a call goes back into the
 // prose exactly as the model wrote it.
-func (p *parser) openCall(kind callKind) {
+func (p *Parser) openCall(kind callKind) {
 	p.inCall = true
 	p.callKind = kind
 	p.callBody = ""
@@ -293,7 +293,7 @@ func (p *parser) openCall(kind callKind) {
 // buffer is emptied as the text arrives. The closing marker may straddle
 // the two, so the search is over the whole body and what is left of the
 // buffer, and the text before the marker is moved into the body.
-func (p *parser) consumeCall() ([]poo.StreamItem, bool) {
+func (p *Parser) consumeCall() ([]poo.StreamItem, bool) {
 	switch p.callKind {
 	case kindTagged:
 		return p.consumeUntil(ToolCallClose)
@@ -310,7 +310,7 @@ func (p *parser) consumeCall() ([]poo.StreamItem, bool) {
 //
 // The marker may straddle the body and the buffer, so the search is over
 // the two together.
-func (p *parser) consumeUntil(marker string) ([]poo.StreamItem, bool) {
+func (p *Parser) consumeUntil(marker string) ([]poo.StreamItem, bool) {
 	combined := p.callBody + p.buf
 	// The search starts far enough back that a marker split across the
 	// body and the buffer is still found.
@@ -350,7 +350,7 @@ func (p *parser) consumeUntil(marker string) ([]poo.StreamItem, bool) {
 // The array ends at its matching bracket. The scan runs over the new
 // text only: the body already counted the brackets it holds, and
 // counting them again would unbalance the depth.
-func (p *parser) consumeArray() ([]poo.StreamItem, bool) {
+func (p *Parser) consumeArray() ([]poo.StreamItem, bool) {
 	for i := 0; i < len(p.buf); i++ {
 		c := p.buf[i]
 		if p.inString {
@@ -396,7 +396,7 @@ func (p *parser) consumeArray() ([]poo.StreamItem, bool) {
 // The body ends at the object's matching brace. The scan runs over the
 // new text only: the body already counted the braces it holds, and
 // counting them again would unbalance the depth.
-func (p *parser) consumeJSON() ([]poo.StreamItem, bool) {
+func (p *Parser) consumeJSON() ([]poo.StreamItem, bool) {
 	for i := 0; i < len(p.buf); i++ {
 		c := p.buf[i]
 		if p.inString {
@@ -441,7 +441,7 @@ func (p *parser) consumeJSON() ([]poo.StreamItem, bool) {
 //
 // It returns the index, the shape, and whether a call was found. Only
 // the shapes the parser reads are looked for.
-func (p *parser) findCallStart() (int, callKind, bool) {
+func (p *Parser) findCallStart() (int, callKind, bool) {
 	var starts []callStart
 	if p.formats.hermes || p.formats.qwen {
 		if i := strings.Index(p.buf, ToolCallOpen); i >= 0 {
@@ -487,7 +487,7 @@ type callStart struct {
 // track records what a batch of events leaves behind: prose that does
 // not end in a newline leaves the buffer mid-line, and a call does not.
 // It returns the events unchanged.
-func (p *parser) track(events ...poo.StreamItem) []poo.StreamItem {
+func (p *Parser) track(events ...poo.StreamItem) []poo.StreamItem {
 	for _, ev := range events {
 		switch ev.Kind {
 		case "delta":
@@ -506,7 +506,7 @@ func (p *parser) track(events ...poo.StreamItem) []poo.StreamItem {
 // The object must start a line, so that prose with a brace in it is not
 // mistaken for a call. The start of the buffer is a line start only when
 // the prose emitted before it ended in a newline.
-func (p *parser) findBareStart() int {
+func (p *Parser) findBareStart() int {
 	for i := 0; i < len(p.buf); i++ {
 		if p.buf[i] != '{' {
 			continue
@@ -528,7 +528,7 @@ func (p *parser) findBareStart() int {
 
 // safePrefix returns the length of the buffer prefix that cannot be the
 // start of a call.
-func (p *parser) safePrefix() int {
+func (p *Parser) safePrefix() int {
 	keep := 0
 	for _, marker := range []string{ToolCallOpen, "```", MistralCallsOpen} {
 		if !p.readsMarker(marker) {
@@ -549,7 +549,7 @@ func (p *parser) safePrefix() int {
 }
 
 // readsMarker reports whether the parser looks for a marker.
-func (p *parser) readsMarker(marker string) bool {
+func (p *Parser) readsMarker(marker string) bool {
 	switch marker {
 	case ToolCallOpen:
 		return p.formats.hermes || p.formats.qwen
@@ -564,7 +564,7 @@ func (p *parser) readsMarker(marker string) bool {
 //
 // It returns the events the call produced, the reason the body is not a
 // call, and whether it is one.
-func (p *parser) parseBody(body string) ([]poo.StreamItem, string, bool) {
+func (p *Parser) parseBody(body string) ([]poo.StreamItem, string, bool) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		p.lastReason = "the call is empty"
@@ -590,7 +590,7 @@ func (p *parser) parseBody(body string) ([]poo.StreamItem, string, bool) {
 }
 
 // parseCallBody reads a JSON call body.
-func (p *parser) parseCallBody(body string) ([]poo.StreamItem, string, bool) {
+func (p *Parser) parseCallBody(body string) ([]poo.StreamItem, string, bool) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return nil, "the call is empty", false
@@ -628,7 +628,7 @@ func (p *parser) parseCallBody(body string) ([]poo.StreamItem, string, bool) {
 //
 // The list is a JSON array of calls, and the arguments of a call may be
 // an object or a string holding one.
-func (p *parser) parseMistral(body string) ([]poo.StreamItem, string, bool) {
+func (p *Parser) parseMistral(body string) ([]poo.StreamItem, string, bool) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return nil, "the call list is empty", false
@@ -668,7 +668,7 @@ func (p *parser) parseMistral(body string) ([]poo.StreamItem, string, bool) {
 }
 
 // parseXMLCall reads a Qwen-style XML call body.
-func (p *parser) parseXMLCall(body string) ([]poo.StreamItem, string, bool) {
+func (p *Parser) parseXMLCall(body string) ([]poo.StreamItem, string, bool) {
 	nm := between(body, "<name>", "</name>")
 	if nm == "" {
 		return nil, "the call has no name element", false
@@ -712,7 +712,7 @@ func between(s, open, close string) string {
 }
 
 // toolEvent builds a tool call event.
-func (p *parser) toolEvent(name, args string) (poo.StreamItem, bool) {
+func (p *Parser) toolEvent(name, args string) (poo.StreamItem, bool) {
 	if name == "" {
 		return poo.StreamItem{}, false
 	}

@@ -1,4 +1,4 @@
-package openai
+package chat
 
 import (
 	"log/slog"
@@ -9,39 +9,38 @@ import (
 
 // The text filters.
 //
-// A filter sits between the endpoint and the consumer: it takes the text
-// a model sends and returns the events that text produced. The filters
-// run in the order the quirks added them, and each filter's text goes to
-// the next one.
+// A filter sits between the endpoint and the consumer: it takes the text a
+// model sends and returns the events that text produced. The filters run in the
+// order the transport composed them, and each filter's text goes to the next
+// one.
 
-// textFilter is a filter over the text a model sends.
+// TextFilter is a filter over the text a model sends.
 //
-// The filter takes the text as it arrives and returns the events it
-// produced. A filter that needs more text than has arrived holds it
-// back until it can decide.
-type textFilter interface {
-	// feed takes a text delta and returns the events it produced.
-	feed(text string) []poo.StreamItem
-	// flush returns the events the filter holds at the end of a stream.
-	flush() []poo.StreamItem
+// The filter takes the text as it arrives and returns the events it produced. A
+// filter that needs more text than has arrived holds it back until it can
+// decide.
+type TextFilter interface {
+	// Feed takes a text delta and returns the events it produced.
+	Feed(text string) []poo.StreamItem
+	// Flush returns the events the filter holds at the end of a stream.
+	Flush() []poo.StreamItem
 }
 
 // applyFilters runs the text through the filters, in order.
 //
-// Each filter's text goes to the next filter, and the events are queued
-// as they are made, so a filter's own events keep their place in the
-// answer.
-func applyFilters(filters []textFilter, text string) []poo.StreamItem {
+// Each filter's text goes to the next filter, and the events are queued as they
+// are made, so a filter's own events keep their place in the answer.
+func applyFilters(filters []TextFilter, text string) []poo.StreamItem {
 	if len(filters) == 0 {
 		return []poo.StreamItem{textEvent(text)}
 	}
 	return feedFilter(filters, text, 0)
 }
 
-// feedFilter feeds the text to the filter at the index, and the
-// filter's text to the one after it.
-func feedFilter(filters []textFilter, text string, idx int) []poo.StreamItem {
-	events := filters[idx].feed(text)
+// feedFilter feeds the text to the filter at the index, and the filter's text
+// to the one after it.
+func feedFilter(filters []TextFilter, text string, idx int) []poo.StreamItem {
+	events := filters[idx].Feed(text)
 	if idx+1 >= len(filters) {
 		return events
 	}
@@ -57,10 +56,10 @@ func feedFilter(filters []textFilter, text string, idx int) []poo.StreamItem {
 }
 
 // flushFilters flushes the filters, in order.
-func flushFilters(filters []textFilter) []poo.StreamItem {
+func flushFilters(filters []TextFilter) []poo.StreamItem {
 	var out []poo.StreamItem
 	for _, f := range filters {
-		out = append(out, f.flush()...)
+		out = append(out, f.Flush()...)
 	}
 	return out
 }
@@ -86,16 +85,16 @@ type thinkFilter struct {
 	inside strings.Builder
 }
 
-// newThinkFilter returns a filter that strips the thinking tags.
-func newThinkFilter() *thinkFilter {
+// NewThinkFilter returns a filter that strips the thinking tags.
+func NewThinkFilter() TextFilter {
 	return &thinkFilter{}
 }
 
-// feed takes a text delta and returns the events it produced.
+// Feed takes a text delta and returns the events it produced.
 //
-// The thinking is held until its block closes, because the closing tag
-// may be split over two deltas.
-func (f *thinkFilter) feed(text string) []poo.StreamItem {
+// The thinking is held until its block closes, because the closing tag may be
+// split over two deltas.
+func (f *thinkFilter) Feed(text string) []poo.StreamItem {
 	f.buf += text
 	var out []poo.StreamItem
 	for {
@@ -137,11 +136,11 @@ func (f *thinkFilter) feed(text string) []poo.StreamItem {
 	return out
 }
 
-// flush returns the events the filter holds at the end of a stream.
+// Flush returns the events the filter holds at the end of a stream.
 //
-// A thinking block that never closed is still thinking, and the text
-// after it is the answer.
-func (f *thinkFilter) flush() []poo.StreamItem {
+// A thinking block that never closed is still thinking, and the text after it is
+// the answer.
+func (f *thinkFilter) Flush() []poo.StreamItem {
 	var out []poo.StreamItem
 	if f.thinking {
 		f.inside.WriteString(f.buf)
@@ -158,15 +157,15 @@ func (f *thinkFilter) flush() []poo.StreamItem {
 	return out
 }
 
-// degenerateRepeats is how many times a model has to send the same text
-// in a row before the stream is noted.
+// degenerateRepeats is how many times a model has to send the same text in a row
+// before the stream is noted.
 const degenerateRepeats = 3
 
 // degenerateFilter notes a stream that repeats itself.
 //
-// A model that answers with the same text over and over is not making
-// progress. The filter notes it and lets the stream run: a guard that
-// aborts loses the answer, which is the pony lesson.
+// A model that answers with the same text over and over is not making progress.
+// The filter notes it and lets the stream run: a guard that aborts loses the
+// answer, which is the pony lesson.
 type degenerateFilter struct {
 	// logger receives the note.
 	logger *slog.Logger
@@ -180,16 +179,16 @@ type degenerateFilter struct {
 	noted bool
 }
 
-// newDegenerateFilter returns a filter that notes a repeated stream.
-func newDegenerateFilter(logger *slog.Logger, model string) *degenerateFilter {
+// NewDegenerateFilter returns a filter that notes a repeated stream.
+func NewDegenerateFilter(logger *slog.Logger, model string) TextFilter {
 	return &degenerateFilter{logger: logger, model: model}
 }
 
-// feed takes a text delta and returns the events it produced.
+// Feed takes a text delta and returns the events it produced.
 //
-// The filter never holds the text back: the answer reaches the consumer
-// as it arrives.
-func (f *degenerateFilter) feed(text string) []poo.StreamItem {
+// The filter never holds the text back: the answer reaches the consumer as it
+// arrives.
+func (f *degenerateFilter) Feed(text string) []poo.StreamItem {
 	if text != "" && text == f.last {
 		f.repeats++
 	} else {
@@ -206,7 +205,7 @@ func (f *degenerateFilter) feed(text string) []poo.StreamItem {
 	return []poo.StreamItem{textEvent(text)}
 }
 
-// flush returns the events the filter holds at the end of a stream.
-func (f *degenerateFilter) flush() []poo.StreamItem {
+// Flush returns the events the filter holds at the end of a stream.
+func (f *degenerateFilter) Flush() []poo.StreamItem {
 	return nil
 }

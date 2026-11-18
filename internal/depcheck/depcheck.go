@@ -109,6 +109,10 @@ func (c Checker) rules() []rule {
 		// SSE framing and the fork's body rewrite, and nothing but the
 		// core beyond them.
 		{path: m + "/provider/internal/responses", allowed: []string{m, m + "/provider/internal/support"}},
+		// The Chat Completions API's wire half composes the same, and
+		// the text repairs a model's answer may need, and nothing but
+		// the core beyond them.
+		{path: m + "/provider/internal/chat", allowed: []string{m, m + "/provider/internal/support"}},
 		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
@@ -155,6 +159,10 @@ func (c Checker) rules() []rule {
 				// input items, the event stream and the compaction
 				// items the Codex transport composes.
 				m + "/provider/internal/responses",
+				// The Chat Completions API's wire half: the request
+				// shape, the messages, the event stream and the text
+				// repairs an OpenAI-compatible transport composes.
+				m + "/provider/internal/chat",
 				// The settings package builds a Codex transport and
 				// reads pi's credential for it, so the server reaches
 				// both through the build.

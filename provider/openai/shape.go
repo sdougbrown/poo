@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/chat"
 	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
@@ -108,18 +109,18 @@ func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings)
 	if model == "" {
 		model = t.cfg.Model
 	}
-	out := chatRequest{
+	out := chat.Request{
 		Model:     model,
 		MaxTokens: t.maxTokens(req, settings.info),
 		Stream:    true,
 		// The usage chunk is asked for in every mode, because the log's
 		// usage record needs the token accounting and a server that
 		// reports it on its own still ignores the field.
-		StreamOptions: &streamOptions{IncludeUsage: true},
+		StreamOptions: &chat.StreamOptions{IncludeUsage: true},
 		Params:        map[string]json.RawMessage{},
 	}
 
-	converted, err := convertMessages(req.Messages)
+	converted, err := chat.Messages(req.Messages)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +132,7 @@ func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings)
 	// reads. In auto mode both happen.
 	if mode := support.ToolsMode(settings.info, t.cfg.ToolsMode); mode == "native" || mode == "auto" {
 		for _, spec := range support.SortedTools(req.Tools) {
-			var ct chatTool
+			var ct chat.Tool
 			ct.Type = "function"
 			ct.Function.Name = spec.Name
 			ct.Function.Description = spec.Description
@@ -152,11 +153,7 @@ func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings)
 	}
 	t.shapeSampling(settings.info, shape)
 	shapeThrough(settings.quirks, shape)
-	if len(out.Params) == 0 {
-		out.Params = nil
-	}
-
-	return json.Marshal(out)
+	return chat.Encode(out)
 }
 
 // maxTokens returns the output limit the request asks for.

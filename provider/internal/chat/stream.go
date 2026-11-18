@@ -1,4 +1,4 @@
-package openai
+package chat
 
 import (
 	"context"
@@ -64,15 +64,26 @@ type streamChunk struct {
 	Error *support.ErrorBody `json:"error"`
 }
 
-// streamReader reads an SSE response.
-type streamReader struct {
+// ReaderOptions configures a reader.
+type ReaderOptions struct {
+	// Filters are the text filters the transport composed, in order. The
+	// parser is the last of them, so it reads the text the others passed
+	// on.
+	Filters []TextFilter
+	// DeferParsed reports that the calls the model writes as text wait for
+	// a native call that would win over them.
+	DeferParsed bool
+}
+
+// Reader reads a Chat Completions SSE answer.
+type Reader struct {
 	// closer releases the response and the request's bound.
 	closer support.Closer
 	frames *support.Frames
-	// filters are the text filters the quirks added, in order. The
-	// parser is the last of them, so it reads the text the others
-	// passed on.
-	filters []textFilter
+	// filters are the text filters the transport composed, in order. The
+	// parser is the last of them, so it reads the text the others passed
+	// on.
+	filters []TextFilter
 	// ctx is the request's context. A stream that ends because the
 	// context ended reports the context's error, not a network failure.
 	ctx context.Context
@@ -103,15 +114,28 @@ type streamReader struct {
 	deferred []poo.StreamItem
 }
 
+// NewReader returns a reader over the answer a request opened.
+func NewReader(stream support.Stream, opts ReaderOptions) *Reader {
+	return &Reader{
+		closer:      support.Closer{Body: stream.Body, Cancel: stream.Cancel},
+		frames:      support.NewFrames(support.SSEScanner(stream.Reader)),
+		filters:     opts.Filters,
+		deferParsed: opts.DeferParsed,
+		ctx:         stream.Context,
+		parent:      stream.Parent,
+		ttft:        stream.TTFT,
+	}
+}
+
 // init makes the scanner when the reader was built without one.
-func (r *streamReader) init() {
+func (r *Reader) init() {
 	if r.frames == nil {
 		r.frames = support.NewFrames(support.SSEScanner(r.closer.Body))
 	}
 }
 
 // Next returns the next event.
-func (r *streamReader) Next() (poo.StreamItem, error) {
+func (r *Reader) Next() (poo.StreamItem, error) {
 	r.init()
 
 	if len(r.pending) > 0 {
@@ -151,9 +175,8 @@ func (r *streamReader) Next() (poo.StreamItem, error) {
 //
 // The events are queued, so they leave the reader in the order the
 // endpoint sent them. An event whose payload does not parse is skipped,
-// because a chunk the transport cannot read is not worth failing the run
-// over.
-func (r *streamReader) dispatch(payload []byte) error {
+// because a chunk the reader cannot read is not worth failing the run over.
+func (r *Reader) dispatch(payload []byte) error {
 	var chunk streamChunk
 	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return nil
@@ -180,7 +203,7 @@ func (r *streamReader) dispatch(payload []byte) error {
 // The parser is flushed, so a text-mode tool call that arrived without a
 // trailing newline is not lost, and the usage report is produced, so every
 // request has one.
-func (r *streamReader) close() (poo.StreamItem, error) {
+func (r *Reader) close() (poo.StreamItem, error) {
 	// The calls the model wrote as text wait for a native call that
 	// would win over them. The endpoint sent one, so the calls the
 	// model wrote are not the ones it made.
@@ -222,7 +245,7 @@ func withoutToolCalls(events []poo.StreamItem) []poo.StreamItem {
 // The usage report follows the failure, so a consumer sees the request's
 // accounting even when the stream broke. The failure itself is returned by the
 // next call.
-func (r *streamReader) fail(err error) (poo.StreamItem, error) {
+func (r *Reader) fail(err error) (poo.StreamItem, error) {
 	r.done = true
 	r.err = err
 	r.pending = r.appendUsage(r.pending)
@@ -235,8 +258,8 @@ func (r *streamReader) fail(err error) (poo.StreamItem, error) {
 // ReportUsage returns the usage report the reader holds.
 //
 // A stream that failed before its usage chunk arrived still produced
-// tokens, so the transport reports what it knows.
-func (r *streamReader) ReportUsage() *poo.UsageReport {
+// tokens, so the reader reports what it knows.
+func (r *Reader) ReportUsage() *poo.UsageReport {
 	return r.usage
 }
 
@@ -244,7 +267,7 @@ func (r *streamReader) ReportUsage() *poo.UsageReport {
 //
 // The chunk carries no status, so its class comes from the code and the
 // message, and the server's own failure is the default.
-func (r *streamReader) providerError(body *support.ErrorBody) error {
+func (r *Reader) providerError(body *support.ErrorBody) error {
 	code := support.CodeString(body.Code)
 	message := body.Message
 	if message == "" {
@@ -258,7 +281,7 @@ func (r *streamReader) providerError(body *support.ErrorBody) error {
 }
 
 // events turns one chunk into the events it carries.
-func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
+func (r *Reader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 	var out []poo.StreamItem
 
 	for _, choice := range chunk.Choices {
@@ -356,7 +379,7 @@ func (r *streamReader) events(chunk streamChunk) ([]poo.StreamItem, error) {
 // Every request gets one, so a consumer can see the time to the first
 // token even when the endpoint reports no token counts. A request whose
 // endpoint reported its own usage already has one.
-func (r *streamReader) appendUsage(evs []poo.StreamItem) []poo.StreamItem {
+func (r *Reader) appendUsage(evs []poo.StreamItem) []poo.StreamItem {
 	if r.usageSent {
 		return evs
 	}
@@ -366,7 +389,7 @@ func (r *streamReader) appendUsage(evs []poo.StreamItem) []poo.StreamItem {
 
 // ensureUsage builds the usage report a request gets when the endpoint
 // reported none.
-func (r *streamReader) ensureUsage() {
+func (r *Reader) ensureUsage() {
 	if r.usage != nil {
 		return
 	}
@@ -375,6 +398,6 @@ func (r *streamReader) ensureUsage() {
 }
 
 // Close releases the response.
-func (r *streamReader) Close() error {
+func (r *Reader) Close() error {
 	return r.closer.Close()
 }

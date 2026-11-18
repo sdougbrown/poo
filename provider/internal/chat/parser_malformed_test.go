@@ -1,4 +1,4 @@
-package openai
+package chat
 
 import (
 	"encoding/json"
@@ -140,7 +140,7 @@ func TestAFencedBlockThatIsNotACallComesBackOnceWhenStreamed(t *testing.T) {
 	text := "The fix:\n```python\ndef parse_csv(text):\n    return rows\n```\nDone."
 	for _, mode := range []string{"text", "auto"} {
 		for _, size := range []int{1, 3, 7} {
-			p := newParser(mode, "")
+			p := NewParser(mode, "")
 			var prose strings.Builder
 			var calls int
 			collect := func(evs []poo.StreamItem) {
@@ -158,9 +158,9 @@ func TestAFencedBlockThatIsNotACallComesBackOnceWhenStreamed(t *testing.T) {
 				if end > len(text) {
 					end = len(text)
 				}
-				collect(p.feed(text[i:end]))
+				collect(p.Feed(text[i:end]))
 			}
-			collect(p.flush())
+			collect(p.Flush())
 			if calls != 0 {
 				t.Errorf("%s/%d: the parser found %d calls, want none", mode, size, calls)
 			}
@@ -176,7 +176,7 @@ func TestAFencedBlockThatIsNotACallComesBackOnceWhenStreamed(t *testing.T) {
 func TestAFencedCallStillParsesWhenStreamed(t *testing.T) {
 	text := "Running it.\n```json\n{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}\n```\n"
 	for _, size := range []int{1, 2, 5} {
-		p := newParser("text", "")
+		p := NewParser("text", "")
 		var calls []string
 		var prose strings.Builder
 		collect := func(evs []poo.StreamItem) {
@@ -191,9 +191,9 @@ func TestAFencedCallStillParsesWhenStreamed(t *testing.T) {
 		}
 		for i := 0; i < len(text); i += size {
 			end := min(i+size, len(text))
-			collect(p.feed(text[i:end]))
+			collect(p.Feed(text[i:end]))
 		}
-		collect(p.flush())
+		collect(p.Flush())
 		if len(calls) != 1 || calls[0] != "bash" {
 			t.Errorf("%d: the calls are %v, want one bash call", size, calls)
 		}
