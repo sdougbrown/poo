@@ -57,6 +57,12 @@ func IsolateStateRoot(dir string) error {
 	return os.Setenv(StateRootEnv, dir)
 }
 
+// ServeSubcommand is the subcommand the repl starts its server as:
+// os.Executable() ServeSubcommand. The guard in Main compares
+// os.Args[1] against it, so a rename on either side fails a test
+// instead of silently disabling the guard.
+const ServeSubcommand = "serve"
+
 // Main runs a package's tests under a settings file of the tests' own,
 // and returns the code TestMain passes to os.Exit.
 //
@@ -72,12 +78,6 @@ func IsolateStateRoot(dir string) error {
 // running at the same time never write over one another, and the
 // directory is removed once the tests finish.
 //
-// ServeSubcommand is the subcommand the repl starts its server as:
-// os.Executable() ServeSubcommand. The guard in Main compares
-// os.Args[1] against it, so a rename on either side fails a test
-// instead of silently disabling the guard.
-const ServeSubcommand = "serve"
-
 // A test binary started as ServeSubcommand is refused before anything
 // else: the repl starts its server as os.Executable() ServeSubcommand,
 // which under go test is the test binary, so a test that reached the

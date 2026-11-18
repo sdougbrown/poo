@@ -362,3 +362,16 @@ func TestConfigureRejectsAnUnknownDeciderModel(t *testing.T) {
 		t.Errorf("the failure is %v, want unknown_model", failure)
 	}
 }
+
+// TestTheServeRefusesABadFlagBeforeTheServerStarts covers the serve
+// command's own flag validation: a flag the validation rejects is
+// refused before the server starts, so no session runs for it.
+func TestTheServeRefusesABadFlagBeforeTheServerStarts(t *testing.T) {
+	code, stderr := runCLI(t, "serve", "--tools-mode", "weird")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "--tools-mode") {
+		t.Errorf("the error is %q, want it to name --tools-mode", stderr)
+	}
+}
