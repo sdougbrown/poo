@@ -1,6 +1,7 @@
 package pootest
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -70,7 +71,16 @@ func IsolateStateRoot(dir string) error {
 // The file lives in a directory of the process's own, so packages
 // running at the same time never write over one another, and the
 // directory is removed once the tests finish.
+//
+// A test binary started as "serve" is refused before anything else:
+// the repl starts its server as os.Executable() serve, which under
+// go test is the test binary, so a test that reached the real
+// server launch would re-run the suite recursively.
 func Main(m *testing.M) int {
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		fmt.Fprintln(os.Stderr, `poo tests: the test binary was started as "serve": a test reached the real server launch instead of refusing first`)
+		return 2
+	}
 	dir, err := os.MkdirTemp("", "poo-test-settings-")
 	if err != nil {
 		println("poo tests: making the settings directory:", err.Error())

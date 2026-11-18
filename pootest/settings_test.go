@@ -1,9 +1,15 @@
 package pootest_test
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
@@ -18,6 +24,30 @@ func TestMain(m *testing.M) {
 		os.Setenv(name, "inherited-from-the-shell")
 	}
 	os.Exit(pootest.Main(m))
+}
+
+// TestTheTestBinaryRefusesTheServeFlag covers the guard Main carries:
+// the repl starts its server as os.Executable() serve, which under
+// go test is the test binary, so a test that reached the real server
+// launch would re-run the suite recursively. The guard refuses the
+// flag before any test runs, so the recursion stops at the guard.
+func TestTheTestBinaryRefusesTheServeFlag(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, os.Args[0], "serve")
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("the test binary as serve: %v", err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("the test binary as serve exited %d, want 2", exitErr.ExitCode())
+	}
+	if !strings.Contains(stderr.String(), `started as "serve"`) {
+		t.Errorf("the refusal does not name the flag: %q", stderr.String())
+	}
 }
 
 // TestTheSuiteRunsUnderItsOwnSettings covers the helper: discovery
