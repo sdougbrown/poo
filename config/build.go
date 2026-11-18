@@ -1160,21 +1160,6 @@ func primaryArgOf(opts BuildOptions, tools map[string]poo.Tool, name string) str
 	return factory(ToolOptions{}).Spec().PrimaryArg
 }
 
-// fileToolAsksOutside reports whether a file tool's settings turn on
-// asking about calls outside the working directory.
-func fileToolAsksOutside(settings *Settings, name string) bool {
-	var target *FileTool
-	switch name {
-	case "read":
-		target = &settings.Tools.Read
-	case "grep":
-		target = &settings.Tools.Grep
-	case "edit":
-		target = &settings.Tools.Edit
-	}
-	return target != nil && target.AskOutsideWorkingDir != nil && *target.AskOutsideWorkingDir
-}
-
 // isChatRole reports whether a failure is about the chat role.
 //
 // The chat model is the one a session cannot run without, so its
@@ -1507,11 +1492,18 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 	// the argument that carries the path. The three file tools take
 	// theirs in "path"; a tool's primary argument is not it — grep's
 	// is "pattern", which the doom loop matches, not the policy's
-	// path boundary.
+	// path boundary. A test pins "path" to each tool's schema.
 	askOutside := map[string]string{}
-	for _, name := range []string{"read", "grep", "edit"} {
-		if fileToolAsksOutside(settings, name) {
-			askOutside[name] = "path"
+	for _, tool := range []struct {
+		name   string
+		target *FileTool
+	}{
+		{"read", &settings.Tools.Read},
+		{"grep", &settings.Tools.Grep},
+		{"edit", &settings.Tools.Edit},
+	} {
+		if tool.target.AskOutsideWorkingDir != nil && *tool.target.AskOutsideWorkingDir {
+			askOutside[tool.name] = "path"
 		}
 	}
 

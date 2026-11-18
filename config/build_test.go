@@ -2011,6 +2011,7 @@ func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
 		{"read false", "tools:\n  read: {ask_outside_working_dir: false}\n", "read", map[string]string{"path": "outside.txt"}, 0},
 		{"read true", "tools:\n  read: {ask_outside_working_dir: true}\n", "read", map[string]string{"path": "outside.txt"}, 1},
 		{"grep true", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"path": "outside.txt", "pattern": "needle"}, 1},
+		{"edit true", "tools:\n  edit: {ask_outside_working_dir: true}\n", "edit", map[string]string{"path": "outside.txt", "old": "a", "new": "b"}, 1},
 		{"grep pattern is not the path", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"pattern": "../escape"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2047,6 +2048,27 @@ func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
 			}
 			if len(client.asks) != tc.asks {
 				t.Fatalf("the policy asked %d time(s), want %d", len(client.asks), tc.asks)
+			}
+		})
+	}
+}
+
+// TestTheFileToolsTakeTheirPathInThePathArgument pins the argument the
+// ask-outside wiring names: each file tool's schema must carry the
+// "path" property, or a rename would leave the policy reading an
+// argument the call no longer sends and silently fail open.
+func TestTheFileToolsTakeTheirPathInThePathArgument(t *testing.T) {
+	for _, name := range []string{"read", "grep", "edit"} {
+		t.Run(name, func(t *testing.T) {
+			spec := theTools()[name](config.ToolOptions{}).Spec()
+			var schema struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			}
+			if err := json.Unmarshal(spec.Schema, &schema); err != nil {
+				t.Fatalf("decoding the %s schema: %v", name, err)
+			}
+			if _, ok := schema.Properties["path"]; !ok {
+				t.Fatalf("the %s schema carries no %q property", name, "path")
 			}
 		})
 	}

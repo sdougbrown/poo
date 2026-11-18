@@ -388,10 +388,7 @@ func (p *Policy) asksOutside(info poo.ToolCallInfo) bool {
 	if !ok {
 		return false
 	}
-	dir := info.WorkingDir
-	if dir == "" {
-		dir = p.workingDir
-	}
+	dir := p.workingDirOf(info)
 	if dir == "" {
 		return false
 	}
@@ -686,17 +683,20 @@ func (p *Policy) Askers() []Asker {
 
 // canAsk reports whether the policy can produce a configured ask.
 //
-// The unmatched action, a rule that asks and a doom loop whose action
-// the options set to ask all count. An unmatched ask counts even as the
-// default: with no asker, every side-effecting call no rule covers takes
-// the fallback. The doom loop's default ask does not count: it takes the
-// fallback only for a call repeated past the threshold, which is what
-// the loop is for.
+// The unmatched action, a rule that asks, a doom loop whose action
+// the options set to ask and the ask-outside tools all count. An
+// unmatched ask counts even as the default: with no asker, every
+// side-effecting call no rule covers takes the fallback. The doom
+// loop's default ask does not count: it takes the fallback only for a
+// call repeated past the threshold, which is what the loop is for.
 func (p *Policy) canAsk() bool {
 	if p.unmatched == ActionAsk {
 		return true
 	}
 	if p.doomLoopActionSet && p.doomLoop.Action == ActionAsk {
+		return true
+	}
+	if len(p.askOutside) > 0 {
 		return true
 	}
 	for _, rule := range p.rules {
