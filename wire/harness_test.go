@@ -574,6 +574,8 @@ func (f *testFactory) Capabilities() protocol.Capabilities {
 		Compaction:  true,
 		Persistence: []string{"ephemeral", "logged"},
 		Jobs:        false,
+		// The history items carry their records' origins.
+		HistoryOrigin: true,
 	}
 }
 

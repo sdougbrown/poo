@@ -1396,7 +1396,7 @@ func (s *Session) reportResponseErrors(run *runState, turn int, errs []StreamErr
 // after it.
 func (s *Session) appendModelNote(run *runState, turn int, text string) error {
 	msg := NewTextMessage(RoleUser, text)
-	msg.Origin = OriginUser
+	msg.Origin = OriginNotice
 	s.appendMessages(msg)
 	if err := s.write(run.ctx, &MessageRecord{
 		RecordMeta: NewRecordMetaFrom("message", msg.Origin),

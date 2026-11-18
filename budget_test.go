@@ -56,11 +56,18 @@ func TestTheNoticeFiresOncePerRun(t *testing.T) {
 	}
 	// The notice is a user message the model reads, and it names the
 	// ratio it fired at.
+	// The notice is a user message the model reads, and it names the
+	// ratio it fired at. The session wrote it: the origin is the
+	// session's own, so a replay does not read it as a line the person
+	// typed.
 	found := false
 	for _, m := range sink.messages() {
 		for _, c := range m.Content {
 			if strings.Contains(c.Text, "Context notice") && strings.Contains(c.Text, "~50%") {
 				found = true
+				if got := m.Origin; got != poo.OriginNotice {
+					t.Errorf("the notice's origin is %q, want the session's own", got)
+				}
 			}
 		}
 	}

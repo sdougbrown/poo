@@ -328,3 +328,72 @@ func TestTheHistoryPageHoldsItsByteBudget(t *testing.T) {
 		t.Error("the page says older entries exist, want none")
 	}
 }
+
+// TestTheHistoryProjectionCarriesTheOrigin covers the origin an item
+// carries: the record's own, verbatim, so a client can tell a line the
+// person typed from a job's result, a feed's message or a hook's step.
+//
+// The origin an item has no record for is empty, and the encoded item
+// leaves the field out: a client that decodes the item strictly reads
+// the same page either way.
+func TestTheHistoryProjectionCarriesTheOrigin(t *testing.T) {
+	seq := int64(0)
+	stamp := func(rec poo.Record) poo.Record {
+		seq++
+		poo.Stamp(rec, seq, timeNow())
+		return rec
+	}
+	message := func(origin poo.Origin, text string) poo.Record {
+		meta := poo.NewRecordMeta("message")
+		if origin != "" {
+			meta = poo.NewRecordMetaFrom("message", origin)
+		}
+		msg := poo.NewTextMessage(poo.RoleUser, text)
+		return stamp(&poo.MessageRecord{RecordMeta: meta, RunID: "run-1", Turn: 1, Role: msg.Role, Content: msg.Content})
+	}
+	records := []poo.Record{
+		message(poo.OriginUser, "what is in the directory?"),
+		message(poo.OriginSteer, "and the hidden ones"),
+		message(poo.OriginJob, "[job j1 · bash]\ndone"),
+		message(poo.FeedOrigin("ticker"), "a commit landed"),
+		message(poo.HookOrigin("cleanup"), "the step's output"),
+		message(poo.OriginNotice, "the context window is nearly full"),
+		message("", "a record older than the origin"),
+		stamp(&poo.RunStartedRecord{RecordMeta: poo.NewRecordMeta("run.started"), RunID: "run-1"}),
+	}
+	want := []poo.Origin{
+		poo.OriginUser,
+		poo.OriginSteer,
+		poo.OriginJob,
+		poo.FeedOrigin("ticker"),
+		poo.HookOrigin("cleanup"),
+		poo.OriginNotice,
+		"",
+		"",
+	}
+
+	page := poo.ProjectHistory(records, 0, 0)
+	if len(page.Items) != len(want) {
+		t.Fatalf("the page holds %d items, want %d", len(page.Items), len(want))
+	}
+	for i, item := range page.Items {
+		if item.Origin != want[i] {
+			t.Errorf("the item %d (%s) has the origin %q, want %q", i, item.Type, item.Origin, want[i])
+		}
+	}
+
+	// The wire shape: the field is there when the record carried an
+	// origin, and absent when it did not.
+	encoded, err := json.Marshal(page.Items)
+	if err != nil {
+		t.Fatalf("encoding the page: %v", err)
+	}
+	for _, held := range []string{`"origin":"user"`, `"origin":"steer"`, `"origin":"job"`, `"origin":"feed:ticker"`, `"origin":"hook:cleanup"`, `"origin":"notice"`} {
+		if !strings.Contains(string(encoded), held) {
+			t.Errorf("the encoded page does not hold %s: %s", held, encoded)
+		}
+	}
+	if got := strings.Count(string(encoded), `"origin"`); got != 6 {
+		t.Errorf("the encoded page holds %d origins, want the 6 records that carried one: %s", got, encoded)
+	}
+}

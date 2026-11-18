@@ -56,8 +56,8 @@ func TestAResumedSessionLoadsInsteadOfCreating(t *testing.T) {
 		{Seq: 1, Type: "run_started", RunID: "r0"},
 		{Seq: 2, Type: "message", RunID: "r0", Role: "user", Text: "what is in the directory?"},
 		{Seq: 3, Type: "message", RunID: "r0", Role: "assistant", Text: "Three files."},
-		{Seq: 4, Type: "tool_call", RunID: "r0", Tool: "bash", Summary: "ls"},
-		{Seq: 5, Type: "tool_result", RunID: "r0", Tool: "bash", Outcome: "ok", Text: "one\n"},
+		{Seq: 4, Type: "tool_call", RunID: "r0", Tool: "bash", Summary: "ls", Origin: "model"},
+		{Seq: 5, Type: "tool_result", RunID: "r0", Tool: "bash", Outcome: "ok", Text: "one\n", Origin: "tool"},
 		{Seq: 6, Type: "permission", RunID: "r0", Tool: "bash", Decision: "allow"},
 		{Seq: 7, Type: "compaction", RunID: "r0", Text: "summary"},
 		{Seq: 8, Type: "run_settled", RunID: "r0", Reason: "end_turn"},
@@ -304,4 +304,114 @@ func TestTheReplayWarnsWhenTheHistoryWillNotBeRead(t *testing.T) {
 	if !strings.Contains(drawn, "poo repl — /help for the commands") {
 		t.Errorf("the transcript does not hold the greeting: the repl did not settle:\n%s", drawn)
 	}
+}
+
+// TestTheReplayDrawsEachOriginTheWayTheLiveTranscriptDoes covers the
+// rendering a replayed user-role message gets: a line the person typed is
+// the prompt's mark, a line that rode the run is the steer's, and a line
+// the live transcript never drew — a job's result, a feed's message, a
+// hook's step or a notice the session wrote — is not drawn at all.
+func TestTheReplayDrawsEachOriginTheWayTheLiveTranscriptDoes(t *testing.T) {
+	server := &fakeServer{t: t}
+	server.history = []protocol.HistoryItem{
+		{Seq: 1, Type: "message", Role: "user", Origin: "user", Text: "what is in the directory?"},
+		{Seq: 2, Type: "message", Role: "user", Origin: "steer", Text: "and the hidden ones"},
+		{Seq: 3, Type: "message", Role: "user", Origin: "interrupt", Text: "stop, wrong directory"},
+		{Seq: 4, Type: "message", Role: "user", Origin: "follow_up", Text: "then summarize it"},
+		{Seq: 5, Type: "message", Role: "user", Origin: "job", Text: "the job's result"},
+		{Seq: 6, Type: "message", Role: "user", Origin: "feed:ticker", Text: "a feed's message"},
+		{Seq: 7, Type: "message", Role: "user", Origin: "hook:cleanup", Text: "a step's output"},
+		// A notice the session wrote into the model's view is not a line
+		// anyone typed: the live transcript draws none of them, and the
+		// replay draws none either.
+		{Seq: 8, Type: "message", Role: "user", Origin: "notice", Text: "the context window is nearly full"},
+		// The reply's origin is the model's, and the reply is drawn
+		// whatever it is: the transcript shows the model's lines.
+		{Seq: 9, Type: "message", Role: "assistant", Origin: "model", Text: "Three files."},
+		// A record older than the origin says nothing about who put the
+		// message there, and it reads as the prompt it always did.
+		{Seq: 10, Type: "message", Role: "user", Text: "a line from an older log"},
+	}
+
+	drawn := ansi.Strip(resumeRepl(t, server, "s9"))
+	for _, want := range []string{
+		"❯ what is in the directory?",
+		"» and the hidden ones",
+		"» stop, wrong directory",
+		"» then summarize it",
+		"❯ a line from an older log",
+		"Three files.",
+		"poo repl — /help for the commands",
+	} {
+		if !strings.Contains(drawn, want) {
+			t.Errorf("the transcript does not hold %q:\n%s", want, drawn)
+		}
+	}
+	// Nothing the live transcript does not draw is drawn, and no line
+	// is echoed as the prompt when nobody typed it.
+	for _, unwanted := range []string{"the job's result", "a feed's message", "a step's output", "the context window is nearly full"} {
+		if strings.Contains(drawn, unwanted) {
+			t.Errorf("the transcript holds %q, which the live path does not draw:\n%s", unwanted, drawn)
+		}
+	}
+	// The reply to a job's result is the model's, and is drawn: the live
+	// transcript loses the cause of that reply in the same way.
+	if strings.Index(drawn, "Three files.") < strings.Index(drawn, "then summarize it") {
+		t.Errorf("the reply renders before the lines it answers:\n%s", drawn)
+	}
+}
+
+// TestTheReplayEchoesASteerTheWayTheLiveTranscriptDoes covers the
+// parity: a steer drawn by the live path and a steer drawn by a replay
+// of the record it left are the same line, mark, styling and all.
+func TestTheReplayEchoesASteerTheWayTheLiveTranscriptDoes(t *testing.T) {
+	// The live run: the line typed while the run works is a steer.
+	hold := make(chan struct{})
+	server := &fakeServer{t: t, script: quietRun(hold)}
+	out, typeLine, code := startTypedRepl(t, server)
+	typeLine("work on it\n")
+	waitFor(t, out, "a find")
+	typeLine("also check the tests\n")
+	waitFor(t, out, "» also check the tests")
+	close(hold)
+	waitFor(t, out, "✓ end_turn")
+	typeLine("/quit\n")
+	if got := <-code; got != 0 {
+		t.Fatalf("the repl exited %d, want 0", got)
+	}
+
+	// The replay: the same line, as the record the steer left.
+	resumed := &fakeServer{t: t}
+	resumed.history = []protocol.HistoryItem{
+		{Seq: 1, Type: "message", Role: "user", Origin: "steer", Text: "also check the tests"},
+	}
+	drawn := resumeRepl(t, resumed, "s9")
+
+	live, ok := echoLine(out.String(), "also check the tests")
+	if !ok {
+		t.Fatalf("the live transcript does not echo the steer:\n%q", out.String())
+	}
+	replayed, ok := echoLine(drawn, "also check the tests")
+	if !ok {
+		t.Fatalf("the replay does not echo the steer:\n%q", drawn)
+	}
+	if live != replayed {
+		t.Errorf("the live echo is %q, and the replay's is %q", live, replayed)
+	}
+}
+
+// echoLine returns the one line of the transcript that holds the text,
+// escape sequences and all.
+func echoLine(transcript, text string) (string, bool) {
+	found := ""
+	for _, line := range strings.Split(transcript, "\n") {
+		if !strings.Contains(line, text) {
+			continue
+		}
+		if found != "" {
+			return "", false
+		}
+		found = line
+	}
+	return found, found != ""
 }

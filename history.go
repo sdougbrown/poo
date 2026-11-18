@@ -51,6 +51,13 @@ type HistoryItem struct {
 	Turn int `json:"turn,omitempty"`
 	// Role is the message's role, for a message item.
 	Role Role `json:"role,omitempty"`
+	// Origin is the record's own, from the record vocabulary the
+	// Origin constants name: "user" for a line the person typed, the
+	// delivery origins ("steer", "interrupt" or "follow_up"), "job",
+	// "hook:<name>", "feed:<name>" and "notice" on a user-role item,
+	// and "model", "tool" or "system" on a model's, a tool's or the
+	// system prompt's item. It is empty on a record that had none.
+	Origin Origin `json:"origin,omitempty"`
 	// Text is the item's text.
 	Text string `json:"text,omitempty"`
 	// Handle is the tool call's handle, for a tool item.
@@ -151,7 +158,7 @@ func historyItems(records []Record) []HistoryItem {
 	items := make([]HistoryItem, 0, len(records))
 	for _, rec := range records {
 		meta := rec.Meta()
-		item := HistoryItem{Seq: meta.Seq, At: meta.TS}
+		item := HistoryItem{Seq: meta.Seq, At: meta.TS, Origin: meta.Origin}
 		switch r := rec.(type) {
 		case *MessageRecord:
 			if r.Role == RoleTool {

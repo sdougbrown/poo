@@ -275,6 +275,9 @@ func (f *Server) Capabilities() protocol.Capabilities {
 		Persistence: modes,
 		Jobs:        f.jobs(),
 		Feeds:       f.feeds(),
+		// The history is this core's projection, so every item it
+		// answers with carries its record's origin.
+		HistoryOrigin: true,
 	}
 }
 
