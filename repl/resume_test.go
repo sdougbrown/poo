@@ -14,7 +14,8 @@ import (
 
 // resumeRepl starts the repl against a fake server with the session id
 // the options resume. The server's history and its load result are the
-// test's; the transcript is what the repl drew.
+// test's; the transcript is what the repl wrote, escape sequences and
+// all, so a test that reads the words strips them first.
 func resumeRepl(t *testing.T, server *fakeServer, id string) string {
 	t.Helper()
 	stdin, stdout := pipeUp(t, server)
@@ -31,7 +32,7 @@ func resumeRepl(t *testing.T, server *fakeServer, id string) string {
 	if code != 0 {
 		t.Fatalf("the repl exited %d, want 0", code)
 	}
-	return ansi.Strip(out.String())
+	return out.String()
 }
 
 // TestAResumedSessionLoadsInsteadOfCreating covers the reopen: the repl
@@ -53,7 +54,7 @@ func TestAResumedSessionLoadsInsteadOfCreating(t *testing.T) {
 		{Seq: 8, Type: "run_settled", RunID: "r0", Reason: "end_turn"},
 	}
 
-	drawn := resumeRepl(t, server, "s9")
+	drawn := ansi.Strip(resumeRepl(t, server, "s9"))
 	for _, want := range []string{
 		"what is in the directory?",
 		"Three files.",
@@ -97,7 +98,7 @@ func TestAResumedSessionShowsTheNewestHistory(t *testing.T) {
 		})
 	}
 
-	drawn := resumeRepl(t, server, "s9")
+	drawn := ansi.Strip(resumeRepl(t, server, "s9"))
 	if !strings.Contains(drawn, "older history is not shown") {
 		t.Errorf("the transcript does not say older history is missing:\n%s", drawn)
 	}
@@ -108,5 +109,29 @@ func TestAResumedSessionShowsTheNewestHistory(t *testing.T) {
 	oldest := fmt.Sprintf("said %03d", 1)
 	if strings.Contains(drawn, oldest) {
 		t.Errorf("the transcript holds the oldest item %q, which the cap drops", oldest)
+	}
+}
+
+// TestAResumedSessionSanitizesTheRecordedText covers what a replay puts on
+// the terminal: the text is the session's, so the escapes and the cursor
+// controls it recorded are stripped, and the words stay.
+func TestAResumedSessionSanitizesTheRecordedText(t *testing.T) {
+	server := &fakeServer{t: t}
+	server.history = []protocol.HistoryItem{
+		{Seq: 1, Type: "message", Role: "user", Text: "\x1b[2Jwho\x07 put a clear in here"},
+		{Seq: 2, Type: "message", Role: "assistant", Text: "\x1b[5;5Ha red reply"},
+		{Seq: 3, Type: "compaction", Text: "\x1b[2Jsummary"},
+	}
+
+	drawn := resumeRepl(t, server, "s9")
+	for _, unwanted := range []string{"\x1b[2J", "\x1b[5;5H", "\x07"} {
+		if strings.Contains(drawn, unwanted) {
+			t.Errorf("the transcript carries the recorded %q:\n%q", unwanted, drawn)
+		}
+	}
+	for _, want := range []string{"who put a clear in here", "a red reply", "the view was compacted: summary"} {
+		if !strings.Contains(drawn, want) {
+			t.Errorf("the transcript does not hold %q:\n%q", want, drawn)
+		}
 	}
 }

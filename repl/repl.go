@@ -600,21 +600,25 @@ func (m *machine) replay() {
 // permission decision, a job's — is skipped: the transcript shows the
 // conversation, and a compaction is the one structural change worth a
 // line.
+//
+// The text is the session's, not this terminal's to obey: it is
+// sanitized before it renders, the way the live path sanitizes what
+// arrives, so a recorded escape sequence reaches no terminal.
 func (m *machine) replayItem(item protocol.HistoryItem) {
 	switch item.Type {
 	case "message":
 		switch item.Role {
 		case "user":
-			m.r.userPrompt(item.Text)
+			m.r.userPrompt(sanitizeText(item.Text))
 		case "assistant":
-			m.r.reply(item.Text)
+			m.r.reply(ansi.Strip(item.Text))
 		}
 	case "tool_call":
 		m.r.toolCall(item.Tool, item.Summary)
 	case "tool_result":
 		m.r.toolResult(item.Tool, item.Outcome, item.Text, 0)
 	case "compaction":
-		m.r.notice("the view was compacted: %s", item.Text)
+		m.r.notice("the view was compacted: %s", sanitizeText(item.Text))
 	}
 }
 
@@ -1235,12 +1239,7 @@ func (m *machine) openAsk(req askRequest, input input) {
 	m.ask = &req
 	m.askMu.Unlock()
 	m.r.write(ansiYellow + "⚙ permission · " + sanitizeLine(req.ask.Tool) + ansiReset + "\n")
-	stripped := ansi.Strip(req.ask.Summary)
-	lines := strings.Split(stripped, "\n")
-	for i, line := range lines {
-		lines[i] = sanitizeLine(line)
-	}
-	if summary := strings.Join(lines, "\n"); summary != "" {
+	if summary := sanitizeText(req.ask.Summary); summary != "" {
 		m.r.write(ansiDim + summary + ansiReset + "\n")
 	}
 	if m.eof {
