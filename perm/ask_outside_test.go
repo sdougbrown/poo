@@ -9,6 +9,8 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/perm"
+	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/tool/read"
 )
 
 func TestACallOutsideTheWorkingDirectoryIsAsked(t *testing.T) {
@@ -177,6 +179,55 @@ func TestAnAskOutsidePolicyCountsAsAnAskSource(t *testing.T) {
 	}
 	if !strings.Contains(warning, "falls back") {
 		t.Fatalf("the warning %q does not name the fallback", warning)
+	}
+}
+
+func TestTheSessionWorkingDirectoryReachesThePolicy(t *testing.T) {
+	policyDir := t.TempDir()
+	sessionDir := t.TempDir()
+	asker := &fakeAsker{decision: perm.DecisionAllow, available: true}
+	policy, err := perm.New(perm.Options{
+		AskOutside: map[string]string{"read": "path"},
+		WorkingDir: policyDir,
+		Askers:     []perm.Asker{asker},
+	})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	// The file sits inside the policy's build directory but outside the
+	// session's, so only the session's directory can decide to ask.
+	args, err := json.Marshal(map[string]string{"path": filepath.Join(policyDir, "sibling.txt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := pootest.NewTransport(
+		pootest.Turn{Calls: []pootest.Call{{Name: "read", ID: "c1", Arguments: args}}},
+		pootest.Turn{Text: "done"},
+	)
+	s, err := poo.New(poo.Options{
+		Transport:  transport,
+		Tools:      map[string]poo.Tool{"read": read.New()},
+		ToolOrder:  []string{"read"},
+		Sink:       pootest.NewSink(),
+		SessionID:  "s1",
+		Model:      poo.ModelInfo{ModelID: "test-model", ContextLimit: 32768},
+		WorkingDir: sessionDir,
+	}, poo.WithPolicy(policy))
+	if err != nil {
+		t.Fatalf("building the session: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if _, err := s.Prompt(context.Background(), "do the thing"); err != nil {
+		t.Fatalf("starting the run: %v", err)
+	}
+	if _, err := s.Wait(context.Background()); err != nil {
+		t.Fatalf("waiting for the run: %v", err)
+	}
+	if asker.asked != 1 {
+		t.Fatalf("the session asked %d time(s), want 1", asker.asked)
+	}
+	if asker.lastAsk.WorkingDir != sessionDir {
+		t.Fatalf("the ask's working directory is %q, want the session's %q", asker.lastAsk.WorkingDir, sessionDir)
 	}
 }
 
