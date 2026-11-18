@@ -518,3 +518,16 @@ func TestTheReplRefusesABadFlagBeforeTheServerStarts(t *testing.T) {
 		t.Errorf("the error is %q, want it to name --tools-mode", stderr)
 	}
 }
+
+// TestTheReplRefusesAnUnknownFlagBeforeTheServerStarts covers the
+// parse-level refusal: a flag no command declares is refused before
+// the repl runs, so no server child is spawned for it either.
+func TestTheReplRefusesAnUnknownFlagBeforeTheServerStarts(t *testing.T) {
+	code, stderr := runCLI(t, "repl", "--no-such-flag")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "--no-such-flag") {
+		t.Errorf("the error is %q, want it to name --no-such-flag", stderr)
+	}
+}

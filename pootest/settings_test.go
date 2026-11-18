@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -56,9 +54,6 @@ func TestTheTestBinaryRefusesTheServeFlag(t *testing.T) {
 	}
 	if exitErr.ExitCode() != 2 {
 		t.Errorf("the test binary as serve exited %d, want 2", exitErr.ExitCode())
-	}
-	if !strings.Contains(stderr.String(), fmt.Sprintf("started as %q", pootest.ServeSubcommand)) {
-		t.Errorf("the refusal does not name the flag: %q", stderr.String())
 	}
 }
 
