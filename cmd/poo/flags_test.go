@@ -13,6 +13,7 @@ import (
 	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/session"
 )
 
@@ -113,6 +114,95 @@ func TestAnEmptyManifestPathFlagIsSkipped(t *testing.T) {
 	}
 	if got := overrides.CLIRegistryPaths; len(got) != 0 {
 		t.Errorf("the registry paths are %q, want none", got)
+	}
+}
+
+// TestTheSystemPromptFlagResolvesAgainstTheWorkingDirectory covers the
+// flag: a relative file is beside the working directory it was typed
+// in, and a leading ~ is the home directory.
+func TestTheSystemPromptFlagResolvesAgainstTheWorkingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("the base section"), 0o644); err != nil {
+		t.Fatalf("writing the base file: %v", err)
+	}
+	t.Chdir(dir)
+
+	inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+		"run",
+		"--system-prompt", "prompt.md",
+	})
+	if err != nil {
+		t.Fatalf("parsing the flags: %v", err)
+	}
+	var f sharedFlags
+	f.bind(inv)
+	overrides, err := f.overrides()
+	if err != nil {
+		t.Fatalf("reading the overrides: %v", err)
+	}
+	if got := overrides.SystemPrompt; got != filepath.Join(dir, "prompt.md") {
+		t.Errorf("the system prompt is %q, want the file beside the working directory", got)
+	}
+
+	// The home directory is apart from the working directory, so a ~
+	// that resolves to the working directory is not a pass.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for value, want := range map[string]string{
+		"~/flagged.md": filepath.Join(home, "flagged.md"),
+		"~":            home,
+	} {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"run",
+			"--system-prompt", value,
+		})
+		if err != nil {
+			t.Fatalf("parsing the flags: %v", err)
+		}
+		var f sharedFlags
+		f.bind(inv)
+		overrides, err := f.overrides()
+		if err != nil {
+			t.Fatalf("reading the overrides: %v", err)
+		}
+		if got := overrides.SystemPrompt; got != want {
+			t.Errorf("the system prompt is %q, want %q", got, want)
+		}
+	}
+}
+
+// TestTheSystemPromptFlagNamesItselfWhenTheHomeIsMissing covers the
+// failure: with no home directory a ~ cannot be resolved, and the
+// error names the flag and the path it was given.
+func TestTheSystemPromptFlagNamesItselfWhenTheHomeIsMissing(t *testing.T) {
+	t.Setenv("HOME", "")
+	inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+		"run",
+		"--system-prompt", "~/prompt.md",
+	})
+	if err != nil {
+		t.Fatalf("parsing the flags: %v", err)
+	}
+	var f sharedFlags
+	f.bind(inv)
+	_, err = f.overrides()
+	if err == nil {
+		t.Fatal("the overrides resolved, want the error")
+	}
+	if !strings.Contains(err.Error(), "--system-prompt") {
+		t.Errorf("the error is %q, want it to name --system-prompt", err)
+	}
+	if !strings.Contains(err.Error(), "~/prompt.md") {
+		t.Errorf("the error is %q, want it to name the path", err)
+	}
+	// The error is the raw home resolution, so it carries no code;
+	// if it did, the code is one of the settings' codes.
+	if code, ok := config.CodeOf(err); ok {
+		switch code {
+		case config.CodeDecode, config.CodeUnknownField, config.CodeUnavailable, config.CodeInvalid, config.CodeUnsupported:
+		default:
+			t.Errorf("the error carries the code %q, want one of the settings' codes", code)
+		}
 	}
 }
 

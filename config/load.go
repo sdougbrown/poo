@@ -47,9 +47,10 @@ func FormatFor(path string) Format {
 // The file's name says its format. A file that does not decode, or
 // that holds a key the settings do not have, is a failure.
 //
-// The file's own directory answers for its relative paths: a models_file
-// resolves against it, and a models.json beside the settings file is imported
-// when the settings name none.
+// The file's own directory answers for its relative paths: a models_file,
+// a system_prompt.base_file and a finish.schema_file resolve against it,
+// and a models.json beside the settings file is imported when the
+// settings name none.
 func Load(path string) (*Settings, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -67,10 +68,10 @@ func Load(path string) (*Settings, error) {
 // The document is normalized to JSON and decoded strictly: an unknown
 // key is an error, and so is a key of the wrong shape.
 //
-// A document held in memory has no directory of its own, so a relative
-// models_file resolves against the working directory, and no models file is
-// discovered beside it. Load is the reader that knows where the file came
-// from.
+// A document held in memory has no directory of its own, so the relative paths
+// it names resolve against the working directory: a relative models file,
+// prompt base file and finish schema. No models file is discovered beside
+// it. Load is the reader that knows where the file came from.
 func Parse(data []byte, format Format) (*Settings, error) {
 	return parse(data, format, "")
 }
@@ -101,6 +102,12 @@ func parse(data []byte, format Format, dir string) (*Settings, error) {
 		return nil, decodeError(err)
 	}
 	settings.Permission.askersNamed = namesAskers(normalized)
+	// The prompt and schema files are resolved here, where the document's
+	// directory is known: a relative name is beside the settings file, and
+	// every reader — the check and the build — sees one path.
+	if err := settings.resolveNamedFiles(dir); err != nil {
+		return nil, err
+	}
 	if err := settings.importPi(dir); err != nil {
 		return nil, err
 	}

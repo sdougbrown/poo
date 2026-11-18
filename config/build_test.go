@@ -484,6 +484,102 @@ func TestTheBuildMakesThePrompt(t *testing.T) {
 	}
 }
 
+// TestARelativeBaseFileResolvesAgainstTheSettings covers the file: a
+// settings file that names a relative base file reads it from beside
+// the settings, not beside the working directory.
+func TestARelativeBaseFileResolvesAgainstTheSettings(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("the base section"), 0o644); err != nil {
+		t.Fatalf("writing the base file: %v", err)
+	}
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(settingsPath, []byte(theModelSettings+`system_prompt:
+  base_file: prompt.md
+`), 0o644); err != nil {
+		t.Fatalf("writing the settings: %v", err)
+	}
+
+	// The process runs somewhere else: the relative name is beside the
+	// settings file, not beside the working directory.
+	t.Chdir(t.TempDir())
+	settings, err := config.Load(settingsPath)
+	if err != nil {
+		t.Fatalf("loading the settings from %s: %v", settingsPath, err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	builder := prompt.New(prompt.Env{})
+	for _, edit := range runtime.Prompt {
+		edit(builder)
+	}
+	if text := builder.Render(); !strings.Contains(text, "the base section") {
+		t.Errorf("the prompt is %q, want the base file's text", text)
+	}
+}
+
+// TestAnInMemoryDocumentKeepsARelativeBaseFileRelative covers the
+// parse-time contract: a document held in memory has no directory of
+// its own, so a relative base file stays relative, and the build
+// reads it beside the working directory.
+func TestAnInMemoryDocumentKeepsARelativeBaseFileRelative(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("the base section"), 0o644); err != nil {
+		t.Fatalf("writing the base file: %v", err)
+	}
+	// The check stats the base file beside the process, so the
+	// process runs where the file is.
+	t.Chdir(dir)
+	settings, err := config.Parse([]byte(theModelSettings+`system_prompt:
+  base_file: prompt.md
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	if got := settings.SystemPrompt.BaseFile; got != "prompt.md" {
+		t.Fatalf("the base file is %q, want it to stay relative", got)
+	}
+	runtime := buildIn(t, settings, config.Overrides{}, dir, theExecutors())
+	builder := prompt.New(prompt.Env{})
+	for _, edit := range runtime.Prompt {
+		edit(builder)
+	}
+	if text := builder.Render(); !strings.Contains(text, "the base section") {
+		t.Errorf("the prompt is %q, want the base file's text", text)
+	}
+
+	// The bare ~ is the home directory, the same shortcut the
+	// settings' other paths take. It is a string in JSON: in YAML
+	// the bare ~ is null.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	settings, err = config.Parse([]byte(`{"version":1,"system_prompt":{"base_file":"~"}}`), config.FormatJSON)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	if got := settings.SystemPrompt.BaseFile; got != home {
+		t.Errorf("the base file is %q, want the home directory", got)
+	}
+}
+
+// TestAFinishSchemaUnderHomeResolves covers the ~: a schema file named
+// under the home directory is read from there.
+func TestAFinishSchemaUnderHomeResolves(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "schema.json"), []byte(`{"type":"object"}`), 0o644); err != nil {
+		t.Fatalf("writing the schema: %v", err)
+	}
+	settings, err := config.Parse([]byte(theModelSettings+`finish:
+  schema_file: ~/schema.json
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	if string(runtime.FinishSchema) != `{"type":"object"}` {
+		t.Errorf("the schema is %s, want the home file's", runtime.FinishSchema)
+	}
+}
+
 // TestTheSettingsPromptIsTheSessionPrompt covers the prompt the
 // session carries: the settings' sections are in it, and not only in
 // the build's own account of them.
@@ -1152,6 +1248,31 @@ func TestAHomeThatCannotBeResolvedFailsThePathSettings(t *testing.T) {
 			})
 			if err == nil {
 				t.Fatal("the build resolved a home directory that is not set")
+			}
+			if code, ok := config.CodeOf(err); !ok || code != config.CodeInvalid {
+				t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
+			}
+			if field, _ := config.FieldOf(err); field != tc.field {
+				t.Errorf("the field is %q, want %s", field, tc.field)
+			}
+		})
+	}
+}
+
+// TestAHomeThatCannotBeResolvedFailsTheNamedFiles covers the same
+// failure for the files the settings name beside themselves: a ~ path
+// with no home to resolve it against fails the parse, reported against
+// the field that named it.
+func TestAHomeThatCannotBeResolvedFailsTheNamedFiles(t *testing.T) {
+	t.Setenv("HOME", "")
+	for _, tc := range []struct{ field, yaml string }{
+		{"system_prompt.base_file", "system_prompt:\n  base_file: ~/prompt.md\n"},
+		{"finish.schema_file", "finish:\n  schema_file: ~/schema.json\n"},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			_, err := config.Parse([]byte(theModelSettings+tc.yaml), config.FormatYAML)
+			if err == nil {
+				t.Fatal("the settings resolved a home directory that is not set")
 			}
 			if code, ok := config.CodeOf(err); !ok || code != config.CodeInvalid {
 				t.Errorf("the code is %q, want %q", code, config.CodeInvalid)

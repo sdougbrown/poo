@@ -75,14 +75,7 @@ func (s *Settings) modelsFilePath(dir string) (string, error) {
 	path := s.ModelsFile
 	switch {
 	case path != "":
-		expanded, err := expandHome(path)
-		if err != nil {
-			return "", err
-		}
-		if !filepath.IsAbs(expanded) && dir != "" {
-			expanded = filepath.Join(dir, expanded)
-		}
-		return expanded, nil
+		return resolveBeside(path, dir)
 	case dir != "":
 		own := filepath.Join(dir, ModelsFileName)
 		pi := filepath.Join(dir, PiModelsFileName)
@@ -104,6 +97,62 @@ func (s *Settings) modelsFilePath(dir string) (string, error) {
 	default:
 		return "", nil
 	}
+}
+
+// resolveBeside resolves a file path a settings file names. ~ and a
+// leading ~/ are under the home directory, and a relative path is
+// beside the settings file. A document held in memory has no directory
+// to answer for its relative paths, so they keep as they are.
+func resolveBeside(path, dir string) (string, error) {
+	return resolvePath(path, dir, true)
+}
+
+// resolvePath expands a leading ~ in a named path and joins a relative
+// name onto dir. With no directory, a relative name stays as it is when
+// keepRelative holds, and answers to the working directory otherwise.
+func resolvePath(path, dir string, keepRelative bool) (string, error) {
+	expanded, err := expandHome(path)
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(expanded) {
+		return expanded, nil
+	}
+	if keepRelative && dir == "" {
+		return expanded, nil
+	}
+	if dir == "" {
+		working, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		dir = working
+	}
+	return filepath.Join(dir, expanded), nil
+}
+
+// resolveNamedFiles resolves the files the settings name beside
+// themselves: the system prompt's base file and the finish schema. Each
+// is resolved once, where the settings load, so the check and the build
+// read the same path.
+func (s *Settings) resolveNamedFiles(dir string) error {
+	for _, named := range []struct {
+		field string
+		path  *string
+	}{
+		{"system_prompt.base_file", &s.SystemPrompt.BaseFile},
+		{"finish.schema_file", &s.Finish.SchemaFile},
+	} {
+		if *named.path == "" {
+			continue
+		}
+		resolved, err := resolveBeside(*named.path, dir)
+		if err != nil {
+			return &Error{Code: CodeInvalid, Field: named.field, Err: err}
+		}
+		*named.path = resolved
+	}
+	return nil
 }
 
 // importModelsFile reads a models file: poo's own shape, or pi's, which is
@@ -252,25 +301,11 @@ func (s *Settings) resolveCredentialFile(dir, modelsPath string) (string, error)
 // A document held in memory has no directory, so a relative path answers to the working
 // directory the way every other path a hand-built settings resolves does.
 func ResolveSettingPath(settingsPath, named string) (string, error) {
-	path, err := expandHome(named)
-	if err != nil {
-		return "", err
-	}
-	if filepath.IsAbs(path) {
-		return path, nil
-	}
 	dir := ""
 	if settingsPath != "" {
 		dir = filepath.Dir(settingsPath)
 	}
-	if dir == "" {
-		working, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		dir = working
-	}
-	return filepath.Join(dir, path), nil
+	return resolvePath(named, dir, false)
 }
 
 // DefaultAuthFile is poo's own credential file in the user's config directory.
@@ -286,12 +321,9 @@ func DefaultAuthFile() (string, error) {
 // settings file's own directory for a relative one. mustExist is for the
 // setting that promised a file there.
 func (s *Settings) resolveCredentialPath(dir, field, named string, mustExist bool) (string, error) {
-	path, err := expandHome(named)
+	path, err := resolvePath(named, dir, true)
 	if err != nil {
 		return "", &Error{Code: CodeInvalid, Field: field, Message: "the credential file cannot be resolved", Err: err}
-	}
-	if !filepath.IsAbs(path) && dir != "" {
-		path = filepath.Join(dir, path)
 	}
 	if mustExist {
 		if _, err := os.Stat(path); err != nil {

@@ -144,12 +144,19 @@ func (f *sharedFlags) overrides() (config.Overrides, error) {
 	if err != nil {
 		return config.Overrides{}, err
 	}
+	systemPrompt := ""
+	if f.systemPrompt != "" {
+		systemPrompt, err = config.ResolveSettingPath("", f.systemPrompt)
+		if err != nil {
+			return config.Overrides{}, fmt.Errorf("resolving --system-prompt %s: %w", f.systemPrompt, err)
+		}
+	}
 	overrides := config.Overrides{
 		Profile:             f.profile,
 		PermissionUnmatched: f.permissionUnmatched,
 		SessionDir:          f.sessionDir,
 		UserPromptFile:      f.userPromptFile,
-		SystemPrompt:        f.systemPrompt,
+		SystemPrompt:        systemPrompt,
 		AppendSystemPrompt:  appended,
 		FeedsPaths:          f.feedsPaths,
 		CLIRegistryPaths:    f.cliRegistryPaths,

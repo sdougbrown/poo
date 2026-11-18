@@ -703,12 +703,9 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 func againstDir(paths []string, dir string) ([]string, error) {
 	resolved := make([]string, 0, len(paths))
 	for _, path := range paths {
-		path, err := expandHome(path)
+		path, err := resolvePath(path, dir, false)
 		if err != nil {
 			return nil, err
-		}
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(dir, path)
 		}
 		resolved = append(resolved, path)
 	}
