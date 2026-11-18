@@ -1994,6 +1994,52 @@ func TestThePolicyGetsTheResolvedWorkingDirectory(t *testing.T) {
 	}
 }
 
+// TestTheOutsideAskSettingReachesThePolicy covers the settings' walk
+// from the tools' file-tool section to the policy: a read the setting
+// names is asked about when its path leaves the working directory, and
+// a session without the setting keeps the auto-allow.
+func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		yaml string
+		asks int
+	}{
+		{"unset", "", 0},
+		{"false", "tools:\n  read: {ask_outside_working_dir: false}\n", 0},
+		{"true", "tools:\n  read: {ask_outside_working_dir: true}\n", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+tc.yaml), config.FormatYAML)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := &askClient{}
+			runtime, err := config.Build(config.BuildOptions{
+				Settings:       settings,
+				DefaultProfile: "code",
+				Tools:          theTools(),
+				Profiles:       theProfiles(),
+				Executors:      theExecutors(),
+				Askers:         []string{"wire"},
+				Wire:           client,
+			})
+			if err != nil {
+				t.Fatalf("building the runtime: %v", err)
+			}
+			args, _ := json.Marshal(map[string]string{"path": filepath.Join(filepath.Dir(t.TempDir()), "outside.txt")})
+			if _, err := runtime.Policy.BeforeTool(poo.HookContext{Context: context.Background()}, poo.ToolCallInfo{
+				Spec:      poo.ToolSpec{Name: "read", Class: poo.ClassReadOnly},
+				Arguments: args,
+			}); err != nil {
+				t.Fatalf("asking the policy: %v", err)
+			}
+			if len(client.asks) != tc.asks {
+				t.Fatalf("the policy asked %d time(s), want %d", len(client.asks), tc.asks)
+			}
+		})
+	}
+}
+
 // TestTheCatalogSettingsCarryTheModelFields covers the translation the
 // catalog builds from: a settings model's endpoint, id, api, window,
 // output limit and reasoning control arrive in the catalog's settings

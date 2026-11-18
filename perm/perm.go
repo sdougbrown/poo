@@ -13,6 +13,7 @@ package perm
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/internal/urlnorm"
+	"github.com/sdougbrown/poo/protect"
 )
 
 // Action is what a rule, a setting or a fallback says to do with a
@@ -122,6 +124,13 @@ type Options struct {
 	// a policy built without them skips that check, for a consumer
 	// that owns its own tool knowledge.
 	PrimaryArgs map[string]string
+	// AskOutside names the tools whose path argument routes a call
+	// outside the working directory through the asker chain, by tool
+	// name. The value is the argument that carries the path. A call
+	// such a tool makes to a path outside WorkingDir is asked about
+	// after the rules: it never takes the read-only auto-allow, and
+	// the unmatched action does not apply to it.
+	AskOutside map[string]string
 	// Unmatched is the action for a side-effecting call no rule
 	// matches. It defaults to DefaultUnmatched.
 	Unmatched Action
@@ -146,9 +155,11 @@ type Options struct {
 // Policy is a permission policy.
 //
 // The policy decides about every prepared call: the doom loop is asked
-// about first, then the rules, and a side-effecting call no rule
-// matches takes the unmatched action. A read-only call no rule matches
-// is allowed.
+// about first, then the rules, then the ask-outside tools, and a
+// side-effecting call no rule matches takes the unmatched action. A
+// read-only call no rule matches is allowed. A call an ask-outside
+// tool makes to a path outside the working directory is asked about
+// after the rules, whatever the unmatched action is.
 type Policy struct { // rules are the policy's rules, in order.
 	rules []Rule
 	// unmatched is the action for a side-effecting call no rule
@@ -159,6 +170,10 @@ type Policy struct { // rules are the policy's rules, in order.
 	// doomLoopActionSet reports whether the options named the doom
 	// loop's action, rather than taking the default.
 	doomLoopActionSet bool
+	// askOutside names the tools whose path argument routes a call
+	// outside the working directory through the asker chain. The map
+	// carries the argument that holds the path.
+	askOutside map[string]string
 	// chain is the asker chain.
 	chain *chain
 	// warnings are the construction-time notes the policy carries: a
@@ -224,6 +239,7 @@ func New(opts Options) (*Policy, error) {
 		rules:      append([]Rule(nil), opts.Rules...),
 		unmatched:  unmatched,
 		doomLoop:   doomLoop,
+		askOutside: copyStringMap(opts.AskOutside),
 		workingDir: opts.WorkingDir,
 		warnings:   warnings,
 
@@ -349,10 +365,44 @@ func (p *Policy) decide(info poo.ToolCallInfo) (Action, poo.AskReason, *poo.Repe
 	if rule, ok := p.match(info); ok {
 		return rule.Action, poo.AskReasonPolicy, nil
 	}
+	if p.asksOutside(info) {
+		return ActionAsk, poo.AskReasonPolicy, nil
+	}
 	if info.Spec.Class == poo.ClassReadOnly {
 		return ActionAllow, poo.AskReasonPolicy, nil
 	}
 	return p.unmatched, poo.AskReasonPolicy, nil
+}
+
+// asksOutside reports whether the call is one the ask-outside tools
+// route through the asker chain: a prepared call whose path argument
+// resolves outside the working directory.
+func (p *Policy) asksOutside(info poo.ToolCallInfo) bool {
+	arg, ok := p.askOutside[info.Spec.Name]
+	if !ok || info.PrepareFailed || p.workingDir == "" {
+		return false
+	}
+	value, ok := stringField(info.Arguments, arg)
+	if !ok || value == "" {
+		return false
+	}
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(p.workingDir, value)
+	}
+	return !protect.Within(protect.Resolve(p.workingDir), protect.Resolve(value))
+}
+
+// copyStringMap copies a string map, so a caller's map changes do not
+// reach a built policy. A nil map copies to nil.
+func copyStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }
 
 // doomLoopCounts returns the counts that trigger the doom loop.

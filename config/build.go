@@ -1160,6 +1160,21 @@ func primaryArgOf(opts BuildOptions, tools map[string]poo.Tool, name string) str
 	return factory(ToolOptions{}).Spec().PrimaryArg
 }
 
+// fileToolAsksOutside reports whether a file tool's settings turn on
+// asking about calls outside the working directory.
+func fileToolAsksOutside(settings *Settings, name string) bool {
+	var target *FileTool
+	switch name {
+	case "read":
+		target = &settings.Tools.Read
+	case "grep":
+		target = &settings.Tools.Grep
+	case "edit":
+		target = &settings.Tools.Edit
+	}
+	return target != nil && target.AskOutsideWorkingDir != nil && *target.AskOutsideWorkingDir
+}
+
 // isChatRole reports whether a failure is about the chat role.
 //
 // The chat model is the one a session cannot run without, so its
@@ -1488,6 +1503,20 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		}
 	}
 
+	// The tools that ask about calls outside the working directory name
+	// the argument that carries the path, so the policy can resolve it.
+	askOutside := map[string]string{}
+	for _, name := range []string{"read", "grep", "edit"} {
+		if !fileToolAsksOutside(settings, name) {
+			continue
+		}
+		arg := primaryArgOf(opts, r.Options.Tools, name)
+		if arg == "" {
+			return fmt.Errorf("config: the %s tool has no primary argument to ask about", name)
+		}
+		askOutside[name] = arg
+	}
+
 	askers, err := r.resolveAskers(opts, settings.Permission)
 	if err != nil {
 		return err
@@ -1496,6 +1525,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 	policy, err := perm.New(perm.Options{
 		Rules:        rules,
 		PrimaryArgs:  primaryArgs,
+		AskOutside:   askOutside,
 		Unmatched:    unmatched,
 		Fallback:     fallback,
 		DoomLoop:     doomLoop,

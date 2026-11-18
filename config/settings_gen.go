@@ -71,6 +71,7 @@ type SettingsFields struct {
 	ToolsCodemodeScriptMaxBytes     *float64 "json:\"tools.codemode.script_max_bytes,omitempty\""
 	ToolsCodemodeTimeoutS           *float64 "json:\"tools.codemode.timeout_s,omitempty\""
 	ToolsDisabled                   []string "json:\"tools.disabled,omitempty\""
+	ToolsEditAskOutsideWorkingDir   *bool    "json:\"tools.edit.ask_outside_working_dir,omitempty\""
 	ToolsEditRestrictToWorkingDir   *bool    "json:\"tools.edit.restrict_to_working_dir,omitempty\""
 	ToolsEnvPassthrough             []string "json:\"tools.env.passthrough,omitempty\""
 	ToolsEnvScrub                   []string "json:\"tools.env.scrub,omitempty\""
@@ -78,8 +79,10 @@ type SettingsFields struct {
 	ToolsFetchMaxBytes              *float64 "json:\"tools.fetch.max_bytes,omitempty\""
 	ToolsFetchTimeoutS              *float64 "json:\"tools.fetch.timeout_s,omitempty\""
 	ToolsFetchUserAgent             *string  "json:\"tools.fetch.user_agent,omitempty\""
+	ToolsGrepAskOutsideWorkingDir   *bool    "json:\"tools.grep.ask_outside_working_dir,omitempty\""
 	ToolsGrepRestrictToWorkingDir   *bool    "json:\"tools.grep.restrict_to_working_dir,omitempty\""
 	ToolsProtectedPaths             []string "json:\"tools.protected_paths,omitempty\""
+	ToolsReadAskOutsideWorkingDir   *bool    "json:\"tools.read.ask_outside_working_dir,omitempty\""
 	ToolsReadRestrictToWorkingDir   *bool    "json:\"tools.read.restrict_to_working_dir,omitempty\""
 	Ui                              *string  "json:\"ui,omitempty\""
 	Version                         *float64 "json:\"version,omitempty\""
@@ -155,6 +158,7 @@ type SettingsAvailability struct {
 	ToolsCodemodeScriptMaxBytes     FieldStatus
 	ToolsCodemodeTimeoutS           FieldStatus
 	ToolsDisabled                   FieldStatus
+	ToolsEditAskOutsideWorkingDir   FieldStatus
 	ToolsEditRestrictToWorkingDir   FieldStatus
 	ToolsEnvPassthrough             FieldStatus
 	ToolsEnvScrub                   FieldStatus
@@ -162,8 +166,10 @@ type SettingsAvailability struct {
 	ToolsFetchMaxBytes              FieldStatus
 	ToolsFetchTimeoutS              FieldStatus
 	ToolsFetchUserAgent             FieldStatus
+	ToolsGrepAskOutsideWorkingDir   FieldStatus
 	ToolsGrepRestrictToWorkingDir   FieldStatus
 	ToolsProtectedPaths             FieldStatus
+	ToolsReadAskOutsideWorkingDir   FieldStatus
 	ToolsReadRestrictToWorkingDir   FieldStatus
 	Ui                              FieldStatus
 	Version                         FieldStatus
@@ -333,6 +339,8 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ToolsCodemodeTimeoutSSatisfied := f.ToolsCodemodeTimeoutS != nil
 	ToolsDisabledEnabled := true
 	ToolsDisabledSatisfied := len(f.ToolsDisabled) > 0
+	ToolsEditAskOutsideWorkingDirEnabled := true
+	ToolsEditAskOutsideWorkingDirSatisfied := f.ToolsEditAskOutsideWorkingDir != nil
 	ToolsEditRestrictToWorkingDirEnabled := true
 	ToolsEditRestrictToWorkingDirSatisfied := f.ToolsEditRestrictToWorkingDir != nil
 	ToolsEnvPassthroughEnabled := true
@@ -347,10 +355,14 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 	ToolsFetchTimeoutSSatisfied := f.ToolsFetchTimeoutS != nil
 	ToolsFetchUserAgentEnabled := true
 	ToolsFetchUserAgentSatisfied := func() bool { v := f.ToolsFetchUserAgent; return v != nil && *v != "" }()
+	ToolsGrepAskOutsideWorkingDirEnabled := true
+	ToolsGrepAskOutsideWorkingDirSatisfied := f.ToolsGrepAskOutsideWorkingDir != nil
 	ToolsGrepRestrictToWorkingDirEnabled := true
 	ToolsGrepRestrictToWorkingDirSatisfied := f.ToolsGrepRestrictToWorkingDir != nil
 	ToolsProtectedPathsEnabled := true
 	ToolsProtectedPathsSatisfied := len(f.ToolsProtectedPaths) > 0
+	ToolsReadAskOutsideWorkingDirEnabled := true
+	ToolsReadAskOutsideWorkingDirSatisfied := f.ToolsReadAskOutsideWorkingDir != nil
 	ToolsReadRestrictToWorkingDirEnabled := true
 	ToolsReadRestrictToWorkingDirSatisfied := f.ToolsReadRestrictToWorkingDir != nil
 	UiEnabled := true
@@ -1941,6 +1953,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		ToolsEditAskOutsideWorkingDir: FieldStatus{
+			Required:  ToolsEditAskOutsideWorkingDirEnabled && false,
+			Enabled:   ToolsEditAskOutsideWorkingDirEnabled,
+			Satisfied: ToolsEditAskOutsideWorkingDirSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		ToolsEditRestrictToWorkingDir: FieldStatus{
 			Required:  ToolsEditRestrictToWorkingDirEnabled && false,
 			Enabled:   ToolsEditRestrictToWorkingDirEnabled,
@@ -2095,6 +2129,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Valid: nil,
 			Error: "",
 		},
+		ToolsGrepAskOutsideWorkingDir: FieldStatus{
+			Required:  ToolsGrepAskOutsideWorkingDirEnabled && false,
+			Enabled:   ToolsGrepAskOutsideWorkingDirEnabled,
+			Satisfied: ToolsGrepAskOutsideWorkingDirSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
 		ToolsGrepRestrictToWorkingDir: FieldStatus{
 			Required:  ToolsGrepRestrictToWorkingDirEnabled && false,
 			Enabled:   ToolsGrepRestrictToWorkingDirEnabled,
@@ -2121,6 +2177,28 @@ func Check(f SettingsFields, c SettingsConditions, prev SettingsFields) Settings
 			Required:  ToolsProtectedPathsEnabled && false,
 			Enabled:   ToolsProtectedPathsEnabled,
 			Satisfied: ToolsProtectedPathsSatisfied,
+			Fair:      true,
+			Reason: func() *string {
+				var reasons []string
+				if len(reasons) == 0 {
+					return nil
+				}
+				return &reasons[0]
+			}(),
+			Reasons: func() []string {
+				var reasons []string
+				if reasons == nil {
+					reasons = []string{}
+				}
+				return reasons
+			}(),
+			Valid: nil,
+			Error: "",
+		},
+		ToolsReadAskOutsideWorkingDir: FieldStatus{
+			Required:  ToolsReadAskOutsideWorkingDirEnabled && false,
+			Enabled:   ToolsReadAskOutsideWorkingDirEnabled,
+			Satisfied: ToolsReadAskOutsideWorkingDirSatisfied,
 			Fair:      true,
 			Reason: func() *string {
 				var reasons []string
@@ -2360,6 +2438,8 @@ func depSatisfied(f SettingsFields, name string) bool {
 		return f.ToolsCodemodeTimeoutS != nil
 	case "ToolsDisabled":
 		return len(f.ToolsDisabled) > 0
+	case "ToolsEditAskOutsideWorkingDir":
+		return f.ToolsEditAskOutsideWorkingDir != nil
 	case "ToolsEditRestrictToWorkingDir":
 		return f.ToolsEditRestrictToWorkingDir != nil
 	case "ToolsEnvPassthrough":
@@ -2375,10 +2455,14 @@ func depSatisfied(f SettingsFields, name string) bool {
 	case "ToolsFetchUserAgent":
 		v := f.ToolsFetchUserAgent
 		return v != nil && *v != ""
+	case "ToolsGrepAskOutsideWorkingDir":
+		return f.ToolsGrepAskOutsideWorkingDir != nil
 	case "ToolsGrepRestrictToWorkingDir":
 		return f.ToolsGrepRestrictToWorkingDir != nil
 	case "ToolsProtectedPaths":
 		return len(f.ToolsProtectedPaths) > 0
+	case "ToolsReadAskOutsideWorkingDir":
+		return f.ToolsReadAskOutsideWorkingDir != nil
 	case "ToolsReadRestrictToWorkingDir":
 		return f.ToolsReadRestrictToWorkingDir != nil
 	case "Ui":
@@ -2961,6 +3045,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+	case "ToolsEditAskOutsideWorkingDir", "tools.edit.ask_outside_working_dir":
+		found = true
+		status = avail.ToolsEditAskOutsideWorkingDir
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "ToolsEditRestrictToWorkingDir", "tools.edit.restrict_to_working_dir":
 		found = true
 		status = avail.ToolsEditRestrictToWorkingDir
@@ -3003,6 +3093,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}
+	case "ToolsGrepAskOutsideWorkingDir", "tools.grep.ask_outside_working_dir":
+		found = true
+		status = avail.ToolsGrepAskOutsideWorkingDir
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
 	case "ToolsGrepRestrictToWorkingDir", "tools.grep.restrict_to_working_dir":
 		found = true
 		status = avail.ToolsGrepRestrictToWorkingDir
@@ -3012,6 +3108,12 @@ func Challenge(fieldName string, f SettingsFields, c SettingsConditions, prev Se
 	case "ToolsProtectedPaths", "tools.protected_paths":
 		found = true
 		status = avail.ToolsProtectedPaths
+		if status.Reason != nil {
+			explanations = append(explanations, "* "+*status.Reason)
+		}
+	case "ToolsReadAskOutsideWorkingDir", "tools.read.ask_outside_working_dir":
+		found = true
+		status = avail.ToolsReadAskOutsideWorkingDir
 		if status.Reason != nil {
 			explanations = append(explanations, "* "+*status.Reason)
 		}

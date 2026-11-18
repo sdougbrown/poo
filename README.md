@@ -337,6 +337,21 @@ Restricted `read` can also reach the session's skill directories. Protected
 paths still apply in either mode. These tool restrictions do not confine `bash`;
 use a whole-process sandbox when isolation is required.
 
+To keep the default reach but ask before a call uses it, set
+`ask_outside_working_dir` on the same tools:
+
+```yaml
+tools:
+  read: {ask_outside_working_dir: true}
+  grep: {ask_outside_working_dir: true}
+  edit: {ask_outside_working_dir: true}
+```
+
+A call one of these tools makes to a path outside the working directory then
+goes through the asker chain after the policy's rules, whatever the unmatched
+action says. The asker sees the call and its path. A restricted tool never
+asks, because its Prepare refuses the path first.
+
 The policy is in `poo/perm`.
 
 **Sessions.** A logged session writes one JSONL file under `session.dir`,
