@@ -295,7 +295,7 @@ func nonStylingEscape(s string) []string {
 		}
 		if i+1 < len(s) && s[i+1] == '[' {
 			j := i + 2
-			for j < len(s) && s[j] >= 0x20 && s[j] <= 0x3f {
+			for j < len(s) && s[j] >= '0' && s[j] <= ';' {
 				j++
 			}
 			if j < len(s) && s[j] == 'm' {
@@ -339,6 +339,12 @@ func TestCharacterReferencesDecodeToNoEscape(t *testing.T) {
 	for _, tc := range []struct{ name, source string }{
 		{"a reset", "before &#27;c after"},
 		{"a clipboard write", "before &#x1b;]52;c;aGk=&#7; after"},
+		// A private marker makes `m` another command: CSI > 4;2 m sets
+		// the terminal's keyboard mode, and CSI ? 4 m asks it to reply.
+		{"a keyboard mode in a code span", "before `&#27;[>4;2m` after"},
+		{"a mode query", "before &#27;&#91;?4m after"},
+		// More parameters than a parser holds.
+		{"an overlong styling sequence", "before `&#27;[" + strings.Repeat("1;", 33) + "1m` after"},
 	} {
 		out := r.markdown(tc.source)
 		if got := nonStylingEscape(out); len(got) > 0 {

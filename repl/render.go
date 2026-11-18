@@ -730,10 +730,12 @@ func (r *renderer) markdown(text string) string {
 func filterRendered(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
-	p := ansi.NewParser()
+	// The decoder gets no parser: one that collects parameters indexes
+	// past its fixed capacity on a long sequence and panics, and the
+	// filter reads none of what it would collect.
 	var state byte
 	for i := 0; i < len(s); {
-		seq, _, n, next := ansi.DecodeSequence(s[i:], state, p)
+		seq, _, n, next := ansi.DecodeSequence(s[i:], state, nil)
 		state = next
 		if n == 0 {
 			// The decoder makes no progress past a byte that starts
@@ -801,9 +803,10 @@ func isSGR(seq string) bool {
 		return false
 	}
 	for i := 2; i < len(seq)-1; i++ {
-		// Parameters only. An intermediate byte would put the sequence
-		// in another command space, where 'm' does not mean styling.
-		if seq[i] < '0' || seq[i] > '?' {
+		// Digits, ':' and ';' only. A private marker (< = > ?) or an
+		// intermediate byte puts the sequence in another command space,
+		// where 'm' is not styling: CSI > 4;2 m sets the keyboard mode.
+		if seq[i] < '0' || seq[i] > ';' {
 			return false
 		}
 	}
