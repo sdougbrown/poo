@@ -32,6 +32,14 @@ type fakeServer struct {
 	levels []string
 	// closed says the client closed the session.
 	closed bool
+	// methods are the request methods the client sent, in order.
+	methods []string
+	// history is what session/history pages, oldest first.
+	history []protocol.HistoryItem
+	// recoveredTail and interrupted are what session/load reports it
+	// recovered.
+	recoveredTail bool
+	interrupted   []string
 	// cancels are the run ids the client's cancels named, in order.
 	cancels []string
 	// refusePrompt makes run/prompt refuse, for the refusal tests.
@@ -124,6 +132,9 @@ func (s *fakeServer) line(line []byte) {
 		s.answer(line)
 		return
 	}
+	s.mu.Lock()
+	s.methods = append(s.methods, req.Method)
+	s.mu.Unlock()
 	switch req.Method {
 	case protocol.MethodInitialize:
 		s.reply(req.ID, map[string]any{
@@ -148,6 +159,50 @@ func (s *fakeServer) line(line []byte) {
 			response["warnings"] = s.warnings
 		}
 		s.reply(req.ID, response)
+	case protocol.MethodSessionLoad:
+		var params protocol.LoadParams
+		json.Unmarshal(req.Params, &params)
+		s.mu.Lock()
+		s.closed = false
+		response := map[string]any{
+			"session_id": params.SessionID,
+			"mode":       "logged",
+			"tools":      []any{},
+			"models":     map[string]any{"chat": s.chat},
+		}
+		if len(s.warnings) > 0 {
+			response["warnings"] = s.warnings
+		}
+		if s.recoveredTail {
+			response["recovered_tail"] = true
+		}
+		if len(s.interrupted) > 0 {
+			response["interrupted_runs"] = s.interrupted
+		}
+		s.mu.Unlock()
+		s.reply(req.ID, response)
+	case protocol.MethodSessionHistory:
+		var params protocol.HistoryParams
+		json.Unmarshal(req.Params, &params)
+		s.mu.Lock()
+		known := append([]protocol.HistoryItem(nil), s.history...)
+		s.mu.Unlock()
+		limit := params.Limit
+		if limit <= 0 {
+			limit = 100
+		}
+		var page []protocol.HistoryItem
+		for _, item := range known {
+			if params.BeforeSeq > 0 && item.Seq >= params.BeforeSeq {
+				continue
+			}
+			page = append(page, item)
+		}
+		hasMore := len(page) > limit
+		if hasMore {
+			page = page[len(page)-limit:]
+		}
+		s.reply(req.ID, map[string]any{"items": page, "has_more": hasMore})
 	case protocol.MethodSessionGet:
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -575,4 +630,12 @@ func (s *fakeServer) answer(line []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.decisions = append(s.decisions, msg.Result.Decision)
+}
+
+// methodsSoFar returns the request methods the client has sent, in
+// order.
+func (s *fakeServer) methodsSoFar() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.methods...)
 }
