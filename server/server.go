@@ -234,7 +234,12 @@ func (f *Server) modelFor(name string) (poo.ModelInfo, bool) {
 		return model, true
 	}
 	if key, ok := f.qualified[name]; ok {
-		return f.runtime.Models[key], true
+		// The catalog holds the key only when the model is reachable:
+		// a settings model whose endpoint is not configured is skipped
+		// with a warning, and an alias for it is unknown the way the
+		// bare key is.
+		model, ok := f.runtime.Models[key]
+		return model, ok
 	}
 	return poo.ModelInfo{}, false
 }

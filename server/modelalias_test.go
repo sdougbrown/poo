@@ -113,6 +113,59 @@ func TestAQualifiedModelNameThatIsAmbiguousFailsTheServer(t *testing.T) {
 	}
 }
 
+// TestAQualifiedAliasForAnUnconfiguredEndpointIsUnknown covers the
+// honesty rule: a settings model whose endpoint is not configured is
+// unreachable, so its alias is the unknown-model error — never a
+// silent fall back to the default model.
+func TestAQualifiedAliasForAnUnconfiguredEndpointIsUnknown(t *testing.T) {
+	settings, err := config.Parse([]byte(`{
+  "version": 1,
+  "profile": "`+search.Name+`",
+  "session": {"mode": "ephemeral"},
+  "endpoints": {"grace": {"endpoint": "http://grace:4000/v1"}},
+  "models": {
+    "chat-model": {"endpoint": "grace", "model_id": "chat-model", "api": "chat_completions", "ops": ["chat"], "inputs": ["text"], "context_limit": 32768},
+    "ghost": {"endpoint": "nowhere", "model_id": "ghost-model", "api": "chat_completions", "ops": ["chat"], "inputs": ["text"], "context_limit": 32768}
+  },
+  "roles": {"chat": "chat-model"}
+}`), config.FormatJSON)
+	if err != nil {
+		t.Fatalf("parsing the settings: %v", err)
+	}
+	srv := newServer(t, settings)
+	_, _, err = srv.Create(context.Background(), protocol.CreateParams{
+		Mode:   "ephemeral",
+		Models: &protocol.ModelRoles{Chat: "nowhere/ghost-model"},
+	}, wire.FactoryEnv{})
+	if err == nil {
+		t.Fatal("the alias of an unconfigured endpoint built a session")
+	}
+	if err != poo.ErrUnknownModel {
+		t.Errorf("the failure is %v, want the unknown-model error", err)
+	}
+	// The bare key of the same unreachable model is refused the same
+	// way, so the two spellings cannot disagree.
+	_, _, err = srv.Create(context.Background(), protocol.CreateParams{
+		Mode:   "ephemeral",
+		Models: &protocol.ModelRoles{Chat: "ghost"},
+	}, wire.FactoryEnv{})
+	if err != poo.ErrUnknownModel {
+		t.Errorf("the bare key's failure is %v, want the unknown-model error", err)
+	}
+	// A model the settings do serve keeps working beside the broken
+	// one.
+	sess, _, err := srv.Create(context.Background(), protocol.CreateParams{
+		Mode:   "ephemeral",
+		Models: &protocol.ModelRoles{Chat: "grace/chat-model"},
+	}, wire.FactoryEnv{})
+	if err != nil {
+		t.Fatalf("the served model was refused: %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Errorf("closing the session: %v", err)
+	}
+}
+
 // TestAQualifiedModelNameNothingServesIsUnknown covers the miss: a
 // qualified form no settings model answers is the unknown-model error,
 // the way a bare key that matches nothing is.
