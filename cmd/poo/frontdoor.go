@@ -49,17 +49,17 @@ func runUI() int {
 // continues the session in.
 func runUIWith(extra []string) int {
 	o, parsed := frontDoorOptions(extra)
-	// A line the repl refuses is dispatched as it stands, so the repl
-	// reports the refusal itself: the settings it never ran under come
-	// from where a bare `poo` reads them.
-	explicit, workingDir := "", ""
-	if parsed {
-		explicit, workingDir = o.settingsFile, o.workingDir
+	if !parsed {
+		// A line the repl refuses, help included, goes to the repl as it
+		// stands and resolves nothing first, so the person reads the
+		// repl's own refusal rather than a settings error from here.
+		return run(append([]string{defaultUI}, extra...))
 	}
 	// The directory is resolved before the settings, so discovery walks
 	// up from where the line's own --working-dir points, not from this
 	// process's directory.
-	wd, err := workingDirectory(workingDir)
+	explicit := o.settingsFile
+	wd, err := workingDirectory(o.workingDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
 		return usageExitCode

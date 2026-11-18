@@ -271,6 +271,15 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 			args: []string{"-c", "-settings", pinned},
 			want: "no_such_key",
 		},
+		{
+			// The project's ui is one this binary does not link: a front
+			// door that resolved settings for a line the repl refuses would
+			// report that instead of the typo.
+			name: "a line the repl refuses is the repl's to report",
+			cwd:  project,
+			args: []string{"-c", "--modle", "x"},
+			want: "modle",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
