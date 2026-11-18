@@ -14,12 +14,6 @@ import (
 func parse(t *testing.T, mode, text string) (calls []poo.ToolCallDelta, prose string) {
 	t.Helper()
 	p := NewParser(mode, "")
-	if mode == "native" {
-		if p.enabled {
-			t.Fatal("the native mode left the parser on")
-		}
-		return nil, text
-	}
 	var events []poo.StreamItem
 	events = append(events, p.Feed(text)...)
 	events = append(events, p.Flush()...)
@@ -136,15 +130,17 @@ func TestACallWithoutANameIsNotACall(t *testing.T) {
 	}
 }
 
-func TestTheNativeModeLeavesTheParserOff(t *testing.T) {
+// A parser whose mode does not read text stays silent, and the reader emits the
+// raw content itself.
+func TestTheNativeModeEmitsNothing(t *testing.T) {
 	text := `<tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>`
 
 	calls, prose := parse(t, "native", text)
 	if len(calls) != 0 {
 		t.Errorf("the native mode found %d calls, want none", len(calls))
 	}
-	if prose != text {
-		t.Errorf("the native mode changed the text")
+	if prose != "" {
+		t.Errorf("the native mode emitted %q, want nothing", prose)
 	}
 }
 

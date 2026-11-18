@@ -1008,6 +1008,31 @@ func TestTheNativeToolCallWinsOverAnUnclosedParsedOne(t *testing.T) {
 	}
 }
 
+// TestTheTextToolCallStaysProseInNativeMode covers the rule: the transport
+// builds a parser only for the text modes, so a call a native-mode model wrote
+// as text reaches the consumer as the model wrote it.
+func TestTheTextToolCallStaysProseInNativeMode(t *testing.T) {
+	text := `<tool_call>{"name": "read", "arguments": {"path": "a.txt"}}</tool_call>`
+	body := chunk(`{"choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\": \"read\", \"arguments\": {\"path\": \"a.txt\"}}</tool_call>"},"finish_reason":"stop"}]}`) + done
+
+	srv := newSSEServer(t, body)
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ToolsMode: "native"})
+
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 1024})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+
+	events := read(t, reader)
+	if calls := toolCallsOf(events); len(calls) != 0 {
+		t.Errorf("the stream held %d calls, want none: the native mode reads no text calls", len(calls))
+	}
+	if got := textOf(events); got != text {
+		t.Errorf("the text is %q, want the model's own text %q", got, text)
+	}
+}
+
 func TestTheAutoModeSendsTheToolsAndParsesTheText(t *testing.T) {
 	body := chunk(`{"choices":[{"index":0,"delta":{"content":"<tool_call>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}</tool_call>"},"finish_reason":"stop"}]}`) + done
 

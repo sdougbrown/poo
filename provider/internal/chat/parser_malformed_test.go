@@ -131,8 +131,6 @@ func TestTheXMLCallWithoutArgumentsIsStillACall(t *testing.T) {
 	}
 }
 
-var _ = poo.ToolCallDelta{}
-
 // TestAFencedBlockThatIsNotACallComesBackOnceWhenStreamed covers a code
 // block in the model's prose that arrives a few characters at a time:
 // the prose is the text the model wrote, once, not every prefix of it.
