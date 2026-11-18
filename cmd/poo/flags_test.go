@@ -150,7 +150,7 @@ func TestTheSystemPromptFlagResolvesAgainstTheWorkingDirectory(t *testing.T) {
 	t.Setenv("HOME", home)
 	for value, want := range map[string]string{
 		"~/flagged.md": filepath.Join(home, "flagged.md"),
-		"~":           home,
+		"~":            home,
 	} {
 		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
 			"run",
