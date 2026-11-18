@@ -68,10 +68,10 @@ func Load(path string) (*Settings, error) {
 // The document is normalized to JSON and decoded strictly: an unknown
 // key is an error, and so is a key of the wrong shape.
 //
-// A document held in memory has no directory of its own, so a relative
-// models_file resolves against the working directory, and no models file is
-// discovered beside it. Load is the reader that knows where the file came
-// from.
+// A document held in memory has no directory of its own, so the relative paths
+// it names resolve against the working directory: a relative models file,
+// prompt base file and finish schema. No models file is discovered beside
+// it. Load is the reader that knows where the file came from.
 func Parse(data []byte, format Format) (*Settings, error) {
 	return parse(data, format, "")
 }
