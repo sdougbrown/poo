@@ -299,6 +299,54 @@ func TestATypelessOneOfNamesTheType(t *testing.T) {
 	}
 }
 
+// TestATypeSiblingBesideAOneOfRendersTheObjectSemantics covers a
+// schema the library compiles with a oneOf and a sibling type: the
+// refusal follows what the schema enforces, not the ignored sibling.
+func TestATypeSiblingBesideAOneOfRendersTheObjectSemantics(t *testing.T) {
+	tool := map[string]any{
+		"description": "Send a payload",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"build": map[string]any{
+					"type": "array",
+					"oneOf": []any{
+						map[string]any{
+							"type":                 "object",
+							"properties":           map[string]any{"kind": map[string]any{"const": "text"}},
+							"required":             []string{"kind"},
+							"additionalProperties": false,
+						},
+						map[string]any{
+							"type":                 "object",
+							"properties":           map[string]any{"kind": map[string]any{"const": "image"}},
+							"required":             []string{"kind"},
+							"additionalProperties": false,
+						},
+					},
+				},
+			},
+			"additionalProperties": false,
+		},
+		"bindings": []any{
+			map[string]any{"property": "build", "style": "equals", "flag": "--build"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "send.json", map[string]any{"send": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"send","args":{"build":7}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the non-object value was accepted")
+	}
+	if strings.Contains(err.Error(), "must be an array") {
+		t.Errorf("the refusal follows the ignored sibling type: %v", err)
+	}
+	if !strings.Contains(err.Error(), `"build" must be an object`) {
+		t.Errorf("the refusal does not name the object semantics: %v", err)
+	}
+}
+
 // TestARefPropertyRendersThroughTheDefinition covers a property the
 // schema declares through $ref: the refusal reads the definition the
 // pointer resolves to, not the reference's bare map.

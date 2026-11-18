@@ -100,13 +100,14 @@ func issueMessage(name string, schema map[string]any, issue schema.StructuralIss
 		return ""
 	case "type":
 		node := schemaPointerAt(schema, segments)
+		// A oneOf node enforces object semantics; a sibling type the
+		// library ignores must not turn the clause into "must be an
+		// array".
+		if _, tagged := node["oneOf"]; tagged {
+			return subject + "must be an object"
+		}
 		kind, _ := node["type"].(string)
 		if kind == "" {
-			// A tagged oneOf reports a type miss for a value that is
-			// not an object; the branches are all objects.
-			if _, tagged := node["oneOf"]; tagged {
-				return subject + "must be an object"
-			}
 			return ""
 		}
 		return subject + "must be " + article(kind) + " " + kind
