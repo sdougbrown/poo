@@ -1516,6 +1516,25 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 		}
 	}
 
+	// The tools that ask about calls outside the working directory name
+	// the argument that carries the path. The three file tools take
+	// theirs in "path"; a tool's primary argument is not it — grep's
+	// is "pattern", which the doom loop matches, not the policy's
+	// path boundary. A test pins "path" to each tool's schema.
+	askOutside := map[string]string{}
+	for _, tool := range []struct {
+		name   string
+		target *FileTool
+	}{
+		{"read", &settings.Tools.Read},
+		{"grep", &settings.Tools.Grep},
+		{"edit", &settings.Tools.Edit},
+	} {
+		if tool.target.AskOutsideWorkingDir != nil && *tool.target.AskOutsideWorkingDir {
+			askOutside[tool.name] = "path"
+		}
+	}
+
 	askers, err := r.resolveAskers(opts, settings.Permission)
 	if err != nil {
 		return err
@@ -1524,6 +1543,7 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 	policy, err := perm.New(perm.Options{
 		Rules:        rules,
 		PrimaryArgs:  primaryArgs,
+		AskOutside:   askOutside,
 		Unmatched:    unmatched,
 		Fallback:     fallback,
 		DoomLoop:     doomLoop,

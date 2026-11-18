@@ -2004,6 +2004,86 @@ func TestThePolicyGetsTheResolvedWorkingDirectory(t *testing.T) {
 	}
 }
 
+// TestTheOutsideAskSettingReachesThePolicy covers the settings' walk
+// from the tools' file-tool section to the policy: a tool the setting
+// names is asked about when its path leaves the working directory, a
+// session without the setting keeps the auto-allow, and grep's pattern
+// argument is never mistaken for the path.
+func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		yaml string
+		tool string
+		args map[string]string
+		asks int
+	}{
+		{"read unset", "", "read", map[string]string{"path": "outside.txt"}, 0},
+		{"read false", "tools:\n  read: {ask_outside_working_dir: false}\n", "read", map[string]string{"path": "outside.txt"}, 0},
+		{"read true", "tools:\n  read: {ask_outside_working_dir: true}\n", "read", map[string]string{"path": "outside.txt"}, 1},
+		{"grep true", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"path": "outside.txt", "pattern": "needle"}, 1},
+		{"edit true", "tools:\n  edit: {ask_outside_working_dir: true}\n", "edit", map[string]string{"path": "outside.txt", "old": "a", "new": "b"}, 1},
+		{"grep pattern is not the path", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"pattern": "../escape"}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+tc.yaml), config.FormatYAML)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := &askClient{}
+			runtime, err := config.Build(config.BuildOptions{
+				Settings:       settings,
+				DefaultProfile: "code",
+				Tools:          theTools(),
+				Profiles:       theProfiles(),
+				Executors:      theExecutors(),
+				Askers:         []string{"wire"},
+				Wire:           client,
+			})
+			if err != nil {
+				t.Fatalf("building the runtime: %v", err)
+			}
+			cwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := tc.args["path"]; ok {
+				tc.args["path"] = filepath.Join(filepath.Dir(cwd), tc.args["path"])
+			}
+			args, _ := json.Marshal(tc.args)
+			if _, err := runtime.Policy.BeforeTool(poo.HookContext{Context: context.Background()}, poo.ToolCallInfo{
+				Spec:      poo.ToolSpec{Name: tc.tool, Class: poo.ClassReadOnly},
+				Arguments: args,
+			}); err != nil {
+				t.Fatalf("asking the policy: %v", err)
+			}
+			if len(client.asks) != tc.asks {
+				t.Fatalf("the policy asked %d time(s), want %d", len(client.asks), tc.asks)
+			}
+		})
+	}
+}
+
+// TestTheFileToolsTakeTheirPathInThePathArgument pins the argument the
+// ask-outside wiring names: each file tool's schema must carry the
+// "path" property, or a rename would leave the policy reading an
+// argument the call no longer sends and silently fail open.
+func TestTheFileToolsTakeTheirPathInThePathArgument(t *testing.T) {
+	for _, name := range []string{"read", "grep", "edit"} {
+		t.Run(name, func(t *testing.T) {
+			spec := theTools()[name](config.ToolOptions{}).Spec()
+			var schema struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			}
+			if err := json.Unmarshal(spec.Schema, &schema); err != nil {
+				t.Fatalf("decoding the %s schema: %v", name, err)
+			}
+			if _, ok := schema.Properties["path"]; !ok {
+				t.Fatalf("the %s schema carries no %q property", name, "path")
+			}
+		})
+	}
+}
+
 // TestTheCatalogSettingsCarryTheModelFields covers the translation the
 // catalog builds from: a settings model's endpoint, id, api, window,
 // output limit and reasoning control arrive in the catalog's settings

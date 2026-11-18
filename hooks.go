@@ -170,6 +170,10 @@ type ToolCallInfo struct {
 	PrepareFailed bool
 	// Handle is the call's handle, e.g. "r1".
 	Handle string
+	// WorkingDir is the directory the call works in. A hook that
+	// judges a path against the working directory reads it here, not
+	// from a build-time setting: a session may name its own directory.
+	WorkingDir string
 	// Job is the identifier of the job the call runs as, e.g. "j3". It is
 	// empty when the call runs in the turn.
 	JobID string

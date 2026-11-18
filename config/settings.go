@@ -325,6 +325,9 @@ type Tools struct {
 type FileTool struct {
 	// RestrictToWorkingDir confines the tool to the working directory.
 	RestrictToWorkingDir *bool `json:"restrict_to_working_dir,omitempty"`
+	// AskOutsideWorkingDir routes a call whose target lies outside the
+	// working directory through the permission asker.
+	AskOutsideWorkingDir *bool `json:"ask_outside_working_dir,omitempty"`
 }
 
 // Bash are the bash tool's settings.
