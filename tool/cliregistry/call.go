@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,7 +162,8 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	}
 	plan, err := t.catalog.Plan(a.Name, args)
 	if err != nil {
-		return nil, planError(a.Name, err)
+		entry, _ := t.catalog.Lookup(a.Name)
+		return nil, planError(a.Name, entry.Schema, err)
 	}
 	key := marshal(struct {
 		Name string         `json:"name"`
@@ -177,10 +180,10 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 // checks and both land here. Anything else is the manifest being
 // unusable — a binding that cannot be built, or a working directory that
 // does not resolve — and it is reported as it is.
-func planError(name string, err error) error {
+func planError(name string, schema map[string]any, err error) error {
 	var invalid *registry.ValidationError
 	if errors.As(err, &invalid) {
-		return poo.InvalidArgsf("%s: %s: %s", CallToolName, name, issuesText(invalid.Issues))
+		return poo.InvalidArgsf("%s: %s: %s", CallToolName, name, issuesText(name, schema, invalid.Issues))
 	}
 	return fmt.Errorf("%s: %s: %w", CallToolName, name, err)
 }
@@ -377,17 +380,209 @@ func decodeStrict(raw json.RawMessage, into any) error {
 // issuesText renders schema issues for the model.
 //
 // A path is an RFC 6901 pointer into the arguments, so the model can see
-// which argument it got wrong.
-func issuesText(issues []schema.StructuralIssue) string {
+// which argument it got wrong. The schema sits beside the issues, so the
+// common refusals are rendered in the vocabulary of the CLI's own schema
+// — the accepted argument names, an enum's values, a bound's limit —
+// instead of a code the model cannot act on. An issue the renderer has
+// no words for keeps the library's message, or its code when the message
+// is empty: a refusal never ends in a bare pointer.
+func issuesText(name string, schema map[string]any, issues []schema.StructuralIssue) string {
 	parts := make([]string, 0, len(issues))
 	for _, issue := range issues {
+		if msg := issueMessage(name, schema, issue); msg != "" {
+			parts = append(parts, msg)
+			continue
+		}
 		path := issue.Path
 		if path == "" {
 			path = "arguments"
 		}
-		parts = append(parts, path+": "+issue.Message)
+		message := issue.Message
+		if message == "" {
+			message = issue.Code
+		}
+		parts = append(parts, path+": "+message)
 	}
 	return strings.Join(parts, "; ")
+}
+
+// issueMessage renders one issue in the schema's vocabulary, or an
+// empty string when the renderer has no words for it.
+func issueMessage(name string, schema map[string]any, issue schema.StructuralIssue) string {
+	segments := splitPointer(issue.Path)
+	last := ""
+	if len(segments) > 0 {
+		last = segments[len(segments)-1]
+	}
+	switch issue.Code {
+	case "required":
+		if last == "" {
+			return ""
+		}
+		return fmt.Sprintf("%q is required", last)
+	case "additionalProperties":
+		parent := schemaPointerAt(schema, segments[:len(segments)-1])
+		accepted := propertyNames(parent)
+		if accepted == "" {
+			return ""
+		}
+		return fmt.Sprintf("unknown argument %q; %s accepts: %s", last, name, accepted)
+	case "enum":
+		enum, _ := schemaPointerAt(schema, segments)["enum"].([]any)
+		if len(enum) == 0 {
+			return ""
+		}
+		return "must be one of: " + joinValues(enum)
+	case "const":
+		value, ok := schemaPointerAt(schema, segments)["const"]
+		if !ok {
+			return ""
+		}
+		return "must be " + valueText(value)
+	case "type":
+		kind, _ := schemaPointerAt(schema, segments)["type"].(string)
+		if kind == "" {
+			return ""
+		}
+		return "must be " + article(kind) + " " + kind
+	case "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+		"minLength", "maxLength", "minItems", "maxItems":
+		bound, ok := schemaPointerAt(schema, segments)[issue.Code]
+		if !ok {
+			return ""
+		}
+		return limitMessage(issue.Code, bound)
+	}
+	return ""
+}
+
+// splitPointer splits an RFC 6901 pointer into its unescaped segments.
+func splitPointer(path string) []string {
+	if path == "" {
+		return nil
+	}
+	segments := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	for i, segment := range segments {
+		segments[i] = strings.ReplaceAll(strings.ReplaceAll(segment, "~1", "/"), "~0", "~")
+	}
+	return segments
+}
+
+// schemaPointerAt resolves a pointer's segments to the subschema they
+// name, walking object properties and array items, or nil when the
+// walk leaves the schema.
+func schemaPointerAt(schema map[string]any, segments []string) map[string]any {
+	current := schema
+	for _, segment := range segments {
+		if _, err := strconv.Atoi(segment); err == nil {
+			items, ok := current["items"].(map[string]any)
+			if !ok {
+				return nil
+			}
+			current = items
+			continue
+		}
+		properties, ok := current["properties"].(map[string]any)
+		if !ok {
+			return nil
+		}
+		next, ok := properties[segment].(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = next
+	}
+	return current
+}
+
+// propertyNames lists a schema object's properties in name order,
+// required ones marked, or an empty string when there are none.
+func propertyNames(schema map[string]any) string {
+	if schema == nil {
+		return ""
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if len(properties) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	required := map[string]bool{}
+	for _, name := range toNames(schema["required"]) {
+		required[name] = true
+	}
+	for i, name := range names {
+		if required[name] {
+			names[i] += "*"
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+// toNames reads a JSON array of strings, tolerating anything else.
+func toNames(value any) []string {
+	names, _ := value.([]any)
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if s, ok := name.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// joinValues renders a JSON array's values the way a model reads them.
+func joinValues(values []any) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, valueText(value))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// valueText renders one JSON value in message prose: strings quoted,
+// everything else as the encoder writes it.
+func valueText(value any) string {
+	if s, ok := value.(string); ok {
+		return strconv.Quote(s)
+	}
+	return fmt.Sprint(value)
+}
+
+// article is the indefinite article a type name takes.
+func article(kind string) string {
+	switch kind[0] {
+	case 'a', 'e', 'i', 'o', 'u':
+		return "an"
+	}
+	return "a"
+}
+
+// limitMessage renders a bound violation, naming the bound the schema
+// declares.
+func limitMessage(code string, bound any) string {
+	switch code {
+	case "minimum":
+		return fmt.Sprintf("is below the minimum of %s", valueText(bound))
+	case "maximum":
+		return fmt.Sprintf("is above the maximum of %s", valueText(bound))
+	case "exclusiveMinimum":
+		return fmt.Sprintf("must be greater than %s", valueText(bound))
+	case "exclusiveMaximum":
+		return fmt.Sprintf("must be less than %s", valueText(bound))
+	case "minLength":
+		return fmt.Sprintf("is shorter than the minimum length of %s", valueText(bound))
+	case "maxLength":
+		return fmt.Sprintf("is longer than the maximum length of %s", valueText(bound))
+	case "minItems":
+		return fmt.Sprintf("has fewer than %s items", valueText(bound))
+	case "maxItems":
+		return fmt.Sprintf("has more than %s items", valueText(bound))
+	}
+	return ""
 }
 
 // marshal encodes a value, falling back to an empty object.
