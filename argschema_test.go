@@ -72,6 +72,33 @@ func TestAValidatorOfNilValidatesNothing(t *testing.T) {
 	}
 }
 
+// TestAValidatorNamesTheAcceptedArguments covers the outer layer: the
+// session's own schema check renders a refusal in the schema's
+// vocabulary, the way a registered CLI's refusal reads.
+func TestAValidatorNamesTheAcceptedArguments(t *testing.T) {
+	tool := &schemaTool{}
+	compiled, err := compileArgSchemas(map[string]Tool{"probe": tool})
+	if err != nil {
+		t.Fatalf("compiling the schemas: %v", err)
+	}
+	err = compiled.validate("probe", json.RawMessage(`{"url": "https://example.com/", "deep": true}`))
+	if err == nil {
+		t.Fatal("the unknown top-level argument validated")
+	}
+	for _, want := range []string{`unknown argument "deep"`, "probe accepts: format, url*"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not carry %q: %v", want, err)
+		}
+	}
+	err = compiled.validate("probe", json.RawMessage(`{"url": "https://example.com/", "format": "html"}`))
+	if err == nil {
+		t.Fatal("the off-enum value validated")
+	}
+	if !strings.Contains(err.Error(), `must be one of: "raw", "markdown"`) {
+		t.Errorf("the refusal does not name the enum's values: %v", err)
+	}
+}
+
 // schemaTool is a tool whose schema is fetch-shaped, for the
 // enforcement tests.
 type schemaTool struct{}

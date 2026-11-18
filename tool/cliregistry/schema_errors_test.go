@@ -98,11 +98,115 @@ func TestABoundArgumentNamesTheBound(t *testing.T) {
 }
 
 // TestTheRefusalNeverEndsInAnEmptyMessage pins the old failure shape:
-// no refusal may render as a bare pointer with an empty message.
+// no refusal may render as a bare pointer with an empty message. The
+// check must not trim, because trimming is what hides the trailing
+// space the old renderer left behind.
 func TestTheRefusalNeverEndsInAnEmptyMessage(t *testing.T) {
 	err := prepareDeploy(t, `{"name":"deploy","args":{"mode":"canary"}}`)
-	if strings.Contains(err.Error(), ": ") && strings.HasSuffix(strings.TrimSpace(err.Error()), ": ") {
-		t.Errorf("the refusal ends in an empty message: %v", err)
+	if strings.HasSuffix(err.Error(), ": ") {
+		t.Errorf("the refusal ends in an empty message: %q", err.Error())
+	}
+}
+
+// TestABadDiscriminatorNamesTheBranchValues covers a tagged oneOf: a
+// discriminator value no branch declares is refused with the values
+// the branches declare.
+func TestABadDiscriminatorNamesTheBranchValues(t *testing.T) {
+	tool := map[string]any{
+		"description": "Send a payload",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"oneOf": []any{
+				map[string]any{
+					"type":                 "object",
+					"properties":           map[string]any{"kind": map[string]any{"const": "text"}},
+					"required":             []string{"kind"},
+					"additionalProperties": false,
+				},
+				map[string]any{
+					"type":                 "object",
+					"properties":           map[string]any{"kind": map[string]any{"const": "image"}},
+					"required":             []string{"kind"},
+					"additionalProperties": false,
+				},
+			},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "send.json", map[string]any{"send": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"send","args":{"kind":"video"}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the unmatched discriminator was accepted")
+	}
+	if !strings.Contains(err.Error(), `must be one of: "text", "image"`) {
+		t.Errorf("the refusal does not name the branch values: %v", err)
+	}
+}
+
+// TestARefPropertyRendersThroughTheDefinition covers a property the
+// schema declares through $ref: the refusal reads the definition the
+// pointer resolves to, not the reference's bare map.
+func TestARefPropertyRendersThroughTheDefinition(t *testing.T) {
+	tool := map[string]any{
+		"description": "Label a thing",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"color": map[string]any{"$ref": "#/$defs/color"},
+			},
+			"required":             []string{"color"},
+			"additionalProperties": false,
+			"$defs": map[string]any{
+				"color": map[string]any{"type": "string", "enum": []string{"red", "green"}},
+			},
+		},
+		"bindings": []any{
+			map[string]any{"property": "color", "style": "equals", "flag": "--color"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "label.json", map[string]any{"label": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"label","args":{"color":"blue"}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the off-enum value was accepted")
+	}
+	if !strings.Contains(err.Error(), `must be one of: "red", "green"`) {
+		t.Errorf("the refusal does not read through the reference: %v", err)
+	}
+}
+
+// TestTheAcceptedArgumentsListKeepsNameOrder pins the ordering
+// convention: names sort by their base name, and a required mark is
+// appended after the sort, so the call-path renderer and the catalog
+// hint list the same arguments in the same order.
+func TestTheAcceptedArgumentsListKeepsNameOrder(t *testing.T) {
+	tool := map[string]any{
+		"description": "Order check",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"a":  map[string]any{"type": "string"},
+				"a!": map[string]any{"type": "string"},
+			},
+			"required":             []string{"a"},
+			"additionalProperties": false,
+		},
+		"bindings": []any{
+			map[string]any{"property": "a", "style": "equals", "flag": "--a"},
+			map[string]any{"property": "a!", "style": "equals", "flag": "--a-bang"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "order.json", map[string]any{"order": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"order","args":{"zzz":1}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the unknown argument was accepted")
+	}
+	if !strings.Contains(err.Error(), "order accepts: a*, a!") {
+		t.Errorf("the accepted list does not keep name order: %v", err)
 	}
 }
 

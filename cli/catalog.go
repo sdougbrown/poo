@@ -19,6 +19,7 @@ import (
 
 	cliregistry "github.com/sdougbrown/cli-registry"
 
+	"github.com/sdougbrown/poo/internal/schematext"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -229,44 +230,12 @@ func (c *Catalog) Plan(name string, args map[string]any) (*cliregistry.Plan, err
 	return c.registry.Plan(tool, args)
 }
 
-// argsHint renders a schema's top-level arguments for a prompt line:
-// the property names in name order, required ones marked, or an empty
-// string when the schema declares no properties. Nested arguments stay
-// out: the line is a hint, and a refused call names the schema's own
-// path when the model reaches inside.
+// argsHint renders a schema's top-level arguments for a prompt line,
+// or an empty string when the schema declares no properties. Nested
+// arguments stay out: the line is a hint, and a refused call names the
+// schema's own path when the model reaches inside.
 func argsHint(schema map[string]any) string {
-	if schema == nil {
-		return ""
-	}
-	properties, _ := schema["properties"].(map[string]any)
-	if len(properties) == 0 {
-		return ""
-	}
-	required := map[string]bool{}
-	for _, name := range toNames(schema["required"]) {
-		required[name] = true
-	}
-	names := make([]string, 0, len(properties))
-	for name := range properties {
-		if required[name] {
-			name += "*"
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return strings.Join(names, ", ")
-}
-
-// toNames reads a JSON array of strings, tolerating anything else.
-func toNames(value any) []string {
-	names, _ := value.([]any)
-	out := make([]string, 0, len(names))
-	for _, name := range names {
-		if s, ok := name.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
+	return schematext.PropertyNames(schema)
 }
 
 //go:embed catalog.md

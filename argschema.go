@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/cli-registry/schema"
+
+	"github.com/sdougbrown/poo/internal/schematext"
 )
 
 // argSchemas holds the compiled input schemas of the session's tools,
@@ -24,6 +26,7 @@ import (
 // it needs no lock: the writes end before the runs begin.
 type argSchemas struct {
 	schemas map[string]*schema.ValueSchema
+	raws    map[string]map[string]any
 }
 
 // compileArgSchemas compiles every tool's input schema.
@@ -33,13 +36,16 @@ type argSchemas struct {
 // that reaches past it is a tool bug. The failure names the keyword
 // the tool used.
 func compileArgSchemas(tools map[string]Tool) (*argSchemas, error) {
-	compiled := &argSchemas{schemas: map[string]*schema.ValueSchema{}}
+	compiled := &argSchemas{
+		schemas: map[string]*schema.ValueSchema{},
+		raws:    map[string]map[string]any{},
+	}
 	for name, tool := range tools {
 		spec := tool.Spec()
 		if len(spec.Schema) == 0 {
 			continue
 		}
-		var raw any
+		var raw map[string]any
 		if err := json.Unmarshal(spec.Schema, &raw); err != nil {
 			return nil, fmt.Errorf("poo: the tool %q has a schema that is not JSON: %v", name, err)
 		}
@@ -52,6 +58,7 @@ func compileArgSchemas(tools map[string]Tool) (*argSchemas, error) {
 			return nil, fmt.Errorf("poo: the tool %q has a schema that does not compile: %v", name, err)
 		}
 		compiled.schemas[name] = valueSchema
+		compiled.raws[name] = raw
 	}
 	return compiled, nil
 }
@@ -79,20 +86,7 @@ func (a *argSchemas) validate(name string, raw json.RawMessage) error {
 	if len(issues) == 0 {
 		return nil
 	}
-	return InvalidArgsf("%s: %s", name, structuralIssuesText(issues))
-}
-
-// structuralIssuesText renders the schema's findings for the model.
-func structuralIssuesText(issues []schema.StructuralIssue) string {
-	parts := make([]string, 0, len(issues))
-	for _, issue := range issues {
-		path := issue.Path
-		if path == "" {
-			path = "arguments"
-		}
-		parts = append(parts, path+": "+issue.Message)
-	}
-	return strings.Join(parts, "; ")
+	return InvalidArgsf("%s: %s", name, schematext.IssuesText(name, a.raws[name], issues))
 }
 
 // definitionIssuesText renders a schema's own problems for the tool's
