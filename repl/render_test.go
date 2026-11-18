@@ -2,8 +2,12 @@ package repl
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
 )
@@ -277,5 +281,139 @@ func TestATerminalWithoutALayoutStillReadsRows(t *testing.T) {
 	}
 	if !strings.Contains(drawn, "look") {
 		t.Errorf("the prompt never read:\n%q", drawn)
+	}
+}
+
+// nonStylingEscape returns the escape sequences in s that do not set a
+// graphic rendition. Every one of them would tell the terminal to do
+// something other than paint text.
+func nonStylingEscape(s string) []string {
+	var found []string
+	for i := 0; i < len(s); i++ {
+		if s[i] != 0x1b {
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && s[j] >= '0' && s[j] <= ';' {
+				j++
+			}
+			if j < len(s) && s[j] == 'm' {
+				i = j
+				continue
+			}
+			found = append(found, s[i:min(j+1, len(s))])
+			i = j
+			continue
+		}
+		found = append(found, s[i:min(i+2, len(s))])
+		i++
+	}
+	return found
+}
+
+// controlBytes returns the C0 controls, DEL and C1 controls in s — as a
+// byte or as the UTF-8 code point that names it. A terminal obeys these
+// rather than printing them. Newline, tab and the escape byte are not
+// controls here: nonStylingEscape reads what the escape opens.
+func controlBytes(s string) []string {
+	var found []string
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		// A byte that is no rune is the raw form of a C1 control.
+		stray := size == 1 && s[i] >= 0x80
+		if stray || (r != '\n' && r != '\t' && r != 0x1b && unicode.IsControl(r)) {
+			found = append(found, fmt.Sprintf("%q", s[i:i+size]))
+		}
+		i += size
+	}
+	return found
+}
+
+// TestCharacterReferencesDecodeToNoEscape covers the decode the renderer
+// does after the stream's strip: an entity that names ESC or BEL must
+// not reach the terminal as the byte it names, and the words around it
+// still render.
+func TestCharacterReferencesDecodeToNoEscape(t *testing.T) {
+	r := aTerminal(t, io.Discard, 40)
+	for _, tc := range []struct{ name, source string }{
+		{"a reset", "before &#27;c after"},
+		{"a clipboard write", "before &#x1b;]52;c;aGk=&#7; after"},
+		// A private marker makes `m` another command: CSI > 4;2 m sets
+		// the terminal's keyboard mode, and CSI ? 4 m asks it to reply.
+		{"a keyboard mode in a code span", "before `&#27;[>4;2m` after"},
+		{"a mode query", "before &#27;&#91;?4m after"},
+		// The remaining private markers, written as entities: < and =.
+		{"a private marker less than", "before &#27;[&lt;5m after"},
+		{"a private marker equals", "before &#27;[&#61;5m after"},
+		// More parameters than a parser holds.
+		{"an overlong styling sequence", "before `&#27;[" + strings.Repeat("1;", 33) + "1m` after"},
+	} {
+		out := r.markdown(tc.source)
+		if got := nonStylingEscape(out); len(got) > 0 {
+			t.Errorf("%s: the render hands the terminal %q:\n%q", tc.name, got, out)
+		}
+		if got := controlBytes(out); len(got) > 0 {
+			t.Errorf("%s: the render carries the control byte(s) %v:\n%q", tc.name, got, out)
+		}
+		for _, want := range []string{"before", "after"} {
+			if !strings.Contains(plain(out), want) {
+				t.Errorf("%s: the words around the escape did not render:\n%q", tc.name, plain(out))
+			}
+		}
+	}
+}
+
+// TestControlBytesStayOutOfTheRenderedText covers the controls the strip
+// leaves behind: a carriage return, a backspace, a bell, a raw C1 byte
+// and the UTF-8 code point that names the same C1 control. Neither the
+// rendered text nor the plain one prints them. The tab is the one control
+// the filter keeps: it lays the rows out, so it survives where the others
+// go.
+func TestControlBytesStayOutOfTheRenderedText(t *testing.T) {
+	source := "one\t\r two\b three\a four\u009b5m five\x9b6m six\u007f seven"
+	for _, branch := range []struct {
+		name string
+		r    *renderer
+	}{
+		{"rendered", aTerminal(t, io.Discard, 40)},
+		{"plain", newRenderer(io.Discard)},
+	} {
+		out := branch.r.markdown(source)
+		if got := nonStylingEscape(out); len(got) > 0 {
+			t.Errorf("%s: the text hands the terminal %q:\n%q", branch.name, got, out)
+		}
+		if got := controlBytes(out); len(got) > 0 {
+			t.Errorf("%s: the text carries the control byte(s) %v:\n%q", branch.name, got, out)
+		}
+		if !strings.Contains(out, "\t") {
+			t.Errorf("%s: the tab did not survive:\n%q", branch.name, out)
+		}
+		for _, want := range []string{"one", "seven"} {
+			if !strings.Contains(plain(out), want) {
+				t.Errorf("%s: the words around the controls did not render:\n%q", branch.name, plain(out))
+			}
+		}
+	}
+}
+
+// TestTheStyledRenderKeepsItsStyling covers the other side of the filter:
+// glamour paints with SGR sequences, and a render that carries nothing
+// the filter drops comes back byte for byte — a heading, a fence and bold
+// text keep the styling they were painted with.
+func TestTheStyledRenderKeepsItsStyling(t *testing.T) {
+	source := "# Heading\n\nA **bold** paragraph.\n\n```go\nfunc main() {}\n```\n"
+	r := aTerminal(t, io.Discard, 40)
+	out := r.markdown(source)
+
+	painted, err := r.tr.Render(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != painted {
+		t.Errorf("the filter changed a render that carries only styling:\n got %q\nwant %q", out, painted)
+	}
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("the render lost its styling:\n%q", out)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/ansi"
@@ -699,18 +700,117 @@ func (r *renderer) reply(text string) {
 	}
 }
 
-// markdown renders one markdown source for the terminal.
+// markdown renders one markdown source for the terminal. What it hands
+// back is what the terminal will obey, so it carries the styling the
+// render drew and nothing else.
 func (r *renderer) markdown(text string) string {
 	if r.tr == nil {
-		return strings.TrimRight(text, "\n") + "\n"
+		return filterRendered(strings.TrimRight(text, "\n")) + "\n"
 	}
 	out, err := r.tr.Render(text)
 	if err != nil {
 		// A source glamour refused is still the model's words: they
 		// go out plain rather than not at all.
-		return strings.TrimRight(text, "\n") + "\n"
+		return filterRendered(strings.TrimRight(text, "\n")) + "\n"
 	}
-	return out
+	return filterRendered(out)
+}
+
+// filterRendered keeps the bytes of a rendered block a terminal should
+// obey: the SGR sequences that carry the styling, and the text itself
+// with its newlines and tabs. Every other escape sequence goes, and so
+// does every C0 control, DEL and C1 control the text carries.
+//
+// The filter sits here, after rendering, because the renderer decodes
+// character references in its text nodes: a source written &#27; holds
+// no escape for the stream's strip to remove, and becomes one only when
+// the reference is decoded. Reading the rendered bytes is also the one
+// place both branches meet, so the plain render is filtered the same
+// way.
+func filterRendered(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	// The decoder gets no parser: one that collects parameters indexes
+	// past its fixed capacity on a long sequence and panics, and the
+	// filter reads none of what it would collect.
+	var state byte
+	for i := 0; i < len(s); {
+		seq, _, n, next := ansi.DecodeSequence(s[i:], state, nil)
+		state = next
+		if n == 0 {
+			// The decoder makes no progress past a byte that starts
+			// no rune, and such a byte is no text.
+			i++
+			continue
+		}
+		i += n
+		if keepsRendered(seq) {
+			b.WriteString(seq)
+		}
+	}
+	return b.String()
+}
+
+// keepsRendered reports whether one decoded sequence is something the
+// terminal should obey.
+func keepsRendered(seq string) bool {
+	if len(seq) == 1 {
+		// One byte: printable ASCII reads, and so do the newline and
+		// the tab the render lays its rows out with. Every other C0
+		// control, a raw C1 control byte and DEL do not.
+		c := seq[0]
+		return c == '\n' || c == '\t' || c >= 0x20 && c < 0x7f
+	}
+	if opensSequence(seq[0]) {
+		// An escape sequence is the styling the render painted, or it
+		// is not obeyed at all.
+		return isSGR(seq)
+	}
+	if strings.ContainsFunc(seq, isC1Control) {
+		// The same control a terminal obeys as a byte, written as the
+		// code point that names it.
+		return false
+	}
+	// Bytes that are no rune are no text either.
+	return utf8.ValidString(seq)
+}
+
+// opensSequence reports whether c opens a control sequence. The parser
+// reads the 7-bit escape and the 8-bit C1 introducers alike, and the
+// raw introducer is as much a sequence to drop as the escape is.
+func opensSequence(c byte) bool {
+	if c == 0x1b {
+		return true
+	}
+	switch c {
+	case 0x90, 0x98, 0x9b, 0x9d, 0x9e, 0x9f: // DCS, SOS, CSI, OSC, PM, APC
+		return true
+	}
+	return false
+}
+
+// isC1Control reports whether r is one of the C1 controls a terminal
+// obeys, U+0080 through U+009F.
+func isC1Control(r rune) bool {
+	return r >= 0x80 && r <= 0x9f
+}
+
+// isSGR reports whether seq selects a graphic rendition: the colour and
+// weight the render paints with. It is the one escape sequence the
+// markdown renderer emits.
+func isSGR(seq string) bool {
+	if len(seq) < 3 || seq[0] != 0x1b || seq[1] != '[' || seq[len(seq)-1] != 'm' {
+		return false
+	}
+	for i := 2; i < len(seq)-1; i++ {
+		// Digits, ':' and ';' only. A private marker (< = > ?) or an
+		// intermediate byte puts the sequence in another command space,
+		// where 'm' is not styling: CSI > 4;2 m sets the keyboard mode.
+		if seq[i] < '0' || seq[i] > ';' {
+			return false
+		}
+	}
+	return true
 }
 
 // toolCall renders one tool call.
