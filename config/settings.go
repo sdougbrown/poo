@@ -430,13 +430,17 @@ type Finish struct {
 
 // CLIRegistry are the cli registry's settings.
 type CLIRegistry struct {
-	// Paths are the registry directories.
+	// Paths are the registry directories, resolved against the working
+	// directory; a path that starts with ~/ is under the home directory
+	// instead.
 	Paths []string `json:"paths,omitempty"`
 }
 
 // Feeds are the feed manifests' settings.
 type Feeds struct {
-	// Paths are the feed manifest directories.
+	// Paths are the feed manifest directories, resolved against the
+	// working directory; a path that starts with ~/ is under the home
+	// directory instead.
 	Paths []string `json:"paths,omitempty"`
 }
 
