@@ -88,15 +88,6 @@ func TestTheUIReadsTheSettingsTheCommandResolves(t *testing.T) {
 	}
 }
 
-// TestTheReplRefusesItsFlagsBeforeTheServerStarts covers the repl's
-// own flag handling: a flag it does not know is a refusal, and no
-// server starts for it.
-func TestTheReplRefusesItsFlagsBeforeTheServerStarts(t *testing.T) {
-	if code := run([]string{"repl", "--no-such-flag"}); code != 2 {
-		t.Errorf("an unknown flag exited %d, want 2", code)
-	}
-}
-
 // TestACommandReadsTheProjectSettings covers the discovery wiring every
 // non-door command shares: a project settings file a command's directory
 // holds is the settings the command runs under, without --settings or

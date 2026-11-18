@@ -1,6 +1,7 @@
 package pootest
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,6 +57,12 @@ func IsolateStateRoot(dir string) error {
 	return os.Setenv(StateRootEnv, dir)
 }
 
+// ServeSubcommand is the subcommand the repl starts its server as:
+// os.Executable() ServeSubcommand. The guard in Main compares
+// os.Args[1] against it, so a rename on either side fails a test
+// instead of silently disabling the guard.
+const ServeSubcommand = "serve"
+
 // Main runs a package's tests under a settings file of the tests' own,
 // and returns the code TestMain passes to os.Exit.
 //
@@ -70,7 +77,16 @@ func IsolateStateRoot(dir string) error {
 // The file lives in a directory of the process's own, so packages
 // running at the same time never write over one another, and the
 // directory is removed once the tests finish.
+//
+// A test binary started as ServeSubcommand is refused before anything
+// else: the repl starts its server as os.Executable() ServeSubcommand,
+// which under go test is the test binary, so a test that reached the
+// real server launch would re-run the suite recursively.
 func Main(m *testing.M) int {
+	if len(os.Args) > 1 && os.Args[1] == ServeSubcommand {
+		fmt.Fprintf(os.Stderr, "poo tests: the test binary was started as %q: a test reached the real server launch instead of refusing first\n", ServeSubcommand)
+		return 2
+	}
 	dir, err := os.MkdirTemp("", "poo-test-settings-")
 	if err != nil {
 		println("poo tests: making the settings directory:", err.Error())

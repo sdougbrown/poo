@@ -13,6 +13,7 @@ import (
 	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/repl"
 	"github.com/sdougbrown/poo/session"
 )
 
@@ -22,7 +23,7 @@ import (
 // handoff forgets is a flag the session never sees.
 func TestTheReplHandsItsServerTheFlagsItParsed(t *testing.T) {
 	app := pooApp(io.Discard)
-	repl, err := clicontract.Parse(app, []string{
+	parsed, err := clicontract.Parse(app, []string{
 		"repl",
 		"--settings", "settings.yaml",
 		"--ephemeral",
@@ -39,33 +40,33 @@ func TestTheReplHandsItsServerTheFlagsItParsed(t *testing.T) {
 		t.Fatalf("parsing the repl's flags: %v", err)
 	}
 
-	argv := append([]string{"serve"}, renderFlags(repl, serverFlagSpecs())...)
+	argv := append([]string{repl.ServeSubcommand}, renderFlags(parsed, serverFlagSpecs())...)
 	server, err := clicontract.Parse(app, argv)
 	if err != nil {
 		t.Fatalf("the server refused the flags the repl spelled (%v): %v", argv, err)
 	}
 
-	for name := range repl.Supplied {
+	for name := range parsed.Supplied {
 		if !server.Supplied[name] {
 			t.Errorf("the handoff dropped --%s: %v", name, argv)
 		}
 	}
-	for name, value := range repl.Flags {
+	for name, value := range parsed.Flags {
 		if server.Flags[name] != value {
 			t.Errorf("--%s is %q for the server, want %q", name, server.Flags[name], value)
 		}
 	}
-	for name, value := range repl.Bools {
+	for name, value := range parsed.Bools {
 		if server.Bools[name] != value {
 			t.Errorf("--%s is %t for the server, want %t", name, server.Bools[name], value)
 		}
 	}
-	for name, value := range repl.Ints {
+	for name, value := range parsed.Ints {
 		if server.Ints[name] != value {
 			t.Errorf("--%s is %d for the server, want %d", name, server.Ints[name], value)
 		}
 	}
-	for name, values := range repl.Repeated {
+	for name, values := range parsed.Repeated {
 		if !slices.Equal(server.Repeated[name], values) {
 			t.Errorf("--%s is %q for the server, want %q", name, server.Repeated[name], values)
 		}
@@ -502,5 +503,31 @@ func TestTheReplRefusesAResumedSessionFromAnotherDirectory(t *testing.T) {
 	}
 	if stdout != "" {
 		t.Errorf("poo repl --resume wrote %q, so a repl started", stdout)
+	}
+}
+
+// TestTheReplRefusesABadFlagBeforeTheServerStarts covers the repl's
+// own flag validation: a flag the validation rejects is refused before
+// the server starts, so no server child is spawned for it.
+func TestTheReplRefusesABadFlagBeforeTheServerStarts(t *testing.T) {
+	code, stderr := runCLI(t, "repl", "--tools-mode", "weird")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "--tools-mode") {
+		t.Errorf("the error is %q, want it to name --tools-mode", stderr)
+	}
+}
+
+// TestTheReplRefusesAnUnknownFlagBeforeTheServerStarts covers the
+// parse-level refusal: a flag no command declares is refused before
+// the repl runs, so no server child is spawned for it either.
+func TestTheReplRefusesAnUnknownFlagBeforeTheServerStarts(t *testing.T) {
+	code, stderr := runCLI(t, "repl", "--no-such-flag")
+	if code != 2 {
+		t.Errorf("the exit code is %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "--no-such-flag") {
+		t.Errorf("the error is %q, want it to name --no-such-flag", stderr)
 	}
 }
