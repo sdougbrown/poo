@@ -15,6 +15,22 @@ the factory, the injected tools, the conformance suite and the closure gate.
 **Status: experimental.** The Go APIs, settings and wire protocol may change
 without a deprecation period until the TUI launches.
 
+## Install
+
+From a release, into `~/.local/bin` (set `BINDIR` for another directory):
+
+```
+curl -fsSL https://raw.githubusercontent.com/sdougbrown/poo/main/install.sh | sh
+```
+
+Or from source with Go 1.26 or newer:
+
+```
+go install github.com/sdougbrown/poo/cmd/poo@latest
+```
+
+To build from a checkout instead, see [Development](#development).
+
 ## What works today
 
 A session runs against an OpenAI-compatible endpoint and settles with a
@@ -421,7 +437,7 @@ Anthropic Messages is written down in
 
 ## Development
 
-Requires [mise](https://mise.jdx.dev/) and Go 1.25 (see `mise.toml`).
+Requires [mise](https://mise.jdx.dev/) and Go 1.26 (see `mise.toml`).
 
 ```
 mise exec -- go vet ./...
