@@ -82,10 +82,13 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 // with nothing to continue: the caller refuses that case, rather than
 // start a session nobody asked for.
 //
-// Either flag opens a session the store holds, so the session it opens is
-// the one the store lists: an id the store does not hold, or a session
-// that works in another directory, is refused here, before a server
-// starts.
+// Either flag opens a session already on disk, so the session it opens is
+// one the store holds: an id it does not hold, or a session that works in
+// another directory, is refused here, before a server starts.
+//
+// --resume reads the session's own log, so a sibling that will not open is
+// not this session's failure. --continue reads the store's listing: which
+// session is the newest is only in the store's answer.
 func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if o.cont && o.resume != "" {
 		return "", errors.New("--continue and --resume are alternatives: give one")
@@ -104,7 +107,14 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if config.SessionMode(settings, overrides) == "ephemeral" {
 		return "", errors.New("--continue and --resume open a logged session, and this command runs without one: drop --ephemeral, or the settings' session.mode")
 	}
-	store, err := o.openStore(workingDir)
+	dir, err := config.SessionDirectory(settings, overrides)
+	if err != nil {
+		return "", err
+	}
+	if o.resume != "" {
+		return namedSession(dir, o.resume, workingDir)
+	}
+	store, err := session.NewStore(dir)
 	if err != nil {
 		return "", err
 	}
@@ -112,9 +122,6 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 	listings, err := store.List(context.Background())
 	if err != nil {
 		return "", err
-	}
-	if o.resume != "" {
-		return namedSession(listings, o.resume, workingDir, store.Dir())
 	}
 	listing, ok := pickContinue(listings, workingDir)
 	if !ok {
@@ -126,6 +133,10 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 // namedSession returns the session --resume names, once the store holds it
 // and it works where this repl does.
 //
+// The session's own log is what it reads, not the store's listing: the
+// listing reads every session in the directory, and one of them being
+// unreadable is not this session's failure.
+//
 // The session's tools run in the directory it recorded, while the
 // statusline, the settings' rules and the decider read the one the repl
 // runs in, so a session from another directory is refused rather than run
@@ -135,18 +146,21 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 // A session another process holds is not refused here: the load reports
 // the lock, and a refusal there says the same thing with the session's
 // own answer.
-func namedSession(listings []session.Listing, id, workingDir, storeDir string) (string, error) {
-	for _, listing := range listings {
-		if listing.ID != id {
-			continue
-		}
-		if !sameDir(listing.WorkingDir, workingDir) {
-			return "", fmt.Errorf("session %s works in %s: resume it from there, or pass --working-dir %s",
-				id, listing.WorkingDir, listing.WorkingDir)
-		}
-		return id, nil
+func namedSession(storeDir, id, workingDir string) (string, error) {
+	meta, err := session.MetadataOf(storeDir, id)
+	switch {
+	case errors.Is(err, session.ErrSessionNotFound):
+		return "", fmt.Errorf("no session %s in %s", id, storeDir)
+	case errors.Is(err, session.ErrInvalidSessionID):
+		return "", fmt.Errorf("%s is not a session id: an id is a plain name", id)
+	case err != nil:
+		return "", err
 	}
-	return "", fmt.Errorf("no session %s in %s", id, storeDir)
+	if !sameDir(meta.WorkingDir, workingDir) {
+		return "", fmt.Errorf("session %s works in %s: resume it from there, or pass --working-dir %s",
+			id, meta.WorkingDir, meta.WorkingDir)
+	}
+	return id, nil
 }
 
 // pickContinue returns the session --continue opens: the one whose last

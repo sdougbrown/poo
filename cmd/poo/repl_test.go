@@ -373,6 +373,16 @@ func TestResumeNeedsTheSessionInItsOwnDirectory(t *testing.T) {
 		t.Errorf("the refusal is %q, want it to name the session and the store %s", err, sessionDir)
 	}
 
+	// An id that is not a plain name is refused, and the refusal names it:
+	// the id is a file name in the store, so one that spells a path is not
+	// looked for outside it.
+	o.resume = "../there-session"
+	if _, err := o.resumeID(here); err == nil {
+		t.Error("an id that is not a plain name was opened")
+	} else if !strings.Contains(err.Error(), "../there-session") {
+		t.Errorf("the refusal is %q, want it to name the id", err)
+	}
+
 	// The lock is the server's to report: a session another process
 	// holds is the id the repl hands the load.
 	held, err := session.Acquire(session.LockPath(sessionDir, "here-session"))
@@ -383,6 +393,36 @@ func TestResumeNeedsTheSessionInItsOwnDirectory(t *testing.T) {
 	o.resume = "here-session"
 	if id, err := o.resumeID(here); err != nil || id != "here-session" {
 		t.Errorf("resuming a locked session is (%q, %v), want the id and no refusal", id, err)
+	}
+}
+
+// TestResumeReadsOnlyTheSessionItNames covers the lookup: --resume reads the
+// session's own log, so a session in the same store that this process cannot
+// read is not this session's failure. The store's listing is what --continue
+// reads, and it reads every log in the directory.
+func TestResumeReadsOnlyTheSessionItNames(t *testing.T) {
+	base := t.TempDir()
+	sessionDir := filepath.Join(base, "sessions")
+	settingsFile := theSettings(t, base, "http://localhost:4000/v1")
+	here := filepath.Join(base, "here")
+	if err := os.MkdirAll(here, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", here, err)
+	}
+	recordSession(t, sessionDir, "here-session", here, time.Now())
+	if err := os.WriteFile(filepath.Join(sessionDir, "unreadable.jsonl"), []byte("{}\n"), 0o000); err != nil {
+		t.Fatalf("writing the unreadable session: %v", err)
+	}
+	if _, err := os.ReadFile(filepath.Join(sessionDir, "unreadable.jsonl")); err == nil {
+		t.Skip("this process reads a file it does not own, so a sibling cannot be made unreadable")
+	}
+
+	o := replOptions{}
+	o.settingsFile = settingsFile
+	o.sessionDir = sessionDir
+	o.resume = "here-session"
+	id, err := o.resumeID(here)
+	if err != nil || id != "here-session" {
+		t.Errorf("resuming here-session beside an unreadable session is (%q, %v), want the id and no refusal", id, err)
 	}
 }
 
