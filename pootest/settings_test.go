@@ -26,16 +26,26 @@ func TestMain(m *testing.M) {
 	os.Exit(pootest.Main(m))
 }
 
+// serveGuardChild marks the child TestTheTestBinaryRefusesTheServeFlag
+// starts, so a regressed guard cannot recurse.
+const serveGuardChild = "POO_SERVE_GUARD_CHILD"
+
 // TestTheTestBinaryRefusesTheServeFlag covers the guard Main carries:
 // the repl starts its server as os.Executable() serve, which under
 // go test is the test binary, so a test that reached the real server
 // launch would re-run the suite recursively. The guard refuses the
 // flag before any test runs, so the recursion stops at the guard.
 func TestTheTestBinaryRefusesTheServeFlag(t *testing.T) {
+	// A child that got past the guard runs this suite, so it reaches this
+	// test again: it fails here instead of starting a grandchild.
+	if os.Getenv(serveGuardChild) == "1" {
+		t.Fatal("the guard let the test binary run as serve")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, os.Args[0], "serve")
+	cmd.Env = append(os.Environ(), serveGuardChild+"=1")
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	var exitErr *exec.ExitError
