@@ -153,6 +153,32 @@ func (t *backgroundTool) Call(ctx context.Context, in Prepared, env ToolEnv) (To
 	return ToolResult{}, nil
 }
 
+// TestABackgroundToolWithoutASchemaOptsOut covers the opt-out for a
+// background-capable tool: an empty schema still means no validation,
+// so the session starts and the tool takes its chances with Prepare.
+func TestABackgroundToolWithoutASchemaOptsOut(t *testing.T) {
+	compiled, err := compileArgSchemas(map[string]Tool{"bare": &backgroundBareTool{}})
+	if err != nil {
+		t.Fatalf("compiling the schemas: %v", err)
+	}
+	if err := compiled.validate("bare", json.RawMessage(`{"anything": true}`)); err != nil {
+		t.Errorf("the schema-less background tool's call is refused: %v", err)
+	}
+}
+
+// backgroundBareTool may run in the background and declares no schema.
+type backgroundBareTool struct{}
+
+func (t *backgroundBareTool) Spec() ToolSpec {
+	return ToolSpec{Name: "bare", Background: BackgroundAllowed}
+}
+func (t *backgroundBareTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepared, error) {
+	return preparedStub{}, nil
+}
+func (t *backgroundBareTool) Call(ctx context.Context, in Prepared, env ToolEnv) (ToolResult, error) {
+	return ToolResult{}, nil
+}
+
 // schemaTool is a tool whose schema is fetch-shaped, for the
 // enforcement tests.
 type schemaTool struct{}

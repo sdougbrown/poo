@@ -41,13 +41,7 @@ func compileArgSchemas(tools map[string]Tool) (*argSchemas, error) {
 		raws:    map[string]map[string]any{},
 	}
 	for name, tool := range tools {
-		spec := tool.Spec()
-		if spec.Background == BackgroundAllowed {
-			// The model is offered the reserved background argument, so
-			// the compiled contract and the refusal's vocabulary both
-			// read the schema the model was shown.
-			spec.Schema = withBackgroundSchema(spec.Schema)
-		}
+		spec := shownSpec(tool)
 		if len(spec.Schema) == 0 {
 			continue
 		}
