@@ -38,13 +38,13 @@ func TestSessionAppliesFileToolRestrictions(t *testing.T) {
 		},
 		{
 			tool: "grep", newTool: func() poo.Tool { return grep.New() },
-			restrict:  func(o *poo.Options, v bool) { o.RestrictGrep = v },
-			args:      map[string]string{"path": outside, "pattern": "needle"},
+			restrict: func(o *poo.Options, v bool) { o.RestrictGrep = v },
+			args:     map[string]string{"path": outside, "pattern": "needle"},
 		},
 		{
 			tool: "edit", newTool: func() poo.Tool { return edit.New() },
-			restrict:  func(o *poo.Options, v bool) { o.RestrictEdit = v },
-			args:      map[string]string{"path": editPath, "old": "hello", "new": "world"},
+			restrict: func(o *poo.Options, v bool) { o.RestrictEdit = v },
+			args:     map[string]string{"path": editPath, "old": "hello", "new": "world"},
 		},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
