@@ -2,12 +2,13 @@
 # install.sh — bootstrapping installer for poo
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/sdougbrown/poo/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/sdougbrown/poo/main/install.sh | sh
 #
-# Downloads the latest release binary for your platform from GitHub Releases
-# and installs it to ~/.local/bin (or a directory of your choice via BINDIR).
+# POSIX sh. Downloads the latest release binary for your platform from GitHub
+# Releases and installs it to ~/.local/bin (or a directory of your choice via
+# BINDIR).
 
-set -euo pipefail
+set -eu
 
 OWNER="sdougbrown"
 REPO="poo"

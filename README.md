@@ -437,7 +437,7 @@ Anthropic Messages is written down in
 
 ## Development
 
-Requires [mise](https://mise.jdx.dev/) and Go 1.25 (see `mise.toml`).
+Requires [mise](https://mise.jdx.dev/) and Go 1.26 (see `mise.toml`).
 
 ```
 mise exec -- go vet ./...
