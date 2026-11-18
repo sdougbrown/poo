@@ -296,6 +296,10 @@ type Summary struct {
 
 // Tools are the tools' settings.
 type Tools struct {
+	// Read, Grep and Edit configure file-tool reach.
+	Read FileTool `json:"read,omitempty"`
+	Grep FileTool `json:"grep,omitempty"`
+	Edit FileTool `json:"edit,omitempty"`
 	// Bash are the bash tool's settings.
 	Bash Bash `json:"bash,omitempty"`
 	// Codemode are the codemode tool's settings.
@@ -315,6 +319,12 @@ type Tools struct {
 	// is ignored; a name the binary does not link, or one the core adds
 	// by itself, is an error.
 	Disabled []string `json:"disabled,omitempty"`
+}
+
+// FileTool configures a file tool.
+type FileTool struct {
+	// RestrictToWorkingDir confines the tool to the working directory.
+	RestrictToWorkingDir *bool `json:"restrict_to_working_dir,omitempty"`
 }
 
 // Bash are the bash tool's settings.

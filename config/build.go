@@ -1680,6 +1680,9 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	r.Options.WorkingDir = workingDir
 	r.Options.Env = r.Env
 	r.Options.ProtectedPaths = r.ProtectedPaths
+	r.Options.RestrictRead = settings.Tools.Read.RestrictToWorkingDir != nil && *settings.Tools.Read.RestrictToWorkingDir
+	r.Options.RestrictGrep = settings.Tools.Grep.RestrictToWorkingDir != nil && *settings.Tools.Grep.RestrictToWorkingDir
+	r.Options.RestrictEdit = settings.Tools.Edit.RestrictToWorkingDir != nil && *settings.Tools.Edit.RestrictToWorkingDir
 	r.Options.MaxTurns = settings.Limits.MaxTurns
 	r.Options.MaxRunTokens = settings.Limits.MaxTokensPerRun
 	if settings.Limits.MaxDurationS > 0 {

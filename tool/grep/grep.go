@@ -190,7 +190,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	// The root is resolved once, so a symlinked root is the directory
 	// it points at and the git and walk paths see the same files.
 	resolved := protect.Resolve(abs)
-	if env.WorkingDir != "" {
+	if env.RestrictGrep && env.WorkingDir != "" {
 		workingDir := protect.Resolve(env.WorkingDir)
 		if !protect.Within(workingDir, resolved) {
 			return nil, poo.InvalidArgsf("grep: path is outside the working directory: %s", a.Path)

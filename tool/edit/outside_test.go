@@ -36,7 +36,7 @@ func TestAPathOutsideTheWorkingDirectoryIsRefused(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshalling: %v", err)
 		}
-		_, err = edit.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir})
+		_, err = edit.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir, RestrictEdit: true})
 		if err == nil {
 			t.Errorf("the path %q was accepted", path)
 			continue

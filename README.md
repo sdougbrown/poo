@@ -323,6 +323,20 @@ that does not render. It exits 1 for a failure with no code of its own.
 - A call repeated too often is a doom loop, and the file tools refuse the
   globs in `tools.protected_paths`.
 
+File tools can reach paths outside the working directory by default. To restrict
+individual tools, set:
+
+```yaml
+tools:
+  read: {restrict_to_working_dir: true}
+  grep: {restrict_to_working_dir: true}
+  edit: {restrict_to_working_dir: true}
+```
+
+Restricted `read` can also reach the session's skill directories. Protected
+paths still apply in either mode. These tool restrictions do not confine `bash`;
+use a whole-process sandbox when isolation is required.
+
 The policy is in `poo/perm`.
 
 **Sessions.** A logged session writes one JSONL file under `session.dir`,

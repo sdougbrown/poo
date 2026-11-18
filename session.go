@@ -554,14 +554,18 @@ type Options struct {
 	// ProtectedPaths are the paths the tools must not touch.
 	ProtectedPaths []string
 	// ReadRoots are the directories outside the working directory the
-	// read tool may reach. A session that offers skills names their
-	// directories here: the catalog tells the model to read a skill,
-	// and the skill is not in the tree it is working in.
+	// read tool may reach while it is restricted. A session that
+	// offers skills names their directories here: the catalog tells
+	// the model to read a skill, and the skill is not in the tree it
+	// is working in.
 	//
-	// The tools that change or search a tree keep to the working
-	// directory: guidance is read, not edited, and not searched across
-	// a person's whole collection.
+	// When RestrictRead is off, the read tool may reach any path and
+	// the roots add nothing.
 	ReadRoots []string
+	// RestrictRead, RestrictGrep and RestrictEdit confine the named tools to the working directory.
+	RestrictRead bool
+	RestrictGrep bool
+	RestrictEdit bool
 
 	// MaxTurns is the turn limit. 0 means unlimited. A run that
 	// reaches it settles max_turns.
