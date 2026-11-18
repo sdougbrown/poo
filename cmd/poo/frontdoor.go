@@ -48,8 +48,23 @@ func runUI() int {
 // so `poo -c --working-dir <dir>` reads the settings of the directory it
 // continues the session in.
 func runUIWith(extra []string) int {
-	explicitSettings, workingDir := aliasLine(extra)
-	path, settings, err := resolveSettings(explicitSettings, workingDir)
+	o, parsed := frontDoorOptions(extra)
+	// A line the repl refuses is dispatched as it stands, so the repl
+	// reports the refusal itself: the settings it never ran under come
+	// from where a bare `poo` reads them.
+	explicit, workingDir := "", ""
+	if parsed {
+		explicit, workingDir = o.settingsFile, o.workingDir
+	}
+	// The directory is resolved before the settings, so discovery walks
+	// up from where the line's own --working-dir points, not from this
+	// process's directory.
+	wd, err := workingDirectory(workingDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
+		return usageExitCode
+	}
+	path, settings, err := resolveSettings(explicit, wd)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
 		return usageExitCode
@@ -59,7 +74,24 @@ func runUIWith(extra []string) int {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
 		return usageExitCode
 	}
-	return run(frontDoorLine(name, path, extra))
+	return run(frontDoorLine(name, path, explicit != "", extra))
+}
+
+// frontDoorOptions reads the alias's words the way the repl reads them,
+// so the front door and the interface agree on what a line says: one
+// parser, every spelling it accepts — the single-dash long flags and the
+// `=` forms included — and its refusal for a line it cannot read.
+//
+// A refused line comes back unread: the interface reports it, and the
+// front door resolves nothing on its behalf.
+func frontDoorOptions(extra []string) (replOptions, bool) {
+	inv, err := clicontract.Parse(pooApp(io.Discard), append([]string{"repl"}, extra...))
+	if err != nil {
+		return replOptions{}, false
+	}
+	var o replOptions
+	o.bind(inv)
+	return o, true
 }
 
 // frontDoorAlias returns the words a front-door alias carries and
@@ -82,49 +114,13 @@ func frontDoorAlias(args []string) ([]string, bool) {
 // The settings file is the one the invocation's own words do not name: a
 // line that spells --settings carries it through, and one prepended here
 // would be a second answer to a question the person already answered.
-func frontDoorLine(name, discoveredPath string, extra []string) []string {
+// explicitGiven reports the parse found one.
+func frontDoorLine(name, discoveredPath string, explicitGiven bool, extra []string) []string {
 	args := []string{name}
-	if explicit, _ := aliasLine(extra); explicit == "" && discoveredPath != "" {
+	if !explicitGiven && discoveredPath != "" {
 		args = append(args, "--settings", discoveredPath)
 	}
 	return append(args, extra...)
-}
-
-// aliasLine returns the settings file and the working directory the
-// alias's words name, each empty when they name none.
-//
-// The words are read, not removed: the interface parses them itself, and
-// they have to reach it as the person spelled them. A terminator ends the
-// flags, so a word after it is never read as one.
-func aliasLine(extra []string) (explicitSettings, workingDir string) {
-	for i := 0; i < len(extra); i++ {
-		word := extra[i]
-		if word == "--" {
-			break
-		}
-		name, value, hasValue := strings.Cut(word, "=")
-		switch name {
-		case "--settings":
-			if hasValue {
-				explicitSettings = value
-				continue
-			}
-			if i+1 < len(extra) {
-				i++
-				explicitSettings = extra[i]
-			}
-		case "--working-dir":
-			if hasValue {
-				workingDir = value
-				continue
-			}
-			if i+1 < len(extra) {
-				i++
-				workingDir = extra[i]
-			}
-		}
-	}
-	return explicitSettings, workingDir
 }
 
 // pickUI decides which interface a bare invocation launches.

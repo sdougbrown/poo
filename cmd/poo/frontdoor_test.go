@@ -166,16 +166,25 @@ func TestAFrontDoorIsADeclaredCommand(t *testing.T) {
 // interface, so the session it opens reads what it read.
 func TestABareInvocationHandsTheSettingsToTheInterface(t *testing.T) {
 	cases := []struct {
-		name string
-		path string
-		want []string
+		name     string
+		path     string
+		explicit bool
+		extra    []string
+		want     []string
 	}{
 		{name: "the settings were found", path: "/project/.poo/settings.yaml", want: []string{"repl", "--settings", "/project/.poo/settings.yaml"}},
 		{name: "no settings were found", path: "", want: []string{"repl"}},
+		{
+			name:     "the line names the settings file",
+			path:     "/project/.poo/settings.yaml",
+			explicit: true,
+			extra:    []string{"-c", "--settings", "/mine/settings.json"},
+			want:     []string{"repl", "-c", "--settings", "/mine/settings.json"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := frontDoorLine("repl", c.path, nil)
+			got := frontDoorLine("repl", c.path, c.explicit, c.extra)
 			if !slices.Equal(got, c.want) {
 				t.Errorf("the argv is %q, want %q", got, c.want)
 			}
@@ -187,6 +196,13 @@ func TestABareInvocationHandsTheSettingsToTheInterface(t *testing.T) {
 // come from: the line's --settings and --working-dir are the invocation's,
 // so `poo -c` reads the file they name and discovers from the directory
 // they name, not from the one this process runs in.
+//
+// Every spelling the repl's parser accepts says the same thing here, and a
+// relative directory discovers from where it resolves: the project's file
+// is found from a subdirectory of it. A line that reads none of them is a
+// refusal rather than a launch, so each case names the answer only its own
+// resolution produces: the project's ui, the user's, or the pinned file's
+// bad key.
 func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 	base := t.TempDir()
 	project := filepath.Join(base, "project")
@@ -197,33 +213,83 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 		[]byte(`{"version":1,"ui":"tui"}`), 0o644); err != nil {
 		t.Fatalf("writing the project's settings: %v", err)
 	}
+	// The user's settings are the answer a run that never finds the
+	// project's gives, so a regression here is a refusal that names the
+	// wrong file instead of a repl that starts.
+	userConfig := filepath.Join(base, "config")
+	if err := os.MkdirAll(filepath.Join(userConfig, "poo"), 0o755); err != nil {
+		t.Fatalf("writing the user's config directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userConfig, "poo", "settings.json"),
+		[]byte(`{"version":1,"ui":"gui"}`), 0o644); err != nil {
+		t.Fatalf("writing the user's settings: %v", err)
+	}
 	pinned := filepath.Join(base, "pinned.json")
 	if err := os.WriteFile(pinned, []byte(`{"version":1,"no_such_key":true}`), 0o644); err != nil {
 		t.Fatalf("writing the pinned settings: %v", err)
 	}
-	t.Chdir(t.TempDir())
-	t.Setenv("POO_SETTINGS", "")
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, "no-config"))
+	sub := filepath.Join(project, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("writing the project's subdirectory: %v", err)
+	}
+	elsewhere := t.TempDir()
 
-	// The project's settings name an interface this binary does not
-	// offer: the refusal says so, and no interface runs.
-	code, stderr := runCLI(t, "-c", "--working-dir", project)
-	if code != 2 {
-		t.Errorf("poo -c --working-dir exited %d, want 2", code)
+	cases := []struct {
+		name string
+		cwd  string
+		args []string
+		want string
+	}{
+		{
+			name: "the working directory the line names",
+			args: []string{"-c", "--working-dir", project},
+			want: "tui",
+		},
+		{
+			name: "a single-dash working directory",
+			args: []string{"-c", "-working-dir", project},
+			want: "tui",
+		},
+		{
+			name: "a single-dash working directory with an equals sign",
+			args: []string{"-c", "-working-dir=" + project},
+			want: "tui",
+		},
+		{
+			name: "a relative working directory discovers from where it resolves",
+			cwd:  sub,
+			args: []string{"-c", "--working-dir", "."},
+			want: "tui",
+		},
+		{
+			name: "the settings file the line names",
+			args: []string{"-c", "--settings", pinned},
+			want: "no_such_key",
+		},
+		{
+			name: "a single-dash settings file",
+			args: []string{"-c", "-settings", pinned},
+			want: "no_such_key",
+		},
 	}
-	if !strings.Contains(stderr, "tui") {
-		t.Errorf("the refusal does not name the project's ui: %q", stderr)
-	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cwd := c.cwd
+			if cwd == "" {
+				cwd = elsewhere
+			}
+			t.Chdir(cwd)
+			t.Setenv("POO_SETTINGS", "")
+			t.Setenv("XDG_CONFIG_HOME", userConfig)
 
-	// A settings file the line names is the one read, and a key it does
-	// not have is the refusal: a run that fell back to discovery would
-	// launch the interface instead.
-	code, stderr = runCLI(t, "-c", "--settings", pinned)
-	if code != 2 {
-		t.Errorf("poo -c --settings exited %d, want 2", code)
-	}
-	if !strings.Contains(stderr, "no_such_key") {
-		t.Errorf("the refusal does not name the pinned file's key: %q", stderr)
+			code, stderr := runCLI(t, c.args...)
+			if code != 2 {
+				t.Errorf("poo %q exited %d, want 2", c.args, code)
+			}
+			if !strings.Contains(stderr, c.want) {
+				t.Errorf("poo %q refused with %q, want it to name %q", c.args, stderr, c.want)
+			}
+		})
 	}
 }
 
@@ -234,15 +300,17 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 // has.
 //
 // The line is also where the front door's own settings come from, so the
-// test reads them the way the launch does: the working directory and the
-// settings file as the line spells them, and the argv the interface is
-// started with.
+// test reads them the way the launch does: the words parsed by the repl's
+// own parser, and the argv the interface is started with.
 func TestTheContinueAliasIsTheFrontDoor(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
 		door bool
-		// settings and dir are what the alias's words name for the
+		// parsed is whether the repl's parser read the line at all: one
+		// it refuses is dispatched as it stands.
+		parsed bool
+		// settings and dir are what the line's words name for the
 		// settings file and the working directory.
 		settings string
 		dir      string
@@ -251,21 +319,24 @@ func TestTheContinueAliasIsTheFrontDoor(t *testing.T) {
 		argv []string
 	}{
 		{
-			name: "the shorthand",
-			args: []string{"-c"},
-			argv: []string{"repl", "--settings", "/project/settings.yaml", "-c"},
-			door: true,
+			name:   "the shorthand",
+			args:   []string{"-c"},
+			parsed: true,
+			argv:   []string{"repl", "--settings", "/project/settings.yaml", "-c"},
+			door:   true,
 		},
 		{
-			name: "the long flag with the repl's flags after it",
-			args: []string{"--continue", "--working-dir", "/work"},
-			dir:  "/work",
-			argv: []string{"repl", "--settings", "/project/settings.yaml", "--continue", "--working-dir", "/work"},
-			door: true,
+			name:   "the long flag with the repl's flags after it",
+			args:   []string{"--continue", "--working-dir", "/work"},
+			parsed: true,
+			dir:    "/work",
+			argv:   []string{"repl", "--settings", "/project/settings.yaml", "--continue", "--working-dir", "/work"},
+			door:   true,
 		},
 		{
 			name:     "resume names the session and keeps its own settings",
 			args:     []string{"--resume", "s1", "--settings", "/mine/settings.json"},
+			parsed:   true,
 			settings: "/mine/settings.json",
 			argv:     []string{"repl", "--resume", "s1", "--settings", "/mine/settings.json"},
 			door:     true,
@@ -273,8 +344,25 @@ func TestTheContinueAliasIsTheFrontDoor(t *testing.T) {
 		{
 			name:     "the settings spelled with an equals sign",
 			args:     []string{"-c", "--settings=/mine/settings.json"},
+			parsed:   true,
 			settings: "/mine/settings.json",
 			argv:     []string{"repl", "-c", "--settings=/mine/settings.json"},
+			door:     true,
+		},
+		{
+			name:   "a single-dash long flag is the flag it spells",
+			args:   []string{"-c", "-working-dir", "/work"},
+			parsed: true,
+			dir:    "/work",
+			argv:   []string{"repl", "--settings", "/project/settings.yaml", "-c", "-working-dir", "/work"},
+			door:   true,
+		},
+		{
+			name:     "a single-dash settings file with an equals sign",
+			args:     []string{"-c", "-settings=/mine/settings.json"},
+			parsed:   true,
+			settings: "/mine/settings.json",
+			argv:     []string{"repl", "-c", "-settings=/mine/settings.json"},
 			door:     true,
 		},
 		{
@@ -303,12 +391,15 @@ func TestTheContinueAliasIsTheFrontDoor(t *testing.T) {
 			if !door {
 				return
 			}
-			settings, dir := aliasLine(extra)
-			if settings != c.settings || dir != c.dir {
-				t.Errorf("aliasLine(%q) is the settings %q in %q, want %q in %q",
-					extra, settings, dir, c.settings, c.dir)
+			o, parsed := frontDoorOptions(extra)
+			if parsed != c.parsed {
+				t.Fatalf("the repl parsed %q: %t, want %t", extra, parsed, c.parsed)
 			}
-			if got := frontDoorLine("repl", "/project/settings.yaml", extra); !slices.Equal(got, c.argv) {
+			if o.settingsFile != c.settings || o.workingDir != c.dir {
+				t.Errorf("the line %q names the settings %q in %q, want %q in %q",
+					extra, o.settingsFile, o.workingDir, c.settings, c.dir)
+			}
+			if got := frontDoorLine("repl", "/project/settings.yaml", o.settingsFile != "", extra); !slices.Equal(got, c.argv) {
 				t.Errorf("the argv is %q, want %q", got, c.argv)
 			}
 		})
