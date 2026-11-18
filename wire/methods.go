@@ -292,6 +292,7 @@ func (s *server) sessionHistory(raw json.RawMessage) (any, *protocol.Error) {
 			RunID:    item.RunID,
 			Turn:     item.Turn,
 			Role:     string(item.Role),
+			Origin:   string(item.Origin),
 			Text:     item.Text,
 			Handle:   item.Handle,
 			Tool:     item.Tool,

@@ -586,6 +586,24 @@ func (s *suite) steer() {
 	if !requestHolds(requests[1], "the steered message") {
 		s.t.Errorf("the second request does not carry the steered message: %v", requests[1])
 	}
+
+	// The history says who put each message there: the prompt is the
+	// person's and the steered line is the steer's, so a client drawing
+	// the scrollback does not read the steer as a line that was typed.
+	if s.handshakeResult.Capabilities.HistoryOrigin {
+		origins := map[string]string{}
+		for _, item := range s.history(c, sessionID, 0, 500).Items {
+			if item.Type == "message" && item.Role == "user" {
+				origins[item.Text] = item.Origin
+			}
+		}
+		if got := origins["do the thing"]; got != "user" {
+			s.t.Errorf("the prompt's origin is %q, want user", got)
+		}
+		if got := origins["the steered message"]; got != "steer" {
+			s.t.Errorf("the steered message's origin is %q, want steer", got)
+		}
+	}
 }
 
 // waitToolCall waits for the tool call of a run.

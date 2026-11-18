@@ -58,6 +58,10 @@ type Capabilities struct {
 	Jobs bool `json:"jobs"`
 	// Feeds says the binary runs the feeds its settings name.
 	Feeds bool `json:"feeds"`
+	// HistoryOrigin says the binary's session/history items carry the
+	// record's origin, so a client can tell a line the person typed
+	// from a job's result, a feed's message or a hook's step.
+	HistoryOrigin bool `json:"history_origin"`
 }
 
 // ToolInfo describes one tool the session offers.
@@ -377,6 +381,13 @@ type HistoryItem struct {
 	Turn int `json:"turn,omitempty"`
 	// Role is the message's role, for a message item.
 	Role string `json:"role,omitempty"`
+	// Origin is the record's origin, as the log carries it: "user" for
+	// a line the person typed, "steer", "interrupt" or "follow_up" for
+	// a line that rode a run, "job" for a background job's result,
+	// "hook:<name>" for a step's output and "feed:<name>" for a feed's.
+	// It is empty on a record that had none, which is every item a
+	// binary without capabilities.history_origin sends.
+	Origin string `json:"origin,omitempty"`
 	// Text is the item's text.
 	Text string `json:"text,omitempty"`
 	// Handle is the tool call's handle, for a tool item.

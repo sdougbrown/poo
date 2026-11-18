@@ -49,6 +49,12 @@ func TestInitializeReportsTheBinary(t *testing.T) {
 	if !result.Capabilities.Compaction {
 		t.Error("the binary compacts, so the capability should say so")
 	}
+	// The history items carry their records' origins, and the handshake
+	// announces it: a client reads the field only because it was told
+	// the binary sends one.
+	if !result.Capabilities.HistoryOrigin {
+		t.Error("the history carries an origin, so the capability should say so")
+	}
 }
 
 // The handshake names the default profile, and a session whose params
@@ -1200,6 +1206,71 @@ func TestTheHistoryCarriesAToolCallsSummary(t *testing.T) {
 		return
 	}
 	t.Fatal("the history holds no tool call")
+}
+
+// The history carries each item's origin, so a client can tell a line
+// the person typed from one the session put there itself.
+func TestTheHistoryCarriesEachItemsOrigin(t *testing.T) {
+	factory := newTestFactory(t, func() poo.ChatTransport {
+		return pootest.NewTransport(
+			pootest.Turn{Calls: []pootest.Call{{Name: "test", Arguments: json.RawMessage(`{}`)}}},
+			pootest.Turn{Text: "done", Finish: "stop"},
+		)
+	})
+	h := newHarness(t, factory, wire.Bounds{})
+	h.initialize()
+
+	sessionID := createSession(t, h)
+	if _, rerr := h.call(protocol.MethodRunPrompt, protocol.PromptParams{SessionID: sessionID, Text: "hi"}); rerr != nil {
+		t.Fatalf("the prompt was refused: %v", rerr)
+	}
+	h.event("run.settled")
+
+	result, rerr := h.call(protocol.MethodSessionHistory, protocol.HistoryParams{SessionID: sessionID})
+	if rerr != nil {
+		t.Fatalf("the history was refused: %v", rerr)
+	}
+	var page protocol.HistoryResult
+	if err := json.Unmarshal(result, &page); err != nil {
+		t.Fatalf("decoding the history: %v", err)
+	}
+	// The core's origin is the wire's: the typed line is the person's,
+	// and the call is the model's, which no client may read as typed.
+	origins := map[string]string{}
+	for _, item := range page.Items {
+		if item.Type == "message" && item.Role == "user" {
+			origins["user message"] = item.Origin
+		}
+		if item.Type == "tool_call" {
+			origins["tool call"] = item.Origin
+		}
+	}
+	if got := origins["user message"]; got != string(poo.OriginUser) {
+		t.Errorf("the typed message's origin is %q, want %q", got, poo.OriginUser)
+	}
+	if got := origins["tool call"]; got != string(poo.OriginModel) {
+		t.Errorf("the tool call's origin is %q, want %q", got, poo.OriginModel)
+	}
+}
+
+// The history item's origin is optional on the wire: a binary that had
+// nothing to say about an item writes no field, and a client that does
+// not know the field reads the rest of the item.
+func TestTheHistoryItemsOriginIsOptional(t *testing.T) {
+	encoded, err := json.Marshal(protocol.HistoryItem{Seq: 1, Type: "message", Role: "user", Text: "hi"})
+	if err != nil {
+		t.Fatalf("encoding the item: %v", err)
+	}
+	if strings.Contains(string(encoded), `"origin"`) {
+		t.Errorf("the item writes an origin it does not have: %s", encoded)
+	}
+	encoded, err = json.Marshal(protocol.HistoryItem{Seq: 1, Type: "message", Role: "user", Origin: "job", Text: "hi"})
+	if err != nil {
+		t.Fatalf("encoding the item: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"origin":"job"`) {
+		t.Errorf("the item does not write its origin: %s", encoded)
+	}
 }
 
 // The protocol's history limits pin the core's: a one-sided change
