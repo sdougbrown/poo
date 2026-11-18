@@ -36,6 +36,10 @@
 //     exec/bwrap package may import the exec package
 //   - the protect package may import the standard library only
 //   - the caps package may import the standard library only
+//   - the schematext package may import the standard library and the
+//     cli-registry schema package: it renders a schema's findings for
+//     the model, for the core's own schema check and for the registered
+//     CLIs' check alike
 //
 // The import graph comes from "go list -e -deps -json", and the toolchain
 // decides what counts as the standard library. The rules cover each checked
@@ -97,7 +101,7 @@ type rule struct {
 func (c Checker) rules() []rule {
 	m := c.ModulePath
 	return []rule{
-		{path: m, allowed: []string{m + "/prompt", m + "/decide", "github.com/sdougbrown/cli-registry/schema"}},
+		{path: m, allowed: []string{m + "/prompt", m + "/decide", m + "/internal/schematext", "github.com/sdougbrown/cli-registry/schema"}},
 		{path: m + "/prompt"},
 		{path: m + "/prompt/agentsmd"},
 		{path: m + "/skill", allowed: []string{m + "/prompt"}, external: true},
@@ -122,7 +126,8 @@ func (c Checker) rules() []rule {
 		{path: m + "/exec/bwrap", allowed: []string{m + "/exec"}},
 		{path: m + "/protect"},
 		{path: m + "/internal/caps"},
-		{path: m + "/cli", allowed: []string{m + "/prompt"}, external: true},
+		{path: m + "/internal/schematext", allowed: []string{"github.com/sdougbrown/cli-registry/schema"}},
+		{path: m + "/cli", allowed: []string{m + "/prompt", m + "/internal/schematext"}, external: true},
 		{path: m + "/feed", allowed: []string{m + "/exec"}, external: true},
 		{
 			path: m + "/server",
@@ -179,7 +184,7 @@ func (c Checker) rules() []rule {
 		},
 		{
 			path:     m + "/tool/cliregistry",
-			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/internal/envelope", m + "/prompt", m + "/tool/bash"},
+			allowed:  []string{m, m + "/cli", m + "/decide", m + "/exec", m + "/internal/caps", m + "/internal/envelope", m + "/internal/schematext", m + "/prompt", m + "/tool/bash"},
 			external: true,
 		},
 		{

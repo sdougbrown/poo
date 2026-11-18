@@ -11,11 +11,11 @@ import (
 	"time"
 
 	registry "github.com/sdougbrown/cli-registry"
-	"github.com/sdougbrown/cli-registry/schema"
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/exec"
 	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/internal/schematext"
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/tool/bash"
 )
@@ -139,7 +139,8 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	if err := decodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("%s: %v", CallToolName, err)
 	}
-	if _, ok := t.catalog.Lookup(a.Name); !ok {
+	entry, ok := t.catalog.Lookup(a.Name)
+	if !ok {
 		if t.catalog.Len() == 0 {
 			return nil, poo.InvalidArgsf("%s: no CLI is registered", CallToolName)
 		}
@@ -160,7 +161,7 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	}
 	plan, err := t.catalog.Plan(a.Name, args)
 	if err != nil {
-		return nil, planError(a.Name, err)
+		return nil, planError(a.Name, entry.Schema, err)
 	}
 	key := marshal(struct {
 		Name string         `json:"name"`
@@ -177,10 +178,13 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 // checks and both land here. Anything else is the manifest being
 // unusable — a binding that cannot be built, or a working directory that
 // does not resolve — and it is reported as it is.
-func planError(name string, err error) error {
+func planError(name string, schema map[string]any, err error) error {
 	var invalid *registry.ValidationError
 	if errors.As(err, &invalid) {
-		return poo.InvalidArgsf("%s: %s: %s", CallToolName, name, issuesText(invalid.Issues))
+		// The refusal is the model's to correct, so it renders in the
+		// schema's own vocabulary: the shared renderer, aimed at the
+		// CLI's schema.
+		return poo.InvalidArgsf("%s: %s: %s", CallToolName, name, schematext.IssuesText(name, schema, invalid.Issues))
 	}
 	return fmt.Errorf("%s: %s: %w", CallToolName, name, err)
 }
@@ -372,22 +376,6 @@ func decodeStrict(raw json.RawMessage, into any) error {
 		return err
 	}
 	return nil
-}
-
-// issuesText renders schema issues for the model.
-//
-// A path is an RFC 6901 pointer into the arguments, so the model can see
-// which argument it got wrong.
-func issuesText(issues []schema.StructuralIssue) string {
-	parts := make([]string, 0, len(issues))
-	for _, issue := range issues {
-		path := issue.Path
-		if path == "" {
-			path = "arguments"
-		}
-		parts = append(parts, path+": "+issue.Message)
-	}
-	return strings.Join(parts, "; ")
 }
 
 // marshal encodes a value, falling back to an empty object.

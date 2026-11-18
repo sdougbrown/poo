@@ -84,8 +84,18 @@ func (s *Session) toolSpecFor(name string) ToolSpec {
 	if !ok {
 		return ToolSpec{Name: name}
 	}
+	return shownSpec(tool)
+}
+
+// shownSpec returns the spec the model sees for a tool.
+//
+// A tool that may run in the background is offered the reserved
+// background argument, so the schema the model reads, the schema the
+// session validates against, and the vocabulary a refusal renders are
+// one and the same. A tool with no schema opts out of all of it.
+func shownSpec(tool Tool) ToolSpec {
 	spec := tool.Spec()
-	if spec.Background == BackgroundAllowed {
+	if spec.Background == BackgroundAllowed && len(spec.Schema) > 0 {
 		spec.Schema = withBackgroundSchema(spec.Schema)
 	}
 	return spec

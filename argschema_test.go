@@ -72,6 +72,113 @@ func TestAValidatorOfNilValidatesNothing(t *testing.T) {
 	}
 }
 
+// TestAValidatorNamesTheAcceptedArguments covers the outer layer: the
+// session's own schema check renders a refusal in the schema's
+// vocabulary, the way a registered CLI's refusal reads.
+func TestAValidatorNamesTheAcceptedArguments(t *testing.T) {
+	tool := &schemaTool{}
+	compiled, err := compileArgSchemas(map[string]Tool{"probe": tool})
+	if err != nil {
+		t.Fatalf("compiling the schemas: %v", err)
+	}
+	err = compiled.validate("probe", json.RawMessage(`{"url": "https://example.com/", "deep": true}`))
+	if err == nil {
+		t.Fatal("the unknown top-level argument validated")
+	}
+	for _, want := range []string{`unknown argument "deep"`, "probe accepts: format, url*"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not carry %q: %v", want, err)
+		}
+	}
+	err = compiled.validate("probe", json.RawMessage(`{"url": "https://example.com/", "format": "html"}`))
+	if err == nil {
+		t.Fatal("the off-enum value validated")
+	}
+	if !strings.Contains(err.Error(), `"format" must be one of: "raw", "markdown"`) {
+		t.Errorf("the refusal does not name the enum's values: %v", err)
+	}
+	// A refusal of the same kind on two arguments names each argument,
+	// so the model can map a clause to the argument it rejects.
+	err = compiled.validate("probe", json.RawMessage(`{"url": 7, "format": "html"}`))
+	if err == nil {
+		t.Fatal("the pair of misses validated")
+	}
+	for _, want := range []string{`"url" must be a string`, `"format" must be one of: "raw", "markdown"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not carry %q: %v", want, err)
+		}
+	}
+}
+
+// TestAValidatorRendersTheShownSchema covers a background-capable
+// tool: the refusal's accepted list is the schema the model was shown,
+// which carries the reserved background argument the base spec does
+// not declare.
+func TestAValidatorRendersTheShownSchema(t *testing.T) {
+	compiled, err := compileArgSchemas(map[string]Tool{"probe": &backgroundTool{}})
+	if err != nil {
+		t.Fatalf("compiling the schemas: %v", err)
+	}
+	err = compiled.validate("probe", json.RawMessage(`{"url": "https://example.com/", "deep": true}`))
+	if err == nil {
+		t.Fatal("the unknown argument validated")
+	}
+	if !strings.Contains(err.Error(), "probe accepts: background, url*") {
+		t.Errorf("the refusal does not list the shown schema's arguments: %v", err)
+	}
+}
+
+// backgroundTool is a tool the model may ask to run in the
+// background, for the shown-schema test.
+type backgroundTool struct{}
+
+func (t *backgroundTool) Spec() ToolSpec {
+	return ToolSpec{
+		Name:       "probe",
+		Background: BackgroundAllowed,
+		Schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {"url": {"type": "string"}},
+  "required": ["url"],
+  "additionalProperties": false
+}`),
+	}
+}
+
+func (t *backgroundTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepared, error) {
+	return preparedStub{}, nil
+}
+
+func (t *backgroundTool) Call(ctx context.Context, in Prepared, env ToolEnv) (ToolResult, error) {
+	return ToolResult{}, nil
+}
+
+// TestABackgroundToolWithoutASchemaOptsOut covers the opt-out for a
+// background-capable tool: an empty schema still means no validation,
+// so the session starts and the tool takes its chances with Prepare.
+func TestABackgroundToolWithoutASchemaOptsOut(t *testing.T) {
+	compiled, err := compileArgSchemas(map[string]Tool{"bare": &backgroundBareTool{}})
+	if err != nil {
+		t.Fatalf("compiling the schemas: %v", err)
+	}
+	if err := compiled.validate("bare", json.RawMessage(`{"anything": true}`)); err != nil {
+		t.Errorf("the schema-less background tool's call is refused: %v", err)
+	}
+}
+
+// backgroundBareTool may run in the background and declares no schema.
+type backgroundBareTool struct{}
+
+func (t *backgroundBareTool) Spec() ToolSpec {
+	return ToolSpec{Name: "bare", Background: BackgroundAllowed}
+}
+func (t *backgroundBareTool) Prepare(raw json.RawMessage, env PrepareEnv) (Prepared, error) {
+	return preparedStub{}, nil
+}
+func (t *backgroundBareTool) Call(ctx context.Context, in Prepared, env ToolEnv) (ToolResult, error) {
+	return ToolResult{}, nil
+}
+
 // schemaTool is a tool whose schema is fetch-shaped, for the
 // enforcement tests.
 type schemaTool struct{}

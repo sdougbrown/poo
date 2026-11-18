@@ -82,13 +82,13 @@ func TestTheCatalogSectionListsTheEntries(t *testing.T) {
 	lines := strings.Split(section, "\n")
 	var entries []string
 	for _, line := range lines {
-		if strings.HasPrefix(line, "list: ") || strings.HasPrefix(line, "say: ") {
+		if strings.HasPrefix(line, "list: ") || strings.HasPrefix(line, "say: ") || strings.HasPrefix(line, "say (args:") || strings.HasPrefix(line, "list (args:") {
 			entries = append(entries, line)
 		}
 	}
 	want := []string{
-		"list: Print the words it is given, one per line",
-		"say: Say hello to a name",
+		"list (args: words): Print the words it is given, one per line",
+		"say (args: name): Say hello to a name",
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("the section lists %v, want %v", entries, want)

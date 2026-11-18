@@ -19,6 +19,7 @@ import (
 
 	cliregistry "github.com/sdougbrown/cli-registry"
 
+	"github.com/sdougbrown/poo/internal/schematext"
 	"github.com/sdougbrown/poo/prompt"
 )
 
@@ -49,6 +50,10 @@ type Entry struct {
 	Description string
 	// Schema is the JSON schema of the CLI's arguments.
 	Schema map[string]any
+	// Args renders the schema's top-level arguments for the prompt, in
+	// name order, required ones marked, or an empty string when the
+	// schema declares no properties.
+	Args string
 }
 
 // Catalog is the set of registered CLIs a session offers.
@@ -89,6 +94,7 @@ func Load(paths ...string) (*Catalog, error) {
 			Name:        tool.Name,
 			Description: tool.Description,
 			Schema:      tool.InputSchema,
+			Args:        argsHint(tool.InputSchema),
 		})
 	}
 	sort.Slice(c.entries, func(i, j int) bool { return c.entries[i].Name < c.entries[j].Name })
@@ -224,6 +230,14 @@ func (c *Catalog) Plan(name string, args map[string]any) (*cliregistry.Plan, err
 	return c.registry.Plan(tool, args)
 }
 
+// argsHint renders a schema's top-level arguments for a prompt line,
+// or an empty string when the schema declares no properties. Nested
+// arguments stay out: the line is a hint, and a refused call names the
+// schema's own path when the model reaches inside.
+func argsHint(schema map[string]any) string {
+	return schematext.PropertyNames(schema)
+}
+
 //go:embed catalog.md
 var catalogText string
 
@@ -245,9 +259,9 @@ type catalogData struct {
 // template.
 //
 // The full catalog is one line per entry: the name the model calls the
-// CLI by, and what it does. A session that searches the catalog instead
-// is told what the search is and how to use it, and the entries stay out
-// of the prompt.
+// CLI by, its arguments with required ones marked, and what it does. A
+// session that searches the catalog instead is told what the search is
+// and how to use it, and the entries stay out of the prompt.
 //
 // The template renders with the catalog's data, so a prompt directory
 // that replaces the section renders with it too.
