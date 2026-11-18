@@ -343,6 +343,9 @@ func TestCharacterReferencesDecodeToNoEscape(t *testing.T) {
 		// the terminal's keyboard mode, and CSI ? 4 m asks it to reply.
 		{"a keyboard mode in a code span", "before `&#27;[>4;2m` after"},
 		{"a mode query", "before &#27;&#91;?4m after"},
+		// The remaining private markers, written as entities: < and =.
+		{"a private marker less than", "before &#27;[&lt;5m after"},
+		{"a private marker equals", "before &#27;[&#61;5m after"},
 		// More parameters than a parser holds.
 		{"an overlong styling sequence", "before `&#27;[" + strings.Repeat("1;", 33) + "1m` after"},
 	} {
@@ -364,9 +367,11 @@ func TestCharacterReferencesDecodeToNoEscape(t *testing.T) {
 // TestControlBytesStayOutOfTheRenderedText covers the controls the strip
 // leaves behind: a carriage return, a backspace, a bell, a raw C1 byte
 // and the UTF-8 code point that names the same C1 control. Neither the
-// rendered text nor the plain one prints them.
+// rendered text nor the plain one prints them. The tab is the one control
+// the filter keeps: it lays the rows out, so it survives where the others
+// go.
 func TestControlBytesStayOutOfTheRenderedText(t *testing.T) {
-	source := "one\r two\b three\a four\u009b5m five\x9b6m six\u007f seven"
+	source := "one\t\r two\b three\a four\u009b5m five\x9b6m six\u007f seven"
 	for _, branch := range []struct {
 		name string
 		r    *renderer
@@ -380,6 +385,9 @@ func TestControlBytesStayOutOfTheRenderedText(t *testing.T) {
 		}
 		if got := controlBytes(out); len(got) > 0 {
 			t.Errorf("%s: the text carries the control byte(s) %v:\n%q", branch.name, got, out)
+		}
+		if !strings.Contains(out, "\t") {
+			t.Errorf("%s: the tab did not survive:\n%q", branch.name, out)
 		}
 		for _, want := range []string{"one", "seven"} {
 			if !strings.Contains(plain(out), want) {

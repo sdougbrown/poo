@@ -131,6 +131,32 @@ func TestAPipeStripsTheEscapesAModelSends(t *testing.T) {
 	}
 }
 
+// TestTheStreamPathFiltersTheDecodedEscape covers the filter on the
+// stream's path, not the direct markdown call: a delta that carries an
+// entity that decodes to an escape and a control byte reaches the
+// filter when the block settles, and neither the escape nor the control
+// byte survives. The words do.
+func TestTheStreamPathFiltersTheDecodedEscape(t *testing.T) {
+	scr, r := aScreen(t, 40)
+	r.streamDelta("m1", "text", "one&#27;c two\r three")
+	r.finish()
+
+	for _, want := range []string{"one", "two", "three"} {
+		if !strings.Contains(scr.text(), want) {
+			t.Errorf("the screen lacks %q:\n%s", want, scr.text())
+		}
+		if !strings.Contains(plain(r.transcriptText()), want) {
+			t.Errorf("the transcript lacks %q:\n%q", want, r.transcriptText())
+		}
+	}
+	if got := nonStylingEscape(r.transcriptText()); len(got) > 0 {
+		t.Errorf("the stream hands the terminal %q:\n%q", got, r.transcriptText())
+	}
+	if got := controlBytes(r.transcriptText()); len(got) > 0 {
+		t.Errorf("the stream carries the control byte(s) %v:\n%q", got, r.transcriptText())
+	}
+}
+
 func TestAToolCallRendersTheStreamedMessageAboveItself(t *testing.T) {
 	var out bytes.Buffer
 	r := aTerminal(t, &out, 40)
