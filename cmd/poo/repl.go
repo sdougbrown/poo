@@ -114,7 +114,7 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if o.resume != "" {
 		return namedSession(dir, o.resume, workingDir)
 	}
-	store, err := session.NewStore(dir)
+	store, err := openSessionStore(settings, overrides)
 	if err != nil {
 		return "", err
 	}

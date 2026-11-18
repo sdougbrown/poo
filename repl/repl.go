@@ -544,10 +544,12 @@ func recoveryNotice(info protocol.SessionInfo) string {
 }
 
 // The scrollback a resumed session shows: the size of the page the repl
-// asks for, and the most items it renders of them.
+// asks for, and the most items it renders of them. The two are the
+// server's history limits, the page a session/history call answers
+// with and the largest one it may ask for.
 const (
-	historyPage  = 100
-	historyItems = 500
+	historyPage  = protocol.DefaultHistoryLimit
+	historyItems = protocol.MaxHistoryLimit
 )
 
 // replay renders the scrollback of the session the repl resumed, oldest

@@ -338,6 +338,15 @@ type CloseParams struct {
 	SessionID string `json:"session_id"`
 }
 
+// The limits a session/history page honors.
+const (
+	// DefaultHistoryLimit is the page size a page answers with when
+	// the caller names no limit.
+	DefaultHistoryLimit = 100
+	// MaxHistoryLimit is the largest page a caller may ask for.
+	MaxHistoryLimit = 500
+)
+
 // HistoryParams are the params of session/history.
 type HistoryParams struct {
 	// SessionID identifies the session.

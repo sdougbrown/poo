@@ -201,8 +201,8 @@ func TestABareInvocationHandsTheSettingsToTheInterface(t *testing.T) {
 // relative directory discovers from where it resolves: the project's file
 // is found from a subdirectory of it. A line that reads none of them is a
 // refusal rather than a launch, so each case names the answer only its own
-// resolution produces: the project's ui, the user's, or the pinned file's
-// bad key.
+// resolution produces: the project's session mode, the user's, or the pinned
+// file's bad key.
 func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 	base := t.TempDir()
 	project := filepath.Join(base, "project")
@@ -210,7 +210,7 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 		t.Fatalf("writing the project directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(project, ".poo", "settings.json"),
-		[]byte(`{"version":1,"ui":"tui"}`), 0o644); err != nil {
+		[]byte(`{"version":1,"ui":"tui","session":{"mode":"ephemeral"}}`), 0o644); err != nil {
 		t.Fatalf("writing the project's settings: %v", err)
 	}
 	// The user's settings are the answer a run that never finds the
@@ -243,23 +243,23 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 		{
 			name: "the working directory the line names",
 			args: []string{"-c", "--working-dir", project},
-			want: "tui",
+			want: "session.mode",
 		},
 		{
 			name: "a single-dash working directory",
 			args: []string{"-c", "-working-dir", project},
-			want: "tui",
+			want: "session.mode",
 		},
 		{
 			name: "a single-dash working directory with an equals sign",
 			args: []string{"-c", "-working-dir=" + project},
-			want: "tui",
+			want: "session.mode",
 		},
 		{
 			name: "a relative working directory discovers from where it resolves",
 			cwd:  sub,
 			args: []string{"-c", "--working-dir", "."},
-			want: "tui",
+			want: "session.mode",
 		},
 		{
 			name: "the settings file the line names",
@@ -299,6 +299,38 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 				t.Errorf("poo %q refused with %q, want it to name %q", c.args, stderr, c.want)
 			}
 		})
+	}
+}
+
+// TestTheAliasIgnoresTheSettingsUI covers the alias's dispatch: the
+// alias means `poo repl <words>`, so the settings' UI choice does not
+// apply to it: a settings file that names a ui the binary does not
+// link still launches the repl door, and the repl's own answer is the
+// one the person reads.
+func TestTheAliasIgnoresTheSettingsUI(t *testing.T) {
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".poo"), 0o755); err != nil {
+		t.Fatalf("writing the project directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".poo", "settings.json"),
+		[]byte(`{"version":1,"ui":"ghost"}`), 0o644); err != nil {
+		t.Fatalf("writing the project's settings: %v", err)
+	}
+	t.Chdir(project)
+	t.Setenv("POO_SETTINGS", "")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(project, "no-config"))
+
+	code, stderr := runCLI(t, "-c")
+	if code != 2 {
+		t.Errorf("poo -c exited %d, want 2", code)
+	}
+	// The repl door is the one that ran: it refused for its own
+	// reason, not for the settings' ui.
+	if !strings.Contains(stderr, "no session to continue") {
+		t.Errorf("the repl door did not run: %q", stderr)
+	}
+	if strings.Contains(stderr, "no ui") {
+		t.Errorf("the settings' ui was applied to the alias: %q", stderr)
 	}
 }
 

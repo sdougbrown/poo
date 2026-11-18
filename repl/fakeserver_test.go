@@ -36,6 +36,10 @@ type fakeServer struct {
 	methods []string
 	// history is what session/history pages, oldest first.
 	history []protocol.HistoryItem
+	// historyPageSize is the page size session/history answers with,
+	// ignoring the limit the request named: the server does not honor
+	// the request. Zero honors it.
+	historyPageSize int
 	// recoveredTail and interrupted are what session/load reports it
 	// recovered.
 	recoveredTail bool
@@ -186,8 +190,12 @@ func (s *fakeServer) line(line []byte) {
 		json.Unmarshal(req.Params, &params)
 		s.mu.Lock()
 		known := append([]protocol.HistoryItem(nil), s.history...)
+		pageSize := s.historyPageSize
 		s.mu.Unlock()
 		limit := params.Limit
+		if pageSize > 0 {
+			limit = pageSize
+		}
 		if limit <= 0 {
 			limit = 100
 		}

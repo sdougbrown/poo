@@ -36,7 +36,17 @@ var frontDoors = map[string]func(io.Writer) *clicontract.Command{
 // settings name — or, without them, the binary's default — runs with the
 // settings file, so the session it opens reads what it read.
 func runUI() int {
-	return runUIWith(nil)
+	path, settings, err := frontDoorSettings("", "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
+		return usageExitCode
+	}
+	name, err := pickUI(settings, defaultUI, frontDoors)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
+		return usageExitCode
+	}
+	return run(frontDoorLine(name, path, false, nil))
 }
 
 // runUIWith executes the front door with the words the invocation added
@@ -55,26 +65,29 @@ func runUIWith(extra []string) int {
 		// repl's own refusal rather than a settings error from here.
 		return run(append([]string{defaultUI}, extra...))
 	}
-	// The directory is resolved before the settings, so discovery walks
-	// up from where the line's own --working-dir points, not from this
-	// process's directory.
-	explicit := o.settingsFile
-	wd, err := workingDirectory(o.workingDir)
+	path, _, err := frontDoorSettings(o.settingsFile, o.workingDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
 		return usageExitCode
 	}
-	path, settings, err := resolveSettings(explicit, wd)
+	// The alias means `poo repl <words>`, so the settings' UI choice
+	// does not apply to it: a line that names a ui the binary does not
+	// link still launches the repl door, and a refused line and a
+	// parsed line reach the same door.
+	return run(frontDoorLine(defaultUI, path, o.settingsFile != "", extra))
+}
+
+// frontDoorSettings resolves the settings a front-door invocation runs
+// under, from the line's own --settings and --working-dir: the
+// directory is resolved before the settings, so discovery walks up from
+// where the line's own --working-dir points, not from this process's
+// directory.
+func frontDoorSettings(settingsFile, workingDir string) (string, *config.Settings, error) {
+	wd, err := workingDirectory(workingDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
-		return usageExitCode
+		return "", nil, err
 	}
-	name, err := pickUI(settings, defaultUI, frontDoors)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
-		return usageExitCode
-	}
-	return run(frontDoorLine(name, path, explicit != "", extra))
+	return resolveSettings(settingsFile, wd)
 }
 
 // frontDoorOptions reads the alias's words the way the repl reads them,

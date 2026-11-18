@@ -141,6 +141,56 @@ func TestAResumedSessionShowsTheNewestHistory(t *testing.T) {
 	}
 }
 
+// TestTheReplayCapsAPageThatOvershootsTheLimit covers the trim: a
+// server that answers a page bigger than the one the repl asked for
+// lands the running total past the cap, and the cap cuts the oldest
+// items whole.
+func TestTheReplayCapsAPageThatOvershootsTheLimit(t *testing.T) {
+	// The session holds historyItems items the repl shows and extra
+	// ones the cap drops, and the server's page holds more than the
+	// one the repl asked for, so the second page lands the total past
+	// the cap.
+	const extra = 20
+	total := historyItems + extra
+	server := &fakeServer{t: t}
+	server.historyPageSize = 300
+	for i := 1; i <= total; i++ {
+		server.history = append(server.history, protocol.HistoryItem{
+			Seq:  int64(i),
+			Type: "message",
+			Role: "user",
+			Text: fmt.Sprintf("said %03d", i),
+		})
+	}
+
+	drawn := ansi.Strip(resumeRepl(t, server, "s9"))
+	if !strings.Contains(drawn, "older history is not shown") {
+		t.Errorf("the transcript does not say older history is missing:\n%s", drawn)
+	}
+	// The newest history is rendered in the order it was recorded, once
+	// each: a page that lands at the wrong end of the items reads as a
+	// conversation that jumps back and forth.
+	previous := 0
+	for n := extra + 1; n <= total; n++ {
+		item := fmt.Sprintf("said %03d", n)
+		if got := strings.Count(drawn, item); got != 1 {
+			t.Errorf("the transcript holds %q %d times, want once", item, got)
+		}
+		at := strings.Index(drawn, item)
+		if at < previous {
+			t.Fatalf("the transcript holds %q before the item recorded before it:\n%s", item, drawn)
+		}
+		previous = at
+	}
+	// The cap drops the oldest items whole: the transcript holds none of
+	// them, rather than the tail of the item the cap cut.
+	for n := 1; n <= extra; n++ {
+		if item := fmt.Sprintf("said %03d", n); strings.Contains(drawn, item) {
+			t.Errorf("the transcript holds the oldest item %q, which the cap drops", item)
+		}
+	}
+}
+
 // TestAResumedSessionSanitizesTheRecordedText covers what a replay puts on
 // the terminal: the text is the session's, so the escapes and the cursor
 // controls it recorded are stripped, and the words stay.
