@@ -1,4 +1,4 @@
-package openai
+package chat
 
 import (
 	"strings"
@@ -17,10 +17,10 @@ import (
 // produced.
 func parseEvents(t *testing.T, format, text string) []poo.StreamItem {
 	t.Helper()
-	p := newParser("text", format)
+	p := NewParser("text", format)
 	var events []poo.StreamItem
-	events = append(events, p.feed(text)...)
-	events = append(events, p.flush()...)
+	events = append(events, p.Feed(text)...)
+	events = append(events, p.Flush()...)
 	return events
 }
 

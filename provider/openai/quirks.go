@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/sdougbrown/poo/provider/internal/chat"
 	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
@@ -63,7 +64,7 @@ type quirkProfile struct {
 // the tool schemas.
 type requestShape struct {
 	// request is the wire shape of the request.
-	request *chatRequest
+	request *chat.Request
 	// params holds the named parameters the request carries.
 	params map[string]json.RawMessage
 	// claimed holds the parameter paths the model info's controls
@@ -170,14 +171,14 @@ type responseRepair struct {
 	// model names the model, for the notes.
 	model string
 	// filters holds the text filters.
-	filters []textFilter
+	filters []chat.TextFilter
 	// textCalls reports that the tool calls the model writes as text
 	// are to be read.
 	textCalls bool
 }
 
 // addFilter adds a filter over the model's text.
-func (r *responseRepair) addFilter(f textFilter) {
+func (r *responseRepair) addFilter(f chat.TextFilter) {
 	r.filters = append(r.filters, f)
 }
 
@@ -186,7 +187,7 @@ func init() {
 	registerQuirk(quirkProfile{
 		name: QuirkThinkTags,
 		repairResponse: func(r *responseRepair) {
-			r.addFilter(newThinkFilter())
+			r.addFilter(chat.NewThinkFilter())
 		},
 	})
 	registerQuirk(quirkProfile{
@@ -206,7 +207,7 @@ func init() {
 	registerQuirk(quirkProfile{
 		name: QuirkDegenerateStream,
 		repairResponse: func(r *responseRepair) {
-			r.addFilter(newDegenerateFilter(r.logger, r.model))
+			r.addFilter(chat.NewDegenerateFilter(r.logger, r.model))
 		},
 	})
 	registerQuirk(quirkProfile{
@@ -219,7 +220,7 @@ func init() {
 		name: QuirkAudioURL,
 		shapeRequest: func(s *requestShape) {
 			for i := range s.request.Messages {
-				parts, ok := s.request.Messages[i].Content.([]chatContentPart)
+				parts, ok := s.request.Messages[i].Content.([]chat.ContentPart)
 				if !ok {
 					continue
 				}
@@ -228,9 +229,9 @@ func init() {
 					if parts[j].InputAudio == nil {
 						continue
 					}
-					parts[j] = chatContentPart{
+					parts[j] = chat.ContentPart{
 						Type: "audio_url",
-						AudioURL: &chatAudioURL{
+						AudioURL: &chat.AudioURL{
 							URL: "data:" + support.AudioMediaType(parts[j].InputAudio.Format) + ";base64," + parts[j].InputAudio.Data,
 						},
 					}
@@ -277,7 +278,7 @@ func simplifySchema(raw json.RawMessage) json.RawMessage {
 //
 // The quirks add theirs in the order the model info named them, and the
 // parser is last: it reads the text the others passed on.
-func (t *Transport) textFilters(settings requestSettings) []textFilter {
+func (t *Transport) textFilters(settings requestSettings) []chat.TextFilter {
 	repair := &responseRepair{logger: t.logger, model: settings.info.Name}
 	for _, quirk := range settings.quirks {
 		if quirk.repairResponse != nil {
@@ -292,7 +293,7 @@ func (t *Transport) textFilters(settings requestSettings) []textFilter {
 		mode = "text"
 	}
 	if mode == "text" || mode == "auto" {
-		filters = append(filters, newParser(mode, settings.info.Tools.TextFormat))
+		filters = append(filters, chat.NewParser(mode, settings.info.Tools.TextFormat))
 	}
 	return filters
 }

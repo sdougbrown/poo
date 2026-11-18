@@ -1,4 +1,4 @@
-package openai
+package chat
 
 import (
 	"encoding/json"
@@ -13,16 +13,10 @@ import (
 // prose it found.
 func parse(t *testing.T, mode, text string) (calls []poo.ToolCallDelta, prose string) {
 	t.Helper()
-	p := newParser(mode, "")
-	if mode == "native" {
-		if p.enabled {
-			t.Fatal("the native mode left the parser on")
-		}
-		return nil, text
-	}
+	p := NewParser(mode, "")
 	var events []poo.StreamItem
-	events = append(events, p.feed(text)...)
-	events = append(events, p.flush()...)
+	events = append(events, p.Feed(text)...)
+	events = append(events, p.Flush()...)
 	for _, ev := range events {
 		switch ev.Kind {
 		case "tool_call":
@@ -136,25 +130,27 @@ func TestACallWithoutANameIsNotACall(t *testing.T) {
 	}
 }
 
-func TestTheNativeModeLeavesTheParserOff(t *testing.T) {
+// A parser whose mode does not read text stays silent, and the reader emits the
+// raw content itself.
+func TestTheNativeModeEmitsNothing(t *testing.T) {
 	text := `<tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>`
 
 	calls, prose := parse(t, "native", text)
 	if len(calls) != 0 {
 		t.Errorf("the native mode found %d calls, want none", len(calls))
 	}
-	if prose != text {
-		t.Errorf("the native mode changed the text")
+	if prose != "" {
+		t.Errorf("the native mode emitted %q, want nothing", prose)
 	}
 }
 
 func TestACallSplitAcrossChunksIsStillFound(t *testing.T) {
-	p := newParser("text", "")
+	p := NewParser("text", "")
 
 	var events []poo.StreamItem
-	events = append(events, p.feed("<tool_call>{\"name\": \"bash\", ")...)
-	events = append(events, p.feed("\"arguments\": {\"command\": \"ls\"}}</tool_call>")...)
-	events = append(events, p.flush()...)
+	events = append(events, p.Feed("<tool_call>{\"name\": \"bash\", ")...)
+	events = append(events, p.Feed("\"arguments\": {\"command\": \"ls\"}}</tool_call>")...)
+	events = append(events, p.Flush()...)
 
 	var calls []poo.ToolCallDelta
 	for _, ev := range events {
@@ -174,20 +170,20 @@ func TestACallSplitAcrossManySmallChunksIsStillFound(t *testing.T) {
 That is all.`
 
 	for _, size := range []int{1, 2, 3, 5, 7, 11, 13} {
-		p := newParser("text", "")
+		p := NewParser("text", "")
 		var calls []poo.ToolCallDelta
 		for i := 0; i < len(text); i += size {
 			end := i + size
 			if end > len(text) {
 				end = len(text)
 			}
-			for _, ev := range p.feed(text[i:end]) {
+			for _, ev := range p.Feed(text[i:end]) {
 				if ev.Kind == "tool_call" {
 					calls = append(calls, *ev.ToolCall)
 				}
 			}
 		}
-		for _, ev := range p.flush() {
+		for _, ev := range p.Flush() {
 			if ev.Kind == "tool_call" {
 				calls = append(calls, *ev.ToolCall)
 			}
@@ -201,20 +197,20 @@ func TestABareJSONCallSplitAcrossChunksIsStillFound(t *testing.T) {
 	text := "Thinking about it.\n{\"name\": \"read\", \"arguments\": {\"path\": \"a.txt\"}}\nDone."
 
 	for _, size := range []int{1, 3, 7, 11} {
-		p := newParser("text", "")
+		p := NewParser("text", "")
 		var calls []poo.ToolCallDelta
 		for i := 0; i < len(text); i += size {
 			end := i + size
 			if end > len(text) {
 				end = len(text)
 			}
-			for _, ev := range p.feed(text[i:end]) {
+			for _, ev := range p.Feed(text[i:end]) {
 				if ev.Kind == "tool_call" {
 					calls = append(calls, *ev.ToolCall)
 				}
 			}
 		}
-		for _, ev := range p.flush() {
+		for _, ev := range p.Flush() {
 			if ev.Kind == "tool_call" {
 				calls = append(calls, *ev.ToolCall)
 			}
@@ -228,20 +224,20 @@ func TestABareJSONCallSplitAcrossChunksIsStillFound(t *testing.T) {
 func TestTheProseSurvivesTheChunking(t *testing.T) {
 	text := "Before the call.\n<tool_call>{\"name\": \"bash\", \"arguments\": {\"command\": \"ls\"}}</tool_call>\nAfter the call."
 
-	p := newParser("text", "")
+	p := NewParser("text", "")
 	prose := ""
 	for i := 0; i < len(text); i += 5 {
 		end := i + 5
 		if end > len(text) {
 			end = len(text)
 		}
-		for _, ev := range p.feed(text[i:end]) {
+		for _, ev := range p.Feed(text[i:end]) {
 			if ev.Kind == "delta" {
 				prose += ev.Delta.Text
 			}
 		}
 	}
-	for _, ev := range p.flush() {
+	for _, ev := range p.Flush() {
 		if ev.Kind == "delta" {
 			prose += ev.Delta.Text
 		}
@@ -255,11 +251,11 @@ func TestTheProseSurvivesTheChunking(t *testing.T) {
 }
 
 func TestACallWithoutAClosingTagIsStillFound(t *testing.T) {
-	p := newParser("text", "")
+	p := NewParser("text", "")
 
 	var events []poo.StreamItem
-	events = append(events, p.feed(`<tool_call>{"name": "bash", "arguments": {"command": "ls"}}`)...)
-	events = append(events, p.flush()...)
+	events = append(events, p.Feed(`<tool_call>{"name": "bash", "arguments": {"command": "ls"}}`)...)
+	events = append(events, p.Flush()...)
 
 	var calls []poo.ToolCallDelta
 	for _, ev := range events {
@@ -296,11 +292,11 @@ func TestProseWithABraceIsNotACall(t *testing.T) {
 func TestAnInlineObjectSplitAcrossChunksStaysProse(t *testing.T) {
 	// The prose before the object does not end in a newline, so the
 	// object does not start a line, wherever the chunk boundary falls.
-	p := newParser("text", "")
+	p := NewParser("text", "")
 	var events []poo.StreamItem
-	events = append(events, p.feed("use ")...)
-	events = append(events, p.feed(`{"name":"bash","arguments":{"command":"ls"}} now`)...)
-	events = append(events, p.flush()...)
+	events = append(events, p.Feed("use ")...)
+	events = append(events, p.Feed(`{"name":"bash","arguments":{"command":"ls"}} now`)...)
+	events = append(events, p.Flush()...)
 	var prose string
 	for _, ev := range events {
 		switch ev.Kind {
@@ -316,16 +312,16 @@ func TestAnInlineObjectSplitAcrossChunksStaysProse(t *testing.T) {
 }
 
 func TestAnObjectAfterANewlineInAnEarlierChunkIsStillACall(t *testing.T) {
-	p := newParser("text", "")
+	p := NewParser("text", "")
 	var calls int
 	for _, chunk := range []string{"ok\n", `{"name":"bash","arguments":{"command":"ls"}}` + "\n"} {
-		for _, ev := range p.feed(chunk) {
+		for _, ev := range p.Feed(chunk) {
 			if ev.Kind == "tool_call" {
 				calls++
 			}
 		}
 	}
-	for _, ev := range p.flush() {
+	for _, ev := range p.Flush() {
 		if ev.Kind == "tool_call" {
 			calls++
 		}

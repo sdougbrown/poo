@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/provider/internal/chat"
 )
 
 // TestAForkShapesTheMessagesItAppends covers the fork's appended messages: a
@@ -27,7 +28,7 @@ func TestAForkShapesTheMessagesItAppends(t *testing.T) {
 		shapeRequest: func(s *requestShape) {
 			s.setParam("test_param", true)
 			for i := range s.request.Messages {
-				parts, ok := s.request.Messages[i].Content.([]chatContentPart)
+				parts, ok := s.request.Messages[i].Content.([]chat.ContentPart)
 				if !ok {
 					continue
 				}
