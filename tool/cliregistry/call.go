@@ -74,6 +74,10 @@ func (t *CallTool) Spec() poo.ToolSpec {
 ,"additionalProperties":false}`),
 		Class:      poo.ClassSideEffecting,
 		PrimaryArg: "name",
+		// A registered CLI runs where bash runs, so it leaves the turn
+		// the same way. Background true turns the call into a job, and
+		// the result arrives as a message.
+		Background: poo.BackgroundAllowed,
 	}
 }
 
