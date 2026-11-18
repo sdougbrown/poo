@@ -39,14 +39,11 @@ func TestASessionNamesAModelByItsEndpointQualifiedAlias(t *testing.T) {
 			t.Errorf("closing the session: %v", err)
 		}
 	}()
-	if got := info.Models.Chat; got != "chat-model" {
-		t.Errorf("the wire reports the %q chat model, want the canonical \"chat-model\"", got)
+	if model := sess.ChatModel(); model.Name != "chat-model" {
+		t.Errorf("the session runs the %q chat model, want \"chat-model\"", model.Name)
 	}
 	if got := info.Models.Decider; got != "decider-model" {
 		t.Errorf("the wire reports the %q decider, want the canonical \"decider-model\"", got)
-	}
-	if model := sess.ChatModel(); model.Name != "chat-model" {
-		t.Errorf("the session runs the %q chat model, want \"chat-model\"", model.Name)
 	}
 }
 

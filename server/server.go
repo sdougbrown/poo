@@ -126,6 +126,10 @@ func New(opts Options) (*Server, error) {
 // `endpoint/model_id` to its key. A form two models answer to, or one a
 // catalog name already holds, is refused here — the ambiguity is the
 // operator's to fix, never the router's to guess at.
+//
+// The index reads the effective settings — the post-override view the
+// settings/get reports. The overrides never touch models today; if one
+// ever renames a model, this index and the catalog must move together.
 func qualifiedModelNames(settings *config.Settings, runtime *config.Runtime) (map[string]string, error) {
 	qualified := map[string]string{}
 	keys := make([]string, 0, len(settings.Models))
