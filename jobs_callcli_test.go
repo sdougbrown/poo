@@ -35,7 +35,7 @@ func sayManifest(t *testing.T, marker string) *cliregistry.Catalog {
 				"additionalProperties": false,
 			},
 			"bindings": []any{
-				map[string]any{"property": "name", "style": "space", "flag": "--name"},
+				map[string]any{"property": "name", "style": "positional"},
 			},
 		},
 	}})
@@ -110,9 +110,23 @@ func TestACallCliBackgroundCallBecomesAJob(t *testing.T) {
 		t.Error("the log holds no started result")
 	}
 
-	// The CLI runs, and its result arrives as a message.
+	// The CLI runs, its result arrives, and the completion names the
+	// CLI's output.
 	waitFor(t, "the CLI to run", func() bool {
 		data, err := os.ReadFile(marker)
 		return err == nil && strings.Contains(string(data), "ran")
 	})
+	var end *poo.JobEndedRecord
+	waitFor(t, "the job's completed result", func() bool {
+		for _, rec := range sink.allRecords() {
+			if r, ok := rec.(*poo.JobEndedRecord); ok && strings.Contains(r.Text, "hello ada") {
+				end = r
+				return true
+			}
+		}
+		return false
+	})
+	if end.Outcome != poo.OutcomeOK {
+		t.Errorf("the job ended %q, want ok", end.Outcome)
+	}
 }
