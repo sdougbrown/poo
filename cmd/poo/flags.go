@@ -144,9 +144,12 @@ func (f *sharedFlags) overrides() (config.Overrides, error) {
 	if err != nil {
 		return config.Overrides{}, err
 	}
-	systemPrompt, err := flagPath(f.systemPrompt)
-	if err != nil {
-		return config.Overrides{}, err
+	systemPrompt := ""
+	if f.systemPrompt != "" {
+		systemPrompt, err = config.ResolveSettingPath("", f.systemPrompt)
+		if err != nil {
+			return config.Overrides{}, err
+		}
 	}
 	overrides := config.Overrides{
 		Profile:             f.profile,
@@ -181,30 +184,6 @@ func (f *sharedFlags) appendedPrompt() (string, error) {
 		return "", fmt.Errorf("reading %s: %w", path, err)
 	}
 	return string(data), nil
-}
-
-// flagPath resolves a file path the command line names. A leading ~ is
-// the home directory, and a relative path is beside the working
-// directory: the flag answers to where it was typed.
-func flagPath(path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolving %s: %w", path, err)
-		}
-		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
-	}
-	if !filepath.IsAbs(path) {
-		absolute, err := filepath.Abs(path)
-		if err != nil {
-			return "", fmt.Errorf("resolving %s: %w", path, err)
-		}
-		path = absolute
-	}
-	return path, nil
 }
 
 // checkUnmatched checks the value of the --permission-unmatched flag.

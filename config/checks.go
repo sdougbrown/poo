@@ -245,8 +245,8 @@ func (s *Settings) checkContext() error {
 //
 // A path in the settings is relative to the working directory, the
 // same as every other path a command line takes — except the ones the
-// load resolved beside the settings file: the prompt's base file and
-// the finish schema arrive absolute.
+// load resolved: the prompt's base file and the finish schema arrive
+// beside the settings file.
 func (s *Settings) checkFiles() error {
 	if len(s.Tools.ProtectedPaths) > 0 {
 		if _, err := protect.Compile(s.Tools.ProtectedPaths); err != nil {

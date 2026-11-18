@@ -143,22 +143,30 @@ func TestTheSystemPromptFlagResolvesAgainstTheWorkingDirectory(t *testing.T) {
 		t.Errorf("the system prompt is %q, want the file beside the working directory", got)
 	}
 
-	inv, err = clicontract.Parse(pooApp(io.Discard), []string{
-		"run",
-		"--system-prompt", "~/flagged.md",
-	})
-	if err != nil {
-		t.Fatalf("parsing the flags: %v", err)
-	}
-	t.Setenv("HOME", dir)
-	f = sharedFlags{}
-	f.bind(inv)
-	overrides, err = f.overrides()
-	if err != nil {
-		t.Fatalf("reading the overrides: %v", err)
-	}
-	if got := overrides.SystemPrompt; got != filepath.Join(dir, "flagged.md") {
-		t.Errorf("the system prompt is %q, want the file under the home directory", got)
+	// The home directory is apart from the working directory, so a ~
+	// that resolves to the working directory is not a pass.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for value, want := range map[string]string{
+		"~/flagged.md": filepath.Join(home, "flagged.md"),
+		"~":           home,
+	} {
+		inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+			"run",
+			"--system-prompt", value,
+		})
+		if err != nil {
+			t.Fatalf("parsing the flags: %v", err)
+		}
+		var f sharedFlags
+		f.bind(inv)
+		overrides, err := f.overrides()
+		if err != nil {
+			t.Fatalf("reading the overrides: %v", err)
+		}
+		if got := overrides.SystemPrompt; got != want {
+			t.Errorf("the system prompt is %q, want %q", got, want)
+		}
 	}
 }
 
