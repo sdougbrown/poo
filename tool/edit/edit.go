@@ -114,7 +114,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 		return nil, poo.InvalidArgsf("edit: path must not be empty")
 	}
 	abs := protect.Resolve(absolutePath(a.Path, env.WorkingDir))
-	if env.WorkingDir != "" && !protect.Within(protect.Resolve(env.WorkingDir), abs) {
+	if env.RestrictEdit && env.WorkingDir != "" && !protect.Within(protect.Resolve(env.WorkingDir), abs) {
 		return nil, poo.InvalidArgsf("edit: path is outside the working directory: %s", a.Path)
 	}
 	// A protected path is refused before the file is touched, so the

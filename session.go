@@ -562,6 +562,10 @@ type Options struct {
 	// directory: guidance is read, not edited, and not searched across
 	// a person's whole collection.
 	ReadRoots []string
+	// RestrictRead, RestrictGrep and RestrictEdit confine the named tools to the working directory.
+	RestrictRead bool
+	RestrictGrep bool
+	RestrictEdit bool
 
 	// MaxTurns is the turn limit. 0 means unlimited. A run that
 	// reaches it settles max_turns.

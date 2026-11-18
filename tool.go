@@ -78,6 +78,10 @@ type PrepareEnv struct {
 	// ReadRoots are the directories outside the working directory the
 	// read tool may reach, already expanded.
 	ReadRoots []string
+	// RestrictRead, RestrictGrep and RestrictEdit confine the named tools to the working directory.
+	RestrictRead bool
+	RestrictGrep bool
+	RestrictEdit bool
 }
 
 // ToolEnv is the environment a tool sees while running.

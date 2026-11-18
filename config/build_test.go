@@ -2167,3 +2167,27 @@ roles:
 		})
 	}
 }
+
+func TestFileToolRestrictionsAreIndependent(t *testing.T) {
+	for _, tc := range []struct {
+		yaml             string
+		read, grep, edit bool
+	}{
+		{"", false, false, false},
+		{"tools:\n  read: {restrict_to_working_dir: true}\n", true, false, false},
+		{"tools:\n  grep: {restrict_to_working_dir: true}\n", false, true, false},
+		{"tools:\n  edit: {restrict_to_working_dir: true}\n", false, false, true},
+		{"tools:\n  read: {restrict_to_working_dir: false}\n", false, false, false},
+	} {
+		t.Run(fmt.Sprintf("%t-%t-%t-%d", tc.read, tc.grep, tc.edit, len(tc.yaml)), func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+tc.yaml), config.FormatYAML)
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := build(t, settings, config.Overrides{}).Options
+			if opts.RestrictRead != tc.read || opts.RestrictGrep != tc.grep || opts.RestrictEdit != tc.edit {
+				t.Fatalf("restrictions: read=%t grep=%t edit=%t", opts.RestrictRead, opts.RestrictGrep, opts.RestrictEdit)
+			}
+		})
+	}
+}

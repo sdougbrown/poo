@@ -35,7 +35,7 @@ func TestASearchRootOutsideTheWorkingDirectoryIsRefused(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshalling: %v", err)
 		}
-		_, err = grep.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir})
+		_, err = grep.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir, RestrictGrep: true})
 		if err == nil {
 			t.Errorf("the root %q was accepted", path)
 			continue

@@ -183,7 +183,7 @@ func (t *Tool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepared, e
 	// The path is resolved once, so the file that is read is the file
 	// the protection check named.
 	abs := protect.Resolve(absolutePath(a.Path, env.WorkingDir))
-	if !reachable(env, abs) {
+	if env.RestrictRead && !reachable(env, abs) {
 		return nil, poo.InvalidArgsf("read: path is outside the working directory: %s", a.Path)
 	}
 	// A protected path is refused before the file is opened, so the

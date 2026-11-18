@@ -49,6 +49,9 @@ func fieldsOf(s *Settings) SettingsFields {
 	f.ContextSummaryKeepRecentTokens = count(s.Context.Summary.KeepRecentTokens)
 	f.ContextSummaryMaxTokens = count(s.Context.Summary.MaxTokens)
 
+	f.ToolsReadRestrictToWorkingDir = flag(s.Tools.Read.RestrictToWorkingDir)
+	f.ToolsGrepRestrictToWorkingDir = flag(s.Tools.Grep.RestrictToWorkingDir)
+	f.ToolsEditRestrictToWorkingDir = flag(s.Tools.Edit.RestrictToWorkingDir)
 	f.ToolsBashTimeoutS = count(s.Tools.Bash.TimeoutS)
 	f.ToolsBashExecutor = pointer(s.Tools.Bash.Executor)
 	f.ToolsCodemodeTimeoutS = count(s.Tools.Codemode.TimeoutS)

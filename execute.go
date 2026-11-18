@@ -779,6 +779,9 @@ func (s *Session) prepareEnv() PrepareEnv {
 		WorkingDir:     s.opts.WorkingDir,
 		ProtectedPaths: s.opts.ProtectedPaths,
 		ReadRoots:      s.opts.ReadRoots,
+		RestrictRead:   s.opts.RestrictRead,
+		RestrictGrep:   s.opts.RestrictGrep,
+		RestrictEdit:   s.opts.RestrictEdit,
 	}
 }
 

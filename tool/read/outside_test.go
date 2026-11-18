@@ -35,7 +35,7 @@ func TestAPathOutsideTheWorkingDirectoryIsRefused(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshalling: %v", err)
 		}
-		_, err = read.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir})
+		_, err = read.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir, RestrictRead: true})
 		if err == nil {
 			t.Errorf("the path %q was accepted", path)
 			continue
@@ -63,7 +63,7 @@ func TestAPathInAReadRootIsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalling: %v", err)
 	}
-	if _, err := read.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir, ReadRoots: []string{root}}); err != nil {
+	if _, err := read.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir, RestrictRead: true, ReadRoots: []string{root}}); err != nil {
 		t.Fatalf("the skill path was refused: %v", err)
 	}
 	// The root is the directory it names, not everything beside it.
@@ -75,7 +75,7 @@ func TestAPathInAReadRootIsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalling: %v", err)
 	}
-	if _, err := read.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir, ReadRoots: []string{root}}); err == nil {
+	if _, err := read.New().Prepare(raw, poo.PrepareEnv{WorkingDir: dir, RestrictRead: true, ReadRoots: []string{root}}); err == nil {
 		t.Errorf("the path %q beside the root was accepted", sibling)
 	}
 }
