@@ -76,7 +76,9 @@ type PrepareEnv struct {
 	// expanded.
 	ProtectedPaths []string
 	// ReadRoots are the directories outside the working directory the
-	// read tool may reach, already expanded.
+	// read tool may reach while it is restricted, already expanded.
+	// They apply only when RestrictRead is set; an unrestricted read
+	// reaches any path.
 	ReadRoots []string
 	// RestrictRead, RestrictGrep and RestrictEdit confine the named tools to the working directory.
 	RestrictRead bool

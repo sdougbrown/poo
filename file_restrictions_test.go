@@ -23,6 +23,9 @@ func TestSessionAppliesFileToolRestrictions(t *testing.T) {
 	if err := os.WriteFile(editPath, []byte("hello"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(outside, "needle.txt"), []byte("x needle y\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		tool      string
 		newTool   func() poo.Tool
@@ -38,8 +41,9 @@ func TestSessionAppliesFileToolRestrictions(t *testing.T) {
 		},
 		{
 			tool: "grep", newTool: func() poo.Tool { return grep.New() },
-			restrict: func(o *poo.Options, v bool) { o.RestrictGrep = v },
-			args:     map[string]string{"path": outside, "pattern": "needle"},
+			restrict:  func(o *poo.Options, v bool) { o.RestrictGrep = v },
+			args:      map[string]string{"path": outside, "pattern": "needle"},
+			unchecked: "needle",
 		},
 		{
 			tool: "edit", newTool: func() poo.Tool { return edit.New() },

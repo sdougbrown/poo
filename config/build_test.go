@@ -2170,16 +2170,17 @@ roles:
 
 func TestFileToolRestrictionsAreIndependent(t *testing.T) {
 	for _, tc := range []struct {
+		name             string
 		yaml             string
 		read, grep, edit bool
 	}{
-		{"", false, false, false},
-		{"tools:\n  read: {restrict_to_working_dir: true}\n", true, false, false},
-		{"tools:\n  grep: {restrict_to_working_dir: true}\n", false, true, false},
-		{"tools:\n  edit: {restrict_to_working_dir: true}\n", false, false, true},
-		{"tools:\n  read: {restrict_to_working_dir: false}\n", false, false, false},
+		{"empty", "", false, false, false},
+		{"read-true", "tools:\n  read: {restrict_to_working_dir: true}\n", true, false, false},
+		{"grep-true", "tools:\n  grep: {restrict_to_working_dir: true}\n", false, true, false},
+		{"edit-true", "tools:\n  edit: {restrict_to_working_dir: true}\n", false, false, true},
+		{"read-false", "tools:\n  read: {restrict_to_working_dir: false}\n", false, false, false},
 	} {
-		t.Run(fmt.Sprintf("%t-%t-%t-%d", tc.read, tc.grep, tc.edit, len(tc.yaml)), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			settings, err := config.Parse([]byte(theModelSettings+tc.yaml), config.FormatYAML)
 			if err != nil {
 				t.Fatal(err)

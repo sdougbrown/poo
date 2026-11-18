@@ -251,6 +251,11 @@ func TestTheModeOfTheFileIsKept(t *testing.T) {
 	if err := os.WriteFile(path, []byte("one\n"), 0o755); err != nil {
 		t.Fatalf("writing %s: %v", path, err)
 	}
+	// The write honors the process umask, so pin the mode the test
+	// asserts on.
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("chmod %s: %v", path, err)
+	}
 
 	res := call(t, edit.New(), map[string]any{"path": "a.sh", "old": "one", "new": "two"}, dir)
 	if res.IsError {
