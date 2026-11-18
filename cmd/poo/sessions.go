@@ -150,11 +150,18 @@ func (o *sessionsOptions) openStore() (*session.FileStore, error) {
 	return openSessionStore(settings, overrides)
 }
 
+// sessionDirectory returns the directory the session files live in: the
+// settings' directory, with the command line's override, and the leading
+// ~ expanded.
+func sessionDirectory(settings *config.Settings, overrides config.Overrides) (string, error) {
+	return config.SessionDirectory(settings, overrides)
+}
+
 // openSessionStore opens the store the sessions live in: the settings'
 // directory, with the command line's override, and the leading ~
 // expanded.
 func openSessionStore(settings *config.Settings, overrides config.Overrides) (*session.FileStore, error) {
-	dir, err := config.SessionDirectory(settings, overrides)
+	dir, err := sessionDirectory(settings, overrides)
 	if err != nil {
 		return nil, err
 	}

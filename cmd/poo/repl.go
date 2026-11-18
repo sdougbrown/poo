@@ -107,7 +107,7 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if config.SessionMode(settings, overrides) == "ephemeral" {
 		return "", errors.New("--continue and --resume open a logged session, and this command runs without one: drop --ephemeral, or the settings' session.mode")
 	}
-	dir, err := config.SessionDirectory(settings, overrides)
+	dir, err := sessionDirectory(settings, overrides)
 	if err != nil {
 		return "", err
 	}

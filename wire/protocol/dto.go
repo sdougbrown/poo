@@ -354,8 +354,8 @@ type HistoryParams struct {
 	// BeforeSeq ends the page before this sequence number. Zero takes
 	// the newest page.
 	BeforeSeq int64 `json:"before_seq,omitempty"`
-	// Limit is how many items the page holds. It is at most 500, and
-	// defaults to 100.
+	// Limit is how many items the page holds. It is at most
+	// MaxHistoryLimit, and defaults to DefaultHistoryLimit.
 	Limit int `json:"limit,omitempty"`
 }
 

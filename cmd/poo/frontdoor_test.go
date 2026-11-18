@@ -235,10 +235,12 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 	elsewhere := t.TempDir()
 
 	cases := []struct {
-		name string
-		cwd  string
-		args []string
-		want string
+		name          string
+		cwd           string
+		args          []string
+		want          string
+		wantPrefix    string
+		notWantPrefix string
 	}{
 		{
 			name: "the working directory the line names",
@@ -272,9 +274,21 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 			want: "no_such_key",
 		},
 		{
-			// The project's ui is one this binary does not link: a front
-			// door that resolved settings for a line the repl refuses would
-			// report that instead of the typo.
+			// The alias's own settings resolution: a line that names a
+			// settings file that will not load is the front door's to
+			// report, not the repl's: the front door resolves the line's
+			// own --settings before the repl runs, so the refusal carries
+			// the front door's prefix, not the repl's.
+			name:          "the alias's own settings resolution",
+			args:          []string{"-c", "--settings", pinned},
+			want:          "no_such_key",
+			wantPrefix:    "poo: ",
+			notWantPrefix: "poo repl: ",
+		},
+		{
+			// A line the repl cannot parse is the repl's to report: the
+			// front door dispatches it as it stands, and the no-settings
+			// argv is pinned by TestTheContinueAliasIsTheFrontDoor.
 			name: "a line the repl refuses is the repl's to report",
 			cwd:  project,
 			args: []string{"-c", "--modle", "x"},
@@ -297,6 +311,12 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 			}
 			if !strings.Contains(stderr, c.want) {
 				t.Errorf("poo %q refused with %q, want it to name %q", c.args, stderr, c.want)
+			}
+			if c.wantPrefix != "" && !strings.Contains(stderr, c.wantPrefix) {
+				t.Errorf("poo %q refused with %q, want the prefix %q", c.args, stderr, c.wantPrefix)
+			}
+			if c.notWantPrefix != "" && strings.Contains(stderr, c.notWantPrefix) {
+				t.Errorf("poo %q refused with %q, want the prefix %q to be absent", c.args, stderr, c.notWantPrefix)
 			}
 		})
 	}
