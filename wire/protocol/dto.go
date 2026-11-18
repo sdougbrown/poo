@@ -385,12 +385,13 @@ type HistoryItem struct {
 	Turn int `json:"turn,omitempty"`
 	// Role is the message's role, for a message item.
 	Role string `json:"role,omitempty"`
-	// Origin is the record's origin, as the log carries it: "user" for
-	// a line the person typed, "steer", "interrupt" or "follow_up" for
-	// a line that rode a run, "job" for a background job's result,
-	// "hook:<name>" for a step's output and "feed:<name>" for a feed's.
-	// It is empty on a record that had none, which is every item a
-	// binary without capabilities.history_origin sends.
+	// Origin is the record's own, from the record vocabulary the
+	// Origin constants name: "user" for a line the person typed, the
+	// delivery origins ("steer", "interrupt", "follow_up"), "job",
+	// "hook:<name>", "feed:<name>" and "notice" on a user-role item,
+	// "model", "tool" or "system" on the rest. It is empty on a record
+	// that had none, which is every item a binary without
+	// capabilities.history_origin sends.
 	Origin string `json:"origin,omitempty"`
 	// Text is the item's text.
 	Text string `json:"text,omitempty"`
