@@ -445,6 +445,49 @@ func TestARegistryPathIsRelativeToTheWorkingDirectory(t *testing.T) {
 	}
 }
 
+// TestARegistryPathMayNameTheHomeDirectory covers the path: a
+// `cli_registry.paths` entry that starts with ~ is resolved against the
+// home directory, not the directory the session works in.
+func TestARegistryPathMayNameTheHomeDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "reg")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("making the registry directory: %v", err)
+	}
+	body, err := json.Marshal(map[string]any{
+		"version": 1,
+		"tools":   map[string]any{"deploy": registryEntry("The deploy command")},
+	})
+	if err != nil {
+		t.Fatalf("encoding the registry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "registry.json"), body, 0o600); err != nil {
+		t.Fatalf("writing the registry: %v", err)
+	}
+	settings, err := config.Parse([]byte(registrySettings("~/reg")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if runtime.Registry == nil || runtime.Registry.Len() != 1 {
+		t.Fatalf("the build loaded %v, want the one entry under the home directory", runtime.Registry)
+	}
+	if !hasTool(runtime.Options.ToolOrder, "call_cli") {
+		t.Errorf("the session offers %v, and not call_cli", runtime.Options.ToolOrder)
+	}
+}
+
 // TestARegistryPathThatIsNotThereNamesTheField covers a path the load
 // cannot read: the failure is the settings field the operator wrote.
 func TestARegistryPathThatIsNotThereNamesTheField(t *testing.T) {

@@ -440,13 +440,17 @@ type Finish struct {
 
 // CLIRegistry are the cli registry's settings.
 type CLIRegistry struct {
-	// Paths are the registry directories.
+	// Paths are the registry directories, resolved against the working
+	// directory; a path that starts with ~/ is under the home directory
+	// instead.
 	Paths []string `json:"paths,omitempty"`
 }
 
 // Feeds are the feed manifests' settings.
 type Feeds struct {
-	// Paths are the feed manifest directories.
+	// Paths are the feed manifest directories, resolved against the
+	// working directory; a path that starts with ~/ is under the home
+	// directory instead.
 	Paths []string `json:"paths,omitempty"`
 }
 
@@ -466,7 +470,8 @@ type Skills struct {
 	// Default.
 	UserPath *string `json:"user_path,omitempty"`
 	// Paths are further directories of skills, resolved against the
-	// working directory. A path that is not there is dropped with a
+	// working directory; a path that starts with ~/ is under the home
+	// directory instead. A path that is not there is dropped with a
 	// warning: skills are guidance a session offers, and a directory
 	// that is missing leaves it with less to offer rather than broken.
 	Paths []string `json:"paths,omitempty"`

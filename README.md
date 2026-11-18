@@ -124,8 +124,9 @@ The one exception is a literal key: a key pi's file writes is copied into the
 settings, where a literal key lives, and the layer never carries one.
 
 `models_file`, `auth_file` and `pi_auth_file` resolve relative paths
-against the settings file's directory. `cli_registry.paths` and
-`feeds.paths` answer to the working directory.
+against the settings file's directory. `cli_registry.paths`,
+`feeds.paths` and `skills.paths` answer to the working directory, and a
+path in them that starts with `~/` resolves under the home directory.
 
 `poo auth import pi` copies the Codex credential pi's `auth.json` holds into poo's
 file, once. It reads the file `--from` names, then the one `pi_auth_file` names,
@@ -402,7 +403,8 @@ first engine is Starlark (`poo/codemode/starlark`); the seam is
 `poo/codemode.Engine`, and a binary that links no engine offers no
 codemode tool. The settings are `tools.codemode.*`.
 
-**Feeds.** When the settings name feed manifests in `feeds.paths`, the
+**Feeds.** When the settings name feed manifests in `feeds.paths` (a
+path that starts with `~/` resolves under the home directory), the
 session runs a long-lived command beside itself and delivers the messages
 it prints as input. A feed is listed as `feed:<name>` and stopped with
 `cancel_job`. Its manifest names the command, the environment, the restart
