@@ -139,7 +139,8 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	if err := decodeStrict(raw, &a); err != nil {
 		return nil, poo.InvalidArgsf("%s: %v", CallToolName, err)
 	}
-	if _, ok := t.catalog.Lookup(a.Name); !ok {
+	entry, ok := t.catalog.Lookup(a.Name)
+	if !ok {
 		if t.catalog.Len() == 0 {
 			return nil, poo.InvalidArgsf("%s: no CLI is registered", CallToolName)
 		}
@@ -160,7 +161,6 @@ func (t *CallTool) Prepare(raw json.RawMessage, env poo.PrepareEnv) (poo.Prepare
 	}
 	plan, err := t.catalog.Plan(a.Name, args)
 	if err != nil {
-		entry, _ := t.catalog.Lookup(a.Name)
 		return nil, planError(a.Name, entry.Schema, err)
 	}
 	key := marshal(struct {

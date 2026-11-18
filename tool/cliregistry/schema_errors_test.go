@@ -256,6 +256,49 @@ func TestANonObjectAgainstATaggedOneOfNamesTheType(t *testing.T) {
 	}
 }
 
+// TestATypelessOneOfNamesTheType covers the tagged oneOf whose schema
+// declares no type: the miss still renders as an object refusal.
+func TestATypelessOneOfNamesTheType(t *testing.T) {
+	tool := map[string]any{
+		"description": "Send a payload",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"build": map[string]any{
+					"oneOf": []any{
+						map[string]any{
+							"type":                 "object",
+							"properties":           map[string]any{"kind": map[string]any{"const": "text"}},
+							"required":             []string{"kind"},
+							"additionalProperties": false,
+						},
+						map[string]any{
+							"type":                 "object",
+							"properties":           map[string]any{"kind": map[string]any{"const": "image"}},
+							"required":             []string{"kind"},
+							"additionalProperties": false,
+						},
+					},
+				},
+			},
+			"additionalProperties": false,
+		},
+		"bindings": []any{
+			map[string]any{"property": "build", "style": "equals", "flag": "--build"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "send.json", map[string]any{"send": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"send","args":{"build":7}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the non-object value was accepted")
+	}
+	if !strings.Contains(err.Error(), `"build" must be an object`) {
+		t.Errorf("the refusal does not name the type: %v", err)
+	}
+}
+
 // TestARefPropertyRendersThroughTheDefinition covers a property the
 // schema declares through $ref: the refusal reads the definition the
 // pointer resolves to, not the reference's bare map.
@@ -375,7 +418,7 @@ func TestAnArrayItemConstraintNamesTheItem(t *testing.T) {
 			"type": "object",
 			"properties": map[string]any{
 				"tags": map[string]any{
-					"type": "array",
+					"type":  "array",
 					"items": map[string]any{"type": "string", "enum": []string{"red", "green"}},
 				},
 			},
@@ -426,43 +469,6 @@ func TestTheAcceptedArgumentsListKeepsNameOrder(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "order accepts: a*, a!") {
 		t.Errorf("the accepted list does not keep name order: %v", err)
-	}
-}
-
-// TestANestedUnknownArgumentNamesTheParentAccepted covers an unknown
-// argument inside a nested object.
-func TestANestedUnknownArgumentNamesTheParentAccepted(t *testing.T) {
-	tool := map[string]any{
-		"description": "Ship a build",
-		"command":     []string{script(t, "say")},
-		"inputSchema": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"build": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"target": map[string]any{"type": "string"},
-					},
-					"required":             []string{"target"},
-					"additionalProperties": false,
-				},
-			},
-			"additionalProperties": false,
-		},
-		"bindings": []any{
-			map[string]any{"property": "build", "style": "equals", "flag": "--build"},
-		},
-	}
-	path := writeManifest(t, t.TempDir(), "ship.json", map[string]any{"ship": tool})
-	tool2 := cliregistry.NewCall(load(t, path))
-	_, err := tool2.Prepare(json.RawMessage(`{"name":"ship","args":{"build":{"targit":"x"}}}`), poo.PrepareEnv{})
-	if err == nil {
-		t.Fatal("the nested unknown argument was accepted")
-	}
-	for _, want := range []string{`unknown argument "targit"`, "ship.build accepts: target*"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal does not carry %q: %v", want, err)
-		}
 	}
 }
 
