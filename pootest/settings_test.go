@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
 	"github.com/sdougbrown/poo/provider/catalog"
+	"github.com/sdougbrown/poo/repl"
 )
 
 // TestMain runs the tests the way a package under this helper does,
@@ -44,7 +46,7 @@ func TestTheTestBinaryRefusesTheServeFlag(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, os.Args[0], "serve")
+	cmd := exec.CommandContext(ctx, os.Args[0], pootest.ServeSubcommand)
 	cmd.Env = append(os.Environ(), serveGuardChild+"=1")
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -55,7 +57,7 @@ func TestTheTestBinaryRefusesTheServeFlag(t *testing.T) {
 	if exitErr.ExitCode() != 2 {
 		t.Errorf("the test binary as serve exited %d, want 2", exitErr.ExitCode())
 	}
-	if !strings.Contains(stderr.String(), `started as "serve"`) {
+	if !strings.Contains(stderr.String(), fmt.Sprintf("started as %q", pootest.ServeSubcommand)) {
 		t.Errorf("the refusal does not name the flag: %q", stderr.String())
 	}
 }
@@ -119,5 +121,16 @@ func TestTheManifestOverridesDoNotReachTheSuite(t *testing.T) {
 func TestTheStateRootNameIsTheCatalogs(t *testing.T) {
 	if pootest.StateRootEnv != catalog.StateRootEnv {
 		t.Errorf("the state root is %q here and %q in the catalog", pootest.StateRootEnv, catalog.StateRootEnv)
+	}
+}
+
+// TestTheServeSubcommandIsTheRepls covers the spelling two binaries
+// agree on: this package's guard compares os.Args[1] against it, and
+// the repl starts its server as os.Executable() with it. A rename on
+// one side only would let a regressed guard pass while the recursion
+// hang the guard exists to stop returns.
+func TestTheServeSubcommandIsTheRepls(t *testing.T) {
+	if pootest.ServeSubcommand != repl.ServeSubcommand {
+		t.Errorf("the serve subcommand is %q here and %q in the repl", pootest.ServeSubcommand, repl.ServeSubcommand)
 	}
 }

@@ -73,7 +73,7 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	}
 	// The repl runs the binary again as `poo serve`, so the flags it
 	// parsed are spelled a second time for the child.
-	serverArgs := append([]string{"serve"}, renderFlags(inv, serverFlagSpecs())...)
+	serverArgs := append([]string{repl.ServeSubcommand}, renderFlags(inv, serverFlagSpecs())...)
 	return exit{repl.Run(repl.Options{
 		ServerArgs:  serverArgs,
 		WorkingDir:  workingDir,

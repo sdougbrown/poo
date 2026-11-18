@@ -37,6 +37,10 @@ import (
 // promptMark is the mark the repl reads its lines behind.
 const promptMark = "💩❯ "
 
+// ServeSubcommand is the subcommand the repl re-execs itself as to
+// run the server.
+const ServeSubcommand = "serve"
+
 // namedLevels are the reasoning levels poo knows, lowest first.
 //
 // A model that announces no levels of its own is climbed through the
@@ -662,7 +666,7 @@ func (m *machine) server() (io.WriteCloser, io.ReadCloser, func() error, error) 
 	}
 	args := m.opts.ServerArgs
 	if len(args) == 0 {
-		args = []string{"serve"}
+		args = []string{ServeSubcommand}
 	}
 	cmd := exec.Command(exe, args...)
 	ownProcessGroup(cmd)
