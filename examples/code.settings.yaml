@@ -165,7 +165,7 @@ tools:
 
 # The registered command-line tools. A path is a manifest file, a
 # directory of manifests, or several of them, resolved against the
-# working directory unless they start with ~. Every manifest is loaded
+# working directory unless they start with ~/. Every manifest is loaded
 # when the session is built, and a name two manifests define fails the
 # load.
 #
@@ -212,7 +212,7 @@ sampling:
 # Off until asked for. `default` reads the directory the rest of the family
 # uses (~/.agents/skills); `user_path` names another, and the two are mutually
 # exclusive. `paths` are further directories, resolved against the working
-# directory or starting with ~, and one that is not there is dropped with a
+# directory or starting with ~/, and one that is not there is dropped with a
 # warning rather than failing the run.
 #
 #     skills:

@@ -456,7 +456,8 @@ type Skills struct {
 	// Default.
 	UserPath *string `json:"user_path,omitempty"`
 	// Paths are further directories of skills, resolved against the
-	// working directory. A path that is not there is dropped with a
+	// working directory; a path that starts with ~/ is under the home
+	// directory instead. A path that is not there is dropped with a
 	// warning: skills are guidance a session offers, and a directory
 	// that is missing leaves it with less to offer rather than broken.
 	Paths []string `json:"paths,omitempty"`

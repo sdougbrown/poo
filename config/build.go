@@ -545,8 +545,8 @@ func (r *Runtime) hasFeeds() bool {
 // resolveSkills loads the skills the settings name.
 //
 // The directories are the person's own — the default one, or the one
-// they name — and then the paths beside them, resolved against the
-// working directory. A directory that is not there is dropped with a
+// they name — and then the paths beside them, resolved by againstDir. A
+// directory that is not there is dropped with a
 // warning rather than failing the build: skills are guidance a session
 // offers, and a tree without the directory is not a tree a session
 // cannot work in. A SKILL.md that is there and does not parse is an
@@ -666,8 +666,8 @@ func (r *Runtime) warn(text string) {
 
 // resolveRegistry loads the cli registries the settings and overrides name.
 //
-// A path is resolved against the working directory, and every manifest
-// reachable from the paths is one catalog. The catalog is loaded here,
+// The paths are resolved by againstDir, and every manifest reachable
+// from them is one catalog. The catalog is loaded here,
 // once: the commands a session may call are the ones its registry holds
 // when the session is built, and a session does not reload one.
 func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
@@ -697,9 +697,9 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	return checkRegistryConditions(catalog.AvailabilityInputs())
 }
 
-// againstDir resolves each path: a leading ~ is expanded to the home
-// directory, a relative path is resolved against dir, and an absolute
-// one is kept.
+// againstDir resolves each path. ~ and a path that starts with ~/ are
+// under the home directory. Any other relative path, ~user included, is
+// under dir. An absolute path is kept.
 func againstDir(paths []string, dir string) ([]string, error) {
 	resolved := make([]string, 0, len(paths))
 	for _, path := range paths {
@@ -717,8 +717,8 @@ func againstDir(paths []string, dir string) ([]string, error) {
 
 // resolveFeeds loads the feed manifests the settings and overrides name.
 //
-// A relative path is resolved against the working directory, and every
-// manifest reachable from the paths joins one set. The set is loaded
+// The paths are resolved by againstDir, and every manifest reachable
+// from them joins one set. The set is loaded
 // once, when the session is built; a session never reloads it. Nothing
 // starts a feed here.
 func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
