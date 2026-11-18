@@ -1,10 +1,9 @@
 // Package schematext renders a tool's schema findings for the model.
 //
-// Two layers check a call against a schema and refuse it: the
-// session's own check of the tool's spec schema, and a registered
-// CLI's check of its manifest's schema. Both hand the model the same
-// kind of refusal, so both render through one renderer, in the
-// vocabulary of the schema the call missed: the accepted argument
+// Two layers refuse a call that misses its schema: the session's own
+// check, and a registered CLI's check of its manifest. Both hand the
+// model the same kind of refusal, so both render through one renderer.
+// The vocabulary is the schema the call missed: the accepted argument
 // names, an enum's values, a bound's limit.
 package schematext
 
@@ -20,12 +19,12 @@ import (
 // IssuesText renders schema issues for the model.
 //
 // A path is an RFC 6901 pointer into the arguments, so the model can
-// see which argument it got wrong. The schema sits beside the issues,
-// so the common refusals are rendered in the vocabulary of the schema
-// itself — the accepted argument names, an enum's values, a bound's
-// limit — instead of a code the model cannot act on. An issue the
-// renderer has no words for keeps the library's message, or its code
-// when the message is empty: a refusal never ends in a bare pointer.
+// see which argument it got wrong. The schema sits beside the issues.
+// The common refusals render in the schema's own vocabulary: the
+// accepted argument names, an enum's values, a bound's limit. An issue
+// the renderer has no words for keeps the library's message, or its
+// code when the message is empty. A refusal never ends in a bare
+// pointer.
 func IssuesText(name string, schema map[string]any, issues []schema.StructuralIssue) string {
 	parts := make([]string, 0, len(issues))
 	for _, issue := range issues {
@@ -111,8 +110,8 @@ func issueMessage(name string, schema map[string]any, issue schema.StructuralIss
 // PropertyNames lists a schema object's properties in name order,
 // required ones marked, or an empty string when there are none.
 //
-// Names sort by their base name and a required mark is appended after
-// the sort, so two renderers that share a schema list the same
+// Names sort by their base name; a required mark is appended after
+// the sort. Two renderers that share a schema then list the same
 // arguments in the same order.
 func PropertyNames(schema map[string]any) string {
 	if schema == nil {
