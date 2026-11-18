@@ -80,6 +80,11 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 // No flag is the empty id, which opens a new session. So is --continue
 // with nothing to continue: the caller refuses that case, rather than
 // start a session nobody asked for.
+//
+// Either flag opens a session the store holds, so the session it opens is
+// the one the store lists: an id the store does not hold, or a session
+// that works in another directory, is refused here, before a server
+// starts.
 func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if o.cont && o.resume != "" {
 		return "", errors.New("--continue and --resume are alternatives: give one")
@@ -94,9 +99,6 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if runsEphemeral(settings, o.ephemeral) {
 		return "", errors.New("--continue and --resume open a logged session, and this command runs without one: drop --ephemeral, or the settings' session.mode")
 	}
-	if o.resume != "" {
-		return o.resume, nil
-	}
 	store, err := o.openStore(workingDir)
 	if err != nil {
 		return "", err
@@ -106,11 +108,40 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if o.resume != "" {
+		return namedSession(listings, o.resume, workingDir, store.Dir())
+	}
 	listing, ok := pickContinue(listings, workingDir)
 	if !ok {
 		return "", nil
 	}
 	return listing.ID, nil
+}
+
+// namedSession returns the session --resume names, once the store holds it
+// and it works where this repl does.
+//
+// The session's tools run in the directory it recorded, while the
+// statusline, the settings' rules and the decider read the one the repl
+// runs in, so a session from another directory is refused rather than run
+// half in each. storeDir is where the id was looked for, which is what a
+// person needs to hear when it is not there.
+//
+// A session another process holds is not refused here: the load reports
+// the lock, and a refusal there says the same thing with the session's
+// own answer.
+func namedSession(listings []session.Listing, id, workingDir, storeDir string) (string, error) {
+	for _, listing := range listings {
+		if listing.ID != id {
+			continue
+		}
+		if !sameDir(listing.WorkingDir, workingDir) {
+			return "", fmt.Errorf("session %s works in %s: resume it from there, or pass --working-dir %s",
+				id, listing.WorkingDir, listing.WorkingDir)
+		}
+		return id, nil
+	}
+	return "", fmt.Errorf("no session %s in %s", id, storeDir)
 }
 
 // pickContinue returns the session --continue opens: the one whose last

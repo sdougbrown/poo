@@ -301,3 +301,101 @@ func TestTheReplRefusesTwoWaysToReopenAtOnce(t *testing.T) {
 		})
 	}
 }
+
+// TestResumeNeedsTheSessionInItsOwnDirectory covers --resume across
+// directories: the session has to be in the store, and it has to work
+// where this repl does, because the tools run in the session's directory
+// while the settings and the statusline read the repl's.
+func TestResumeNeedsTheSessionInItsOwnDirectory(t *testing.T) {
+	base := t.TempDir()
+	sessionDir := filepath.Join(base, "sessions")
+	settingsFile := theSettings(t, base, "http://localhost:4000/v1")
+	here := filepath.Join(base, "here")
+	there := filepath.Join(base, "there")
+	for _, dir := range []string{here, there} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("creating %s: %v", dir, err)
+		}
+	}
+	now := time.Now()
+	recordSession(t, sessionDir, "here-session", here, now.Add(-time.Hour))
+	recordSession(t, sessionDir, "there-session", there, now.Add(-time.Hour))
+
+	o := replOptions{}
+	o.settingsFile = settingsFile
+	o.sessionDir = sessionDir
+
+	// The session of this directory opens, and the one of another
+	// directory is refused with the directory it works in.
+	o.resume = "here-session"
+	id, err := o.resumeID(here)
+	if err != nil {
+		t.Fatalf("resuming here-session in its own directory: %v", err)
+	}
+	if id != "here-session" {
+		t.Errorf("--resume opened %q, want here-session", id)
+	}
+
+	o.resume = "there-session"
+	if _, err := o.resumeID(here); err == nil {
+		t.Error("a session from another directory was opened")
+	} else {
+		for _, want := range []string{"there", "--working-dir"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the refusal is %q, want it to name %q", err, want)
+			}
+		}
+	}
+	// The directory it recorded is where it opens, without another flag.
+	if id, err := o.resumeID(there); err != nil || id != "there-session" {
+		t.Errorf("resuming there-session in its own directory is (%q, %v)", id, err)
+	}
+
+	// A session the store does not hold is refused with the store it was
+	// looked for in.
+	o.resume = "no-such-session"
+	if _, err := o.resumeID(here); err == nil {
+		t.Error("a session the store does not hold was opened")
+	} else if !strings.Contains(err.Error(), "no-such-session") || !strings.Contains(err.Error(), sessionDir) {
+		t.Errorf("the refusal is %q, want it to name the session and the store %s", err, sessionDir)
+	}
+
+	// The lock is the server's to report: a session another process
+	// holds is the id the repl hands the load.
+	held, err := session.Acquire(session.LockPath(sessionDir, "here-session"))
+	if err != nil {
+		t.Fatalf("taking the lock of here-session: %v", err)
+	}
+	defer held.Release()
+	o.resume = "here-session"
+	if id, err := o.resumeID(here); err != nil || id != "here-session" {
+		t.Errorf("resuming a locked session is (%q, %v), want the id and no refusal", id, err)
+	}
+}
+
+// TestTheReplRefusesAResumedSessionFromAnotherDirectory covers the same
+// refusal at the front door: the exit code says the line was refused, the
+// message names the directory the session works in, and no repl starts.
+func TestTheReplRefusesAResumedSessionFromAnotherDirectory(t *testing.T) {
+	base := t.TempDir()
+	sessionDir := filepath.Join(base, "sessions")
+	settingsFile := theSettings(t, base, "http://localhost:4000/v1")
+	there := filepath.Join(base, "there")
+	if err := os.MkdirAll(there, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", there, err)
+	}
+	recordSession(t, sessionDir, "there-session", there, time.Now())
+	t.Chdir(t.TempDir())
+
+	code, stderr, stdout := runCLIWithStdout(t,
+		"repl", "--resume", "there-session", "--settings", settingsFile, "--session-dir", sessionDir)
+	if code != 2 {
+		t.Errorf("poo repl --resume exited %d, want 2", code)
+	}
+	if !strings.Contains(stderr, there) {
+		t.Errorf("the refusal does not name the session's directory: %q", stderr)
+	}
+	if stdout != "" {
+		t.Errorf("poo repl --resume wrote %q, so a repl started", stdout)
+	}
+}

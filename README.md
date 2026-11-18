@@ -278,7 +278,9 @@ the repl renders its scrollback — the newest 500 items — before the first
 prompt; none of it is sent to the model again. `poo sessions list` names
 the sessions by id. A session another process holds is skipped, and a
 directory with nothing to continue, a pair of flags that conflict, or an
-ephemeral session is a refusal with exit 2.
+ephemeral session is a refusal with exit 2. `--resume <id>` opens a
+session that works in the repl's directory: one that recorded another is
+refused, with the directory to resume it from.
 
 The repl is a package of the root module, and `go test ./...` at the
 root covers it with the rest of the tree. Its dependencies — markdown
