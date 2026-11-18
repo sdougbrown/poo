@@ -148,7 +148,7 @@ func (f *sharedFlags) overrides() (config.Overrides, error) {
 	if f.systemPrompt != "" {
 		systemPrompt, err = config.ResolveSettingPath("", f.systemPrompt)
 		if err != nil {
-			return config.Overrides{}, err
+			return config.Overrides{}, fmt.Errorf("resolving --system-prompt %s: %w", f.systemPrompt, err)
 		}
 	}
 	overrides := config.Overrides{

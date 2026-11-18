@@ -13,6 +13,7 @@ import (
 	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/poo"
+	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/session"
 )
 
@@ -166,6 +167,41 @@ func TestTheSystemPromptFlagResolvesAgainstTheWorkingDirectory(t *testing.T) {
 		}
 		if got := overrides.SystemPrompt; got != want {
 			t.Errorf("the system prompt is %q, want %q", got, want)
+		}
+	}
+}
+
+// TestTheSystemPromptFlagNamesItselfWhenTheHomeIsMissing covers the
+// failure: with no home directory a ~ cannot be resolved, and the
+// error names the flag and the path it was given.
+func TestTheSystemPromptFlagNamesItselfWhenTheHomeIsMissing(t *testing.T) {
+	t.Setenv("HOME", "")
+	inv, err := clicontract.Parse(pooApp(io.Discard), []string{
+		"run",
+		"--system-prompt", "~/prompt.md",
+	})
+	if err != nil {
+		t.Fatalf("parsing the flags: %v", err)
+	}
+	var f sharedFlags
+	f.bind(inv)
+	_, err = f.overrides()
+	if err == nil {
+		t.Fatal("the overrides resolved, want the error")
+	}
+	if !strings.Contains(err.Error(), "--system-prompt") {
+		t.Errorf("the error is %q, want it to name --system-prompt", err)
+	}
+	if !strings.Contains(err.Error(), "~/prompt.md") {
+		t.Errorf("the error is %q, want it to name the path", err)
+	}
+	// The error is the raw home resolution, so it carries no code;
+	// if it did, the code is one of the settings' codes.
+	if code, ok := config.CodeOf(err); ok {
+		switch code {
+		case config.CodeDecode, config.CodeUnknownField, config.CodeUnavailable, config.CodeInvalid, config.CodeUnsupported:
+		default:
+			t.Errorf("the error carries the code %q, want one of the settings' codes", code)
 		}
 	}
 }
