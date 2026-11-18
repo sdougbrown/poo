@@ -1126,30 +1126,40 @@ func TestTheSkillsDefaultThatIsMissingIsQuiet(t *testing.T) {
 	}
 }
 
-// TestAHomeThatCannotBeResolvedFailsTheSkillsSetting covers the failure
-// the settings can cause: a ~ path with no home to resolve it against.
-func TestAHomeThatCannotBeResolvedFailsTheSkillsSetting(t *testing.T) {
+// TestAHomeThatCannotBeResolvedFailsThePathSettings covers the failure
+// the settings can cause: a ~ path with no home to resolve it against,
+// reported against the field that named it.
+func TestAHomeThatCannotBeResolvedFailsThePathSettings(t *testing.T) {
 	t.Setenv("HOME", "")
-	settings, err := config.Parse([]byte(theModelSettings+"skills:\n  user_path: ~/skills\n"), config.FormatYAML)
-	if err != nil {
-		t.Fatalf("decoding the settings: %v", err)
-	}
-	_, err = config.Build(config.BuildOptions{
-		Settings:       settings,
-		WorkingDir:     t.TempDir(),
-		DefaultProfile: "code",
-		Tools:          theTools(),
-		Profiles:       theProfiles(),
-		Executors:      theExecutors(),
-	})
-	if err == nil {
-		t.Fatal("the build resolved a home directory that is not set")
-	}
-	if code, ok := config.CodeOf(err); !ok || code != config.CodeInvalid {
-		t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
-	}
-	if field, _ := config.FieldOf(err); field != "skills.user_path" {
-		t.Errorf("the field is %q, want skills.user_path", field)
+	for _, tc := range []struct{ field, yaml string }{
+		{"skills.user_path", "skills:\n  user_path: ~/skills\n"},
+		{"skills.paths", "skills:\n  paths: [\"~/skills\"]\n"},
+		{"cli_registry.paths", "cli_registry:\n  paths: [\"~/registry\"]\n"},
+		{"feeds.paths", "feeds:\n  paths: [\"~/feeds\"]\n"},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			settings, err := config.Parse([]byte(theModelSettings+tc.yaml), config.FormatYAML)
+			if err != nil {
+				t.Fatalf("decoding the settings: %v", err)
+			}
+			_, err = config.Build(config.BuildOptions{
+				Settings:       settings,
+				WorkingDir:     t.TempDir(),
+				DefaultProfile: "code",
+				Tools:          theTools(),
+				Profiles:       theProfiles(),
+				Executors:      theExecutors(),
+			})
+			if err == nil {
+				t.Fatal("the build resolved a home directory that is not set")
+			}
+			if code, ok := config.CodeOf(err); !ok || code != config.CodeInvalid {
+				t.Errorf("the code is %q, want %q", code, config.CodeInvalid)
+			}
+			if field, _ := config.FieldOf(err); field != tc.field {
+				t.Errorf("the field is %q, want %s", field, tc.field)
+			}
+		})
 	}
 }
 
