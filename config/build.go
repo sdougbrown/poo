@@ -1504,17 +1504,15 @@ func (r *Runtime) resolvePolicy(opts BuildOptions, workingDir string) error {
 	}
 
 	// The tools that ask about calls outside the working directory name
-	// the argument that carries the path, so the policy can resolve it.
+	// the argument that carries the path. The three file tools take
+	// theirs in "path"; a tool's primary argument is not it — grep's
+	// is "pattern", which the doom loop matches, not the policy's
+	// path boundary.
 	askOutside := map[string]string{}
 	for _, name := range []string{"read", "grep", "edit"} {
-		if !fileToolAsksOutside(settings, name) {
-			continue
+		if fileToolAsksOutside(settings, name) {
+			askOutside[name] = "path"
 		}
-		arg := primaryArgOf(opts, r.Options.Tools, name)
-		if arg == "" {
-			return fmt.Errorf("config: the %s tool has no primary argument to ask about", name)
-		}
-		askOutside[name] = arg
 	}
 
 	askers, err := r.resolveAskers(opts, settings.Permission)

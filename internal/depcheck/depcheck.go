@@ -12,7 +12,9 @@
 //     the wire/protocol package, for it is a client of the contract
 //   - the provider/catalog package may import the standard library and the
 //     core package, and no transport
-//   - the perm package may import the standard library and the core package
+//   - the perm package may import the standard library, the core package
+//     and the protect package, for the policy resolves a call's path with
+//     the same resolver the tools use
 //   - the perm/decide package may import the standard library, the core
 //     package, the perm package and the decide package
 //   - the session package may import the standard library, the core
@@ -113,7 +115,7 @@ func (c Checker) rules() []rule {
 		// the text repairs a model's answer may need, and nothing but
 		// the core beyond them.
 		{path: m + "/provider/internal/chat", allowed: []string{m, m + "/provider/internal/support"}},
-		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm"}},
+		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm", m + "/protect"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
 		{path: m + "/exec"},

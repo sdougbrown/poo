@@ -127,9 +127,11 @@ type Options struct {
 	// AskOutside names the tools whose path argument routes a call
 	// outside the working directory through the asker chain, by tool
 	// name. The value is the argument that carries the path. A call
-	// such a tool makes to a path outside WorkingDir is asked about
-	// after the rules: it never takes the read-only auto-allow, and
-	// the unmatched action does not apply to it.
+	// such a tool makes to a path outside the working directory is
+	// asked about after the rules: it never takes the read-only
+	// auto-allow, and the unmatched action does not apply to it. The
+	// boundary is the call's own working directory when it names one,
+	// else the policy's.
 	AskOutside map[string]string
 	// Unmatched is the action for a side-effecting call no rule
 	// matches. It defaults to DefaultUnmatched.
@@ -217,6 +219,9 @@ func New(opts Options) (*Policy, error) {
 		return nil, err
 	}
 	var warnings []string
+	if len(opts.AskOutside) > 0 && opts.WorkingDir == "" {
+		warnings = append(warnings, "the ask-outside tools name no working directory; the policy judges a call's path against the directory the call itself carries, and a call that names none is allowed")
+	}
 	for i, rule := range opts.Rules {
 		if err := checkRule(i, rule); err != nil {
 			return nil, err
@@ -376,10 +381,18 @@ func (p *Policy) decide(info poo.ToolCallInfo) (Action, poo.AskReason, *poo.Repe
 
 // asksOutside reports whether the call is one the ask-outside tools
 // route through the asker chain: a prepared call whose path argument
-// resolves outside the working directory.
+// resolves outside the working directory. The boundary is the call's
+// working directory, falling back to the build-time one.
 func (p *Policy) asksOutside(info poo.ToolCallInfo) bool {
 	arg, ok := p.askOutside[info.Spec.Name]
-	if !ok || info.PrepareFailed || p.workingDir == "" {
+	if !ok {
+		return false
+	}
+	dir := info.WorkingDir
+	if dir == "" {
+		dir = p.workingDir
+	}
+	if dir == "" {
 		return false
 	}
 	value, ok := stringField(info.Arguments, arg)
@@ -387,9 +400,19 @@ func (p *Policy) asksOutside(info poo.ToolCallInfo) bool {
 		return false
 	}
 	if !filepath.IsAbs(value) {
-		value = filepath.Join(p.workingDir, value)
+		value = filepath.Join(dir, value)
 	}
-	return !protect.Within(protect.Resolve(p.workingDir), protect.Resolve(value))
+	return !protect.Within(protect.Resolve(dir), protect.Resolve(value))
+}
+
+// workingDirOf is the working directory the policy judges the call
+// against: the call's own directory when it names one, else the
+// build-time one.
+func (p *Policy) workingDirOf(info poo.ToolCallInfo) string {
+	if info.WorkingDir != "" {
+		return info.WorkingDir
+	}
+	return p.workingDir
 }
 
 // copyStringMap copies a string map, so a caller's map changes do not
@@ -565,7 +588,7 @@ func (p *Policy) ask(ctx poo.HookContext, info poo.ToolCallInfo, reason poo.AskR
 		RepeatCount: counts,
 		Arguments:   argumentsOf(info),
 		HistoryView: ctx.HistoryView,
-		WorkingDir:  p.workingDir,
+		WorkingDir:  p.workingDirOf(info),
 		Interrupted: ctx.Interrupted,
 	}
 	resolution := p.chain.askReported(ctx, ask, ctx.Permissions)

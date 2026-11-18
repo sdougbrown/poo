@@ -1995,18 +1995,23 @@ func TestThePolicyGetsTheResolvedWorkingDirectory(t *testing.T) {
 }
 
 // TestTheOutsideAskSettingReachesThePolicy covers the settings' walk
-// from the tools' file-tool section to the policy: a read the setting
-// names is asked about when its path leaves the working directory, and
-// a session without the setting keeps the auto-allow.
+// from the tools' file-tool section to the policy: a tool the setting
+// names is asked about when its path leaves the working directory, a
+// session without the setting keeps the auto-allow, and grep's pattern
+// argument is never mistaken for the path.
 func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		yaml string
+		tool string
+		args map[string]string
 		asks int
 	}{
-		{"unset", "", 0},
-		{"false", "tools:\n  read: {ask_outside_working_dir: false}\n", 0},
-		{"true", "tools:\n  read: {ask_outside_working_dir: true}\n", 1},
+		{"read unset", "", "read", map[string]string{"path": "outside.txt"}, 0},
+		{"read false", "tools:\n  read: {ask_outside_working_dir: false}\n", "read", map[string]string{"path": "outside.txt"}, 0},
+		{"read true", "tools:\n  read: {ask_outside_working_dir: true}\n", "read", map[string]string{"path": "outside.txt"}, 1},
+		{"grep true", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"path": "outside.txt", "pattern": "needle"}, 1},
+		{"grep pattern is not the path", "tools:\n  grep: {ask_outside_working_dir: true}\n", "grep", map[string]string{"pattern": "../escape"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			settings, err := config.Parse([]byte(theModelSettings+tc.yaml), config.FormatYAML)
@@ -2026,9 +2031,16 @@ func TestTheOutsideAskSettingReachesThePolicy(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the runtime: %v", err)
 			}
-			args, _ := json.Marshal(map[string]string{"path": filepath.Join(filepath.Dir(t.TempDir()), "outside.txt")})
+			cwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := tc.args["path"]; ok {
+				tc.args["path"] = filepath.Join(filepath.Dir(cwd), tc.args["path"])
+			}
+			args, _ := json.Marshal(tc.args)
 			if _, err := runtime.Policy.BeforeTool(poo.HookContext{Context: context.Background()}, poo.ToolCallInfo{
-				Spec:      poo.ToolSpec{Name: "read", Class: poo.ClassReadOnly},
+				Spec:      poo.ToolSpec{Name: tc.tool, Class: poo.ClassReadOnly},
 				Arguments: args,
 			}); err != nil {
 				t.Fatalf("asking the policy: %v", err)

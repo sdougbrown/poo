@@ -110,6 +110,37 @@ func TestTheUnmatchedAllowDoesNotSwallowTheOutsideAsk(t *testing.T) {
 	}
 }
 
+func TestTheCallOwnWorkingDirectoryDecidesTheBoundary(t *testing.T) {
+	policyDir := t.TempDir()
+	sessionDir := t.TempDir()
+	asker := &fakeAsker{decision: perm.DecisionAllow, available: true}
+	policy, err := perm.New(perm.Options{
+		AskOutside: map[string]string{"read": "path"},
+		WorkingDir: policyDir,
+		Askers:     []perm.Asker{asker},
+	})
+	if err != nil {
+		t.Fatalf("building the policy: %v", err)
+	}
+	// The file sits inside the policy's build directory but outside the
+	// directory the session works in.
+	insidePolicyDir := filepath.Join(policyDir, "sibling.txt")
+	args, _ := json.Marshal(map[string]string{"path": insidePolicyDir})
+	if _, err := policy.BeforeTool(poo.HookContext{Context: context.Background()}, poo.ToolCallInfo{
+		Spec:       poo.ToolSpec{Name: "read", Class: poo.ClassReadOnly},
+		Arguments:  args,
+		WorkingDir: sessionDir,
+	}); err != nil {
+		t.Fatalf("asking the policy: %v", err)
+	}
+	if asker.asked != 1 {
+		t.Fatalf("the call outside the session directory was asked %d time(s), want 1", asker.asked)
+	}
+	if asker.lastAsk.WorkingDir != sessionDir {
+		t.Fatalf("the ask's working directory is %q, want the session's %q", asker.lastAsk.WorkingDir, sessionDir)
+	}
+}
+
 func TestARuleMatchesBeforeTheOutsideAsk(t *testing.T) {
 	dir := t.TempDir()
 	asker := &fakeAsker{decision: perm.DecisionDeny, available: true}
