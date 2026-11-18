@@ -53,11 +53,13 @@ func issueMessage(name string, schema map[string]any, issue schema.StructuralIss
 	if len(segments) > 0 {
 		last = segments[len(segments)-1]
 	}
-	// A clause names the argument it rejects: a refusal of the same
-	// kind on two arguments must stay mappable to each argument.
+	// A clause names the argument it rejects: the leaf name at the top
+	// level, the pointer's path once the argument sits inside an object
+	// or an array, so two same-kind misses stay mappable to each
+	// argument.
 	subject := ""
-	if last != "" {
-		subject = fmt.Sprintf("%q ", last)
+	if arg := clauseSubject(segments); arg != "" {
+		subject = fmt.Sprintf("%q ", arg)
 	}
 	switch issue.Code {
 	case "required":
@@ -71,7 +73,13 @@ func issueMessage(name string, schema map[string]any, issue schema.StructuralIss
 		if accepted == "" {
 			return ""
 		}
-		return fmt.Sprintf("unknown argument %q; %s accepts: %s", last, name, accepted)
+		// The accepted list is the parent's vocabulary, so a nested
+		// argument names the parent it belongs under.
+		who := name
+		if parentSegments := segments[:len(segments)-1]; len(parentSegments) > 0 {
+			who = name + "." + strings.Join(parentSegments, ".")
+		}
+		return fmt.Sprintf("unknown argument %q; %s accepts: %s", last, who, accepted)
 	case "enum":
 		enum, _ := schemaPointerAt(schema, segments)["enum"].([]any)
 		if len(enum) == 0 {
@@ -154,6 +162,19 @@ func ToNames(value any) []string {
 		}
 	}
 	return out
+}
+
+// clauseSubject names the argument a clause rejects: the leaf name at
+// the top level, the pointer's path once the argument sits inside an
+// object or an array.
+func clauseSubject(segments []string) string {
+	if len(segments) == 0 {
+		return ""
+	}
+	if len(segments) == 1 {
+		return segments[0]
+	}
+	return strings.Join(segments, "/")
 }
 
 // splitPointer splits an RFC 6901 pointer into its unescaped segments.

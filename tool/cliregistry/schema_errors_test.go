@@ -326,6 +326,76 @@ func TestATwoHopReferenceDegradesToThePath(t *testing.T) {
 	}
 }
 
+// TestANestedUnknownArgumentScopesTheParent covers a nested unknown
+// argument: the accepted list names the parent the argument belongs
+// under, not the tool's top level.
+func TestANestedUnknownArgumentScopesTheParent(t *testing.T) {
+	tool := map[string]any{
+		"description": "Ship a build",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"build": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"target": map[string]any{"type": "string"},
+					},
+					"required":             []string{"target"},
+					"additionalProperties": false,
+				},
+			},
+			"additionalProperties": false,
+		},
+		"bindings": []any{
+			map[string]any{"property": "build", "style": "equals", "flag": "--build"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "ship.json", map[string]any{"ship": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"ship","args":{"build":{"targit":"x"}}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the nested unknown argument was accepted")
+	}
+	for _, want := range []string{`unknown argument "targit"`, "ship.build accepts: target*"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not carry %q: %v", want, err)
+		}
+	}
+}
+
+// TestAnArrayItemConstraintNamesTheItem covers the per-item walk: a
+// constraint the schema declares on an array's items renders with the
+// item's path, not the raw pointer.
+func TestAnArrayItemConstraintNamesTheItem(t *testing.T) {
+	tool := map[string]any{
+		"description": "Tag a thing",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"tags": map[string]any{
+					"type": "array",
+					"items": map[string]any{"type": "string", "enum": []string{"red", "green"}},
+				},
+			},
+			"additionalProperties": false,
+		},
+		"bindings": []any{
+			map[string]any{"property": "tags", "style": "equals", "flag": "--tags"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "tag.json", map[string]any{"tag": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"tag","args":{"tags":["red","blue"]}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the off-enum item was accepted")
+	}
+	if !strings.Contains(err.Error(), `"tags/1" must be one of: "red", "green"`) {
+		t.Errorf("the refusal does not name the item and its values: %v", err)
+	}
+}
+
 // TestTheAcceptedArgumentsListKeepsNameOrder pins the ordering
 // convention: names sort by their base name, and a required mark is
 // appended after the sort, so the call-path renderer and the catalog
@@ -389,7 +459,7 @@ func TestANestedUnknownArgumentNamesTheParentAccepted(t *testing.T) {
 	if err == nil {
 		t.Fatal("the nested unknown argument was accepted")
 	}
-	for _, want := range []string{`unknown argument "targit"`, "ship accepts: target*"} {
+	for _, want := range []string{`unknown argument "targit"`, "ship.build accepts: target*"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not carry %q: %v", want, err)
 		}
