@@ -613,7 +613,7 @@ func (m *machine) replayItem(item protocol.HistoryItem) {
 	case "message":
 		switch item.Role {
 		case "user":
-			m.r.userPrompt(sanitizeText(item.Text))
+			m.replayUser(item)
 		case "assistant":
 			m.r.reply(ansi.Strip(item.Text))
 		}
@@ -623,6 +623,26 @@ func (m *machine) replayItem(item protocol.HistoryItem) {
 		m.r.toolResult(item.Tool, item.Outcome, item.Text, 0)
 	case "compaction":
 		m.r.notice("the view was compacted: %s", sanitizeText(item.Text))
+	}
+}
+
+// replayUser renders a user-role message the way the live transcript
+// drew it.
+//
+// A line the person typed is the prompt the session ran; a line that
+// rode a run — a steer, an interrupt or a follow-up — is the steer's
+// echo, which is how the live path draws the one of them it sends. Any
+// other origin is a line nobody typed: a job's result, a feed's message
+// or a hook's step, and the live transcript draws none of them, so the
+// replay draws none either. An item with no origin at all is a record
+// older than the origin or a binary that does not report it, and it
+// reads as the prompt it always did.
+func (m *machine) replayUser(item protocol.HistoryItem) {
+	switch item.Origin {
+	case "", "user":
+		m.r.userPrompt(sanitizeText(item.Text))
+	case "steer", "interrupt", "follow_up":
+		m.r.steerPrompt(sanitizeText(item.Text))
 	}
 }
 
