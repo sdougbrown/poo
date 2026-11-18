@@ -93,6 +93,40 @@ func TestAFeedPathRelativeToTheWorkingDirectory(t *testing.T) {
 	}
 }
 
+// TestAFeedPathMayNameTheHomeDirectory covers the path: a `feeds.paths`
+// entry that starts with ~ is resolved against the home directory, not
+// the directory the session works in.
+func TestAFeedPathMayNameTheHomeDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "manifests")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("making the manifest directory: %v", err)
+	}
+	body := `{"version": 1, "feeds": {"broker": {"command": ["true"]}}}`
+	if err := os.WriteFile(filepath.Join(dir, "feeds.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the manifest: %v", err)
+	}
+	settings, err := config.Parse([]byte(theFeedsSettings("~/manifests")), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime, err := config.Build(config.BuildOptions{
+		Settings:       settings,
+		WorkingDir:     t.TempDir(),
+		DefaultProfile: "code",
+		Tools:          theTools(),
+		Profiles:       theProfiles(),
+		Executors:      theExecutors(),
+	})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	if runtime.Feeds == nil || runtime.Feeds.Len() != 1 {
+		t.Fatalf("the build loaded %v, want the one feed under the home directory", runtime.Feeds)
+	}
+}
+
 // TestAFeedPathThatDoesNotLoadNamesTheField covers the failure: a
 // feeds.paths entry the loader cannot read fails the build, and the
 // failure names the settings field the operator wrote.

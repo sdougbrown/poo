@@ -575,7 +575,16 @@ func (r *Runtime) resolveSkills(opts BuildOptions, workingDir string) error {
 		}
 	}
 	paths := append(append([]string{}, settings.Paths...), opts.Overrides.SkillsPaths...)
-	for _, path := range againstDir(paths, workingDir) {
+	resolved, err := againstDir(paths, workingDir)
+	if err != nil {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "skills.paths",
+			Message: "the skills paths cannot be resolved",
+			Err:     err,
+		}
+	}
+	for _, path := range resolved {
 		// A directory that is not there, and a file named where a
 		// directory belongs, are both dropped with a warning: skills are
 		// guidance a session offers, and a path that is not a directory
@@ -665,8 +674,15 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	if len(r.Settings.CLIRegistry.Paths) == 0 && len(opts.Overrides.CLIRegistryPaths) == 0 {
 		return nil
 	}
-	paths := againstDir(r.Settings.CLIRegistry.Paths, workingDir)
-	paths = append(paths, againstDir(opts.Overrides.CLIRegistryPaths, workingDir)...)
+	paths, err := againstDir(append(append([]string{}, r.Settings.CLIRegistry.Paths...), opts.Overrides.CLIRegistryPaths...), workingDir)
+	if err != nil {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "cli_registry.paths",
+			Message: "the cli registry paths cannot be resolved",
+			Err:     err,
+		}
+	}
 	catalog, err := cli.Load(paths...)
 	if err != nil {
 		return &Error{
@@ -681,17 +697,22 @@ func (r *Runtime) resolveRegistry(opts BuildOptions, workingDir string) error {
 	return checkRegistryConditions(catalog.AvailabilityInputs())
 }
 
-// againstDir resolves each relative path against dir and keeps each
-// absolute one.
-func againstDir(paths []string, dir string) []string {
+// againstDir resolves each path: a leading ~ is expanded to the home
+// directory, a relative path is resolved against dir, and an absolute
+// one is kept.
+func againstDir(paths []string, dir string) ([]string, error) {
 	resolved := make([]string, 0, len(paths))
 	for _, path := range paths {
+		path, err := expandHome(path)
+		if err != nil {
+			return nil, err
+		}
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(dir, path)
 		}
 		resolved = append(resolved, path)
 	}
-	return resolved
+	return resolved, nil
 }
 
 // resolveFeeds loads the feed manifests the settings and overrides name.
@@ -704,8 +725,15 @@ func (r *Runtime) resolveFeeds(opts BuildOptions, workingDir string) error {
 	if len(r.Settings.Feeds.Paths) == 0 && len(opts.Overrides.FeedsPaths) == 0 {
 		return nil
 	}
-	paths := againstDir(r.Settings.Feeds.Paths, workingDir)
-	paths = append(paths, againstDir(opts.Overrides.FeedsPaths, workingDir)...)
+	paths, err := againstDir(append(append([]string{}, r.Settings.Feeds.Paths...), opts.Overrides.FeedsPaths...), workingDir)
+	if err != nil {
+		return &Error{
+			Code:    CodeInvalid,
+			Field:   "feeds.paths",
+			Message: "the feeds paths cannot be resolved",
+			Err:     err,
+		}
+	}
 	set, err := feed.Load(paths...)
 	if err != nil {
 		return &Error{
