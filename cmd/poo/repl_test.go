@@ -245,11 +245,20 @@ func TestTheReplRefusesTwoWaysToReopenAtOnce(t *testing.T) {
 	base := t.TempDir()
 	settingsFile := theSettings(t, base, "http://localhost:4000/v1")
 	sessionDir := filepath.Join(base, "sessions")
+	// The broken settings are the settings' own refusal: a file that
+	// will not load is a refusal, like the flags, not a store failure.
+	broken := filepath.Join(base, "broken.json")
+	if err := os.WriteFile(broken, []byte(`{"version":1,"no_such_key":true}`), 0o644); err != nil {
+		t.Fatalf("writing the broken settings: %v", err)
+	}
 
 	cases := []struct {
 		name string
 		args []string
 		want string
+		// settings names the settings file the case runs under; the
+		// empty name is the valid one.
+		settings string
 	}{
 		{
 			name: "continue and resume",
@@ -266,11 +275,21 @@ func TestTheReplRefusesTwoWaysToReopenAtOnce(t *testing.T) {
 			args: []string{"repl", "--resume", "s1", "--ephemeral"},
 			want: "without one",
 		},
+		{
+			name:     "continue and settings that will not load",
+			args:     []string{"repl", "--continue"},
+			want:     "no_such_key",
+			settings: broken,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			settings := c.settings
+			if settings == "" {
+				settings = settingsFile
+			}
 			args := append(append([]string{}, c.args...),
-				"--settings", settingsFile, "--session-dir", sessionDir)
+				"--settings", settings, "--session-dir", sessionDir)
 			code, stderr, stdout := runCLIWithStdout(t, args...)
 			if code != 2 {
 				t.Errorf("poo %s exited %d, want 2", strings.Join(args, " "), code)
@@ -285,6 +304,39 @@ func TestTheReplRefusesTwoWaysToReopenAtOnce(t *testing.T) {
 				t.Errorf("the refusal is %q, want it to name the conflict (%q)", stderr, c.want)
 			}
 		})
+	}
+}
+
+// TestTheReplReportsAStoreItCannotOpen covers a session store that
+// will not open: the settings point at a directory that is a file,
+// so the store cannot open it, and the repl reports the failure
+// operationally rather than as a refusal: the line the person typed
+// is not at fault, and the same failure is operational on the
+// sessions commands.
+func TestTheReplReportsAStoreItCannotOpen(t *testing.T) {
+	base := t.TempDir()
+	settingsFile := theSettings(t, base, "http://localhost:4000/v1")
+	// The session directory is a regular file, so the store cannot
+	// open it: the settings point at a directory that is not one.
+	blocked := filepath.Join(base, "sessions")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("writing the file where the directory belongs: %v", err)
+	}
+	t.Chdir(t.TempDir())
+
+	code, stderr, stdout := runCLIWithStdout(t,
+		"repl", "--continue", "--settings", settingsFile, "--session-dir", blocked)
+	if code != 1 {
+		t.Errorf("poo repl --continue exited %d, want 1 for the store's failure", code)
+	}
+	if !strings.Contains(stderr, "poo repl:") {
+		t.Errorf("the failure is %q, want it under the repl's prefix", stderr)
+	}
+	if !strings.Contains(stderr, blocked) {
+		t.Errorf("the failure does not name the directory it could not open: %q", stderr)
+	}
+	if stdout != "" {
+		t.Errorf("poo repl --continue wrote %q, so a repl started", stdout)
 	}
 }
 

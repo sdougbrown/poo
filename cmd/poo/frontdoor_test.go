@@ -228,6 +228,16 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 	if err := os.WriteFile(pinned, []byte(`{"version":1,"no_such_key":true}`), 0o644); err != nil {
 		t.Fatalf("writing the pinned settings: %v", err)
 	}
+	// The broken project's settings are the discovery a run that finds
+	// them fails on: the conflict must refuse before they load.
+	brokenProject := filepath.Join(base, "broken-project")
+	if err := os.MkdirAll(filepath.Join(brokenProject, ".poo"), 0o755); err != nil {
+		t.Fatalf("writing the broken project directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brokenProject, ".poo", "settings.json"),
+		[]byte(`{"version":1,"no_such_key":true}`), 0o644); err != nil {
+		t.Fatalf("writing the broken project's settings: %v", err)
+	}
 	sub := filepath.Join(project, "sub")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatalf("writing the project's subdirectory: %v", err)
@@ -293,6 +303,28 @@ func TestTheFrontDoorReadsTheFlagsOnItsLine(t *testing.T) {
 			cwd:  project,
 			args: []string{"-c", "--modle", "x"},
 			want: "modle",
+		},
+		{
+			// The flags conflict before the settings resolve: a line that
+			// names a settings file that will not load is still refused
+			// for the conflict, under the front door's prefix, not the
+			// settings error.
+			name:          "the conflict refuses before the settings resolve",
+			args:          []string{"-c", "--resume", "s1", "--continue", "--settings", pinned},
+			want:          "alternatives",
+			wantPrefix:    "poo: ",
+			notWantPrefix: "poo repl: ",
+		},
+		{
+			// The same refusal when the discovery is what would fail: the
+			// project's settings will not load, and the conflict still
+			// refuses first, under the front door's prefix.
+			name:          "the conflict refuses before the discovered settings resolve",
+			cwd:           brokenProject,
+			args:          []string{"-c", "--resume", "s1", "--continue"},
+			want:          "alternatives",
+			wantPrefix:    "poo: ",
+			notWantPrefix: "poo repl: ",
 		},
 	}
 	for _, c := range cases {

@@ -214,3 +214,33 @@ func TestAResumedSessionSanitizesTheRecordedText(t *testing.T) {
 		}
 	}
 }
+
+// TestTheReplayWarnsWhenTheHistoryWillNotBeRead covers the replay's
+// failure: a server that refuses the history is a warning in the
+// transcript, and the repl settles to the prompt rather than paging
+// forever.
+func TestTheReplayWarnsWhenTheHistoryWillNotBeRead(t *testing.T) {
+	server := &fakeServer{t: t}
+	server.refuseHistory = true
+	server.history = []protocol.HistoryItem{
+		{Seq: 1, Type: "message", Role: "user", Text: "a line the replay cannot draw"},
+	}
+
+	drawn := ansi.Strip(resumeRepl(t, server, "s9"))
+	// The warning says the history could not be read, with the
+	// server's answer.
+	for _, want := range []string{"the session's history could not be read", "the session's history is not readable"} {
+		if !strings.Contains(drawn, want) {
+			t.Errorf("the transcript does not hold %q:\n%s", want, drawn)
+		}
+	}
+	// The repl gave up paging: the history it could not read is not
+	// drawn, and the greeting is there, so the repl reached the
+	// prompt.
+	if strings.Contains(drawn, "a line the replay cannot draw") {
+		t.Errorf("the transcript holds the history the server refused:\n%s", drawn)
+	}
+	if !strings.Contains(drawn, "poo repl — /help for the commands") {
+		t.Errorf("the transcript does not hold the greeting: the repl did not settle:\n%s", drawn)
+	}
+}

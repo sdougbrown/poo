@@ -48,6 +48,8 @@ type fakeServer struct {
 	cancels []string
 	// refusePrompt makes run/prompt refuse, for the refusal tests.
 	refusePrompt bool
+	// refuseHistory makes session/history refuse, for the refusal tests.
+	refuseHistory bool
 	// messages are the run/message texts the client sent, in order.
 	messages []string
 	// refuseMessage makes run/message refuse, for the refusal tests.
@@ -186,6 +188,10 @@ func (s *fakeServer) line(line []byte) {
 		s.mu.Unlock()
 		s.reply(req.ID, response)
 	case protocol.MethodSessionHistory:
+		if s.refuseHistory {
+			s.fail(req.ID, "no_history", "the session's history is not readable")
+			return
+		}
 		var params protocol.HistoryParams
 		json.Unmarshal(req.Params, &params)
 		s.mu.Lock()

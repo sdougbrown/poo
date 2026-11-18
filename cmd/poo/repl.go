@@ -58,6 +58,13 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	resumeID, err := o.resumeID(workingDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo repl: %v\n", err)
+		// A store failure is operational: the line the person typed is
+		// not at fault, and the same failure is operational on the
+		// sessions commands. Every other refusal is a usage error.
+		var storeErr *storeError
+		if errors.As(err, &storeErr) {
+			return exit{operationalExitCode}
+		}
 		return exit{usageExitCode}
 	}
 	if o.cont && resumeID == "" {
@@ -75,6 +82,21 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	})}
 }
 
+// errContinueResume is the refusal both doors share: the front door
+// checks it before the settings resolve, and the repl checks it before
+// the store opens.
+var errContinueResume = errors.New("--continue and --resume are alternatives: give one")
+
+// storeError marks a failure of the session store itself: the
+// directory the settings point at exists, but opening or reading it
+// failed. The line the repl parsed is not at fault, so the exit is
+// operational rather than a refusal.
+type storeError struct{ err error }
+
+func (e *storeError) Error() string { return e.err.Error() }
+
+func (e *storeError) Unwrap() error { return e.err }
+
 // resumeID returns the session the repl opens: the id --resume names, or
 // the one --continue picks out of the store.
 //
@@ -91,7 +113,7 @@ func handleRepl(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 // session is the newest is only in the store's answer.
 func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if o.cont && o.resume != "" {
-		return "", errors.New("--continue and --resume are alternatives: give one")
+		return "", errContinueResume
 	}
 	if !o.cont && o.resume == "" {
 		return "", nil
@@ -107,21 +129,24 @@ func (o *replOptions) resumeID(workingDir string) (string, error) {
 	if config.SessionMode(settings, overrides) == "ephemeral" {
 		return "", errors.New("--continue and --resume open a logged session, and this command runs without one: drop --ephemeral, or the settings' session.mode")
 	}
-	dir, err := sessionDirectory(settings, overrides)
+	dir, err := config.SessionDirectory(settings, overrides)
 	if err != nil {
 		return "", err
 	}
 	if o.resume != "" {
 		return namedSession(dir, o.resume, workingDir)
 	}
-	store, err := openSessionStore(settings, overrides)
+	// The store's own failure is operational, not a refusal: the
+	// directory the settings point at is not the line's fault, and the
+	// same failure is operational on the sessions commands.
+	store, err := session.NewStore(dir)
 	if err != nil {
-		return "", err
+		return "", &storeError{err}
 	}
 	defer store.Close()
 	listings, err := store.List(context.Background())
 	if err != nil {
-		return "", err
+		return "", &storeError{err}
 	}
 	listing, ok := pickContinue(listings, workingDir)
 	if !ok {

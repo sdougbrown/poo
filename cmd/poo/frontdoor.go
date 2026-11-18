@@ -65,6 +65,13 @@ func runUIWith(extra []string) int {
 		// repl's own refusal rather than a settings error from here.
 		return run(append([]string{defaultUI}, extra...))
 	}
+	// The conflict is the front door's to refuse, before the settings
+	// resolve: the repl refuses the same line for the same reason,
+	// and a settings error would hide it.
+	if o.cont && o.resume != "" {
+		fmt.Fprintf(os.Stderr, "poo: %v\n", errContinueResume)
+		return usageExitCode
+	}
 	path, _, err := frontDoorSettings(o.settingsFile, o.workingDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
