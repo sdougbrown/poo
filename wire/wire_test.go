@@ -1202,6 +1202,18 @@ func TestTheHistoryCarriesAToolCallsSummary(t *testing.T) {
 	t.Fatal("the history holds no tool call")
 }
 
+// The protocol's history limits pin the core's: a one-sided change
+// would leave the repl paging at a limit the server no longer enforces,
+// or refusing pages the server allows.
+func TestTheHistoryLimitsMatchTheProtocol(t *testing.T) {
+	if poo.DefaultHistoryLimit != protocol.DefaultHistoryLimit {
+		t.Errorf("the default limit is %d, want the protocol's %d", poo.DefaultHistoryLimit, protocol.DefaultHistoryLimit)
+	}
+	if poo.MaxHistoryLimit != protocol.MaxHistoryLimit {
+		t.Errorf("the max limit is %d, want the protocol's %d", poo.MaxHistoryLimit, protocol.MaxHistoryLimit)
+	}
+}
+
 // The session's state is reported.
 func TestSessionGetReportsTheState(t *testing.T) {
 	factory := newTestFactory(t, func() poo.ChatTransport { return pootest.NewTransport() })

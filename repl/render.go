@@ -691,6 +691,14 @@ func (r *renderer) steerPrompt(text string) {
 	r.write(ansiBold + "» " + text + ansiReset + "\n")
 }
 
+// reply renders a reply the session already recorded, the way a stream's
+// flush renders one: the markdown is laid out and written whole.
+func (r *renderer) reply(text string) {
+	if body := r.chunkBody("", text); body != "" {
+		r.write(body)
+	}
+}
+
 // markdown renders one markdown source for the terminal.
 func (r *renderer) markdown(text string) string {
 	if r.tr == nil {

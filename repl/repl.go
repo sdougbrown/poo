@@ -54,6 +54,10 @@ type Options struct {
 	// WorkingDir is the directory the session's tools work in. It is
 	// also the folder the statusline names.
 	WorkingDir string
+	// ResumeID opens the session this id names instead of starting a
+	// new one. A resumed session keeps the working directory and the
+	// model it recorded.
+	ResumeID string
 	// Profile is the profile the session runs under. An empty name
 	// takes the server's default.
 	Profile string
@@ -467,10 +471,19 @@ func (m *machine) start() error {
 		profile = info.DefaultProfile
 	}
 	var session protocol.SessionInfo
-	err = m.conn.call(protocol.MethodSessionCreate, protocol.CreateParams{
-		WorkingDir: m.opts.WorkingDir,
-		Profile:    profile,
-	}, &session)
+	if m.opts.ResumeID != "" {
+		// The session is on disk. The server resolves the store the
+		// way this process did, so the id alone opens it, and its own
+		// header says where it works and what it talks to.
+		err = m.conn.call(protocol.MethodSessionLoad, protocol.LoadParams{
+			SessionID: m.opts.ResumeID,
+		}, &session)
+	} else {
+		err = m.conn.call(protocol.MethodSessionCreate, protocol.CreateParams{
+			WorkingDir: m.opts.WorkingDir,
+			Profile:    profile,
+		}, &session)
+	}
 	if err != nil {
 		return err
 	}
@@ -478,6 +491,9 @@ func (m *machine) start() error {
 	m.status.model = session.Models.Chat
 	for _, warning := range session.Warnings {
 		m.r.warning(warning)
+	}
+	if notice := recoveryNotice(session); notice != "" {
+		m.r.warning(notice)
 	}
 
 	// The catalog names every model the session may switch to, and
@@ -504,7 +520,110 @@ func (m *machine) start() error {
 		return err
 	}
 	m.status.level = current.Reasoning
+	if m.opts.ResumeID != "" {
+		m.replay()
+	}
 	return nil
+}
+
+// recoveryNotice says what a load recovered, in one line: the torn tail
+// it cut and the runs it marked interrupted. A load that recovered
+// nothing has no notice.
+func recoveryNotice(info protocol.SessionInfo) string {
+	var recovered []string
+	if info.RecoveredTail {
+		recovered = append(recovered, "a torn tail was cut")
+	}
+	if runs := len(info.InterruptedRuns); runs > 0 {
+		recovered = append(recovered, fmt.Sprintf("%d interrupted run(s) marked", runs))
+	}
+	if len(recovered) == 0 {
+		return ""
+	}
+	return "the session was recovered: " + strings.Join(recovered, ", ")
+}
+
+// The scrollback a resumed session shows: the size of the page the repl
+// asks for, and the most items it renders of them. The two are the
+// server's history limits, the page a session/history call answers
+// with and the largest one it may ask for.
+const (
+	historyPage  = protocol.DefaultHistoryLimit
+	historyItems = protocol.MaxHistoryLimit
+)
+
+// replay renders the scrollback of the session the repl resumed, oldest
+// first, so the person reads the conversation the session already had.
+//
+// The history stays the server's: nothing here goes back to the model.
+// The pages are read backwards from the newest item, and a session with
+// more items than the cap says that older history is not shown instead
+// of paging through all of it.
+func (m *machine) replay() {
+	var items []protocol.HistoryItem
+	truncated := false
+	for {
+		params := protocol.HistoryParams{SessionID: m.sessionID, Limit: historyPage}
+		if len(items) > 0 {
+			params.BeforeSeq = items[0].Seq
+		}
+		var page protocol.HistoryResult
+		if err := m.conn.call(protocol.MethodSessionHistory, params, &page); err != nil {
+			m.r.warning("the session's history could not be read: " + err.Error())
+			return
+		}
+		if len(page.Items) == 0 {
+			break
+		}
+		items = append(page.Items, items...)
+		if !page.HasMore {
+			break
+		}
+		if len(items) >= historyItems {
+			truncated = true
+			break
+		}
+	}
+	if len(items) > historyItems {
+		items = items[len(items)-historyItems:]
+		truncated = true
+	}
+	if truncated {
+		m.r.notice("older history is not shown")
+	}
+	for _, item := range items {
+		m.replayItem(item)
+	}
+}
+
+// replayItem renders one item of a resumed session's history.
+//
+// An item the transcript has no place for — a run's boundary, a
+// permission decision, a job's — is skipped: the transcript shows the
+// conversation, and a compaction is the one structural change worth a
+// line.
+//
+// The text is the session's, not this terminal's to obey: the replay
+// strips its escape sequences before rendering it, the way the live stream
+// strips what arrives, so a recorded sequence is not painted again.
+// Stripping escapes is all this does; whatever else the text carries is
+// the renderer's, on the replay as on the live path.
+func (m *machine) replayItem(item protocol.HistoryItem) {
+	switch item.Type {
+	case "message":
+		switch item.Role {
+		case "user":
+			m.r.userPrompt(sanitizeText(item.Text))
+		case "assistant":
+			m.r.reply(ansi.Strip(item.Text))
+		}
+	case "tool_call":
+		m.r.toolCall(item.Tool, item.Summary)
+	case "tool_result":
+		m.r.toolResult(item.Tool, item.Outcome, item.Text, 0)
+	case "compaction":
+		m.r.notice("the view was compacted: %s", sanitizeText(item.Text))
+	}
 }
 
 // server starts the poo server.
@@ -1124,12 +1243,7 @@ func (m *machine) openAsk(req askRequest, input input) {
 	m.ask = &req
 	m.askMu.Unlock()
 	m.r.write(ansiYellow + "⚙ permission · " + sanitizeLine(req.ask.Tool) + ansiReset + "\n")
-	stripped := ansi.Strip(req.ask.Summary)
-	lines := strings.Split(stripped, "\n")
-	for i, line := range lines {
-		lines[i] = sanitizeLine(line)
-	}
-	if summary := strings.Join(lines, "\n"); summary != "" {
+	if summary := sanitizeText(req.ask.Summary); summary != "" {
 		m.r.write(ansiDim + summary + ansiReset + "\n")
 	}
 	if m.eof {

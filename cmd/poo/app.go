@@ -29,6 +29,16 @@ repl, or the one the settings' ui names.
 runs one session, like poo run, with the run's flags before or after the
 prompt. --print is the same flag.
 
+  poo -c [flags]
+
+reopens the most recent session in the working directory, and
+
+  poo --resume <id> [flags]
+
+reopens the session that id names: they are poo repl's --continue and
+--resume. The session keeps its recorded working directory and model,
+and the repl renders its scrollback before the first prompt.
+
 Settings discovery:
   Without --settings, the settings are found at the file the POO_SETTINGS
   environment variable names, then the project's .poo directory (walking
@@ -136,7 +146,7 @@ func replCommand(stdout io.Writer) *clicontract.Command {
 		Name:  "repl",
 		Short: "An interactive session in the terminal (vi keys, markdown rendering)",
 		Long:  replLong,
-		Flags: serveFlagSpecs(),
+		Flags: append(serveFlagSpecs(), reopenFlagSpecs()...),
 		Handle: func(_ context.Context, inv clicontract.Invocation, cmdStderr io.Writer) (any, error) {
 			return handleRepl(inv, stdout, cmdStderr), nil
 		},
@@ -342,6 +352,18 @@ func projectPromptFlagSpecs() []clicontract.Flag {
 // the placement of the tools.
 func serveFlagSpecs() []clicontract.Flag {
 	return append(endpointFlagSpecs(), toolFlagSpecs()...)
+}
+
+// reopenFlagSpecs declares the flags that open a session the store
+// already holds instead of starting one.
+//
+// They are the repl's own: the server it starts opens the session the
+// repl names, so the child parses neither of them.
+func reopenFlagSpecs() []clicontract.Flag {
+	return []clicontract.Flag{
+		{Name: "continue", Short: "c", Kind: clicontract.Bool, Usage: "Continue the most recent session in the working directory"},
+		{Name: "resume", Kind: clicontract.String, Usage: "Resume the session this id names"},
+	}
 }
 
 // toolFlagSpecs declares the flags that place the tools: the directory they

@@ -466,3 +466,39 @@ func TestTheClockReachesARecordsTimestamp(t *testing.T) {
 		t.Errorf("the session's last activity is %s, want %s", summaries[0].LastActivity, at)
 	}
 }
+
+// TestAListingNamesTheWorkingDirectory covers the summary's working
+// directory: a session's header names the directory it works in, and a
+// listing carries it, so a reader can pick the sessions of one
+// directory out of the store.
+func TestAListingNamesTheWorkingDirectory(t *testing.T) {
+	ctx := context.Background()
+	_, store := newTestStore(t)
+	if _, err := store.Create(ctx, createdRecord("s1")); err != nil {
+		t.Fatalf("creating the session: %v", err)
+	}
+	summaries, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("listing: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("the store lists %d sessions, want 1", len(summaries))
+	}
+	if summaries[0].WorkingDir != "/tmp" {
+		t.Errorf("the listing's working directory is %q, want /tmp", summaries[0].WorkingDir)
+	}
+
+	// The ephemeral store computes its one summary from the records it
+	// holds, and it names the directory too.
+	memory := NewMemory()
+	if _, err := memory.Create(ctx, createdRecord("s2")); err != nil {
+		t.Fatalf("creating the session in memory: %v", err)
+	}
+	summaries, err = memory.List(ctx)
+	if err != nil {
+		t.Fatalf("listing the memory: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].WorkingDir != "/tmp" {
+		t.Errorf("the memory's listing is %v, want one session in /tmp", summaries)
+	}
+}

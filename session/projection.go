@@ -87,6 +87,9 @@ type Listing struct {
 	CreatedAt time.Time
 	// Mode is the session's persistence mode.
 	Mode Mode
+	// WorkingDir is the directory the session works in, as its header
+	// recorded it.
+	WorkingDir string
 	// Profile is the profile the session was created with.
 	Profile string
 	// Build names the binary that created the session.
@@ -130,6 +133,7 @@ func (Projection) Summarize(meta Metadata, recs []poo.Record) Listing {
 		ID:           meta.SessionID,
 		CreatedAt:    meta.CreatedAt,
 		Mode:         meta.Mode,
+		WorkingDir:   meta.WorkingDir,
 		Profile:      meta.Profile,
 		Build:        meta.Build,
 		Runs:         scan.runs,
@@ -151,6 +155,8 @@ type summaryLine struct {
 	CreatedAt string `json:"created_at"`
 	// Mode is the persistence mode of a session.created record.
 	Mode string `json:"mode"`
+	// WorkingDir is the directory a session.created record names.
+	WorkingDir string `json:"working_dir"`
 	// Profile is the profile of a session.created record.
 	Profile string `json:"profile"`
 	// Build names the binary of a session.created record.
@@ -163,6 +169,8 @@ type scanned struct {
 	created time.Time
 	// mode is the session's persistence mode.
 	mode Mode
+	// workingDir is the directory the session works in.
+	workingDir string
 	// profile is the profile the session was created with.
 	profile string
 	// build names the binary that created the session.
@@ -181,6 +189,7 @@ func (s *scanned) add(line summaryLine) {
 	case "session.created":
 		s.created = parseTime(line.CreatedAt)
 		s.mode = Mode(line.Mode)
+		s.workingDir = line.WorkingDir
 		s.profile = line.Profile
 		s.build = line.Build
 	case "run.started":

@@ -249,6 +249,17 @@ func sanitizeLine(line string) string {
 	}, line)
 }
 
+// sanitizeText makes text the session recorded safe to print, line by
+// line: every line goes through sanitizeLine, and the line breaks stay,
+// so a block keeps the rows it had.
+func sanitizeText(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = sanitizeLine(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // clipLine ends a line at the terminal's width, marking the cut.
 func clipLine(line string, width int) string {
 	if width <= 0 || ansi.StringWidth(line) <= width {

@@ -683,9 +683,9 @@ func (s *FileStore) recordsOf(open *openSession) []poo.Record {
 // List returns the summaries of the sessions in the store.
 //
 // A summary is what a reader of the session directory wants: the
-// session's id, when it was created, its profile and build, how many
-// runs it had, why its last run settled, how big its file is, and
-// whether a process holds its lock.
+// session's id, when it was created, the directory it works in, its
+// profile and build, how many runs it had, why its last run settled, how
+// big its file is, and whether a process holds its lock.
 func (s *FileStore) List(ctx context.Context) ([]Listing, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -738,6 +738,7 @@ func (s *FileStore) summarize(id string) (Listing, error) {
 	}
 	sum.CreatedAt = scan.created
 	sum.Mode = scan.mode
+	sum.WorkingDir = scan.workingDir
 	sum.Profile = scan.profile
 	sum.Build = scan.build
 	sum.Runs = scan.runs

@@ -338,6 +338,15 @@ type CloseParams struct {
 	SessionID string `json:"session_id"`
 }
 
+// The limits a session/history page honors.
+const (
+	// DefaultHistoryLimit is the page size a page answers with when
+	// the caller names no limit.
+	DefaultHistoryLimit = 100
+	// MaxHistoryLimit is the largest page a caller may ask for.
+	MaxHistoryLimit = 500
+)
+
 // HistoryParams are the params of session/history.
 type HistoryParams struct {
 	// SessionID identifies the session.
@@ -345,8 +354,8 @@ type HistoryParams struct {
 	// BeforeSeq ends the page before this sequence number. Zero takes
 	// the newest page.
 	BeforeSeq int64 `json:"before_seq,omitempty"`
-	// Limit is how many items the page holds. It is at most 500, and
-	// defaults to 100.
+	// Limit is how many items the page holds. It is at most
+	// MaxHistoryLimit, and defaults to DefaultHistoryLimit.
 	Limit int `json:"limit,omitempty"`
 }
 
