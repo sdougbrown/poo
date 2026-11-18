@@ -601,9 +601,11 @@ func (m *machine) replay() {
 // conversation, and a compaction is the one structural change worth a
 // line.
 //
-// The text is the session's, not this terminal's to obey: it is
-// sanitized before it renders, the way the live path sanitizes what
-// arrives, so a recorded escape sequence reaches no terminal.
+// The text is the session's, not this terminal's to obey: the replay
+// strips its escape sequences before rendering it, the way the live stream
+// strips what arrives, so a recorded sequence is not painted again.
+// Stripping escapes is all this does; whatever else the text carries is
+// the renderer's, on the replay as on the live path.
 func (m *machine) replayItem(item protocol.HistoryItem) {
 	switch item.Type {
 	case "message":
