@@ -139,11 +139,21 @@ func handleSessionsPrune(inv clicontract.Invocation, stdout, stderr io.Writer) e
 
 // openStore opens the store the sessions live in.
 func (o *sessionsOptions) openStore() (*session.FileStore, error) {
-	settings, err := o.settings("")
+	return o.sharedFlags.openStore("")
+}
+
+// openStore opens the store the settings and the flags name.
+//
+// The directory is the one a server would open: session.dir, then the
+// --session-dir flag, with the home directory expanded. The working
+// directory is where the settings are discovered from, so a command that
+// runs in another one reads the settings that one names.
+func (f *sharedFlags) openStore(workingDir string) (*session.FileStore, error) {
+	settings, err := f.settings(workingDir)
 	if err != nil {
 		return nil, err
 	}
-	overrides, err := o.overrides()
+	overrides, err := f.overrides()
 	if err != nil {
 		return nil, err
 	}

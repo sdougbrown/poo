@@ -182,3 +182,61 @@ func TestABareInvocationHandsTheSettingsToTheInterface(t *testing.T) {
 		})
 	}
 }
+
+// TestTheContinueAliasIsTheFrontDoor covers `poo -c`, `poo --continue` and
+// `poo --resume <id>`: they launch the front door with the rest of the
+// line, so a short invocation is the repl with the flags that reopen a
+// session. A leading flag that is not one of them keeps the behaviour it
+// has.
+func TestTheContinueAliasIsTheFrontDoor(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		argv []string
+		door bool
+	}{
+		{
+			name: "the shorthand",
+			args: []string{"-c"},
+			argv: []string{"repl", "--settings", "/project/settings.yaml", "-c"},
+			door: true,
+		},
+		{
+			name: "the long flag with the repl's flags after it",
+			args: []string{"--continue", "--working-dir", "/work"},
+			argv: []string{"repl", "--settings", "/project/settings.yaml", "--continue", "--working-dir", "/work"},
+			door: true,
+		},
+		{
+			name: "resume names the session",
+			args: []string{"--resume", "s1"},
+			argv: []string{"repl", "--settings", "/project/settings.yaml", "--resume", "s1"},
+			door: true,
+		},
+		{
+			name: "the print alias is not the front door",
+			args: []string{"--print", "hello"},
+			door: false,
+		},
+		{
+			name: "a flag no alias names keeps its behaviour",
+			args: []string{"--ephemeral"},
+			door: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			extra, door := frontDoorAlias(c.args)
+			if door != c.door {
+				t.Fatalf("frontDoorAlias(%q) is the front door: %t, want %t", c.args, door, c.door)
+			}
+			if !door {
+				return
+			}
+			got := append(frontDoorArgs("repl", "/project/settings.yaml"), extra...)
+			if !slices.Equal(got, c.argv) {
+				t.Errorf("the argv is %q, want %q", got, c.argv)
+			}
+		})
+	}
+}

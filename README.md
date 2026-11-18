@@ -268,6 +268,18 @@ reasoning levels; `/thinking <level>` selects one. The repl is a wire
 client, and the
 server runs the session.
 
+**Continuing a session.** `poo repl --continue` (`-c`) reopens the logged
+session with the latest activity whose working directory is the one the
+repl runs in, and `poo repl --resume <id>` reopens the session that id
+names. A bare `poo -c`, `poo --continue` or `poo --resume <id>` is the
+same thing, with the rest of the line as the repl's flags. The loaded
+session keeps the working directory, profile and model it recorded, and
+the repl renders its scrollback — the newest 500 items — before the first
+prompt; none of it is sent to the model again. `poo sessions list` names
+the sessions by id. A session another process holds is skipped, and a
+directory with nothing to continue, a pair of flags that conflict, or an
+ephemeral session is a refusal with exit 2.
+
 The repl is a package of the root module, and `go test ./...` at the
 root covers it with the rest of the tree. Its dependencies — markdown
 rendering and terminal input — are imported only by the repl package,

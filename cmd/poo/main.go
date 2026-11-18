@@ -23,6 +23,11 @@ func run(args []string) int {
 	if len(args) == 0 {
 		return runUI()
 	}
+	// `poo -c` and `poo --resume <id>` launch the front door, with the
+	// rest of the line as its flags.
+	if extra, ok := frontDoorAlias(args); ok {
+		return runUIWith(extra)
+	}
 	return clicontract.Run(pooApp(os.Stdout), pooAdapter{}, printAlias(args), os.Stdout, os.Stderr)
 }
 

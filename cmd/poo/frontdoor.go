@@ -36,6 +36,13 @@ var frontDoors = map[string]func(io.Writer) *clicontract.Command{
 // settings name — or, without them, the binary's default — runs with the
 // settings file, so the session it opens reads what it read.
 func runUI() int {
+	return runUIWith(nil)
+}
+
+// runUIWith executes the front door with the words the invocation added
+// to it: `poo -c` and `poo --resume <id>` are `poo repl --continue` and
+// `poo repl --resume <id>`, and the rest of the line goes with them.
+func runUIWith(extra []string) int {
 	path, settings, err := resolveSettings("", "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
@@ -46,7 +53,20 @@ func runUI() int {
 		fmt.Fprintf(os.Stderr, "poo: %v\n", err)
 		return usageExitCode
 	}
-	return run(frontDoorArgs(name, path))
+	return run(append(frontDoorArgs(name, path), extra...))
+}
+
+// frontDoorAlias returns the words a front-door alias carries and
+// whether the invocation is one: `poo -c`, `poo --continue` and `poo
+// --resume <id>` open a logged session in the repl, and the rest of the
+// line is the repl's flags. Every other leading flag is not the front
+// door's, so it keeps the behaviour it has.
+func frontDoorAlias(args []string) ([]string, bool) {
+	switch args[0] {
+	case "-c", "--continue", "--resume":
+		return args, true
+	}
+	return nil, false
 }
 
 // frontDoorArgs is the argv a bare invocation dispatches: the interface the
