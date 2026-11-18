@@ -276,6 +276,31 @@ func TestAResumedSessionSanitizesTheRecordedText(t *testing.T) {
 	}
 }
 
+// TestAReplayedReplyCarriesNoDecodedEscape covers the reply's path: a
+// recorded reply whose text carries character references decodes to
+// real escapes inside the renderer, so the reply the replay draws goes
+// through the same filter the stream's flush does, and neither the
+// escape nor the control byte reaches the terminal.
+func TestAReplayedReplyCarriesNoDecodedEscape(t *testing.T) {
+	server := &fakeServer{t: t}
+	server.history = []protocol.HistoryItem{
+		{Seq: 1, Type: "message", Role: "assistant", Text: "one&#27;c two\r three&#7;"},
+	}
+
+	drawn := resumeRepl(t, server, "s9")
+	for _, want := range []string{"one", "two", "three"} {
+		if !strings.Contains(plain(drawn), want) {
+			t.Errorf("the transcript does not hold %q:\n%q", want, drawn)
+		}
+	}
+	if got := nonStylingEscape(drawn); len(got) > 0 {
+		t.Errorf("the replay hands the terminal %q:\n%q", got, drawn)
+	}
+	if got := controlBytes(drawn); len(got) > 0 {
+		t.Errorf("the replay carries the control byte(s) %v:\n%q", got, drawn)
+	}
+}
+
 // TestTheReplayWarnsWhenTheHistoryWillNotBeRead covers the replay's
 // failure: a server that refuses the history is a warning in the
 // transcript, and the repl settles to the prompt rather than paging
