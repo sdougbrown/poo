@@ -67,6 +67,35 @@ func TestAnUnknownArgumentNamesItAndTheAcceptedArguments(t *testing.T) {
 	}
 }
 
+// TestABadTypeNamesTheType covers the type refusal and the article it
+// takes.
+func TestABadTypeNamesTheType(t *testing.T) {
+	err := prepareDeploy(t, `{"name":"deploy","args":{"env":"staging","replicas":"abc"}}`)
+	if !strings.Contains(err.Error(), `"replicas" must be an integer`) {
+		t.Errorf("the refusal does not name the type: %v", err)
+	}
+}
+
+// TestABadConstNamesTheValue covers a plain const property, the path
+// the oneOf branches never reach.
+func TestABadConstNamesTheValue(t *testing.T) {
+	tool := deployTool(t)
+	schema := tool["inputSchema"].(map[string]any)
+	props := schema["properties"].(map[string]any)
+	props["channel"] = map[string]any{"const": "main"}
+	tool["bindings"] = append(tool["bindings"].([]any),
+		map[string]any{"property": "channel", "style": "equals", "flag": "--channel"})
+	path := writeManifest(t, t.TempDir(), "deploy.json", map[string]any{"deploy": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"deploy","args":{"env":"staging","channel":"other"}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the off-const value was accepted")
+	}
+	if !strings.Contains(err.Error(), `"channel" must be "main"`) {
+		t.Errorf("the refusal does not name the const: %v", err)
+	}
+}
+
 // TestAMissingRequiredArgumentIsNamed covers the required refusal.
 func TestAMissingRequiredArgumentIsNamed(t *testing.T) {
 	err := prepareDeploy(t, `{"name":"deploy","args":{"replicas":2}}`)
@@ -79,16 +108,64 @@ func TestAMissingRequiredArgumentIsNamed(t *testing.T) {
 // test's second probe hit: an action the CLI does not offer.
 func TestABadEnumNamesTheValues(t *testing.T) {
 	err := prepareDeploy(t, `{"name":"deploy","args":{"env":"canary"}}`)
-	if !strings.Contains(err.Error(), `must be one of: "staging", "production"`) {
+	if !strings.Contains(err.Error(), `"env" must be one of: "staging", "production"`) {
 		t.Errorf("the refusal does not name the enum's values: %v", err)
 	}
 }
 
-// TestABoundArgumentNamesTheBound covers the numeric refusals.
+// TestABoundArgumentNamesTheBound covers every bound code the
+// renderer translates, one violated bound each.
 func TestABoundArgumentNamesTheBound(t *testing.T) {
+	tool := map[string]any{
+		"description": "Tune a service",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"env":  map[string]any{"type": "string", "enum": []string{"staging", "production"}},
+				"rate": map[string]any{"type": "number", "exclusiveMinimum": 0},
+				"load": map[string]any{"type": "number", "exclusiveMaximum": 100},
+				"name": map[string]any{"type": "string", "minLength": 2},
+				"note": map[string]any{"type": "string", "maxLength": 5},
+				"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1},
+				"ids":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 3},
+			},
+			"required":             []string{"env"},
+			"additionalProperties": false,
+		},
+		"bindings": []any{
+			map[string]any{"property": "env", "style": "equals", "flag": "--env"},
+			map[string]any{"property": "rate", "style": "equals", "flag": "--rate"},
+			map[string]any{"property": "load", "style": "equals", "flag": "--load"},
+			map[string]any{"property": "name", "style": "equals", "flag": "--name"},
+			map[string]any{"property": "note", "style": "equals", "flag": "--note"},
+			map[string]any{"property": "tags", "style": "equals", "flag": "--tags"},
+			map[string]any{"property": "ids", "style": "equals", "flag": "--ids"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "tune.json", map[string]any{"tune": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
 	for _, tc := range []struct{ args, want string }{
-		{`{"name":"deploy","args":{"env":"staging","replicas":0}}`, "is below the minimum of 1"},
-		{`{"name":"deploy","args":{"env":"staging","replicas":11}}`, "is above the maximum of 10"},
+		{`{"name":"tune","args":{"env":"staging","rate":0}}`, `"rate" must be greater than 0`},
+		{`{"name":"tune","args":{"env":"staging","load":100}}`, `"load" must be less than 100`},
+		{`{"name":"tune","args":{"env":"staging","name":"a"}}`, `"name" is shorter than the minimum length of 2`},
+		{`{"name":"tune","args":{"env":"staging","note":"toolong"}}`, `"note" is longer than the maximum length of 5`},
+		{`{"name":"tune","args":{"env":"staging","tags":[]}}`, `"tags" has fewer than 1 items`},
+		{`{"name":"tune","args":{"env":"staging","ids":["a","b","c","d"]}}`, `"ids" has more than 3 items`},
+	} {
+		_, err := tool2.Prepare(json.RawMessage(tc.args), poo.PrepareEnv{})
+		if err == nil {
+			t.Errorf("the call %s was accepted, want a refusal", tc.args)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("the refusal for %s does not carry %q: %v", tc.args, tc.want, err)
+		}
+	}
+	// The minimum and maximum refusals keep their own names.
+	for _, tc := range []struct{ args, want string }{
+		{`{"name":"deploy","args":{"env":"staging","replicas":0}}`, `"replicas" is below the minimum of 1`},
+		{`{"name":"deploy","args":{"env":"staging","replicas":11}}`, `"replicas" is above the maximum of 10`},
 	} {
 		err := prepareDeploy(t, tc.args)
 		if !strings.Contains(err.Error(), tc.want) {
@@ -139,8 +216,43 @@ func TestABadDiscriminatorNamesTheBranchValues(t *testing.T) {
 	if err == nil {
 		t.Fatal("the unmatched discriminator was accepted")
 	}
-	if !strings.Contains(err.Error(), `must be one of: "text", "image"`) {
+	if !strings.Contains(err.Error(), `"kind" must be one of: "text", "image"`) {
 		t.Errorf("the refusal does not name the branch values: %v", err)
+	}
+}
+
+// TestANonObjectAgainstATaggedOneOfNamesTheType covers the type miss a
+// tagged oneOf reports for a value that is not an object.
+func TestANonObjectAgainstATaggedOneOfNamesTheType(t *testing.T) {
+	tool := map[string]any{
+		"description": "Ship a build",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"build": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"target": map[string]any{"type": "string"},
+					},
+					"required":             []string{"target"},
+					"additionalProperties": false,
+				},
+			},
+			"additionalProperties": false,
+		},
+		"bindings": []any{
+			map[string]any{"property": "build", "style": "equals", "flag": "--build"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "ship.json", map[string]any{"ship": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"ship","args":{"build":7}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the non-object value was accepted")
+	}
+	if !strings.Contains(err.Error(), `"build" must be an object`) {
+		t.Errorf("the refusal does not name the type: %v", err)
 	}
 }
 
@@ -172,8 +284,45 @@ func TestARefPropertyRendersThroughTheDefinition(t *testing.T) {
 	if err == nil {
 		t.Fatal("the off-enum value was accepted")
 	}
-	if !strings.Contains(err.Error(), `must be one of: "red", "green"`) {
+	if !strings.Contains(err.Error(), `"color" must be one of: "red", "green"`) {
 		t.Errorf("the refusal does not read through the reference: %v", err)
+	}
+}
+
+// TestATwoHopReferenceDegradesToThePath pins the documented limit: a
+// reference chain deeper than one hop falls back to the pointer and
+// the issue code, never to an empty message.
+func TestATwoHopReferenceDegradesToThePath(t *testing.T) {
+	tool := map[string]any{
+		"description": "Label a thing",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"color": map[string]any{"$ref": "#/$defs/color"},
+			},
+			"required":             []string{"color"},
+			"additionalProperties": false,
+			"$defs": map[string]any{
+				"color": map[string]any{"$ref": "#/$defs/hue"},
+				"hue":   map[string]any{"type": "string", "enum": []string{"red", "green"}},
+			},
+		},
+		"bindings": []any{
+			map[string]any{"property": "color", "style": "equals", "flag": "--color"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "label.json", map[string]any{"label": tool})
+	tool2 := cliregistry.NewCall(load(t, path))
+	_, err := tool2.Prepare(json.RawMessage(`{"name":"label","args":{"color":"blue"}}`), poo.PrepareEnv{})
+	if err == nil {
+		t.Fatal("the off-enum value was accepted")
+	}
+	if !strings.Contains(err.Error(), "/color: enum") {
+		t.Errorf("the two-hop refusal does not degrade to the pointer and code: %v", err)
+	}
+	if strings.HasSuffix(err.Error(), ": ") {
+		t.Errorf("the degraded refusal ends in an empty message: %v", err)
 	}
 }
 

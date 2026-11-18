@@ -53,6 +53,12 @@ func issueMessage(name string, schema map[string]any, issue schema.StructuralIss
 	if len(segments) > 0 {
 		last = segments[len(segments)-1]
 	}
+	// A clause names the argument it rejects: a refusal of the same
+	// kind on two arguments must stay mappable to each argument.
+	subject := ""
+	if last != "" {
+		subject = fmt.Sprintf("%q ", last)
+	}
 	switch issue.Code {
 	case "required":
 		if last == "" {
@@ -71,17 +77,17 @@ func issueMessage(name string, schema map[string]any, issue schema.StructuralIss
 		if len(enum) == 0 {
 			return ""
 		}
-		return "must be one of: " + joinValues(enum)
+		return subject + "must be one of: " + joinValues(enum)
 	case "const":
 		value, ok := schemaPointerAt(schema, segments)["const"]
 		if !ok {
 			return ""
 		}
-		return "must be " + valueText(value)
+		return subject + "must be " + valueText(value)
 	case "discriminator":
 		parent := schemaPointerAt(schema, segments[:len(segments)-1])
 		if values := discriminatorValues(parent, last); len(values) > 0 {
-			return "must be one of: " + joinValues(values)
+			return subject + "must be one of: " + joinValues(values)
 		}
 		return ""
 	case "type":
@@ -91,18 +97,18 @@ func issueMessage(name string, schema map[string]any, issue schema.StructuralIss
 			// A tagged oneOf reports a type miss for a value that is
 			// not an object; the branches are all objects.
 			if _, tagged := node["oneOf"]; tagged {
-				return "must be an object"
+				return subject + "must be an object"
 			}
 			return ""
 		}
-		return "must be " + article(kind) + " " + kind
+		return subject + "must be " + article(kind) + " " + kind
 	case "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
 		"minLength", "maxLength", "minItems", "maxItems":
 		bound, ok := schemaPointerAt(schema, segments)[issue.Code]
 		if !ok {
 			return ""
 		}
-		return limitMessage(issue.Code, bound)
+		return subject + limitMessage(issue.Code, bound)
 	}
 	return ""
 }
