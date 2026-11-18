@@ -461,7 +461,12 @@ func TestTheContinueAliasIsTheFrontDoor(t *testing.T) {
 			door:     true,
 		},
 		{
-			name: "a word after the terminator is not a flag",
+			// The words after the terminator are positionals, and the
+			// repl takes none: the line is refused and goes to the
+			// repl as it stands. The terminator's own contract — the
+			// words are the prompt, even spelled like the run's flags —
+			// is TestThePrintPromptAfterTheTerminator's.
+			name: "the words after the terminator are positionals the repl refuses",
 			args: []string{"--continue", "--", "--settings", "/mine/settings.json"},
 			door: true,
 		},

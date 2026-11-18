@@ -18,6 +18,18 @@ import (
 // all, so a test that reads the words strips them first.
 func resumeRepl(t *testing.T, server *fakeServer, id string) string {
 	t.Helper()
+	code, out := resumeReplExit(t, server, id)
+	if code != 0 {
+		t.Fatalf("the repl exited %d, want 0", code)
+	}
+	return out
+}
+
+// resumeReplExit is resumeRepl's exit-reading twin: it returns the code
+// the repl took and what it wrote, for the cases where a non-zero exit
+// is the point.
+func resumeReplExit(t *testing.T, server *fakeServer, id string) (int, string) {
+	t.Helper()
 	stdin, stdout := pipeUp(t, server)
 	var out bytes.Buffer
 	code := Run(Options{
@@ -29,10 +41,7 @@ func resumeRepl(t *testing.T, server *fakeServer, id string) string {
 			return stdin, stdout, func() error { return nil }, nil
 		},
 	})
-	if code != 0 {
-		t.Fatalf("the repl exited %d, want 0", code)
-	}
-	return out.String()
+	return code, out.String()
 }
 
 // TestAResumedSessionLoadsInsteadOfCreating covers the reopen: the repl
@@ -92,6 +101,54 @@ func TestAResumedSessionLoadsInsteadOfCreating(t *testing.T) {
 	}
 	if slices.Contains(methods, protocol.MethodSessionCreate) {
 		t.Errorf("the repl created a session as well as loading one: %v", methods)
+	}
+}
+
+// TestAResumedSessionWhoseLoadIsRefusedExits covers the refusal: a
+// server that refuses the load fails the start, and the repl exits
+// non-zero without falling through to creating a fresh session.
+func TestAResumedSessionWhoseLoadIsRefusedExits(t *testing.T) {
+	server := &fakeServer{t: t, refuseLoad: true}
+
+	code, drawn := resumeReplExit(t, server, "s9")
+	if code == 0 {
+		t.Fatalf("the repl exited 0, want non-zero: the load refusal fell through to a session:\n%s", drawn)
+	}
+	// The failure is the start's, with the server's answer.
+	if !strings.Contains(drawn, "the session's load is not readable") {
+		t.Errorf("the transcript does not hold the refusal:\n%s", drawn)
+	}
+	// The refusal is the end of the line: the repl does not fall
+	// through to creating a fresh session for the id.
+	if methods := server.methodsSoFar(); slices.Contains(methods, protocol.MethodSessionCreate) {
+		t.Errorf("the repl created a session after the load refused: %v", methods)
+	}
+}
+
+// TestAResumedSessionWithNoHistoryShowsNothing covers the boundary: a
+// logged session with zero runs has no scrollback to draw: the greeting
+// is there, the transcript holds no history items, and the cap's notice
+// is absent.
+func TestAResumedSessionWithNoHistoryShowsNothing(t *testing.T) {
+	server := &fakeServer{t: t}
+
+	drawn := ansi.Strip(resumeRepl(t, server, "s9"))
+	if !strings.Contains(drawn, "poo repl — /help for the commands") {
+		t.Errorf("the transcript does not hold the greeting:\n%s", drawn)
+	}
+	if strings.Contains(drawn, "older history is not shown") {
+		t.Errorf("the transcript says older history is not shown, with no history:\n%s", drawn)
+	}
+	// The transcript holds no history items: what is drawn is the
+	// greeting and the prompt, nothing else. A history item's line
+	// would be the rest.
+	for _, line := range strings.Split(drawn, "\n") {
+		if line == "" ||
+			strings.Contains(line, "poo repl — /help for the commands") ||
+			strings.Contains(line, "💩❯ ") {
+			continue
+		}
+		t.Errorf("the transcript holds a line the empty history does not draw: %q:\n%s", line, drawn)
 	}
 }
 
@@ -212,6 +269,10 @@ func TestAResumedSessionSanitizesTheRecordedText(t *testing.T) {
 		if !strings.Contains(drawn, want) {
 			t.Errorf("the transcript does not hold %q:\n%q", want, drawn)
 		}
+	}
+	// The load recovered nothing: the recovery's notice is absent.
+	if strings.Contains(drawn, "the session was recovered") {
+		t.Errorf("the transcript holds the recovery's notice, with nothing recovered:\n%q", drawn)
 	}
 }
 
