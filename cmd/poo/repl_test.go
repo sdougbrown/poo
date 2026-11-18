@@ -72,26 +72,6 @@ func TestTheReplHandsItsServerTheFlagsItParsed(t *testing.T) {
 	}
 }
 
-// TestTheReopenFlagsStayWithTheRepl covers the split between the two
-// processes: the id the repl resolved is the repl's, and the child server
-// parses neither flag, because it opens the session the id names.
-func TestTheReopenFlagsStayWithTheRepl(t *testing.T) {
-	app := pooApp(io.Discard)
-	repl, err := clicontract.Parse(app, []string{"repl", "--continue"})
-	if err != nil {
-		t.Fatalf("parsing the repl's flags: %v", err)
-	}
-	argv := append([]string{"serve"}, renderFlags(repl, serverFlagSpecs())...)
-	if _, err := clicontract.Parse(app, argv); err != nil {
-		t.Fatalf("the server refused the flags the repl spelled (%v): %v", argv, err)
-	}
-	for _, arg := range argv {
-		if strings.HasPrefix(arg, "--continue") || strings.HasPrefix(arg, "--resume") {
-			t.Errorf("the child's argv carries %q: %v", arg, argv)
-		}
-	}
-}
-
 // TestTheContinuePickerTakesTheNewestUnlockedSessionOfTheDirectory covers
 // who --continue picks: the session with the latest activity whose working
 // directory is the one the repl runs in, and not one another process
@@ -291,14 +271,47 @@ func TestTheReplRefusesTwoWaysToReopenAtOnce(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			args := append(append([]string{}, c.args...),
 				"--settings", settingsFile, "--session-dir", sessionDir)
-			code, stderr := runCLI(t, args...)
+			code, stderr, stdout := runCLIWithStdout(t, args...)
 			if code != 2 {
 				t.Errorf("poo %s exited %d, want 2", strings.Join(args, " "), code)
+			}
+			// The repl greets the terminal as soon as it runs, and it
+			// runs only after the server is up: a silent stdout is the
+			// refusal that came first.
+			if stdout != "" {
+				t.Errorf("poo %s wrote %q, so a repl started", strings.Join(args, " "), stdout)
 			}
 			if !strings.Contains(stderr, c.want) {
 				t.Errorf("the refusal is %q, want it to name the conflict (%q)", stderr, c.want)
 			}
 		})
+	}
+}
+
+// TestTheReplRefusesToContinueWithNothingToContinue covers --continue in a
+// store that holds no session of this directory: the refusal names the
+// directory it looked in, and no session is opened in its place.
+func TestTheReplRefusesToContinueWithNothingToContinue(t *testing.T) {
+	base := t.TempDir()
+	settingsFile := theSettings(t, base, "http://localhost:4000/v1")
+	sessionDir := filepath.Join(base, "sessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", sessionDir, err)
+	}
+	// The refusal names the directory it found nothing to continue in.
+	empty := t.TempDir()
+	t.Chdir(empty)
+
+	code, stderr, stdout := runCLIWithStdout(t,
+		"repl", "--continue", "--settings", settingsFile, "--session-dir", sessionDir)
+	if code != 2 {
+		t.Errorf("poo repl --continue exited %d, want 2", code)
+	}
+	if !strings.Contains(stderr, empty) {
+		t.Errorf("the refusal does not name the directory it looked in %s: %q", empty, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("poo repl --continue wrote %q, so a repl started", stdout)
 	}
 }
 

@@ -75,6 +75,17 @@ func TestAResumedSessionLoadsInsteadOfCreating(t *testing.T) {
 		}
 	}
 
+	// The user's line is what the session was asked, and the reply
+	// answers it: the transcript reads in the order the session ran.
+	asked := strings.Index(drawn, "what is in the directory?")
+	answered := strings.Index(drawn, "Three files.")
+	if asked < 0 || answered < 0 {
+		t.Fatalf("the transcript does not hold both sides of the exchange:\n%s", drawn)
+	}
+	if asked > answered {
+		t.Errorf("the reply renders before the line it answers:\n%s", drawn)
+	}
+
 	methods := server.methodsSoFar()
 	if !slices.Contains(methods, protocol.MethodSessionLoad) {
 		t.Errorf("the repl opened the session with %v, want session/load", methods)
@@ -88,8 +99,12 @@ func TestAResumedSessionLoadsInsteadOfCreating(t *testing.T) {
 // more history than the repl shows says so, and renders the newest items
 // rather than the oldest.
 func TestAResumedSessionShowsTheNewestHistory(t *testing.T) {
+	// The session holds historyItems items the repl shows and extra
+	// ones the cap drops.
+	const extra = 100
+	total := historyItems + extra
 	server := &fakeServer{t: t}
-	for i := 1; i <= historyItems+100; i++ {
+	for i := 1; i <= total; i++ {
 		server.history = append(server.history, protocol.HistoryItem{
 			Seq:  int64(i),
 			Type: "message",
@@ -102,13 +117,27 @@ func TestAResumedSessionShowsTheNewestHistory(t *testing.T) {
 	if !strings.Contains(drawn, "older history is not shown") {
 		t.Errorf("the transcript does not say older history is missing:\n%s", drawn)
 	}
-	last := fmt.Sprintf("said %03d", historyItems+100)
-	if !strings.Contains(drawn, last) {
-		t.Errorf("the transcript does not hold the newest item %q", last)
+	// The newest history is rendered in the order it was recorded, once
+	// each: a page that lands at the wrong end of the items reads as a
+	// conversation that jumps back and forth.
+	previous := 0
+	for n := extra + 1; n <= total; n++ {
+		item := fmt.Sprintf("said %03d", n)
+		if got := strings.Count(drawn, item); got != 1 {
+			t.Errorf("the transcript holds %q %d times, want once", item, got)
+		}
+		at := strings.Index(drawn, item)
+		if at < previous {
+			t.Fatalf("the transcript holds %q before the item recorded before it:\n%s", item, drawn)
+		}
+		previous = at
 	}
-	oldest := fmt.Sprintf("said %03d", 1)
-	if strings.Contains(drawn, oldest) {
-		t.Errorf("the transcript holds the oldest item %q, which the cap drops", oldest)
+	// The cap drops the oldest items whole: the transcript holds none of
+	// them, rather than the tail of the item the cap cut.
+	for n := 1; n <= extra; n++ {
+		if item := fmt.Sprintf("said %03d", n); strings.Contains(drawn, item) {
+			t.Errorf("the transcript holds the oldest item %q, which the cap drops", item)
+		}
 	}
 }
 
