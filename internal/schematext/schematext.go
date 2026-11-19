@@ -183,21 +183,37 @@ func propertyNamesAndMarks(schema map[string]any) ([]string, []string) {
 
 // enumValues renders a property's enum the way a prompt reads it: the
 // values bare, pipe-separated, or an empty string when the property
-// takes none.
+// takes none. The property resolves the way a refusal does — a
+// reference is followed, so a hint and a refusal read the same
+// definition. A value with a pipe in it is quoted, so the bracket
+// list stays one value per member.
 func enumValues(schema map[string]any, name string) string {
-	properties, _ := schema["properties"].(map[string]any)
-	ps, _ := properties[name].(map[string]any)
-	enum, _ := ps["enum"].([]any)
+	node := schemaPointerAt(schema, []string{name})
+	if node == nil {
+		return ""
+	}
+	enum, _ := node["enum"].([]any)
 	if len(enum) == 0 {
 		return ""
 	}
 	parts := make([]string, 0, len(enum))
+	piped := false
 	for _, value := range enum {
+		part := fmt.Sprint(value)
 		if s, ok := value.(string); ok {
-			parts = append(parts, s)
-			continue
+			part = s
+			if strings.Contains(s, "|") {
+				piped = true
+			}
 		}
-		parts = append(parts, fmt.Sprint(value))
+		parts = append(parts, part)
+	}
+	if piped {
+		for i, value := range enum {
+			if s, ok := value.(string); ok {
+				parts[i] = strconv.Quote(s)
+			}
+		}
 	}
 	return strings.Join(parts, "|")
 }

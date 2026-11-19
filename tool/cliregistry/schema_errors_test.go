@@ -497,6 +497,65 @@ func TestAnArrayItemConstraintNamesTheItem(t *testing.T) {
 	}
 }
 
+// TestARefPropertyHintsItsValues covers the reference in the hint: a
+// property the schema declares through $ref shows the definition's
+// values in the catalog line, the way a refusal reads them.
+func TestARefPropertyHintsItsValues(t *testing.T) {
+	tool := map[string]any{
+		"description": "Label a thing",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"color": map[string]any{"$ref": "#/$defs/color"},
+			},
+			"required":             []string{"color"},
+			"additionalProperties": false,
+			"$defs": map[string]any{
+				"color": map[string]any{"type": "string", "enum": []string{"red", "green"}},
+			},
+		},
+		"bindings": []any{
+			map[string]any{"property": "color", "style": "equals", "flag": "--color"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "label.json", map[string]any{"label": tool})
+	catalog := load(t, path)
+	text := catalog.Section(false)
+	if !strings.Contains(text, "label (args: color*[red|green]:") && !strings.Contains(text, "label (args: color*[red|green])") {
+		t.Errorf("the catalog line does not carry the reference's values: %q", text)
+	}
+}
+
+// TestAnEnumValueWithAPipeIsQuoted covers the bracket list's own
+// separator: an enum value with a pipe in it quotes the list's string
+// values, so the list stays one value per member.
+func TestAnEnumValueWithAPipeIsQuoted(t *testing.T) {
+	tool := map[string]any{
+		"description": "Match a mode",
+		"command":     []string{script(t, "say")},
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"mode": map[string]any{
+					"type": "string",
+					"enum": []string{"a|b", "c"},
+				},
+			},
+			"additionalProperties": false,
+		},
+		"bindings": []any{
+			map[string]any{"property": "mode", "style": "equals", "flag": "--mode"},
+		},
+	}
+	path := writeManifest(t, t.TempDir(), "match.json", map[string]any{"match": tool})
+	catalog := load(t, path)
+	text := catalog.Section(false)
+	if !strings.Contains(text, `mode["a|b"|"c"]`) {
+		t.Errorf("the catalog line does not quote the piped value: %q", text)
+	}
+}
+
 // TestTheAcceptedArgumentsListKeepsNameOrder pins the ordering
 // convention: names sort by their base name, and a required mark is
 // appended after the sort, so the call-path renderer and the catalog
