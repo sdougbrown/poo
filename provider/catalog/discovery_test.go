@@ -214,10 +214,9 @@ func TestTheProbeReadsTheLimitsAndCapabilitiesAGatewayReports(t *testing.T) {
 }
 
 // TestTheProbeReadsTheLimitsEachGatewayShapeReports covers the places
-// gateways put the token budgets: LiteLLM's max_input_tokens and
-// max_output_tokens, OpenRouter's context_length and top_provider, and the
-// opencode limit object with an input cap. The context limit bounds the
-// prompt, so an input cap below the context takes its place.
+// gateways put the token budgets: LiteLLM's max_output_tokens, OpenRouter's
+// context_length and top_provider, and the opencode limit object. An input
+// cap is not the context window, so it never sets the context limit.
 func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -228,7 +227,7 @@ func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
 		{
 			name:        "litellm",
 			item:        map[string]any{"id": "litellm", "object": "model", "owned_by": "openai", "max_input_tokens": 262144, "max_output_tokens": 65536},
-			wantContext: 262144,
+			wantContext: 0,
 			wantOutput:  65536,
 		},
 		{
@@ -253,26 +252,19 @@ func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
 		{
 			name:        "opencode-input-cap",
 			item:        map[string]any{"id": "opencode-input-cap", "limit": map[string]any{"context": 400000, "input": 272000, "output": 128000}},
-			wantContext: 272000,
+			wantContext: 400000,
 			wantOutput:  128000,
-		},
-		{
-			name:        "opencode-input-above-context",
-			item:        map[string]any{"id": "opencode-input-above-context", "limit": map[string]any{"context": 100000, "input": 272000, "output": 8000}},
-			wantContext: 100000,
-			wantOutput:  8000,
 		},
 		{
 			name: "two-sources-per-budget",
 			item: map[string]any{
 				"id":                "two-sources-per-budget",
-				"limit":             map[string]any{"context": 300000, "input": 200000, "output": 50000},
+				"limit":             map[string]any{"context": 300000, "output": 50000},
 				"context_length":    900000,
-				"max_input_tokens":  100000,
 				"max_output_tokens": 70000,
 				"top_provider":      map[string]any{"context_length": 800000, "max_completion_tokens": 60000},
 			},
-			wantContext: 200000,
+			wantContext: 300000,
 			wantOutput:  50000,
 		},
 		{
@@ -280,18 +272,11 @@ func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
 			item: map[string]any{
 				"id":                "two-sources-without-limit-object",
 				"context_length":    900000,
-				"max_input_tokens":  1000000,
 				"max_output_tokens": 70000,
 				"top_provider":      map[string]any{"context_length": 800000, "max_completion_tokens": 60000},
 			},
 			wantContext: 900000,
 			wantOutput:  70000,
-		},
-		{
-			name:        "input-cap-without-context",
-			item:        map[string]any{"id": "input-cap-without-context", "limit": map[string]any{"input": 272000}},
-			wantContext: 272000,
-			wantOutput:  0,
 		},
 	}
 
@@ -343,9 +328,8 @@ func TestAMalformedLimitCostsOnlyThatLimit(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"object":"list","data":[
 			{"id":"valid","limit":{"context":131072,"output":16384}},
-			{"id":"spelled","limit":{"context":1e5,"output":"8192"},"max_input_tokens":65536.0},
-			{"id":"malformed","limit":{"context":-1,"output":12.5},"max_input_tokens":"lots",
-			 "max_output_tokens":99999999999,"context_length":true,"max_model_len":null,
+			{"id":"spelled","limit":{"context":1e5,"output":"8192"}},
+			{"id":"malformed","limit":{"context":-1,"output":12.5},"max_output_tokens":99999999999,"context_length":true,"max_model_len":"lots",
 			 "top_provider":{"context_length":{"n":1},"max_completion_tokens":[1]}}
 		]}`))
 	})
@@ -366,7 +350,7 @@ func TestAMalformedLimitCostsOnlyThatLimit(t *testing.T) {
 
 	for name, want := range map[string][2]int{
 		"valid":     {131072, 16384},
-		"spelled":   {65536, 8192},
+		"spelled":   {100000, 8192},
 		"malformed": {0, 0},
 	} {
 		model, err := c.Resolve("gateway/" + name)

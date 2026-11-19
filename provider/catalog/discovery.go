@@ -39,9 +39,7 @@ const (
 type Discovered struct {
 	// ModelID is the id the endpoint calls the model.
 	ModelID string `json:"model_id"`
-	// ContextLimit is the model's context window, or the largest prompt the
-	// endpoint takes when it reports an input cap below that. Zero means
-	// unknown.
+	// ContextLimit is the model's context window. Zero means unknown.
 	ContextLimit int `json:"context_limit,omitempty"`
 	// MaxOutput is the most tokens the model writes in one response. Zero
 	// means unknown.
@@ -403,18 +401,16 @@ func (n *tokenCount) UnmarshalJSON(data []byte) error {
 // there: capabilities for the tools and the reasoning, modalities for the
 // inputs, and the token budgets in whichever shape the gateway uses:
 //
-//   - an opencode limit object, {"limit":{"context":N,"input":N,"output":N}};
-//   - LiteLLM's max_input_tokens and max_output_tokens;
+//   - an opencode limit object, {"limit":{"context":N,"output":N}};
+//   - LiteLLM's max_output_tokens;
 //   - OpenRouter's context_length and top_provider, which carries its own
 //     context_length and max_completion_tokens;
 //   - vLLM's max_model_len.
 //
 // The output limit is the first of limit.output, max_output_tokens and
-// top_provider.max_completion_tokens. The context limit bounds the prompt,
-// so it is the first of limit.context, context_length,
-// top_provider.context_length and max_model_len, and an input cap below
-// that, or one with no context beside it, takes its place. A field the
-// endpoint does not send stays unknown. A server that does not serve the
+// top_provider.max_completion_tokens. The context limit is the first of
+// limit.context, context_length, top_provider.context_length and
+// max_model_len. A field the endpoint does not send stays unknown. A server that does not serve the
 // list answers with an error, and the probe reports that the shape is not
 // there.
 func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL string) (map[string]Discovered, error) {
@@ -429,13 +425,11 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		Data []struct {
 			ID              string     `json:"id"`
 			MaxModelLen     tokenCount `json:"max_model_len"`
-			MaxInputTokens  tokenCount `json:"max_input_tokens"`
 			MaxOutputTokens tokenCount `json:"max_output_tokens"`
 			ContextLength   tokenCount `json:"context_length"`
 			PrefixCaching   *bool      `json:"prefix_caching"`
 			Limit           struct {
 				Context tokenCount `json:"context"`
-				Input   tokenCount `json:"input"`
 				Output  tokenCount `json:"output"`
 			} `json:"limit"`
 			TopProvider struct {
@@ -481,12 +475,8 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		}
 		// The limit object wins when the list carries one; max_model_len is
 		// the plain shape's answer, read only when nothing else names the
-		// context. An input cap smaller than the context is the largest
-		// prompt the endpoint takes, and the prompt is what the limit bounds.
+		// context.
 		model.ContextLimit = int(cmp.Or(item.Limit.Context, item.ContextLength, item.TopProvider.ContextLength, item.MaxModelLen))
-		if input := int(cmp.Or(item.Limit.Input, item.MaxInputTokens)); input > 0 && (model.ContextLimit == 0 || input < model.ContextLimit) {
-			model.ContextLimit = input
-		}
 		if item.Capabilities.Tools.Supported != nil {
 			model.Tools = poo.ToolsNone
 			if *item.Capabilities.Tools.Supported {
