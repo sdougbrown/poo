@@ -23,12 +23,35 @@ const (
 	ReasoningPathToggle = "chat_template_kwargs.enable_thinking"
 )
 
+// DefaultMaxOutputFor returns the output limit of a model that declares
+// none, from the model's context window in tokens.
+//
+// The limit grows with the window because a reasoning model's thinking
+// counts against max_tokens, and the large-window models publish output
+// limits to match: none with a window of 128k or more has a limit under
+// 32000, and current hosted models allow at least 16k. A window under
+// 64k gets 8192, a window from 64k up to 128k gets 16384, and a window
+// of 128k or more gets 32768. An unknown window (zero or less) gets
+// 16384.
+func DefaultMaxOutputFor(contextLimit int) int {
+	switch {
+	case contextLimit <= 0:
+		return 16384
+	case contextLimit < 65536:
+		return 8192
+	case contextLimit < 131072:
+		return 16384
+	default:
+		return 32768
+	}
+}
+
 // OutputLimitSource names which limit a response stopped on.
 type OutputLimitSource string
 
 const (
-	// OutputLimitDefault is DefaultMaxOutput, used because the model
-	// declares no output limit.
+	// OutputLimitDefault is DefaultMaxOutputFor the model's context
+	// window, used because the model declares no output limit.
 	OutputLimitDefault OutputLimitSource = "default"
 	// OutputLimitModel is the output limit the model declares.
 	OutputLimitModel OutputLimitSource = "model"
@@ -93,20 +116,25 @@ func (l OutputLimit) Truncation(info ModelInfo, sent int) SettleDetail {
 
 // MaxTokens computes the output room for a request against a model.
 //
-// The room is the model's own output limit, or DefaultMaxOutput when
-// the model declares none, and it never exceeds the window that is left
-// after the prompt. The value is always computed, so a request always
-// carries a max_tokens and never the endpoint's own default.
+// The room is the model's own output limit, or DefaultMaxOutputFor its
+// window when the model declares none, and it never exceeds the window
+// that is left after the prompt. The value is always computed, so a
+// request always carries a max_tokens and never the endpoint's own
+// default.
 func MaxTokens(info ModelInfo, estimatedInput int) int {
 	return info.OutputLimit(estimatedInput).Tokens
 }
 
 // OutputLimit computes the output room for a request against the model,
 // and names the limit that set it.
+//
+// The model's own limit, or DefaultMaxOutputFor the model's context
+// window when it declares none, gives the room; the room the window
+// leaves after the prompt clamps it.
 func (m ModelInfo) OutputLimit(estimatedInput int) OutputLimit {
 	limit := OutputLimit{Tokens: m.MaxOutput, Source: OutputLimitModel, Input: estimatedInput, Window: m.ContextLimit}
 	if limit.Tokens <= 0 {
-		limit.Tokens, limit.Source = DefaultMaxOutput, OutputLimitDefault
+		limit.Tokens, limit.Source = DefaultMaxOutputFor(m.ContextLimit), OutputLimitDefault
 	}
 	if m.ContextLimit > 0 {
 		room := m.ContextLimit - estimatedInput - OutputReserve

@@ -481,8 +481,9 @@ func (s *Session) readSideReply(ctx context.Context, run *runState, reader Strea
 
 // maxTokens computes the output room for the next request.
 //
-// The rule is the core's: min(model MaxOutput or 8192, context_limit −
-// estimated input − 256). The value is always computed, never left to
+// The rule is the core's: min(model MaxOutput or
+// DefaultMaxOutputFor(context_limit), context_limit − estimated input −
+// 256). The value is always computed, never left to
 // the endpoint's default.
 func (s *Session) maxTokens() int {
 	return s.opts.Model.MaxTokens(s.estimatedInput())

@@ -265,7 +265,7 @@ func TestATruncatedRunSaysWhichLimitItHit(t *testing.T) {
 			setup:  func(m *poo.ModelInfo) { m.Source = settingsModel },
 			source: "output_truncated:default",
 			want: func(sent int) string {
-				return "the response stopped at max_tokens 8192, poo's default for a model with no max_output; set models.glm-flash.max_output to raise it"
+				return fmt.Sprintf("the response stopped at max_tokens %d, poo's default for a model with no max_output; set models.glm-flash.max_output to raise it", sent)
 			},
 		},
 		{
@@ -273,7 +273,7 @@ func TestATruncatedRunSaysWhichLimitItHit(t *testing.T) {
 			setup:  func(m *poo.ModelInfo) { m.Source = discoveredModel },
 			source: "output_truncated:default",
 			want: func(sent int) string {
-				return "the response stopped at max_tokens 8192, poo's default for a model with no max_output; declare the model in settings with its endpoint, model_id and max_output to raise it"
+				return fmt.Sprintf("the response stopped at max_tokens %d, poo's default for a model with no max_output; declare the model in settings with its endpoint, model_id and max_output to raise it", sent)
 			},
 		},
 		{
@@ -377,8 +377,8 @@ func TestTheMaxTokensIsComputedFromTheContext(t *testing.T) {
 	}
 	mt := reqs[0].MaxTokens
 	// The room is the limit minus the estimated input minus 256, and the
-	// model's own ceiling is 8192 by default. The estimate covers the
-	// history at request time: the raw system message ("the system
+	// model's own ceiling is 8192 for a window this small. The estimate
+	// covers the history at request time: the raw system message ("the system
 	// prompt") is sent verbatim, the user message is "a short prompt",
 	// and the estimate counts 3.5 chars per token, so 41*10/35 = 11.
 	estimate := (len("system") + len("the system prompt") + len("user") + len("a short prompt")) * 10 / 35
@@ -403,7 +403,7 @@ func TestTheMaxOutputCapsTheMaxTokens(t *testing.T) {
 	}
 }
 
-func TestTheDefaultMaxTokensIsEightThousandAndNinetyTwo(t *testing.T) {
+func TestAModelWithNoCeilingGetsAnOutputLimitThatScalesWithItsWindow(t *testing.T) {
 	tr := scripted([]fakeResponse{{text: "hello"}})
 	tool := &echoTool{result: "echoed"}
 
@@ -413,8 +413,8 @@ func TestTheDefaultMaxTokensIsEightThousandAndNinetyTwo(t *testing.T) {
 
 	s := newTestSession(t, opts)
 	runSession(t, s, "a short prompt")
-	if got := tr.Requests()[0].MaxTokens; got != 8192 {
-		t.Errorf("max_tokens is %d, want 8192", got)
+	if got := tr.Requests()[0].MaxTokens; got != 32768 {
+		t.Errorf("max_tokens is %d, want 32768", got)
 	}
 }
 

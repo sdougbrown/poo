@@ -15,10 +15,31 @@ func TestMaxTokensUsesTheModelCeiling(t *testing.T) {
 	}
 }
 
-func TestMaxTokensFallsBackToTheDefaultCeiling(t *testing.T) {
-	info := poo.ModelInfo{ContextLimit: 32768}
-	if got := poo.MaxTokens(info, 1000); got != poo.DefaultMaxOutput {
-		t.Errorf("the output room is %d, want %d", got, poo.DefaultMaxOutput)
+func TestMaxTokensFallsBackToTheCeilingTheWindowGets(t *testing.T) {
+	info := poo.ModelInfo{ContextLimit: 262144}
+	if got := poo.MaxTokens(info, 1000); got != 32768 {
+		t.Errorf("the output room is %d, want 32768", got)
+	}
+}
+
+func TestTheDefaultOutputLimitScalesWithTheWindow(t *testing.T) {
+	cases := []struct {
+		window int
+		want   int
+	}{
+		{window: 0, want: 16384},
+		{window: -1, want: 16384},
+		{window: 4096, want: 8192},
+		{window: 65535, want: 8192},
+		{window: 65536, want: 16384},
+		{window: 131071, want: 16384},
+		{window: 131072, want: 32768},
+		{window: 1048576, want: 32768},
+	}
+	for _, c := range cases {
+		if got := poo.DefaultMaxOutputFor(c.window); got != c.want {
+			t.Errorf("a window of %d gets %d, want %d", c.window, got, c.want)
+		}
 	}
 }
 
