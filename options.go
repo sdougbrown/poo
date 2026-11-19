@@ -141,6 +141,12 @@ func WithPrompt(edit func(*prompt.Builder)) Option {
 	}
 }
 
+// WithPromptLoader loads prompt edits for the session's working directory.
+// Restore skips the loader when the session already has a recorded prompt.
+func WithPromptLoader(load func(dir string) ([]func(*prompt.Builder), error)) Option {
+	return func(opts *Options) { opts.loadPrompt = load }
+}
+
 // WithDecider gives the session a decision model.
 //
 // The model describes the decision model, and it must serve the

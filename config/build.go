@@ -256,7 +256,8 @@ type Runtime struct {
 	// Askers are the asker chain, in order.
 	Askers []perm.Asker
 	// Profiles are the profiles the binary offers.
-	Profiles []poo.Profile
+	Profiles           []poo.Profile
+	profileDefinitions []profile.Profile
 	// Profile is the profile the session is built from.
 	Profile poo.Profile
 	// Models are the models the settings offer, by name.
@@ -478,7 +479,12 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	if name == "" {
 		return &Error{Code: CodeUnsupported, Message: "the build has no profile to run under"}
 	}
-	chosen, err := profile.Find(opts.Profiles, name)
+	definitions, err := r.resolveProfileDefinitions(opts)
+	if err != nil {
+		return err
+	}
+	r.profileDefinitions = definitions
+	chosen, err := profile.Find(definitions, name)
 	if err != nil {
 		return &Error{
 			Code:    CodeUnsupported,
@@ -534,7 +540,7 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	// run in the background or the session runs feeds, and the profile
 	// offers them with it.
 	r.Profile.Tools = withJobTools(r.Profile.Tools, r.hasFeeds())
-	profiles, err := r.resolveProfiles(opts)
+	profiles, err := r.resolveProfiles(opts, definitions)
 	if err != nil {
 		return err
 	}
@@ -849,7 +855,7 @@ func (r *Runtime) addRegistryTools(opts BuildOptions) error {
 			return err
 		}
 	}
-	disabled := r.Settings.Tools.Disabled
+	disabled := r.disabledTools(r.Profile.Name)
 	for _, name := range names {
 		if slices.Contains(disabled, name) {
 			continue
@@ -974,28 +980,32 @@ func withJobTools(tools []poo.ToolInfo, feeds bool) []poo.ToolInfo {
 // It runs before the registry joins, so the tools that are left are the
 // ones the registry and the core judge.
 func (r *Runtime) disableTools(opts BuildOptions) error {
-	disabled := r.Settings.Tools.Disabled
-	if len(disabled) == 0 {
-		return nil
+	if err := validateDisabledTools(opts, "tools.disabled", r.Settings.Tools.Disabled); err != nil {
+		return err
 	}
+	disabled := r.disabledTools(r.Profile.Name)
+	r.toolNames = withoutToolNames(r.toolNames, disabled)
+	r.Profile.Tools = withoutDisabled(r.Profile.Tools, disabled)
+	return nil
+}
+
+func validateDisabledTools(opts BuildOptions, field string, disabled []string) error {
 	for _, name := range disabled {
 		if slices.Contains(coreToolNames, name) {
 			return &Error{
 				Code:    CodeUnsupported,
-				Field:   "tools.disabled",
+				Field:   field,
 				Message: fmt.Sprintf("the settings disable the %q tool, and the core adds that tool by itself", name),
 			}
 		}
 		if !linksTool(opts, name) {
 			return &Error{
 				Code:    CodeUnsupported,
-				Field:   "tools.disabled",
+				Field:   field,
 				Message: fmt.Sprintf("the settings disable the %q tool, and this binary does not link it", name),
 			}
 		}
 	}
-	r.toolNames = withoutToolNames(r.toolNames, disabled)
-	r.Profile.Tools = withoutDisabled(r.Profile.Tools, disabled)
 	return nil
 }
 
@@ -1024,11 +1034,11 @@ func withoutDisabled(tools []poo.ToolInfo, disabled []string) []poo.ToolInfo {
 // disabled tools come off a profile before it is judged runnable, a
 // profile the settings empty is not offered, and a profile earns the
 // registry tools its own entries leave for it.
-func (r *Runtime) resolveProfiles(opts BuildOptions) ([]poo.Profile, error) {
+func (r *Runtime) resolveProfiles(opts BuildOptions, definitions []profile.Profile) ([]poo.Profile, error) {
 	feeds := r.hasFeeds()
-	disabled := r.Settings.Tools.Disabled
 	var out []poo.Profile
-	for _, definition := range opts.Profiles {
+	for _, definition := range definitions {
+		disabled := r.disabledTools(definition.Name)
 		resolved := poo.Profile{Name: definition.Name, Unmatched: definition.Unmatched}
 		for _, tool := range definition.Tools {
 			if !linksTool(opts, tool) {
@@ -2158,9 +2168,6 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 			Message: "the session has no store: the settings are in the ephemeral mode",
 		}
 	}
-	if _, err := store.Create(ctx, created); err != nil {
-		return nil, err
-	}
 	opts := r.Options
 	// The session works in the directory its header names: the tools
 	// work there, and the prompt names it.
@@ -2170,16 +2177,15 @@ func (r *Runtime) CreateSession(ctx context.Context, store session.Store, create
 	// The project's instructions are read from the directory the
 	// session works in: the build read none, because it does not know
 	// which one this session names.
-	instructions, err := r.ProjectInstructions(opts.WorkingDir)
+	edits, err := r.SessionPrompt(opts.WorkingDir)
 	if err != nil {
 		return nil, err
 	}
-	if instructions != nil {
-		// The session's prompt is its own slice: the runtime's is shared
-		// by every session this process creates, and two of them
-		// appending at once would write the same spare slot.
-		prompt := append([]func(*prompt.Builder){}, opts.Prompt...)
-		opts.Prompt = append(prompt, instructions)
+	if _, err := store.Create(ctx, created); err != nil {
+		return nil, err
+	}
+	if len(edits) != 0 {
+		opts.Prompt = append(slices.Clone(opts.Prompt), edits...)
 	}
 	opts.Sink = store
 	opts.SessionID = created.SessionID
@@ -2215,7 +2221,7 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 	// in: the core takes the recorded directory when the options name
 	// none.
 	opts.WorkingDir = ""
-	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy))...)
+	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), poo.WithPromptLoader(r.SessionPrompt))...)
 }
 
 // PromptOverrides are the prompt changes a client asks for.

@@ -38,7 +38,8 @@ type Settings struct {
 	// Decider are the decider's settings.
 	Decider Decider `json:"decider,omitempty"`
 	// Profile is the name of the profile a session is built from.
-	Profile string `json:"profile,omitempty"`
+	Profile  string                     `json:"profile,omitempty"`
+	Profiles map[string]ProfileSettings `json:"profiles,omitempty"`
 	// Permission are the permission policy's settings.
 	Permission Permission `json:"permission,omitempty"`
 	// SystemPrompt are the system prompt's settings.
@@ -245,6 +246,17 @@ type Decide struct {
 	Deny *float64 `json:"deny,omitempty"`
 	// TimeoutMS is the per-call latency budget, in milliseconds.
 	TimeoutMS *int `json:"timeout_ms,omitempty"`
+}
+
+// ProfileSettings defines a named variant of a profile linked by the binary.
+type ProfileSettings struct {
+	Base       string       `json:"base"`
+	PromptFile string       `json:"prompt_file,omitempty"`
+	Tools      ProfileTools `json:"tools,omitempty"`
+}
+
+type ProfileTools struct {
+	Disabled []string `json:"disabled,omitempty"`
 }
 
 // SystemPrompt are the system prompt's settings.

@@ -73,14 +73,12 @@ func handlePrompt(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		return exit{usageExitCode}
 	}
 	model := runtime.Options.Model
-	instructions, err := runtime.ProjectInstructions(workDir)
+	edits, err := runtime.SessionPrompt(workDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "poo prompt: %v\n", err)
 		return exit{usageExitCode}
 	}
-	if instructions != nil {
-		runtime.Options.Prompt = append(runtime.Options.Prompt, instructions)
-	}
+	runtime.Options.Prompt = append(runtime.Options.Prompt, edits...)
 	runtime.Options.Prompt = append(runtime.Options.Prompt, promptMutation(runtime, model))
 
 	// The build rendered the prompt; the sections the command adds after

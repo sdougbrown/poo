@@ -103,7 +103,7 @@ func New(opts Options) (*Server, error) {
 		effective: effective,
 		workDir:   opts.WorkingDir,
 		client:    client,
-		runtimes:  map[string]*config.Runtime{},
+		runtimes:  map[runtimeKey]*config.Runtime{},
 		decorate:  opts.SessionTools,
 	}
 	qualified, err := qualifiedModelNames(effective, runtime)
@@ -198,7 +198,7 @@ type Server struct {
 	mu sync.Mutex
 	// runtimes are the runtimes the sessions run under, by profile and
 	// model.
-	runtimes map[string]*config.Runtime
+	runtimes map[runtimeKey]*config.Runtime
 	// decorate changes a runtime the server built, before a session is
 	// created from it.
 	decorate func(*config.Runtime) error
@@ -244,14 +244,16 @@ func (f *Server) modelFor(name string) (poo.ModelInfo, bool) {
 	return poo.ModelInfo{}, false
 }
 
+type runtimeKey struct{ profile, model string }
+
 // runtimeFor returns the runtime a session runs under.
 //
 // A session names the profile it is built from and the model it talks
 // to, and the two decide the tools it offers and the policy it runs
 // with. The runtimes are built once and kept: a second session with
 // the same profile and model gets the same runtime.
-func (f *Server) runtimeFor(profile, model string) (*config.Runtime, error) {
-	if profile != "" && !hasProfile(f.build.Profiles, profile) {
+func (f *Server) runtimeFor(profileName, model string) (*config.Runtime, error) {
+	if profileName != "" && !f.runtime.HasProfile(profileName) {
 		return nil, poo.ErrUnknownProfile
 	}
 	if model != "" {
@@ -261,13 +263,13 @@ func (f *Server) runtimeFor(profile, model string) (*config.Runtime, error) {
 		}
 		model = resolved.Name
 	}
-	key := profile + "\x00" + model
+	key := runtimeKey{profile: profileName, model: model}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if runtime, ok := f.runtimes[key]; ok {
 		return runtime, nil
 	}
-	if profile == "" && model == "" {
+	if profileName == "" && model == "" {
 		// The default runtime is the one New built, and it carries
 		// the settings' own tools.
 		f.runtimes[key] = f.runtime
@@ -283,8 +285,8 @@ func (f *Server) runtimeFor(profile, model string) (*config.Runtime, error) {
 	}
 	opts := f.build
 	opts.Settings = &settings
-	if profile != "" {
-		opts.Overrides.Profile = profile
+	if profileName != "" {
+		opts.Overrides.Profile = profileName
 	}
 	runtime, err := config.Build(opts)
 	if err != nil {
@@ -295,16 +297,6 @@ func (f *Server) runtimeFor(profile, model string) (*config.Runtime, error) {
 	}
 	f.runtimes[key] = runtime
 	return runtime, nil
-}
-
-// hasProfile reports whether the binary links the named profile.
-func hasProfile(profiles []profile.Profile, name string) bool {
-	for _, p := range profiles {
-		if p.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 // Profiles returns the profiles the binary offers.

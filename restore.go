@@ -198,7 +198,8 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 	// options were built with are not applied to it either: the recorded
 	// text is the whole prompt, and an edit on top of it would add a
 	// section the record already carries.
-	if text, ok := recordedPrompt(records); ok {
+	text, hasRecordedPrompt := recordedPrompt(records)
+	if hasRecordedPrompt {
 		opts.SystemPrompt = text
 		opts.Prompt = nil
 	}
@@ -210,6 +211,9 @@ func Restore(opts Options, records []Record, fns ...Option) (*Session, Restored,
 		if fn != nil {
 			fn(&opts)
 		}
+	}
+	if hasRecordedPrompt {
+		opts.loadPrompt = nil
 	}
 	if opts.SessionID == "" {
 		opts.SessionID = restored.Metadata.SessionID

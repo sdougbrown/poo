@@ -15,6 +15,7 @@ import (
 	_ "image/png"
 	"log/slog"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -526,7 +527,8 @@ type Options struct {
 	// Every mutation is called with the session's prompt builder, in
 	// the order they were added, after the core's own sections and the
 	// tools' sections are in it. A mutation that is nil is skipped.
-	Prompt []func(*prompt.Builder)
+	Prompt     []func(*prompt.Builder)
+	loadPrompt func(dir string) ([]func(*prompt.Builder), error)
 	// PromptVariant names the prompt variant the prompt renders in.
 	//
 	// The variant picks the alternative text of the sections that
@@ -667,6 +669,16 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		if fn != nil {
 			fn(&opts)
 		}
+	}
+	if opts.loadPrompt != nil {
+		edits, err := opts.loadPrompt(opts.WorkingDir)
+		if err != nil {
+			return nil, err
+		}
+		if len(edits) != 0 {
+			opts.Prompt = append(slices.Clone(opts.Prompt), edits...)
+		}
+		opts.loadPrompt = nil
 	}
 	// The core adds its own job tools and the order they are offered
 	// in, so it works on copies: a caller may build two sessions from
