@@ -484,6 +484,31 @@ func TestTheExampleSettingsDecode(t *testing.T) {
 	}
 }
 
+// TestEveryExampleSettingsDecode covers the examples: every settings
+// file the repository ships decodes, so they stay in step with the
+// settings as the schema moves.
+func TestEveryExampleSettingsDecode(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "examples", "*.settings.yaml"))
+	if err != nil {
+		t.Fatalf("listing the examples: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("the examples hold no settings files")
+	}
+	for _, file := range files {
+		file := file
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			data, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("reading the example: %v", err)
+			}
+			if _, err := config.Parse(data, config.FormatYAML); err != nil {
+				t.Fatalf("decoding the example: %v", err)
+			}
+		})
+	}
+}
+
 // TestAnOldRegistryKeyStillLoads covers the cliregistry → cli_registry
 // rename: a settings file that predates the rename loads to the same
 // settings the new name gives, a value that merely names the tool

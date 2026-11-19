@@ -1,0 +1,37 @@
+# A session on the OpenCode Console gateway: no endpoints block, no
+# models block. One key serves every OpenCode endpoint, because a key
+# belongs to one workspace and the workspace's plan says which endpoint
+# bills it.
+#
+#     poo run --settings examples/opencode.settings.yaml "..."
+#
+# `poo login opencode` stores the key in poo's credential file. The
+# gateway lists its models itself, so the probe supplies each model's
+# fields and the built-in record names one model per endpoint only
+# because the loader requires an endpoint to serve something.
+version: 1
+
+profile: code
+
+auth_file: ~/.config/poo/auth.json
+roles:
+  chat: opencode-go/glm-5.3
+
+# The gateway speaks the Anthropic Messages API beside the Chat
+# Completions one, at its own base, so the endpoints come in pairs and
+# a Messages model is a role away:
+#
+# roles:
+#   chat: opencode-go-anthropic/claude-haiku-5-5
+#
+# The Messages transport carries the thinking a model did — with the
+# signature the response carried, returned unchanged in the history that
+# answers it — so a Messages model that reasons keeps its reasoning
+# across turns.
+
+# The skills the person keeps, in the directory the rest of the family
+# uses, and further directories beside it. A path that is not there is
+# dropped with a warning rather than failing the run.
+skills:
+  default: true
+  paths: ["./skills"]
