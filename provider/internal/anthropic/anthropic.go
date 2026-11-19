@@ -105,13 +105,4 @@ func Tools(specs []poo.ToolSpec) []Tool {
 	return out
 }
 
-// AppendMessages appends messages to a serialized request body, and replaces
-// the output limit.
-//
-// The fork re-sends the snapshot as it was built: the body is decoded, the
-// messages go after the last one and the output limit is replaced, and the
-// result is serialized again. The key order is the one the body already had,
-// so a fork's prefix is the one the endpoint has already cached.
-func AppendMessages(body []byte, messages []Message, maxTokens int) ([]byte, error) {
-	return appendBody(body, messages, maxTokens)
-}
+// Tool is the wire shape of a tool.
