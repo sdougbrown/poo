@@ -149,8 +149,8 @@ func TestAKeyLoginTakesTheKeyFromStdin(t *testing.T) {
 }
 
 // TestAnOpencodeLoginStoresTheKey covers the OpenCode sign-in: the key lands
-// under the provider the endpoints read, and a second sign-in of the same key
-// is what replaces it.
+// under the provider the endpoints read, and reads back as the credential
+// it is.
 func TestAnOpencodeLoginStoresTheKey(t *testing.T) {
 	dir := t.TempDir()
 	settings := loginSettings(t, dir)

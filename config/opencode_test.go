@@ -97,6 +97,10 @@ roles:
 // bills it — and the gateway lists its models, so the endpoints are probed
 // rather than pinned to the record's snapshot.
 func TestTheBuiltinOpencodeEndpointsAreOfferedOnTheirKey(t *testing.T) {
+	// The variable is pinned empty so the environment a test runs in cannot
+	// decide whether the built-in endpoints are offered or which key answers.
+	t.Setenv("OPENCODE_API_KEY", "")
+
 	dir := t.TempDir()
 	runtime, settings := opencodeRuntime(t, dir, map[string]string{"opencode": "oc_sk_test"}, "opencode-go/glm-5.3", &opencodeGateway{})
 
@@ -132,6 +136,10 @@ func TestTheBuiltinOpencodeEndpointsAreOfferedOnTheirKey(t *testing.T) {
 // does not wake an endpoint this key cannot reach, and a chat role naming a
 // sleeping model is a settings failure that names the model.
 func TestTheBuiltinOpencodeEndpointsSleepOnAnotherProvidersCredential(t *testing.T) {
+	// The variable is pinned empty so the environment a test runs in cannot
+	// decide whether the built-in endpoints are offered or which key answers.
+	t.Setenv("OPENCODE_API_KEY", "")
+
 	dir := t.TempDir()
 	writeOpencodeAuth(t, dir, map[string]string{"ollama-cloud": "an-ollama-key"})
 	path := writeCodexSettings(t, dir, `version: 1
@@ -175,6 +183,10 @@ func TestTheBuiltinOpencodeEndpointsWakeOnTheVariable(t *testing.T) {
 // own rung: a settings endpoint of the layer's own name carrying api_key is a
 // key the transport resolves, so the gate keeps the models it names.
 func TestTheBuiltinOpencodeEndpointsWakeOnTheSettingsLiteral(t *testing.T) {
+	// The variable is pinned empty so the environment a test runs in cannot
+	// decide whether the built-in endpoints are offered or which key answers.
+	t.Setenv("OPENCODE_API_KEY", "")
+
 	dir := t.TempDir()
 	writeOpencodeAuth(t, dir, map[string]string{"ollama-cloud": "an-ollama-key"})
 	path := writeCodexSettings(t, dir, `version: 1
@@ -210,6 +222,10 @@ roles:
 // conversation together, and the stored key is the bearer token. Both
 // endpoints declare the header, so each one's transport sends it.
 func TestTheOpencodeTransportNamesTheSession(t *testing.T) {
+	// The variable is pinned empty so the environment a test runs in cannot
+	// decide whether the built-in endpoints are offered or which key answers.
+	t.Setenv("OPENCODE_API_KEY", "")
+
 	for _, name := range []string{opencodeGo, opencodePAYG} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -250,6 +266,10 @@ func TestTheOpencodeTransportNamesTheSession(t *testing.T) {
 // one file, and each endpoint takes its own, so one provider's key never
 // reaches the other's gateway.
 func TestEachEndpointReadsItsOwnStoredKey(t *testing.T) {
+	// The variable is pinned empty so the environment a test runs in cannot
+	// decide whether the built-in endpoints are offered or which key answers.
+	t.Setenv("OPENCODE_API_KEY", "")
+
 	dir := t.TempDir()
 	runtime, _ := opencodeRuntime(t, dir, map[string]string{
 		"ollama-cloud": "an-ollama-key",
