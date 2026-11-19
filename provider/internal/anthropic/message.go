@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // Message is the wire shape of one message: a role and its content blocks.
@@ -128,7 +128,7 @@ func systemText(m poo.Message) (string, error) {
 	var parts []string
 	for _, c := range m.Content {
 		if c.Provider != nil {
-			if err := support.CarryError(poo.APIAnthropicMessages, false, c.Provider); err != nil {
+			if err := transport.CarryError(poo.APIAnthropicMessages, false, c.Provider); err != nil {
 				return "", err
 			}
 		}
@@ -153,7 +153,7 @@ func blocks(m poo.Message) ([]Block, error) {
 		// companion when it belongs to another API — is data the Messages
 		// request has no place for.
 		if c.Provider != nil && !(c.Kind == poo.ContentThinking && c.Provider.API == poo.APIAnthropicMessages) {
-			if err := support.CarryError(poo.APIAnthropicMessages, false, c.Provider); err != nil {
+			if err := transport.CarryError(poo.APIAnthropicMessages, false, c.Provider); err != nil {
 				return nil, err
 			}
 		}

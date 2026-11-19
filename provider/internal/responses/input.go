@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // The input encoding.
@@ -144,7 +144,7 @@ func InputItems(messages []poo.Message, reads Modalities, firstID int) ([]json.R
 	next := firstID
 	for i, m := range messages {
 		for _, c := range m.Content {
-			if err := support.CarryError(poo.APIResponses, true, c.Provider); err != nil {
+			if err := transport.CarryError(poo.APIResponses, true, c.Provider); err != nil {
 				return nil, "", err
 			}
 		}
@@ -393,12 +393,12 @@ func inputParts(blocks []poo.ContentBlock, reads Modalities) []inputPart {
 			if !reads.Image {
 				continue
 			}
-			parts = append(parts, inputPart{Type: "input_image", Detail: "auto", ImageURL: support.AttachmentDataURL(c)})
+			parts = append(parts, inputPart{Type: "input_image", Detail: "auto", ImageURL: transport.AttachmentDataURL(c)})
 		case poo.ContentAudio:
 			if !reads.Audio {
 				continue
 			}
-			format := support.AudioFormat(c.MediaType)
+			format := transport.AudioFormat(c.MediaType)
 			if format == "" {
 				continue
 			}

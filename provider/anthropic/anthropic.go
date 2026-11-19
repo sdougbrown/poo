@@ -24,6 +24,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/provider/internal/anthropic"
 	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // APIVersion is the Messages API version the transport speaks.
@@ -174,7 +175,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 // buildBody turns a request into the wire body it is sent as.
 func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	info := req.ModelInfo
-	if support.ZeroModelInfo(info) {
+	if transport.ZeroModelInfo(info) {
 		info = t.cfg.ModelInfo
 	}
 	messages, system, err := anthropic.Messages(req.Messages)
@@ -192,7 +193,7 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	// prompt by the core; the wire carries the calls of a model that takes
 	// them natively.
 	if len(req.Tools) > 0 && takesNativeTools(info) {
-		request.Tools = anthropic.Tools(support.SortedTools(req.Tools))
+		request.Tools = anthropic.Tools(transport.SortedTools(req.Tools))
 	}
 	params, err := t.params(req, info)
 	if err != nil {
@@ -239,7 +240,7 @@ func (t *Transport) params(req poo.ChatRequest, info poo.ModelInfo) (map[string]
 		return nil, support.ConfigErrorf("%s", support.ReasonError(err))
 	}
 	for _, field := range fields {
-		support.SetNested(params, field.Path, field.Value)
+		transport.SetNested(params, field.Path, field.Value)
 	}
 	// The thinking field names the kind of thinking a request asks for,
 	// and the API takes no value without it. The companion is decided from
@@ -257,22 +258,22 @@ func (t *Transport) params(req poo.ChatRequest, info poo.ModelInfo) (map[string]
 		}
 	}
 	if adaptive {
-		support.SetNested(params, "thinking.type", "adaptive")
+		transport.SetNested(params, "thinking.type", "adaptive")
 	} else if enabled {
-		support.SetNested(params, "thinking.type", "enabled")
+		transport.SetNested(params, "thinking.type", "enabled")
 	}
 	// The sampling the model takes is the core's own rule: the effective
 	// sampling clears the temperature for a model that takes none, and
 	// leaves the rest of the fields alone.
 	sampling := info.EffectiveSampling(t.cfg.Sampling)
 	if v := sampling.Temperature; v != nil {
-		support.SetNested(params, "temperature", *v)
+		transport.SetNested(params, "temperature", *v)
 	}
 	if v := sampling.TopP; v != nil {
-		support.SetNested(params, "top_p", *v)
+		transport.SetNested(params, "top_p", *v)
 	}
 	if v := sampling.TopK; v != nil {
-		support.SetNested(params, "top_k", *v)
+		transport.SetNested(params, "top_k", *v)
 	}
 	if len(params) == 0 {
 		return nil, nil

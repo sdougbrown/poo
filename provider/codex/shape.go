@@ -6,6 +6,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/provider/internal/responses"
 	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // The request policy.
@@ -38,14 +39,14 @@ func (t *Transport) modelInfo(req poo.ChatRequest) poo.ModelInfo {
 
 // zeroModelInfo reports that a request carried no model info.
 func zeroModelInfo(info poo.ModelInfo) bool {
-	return support.ZeroModelInfo(info)
+	return transport.ZeroModelInfo(info)
 }
 
 // toolsMode returns how the run asks for tool calls.
 //
 // A model info that names a mode wins over the configured one.
 func (t *Transport) toolsMode(info poo.ModelInfo) string {
-	return support.ToolsMode(info, t.cfg.ToolsMode)
+	return transport.ToolsMode(info, t.cfg.ToolsMode)
 }
 
 // textVerbosity returns the verbosity the request asks for.
@@ -135,7 +136,7 @@ func (t *Transport) tools(info poo.ModelInfo, specs []poo.ToolSpec) ([]responses
 		return nil, support.ConfigErrorf("the Codex endpoint makes native tool calls, so %q is not a tools mode it serves", mode)
 	}
 	out := make([]responses.Tool, 0, len(specs))
-	for _, spec := range support.SortedTools(specs) {
+	for _, spec := range transport.SortedTools(specs) {
 		parameters := spec.Schema
 		if len(parameters) == 0 {
 			parameters = json.RawMessage(`{"type":"object","properties":{}}`)

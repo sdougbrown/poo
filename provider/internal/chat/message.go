@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // Message is the wire shape of one message.
@@ -110,7 +110,7 @@ func message(m poo.Message) (Message, []ContentPart, error) {
 	// after a tool result is checked too.
 	for _, c := range m.Content {
 		if c.Provider != nil {
-			if err := support.CarryError(poo.APIChatCompletions, false, c.Provider); err != nil {
+			if err := transport.CarryError(poo.APIChatCompletions, false, c.Provider); err != nil {
 				return Message{}, nil, err
 			}
 		}
@@ -176,10 +176,10 @@ func attachmentParts(attachments []poo.ContentBlock) ([]ContentPart, error) {
 		case poo.ContentImage:
 			parts = append(parts, ContentPart{
 				Type:     "image_url",
-				ImageURL: &ImageURL{URL: support.AttachmentDataURL(attachment)},
+				ImageURL: &ImageURL{URL: transport.AttachmentDataURL(attachment)},
 			})
 		case poo.ContentAudio:
-			format := support.AudioFormat(attachment.MediaType)
+			format := transport.AudioFormat(attachment.MediaType)
 			if format == "" {
 				return nil, fmt.Errorf("the Chat Completions wire has no format name for %q", attachment.MediaType)
 			}

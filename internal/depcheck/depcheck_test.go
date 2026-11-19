@@ -173,6 +173,7 @@ func wantSkipped(m string, extra ...string) []string {
 		m + "/provider/internal/chat (does not exist yet)",
 		m + "/provider/internal/responses (does not exist yet)",
 		m + "/provider/internal/support (does not exist yet)",
+		m + "/provider/internal/transport (does not exist yet)",
 		m + "/server (does not exist yet)",
 		m + "/session (does not exist yet)",
 		m + "/skill (does not exist yet)",

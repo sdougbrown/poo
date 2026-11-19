@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // AppendMessages appends messages to a serialized request body, and replaces
@@ -26,5 +26,5 @@ func AppendMessages(body []byte, messages []Message, maxTokens int) ([]byte, err
 		}
 		encoded = append(encoded, raw)
 	}
-	return support.AppendMessagesToBody(body, encoded, maxTokens)
+	return transport.AppendMessagesToBody(body, encoded, maxTokens)
 }

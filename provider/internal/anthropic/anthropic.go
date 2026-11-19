@@ -15,7 +15,7 @@ import (
 	"encoding/json"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // Request is the wire shape of a Messages request.
@@ -47,7 +47,7 @@ func (r Request) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return support.MergeParams(body, r.Params)
+	return transport.MergeParams(body, r.Params)
 }
 
 // Encode serializes a request.

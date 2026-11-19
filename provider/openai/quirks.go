@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/sdougbrown/poo/provider/internal/chat"
-	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // The quirk framework.
@@ -85,7 +85,7 @@ func (s *requestShape) setParam(name string, value any) {
 		s.claimed = map[string]bool{}
 	}
 	s.claimed[name] = true
-	support.SetNested(s.params, name, value)
+	transport.SetNested(s.params, name, value)
 }
 
 // quirks holds the registered profiles, by name.
@@ -185,7 +185,7 @@ func init() {
 					parts[j] = chat.ContentPart{
 						Type: "audio_url",
 						AudioURL: &chat.AudioURL{
-							URL: "data:" + support.AudioMediaType(parts[j].InputAudio.Format) + ";base64," + parts[j].InputAudio.Data,
+							URL: "data:" + transport.AudioMediaType(parts[j].InputAudio.Format) + ";base64," + parts[j].InputAudio.Data,
 						},
 					}
 					changed = true
@@ -239,7 +239,7 @@ func (t *Transport) textFilters(settings requestSettings) []chat.TextFilter {
 		}
 	}
 	filters := repair.filters
-	mode := support.ToolsMode(settings.info, t.cfg.ToolsMode)
+	mode := transport.ToolsMode(settings.info, t.cfg.ToolsMode)
 	if repair.textCalls && mode != "text" && mode != "auto" {
 		// The model writes its tool calls as text, whatever its mode
 		// says.
@@ -256,7 +256,7 @@ func (t *Transport) textFilters(settings requestSettings) []chat.TextFilter {
 // A request that carries them may also carry native tool calls, and a
 // native call wins over one the model wrote as text.
 func (t *Transport) sendsTools(settings requestSettings) bool {
-	mode := support.ToolsMode(settings.info, t.cfg.ToolsMode)
+	mode := transport.ToolsMode(settings.info, t.cfg.ToolsMode)
 	return mode == "native" || mode == "auto"
 }
 

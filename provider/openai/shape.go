@@ -6,6 +6,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/provider/internal/chat"
 	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // The request shaping.
@@ -34,7 +35,7 @@ type requestSettings struct {
 // requestSettings returns the settings a request is shaped by.
 func (t *Transport) requestSettings(req poo.ChatRequest) requestSettings {
 	info := req.ModelInfo
-	if support.ZeroModelInfo(info) {
+	if transport.ZeroModelInfo(info) {
 		info = t.cfg.ModelInfo
 	}
 	return requestSettings{info: info, quirks: quirksFor(info.Quirks, t.logger), sessionID: req.SessionID}
@@ -133,8 +134,8 @@ func (t *Transport) buildBodyWith(req poo.ChatRequest, settings requestSettings)
 	// with tool_calls. In text mode the tools are described in the
 	// prompt instead, and the model answers with text that the parser
 	// reads. In auto mode both happen.
-	if mode := support.ToolsMode(settings.info, t.cfg.ToolsMode); mode == "native" || mode == "auto" {
-		for _, spec := range support.SortedTools(req.Tools) {
+	if mode := transport.ToolsMode(settings.info, t.cfg.ToolsMode); mode == "native" || mode == "auto" {
+		for _, spec := range transport.SortedTools(req.Tools) {
 			var ct chat.Tool
 			ct.Type = "function"
 			ct.Function.Name = spec.Name

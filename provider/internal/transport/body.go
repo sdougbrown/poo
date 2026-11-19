@@ -1,4 +1,13 @@
-package support
+// Package transport holds the request-shape half the wire APIs share.
+//
+// Nothing here moves a request or reads an answer: that is the support
+// package's. What is here is what a request carries and how its body is
+// written — the stable key order a fork preserves, the named parameters
+// merged into a top level, the messages a fork appends, and the policy for
+// the provider data an API may carry back. A transport composes both
+// halves with the wire package that knows its API's own shapes.
+
+package transport
 
 import (
 	"bytes"

@@ -15,7 +15,7 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // Request is the wire shape of a chat completion request.
@@ -48,7 +48,7 @@ func (r Request) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return support.MergeParams(body, r.Params)
+	return transport.MergeParams(body, r.Params)
 }
 
 // StreamOptions asks for a final usage chunk.
