@@ -1240,7 +1240,73 @@ func originForMode(mode InputMode) Origin {
 //
 // A response that broke part way through is returned along with the
 // error, so the caller can still write the usage it produced.
+//
+// A request that the endpoint rejects because its default max_tokens is
+// above the endpoint's cap is sent once more under the lower cap, and
+// the session keeps the cap for the requests that follow.
 func (s *Session) request(run *runState, turn int) (*response, Rendered, error) {
+	resp, rendered, sent, err := s.requestOnce(run, turn)
+	var perr *ProviderError
+	if !errors.As(err, &perr) || perr.Kind != ProviderKindOutputLimit {
+		return resp, rendered, err
+	}
+	if resp != nil && (len(resp.content) > 0 || len(resp.calls) > 0) {
+		return resp, rendered, err
+	}
+	if !s.learnOutputLimit(run, turn, perr, sent) {
+		return resp, rendered, err
+	}
+	resp, rendered, _, err = s.requestOnce(run, turn)
+	return resp, rendered, err
+}
+
+// learnOutputLimit keeps the output limit an endpoint named for a model
+// that declares none, and reports whether the request is worth sending
+// again.
+//
+// A declared limit is the user's word and is never replaced. The limit is
+// the endpoint's own number, or the smallest default when the rejection
+// named none. A limit that is not below what the request asked for would
+// get the same rejection, so it is not learned.
+func (s *Session) learnOutputLimit(run *runState, turn int, perr *ProviderError, sent int) bool {
+	limit := perr.OutputLimit
+	if limit <= 0 {
+		limit = fallbackOutputLimit
+	}
+	s.mu.Lock()
+	model := s.opts.Model
+	learn := model.MaxOutput <= 0 && limit < sent
+	if learn {
+		s.opts.Model.MaxOutput = limit
+	}
+	s.mu.Unlock()
+	if !learn {
+		return false
+	}
+
+	name := model.Name
+	if name == "" {
+		name = model.ModelID
+	}
+	setting := fmt.Sprintf("models.%s.max_output", name)
+	message := fmt.Sprintf("the endpoint rejected max_tokens %d; asking for %d from now on. Set %s to declare the limit.", sent, limit, setting)
+	s.logWarn(message)
+	s.events.emit(EventModelOutputLimit, map[string]any{
+		"run_id":   run.id,
+		"turn":     turn,
+		"request":  run.requests,
+		"previous": sent,
+		"limit":    limit,
+		"setting":  setting,
+		"message":  message,
+	})
+	return true
+}
+
+// requestOnce sends one provider request and reads the whole response.
+//
+// It also returns the max_tokens the request carried.
+func (s *Session) requestOnce(run *runState, turn int) (*response, Rendered, int, error) {
 	// The model is read once, here: the request's body, its token limit and
 	// every model info-derived decision come from this one value, so a
 	// switch between runs cannot reach a request half way.
@@ -1270,7 +1336,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 		OnAttempt: func(a Attempt) { s.reportAttempt(run, turn, a) },
 	})
 	if err != nil {
-		return nil, rendered, err
+		return nil, rendered, maxTokens, err
 	}
 	defer reader.Close()
 
@@ -1299,7 +1365,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 			}
 		}
 	}
-	return resp, rendered, err
+	return resp, rendered, maxTokens, err
 }
 
 // reportAttempt writes the record of an attempt that failed.

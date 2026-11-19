@@ -23,6 +23,11 @@ const (
 	ReasoningPathToggle = "chat_template_kwargs.enable_thinking"
 )
 
+// fallbackOutputLimit is the output limit a session asks for after an
+// endpoint rejects max_tokens without saying what it allows. It is the
+// smallest default, so a model that takes any default takes it.
+const fallbackOutputLimit = 8192
+
 // DefaultMaxOutputFor returns the output limit of a model that declares
 // none, from the model's context window in tokens.
 //

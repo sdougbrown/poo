@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -51,17 +52,20 @@ type ErrorResponse struct {
 //
 // The table, one row at a time:
 //
-//	context-length codes            → context_length
-//	quota codes                     → usage_limit
-//	429                             → rate_limited
-//	402, or a billing code          → plan_inactive
-//	401, 403                        → auth_failed
-//	other 4xx                       → invalid_request
-//	5xx                             → server
+//	context-length codes                   → context_length
+//	400, 422 naming a too-large max_tokens → output_limit
+//	quota codes                            → usage_limit
+//	429                                    → rate_limited
+//	402, or a billing code                 → plan_inactive
+//	401, 403                               → auth_failed
+//	other 4xx                              → invalid_request
+//	5xx                                    → server
 func FailureKind(status int, code, errType, message string, fallback poo.ProviderKind) poo.ProviderKind {
 	switch {
 	case isContextLength(code, message):
 		return poo.ProviderKindContextLength
+	case isOutputLimit(status, message):
+		return poo.ProviderKindOutputLimit
 	case isQuota(code, message):
 		return poo.ProviderKindUsageLimit
 	case isBilling(code, errType):
@@ -157,6 +161,77 @@ func isContextLength(code, message string) bool {
 		}
 	}
 	return false
+}
+
+// outputFields are the request fields that carry the output-token limit.
+var outputFields = []string{"max_tokens", "max_completion_tokens", "max_output_tokens"}
+
+// outputLimitPhrases are the words an endpoint uses to say the output-token
+// field is above what it allows.
+var outputLimitPhrases = []string{
+	"too large",
+	"too high",
+	"valid range",
+	"range of",
+	"at most",
+	"maximum allowed",
+	"less than or equal",
+	"exceeds",
+}
+
+// isOutputLimit reports whether a rejection says the request's output-token
+// field is above what the endpoint allows.
+//
+// Only a 400 or a 422 is the endpoint rejecting the request itself, and the
+// message has to name the output-token field and say it is too large. A
+// context overflow is checked before this and stays a context-length
+// failure, even when its message names max_tokens.
+func isOutputLimit(status int, message string) bool {
+	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+		return false
+	}
+	lower := strings.ToLower(message)
+	return containsAny(lower, outputFields) && containsAny(lower, outputLimitPhrases)
+}
+
+// containsAny reports whether the text holds any of the needles.
+func containsAny(text string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// outputLimitPatterns read the largest output-token count a rejection
+// allows, each from one of the shapes the endpoints use: a range
+// "[1, 8192]", "at most 16384", "32768 > 8192" and "less than or equal to
+// 4096".
+var outputLimitPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\[\s*\d+\s*,\s*(\d+)\s*\]`),
+	regexp.MustCompile(`at most\s+(\d+)`),
+	regexp.MustCompile(`>\s*(\d+)`),
+	regexp.MustCompile(`less than or equal to\s+(\d+)`),
+}
+
+// outputLimitOf returns the largest output-token count a rejection
+// states, or zero when it states none.
+func outputLimitOf(kind poo.ProviderKind, message string) int {
+	if kind != poo.ProviderKindOutputLimit {
+		return 0
+	}
+	lower := strings.ToLower(message)
+	for _, pattern := range outputLimitPatterns {
+		match := pattern.FindStringSubmatch(lower)
+		if match == nil {
+			continue
+		}
+		if n, err := strconv.Atoi(match[1]); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 // RetryAfter returns how long the endpoint asked the client to wait.
@@ -298,13 +373,15 @@ func ClassifyStatus(resp *http.Response) error {
 		message = resp.Status
 	}
 
+	kind := FailureKind(resp.StatusCode, code, er.Error.Type, message, poo.ProviderKindServer)
 	return &poo.ProviderError{
-		Kind:       FailureKind(resp.StatusCode, code, er.Error.Type, message, poo.ProviderKindServer),
-		Message:    message,
-		Status:     resp.StatusCode,
-		Code:       code,
-		RetryAfter: RetryAfter(resp),
-		ResetsAt:   resetAt(resp.Header, body),
+		Kind:        kind,
+		Message:     message,
+		Status:      resp.StatusCode,
+		Code:        code,
+		OutputLimit: outputLimitOf(kind, message),
+		RetryAfter:  RetryAfter(resp),
+		ResetsAt:    resetAt(resp.Header, body),
 	}
 }
 

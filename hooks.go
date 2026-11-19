@@ -420,6 +420,10 @@ const (
 	// is a record-only diagnostic, never delivered to observers; the
 	// event bus writes the coalesced record.
 	EventObserverDropped EventName = "observer.dropped"
+	// EventModelOutputLimit is emitted when the endpoint rejects a
+	// request's default max_tokens and the session learns a lower limit
+	// for the model.
+	EventModelOutputLimit EventName = "model.output_limit"
 	// EventModelsChanged is emitted when the session switches models.
 	EventModelsChanged EventName = "session.models_changed"
 )
