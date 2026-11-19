@@ -2219,24 +2219,7 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 	// in: the core takes the recorded directory when the options name
 	// none.
 	opts.WorkingDir = ""
-	resumed, err := session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy))...)
-	if err != nil || r.profilePromptFile() == "" {
-		return resumed, err
-	}
-	for _, record := range resumed.Loaded.Records {
-		if _, ok := record.(*poo.SystemPromptRecord); ok {
-			return resumed, nil
-		}
-	}
-	edit, err := r.profilePrompt()
-	if err == nil {
-		err = resumed.Session.SetPrompt(edit)
-	}
-	if err != nil {
-		_ = resumed.Session.Close()
-		return nil, err
-	}
-	return resumed, nil
+	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), poo.WithPromptLoader(r.profilePrompt))...)
 }
 
 // PromptOverrides are the prompt changes a client asks for.
