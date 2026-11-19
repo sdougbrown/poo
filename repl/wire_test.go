@@ -3,6 +3,8 @@ package repl
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -86,6 +88,29 @@ func TestTheDemuxSendsEachKindWhereItBelongs(t *testing.T) {
 	}
 }
 
+// TestABurstOfEventsOutlastsAStalledLoop covers a fast stream while
+// the main loop stops draining for a moment. The deltas wait for the
+// loop, and the session goes on.
+func TestABurstOfEventsOutlastsAStalledLoop(t *testing.T) {
+	h := newWireHarness(t)
+	conn := startConn(h.stdout, h.stdin)
+	const burst = 1000
+	for i := 1; i <= burst; i++ {
+		h.feed(fmt.Sprintf(`{"jsonrpc":"2.0","method":"event","params":{"session_id":"s1","seq":%d,"type":"message.delta"}}`, i))
+	}
+	select {
+	case <-conn.done:
+		t.Fatalf("the connection ended under a burst: %v", conn.err)
+	default:
+	}
+	for i := 1; i <= burst; i++ {
+		evt := <-conn.events
+		if evt.Seq != int64(i) {
+			t.Fatalf("event %d read back as seq %d", i, evt.Seq)
+		}
+	}
+}
+
 func TestAnEventOverflowEndsTheConnection(t *testing.T) {
 	h := newWireHarness(t)
 	conn := startConn(h.stdout, h.stdin)
@@ -96,11 +121,40 @@ func TestAnEventOverflowEndsTheConnection(t *testing.T) {
 	}()
 	select {
 	case <-conn.done:
-		if conn.err == nil || !strings.Contains(conn.err.Error(), "overflow") {
+		// The client is the side that gave up, and the failure says
+		// so: the server closed nothing.
+		if !errors.Is(conn.err, errEventBacklog) {
 			t.Fatalf("the connection did not report the overflow: %v", conn.err)
 		}
-	case <-time.After(time.Second):
+		if errors.Is(conn.err, errServerClosed) {
+			t.Fatalf("the overflow blamed the server: %v", conn.err)
+		}
+	case <-time.After(10 * time.Second):
 		t.Fatal("the connection kept running after losing an event")
+	}
+}
+
+// TestACallCaughtByAnOverflowReportsIt covers a call in flight when the
+// backlog fills: the call fails with the overflow, which ends the
+// session, and does not blame the server.
+func TestACallCaughtByAnOverflowReportsIt(t *testing.T) {
+	h := newWireHarness(t)
+	conn := startConn(h.stdout, h.stdin)
+	go func() {
+		h.taken()
+		for i := 0; i <= cap(conn.events); i++ {
+			h.feed(`{"jsonrpc":"2.0","method":"event","params":{"session_id":"s1","type":"message.delta"}}`)
+		}
+	}()
+	err := conn.call("run/message", map[string]any{}, nil)
+	if !errors.Is(err, errEventBacklog) {
+		t.Fatalf("the call failed with %v, want the overflow", err)
+	}
+	if errors.Is(err, errServerClosed) {
+		t.Fatalf("the call blamed the server: %v", err)
+	}
+	if !isShutdown(err) {
+		t.Fatalf("the overflow did not end the session: %v", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package repl
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -17,6 +18,14 @@ import (
 // the timeout is for a slow machine, not a slow model: a run streams
 // its events while the prompt's answer has been in for a while.
 const callTimeout = 2 * time.Minute
+
+// eventBacklog is how many events wait for the main loop. The loop
+// renders between reads, and a model streams one delta per token. A
+// terminal write or a frame paint can fall behind that stream. The
+// backlog holds as many messages as the server's output queue
+// (wire.DefaultQueueMessages). A full backlog means the client stopped
+// reading, not that it paused.
+const eventBacklog = 10000
 
 // conn is the client's end of the wire: a JSON-RPC 2.0 peer over the
 // server's pipes.
@@ -68,7 +77,7 @@ func startConn(stdout io.Reader, stdin io.Writer) *conn {
 	c := &conn{
 		w:       stdin,
 		pending: map[int]chan rpcResult{},
-		events:  make(chan protocol.Event, 256),
+		events:  make(chan protocol.Event, eventBacklog),
 		asks:    make(chan askRequest, 8),
 		done:    make(chan struct{}),
 	}
@@ -85,7 +94,9 @@ func (c *conn) read(r io.Reader) {
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
 		if !c.line(scanner.Bytes()) {
-			c.err = fmt.Errorf("%w: event queue overflow", errServerClosed)
+			// The client gives up here, not the server: the
+			// failure names the side that stopped.
+			c.err = fmt.Errorf("repl: %w: %d were waiting", errEventBacklog, cap(c.events))
 			break
 		}
 	}
@@ -203,6 +214,9 @@ func (c *conn) call(method string, params, result any) error {
 	select {
 	case r, ok := <-ch:
 		if !ok {
+			if errors.Is(c.err, errEventBacklog) {
+				return fmt.Errorf("repl: %s: %w", method, c.err)
+			}
 			return fmt.Errorf("repl: %s: the server stopped answering", method)
 		}
 		if r.err != nil {
@@ -220,6 +234,11 @@ func (c *conn) call(method string, params, result any) error {
 		c.mu.Unlock()
 		return fmt.Errorf("repl: %s: timed out", method)
 	case <-c.done:
+		// The reader set its failure before it closed done. An
+		// overflow is the client's own, and the call names it.
+		if errors.Is(c.err, errEventBacklog) {
+			return fmt.Errorf("repl: %s: %w", method, c.err)
+		}
 		return fmt.Errorf("repl: %s: %w", method, errServerClosed)
 	}
 }

@@ -1327,11 +1327,14 @@ type runState struct {
 // The errors the run loop reports to the caller.
 var (
 	errServerClosed = errors.New("the server closed the connection")
+	// errEventBacklog means the client stopped reading the server's
+	// events and dropped the connection itself.
+	errEventBacklog = errors.New("the session fell behind the server's events")
 )
 
-// isShutdown says whether a failure means the server is gone.
+// isShutdown says whether a failure means the connection is gone.
 func isShutdown(err error) bool {
-	return errors.Is(err, errServerClosed)
+	return errors.Is(err, errServerClosed) || errors.Is(err, errEventBacklog)
 }
 
 // plainInput reads lines without an editor.
