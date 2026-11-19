@@ -24,7 +24,11 @@ import (
 )
 
 func TestCreateRejectsUnknownProfileBeforeModelLookup(t *testing.T) {
-	srv := newServer(t, servedSettings(t, "search", `{"chat":"chat-model"}`))
+	settings := servedSettings(t, "search", `{"chat":"chat-model"}`)
+	settings.Profiles = map[string]config.ProfileSettings{
+		"unavailable": {Base: "search", Tools: config.ProfileTools{Disabled: []string{"read", "grep"}}},
+	}
+	srv := newServer(t, settings)
 	for _, model := range []string{"chat-model", "unknown-model"} {
 		_, _, err := srv.Create(context.Background(), protocol.CreateParams{
 			Profile: "unknown-profile", Models: &protocol.ModelRoles{Chat: model},
@@ -32,6 +36,12 @@ func TestCreateRejectsUnknownProfileBeforeModelLookup(t *testing.T) {
 		if !errors.Is(err, poo.ErrUnknownProfile) {
 			t.Errorf("creating a session with an unknown profile and model %q: got %v, want unknown profile", model, err)
 		}
+	}
+	_, _, err := srv.Create(context.Background(), protocol.CreateParams{Profile: "unavailable"},
+		wire.FactoryEnv{Client: silentClient{}})
+	field, _ := config.FieldOf(err)
+	if field != "tools.disabled" {
+		t.Errorf("creating a session with a known profile that cannot run: got %v, want a tool exclusion error", err)
 	}
 }
 

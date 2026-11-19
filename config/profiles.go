@@ -10,7 +10,14 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 )
 
-func (r *Runtime) profileDefinitions(opts BuildOptions) ([]profile.Profile, error) {
+// HasProfile reports whether the runtime knows the name, even if settings
+// make that profile unavailable to run.
+func (r *Runtime) HasProfile(name string) bool {
+	_, err := profile.Find(r.profileDefinitions, name)
+	return err == nil
+}
+
+func (r *Runtime) resolveProfileDefinitions(opts BuildOptions) ([]profile.Profile, error) {
 	definitions := slices.Clone(opts.Profiles)
 	for _, name := range slices.Sorted(maps.Keys(r.Settings.Profiles)) {
 		field := "profiles." + name

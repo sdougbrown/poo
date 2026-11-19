@@ -253,12 +253,8 @@ type runtimeKey struct{ profile, model string }
 // with. The runtimes are built once and kept: a second session with
 // the same profile and model gets the same runtime.
 func (f *Server) runtimeFor(profileName, model string) (*config.Runtime, error) {
-	if profileName != "" {
-		if _, configured := f.settings.Profiles[profileName]; !configured {
-			if _, err := profile.Find(f.build.Profiles, profileName); err != nil {
-				return nil, poo.ErrUnknownProfile
-			}
-		}
+	if profileName != "" && !f.runtime.HasProfile(profileName) {
+		return nil, poo.ErrUnknownProfile
 	}
 	if model != "" {
 		resolved, ok := f.modelFor(model)

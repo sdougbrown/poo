@@ -256,7 +256,8 @@ type Runtime struct {
 	// Askers are the asker chain, in order.
 	Askers []perm.Asker
 	// Profiles are the profiles the binary offers.
-	Profiles []poo.Profile
+	Profiles           []poo.Profile
+	profileDefinitions []profile.Profile
 	// Profile is the profile the session is built from.
 	Profile poo.Profile
 	// Models are the models the settings offer, by name.
@@ -478,10 +479,11 @@ func (r *Runtime) resolveProfile(opts BuildOptions) error {
 	if name == "" {
 		return &Error{Code: CodeUnsupported, Message: "the build has no profile to run under"}
 	}
-	definitions, err := r.profileDefinitions(opts)
+	definitions, err := r.resolveProfileDefinitions(opts)
 	if err != nil {
 		return err
 	}
+	r.profileDefinitions = definitions
 	chosen, err := profile.Find(definitions, name)
 	if err != nil {
 		return &Error{
