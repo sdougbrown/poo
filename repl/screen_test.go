@@ -85,10 +85,11 @@ func trimScreen(raw string) string {
 }
 
 // aLayout is the layout over a writer, the way a terminal session has
-// one: it starts with the prompt's row reserved.
+// one: it starts with the footer's own rows reserved — the prompt's row
+// plus the chrome's two, as newLayout builds it.
 func aLayout(t *testing.T, out io.Writer, cols, rows int) *layout {
 	t.Helper()
-	l := &layout{out: out, width: cols, height: rows, footer: 1}
+	l := &layout{out: out, width: cols, height: rows, footer: 1 + footerChrome}
 	l.last = l.regionBottom() - 1
 	l.enter()
 	return l

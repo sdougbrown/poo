@@ -431,6 +431,15 @@ func (m *machine) prompt() string {
 	return promptMark
 }
 
+// mutateStatus applies fn to the status and repaints the footer's
+// statusline row. The status's changes funnel through here, so a
+// change and its paint cannot separate: a writer that skips it leaves
+// the row standing on the last pushed line.
+func (m *machine) mutateStatus(fn func(*status)) {
+	fn(m.status)
+	m.paintStatusline()
+}
+
 // paintStatusline sends the statusline to the footer's bottom row. A
 // host without the pinned footer has no row for it, and reads nothing.
 func (m *machine) paintStatusline() {
@@ -503,7 +512,7 @@ func (m *machine) start() error {
 		return err
 	}
 	m.sessionID = session.SessionID
-	m.status.model = session.Models.Chat
+	m.mutateStatus(func(s *status) { s.model = session.Models.Chat })
 	for _, warning := range session.Warnings {
 		m.r.warning(warning)
 	}
@@ -522,7 +531,7 @@ func (m *machine) start() error {
 	for _, model := range catalog.Models {
 		m.catalog[model.Name] = model
 		if model.Name == session.Models.Chat {
-			m.status.setContextLimit(model.ContextLimit)
+			m.mutateStatus(func(s *status) { s.setContextLimit(model.ContextLimit) })
 		}
 	}
 
@@ -534,8 +543,7 @@ func (m *machine) start() error {
 	if err := m.conn.call(protocol.MethodSessionGet, protocol.GetParams{SessionID: m.sessionID}, &current); err != nil {
 		return err
 	}
-	m.status.level = current.Reasoning
-	m.paintStatusline()
+	m.mutateStatus(func(s *status) { s.level = current.Reasoning })
 	if m.opts.ResumeID != "" {
 		m.replay()
 	}
@@ -944,9 +952,9 @@ func (m *machine) configureModel(name string) {
 		m.r.failure(err.Error())
 		return
 	}
-	m.status.model = res.Models.Chat
+	m.mutateStatus(func(s *status) { s.model = res.Models.Chat })
 	if info, ok := m.catalog[res.Models.Chat]; ok {
-		m.status.setContextLimit(info.ContextLimit)
+		m.mutateStatus(func(s *status) { s.setContextLimit(info.ContextLimit) })
 	}
 	m.r.notice("model → %s", res.Models.Chat)
 	// The level is the new model's to take, so the wire says where the
@@ -955,8 +963,7 @@ func (m *machine) configureModel(name string) {
 	if res.Reasoning != m.status.level {
 		m.r.notice("thinking → %s", levelName(res.Reasoning))
 	}
-	m.status.level = res.Reasoning
-	m.paintStatusline()
+	m.mutateStatus(func(s *status) { s.level = res.Reasoning })
 }
 
 // thinking sets the session's reasoning level, or takes the next one when
@@ -1018,8 +1025,7 @@ func (m *machine) setThinking(level string) error {
 	}, &res); err != nil {
 		return err
 	}
-	m.status.level = res.Reasoning
-	m.paintStatusline()
+	m.mutateStatus(func(s *status) { s.level = res.Reasoning })
 	return nil
 }
 
@@ -1163,8 +1169,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 			// reports: a background job's request rides the same
 			// connection and counts against its own fill.
 			if json.Unmarshal(raw, &usage) == nil && usage.RunID == runID {
-				m.status.setTokens(usage.InputTokens)
-				m.paintStatusline()
+				m.mutateStatus(func(s *status) { s.setTokens(usage.InputTokens) })
 			}
 		}
 	case "turn.ended":
