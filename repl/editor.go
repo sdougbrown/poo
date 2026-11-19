@@ -271,7 +271,7 @@ func (i *editorInput) read() (string, error) {
 	}
 	i.readMu.Lock()
 	i.readHeld = false
-	i.readCond.Signal()
+	i.readCond.Broadcast()
 	i.readMu.Unlock()
 	return strings.TrimSuffix(line, "\n"), err
 }
