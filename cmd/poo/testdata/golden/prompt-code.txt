@@ -53,12 +53,20 @@ Fetch:
 - The fetch runs in poo's own process, so a sandbox that cuts the network for bash does not cut it. The refusals above are what bounds it.
 --- tools.codemode ---
 Codemode runs a short script whose only capability is calling your other
-tools. Use it when one call feeds the next, or when a job needs many
-calls. The script's intermediate results stay out of the conversation;
-only what it prints and returns comes back.
+tools. Reach for it when a tool returns far more text than you need to
+act on. The script reads the bulk, and only what it prints and returns
+comes back. Its calls keep up to a million characters of output, far
+more than your own calls show you.
 
-The script's language is Starlark, a deterministic dialect of Python.
-The language has no files, network or clocks, and modules never load.
+It also chains calls: one call's result decides the next, without a
+round trip through you. The script's intermediate results stay out of
+the conversation.
+
+The script's language is Starlark: Python-like, but not Python. The
+language has no files, network or clocks, and modules never load. There
+are no f-strings, so format with `"... % (a, b)"`. There is no
+try/except: a refused or failed call comes back as data in its
+`outcome` field.
 
 For a file, a URL or a command, call the tool that reaches it, such as
 `call("bash", {"command": "curl -sL URL"})`. The builtins:
@@ -78,17 +86,12 @@ For a file, a URL or a command, call the tool that reaches it, such as
 - `exit(value)` ends the script with a value; the value comes back as
   JSON. A script without `exit` returns nothing but its printed lines.
 
-A script's calls keep up to a million characters of output, far more
-than your own calls show you.
-
 A bash payload holds the command's stdout in `output`. When the command
 writes more than the call keeps, `truncated` is true and the rest is
 dropped. An output too long to show whole comes back as `output_head`
 and `output_tail` in place of `output`.
 
-A call that is refused or fails comes back as data (the `outcome` says
-which), so the script can decide what to do. The tools you can call are
-the ones this session offers; calling an unknown one is an error. Keep
-scripts short, each with a single job.
+The tools you can call are the ones this session offers; calling an
+unknown one is an error. Keep scripts short, each with a single job.
 --- environment ---
 You are running as the model test-model.
