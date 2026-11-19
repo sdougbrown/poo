@@ -1,0 +1,53 @@
+# A session on a built-in provider: no endpoints block, no models block.
+# The credential file brings the provider's models in, and a role names
+# one.
+#
+#     poo run --settings examples/codex.settings.yaml "..."
+#
+# The pi Codex provider is built in, and its models are named
+# `openai-codex/<id>`. Its credential is an OAuth entry in poo's own
+# file; `poo auth import pi` copies it from pi's auth.json once, and
+# `poo auth status` reports what the file holds. The credential is sent
+# only to the built-in Codex endpoint, and the Codex models serve chat
+# turns: they cannot be the decider.
+#
+# With no auth_file named, poo reads an auth.json beside the models file
+# when that file is there, and poo's own in the user's config directory
+# otherwise.
+version: 1
+
+profile: code
+
+auth_file: ~/.config/poo/auth.json
+roles:
+  chat: openai-codex/gpt-6.1-sol
+
+# A model the record does not name is an entry away. The settings' own
+# models win on a name collision, and a newer id under the same
+# provider runs the same way. A model that declares the `compact`
+# operation runs the native compaction below; one that does not is a
+# chat model all the same:
+models:
+  openai-codex/gpt-6.1-sol:
+    endpoint: openai-codex
+    model_id: gpt-6.1-sol
+    api: responses
+    ops: [chat, compact]
+
+# The context window's strategy. `native` asks the provider to compact
+# its own conversation; a model must declare the `compact` operation for
+# it, and pi's Codex provider is the transport that can produce the
+# state. The default stays `summary`, which writes its own summary of
+# the oldest turns.
+context:
+  strategy: native
+
+# The skills the person keeps, and the instructions. `default: true`
+# reads ~/.agents/skills — the directory the rest of the family uses —
+# and `user_prompt: true` reads AGENTS.md in poo's config directory.
+# Both are conventions rather than promises: a directory or a file that
+# is not there holds nothing, and the run goes on.
+skills:
+  default: true
+session:
+  user_prompt: true

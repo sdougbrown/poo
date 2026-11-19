@@ -61,7 +61,12 @@ then `settings.yaml`, `settings.yml` and `settings.toml`, and the
 extension picks the parser. A directory holding more than one is
 read through the first name it holds. A command that finds none runs
 on the defaults, and the flags change them.
-`examples/code.settings.yaml` is the file to start from.
+`examples/code.settings.yaml` is the file to start from, and the
+directory holds more shapes beside it: `sandboxed.settings.yaml` asks
+about every side-effecting call and runs bash in the sandbox,
+`codex.settings.yaml` and `opencode.settings.yaml` run the built-in
+providers off a credential file. Copy one into `.poo/settings.yaml` or
+`~/.config/poo/settings.yaml` and edit down from there.
 
 **One help per command.** Every command declares its own usage and its
 own flags, and `poo <command> --help` (or `poo help <command>`) prints

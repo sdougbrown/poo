@@ -38,6 +38,22 @@ endpoints:
     # cannot read the credential.
     api_key_env: "HOME_MODELS_KEY"
 
+# An operator with a credential file skips the endpoints block above and
+# runs a built-in provider. poo ships records for pi's Codex provider and
+# for the OpenCode Console gateway (pay-as-you-go and Go, Chat Completions
+# and Anthropic Messages); the models come out of the settings when the
+# credential is there:
+#
+#     auth_file: ~/.config/poo/auth.json
+#     roles:
+#       chat: openai-codex/gpt-6.1-sol
+#
+# One key serves every OpenCode endpoint, and `poo login opencode` stores
+# it:
+#
+#     roles:
+#       chat: opencode-go/glm-5.3
+
 models:
   gemma4:
     endpoint: home
@@ -209,15 +225,17 @@ sampling:
 # it does. The prompt carries the catalog — a line per skill — and the model
 # reads the guidance with the read tool when a description fits the task.
 #
-# Off until asked for. `default` reads the directory the rest of the family
-# uses (~/.agents/skills); `user_path` names another, and the two are mutually
+# `default` reads the directory the rest of the family keeps skills in
+# (~/.agents/skills); `user_path` names another, and the two are mutually
 # exclusive. `paths` are further directories, resolved against the working
 # directory or starting with ~/, and one that is not there is dropped with a
-# warning rather than failing the run.
-#
-#     skills:
-#       default: true
-#       paths: ["./skills"]
+# warning rather than failing the run. All of it is a convention rather than
+# a promise: a directory that is not there holds no skills, and the run
+# carries on.
+skills:
+  default: true
+  # user_path: "~/.my-skills"
+  # paths: ["./skills"]
 
 # The session.
 session:
@@ -230,17 +248,17 @@ session:
     max_age_days: 30
     max_sessions: 500
   # The prompt carries a layer for the user's own instructions and one for
-  # the project's, and both are off until asked for. Naming a file asks for
-  # the user's; `user_prompt: true` takes the binary's default path
-  # instead, which is AGENTS.md in the user's config directory. The
-  # project's come from the directory the session works in, and the loader
-  # never walks up to a parent. A layer that is on and holds no
-  # instructions adds no section.
+  # the project's, and both are conventions rather than promises: a layer
+  # that is on and holds no instructions adds no section.
   #
-  # An operator whose rules already live somewhere else — the file their
-  # other harnesses read — names that file here, so the rules stay one copy
-  # instead of one per tool:
-  #
-  #     user_prompt: true
-  #     user_prompt_file: "~/.config/poo/AGENTS.md"
-  #     project_prompt: true
+  # `user_prompt: true` reads the operator's own instructions from
+  # AGENTS.md in poo's config directory; `user_prompt_file` names the file
+  # instead, which is how an operator whose rules already live somewhere
+  # else — the file their other harnesses read — keeps them one copy
+  # instead of one per tool. `project_prompt: true` reads the working
+  # directory's AGENTS.md, or CLAUDE.md when there is none, and the loader
+  # never walks up to a parent.
+  user_prompt: true
+  # user_prompt_file: "~/.config/poo/AGENTS.md"
+  project_prompt: true
+

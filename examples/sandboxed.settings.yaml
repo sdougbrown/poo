@@ -1,0 +1,84 @@
+# The code profile with the guardrails on: the same tool set as
+# examples/code.settings.yaml, with every side-effecting call the policy
+# has no rule for asked about, and the bash commands run in a sandbox.
+#
+#     poo run --settings examples/sandboxed.settings.yaml "..."
+#
+# The permission policy's rules come first: a call a rule allows or
+# refuses never reaches the askers. What falls through to `unmatched`
+# goes down the asker chain, and this file names the binary's own chain —
+# a command without a wire client runs on the default chain. A `decide`
+# asker would need a decider model in `roles`.
+version: 1
+
+profile: code
+
+permission:
+  # Ask about a side-effecting call no rule covers, instead of the
+  # profile's allow.
+  unmatched: ask
+  # The decision when the asker chain is exhausted.
+  fallback: deny
+  # A call the model keeps making is a permission case.
+  doom_loop:
+    threshold: 3
+    near_threshold: 5
+    action: ask
+  # The rules, in order. The first match wins. A rule matches on the
+  # tool's name or on the tool's class, never on both; a bash rule may
+  # match on the command's prefix.
+  rules:
+    - tool: bash
+      command_prefix: "git status"
+      action: allow
+    - class: read_only
+      action: allow
+
+tools:
+  bash:
+    # The sandboxed executor. A name the binary does not link is an
+    # error, and the command never falls back to another executor.
+    executor: bwrap
+  bwrap:
+    # The sandbox has the host's network unless this is false.
+    network: false
+    ro_binds: ["/usr", "/bin", "/lib", "/lib64", "/etc"]
+    rw_binds: []
+  # The paths the tools must not touch, as globs on the resolved paths.
+  # The file tools refuse a protected path, and the sandbox masks the
+  # protected paths inside the directories it binds.
+  protected_paths:
+    - "~/.ssh"
+    - "~/.aws"
+    - "/etc/shadow"
+  # The file tools reach paths outside the working directory by default;
+  # the three settings below keep read, grep and edit inside it.
+  read: {restrict_to_working_dir: true}
+  grep: {restrict_to_working_dir: true}
+  edit: {restrict_to_working_dir: true}
+  # A model that must not reach the network at all names fetch here.
+  # The sandboxed bash above is already off it.
+  disabled: [fetch]
+
+# The models and the roles. Any endpoint block works; this one is the
+# shape examples/code.settings.yaml uses, with the key's variable named.
+endpoints:
+  home:
+    endpoint: "http://localhost:4000/v1"
+    api_key_env: "HOME_MODELS_KEY"
+models:
+  gemma4:
+    endpoint: home
+    model_id: "gemma4"
+    api: chat_completions
+    tools_mode: native
+    ops: [chat, systemone, decisions]
+    inputs: [text]
+    context_limit: 131072
+roles:
+  chat: gemma4
+
+# The session writes nothing: the settings a scratch run uses, and the
+# shape a server takes whose client keeps its own records.
+session:
+  mode: ephemeral
