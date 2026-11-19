@@ -607,6 +607,72 @@ func TestTheRestoreKeepsTheRecordedProfileAndRole(t *testing.T) {
 	}
 }
 
+// restoredMaxTokens restores the header's session under the options and
+// returns the max_tokens of its first request.
+func restoredMaxTokens(t *testing.T, created *poo.SessionCreatedRecord, opts poo.Options, tr *pootest.Transport) int {
+	t.Helper()
+	sess, _, err := poo.Restore(opts, []poo.Record{created})
+	if err != nil {
+		t.Fatalf("restoring the session: %v", err)
+	}
+	t.Cleanup(func() { sess.Close() })
+	runSession(t, sess, "again")
+	requests := tr.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("the restored session made %d requests, want 1", len(requests))
+	}
+	return requests[0].MaxTokens
+}
+
+// TestTheRestoreFillsAnUnknownMaxOutputFromTheSettings covers a model
+// whose output limit the record does not know: the restored session
+// sends the limit the current settings declare for the same model, and
+// never one declared for another model.
+func TestTheRestoreFillsAnUnknownMaxOutputFromTheSettings(t *testing.T) {
+	t.Run("the same model", func(t *testing.T) {
+		tr := scripted([]fakeResponse{{text: "done"}})
+		opts := restoreOptions(t, tr, &recordingSink{})
+		fast := opts.Models["fast"]
+		fast.MaxOutput = 16384
+		opts.Models["fast"] = fast
+		if got := restoredMaxTokens(t, header("s1"), opts, tr); got != 16384 {
+			t.Errorf("the restored request's max_tokens is %d, want the settings' 16384", got)
+		}
+	})
+	t.Run("another model", func(t *testing.T) {
+		tr := scripted([]fakeResponse{{text: "done"}})
+		opts := restoreOptions(t, tr, &recordingSink{})
+		opts.Models["other"] = poo.ModelInfo{Name: "other", ModelID: "other-model", ContextLimit: 32768, MaxOutput: 16384}
+		opts.Model = opts.Models["other"]
+		if got := restoredMaxTokens(t, header("s1"), opts, tr); got != poo.DefaultMaxOutput {
+			t.Errorf("the restored request's max_tokens is %d, want the default %d", got, poo.DefaultMaxOutput)
+		}
+	})
+	t.Run("an unknown context limit", func(t *testing.T) {
+		tr := scripted([]fakeResponse{{text: "done"}})
+		opts := restoreOptions(t, tr, &recordingSink{})
+		opts.Model = poo.ModelInfo{Name: "other", ModelID: "other-model", ContextLimit: 4096}
+		created := header("s1")
+		created.Roles.Chat.ContextLimit = 0
+		created.ContextLimit = 0
+		if got := restoredMaxTokens(t, created, opts, tr); got != poo.DefaultMaxOutput {
+			t.Errorf("the restored request's max_tokens is %d, want %d: the room is the settings' window, not another model's", got, poo.DefaultMaxOutput)
+		}
+	})
+	t.Run("a recorded limit", func(t *testing.T) {
+		tr := scripted([]fakeResponse{{text: "done"}})
+		opts := restoreOptions(t, tr, &recordingSink{})
+		fast := opts.Models["fast"]
+		fast.MaxOutput = 16384
+		opts.Models["fast"] = fast
+		created := header("s1")
+		created.Roles.Chat.MaxOutput = 1024
+		if got := restoredMaxTokens(t, created, opts, tr); got != 1024 {
+			t.Errorf("the restored request's max_tokens is %d, want the recorded 1024", got)
+		}
+	})
+}
+
 // TestTheRestoreKeepsARecordedBackgroundModeItDoesNotKnow covers a log
 // written before the header carried a tool's background mode: the empty
 // record says nothing about the mode, so it is not a difference.
