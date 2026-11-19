@@ -369,11 +369,11 @@ func (c *Catalog) candidates(modelIDs []string, list map[string]Discovered) []st
 //
 // The shape every OpenAI-compatible endpoint serves is
 // {"data":[{"id":"...","max_model_len":32768}]}. A gateway that knows its
-// models better says more in the same place — a limit object for the two
-// token budgets, and capabilities for the tools and the reasoning — and the
-// probe reads what is there: a field the endpoint does not send stays
-// unknown. A server that does not serve the list answers with an error, and
-// the probe reports that the shape is not there.
+// models better says more in the same place, and the probe reads what is
+// there: a limit object for the two token budgets, capabilities for the
+// tools and the reasoning, modalities for the inputs. A field the endpoint
+// does not send stays unknown. A server that does not serve the list
+// answers with an error, and the probe reports that the shape is not there.
 func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL string) (map[string]Discovered, error) {
 	body, err := c.get(ctx, client, openAIBase(baseURL)+"/models")
 	if err != nil {

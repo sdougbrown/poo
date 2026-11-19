@@ -29,11 +29,11 @@ const builtinModelsName = "builtin-models.yaml"
 // for. They are the layer's fallback: the models file is the operator's word
 // and overrules them by name.
 //
-// A layer endpoint that names a key's variable is held to a sharper rule: it
-// is offered when that key is there — the variable, or the credential file's
-// entry for it. The file is one gate for every provider it may hold, so a
-// file holding another provider's credential does not wake an endpoint this
-// key cannot reach.
+// A layer endpoint that names a key's variable is held to a sharper rule:
+// it is offered when that key is there — the variable, or the credential
+// file's entry for it. The file is one gate for every provider it may hold,
+// so a file holding another provider's credential does not wake an endpoint
+// this key cannot reach.
 //
 // A replacement the environment names is read wherever it is named, gate or
 // not: an explicit name is a promise, and a file that does not read fails
