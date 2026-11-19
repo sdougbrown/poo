@@ -127,6 +127,11 @@ type Options struct {
 	// Originator is the originator header. Empty means
 	// DefaultOriginator.
 	Originator string
+	// UserAgent is what the client calls itself on the request. A gateway
+	// that watches its traffic asks each client to name itself, and a
+	// client that says nothing is named by the HTTP library alone. Empty
+	// sends none.
+	UserAgent string
 	// Headers are extra headers, applied last, so a caller can override
 	// one the transport set.
 	Headers map[string]string
@@ -350,6 +355,9 @@ func (t *Transport) setHeaders(req *http.Request, credential Credential, session
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("originator", originator)
+	if t.cfg.UserAgent != "" {
+		req.Header.Set("User-Agent", t.cfg.UserAgent)
+	}
 	if session != "" {
 		req.Header.Set("session-id", session)
 		req.Header.Set("x-client-request-id", session)

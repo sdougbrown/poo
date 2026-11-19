@@ -628,6 +628,20 @@ func TestABudgetRidesTheThinkingObject(t *testing.T) {
 	}
 }
 
+func TestTheUserAgentNamesTheClient(t *testing.T) {
+	srv := newSSEServer(t, frame(`{"type":"message_stop"}`))
+	tr := anthropic.New(anthropic.Options{Endpoint: srv.URL, Model: "claude-haiku-5-5", ModelInfo: thinkingModel(), UserAgent: "poo/test"})
+	reader, _, err := tr.Stream(context.Background(), request(""))
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	read(t, reader)
+	_ = reader.Close()
+	if got := srv.headers[0].Get("User-Agent"); got != "poo/test" {
+		t.Errorf("the request named itself %q, want poo/test", got)
+	}
+}
+
 func TestAKeylessEndpointSendsNoAuthorization(t *testing.T) {
 	srv := newSSEServer(t, frame(`{"type":"message_stop"}`))
 	tr := anthropic.New(anthropic.Options{Endpoint: srv.URL, Model: "claude-haiku-5-5", ModelInfo: thinkingModel()})

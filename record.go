@@ -137,6 +137,19 @@ type BuildInfo struct {
 	Version string `json:"version"`
 }
 
+// UserAgent is what the binary's own requests call themselves.
+//
+// A gateway that watches for abuse asks each client to name itself, and a
+// name the HTTP library stamps — the default when a client says nothing —
+// names nobody. The build's own name and version are the ones the requests
+// carry; a build that names nothing sends none.
+func (b BuildInfo) UserAgent() string {
+	if b.Name == "" {
+		return ""
+	}
+	return b.Name + "/" + b.Version
+}
+
 // RunStartedRecord records the beginning of a run.
 type RunStartedRecord struct {
 	RecordMeta

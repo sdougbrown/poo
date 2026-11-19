@@ -34,6 +34,11 @@ type SystemOneConfig struct {
 	// Timeout bounds one Decide call, the split requests included.
 	// Zero means DefaultDeciderTimeout.
 	Timeout time.Duration
+	// UserAgent is what the client calls itself on the request. A gateway
+	// that watches its traffic asks each client to name itself, and a
+	// client that says nothing is named by the HTTP library alone. Empty
+	// sends none.
+	UserAgent string
 }
 
 // SystemOneDecider asks a decision model over a systemone endpoint.
@@ -210,6 +215,9 @@ func (d *SystemOneDecider) post(ctx context.Context, body []byte) ([]byte, error
 		return nil, deferred(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if d.cfg.UserAgent != "" {
+		req.Header.Set("User-Agent", d.cfg.UserAgent)
+	}
 	if d.cfg.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+d.cfg.APIKey)
 	}

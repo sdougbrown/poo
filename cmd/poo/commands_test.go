@@ -3,9 +3,12 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sdougbrown/poo/config"
@@ -57,6 +60,43 @@ func TestTheModelsCommandListsTheCatalog(t *testing.T) {
 	}
 	if !strings.Contains(out, "chat") {
 		t.Errorf("the listing is %q, want it to name the operations", out)
+	}
+}
+
+// TestTheModelsCommandNamesTheClient covers the name the command's probes
+// carry: the same binary asks the endpoints what they serve, so the same
+// name answers for them.
+func TestTheModelsCommandNamesTheClient(t *testing.T) {
+	var mu sync.Mutex
+	var agents []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		agents = append(agents, r.Header.Get("User-Agent"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"test-model"}]}`)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	dir := t.TempDir()
+	settings := theSettings(t, dir, server.URL+"/v1")
+	captureStdout(t, func() {
+		if code := run([]string{"models", "--settings", settings}); code != 0 {
+			t.Errorf("poo models exited with %d", code)
+		}
+	})
+	mu.Lock()
+	probed := append([]string(nil), agents...)
+	mu.Unlock()
+	if len(probed) == 0 {
+		t.Fatal("the command never probed the endpoint")
+	}
+	for _, agent := range probed {
+		if !strings.HasPrefix(agent, "poo/") {
+			t.Errorf("a probe named itself %q, want the binary's own name", agent)
+		}
 	}
 }
 

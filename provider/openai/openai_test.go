@@ -359,6 +359,27 @@ func TestAnAuthorizationHeaderIsSent(t *testing.T) {
 	}
 }
 
+func TestTheUserAgentNamesTheClient(t *testing.T) {
+	var agents []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		agents = append(agents, r.Header.Get("User-Agent"))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
+	}))
+	defer srv.Close()
+
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", UserAgent: "poo/test"})
+	reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m", MaxTokens: 16})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	read(t, reader)
+
+	if len(agents) == 0 || agents[0] != "poo/test" {
+		t.Errorf("the requests named themselves %v, want poo/test", agents)
+	}
+}
+
 func TestASessionHeaderCarriesTheRequestsSession(t *testing.T) {
 	var mu sync.Mutex
 	var sessions []string

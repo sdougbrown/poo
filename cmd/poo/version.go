@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	clicontract "github.com/sdougbrown/cli-contract"
+
+	"github.com/sdougbrown/poo"
 )
 
 // versionInfo is the identity a binary reports for itself.
@@ -27,6 +29,15 @@ type versionInfo struct {
 
 // devVersion is what a build carrying no version of its own reports.
 const devVersion = "dev"
+
+// userAgent is what the binary calls itself on the requests it makes.
+//
+// The rule is the build info's own — the one the runtime's requests name
+// themselves by — so a change to the naming lands everywhere the binary
+// speaks.
+func userAgent() string {
+	return poo.BuildInfo{Name: "poo", Version: buildVersion().String()}.UserAgent()
+}
 
 // shortRevision is how much of the revision a version line carries:
 // enough to identify a build, short enough to read.
