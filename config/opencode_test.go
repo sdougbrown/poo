@@ -65,7 +65,10 @@ func (g *opencodeGateway) RoundTrip(req *http.Request) (*http.Response, error) {
 	g.authorization = req.Header.Get("Authorization")
 	g.agent = req.Header.Get("User-Agent")
 	g.paths = append(g.paths, req.URL.Path)
-	raw, _ := io.ReadAll(req.Body)
+	var raw []byte
+	if req.Body != nil {
+		raw, _ = io.ReadAll(req.Body)
+	}
 	g.bodies = append(g.bodies, string(raw))
 	body := `{"data":[{"id":"glm-5.3"}]}`
 	if strings.HasSuffix(req.URL.Path, "/chat/completions") {
@@ -321,6 +324,7 @@ func TestTheBuiltinAnthropicEndpointsServeOnTheirKey(t *testing.T) {
 	if err := reader.Close(); err != nil {
 		t.Fatalf("closing the stream: %v", err)
 	}
+	transportAt := len(gateway.paths) - 1
 	if gateway.session != "ses_anthropic_test" {
 		t.Errorf("the request carried session %q, want the session's id", gateway.session)
 	}
@@ -332,13 +336,22 @@ func TestTheBuiltinAnthropicEndpointsServeOnTheirKey(t *testing.T) {
 	if gateway.agent != "poo/test" {
 		t.Errorf("the request named itself %q, want the build's own name", gateway.agent)
 	}
+	// The runtime's own catalog names the client too, from the first probe
+	// it makes: the build's name is in place before the catalog is built,
+	// so a serve binary's reprobe carries the same name.
+	if err := runtime.Catalog.Reprobe(context.Background()); err != nil {
+		t.Fatalf("the reprobe: %v", err)
+	}
+	if gateway.agent != "poo/test" {
+		t.Errorf("the reprobe named itself %q, want the build's own name", gateway.agent)
+	}
 	// The Messages transport is the one that served: the request went to
 	// the messages path, in the Messages API's own shape.
-	if !strings.HasSuffix(gateway.paths[len(gateway.paths)-1], "/v1/messages") {
-		t.Errorf("the request went to %q, want the messages path", gateway.paths[len(gateway.paths)-1])
+	if !strings.HasSuffix(gateway.paths[transportAt], "/v1/messages") {
+		t.Errorf("the request went to %q, want the messages path", gateway.paths[transportAt])
 	}
 	var sent map[string]any
-	if err := json.Unmarshal([]byte(gateway.bodies[len(gateway.bodies)-1]), &sent); err != nil {
+	if err := json.Unmarshal([]byte(gateway.bodies[transportAt]), &sent); err != nil {
 		t.Fatalf("the request body does not decode: %v", err)
 	}
 	if sent["max_tokens"] != float64(32) || sent["stream"] != true {

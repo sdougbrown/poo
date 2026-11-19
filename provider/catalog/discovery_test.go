@@ -307,6 +307,22 @@ func TestTheProbeNamesTheClient(t *testing.T) {
 			break
 		}
 	}
+	// A catalog that names no client sends no header, so the HTTP library
+	// names the request and an operator's own choice stands.
+	agents = nil
+	bare := catalog.New(catalog.Options{
+		Settings: settingsFor(server.URL + "/v1"),
+		StateDir: t.TempDir(),
+	})
+	if err := bare.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	for _, agent := range agents {
+		if !strings.HasPrefix(agent, "Go-http-client/") {
+			t.Errorf("a nameless catalog named itself %q, want the HTTP library's own default", agent)
+			break
+		}
+	}
 }
 
 func TestTheVLLMProbeReadsTheModelList(t *testing.T) {

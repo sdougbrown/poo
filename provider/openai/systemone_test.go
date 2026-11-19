@@ -26,6 +26,8 @@ type systemOneServer struct {
 	mu sync.Mutex
 	// bodies holds the request bodies the server received, in order.
 	bodies []string
+	// agents holds the User-Agent headers the server received, in order.
+	agents []string
 	// answers is the answer the server sends, keyed by the question's
 	// id. A question the map does not hold is not answered.
 	answers map[string]any
@@ -48,6 +50,7 @@ func newSystemOneServer(t *testing.T) *systemOneServer {
 		raw, _ := io.ReadAll(r.Body)
 		s.mu.Lock()
 		s.bodies = append(s.bodies, string(raw))
+		s.agents = append(s.agents, r.Header.Get("User-Agent"))
 		s.active++
 		if s.active > s.peak {
 			s.peak = s.active
@@ -232,6 +235,61 @@ func TestTheSystemOneDeciderAnswersAChoiceQuestion(t *testing.T) {
 	}
 	if question.Criteria["approve"] != "the change is right" {
 		t.Errorf("the criteria are %v, want the option's description", question.Criteria)
+	}
+}
+
+// TestADeciderThatNamesNothingSendsNoHeader covers the decider built without
+// a name: the HTTP library names the request, the way a direct consumer's
+// build does.
+func TestADeciderThatNamesNothingSendsNoHeader(t *testing.T) {
+	srv := newSystemOneServer(t)
+	srv.answers["q1"] = map[string]any{
+		"probabilities": map[string]float64{"approve": 0.8, "deny": 0.2},
+		"choice":        "approve",
+	}
+	dec := srv.decider(t, 0)
+
+	if _, err := dec.Decide(context.Background(), map[string]any{"cwd": "/tmp"}, "judge the change", []decide.Question{choiceQuestion("q1")}); err != nil {
+		t.Fatalf("asking the question: %v", err)
+	}
+	srv.mu.Lock()
+	agents := append([]string(nil), srv.agents...)
+	srv.mu.Unlock()
+	for _, agent := range agents {
+		if !strings.HasPrefix(agent, "Go-http-client/") {
+			t.Errorf("a decider with no name named itself %q, want the HTTP library's own default", agent)
+		}
+	}
+}
+
+// TestTheSystemOneDeciderNamesTheClient covers the name the decider's
+// requests carry: the same name the transports send, on the questions the
+// same binary asks.
+func TestTheSystemOneDeciderNamesTheClient(t *testing.T) {
+	srv := newSystemOneServer(t)
+	srv.answers["q1"] = map[string]any{
+		"probabilities": map[string]float64{"approve": 0.8, "deny": 0.2},
+		"choice":        "approve",
+	}
+	dec := openai.NewSystemOneDecider(openai.SystemOneConfig{
+		Endpoint:  srv.URL,
+		Model:     "gemma4",
+		UserAgent: "poo/test",
+	})
+
+	if _, err := dec.Decide(context.Background(), map[string]any{"cwd": "/tmp"}, "judge the change", []decide.Question{choiceQuestion("q1")}); err != nil {
+		t.Fatalf("asking the question: %v", err)
+	}
+	srv.mu.Lock()
+	agents := append([]string(nil), srv.agents...)
+	srv.mu.Unlock()
+	if len(agents) == 0 {
+		t.Fatal("the decider never reached the endpoint")
+	}
+	for _, agent := range agents {
+		if agent != "poo/test" {
+			t.Errorf("a decider's request named itself %q, want poo/test", agent)
+		}
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	clicontract "github.com/sdougbrown/cli-contract"
+
+	"github.com/sdougbrown/poo"
 )
 
 // versionInfo is the identity a binary reports for itself.
@@ -30,11 +32,11 @@ const devVersion = "dev"
 
 // userAgent is what the binary calls itself on the requests it makes.
 //
-// A gateway that watches for abuse asks each client to name itself, and a
-// name the HTTP library stamps — the default when a client says nothing —
-// names nobody. The version the build carries is the one the name holds.
+// The rule is the build info's own — the one the runtime's requests name
+// themselves by — so a change to the naming lands everywhere the binary
+// speaks.
 func userAgent() string {
-	return "poo/" + buildVersion().String()
+	return poo.BuildInfo{Name: "poo", Version: buildVersion().String()}.UserAgent()
 }
 
 // shortRevision is how much of the revision a version line carries:

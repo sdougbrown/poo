@@ -59,7 +59,7 @@ func (r *Runtime) codexTransport(model poo.ModelInfo) (poo.ChatTransport, error)
 		ToolsMode:   string(model.Tools.Mode),
 		Reasoning:   r.codexReasoning(model),
 		HTTPClient:  r.httpClient,
-		UserAgent:   r.userAgent(),
+		UserAgent:   r.Build.UserAgent(),
 	}), nil
 }
 

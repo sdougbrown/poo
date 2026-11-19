@@ -401,6 +401,10 @@ func Build(opts BuildOptions) (*Runtime, error) {
 	}
 
 	runtime := &Runtime{Settings: settings, httpClient: opts.HTTPClient}
+	// The build's own name is what the runtime's requests call themselves,
+	// and the catalog is the first thing built: the probes it carries name
+	// the client from the first one, not from the transports alone.
+	runtime.Build = opts.Build
 
 	if err := runtime.resolveRegistry(opts, workingDir); err != nil {
 		return nil, err
@@ -1135,7 +1139,7 @@ func (r *Runtime) resolveModels(opts BuildOptions) error {
 	catalogOptions := r.Settings.CatalogOptions()
 	catalogOptions.Logger = opts.Logger
 	catalogOptions.HTTPClient = opts.HTTPClient
-	catalogOptions.UserAgent = r.userAgent()
+	catalogOptions.UserAgent = r.Build.UserAgent()
 	cat := catalog.New(catalogOptions)
 	if err := cat.CheckRoles(); err != nil {
 		if !opts.NoChatModel || !isChatRole(err) {
@@ -1678,7 +1682,6 @@ func (r *Runtime) resolveSession(opts BuildOptions, workingDir string) error {
 	}
 	r.SessionDir = expanded
 	r.SessionMode = mode
-	r.Build = opts.Build
 
 	if mode == "logged" {
 		store, err := session.NewStore(expanded, session.WithBuild(opts.Build))
@@ -2344,7 +2347,7 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 			ModelInfo:     model,
 			Sampling:      model.Sampling,
 			HTTPClient:    r.httpClient,
-			UserAgent:     r.userAgent(),
+			UserAgent:     r.Build.UserAgent(),
 		}), nil
 	case poo.APIAnthropicMessages:
 		return anthropic.New(anthropic.Options{
@@ -2355,7 +2358,7 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 			ModelInfo:     model,
 			Sampling:      model.Sampling,
 			HTTPClient:    r.httpClient,
-			UserAgent:     r.userAgent(),
+			UserAgent:     r.Build.UserAgent(),
 		}), nil
 	default:
 		return nil, &Error{
@@ -2374,18 +2377,6 @@ func servedBy(model poo.ModelInfo) string {
 		return model.Provider
 	}
 	return model.Endpoint
-}
-
-// userAgent is what the binary's own requests call themselves.
-//
-// A gateway that watches for abuse asks each client to name itself, and a
-// name the HTTP library stamps when a client says nothing names nobody. The
-// build's own name and version are the ones the requests carry.
-func (r *Runtime) userAgent() string {
-	if r.Build.Name == "" {
-		return ""
-	}
-	return r.Build.Name + "/" + r.Build.Version
 }
 
 // httpClient is the client the transports use. It is nil unless the
@@ -2453,6 +2444,7 @@ func (r *Runtime) newDecider(model poo.ModelInfo) (decide.Decider, error) {
 		APIKey:     r.EndpointKey(model),
 		Timeout:    timeout,
 		HTTPClient: r.httpClient,
+		UserAgent:  r.Build.UserAgent(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
