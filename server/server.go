@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"io/fs"
+	"sort"
 	"sync"
 	"time"
 
@@ -105,10 +106,55 @@ func New(opts Options) (*Server, error) {
 		runtimes:  map[string]*config.Runtime{},
 		decorate:  opts.SessionTools,
 	}
+	qualified, err := qualifiedModelNames(effective, runtime)
+	if err != nil {
+		return nil, err
+	}
+	s.qualified = qualified
 	if err := s.decorateRuntime(runtime); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// qualifiedModelNames indexes the endpoint-qualified names the settings'
+// models answer to.
+//
+// A settings model keeps its bare key, and the models file's naming is
+// `endpoint/model`: one spelling should reach a model however the
+// settings declared it. The index maps each model's
+// `endpoint/model_id` to its key. A form two models answer to, or one a
+// catalog name already holds, is refused here — the ambiguity is the
+// operator's to fix, never the router's to guess at.
+//
+// The index reads the effective settings — the post-override view the
+// settings/get reports. The overrides never touch models today; if one
+// ever renames a model, this index and the catalog must move together.
+func qualifiedModelNames(settings *config.Settings, runtime *config.Runtime) (map[string]string, error) {
+	qualified := map[string]string{}
+	keys := make([]string, 0, len(settings.Models))
+	for key := range settings.Models {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		model := settings.Models[key]
+		if model.Endpoint == "" || model.ModelID == "" {
+			continue
+		}
+		candidate := model.Endpoint + "/" + model.ModelID
+		if candidate == key {
+			continue
+		}
+		if _, held := runtime.Models[candidate]; held {
+			return nil, fmt.Errorf("config: the model name %q is ambiguous: the settings key %q and the catalog both answer to it", candidate, key)
+		}
+		if owner, seen := qualified[candidate]; seen {
+			return nil, fmt.Errorf("config: the model name %q is ambiguous: %q and %q both answer to it", candidate, owner, key)
+		}
+		qualified[candidate] = key
+	}
+	return qualified, nil
 }
 
 // Warning is the warning the build printed. It is empty when there is
@@ -156,6 +202,11 @@ type Server struct {
 	// decorate changes a runtime the server built, before a session is
 	// created from it.
 	decorate func(*config.Runtime) error
+	// qualified maps the endpoint-qualified names the settings'
+	// models answer to — `endpoint/model_id` — to the settings keys
+	// the catalog holds. The models file's spelling reaches a settings
+	// model through it.
+	qualified map[string]string
 }
 
 // servesModel reports whether a model name is one a session can name.
@@ -165,8 +216,32 @@ type Server struct {
 // the server keeps the catalog, and the catalog is the same whichever profile a session
 // is built from.
 func (f *Server) servesModel(name string) bool {
-	_, ok := f.runtime.Models[name]
+	_, ok := f.modelFor(name)
 	return ok
+}
+
+// modelFor returns the model a requested name refers to: the model the
+// settings name by key, or the settings model an endpoint-qualified
+// name points at.
+//
+// The models file names its models `endpoint/model`, so that spelling
+// has always reached the models a file declares. A settings model keeps
+// its bare key, and the qualified form resolves to it as an alias: the
+// one the endpoint and the model id name. A form two models answer to
+// never reaches here — New refuses the ambiguity.
+func (f *Server) modelFor(name string) (poo.ModelInfo, bool) {
+	if model, ok := f.runtime.Models[name]; ok {
+		return model, true
+	}
+	if key, ok := f.qualified[name]; ok {
+		// The catalog holds the key only when the model is reachable:
+		// a settings model whose endpoint is not configured is skipped
+		// with a warning, and an alias for it is unknown the way the
+		// bare key is.
+		model, ok := f.runtime.Models[key]
+		return model, ok
+	}
+	return poo.ModelInfo{}, false
 }
 
 // runtimeFor returns the runtime a session runs under.
@@ -179,8 +254,12 @@ func (f *Server) runtimeFor(profile, model string) (*config.Runtime, error) {
 	if profile != "" && !hasProfile(f.build.Profiles, profile) {
 		return nil, poo.ErrUnknownProfile
 	}
-	if model != "" && !f.servesModel(model) {
-		return nil, poo.ErrUnknownModel
+	if model != "" {
+		resolved, ok := f.modelFor(model)
+		if !ok {
+			return nil, poo.ErrUnknownModel
+		}
+		model = resolved.Name
 	}
 	key := profile + "\x00" + model
 	f.mu.Lock()
@@ -361,10 +440,11 @@ func (f *Server) Create(ctx context.Context, params protocol.CreateParams, env w
 	var deciderModel poo.ModelInfo
 	var decider decide.Decider
 	if deciderName != "" {
-		if !f.servesModel(deciderName) {
+		resolved, ok := f.modelFor(deciderName)
+		if !ok {
 			return nil, nil, poo.ErrUnknownModel
 		}
-		deciderModel, decider, err = runtime.DeciderFor(deciderName)
+		deciderModel, decider, err = runtime.DeciderFor(resolved.Name)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -562,7 +642,7 @@ func (f *Server) Configure(ctx context.Context, sess *poo.Session, params protoc
 		}
 	}
 	if params.Models != nil && params.Models.Chat != "" {
-		model, ok := runtime.Models[params.Models.Chat]
+		model, ok := f.modelFor(params.Models.Chat)
 		if !ok {
 			return protocol.ConfigureResult{}, poo.ErrUnknownModel
 		}
@@ -577,10 +657,11 @@ func (f *Server) Configure(ctx context.Context, sess *poo.Session, params protoc
 		roles.Chat = changed.To
 	}
 	if params.Models != nil && params.Models.Decider != "" {
-		if !f.servesModel(params.Models.Decider) {
+		resolved, ok := f.modelFor(params.Models.Decider)
+		if !ok {
 			return protocol.ConfigureResult{}, poo.ErrUnknownModel
 		}
-		model, decider, err := runtime.DeciderFor(params.Models.Decider)
+		model, decider, err := runtime.DeciderFor(resolved.Name)
 		if err != nil {
 			return protocol.ConfigureResult{}, err
 		}
