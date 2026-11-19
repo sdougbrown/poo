@@ -3,6 +3,7 @@ package repl
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -95,7 +96,7 @@ func (c *conn) read(r io.Reader) {
 		if !c.line(scanner.Bytes()) {
 			// The client gives up here, not the server: the
 			// failure names the side that stopped.
-			c.err = fmt.Errorf("repl: the session fell behind the server's events: %d were waiting", cap(c.events))
+			c.err = fmt.Errorf("repl: %w: %d were waiting", errEventBacklog, cap(c.events))
 			break
 		}
 	}
@@ -213,6 +214,9 @@ func (c *conn) call(method string, params, result any) error {
 	select {
 	case r, ok := <-ch:
 		if !ok {
+			if errors.Is(c.err, errEventBacklog) {
+				return fmt.Errorf("repl: %s: %w", method, c.err)
+			}
 			return fmt.Errorf("repl: %s: the server stopped answering", method)
 		}
 		if r.err != nil {
@@ -230,6 +234,11 @@ func (c *conn) call(method string, params, result any) error {
 		c.mu.Unlock()
 		return fmt.Errorf("repl: %s: timed out", method)
 	case <-c.done:
+		// The reader set its failure before it closed done. An
+		// overflow is the client's own, and the call names it.
+		if errors.Is(c.err, errEventBacklog) {
+			return fmt.Errorf("repl: %s: %w", method, c.err)
+		}
 		return fmt.Errorf("repl: %s: %w", method, errServerClosed)
 	}
 }

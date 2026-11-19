@@ -123,7 +123,7 @@ func TestAnEventOverflowEndsTheConnection(t *testing.T) {
 	case <-conn.done:
 		// The client is the side that gave up, and the failure says
 		// so: the server closed nothing.
-		if conn.err == nil || !strings.Contains(conn.err.Error(), "fell behind") {
+		if !errors.Is(conn.err, errEventBacklog) {
 			t.Fatalf("the connection did not report the overflow: %v", conn.err)
 		}
 		if errors.Is(conn.err, errServerClosed) {
@@ -131,6 +131,30 @@ func TestAnEventOverflowEndsTheConnection(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the connection kept running after losing an event")
+	}
+}
+
+// TestACallCaughtByAnOverflowReportsIt covers a call in flight when the
+// backlog fills: the call fails with the overflow, which ends the
+// session, and does not blame the server.
+func TestACallCaughtByAnOverflowReportsIt(t *testing.T) {
+	h := newWireHarness(t)
+	conn := startConn(h.stdout, h.stdin)
+	go func() {
+		h.taken()
+		for i := 0; i <= cap(conn.events); i++ {
+			h.feed(`{"jsonrpc":"2.0","method":"event","params":{"session_id":"s1","type":"message.delta"}}`)
+		}
+	}()
+	err := conn.call("run/message", map[string]any{}, nil)
+	if !errors.Is(err, errEventBacklog) {
+		t.Fatalf("the call failed with %v, want the overflow", err)
+	}
+	if errors.Is(err, errServerClosed) {
+		t.Fatalf("the call blamed the server: %v", err)
+	}
+	if !isShutdown(err) {
+		t.Fatalf("the overflow did not end the session: %v", err)
 	}
 }
 
