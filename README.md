@@ -65,6 +65,10 @@ In each directory, poo tries `settings.json`, `settings.yaml`,
 file it finds and uses the extension to pick the parser. Without a
 settings file, poo runs on defaults that flags can override.
 
+On macOS, finding a settings file in `~/.config/poo` does not change
+where poo looks for `auth.json` or `AGENTS.md` by default. Both still
+default to `~/Library/Application Support/poo`.
+
 Start with `examples/code.settings.yaml`. For sandboxed bash and prompts
 before side-effecting calls, use `sandboxed.settings.yaml`. For built-in
 providers that use a credential file, use `codex.settings.yaml` or
@@ -170,9 +174,9 @@ roles:
   chat: openai-codex/gpt-6.1-sol
 ```
 
-With no `auth_file` named, poo reads an `auth.json` beside the models
-file when that file is there — the arrangement pi's own files already
-have — and otherwise its own `~/.config/poo/auth.json`. Naming both
+If the settings name neither credential path, poo uses `auth.json`
+beside the models file when a models file is loaded. Otherwise, it uses
+`auth.json` in the platform's config directory for poo. Naming both
 `auth_file` and `pi_auth_file` is refused: poo reads one credential at
 a time.
 

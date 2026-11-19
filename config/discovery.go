@@ -96,6 +96,8 @@ func UserConfigDir() (string, error) {
 	return filepath.Join(dir, "poo"), nil
 }
 
+// userSettings alone searches the macOS fallback. Default credentials and
+// instructions stay in UserConfigDir.
 func userSettings() (string, bool) {
 	if dir, err := UserConfigDir(); err == nil {
 		if path, ok := settingsFileIn(dir); ok {
