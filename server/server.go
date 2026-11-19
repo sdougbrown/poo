@@ -11,7 +11,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io/fs"
 	"sort"
 	"sync"
@@ -254,6 +253,13 @@ type runtimeKey struct{ profile, model string }
 // with. The runtimes are built once and kept: a second session with
 // the same profile and model gets the same runtime.
 func (f *Server) runtimeFor(profileName, model string) (*config.Runtime, error) {
+	if profileName != "" {
+		if _, configured := f.settings.Profiles[profileName]; !configured {
+			if _, err := profile.Find(f.build.Profiles, profileName); err != nil {
+				return nil, poo.ErrUnknownProfile
+			}
+		}
+	}
 	if model != "" {
 		resolved, ok := f.modelFor(model)
 		if !ok {
@@ -288,10 +294,6 @@ func (f *Server) runtimeFor(profileName, model string) (*config.Runtime, error) 
 	}
 	runtime, err := config.Build(opts)
 	if err != nil {
-		var unknown *profile.UnknownError
-		if errors.As(err, &unknown) {
-			return nil, poo.ErrUnknownProfile
-		}
 		return nil, err
 	}
 	if err := f.decorateRuntime(runtime); err != nil {

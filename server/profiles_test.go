@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,9 +13,60 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/pootest"
+	"github.com/sdougbrown/poo/profile"
+	"github.com/sdougbrown/poo/profile/search"
+	"github.com/sdougbrown/poo/server"
+	"github.com/sdougbrown/poo/tool/edit"
+	"github.com/sdougbrown/poo/tool/grep"
+	"github.com/sdougbrown/poo/tool/read"
 	"github.com/sdougbrown/poo/wire"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
+
+func TestCreateRejectsUnknownProfileBeforeModelLookup(t *testing.T) {
+	srv := newServer(t, servedSettings(t, "search", `{"chat":"chat-model"}`))
+	for _, model := range []string{"chat-model", "unknown-model"} {
+		_, _, err := srv.Create(context.Background(), protocol.CreateParams{
+			Profile: "unknown-profile", Models: &protocol.ModelRoles{Chat: model},
+		}, wire.FactoryEnv{Client: silentClient{}})
+		if !errors.Is(err, poo.ErrUnknownProfile) {
+			t.Errorf("creating a session with an unknown profile and model %q: got %v, want unknown profile", model, err)
+		}
+	}
+}
+
+func TestConfiguredProfilesKeepGlobalToolExclusions(t *testing.T) {
+	settings := servedSettings(t, "search", `{"chat":"chat-model"}`)
+	settings.Tools.Disabled = []string{"edit"}
+	settings.Profiles = map[string]config.ProfileSettings{
+		"reviewer": {Base: "search", Tools: config.ProfileTools{Disabled: []string{"grep"}}},
+	}
+	base := search.Profile()
+	base.Tools = append(base.Tools, "edit")
+	dir := t.TempDir()
+	srv, err := server.New(server.Options{
+		Settings: settings, WorkingDir: dir, Profiles: []profile.Profile{base},
+		Tools: map[string]config.ToolFactory{
+			"read": func(config.ToolOptions) poo.Tool { return read.New() },
+			"grep": func(config.ToolOptions) poo.Tool { return grep.New() },
+			"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, info, err := srv.Create(context.Background(), protocol.CreateParams{
+		Profile: "reviewer", WorkingDir: dir, SessionDir: dir,
+	}, wire.FactoryEnv{Client: silentClient{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer info.Release()
+	defer sess.Close()
+	if len(info.Tools) != 1 || info.Tools[0].Name != "read" {
+		t.Fatalf("reviewer tools = %+v, want read only", info.Tools)
+	}
+}
 
 func TestConfiguredProfilesReadTheirOwnPromptAtSessionCreation(t *testing.T) {
 	ctx := context.Background()
@@ -90,6 +142,36 @@ func TestConfiguredProfilesReadTheirOwnPromptAtSessionCreation(t *testing.T) {
 		t.Fatalf("the handshake does not advertise the reviewer's tools: %+v", srv.Profiles())
 	}
 
+	unrun, unrunInfo, err := create("reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unrun.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := unrunInfo.Release(); err != nil {
+		t.Fatal(err)
+	}
+	unrunParams := protocol.LoadParams{SessionID: unrun.ID(), SessionDir: dir}
+	client := wire.FactoryEnv{Client: silentClient{}}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if sess, info, err := srv.Load(ctx, unrunParams, client); sess != nil || info != nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("loading an unrun session without the prompt file: session=%v, info=%v, err=%v", sess != nil, info != nil, err)
+	}
+	write(path, "Use the updated review instructions.")
+	unrunResumed, unrunResumedInfo, err := srv.Load(ctx, unrunParams, client)
+	if err != nil {
+		t.Fatalf("retrying after restoring the file: %v", err)
+	}
+	defer unrunResumedInfo.Release()
+	defer unrunResumed.Close()
+	if !strings.Contains(unrunResumed.PromptState().Text, "Use the updated review instructions.") {
+		t.Fatal("the unrun session did not load the current prompt file")
+	}
+
+	write(path, "Review the tests too.")
 	logged, info, err := create("reviewer")
 	if err != nil {
 		t.Fatal(err)
