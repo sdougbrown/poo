@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -266,6 +267,37 @@ func TestADirectoryNamedLikeSettingsIsNotAFile(t *testing.T) {
 	}
 	if found != yamlPath {
 		t.Errorf("the directory resolved to %q, want %q", found, yamlPath)
+	}
+}
+
+// TestDarwinConfigFallback follows macOS's literal ~/.config convention after
+// the native user config directory, without involving the process cwd.
+func TestDarwinConfigFallback(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS settings discovery")
+	}
+	t.Setenv(EnvSettings, "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	fallback := writeSettingsFile(t, filepath.Join(home, ".config", "poo"), "settings.yaml", "version: 1\n")
+	found, err := FindSettings("", cwd)
+	if err != nil {
+		t.Fatalf("the fallback file was refused: %v", err)
+	}
+	if found != fallback {
+		t.Fatalf("the fallback file resolved to %q, want %q", found, fallback)
+	}
+
+	native := writeSettingsFile(t, filepath.Join(home, "Library", "Application Support", "poo"), "settings.toml", "version = 1\n")
+	found, err = FindSettings("", cwd)
+	if err != nil {
+		t.Fatalf("the native file was refused: %v", err)
+	}
+	if found != native {
+		t.Errorf("the native file did not win: %q, want %q", found, native)
 	}
 }
 

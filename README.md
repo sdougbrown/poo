@@ -50,23 +50,26 @@ settings directory (found by walking up), or the user's config
 file. A binary with none linked, or a name it does not offer, refuses
 the bare invocation and names what it does offer.
 
-**Settings discovery.** Every command resolves its settings file the
-same way: the explicit `--settings` file, then the file the
-`POO_SETTINGS` environment variable names, then the project's
-`.poo/` directory walking up from the current directory, then the
-user's config directory — `~/.config/poo` on Linux,
-`~/Library/Application Support/poo` on macOS, `%AppData%\poo` on
-Windows. Each of those directories is searched for `settings.json`,
-then `settings.yaml`, `settings.yml` and `settings.toml`, and the
-extension picks the parser. A directory holding more than one is
-read through the first name it holds. A command that finds none runs
-on the defaults, and the flags change them.
-`examples/code.settings.yaml` is the file to start from, and the
-directory holds more shapes beside it: `sandboxed.settings.yaml` asks
-about every side-effecting call and runs bash in the sandbox,
-`codex.settings.yaml` and `opencode.settings.yaml` run the built-in
-providers off a credential file. Copy one into `.poo/settings.yaml` or
-`~/.config/poo/settings.yaml` and edit down from there.
+**Settings discovery.** Every command checks these locations in order:
+
+1. The file named by `--settings`.
+2. The file named by `POO_SETTINGS`.
+3. A `.poo/` directory, starting in the current directory and walking up.
+4. The user's config directories:
+   - Linux: `$XDG_CONFIG_HOME/poo` if set, otherwise `~/.config/poo`.
+   - macOS: `~/Library/Application Support/poo` first, then `~/.config/poo`.
+   - Windows: `%AppData%\poo`.
+
+In each directory, poo tries `settings.json`, `settings.yaml`,
+`settings.yml` and `settings.toml` in that order. It reads the first
+file it finds and uses the extension to pick the parser. Without a
+settings file, poo runs on defaults that flags can override.
+
+Start with `examples/code.settings.yaml`. For sandboxed bash and prompts
+before side-effecting calls, use `sandboxed.settings.yaml`. For built-in
+providers that use a credential file, use `codex.settings.yaml` or
+`opencode.settings.yaml`. Copy the example to `.poo/settings.yaml` or
+save it as `settings.yaml` in one of the user directories above.
 
 **One help per command.** Every command declares its own usage and its
 own flags, and `poo <command> --help` (or `poo help <command>`) prints
