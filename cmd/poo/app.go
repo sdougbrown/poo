@@ -42,10 +42,11 @@ and the repl renders its scrollback before the first prompt.
 Settings discovery:
   Without --settings, the settings are found at the file the POO_SETTINGS
   environment variable names, then the project's .poo directory (walking
-  up from the current directory), then the user's config directory. Each
-  is searched for settings.json, settings.yaml, settings.yml and
-  settings.toml, and the extension picks the parser. A command that finds
-  none runs on the defaults.`
+  up from the current directory), then the user's config directory. On
+  macOS, ~/Library/Application Support/poo is checked before ~/.config/poo.
+  In each directory, poo tries settings.json, settings.yaml, settings.yml
+  and settings.toml in order. It uses the first file it finds, or defaults
+  if there is no file.`
 
 // runLong is the help body of `poo run`.
 const runLong = `The prompt starts at the first argument that is not one of the run's

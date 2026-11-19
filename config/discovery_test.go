@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -266,6 +267,54 @@ func TestADirectoryNamedLikeSettingsIsNotAFile(t *testing.T) {
 	}
 	if found != yamlPath {
 		t.Errorf("the directory resolved to %q, want %q", found, yamlPath)
+	}
+}
+
+// TestDarwinConfigFallback checks that the native settings file wins when
+// both macOS user directories hold a settings file.
+func TestDarwinConfigFallback(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS settings discovery")
+	}
+	t.Setenv(EnvSettings, "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	fallback := writeSettingsFile(t, filepath.Join(home, ".config", "poo"), "settings.yaml", "version: 1\n")
+	found, err := FindSettings("", cwd)
+	if err != nil {
+		t.Fatalf("the fallback file was refused: %v", err)
+	}
+	if found != fallback {
+		t.Fatalf("the fallback file resolved to %q, want %q", found, fallback)
+	}
+
+	native := writeSettingsFile(t, filepath.Join(home, "Library", "Application Support", "poo"), "settings.toml", "version = 1\n")
+	found, err = FindSettings("", cwd)
+	if err != nil {
+		t.Fatalf("the native file was refused: %v", err)
+	}
+	if found != native {
+		t.Errorf("the native file did not win: %q, want %q", found, native)
+	}
+}
+
+// TestDarwinConfigFallbackDoesNotSearchRelativeHome keeps a relative HOME
+// from turning .config in the working directory into a user settings source.
+func TestDarwinConfigFallbackDoesNotSearchRelativeHome(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS settings discovery")
+	}
+	t.Setenv(EnvSettings, "")
+	t.Setenv("HOME", ".")
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	writeSettingsFile(t, filepath.Join(cwd, ".config", "poo"), "settings.yaml", "version: 1\n")
+
+	if found, err := FindSettings("", cwd); err != nil || found != "" {
+		t.Errorf("discovery with a relative HOME resolved to %q (%v), want defaults", found, err)
 	}
 }
 

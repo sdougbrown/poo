@@ -52,6 +52,21 @@ jobs:
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
+  macos-settings:
+    name: macOS settings discovery
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Darwin config fallback
+        run: go test -race -v ./config -run '^TestDarwinConfigFallback' -count=1
+
   cross:
     name: Cross-build
     runs-on: ubuntu-latest

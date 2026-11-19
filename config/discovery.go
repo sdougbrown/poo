@@ -4,15 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
-// The places a settings file is discovered at, in the order a command
-// reads them. The explicit path wins — the --settings flag or the
-// POO_SETTINGS environment variable; then the project's `.poo`
-// directory, walking up from the working directory the way git finds
-// its repository; then the user's config directory; and a command that
-// finds nothing runs on the defaults. Each directory is searched for
-// the names settingsFileNames lists.
 const (
 	// EnvSettings is the environment variable a settings file is
 	// pointed at by.
@@ -91,12 +85,9 @@ func findProjectSettings(workingDir string) (string, bool) {
 	}
 }
 
-// UserConfigDir returns the directory poo keeps a user's own files in:
-// the settings file, and the instructions beside it.
-//
-// The directory is the one os.UserConfigDir names, under poo's name, so
-// a caller that wants a file beside the settings finds it where the
-// discovery looks.
+// UserConfigDir returns poo's directory under the platform's user config
+// directory. It is the default location for credentials and instructions
+// and the first user directory searched for settings.
 func UserConfigDir() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -105,14 +96,20 @@ func UserConfigDir() (string, error) {
 	return filepath.Join(dir, "poo"), nil
 }
 
-// userSettings returns the settings file in the user's config
-// directory.
+// userSettings alone searches the macOS fallback. Default credentials and
+// instructions stay in UserConfigDir.
 func userSettings() (string, bool) {
-	dir, err := UserConfigDir()
-	if err != nil {
-		return "", false
+	if dir, err := UserConfigDir(); err == nil {
+		if path, ok := settingsFileIn(dir); ok {
+			return path, true
+		}
 	}
-	return settingsFileIn(dir)
+	if runtime.GOOS == "darwin" {
+		if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
+			return settingsFileIn(filepath.Join(home, ".config", "poo"))
+		}
+	}
+	return "", false
 }
 
 // settingsFileIn returns the settings file in dir, or false when dir holds
