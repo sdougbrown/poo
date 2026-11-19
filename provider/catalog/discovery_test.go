@@ -263,6 +263,31 @@ func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
 			wantOutput:  8000,
 		},
 		{
+			name: "two-sources-per-budget",
+			item: map[string]any{
+				"id":                "two-sources-per-budget",
+				"limit":             map[string]any{"context": 300000, "input": 200000, "output": 50000},
+				"context_length":    900000,
+				"max_input_tokens":  100000,
+				"max_output_tokens": 70000,
+				"top_provider":      map[string]any{"context_length": 800000, "max_completion_tokens": 60000},
+			},
+			wantContext: 200000,
+			wantOutput:  50000,
+		},
+		{
+			name: "two-sources-without-limit-object",
+			item: map[string]any{
+				"id":                "two-sources-without-limit-object",
+				"context_length":    900000,
+				"max_input_tokens":  1000000,
+				"max_output_tokens": 70000,
+				"top_provider":      map[string]any{"context_length": 800000, "max_completion_tokens": 60000},
+			},
+			wantContext: 900000,
+			wantOutput:  70000,
+		},
+		{
 			name:        "input-cap-without-context",
 			item:        map[string]any{"id": "input-cap-without-context", "limit": map[string]any{"input": 272000}},
 			wantContext: 272000,
@@ -304,6 +329,84 @@ func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
 				t.Errorf("the limits are %d/%d, want %d/%d", model.ContextLimit, model.MaxOutput, tc.wantContext, tc.wantOutput)
 			}
 		})
+	}
+}
+
+// TestAMalformedLimitCostsOnlyThatLimit covers a gateway that writes a token
+// budget in a form the plain integer does not take. A float, an exponent and
+// a numeric string read as the number they spell; a negative, a fraction,
+// text, a value past what a window can be and a non-numeric type read as
+// unknown, and the model beside them still resolves.
+func TestAMalformedLimitCostsOnlyThatLimit(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[
+			{"id":"valid","limit":{"context":131072,"output":16384}},
+			{"id":"spelled","limit":{"context":1e5,"output":"8192"},"max_input_tokens":65536.0},
+			{"id":"malformed","limit":{"context":-1,"output":12.5},"max_input_tokens":"lots",
+			 "max_output_tokens":99999999999,"context_length":true,"max_model_len":null,
+			 "top_provider":{"context_length":{"n":1},"max_completion_tokens":[1]}}
+		]}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"gateway": {Endpoint: server.URL + "/v1"},
+			},
+		},
+		StateDir: t.TempDir(),
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+
+	for name, want := range map[string][2]int{
+		"valid":     {131072, 16384},
+		"spelled":   {65536, 8192},
+		"malformed": {0, 0},
+	} {
+		model, err := c.Resolve("gateway/" + name)
+		if err != nil {
+			t.Fatalf("the model %s: %v", name, err)
+		}
+		if model.ContextLimit != want[0] || model.MaxOutput != want[1] {
+			t.Errorf("%s: the limits are %d/%d, want %d/%d", name, model.ContextLimit, model.MaxOutput, want[0], want[1])
+		}
+	}
+}
+
+// TestAnUnknownListedLimitLeavesTheContextToLlamaCPP covers a list that
+// sends -1 for a model's context: the limit reads as unknown, so the
+// server's n_ctx still fills it.
+func TestAnUnknownListedLimitLeavesTheContextToLlamaCPP(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gemma4","max_model_len":-1,"limit":{"context":-1}}]}`))
+	})
+	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"default_generation_settings": map[string]any{"n_ctx": 32768},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{Settings: settingsFor(server.URL + "/v1"), StateDir: t.TempDir()})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	model, err := c.Resolve("gemma4")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if model.ContextLimit != 32768 {
+		t.Errorf("the context limit is %d, want llama.cpp's 32768", model.ContextLimit)
 	}
 }
 

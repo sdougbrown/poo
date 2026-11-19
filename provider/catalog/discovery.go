@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,7 +39,9 @@ const (
 type Discovered struct {
 	// ModelID is the id the endpoint calls the model.
 	ModelID string `json:"model_id"`
-	// ContextLimit is the model's context window. Zero means unknown.
+	// ContextLimit is the model's context window, or the largest prompt the
+	// endpoint takes when it reports an input cap below that. Zero means
+	// unknown.
 	ContextLimit int `json:"context_limit,omitempty"`
 	// MaxOutput is the most tokens the model writes in one response. Zero
 	// means unknown.
@@ -367,6 +371,30 @@ func (c *Catalog) candidates(modelIDs []string, list map[string]Discovered) []st
 	return out
 }
 
+// tokenCount is a token budget as a model list reports it.
+//
+// Gateways write the same number as 128000, 128000.0, 1e5, "128000" or
+// null. The count reads all of them, and anything that is not a whole
+// number of tokens, such as a negative, a fraction, text or a value past
+// what a context window can be, reads as zero, which means unknown. One
+// odd field costs that field, not the whole list.
+type tokenCount int
+
+// UnmarshalJSON reads a token budget, and never fails.
+func (n *tokenCount) UnmarshalJSON(data []byte) error {
+	*n = 0
+	text := strings.TrimSpace(string(data))
+	if unquoted, err := strconv.Unquote(text); err == nil {
+		text = strings.TrimSpace(unquoted)
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil || value < 1 || value > math.MaxInt32 || value != math.Trunc(value) {
+		return nil
+	}
+	*n = tokenCount(value)
+	return nil
+}
+
 // probeOpenAI reads the OpenAI-compatible model list.
 //
 // The shape every OpenAI-compatible endpoint serves is
@@ -399,20 +427,20 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 	}
 	var list struct {
 		Data []struct {
-			ID              string `json:"id"`
-			MaxModelLen     int    `json:"max_model_len"`
-			MaxInputTokens  int    `json:"max_input_tokens"`
-			MaxOutputTokens int    `json:"max_output_tokens"`
-			ContextLength   int    `json:"context_length"`
-			PrefixCaching   *bool  `json:"prefix_caching"`
+			ID              string     `json:"id"`
+			MaxModelLen     tokenCount `json:"max_model_len"`
+			MaxInputTokens  tokenCount `json:"max_input_tokens"`
+			MaxOutputTokens tokenCount `json:"max_output_tokens"`
+			ContextLength   tokenCount `json:"context_length"`
+			PrefixCaching   *bool      `json:"prefix_caching"`
 			Limit           struct {
-				Context int `json:"context"`
-				Input   int `json:"input"`
-				Output  int `json:"output"`
+				Context tokenCount `json:"context"`
+				Input   tokenCount `json:"input"`
+				Output  tokenCount `json:"output"`
 			} `json:"limit"`
 			TopProvider struct {
-				ContextLength       int `json:"context_length"`
-				MaxCompletionTokens int `json:"max_completion_tokens"`
+				ContextLength       tokenCount `json:"context_length"`
+				MaxCompletionTokens tokenCount `json:"max_completion_tokens"`
 			} `json:"top_provider"`
 			Capabilities struct {
 				Tools struct {
@@ -438,7 +466,7 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		reasoning := item.Capabilities.Reasoning.Effort
 		model := Discovered{
 			ModelID:     item.ID,
-			MaxOutput:   cmp.Or(item.Limit.Output, item.MaxOutputTokens, item.TopProvider.MaxCompletionTokens),
+			MaxOutput:   int(cmp.Or(item.Limit.Output, item.MaxOutputTokens, item.TopProvider.MaxCompletionTokens)),
 			PrefixCache: item.PrefixCaching,
 			Inputs:      modalities(item.Modalities.Input),
 		}
@@ -455,8 +483,8 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		// the plain shape's answer, read only when nothing else names the
 		// context. An input cap smaller than the context is the largest
 		// prompt the endpoint takes, and the prompt is what the limit bounds.
-		model.ContextLimit = cmp.Or(item.Limit.Context, item.ContextLength, item.TopProvider.ContextLength, item.MaxModelLen)
-		if input := cmp.Or(item.Limit.Input, item.MaxInputTokens); input > 0 && (model.ContextLimit == 0 || input < model.ContextLimit) {
+		model.ContextLimit = int(cmp.Or(item.Limit.Context, item.ContextLength, item.TopProvider.ContextLength, item.MaxModelLen))
+		if input := int(cmp.Or(item.Limit.Input, item.MaxInputTokens)); input > 0 && (model.ContextLimit == 0 || input < model.ContextLimit) {
 			model.ContextLimit = input
 		}
 		if item.Capabilities.Tools.Supported != nil {
