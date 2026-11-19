@@ -223,12 +223,23 @@ func TestTheFooterGrowsForAWrappedDraftAndShrinksBack(t *testing.T) {
 func TestAStatuslineWiderThanTheScreenClipsToTheRow(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(12, 12))
 	l := aLayout(t, vt, 12, 12)
-	l.setStatus("⌂ a-really-long-folder-name │ a-long-branch-name")
+	// The payload is the real dim-wrapped shape the statusline paints:
+	// the clip must not leave the terminal styling unbalanced.
+	s := &status{dir: "/home/me/Code/a-really-long-folder-name", model: "gemma4", contextLimit: 262144}
+	s.setTokens(12300)
+	l.setStatus(s.line())
 	l.ensure(1)
 
 	rows := screenRows(vt)
-	if last := rows[len(rows)-1]; !strings.Contains(last, "a-really-l") || strings.Contains(last, "branch") {
+	last := rows[len(rows)-1]
+	if !strings.Contains(last, "a-really-l") || strings.Contains(last, "gemma4") {
 		t.Errorf("the bottom row is not the clipped statusline: %q", last)
+	}
+	// The clip leaves the dim balanced: the row keeps its opening dim
+	// and ends with a reset, so the frames after it do not inherit the
+	// styling.
+	if row := l.statusRow(); !strings.HasPrefix(row, ansiDim) || !strings.HasSuffix(row, ansiReset) {
+		t.Errorf("the clipped row's styling is unbalanced: %q", row)
 	}
 	if rule := lastRow(vt, "───"); rule != len(rows)-2 {
 		t.Errorf("the rule stands on row %d, want the row above the statusline:\n%s", rule, vt.String())

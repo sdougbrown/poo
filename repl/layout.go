@@ -599,9 +599,6 @@ func (l *layout) resize() bool {
 	if l.footer < 1+footerChrome {
 		l.footer = 1 + footerChrome
 	}
-	if l.footer < 1 {
-		l.footer = 1
-	}
 	if l.last > l.regionBottom() {
 		l.last = l.regionBottom()
 	}

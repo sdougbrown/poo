@@ -232,7 +232,7 @@ func TestLongOutputScrollsAboveTheFooter(t *testing.T) {
 }
 
 func TestAModelSwitchPaintsTheFooterStatusline(t *testing.T) {
-	server := &fakeServer{t: t}
+	server := &fakeServer{t: t, level: "high"}
 	closed := make(chan struct{})
 	close(closed)
 	server.script = quietRun(closed)
@@ -245,12 +245,48 @@ func TestAModelSwitchPaintsTheFooterStatusline(t *testing.T) {
 	waitScreen(t, term, "✓ end_turn")
 
 	// The footer's bottom row names the model the switch took, beside
-	// the window the run's usage filled: a switch that kept the old
-	// name or window would read them here.
+	// the window the run's usage filled and the level the wire reported:
+	// qwen does not take high, so the switch reads back off. A switch
+	// that kept the old name, window, or level would read them here.
 	rows := strings.Split(term.screen(), "\n")
 	last := rows[len(rows)-1]
-	if !strings.Contains(last, "qwen") || !strings.Contains(last, "/131.1k") {
-		t.Errorf("the footer's statusline does not name qwen beside its window: %q", last)
+	if !strings.Contains(last, "qwen") || !strings.Contains(last, "/131.1k") || !strings.Contains(last, "🧠 off") {
+		t.Errorf("the footer's statusline does not name qwen beside its window and level: %q", last)
+	}
+
+	term.press("/quit\r")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}
+
+// TestAModelSwitchTheCatalogCannotDescribeKeepsTheWindow covers the
+// aliased switch on a real footer: the server answers a name the
+// client's catalog cannot describe, and the footer's bottom row names
+// that name beside the window the previous model filled — a window the
+// client never invented for the answer.
+func TestAModelSwitchTheCatalogCannotDescribeKeepsTheWindow(t *testing.T) {
+	server := &fakeServer{t: t, replyAs: "hidden"}
+	closed := make(chan struct{})
+	close(closed)
+	server.script = quietRun(closed)
+	term, code := startTerminalRepl(t, server)
+	waitBottom(t, term)
+
+	term.press("/model qwen\r")
+	waitScreen(t, term, "model → hidden")
+	term.press("say hi\r")
+	waitScreen(t, term, "✓ end_turn")
+
+	rows := strings.Split(term.screen(), "\n")
+	last := rows[len(rows)-1]
+	if !strings.Contains(last, "hidden") || !strings.Contains(last, "/262.1k") {
+		t.Errorf("the footer's statusline does not name hidden beside the kept window: %q", last)
 	}
 
 	term.press("/quit\r")
