@@ -124,17 +124,44 @@ func issueMessage(name string, schema map[string]any, issue schema.StructuralIss
 
 // PropertyNames lists a schema object's properties in name order,
 // required ones marked, or an empty string when there are none.
-//
-// Names sort by their base name; a required mark is appended after
-// the sort. Two renderers that share a schema then list the same
-// arguments in the same order.
 func PropertyNames(schema map[string]any) string {
 	if schema == nil {
 		return ""
 	}
+	names, marks := propertyNamesAndMarks(schema)
+	out := make([]string, 0, len(names))
+	for i, name := range names {
+		out = append(out, name+marks[i])
+	}
+	return strings.Join(out, ", ")
+}
+
+// ArgsHint lists a schema object's properties for a prompt line, the
+// way PropertyNames does, with an enum's values in brackets: the
+// values are the one thing a name cannot say, and the one thing a
+// first call guesses wrong without.
+func ArgsHint(schema map[string]any) string {
+	if schema == nil {
+		return ""
+	}
+	names, marks := propertyNamesAndMarks(schema)
+	out := make([]string, 0, len(names))
+	for i, name := range names {
+		entry := name + marks[i]
+		if values := enumValues(schema, name); values != "" {
+			entry += "[" + values + "]"
+		}
+		out = append(out, entry)
+	}
+	return strings.Join(out, ", ")
+}
+
+// propertyNamesAndMarks returns a schema object's property names in
+// name order and the mark each takes ("*" when required).
+func propertyNamesAndMarks(schema map[string]any) ([]string, []string) {
 	properties, _ := schema["properties"].(map[string]any)
 	if len(properties) == 0 {
-		return ""
+		return nil, nil
 	}
 	names := make([]string, 0, len(properties))
 	for name := range properties {
@@ -145,12 +172,34 @@ func PropertyNames(schema map[string]any) string {
 	for _, name := range ToNames(schema["required"]) {
 		required[name] = true
 	}
+	marks := make([]string, len(names))
 	for i, name := range names {
 		if required[name] {
-			names[i] += "*"
+			marks[i] = "*"
 		}
 	}
-	return strings.Join(names, ", ")
+	return names, marks
+}
+
+// enumValues renders a property's enum the way a prompt reads it: the
+// values bare, pipe-separated, or an empty string when the property
+// takes none.
+func enumValues(schema map[string]any, name string) string {
+	properties, _ := schema["properties"].(map[string]any)
+	ps, _ := properties[name].(map[string]any)
+	enum, _ := ps["enum"].([]any)
+	if len(enum) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(enum))
+	for _, value := range enum {
+		if s, ok := value.(string); ok {
+			parts = append(parts, s)
+			continue
+		}
+		parts = append(parts, fmt.Sprint(value))
+	}
+	return strings.Join(parts, "|")
 }
 
 // ToNames reads a JSON array of strings, tolerating anything else.

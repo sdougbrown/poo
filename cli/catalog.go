@@ -231,11 +231,12 @@ func (c *Catalog) Plan(name string, args map[string]any) (*cliregistry.Plan, err
 }
 
 // argsHint renders a schema's top-level arguments for a prompt line,
-// or an empty string when the schema declares no properties. Nested
-// arguments stay out: the line is a hint, and a refused call names the
-// schema's own path when the model reaches inside.
+// with an enum's values in brackets, or an empty string when the
+// schema declares no properties. Nested arguments stay out: the line
+// is a hint, and a refused call names the schema's own path when the
+// model reaches inside.
 func argsHint(schema map[string]any) string {
-	return schematext.PropertyNames(schema)
+	return schematext.ArgsHint(schema)
 }
 
 //go:embed catalog.md

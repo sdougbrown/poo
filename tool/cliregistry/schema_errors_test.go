@@ -67,6 +67,16 @@ func TestAnUnknownArgumentNamesItAndTheAcceptedArguments(t *testing.T) {
 	}
 }
 
+// TestTheRefusalKeepsNamesOnly pins the split: the refusal's accepted
+// list names the arguments, it does not embed enum values — the values
+// belong to the refusal's own clause when the enum is the miss.
+func TestTheRefusalKeepsNamesOnly(t *testing.T) {
+	err := prepareDeploy(t, `{"name":"deploy","args":{"env":"canary","mode":"canary"}}`)
+	if !strings.Contains(err.Error(), "deploy accepts: env*, replicas") {
+		t.Errorf("the refusal's accepted list changed shape: %v", err)
+	}
+}
+
 // TestABadTypeNamesTheType covers the type refusal and the article it
 // takes.
 func TestABadTypeNamesTheType(t *testing.T) {
@@ -522,13 +532,14 @@ func TestTheAcceptedArgumentsListKeepsNameOrder(t *testing.T) {
 
 // TestTheCatalogCarriesEachToolSArguments pins the up-front half: the
 // prompt's catalog line names the tool's arguments, required ones
-// marked, so the first call can be right.
+// marked, with an enum's values in brackets, so the first call can be
+// right.
 func TestTheCatalogCarriesEachToolSArguments(t *testing.T) {
 	path := writeManifest(t, t.TempDir(), "deploy.json", map[string]any{"deploy": deployTool(t)})
 	catalog := load(t, path)
 	text := catalog.Section(false)
-	if !strings.Contains(text, "deploy (args: env*, replicas): Deploy a service") {
-		t.Errorf("the catalog line does not carry the arguments with required marked: %q", text)
+	if !strings.Contains(text, "deploy (args: env*[staging|production], replicas): Deploy a service") {
+		t.Errorf("the catalog line does not carry the arguments with the enum's values: %q", text)
 	}
 }
 
