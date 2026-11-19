@@ -88,10 +88,9 @@ func TestTheDemuxSendsEachKindWhereItBelongs(t *testing.T) {
 	}
 }
 
-// TestABurstOfEventsOutlastsAStalledLoop covers the main loop that
-// stops draining for a moment, a terminal write or a frame paint,
-// while a fast model streams: the deltas wait for it, and the session
-// goes on.
+// TestABurstOfEventsOutlastsAStalledLoop covers a fast stream while
+// the main loop stops draining for a moment. The deltas wait for the
+// loop, and the session goes on.
 func TestABurstOfEventsOutlastsAStalledLoop(t *testing.T) {
 	h := newWireHarness(t)
 	conn := startConn(h.stdout, h.stdin)

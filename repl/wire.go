@@ -19,11 +19,11 @@ import (
 const callTimeout = 2 * time.Minute
 
 // eventBacklog is how many events wait for the main loop. The loop
-// renders between reads, and a model that streams a delta per token
-// outruns a terminal write or a frame paint, so the backlog holds as
-// many messages as the server's own output queue does
-// (wire.DefaultQueueMessages). A full backlog is a client that has
-// stopped reading, not one that paused.
+// renders between reads, and a model streams one delta per token. A
+// terminal write or a frame paint can fall behind that stream. The
+// backlog holds as many messages as the server's output queue
+// (wire.DefaultQueueMessages). A full backlog means the client stopped
+// reading, not that it paused.
 const eventBacklog = 10000
 
 // conn is the client's end of the wire: a JSON-RPC 2.0 peer over the
