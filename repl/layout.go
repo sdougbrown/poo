@@ -22,10 +22,9 @@ const (
 	seqResetRegion   = "\x1b[r"  // DECSTBM full screen
 )
 
-// footerChrome is the rows the layout owns below the editor's rows in
-// the footer: the rule that separates the input from the statusline,
-// and the statusline row itself. They stay pinned to the screen's
-// bottom edge while the draft grows above them.
+// footerChrome is the rows the layout owns below the editor's rows:
+// the rule above the statusline, and the statusline row itself. Both
+// stay pinned to the screen's bottom edge.
 const footerChrome = 2
 
 // layout pins the line editor to the bottom of the terminal.
@@ -61,8 +60,8 @@ type layout struct {
 	// status is the statusline text the footer's bottom row carries.
 	// It is empty until the session names its first parts.
 	status string
-	// chromeStale says the chrome rows need a repaint: after an enter
-	// or a resize, the next footer sizing paints them again.
+	// chromeStale says the chrome rows need a repaint. An enter or a
+	// resize sets it; the next footer sizing paints them again.
 	chromeStale bool
 	// active says the region is set and the footer is reserved.
 	active bool
@@ -406,10 +405,8 @@ func (l *layout) prepare(footer int) {
 }
 
 // setStatus stores the statusline and repaints the footer's bottom row
-// when the footer stands. The statusline lives below the editor's rows,
-// so its changes reach the terminal without touching the editor's
-// frame; the rule above it is the chrome's, and only a resize repaints
-// that.
+// when the footer stands. Its changes never touch the editor's frame;
+// the rule above it repaints with the rest of the chrome.
 func (l *layout) setStatus(s string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -428,17 +425,16 @@ func (l *layout) setStatus(s string) {
 	l.emit(b.String())
 }
 
-// statusRow is the statusline text clipped to the terminal's width: a
-// line wider than the screen would wrap the bottom row, and the wrap
-// scrolls the pinned footer off the screen's bottom edge.
+// statusRow is the statusline text clipped to the terminal's width. A
+// wider line would wrap the bottom row, and the wrap scrolls the
+// pinned footer off the screen.
 func (l *layout) statusRow() string {
 	return ansi.Truncate(l.status, l.width, "")
 }
 
-// paintChromeLocked writes the chrome rows into b: the rule between the
-// input and the statusline, and the statusline itself. They are the
-// footer's bottom two rows, pinned to the screen's bottom edge, so a
-// draft that grows moves them never.
+// paintChromeLocked writes the chrome rows into b: the rule and the
+// statusline. They are the footer's bottom two rows, pinned to the
+// screen's bottom edge, so a draft that grows moves them never.
 func (l *layout) paintChromeLocked(b *strings.Builder) {
 	rule := ansiDim + strings.Repeat("─", l.width) + ansiReset
 	b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", l.height-1))
@@ -480,10 +476,10 @@ func (l *layout) ensureLocked(footer int) bool {
 	}
 	total := footer + footerChrome
 	if total == l.footer && !l.chromeStale {
-		// The editor's own line handling erases below its line — an
-		// accepted line wipes the screen under the input — so the chrome
-		// rows go with it. Every preparation paints them again, the way
-		// the frames keep the prompt standing.
+		// The editor's accepted-line handling erases below its input,
+		// and that wipe takes the chrome rows with it. Every
+		// preparation paints them again, the way the frames keep the
+		// prompt standing.
 		var b strings.Builder
 		b.WriteString(seqSaveCursor)
 		l.paintChromeLocked(&b)
