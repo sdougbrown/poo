@@ -48,17 +48,21 @@ type opencodeGateway struct {
 	authorization string
 }
 
-// RoundTrip answers the routes the catalog and the transport reach. A chat
-// request gets a stream; anything else gets the model list.
+// RoundTrip answers the routes the catalog and the transports reach. A
+// messages request gets a stream; a chat request gets one too; anything
+// else gets the model list.
 func (g *opencodeGateway) RoundTrip(req *http.Request) (*http.Response, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.session = req.Header.Get("x-opencode-session")
 	g.authorization = req.Header.Get("Authorization")
 	body := `{"data":[{"id":"glm-5.3"}]}`
-	if strings.HasSuffix(req.URL.Path, "/chat/completions") {
-		body = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n" +
-			"data: [DONE]\n\n"
+	if strings.HasSuffix(req.URL.Path, "/chat/completions") || strings.HasSuffix(req.URL.Path, "/messages") {
+		body = "data: {\"type\":\"message_stop\"}\n\n"
+		if strings.HasSuffix(req.URL.Path, "/messages") {
+			body = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n" +
+				"data: {\"type\":\"message_stop\"}\n\n"
+		}
 	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
@@ -259,6 +263,58 @@ func TestTheOpencodeTransportNamesTheSession(t *testing.T) {
 				t.Errorf("the request carried %q, want the stored key", gateway.authorization)
 			}
 		})
+	}
+}
+
+// TestTheBuiltinAnthropicEndpointsServeOnTheirKey covers the Messages pair:
+// offered on the same key as the Chat Completions one, and the transport
+// names the session through the endpoint's own declared header.
+func TestTheBuiltinAnthropicEndpointsServeOnTheirKey(t *testing.T) {
+	dir := t.TempDir()
+	gateway := &opencodeGateway{}
+	runtime, _ := opencodeRuntime(t, dir, map[string]string{"opencode": "oc_sk_test"}, "opencode-go-anthropic/claude-haiku-5-5", gateway)
+
+	model, err := runtime.ChatModel()
+	if err != nil {
+		t.Fatalf("resolving the chat model: %v", err)
+	}
+	if model.Name != "opencode-go-anthropic/claude-haiku-5-5" {
+		t.Fatalf("the chat model is %q, want the built-in anthropic model", model.Name)
+	}
+	if model.Endpoint != "https://opencode.ai/inference/go/anthropic/v1" {
+		t.Errorf("the endpoint is %q, want the Messages gateway", model.Endpoint)
+	}
+	if model.API != poo.APIAnthropicMessages {
+		t.Errorf("the API is %q, want the Messages API", model.API)
+	}
+	if got := runtime.EndpointKey(model); got != "oc_sk_test" {
+		t.Errorf("the key is %q, want the stored credential", got)
+	}
+	transport, err := runtime.Transport(model)
+	if err != nil {
+		t.Fatalf("building the transport: %v", err)
+	}
+	reader, _, err := transport.Stream(context.Background(), poo.ChatRequest{
+		Model:     model.ModelID,
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 32,
+		SessionID: "ses_anthropic_test",
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("closing the stream: %v", err)
+	}
+	if gateway.session != "ses_anthropic_test" {
+		t.Errorf("the request carried session %q, want the session's id", gateway.session)
+	}
+	if gateway.authorization != "Bearer oc_sk_test" {
+		t.Errorf("the request carried %q, want the stored key", gateway.authorization)
+	}
+	// The pay-as-you-go sibling is offered beside the Go one.
+	if _, err := runtime.Catalog.Resolve("opencode-anthropic/claude-haiku-5-5"); err != nil {
+		t.Fatalf("resolving the pay-as-you-go model: %v", err)
 	}
 }
 

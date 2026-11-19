@@ -36,6 +36,9 @@ type FileSettings struct {
 type EndpointSettings struct {
 	// Endpoint is the endpoint's base URL.
 	Endpoint string
+	// API is the wire API the endpoint speaks, which a model no layer
+	// named inherits. Empty means chat completions.
+	API poo.API
 	// APIKeyEnv names the environment variable holding the key.
 	APIKeyEnv string
 	// APIKey is a key written in the settings themselves.
@@ -131,7 +134,7 @@ func (m ModelSettings) layer(name, endpointURL string) poo.ModelInfo {
 // the transport resolves by too. An endpoint that names neither needs
 // no key.
 func (e EndpointSettings) endpoint(name string) Endpoint {
-	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint, SessionHeader: e.SessionHeader, SkipProbe: e.SkipProbe}
+	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint, API: e.API, SessionHeader: e.SessionHeader, SkipProbe: e.SkipProbe}
 	switch {
 	case e.APIKeyEnv != "":
 		endpoint.Credential = Credential{Source: CredentialEnv, Env: e.APIKeyEnv}

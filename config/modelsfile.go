@@ -483,6 +483,7 @@ func (f modelsFile) layer() (catalog.FileSettings, error) {
 		}
 		out.Endpoints[name] = catalog.EndpointSettings{
 			Endpoint:      endpoint.Endpoint,
+			API:           poo.API(endpoint.API),
 			APIKeyEnv:     endpoint.APIKeyEnv,
 			SessionHeader: endpoint.SessionHeader,
 			SkipProbe:     endpoint.SkipProbe,

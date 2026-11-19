@@ -30,6 +30,7 @@ import (
 	"github.com/sdougbrown/poo/prompt"
 	"github.com/sdougbrown/poo/prompt/agentsmd"
 	"github.com/sdougbrown/poo/protect"
+	"github.com/sdougbrown/poo/provider/anthropic"
 	"github.com/sdougbrown/poo/provider/auth"
 	"github.com/sdougbrown/poo/provider/catalog"
 	"github.com/sdougbrown/poo/provider/openai"
@@ -2338,6 +2339,22 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 			APIKey:        r.EndpointKey(model),
 			SessionHeader: session,
 			ToolsMode:     string(model.Tools.Mode),
+			ModelInfo:     model,
+			Sampling:      model.Sampling,
+			HTTPClient:    r.httpClient,
+		}), nil
+	case poo.APIAnthropicMessages:
+		// The Messages API's session header is the endpoint's declaration,
+		// the same lookup the Chat Completions case reads.
+		session := ""
+		if endpoint, ok := r.Catalog.Endpoints()[model.Provider]; ok {
+			session = endpoint.SessionHeader
+		}
+		return anthropic.New(anthropic.Options{
+			Endpoint:      model.Endpoint,
+			Model:         model.ModelID,
+			APIKey:        r.EndpointKey(model),
+			SessionHeader: session,
 			ModelInfo:     model,
 			Sampling:      model.Sampling,
 			HTTPClient:    r.httpClient,

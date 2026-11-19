@@ -170,11 +170,20 @@ func (c Checker) rules() []rule {
 				// shape, the messages, the event stream and the text
 				// repairs an OpenAI-compatible transport composes.
 				m + "/provider/internal/chat",
+				// The Messages API's wire half: the request shape,
+				// the content blocks, the event stream and the
+				// thinking signatures an Anthropic-compatible
+				// transport composes.
+				m + "/provider/internal/anthropic",
 				// The settings package builds a Codex transport and
 				// reads pi's credential for it, so the server reaches
 				// both through the build.
 				m + "/provider/codex",
+				// The transports the build composes for the
+				// catalog's models: the Chat Completions one and
+				// the Messages one.
 				m + "/provider/openai",
+				m + "/provider/anthropic",
 				m + "/provider/auth",
 				m + "/session",
 				m + "/wire",
