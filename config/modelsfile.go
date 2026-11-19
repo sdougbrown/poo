@@ -152,6 +152,17 @@ func (s *Settings) resolveNamedFiles(dir string) error {
 		}
 		*named.path = resolved
 	}
+	for name, profile := range s.Profiles {
+		if profile.PromptFile == "" {
+			continue
+		}
+		resolved, err := resolveBeside(profile.PromptFile, dir)
+		if err != nil {
+			return &Error{Code: CodeInvalid, Field: "profiles." + name + ".prompt_file", Err: err}
+		}
+		profile.PromptFile = resolved
+		s.Profiles[name] = profile
+	}
 	return nil
 }
 

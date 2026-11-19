@@ -348,6 +348,30 @@ name the binary does not link, or one of the core's own `jobs`,
 tool of its own is an error too, and such a profile is not one the binary
 lists.
 
+**Named profiles.** Define a profile in settings and select it with
+`--profile`, the top-level `profile` setting, or `session/create.profile`.
+For example, add this to an existing settings file:
+
+```yaml
+profiles:
+  reviewer:
+    base: code
+    prompt_file: prompts/reviewer.md
+    tools:
+      disabled: [edit, bash, codemode]
+```
+
+`base` names a profile linked by the binary. The named profile's tool
+exclusions add to the global `tools.disabled` list. Exclusions do not
+change permission rules or sandbox the remaining tools.
+
+`prompt_file` accepts an absolute path or a path relative to the settings
+file. Poo reads it when opening a new session, not when listing profiles.
+It replaces the `profile` section without replacing the base or tool
+instructions. An explicit `system_prompt` replacement, or a setting that
+sets or removes the `profile` section, takes precedence. A resumed
+session uses its recorded prompt once it has run.
+
 **Exit codes.** The exit code says why a run ended:
 
 | Code | Reason |
