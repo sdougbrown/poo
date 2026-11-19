@@ -17,6 +17,19 @@ import (
 // writes: the module version of an installed binary, and the VCS stamp of a
 // build from a checkout.
 
+// TestTheUserAgentNamesTheClient covers what the binary calls itself on the
+// requests it makes: its own name and the version the build carries, and
+// never the name the HTTP library stamps when a client says nothing.
+func TestTheUserAgentNamesTheClient(t *testing.T) {
+	agent := userAgent()
+	if !strings.HasPrefix(agent, "poo/") {
+		t.Fatalf("the user agent is %q, want the binary's own name", agent)
+	}
+	if agent == "poo/" {
+		t.Fatalf("the user agent names no version")
+	}
+}
+
 // TestTheVersionComesFromTheBuildInformation covers what each kind of
 // build reports, and the one word the version line carries.
 func TestTheVersionComesFromTheBuildInformation(t *testing.T) {

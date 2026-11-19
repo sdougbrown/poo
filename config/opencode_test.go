@@ -47,6 +47,8 @@ type opencodeGateway struct {
 	session string
 	// authorization is the Authorization header the last request carried.
 	authorization string
+	// agent is the User-Agent header the last request carried.
+	agent string
 	// paths are the request paths the requests reached.
 	paths []string
 	// bodies are the request bodies the requests carried.
@@ -61,6 +63,7 @@ func (g *opencodeGateway) RoundTrip(req *http.Request) (*http.Response, error) {
 	defer g.mu.Unlock()
 	g.session = req.Header.Get("x-opencode-session")
 	g.authorization = req.Header.Get("Authorization")
+	g.agent = req.Header.Get("User-Agent")
 	g.paths = append(g.paths, req.URL.Path)
 	raw, _ := io.ReadAll(req.Body)
 	g.bodies = append(g.bodies, string(raw))
@@ -323,6 +326,11 @@ func TestTheBuiltinAnthropicEndpointsServeOnTheirKey(t *testing.T) {
 	}
 	if gateway.authorization != "Bearer oc_sk_test" {
 		t.Errorf("the request carried %q, want the stored key", gateway.authorization)
+	}
+	// The binary names itself, so the gateway that watches its traffic
+	// reads a client and not the HTTP library that carried it.
+	if gateway.agent != "poo/test" {
+		t.Errorf("the request named itself %q, want the build's own name", gateway.agent)
 	}
 	// The Messages transport is the one that served: the request went to
 	// the messages path, in the Messages API's own shape.

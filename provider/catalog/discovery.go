@@ -620,6 +620,9 @@ func (c *Catalog) post(ctx context.Context, client *http.Client, url string, pay
 
 // do sends a request and reads the answer.
 func (c *Catalog) do(client *http.Client, req *http.Request) ([]byte, error) {
+	if c.opts.UserAgent != "" {
+		req.Header.Set("User-Agent", c.opts.UserAgent)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: the request for %s failed: %w", req.URL, err)

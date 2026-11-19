@@ -91,6 +91,11 @@ type Options struct {
 	HTTPClient *http.Client
 	// ProbeTimeout bounds one probe. Zero means DefaultProbeTimeout.
 	ProbeTimeout time.Duration
+	// UserAgent is what the client calls itself on the probes. A gateway
+	// that watches its traffic asks each client to name itself, and a
+	// client that says nothing is named by the HTTP library alone. Empty
+	// sends none.
+	UserAgent string
 	// Cached says the catalog holds what the endpoints last reported, read from the
 	// discovery cache when it is built. It is how a model an endpoint served is a model a
 	// session can name without a probe: the build never reaches the network, and the cache

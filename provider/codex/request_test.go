@@ -294,6 +294,7 @@ func TestTheCredentialIsResolvedForEveryRequest(t *testing.T) {
 	tr := newTransport(srv.URL, func(o *codex.Options) {
 		o.SessionID = "s1"
 		o.Originator = "poo-test"
+		o.UserAgent = "poo/test"
 		o.Credentials = func(context.Context) (codex.Credential, error) {
 			token := tokens[asked]
 			asked++
@@ -321,6 +322,7 @@ func TestTheCredentialIsResolvedForEveryRequest(t *testing.T) {
 			"Originator":          "poo-test",
 			"Session-Id":          "s1",
 			"X-Client-Request-Id": "s1",
+			"User-Agent":          "poo/test",
 			"Accept":              "text/event-stream",
 			"Content-Type":        "application/json",
 		} {

@@ -36,7 +36,9 @@ func handleRoles(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 		fmt.Fprintf(stderr, "poo roles: %v\n", err)
 		return exit{usageExitCode}
 	}
-	cat := catalog.New(settings.CatalogOptions())
+	options := settings.CatalogOptions()
+	options.UserAgent = userAgent()
+	cat := catalog.New(options)
 
 	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ROLE\tMODEL\tPROVIDER\tCREDENTIAL")

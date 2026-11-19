@@ -1135,6 +1135,7 @@ func (r *Runtime) resolveModels(opts BuildOptions) error {
 	catalogOptions := r.Settings.CatalogOptions()
 	catalogOptions.Logger = opts.Logger
 	catalogOptions.HTTPClient = opts.HTTPClient
+	catalogOptions.UserAgent = r.userAgent()
 	cat := catalog.New(catalogOptions)
 	if err := cat.CheckRoles(); err != nil {
 		if !opts.NoChatModel || !isChatRole(err) {
@@ -2343,6 +2344,7 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 			ModelInfo:     model,
 			Sampling:      model.Sampling,
 			HTTPClient:    r.httpClient,
+			UserAgent:     r.userAgent(),
 		}), nil
 	case poo.APIAnthropicMessages:
 		return anthropic.New(anthropic.Options{
@@ -2353,6 +2355,7 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 			ModelInfo:     model,
 			Sampling:      model.Sampling,
 			HTTPClient:    r.httpClient,
+			UserAgent:     r.userAgent(),
 		}), nil
 	default:
 		return nil, &Error{
@@ -2371,6 +2374,18 @@ func servedBy(model poo.ModelInfo) string {
 		return model.Provider
 	}
 	return model.Endpoint
+}
+
+// userAgent is what the binary's own requests call themselves.
+//
+// A gateway that watches for abuse asks each client to name itself, and a
+// name the HTTP library stamps when a client says nothing names nobody. The
+// build's own name and version are the ones the requests carry.
+func (r *Runtime) userAgent() string {
+	if r.Build.Name == "" {
+		return ""
+	}
+	return r.Build.Name + "/" + r.Build.Version
 }
 
 // httpClient is the client the transports use. It is nil unless the

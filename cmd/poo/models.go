@@ -47,6 +47,7 @@ func handleModels(inv clicontract.Invocation, stdout, stderr io.Writer) exit {
 	// layer too would apply it twice, and warn twice when the cache is unreadable.
 	options := settings.CatalogOptions()
 	options.Cached = false
+	options.UserAgent = userAgent()
 	cat := catalog.New(options)
 	// A probe that fails falls back to the cache and then to the
 	// curated catalog, with a warning: the list is still the list.

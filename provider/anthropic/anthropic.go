@@ -75,6 +75,11 @@ type Options struct {
 	// session id, for an endpoint whose gateway routes one conversation's
 	// requests together. Empty sends none.
 	SessionHeader string
+	// UserAgent is what the client calls itself on the request. A gateway
+	// that watches its traffic asks each client to name itself, and a
+	// client that says nothing is named by the HTTP library alone. Empty
+	// sends none.
+	UserAgent string
 }
 
 // Transport is the Anthropic Messages chat transport.
@@ -323,6 +328,9 @@ func (t *Transport) open(ctx context.Context, body []byte, session string) (*ant
 			}
 			if t.cfg.SessionHeader != "" && session != "" {
 				req.Header.Set(t.cfg.SessionHeader, session)
+			}
+			if t.cfg.UserAgent != "" {
+				req.Header.Set("User-Agent", t.cfg.UserAgent)
 			}
 			return req, nil
 		},

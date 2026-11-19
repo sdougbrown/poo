@@ -137,6 +137,9 @@ func buildCodex(t *testing.T, settings *config.Settings, client *http.Client) (*
 		Profiles:       theProfiles(),
 		Executors:      theExecutors(),
 		HTTPClient:     client,
+		// The binary names itself on the requests it makes, so a build's
+		// transports and probes carry a name a test can read.
+		Build: poo.BuildInfo{Name: "poo", Version: "test"},
 	})
 }
 

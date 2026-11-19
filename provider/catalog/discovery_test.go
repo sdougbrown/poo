@@ -273,6 +273,42 @@ func TestADiscoveredModelSpeaksItsEndpointsAPI(t *testing.T) {
 	}
 }
 
+// TestTheProbeNamesTheClient covers the agent the probes travel under: a
+// catalog that names one sends it, and a catalog that names none leaves the
+// header to the HTTP library, the way an operator's own client would.
+func TestTheProbeNamesTheClient(t *testing.T) {
+	var agents []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		agents = append(agents, r.Header.Get("User-Agent"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data":   []map[string]any{{"id": "gemma4"}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		Settings:  settingsFor(server.URL + "/v1"),
+		StateDir:  t.TempDir(),
+		UserAgent: "poo/test",
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	if len(agents) == 0 {
+		t.Fatal("the probe never reached the endpoint")
+	}
+	for _, agent := range agents {
+		if agent != "poo/test" {
+			t.Errorf("a probe named itself %q, want poo/test", agent)
+			break
+		}
+	}
+}
+
 func TestTheVLLMProbeReadsTheModelList(t *testing.T) {
 	server := vllmServer(t, "gemma4", 32768)
 	c := catalog.New(catalog.Options{

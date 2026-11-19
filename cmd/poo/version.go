@@ -28,6 +28,15 @@ type versionInfo struct {
 // devVersion is what a build carrying no version of its own reports.
 const devVersion = "dev"
 
+// userAgent is what the binary calls itself on the requests it makes.
+//
+// A gateway that watches for abuse asks each client to name itself, and a
+// name the HTTP library stamps — the default when a client says nothing —
+// names nobody. The version the build carries is the one the name holds.
+func userAgent() string {
+	return "poo/" + buildVersion().String()
+}
+
 // shortRevision is how much of the revision a version line carries:
 // enough to identify a build, short enough to read.
 const shortRevision = 7
