@@ -119,10 +119,20 @@ func (l OutputLimit) Truncation(info ModelInfo, sent int) SettleDetail {
 	return detail
 }
 
+// OutputCeiling returns the most output tokens a request for the model
+// asks for before the room the window leaves is taken into account: the
+// model's own limit, or DefaultMaxOutputFor its window when the model
+// declares none.
+func (m ModelInfo) OutputCeiling() int {
+	if m.MaxOutput > 0 {
+		return m.MaxOutput
+	}
+	return DefaultMaxOutputFor(m.ContextLimit)
+}
+
 // MaxTokens computes the output room for a request against a model.
 //
-// The room is the model's own output limit, or DefaultMaxOutputFor its
-// window when the model declares none, and it never exceeds the window
+// The room is the model's OutputLimit, and it never exceeds the window
 // that is left after the prompt. The value is always computed, so a
 // request always carries a max_tokens and never the endpoint's own
 // default.
