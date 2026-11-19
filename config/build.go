@@ -1125,6 +1125,7 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 			Ops:             ops(model.Ops),
 			Inputs:          modalities(model.Inputs),
 			ContextLimit:    model.ContextLimit,
+			InputLimit:      model.InputLimit,
 			MaxOutput:       model.MaxOutput,
 			Reasoning:       model.Reasoning,
 			ReasoningLevels: model.ReasoningLevels,

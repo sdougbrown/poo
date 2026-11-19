@@ -479,6 +479,9 @@ type modelsModel struct {
 	Inputs []string `json:"inputs,omitempty"`
 	// ContextLimit is the model's context window.
 	ContextLimit int `json:"context_limit,omitempty"`
+	// InputLimit is the largest prompt the endpoint accepts, for a model
+	// whose endpoint takes less than its window.
+	InputLimit int `json:"input_limit,omitempty"`
 	// MaxOutput is the most tokens the model writes in one response.
 	MaxOutput int `json:"max_output,omitempty"`
 	// Reasoning is how the model's reasoning is controlled.
@@ -567,6 +570,7 @@ func (f modelsFile) layer() (catalog.FileSettings, error) {
 				Ops:             model.Ops,
 				Inputs:          inputs,
 				ContextLimit:    model.ContextLimit,
+				InputLimit:      model.InputLimit,
 				MaxOutput:       model.MaxOutput,
 				Reasoning:       model.Reasoning,
 				ReasoningLevels: model.ReasoningLevels,

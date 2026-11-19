@@ -457,3 +457,23 @@ func (m ModelInfo) reasoningError(setting, why string) *ConfigError {
 		Message: fmt.Sprintf("the %q setting cannot be honoured for %s: %s", setting, model, why),
 	}
 }
+
+// PromptLimit is the largest prompt a request to the model may carry: the
+// smaller of the window and the endpoint's input cap, ignoring the one that
+// is unknown. Zero means neither is known.
+//
+// The prompt checks read it: the hard stop, the context notice, the
+// compaction triggers and the check a model switch makes. The output room
+// of MaxTokens reads the window, which the prompt and the answer share.
+func (m ModelInfo) PromptLimit() int {
+	return promptLimit(m.ContextLimit, m.InputLimit)
+}
+
+// promptLimit is the smaller of a window and an input cap, where zero is
+// unknown.
+func promptLimit(window, input int) int {
+	if input > 0 && (window <= 0 || input < window) {
+		return input
+	}
+	return window
+}

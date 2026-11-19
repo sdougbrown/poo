@@ -34,9 +34,9 @@ type ModelSwitch struct {
 //  2. The history holds no required provider block from another API. A
 //     block that is not required is left out of the requests, and the
 //     omission is recorded.
-//  3. The view fits the new context window. A view that does not fit is
-//     a warning, not a refusal: the history is never truncated, and the
-//     next run's gate settles context_exhausted.
+//  3. The view fits the new model's prompt limit. A view that does not
+//     fit is a warning, not a refusal: the history is never truncated,
+//     and the next run's gate settles context_exhausted.
 //
 // The system prompt is rendered in the switch, because the environment
 // section names the model and the model info selects the variant. A prompt
@@ -89,9 +89,9 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 		s.mu.Unlock()
 		return ModelSwitch{}, err
 	}
-	// The view must fit the new window. It is never truncated, so a view
-	// that does not fit is a warning and the next run settles
-	// context_exhausted.
+	// The view must fit the new model's prompt limit and leave room to
+	// answer in its window. It is never truncated, so a view that does
+	// not fit is a warning and the next run settles context_exhausted.
 	limit := info.ContextLimit
 	var warnings []string
 	if limit <= 0 {
@@ -100,10 +100,11 @@ func (s *Session) SetModel(info ModelInfo, transport ...ChatTransport) (ModelSwi
 			"the model %q declares no context limit, so the session keeps the %d-token window",
 			name, limit))
 	}
-	if exhausted, reason := s.contextExhaustedLocked(limit); exhausted {
+	prompt := promptLimit(limit, info.InputLimit)
+	if exhausted, reason := s.contextExhaustedLocked(limit, info.InputLimit); exhausted {
 		warnings = append(warnings, fmt.Sprintf(
-			"the current view does not fit the %d-token window of %q: %s; the next run settles context_exhausted",
-			limit, name, reason))
+			"the current view does not fit the %d-token prompt limit of %q: %s; the next run settles context_exhausted",
+			prompt, name, reason))
 	}
 
 	from := modelLabel(s.opts.Model)
@@ -198,18 +199,19 @@ func (s *Session) SetDecider(info ModelInfo, decider decide.Decider) error {
 }
 
 // contextExhaustedLocked reports that the next request could not be
-// made: the view does not fit the window, or there is no room to
-// answer.
+// made: the view does not fit the prompt limit the window and the input cap
+// make, or the window leaves no room to answer.
 //
 // The gate settles the run as context_exhausted in both cases, so a
 // switch warns exactly when the gate would settle.
 //
 // The caller holds the session's lock.
-func (s *Session) contextExhaustedLocked(limit int) (bool, string) {
+func (s *Session) contextExhaustedLocked(limit, inputLimit int) (bool, string) {
 	estimated := s.est.estimate(s.modelMessagesLocked())
-	if float64(estimated) >= s.opts.HardRatio*float64(limit) {
-		return true, fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token window",
-			estimated, int(s.opts.HardRatio*100), limit)
+	prompt := promptLimit(limit, inputLimit)
+	if float64(estimated) >= s.opts.HardRatio*float64(prompt) {
+		return true, fmt.Sprintf("the estimated input of %d tokens is at or above %d%% of the %d-token prompt limit",
+			estimated, int(s.opts.HardRatio*100), prompt)
 	}
 	room := limit - estimated - OutputReserve
 	if room < MinOutputTokens {

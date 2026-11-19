@@ -295,8 +295,8 @@ func liveTurns(turns []poo.TurnSummary) []poo.TurnSummary {
 // tailTokens returns how many tokens the verbatim tail may hold.
 func (c *Compactor) tailTokens(budget poo.ContextBudget) int {
 	keep := c.keepRecent
-	if budget.ContextLimit > 0 {
-		if share := int(float64(budget.ContextLimit) * tailShare); share < keep {
+	if limit := budget.PromptLimit(); limit > 0 {
+		if share := int(float64(limit) * tailShare); share < keep {
 			keep = share
 		}
 	}

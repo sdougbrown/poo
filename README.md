@@ -112,11 +112,16 @@ endpoints:
 The file is YAML, and JSON is read as an alternative spelling of it. Its
 vocabulary is the settings' own: `endpoint`, `api`, `api_key_env`,
 `skip_probe`, `instructions_per_question` and `models` on an endpoint,
-and `model_id`, `ops`, `inputs`, `context_limit`, `max_output`,
-`reasoning`, `reasoning_levels`, `tools_mode`, `quirks` and `sampling`
-on a model. A model's name is `endpoint/id`, so
+and `model_id`, `ops`, `inputs`, `context_limit`, `input_limit`,
+`max_output`, `reasoning`, `reasoning_levels`, `tools_mode`, `quirks`
+and `sampling` on a model. A model's name is `endpoint/id`, so
 `roles.chat: home/qwen3` runs a model the settings never mention. A key
 this file does not have is a failure that names it.
+
+`context_limit` is the whole window the prompt and the answer share.
+`input_limit` is the largest prompt the endpoint accepts, for one that takes
+less than its window: poo bounds the prompt by the smaller of the two, and
+still sizes the answer from the window. It reads the same in the settings.
 
 A literal `api_key` is refused: a models file is the one an operator shares or
 checks in. Name `api_key_env` for the environment variable that holds the key,

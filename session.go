@@ -584,11 +584,11 @@ type Options struct {
 	// StopConditions are the conditions that end a run. Each one that
 	// matches adds a candidate stop_requested.
 	StopConditions []StopCondition
-	// NoticeRatio is the share of the window at which the model is
-	// told that the context is filling up. It defaults to 0.80.
+	// NoticeRatio is the share of the prompt limit at which the model
+	// is told that the context is filling up. It defaults to 0.80.
 	NoticeRatio float64
-	// HardRatio is the share of the window at which the run stops. It
-	// defaults to 0.97.
+	// HardRatio is the share of the prompt limit at which the run
+	// stops. It defaults to 0.97.
 	HardRatio float64
 	// Compactor is the strategy that compacts the view. A session
 	// without one never enters the compacting state.
@@ -844,10 +844,10 @@ const (
 	// DefaultMaxContinuations is how many BeforeSettle continuations a
 	// run may take.
 	DefaultMaxContinuations = 3
-	// DefaultNoticeRatio is the share of the context window at which
-	// the model is told that the context is filling up.
+	// DefaultNoticeRatio is the share of the prompt limit at which the
+	// model is told that the context is filling up.
 	DefaultNoticeRatio = 0.80
-	// DefaultHardRatio is the share of the context window at which the
+	// DefaultHardRatio is the share of the prompt limit at which the
 	// run stops.
 	DefaultHardRatio = 0.97
 	// DefaultHookTimeout bounds one hook call.
@@ -1219,6 +1219,7 @@ func (s *Session) budgetLocked() ContextBudget {
 	}
 	return ContextBudget{
 		ContextLimit:   s.opts.Model.ContextLimit,
+		InputLimit:     s.opts.Model.InputLimit,
 		EstimatedInput: s.estimatedInputLocked(),
 		NoticeRatio:    s.opts.NoticeRatio,
 		HardRatio:      s.opts.HardRatio,
