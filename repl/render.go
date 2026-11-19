@@ -968,9 +968,8 @@ func (r *renderer) previewContentWidth() int {
 
 // settle renders a run's outcome and what it cost.
 //
-// A run that stopped on the output limit carries the settle's text as a
-// warning under the line, because the line alone reads as a stall. Another
-// reason's text is not repeated here.
+// A run that stopped on the output limit writes the settle's text as a
+// warning under the line, because the line alone reads as a stall.
 func (r *renderer) settle(reason string, turns int, input, output int, text string) {
 	line := ansiDim + fmt.Sprintf("✓ %s · %d turn(s) · %s in · %s out",
 		reason, turns, shortTokens(input), shortTokens(output)) + ansiReset
@@ -986,8 +985,10 @@ func (r *renderer) notice(format string, args ...any) {
 }
 
 // warning writes a warning the session reported.
+//
+// The text may carry names an endpoint chose, so it is made safe to print.
 func (r *renderer) warning(text string) {
-	r.write(ansiYellow + "⚠ " + text + ansiReset + "\n")
+	r.write(ansiYellow + "⚠ " + sanitizeText(text) + ansiReset + "\n")
 }
 
 // failure writes a failure the repl could not get past.

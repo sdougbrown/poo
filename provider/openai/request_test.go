@@ -47,7 +47,7 @@ func TestTheMaxTokensAreComputed(t *testing.T) {
 			srv := newSSEServer(t, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
 			tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", ModelInfo: c.info})
 
-			reader, _, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m"})
+			reader, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{Model: "m"})
 			if err != nil {
 				t.Fatalf("starting the request: %v", err)
 			}
@@ -60,6 +60,9 @@ func TestTheMaxTokensAreComputed(t *testing.T) {
 			}
 			if got != c.want {
 				t.Errorf("max_tokens is %v, want %v", got, c.want)
+			}
+			if float64(rendered.MaxTokens) != got {
+				t.Errorf("the snapshot's output limit is %d, want the body's %v", rendered.MaxTokens, got)
 			}
 		})
 	}

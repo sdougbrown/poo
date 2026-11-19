@@ -61,6 +61,19 @@ type ModelInfo struct {
 	Source map[string]string `json:"source,omitempty"`
 }
 
+// LayerSettings is the Source layer name for a field the user's own
+// settings set.
+const LayerSettings = "settings"
+
+// DeclaredInSettings reports whether the user's settings declare the model.
+//
+// A settings model is declared by its endpoint and model_id, so the layer
+// that set the model_id is the layer that declared the model. A model the
+// catalog found some other way has no settings entry to edit.
+func (m ModelInfo) DeclaredInSettings() bool {
+	return m.Source["model_id"] == LayerSettings
+}
+
 // Op names an operation a model serves.
 type Op string
 

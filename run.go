@@ -720,7 +720,7 @@ func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *respons
 	naturalDetail := SettleDetail{Source: string(natural)}
 	if resp.finish == FinishLength {
 		natural = ReasonOutputTruncated
-		naturalDetail = SettleDetail{Source: string(natural), Text: resp.truncation}
+		naturalDetail = resp.truncation
 	}
 
 	// A job started by this run that is still running holds the run
@@ -1290,7 +1290,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	})
 	if resp != nil {
 		resp.requestChars = requestChars
-		resp.truncation = limit.Explain(model)
+		resp.truncation = limit.Truncation(model, rendered.MaxTokens)
 	}
 	if err != nil && resp != nil && resp.usage == nil {
 		if reporter, ok := reader.(UsageReporter); ok {
@@ -1862,9 +1862,10 @@ type response struct {
 	// requestChars is the serialized size of the view the request sent,
 	// which is what the endpoint's input token count measures.
 	requestChars int
-	// truncation says which output limit the request carried, for a
-	// response that stopped on it.
-	truncation string
+	// truncation is the settle detail for a response that stopped on the
+	// output limit: the limit the request's body carried, and where it
+	// came from.
+	truncation SettleDetail
 	// errors are the failures the transport reported about the
 	// response.
 	errors []StreamError

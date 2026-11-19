@@ -23,7 +23,7 @@ const (
 	ReasoningPathToggle = "chat_template_kwargs.enable_thinking"
 )
 
-// OutputLimitSource names which limit set a request's max_tokens.
+// OutputLimitSource names which limit a response stopped on.
 type OutputLimitSource string
 
 const (
@@ -35,6 +35,9 @@ const (
 	// OutputLimitContext is the room the context window leaves after the
 	// prompt, when that is under the model's output limit.
 	OutputLimitContext OutputLimitSource = "context"
+	// OutputLimitEndpoint is the endpoint's own limit, for a request
+	// that carried none.
+	OutputLimitEndpoint OutputLimitSource = "endpoint"
 )
 
 // OutputLimit is the output room a request carries and the limit that
@@ -44,28 +47,48 @@ type OutputLimit struct {
 	Tokens int
 	// Source is the limit that set Tokens.
 	Source OutputLimitSource
+	// Input is the estimated size of the prompt the room was computed
+	// after, and Window the context window it was computed against.
+	Input, Window int
 }
 
-// Explain says which limit a truncated response hit, for the model that
-// was asked.
+// Truncation describes the stop of a response that hit the output limit.
 //
-// A model with no declared output limit is told the setting that raises
-// it, named by the model's settings name or, without one, its model id.
-func (l OutputLimit) Explain(info ModelInfo) string {
-	switch l.Source {
-	case OutputLimitDefault:
-		name := info.Name
-		if name == "" {
-			name = info.ModelID
-		}
-		return fmt.Sprintf("the response stopped at max_tokens %d, poo's default for a model with no max_output; set models.%s.max_output to raise it",
-			l.Tokens, name)
-	case OutputLimitContext:
-		return fmt.Sprintf("the response stopped at max_tokens %d, all the room the context window had left; the context is nearly full",
-			l.Tokens)
-	default:
-		return fmt.Sprintf("the response stopped at max_tokens %d, the model's max_output", l.Tokens)
+// sent is the output limit the transport's request body carried, which
+// is what the response stopped on; a body that carried none was stopped by
+// the endpoint's own limit. The source is the settle's output_truncated
+// source, with the cause after the colon, and the text says the cause in a
+// sentence. A model with no declared output limit is told the setting that
+// raises it: the model's entry when the settings declare the model, a
+// declaration otherwise.
+func (l OutputLimit) Truncation(info ModelInfo, sent int) SettleDetail {
+	if sent <= 0 {
+		l.Source = OutputLimitEndpoint
+	} else {
+		l.Tokens = sent
 	}
+	detail := SettleDetail{Source: string(ReasonOutputTruncated) + ":" + string(l.Source)}
+	switch l.Source {
+	case OutputLimitEndpoint:
+		detail.Text = "the response stopped on the endpoint's own output limit; poo sends this endpoint none"
+	case OutputLimitDefault:
+		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, poo's default for a model with no max_output; ", l.Tokens)
+		if info.DeclaredInSettings() {
+			name := info.Name
+			if name == "" {
+				name = info.ModelID
+			}
+			detail.Text += fmt.Sprintf("set models.%s.max_output to raise it", name)
+		} else {
+			detail.Text += "declare the model in settings with its endpoint, model_id and max_output to raise it"
+		}
+	case OutputLimitContext:
+		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, all the room the context window had left (about %d of %d tokens in use)",
+			l.Tokens, l.Input, l.Window)
+	default:
+		detail.Text = fmt.Sprintf("the response stopped at max_tokens %d, the model's max_output", l.Tokens)
+	}
+	return detail
 }
 
 // MaxTokens computes the output room for a request against a model.
@@ -81,14 +104,14 @@ func MaxTokens(info ModelInfo, estimatedInput int) int {
 // OutputLimit computes the output room for a request against the model,
 // and names the limit that set it.
 func (m ModelInfo) OutputLimit(estimatedInput int) OutputLimit {
-	limit := OutputLimit{Tokens: m.MaxOutput, Source: OutputLimitModel}
+	limit := OutputLimit{Tokens: m.MaxOutput, Source: OutputLimitModel, Input: estimatedInput, Window: m.ContextLimit}
 	if limit.Tokens <= 0 {
-		limit = OutputLimit{Tokens: DefaultMaxOutput, Source: OutputLimitDefault}
+		limit.Tokens, limit.Source = DefaultMaxOutput, OutputLimitDefault
 	}
 	if m.ContextLimit > 0 {
 		room := m.ContextLimit - estimatedInput - OutputReserve
 		if room < limit.Tokens {
-			limit = OutputLimit{Tokens: room, Source: OutputLimitContext}
+			limit.Tokens, limit.Source = room, OutputLimitContext
 		}
 	}
 	return limit

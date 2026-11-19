@@ -37,7 +37,7 @@ func TestEverySettleReasonHasAWayToReachIt(t *testing.T) {
 		{
 			name:   "output_truncated",
 			want:   poo.ReasonOutputTruncated,
-			source: "output_truncated",
+			source: "output_truncated:default",
 			build: func(t *testing.T, opts *poo.Options) *poo.Session {
 				opts.Transport = scripted([]fakeResponse{{
 					text:   "half an ans",

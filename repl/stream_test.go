@@ -322,6 +322,34 @@ func TestASessionThatEndsMidMessageRendersTheReply(t *testing.T) {
 	}
 }
 
+// TestATruncatedRunsExplanationReachesTheScreenOverTheWire covers the
+// event path: a run.settled whose reason is output_truncated carries its
+// detail text, and the repl prints it as a warning under the settle line.
+func TestATruncatedRunsExplanationReachesTheScreenOverTheWire(t *testing.T) {
+	const why = "the response stopped at max_tokens 8192, poo's default for a model with no max_output; set models.glm-flash.max_output to raise it"
+	server := &fakeServer{t: t}
+	server.script = func(s *fakeServer) {
+		s.event("turn.started", map[string]any{"run_id": "r1", "turn": 1})
+		s.event("turn.ended", map[string]any{"run_id": "r1", "turn": 1})
+		s.event("run.settled", map[string]any{
+			"run_id": "r1", "reason": "output_truncated", "turns": 1,
+			"detail": map[string]any{"source": "output_truncated:default", "text": why},
+		})
+	}
+	out, _ := startReplServer(t, "think hard\n/quit\n", server)
+
+	lines := strings.Split(ansi.Strip(out), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "✓ output_truncated") {
+			if i+1 >= len(lines) || lines[i+1] != "⚠ "+why {
+				t.Fatalf("the line under the settle is not the warning with the explanation:\n%s", ansi.Strip(out))
+			}
+			return
+		}
+	}
+	t.Errorf("the settle line never reached the screen:\n%s", ansi.Strip(out))
+}
+
 // TestAServerThatDiesMidMessageEndsTheSession covers the loop's exit on
 // a lost server: the session ends with the failure code rather than
 // waiting on a wire nothing will answer.

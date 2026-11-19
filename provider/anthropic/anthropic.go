@@ -124,6 +124,7 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		Body:      body,
 		Messages:  len(req.Messages),
 		SessionID: req.SessionID,
+		MaxTokens: maxTokens(req, t.modelInfo(req)),
 	}
 
 	open := func(ctx context.Context) (support.Reader, error) {
@@ -179,10 +180,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 
 // buildBody turns a request into the wire body it is sent as.
 func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
-	info := req.ModelInfo
-	if transport.ZeroModelInfo(info) {
-		info = t.cfg.ModelInfo
-	}
+	info := t.modelInfo(req)
 	messages, system, err := anthropic.Messages(req.Messages)
 	if err != nil {
 		return nil, err
@@ -206,6 +204,15 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	}
 	request.Params = params
 	return anthropic.Encode(request)
+}
+
+// modelInfo returns the model info a request is shaped by: the request's
+// own, or the transport's when the request names none.
+func (t *Transport) modelInfo(req poo.ChatRequest) poo.ModelInfo {
+	if transport.ZeroModelInfo(req.ModelInfo) {
+		return t.cfg.ModelInfo
+	}
+	return req.ModelInfo
 }
 
 // takesNativeTools reports whether the model's own tools mode carries calls

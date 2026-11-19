@@ -306,9 +306,10 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 
 	t.requests = append(t.requests, copyRequest(req))
 	rendered := poo.Rendered{
-		API:      poo.APIChatCompletions,
-		Body:     renderBody(req),
-		Messages: len(req.Messages),
+		API:       poo.APIChatCompletions,
+		Body:      renderBody(req),
+		Messages:  len(req.Messages),
+		MaxTokens: req.MaxTokens,
 	}
 	t.rendered = append(t.rendered, copyRendered(rendered))
 

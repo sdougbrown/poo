@@ -139,6 +139,13 @@ func TestATruncatedSettleCarriesItsExplanationAsANotice(t *testing.T) {
 	}
 
 	out.Reset()
+	r.settle("output_truncated", 1, 64300, 8200, "stopped at \x1b[31mmodel\x1b]0;title\x07 id")
+	written := strings.NewReplacer(ansiDim, "", ansiYellow, "", ansiReset, "").Replace(out.String())
+	if strings.ContainsAny(written, "\x1b\x07") || !strings.Contains(written, "⚠ stopped at model id") {
+		t.Errorf("the notice let a model's escape sequence through:\n%q", out.String())
+	}
+
+	out.Reset()
 	r.settle("end_turn", 1, 1000, 100, why)
 	if strings.Contains(out.String(), why) {
 		t.Errorf("a settle that is not truncated carries the notice:\n%s", out.String())

@@ -967,3 +967,28 @@ func TestAFinishedCallThatDisagreesIsLeftAlone(t *testing.T) {
 		t.Errorf("the call's arguments are %q, want the fragments the core already assembled", arguments)
 	}
 }
+
+// TestTheSnapshotCarriesNoOutputLimit covers the body's shape: the endpoint
+// takes no output limit, so the snapshot says the request carried none even
+// when the caller computed one.
+func TestTheSnapshotCarriesNoOutputLimit(t *testing.T) {
+	srv := newServer(t,
+		frame(`{"type":"response.completed","response":{"status":"completed"}}`)+done,
+	)
+	tr := newTransport(srv.URL)
+
+	reader, rendered, err := tr.Stream(context.Background(), poo.ChatRequest{
+		Model:     "gpt-6.1-sol",
+		Messages:  []poo.Message{poo.NewTextMessage(poo.RoleUser, "hi")},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	defer reader.Close()
+	read(t, reader)
+
+	if rendered.MaxTokens != 0 {
+		t.Errorf("the snapshot's output limit is %d, want none", rendered.MaxTokens)
+	}
+}
