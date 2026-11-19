@@ -3,6 +3,7 @@ package repl
 import (
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // status is what the statusline says. The repl fills it in as it
@@ -10,6 +11,11 @@ import (
 // accounting, and the working directory names the folder and the
 // branch.
 type status struct {
+	// mu guards the fields: the mutations and the render run on two
+	// goroutines — the session's loop and the editor's keys — and a
+	// render that tore a concurrent write would paint a row no one
+	// asked for.
+	mu sync.Mutex
 	// dir is the directory the session's tools work in.
 	dir string
 	// branch is the git branch of dir, when dir is a repository.
@@ -59,10 +65,37 @@ func newStatus(dir string) *status {
 	return s
 }
 
+// mutate applies fn to the fields under the status's lock. The
+// status's changes funnel through it, so a change and its read cannot
+// tear each other.
+func (s *status) mutate(fn func(*status)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn(s)
+}
+
+// chatModel returns the name the session's chat model answers to.
+func (s *status) chatModel() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.model
+}
+
+// reasoning returns the level the session runs at.
+func (s *status) reasoning() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.level
+}
+
 // line renders the statusline: the folder, the branch, the model and
 // the context's fill, dimmed to stay behind the conversation. The repl
 // sends it to the footer's bottom row, below the editor's own rows.
+// The render takes the lock the mutations hold, so it never tears a
+// concurrent write.
 func (s *status) line() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var segments []string
 	if s.dir != "" {
 		segments = append(segments, "⌂ "+folderName(s.dir))

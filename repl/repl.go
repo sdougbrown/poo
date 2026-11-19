@@ -436,7 +436,7 @@ func (m *machine) prompt() string {
 // change and its paint cannot separate: a writer that skips it leaves
 // the row standing on the last pushed line.
 func (m *machine) mutateStatus(fn func(*status)) {
-	fn(m.status)
+	m.status.mutate(fn)
 	m.paintStatusline()
 }
 
@@ -884,7 +884,7 @@ func (m *machine) switchModel(fragment string) {
 		m.configureModel(fragment)
 		return
 	}
-	matches := rankModels(m.catalogNames(), fragment, m.status.model)
+	matches := rankModels(m.catalogNames(), fragment, m.status.chatModel())
 	switch len(matches) {
 	case 0:
 		m.lastMatches = nil
@@ -926,7 +926,7 @@ func (m *machine) listModels(names []string, hint string) {
 	m.lastMatches = names
 	for i, name := range names {
 		shown := name
-		if name == m.status.model {
+		if name == m.status.chatModel() {
 			shown += " ←"
 		}
 		m.r.notice("%d. %s · %s", i+1, shown, m.catalog[name].ModelID)
@@ -960,7 +960,7 @@ func (m *machine) configureModel(name string) {
 	// The level is the new model's to take, so the wire says where the
 	// session runs now: a model that cannot take the level it had takes
 	// the session to another one, and the repl says so.
-	if res.Reasoning != m.status.level {
+	if res.Reasoning != m.status.reasoning() {
 		m.r.notice("thinking → %s", levelName(res.Reasoning))
 	}
 	m.mutateStatus(func(s *status) { s.level = res.Reasoning })
@@ -984,7 +984,7 @@ func (m *machine) thinking(level string) {
 		m.r.failure(err.Error())
 		return
 	}
-	m.r.notice("thinking → %s", levelName(m.status.level))
+	m.r.notice("thinking → %s", levelName(m.status.reasoning()))
 }
 
 // nextThinkingLevel returns the level after the session's, wrapping at the
@@ -997,7 +997,7 @@ func (m *machine) thinking(level string) {
 // type, rather than a level the server refuses on every press.
 func (m *machine) nextThinkingLevel() (level string, ok bool, notice string) {
 	levels := namedLevels
-	if info, ok := m.catalog[m.status.model]; ok {
+	if info, ok := m.catalog[m.status.chatModel()]; ok {
 		switch {
 		case len(info.ReasoningLevels) > 0:
 			levels = info.ReasoningLevels
@@ -1008,7 +1008,7 @@ func (m *machine) nextThinkingLevel() (level string, ok bool, notice string) {
 		}
 	}
 	for i, level := range levels {
-		if strings.EqualFold(level, m.status.level) {
+		if strings.EqualFold(level, m.status.reasoning()) {
 			return levels[(i+1)%len(levels)], true, ""
 		}
 	}
