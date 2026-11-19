@@ -62,7 +62,7 @@ func TestAResizeKeepsTheHintBeforeTheFirstDelta(t *testing.T) {
 	r.liveWidth = func() int { return width }
 	r.userPrompt("go")
 	r.hint()
-	if rowOf(t, scr, "… writing") < 0 {
+	if rowOf(t, scr, "⠋ writing") < 0 {
 		t.Fatalf("the hint never showed:\n%s", scr.text())
 	}
 
@@ -74,7 +74,7 @@ func TestAResizeKeepsTheHintBeforeTheFirstDelta(t *testing.T) {
 	r.rewrap(width)
 	r.repaintPreview()
 
-	if rowOf(t, scr, "… writing") < 0 {
+	if rowOf(t, scr, "⠋ writing") < 0 {
 		t.Errorf("the hint was lost to the resize:\n%s", scr.text())
 	}
 }
@@ -83,13 +83,13 @@ func TestAHintEndsBeforeAToolCall(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.userPrompt("go")
 	r.hint()
-	if rowOf(t, scr, "… writing") < 0 {
+	if rowOf(t, scr, "⠋ writing") < 0 {
 		t.Fatalf("the hint never showed:\n%s", scr.text())
 	}
 	r.toolCall("bash", "ls")
 
 	drawn := scr.text()
-	if rowOf(t, scr, "… writing") >= 0 {
+	if rowOf(t, scr, "⠋ writing") >= 0 {
 		t.Errorf("the hint stood over the tool call:\n%s", drawn)
 	}
 	if rowOf(t, scr, "⚙ bash") < 0 {

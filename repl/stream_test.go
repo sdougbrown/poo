@@ -48,12 +48,12 @@ func TestTheWritingHintStandsUntilTheFirstDeltaArrives(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.hint()
 	r.hint()
-	if got := countOf(t, scr, "… writing"); got != 1 {
+	if got := countOf(t, scr, "⠋ writing"); got != 1 {
 		t.Fatalf("the hint shows %d time(s), want 1 once:\n%s", got, scr.text())
 	}
 
 	r.streamDelta("m1", "text", "Hi")
-	if rowOf(t, scr, "… writing") >= 0 {
+	if rowOf(t, scr, "⠋ writing") >= 0 {
 		t.Errorf("the hint stayed on the terminal after the text arrived:\n%s", scr.text())
 	}
 	if rowOf(t, scr, "Hi") < 0 {
@@ -76,11 +76,11 @@ func TestTheWritingHintStandsUntilTheFirstDeltaArrives(t *testing.T) {
 func TestTheHintComesOffAtTheFlush(t *testing.T) {
 	scr, r := aScreen(t, 40)
 	r.hint()
-	if rowOf(t, scr, "… writing") < 0 {
+	if rowOf(t, scr, "⠋ writing") < 0 {
 		t.Fatalf("the hint never showed:\n%s", scr.text())
 	}
 	r.finish()
-	if rowOf(t, scr, "… writing") >= 0 {
+	if rowOf(t, scr, "⠋ writing") >= 0 {
 		t.Errorf("the flush left the hint on the screen:\n%s", scr.text())
 	}
 	if got := r.transcriptText(); got != "" {

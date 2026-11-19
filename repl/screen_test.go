@@ -148,11 +148,11 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 
 	// The hint stands on its own sealed row and survives typing too.
 	r.hint()
-	if rowOf(t, scr, "… writing") < 0 {
+	if rowOf(t, scr, "⠋ writing") < 0 {
 		t.Fatalf("the hint never showed:\n%s", scr.text())
 	}
 	scr.typeText("wa")
-	if rowOf(t, scr, "… writing") < 0 {
+	if rowOf(t, scr, "⠋ writing") < 0 {
 		t.Fatalf("typing took the hint off the screen:\n%s", scr.text())
 	}
 
@@ -172,7 +172,7 @@ func TestTheScreenKeepsTheStreamWhileTheDraftTypes(t *testing.T) {
 	if got := countOf(t, scr, "Hello, world."); got != 1 {
 		t.Fatalf("the streamed text reads %d time(s) on the screen, want 1:\n%s", got, scr.text())
 	}
-	if rowOf(t, scr, "… writing") >= 0 {
+	if rowOf(t, scr, "⠋ writing") >= 0 {
 		t.Errorf("the hint stood over the text:\n%s", scr.text())
 	}
 	if rowOf(t, scr, promptMark+"watch") < 0 {

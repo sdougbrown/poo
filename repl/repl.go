@@ -290,6 +290,8 @@ func (m *machine) run() int {
 			}
 		case <-m.frameTick():
 			m.r.paintPending()
+			m.r.paintHintFrame()
+			m.r.paintSpinner()
 		case <-resizes:
 			// The terminal changed size: reserve the footer again at
 			// the new geometry and redraw the prompt where it now
@@ -1159,6 +1161,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		tool, _ := evt.Payload["tool"].(string)
 		summary, _ := evt.Payload["summary"].(string)
 		m.r.toolCall(tool, summary)
+		m.r.armSpinner(tool, summary)
 	case "tool.result":
 		tool, _ := evt.Payload["tool"].(string)
 		outcome, _ := evt.Payload["outcome"].(string)
@@ -1167,6 +1170,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 		if n, ok := evt.Payload["elided_chars"].(float64); ok {
 			elided = int(n)
 		}
+		m.r.takeSpinner()
 		m.r.toolResult(tool, outcome, text, elided)
 	case "usage":
 		if raw, err := json.Marshal(evt.Payload); err == nil {
