@@ -248,6 +248,29 @@ func TestADiscoveredModelSpeaksItsEndpointsAPI(t *testing.T) {
 	if model.API != poo.APIChatCompletions {
 		t.Errorf("the API is %q, want the chat-completions default", model.API)
 	}
+
+	// A model's own word wins: the layer that named the model says which
+	// API it speaks, and the endpoint's declaration answers only for the
+	// models no layer named.
+	named := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"gateway": {Endpoint: server.URL + "/v1", API: poo.APIAnthropicMessages},
+		},
+		Models: map[string]catalog.ModelSettings{
+			"gateway/glm-5.3": {Endpoint: "gateway", ModelID: "glm-5.3", API: poo.APIChatCompletions},
+		},
+	}
+	overridden := catalog.New(catalog.Options{Settings: named, StateDir: t.TempDir()})
+	if err := overridden.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	named2, err := overridden.Resolve("gateway/glm-5.3")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if named2.API != poo.APIChatCompletions {
+		t.Errorf("the API is %q, want the model's own word", named2.API)
+	}
 }
 
 func TestTheVLLMProbeReadsTheModelList(t *testing.T) {

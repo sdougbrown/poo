@@ -86,13 +86,20 @@ type Tool struct {
 
 // Tools turns the core's tool specs into the wire shape, in the stable order
 // the core sorts them into.
+//
+// A spec with no schema is a tool that opted out of one, and the API takes
+// no tool without an input schema, so the tool is sent the empty object.
 func Tools(specs []poo.ToolSpec) []Tool {
 	var out []Tool
 	for _, spec := range specs {
+		schema := spec.Schema
+		if len(schema) == 0 {
+			schema = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
 		out = append(out, Tool{
 			Name:        spec.Name,
 			Description: spec.Description,
-			InputSchema: spec.Schema,
+			InputSchema: schema,
 		})
 	}
 	return out

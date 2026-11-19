@@ -247,6 +247,8 @@ func wireAPI(provider, api string) (string, error) {
 		if provider == auth.ProviderCodex {
 			return string(poo.APIResponses), nil
 		}
+	case "anthropic-messages":
+		return string(poo.APIAnthropicMessages), nil
 	}
 	return "", fmt.Errorf("the provider %s speaks %q, which poo does not know", provider, api)
 }

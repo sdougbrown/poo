@@ -76,6 +76,18 @@ func Messages(msgs []poo.Message) ([]Message, string, error) {
 			system = append(system, text)
 			continue
 		case poo.RoleUser, poo.RoleAssistant:
+		case poo.RoleTool:
+			// A tool's result is the user message that answers the call,
+			// so a run's tool results arrive as user messages with result
+			// blocks.
+			blocks, err := blocks(m)
+			if err != nil {
+				return nil, "", err
+			}
+			if len(blocks) > 0 {
+				out = append(out, Message{Role: "user", Content: blocks})
+			}
+			continue
 		default:
 			return nil, "", &poo.ProviderError{
 				Kind:    poo.ProviderKindInvalidRequest,
@@ -122,10 +134,11 @@ func blocks(m poo.Message) ([]Block, error) {
 	var out []Block
 	var pending []Block
 	for _, c := range m.Content {
-		if c.Provider != nil && c.Kind != poo.ContentThinking {
-			// A thinking block's companion is its signature, which the
-			// block itself carries. Every other block's companion is one
-			// the Messages API has no place for.
+		// A thinking block's own companion is its signature, which the
+		// block carries. Every other companion — and a thinking block's
+		// companion when it belongs to another API — is data the Messages
+		// request has no place for.
+		if c.Provider != nil && !(c.Kind == poo.ContentThinking && c.Provider.API == poo.APIAnthropicMessages) {
 			if err := support.CarryError(poo.APIAnthropicMessages, false, c.Provider); err != nil {
 				return nil, err
 			}
@@ -153,10 +166,6 @@ func blocks(m poo.Message) ([]Block, error) {
 				continue
 			}
 			pending = append(pending, block)
-		case poo.ContentProvider:
-			if err := support.CarryError(poo.APIAnthropicMessages, false, c.Provider); err != nil {
-				return nil, err
-			}
 		}
 	}
 	// An attachment rides after the blocks of its own message: the API

@@ -10,6 +10,13 @@ import (
 	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
+// maxToolArguments bounds the arguments one tool call accumulates.
+//
+// A stream that never ends its block, or ends it after a boundless run of
+// fragments, is a stream a hostile endpoint can hold open and fill; the
+// bound is what the request refuses rather than a limit a model hits.
+const maxToolArguments = 4 << 20
+
 // streamEvent is the wire shape of one SSE data payload.
 type streamEvent struct {
 	Type string `json:"type"`
@@ -88,9 +95,13 @@ type Reader struct {
 	// of the block that carries them, so the arguments a call accumulates
 	// stay with the call they belong to.
 	calls map[int]*poo.ToolCallDelta
-	// signatures holds the signatures the thinking blocks carried, in the
-	// order their blocks opened.
-	signatures []string
+	// signature holds the first thinking signature the response carried.
+	//
+	// The core attaches one signature to the one thinking block it keeps,
+	// so the first is the one the next request carries back. A later
+	// signature has no block of its own to ride, and reporting it as
+	// required data would end the session on the next turn.
+	signature string
 }
 
 // NewReader returns a reader over the answer a request opened.
@@ -174,7 +185,11 @@ func (r *Reader) dispatch(payload []byte) error {
 				Origin: poo.CallOriginWire,
 			}
 			r.calls[event.Index] = call
-			r.pending = append(r.pending, poo.StreamItem{Kind: "tool_call", ToolCall: call})
+			// The event carries a copy, not the call itself: the call is
+			// the one the fragments accumulate into, and an event that
+			// shares it would change as the block goes on.
+			out := *call
+			r.pending = append(r.pending, poo.StreamItem{Kind: "tool_call", ToolCall: &out})
 		}
 	case "content_block_delta":
 		if event.Delta == nil {
@@ -198,8 +213,8 @@ func (r *Reader) dispatch(payload []byte) error {
 				})
 			}
 		case "signature_delta":
-			if event.Delta.Signature != "" {
-				r.signatures = append(r.signatures, event.Delta.Signature)
+			if event.Delta.Signature != "" && r.signature == "" {
+				r.signature = event.Delta.Signature
 			}
 		case "input_json_delta":
 			call, ok := r.calls[event.Index]
@@ -208,15 +223,26 @@ func (r *Reader) dispatch(payload []byte) error {
 			}
 			r.ttft.Mark()
 			call.Arguments = append(call.Arguments, event.Delta.PartialJSON...)
+			if len(call.Arguments) > maxToolArguments {
+				return &poo.ProviderError{
+					Kind:    poo.ProviderKindServer,
+					Message: "the tool arguments a block accumulated exceed the bound a request accepts",
+				}
+			}
+			// Only the part the core has not seen is emitted, because the
+			// core assembles a call by appending its fragments.
 			out := *call
-			out.Arguments = append([]byte(nil), call.Arguments...)
-			out.Complete = support.IsCompleteJSON(string(out.Arguments))
+			out.Arguments = []byte(event.Delta.PartialJSON)
+			out.Complete = support.IsCompleteJSON(string(call.Arguments))
 			r.pending = append(r.pending, poo.StreamItem{Kind: "tool_call", ToolCall: &out})
 		}
 	case "content_block_stop":
 		if call, ok := r.calls[event.Index]; ok && !call.Complete {
+			// The block ended. What it accumulated is whole now, and the
+			// core has already seen every fragment of it.
+			call.Complete = true
 			out := *call
-			out.Arguments = append([]byte(nil), call.Arguments...)
+			out.Arguments = nil
 			out.Complete = true
 			r.pending = append(r.pending, poo.StreamItem{Kind: "tool_call", ToolCall: &out})
 		}
@@ -252,7 +278,9 @@ func finish(reason string) poo.FinishReason {
 // recordUsage folds a usage report into the one the reader holds.
 //
 // The report opens with the input the request cost and closes with the
-// output the answer cost, so each report fills in what it carries.
+// output the answer cost, so each report fills in what it carries. The
+// input the API reports leaves out the tokens its prompt cache served,
+// and the run charges the whole prompt, so the cached counts fold in.
 func (r *Reader) recordUsage(u *Usage) {
 	if r.usage == nil {
 		r.usage = &poo.UsageReport{}
@@ -260,12 +288,14 @@ func (r *Reader) recordUsage(u *Usage) {
 	if u.InputTokens > 0 {
 		r.usage.InputTokens = u.InputTokens
 	}
+	if u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0 {
+		cached := u.CacheReadInputTokens + u.CacheCreationInputTokens
+		r.usage.InputTokens += cached
+		read := u.CacheReadInputTokens
+		r.usage.CacheReadTokens = &read
+	}
 	if u.OutputTokens > 0 {
 		r.usage.OutputTokens = u.OutputTokens
-	}
-	if u.CacheReadInputTokens > 0 {
-		cached := u.CacheReadInputTokens
-		r.usage.CacheReadTokens = &cached
 	}
 }
 
@@ -320,26 +350,27 @@ func (r *Reader) ReportUsage() *poo.UsageReport {
 	return r.usage
 }
 
-// ReportProviderBlocks returns the thinking signatures the response carried.
+// ReportProviderBlocks returns the thinking signature the response carried.
 //
 // A signature belongs to the request that follows: the API checks a returned
 // thinking block against the one it signed, so the block is required, and
-// the harness carries it beside the thinking it signed.
+// the harness carries it beside the thinking it signed. The first signature
+// is the one reported, because the core keeps one thinking block and
+// attaches one companion to it.
 func (r *Reader) ReportProviderBlocks() []poo.ProviderBlock {
-	var out []poo.ProviderBlock
-	for _, signature := range r.signatures {
-		encoded, err := json.Marshal(signature)
-		if err != nil {
-			continue
-		}
-		out = append(out, poo.ProviderBlock{
-			API:      poo.APIAnthropicMessages,
-			Type:     "thinking_signature",
-			Data:     encoded,
-			Required: true,
-		})
+	if r.signature == "" {
+		return nil
 	}
-	return out
+	encoded, err := json.Marshal(r.signature)
+	if err != nil {
+		return nil
+	}
+	return []poo.ProviderBlock{{
+		API:      poo.APIAnthropicMessages,
+		Type:     "thinking_signature",
+		Data:     encoded,
+		Required: true,
+	}}
 }
 
 // providerError turns an error event into a provider error.

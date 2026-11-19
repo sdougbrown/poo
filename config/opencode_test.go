@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -46,6 +47,10 @@ type opencodeGateway struct {
 	session string
 	// authorization is the Authorization header the last request carried.
 	authorization string
+	// paths are the request paths the requests reached.
+	paths []string
+	// bodies are the request bodies the requests carried.
+	bodies []string
 }
 
 // RoundTrip answers the routes the catalog and the transports reach. A
@@ -56,13 +61,16 @@ func (g *opencodeGateway) RoundTrip(req *http.Request) (*http.Response, error) {
 	defer g.mu.Unlock()
 	g.session = req.Header.Get("x-opencode-session")
 	g.authorization = req.Header.Get("Authorization")
+	g.paths = append(g.paths, req.URL.Path)
+	raw, _ := io.ReadAll(req.Body)
+	g.bodies = append(g.bodies, string(raw))
 	body := `{"data":[{"id":"glm-5.3"}]}`
-	if strings.HasSuffix(req.URL.Path, "/chat/completions") || strings.HasSuffix(req.URL.Path, "/messages") {
-		body = "data: {\"type\":\"message_stop\"}\n\n"
-		if strings.HasSuffix(req.URL.Path, "/messages") {
-			body = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n" +
-				"data: {\"type\":\"message_stop\"}\n\n"
-		}
+	if strings.HasSuffix(req.URL.Path, "/chat/completions") {
+		body = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n"
+	} else if strings.HasSuffix(req.URL.Path, "/messages") {
+		body = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n" +
+			"data: {\"type\":\"message_stop\"}\n\n"
 	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
@@ -311,6 +319,18 @@ func TestTheBuiltinAnthropicEndpointsServeOnTheirKey(t *testing.T) {
 	}
 	if gateway.authorization != "Bearer oc_sk_test" {
 		t.Errorf("the request carried %q, want the stored key", gateway.authorization)
+	}
+	// The Messages transport is the one that served: the request went to
+	// the messages path, in the Messages API's own shape.
+	if !strings.HasSuffix(gateway.paths[len(gateway.paths)-1], "/v1/messages") {
+		t.Errorf("the request went to %q, want the messages path", gateway.paths[len(gateway.paths)-1])
+	}
+	var sent map[string]any
+	if err := json.Unmarshal([]byte(gateway.bodies[len(gateway.bodies)-1]), &sent); err != nil {
+		t.Fatalf("the request body does not decode: %v", err)
+	}
+	if sent["max_tokens"] != float64(32) || sent["stream"] != true {
+		t.Errorf("the request is %v, want a streaming Messages request with the output limit", sent)
 	}
 	// The pay-as-you-go sibling is offered beside the Go one.
 	if _, err := runtime.Catalog.Resolve("opencode-anthropic/claude-haiku-5-5"); err != nil {

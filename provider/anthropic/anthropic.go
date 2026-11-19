@@ -185,10 +185,13 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 		Model:     model(req, t.cfg.Model),
 		Messages:  messages,
 		System:    system,
-		MaxTokens: req.MaxTokens,
+		MaxTokens: maxTokens(req, info),
 		Stream:    true,
 	}
-	if len(req.Tools) > 0 {
+	// A model that takes its calls as text has them described in its
+	// prompt by the core; the wire carries the calls of a model that takes
+	// them natively.
+	if len(req.Tools) > 0 && takesNativeTools(info) {
 		request.Tools = anthropic.Tools(support.SortedTools(req.Tools))
 	}
 	params, err := t.params(req, info)
@@ -197,6 +200,32 @@ func (t *Transport) buildBody(req poo.ChatRequest) ([]byte, error) {
 	}
 	request.Params = params
 	return anthropic.Encode(request)
+}
+
+// takesNativeTools reports whether the model's own tools mode carries calls
+// on the wire. A model that names no mode takes them natively, which is what
+// the Messages API serves.
+func takesNativeTools(info poo.ModelInfo) bool {
+	switch info.Tools.Mode {
+	case poo.ToolsNative, poo.ToolsAuto, "":
+		return true
+	}
+	return false
+}
+
+// maxTokens returns the output limit a request is sent with.
+//
+// The API takes no request without one, so a caller that computed none gets
+// the model's own limit, and a model that names none gets the least the
+// API accepts.
+func maxTokens(req poo.ChatRequest, info poo.ModelInfo) int {
+	if req.MaxTokens > 0 {
+		return req.MaxTokens
+	}
+	if info.MaxOutput > 0 {
+		return info.MaxOutput
+	}
+	return 1
 }
 
 // params returns the request's named parameters: the reasoning the request
@@ -211,15 +240,18 @@ func (t *Transport) params(req poo.ChatRequest, info poo.ModelInfo) (map[string]
 		support.SetNested(params, field.Path, field.Value)
 	}
 	if len(fields) > 0 {
-		// An effort level rides as output_config.effort, and adaptive
-		// thinking is what turns it on: the API names the pair together,
-		// and a request that carries one carries the other.
+		// The thinking field names the kind of thinking a request asks
+		// for, and the API takes no value without it: an effort level
+		// rides as the output config's effort with adaptive thinking, and
+		// a budget rides in the thinking object with thinking enabled.
 		if _, ok := params["output_config"]; ok {
 			support.SetNested(params, "thinking.type", "adaptive")
+		} else if _, ok := params["thinking"]; ok {
+			support.SetNested(params, "thinking.type", "enabled")
 		}
 	}
-	if info.Temperature != poo.TempFixed {
-		sampling := samplingOf(info.Sampling, t.cfg.Sampling)
+	if info.Temperature != poo.TempFixed && info.Temperature != poo.TempUnsupported {
+		sampling := info.EffectiveSampling(t.cfg.Sampling)
 		if v := sampling.Temperature; v != nil {
 			support.SetNested(params, "temperature", *v)
 		}
@@ -254,25 +286,6 @@ func model(req poo.ChatRequest, fallback string) string {
 		return req.Model
 	}
 	return fallback
-}
-
-// samplingOf returns the sampling a request uses: the model's own defaults,
-// with the transport's configured overrides winning field by field.
-func samplingOf(model, override poo.Sampling) poo.Sampling {
-	out := model
-	if override.Temperature != nil {
-		out.Temperature = override.Temperature
-	}
-	if override.TopP != nil {
-		out.TopP = override.TopP
-	}
-	if override.TopK != nil {
-		out.TopK = override.TopK
-	}
-	if override.MinP != nil {
-		out.MinP = override.MinP
-	}
-	return out
 }
 
 // open sends a serialized body and returns the response stream.

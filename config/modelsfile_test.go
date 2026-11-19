@@ -133,7 +133,7 @@ func TestTheSettingsOwnEntriesWinOverAnImport(t *testing.T) {
 }
 
 func TestPIImportRefusesUnsupportedAPIs(t *testing.T) {
-	for _, api := range []string{"openai-responses", "anthropic-messages"} {
+	for _, api := range []string{"openai-responses"} {
 		t.Run(api, func(t *testing.T) {
 			modelsFile := writePIModels(t, `{"providers":{"remote":{"api":"`+api+`","baseUrl":"https://example.com","models":[{"id":"model"}]}}}`)
 			_, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
@@ -141,6 +141,21 @@ func TestPIImportRefusesUnsupportedAPIs(t *testing.T) {
 				t.Fatalf("unsupported API %q was not refused: %v", api, err)
 			}
 		})
+	}
+}
+
+// TestPIImportReadsTheMessagesAPI covers the one import path a Messages
+// endpoint arrives by: pi names the API its own way, and the import maps the
+// name onto the one poo speaks.
+func TestPIImportReadsTheMessagesAPI(t *testing.T) {
+	modelsFile := writePIModels(t, `{"providers":{"remote":{"api":"anthropic-messages","baseUrl":"https://example.com","models":[{"id":"model"}]}}}`)
+	settings, err := Parse([]byte(`{"version":1,"models_file":"`+modelsFile+`"}`), FormatJSON)
+	if err != nil {
+		t.Fatalf("the settings did not read: %v", err)
+	}
+	model := settings.modelsFileLayer.Models["remote/model"]
+	if model.API != poo.APIAnthropicMessages {
+		t.Errorf("the imported model speaks %q, want the Messages API", model.API)
 	}
 }
 
