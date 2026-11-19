@@ -42,7 +42,8 @@ type layout struct {
 
 	// width and height are the terminal's size in cells.
 	width, height int
-	// footer is the rows reserved at the bottom for the editor.
+	// footer is the rows reserved at the screen's bottom: the editor's
+	// rows plus the chrome's two.
 	footer int
 	// last is the row the last committed transcript row was written
 	// on. The next row goes just below it; a row below the region

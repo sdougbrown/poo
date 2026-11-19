@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -232,8 +233,14 @@ func startTerminalRepl(t *testing.T, server *fakeServer) (*terminal, <-chan int)
 
 	code := make(chan int, 1)
 	exited := make(chan struct{})
+	// The working dir's basename rides the statusline's first segment,
+	// so it stays short and explicit: a TempDir's name is the
+	// toolchain's to choose, and a wide one would clip the segments the
+	// footer tests read.
+	dir := filepath.Join(t.TempDir(), "poo")
+	os.MkdirAll(dir, 0o700)
 	opts := Options{
-		WorkingDir: t.TempDir(),
+		WorkingDir: dir,
 		StartServer: func(args []string) (io.WriteCloser, io.ReadCloser, func() error, error) {
 			return stdin, stdout, func() error { return nil }, nil
 		},

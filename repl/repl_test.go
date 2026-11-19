@@ -1096,9 +1096,10 @@ func TestAModelSwitchFallsBackToTheLevelTheModelTakes(t *testing.T) {
 	}
 }
 
-// TestTheStatuslineNamesTheLevelTheSessionOpenedAt covers the read-back:
-// a session that runs at a level says so in the status the footer's
-// bottom row carries.
+// TestTheStatuslineNamesTheLevelTheSessionOpenedAt covers the level's
+// own rendering: 🧠 <level> in the status the footer's bottom row
+// carries. The session-open read-back from the wire is not exercised
+// here.
 func TestTheStatuslineNamesTheLevelTheSessionOpenedAt(t *testing.T) {
 	s := &status{level: "high"}
 	if line := s.line(); !strings.Contains(line, "🧠 high") {
