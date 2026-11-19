@@ -270,6 +270,8 @@ func TestADirectoryNamedLikeSettingsIsNotAFile(t *testing.T) {
 	}
 }
 
+// TestDarwinConfigFallback checks that the native settings file wins when
+// both macOS user directories hold a settings file.
 func TestDarwinConfigFallback(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS settings discovery")
@@ -299,6 +301,8 @@ func TestDarwinConfigFallback(t *testing.T) {
 	}
 }
 
+// TestDarwinConfigFallbackDoesNotSearchRelativeHome keeps a relative HOME
+// from turning .config in the working directory into a user settings source.
 func TestDarwinConfigFallbackDoesNotSearchRelativeHome(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS settings discovery")
