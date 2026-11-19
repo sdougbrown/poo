@@ -44,8 +44,9 @@ func newEditor(m *machine) *editorInput {
 	sh := readline.NewShell()
 	i.rl = sh
 
-	// The session reads the prompt behind the statusline, the ask's
-	// line, or a steer's mark; prompt() swaps it live.
+	// The session reads the prompt behind the ask's line or the mark;
+	// prompt() swaps it live. The statusline is not part of it: the
+	// layout paints the footer's bottom row itself.
 	sh.Prompt.Primary(func() string {
 		i.mu.Lock()
 		defer i.mu.Unlock()

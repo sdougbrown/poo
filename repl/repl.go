@@ -418,7 +418,9 @@ func (m *machine) steer(text string, input input) (int, bool) {
 }
 
 // prompt is the prompt the next read sits behind: the ask's when a
-// decision waits, the statusline's otherwise.
+// decision waits, the mark otherwise. A host with no pinned footer
+// rides the statusline in the prompt instead — the bottom row is the
+// layout's to paint, and there is none.
 func (m *machine) prompt() string {
 	m.askMu.Lock()
 	ask := m.ask
@@ -426,7 +428,31 @@ func (m *machine) prompt() string {
 	if ask != nil {
 		return askPrompt(ask.ask)
 	}
-	return m.status.prompt()
+	if m.r == nil || m.r.layout == nil {
+		if line := m.status.line(); line != "" {
+			return line + " " + promptMark
+		}
+	}
+	return promptMark
+}
+
+// mutateStatus applies fn to the status and repaints the footer's
+// statusline row. The status's changes funnel through here, so a
+// change and its paint cannot separate: a writer that skips it leaves
+// the row standing on the last pushed line.
+func (m *machine) mutateStatus(fn func(*status)) {
+	m.status.mutate(fn)
+	m.paintStatusline()
+}
+
+// paintStatusline sends the statusline to the footer's bottom row. A
+// host without the pinned footer reads nothing here — its prompt
+// carries the statusline instead.
+func (m *machine) paintStatusline() {
+	if m.r == nil || m.r.layout == nil {
+		return
+	}
+	m.r.layout.setStatus(m.status.line())
 }
 
 // askPrompt is the line a permission decision is typed behind.
@@ -492,7 +518,7 @@ func (m *machine) start() error {
 		return err
 	}
 	m.sessionID = session.SessionID
-	m.status.model = session.Models.Chat
+	m.mutateStatus(func(s *status) { s.model = session.Models.Chat })
 	for _, warning := range session.Warnings {
 		m.r.warning(warning)
 	}
@@ -511,7 +537,7 @@ func (m *machine) start() error {
 	for _, model := range catalog.Models {
 		m.catalog[model.Name] = model
 		if model.Name == session.Models.Chat {
-			m.status.setContextLimit(model.ContextLimit)
+			m.mutateStatus(func(s *status) { s.setContextLimit(model.ContextLimit) })
 		}
 	}
 
@@ -523,7 +549,7 @@ func (m *machine) start() error {
 	if err := m.conn.call(protocol.MethodSessionGet, protocol.GetParams{SessionID: m.sessionID}, &current); err != nil {
 		return err
 	}
-	m.status.level = current.Reasoning
+	m.mutateStatus(func(s *status) { s.level = current.Reasoning })
 	if m.opts.ResumeID != "" {
 		m.replay()
 	}
@@ -864,7 +890,7 @@ func (m *machine) switchModel(fragment string) {
 		m.configureModel(fragment)
 		return
 	}
-	matches := rankModels(m.catalogNames(), fragment, m.status.model)
+	matches := rankModels(m.catalogNames(), fragment, m.status.chatModel())
 	switch len(matches) {
 	case 0:
 		m.lastMatches = nil
@@ -906,7 +932,7 @@ func (m *machine) listModels(names []string, hint string) {
 	m.lastMatches = names
 	for i, name := range names {
 		shown := name
-		if name == m.status.model {
+		if name == m.status.chatModel() {
 			shown += " ←"
 		}
 		m.r.notice("%d. %s · %s", i+1, shown, m.catalog[name].ModelID)
@@ -932,18 +958,18 @@ func (m *machine) configureModel(name string) {
 		m.r.failure(err.Error())
 		return
 	}
-	m.status.model = res.Models.Chat
+	m.mutateStatus(func(s *status) { s.model = res.Models.Chat })
 	if info, ok := m.catalog[res.Models.Chat]; ok {
-		m.status.setContextLimit(info.ContextLimit)
+		m.mutateStatus(func(s *status) { s.setContextLimit(info.ContextLimit) })
 	}
 	m.r.notice("model → %s", res.Models.Chat)
 	// The level is the new model's to take, so the wire says where the
 	// session runs now: a model that cannot take the level it had takes
 	// the session to another one, and the repl says so.
-	if res.Reasoning != m.status.level {
+	if res.Reasoning != m.status.reasoning() {
 		m.r.notice("thinking → %s", levelName(res.Reasoning))
 	}
-	m.status.level = res.Reasoning
+	m.mutateStatus(func(s *status) { s.level = res.Reasoning })
 }
 
 // thinking sets the session's reasoning level, or takes the next one when
@@ -964,7 +990,7 @@ func (m *machine) thinking(level string) {
 		m.r.failure(err.Error())
 		return
 	}
-	m.r.notice("thinking → %s", levelName(m.status.level))
+	m.r.notice("thinking → %s", levelName(m.status.reasoning()))
 }
 
 // nextThinkingLevel returns the level after the session's, wrapping at the
@@ -977,7 +1003,7 @@ func (m *machine) thinking(level string) {
 // type, rather than a level the server refuses on every press.
 func (m *machine) nextThinkingLevel() (level string, ok bool, notice string) {
 	levels := namedLevels
-	if info, ok := m.catalog[m.status.model]; ok {
+	if info, ok := m.catalog[m.status.chatModel()]; ok {
 		switch {
 		case len(info.ReasoningLevels) > 0:
 			levels = info.ReasoningLevels
@@ -988,7 +1014,7 @@ func (m *machine) nextThinkingLevel() (level string, ok bool, notice string) {
 		}
 	}
 	for i, level := range levels {
-		if strings.EqualFold(level, m.status.level) {
+		if strings.EqualFold(level, m.status.reasoning()) {
 			return levels[(i+1)%len(levels)], true, ""
 		}
 	}
@@ -1005,7 +1031,7 @@ func (m *machine) setThinking(level string) error {
 	}, &res); err != nil {
 		return err
 	}
-	m.status.level = res.Reasoning
+	m.mutateStatus(func(s *status) { s.level = res.Reasoning })
 	return nil
 }
 
@@ -1149,7 +1175,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 			// reports: a background job's request rides the same
 			// connection and counts against its own fill.
 			if json.Unmarshal(raw, &usage) == nil && usage.RunID == runID {
-				m.status.setTokens(usage.InputTokens)
+				m.mutateStatus(func(s *status) { s.setTokens(usage.InputTokens) })
 			}
 		}
 	case "turn.ended":

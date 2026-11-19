@@ -202,16 +202,47 @@ func TestTheFooterGrowsForAWrappedDraftAndShrinksBack(t *testing.T) {
 	}
 
 	// The line is submitted: the footer goes back to the prompt's row,
-	// and the prompt lands on the bottom row.
+	// and the prompt stands just above the chrome's rule.
 	if !l.ensure(1) {
 		t.Fatal("the footer did not shrink back")
 	}
 	showPrompt(l, promptMark)
-	if got, want := lastRow(vt, mark), len(screenRows(vt))-1; got != want {
-		t.Fatalf("the prompt stands on row %d after the line, want the last row %d:\n%s", got, want, vt.String())
+	rule := lastRow(vt, "───")
+	if got, want := lastRow(vt, mark), rule-1; rule < 0 || got != want {
+		t.Fatalf("the prompt stands on row %d, want row %d just above the rule:\n%s", got, want, vt.String())
 	}
 	if lastRow(vt, "a transcript line") < 0 {
 		t.Errorf("shrinking the footer lost the transcript:\n%s", vt.String())
+	}
+}
+
+// TestAStatuslineWiderThanTheScreenClipsToTheRow covers a narrow
+// terminal: a statusline longer than the width would wrap the bottom
+// row, and the wrap scrolls the screen — the pinned footer rides off
+// the bottom edge and the transcript's rows desync.
+func TestAStatuslineWiderThanTheScreenClipsToTheRow(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(12, 12))
+	l := aLayout(t, vt, 12, 12)
+	// The payload is the real dim-wrapped shape the statusline paints:
+	// the clip must not leave the terminal styling unbalanced.
+	s := &status{dir: "/home/me/Code/a-really-long-folder-name", model: "gemma4", contextLimit: 262144}
+	s.setTokens(12300)
+	l.setStatus(s.line())
+	l.ensure(1)
+
+	rows := screenRows(vt)
+	last := rows[len(rows)-1]
+	if !strings.Contains(last, "a-really-l") || strings.Contains(last, "gemma4") {
+		t.Errorf("the bottom row is not the clipped statusline: %q", last)
+	}
+	// The clip leaves the dim balanced: the row keeps its opening dim
+	// and ends with a reset, so the frames after it do not inherit the
+	// styling.
+	if row := l.statusRow(); !strings.HasPrefix(row, ansiDim) || !strings.HasSuffix(row, ansiReset) {
+		t.Errorf("the clipped row's styling is unbalanced: %q", row)
+	}
+	if rule := lastRow(vt, "───"); rule != len(rows)-2 {
+		t.Errorf("the rule stands on row %d, want the row above the statusline:\n%s", rule, vt.String())
 	}
 }
 
@@ -344,8 +375,9 @@ func TestTheLayoutAndTheEditorShareOneTerminal(t *testing.T) {
 	l.ensure(1)
 	showPrompt(l, promptMark)
 	rows := screenRows(vt)
-	if got, want := lastRow(vt, mark), len(rows)-1; got != want {
-		t.Fatalf("the prompt stands on row %d, want the bottom row %d:\n%s", got, want, vt.String())
+	rule := lastRow(vt, "───")
+	if got, want := lastRow(vt, mark), rule-1; rule < 0 || got != want {
+		t.Fatalf("the prompt stands on row %d, want row %d just above the rule:\n%s", got, want, vt.String())
 	}
 	if strings.Contains(rows[len(rows)-1], "transcript row") {
 		t.Errorf("a transcript row overwrote the footer:\n%s", vt.String())

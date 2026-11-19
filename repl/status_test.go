@@ -70,28 +70,6 @@ func TestAWindowSwitchClearsTheWindowItDoesNotKnow(t *testing.T) {
 	}
 }
 
-// TestThePromptReadsBehindTheStatusline keeps the readline prompt on one
-// line, so editing does not redraw the status on every keystroke.
-func TestThePromptReadsBehindTheStatusline(t *testing.T) {
-	s := &status{dir: "/home/me/Code/poo", model: "gemma4"}
-	prompt := s.prompt()
-	if strings.Contains(prompt, "\n") || !strings.HasSuffix(prompt, promptMark) {
-		t.Errorf("the prompt must fit on one line: %q", prompt)
-	}
-	if !strings.Contains(prompt, "poo") {
-		t.Errorf("the prompt carries no status: %q", prompt)
-	}
-}
-
-// TestThePromptIsTheMarkAloneWithoutAStatus covers a session with
-// nothing to say: the mark stands alone.
-func TestThePromptIsTheMarkAloneWithoutAStatus(t *testing.T) {
-	s := &status{}
-	if got := s.prompt(); got != promptMark {
-		t.Errorf("the prompt is %q, want %q", got, promptMark)
-	}
-}
-
 // TestTheBranchReadsFromARepository covers the branch segment: a
 // repository names its branch, and a plain directory has none.
 func TestTheBranchReadsFromARepository(t *testing.T) {

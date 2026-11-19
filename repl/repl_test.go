@@ -192,8 +192,8 @@ func (s *fakeServer) waitCancels(t *testing.T, want int) []string {
 func TestUsageUpdatesTheStatus(t *testing.T) {
 	m := &machine{status: &status{contextLimit: 262144}}
 	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
-	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
-		t.Fatalf("the prompt lacks the run's usage: %s", prompt)
+	if line := m.status.line(); !strings.Contains(line, "ctx 12.3k/262.1k") {
+		t.Fatalf("the statusline lacks the run's usage: %s", line)
 	}
 }
 
@@ -213,8 +213,8 @@ func TestTheSettleDoesNotStealTheStatusline(t *testing.T) {
 				"usage": map[string]any{"input_tokens": 20300, "output_tokens": 1100},
 			}},
 	}, "r1", &runState{})
-	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
-		t.Errorf("the statusline does not hold the last request's fill: %s", prompt)
+	if line := m.status.line(); !strings.Contains(line, "ctx 12.3k/262.1k") {
+		t.Errorf("the statusline does not hold the last request's fill: %s", line)
 	}
 }
 
@@ -226,8 +226,8 @@ func TestAnotherRunsUsageLeavesTheStatuslineAlone(t *testing.T) {
 	m := &machine{status: &status{contextLimit: 262144}, r: newRenderer(&out)}
 	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "r1", "input_tokens": 12300}}, "r1", &runState{})
 	m.event(protocol.Event{Type: "usage", Payload: map[string]any{"run_id": "job-7", "input_tokens": 99000}}, "r1", &runState{})
-	if prompt := m.status.prompt(); !strings.Contains(prompt, "ctx 12.3k/262.1k") {
-		t.Errorf("another run's request took the statusline: %s", prompt)
+	if line := m.status.line(); !strings.Contains(line, "ctx 12.3k/262.1k") {
+		t.Errorf("another run's request took the statusline: %s", line)
 	}
 }
 
@@ -275,13 +275,6 @@ func TestARunRendersTheReplyTheToolsAndTheSettle(t *testing.T) {
 	world := strings.Index(out, "world.")
 	if hello < 0 || hmm < 0 || world < 0 || !(hello < hmm && hmm < world) {
 		t.Errorf("the deltas read out of arrival order:\n%s", out)
-	}
-	// The statusline names the model and the window the usage filled.
-	if !strings.Contains(out, "gemma4") {
-		t.Errorf("the statusline names no model:\n%s", out)
-	}
-	if !strings.Contains(out, "12.3k/262.1k") {
-		t.Errorf("the statusline shows no context fill:\n%s", out)
 	}
 
 	server.mu.Lock()
@@ -774,20 +767,17 @@ func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
 	if !strings.Contains(out, "model → qwen") {
 		t.Errorf("the transcript shows no switch:\n%s", out)
 	}
-	if !strings.Contains(out, "ctx 12.3k/131.1k") {
-		t.Errorf("the statusline does not fill the new model's window:\n%s", out)
-	}
-	// The statusline is written again once the switch lands, and that
-	// write names the new model beside the new window: a switch that
-	// kept the old name would render gemma4 over qwen's window.
+	// A footerless host rides the statusline in the prompt: the switch
+	// names qwen beside the window the run filled, and a switch that
+	// kept the old model's name or window would read them here.
 	found := false
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(ansi.Strip(out), "\n") {
 		if strings.Contains(line, "ctx 12.3k/131.1k") && strings.Contains(line, "qwen") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("no statusline names qwen beside its window:\n%s", out)
+		t.Errorf("no prompt names qwen beside its window:\n%s", out)
 	}
 
 	server.mu.Lock()
@@ -799,8 +789,9 @@ func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
 
 // TestAModelSwitchTheCatalogCannotDescribe covers a switch the server
 // accepts for a model the client's catalog does not hold: the session
-// moves, and the statusline keeps the window it had rather than
-// inventing one.
+// moves, and the transcript says the name the wire answered with. The
+// window it kept is the pty variant's to pin:
+// TestAModelSwitchTheCatalogCannotDescribeKeepsTheWindow.
 func TestAModelSwitchTheCatalogCannotDescribe(t *testing.T) {
 	// The server answers the switch with a name its catalog does not
 	// carry, the way a normalising server would.
@@ -814,19 +805,6 @@ func TestAModelSwitchTheCatalogCannotDescribe(t *testing.T) {
 	typeLine("/quit\n")
 	<-code
 
-	plain := ansi.Strip(out.String())
-	// The window the run filled stays: there is no entry to read a new
-	// one from, and the old model's must not be presented as the new
-	// model's guess.
-	found := false
-	for _, line := range strings.Split(plain, "\n") {
-		if strings.Contains(line, "│ hidden") && strings.Contains(line, "262.1k") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("no statusline names hidden beside the window it kept:\n%s", plain)
-	}
 }
 
 // TestAModelSwitchToAnUnknownNameIsRefused covers a switch the catalog
@@ -837,16 +815,6 @@ func TestAModelSwitchToAnUnknownNameIsRefused(t *testing.T) {
 
 	if !strings.Contains(out, "✗") {
 		t.Errorf("the transcript shows no refusal:\n%s", out)
-	}
-	// The statusline still names the model the wire session kept: a
-	// refusal that clobbered the client's copy would print the name it
-	// never switched to.
-	plain := ansi.Strip(out)
-	if strings.Contains(plain, "│ nope") {
-		t.Errorf("the refused switch took the statusline's model:\n%s", plain)
-	}
-	if !strings.Contains(plain, "│ gemma4") {
-		t.Errorf("the statusline lost the model the session kept:\n%s", plain)
 	}
 	// The refusal is the matcher's to word: no catalog entry matches
 	// the fragment. A failure line that renders anything else — or
@@ -871,9 +839,6 @@ func TestAFragmentThatMatchesOneModelSwitchesToIt(t *testing.T) {
 
 	if !strings.Contains(out, "model → qwen") {
 		t.Errorf("the fragment did not switch:\n%s", out)
-	}
-	if !strings.Contains(out, "ctx 12.3k/131.1k") {
-		t.Errorf("the statusline does not fill the new model's window:\n%s", out)
 	}
 	server.mu.Lock()
 	defer server.mu.Unlock()
@@ -923,9 +888,6 @@ func TestANumberPicksFromTheRankedList(t *testing.T) {
 
 	if !strings.Contains(out, "model → gemma-3-27b") {
 		t.Errorf("the numbered pick switched nothing:\n%s", out)
-	}
-	if !strings.Contains(out, "ctx 12.3k/131.1k") {
-		t.Errorf("the statusline does not fill the picked model's window:\n%s", out)
 	}
 	server.mu.Lock()
 	defer server.mu.Unlock()
@@ -1061,9 +1023,6 @@ func TestTheThinkingCommandCyclesTheModelSLevels(t *testing.T) {
 			t.Errorf("the transcript lacks %q:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "🧠 high") {
-		t.Errorf("the statusline names no level:\n%s", out)
-	}
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	if got := strings.Join(server.levels, ","); got != "off,low,high" {
@@ -1092,9 +1051,6 @@ func TestANamedThinkingLevelIsSet(t *testing.T) {
 
 	if !strings.Contains(out, "thinking → high") {
 		t.Errorf("the transcript shows no level:\n%s", out)
-	}
-	if !strings.Contains(out, "🧠 high") {
-		t.Errorf("the statusline names no level:\n%s", out)
 	}
 	server.mu.Lock()
 	defer server.mu.Unlock()
@@ -1137,9 +1093,6 @@ func TestAModelSwitchTakesTheLevelTheWireReports(t *testing.T) {
 	if !strings.Contains(out, "thinking → off") {
 		t.Errorf("the switch did not report the level it left the session at:\n%s", out)
 	}
-	if !strings.Contains(out, "🧠 off") {
-		t.Errorf("the statusline names no level after the switch:\n%s", out)
-	}
 }
 
 // TestAModelSwitchFallsBackToTheLevelTheModelTakes covers a move to a
@@ -1157,13 +1110,14 @@ func TestAModelSwitchFallsBackToTheLevelTheModelTakes(t *testing.T) {
 	}
 }
 
-// TestTheStatuslineNamesTheLevelTheSessionOpenedAt covers the read-back:
-// a session that runs at a level says so before anything is typed.
+// TestTheStatuslineNamesTheLevelTheSessionOpenedAt covers the level's
+// own rendering: 🧠 <level> in the status the footer's bottom row
+// carries. The session-open read-back from the wire is not exercised
+// here.
 func TestTheStatuslineNamesTheLevelTheSessionOpenedAt(t *testing.T) {
-	out, _ := startReplAs(t, "/quit\n", &fakeServer{t: t, level: "high"})
-
-	if !strings.Contains(out, "🧠 high") {
-		t.Errorf("the statusline names no level:\n%s", out)
+	s := &status{level: "high"}
+	if line := s.line(); !strings.Contains(line, "🧠 high") {
+		t.Errorf("the statusline names no level:\n%s", line)
 	}
 }
 

@@ -142,10 +142,23 @@ func TestTheInputHoldsTheBottomRowThroughARun(t *testing.T) {
 	waitScreen(t, term, "file one")
 	waitScreen(t, term, "✓ end_turn")
 
-	// The reply and the tool result read above the input, in order.
-	world, prompt := term.rowOf("world."), term.rowOf("💩❯")
-	if world < 0 || prompt < 0 || world >= prompt {
-		t.Fatalf("the reply is not above the input:\n%s", term.screen())
+	// The transcript's last rows read above the input, and the input
+	// stands in the footer's own rows: the mark above the rule and the
+	// statusline row at the screen's bottom edge. The earlier reply rows
+	// have scrolled into the terminal's history by now.
+	settle, prompt, rule := term.rowOf("✓ end_turn"), term.rowOf("💩❯"), term.rowOf("───")
+	if settle < 0 || prompt < 0 || settle >= prompt {
+		t.Fatalf("the run's rows are not above the input:\n%s", term.screen())
+	}
+	if rule < 0 || rule <= prompt {
+		t.Fatalf("the footer's rule is not below the input:\n%s", term.screen())
+	}
+	// The footer's bottom row carries the statusline: the model the
+	// session opened with, and the window the run's usage filled.
+	rows := strings.Split(term.screen(), "\n")
+	last := rows[len(rows)-1]
+	if !strings.Contains(last, "gemma4") || !strings.Contains(last, "ctx ") || !strings.Contains(last, "/262.1k") {
+		t.Errorf("the footer's statusline lacks the model and the fill: %q", last)
 	}
 
 	term.press("/quit\r")
@@ -201,9 +214,10 @@ func TestLongOutputScrollsAboveTheFooter(t *testing.T) {
 		t.Fatalf("the newest row, the settle and the prompt are out of order:\n%s", term.screen())
 	}
 	// The prompt reads within the footer: its line row and the spare
-	// row the editor's erases spend under it.
-	if prompt < len(physicalRows(term))-2 {
-		t.Errorf("the prompt stands on row %d, want the footer's rows:\n%s", prompt, indexedRows(term))
+	// row the editor's erases spend under it, above the chrome's rule.
+	rule := term.rowOf("───")
+	if rule < 0 || prompt > rule-1 {
+		t.Errorf("the prompt stands on row %d, want the footer's rows above the rule:\n%s", prompt, indexedRows(term))
 	}
 	if term.rowOf("result 0 row 0") >= 0 {
 		t.Errorf("the oldest row is still on the screen instead of the scrollback:\n%s", term.screen())
@@ -212,6 +226,80 @@ func TestLongOutputScrollsAboveTheFooter(t *testing.T) {
 	term.press("/quit\r")
 	select {
 	case <-code:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}
+
+func TestAModelSwitchPaintsTheFooterStatusline(t *testing.T) {
+	server := &fakeServer{t: t, level: "high"}
+	closed := make(chan struct{})
+	close(closed)
+	server.script = quietRun(closed)
+	term, code := startTerminalRepl(t, server)
+	waitBottom(t, term)
+
+	// The footer's bottom row names the level the session opened at,
+	// the read-back the wire's SessionGet reported: high, before the
+	// switch moves the session to a level qwen can take.
+	waitScreen(t, term, "🧠 high")
+
+	term.press("/model qwen\r")
+	waitScreen(t, term, "model → qwen")
+	term.press("say hi\r")
+	waitScreen(t, term, "✓ end_turn")
+
+	// The footer's bottom row names the model the switch took, beside
+	// the window the run's usage filled and the level the wire reported:
+	// qwen does not take high, so the switch reads back off. A switch
+	// that kept the old name, window, or level would read them here.
+	rows := strings.Split(term.screen(), "\n")
+	last := rows[len(rows)-1]
+	if !strings.Contains(last, "qwen") || !strings.Contains(last, "/131.1k") || !strings.Contains(last, "🧠 off") {
+		t.Errorf("the footer's statusline does not name qwen beside its window and level: %q", last)
+	}
+
+	term.press("/quit\r")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}
+
+// TestAModelSwitchTheCatalogCannotDescribeKeepsTheWindow covers the
+// aliased switch on a real footer: the server answers a name the
+// client's catalog cannot describe, and the footer's bottom row names
+// that name beside the window the previous model filled — a window the
+// client never invented for the answer.
+func TestAModelSwitchTheCatalogCannotDescribeKeepsTheWindow(t *testing.T) {
+	server := &fakeServer{t: t, replyAs: "hidden"}
+	closed := make(chan struct{})
+	close(closed)
+	server.script = quietRun(closed)
+	term, code := startTerminalRepl(t, server)
+	waitBottom(t, term)
+
+	term.press("/model qwen\r")
+	waitScreen(t, term, "model → hidden")
+	term.press("say hi\r")
+	waitScreen(t, term, "✓ end_turn")
+
+	rows := strings.Split(term.screen(), "\n")
+	last := rows[len(rows)-1]
+	if !strings.Contains(last, "hidden") || !strings.Contains(last, "/262.1k") {
+		t.Errorf("the footer's statusline does not name hidden beside the kept window: %q", last)
+	}
+
+	term.press("/quit\r")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d", got)
+		}
 	case <-time.After(10 * time.Second):
 		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
 	}
@@ -363,19 +451,6 @@ func echoOnScreen(term *terminal, text string) bool {
 	return false
 }
 
-// waitEcho waits for the transcript's echo of a submitted line.
-func waitEcho(t *testing.T, term *terminal, text string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if echoOnScreen(term, text) {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("the echo of %q never read:\n%s", text, term.screen())
-}
-
 // pressSubmitted types a line and waits for the machine's echo of it. An
 // Enter that lands mid-winch-redraw can clear the draft without
 // submitting, so the echo says whether the line was taken; until it
@@ -404,12 +479,15 @@ func waitBottomRows(t *testing.T, term *terminal, rowsWant int) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		_, rows := term.vt.Size()
-		if rows == rowsWant && cursorRow(term) >= rowsWant-2 {
+		// The input cursor reads on the prompt's row, inside the footer's
+		// own rows above the chrome: the rule and the statusline's row
+		// sit under it at the screen's bottom edge.
+		if rows == rowsWant && cursorRow(term) >= rowsWant-4 {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("the input cursor is not on row %d; rows:\n%s", rowsWant, indexedRows(term))
+	t.Fatalf("the input cursor is not on the footer's rows above row %d; rows:\n%s", rowsWant, indexedRows(term))
 }
 
 // TestAnInactiveLayoutDoesNotDoubleTheCarriageReturns covers the
@@ -567,8 +645,8 @@ func TestAMultilineDraftStaysInTheFooter(t *testing.T) {
 	draft := "draft " + strings.Repeat("x", 76)
 	term.press(draft)
 	waitScreen(t, term, "💩❯ draft")
-	// The draft wraps over the footer's rows, and its tail stands on the
-	// last visible row above the spare one.
+	// The draft wraps within the footer's rows, and its tail stands
+	// above the chrome's rule, never below the footer's own rows.
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if strings.Contains(term.screen(), strings.Repeat("x", 20)) {
@@ -577,8 +655,17 @@ func TestAMultilineDraftStaysInTheFooter(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	rows := strings.Split(term.screen(), "\n")
-	if !strings.Contains(rows[len(rows)-1], "xxxx") {
-		t.Fatalf("the draft's tail is not in the footer:\n%s", indexedRows(term))
+	rule, tail := -1, -1
+	for i, row := range rows {
+		if strings.Contains(row, "───") {
+			rule = i
+		}
+		if strings.Contains(row, "xxxx") {
+			tail = i
+		}
+	}
+	if tail < 0 || rule < 0 || tail >= rule {
+		t.Fatalf("the draft's tail is not in the footer above the rule:\n%s", indexedRows(term))
 	}
 	if len(physicalRows(term)) != 12 {
 		t.Fatalf("the terminal changed size:\n%s", indexedRows(term))
@@ -684,11 +771,12 @@ func TestAPromptChangeKeepsATypedDraft(t *testing.T) {
 	waitScreen(t, term, "🧠 off")
 	// The draft and its cursor settle together: the frame that shows
 	// the tail also lands the cursor under it, and a read between the
-	// two sees the cursor still on the prompt's row.
+	// two sees the cursor still on the prompt's row, inside the
+	// footer's rows above the chrome.
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		screen := term.screen()
-		if strings.Contains(screen, strings.Repeat("d", 20)) && cursorRow(term) >= len(physicalRows(term))-2 {
+		if strings.Contains(screen, strings.Repeat("d", 20)) && cursorRow(term) >= len(physicalRows(term))-4 {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -696,8 +784,8 @@ func TestAPromptChangeKeepsATypedDraft(t *testing.T) {
 	if !strings.Contains(term.screen(), strings.Repeat("d", 20)) {
 		t.Fatalf("the prompt change lost the draft:\n%s", indexedRows(term))
 	}
-	if row := cursorRow(term); row < len(physicalRows(term))-2 {
-		t.Errorf("the draft's cursor stands on row %d, want the footer's last rows:\n%s", row, indexedRows(term))
+	if row := cursorRow(term); row < len(physicalRows(term))-4 {
+		t.Errorf("the draft's cursor stands on row %d, want the footer's rows above the chrome:\n%s", row, indexedRows(term))
 	}
 
 	// A real Enter is CR: after the cycle's ESC put vim in normal mode,
@@ -770,13 +858,14 @@ func TestARecalledHistoryLineTakesTheFooter(t *testing.T) {
 	// The recalled block keeps the newline its storage carries: the
 	// draft fills three rows (the prompt's indent rides on the first),
 	// the cursor reads on the row the trailing newline opens, and the
-	// spare row sits under that. The wrapped tail is whole.
+	// spare row and the chrome's two sit under that. The wrapped tail
+	// is whole.
 	head, tail := term.rowOf("recalled"), term.rowOf(strings.Repeat("h", 20))
-	if head < rows-5 || head > rows-4 {
+	if head < rows-7 || head > rows-6 {
 		t.Fatalf("the draft's head stands on row %d, want the footer's top rows:\n%s", head, indexedRows(term))
 	}
-	if tail != head+2 {
-		t.Fatalf("the draft's wrapped tail stands on row %d, want the row two under the head:\n%s", tail, indexedRows(term))
+	if tail != head+1 {
+		t.Fatalf("the draft's wrapped tail stands on row %d, want the row under the head:\n%s", tail, indexedRows(term))
 	}
 	if row := cursorRow(term); row < head+2 || row > head+3 {
 		t.Errorf("the recalled draft's cursor stands on row %d, want the rows under the draft:\n%s", row, indexedRows(term))

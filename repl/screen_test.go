@@ -85,10 +85,11 @@ func trimScreen(raw string) string {
 }
 
 // aLayout is the layout over a writer, the way a terminal session has
-// one: it starts with the prompt's row reserved.
+// one: it starts with the footer's own rows reserved — the prompt's row
+// plus the chrome's two, as newLayout builds it.
 func aLayout(t *testing.T, out io.Writer, cols, rows int) *layout {
 	t.Helper()
-	l := &layout{out: out, width: cols, height: rows, footer: 1}
+	l := &layout{out: out, width: cols, height: rows, footer: 1 + footerChrome}
 	l.last = l.regionBottom() - 1
 	l.enter()
 	return l
@@ -443,8 +444,8 @@ func TestATallLivePreviewCommitsEachRowOnce(t *testing.T) {
 	if !strings.Contains(strings.Join(screenRows(vt), "\n"), "tail 19|") {
 		t.Errorf("the committed tail is not on the screen:\n%s", vt.String())
 	}
-	if row := vt.Cursor().Y; row != 23 {
-		t.Errorf("the prompt stands on row %d, want the bottom row 23:\n%s", row, indexedScreen(vt))
+	if row := vt.Cursor().Y; row != 21 {
+		t.Errorf("the prompt stands on row %d, want the row above the chrome 21:\n%s", row, indexedScreen(vt))
 	}
 }
 
