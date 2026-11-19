@@ -213,6 +213,100 @@ func TestTheProbeReadsTheLimitsAndCapabilitiesAGatewayReports(t *testing.T) {
 	}
 }
 
+// TestTheProbeReadsTheLimitsEachGatewayShapeReports covers the places
+// gateways put the token budgets: LiteLLM's max_input_tokens and
+// max_output_tokens, OpenRouter's context_length and top_provider, and the
+// opencode limit object with an input cap. The context limit bounds the
+// prompt, so an input cap below the context takes its place.
+func TestTheProbeReadsTheLimitsEachGatewayShapeReports(t *testing.T) {
+	cases := []struct {
+		name        string
+		item        map[string]any
+		wantContext int
+		wantOutput  int
+	}{
+		{
+			name:        "litellm",
+			item:        map[string]any{"id": "litellm", "object": "model", "owned_by": "openai", "max_input_tokens": 262144, "max_output_tokens": 65536},
+			wantContext: 262144,
+			wantOutput:  65536,
+		},
+		{
+			name: "openrouter",
+			item: map[string]any{
+				"id":             "openrouter",
+				"context_length": 200000,
+				"top_provider":   map[string]any{"context_length": 180000, "max_completion_tokens": 32000},
+			},
+			wantContext: 200000,
+			wantOutput:  32000,
+		},
+		{
+			name: "openrouter-unlimited-completion",
+			item: map[string]any{
+				"id":           "openrouter-unlimited-completion",
+				"top_provider": map[string]any{"context_length": 131072, "max_completion_tokens": nil},
+			},
+			wantContext: 131072,
+			wantOutput:  0,
+		},
+		{
+			name:        "opencode-input-cap",
+			item:        map[string]any{"id": "opencode-input-cap", "limit": map[string]any{"context": 400000, "input": 272000, "output": 128000}},
+			wantContext: 272000,
+			wantOutput:  128000,
+		},
+		{
+			name:        "opencode-input-above-context",
+			item:        map[string]any{"id": "opencode-input-above-context", "limit": map[string]any{"context": 100000, "input": 272000, "output": 8000}},
+			wantContext: 100000,
+			wantOutput:  8000,
+		},
+		{
+			name:        "input-cap-without-context",
+			item:        map[string]any{"id": "input-cap-without-context", "limit": map[string]any{"input": 272000}},
+			wantContext: 272000,
+			wantOutput:  0,
+		},
+	}
+
+	items := make([]map[string]any, 0, len(cases))
+	for _, tc := range cases {
+		items = append(items, tc.item)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": items})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"gateway": {Endpoint: server.URL + "/v1"},
+			},
+		},
+		StateDir: t.TempDir(),
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model, err := c.Resolve("gateway/" + tc.name)
+			if err != nil {
+				t.Fatalf("the model: %v", err)
+			}
+			if model.ContextLimit != tc.wantContext || model.MaxOutput != tc.wantOutput {
+				t.Errorf("the limits are %d/%d, want %d/%d", model.ContextLimit, model.MaxOutput, tc.wantContext, tc.wantOutput)
+			}
+		})
+	}
+}
+
 // TestADiscoveredModelSpeaksItsEndpointsAPI covers the inheritance: a model
 // no layer gave an API to speaks the one its endpoint declares, and a model
 // on an endpoint that declares none keeps the chat-completions default.
