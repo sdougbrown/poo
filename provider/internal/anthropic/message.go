@@ -92,8 +92,9 @@ func Messages(msgs []poo.Message) ([]Message, string, error) {
 			// The results a batch returned answer one assistant message,
 			// so the ones that follow the first ride in the message it
 			// opened: two user messages in a row are a request the API
-			// refuses.
-			if answers == len(out)-1 {
+			// refuses. A history that opens with a result has no message
+			// to add to, so the result opens one.
+			if len(out) > 0 && answers == len(out)-1 {
 				out[answers].Content = append(out[answers].Content, blocks...)
 				continue
 			}

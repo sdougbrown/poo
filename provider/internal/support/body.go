@@ -3,6 +3,7 @@ package support
 import (
 	"bytes"
 	"encoding/json"
+	"sort"
 
 	"github.com/sdougbrown/poo"
 )
@@ -99,4 +100,37 @@ func WithKeys(order []string, payload map[string]json.RawMessage, keys []string)
 		seen[k] = true
 	}
 	return order
+}
+
+// MergeParams writes a request body with named parameters merged into its
+// top level.
+//
+// The parameters are written last and in name order, so the body of two
+// requests that ask for the same thing is the same bytes. A body that is
+// not a bare JSON object is a body the merge cannot spell, and the error is
+// the caller's to report.
+func MergeParams(body []byte, params map[string]json.RawMessage) ([]byte, error) {
+	if len(params) == 0 {
+		return body, nil
+	}
+	names := make([]string, 0, len(params))
+	for name := range params {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var b bytes.Buffer
+	b.Write(body[:len(body)-1])
+	for _, name := range names {
+		b.WriteByte(',')
+		key, err := json.Marshal(name)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(key)
+		b.WriteByte(':')
+		b.Write(params[name])
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
 }

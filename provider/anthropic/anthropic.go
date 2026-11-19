@@ -261,17 +261,18 @@ func (t *Transport) params(req poo.ChatRequest, info poo.ModelInfo) (map[string]
 	} else if enabled {
 		support.SetNested(params, "thinking.type", "enabled")
 	}
-	if info.Temperature != poo.TempFixed && info.Temperature != poo.TempUnsupported {
-		sampling := info.EffectiveSampling(t.cfg.Sampling)
-		if v := sampling.Temperature; v != nil {
-			support.SetNested(params, "temperature", *v)
-		}
-		if v := sampling.TopP; v != nil {
-			support.SetNested(params, "top_p", *v)
-		}
-		if v := sampling.TopK; v != nil {
-			support.SetNested(params, "top_k", *v)
-		}
+	// The sampling the model takes is the core's own rule: the effective
+	// sampling clears the temperature for a model that takes none, and
+	// leaves the rest of the fields alone.
+	sampling := info.EffectiveSampling(t.cfg.Sampling)
+	if v := sampling.Temperature; v != nil {
+		support.SetNested(params, "temperature", *v)
+	}
+	if v := sampling.TopP; v != nil {
+		support.SetNested(params, "top_p", *v)
+	}
+	if v := sampling.TopK; v != nil {
+		support.SetNested(params, "top_k", *v)
 	}
 	if len(params) == 0 {
 		return nil, nil

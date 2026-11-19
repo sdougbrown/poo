@@ -119,6 +119,9 @@ func (c Checker) rules() []rule {
 		// the text repairs a model's answer may need, and nothing but
 		// the core beyond them.
 		{path: m + "/provider/internal/chat", allowed: []string{m, m + "/provider/internal/support"}},
+		// The Messages API's wire half composes the same as its two
+		// siblings, and nothing but the core beyond them.
+		{path: m + "/provider/internal/anthropic", allowed: []string{m, m + "/provider/internal/support"}},
 		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm", m + "/protect"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},

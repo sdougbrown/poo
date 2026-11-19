@@ -2324,15 +2324,16 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	case auth.ProviderCodex:
 		return r.codexTransport(model)
 	}
+	// The header a session travels by is the endpoint's own declaration:
+	// a gateway that requires one names it where the endpoint is declared,
+	// whatever the endpoint is called. Every transport reads the one
+	// lookup, so a change to how the header is resolved is made once.
+	session := ""
+	if endpoint, ok := r.Catalog.Endpoints()[model.Provider]; ok {
+		session = endpoint.SessionHeader
+	}
 	switch model.API {
 	case "", poo.APIChatCompletions:
-		// The header a session travels by is the endpoint's own declaration,
-		// the same lookup the key takes: a gateway that requires one names
-		// it where the endpoint is declared, whatever the endpoint is called.
-		session := ""
-		if endpoint, ok := r.Catalog.Endpoints()[model.Provider]; ok {
-			session = endpoint.SessionHeader
-		}
 		return openai.New(openai.Options{
 			Endpoint:      model.Endpoint,
 			Model:         model.ModelID,
@@ -2344,12 +2345,6 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 			HTTPClient:    r.httpClient,
 		}), nil
 	case poo.APIAnthropicMessages:
-		// The Messages API's session header is the endpoint's declaration,
-		// the same lookup the Chat Completions case reads.
-		session := ""
-		if endpoint, ok := r.Catalog.Endpoints()[model.Provider]; ok {
-			session = endpoint.SessionHeader
-		}
 		return anthropic.New(anthropic.Options{
 			Endpoint:      model.Endpoint,
 			Model:         model.ModelID,

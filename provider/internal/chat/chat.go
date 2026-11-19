@@ -13,9 +13,9 @@
 package chat
 
 import (
-	"bytes"
 	"encoding/json"
-	"sort"
+
+	"github.com/sdougbrown/poo/provider/internal/support"
 )
 
 // Request is the wire shape of a chat completion request.
@@ -39,7 +39,8 @@ type Request struct {
 // MarshalJSON writes the request, with the named parameters merged into the top
 // level.
 //
-// The parameters are written last and in name order, so the body of two
+// The merge is the support package's, the one every wire half shares: the
+// parameters are written last and in name order, so the body of two
 // requests that ask for the same thing is the same bytes.
 func (r Request) MarshalJSON() ([]byte, error) {
 	type plain Request
@@ -47,29 +48,7 @@ func (r Request) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(r.Params) == 0 {
-		return body, nil
-	}
-	names := make([]string, 0, len(r.Params))
-	for name := range r.Params {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	var b bytes.Buffer
-	b.Write(body[:len(body)-1])
-	for _, name := range names {
-		b.WriteByte(',')
-		key, err := json.Marshal(name)
-		if err != nil {
-			return nil, err
-		}
-		b.Write(key)
-		b.WriteByte(':')
-		b.Write(r.Params[name])
-	}
-	b.WriteByte('}')
-	return b.Bytes(), nil
+	return support.MergeParams(body, r.Params)
 }
 
 // StreamOptions asks for a final usage chunk.

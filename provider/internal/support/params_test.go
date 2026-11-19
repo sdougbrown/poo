@@ -47,3 +47,35 @@ func TestSetNestedReplacesASingleField(t *testing.T) {
 		t.Errorf("the parameter is %s, want the second write", params["temperature"])
 	}
 }
+
+func TestMergeParamsWritesTheSameBodyEveryTime(t *testing.T) {
+	body := []byte(`{"model":"m","max_tokens":16}`)
+	params := map[string]json.RawMessage{
+		"output_config": json.RawMessage(`{"effort":"high"}`),
+		"thinking":      json.RawMessage(`{"type":"adaptive"}`),
+	}
+	merged, err := MergeParams(body, params)
+	if err != nil {
+		t.Fatalf("the merge: %v", err)
+	}
+	// The parameters are written last, in name order, so the same request
+	// is the same bytes.
+	want := `{"model":"m","max_tokens":16,"output_config":{"effort":"high"},"thinking":{"type":"adaptive"}}`
+	if string(merged) != want {
+		t.Errorf("the merged body is %s, want %s", merged, want)
+	}
+	again, err := MergeParams(body, params)
+	if err != nil {
+		t.Fatalf("the merge: %v", err)
+	}
+	if string(again) != string(merged) {
+		t.Errorf("the merge is not stable: %s then %s", merged, again)
+	}
+	plain, err := MergeParams(body, nil)
+	if err != nil {
+		t.Fatalf("the merge: %v", err)
+	}
+	if string(plain) != string(body) {
+		t.Errorf("a request with no parameters is %s, want the body as it was", plain)
+	}
+}

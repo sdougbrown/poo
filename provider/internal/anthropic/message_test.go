@@ -94,6 +94,24 @@ func TestSoundIsLeftOutOfTheMessage(t *testing.T) {
 	}
 }
 
+func TestAHistoryThatOpensWithAResultAnswersAsOneMessage(t *testing.T) {
+	// A history that starts with a tool result has no message to add to,
+	// so the result opens one instead of reaching for a place that is
+	// not there.
+	result := poo.ContentBlock{Kind: poo.ContentToolResult, ToolCallID: "toolu_1", Text: "sunny"}
+	msgs := []poo.Message{{Role: poo.RoleTool, Content: []poo.ContentBlock{result}}}
+	messages, _, err := anthropic.Messages(msgs)
+	if err != nil {
+		t.Fatalf("converting: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Role != "user" {
+		t.Fatalf("the messages are %+v, want the one answer", messages)
+	}
+	if len(messages[0].Content) != 1 || messages[0].Content[0].ToolUseID != "toolu_1" {
+		t.Errorf("the answer is %+v", messages[0].Content)
+	}
+}
+
 func TestTheResultsOfABatchAnswerAsOneMessage(t *testing.T) {
 	// A turn with two calls returns two tool messages, and the Messages
 	// API alternates roles: both answers ride in the one user message that
