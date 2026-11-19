@@ -3,6 +3,7 @@
 package repl
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -354,6 +355,67 @@ func TestStreamingSurvivesServerDisconnect(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the repl did not exit after disconnect")
+	}
+}
+
+// TestCloseLeavesNoReaderInTheTerminal covers the read/close handshake
+// the session's exit rests on. The close returns only once the read it
+// aborted has left the terminal. Run returns behind the close, and
+// whatever tears the terminal down after — a test closing its pty —
+// races a reader still inside. A read that starts after the close is
+// the interrupt, without entering the terminal at all.
+func TestCloseLeavesNoReaderInTheTerminal(t *testing.T) {
+	term := openTerminal(t)
+	restore := takeOverStdio(t, term.slave)
+	t.Cleanup(restore)
+
+	m := &machine{in: os.Stdin, out: os.Stdout, r: &renderer{}}
+	i := newEditor(m)
+	t.Cleanup(i.close)
+
+	// The reader parks after its read ends, before the handshake
+	// reports the read left. A close that waits the read out cannot
+	// return while the read still holds the terminal.
+	parked := make(chan struct{})
+	release := make(chan struct{})
+	i.afterReadline = func() { close(parked); <-release }
+	done := make(chan struct{})
+	go func() { defer close(done); i.read() }()
+	// The prompt on the terminal says the read holds it.
+	waitFor(t, term, promptMark)
+
+	closed := make(chan struct{})
+	go func() { i.close(); close(closed) }()
+	<-parked
+	select {
+	case <-closed:
+		t.Fatal("the close returned while the read it aborted still held the terminal")
+	case <-time.After(500 * time.Millisecond):
+	}
+	// The read may leave now; the close behind it must return.
+	close(release)
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the close never returned once the read had left")
+	}
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the read the close aborted never returned")
+	}
+
+	// A read that starts after the close is the interrupt, without
+	// entering the terminal.
+	after := make(chan error, 1)
+	go func() { _, err := i.read(); after <- err }()
+	select {
+	case err := <-after:
+		if !errors.Is(err, readline.ErrInterrupt) {
+			t.Fatalf("a read after the close returned %v, want the interrupt", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a read after the close never returned: it entered the terminal the close had closed")
 	}
 }
 
