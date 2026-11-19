@@ -202,13 +202,14 @@ func TestTheFooterGrowsForAWrappedDraftAndShrinksBack(t *testing.T) {
 	}
 
 	// The line is submitted: the footer goes back to the prompt's row,
-	// and the prompt lands on the bottom row.
+	// and the prompt stands just above the chrome's rule.
 	if !l.ensure(1) {
 		t.Fatal("the footer did not shrink back")
 	}
 	showPrompt(l, promptMark)
-	if got, want := lastRow(vt, mark), len(screenRows(vt))-1; got != want {
-		t.Fatalf("the prompt stands on row %d after the line, want the last row %d:\n%s", got, want, vt.String())
+	rule := lastRow(vt, "───")
+	if got, want := lastRow(vt, mark), rule-1; rule < 0 || got != want {
+		t.Fatalf("the prompt stands on row %d, want row %d just above the rule:\n%s", got, want, vt.String())
 	}
 	if lastRow(vt, "a transcript line") < 0 {
 		t.Errorf("shrinking the footer lost the transcript:\n%s", vt.String())
@@ -344,8 +345,9 @@ func TestTheLayoutAndTheEditorShareOneTerminal(t *testing.T) {
 	l.ensure(1)
 	showPrompt(l, promptMark)
 	rows := screenRows(vt)
-	if got, want := lastRow(vt, mark), len(rows)-1; got != want {
-		t.Fatalf("the prompt stands on row %d, want the bottom row %d:\n%s", got, want, vt.String())
+	rule := lastRow(vt, "───")
+	if got, want := lastRow(vt, mark), rule-1; rule < 0 || got != want {
+		t.Fatalf("the prompt stands on row %d, want row %d just above the rule:\n%s", got, want, vt.String())
 	}
 	if strings.Contains(rows[len(rows)-1], "transcript row") {
 		t.Errorf("a transcript row overwrote the footer:\n%s", vt.String())

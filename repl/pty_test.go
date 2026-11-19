@@ -377,22 +377,25 @@ func TestEscapeStopsTheRunAndTheSessionGoesOn(t *testing.T) {
 	term.press("work\r")
 	// The run must be on before the escape. An escape that arrives while
 	// the editor still holds the draft is one the editor eats under
-	// load. The echo is the machine's receipt for the line, so the keys
-	// after it reach the run. The held deltas paint when the run settles,
-	// so the cancel is what brings the reply's words onto the screen.
-	waitEcho(t, term, "work")
+	// load. The run the server opened is the receipt for the line, so
+	// the keys after it reach the run. The held deltas paint as the
+	// stream's preview, and they can scroll the echo out of the region,
+	// so the prompt is what the wait asserts.
+	if prompts := server.waitPrompts(t, 1); prompts[0] != "work" {
+		t.Fatalf("the session got %v, want \"work\"", prompts)
+	}
 	term.press("\x1b")
 	server.waitCancels(t, 1)
 	waitFor(t, term, "✓ cancelled")
 	waitTimes(t, term, "world.", 1)
 
 	term.press("next\r")
+	// The held deltas paint as the stream's preview while the run
+	// holds, so the second run's cancel comes before its reply's words
+	// settle; the prompt the server received is the receipt.
 	if prompts := server.waitPrompts(t, 2); prompts[1] != "next" {
 		t.Fatalf("the session got %v, want \"next\" after the cancel", prompts)
 	}
-	// The held deltas paint when the run settles, so the second run's
-	// cancel comes before its reply's words can.
-	waitEcho(t, term, "next")
 	term.press("\x1b")
 	server.waitCancels(t, 2)
 	waitTimes(t, term, "✓ cancelled", 2)
@@ -419,9 +422,11 @@ func TestAnArrowKeyIsNotAnEscape(t *testing.T) {
 	term.press("work\r")
 	// The run must be on before the keys. An escape that arrives while
 	// the editor still holds the draft is one the editor eats under
-	// load. The echo is the machine's receipt for the line, so the keys
-	// after it reach the run.
-	waitEcho(t, term, "work")
+	// load. The run the server opened is the receipt for the line, so
+	// the keys after it reach the run.
+	if prompts := server.waitPrompts(t, 1); prompts[0] != "work" {
+		t.Fatalf("the session got %v, want \"work\"", prompts)
+	}
 	// The editor dispatches a bare escape once its key buffer holds no
 	// more keys, and an arrow the moment its last byte lands, so a poll
 	// through the dispatch window is enough to tell them apart: an

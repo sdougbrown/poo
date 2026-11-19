@@ -418,7 +418,9 @@ func (m *machine) steer(text string, input input) (int, bool) {
 }
 
 // prompt is the prompt the next read sits behind: the ask's when a
-// decision waits, the statusline's otherwise.
+// decision waits, the mark otherwise. The statusline does not ride the
+// prompt; it lives on the footer's bottom row, and the status's
+// changes reach it through paintStatusline.
 func (m *machine) prompt() string {
 	m.askMu.Lock()
 	ask := m.ask
@@ -426,7 +428,16 @@ func (m *machine) prompt() string {
 	if ask != nil {
 		return askPrompt(ask.ask)
 	}
-	return m.status.prompt()
+	return promptMark
+}
+
+// paintStatusline sends the statusline to the footer's bottom row. A
+// host without the pinned footer has no row for it, and reads nothing.
+func (m *machine) paintStatusline() {
+	if m.r == nil || m.r.layout == nil {
+		return
+	}
+	m.r.layout.setStatus(m.status.line())
 }
 
 // askPrompt is the line a permission decision is typed behind.
@@ -524,6 +535,7 @@ func (m *machine) start() error {
 		return err
 	}
 	m.status.level = current.Reasoning
+	m.paintStatusline()
 	if m.opts.ResumeID != "" {
 		m.replay()
 	}
@@ -944,6 +956,7 @@ func (m *machine) configureModel(name string) {
 		m.r.notice("thinking → %s", levelName(res.Reasoning))
 	}
 	m.status.level = res.Reasoning
+	m.paintStatusline()
 }
 
 // thinking sets the session's reasoning level, or takes the next one when
@@ -1006,6 +1019,7 @@ func (m *machine) setThinking(level string) error {
 		return err
 	}
 	m.status.level = res.Reasoning
+	m.paintStatusline()
 	return nil
 }
 
@@ -1150,6 +1164,7 @@ func (m *machine) event(evt protocol.Event, runID string, state *runState) bool 
 			// connection and counts against its own fill.
 			if json.Unmarshal(raw, &usage) == nil && usage.RunID == runID {
 				m.status.setTokens(usage.InputTokens)
+				m.paintStatusline()
 			}
 		}
 	case "turn.ended":

@@ -443,8 +443,8 @@ func TestATallLivePreviewCommitsEachRowOnce(t *testing.T) {
 	if !strings.Contains(strings.Join(screenRows(vt), "\n"), "tail 19|") {
 		t.Errorf("the committed tail is not on the screen:\n%s", vt.String())
 	}
-	if row := vt.Cursor().Y; row != 23 {
-		t.Errorf("the prompt stands on row %d, want the bottom row 23:\n%s", row, indexedScreen(vt))
+	if row := vt.Cursor().Y; row != 21 {
+		t.Errorf("the prompt stands on row %d, want the row above the chrome 21:\n%s", row, indexedScreen(vt))
 	}
 }
 

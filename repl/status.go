@@ -60,7 +60,8 @@ func newStatus(dir string) *status {
 }
 
 // line renders the statusline: the folder, the branch, the model and
-// the context's fill, dimmed to stay behind the conversation.
+// the context's fill, dimmed to stay behind the conversation. The repl
+// sends it to the footer's bottom row, below the editor's own rows.
 func (s *status) line() string {
 	var segments []string
 	if s.dir != "" {
@@ -86,14 +87,6 @@ func (s *status) line() string {
 		return ""
 	}
 	return ansiDim + strings.Join(segments, " │ ") + ansiReset
-}
-
-// prompt renders the status and input mark on one readline line.
-func (s *status) prompt() string {
-	if line := s.line(); line != "" {
-		return line + " " + promptMark
-	}
-	return promptMark
 }
 
 // folderName returns the directory a statusline names: the folder's

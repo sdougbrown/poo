@@ -22,6 +22,12 @@ const (
 	seqResetRegion   = "\x1b[r"  // DECSTBM full screen
 )
 
+// footerChrome is the rows the layout owns below the editor's rows in
+// the footer: the rule that separates the input from the statusline,
+// and the statusline row itself. They stay pinned to the screen's
+// bottom edge while the draft grows above them.
+const footerChrome = 2
+
 // layout pins the line editor to the bottom of the terminal.
 //
 // The transcript scrolls in a region above a footer the editor owns, and
@@ -52,6 +58,12 @@ type layout struct {
 	// and the preview cache is cleared for a rebuild, so a frame that
 	// lands before the rebuild only anchors.
 	resizing bool
+	// status is the statusline text the footer's bottom row carries.
+	// It is empty until the session names its first parts.
+	status string
+	// chromeStale says the chrome rows need a repaint: after an enter
+	// or a resize, the next footer sizing paints them again.
+	chromeStale bool
 	// active says the region is set and the footer is reserved.
 	active bool
 }
@@ -64,7 +76,7 @@ func newLayout(out io.Writer) *layout {
 	if !ok || !term.IsTerminal(int(f.Fd())) {
 		return nil
 	}
-	l := &layout{out: out, fd: int(f.Fd()), footer: 1}
+	l := &layout{out: out, fd: int(f.Fd()), footer: 1 + footerChrome}
 	if !l.readSize() || l.height < 4 || l.width < 2 {
 		return nil
 	}
@@ -112,6 +124,7 @@ func (l *layout) enter() {
 		return
 	}
 	l.active = true
+	l.chromeStale = true
 	l.emit(l.regionSeq() + l.footerSeq())
 }
 
@@ -392,6 +405,41 @@ func (l *layout) prepare(footer int) {
 	l.anchorLocked()
 }
 
+// setStatus stores the statusline and repaints the footer's bottom row
+// when the footer stands. The statusline lives below the editor's rows,
+// so its changes reach the terminal without touching the editor's
+// frame; the rule above it is the chrome's, and only a resize repaints
+// that.
+func (l *layout) setStatus(s string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.status == s {
+		return
+	}
+	l.status = s
+	if !l.active {
+		return
+	}
+	var b strings.Builder
+	b.WriteString(seqSaveCursor)
+	b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", l.height))
+	b.WriteString(seqEraseLine + l.status)
+	b.WriteString(seqRestoreCursor)
+	l.emit(b.String())
+}
+
+// paintChromeLocked writes the chrome rows into b: the rule between the
+// input and the statusline, and the statusline itself. They are the
+// footer's bottom two rows, pinned to the screen's bottom edge, so a
+// draft that grows moves them never.
+func (l *layout) paintChromeLocked(b *strings.Builder) {
+	rule := ansiDim + strings.Repeat("─", l.width) + ansiReset
+	b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", l.height-1))
+	b.WriteString(seqEraseLine + rule)
+	b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", l.height))
+	b.WriteString(seqEraseLine + l.status)
+}
+
 // endResize lifts the mark once the caller repainted the region.
 func (l *layout) endResize() {
 	l.mu.Lock()
@@ -420,10 +468,20 @@ func (l *layout) ensureLocked(footer int) bool {
 	if footer < 1 {
 		footer = 1
 	}
-	if room := l.height - 2; footer > room {
+	if room := l.height - 1 - footerChrome; footer > room {
 		footer = room
 	}
-	if footer == l.footer {
+	total := footer + footerChrome
+	if total == l.footer && !l.chromeStale {
+		// The editor's own line handling erases below its line — an
+		// accepted line wipes the screen under the input — so the chrome
+		// rows go with it. Every preparation paints them again, the way
+		// the frames keep the prompt standing.
+		var b strings.Builder
+		b.WriteString(seqSaveCursor)
+		l.paintChromeLocked(&b)
+		b.WriteString(seqRestoreCursor)
+		l.emit(b.String())
 		return false
 	}
 	rows := l.previewRows
@@ -431,11 +489,11 @@ func (l *layout) ensureLocked(footer int) bool {
 	l.clearPreviewLocked(&b)
 	b.WriteString(seqSaveCursor)
 	b.WriteString(l.footerSeq())
-	if footer > l.footer {
+	if total > l.footer {
 		// Only committed rows scroll. A pending preview row that left
 		// the region is written again when the stream repaints, and
 		// the footer's growth covers the rest.
-		k := footer - l.footer
+		k := total - l.footer
 		if committed := l.last - (l.regionTop() - 1); k > committed {
 			k = committed
 		}
@@ -443,7 +501,7 @@ func (l *layout) ensureLocked(footer int) bool {
 			b.WriteString(l.scrollSeq(k))
 		}
 	}
-	l.footer = footer
+	l.footer = total
 	b.WriteString(l.regionSeq())
 	b.WriteString(l.footerSeq())
 	b.WriteString(seqRestoreCursor)
@@ -454,6 +512,8 @@ func (l *layout) ensureLocked(footer int) bool {
 		l.last = l.regionTop() - 1
 	}
 	l.active = true
+	l.paintChromeLocked(&b)
+	l.chromeStale = false
 	l.emit(b.String())
 	var pb strings.Builder
 	l.paintPreviewLocked(&pb, rows)
@@ -525,8 +585,9 @@ func (l *layout) resize() bool {
 		return false
 	}
 	l.resizing = true
-	if l.footer > l.height-2 {
-		l.footer = l.height - 2
+	l.chromeStale = true
+	if l.footer > l.height-1-footerChrome {
+		l.footer = l.height - 1 - footerChrome
 	}
 	if l.footer < 1 {
 		l.footer = 1
