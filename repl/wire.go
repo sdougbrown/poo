@@ -18,6 +18,14 @@ import (
 // its events while the prompt's answer has been in for a while.
 const callTimeout = 2 * time.Minute
 
+// eventBacklog is how many events wait for the main loop. The loop
+// renders between reads, and a model that streams a delta per token
+// outruns a terminal write or a frame paint, so the backlog holds as
+// many messages as the server's own output queue does
+// (wire.DefaultQueueMessages). A full backlog is a client that has
+// stopped reading, not one that paused.
+const eventBacklog = 10000
+
 // conn is the client's end of the wire: a JSON-RPC 2.0 peer over the
 // server's pipes.
 //
@@ -68,7 +76,7 @@ func startConn(stdout io.Reader, stdin io.Writer) *conn {
 	c := &conn{
 		w:       stdin,
 		pending: map[int]chan rpcResult{},
-		events:  make(chan protocol.Event, 256),
+		events:  make(chan protocol.Event, eventBacklog),
 		asks:    make(chan askRequest, 8),
 		done:    make(chan struct{}),
 	}
@@ -85,7 +93,9 @@ func (c *conn) read(r io.Reader) {
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
 		if !c.line(scanner.Bytes()) {
-			c.err = fmt.Errorf("%w: event queue overflow", errServerClosed)
+			// The client gives up here, not the server: the
+			// failure names the side that stopped.
+			c.err = fmt.Errorf("repl: the session fell behind the server's events: %d were waiting", cap(c.events))
 			break
 		}
 	}

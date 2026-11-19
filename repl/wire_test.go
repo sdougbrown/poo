@@ -3,6 +3,8 @@ package repl
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -86,6 +88,30 @@ func TestTheDemuxSendsEachKindWhereItBelongs(t *testing.T) {
 	}
 }
 
+// TestABurstOfEventsOutlastsAStalledLoop covers the main loop that
+// stops draining for a moment, a terminal write or a frame paint,
+// while a fast model streams: the deltas wait for it, and the session
+// goes on.
+func TestABurstOfEventsOutlastsAStalledLoop(t *testing.T) {
+	h := newWireHarness(t)
+	conn := startConn(h.stdout, h.stdin)
+	const burst = 1000
+	for i := 1; i <= burst; i++ {
+		h.feed(fmt.Sprintf(`{"jsonrpc":"2.0","method":"event","params":{"session_id":"s1","seq":%d,"type":"message.delta"}}`, i))
+	}
+	select {
+	case <-conn.done:
+		t.Fatalf("the connection ended under a burst: %v", conn.err)
+	default:
+	}
+	for i := 1; i <= burst; i++ {
+		evt := <-conn.events
+		if evt.Seq != int64(i) {
+			t.Fatalf("event %d read back as seq %d", i, evt.Seq)
+		}
+	}
+}
+
 func TestAnEventOverflowEndsTheConnection(t *testing.T) {
 	h := newWireHarness(t)
 	conn := startConn(h.stdout, h.stdin)
@@ -96,10 +122,15 @@ func TestAnEventOverflowEndsTheConnection(t *testing.T) {
 	}()
 	select {
 	case <-conn.done:
-		if conn.err == nil || !strings.Contains(conn.err.Error(), "overflow") {
+		// The client is the side that gave up, and the failure says
+		// so: the server closed nothing.
+		if conn.err == nil || !strings.Contains(conn.err.Error(), "fell behind") {
 			t.Fatalf("the connection did not report the overflow: %v", conn.err)
 		}
-	case <-time.After(time.Second):
+		if errors.Is(conn.err, errServerClosed) {
+			t.Fatalf("the overflow blamed the server: %v", conn.err)
+		}
+	case <-time.After(10 * time.Second):
 		t.Fatal("the connection kept running after losing an event")
 	}
 }
