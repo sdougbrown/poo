@@ -111,14 +111,21 @@ func (c Checker) rules() []rule {
 		{path: m + "/wire/conformance", allowed: []string{m + "/wire/protocol"}},
 		{path: m + "/provider/catalog", allowed: []string{m}},
 		{path: m + "/provider/internal/support", allowed: []string{m}},
+		// The request-shape half the wire APIs share: the stable key
+		// order a fork preserves, the parameters merged into a body,
+		// and the policy for the provider data a request may carry.
+		{path: m + "/provider/internal/transport", allowed: []string{m}},
 		// The Responses API's wire half composes the failure table, the
 		// SSE framing and the fork's body rewrite, and nothing but the
 		// core beyond them.
-		{path: m + "/provider/internal/responses", allowed: []string{m, m + "/provider/internal/support"}},
+		{path: m + "/provider/internal/responses", allowed: []string{m, m + "/provider/internal/support", m + "/provider/internal/transport"}},
 		// The Chat Completions API's wire half composes the same, and
 		// the text repairs a model's answer may need, and nothing but
 		// the core beyond them.
-		{path: m + "/provider/internal/chat", allowed: []string{m, m + "/provider/internal/support"}},
+		{path: m + "/provider/internal/chat", allowed: []string{m, m + "/provider/internal/support", m + "/provider/internal/transport"}},
+		// The Messages API's wire half composes the same as its two
+		// siblings, and nothing but the core beyond them.
+		{path: m + "/provider/internal/anthropic", allowed: []string{m, m + "/provider/internal/support", m + "/provider/internal/transport"}},
 		{path: m + "/perm", allowed: []string{m, m + "/internal/urlnorm", m + "/protect"}},
 		{path: m + "/perm/decide", allowed: []string{m, m + "/perm", m + "/decide"}},
 		{path: m + "/session", allowed: []string{m, m + "/decide"}},
@@ -162,6 +169,11 @@ func (c Checker) rules() []rule {
 				// failure table, the retry policy and the SSE scanner a
 				// transport composes.
 				m + "/provider/internal/support",
+				// The request-shape half the wire APIs share: the
+				// stable key order a fork preserves, the parameters
+				// merged into a body, and the policy for the provider
+				// data a request may carry.
+				m + "/provider/internal/transport",
 				// The Responses API's wire half: the request shape, the
 				// input items, the event stream and the compaction
 				// items the Codex transport composes.
@@ -170,11 +182,20 @@ func (c Checker) rules() []rule {
 				// shape, the messages, the event stream and the text
 				// repairs an OpenAI-compatible transport composes.
 				m + "/provider/internal/chat",
+				// The Messages API's wire half: the request shape,
+				// the content blocks, the event stream and the
+				// thinking signatures an Anthropic-compatible
+				// transport composes.
+				m + "/provider/internal/anthropic",
 				// The settings package builds a Codex transport and
 				// reads pi's credential for it, so the server reaches
 				// both through the build.
 				m + "/provider/codex",
+				// The transports the build composes for the
+				// catalog's models: the Chat Completions one and
+				// the Messages one.
 				m + "/provider/openai",
+				m + "/provider/anthropic",
 				m + "/provider/auth",
 				m + "/session",
 				m + "/wire",

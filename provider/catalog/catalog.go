@@ -598,7 +598,14 @@ func (c *Catalog) merge(e *entry) (poo.ModelInfo, map[string]string) {
 	applyLayer(&out, source, LayerModelsFile, e.file)
 	applyLayer(&out, source, LayerSettings, e.settings)
 	if out.API == "" {
-		out.API = poo.APIChatCompletions
+		// A model no layer gave an API to speaks the one its endpoint
+		// declares, and an endpoint that declares none speaks the one the
+		// endpoints poo reaches by default do.
+		if endpoint, ok := c.endpoints[e.endpoint]; ok && endpoint.API != "" {
+			out.API = endpoint.API
+		} else {
+			out.API = poo.APIChatCompletions
+		}
 		source[fieldAPI] = LayerDefault
 	}
 	if out.Name == "" {

@@ -62,6 +62,9 @@ type Endpoint struct {
 	Name string
 	// Endpoint is the endpoint's base URL.
 	Endpoint string
+	// API is the wire API the endpoint speaks, which a model no layer
+	// named inherits.
+	API poo.API
 	// SessionHeader is the name of a header that carries the session's id, for
 	// a gateway that routes one conversation's requests together. Empty means
 	// the endpoint asks for none.

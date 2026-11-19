@@ -213,6 +213,66 @@ func TestTheProbeReadsTheLimitsAndCapabilitiesAGatewayReports(t *testing.T) {
 	}
 }
 
+// TestADiscoveredModelSpeaksItsEndpointsAPI covers the inheritance: a model
+// no layer gave an API to speaks the one its endpoint declares, and a model
+// on an endpoint that declares none keeps the chat-completions default.
+func TestADiscoveredModelSpeaksItsEndpointsAPI(t *testing.T) {
+	server := vllmServer(t, "glm-5.3", 32768)
+	settings := func(api poo.API) catalog.Settings {
+		return catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"gateway": {Endpoint: server.URL + "/v1", API: api},
+			},
+		}
+	}
+	declared := catalog.New(catalog.Options{Settings: settings(poo.APIAnthropicMessages), StateDir: t.TempDir()})
+	if err := declared.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	model, err := declared.Resolve("gateway/glm-5.3")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if model.API != poo.APIAnthropicMessages {
+		t.Errorf("the API is %q, want the endpoint's", model.API)
+	}
+
+	plain := catalog.New(catalog.Options{Settings: settings(""), StateDir: t.TempDir()})
+	if err := plain.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	model, err = plain.Resolve("gateway/glm-5.3")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if model.API != poo.APIChatCompletions {
+		t.Errorf("the API is %q, want the chat-completions default", model.API)
+	}
+
+	// A model's own word wins: the layer that named the model says which
+	// API it speaks, and the endpoint's declaration answers only for the
+	// models no layer named.
+	named := catalog.Settings{
+		Endpoints: map[string]catalog.EndpointSettings{
+			"gateway": {Endpoint: server.URL + "/v1", API: poo.APIAnthropicMessages},
+		},
+		Models: map[string]catalog.ModelSettings{
+			"gateway/glm-5.3": {Endpoint: "gateway", ModelID: "glm-5.3", API: poo.APIChatCompletions},
+		},
+	}
+	overridden := catalog.New(catalog.Options{Settings: named, StateDir: t.TempDir()})
+	if err := overridden.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+	named2, err := overridden.Resolve("gateway/glm-5.3")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if named2.API != poo.APIChatCompletions {
+		t.Errorf("the API is %q, want the model's own word", named2.API)
+	}
+}
+
 func TestTheVLLMProbeReadsTheModelList(t *testing.T) {
 	server := vllmServer(t, "gemma4", 32768)
 	c := catalog.New(catalog.Options{

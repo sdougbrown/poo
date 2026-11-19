@@ -66,7 +66,7 @@ func FailureKind(status int, code, errType, message string, fallback poo.Provide
 		return poo.ProviderKindUsageLimit
 	case isBilling(code, errType):
 		return poo.ProviderKindPlanInactive
-	case isRateLimit(code, message):
+	case isRateLimit(code, errType, message):
 		return poo.ProviderKindRateLimited
 	}
 
@@ -124,9 +124,13 @@ func isBilling(code, errType string) bool {
 	return false
 }
 
-// isRateLimit reports whether a failure names a rate limit.
-func isRateLimit(code, message string) bool {
-	lower := strings.ToLower(code + " " + message)
+// isRateLimit reports whether a failure means the requests came too fast.
+//
+// The type is read as well as the code and the message, because a server
+// that reports its failures as an error type — the Messages API names its
+// rate limit "rate_limit_error" — carries the fact there and nowhere else.
+func isRateLimit(code, errType, message string) bool {
+	lower := strings.ToLower(code + " " + errType + " " + message)
 	return strings.Contains(lower, "rate_limit") || strings.Contains(lower, "rate limit")
 }
 

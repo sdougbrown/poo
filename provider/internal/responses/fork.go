@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/sdougbrown/poo"
-	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // AppendInput appends messages to a serialized request body.
@@ -63,12 +63,12 @@ func AppendInput(body []byte, appended []poo.Message, reads Modalities) ([]byte,
 		payload["input"] = raw
 	}
 
-	order, err := support.JSONKeyOrder(body)
+	order, err := transport.JSONKeyOrder(body)
 	if err != nil {
 		return nil, err
 	}
 	// A snapshot can lack input. Include the added field in the order so
 	// encoding retains the appended items.
-	order = support.WithKeys(order, payload, []string{"input"})
-	return support.EncodeObject(payload, order), nil
+	order = transport.WithKeys(order, payload, []string{"input"})
+	return transport.EncodeObject(payload, order), nil
 }

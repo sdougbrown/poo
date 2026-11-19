@@ -227,25 +227,37 @@ key after the variable itself and ahead of a literal the settings carry.
 
 **The OpenCode providers.** The Console providers `opencode` and
 `opencode-go` are built in — pay-as-you-go and Go, at their own base
-URLs. `poo login opencode` stores the Console key, and one key serves
-both endpoints, because a key belongs to one workspace and the
+URLs — and each has a Messages sibling, `opencode-anthropic` and
+`opencode-go-anthropic`, because the gateway serves the Anthropic
+Messages API beside the Chat Completions one and every model answers
+through both. `poo login opencode` stores the Console key, and one key
+serves every endpoint, because a key belongs to one workspace and the
 workspace's plan says which endpoint bills it:
 
 ```yaml
 auth_file: ~/.config/poo/auth.json
 roles:
   chat: opencode-go/glm-5.3
+  # or the Messages sibling:
+  # chat: opencode-go-anthropic/claude-haiku-5-5
 ```
 
-The gateway lists the models it serves, so the built-in record names one
-model per endpoint and the discovery probe supplies every field,
-including the ones the record could have carried: limits, tools,
-reasoning levels and modalities, cached locally and refreshed as the
-catalog is built. The gateway requires a session header on every chat
-request, so the endpoints declare `session_header: x-opencode-session`
-and the transport carries the session's id — on a turn, on a fork, and
-on the compaction a long run makes. An endpoint the operator declares
-under another name names its own header the same way.
+Each endpoint's models come from the gateway's live list, cached locally
+and refreshed as the catalog is built; the built-in record names one
+model per endpoint because the loader requires an endpoint to serve
+something, and the probe supplies every field it reports. The gateway
+requires a session header on every chat request, so the endpoints
+declare `session_header: x-opencode-session` and the transports carry
+the session's id — on a turn, on a fork, and on the compaction a long
+run makes. An endpoint the operator declares under another name names
+its own header the same way, and a model no layer gave an API to speaks
+the one its endpoint declares.
+
+The Messages transport is the Anthropic one: content blocks, tool uses
+that stream their arguments, and the thinking a model did — with the
+signature the response carried, returned unchanged in the history that
+answers it. An effort level rides as the output config's effort with
+adaptive thinking, and a budget rides in the thinking field itself.
 
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.

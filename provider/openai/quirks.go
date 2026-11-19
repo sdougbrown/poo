@@ -3,10 +3,9 @@ package openai
 import (
 	"encoding/json"
 	"log/slog"
-	"strings"
 
 	"github.com/sdougbrown/poo/provider/internal/chat"
-	"github.com/sdougbrown/poo/provider/internal/support"
+	"github.com/sdougbrown/poo/provider/internal/transport"
 )
 
 // The quirk framework.
@@ -86,53 +85,7 @@ func (s *requestShape) setParam(name string, value any) {
 		s.claimed = map[string]bool{}
 	}
 	s.claimed[name] = true
-	parts := strings.Split(name, ".")
-	if len(parts) == 1 {
-		s.setRaw(name, value)
-		return
-	}
-	var leaf any = value
-	for i := len(parts) - 1; i > 0; i-- {
-		leaf = map[string]any{parts[i]: leaf}
-	}
-	s.setRaw(parts[0], leaf)
-}
-
-// setRaw sets a parameter, merging it into an object that is there.
-func (s *requestShape) setRaw(name string, value any) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return
-	}
-	existing, ok := s.params[name]
-	if !ok {
-		s.params[name] = raw
-		return
-	}
-	merged, err := mergeJSON(existing, raw)
-	if err != nil {
-		s.params[name] = raw
-		return
-	}
-	s.params[name] = merged
-}
-
-// mergeJSON merges two JSON objects, one field at a time.
-//
-// A field the second object does not have keeps the first object's
-// value.
-func mergeJSON(first, second []byte) ([]byte, error) {
-	var a, b map[string]json.RawMessage
-	if err := json.Unmarshal(first, &a); err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(second, &b); err != nil {
-		return nil, err
-	}
-	for k, v := range b {
-		a[k] = v
-	}
-	return json.Marshal(a)
+	transport.SetNested(s.params, name, value)
 }
 
 // quirks holds the registered profiles, by name.
@@ -232,7 +185,7 @@ func init() {
 					parts[j] = chat.ContentPart{
 						Type: "audio_url",
 						AudioURL: &chat.AudioURL{
-							URL: "data:" + support.AudioMediaType(parts[j].InputAudio.Format) + ";base64," + parts[j].InputAudio.Data,
+							URL: "data:" + transport.AudioMediaType(parts[j].InputAudio.Format) + ";base64," + parts[j].InputAudio.Data,
 						},
 					}
 					changed = true
@@ -286,7 +239,7 @@ func (t *Transport) textFilters(settings requestSettings) []chat.TextFilter {
 		}
 	}
 	filters := repair.filters
-	mode := support.ToolsMode(settings.info, t.cfg.ToolsMode)
+	mode := transport.ToolsMode(settings.info, t.cfg.ToolsMode)
 	if repair.textCalls && mode != "text" && mode != "auto" {
 		// The model writes its tool calls as text, whatever its mode
 		// says.
@@ -303,7 +256,7 @@ func (t *Transport) textFilters(settings requestSettings) []chat.TextFilter {
 // A request that carries them may also carry native tool calls, and a
 // native call wins over one the model wrote as text.
 func (t *Transport) sendsTools(settings requestSettings) bool {
-	mode := support.ToolsMode(settings.info, t.cfg.ToolsMode)
+	mode := transport.ToolsMode(settings.info, t.cfg.ToolsMode)
 	return mode == "native" || mode == "auto"
 }
 
