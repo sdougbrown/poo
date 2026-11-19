@@ -625,9 +625,9 @@ func restoredMaxTokens(t *testing.T, created *poo.SessionCreatedRecord, opts poo
 }
 
 // TestTheRestoreFillsAnUnknownMaxOutputFromTheSettings covers a model
-// whose output limit the record does not know: the restored session
-// sends the limit the current settings declare for the same model, and
-// never one declared for another model.
+// whose recorded chat role has no output limit: the restored session
+// sends the limit the current settings declare for the same model, then
+// the one the header recorded, and never one declared for another model.
 func TestTheRestoreFillsAnUnknownMaxOutputFromTheSettings(t *testing.T) {
 	t.Run("the same model", func(t *testing.T) {
 		tr := scripted([]fakeResponse{{text: "done"}})
@@ -639,13 +639,13 @@ func TestTheRestoreFillsAnUnknownMaxOutputFromTheSettings(t *testing.T) {
 			t.Errorf("the restored request's max_tokens is %d, want the settings' 16384", got)
 		}
 	})
-	t.Run("another model", func(t *testing.T) {
+	t.Run("the header's limit", func(t *testing.T) {
 		tr := scripted([]fakeResponse{{text: "done"}})
 		opts := restoreOptions(t, tr, &recordingSink{})
-		opts.Models["other"] = poo.ModelInfo{Name: "other", ModelID: "other-model", ContextLimit: 32768, MaxOutput: 16384}
-		opts.Model = opts.Models["other"]
-		if got := restoredMaxTokens(t, header("s1"), opts, tr); got != poo.DefaultMaxOutput {
-			t.Errorf("the restored request's max_tokens is %d, want the default %d", got, poo.DefaultMaxOutput)
+		created := header("s1")
+		created.Model = poo.SessionModel{ModelID: "test-model", MaxOutput: 4096}
+		if got := restoredMaxTokens(t, created, opts, tr); got != 4096 {
+			t.Errorf("the restored request's max_tokens is %d, want the header's 4096", got)
 		}
 	})
 	t.Run("the name now serves another model_id", func(t *testing.T) {
