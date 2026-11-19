@@ -270,8 +270,6 @@ func TestADirectoryNamedLikeSettingsIsNotAFile(t *testing.T) {
 	}
 }
 
-// TestDarwinConfigFallback follows macOS's literal ~/.config convention after
-// the native user config directory, without involving the process cwd.
 func TestDarwinConfigFallback(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS settings discovery")

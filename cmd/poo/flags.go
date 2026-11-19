@@ -92,9 +92,8 @@ func nonEmpty(values []string) []string {
 	return kept
 }
 
-// defaultUserPromptFile is the file the user's own instructions are read
-// from when neither the flag nor the settings name one: AGENTS.md in the
-// platform's config directory for poo.
+// defaultUserPromptFile points to AGENTS.md in poo's platform config directory.
+// A flag or setting can name a different file.
 //
 // A binary that keeps its instructions elsewhere sets BuildOptions'
 // UserPromptFile to its own path, and one that wants no default leaves

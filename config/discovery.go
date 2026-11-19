@@ -7,13 +7,6 @@ import (
 	"runtime"
 )
 
-// The places a settings file is discovered at, in the order a command
-// reads them. The explicit path wins — the --settings flag or the
-// POO_SETTINGS environment variable; then the project's `.poo`
-// directory, walking up from the working directory the way git finds
-// its repository; then the user's config locations; and a command that
-// finds nothing runs on the defaults. Each directory is searched for
-// the names settingsFileNames lists.
 const (
 	// EnvSettings is the environment variable a settings file is
 	// pointed at by.
