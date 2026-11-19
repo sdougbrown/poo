@@ -435,6 +435,37 @@ func TestTheCutKeepsTheNewestTurnsWithinTheTail(t *testing.T) {
 		}
 	})
 
+	t.Run("input cap caps the tail", func(t *testing.T) {
+		var got []poo.Message
+		// The configured tail is far larger than the input cap, and the window is no bound at all, so the
+		// strategy keeps half of it: 500 tokens, which is the newest
+		// turn alone.
+		c := summary.New(summary.Options{KeepRecentTokens: 20000})
+		compaction, err := c.Compact(context.Background(), poo.CompactionEnv{
+			View:   view(),
+			Budget: poo.ContextBudget{ContextLimit: 100000, InputLimit: 1000, CharsPerToken: 4},
+			Ask:    ask(&got),
+		})
+		if err != nil {
+			t.Fatalf("compacting: %v", err)
+		}
+		if compaction.Replace == nil {
+			t.Fatalf("the compaction is %+v, want a replacement", compaction)
+		}
+		if got := compaction.Replace.Cut; got != (poo.TurnRange{First: 1, Last: 2}) {
+			t.Errorf("the cut is %+v, want turns 1 to 2", got)
+		}
+		transcript := got[len(got)-1].Text()
+		for _, want := range []string{"aaa", "bbb"} {
+			if !strings.Contains(transcript, want) {
+				t.Errorf("the transcript is %q, want the cut's turns in it", transcript)
+			}
+		}
+		if strings.Contains(transcript, "ccc") {
+			t.Errorf("the transcript is %q, want the tail left out", transcript)
+		}
+	})
+
 	t.Run("a tail that holds the view is a refusal", func(t *testing.T) {
 		var got []poo.Message
 		c := summary.New(summary.Options{KeepRecentTokens: 20000})
