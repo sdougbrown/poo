@@ -256,8 +256,7 @@ func stripDocumentBOM(data []byte) []byte {
 	return bytes.TrimPrefix(data, []byte("\ufeff"))
 }
 
-// resolveCredentialFile returns the file the Codex credential is read from, and
-// that poo writes it to.
+// resolveCredentialFile selects the file the Codex credential is read from.
 //
 // The operator's own words come first, then the arrangement pi's files already
 // have, then poo's own file:
@@ -272,8 +271,9 @@ func stripDocumentBOM(data []byte) []byte {
 //     so a pi setup keeps working without naming the file. The path is answered
 //     whether or not the file is there yet: a long-lived process that resolved it
 //     before pi's first login must still find the credential pi wrote after.
-//  4. poo's own file in the user's config directory, when there is no models file
-//     for a credential to sit beside. It is where poo creates one of its own.
+//  4. DefaultAuthFile selects poo's own file when there is no models file for a
+//     credential to sit beside. On macOS, an existing ~/.config/poo/auth.json
+//     stands in when the native file is absent.
 //
 // Naming both files is refused: poo reads one credential at a time, and two
 // settings naming one apiece is a question the file cannot answer.
@@ -353,8 +353,8 @@ func (s *Settings) resolveCredentialPath(dir, field, named string, mustExist boo
 	return path, nil
 }
 
-// defaultCredentialFile is poo's own credential file in the user's config
-// directory.
+// defaultCredentialFile returns DefaultAuthFile, or an empty path if it cannot
+// be resolved.
 //
 // A machine whose config directory cannot be resolved has no default file, and
 // the Codex provider reports the credential it could not find. The settings are
@@ -369,7 +369,7 @@ func defaultCredentialFile() string {
 
 // CredentialFile returns the file the Codex credential is read from: the one
 // auth_file or pi_auth_file named, else the auth.json beside the models file,
-// else poo's own file in the user's config directory.
+// else DefaultAuthFile.
 //
 // A Settings that was loaded has the path resolved. One built by hand names it,
 // and the path answers to the working directory the way every other hand-built
