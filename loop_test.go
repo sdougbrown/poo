@@ -3,6 +3,7 @@ package poo_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -228,6 +229,69 @@ func TestAFinishReasonOfLengthReachesBeforeSettle(t *testing.T) {
 	res := runSession(t, s, "do the thing")
 	if res.Reason != poo.ReasonOutputTruncated {
 		t.Errorf("the run settled %q, want output_truncated", res.Reason)
+	}
+}
+
+func TestATruncatedRunSaysWhichLimitItHit(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(m *poo.ModelInfo)
+		// want are the phrases the settle's text carries.
+		want []string
+		// absent are the phrases it does not.
+		absent []string
+	}{
+		{
+			name:   "the default for a model that declares no max_output",
+			setup:  func(m *poo.ModelInfo) { m.MaxOutput = 0 },
+			want:   []string{"max_tokens 8192", "models.glm-flash.max_output"},
+			absent: []string{"context"},
+		},
+		{
+			name:   "the model's own max_output",
+			setup:  func(m *poo.ModelInfo) { m.MaxOutput = 512 },
+			want:   []string{"max_tokens 512", "max_output"},
+			absent: []string{"models.glm-flash.max_output", "context"},
+		},
+		{
+			name: "the room the context window leaves",
+			setup: func(m *poo.ModelInfo) {
+				m.MaxOutput = 0
+				m.ContextLimit = 4096
+			},
+			want:   []string{"max_tokens", "context"},
+			absent: []string{"models.glm-flash.max_output"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := scripted([]fakeResponse{{text: "a truncated ans", finish: poo.FinishLength}})
+			opts := testOptions(t, tr, &echoTool{result: "echoed"}, &recordingSink{})
+			opts.Model.Name = "glm-flash"
+			opts.Model.ContextLimit = 262144
+			tc.setup(&opts.Model)
+
+			s := newTestSession(t, opts)
+			res := runSession(t, s, "a short prompt")
+			if res.Reason != poo.ReasonOutputTruncated {
+				t.Fatalf("the run settled %q, want output_truncated", res.Reason)
+			}
+			text := res.Detail.Text
+			sent := fmt.Sprintf("max_tokens %d", tr.Requests()[0].MaxTokens)
+			if !strings.Contains(text, sent) {
+				t.Errorf("the settle text %q does not name the request's %q", text, sent)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(text, want) {
+					t.Errorf("the settle text %q lacks %q", text, want)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(text, absent) {
+					t.Errorf("the settle text %q has %q", text, absent)
+				}
+			}
+		})
 	}
 }
 

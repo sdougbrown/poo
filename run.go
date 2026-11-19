@@ -636,7 +636,7 @@ func (s *Session) loop(run *runState) []candidate {
 
 		// The turn ended. The turn-end algorithm decides what happens
 		// next: it may settle the run, or it may go to the gate.
-		outcome := s.turnEnd(run, turn, processed, truncated, note)
+		outcome := s.turnEnd(run, turn, processed, resp, note)
 		if len(outcome.candidates) > 0 {
 			return outcome.candidates
 		}
@@ -657,7 +657,7 @@ type turnOutcome struct {
 // The steps are normative: emit turn.ended, drain the queues, run the
 // AfterTurn hooks, evaluate the stop conditions, and then either settle
 // or go to the next-request gate.
-func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool, note turnNote) turnOutcome {
+func (s *Session) turnEnd(run *runState, turn int, processed bool, resp *response, note turnNote) turnOutcome {
 	// Step 1: the turn is over.
 	s.events.emit(EventTurnEnded, map[string]any{"run_id": run.id, "turn": turn})
 
@@ -717,8 +717,10 @@ func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool, no
 	// A truncated response with no complete call is a natural stop with
 	// the truncated reason.
 	natural := ReasonEndTurn
-	if truncated {
+	naturalDetail := SettleDetail{Source: string(natural)}
+	if resp.finish == FinishLength {
 		natural = ReasonOutputTruncated
+		naturalDetail = SettleDetail{Source: string(natural), Text: resp.truncation}
 	}
 
 	// A job started by this run that is still running holds the run
@@ -771,7 +773,7 @@ func (s *Session) turnEnd(run *runState, turn int, processed, truncated bool, no
 	case continued:
 		return turnOutcome{}
 	default:
-		return turnOutcome{candidates: []candidate{newCandidate(natural, SettleDetail{Source: string(natural)})}}
+		return turnOutcome{candidates: []candidate{newCandidate(natural, naturalDetail)}}
 	}
 }
 
@@ -1248,7 +1250,8 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	messages := s.modelMessagesLocked()
 	tools := s.toolSpecs()
 	requestChars := s.historyCharsLocked()
-	maxTokens := model.MaxTokens(s.estimatedInputLocked())
+	limit := model.OutputLimit(s.estimatedInputLocked())
+	maxTokens := limit.Tokens
 	s.mu.Unlock()
 
 	// The request runs under the run's activity context, so an
@@ -1287,6 +1290,7 @@ func (s *Session) request(run *runState, turn int) (*response, Rendered, error) 
 	})
 	if resp != nil {
 		resp.requestChars = requestChars
+		resp.truncation = limit.Explain(model)
 	}
 	if err != nil && resp != nil && resp.usage == nil {
 		if reporter, ok := reader.(UsageReporter); ok {
@@ -1858,6 +1862,9 @@ type response struct {
 	// requestChars is the serialized size of the view the request sent,
 	// which is what the endpoint's input token count measures.
 	requestChars int
+	// truncation says which output limit the request carried, for a
+	// response that stopped on it.
+	truncation string
 	// errors are the failures the transport reported about the
 	// response.
 	errors []StreamError

@@ -23,6 +23,51 @@ const (
 	ReasoningPathToggle = "chat_template_kwargs.enable_thinking"
 )
 
+// OutputLimitSource names which limit set a request's max_tokens.
+type OutputLimitSource string
+
+const (
+	// OutputLimitDefault is DefaultMaxOutput, used because the model
+	// declares no output limit.
+	OutputLimitDefault OutputLimitSource = "default"
+	// OutputLimitModel is the output limit the model declares.
+	OutputLimitModel OutputLimitSource = "model"
+	// OutputLimitContext is the room the context window leaves after the
+	// prompt, when that is under the model's output limit.
+	OutputLimitContext OutputLimitSource = "context"
+)
+
+// OutputLimit is the output room a request carries and the limit that
+// set it.
+type OutputLimit struct {
+	// Tokens is the request's max_tokens.
+	Tokens int
+	// Source is the limit that set Tokens.
+	Source OutputLimitSource
+}
+
+// Explain says which limit a truncated response hit, for the model that
+// was asked.
+//
+// A model with no declared output limit is told the setting that raises
+// it, named by the model's settings name or, without one, its model id.
+func (l OutputLimit) Explain(info ModelInfo) string {
+	switch l.Source {
+	case OutputLimitDefault:
+		name := info.Name
+		if name == "" {
+			name = info.ModelID
+		}
+		return fmt.Sprintf("the response stopped at max_tokens %d, poo's default for a model with no max_output; set models.%s.max_output to raise it",
+			l.Tokens, name)
+	case OutputLimitContext:
+		return fmt.Sprintf("the response stopped at max_tokens %d, all the room the context window had left; the context is nearly full",
+			l.Tokens)
+	default:
+		return fmt.Sprintf("the response stopped at max_tokens %d, the model's max_output", l.Tokens)
+	}
+}
+
 // MaxTokens computes the output room for a request against a model.
 //
 // The room is the model's own output limit, or DefaultMaxOutput when
@@ -30,14 +75,20 @@ const (
 // after the prompt. The value is always computed, so a request always
 // carries a max_tokens and never the endpoint's own default.
 func MaxTokens(info ModelInfo, estimatedInput int) int {
-	limit := info.MaxOutput
-	if limit <= 0 {
-		limit = DefaultMaxOutput
+	return info.OutputLimit(estimatedInput).Tokens
+}
+
+// OutputLimit computes the output room for a request against the model,
+// and names the limit that set it.
+func (m ModelInfo) OutputLimit(estimatedInput int) OutputLimit {
+	limit := OutputLimit{Tokens: m.MaxOutput, Source: OutputLimitModel}
+	if limit.Tokens <= 0 {
+		limit = OutputLimit{Tokens: DefaultMaxOutput, Source: OutputLimitDefault}
 	}
-	if info.ContextLimit > 0 {
-		room := info.ContextLimit - estimatedInput - OutputReserve
-		if room < limit {
-			limit = room
+	if m.ContextLimit > 0 {
+		room := m.ContextLimit - estimatedInput - OutputReserve
+		if room < limit.Tokens {
+			limit = OutputLimit{Tokens: room, Source: OutputLimitContext}
 		}
 	}
 	return limit
@@ -45,7 +96,7 @@ func MaxTokens(info ModelInfo, estimatedInput int) int {
 
 // MaxTokens computes the output room for a request against the model.
 func (m ModelInfo) MaxTokens(estimatedInput int) int {
-	return MaxTokens(m, estimatedInput)
+	return m.OutputLimit(estimatedInput).Tokens
 }
 
 // EffectiveSampling returns the sampling parameters a request carries.

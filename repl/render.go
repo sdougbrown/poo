@@ -967,10 +967,17 @@ func (r *renderer) previewContentWidth() int {
 }
 
 // settle renders a run's outcome and what it cost.
-func (r *renderer) settle(reason string, turns int, input, output int) {
+//
+// A run that stopped on the output limit carries the settle's text as a
+// warning under the line, because the line alone reads as a stall. Another
+// reason's text is not repeated here.
+func (r *renderer) settle(reason string, turns int, input, output int, text string) {
 	line := ansiDim + fmt.Sprintf("✓ %s · %d turn(s) · %s in · %s out",
 		reason, turns, shortTokens(input), shortTokens(output)) + ansiReset
 	r.write(line + "\n")
+	if reason == "output_truncated" && text != "" {
+		r.warning(text)
+	}
 }
 
 // notice writes a dim line that is not part of the conversation.
