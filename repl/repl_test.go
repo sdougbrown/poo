@@ -789,8 +789,9 @@ func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
 
 // TestAModelSwitchTheCatalogCannotDescribe covers a switch the server
 // accepts for a model the client's catalog does not hold: the session
-// moves, and the statusline keeps the window it had rather than
-// inventing one.
+// moves, and the transcript says the name the wire answered with. The
+// window it kept is the pty variant's to pin:
+// TestAModelSwitchTheCatalogCannotDescribeKeepsTheWindow.
 func TestAModelSwitchTheCatalogCannotDescribe(t *testing.T) {
 	// The server answers the switch with a name its catalog does not
 	// carry, the way a normalising server would.
