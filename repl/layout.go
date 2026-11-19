@@ -168,12 +168,14 @@ func (l *layout) write(s string) {
 	if len(rows) == 0 {
 		return
 	}
+	var b strings.Builder
 	pending := l.previewRows
 	if l.preview > 0 {
-		l.clearPreviewLocked()
+		l.clearPreviewLocked(&b)
 	}
-	l.emit(seqSaveCursor + l.rowsSeq(rows) + seqRestoreCursor)
-	l.paintPreviewLocked(pending)
+	b.WriteString(seqSaveCursor + l.rowsSeq(rows) + seqRestoreCursor)
+	l.paintPreviewLocked(&b, pending)
+	l.emit(b.String())
 }
 
 // wrapRows lays one line out as rows no wider than the terminal. A row
@@ -247,19 +249,27 @@ func (l *layout) scrollSeq(n int) string {
 //
 // The region scrolls only over committed rows, and a taller preview
 // shows its visible tail until the commit.
+// paintPreview takes the standing preview down and paints rows in its
+// place as one composed write: between the erases and the paint the
+// terminal shows nothing gone, so a fast stream does not flash.
 func (l *layout) paintPreview(rows []string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.clearPreviewLocked()
-	return l.paintPreviewLocked(rows)
+	var b strings.Builder
+	l.clearPreviewLocked(&b)
+	n := l.paintPreviewLocked(&b, rows)
+	l.emit(b.String())
+	return n
 }
 
-func (l *layout) paintPreviewLocked(rows []string) int {
+// paintPreviewLocked writes the rows' paint into b and caches them as
+// the standing preview, returning the rows it stands on. The caller
+// emits the builder, so a clear and a paint can share one write.
+func (l *layout) paintPreviewLocked(b *strings.Builder, rows []string) int {
 	l.previewRows = rows
 	if !l.active || len(rows) == 0 {
 		return 0
 	}
-	var b strings.Builder
 	b.WriteString(seqSaveCursor)
 	if extra := len(rows) - (l.regionBottom() - l.last); extra > 0 {
 		// Room comes from what is above the preview: the committed rows
@@ -291,7 +301,6 @@ func (l *layout) paintPreviewLocked(rows []string) int {
 		l.preview = 0
 	}
 	b.WriteString(seqRestoreCursor)
-	l.emit(b.String())
 	return l.preview
 }
 
@@ -305,10 +314,16 @@ func (l *layout) hint(text string) {
 func (l *layout) clearPreview() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.clearPreviewLocked()
+	var b strings.Builder
+	l.clearPreviewLocked(&b)
+	l.emit(b.String())
 }
 
-func (l *layout) clearPreviewLocked() {
+// clearPreviewLocked writes the erases that take the standing preview
+// off the region into b, and empties the cache. The caller emits the
+// builder, so a clear that shares a frame with a paint lands as one
+// write and the terminal never shows the rows erased.
+func (l *layout) clearPreviewLocked(b *strings.Builder) {
 	l.previewRows = nil
 	if !l.active || l.preview <= 0 {
 		return
@@ -316,14 +331,12 @@ func (l *layout) clearPreviewLocked() {
 	top := l.last + 1
 	rows := l.preview
 	l.preview = 0
-	var b strings.Builder
 	b.WriteString(seqSaveCursor)
 	for row := top; row < top+rows && row <= l.regionBottom(); row++ {
 		b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", row))
 		b.WriteString(seqEraseLine)
 	}
 	b.WriteString(seqRestoreCursor)
-	l.emit(b.String())
 }
 
 // sealPreview keeps the rows a live preview painted: the stream ended
@@ -353,8 +366,10 @@ func (l *layout) commitPreview(body string) {
 	defer l.mu.Unlock()
 	rows := textRows(body, l.width)
 	if len(rows) > l.preview {
-		l.clearPreviewLocked()
-		l.emit(seqSaveCursor + l.rowsSeq(rows) + seqRestoreCursor)
+		var b strings.Builder
+		l.clearPreviewLocked(&b)
+		b.WriteString(seqSaveCursor + l.rowsSeq(rows) + seqRestoreCursor)
+		l.emit(b.String())
 	} else {
 		l.sealPreviewLocked()
 	}
@@ -412,8 +427,8 @@ func (l *layout) ensureLocked(footer int) bool {
 		return false
 	}
 	rows := l.previewRows
-	l.clearPreviewLocked()
 	var b strings.Builder
+	l.clearPreviewLocked(&b)
 	b.WriteString(seqSaveCursor)
 	b.WriteString(l.footerSeq())
 	if footer > l.footer {
@@ -440,7 +455,9 @@ func (l *layout) ensureLocked(footer int) bool {
 	}
 	l.active = true
 	l.emit(b.String())
-	l.paintPreviewLocked(rows)
+	var pb strings.Builder
+	l.paintPreviewLocked(&pb, rows)
+	l.emit(pb.String())
 	return true
 }
 
@@ -482,8 +499,8 @@ func (l *layout) anchorLocked() {
 		b.WriteString(seqEraseLine)
 	}
 	b.WriteString(fmt.Sprintf("\x1b[%d;1H", l.footerTop()))
+	l.paintPreviewLocked(&b, pending)
 	l.emit(b.String())
-	l.paintPreviewLocked(pending)
 }
 
 // cols is the terminal's width now.
