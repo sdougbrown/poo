@@ -418,15 +418,20 @@ func (m *machine) steer(text string, input input) (int, bool) {
 }
 
 // prompt is the prompt the next read sits behind: the ask's when a
-// decision waits, the mark otherwise. The statusline does not ride the
-// prompt; it lives on the footer's bottom row, and the status's
-// changes reach it through paintStatusline.
+// decision waits, the mark otherwise. A host with no pinned footer
+// rides the statusline in the prompt instead — the bottom row is the
+// layout's to paint, and there is none.
 func (m *machine) prompt() string {
 	m.askMu.Lock()
 	ask := m.ask
 	m.askMu.Unlock()
 	if ask != nil {
 		return askPrompt(ask.ask)
+	}
+	if m.r == nil || m.r.layout == nil {
+		if line := m.status.line(); line != "" {
+			return line + " " + promptMark
+		}
 	}
 	return promptMark
 }
@@ -441,7 +446,8 @@ func (m *machine) mutateStatus(fn func(*status)) {
 }
 
 // paintStatusline sends the statusline to the footer's bottom row. A
-// host without the pinned footer has no row for it, and reads nothing.
+// host without the pinned footer reads nothing here — its prompt
+// carries the statusline instead.
 func (m *machine) paintStatusline() {
 	if m.r == nil || m.r.layout == nil {
 		return

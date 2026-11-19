@@ -239,6 +239,11 @@ func TestAModelSwitchPaintsTheFooterStatusline(t *testing.T) {
 	term, code := startTerminalRepl(t, server)
 	waitBottom(t, term)
 
+	// The footer's bottom row names the level the session opened at,
+	// the read-back the wire's SessionGet reported: high, before the
+	// switch moves the session to a level qwen can take.
+	waitScreen(t, term, "🧠 high")
+
 	term.press("/model qwen\r")
 	waitScreen(t, term, "model → qwen")
 	term.press("say hi\r")

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/reeflective/readline"
 	"github.com/sdougbrown/poo/wire/protocol"
 )
@@ -765,6 +766,18 @@ func TestAModelSwitchTakesTheNewModelAndItsWindow(t *testing.T) {
 
 	if !strings.Contains(out, "model → qwen") {
 		t.Errorf("the transcript shows no switch:\n%s", out)
+	}
+	// A footerless host rides the statusline in the prompt: the switch
+	// names qwen beside the window the run filled, and a switch that
+	// kept the old model's name or window would read them here.
+	found := false
+	for _, line := range strings.Split(ansi.Strip(out), "\n") {
+		if strings.Contains(line, "ctx 12.3k/131.1k") && strings.Contains(line, "qwen") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no prompt names qwen beside its window:\n%s", out)
 	}
 
 	server.mu.Lock()
