@@ -423,9 +423,16 @@ func (l *layout) setStatus(s string) {
 	var b strings.Builder
 	b.WriteString(seqSaveCursor)
 	b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", l.height))
-	b.WriteString(seqEraseLine + l.status)
+	b.WriteString(seqEraseLine + l.statusRow())
 	b.WriteString(seqRestoreCursor)
 	l.emit(b.String())
+}
+
+// statusRow is the statusline text clipped to the terminal's width: a
+// line wider than the screen would wrap the bottom row, and the wrap
+// scrolls the pinned footer off the screen's bottom edge.
+func (l *layout) statusRow() string {
+	return ansi.Truncate(l.status, l.width, "")
 }
 
 // paintChromeLocked writes the chrome rows into b: the rule between the
@@ -437,7 +444,7 @@ func (l *layout) paintChromeLocked(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", l.height-1))
 	b.WriteString(seqEraseLine + rule)
 	b.WriteString(fmt.Sprintf("\x1b[%d;1H\r", l.height))
-	b.WriteString(seqEraseLine + l.status)
+	b.WriteString(seqEraseLine + l.statusRow())
 }
 
 // endResize lifts the mark once the caller repainted the region.
@@ -586,8 +593,14 @@ func (l *layout) resize() bool {
 	}
 	l.resizing = true
 	l.chromeStale = true
-	if l.footer > l.height-1-footerChrome {
-		l.footer = l.height - 1 - footerChrome
+	// l.footer counts the chrome: the total stays within one region row
+	// of the screen's height, and never falls under its own minimum of
+	// one editor row plus the chrome.
+	if l.footer > l.height-1 {
+		l.footer = l.height - 1
+	}
+	if l.footer < 1+footerChrome {
+		l.footer = 1 + footerChrome
 	}
 	if l.footer < 1 {
 		l.footer = 1

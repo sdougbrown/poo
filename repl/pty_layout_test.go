@@ -231,6 +231,39 @@ func TestLongOutputScrollsAboveTheFooter(t *testing.T) {
 	}
 }
 
+func TestAModelSwitchPaintsTheFooterStatusline(t *testing.T) {
+	server := &fakeServer{t: t}
+	closed := make(chan struct{})
+	close(closed)
+	server.script = quietRun(closed)
+	term, code := startTerminalRepl(t, server)
+	waitBottom(t, term)
+
+	term.press("/model qwen\r")
+	waitScreen(t, term, "model → qwen")
+	term.press("say hi\r")
+	waitScreen(t, term, "✓ end_turn")
+
+	// The footer's bottom row names the model the switch took, beside
+	// the window the run's usage filled: a switch that kept the old
+	// name or window would read them here.
+	rows := strings.Split(term.screen(), "\n")
+	last := rows[len(rows)-1]
+	if !strings.Contains(last, "qwen") || !strings.Contains(last, "/131.1k") {
+		t.Errorf("the footer's statusline does not name qwen beside its window: %q", last)
+	}
+
+	term.press("/quit\r")
+	select {
+	case got := <-code:
+		if got != 0 {
+			t.Fatalf("the repl exited %d", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the repl did not quit; it drew:\n%s", term.screen())
+	}
+}
+
 func TestTheDraftSurvivesTheStreamingAndSettlesInTheFooter(t *testing.T) {
 	first := make(chan struct{})
 	finish := make(chan struct{})

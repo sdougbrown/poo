@@ -216,6 +216,25 @@ func TestTheFooterGrowsForAWrappedDraftAndShrinksBack(t *testing.T) {
 	}
 }
 
+// TestAStatuslineWiderThanTheScreenClipsToTheRow covers a narrow
+// terminal: a statusline longer than the width would wrap the bottom
+// row, and the wrap scrolls the screen — the pinned footer rides off
+// the bottom edge and the transcript's rows desync.
+func TestAStatuslineWiderThanTheScreenClipsToTheRow(t *testing.T) {
+	vt := vt10x.New(vt10x.WithSize(12, 12))
+	l := aLayout(t, vt, 12, 12)
+	l.setStatus("⌂ a-really-long-folder-name │ a-long-branch-name")
+	l.ensure(1)
+
+	rows := screenRows(vt)
+	if last := rows[len(rows)-1]; !strings.Contains(last, "a-really-l") || strings.Contains(last, "branch") {
+		t.Errorf("the bottom row is not the clipped statusline: %q", last)
+	}
+	if rule := lastRow(vt, "───"); rule != len(rows)-2 {
+		t.Errorf("the rule stands on row %d, want the row above the statusline:\n%s", rule, vt.String())
+	}
+}
+
 func TestTheLayoutLeavesTheWholeScreenOnExit(t *testing.T) {
 	vt := vt10x.New(vt10x.WithSize(40, 12))
 	l := aLayout(t, vt, 40, 12)
