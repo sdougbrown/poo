@@ -301,6 +301,21 @@ func TestDarwinConfigFallback(t *testing.T) {
 	}
 }
 
+func TestDarwinConfigFallbackDoesNotSearchRelativeHome(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS settings discovery")
+	}
+	t.Setenv(EnvSettings, "")
+	t.Setenv("HOME", ".")
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	writeSettingsFile(t, filepath.Join(cwd, ".config", "poo"), "settings.yaml", "version: 1\n")
+
+	if found, err := FindSettings("", cwd); err != nil || found != "" {
+		t.Errorf("discovery with a relative HOME resolved to %q (%v), want defaults", found, err)
+	}
+}
+
 // TestTheUsersSettingsAreFoundUnderAnyName covers the user's config
 // directory: the names are tried there too, and the file is read in its own
 // format.

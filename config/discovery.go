@@ -110,7 +110,7 @@ func userSettings() (string, bool) {
 		}
 	}
 	if runtime.GOOS == "darwin" {
-		if home, err := os.UserHomeDir(); err == nil {
+		if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
 			return settingsFileIn(filepath.Join(home, ".config", "poo"))
 		}
 	}
