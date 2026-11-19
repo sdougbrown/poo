@@ -648,6 +648,14 @@ func TestTheRestoreFillsAnUnknownMaxOutputFromTheSettings(t *testing.T) {
 			t.Errorf("the restored request's max_tokens is %d, want the default %d", got, poo.DefaultMaxOutput)
 		}
 	})
+	t.Run("the name now serves another model_id", func(t *testing.T) {
+		tr := scripted([]fakeResponse{{text: "done"}})
+		opts := restoreOptions(t, tr, &recordingSink{})
+		opts.Models["fast"] = poo.ModelInfo{Name: "fast", ModelID: "other-model", ContextLimit: 32768, MaxOutput: 16384}
+		if got := restoredMaxTokens(t, header("s1"), opts, tr); got != poo.DefaultMaxOutput {
+			t.Errorf("the restored request's max_tokens is %d, want the default %d: the entry names another model_id", got, poo.DefaultMaxOutput)
+		}
+	})
 	t.Run("an unknown context limit", func(t *testing.T) {
 		tr := scripted([]fakeResponse{{text: "done"}})
 		opts := restoreOptions(t, tr, &recordingSink{})
