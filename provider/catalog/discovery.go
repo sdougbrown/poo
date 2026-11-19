@@ -417,7 +417,7 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 			ModelID:     item.ID,
 			MaxOutput:   item.Limit.Output,
 			PrefixCache: item.PrefixCaching,
-			Inputs:      inputModalities(item.Modalities.Input),
+			Inputs:      modalities(item.Modalities.Input),
 		}
 		if len(reasoning) > 0 {
 			// The model takes a level as the effort parameter, and the levels
@@ -443,23 +443,6 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		out[item.ID] = model
 	}
 	return out, nil
-}
-
-// inputModalities maps the modality names a model list reports — a bare
-// "text" or a MIME type — to the modalities poo names.
-func inputModalities(names []string) []poo.Modality {
-	var out []poo.Modality
-	for _, name := range names {
-		switch {
-		case name == "text":
-			out = append(out, poo.ModalityText)
-		case name == "image", strings.HasPrefix(name, "image/"):
-			out = append(out, poo.ModalityImage)
-		case name == "audio", strings.HasPrefix(name, "audio/"):
-			out = append(out, poo.ModalityAudio)
-		}
-	}
-	return out
 }
 
 // llamaProps is what llama.cpp's server reports.

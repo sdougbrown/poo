@@ -56,15 +56,20 @@ func (s *Settings) applyBuiltinProviders(override string) error {
 // gateKeyEndpoints drops the layer's key-read endpoints whose key is not
 // there, and keeps every other endpoint as it is.
 //
-// The key is there when the variable it names is set, or the credential file
-// holds the entry of the provider that reads it. A read of the file that
-// fails is a file that holds nothing: the variable is the other way in.
+// The key is there through the same rungs the key's own resolution reads, in
+// the same order: the variable it names, the credential file's entry for the
+// provider that reads it, and the literal the settings carry for an endpoint
+// of the same name. A read of the file that fails is a file that holds
+// nothing: the variable and the literal are the other ways in.
 func (s *Settings) gateKeyEndpoints(layer catalog.FileSettings) catalog.FileSettings {
 	for name, endpoint := range layer.Endpoints {
 		if endpoint.APIKeyEnv == "" {
 			continue
 		}
 		if os.Getenv(endpoint.APIKeyEnv) != "" || s.credentialHolds(endpoint.APIKeyEnv) {
+			continue
+		}
+		if named, ok := s.Endpoints[name]; ok && named.APIKey != "" {
 			continue
 		}
 		delete(layer.Endpoints, name)

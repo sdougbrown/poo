@@ -154,6 +154,57 @@ roles:
 	}
 }
 
+// TestTheBuiltinOpencodeEndpointsWakeOnTheVariable covers the variable's own
+// rung: with no OpenCode entry in the credential file, the variable the
+// endpoints read is what offers them.
+func TestTheBuiltinOpencodeEndpointsWakeOnTheVariable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_API_KEY", "oc_sk_from_env")
+	runtime, _ := opencodeRuntime(t, dir, map[string]string{"ollama-cloud": "an-ollama-key"}, "opencode-go/glm-5.3", &opencodeGateway{})
+
+	model, err := runtime.ChatModel()
+	if err != nil {
+		t.Fatalf("resolving the chat model: %v", err)
+	}
+	if got := runtime.EndpointKey(model); got != "oc_sk_from_env" {
+		t.Errorf("the key is %q, want the variable's", got)
+	}
+}
+
+// TestTheBuiltinOpencodeEndpointsWakeOnTheSettingsLiteral covers the literal's
+// own rung: a settings endpoint of the layer's own name carrying api_key is a
+// key the transport resolves, so the gate keeps the models it names.
+func TestTheBuiltinOpencodeEndpointsWakeOnTheSettingsLiteral(t *testing.T) {
+	dir := t.TempDir()
+	writeOpencodeAuth(t, dir, map[string]string{"ollama-cloud": "an-ollama-key"})
+	path := writeCodexSettings(t, dir, `version: 1
+auth_file: auth.json
+session:
+  mode: ephemeral
+endpoints:
+  opencode-go:
+    endpoint: https://opencode.ai/inference/go/openai/v1
+    api_key: oc_sk_from_settings
+roles:
+  chat: opencode-go/glm-5.3
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	runtime, err := buildCodex(t, settings, &http.Client{Transport: &opencodeGateway{}})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	model, err := runtime.ChatModel()
+	if err != nil {
+		t.Fatalf("resolving the chat model: %v", err)
+	}
+	if got := runtime.EndpointKey(model); got != "oc_sk_from_settings" {
+		t.Errorf("the key is %q, want the settings' literal", got)
+	}
+}
+
 // TestTheOpencodeTransportNamesTheSession covers the header the gateway
 // requires: the request carries the session's id, so the gateway routes one
 // conversation together, and the stored key is the bearer token. Both
