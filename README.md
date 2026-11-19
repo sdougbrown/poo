@@ -65,9 +65,8 @@ In each directory, poo tries `settings.json`, `settings.yaml`,
 file it finds and uses the extension to pick the parser. Without a
 settings file, poo runs on defaults that flags can override.
 
-On macOS, finding a settings file in `~/.config/poo` does not change
-where poo looks for `auth.json` or `AGENTS.md` by default. Both still
-default to `~/Library/Application Support/poo`.
+On macOS, the default location for `AGENTS.md` remains
+`~/Library/Application Support/poo`.
 
 Start with `examples/code.settings.yaml`. For sandboxed bash and prompts
 before side-effecting calls, use `sandboxed.settings.yaml`. For built-in
@@ -164,21 +163,23 @@ other.
 
 **pi's Codex provider.** The pi provider `openai-codex` is built in.
 Its models are named `openai-codex/<id>`, and its credential is an
-OAuth entry in a credential file. `auth_file` names poo's own file, and
-a relative path resolves against the settings file's own directory,
-like `models_file`:
+OAuth entry in a credential file. Run `poo login codex` to sign in:
 
 ```yaml
-auth_file: ~/.config/poo/auth.json
 roles:
   chat: openai-codex/gpt-6.1-sol
 ```
 
-If the settings name neither credential path, poo uses `auth.json`
-beside the models file when a models file is loaded. Otherwise, it uses
-`auth.json` in the platform's config directory for poo. Naming both
-`auth_file` and `pi_auth_file` is refused: poo reads one credential at
-a time.
+On macOS, poo's default is `~/Library/Application Support/poo/auth.json`.
+If that file is absent, poo uses an existing `~/.config/poo/auth.json`.
+If neither exists, login creates the native file. Poo does not merge the files.
+Other platforms use `auth.json` in poo's platform config directory.
+
+Set `auth_file: auth.json` to keep the credential beside your settings.
+Pass the same `--settings` path to `poo login` when using this option.
+Without `auth_file` or `pi_auth_file`, a loaded models file makes poo read
+`auth.json` beside that models file instead of the default. This rule does
+not redirect login writes. Poo rejects settings that name both credential paths.
 
 poo's own file is versioned, holds the credentials under it, and is written as
 YAML — the format an operator edits, and the one the models file is written with.
@@ -247,7 +248,6 @@ serves every endpoint, because a key belongs to one workspace and the
 workspace's plan says which endpoint bills it:
 
 ```yaml
-auth_file: ~/.config/poo/auth.json
 roles:
   chat: opencode-go/glm-5.3
   # or the Messages sibling:

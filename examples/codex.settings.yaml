@@ -11,14 +11,22 @@
 # only to the built-in Codex endpoint, and the Codex models serve chat
 # turns: they cannot be the decider.
 #
-# With no auth_file named, poo reads an auth.json beside the models file
-# when that file is there, and poo's own in the user's config directory
-# otherwise.
+# With no explicit auth_file, poo uses its default credential file.
+# On macOS, poo checks ~/Library/Application Support/poo/auth.json first,
+# then uses ~/.config/poo/auth.json only when that alternate file exists.
+# Other platforms use their platform config directory. See the README for
+# the full discovery rules.
+#
+# To keep poo's credential beside this settings file, opt in explicitly:
+# auth_file: auth.json
+# Ordinary login stores in poo's default file:
+#     poo login codex --settings examples/codex.settings.yaml
+# If auth_file is uncommented, pass the same --settings to login so it
+# writes to the named file.
 version: 1
 
 profile: code
 
-auth_file: ~/.config/poo/auth.json
 roles:
   chat: openai-codex/gpt-6.1-sol
 

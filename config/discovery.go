@@ -86,8 +86,8 @@ func findProjectSettings(workingDir string) (string, bool) {
 }
 
 // UserConfigDir returns poo's directory under the platform's user config
-// directory. It is the default location for credentials and instructions
-// and the first user directory searched for settings.
+// directory. It holds the default instructions and is searched first for
+// user settings and credentials.
 func UserConfigDir() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -96,18 +96,27 @@ func UserConfigDir() (string, error) {
 	return filepath.Join(dir, "poo"), nil
 }
 
-// userSettings alone searches the macOS fallback. Default credentials and
-// instructions stay in UserConfigDir.
+// userConfigFallbackDir finds the macOS fallback without using a relative home.
+func userConfigFallbackDir() (string, bool) {
+	if runtime.GOOS != "darwin" {
+		return "", false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || !filepath.IsAbs(home) {
+		return "", false
+	}
+	return filepath.Join(home, ".config", "poo"), true
+}
+
+// userSettings searches the native user directory before the macOS fallback.
 func userSettings() (string, bool) {
 	if dir, err := UserConfigDir(); err == nil {
 		if path, ok := settingsFileIn(dir); ok {
 			return path, true
 		}
 	}
-	if runtime.GOOS == "darwin" {
-		if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
-			return settingsFileIn(filepath.Join(home, ".config", "poo"))
-		}
+	if dir, ok := userConfigFallbackDir(); ok {
+		return settingsFileIn(dir)
 	}
 	return "", false
 }

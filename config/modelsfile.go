@@ -3,9 +3,11 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 
 	"github.com/sdougbrown/poo"
@@ -308,13 +310,31 @@ func ResolveSettingPath(settingsPath, named string) (string, error) {
 	return resolvePath(named, dir, false)
 }
 
-// DefaultAuthFile is poo's own credential file in the user's config directory.
+// DefaultAuthFile selects poo's own credential file for reads and writes.
+// On macOS, an existing ~/.config/poo file can stand in for a missing native file.
 func DefaultAuthFile() (string, error) {
 	dir, err := UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("the user's config directory cannot be resolved: %w", err)
 	}
-	return filepath.Join(dir, AuthFileName), nil
+	native := filepath.Join(dir, AuthFileName)
+	if runtime.GOOS != "darwin" {
+		return native, nil
+	}
+	if !filepath.IsAbs(dir) {
+		return "", fmt.Errorf("the user's config directory is not absolute")
+	}
+	// An unreadable path or dangling link is not permission to change stores.
+	if _, err := os.Lstat(native); !errors.Is(err, os.ErrNotExist) {
+		return native, nil
+	}
+	if dir, ok := userConfigFallbackDir(); ok {
+		fallback := filepath.Join(dir, AuthFileName)
+		if info, err := os.Stat(fallback); err == nil && info.Mode().IsRegular() {
+			return fallback, nil
+		}
+	}
+	return native, nil
 }
 
 // resolveCredentialPath resolves the path a setting names: ~ first, then the
@@ -340,11 +360,11 @@ func (s *Settings) resolveCredentialPath(dir, field, named string, mustExist boo
 // the Codex provider reports the credential it could not find. The settings are
 // not a failure over a file only one provider reads.
 func defaultCredentialFile() string {
-	dir, err := UserConfigDir()
+	path, err := DefaultAuthFile()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, AuthFileName)
+	return path
 }
 
 // CredentialFile returns the file the Codex credential is read from: the one

@@ -77,8 +77,11 @@ the models the binary knows about, and what the endpoints report.
 --explain names one model and prints the layer that set each field.`
 
 // loginLong is the help body of `poo login`.
-const loginLong = `The command signs in to a provider and stores the credential in the file auth_file names, or
-the one poo resolves without it. A bare poo login offers the list; a name picks one:
+const loginLong = `The command writes the credential to the file auth_file names, or to poo's default auth.json.
+On macOS, the default is ~/Library/Application Support/poo/auth.json. If that file is absent,
+poo uses an existing ~/.config/poo/auth.json instead.
+
+A bare poo login offers the list; a name picks one:
 
   poo login codex         OpenAI Codex, through a browser
   poo login ollama-cloud  Ollama Cloud, with a key

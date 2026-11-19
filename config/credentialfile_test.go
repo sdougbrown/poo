@@ -3,7 +3,9 @@ package config
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -105,6 +107,127 @@ session:
 	}
 	if got, want := settings.CredentialFile(), filepath.Join(dir, "poo", AuthFileName); got != want {
 		t.Errorf("the credential file is %q, want poo's own at %q", got, want)
+	}
+}
+
+// TestDarwinConfigFallbackCredentialNativeDefault covers the native credential path.
+func TestDarwinConfigFallbackCredentialNativeDefault(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS-only credential discovery")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	settingsPath := writeSettings(t, t.TempDir(), "version: 1\nsession:\n  mode: ephemeral\n")
+	settings, err := Load(settingsPath)
+	if err != nil {
+		t.Fatalf("loading settings: %v", err)
+	}
+	want := filepath.Join(home, "Library", "Application Support", "poo", AuthFileName)
+	if got := settings.CredentialFile(); got != want {
+		t.Errorf("CredentialFile() = %q, want %q", got, want)
+	}
+	if got, err := DefaultAuthFile(); err != nil || got != want {
+		t.Errorf("DefaultAuthFile() = %q, %v, want %q", got, err, want)
+	}
+}
+
+// TestDarwinConfigFallbackLegacyOnlyArbitrarySettings ignores auth beside arbitrary settings.
+func TestDarwinConfigFallbackLegacyOnlyArbitrarySettings(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS-only credential discovery")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	fallback := filepath.Join(home, ".config", "poo", AuthFileName)
+	if err := os.MkdirAll(filepath.Dir(fallback), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fallback, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settingsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(settingsDir, AuthFileName), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := writeSettings(t, settingsDir, "version: 1\nsession:\n  mode: ephemeral\n")
+	settings, err := Load(settingsPath)
+	if err != nil {
+		t.Fatalf("loading settings: %v", err)
+	}
+	if got := settings.CredentialFile(); got != fallback {
+		t.Errorf("CredentialFile() = %q, want %q", got, fallback)
+	}
+	if got, err := DefaultAuthFile(); err != nil || got != fallback {
+		t.Errorf("DefaultAuthFile() = %q, %v, want %q", got, err, fallback)
+	}
+}
+
+// TestDarwinConfigFallbackCredentialNativeWins keeps native credentials ahead of fallback.
+func TestDarwinConfigFallbackCredentialNativeWins(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS-only credential discovery")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	native := filepath.Join(home, "Library", "Application Support", "poo", AuthFileName)
+	fallback := filepath.Join(home, ".config", "poo", AuthFileName)
+	for _, path := range []string{native, fallback} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settings, err := Load(writeSettings(t, t.TempDir(), "version: 1\nsession:\n  mode: ephemeral\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := settings.CredentialFile(); got != native {
+		t.Errorf("CredentialFile() = %q, want %q", got, native)
+	}
+	if got, err := DefaultAuthFile(); err != nil || got != native {
+		t.Errorf("DefaultAuthFile() = %q, %v, want %q", got, err, native)
+	}
+}
+
+// TestDarwinConfigFallbackIgnoresCredentialPipe keeps the default write target
+// when the alternate path would block a reader instead of providing a file.
+func TestDarwinConfigFallbackIgnoresCredentialPipe(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS-only credential discovery")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	fallback := filepath.Join(home, ".config", "poo", AuthFileName)
+	if err := os.MkdirAll(filepath.Dir(fallback), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("mkfifo", fallback).CombinedOutput(); err != nil {
+		t.Fatalf("creating the credential pipe: %v: %s", err, out)
+	}
+	want := filepath.Join(home, "Library", "Application Support", "poo", AuthFileName)
+	if got, err := DefaultAuthFile(); err != nil || got != want {
+		t.Errorf("DefaultAuthFile() = %q, %v, want %q", got, err, want)
+	}
+}
+
+// TestDarwinConfigFallbackCredentialRelativeHome rejects cwd-relative candidates.
+func TestDarwinConfigFallbackCredentialRelativeHome(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS-only credential discovery")
+	}
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", "relative-home")
+	if err := os.MkdirAll(filepath.Join("relative-home", ".config", "poo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("relative-home", ".config", "poo", AuthFileName), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := DefaultAuthFile()
+	if err == nil || got != "" {
+		t.Errorf("DefaultAuthFile() = %q, %v; want empty path and error", got, err)
 	}
 }
 

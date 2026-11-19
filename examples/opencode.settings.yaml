@@ -5,15 +5,23 @@
 #
 #     poo run --settings examples/opencode.settings.yaml "..."
 #
-# `poo login opencode` stores the key in poo's credential file. The
-# gateway lists its models itself, so the probe supplies each model's
-# fields and the built-in record names one model per endpoint only
-# because the loader requires an endpoint to serve something.
+# `poo login opencode` stores the key in poo's credential file. With no
+# explicit auth_file, poo uses its default credential file. On macOS,
+# poo checks ~/Library/Application Support/poo/auth.json first, then uses
+# ~/.config/poo/auth.json only when that alternate file exists. Other
+# platforms use their platform config directory. See the README for the
+# full discovery rules.
+#
+# To keep poo's credential beside this settings file, opt in explicitly:
+# auth_file: auth.json
+# Ordinary login stores in poo's default file:
+#     poo login opencode --settings examples/opencode.settings.yaml
+# If auth_file is uncommented, pass the same --settings to login so it
+# writes to the named file.
 version: 1
 
 profile: code
 
-auth_file: ~/.config/poo/auth.json
 roles:
   chat: opencode-go/glm-5.3
 
