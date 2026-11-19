@@ -1088,9 +1088,10 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 	}
 	for name, endpoint := range s.Endpoints {
 		settings.Endpoints[name] = catalog.EndpointSettings{
-			Endpoint:  endpoint.Endpoint,
-			APIKeyEnv: endpoint.APIKeyEnv,
-			APIKey:    endpoint.APIKey,
+			Endpoint:      endpoint.Endpoint,
+			APIKeyEnv:     endpoint.APIKeyEnv,
+			APIKey:        endpoint.APIKey,
+			SessionHeader: endpoint.SessionHeader,
 			// An endpoint whose models are declared is not asked what it serves:
 			// it has no model list, and a probe would reach it with no
 			// credential. The models file declares its own, and the built-in
@@ -2324,14 +2325,22 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	}
 	switch model.API {
 	case "", poo.APIChatCompletions:
+		// The header a session travels by is the endpoint's own declaration,
+		// the same lookup the key takes: a gateway that requires one names
+		// it where the endpoint is declared, whatever the endpoint is called.
+		session := ""
+		if endpoint, ok := r.Catalog.Endpoints()[model.Provider]; ok {
+			session = endpoint.SessionHeader
+		}
 		return openai.New(openai.Options{
-			Endpoint:   model.Endpoint,
-			Model:      model.ModelID,
-			APIKey:     r.EndpointKey(model),
-			ToolsMode:  string(model.Tools.Mode),
-			ModelInfo:  model,
-			Sampling:   model.Sampling,
-			HTTPClient: r.httpClient,
+			Endpoint:      model.Endpoint,
+			Model:         model.ModelID,
+			APIKey:        r.EndpointKey(model),
+			SessionHeader: session,
+			ToolsMode:     string(model.Tools.Mode),
+			ModelInfo:     model,
+			Sampling:      model.Sampling,
+			HTTPClient:    r.httpClient,
 		}), nil
 	default:
 		return nil, &Error{
@@ -2451,9 +2460,12 @@ func (r *Runtime) EndpointKey(model poo.ModelInfo) string {
 		// provider's declaration both carry, so it is the join: an endpoint that reads the
 		// variable a provider stores its key under is served by that provider's credential,
 		// and no endpoint name is hardcoded here.
-		if endpoint.Credential.Env == auth.OllamaCloud.Env {
+		for _, provider := range auth.KeyProviders() {
+			if endpoint.Credential.Env != provider.Env {
+				continue
+			}
 			// An absent or unreadable credential is not a failure here: the next rung answers.
-			stored, err := (auth.Credentials{Path: r.Settings.CredentialFile()}).Read(auth.OllamaCloud)
+			stored, err := (auth.Credentials{Path: r.Settings.CredentialFile()}).Read(provider)
 			if err == nil && stored.Key != "" {
 				return stored.Key
 			}

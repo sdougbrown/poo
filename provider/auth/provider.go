@@ -55,6 +55,24 @@ var Codex = Provider{
 // credential `poo login` stores. It has no token endpoint and no account.
 var OllamaCloud = Provider{ID: "ollama-cloud", Kind: KindAPIKey, Env: "OLLAMA_API_KEY"}
 
+// Opencode is the OpenCode provider: a key the Console issues, read from the
+// environment or from the credential `poo login` stores. The one key serves both
+// the pay-as-you-go and the Go endpoints, which read the same environment
+// variable: a key is bound to one workspace, and the workspace's plan says
+// which endpoint bills it.
+var Opencode = Provider{ID: ProviderOpencode, Kind: KindAPIKey, Env: "OPENCODE_API_KEY"}
+
+// KeyProviders are the providers whose credential is a key, in the order a
+// search reads them.
+//
+// Everything that walks the key providers — the endpoint's key, the auth
+// status report, the built-in offer — reads this one list, so a provider
+// added later is a declaration beside these and not a second list to keep
+// in step.
+func KeyProviders() []Provider {
+	return []Provider{OllamaCloud, Opencode}
+}
+
 // validate reports what a credential is missing, or what it carries that its kind or its
 // provider does not take.
 //

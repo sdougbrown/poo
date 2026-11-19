@@ -4,10 +4,21 @@
 # can still be declared in the settings or a models file under the same
 # endpoint.
 #
+# The opencode endpoints are the other shape: the gateway lists the models
+# it serves — the list is public, so the probe reaches it with no key — and
+# the record names one model per endpoint because the loader requires an
+# endpoint to serve something. The named model carries only its id: the
+# probe supplies every field, so the gateway's own word is what the catalog
+# holds. session_header is the header the gateway requires on every chat
+# request, so the transport knows what to name the session by.
+#
 # POO_BUILTIN_MODELS names a file read instead of this one, in the same
 # vocabulary. The credential the openai-codex endpoint runs on is not an api
 # key, so none is declared here, and poo sends its credential only to the
-# endpoint the transport pins.
+# endpoint the transport pins. The opencode endpoints read one key: a key
+# belongs to one workspace, and the workspace's plan says which endpoint
+# bills it. An endpoint that names a key's variable is offered only when the
+# key is there.
 endpoints:
   openai-codex:
     endpoint: https://chatgpt.com/backend-api
@@ -113,3 +124,15 @@ endpoints:
           mode: effort
           param: reasoning_effort
         reasoning_levels: [low, medium, high, xhigh, max]
+  opencode:
+    endpoint: https://opencode.ai/inference/openai/v1
+    api_key_env: OPENCODE_API_KEY
+    session_header: x-opencode-session
+    models:
+      glm-5.3: {}
+  opencode-go:
+    endpoint: https://opencode.ai/inference/go/openai/v1
+    api_key_env: OPENCODE_API_KEY
+    session_header: x-opencode-session
+    models:
+      glm-5.3: {}

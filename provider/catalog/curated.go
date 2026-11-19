@@ -148,16 +148,22 @@ func promptCacheMode(provider string) poo.CacheMode {
 	return ""
 }
 
-// modalities maps the modality names of a hosted entry.
+// modalities maps the modality names a layer reads to the modalities poo
+// names: a bare "text" or a MIME type, in either letter case.
+//
+// Every layer that reads modality names — the hosted entries this package
+// generates from, and the discovery probe's model list — maps them here, so
+// one reported name means one modality whichever layer read it.
 func modalities(names []string) []poo.Modality {
 	var out []poo.Modality
 	for _, name := range names {
-		switch strings.ToLower(name) {
-		case "text":
+		name := strings.ToLower(name)
+		switch {
+		case name == "text":
 			out = append(out, poo.ModalityText)
-		case "image":
+		case name == "image", strings.HasPrefix(name, "image/"):
 			out = append(out, poo.ModalityImage)
-		case "audio":
+		case name == "audio", strings.HasPrefix(name, "audio/"):
 			out = append(out, poo.ModalityAudio)
 		}
 	}

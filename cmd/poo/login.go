@@ -30,9 +30,17 @@ var ollamaCloud = auth.Flow{
 	Method:   auth.MethodKey,
 }
 
+// opencode is the third way in: an OpenCode Console key, which the pay-as-you-go
+// and the Go endpoints both read.
+var opencode = auth.Flow{
+	Name:     "OpenCode",
+	Provider: auth.Opencode,
+	Method:   auth.MethodKey,
+}
+
 // logins are the sign-ins this command offers, in the order the picker shows them.
 func logins() []auth.Flow {
-	return []auth.Flow{auth.CodexLogin, ollamaCloud}
+	return []auth.Flow{auth.CodexLogin, ollamaCloud, opencode}
 }
 
 // loginOptions are the flags of `poo login`.

@@ -120,6 +120,35 @@ func TestTheAuthStatusAnswersInJSON(t *testing.T) {
 	}
 }
 
+// TestTheAuthStatusReportsAStoredOpencodeKey covers the report of a file that
+// holds no Codex token and no Ollama key: the OpenCode key is the credential
+// the report names, live, because a key is sent as it is.
+func TestTheAuthStatusReportsAStoredOpencodeKey(t *testing.T) {
+	dir := t.TempDir()
+	credential := filepath.Join(dir, "auth.json")
+	body := `{"version": 1, "credentials": {"opencode": {"type": "api_key", "key": "oc_sk_test"}}}`
+	if err := os.WriteFile(credential, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing the credential file: %v", err)
+	}
+	settings := authSettings(t, dir, credential)
+
+	out := captureStdout(t, func() {
+		if code := run([]string{"auth", "status", "--settings", settings, "--json"}); code != 0 {
+			t.Errorf("poo auth status --json exited with %d", code)
+		}
+	})
+	var report authStatus
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the report is not JSON: %v\n%s", err, out)
+	}
+	if report.Format != "poo" || report.Provider != "opencode" || report.State != "live" {
+		t.Errorf("the report is %+v, want poo's file for the OpenCode provider, live", report)
+	}
+	if strings.Contains(out, "oc_sk_test") {
+		t.Errorf("the report carries the key:\n%s", out)
+	}
+}
+
 // TestTheAuthStatusNamesTheClientTheFileRecords covers the report of a
 // credential that records the client it was granted to: the CLIENT line names
 // it, and the JSON report carries client_id, so an operator can tell whose

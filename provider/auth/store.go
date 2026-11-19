@@ -53,6 +53,11 @@ const (
 	// under. It is the key the file's entry is read and written by.
 	ProviderCodex = "openai-codex"
 
+	// ProviderOpencode is the provider id the OpenCode key is stored under. One
+	// credential serves both the pay-as-you-go and the Go endpoints, because a
+	// key belongs to one workspace and the workspace says which plan it runs.
+	ProviderOpencode = "opencode"
+
 	// DefaultTokenURL is the endpoint pi trades a Codex refresh token at.
 	DefaultTokenURL = "https://auth.openai.com/oauth/token"
 

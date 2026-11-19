@@ -40,6 +40,10 @@ type EndpointSettings struct {
 	APIKeyEnv string
 	// APIKey is a key written in the settings themselves.
 	APIKey string
+	// SessionHeader is the name of a header that carries the session's id,
+	// for an endpoint whose gateway routes one conversation's requests
+	// together. Empty means the endpoint asks for none.
+	SessionHeader string
 	// SkipProbe says the endpoint is not asked what it serves: its models are
 	// declared by the settings or the curated layer. A request to the endpoint
 	// would send nothing it understands.
@@ -127,7 +131,7 @@ func (m ModelSettings) layer(name, endpointURL string) poo.ModelInfo {
 // the transport resolves by too. An endpoint that names neither needs
 // no key.
 func (e EndpointSettings) endpoint(name string) Endpoint {
-	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint, SkipProbe: e.SkipProbe}
+	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint, SessionHeader: e.SessionHeader, SkipProbe: e.SkipProbe}
 	switch {
 	case e.APIKeyEnv != "":
 		endpoint.Credential = Credential{Source: CredentialEnv, Env: e.APIKeyEnv}

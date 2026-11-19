@@ -225,6 +225,28 @@ A key entry is read by the endpoint that declares the same environment
 variable: an endpoint reading `OLLAMA_API_KEY` takes the `ollama-cloud`
 key after the variable itself and ahead of a literal the settings carry.
 
+**The OpenCode providers.** The Console providers `opencode` and
+`opencode-go` are built in — pay-as-you-go and Go, at their own base
+URLs. `poo login opencode` stores the Console key, and one key serves
+both endpoints, because a key belongs to one workspace and the
+workspace's plan says which endpoint bills it:
+
+```yaml
+auth_file: ~/.config/poo/auth.json
+roles:
+  chat: opencode-go/glm-5.3
+```
+
+The gateway lists the models it serves, so the built-in record names one
+model per endpoint and the discovery probe supplies every field,
+including the ones the record could have carried: limits, tools,
+reasoning levels and modalities, cached locally and refreshed as the
+catalog is built. The gateway requires a session header on every chat
+request, so the endpoints declare `session_header: x-opencode-session`
+and the transport carries the session's id — on a turn, on a fork, and
+on the compaction a long run makes. An endpoint the operator declares
+under another name names its own header the same way.
+
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.
 It is opt-in: the default stays `summary`, which writes its own summary of the

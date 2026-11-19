@@ -79,6 +79,10 @@ type Options struct {
 	// Timeout bounds a whole request, streaming included. Zero means no
 	// extra bound beyond the run's context.
 	Timeout time.Duration
+	// SessionHeader is the name of a header that carries the request's
+	// session id, for an endpoint whose gateway routes one conversation's
+	// requests together. Empty sends none.
+	SessionHeader string
 }
 
 // Transport is the OpenAI-compatible chat transport.
@@ -124,10 +128,11 @@ func (t *Transport) Stream(ctx context.Context, req poo.ChatRequest) (poo.Stream
 		return nil, poo.Rendered{}, err
 	}
 	rendered := poo.Rendered{
-		API:      poo.APIChatCompletions,
-		Body:     body,
-		Messages: len(req.Messages),
-		Quirks:   settings.info.Quirks,
+		API:       poo.APIChatCompletions,
+		Body:      body,
+		Messages:  len(req.Messages),
+		Quirks:    settings.info.Quirks,
+		SessionID: settings.sessionID,
 	}
 
 	open := func(ctx context.Context) (support.Reader, error) {
@@ -166,7 +171,10 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 	// The snapshot carries the profiles the body was shaped with, so the
 	// appended messages are shaped by those and not by the transport's own
 	// model info: a request may name a profile the transport's info does not.
-	settings := t.requestSettings(poo.ChatRequest{})
+	// The session is the snapshot's, because the fork belongs to the request
+	// it forks: a session header is what tells the gateway the two are one
+	// conversation.
+	settings := t.requestSettings(poo.ChatRequest{SessionID: prev.SessionID})
 	converted, err := chat.Messages(appended)
 	if err != nil {
 		return nil, err
@@ -205,6 +213,9 @@ func (t *Transport) open(ctx context.Context, body []byte, settings requestSetti
 			req.Header.Set("Accept", "text/event-stream")
 			if t.cfg.APIKey != "" {
 				req.Header.Set("Authorization", "Bearer "+t.cfg.APIKey)
+			}
+			if t.cfg.SessionHeader != "" && settings.sessionID != "" {
+				req.Header.Set(t.cfg.SessionHeader, settings.sessionID)
 			}
 			return req, nil
 		},

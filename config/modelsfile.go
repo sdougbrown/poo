@@ -404,6 +404,10 @@ type modelsEndpoint struct {
 	// APIKey is a key written in the file. It is refused: a models file is one
 	// an operator shares or checks in.
 	APIKey *string `json:"api_key,omitempty"`
+	// SessionHeader is the name of a header that carries the session's id, for
+	// an endpoint whose gateway routes one conversation's requests together.
+	// Empty means the endpoint asks for none.
+	SessionHeader string `json:"session_header,omitempty"`
 	// SkipProbe says the endpoint's models are declared rather than discovered,
 	// so no probe is sent to it.
 	SkipProbe bool `json:"skip_probe,omitempty"`
@@ -478,9 +482,10 @@ func (f modelsFile) layer() (catalog.FileSettings, error) {
 			return catalog.FileSettings{}, fmt.Errorf("the endpoint %s serves no models", name)
 		}
 		out.Endpoints[name] = catalog.EndpointSettings{
-			Endpoint:  endpoint.Endpoint,
-			APIKeyEnv: endpoint.APIKeyEnv,
-			SkipProbe: endpoint.SkipProbe,
+			Endpoint:      endpoint.Endpoint,
+			APIKeyEnv:     endpoint.APIKeyEnv,
+			SessionHeader: endpoint.SessionHeader,
+			SkipProbe:     endpoint.SkipProbe,
 		}
 		ids := make([]string, 0, len(endpoint.Models))
 		for id := range endpoint.Models {
