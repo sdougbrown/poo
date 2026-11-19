@@ -410,19 +410,6 @@ func echoOnScreen(term *terminal, text string) bool {
 	return false
 }
 
-// waitEcho waits for the transcript's echo of a submitted line.
-func waitEcho(t *testing.T, term *terminal, text string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if echoOnScreen(term, text) {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("the echo of %q never read:\n%s", text, term.screen())
-}
-
 // pressSubmitted types a line and waits for the machine's echo of it. An
 // Enter that lands mid-winch-redraw can clear the draft without
 // submitting, so the echo says whether the line was taken; until it
