@@ -174,8 +174,7 @@ func (t *Transport) Fork(ctx context.Context, prev poo.Rendered, appended []poo.
 	// The session is the snapshot's, because the fork belongs to the request
 	// it forks: a session header is what tells the gateway the two are one
 	// conversation.
-	settings := t.requestSettings(poo.ChatRequest{})
-	settings.sessionID = prev.SessionID
+	settings := t.requestSettings(poo.ChatRequest{SessionID: prev.SessionID})
 	converted, err := chat.Messages(appended)
 	if err != nil {
 		return nil, err

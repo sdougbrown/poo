@@ -62,6 +62,10 @@ type Endpoint struct {
 	Name string
 	// Endpoint is the endpoint's base URL.
 	Endpoint string
+	// SessionHeader is the name of a header that carries the session's id, for
+	// a gateway that routes one conversation's requests together. Empty means
+	// the endpoint asks for none.
+	SessionHeader string
 	// SkipProbe says the endpoint is not probed for its models, because its
 	// models are declared rather than discovered.
 	SkipProbe bool

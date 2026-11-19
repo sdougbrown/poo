@@ -62,6 +62,17 @@ var OllamaCloud = Provider{ID: "ollama-cloud", Kind: KindAPIKey, Env: "OLLAMA_AP
 // which endpoint bills it.
 var Opencode = Provider{ID: ProviderOpencode, Kind: KindAPIKey, Env: "OPENCODE_API_KEY"}
 
+// KeyProviders are the providers whose credential is a key, in the order a
+// search reads them.
+//
+// Everything that walks the key providers — the endpoint's key, the auth
+// status report, the built-in offer — reads this one list, so a provider
+// added later is a declaration beside these and not a second list to keep
+// in step.
+func KeyProviders() []Provider {
+	return []Provider{OllamaCloud, Opencode}
+}
+
 // validate reports what a credential is missing, or what it carries that its kind or its
 // provider does not take.
 //

@@ -432,6 +432,9 @@ func (s *Session) forkFunc(run *runState) ForkFunc {
 //
 // The request carries the messages the strategy wrote and nothing else:
 // no tools, and no reasoning setting of the run's, so it is not a turn.
+// The session is the request's own, so a session header is what a
+// gateway reads on the side request too: the compaction of one
+// conversation is part of it.
 func (s *Session) askFunc(run *runState) AskFunc {
 	return func(ctx context.Context, messages []Message, maxTokens int) (Reply, error) {
 		s.mu.Lock()
@@ -442,6 +445,7 @@ func (s *Session) askFunc(run *runState) AskFunc {
 			ModelInfo: model,
 			Messages:  CloneMessages(messages),
 			MaxTokens: maxTokens,
+			SessionID: s.ID(),
 		})
 		if err != nil {
 			return Reply{}, err

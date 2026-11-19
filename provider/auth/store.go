@@ -58,10 +58,6 @@ const (
 	// key belongs to one workspace and the workspace says which plan it runs.
 	ProviderOpencode = "opencode"
 
-	// ProviderOpencodeGo is the provider id of the Go endpoint, which the same
-	// OpenCode credential serves.
-	ProviderOpencodeGo = "opencode-go"
-
 	// DefaultTokenURL is the endpoint pi trades a Codex refresh token at.
 	DefaultTokenURL = "https://auth.openai.com/oauth/token"
 

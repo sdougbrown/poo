@@ -1088,9 +1088,10 @@ func (s *Settings) CatalogSettings() catalog.Settings {
 	}
 	for name, endpoint := range s.Endpoints {
 		settings.Endpoints[name] = catalog.EndpointSettings{
-			Endpoint:  endpoint.Endpoint,
-			APIKeyEnv: endpoint.APIKeyEnv,
-			APIKey:    endpoint.APIKey,
+			Endpoint:      endpoint.Endpoint,
+			APIKeyEnv:     endpoint.APIKeyEnv,
+			APIKey:        endpoint.APIKey,
+			SessionHeader: endpoint.SessionHeader,
 			// An endpoint whose models are declared is not asked what it serves:
 			// it has no model list, and a probe would reach it with no
 			// credential. The models file declares its own, and the built-in
@@ -2324,11 +2325,18 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	}
 	switch model.API {
 	case "", poo.APIChatCompletions:
+		// The header a session travels by is the endpoint's own declaration,
+		// the same lookup the key takes: a gateway that requires one names
+		// it where the endpoint is declared, whatever the endpoint is called.
+		session := ""
+		if endpoint, ok := r.Catalog.Endpoints()[model.Provider]; ok {
+			session = endpoint.SessionHeader
+		}
 		return openai.New(openai.Options{
 			Endpoint:      model.Endpoint,
 			Model:         model.ModelID,
 			APIKey:        r.EndpointKey(model),
-			SessionHeader: sessionHeader(model.Provider),
+			SessionHeader: session,
 			ToolsMode:     string(model.Tools.Mode),
 			ModelInfo:     model,
 			Sampling:      model.Sampling,
@@ -2351,18 +2359,6 @@ func servedBy(model poo.ModelInfo) string {
 		return model.Provider
 	}
 	return model.Endpoint
-}
-
-// sessionHeader is the header an endpoint's gateway reads a conversation's
-// requests by. The opencode gateway requires one on every chat request, and any
-// stable value answers, so the session's own id is what the transport sends.
-// Empty means the endpoint asks for none.
-func sessionHeader(provider string) string {
-	switch provider {
-	case auth.ProviderOpencode, auth.ProviderOpencodeGo:
-		return "x-opencode-session"
-	}
-	return ""
 }
 
 // httpClient is the client the transports use. It is nil unless the
@@ -2464,7 +2460,7 @@ func (r *Runtime) EndpointKey(model poo.ModelInfo) string {
 		// provider's declaration both carry, so it is the join: an endpoint that reads the
 		// variable a provider stores its key under is served by that provider's credential,
 		// and no endpoint name is hardcoded here.
-		for _, provider := range []auth.Provider{auth.OllamaCloud, auth.Opencode} {
+		for _, provider := range auth.KeyProviders() {
 			if endpoint.Credential.Env != provider.Env {
 				continue
 			}

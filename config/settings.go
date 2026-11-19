@@ -119,6 +119,10 @@ type Endpoint struct {
 	// environment variable is the better neighbor; the literal is
 	// what a models file written for another tool imports as.
 	APIKey string `json:"api_key,omitempty"`
+	// SessionHeader is the name of a header that carries the session's id,
+	// for an endpoint whose gateway routes one conversation's requests
+	// together. Empty means the endpoint asks for none.
+	SessionHeader string `json:"session_header,omitempty"`
 	// SkipProbe says the endpoint is not asked what models it serves.
 	//
 	// An endpoint whose models are declared — the built-in Codex provider

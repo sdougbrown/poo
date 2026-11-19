@@ -132,7 +132,7 @@ func printAuthStatus(report authStatus, status auth.Status, stdout io.Writer) {
 // act on. No held entry at all leaves the earlier failure in place, which names the
 // provider the operator was trying to use.
 func keyStatus(credentials auth.Credentials, earlier error) (auth.Status, error) {
-	for _, provider := range []auth.Provider{auth.OllamaCloud, auth.Opencode} {
+	for _, provider := range auth.KeyProviders() {
 		status, err := credentials.Status(provider)
 		if err == nil {
 			return status, nil

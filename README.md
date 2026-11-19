@@ -237,13 +237,15 @@ roles:
   chat: opencode-go/glm-5.3
 ```
 
-The gateway lists the models it serves, so the built-in record seeds one
-model per endpoint and the discovery probe fills in the rest: limits,
-tools, reasoning levels and modalities, cached locally and refreshed as
-the catalog is built. The gateway requires a session header on every
-chat request, so the transport sends one named `x-opencode-session`,
-carrying the session's id; `poo models --explain` names the layer each
-field came from.
+The gateway lists the models it serves, so the built-in record names one
+model per endpoint and the discovery probe supplies every field,
+including the ones the record could have carried: limits, tools,
+reasoning levels and modalities, cached locally and refreshed as the
+catalog is built. The gateway requires a session header on every chat
+request, so the endpoints declare `session_header: x-opencode-session`
+and the transport carries the session's id — on a turn, on a fork, and
+on the compaction a long run makes. An endpoint the operator declares
+under another name names its own header the same way.
 
 **Native compaction.** `context.strategy: native` asks the provider to compact
 its own conversation and gives the model the provider's compacted state back.

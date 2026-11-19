@@ -412,19 +412,24 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		if item.ID == "" {
 			continue
 		}
-		reasoning := effortControl(item.Capabilities.Reasoning.Effort)
+		reasoning := item.Capabilities.Reasoning.Effort
 		model := Discovered{
 			ModelID:     item.ID,
 			MaxOutput:   item.Limit.Output,
 			PrefixCache: item.PrefixCaching,
-			Reasoning:   reasoning,
 			Inputs:      inputModalities(item.Modalities.Input),
 		}
-		if reasoning != nil {
-			model.ReasoningLevels = item.Capabilities.Reasoning.Effort
+		if len(reasoning) > 0 {
+			// The model takes a level as the effort parameter, and the levels
+			// are the ones the list named.
+			model.Reasoning = &poo.ReasoningControl{
+				Mode:  poo.ReasoningEffort,
+				Param: poo.ReasoningPathEffort,
+			}
+			model.ReasoningLevels = reasoning
 		}
-		// The limit object is the gateway's own word, and max_model_len is the
-		// plain shape's, so the two are read in that order.
+		// The limit object wins when the list carries one; max_model_len is
+		// the plain shape's answer, read only when the object is absent.
 		model.ContextLimit = item.Limit.Context
 		if model.ContextLimit == 0 {
 			model.ContextLimit = item.MaxModelLen
@@ -440,19 +445,6 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 	return out, nil
 }
 
-// effortControl returns the reasoning control an effort list describes: the
-// request carries the level as the effort parameter. Nil means the model's
-// reasoning is not controlled through the request.
-func effortControl(levels []string) *poo.ReasoningControl {
-	if len(levels) == 0 {
-		return nil
-	}
-	return &poo.ReasoningControl{
-		Mode:  poo.ReasoningEffort,
-		Param: poo.ReasoningPathEffort,
-	}
-}
-
 // inputModalities maps the modality names a model list reports — a bare
 // "text" or a MIME type — to the modalities poo names.
 func inputModalities(names []string) []poo.Modality {
@@ -461,9 +453,9 @@ func inputModalities(names []string) []poo.Modality {
 		switch {
 		case name == "text":
 			out = append(out, poo.ModalityText)
-		case strings.HasPrefix(name, "image/"):
+		case name == "image", strings.HasPrefix(name, "image/"):
 			out = append(out, poo.ModalityImage)
-		case strings.HasPrefix(name, "audio/"):
+		case name == "audio", strings.HasPrefix(name, "audio/"):
 			out = append(out, poo.ModalityAudio)
 		}
 	}
