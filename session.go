@@ -528,7 +528,7 @@ type Options struct {
 	// the order they were added, after the core's own sections and the
 	// tools' sections are in it. A mutation that is nil is skipped.
 	Prompt     []func(*prompt.Builder)
-	loadPrompt func() (func(*prompt.Builder), error)
+	loadPrompt func(dir string) ([]func(*prompt.Builder), error)
 	// PromptVariant names the prompt variant the prompt renders in.
 	//
 	// The variant picks the alternative text of the sections that
@@ -671,12 +671,12 @@ func New(opts Options, fns ...Option) (*Session, error) {
 		}
 	}
 	if opts.loadPrompt != nil {
-		edit, err := opts.loadPrompt()
+		edits, err := opts.loadPrompt(opts.WorkingDir)
 		if err != nil {
 			return nil, err
 		}
-		if edit != nil {
-			opts.Prompt = append(slices.Clone(opts.Prompt), edit)
+		if len(edits) != 0 {
+			opts.Prompt = append(slices.Clone(opts.Prompt), edits...)
 		}
 		opts.loadPrompt = nil
 	}

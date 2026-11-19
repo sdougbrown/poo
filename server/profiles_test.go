@@ -72,6 +72,8 @@ func TestConfiguredProfilesReadTheirOwnPromptAtSessionCreation(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	settings := servedSettings(t, "search", `{"chat":"chat-model"}`)
+	projectPrompt := true
+	settings.Session.ProjectPrompt = &projectPrompt
 	settings.Profiles = map[string]config.ProfileSettings{
 		"reviewer": {Base: "search", PromptFile: "review.md", Tools: config.ProfileTools{Disabled: []string{"grep"}}},
 		"explore":  {Base: "search", PromptFile: filepath.Join(t.TempDir(), "explore.md")},
@@ -95,10 +97,13 @@ func TestConfiguredProfilesReadTheirOwnPromptAtSessionCreation(t *testing.T) {
 	}
 	// The unselected review file does not exist while the server starts.
 	srv := newServer(t, loaded)
+	workspace := t.TempDir()
+	instructions := filepath.Join(workspace, "AGENTS.md")
+	write(instructions, "Use the project's test command.")
 	create := func(name string) (*poo.Session, *wire.Info, error) {
 		t.Helper()
 		sess, info, err := srv.Create(ctx, protocol.CreateParams{
-			Profile: name, WorkingDir: t.TempDir(), SessionDir: dir,
+			Profile: name, WorkingDir: workspace, SessionDir: dir,
 		}, wire.FactoryEnv{Client: silentClient{}})
 		if err == nil {
 			t.Cleanup(func() {
@@ -167,8 +172,10 @@ func TestConfiguredProfilesReadTheirOwnPromptAtSessionCreation(t *testing.T) {
 	}
 	defer unrunResumedInfo.Release()
 	defer unrunResumed.Close()
-	if !strings.Contains(unrunResumed.PromptState().Text, "Use the updated review instructions.") {
-		t.Fatal("the unrun session did not load the current prompt file")
+	for _, want := range []string{"Use the updated review instructions.", "Use the project's test command."} {
+		if !strings.Contains(unrunResumed.PromptState().Text, want) {
+			t.Errorf("the unrun session's prompt is missing %q", want)
+		}
 	}
 
 	write(path, "Review the tests too.")
@@ -199,6 +206,7 @@ func TestConfiguredProfilesReadTheirOwnPromptAtSessionCreation(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
+	write(instructions, "Use a different test command.")
 	resumed, resumedInfo, err := srv.Load(ctx, protocol.LoadParams{
 		SessionID: logged.ID(), SessionDir: dir,
 	}, wire.FactoryEnv{Client: silentClient{}})
@@ -207,7 +215,8 @@ func TestConfiguredProfilesReadTheirOwnPromptAtSessionCreation(t *testing.T) {
 	}
 	defer resumedInfo.Release()
 	defer resumed.Close()
-	if !strings.Contains(resumed.PromptState().Text, "Review the tests too.") {
-		t.Fatal("the resumed session did not keep the recorded prompt")
+	if text := resumed.PromptState().Text; !strings.Contains(text, "Review the tests too.") ||
+		!strings.Contains(text, "Use the project's test command.") || strings.Contains(text, "Use a different test command.") {
+		t.Fatal("the resumed session did not keep the recorded profile and project instructions")
 	}
 }

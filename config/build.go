@@ -2219,7 +2219,7 @@ func (r *Runtime) ResumeSession(ctx context.Context, store session.Store, id str
 	// in: the core takes the recorded directory when the options name
 	// none.
 	opts.WorkingDir = ""
-	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), poo.WithPromptLoader(r.profilePrompt))...)
+	return session.Resume(ctx, store, id, opts, append(fns, poo.WithPolicy(r.Policy), poo.WithPromptLoader(r.SessionPrompt))...)
 }
 
 // PromptOverrides are the prompt changes a client asks for.

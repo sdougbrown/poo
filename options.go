@@ -141,9 +141,9 @@ func WithPrompt(edit func(*prompt.Builder)) Option {
 	}
 }
 
-// WithPromptLoader adds a prompt edit at construction time. Restore skips
-// the loader when the session already has a recorded prompt.
-func WithPromptLoader(load func() (func(*prompt.Builder), error)) Option {
+// WithPromptLoader loads prompt edits for the session's working directory.
+// Restore skips the loader when the session already has a recorded prompt.
+func WithPromptLoader(load func(dir string) ([]func(*prompt.Builder), error)) Option {
 	return func(opts *Options) { opts.loadPrompt = load }
 }
 
