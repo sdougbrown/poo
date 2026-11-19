@@ -94,6 +94,36 @@ func TestSoundIsLeftOutOfTheMessage(t *testing.T) {
 	}
 }
 
+func TestTheResultsOfABatchAnswerAsOneMessage(t *testing.T) {
+	// A turn with two calls returns two tool messages, and the Messages
+	// API alternates roles: both answers ride in the one user message that
+	// answers the assistant message that asked.
+	calls := poo.Message{Role: poo.RoleAssistant, Content: []poo.ContentBlock{
+		{Kind: poo.ContentToolCall, ToolCallID: "toolu_1", Name: "get_weather", Arguments: json.RawMessage(`{}`)},
+		{Kind: poo.ContentToolCall, ToolCallID: "toolu_2", Name: "get_time", Arguments: json.RawMessage(`{}`)},
+	}}
+	results := []poo.Message{
+		{Role: poo.RoleTool, Content: []poo.ContentBlock{{Kind: poo.ContentToolResult, ToolCallID: "toolu_1", Text: "sunny"}}},
+		{Role: poo.RoleTool, Content: []poo.ContentBlock{{Kind: poo.ContentToolResult, ToolCallID: "toolu_2", Text: "14:00"}}},
+	}
+	msgs := append([]poo.Message{poo.NewTextMessage(poo.RoleUser, "Paris?")}, calls)
+	msgs = append(msgs, results...)
+	messages, _, err := anthropic.Messages(msgs)
+	if err != nil {
+		t.Fatalf("converting: %v", err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("the messages are %d, want the question, the calls, and one answer", len(messages))
+	}
+	answer := messages[2]
+	if answer.Role != "user" || len(answer.Content) != 2 {
+		t.Fatalf("the answer is a %q message with %d blocks, want the batch's one answer", answer.Role, len(answer.Content))
+	}
+	if answer.Content[0].ToolUseID != "toolu_1" || answer.Content[1].ToolUseID != "toolu_2" {
+		t.Errorf("the answer's blocks are %+v", answer.Content)
+	}
+}
+
 func TestARequiredForeignBlockIsRefused(t *testing.T) {
 	msgs := []poo.Message{{Role: poo.RoleAssistant, Content: []poo.ContentBlock{{
 		Kind: poo.ContentProvider,

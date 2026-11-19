@@ -215,17 +215,19 @@ func takesNativeTools(info poo.ModelInfo) bool {
 
 // maxTokens returns the output limit a request is sent with.
 //
-// The API takes no request without one, so a caller that computed none gets
-// the model's own limit, and a model that names none gets the least the
-// API accepts.
+// The API takes no request without one. A caller that computed none gets the
+// core's own rule — the model's limit or the default, clamped to the window
+// its context leaves — floored at one token, the way the Chat Completions
+// transport answers the same question.
 func maxTokens(req poo.ChatRequest, info poo.ModelInfo) int {
 	if req.MaxTokens > 0 {
 		return req.MaxTokens
 	}
-	if info.MaxOutput > 0 {
-		return info.MaxOutput
+	limit := info.MaxTokens(0)
+	if limit < 1 {
+		limit = 1
 	}
-	return 1
+	return limit
 }
 
 // params returns the request's named parameters: the reasoning the request
@@ -239,16 +241,25 @@ func (t *Transport) params(req poo.ChatRequest, info poo.ModelInfo) (map[string]
 	for _, field := range fields {
 		support.SetNested(params, field.Path, field.Value)
 	}
-	if len(fields) > 0 {
-		// The thinking field names the kind of thinking a request asks
-		// for, and the API takes no value without it: an effort level
-		// rides as the output config's effort with adaptive thinking, and
-		// a budget rides in the thinking object with thinking enabled.
-		if _, ok := params["output_config"]; ok {
-			support.SetNested(params, "thinking.type", "adaptive")
-		} else if _, ok := params["thinking"]; ok {
-			support.SetNested(params, "thinking.type", "enabled")
+	// The thinking field names the kind of thinking a request asks for,
+	// and the API takes no value without it. The companion is decided from
+	// the paths the reasoning fields named — the paths the core owns and a
+	// model may override — so a budget in the thinking object comes with
+	// thinking enabled, and an effort in the output config comes with
+	// adaptive thinking.
+	adaptive, enabled := false, false
+	for _, field := range fields {
+		switch {
+		case strings.HasPrefix(field.Path, "output_config."):
+			adaptive = true
+		case strings.HasPrefix(field.Path, "thinking."):
+			enabled = true
 		}
+	}
+	if adaptive {
+		support.SetNested(params, "thinking.type", "adaptive")
+	} else if enabled {
+		support.SetNested(params, "thinking.type", "enabled")
 	}
 	if info.Temperature != poo.TempFixed && info.Temperature != poo.TempUnsupported {
 		sampling := info.EffectiveSampling(t.cfg.Sampling)

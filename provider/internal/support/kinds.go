@@ -124,7 +124,6 @@ func isBilling(code, errType string) bool {
 	return false
 }
 
-// isRateLimit reports whether a failure names a rate limit.
 // isRateLimit reports whether a failure means the requests came too fast.
 //
 // The type is read as well as the code and the message, because a server

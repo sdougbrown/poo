@@ -59,13 +59,18 @@ type Source struct {
 //
 // The system prompt travels in the request's own field, above the messages
 // the API alternates. A tool's result is the user message that answers the
-// call, so a run's tool results arrive as user messages with result blocks.
-// The thinking the model did rides back as a thinking block with its
-// signature, because a request that answers its own thinking must return it
-// unchanged.
+// call, and one assistant message's calls take one answer: the results a
+// batch returns arrive as consecutive tool messages, and they merge into the
+// one user message that answers them, because the API alternates roles and
+// takes no two user messages in a row. The thinking the model did rides back
+// as a thinking block with its signature, because a request that answers its
+// own thinking must return it unchanged.
 func Messages(msgs []poo.Message) ([]Message, string, error) {
 	var system []string
 	out := make([]Message, 0, len(msgs))
+	// answers is the index of the user message the tool results are
+	// accumulating into, or -1 when the last message is not one.
+	answers := -1
 	for _, m := range msgs {
 		switch m.Role {
 		case poo.RoleSystem:
@@ -77,16 +82,23 @@ func Messages(msgs []poo.Message) ([]Message, string, error) {
 			continue
 		case poo.RoleUser, poo.RoleAssistant:
 		case poo.RoleTool:
-			// A tool's result is the user message that answers the call,
-			// so a run's tool results arrive as user messages with result
-			// blocks.
 			blocks, err := blocks(m)
 			if err != nil {
 				return nil, "", err
 			}
-			if len(blocks) > 0 {
-				out = append(out, Message{Role: "user", Content: blocks})
+			if len(blocks) == 0 {
+				continue
 			}
+			// The results a batch returned answer one assistant message,
+			// so the ones that follow the first ride in the message it
+			// opened: two user messages in a row are a request the API
+			// refuses.
+			if answers == len(out)-1 {
+				out[answers].Content = append(out[answers].Content, blocks...)
+				continue
+			}
+			out = append(out, Message{Role: "user", Content: blocks})
+			answers = len(out) - 1
 			continue
 		default:
 			return nil, "", &poo.ProviderError{
@@ -105,6 +117,7 @@ func Messages(msgs []poo.Message) ([]Message, string, error) {
 			continue
 		}
 		out = append(out, Message{Role: string(m.Role), Content: blocks})
+		answers = -1
 	}
 	return out, strings.Join(system, "\n\n"), nil
 }

@@ -278,6 +278,10 @@ func TestTheOpencodeTransportNamesTheSession(t *testing.T) {
 // offered on the same key as the Chat Completions one, and the transport
 // names the session through the endpoint's own declared header.
 func TestTheBuiltinAnthropicEndpointsServeOnTheirKey(t *testing.T) {
+	// The variable is pinned empty so the environment a test runs in cannot
+	// decide whether the built-in endpoints are offered or which key answers.
+	t.Setenv("OPENCODE_API_KEY", "")
+
 	dir := t.TempDir()
 	gateway := &opencodeGateway{}
 	runtime, _ := opencodeRuntime(t, dir, map[string]string{"opencode": "oc_sk_test"}, "opencode-go-anthropic/claude-haiku-5-5", gateway)
