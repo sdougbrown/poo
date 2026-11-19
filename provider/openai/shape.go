@@ -26,6 +26,9 @@ type requestSettings struct {
 	info poo.ModelInfo
 	// quirks are the profiles the model info named, in its order.
 	quirks []quirkProfile
+	// sessionID is the session the request belongs to, empty when the
+	// request names none. It is what a session header carries.
+	sessionID string
 }
 
 // requestSettings returns the settings a request is shaped by.
@@ -34,7 +37,7 @@ func (t *Transport) requestSettings(req poo.ChatRequest) requestSettings {
 	if support.ZeroModelInfo(info) {
 		info = t.cfg.ModelInfo
 	}
-	return requestSettings{info: info, quirks: quirksFor(info.Quirks, t.logger)}
+	return requestSettings{info: info, quirks: quirksFor(info.Quirks, t.logger), sessionID: req.SessionID}
 }
 
 // reasoningSetting returns the reasoning setting a request uses.

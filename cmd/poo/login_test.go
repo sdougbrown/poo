@@ -148,6 +148,28 @@ func TestAKeyLoginTakesTheKeyFromStdin(t *testing.T) {
 	}
 }
 
+// TestAnOpencodeLoginStoresTheKey covers the OpenCode sign-in: the key lands
+// under the provider the endpoints read, and a second sign-in of the same key
+// is what replaces it.
+func TestAnOpencodeLoginStoresTheKey(t *testing.T) {
+	dir := t.TempDir()
+	settings := loginSettings(t, dir)
+	withoutATerminal(t)
+
+	withStdin(t, "oc_sk_from-stdin\n")
+	if code := run([]string{"login", "opencode", "--settings", settings}); code != 0 {
+		t.Errorf("poo login exited with %d", code)
+	}
+	credentials := auth.Credentials{Path: filepath.Join(dir, "auth.json")}
+	entry, err := credentials.Read(opencode.Provider)
+	if err != nil {
+		t.Fatalf("reading the credential back: %v", err)
+	}
+	if entry.Kind != auth.KindAPIKey || entry.Key != "oc_sk_from-stdin" {
+		t.Errorf("the credential reads back as %+v", entry)
+	}
+}
+
 // TestAKeyLoginWithNoKeyIsAFailure covers the sign-in that has nothing to sign in with.
 func TestAKeyLoginWithNoKeyIsAFailure(t *testing.T) {
 	dir := t.TempDir()
@@ -742,6 +764,7 @@ func TestThePickerTakesTheNumberOfASignIn(t *testing.T) {
 	}{
 		{"1\n", auth.CodexLogin.Provider.ID},
 		{"2\n", ollamaCloud.Provider.ID},
+		{"3\n", opencode.Provider.ID},
 	} {
 		t.Run(c.want, func(t *testing.T) {
 			var o loginOptions
@@ -764,7 +787,7 @@ func TestThePickerRefusesWhatIsNotASignIn(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"3\n", "that is not one of the sign-ins"},
+		{"4\n", "that is not one of the sign-ins"},
 		{"0\n", "that is not one of the sign-ins"},
 		{"abc\n", "that is not one of the sign-ins"},
 		{"", "nothing was chosen"},

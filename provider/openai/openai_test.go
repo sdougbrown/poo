@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -354,6 +356,49 @@ func TestAnAuthorizationHeaderIsSent(t *testing.T) {
 
 	if got != "Bearer secret-token" {
 		t.Errorf("the Authorization header is %q, want the bearer token", got)
+	}
+}
+
+func TestASessionHeaderCarriesTheRequestsSession(t *testing.T) {
+	var mu sync.Mutex
+	var sessions []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		sessions = append(sessions, r.Header.Get("x-opencode-session"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, chunk(`{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}`)+done)
+	}))
+	defer srv.Close()
+
+	body := func(session string) poo.ChatRequest {
+		return poo.ChatRequest{Model: "m", MaxTokens: 16, SessionID: session}
+	}
+	tr := openai.New(openai.Options{Endpoint: srv.URL, Model: "m", SessionHeader: "x-opencode-session"})
+
+	// The request names a session, so the header carries it.
+	reader, rendered, err := tr.Stream(context.Background(), body("ses_one"))
+	if err != nil {
+		t.Fatalf("starting the request: %v", err)
+	}
+	read(t, reader)
+	// A request that names no session sends no header: an empty value tells
+	// the gateway nothing.
+	reader, _, err = tr.Stream(context.Background(), body(""))
+	if err != nil {
+		t.Fatalf("starting the request without a session: %v", err)
+	}
+	read(t, reader)
+	// The fork belongs to the request it forks, so it names the same session.
+	reader, err = tr.Fork(context.Background(), rendered, []poo.Message{poo.NewTextMessage(poo.RoleUser, "more")}, 16)
+	if err != nil {
+		t.Fatalf("forking the request: %v", err)
+	}
+	read(t, reader)
+
+	want := []string{"ses_one", "", "ses_one"}
+	if !slices.Equal(sessions, want) {
+		t.Errorf("the requests carried sessions %v, want %v", sessions, want)
 	}
 }
 

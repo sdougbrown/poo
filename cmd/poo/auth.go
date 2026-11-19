@@ -74,16 +74,7 @@ func handleAuthStatus(inv clicontract.Invocation, stdout, stderr io.Writer) exit
 		// whether it reads: an entry that is there and does not decode is the failure to report,
 		// and looking past it would drop what the operator needs to know.
 		if held, heldErr := credentials.Holds(auth.Codex.ID); heldErr == nil && !held {
-			key, keyErr := credentials.Status(auth.OllamaCloud)
-			if keyErr == nil {
-				status, err = key, nil
-			} else if heldKey, heldErr := credentials.Holds(auth.OllamaCloud.ID); heldErr == nil && heldKey {
-				// The key's entry is there and does not read, so it is the failure to report: the
-				// operator has a credential in the file, and what is wrong with it is the one thing
-				// the report can act on. The Codex error would name an entry that was never meant to
-				// be there.
-				err = keyErr
-			}
+			status, err = keyStatus(credentials, err)
 		}
 	}
 	if err != nil {
@@ -131,6 +122,26 @@ func printAuthStatus(report authStatus, status auth.Status, stdout io.Writer) {
 	}
 	fmt.Fprintf(w, "STATE\t%s\n", report.State)
 	_ = w.Flush()
+}
+
+// keyStatus reports the key credential the file holds: the first key provider whose
+// entry reads.
+//
+// A held entry that does not read is the failure to report: the operator has a
+// credential in the file, and what is wrong with it is the one thing the report can
+// act on. No held entry at all leaves the earlier failure in place, which names the
+// provider the operator was trying to use.
+func keyStatus(credentials auth.Credentials, earlier error) (auth.Status, error) {
+	for _, provider := range []auth.Provider{auth.OllamaCloud, auth.Opencode} {
+		status, err := credentials.Status(provider)
+		if err == nil {
+			return status, nil
+		}
+		if held, holdErr := credentials.Holds(provider.ID); holdErr == nil && held {
+			return auth.Status{}, err
+		}
+	}
+	return auth.Status{}, earlier
 }
 
 // credentialState is the word a report gives a credential's state: a credential poo

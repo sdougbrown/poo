@@ -4,10 +4,17 @@
 # can still be declared in the settings or a models file under the same
 # endpoint.
 #
+# The opencode endpoints are the other shape: the gateway lists every model it
+# serves, so each entry declares one seed model — the loader requires an
+# endpoint to serve something — and the discovery probe fills in the rest,
+# cached locally and refreshed as the catalog is built.
+#
 # POO_BUILTIN_MODELS names a file read instead of this one, in the same
 # vocabulary. The credential the openai-codex endpoint runs on is not an api
 # key, so none is declared here, and poo sends its credential only to the
-# endpoint the transport pins.
+# endpoint the transport pins. The opencode endpoints read one key: a key
+# belongs to one workspace, and the workspace's plan says which endpoint
+# bills it.
 endpoints:
   openai-codex:
     endpoint: https://chatgpt.com/backend-api
@@ -113,3 +120,29 @@ endpoints:
           mode: effort
           param: reasoning_effort
         reasoning_levels: [low, medium, high, xhigh, max]
+  opencode:
+    endpoint: https://opencode.ai/inference/openai/v1
+    api_key_env: OPENCODE_API_KEY
+    models:
+      glm-5.3:
+        inputs: [text]
+        context_limit: 1000000
+        max_output: 131072
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [low, high, max]
+  opencode-go:
+    endpoint: https://opencode.ai/inference/go/openai/v1
+    api_key_env: OPENCODE_API_KEY
+    models:
+      glm-5.3:
+        inputs: [text]
+        context_limit: 1000000
+        max_output: 131072
+        tools_mode: native
+        reasoning:
+          mode: effort
+          param: reasoning_effort
+        reasoning_levels: [low, high, max]

@@ -38,6 +38,9 @@ type Discovered struct {
 	ModelID string `json:"model_id"`
 	// ContextLimit is the model's context window. Zero means unknown.
 	ContextLimit int `json:"context_limit,omitempty"`
+	// MaxOutput is the most tokens the model writes in one response. Zero
+	// means unknown.
+	MaxOutput int `json:"max_output,omitempty"`
 	// PrefixCache reports whether the endpoint caches prompt prefixes.
 	// Nil means unknown.
 	PrefixCache *bool `json:"prefix_cache,omitempty"`
@@ -46,6 +49,11 @@ type Discovered struct {
 	// Reasoning is how the model's reasoning is controlled. Nil means
 	// unknown.
 	Reasoning *poo.ReasoningControl `json:"reasoning,omitempty"`
+	// ReasoningLevels are the reasoning levels the model accepts, lowest
+	// first. Empty means unknown.
+	ReasoningLevels []string `json:"reasoning_levels,omitempty"`
+	// Inputs are the modalities the model reads. Empty means unknown.
+	Inputs []poo.Modality `json:"inputs,omitempty"`
 }
 
 // discovery is what the probes found.
@@ -284,8 +292,23 @@ func (c *Catalog) probeEndpoint(ctx context.Context, endpoint Endpoint, modelIDs
 		if model.ContextLimit == 0 {
 			model.ContextLimit = item.ContextLimit
 		}
+		if model.MaxOutput == 0 {
+			model.MaxOutput = item.MaxOutput
+		}
 		if model.PrefixCache == nil {
 			model.PrefixCache = item.PrefixCache
+		}
+		if model.Tools == "" {
+			model.Tools = item.Tools
+		}
+		if model.Reasoning == nil {
+			model.Reasoning = item.Reasoning
+		}
+		if len(model.ReasoningLevels) == 0 {
+			model.ReasoningLevels = item.ReasoningLevels
+		}
+		if len(model.Inputs) == 0 {
+			model.Inputs = item.Inputs
 		}
 		models[id] = model
 	}
@@ -344,10 +367,13 @@ func (c *Catalog) candidates(modelIDs []string, list map[string]Discovered) []st
 
 // probeOpenAI reads the OpenAI-compatible model list.
 //
-// The shape is the one every OpenAI-compatible endpoint serves:
-// {"data":[{"id":"...","max_model_len":32768}]}. A server that does not
-// serve the list answers with an error, and the probe reports that the
-// shape is not there.
+// The shape every OpenAI-compatible endpoint serves is
+// {"data":[{"id":"...","max_model_len":32768}]}. A gateway that knows its
+// models better says more in the same place — a limit object for the two
+// token budgets, and capabilities for the tools and the reasoning — and the
+// probe reads what is there: a field the endpoint does not send stays
+// unknown. A server that does not serve the list answers with an error, and
+// the probe reports that the shape is not there.
 func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL string) (map[string]Discovered, error) {
 	body, err := c.get(ctx, client, openAIBase(baseURL)+"/models")
 	if err != nil {
@@ -361,6 +387,21 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 			ID            string `json:"id"`
 			MaxModelLen   int    `json:"max_model_len"`
 			PrefixCaching *bool  `json:"prefix_caching"`
+			Limit         struct {
+				Context int `json:"context"`
+				Output  int `json:"output"`
+			} `json:"limit"`
+			Capabilities struct {
+				Tools struct {
+					Supported *bool `json:"supported"`
+				} `json:"tools"`
+				Reasoning struct {
+					Effort []string `json:"effort"`
+				} `json:"reasoning"`
+			} `json:"capabilities"`
+			Modalities struct {
+				Input []string `json:"input"`
+			} `json:"modalities"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &list); err != nil {
@@ -371,13 +412,62 @@ func (c *Catalog) probeOpenAI(ctx context.Context, client *http.Client, baseURL 
 		if item.ID == "" {
 			continue
 		}
-		out[item.ID] = Discovered{
-			ModelID:      item.ID,
-			ContextLimit: item.MaxModelLen,
-			PrefixCache:  item.PrefixCaching,
+		reasoning := effortControl(item.Capabilities.Reasoning.Effort)
+		model := Discovered{
+			ModelID:     item.ID,
+			MaxOutput:   item.Limit.Output,
+			PrefixCache: item.PrefixCaching,
+			Reasoning:   reasoning,
+			Inputs:      inputModalities(item.Modalities.Input),
 		}
+		if reasoning != nil {
+			model.ReasoningLevels = item.Capabilities.Reasoning.Effort
+		}
+		// The limit object is the gateway's own word, and max_model_len is the
+		// plain shape's, so the two are read in that order.
+		model.ContextLimit = item.Limit.Context
+		if model.ContextLimit == 0 {
+			model.ContextLimit = item.MaxModelLen
+		}
+		if item.Capabilities.Tools.Supported != nil {
+			model.Tools = poo.ToolsNone
+			if *item.Capabilities.Tools.Supported {
+				model.Tools = poo.ToolsNative
+			}
+		}
+		out[item.ID] = model
 	}
 	return out, nil
+}
+
+// effortControl returns the reasoning control an effort list describes: the
+// request carries the level as the effort parameter. Nil means the model's
+// reasoning is not controlled through the request.
+func effortControl(levels []string) *poo.ReasoningControl {
+	if len(levels) == 0 {
+		return nil
+	}
+	return &poo.ReasoningControl{
+		Mode:  poo.ReasoningEffort,
+		Param: poo.ReasoningPathEffort,
+	}
+}
+
+// inputModalities maps the modality names a model list reports — a bare
+// "text" or a MIME type — to the modalities poo names.
+func inputModalities(names []string) []poo.Modality {
+	var out []poo.Modality
+	for _, name := range names {
+		switch {
+		case name == "text":
+			out = append(out, poo.ModalityText)
+		case strings.HasPrefix(name, "image/"):
+			out = append(out, poo.ModalityImage)
+		case strings.HasPrefix(name, "audio/"):
+			out = append(out, poo.ModalityAudio)
+		}
+	}
+	return out
 }
 
 // llamaProps is what llama.cpp's server reports.
@@ -511,11 +601,14 @@ func hasCapability(capabilities []string, name string) bool {
 // discovery layer.
 func discoveredLayer(model Discovered, endpointURL string) poo.ModelInfo {
 	info := poo.ModelInfo{
-		Endpoint:     endpointURL,
-		ModelID:      model.ModelID,
-		ContextLimit: model.ContextLimit,
-		PrefixCache:  model.PrefixCache,
-		Tools:        poo.ToolCalling{Mode: model.Tools},
+		Endpoint:        endpointURL,
+		ModelID:         model.ModelID,
+		ContextLimit:    model.ContextLimit,
+		MaxOutput:       model.MaxOutput,
+		PrefixCache:     model.PrefixCache,
+		Tools:           poo.ToolCalling{Mode: model.Tools},
+		Inputs:          model.Inputs,
+		ReasoningLevels: model.ReasoningLevels,
 	}
 	if model.Reasoning != nil {
 		info.Reasoning = *model.Reasoning

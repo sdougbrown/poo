@@ -2325,13 +2325,14 @@ func (r *Runtime) Transport(model poo.ModelInfo) (poo.ChatTransport, error) {
 	switch model.API {
 	case "", poo.APIChatCompletions:
 		return openai.New(openai.Options{
-			Endpoint:   model.Endpoint,
-			Model:      model.ModelID,
-			APIKey:     r.EndpointKey(model),
-			ToolsMode:  string(model.Tools.Mode),
-			ModelInfo:  model,
-			Sampling:   model.Sampling,
-			HTTPClient: r.httpClient,
+			Endpoint:      model.Endpoint,
+			Model:         model.ModelID,
+			APIKey:        r.EndpointKey(model),
+			SessionHeader: sessionHeader(model.Provider),
+			ToolsMode:     string(model.Tools.Mode),
+			ModelInfo:     model,
+			Sampling:      model.Sampling,
+			HTTPClient:    r.httpClient,
 		}), nil
 	default:
 		return nil, &Error{
@@ -2350,6 +2351,18 @@ func servedBy(model poo.ModelInfo) string {
 		return model.Provider
 	}
 	return model.Endpoint
+}
+
+// sessionHeader is the header an endpoint's gateway reads a conversation's
+// requests by. The opencode gateway requires one on every chat request, and any
+// stable value answers, so the session's own id is what the transport sends.
+// Empty means the endpoint asks for none.
+func sessionHeader(provider string) string {
+	switch provider {
+	case auth.ProviderOpencode, auth.ProviderOpencodeGo:
+		return "x-opencode-session"
+	}
+	return ""
 }
 
 // httpClient is the client the transports use. It is nil unless the
@@ -2451,9 +2464,12 @@ func (r *Runtime) EndpointKey(model poo.ModelInfo) string {
 		// provider's declaration both carry, so it is the join: an endpoint that reads the
 		// variable a provider stores its key under is served by that provider's credential,
 		// and no endpoint name is hardcoded here.
-		if endpoint.Credential.Env == auth.OllamaCloud.Env {
+		for _, provider := range []auth.Provider{auth.OllamaCloud, auth.Opencode} {
+			if endpoint.Credential.Env != provider.Env {
+				continue
+			}
 			// An absent or unreadable credential is not a failure here: the next rung answers.
-			stored, err := (auth.Credentials{Path: r.Settings.CredentialFile()}).Read(auth.OllamaCloud)
+			stored, err := (auth.Credentials{Path: r.Settings.CredentialFile()}).Read(provider)
 			if err == nil && stored.Key != "" {
 				return stored.Key
 			}

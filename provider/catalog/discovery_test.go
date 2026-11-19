@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/provider/catalog"
 )
 
@@ -83,6 +84,98 @@ func settingsFor(baseURL string) catalog.Settings {
 		Models: map[string]catalog.ModelSettings{
 			"gemma4": {Endpoint: "local", ModelID: "gemma4"},
 		},
+	}
+}
+
+// TestTheProbeReadsTheLimitsAndCapabilitiesAGatewayReports covers the list
+// shape a gateway that knows its models serves: the plain OpenAI shape with
+// a limit object, capabilities and modalities added, which is what the
+// OpenCode Console answers. A field the list does not carry stays unknown,
+// so the plain shape keeps reading as it did.
+func TestTheProbeReadsTheLimitsAndCapabilitiesAGatewayReports(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]any{
+				{
+					"id": "glm-5.3",
+					"limit": map[string]any{
+						"context": 1000000,
+						"output":  131072,
+					},
+					"capabilities": map[string]any{
+						"tools":     map[string]any{"supported": true},
+						"reasoning": map[string]any{"effort": []string{"low", "high", "max"}},
+					},
+					"modalities": map[string]any{
+						"input": []string{"text", "image/jpeg"},
+					},
+				},
+				{
+					"id": "plain-7b",
+					"capabilities": map[string]any{
+						"tools": map[string]any{"supported": false},
+					},
+				},
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	c := catalog.New(catalog.Options{
+		Settings: catalog.Settings{
+			Endpoints: map[string]catalog.EndpointSettings{
+				"gateway": {Endpoint: server.URL + "/v1"},
+			},
+		},
+		StateDir: t.TempDir(),
+	})
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("the refresh: %v", err)
+	}
+
+	glm, err := c.Resolve("gateway/glm-5.3")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if glm.ContextLimit != 1000000 || glm.MaxOutput != 131072 {
+		t.Errorf("the limits are %d/%d, want the reported 1000000/131072", glm.ContextLimit, glm.MaxOutput)
+	}
+	if glm.Tools.Mode != poo.ToolsNative {
+		t.Errorf("the tools mode is %q, want native", glm.Tools.Mode)
+	}
+	if glm.Reasoning.Mode != poo.ReasoningEffort {
+		t.Errorf("the reasoning mode is %q, want effort", glm.Reasoning.Mode)
+	}
+	if strings.Join(glm.ReasoningLevels, ",") != "low,high,max" {
+		t.Errorf("the reasoning levels are %v, want the reported ones", glm.ReasoningLevels)
+	}
+	if !glm.Reads(poo.ModalityImage) || !glm.Reads(poo.ModalityText) {
+		t.Errorf("the inputs are %v, want text and image", glm.Inputs)
+	}
+	for _, layer := range []string{"context_limit", "max_output", "tools.mode", "reasoning.mode", "reasoning.levels", "inputs"} {
+		if glm.Source[layer] != catalog.LayerDiscovery {
+			t.Errorf("%s comes from %q, want discovery", layer, glm.Source[layer])
+		}
+	}
+
+	// A model the list says nothing about keeps what it reported: no limits,
+	// and tools the capabilities refuse.
+	plain, err := c.Resolve("gateway/plain-7b")
+	if err != nil {
+		t.Fatalf("the model: %v", err)
+	}
+	if plain.ContextLimit != 0 || plain.MaxOutput != 0 {
+		t.Errorf("the limits are %d/%d, want none reported", plain.ContextLimit, plain.MaxOutput)
+	}
+	if plain.Tools.Mode != poo.ToolsNone {
+		t.Errorf("the tools mode is %q, want none", plain.Tools.Mode)
+	}
+	if len(plain.Inputs) != 0 {
+		t.Errorf("the inputs are %v, want none reported", plain.Inputs)
 	}
 }
 
