@@ -67,7 +67,6 @@ func TestAnUnknownArgumentNamesItAndTheAcceptedArguments(t *testing.T) {
 	}
 }
 
-// TestTheRefusalKeepsNamesOnly pins the split: the refusal's accepted
 // list names the arguments, it does not embed enum values — the values
 // belong to the refusal's own clause when the enum is the miss.
 func TestTheRefusalKeepsNamesOnly(t *testing.T) {

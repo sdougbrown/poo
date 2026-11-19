@@ -51,8 +51,8 @@ type Entry struct {
 	// Schema is the JSON schema of the CLI's arguments.
 	Schema map[string]any
 	// Args renders the schema's top-level arguments for the prompt, in
-	// name order, required ones marked, or an empty string when the
-	// schema declares no properties.
+	// name order, required ones marked, an enum's values in brackets,
+	// or an empty string when the schema declares no properties.
 	Args string
 }
 
@@ -260,9 +260,10 @@ type catalogData struct {
 // template.
 //
 // The full catalog is one line per entry: the name the model calls the
-// CLI by, its arguments with required ones marked, and what it does. A
-// session that searches the catalog instead is told what the search is
-// and how to use it, and the entries stay out of the prompt.
+// CLI by, its arguments with required ones marked and enum values in
+// brackets, and what it does. A session that searches the catalog
+// instead is told what the search is and how to use it, and the
+// entries stay out of the prompt.
 //
 // The template renders with the catalog's data, so a prompt directory
 // that replaces the section renders with it too.
