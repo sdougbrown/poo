@@ -46,10 +46,10 @@ const NestedOutputCapChars = 1 << 20
 // arguments far under the wire's output queue line budget.
 const NestedArgumentMaxBytes = 1 << 20
 
-// defaultNestedTextCapChars is the cap on a nested result's recorded
-// text when the session sets no observation cap. It is the largest
-// observation the model ever sees.
-const defaultNestedTextCapChars = 30000
+// defaultObservationCapChars is the cap on an observation when the session
+// sets none, for a result's recorded text and for the turn growth a session
+// plans for. It is the largest observation the model ever sees.
+const defaultObservationCapChars = 30000
 
 // callParent returns the handle of the call that made the call with
 // the handle, or the empty string for a call the model made.
@@ -78,7 +78,7 @@ const NestedElisionNote = "\n… %d more characters went to the calling tool"
 func (s *Session) nestedRecordText(text string) (string, int) {
 	limit := s.opts.Settings.ObservationCapChars
 	if limit <= 0 {
-		limit = defaultNestedTextCapChars
+		limit = defaultObservationCapChars
 	}
 	head, elided := cutRuneHead(text, limit)
 	if elided == 0 {

@@ -246,9 +246,11 @@ func (s *Session) commitCompactionView(run *runState, view compactionView) bool 
 	}
 	s.est.rebase(view.history)
 	// The next usage report is the first after this compaction, so it
-	// reports what the new view cost the endpoint.
+	// reports what the new view cost the endpoint. It is the new baseline
+	// for the turn growth too: the input dropped, and a drop is not a turn.
 	s.compactedInput = 0
 	s.compactedReportPending = true
+	s.growth.resetBaseline()
 	return true
 }
 

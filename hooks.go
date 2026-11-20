@@ -96,6 +96,11 @@ type ContextBudget struct {
 	// can run high after a retry. A strategy that guards on it then
 	// declines earlier than the next request would have needed.
 	CompactedInput int
+	// TurnGrowth is how many prompt tokens a turn adds to the input: the
+	// largest recent increase between two usage reports, or before there
+	// is one, the observation cap in tokens. It is zero unless the
+	// session measures turn growth.
+	TurnGrowth int
 	// Turns is the number of provider requests the run has made.
 	//
 	// A compaction strategy needs it: the handoff strategy asks for a
@@ -127,22 +132,23 @@ func (b ContextBudget) PromptLimit() int {
 	return PromptLimitOf(b.ContextLimit, b.InputLimit)
 }
 
-// RoomShort reports that the next request does not fit. Either the prompt,
-// the output need and the reserve exceed the window, or the prompt and the
-// reserve exceed the endpoint's input cap.
+// RoomShort reports that the next request does not fit. Either the prompt, the
+// turn growth the session measured, the output need and the reserve exceed the
+// window, or the prompt, the growth and the reserve exceed the endpoint's input
+// cap.
 //
 // It is the trigger for a compaction strategy. A strategy checks whether a
 // compaction would end the shortage with the same rule, on a budget that
-// carries the input the compaction would leave. A budget with no window and no cap, or
-// whose run has asked the model nothing, is never short.
+// carries the input the compaction would leave. A budget with no window and no
+// cap, or whose run has asked the model nothing, is never short.
 func (b ContextBudget) RoomShort(need int) bool {
 	if b.Turns < 1 {
 		return false
 	}
-	if b.ContextLimit > 0 && b.EstimatedInput+need+OutputReserve > b.ContextLimit {
+	if b.ContextLimit > 0 && b.EstimatedInput+b.TurnGrowth+need+OutputReserve > b.ContextLimit {
 		return true
 	}
-	return b.InputLimit > 0 && b.EstimatedInput+OutputReserve > b.InputLimit
+	return b.InputLimit > 0 && b.EstimatedInput+b.TurnGrowth+OutputReserve > b.InputLimit
 }
 
 // RequestBlocked reports that the next request cannot go out. Either the

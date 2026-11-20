@@ -1975,6 +1975,7 @@ func (s *Session) chargeUsageLocked(run *runState, usage *UsageReport) {
 func (s *Session) recordUsage(run *runState, meta RecordMeta, turn, request int, usage *UsageReport, requestChars int) bool {
 	s.observeUsage(usage, requestChars)
 	s.noteCompactedInput(meta, usage)
+	s.noteTurnInput(meta, usage)
 	if err := s.write(run.ctx, &UsageRecord{
 		RecordMeta:      meta,
 		RunID:           run.id,
