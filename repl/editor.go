@@ -45,16 +45,19 @@ type editorInput struct {
 	// close has shut the read gate. close aborts the held read and
 	// waits until it has left; a read that arrives after close is the
 	// interrupt, without entering the terminal at all.
-	//
+	readMu   sync.Mutex
+	readCond *sync.Cond
+	readHeld bool
+	closed   bool
+
 	// afterReadline, when set, runs on the reader's goroutine after a
 	// read leaves the editor and before the handshake reports it.
 	// The close test parks there to prove the close waits the read
-	// out.
-	readMu        sync.Mutex
-	readCond      *sync.Cond
-	readHeld      bool
-	closed        bool
+	// out. beforeWait, when set, runs on a close's goroutine just
+	// before it parks in that wait, under readMu; the two-closes test
+	// counts parkings there to know every closer is waiting.
 	afterReadline func()
+	beforeWait    func()
 }
 
 // newEditor builds the line editor for the session.
@@ -296,6 +299,9 @@ func (i *editorInput) close() {
 	i.closed = true
 	i.rl.Keys.Abort()
 	for i.readHeld {
+		if i.beforeWait != nil {
+			i.beforeWait()
+		}
 		i.readCond.Wait()
 	}
 	i.readMu.Unlock()

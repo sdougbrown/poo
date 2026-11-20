@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -408,16 +409,17 @@ func TestCloseLeavesNoReaderInTheTerminal(t *testing.T) {
 	// The prompt on the terminal says the read holds it.
 	waitFor(t, term, promptMark)
 
+	returned := make(chan bool, 1)
 	go func() {
 		i.close()
 		// The handshake's own invariant, at the instant the close
-		// returned: the read it aborted has left the terminal.
+		// returned: the read it aborted has left the terminal. The
+		// buffered send lets a close that returns after the test's
+		// end report without touching the test itself.
 		i.readMu.Lock()
 		held := i.readHeld
 		i.readMu.Unlock()
-		if held {
-			t.Error("the close returned while the read it aborted still held the terminal")
-		}
+		returned <- held
 		close(closed)
 	}()
 	select {
@@ -430,8 +432,8 @@ func TestCloseLeavesNoReaderInTheTerminal(t *testing.T) {
 	i.afterReadline = nil
 	// A close that waits the read out cannot return while it is
 	// held, however loaded the machine. The window is generous
-	// against a close that polls instead of waiting, and the close
-	// goroutine's own check above catches a return in the gap
+	// against a close that polls instead of waiting, and the report
+	// the close goroutine carries below catches a return in the gap
 	// between this window and the read's departure.
 	select {
 	case <-closed:
@@ -444,6 +446,11 @@ func TestCloseLeavesNoReaderInTheTerminal(t *testing.T) {
 	case <-closed:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the close never returned once the read had left")
+	}
+	// The close's own report, at the instant it returned: the read
+	// it aborted had left the terminal.
+	if held := <-returned; held {
+		t.Fatal("the close returned while the read it aborted still held the terminal")
 	}
 	select {
 	case <-done:
@@ -480,15 +487,45 @@ func TestTwoClosesWaitTheSameReadOut(t *testing.T) {
 	parked := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	first, second := make(chan struct{}), make(chan struct{})
+	// The cleanup joins both closes behind a deadline, the way the
+	// handshake test's does, and a close the deadline catches gets
+	// the pty's end: no close outlives the stdio restore below to put
+	// this pty's termios on a foreign fd.
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		for _, done := range []chan struct{}{first, second} {
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				term.master.Close()
+				i.rl.Keys.RequestRefresh()
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+				}
+			}
+		}
+	})
 	i.afterReadline = func() { close(parked); <-release }
 	go func() { i.read() }()
 	// The prompt on the terminal says the read holds it.
 	waitFor(t, term, promptMark)
 
-	first, second := make(chan struct{}), make(chan struct{})
+	var waiters atomic.Int32
+	i.beforeWait = func() { waiters.Add(1) }
 	go func() { i.close(); close(first) }()
 	go func() { i.close(); close(second) }()
+	// Both closes must be parked in the handshake's wait before the
+	// read leaves — the count under readMu is the receipt — or the
+	// wake this test exists to pin races past the wait entirely.
+	deadline := time.Now().Add(10 * time.Second)
+	for waiters.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := waiters.Load(); got < 2 {
+		t.Fatalf("only %d of two closes reached the wait", got)
+	}
 	// The read may leave now; both closes behind it must return.
 	releaseOnce.Do(func() { close(release) })
 	for _, done := range []chan struct{}{first, second} {
