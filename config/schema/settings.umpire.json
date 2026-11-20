@@ -46,6 +46,7 @@
     "tools.env.scrub": { "isEmpty": "array" },
     "tools.env.passthrough": { "isEmpty": "array" },
     "tools.protected_paths": { "isEmpty": "array" },
+    "tools.codemode.engine": { "isEmpty": "string" },
     "tools.codemode.timeout_s": { "isEmpty": "number" },
     "tools.codemode.script_max_bytes": { "isEmpty": "number" },
     "tools.codemode.output_cap_chars": { "isEmpty": "number" },
@@ -201,6 +202,13 @@
       "min": 0,
       "max": 1,
       "reason": "context.hard_ratio must be between 0 and 1"
+    },
+    {
+      "type": "check",
+      "field": "tools.codemode.engine",
+      "op": "matches",
+      "pattern": "^(starlark|quickjs)$",
+      "reason": "tools.codemode.engine must be starlark or quickjs"
     },
     {
       "type": "check",

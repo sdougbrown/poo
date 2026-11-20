@@ -379,6 +379,8 @@ type ToolOptions struct {
 	// Inputs are the modalities the session's model reads, so a tool that can
 	// return one does, rather than refusing what the model cannot see.
 	Inputs []poo.Modality
+	// CodemodeEngine is the engine selected for the codemode tool.
+	CodemodeEngine string
 }
 
 // Build turns the settings into the runtime a session is built from.
@@ -1351,6 +1353,9 @@ func (r *Runtime) resolveTools(opts BuildOptions, workingDir string) error {
 		Registry:       r.offeredCatalog(),
 		Search:         r.offersSearch(),
 		Inputs:         r.modelInputs(),
+	}
+	if settings.Tools.Codemode.Engine != nil {
+		toolOptions.CodemodeEngine = *settings.Tools.Codemode.Engine
 	}
 	if r.needsExecutor() {
 		executor, err := opts.Executors.New(executorName, exec.Options{
