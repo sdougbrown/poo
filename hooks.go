@@ -151,9 +151,14 @@ func (b ContextBudget) RequestBlocked() (bool, string, string) {
 	return false, "", ""
 }
 
-// OutputRoom returns the max_tokens the next request would carry: the output
-// limit, clamped to the room the window leaves after the input and the
-// reserve.
+// OutputRoom returns the room RequestBlocked measures: the output limit,
+// clamped to the room the window leaves after the input and the reserve.
+//
+// It is not necessarily the max_tokens a request carries: a request starts
+// from ModelInfo.OutputLimit, which uses the model's own limit before any
+// default, so a model that declares more than the default sends more. The
+// block decision matches the request's anyway, because the room it reads is
+// the one under MinOutputTokens, and DefaultMaxOutputFor is never below it.
 func (b ContextBudget) OutputRoom() int {
 	room := b.OutputLimit
 	if room <= 0 {

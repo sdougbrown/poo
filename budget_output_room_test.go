@@ -113,3 +113,76 @@ func (p *budgetProbe) ShouldCompact(view poo.View, budget poo.ContextBudget) boo
 func (p *budgetProbe) Compact(ctx context.Context, in poo.CompactionEnv) (poo.Compaction, error) {
 	return poo.Compaction{}, nil
 }
+
+// TestTheRequestIsBlockedOnlyWhenNoRoomIsLeft covers the gate's block
+// decision on both lines it draws: the window's room under the smallest
+// max_tokens, and the prompt over the endpoint's input cap.
+func TestTheRequestIsBlockedOnlyWhenNoRoomIsLeft(t *testing.T) {
+	const window, cap = 100000, 8000
+	cases := []struct {
+		name   string
+		budget poo.ContextBudget
+		want   bool
+		source string
+		room   int
+	}{
+		{
+			name:   "the window leaves exactly the minimum",
+			budget: poo.ContextBudget{ContextLimit: window, EstimatedInput: window - poo.OutputReserve - poo.MinOutputTokens, OutputLimit: 4096},
+			room:   poo.MinOutputTokens,
+		},
+		{
+			name:   "the window leaves one token less",
+			budget: poo.ContextBudget{ContextLimit: window, EstimatedInput: window - poo.OutputReserve - poo.MinOutputTokens + 1, OutputLimit: 4096},
+			want:   true,
+			source: "no_output_room",
+			room:   poo.MinOutputTokens - 1,
+		},
+		{
+			// The output limit is the default for the window, and the
+			// room the window leaves is wider than it.
+			name:   "an output limit of zero",
+			budget: poo.ContextBudget{ContextLimit: window, EstimatedInput: 80000},
+			room:   poo.DefaultMaxOutputFor(window),
+		},
+		{
+			name:   "no window",
+			budget: poo.ContextBudget{EstimatedInput: 1 << 20, OutputLimit: 4096},
+			room:   4096,
+		},
+		{
+			name:   "no window and no output limit",
+			budget: poo.ContextBudget{EstimatedInput: 1 << 20},
+			room:   poo.DefaultMaxOutputFor(0),
+		},
+		{
+			name:   "the cap is exactly the reserve away",
+			budget: poo.ContextBudget{ContextLimit: window, InputLimit: cap, EstimatedInput: cap - poo.OutputReserve, OutputLimit: 4096},
+		},
+		{
+			name:   "the cap is one token over",
+			budget: poo.ContextBudget{ContextLimit: window, InputLimit: cap, EstimatedInput: cap - poo.OutputReserve + 1, OutputLimit: 4096},
+			want:   true,
+			source: "prompt_limit",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			blocked, source, text := c.budget.RequestBlocked()
+			if blocked != c.want {
+				t.Errorf("RequestBlocked is %v, want %v", blocked, c.want)
+			}
+			if source != c.source {
+				t.Errorf("the source is %q, want %q", source, c.source)
+			}
+			if c.want && text == "" {
+				t.Error("the blocked request has no text")
+			}
+			if c.room != 0 {
+				if got := c.budget.OutputRoom(); got != c.room {
+					t.Errorf("the output room is %d, want %d", got, c.room)
+				}
+			}
+		})
+	}
+}

@@ -1202,18 +1202,25 @@ func (s *Session) budget() ContextBudget {
 //
 // The caller holds the session's lock.
 func (s *Session) budgetLocked() ContextBudget {
-	turns := 0
+	budget := budgetFor(s.opts.Model, s.estimatedInputLocked())
+	budget.CharsPerToken = s.est.charsPerToken
+	budget.CompactedInput = s.compactedInput
 	if s.run != nil {
-		turns = s.run.turn
+		budget.Turns = s.run.turn
 	}
+	return budget
+}
+
+// budgetFor returns the context budget of a model and an estimated input.
+//
+// Both places that size a request against a model read the budget from here, so
+// a model switch warns on the budget its next request reads.
+func budgetFor(model ModelInfo, estimated int) ContextBudget {
 	return ContextBudget{
-		ContextLimit:   s.opts.Model.ContextLimit,
-		InputLimit:     s.opts.Model.InputLimit,
-		EstimatedInput: s.estimatedInputLocked(),
-		CharsPerToken:  s.est.charsPerToken,
-		OutputLimit:    min(s.opts.Model.OutputCeiling(), DefaultMaxOutputFor(s.opts.Model.ContextLimit)),
-		CompactedInput: s.compactedInput,
-		Turns:          turns,
+		ContextLimit:   model.ContextLimit,
+		InputLimit:     model.InputLimit,
+		EstimatedInput: estimated,
+		OutputLimit:    min(model.OutputCeiling(), DefaultMaxOutputFor(model.ContextLimit)),
 	}
 }
 

@@ -214,12 +214,10 @@ func (s *Session) SetDecider(info ModelInfo, decider decide.Decider) error {
 //
 // The caller holds the session's lock.
 func (s *Session) contextExhaustedLocked(info ModelInfo, limit int) (bool, string) {
-	budget := ContextBudget{
-		ContextLimit:   limit,
-		InputLimit:     info.InputLimit,
-		EstimatedInput: s.est.estimate(s.modelMessagesLocked()),
-		OutputLimit:    min(info.OutputCeiling(), DefaultMaxOutputFor(limit)),
-	}
+	// The budget the next request reads is the one the model with its final
+	// window gives, so a switch that brings the window with it is judged on it.
+	info.ContextLimit = limit
+	budget := budgetFor(info, s.est.estimate(s.modelMessagesLocked()))
 	if blocked, _, reason := budget.RequestBlocked(); blocked {
 		return true, reason
 	}
