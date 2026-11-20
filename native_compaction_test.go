@@ -340,3 +340,53 @@ func TestANativeSessionCompactsASwitchedModelThatDeclaresTheOperation(t *testing
 		t.Errorf("the transport served %d native compactions, want 1", got)
 	}
 }
+
+// TestANativeCompactionDeclinesWhileTheCompactedInputIsShort covers the
+// strategy's own limit: a compaction that left the input short of the window
+// must not repeat every turn, so the run settles at the gate instead.
+//
+// The report a compaction made for itself is not the view's input, so it does
+// not arm the limit: only the first turn's report after a compaction does.
+func TestANativeCompactionDeclinesWhileTheCompactedInputIsShort(t *testing.T) {
+	tr := scripted([]fakeResponse{
+		// The first turn fills the window, and the strategy compacts.
+		{calls: []poo.ToolCall{{CallID: "c1", Name: "echo", Arguments: []byte(`{"text":"one"}`)}}, usage: &poo.UsageReport{InputTokens: 3600, OutputTokens: 5}},
+		// The report after the compaction is still short of the window...
+		{calls: []poo.ToolCall{{CallID: "c2", Name: "echo", Arguments: []byte(`{"text":"two"}`)}}, usage: &poo.UsageReport{InputTokens: 3300, OutputTokens: 5}},
+		// ...and the last turn leaves the window without the room a request
+		// needs.
+		{calls: []poo.ToolCall{{CallID: "c3", Name: "echo", Arguments: []byte(`{"text":"three"}`)}}, usage: &poo.UsageReport{InputTokens: 3500, OutputTokens: 5}},
+	})
+	tr.SetWindow(nativeWindowOf(`{"encrypted_content":"abc"}`))
+	// The compaction's own request reported usage. It is the compaction's, not
+	// the view's, and a guard armed by it would let the strategy compact again.
+	tr.SetWindowUsage(&poo.UsageReport{InputTokens: 50, OutputTokens: 5})
+	sink := &recordingSink{}
+	s := newTestSession(t, nativeOptions(t, tr, "echoed", sink))
+
+	res := runSession(t, s, "do the thing")
+	if res.Reason != poo.ReasonContextExhausted {
+		t.Fatalf("the run settled %q (%s), want context_exhausted", res.Reason, res.Detail.Text)
+	}
+	if res.Detail.Source != "no_output_room" {
+		t.Errorf("the settle source is %q, want no_output_room from the gate", res.Detail.Source)
+	}
+	if got := tr.Compactions(); got != 1 {
+		t.Errorf("the transport served %d native compactions, want the one the first turn bought", got)
+	}
+	// Two turns followed the compaction and the run kept going through both
+	// gates, so the guard was the only thing that stopped the second one.
+	if got := len(tr.Requests()); got != 3 {
+		t.Errorf("the transport got %d requests, want three turns", got)
+	}
+	var compactionUsage bool
+	for _, rec := range sink.allRecords() {
+		usage, ok := rec.(*poo.UsageRecord)
+		if ok && usage.Origin == poo.OriginCompaction {
+			compactionUsage = true
+		}
+	}
+	if !compactionUsage {
+		t.Error("the log holds no usage record for the compaction's own request")
+	}
+}
