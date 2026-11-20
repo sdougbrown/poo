@@ -1,10 +1,5 @@
 package config
 
-import (
-	"os"
-	"testing"
-)
-
 // CoreToolNames is the list of the tools the core adds by itself, for the
 // tests that check the settings refuse to disable one.
 var CoreToolNames = coreToolNames
@@ -20,19 +15,4 @@ func (r *Runtime) ModelAPIKey(name string) string {
 		return ""
 	}
 	return r.EndpointKey(model)
-}
-
-// Chdir moves the process into dir for the test's duration and restores
-// the working directory when the test ends. The tests that load a
-// settings document relative to the working directory share it.
-func Chdir(t *testing.T, dir string) {
-	t.Helper()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(cwd) })
 }

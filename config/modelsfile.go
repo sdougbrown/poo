@@ -262,9 +262,10 @@ func readModelsDocument(path string) ([]byte, error) {
 // One codec over two encodings: the file is YAML, which is what an
 // operator edits, and JSON is YAML an operator can also write. The
 // document normalizes through the pipeline the settings use, so a
-// change to how a document is read reaches every sidecar. what names
-// the document in a failure, because a message about the settings would
-// be a message about a file the operator did not write.
+// change to how a document is read reaches every sidecar. The what
+// argument names the document in a failure, because a message about
+// the settings would be a message about a file the operator did not
+// write.
 func readYAMLDocument(path, what string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

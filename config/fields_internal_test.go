@@ -12,7 +12,7 @@ import (
 // settings name files, and is absent when they name none.
 func TestTheFieldsHoldTheLeavesTheSettingsName(t *testing.T) {
 	dir := t.TempDir()
-	Chdir(t, dir)
+	t.Chdir(dir)
 	if err := os.WriteFile(filepath.Join(dir, "profiles.yaml"), []byte("profiles:\n  reviewer:\n    base: code\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

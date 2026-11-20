@@ -80,7 +80,7 @@ profiles_files:
 
 func TestProfilesFilePromptAnswersToTheFileFromARelativeSettingsPath(t *testing.T) {
 	dir := t.TempDir()
-	config.Chdir(t, dir)
+	t.Chdir(dir)
 	if err := os.MkdirAll(filepath.Join(dir, ".poo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ profiles:
 
 func TestProfilesFilesNamedWithoutADirectoryAnswerToTheWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
-	config.Chdir(t, dir)
+	t.Chdir(dir)
 	writeProfilesFixture(t, filepath.Join(dir, "profiles.yaml"), `
 profiles:
   reviewer:
