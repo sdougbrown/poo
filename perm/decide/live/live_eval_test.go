@@ -3,6 +3,7 @@ package live
 import (
 	"context"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -17,11 +18,12 @@ import (
 // an endpoint, and a decision model that is unavailable is a failure of
 // the evaluation, never a refusal.
 //
-// POO_DECIDE_QUESTION_INSTRUCTIONS=true names an endpoint that answers
-// what each question asks and rejects a request-level instructions
-// field — the shape the built-in typesafe provider has — so the decider
-// folds the call's framing into the questions the way the runtime does
-// for a model that endpoint serves.
+// POO_DECIDE_INSTRUCTIONS_PER_QUESTION=true names an endpoint that answers
+// what each question asks and rejects a request-level instructions field —
+// the shape the built-in typesafe provider declares — so the decider folds
+// the call's framing into the questions the way the runtime does for an
+// endpoint that declares it. A value that does not parse is a failure, not
+// the default wire.
 
 // case is one call the asker is asked about.
 type evalCase struct {
@@ -96,11 +98,19 @@ func TestTheLiveEvaluationOfThePermissionAsker(t *testing.T) {
 	if url == "" || model == "" {
 		t.Skip("POO_DECIDE_URL and POO_DECIDE_MODEL are not set")
 	}
+	perQuestion := false
+	if raw := os.Getenv("POO_DECIDE_INSTRUCTIONS_PER_QUESTION"); raw != "" {
+		var err error
+		perQuestion, err = strconv.ParseBool(raw)
+		if err != nil {
+			t.Fatalf("POO_DECIDE_INSTRUCTIONS_PER_QUESTION is %q, which does not parse: %v", raw, err)
+		}
+	}
 	decider := openai.NewSystemOneDecider(openai.SystemOneConfig{
-		Endpoint:             url,
-		Model:                model,
-		APIKey:               os.Getenv("POO_DECIDE_API_KEY"),
-		QuestionInstructions: os.Getenv("POO_DECIDE_QUESTION_INSTRUCTIONS") == "true",
+		Endpoint:                url,
+		Model:                   model,
+		APIKey:                  os.Getenv("POO_DECIDE_API_KEY"),
+		InstructionsPerQuestion: perQuestion,
 	})
 	asker := permissive.New(decider, permissive.Options{Timeout: 10 * time.Second})
 

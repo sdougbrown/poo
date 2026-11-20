@@ -58,9 +58,10 @@ const (
 	// key belongs to one workspace and the workspace says which plan it runs.
 	ProviderOpencode = "opencode"
 
-	// ProviderTypesafe is the provider id the TypeSafe key is stored under. It
-	// is also the name the built-in record declares the provider's endpoint
-	// under, so a stored credential is read by the endpoint that shares it.
+	// ProviderTypesafe is the provider id the TypeSafe key is stored
+	// under. It is the entry's name in poo's own credential file; the
+	// endpoint reads the credential by declaring the same environment
+	// variable, so the names meet there and nowhere else.
 	ProviderTypesafe = "typesafe"
 
 	// DefaultTokenURL is the endpoint pi trades a Codex refresh token at.

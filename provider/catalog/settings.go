@@ -51,6 +51,10 @@ type EndpointSettings struct {
 	// declared by the settings or the curated layer. A request to the endpoint
 	// would send nothing it understands.
 	SkipProbe bool
+	// InstructionsPerQuestion says the endpoint answers what each question
+	// asks and rejects a request-level instructions field, so a decision
+	// call folds its framing into the questions.
+	InstructionsPerQuestion bool
 }
 
 // ModelSettings is one model in the settings.
@@ -134,7 +138,14 @@ func (m ModelSettings) layer(name, endpointURL string) poo.ModelInfo {
 // the transport resolves by too. An endpoint that names neither needs
 // no key.
 func (e EndpointSettings) endpoint(name string) Endpoint {
-	endpoint := Endpoint{Name: name, Endpoint: e.Endpoint, API: e.API, SessionHeader: e.SessionHeader, SkipProbe: e.SkipProbe}
+	endpoint := Endpoint{
+		Name:                    name,
+		Endpoint:                e.Endpoint,
+		API:                     e.API,
+		SessionHeader:           e.SessionHeader,
+		SkipProbe:               e.SkipProbe,
+		InstructionsPerQuestion: e.InstructionsPerQuestion,
+	}
 	switch {
 	case e.APIKeyEnv != "":
 		endpoint.Credential = Credential{Source: CredentialEnv, Env: e.APIKeyEnv}

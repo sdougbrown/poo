@@ -3,6 +3,7 @@ package config_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/config"
 	"github.com/sdougbrown/poo/decide"
+	"github.com/sdougbrown/poo/provider/catalog"
 )
 
 // typesafeServer is a scripted TypeSafe endpoint: it answers the systemone
@@ -41,7 +43,13 @@ func newTypesafeServer(t *testing.T) *typesafeServer {
 		}
 		_ = json.Unmarshal(raw, &ask)
 		answers := map[string]any{}
-		for id := range ask.Questions {
+		for id, question := range ask.Questions {
+			// The answer matches the question's own type, so a call's
+			// answers validate whatever the caller asked.
+			if question.Type == "noul" {
+				answers[id] = map[string]any{"type": "noul", "noul": 0.5}
+				continue
+			}
 			answers[id] = map[string]any{
 				"type":          "choice",
 				"choice":        "approve",
@@ -201,15 +209,23 @@ func TestTheBuiltinTypesafeModelCannotBeTheChatModel(t *testing.T) {
 	if err == nil {
 		t.Fatal("the build put Jev in the chat role, want it refused")
 	}
-	if !strings.Contains(err.Error(), "chat") {
-		t.Errorf("the refusal is %q, want it to name the chat operation", err.Error())
+	// The refusal is the operation one, not a missing model: the model is
+	// in the catalog and serves no chat turn.
+	var opErr *catalog.OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("the refusal is %v, want the operation error", err)
+	}
+	if opErr.Role != catalog.RoleChat {
+		t.Errorf("the refusal names the %q role, want the chat one", opErr.Role)
 	}
 }
 
 // TestTheTypesafeDeciderFoldsTheCallInstructions covers the wire the
-// built-in record promises: a typesafe-served model's decider answers what
-// each question asks, so the call's framing rides with the questions and the
-// request carries no instructions field of its own.
+// built-in record promises: an endpoint that declares
+// instructions_per_question answers what each question asks, so the
+// call's framing rides with the questions and the request carries no
+// instructions field of its own. The endpoint's name is not the one the
+// built-in record uses, because the declaration is what says it.
 func TestTheTypesafeDeciderFoldsTheCallInstructions(t *testing.T) {
 	// The variable is pinned empty so the environment a test runs in cannot
 	// decide which key answers.
@@ -221,17 +237,18 @@ func TestTheTypesafeDeciderFoldsTheCallInstructions(t *testing.T) {
 session:
   mode: ephemeral
 endpoints:
-  typesafe:
+  jev:
     endpoint: `+srv.URL+`
     api_key: ts_sk_test
+    instructions_per_question: true
 models:
-  jev:
-    endpoint: typesafe
+  jev-latest:
+    endpoint: jev
     model_id: jev-latest
     ops: [systemone]
 roles:
   chat: gpt-4o-mini
-  decider: jev
+  decider: jev-latest
 `)
 	settings, err := config.Load(path)
 	if err != nil {
@@ -273,5 +290,66 @@ roles:
 	if got, want := answered["q1"].Instructions,
 		"the permission asker's framing should the tool call be allowed?"; got != want {
 		t.Errorf("the question's instructions are %q, want the framing folded in: %q", got, want)
+	}
+}
+
+// TestADeciderKeepsTheCallInstructionsOnTheRequest covers the default
+// wire: an endpoint that declares nothing takes the call's instructions
+// as the request's own field, and each question says only what it was
+// asked.
+func TestADeciderKeepsTheCallInstructionsOnTheRequest(t *testing.T) {
+	dir := t.TempDir()
+	srv := newTypesafeServer(t)
+	path := writeCodexSettings(t, dir, `version: 1
+session:
+  mode: ephemeral
+endpoints:
+  grace:
+    endpoint: `+srv.URL+`
+    api_key: a-local-key
+models:
+  gemma4:
+    endpoint: grace
+    model_id: gemma4
+    ops: [systemone]
+roles:
+  chat: gpt-4o-mini
+  decider: gemma4
+`)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("loading the settings: %v", err)
+	}
+	runtime, err := buildCodex(t, settings, &http.Client{})
+	if err != nil {
+		t.Fatalf("building the runtime: %v", err)
+	}
+	_, decider, err := runtime.Decider()
+	if err != nil {
+		t.Fatalf("resolving the decider: %v", err)
+	}
+	questions := []decide.Question{{
+		ID:           "q1",
+		Instructions: "should the tool call be allowed?",
+		Kind:         decide.Bool{True: "the test fails", False: "the test passes"},
+	}}
+	if _, err := decider.Decide(context.Background(), map[string]string{"cwd": "/tmp"},
+		"the permission asker's framing", questions); err != nil {
+		t.Fatalf("asking the question: %v", err)
+	}
+	var req struct {
+		Instructions string `json:"instructions"`
+		Questions    map[string]struct {
+			Instructions string `json:"instructions"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal([]byte(srv.body(0)), &req); err != nil {
+		t.Fatalf("the request does not decode: %v", err)
+	}
+	if req.Instructions != "the permission asker's framing" {
+		t.Errorf("the request's instructions are %q, want the call's framing", req.Instructions)
+	}
+	if got := req.Questions["q1"].Instructions; got != "should the tool call be allowed?" {
+		t.Errorf("the question's instructions are %q, want the question's own", got)
 	}
 }

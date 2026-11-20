@@ -39,11 +39,12 @@ type SystemOneConfig struct {
 	// client that says nothing is named by the HTTP library alone. Empty
 	// sends none.
 	UserAgent string
-	// QuestionInstructions says the endpoint answers what each question
-	// asks and rejects a request-level instructions field. The call's
-	// instructions are folded into every question that does not already
-	// say them, so the framing a caller sent still reaches the model.
-	QuestionInstructions bool
+	// InstructionsPerQuestion says the endpoint answers what each
+	// question asks and rejects a request-level instructions field. The
+	// call's instructions are folded into every question that does not
+	// already say them, so the framing a caller sent still reaches the
+	// model.
+	InstructionsPerQuestion bool
 }
 
 // SystemOneDecider asks a decision model over a systemone endpoint.
@@ -263,7 +264,7 @@ func (d *SystemOneDecider) buildBody(state any, instructions string, qs []decide
 		State:     raw,
 		Questions: questions,
 	}
-	if !d.cfg.QuestionInstructions {
+	if !d.cfg.InstructionsPerQuestion {
 		req.Instructions = instructions
 	}
 	return json.Marshal(req)
@@ -357,8 +358,6 @@ type systemOneUsage struct {
 
 // encodeQuestions encodes the questions as the wire's question object.
 //
-// encodeQuestions encodes the questions as the wire's question object.
-//
 // The wire shape is an object, and an object's keys have no order of
 // their own: the body is written by hand, so the questions read the way
 // they were asked.
@@ -397,18 +396,18 @@ func (d *SystemOneDecider) encodeQuestion(instructions string, q decide.Question
 	}
 	return json.Marshal(systemOneQuestion{
 		Type:         kind,
-		Instructions: d.folded(instructions, q),
+		Instructions: d.instructionsFor(instructions, q),
 		Criteria:     criteria,
 	})
 }
 
-// folded returns the instructions a question carries on the wire.
+// instructionsFor returns the instructions a question carries on the wire.
 //
 // An endpoint that takes its instructions per question carries the call's
 // framing with each one, unless the question already says it: the caller
 // that passes one sentence both ways sends it once.
-func (d *SystemOneDecider) folded(instructions string, q decide.Question) string {
-	if !d.cfg.QuestionInstructions || instructions == "" || instructions == q.Instructions {
+func (d *SystemOneDecider) instructionsFor(instructions string, q decide.Question) string {
+	if !d.cfg.InstructionsPerQuestion || instructions == "" || instructions == q.Instructions {
 		return q.Instructions
 	}
 	return instructions + " " + q.Instructions

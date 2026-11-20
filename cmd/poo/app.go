@@ -86,6 +86,7 @@ A bare poo login offers the list; a name picks one:
   poo login codex         OpenAI Codex, through a browser
   poo login ollama-cloud  Ollama Cloud, with a key
   poo login opencode      OpenCode, with a key
+  poo login typesafe      TypeSafe, with a key
 
 The Codex sign-in is the legacy flow: it names the Codex CLI's public client, not poo's own, and
 the credential records it so a refresh keeps working. A future first-party sign-in is another

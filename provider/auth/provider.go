@@ -62,10 +62,11 @@ var OllamaCloud = Provider{ID: "ollama-cloud", Kind: KindAPIKey, Env: "OLLAMA_AP
 // which endpoint bills it.
 var Opencode = Provider{ID: ProviderOpencode, Kind: KindAPIKey, Env: "OPENCODE_API_KEY"}
 
-// Typesafe is the TypeSafe provider: a key the console issues, read from the
-// environment or from the credential `poo login` stores. It reaches the one
-// decisions endpoint the built-in record declares, which serves no chat
-// turns, so a key buys a decider and not a chat model.
+// Typesafe is the TypeSafe provider: a key TypeSafe's console issues,
+// read from the environment or from the credential `poo login` stores.
+// It reaches the one decisions endpoint the built-in record declares,
+// which serves no chat turns, so a key buys a decider and not a chat
+// model.
 var Typesafe = Provider{ID: ProviderTypesafe, Kind: KindAPIKey, Env: "TYPESAFE_API_KEY"}
 
 // KeyProviders are the providers whose credential is a key, in the order a

@@ -20,8 +20,9 @@
 # decider but not the chat model. Its model list is not the OpenAI shape
 # the probe reads, so the endpoint is not probed and the record is the
 # word on what it serves. The endpoint answers what each question asks
-# and rejects a request-level instructions field, so the decider folds the
-# call's framing into each question when it asks.
+# and rejects a request-level instructions field, so it declares
+# instructions_per_question and the decider folds the call's framing
+# into each question when it asks.
 #
 # POO_BUILTIN_MODELS names a file read instead of this one, in the same
 # vocabulary. The credential the openai-codex endpoint runs on is not an api
@@ -181,6 +182,7 @@ endpoints:
     endpoint: https://api.typesafe.ai/v1
     api_key_env: TYPESAFE_API_KEY
     skip_probe: true
+    instructions_per_question: true
     models:
       jev-latest:
         ops: [systemone]

@@ -352,6 +352,41 @@ func TestTheBuildScrubsTheCredentials(t *testing.T) {
 	}
 }
 
+// TestTheBuildScrubsTheKeyProvidersVariables covers the rung the catalog
+// cannot name: a provider's key variable is scrubbed whether an endpoint
+// that reads it is offered or not, because the variable names a
+// credential whatever the catalog holds.
+func TestTheBuildScrubsTheKeyProvidersVariables(t *testing.T) {
+	// No endpoint reads the variable here: the settings name none, and the
+	// built-in provider that would is not offered, because no credential
+	// file is there to offer it.
+	t.Setenv("TYPESAFE_API_KEY", "secret")
+	dir := t.TempDir()
+	settings, err := config.Parse([]byte(`version: 1
+auth_file: `+filepath.Join(dir, "auth.json")+`
+endpoints:
+  test:
+    endpoint: http://localhost:4000/v1
+    api_key_env: POO_TEST_KEY
+models:
+  test-model:
+    endpoint: test
+    model_id: test-model
+    ops: [chat]
+roles:
+  chat: test-model
+`), config.FormatYAML)
+	if err != nil {
+		t.Fatalf("decoding the settings: %v", err)
+	}
+	runtime := build(t, settings, config.Overrides{})
+	for _, entry := range runtime.Env {
+		if strings.HasPrefix(entry, "TYPESAFE_API_KEY=") {
+			t.Error("the child environment holds the credential")
+		}
+	}
+}
+
 // theCredentialSettings is a settings document with one model in it,
 // and the endpoint's credential lines left to the test.
 const theCredentialSettings = `
