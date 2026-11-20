@@ -340,9 +340,11 @@ logged session, the decision record still names the question and answer.
 An answer the filter cannot use leaves the message on the feed's normal
 delivery path. That covers a missing decider, a failed or invalid answer,
 invalid label mass, and a probability below the threshold. Messages whose
-sender and text total more than 8 KiB are delivered unasked. The feed waits
-for each answer before it reads the next message. A stopped feed cancels its
-pending decision and never delivers the message it was assessing.
+sender and text total more than 8 KiB are delivered unasked. One decision is
+bounded by a 1.5-second budget, and a decision that runs past it is
+undecidable. The feed waits for each answer before it reads the next message.
+A stopped feed cancels its pending decision and never delivers the message it
+was assessing.
 
 **The model reads a feed's input as outside input.** The message is one
 XML element: `<feed name="<name>" from="<from>">` around the text, with

@@ -33,7 +33,8 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
         "{\"text\":\"routine\"}",
         "{\"from\":\"ci\",\"text\":\"uncertain\"}",
         "{\"text\":\"unavailable\"}",
-        "{\"text\":\"required check failed\"}"],
+        "{\"text\":\"required check failed\"}",
+        "{\"text\":\"slow\"}"],
       "on_idle": "wake",
       "filter": {"question": "` + question + `", "min_no_probability": 0.9}
     }
@@ -51,7 +52,7 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 	sink := pootest.NewSink()
 	runtime.Options.Transport = transport
 	runtime.Options.Sink = sink
-	model := decide.DeciderFunc(func(_ context.Context, state any, _ string, qs []decide.Question) ([]decide.Answer, error) {
+	model := decide.DeciderFunc(func(ctx context.Context, state any, _ string, qs []decide.Question) ([]decide.Answer, error) {
 		fields, ok := state.(map[string]string)
 		if !ok || fields["feed"] != "inbox" || len(fields) != 3 || len(qs) != 1 || qs[0].Instructions != question {
 			t.Errorf("unexpected filter request: %#v, %#v", state, qs)
@@ -71,6 +72,11 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 			return nil, decide.ErrDeferred
 		case "required check failed":
 			no = 0.01
+		case "slow":
+			// A decider that hangs must not stall the feed: the filter's
+			// own budget ends the call, and the message is delivered.
+			<-ctx.Done()
+			return nil, ctx.Err()
 		default:
 			t.Errorf("unexpected message: %q", fields["text"])
 		}
@@ -85,6 +91,11 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 	waitUntil(t, "the relevant message to reach the chat model", func() bool {
 		return theModelRead(transport, `<feed name="inbox">required check failed</feed>`, poo.FeedOrigin("inbox"))
 	})
+	// The slow decision is still running at that point; its message must
+	// arrive after the filter's own budget ends the call.
+	waitUntil(t, "the message the decider hung on to reach the chat model", func() bool {
+		return theModelRead(transport, `<feed name="inbox">slow</feed>`, poo.FeedOrigin("inbox"))
+	})
 	var queued []string
 	var decisions int
 	for _, rec := range sink.Records() {
@@ -97,9 +108,9 @@ func TestFeedFilterDropsOnlyAConfidentNo(t *testing.T) {
 			decisions++
 		}
 	}
-	want := []string{`<feed name="inbox" from="ci">uncertain</feed>`, `<feed name="inbox">unavailable</feed>`, `<feed name="inbox">required check failed</feed>`}
-	if !reflect.DeepEqual(queued, want) || decisions != 4 {
-		t.Errorf("queued %v and recorded %d decisions; want %v and 4", queued, decisions, want)
+	want := []string{`<feed name="inbox" from="ci">uncertain</feed>`, `<feed name="inbox">unavailable</feed>`, `<feed name="inbox">required check failed</feed>`, `<feed name="inbox">slow</feed>`}
+	if !reflect.DeepEqual(queued, want) || decisions != 5 {
+		t.Errorf("queued %v and recorded %d decisions; want %v and 5", queued, decisions, want)
 	}
 }
 
