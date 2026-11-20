@@ -167,6 +167,67 @@ func TestAnOutputCapRejectionIsItsOwnKind(t *testing.T) {
 	}
 }
 
+// TestAContextRejectionCarriesItsPromptCount covers the words a
+// context-length refusal uses for the prompt's own count. The session reads
+// the count to ask for the room it leaves, so a shape read as the whole
+// request or as the completion is a smaller max_tokens than the window can
+// spare.
+func TestAContextRejectionCarriesItsPromptCount(t *testing.T) {
+	cases := []struct {
+		name     string
+		message  string
+		wantKind poo.ProviderKind
+		want     int
+	}{
+		{
+			name:     "vLLM states the prompt's share of the request",
+			message:  "This model's maximum context length is 4096 tokens. However, you requested 5829 tokens (3000 in the messages, 2829 in the completion). Please reduce the length of the messages or completion.",
+			wantKind: poo.ProviderKindContextLength,
+			want:     3000,
+		},
+		{
+			name:     "the Messages API states the prompt and the completion",
+			message:  "input length and max_tokens exceed context limit: 3000 + 2829 > 4096",
+			wantKind: poo.ProviderKindContextLength,
+			want:     3000,
+		},
+		{
+			name:     "a refusal that states no count",
+			message:  "the prompt is too long",
+			wantKind: poo.ProviderKindContextLength,
+		},
+		{
+			name:     "an output cap states no prompt",
+			message:  "max_tokens is too large: 32768. This model supports at most 16384 completion tokens.",
+			wantKind: poo.ProviderKindOutputLimit,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"error": map[string]any{"message": c.message}})
+			if err != nil {
+				t.Fatalf("encoding the body: %v", err)
+			}
+			resp := &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Status:     http.StatusText(http.StatusBadRequest),
+				Header:     http.Header{},
+				Body:       io.NopCloser(bytes.NewReader(body)),
+			}
+			var perr *poo.ProviderError
+			if err := support.ClassifyStatus(resp); !errors.As(err, &perr) {
+				t.Fatalf("the failure is %v, want a provider error", err)
+			}
+			if perr.Kind != c.wantKind {
+				t.Errorf("the failure is %q, want %q", perr.Kind, c.wantKind)
+			}
+			if perr.PromptTokens != c.want {
+				t.Errorf("the prompt count is %d, want %d", perr.PromptTokens, c.want)
+			}
+		})
+	}
+}
+
 // TestAnOutputCapRejectionNeedsABadRequest covers the status: the same
 // words under a 500 are a server failure, because only a 400 is the
 // endpoint rejecting the request's own max_tokens.

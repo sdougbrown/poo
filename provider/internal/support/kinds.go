@@ -91,6 +91,25 @@ func FailureKind(status int, code, errType, message string, fallback poo.Provide
 	return fallback
 }
 
+// NewProviderError classifies a failure the endpoint reported and fills in
+// what its message states about the request.
+//
+// The kind is the class the table gives. The output cap and the prompt's
+// token count come from the message, so every path that turns a wire
+// failure into an error — a rejected response, an error body, an error
+// event in a stream — carries the same numbers to the session.
+func NewProviderError(status int, code, errType, message string, fallback poo.ProviderKind) *poo.ProviderError {
+	kind := FailureKind(status, code, errType, message, fallback)
+	return &poo.ProviderError{
+		Kind:         kind,
+		Message:      message,
+		Status:       status,
+		Code:         code,
+		OutputLimit:  outputLimitOf(kind, message),
+		PromptTokens: promptTokensOf(kind, message),
+	}
+}
+
 // isQuota reports whether a failure means the account is out of quota.
 //
 // The plan's row: a 429 whose code is one of the quota codes is a usage
@@ -154,6 +173,7 @@ func isContextLength(code, message string) bool {
 		"reduce the length",
 		"prompt is too long",
 		"input is too long",
+		"exceed context limit",
 		"exceeds the context",
 	} {
 		if strings.Contains(text, needle) {
@@ -252,6 +272,35 @@ func outputLimitOf(kind poo.ProviderKind, message string) int {
 	}
 	lower := strings.ToLower(message)
 	for _, pattern := range outputLimitPatterns {
+		match := pattern.FindStringSubmatch(lower)
+		if match == nil {
+			continue
+		}
+		if n, err := strconv.Atoi(match[1]); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// promptTokenPatterns read the prompt's token count a context-length
+// rejection states, each from one of the shapes the endpoints use: vLLM's
+// "you requested 5829 tokens (3000 in the messages, 2829 in the
+// completion)" and the Messages API's "input length and max_tokens exceed
+// context limit: 3000 + 2829 > 4096".
+var promptTokenPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(\d+)\s+in the messages`),
+	regexp.MustCompile(`context limit:\s*(\d+)\s*\+`),
+}
+
+// promptTokensOf returns the prompt's token count a context-length
+// rejection states, or zero when it states none.
+func promptTokensOf(kind poo.ProviderKind, message string) int {
+	if kind != poo.ProviderKindContextLength {
+		return 0
+	}
+	lower := strings.ToLower(message)
+	for _, pattern := range promptTokenPatterns {
 		match := pattern.FindStringSubmatch(lower)
 		if match == nil {
 			continue
@@ -402,16 +451,10 @@ func ClassifyStatus(resp *http.Response) error {
 		message = resp.Status
 	}
 
-	kind := FailureKind(resp.StatusCode, code, er.Error.Type, message, poo.ProviderKindServer)
-	return &poo.ProviderError{
-		Kind:        kind,
-		Message:     message,
-		Status:      resp.StatusCode,
-		Code:        code,
-		OutputLimit: outputLimitOf(kind, message),
-		RetryAfter:  RetryAfter(resp),
-		ResetsAt:    resetAt(resp.Header, body),
-	}
+	perr := NewProviderError(resp.StatusCode, code, er.Error.Type, message, poo.ProviderKindServer)
+	perr.RetryAfter = RetryAfter(resp)
+	perr.ResetsAt = resetAt(resp.Header, body)
+	return perr
 }
 
 // ErrorInBody reports whether a response body is a JSON error rather than
@@ -435,13 +478,9 @@ func ErrorInBody(body []byte, status int, header http.Header) (*poo.ProviderErro
 	if message == "" {
 		message = "the endpoint returned an error"
 	}
-	return &poo.ProviderError{
-		Kind:     FailureKind(status, code, payload.Error.Type, message, poo.ProviderKindInvalidRequest),
-		Message:  message,
-		Code:     code,
-		Status:   status,
-		ResetsAt: resetAt(header, body),
-	}, true
+	perr := NewProviderError(status, code, payload.Error.Type, message, poo.ProviderKindInvalidRequest)
+	perr.ResetsAt = resetAt(header, body)
+	return perr, true
 }
 
 // CodeString renders an error code, which a server may send as a string

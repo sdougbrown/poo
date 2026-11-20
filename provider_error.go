@@ -68,6 +68,10 @@ type ProviderError struct {
 	// when the failure is an output_limit that states one. Zero means the
 	// endpoint named no number.
 	OutputLimit int
+	// PromptTokens is the prompt's token count the endpoint reported when
+	// it refused the request for its context length. Zero means the
+	// endpoint stated none.
+	PromptTokens int
 	// RetryAfter is how long the endpoint asked the client to wait, when
 	// it said so.
 	RetryAfter time.Duration
