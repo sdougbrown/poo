@@ -3,7 +3,9 @@ only a small part of a large result. Intermediate results stay out of the
 conversation. Only what you print and return comes back.
 
 Write a synchronous JavaScript function body for QuickJS, not Node.js.
-For example, if `read` is available:
+The runtime has no files, network, timers, console or clock: use the
+session's tools for those. A slow tool call is bounded by that tool's own
+timeout. For example, if `read` is available:
 
 ```js
 const r = call("read", {path: "README.md"});

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -106,6 +107,8 @@ func TestQuickJSBoundsGuestExecution(t *testing.T) {
 		{"step budget", `return 1;`, codemode.Limits{ExecSteps: 100}, "does not support the exec_steps limit"},
 		{"batch width", `gather(Array.from({length: 17}, () => ["read", {}]));`, codemode.Limits{}, "gather takes at most"},
 		{"async result", `return Promise.resolve(42);`, codemode.Limits{}, "scripts must be synchronous"},
+		{"oversized return", `return "x".repeat(2097152);`, codemode.Limits{}, "print a summary instead"},
+		{"call after return", `return {toJSON() { call("read", {}); return 1; }};`, codemode.Limits{}, "after returning"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -126,25 +129,45 @@ func TestQuickJSHasNoWorkspaceOrHostEnvironment(t *testing.T) {
 	if err := os.WriteFile(file, []byte("private"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	quoted, _ := json.Marshal(file)
-	engine := quickjs.New()
-	for _, args := range []string{`"input.txt", "r"`, string(quoted) + `, "r"`, `"output.txt", "w"`} {
-		res, err := engine.Run(t.Context(), codemode.RunOptions{
-			Script: `import("qjs:std").then(std => std.open(` + args + `)); return typeof std;`,
-			Nested: nested(noCalls),
-		})
-		if err != nil || string(res.Value) != `"undefined"` {
-			t.Fatalf("std.open(%s): run = %+v, %v", args, res, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, "output.txt")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("workspace write: %v", err)
-	}
-	res, err := engine.Run(t.Context(), codemode.RunOptions{
-		Script: `return [typeof std, typeof os, typeof setTimeout, typeof fetch, typeof process];`,
+	res, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		// Every global the wrapper must have removed, plus the ones a
+		// QuickJS bump could reintroduce under a familiar name. The
+		// snapshot fails loudly when a dependency upgrade re-exposes one.
+		Script: `return Object.getOwnPropertyNames(globalThis);`,
 		Nested: nested(noCalls),
 	})
-	if err != nil || string(res.Value) != `["undefined","undefined","undefined","undefined","undefined"]` {
+	if err != nil {
 		t.Fatalf("run = %+v, %v", res, err)
+	}
+	var names []string
+	if err := json.Unmarshal(res.Value, &names); err != nil {
+		t.Fatalf("the globals snapshot is not a list: %v", err)
+	}
+	for _, danger := range []string{
+		"std", "os", "bjson", "print", "console", "scriptArgs",
+		"setTimeout", "setInterval", "clearTimeout", "clearInterval",
+		"QJS_PROXY_VALUE", "performance", "Date", "navigator", "gc", "eval",
+		"fetch", "process", "require", "module", "__pooTools", "__pooPrint",
+	} {
+		if slices.Contains(names, danger) {
+			t.Errorf("the script can see the global %q", danger)
+		}
+	}
+}
+
+func TestAPanickingToolCallReportsNoHostStack(t *testing.T) {
+	_, err := quickjs.New().Run(t.Context(), codemode.RunOptions{
+		Script: `call("panic", {})`,
+		Nested: nested(func(context.Context, []poo.NestedCall) ([]poo.NestedResult, error) {
+			panic("a host bug")
+		}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "the tool bridge failed") {
+		t.Fatalf("run error = %v", err)
+	}
+	for _, leak := range []string{"goroutine", ".go", "/home/"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Errorf("the error leaks host details: %q", err.Error())
+		}
 	}
 }
