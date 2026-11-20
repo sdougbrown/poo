@@ -83,7 +83,7 @@ func linkedTools() map[string]config.ToolFactory {
 		"edit": func(config.ToolOptions) poo.Tool { return edit.New() },
 		"codemode": func(opts config.ToolOptions) poo.Tool {
 			if opts.CodemodeEngine == "quickjs" {
-				return codemode.NewQuickJS(quickjs.New())
+				return codemode.New(quickjs.New())
 			}
 			return codemode.New(codemodestarlark.New())
 		},

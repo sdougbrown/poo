@@ -9,7 +9,10 @@ import (
 
 	"github.com/sdougbrown/poo"
 	"github.com/sdougbrown/poo/codemode"
+	"github.com/sdougbrown/poo/codemode/quickjs"
+	"github.com/sdougbrown/poo/codemode/starlark"
 	"github.com/sdougbrown/poo/internal/caps"
+	"github.com/sdougbrown/poo/prompt"
 	toolcodemode "github.com/sdougbrown/poo/tool/codemode"
 )
 
@@ -255,5 +258,31 @@ func TestTheToolValidatesItsArguments(t *testing.T) {
 	}
 	if _, err := tool.Prepare(json.RawMessage(`{"script": 42}`), poo.PrepareEnv{}); err == nil {
 		t.Error("a non-string script prepared")
+	}
+}
+
+// TestTheGuidanceFollowsTheEngine covers the pairing of guidance to
+// runtime: the engine names its script language, and the schema and the
+// prompt section follow it. An engine that names no language keeps the
+// Starlark guidance, the language the seam's first engine runs.
+func TestTheGuidanceFollowsTheEngine(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		engine        codemode.Engine
+		schema, guide string
+	}{
+		{"starlark", starlark.New(), "A Starlark script", "Starlark"},
+		{"quickjs", quickjs.New(), "A JavaScript function body", "QuickJS"},
+		{"unnamed engine", &fakeEngine{}, "A Starlark script", "Starlark"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tool := toolcodemode.New(test.engine)
+			if schema := string(tool.Spec().Schema); !strings.Contains(schema, test.schema) {
+				t.Errorf("the schema description does not say %q", test.schema)
+			}
+			if section := tool.PromptSection(prompt.Env{}); !strings.Contains(section, test.guide) {
+				t.Errorf("the prompt section does not mention %q", test.guide)
+			}
+		})
 	}
 }
