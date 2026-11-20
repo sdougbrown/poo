@@ -48,6 +48,12 @@ func withStdin(t *testing.T, content string) {
 	})
 }
 
+// callbackWait is how long a test's own callback wait holds its listener. It outlives the
+// window askCallback asks within: a wait that gives up while asks are still standing takes its
+// port down with it, and the asks that follow read as a connection refused rather than as
+// whatever the wait had to say.
+const callbackWait = 30 * time.Second
+
 // holdCallbackListener opens the listener a callback wait will hold, and hands it to the wait.
 //
 // The wait binds this listener, not a port that was free a moment ago: the kernel hands out the
@@ -142,7 +148,10 @@ func signInURL(t *testing.T, printed func() string) *url.URL {
 
 // askCallback requests a path and query on the loopback a redirect URI names, retrying while the
 // listener is still coming up, and returns the answer. An empty path is the redirect's own.
-func askCallback(t *testing.T, redirectURI, path, query string) *http.Response {
+// A caller may pass one stop channel: when a dial fails after the wait has ended — its answer
+// was handled without the client seeing the page, or the wait gave up — the ask returns nil,
+// and the caller asserts on the wait's own outcome instead of the page it never saw.
+func askCallback(t *testing.T, redirectURI, path, query string, stop ...<-chan struct{}) *http.Response {
 	t.Helper()
 	redirect, err := url.Parse(redirectURI)
 	if err != nil {
@@ -152,6 +161,10 @@ func askCallback(t *testing.T, redirectURI, path, query string) *http.Response {
 		path = redirect.Path
 	}
 	target := fmt.Sprintf("%s://%s%s%s", redirect.Scheme, redirect.Host, path, query)
+	var stopped <-chan struct{}
+	if len(stop) > 0 {
+		stopped = stop[0]
+	}
 	var last error
 	// The window bounds the whole retry, not the count. A listener that
 	// accepts but never answers costs one 2s request at a time.
@@ -166,6 +179,11 @@ func askCallback(t *testing.T, redirectURI, path, query string) *http.Response {
 		cancel()
 		if err == nil {
 			return response
+		}
+		select {
+		case <-stopped:
+			return nil
+		default:
 		}
 		last = err
 		time.Sleep(50 * time.Millisecond)
