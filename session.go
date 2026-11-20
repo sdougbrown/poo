@@ -602,7 +602,7 @@ type Options struct {
 	// without one never enters the compacting state.
 	Compactor Compactor
 	// TurnGrowth adds the session's measured per-turn input growth to the
-	// fit rule, so a compaction happens one turn before the turn's tool
+	// fit rule. A compaction then happens one turn before the turn's tool
 	// results would push the prompt past the limit. It is off by default:
 	// the rule then compacts at the last possible moment.
 	TurnGrowth bool

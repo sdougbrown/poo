@@ -151,9 +151,9 @@ func (c *Compactor) ShouldCompact(view poo.View, budget poo.ContextBudget) bool 
 // The input a compaction would leave is the input now, less the turns the
 // cut replaces, plus a summary as long as the strategy allows. That check
 // asks whether a compaction restores room for the next answer, so it reads
-// RoomShortAfter and leaves the turn growth out: a summary that frees room for
-// the answer but not for one more turn would be refused, and the run would end
-// when it could have carried on.
+// RoomShortAfter and leaves the turn growth out. A summary that frees room
+// for the answer but not for one more turn would otherwise be refused. The
+// run would end where it could have carried on.
 func (c *Compactor) restoresRoom(view poo.View, budget poo.ContextBudget) bool {
 	if !budget.RoomShort(budget.OutputLimit) {
 		return false

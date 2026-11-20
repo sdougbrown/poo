@@ -47,8 +47,8 @@ const NestedOutputCapChars = 1 << 20
 const NestedArgumentMaxBytes = 1 << 20
 
 // defaultObservationCapChars is the cap on an observation when the session
-// sets none, for a result's recorded text and for the turn growth a session
-// plans for. It is the largest observation the model ever sees.
+// sets none. It applies to a result's recorded text and to the turn growth
+// a session plans for. It is the largest observation the model ever sees.
 const defaultObservationCapChars = 30000
 
 // callParent returns the handle of the call that made the call with

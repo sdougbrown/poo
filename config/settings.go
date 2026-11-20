@@ -310,7 +310,7 @@ type Context struct {
 	// none.
 	Strategy *string `json:"strategy,omitempty"`
 	// TurnGrowth adds the session's measured per-turn input growth to the
-	// fit rule, so the view is compacted one turn before a turn's tool
+	// fit rule. The view is then compacted one turn before a turn's tool
 	// results would push the prompt past the limit. It is off when unset.
 	TurnGrowth *bool `json:"turn_growth,omitempty"`
 	// Handoff are the handoff strategy's settings.

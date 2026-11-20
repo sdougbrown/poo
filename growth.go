@@ -5,17 +5,17 @@ import "math"
 // The turn-growth tracker.
 //
 // A session that measures turn growth adds what one turn costs to the fit
-// rule, so a compaction happens before a turn's own message and tool results
-// push the prompt over the limit rather than after. What a turn costs is
-// measured, not assumed: it is the increase in the input the endpoint reports
-// between two of the session's requests.
+// rule. A compaction then happens before a turn's own message and tool
+// results push the prompt over the limit, rather than after. What a turn
+// costs is measured, not assumed: it is the increase in the input the
+// endpoint reports between two of the session's requests.
 
 // growthReports is how many of the most recent positive differences the
 // tracker keeps.
 //
 // Turn growth is the largest of them, so one large turn moves the trigger for
-// the turns that follow it, and an older one ages out instead of pinning the
-// trigger for the rest of the run.
+// the turns that follow it. An older one then ages out instead of pinning
+// the trigger for the rest of the run.
 const growthReports = 4
 
 // growthTracker measures how many tokens one turn adds to the prompt.
@@ -24,7 +24,7 @@ const growthReports = 4
 // report sets the baseline and records no difference.
 type growthTracker struct {
 	// prev is the input the previous report gave. Zero means there is no
-	// report to measure against: none has arrived, or a compaction moved the
+	// report to measure against. None has arrived, or a compaction moved the
 	// view and the next report is the new baseline.
 	prev int
 	// diffs are the positive differences of the most recent reports, oldest
@@ -34,7 +34,7 @@ type growthTracker struct {
 
 // observe records a report's input.
 //
-// Only an increase is a difference: an input that went down reports a view
+// Only an increase is a difference. An input that went down reports a view
 // that did not grow, and a drop is not growth to plan for.
 func (g *growthTracker) observe(input int) {
 	if input <= 0 {
@@ -76,11 +76,12 @@ func (g *growthTracker) growth(observationCap int) int {
 // noteTurnInput feeds a turn's usage report to the tracker, when the session
 // measures turn growth.
 //
-// A request a compaction made is not a turn: the input it reports is the
+// A request a compaction made is not a turn. The input it reports is the
 // request the strategy built, not the view the run is growing.
 //
-// A turn that reported no input ends the reports the tracker measures across:
-// a difference must never span two turns, so the next report is a baseline.
+// A turn that reported no input ends the reports the tracker measures
+// across. A difference must never span two turns, so the next report is a
+// baseline.
 func (s *Session) noteTurnInput(meta RecordMeta, usage *UsageReport) {
 	if !s.opts.TurnGrowth || meta.Origin == OriginCompaction {
 		return
